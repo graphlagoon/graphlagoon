@@ -1,0 +1,10 @@
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''\.lock$''',
+  '''package-lock\.json$''',
+  '''\.whl$''',
+  '''\.tar\.gz$''',
+]

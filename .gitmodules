@@ -1,0 +1,9 @@
+[submodule "frontend/ext-3d-force/3d-force-graph"]
+	path = frontend/ext-3d-force/3d-force-graph
+	url = https://github.com/graphlagoon/3d-force-graph.git
+[submodule "frontend/ext-3d-force/three-forcegraph"]
+	path = frontend/ext-3d-force/three-forcegraph
+	url = https://github.com/graphlagoon/three-forcegraph.git
+[submodule "frontend/ext-3d-force/d3-force-3d"]
+	path = frontend/ext-3d-force/d3-force-3d
+	url = https://github.com/graphlagoon/d3-force-3d.git

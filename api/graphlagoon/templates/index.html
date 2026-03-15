@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Lagoon Studio</title>
+    <link rel="icon" type="image/svg+xml" href="{{ static_prefix }}/favicon.svg">
+    {% for css_file in assets.css %}
+    <link rel="stylesheet" href="{{ static_prefix }}/{{ css_file }}">
+    {% endfor %}
+</head>
+<body>
+    <div id="app"></div>
+    <script>
+        // Configuration injected by server
+        window.__GRAPH_LAGOON_API_URL__ = "{{ api_url }}";
+        window.__GRAPH_LAGOON_CONFIG__ = {{ config | tojson }};
+    </script>
+    {% for js_file in assets.js %}
+    <script type="module" src="{{ static_prefix }}/{{ js_file }}"></script>
+    {% endfor %}
+    {% if not assets.js %}
+    <!-- Fallback for development mode without manifest -->
+    <script type="module">
+        document.getElementById('app').innerHTML = `
+            <div style="padding: 20px; font-family: system-ui;">
+                <h1>Graph Lagoon Studio</h1>
+                <p>Frontend assets not found. Please build the frontend:</p>
+                <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px;">
+cd graphlagoon-studio-frontend
+npm run build
+                </pre>
+                <p>Or run in development mode:</p>
+                <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px;">
+cd graphlagoon-studio-frontend
+npm run dev
+                </pre>
+            </div>
+        `;
+    </script>
+    {% endif %}
+</body>
+</html>
