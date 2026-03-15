@@ -46,8 +46,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add api/pyproject.toml api/uv.lock
-          git diff --cached --quiet && echo "No changes to commit" && exit 1
-          git commit -m "chore(release): v${{ inputs.version }}"
+          if git diff --cached --quiet; then
+            echo "Version already set to ${{ inputs.version }}, skipping commit"
+          else
+            git commit -m "chore(release): v${{ inputs.version }}"
+          fi
           git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
           git push origin main --tags
 
