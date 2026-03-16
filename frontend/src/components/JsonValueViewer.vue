@@ -135,7 +135,7 @@ function loadMoreRows() {
         </thead>
         <tbody>
           <tr v-for="[key, val] in objectEntries" :key="key">
-            <td class="vt-key">{{ key }}</td>
+            <td class="vt-key" :title="key">{{ key }}</td>
             <td class="vt-val">
               <!-- Nested complex value: recursive viewer with depth tracking -->
               <JsonValueViewer v-if="isComplexValue(val)" :value="val" :maxRows="maxRows" :depth="depth + 1" />
@@ -256,6 +256,7 @@ function loadMoreRows() {
 .vertical-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 12px;
   margin-top: 4px;
 }
@@ -284,14 +285,16 @@ function loadMoreRows() {
 .vt-key {
   color: var(--text-muted, #666);
   font-weight: 500;
-  white-space: nowrap;
   width: 30%;
-  max-width: 150px;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .vt-val {
   color: var(--text-primary, #333);
   word-break: break-word;
+  overflow-wrap: break-word;
+  overflow: hidden;
 }
 
 /* ─── Array: open table button ─── */

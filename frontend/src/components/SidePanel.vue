@@ -172,14 +172,14 @@ async function expandFromNode() {
               ID
               <span class="col-name">({{ nodeColumns.id }})</span>
             </span>
-            <span class="value mono">{{ selectedItem.data.node_id }}</span>
+            <span class="value mono" :title="String(selectedItem.data.node_id)">{{ selectedItem.data.node_id }}</span>
           </div>
           <div class="detail-row">
             <span class="label">
               Type
               <span class="col-name">({{ nodeColumns.type }})</span>
             </span>
-            <span class="value badge badge-primary">{{ selectedItem.data.node_type }}</span>
+            <span class="value badge badge-primary" :title="selectedItem.data.node_type">{{ selectedItem.data.node_type }}</span>
           </div>
         </template>
 
@@ -189,28 +189,28 @@ async function expandFromNode() {
               ID
               <span class="col-name">({{ edgeColumns.id }})</span>
             </span>
-            <span class="value mono">{{ selectedItem.data.edge_id }}</span>
+            <span class="value mono" :title="String(selectedItem.data.edge_id)">{{ selectedItem.data.edge_id }}</span>
           </div>
           <div class="detail-row">
             <span class="label">
               Type
               <span class="col-name">({{ edgeColumns.type }})</span>
             </span>
-            <span class="value badge badge-secondary">{{ selectedItem.data.relationship_type }}</span>
+            <span class="value badge badge-secondary" :title="selectedItem.data.relationship_type">{{ selectedItem.data.relationship_type }}</span>
           </div>
           <div class="detail-row">
             <span class="label">
               Source
               <span class="col-name">({{ edgeColumns.src }})</span>
             </span>
-            <span class="value mono">{{ selectedItem.data.src }}</span>
+            <span class="value mono" :title="String(selectedItem.data.src)">{{ selectedItem.data.src }}</span>
           </div>
           <div class="detail-row">
             <span class="label">
               Target
               <span class="col-name">({{ edgeColumns.dst }})</span>
             </span>
-            <span class="value mono">{{ selectedItem.data.dst }}</span>
+            <span class="value mono" :title="String(selectedItem.data.dst)">{{ selectedItem.data.dst }}</span>
           </div>
         </template>
       </div>
@@ -239,7 +239,7 @@ async function expandFromNode() {
           :key="metric.name"
           class="detail-row"
         >
-          <span class="label">{{ metric.name }}</span>
+          <span class="label" :title="metric.name">{{ metric.name }}</span>
           <span class="value metric-value" :title="metric.value.toString()">
             {{ formatMetricValue(metric.value) }}
           </span>
@@ -371,13 +371,16 @@ async function expandFromNode() {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 8px;
   margin-bottom: 8px;
   font-size: 14px;
 }
 
 .detail-row .label {
   color: var(--text-muted);
-  min-width: 80px;
+  min-width: 60px;
+  flex-shrink: 0;
+  max-width: 40%;
 }
 
 .col-name {
@@ -388,7 +391,10 @@ async function expandFromNode() {
 
 .detail-row .value {
   text-align: right;
-  word-break: break-all;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;
+  flex: 1;
 }
 
 .mono {
@@ -405,7 +411,7 @@ async function expandFromNode() {
 .prop-label {
   font-family: monospace;
   font-size: 11px;
-  max-width: 100px;
+  max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -414,15 +420,16 @@ async function expandFromNode() {
 .prop-value-text {
   font-family: monospace;
   font-size: 11px;
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
   cursor: help;
 }
 
 .prop-json-block {
   margin-bottom: 12px;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .prop-json-label {

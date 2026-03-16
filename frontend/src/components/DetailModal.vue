@@ -175,11 +175,11 @@ function copyAll() {
             <table class="props-table">
               <tbody>
                 <tr v-for="field in basicFields" :key="field.label">
-                  <td class="prop-key">
+                  <td class="prop-key" :title="field.label + ' (' + field.colName + ')'">
                     {{ field.label }}
                     <span class="col-hint">{{ field.colName }}</span>
                   </td>
-                  <td class="prop-val mono">{{ field.value }}</td>
+                  <td class="prop-val mono" :title="String(field.value)">{{ field.value }}</td>
                   <td class="prop-action">
                     <button
                       class="copy-btn"
@@ -202,8 +202,8 @@ function copyAll() {
             <table class="props-table">
               <tbody>
                 <tr v-for="prop in properties" :key="prop.key" :class="{ 'complex-row': prop.isJsonValue }">
-                  <td class="prop-key">{{ prop.key }}</td>
-                  <td class="prop-val mono">
+                  <td class="prop-key" :title="prop.key">{{ prop.key }}</td>
+                  <td class="prop-val mono" :title="!prop.isJsonValue ? prop.displayValue : undefined">
                     <JsonValueViewer v-if="prop.isJsonValue" :value="prop.parsedJson" />
                     <span v-else>{{ prop.displayValue }}</span>
                   </td>
@@ -229,8 +229,8 @@ function copyAll() {
             <table class="props-table">
               <tbody>
                 <tr v-for="m in metrics" :key="m.name">
-                  <td class="prop-key">{{ m.name }}</td>
-                  <td class="prop-val mono">{{ formatMetricValue(m.value) }}</td>
+                  <td class="prop-key" :title="m.name">{{ m.name }}</td>
+                  <td class="prop-val mono" :title="String(m.value)">{{ formatMetricValue(m.value) }}</td>
                   <td class="prop-action">
                     <button
                       class="copy-btn"
@@ -343,6 +343,7 @@ function copyAll() {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
 }
 
 .props-table tr {
@@ -357,12 +358,10 @@ function copyAll() {
   padding: 8px 12px 8px 0;
   color: var(--text-muted, #666);
   font-weight: 500;
-  white-space: nowrap;
   vertical-align: top;
-  min-width: 100px;
-  max-width: 180px;
+  width: 25%;
   word-break: break-word;
-  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .col-hint {
@@ -377,6 +376,7 @@ function copyAll() {
   padding: 8px 12px 8px 0;
   color: var(--text-primary, #333);
   word-break: break-word;
+  overflow-wrap: break-word;
   vertical-align: top;
 }
 
@@ -404,6 +404,7 @@ function copyAll() {
   vertical-align: top;
   text-align: right;
   white-space: nowrap;
+  width: 50px;
 }
 
 .copy-btn {
@@ -422,6 +423,7 @@ function copyAll() {
 
 .complex-row .prop-val {
   padding-top: 4px;
+  overflow-x: auto;
 }
 
 .modal-footer {
