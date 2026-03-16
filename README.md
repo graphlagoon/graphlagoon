@@ -2,7 +2,18 @@
 
 Graph exploration on Databricks. Zero ETL. Zero extra cost.
 
-Explore fraud networks, supply chains, and entity relationships directly on your Delta tables — no dedicated graph database needed. Write Cypher queries that get transpiled to Databricks SQL, visualize results in an interactive 3D force-directed graph.
+Explore fraud networks, supply chains, and entity relationships directly on your Delta tables — no dedicated graph database needed. Write Cypher queries that get transpiled to Databricks SQL via [gsql2rsql](https://github.com/graphlagoon/gsql2rsql), and visualize results in an interactive 3D force-directed graph.
+
+## gsql2rsql — Query your Delta Tables as a Graph
+
+Graph Lagoon Studio is powered by [gsql2rsql](https://github.com/graphlagoon/gsql2rsql) (open-source, MIT), a Cypher-to-SQL transpiler. Write intuitive OpenCypher queries, get Databricks SQL automatically — no separate graph database needed.
+
+| Challenge | Solution |
+|-----------|----------|
+| Graph queries require complex recursive SQL | Write a few lines of Cypher instead |
+| Maintaining a separate graph database | Query Delta Lake directly |
+| LLM-generated SQL is hard to audit | Human-readable Cypher + deterministic transpilation |
+| Scaling to billions of triples is costly in graph DBs | Delta Lake handles it natively with Spark scalability |
 
 ## Databricks Integration
 

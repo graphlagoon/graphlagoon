@@ -766,8 +766,8 @@ export const useGraphStore = defineStore('graph', () => {
     const pairEdges = new Map<string, Edge[]>();
 
     for (const edge of enhancedEdges.value) {
-      // Normalize key so A->B and B->A are different (directed graph)
-      const key = `${edge.src}|${edge.dst}`;
+      // Normalize key so A->B and B->A are in the same group (bidirectional edges curve apart)
+      const key = edge.src < edge.dst ? `${edge.src}|${edge.dst}` : `${edge.dst}|${edge.src}`;
       pairCount.set(key, (pairCount.get(key) || 0) + 1);
 
       if (!pairEdges.has(key)) {

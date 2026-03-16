@@ -98,6 +98,8 @@ class RandomGraphRequest(BaseModel):
     multi_edges_max_count: int = 0
     # Fraction of existing edges to duplicate as multi-edges (0.0-1.0)
     multi_edges_ratio: float = 0.3
+    # Fraction of existing edges to create reverse (B->A for each A->B) (0.0-1.0, 0 = disabled)
+    bidirectional_edges_ratio: float = 0.0
 
     # Node and edge types
     node_types: list[str] = Field(default_factory=lambda: ["Person", "Company", "Product"])

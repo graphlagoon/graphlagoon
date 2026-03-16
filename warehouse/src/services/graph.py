@@ -487,6 +487,29 @@ def generate_random_graph(
                 edges_data.append(tuple(row))
                 edge_idx += 1
 
+    # Add bidirectional edges (reverse B->A for existing A->B) based on requested ratio
+    if request.bidirectional_edges_ratio > 0:
+        base_edges = list(G.edges())
+        edge_idx = len(edges_data)
+        for src_nx, dst_nx in base_edges:
+            if random.random() > request.bidirectional_edges_ratio:
+                continue
+            # Reverse: dst -> src
+            src = node_id_map[dst_nx]
+            dst = node_id_map[src_nx]
+            relationship_type = request.edge_types[edge_idx % len(request.edge_types)]
+            row = []
+            if cols.edge_id_col:
+                row.append(str(uuid.uuid4()))
+            row.extend([src, dst, relationship_type])
+            if request.include_metadata:
+                metadata = {"weight": str(random.random()), "index": str(edge_idx), "bidirectional": "true"}
+                row.append(metadata)
+            for col_def in request.extra_edge_columns:
+                row.append(generate_column_value(col_def, edge_idx))
+            edges_data.append(tuple(row))
+            edge_idx += 1
+
     edges_df = spark.createDataFrame(edges_data, edge_schema)
 
     # Save to Parquet (for backward compatibility and file-based access)

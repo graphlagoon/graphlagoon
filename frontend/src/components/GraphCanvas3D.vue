@@ -306,13 +306,27 @@ function buildGraphData(): GraphData {
   const useMultiEdgeCurvature = graphStore.enhancedHasMultiEdges && graphStore.aesthetics.enableMultiEdgeCurvature;
   const pairEdges = useMultiEdgeCurvature ? graphStore.enhancedMultiEdgeStats.pairEdges : null;
 
-  const edgeIndexInPair = new Map<string, { index: number; total: number }>();
+  const edgeCurvatureInfo = new Map<string, { indexInSub: number; subCount: number; reversed: boolean; hasOpposite: boolean }>();
   if (useMultiEdgeCurvature && pairEdges) {
     for (const [, edges] of pairEdges) {
       if (edges.length > 1) {
-        edges.forEach((e, idx) => {
-          edgeIndexInPair.set(e.edge_id, { index: idx, total: edges.length });
-        });
+        // Split into forward (src < dst) and reverse (src > dst) sub-groups
+        const forward: Edge[] = [];
+        const reverse: Edge[] = [];
+        for (const e of edges) {
+          if (e.src > e.dst) reverse.push(e);
+          else forward.push(e);
+        }
+        // Stable sort within each sub-group by edge_id
+        forward.sort((a, b) => a.edge_id.localeCompare(b.edge_id));
+        reverse.sort((a, b) => a.edge_id.localeCompare(b.edge_id));
+        const hasOpposite = forward.length > 0 && reverse.length > 0;
+        for (let i = 0; i < forward.length; i++) {
+          edgeCurvatureInfo.set(forward[i].edge_id, { indexInSub: i, subCount: forward.length, reversed: false, hasOpposite });
+        }
+        for (let i = 0; i < reverse.length; i++) {
+          edgeCurvatureInfo.set(reverse[i].edge_id, { indexInSub: i, subCount: reverse.length, reversed: true, hasOpposite });
+        }
       }
     }
   }
@@ -328,11 +342,18 @@ function buildGraphData(): GraphData {
       edge.edge_id, edge.relationship_type, edge.src, edge.dst, hiddenNodeIds, ctx,
     );
 
-    const multiInfo = edgeIndexInPair.get(edge.edge_id);
+    const curveInfo = edgeCurvatureInfo.get(edge.edge_id);
     const isSelfEdge = edge.src === edge.dst;
-    const curvature = isSelfEdge
-      ? (multiInfo ? 0.3 + multiInfo.index * 0.15 : 0.3)
-      : (multiInfo ? getMultiEdgeCurvature3D(multiInfo.index, multiInfo.total) : 0);
+    let curvature = 0;
+    if (isSelfEdge) {
+      curvature = curveInfo ? 0.3 + curveInfo.indexInSub * 0.15 : 0.3;
+    } else if (curveInfo) {
+      // All edges in the same direction sub-group get the same sign of curvature.
+      // calcLinkCurve computes the perpendicular relative to source→target direction,
+      // so A→B with +c and B→A with +c naturally bend to OPPOSITE visual sides
+      // (because B→A's direction vector is reversed, flipping the perpendicular).
+      curvature = getMultiEdgeCurvature3D(curveInfo.indexInSub, curveInfo.subCount, curveInfo.hasOpposite);
+    }
 
     links.push({
       id: edge.edge_id,
@@ -563,10 +584,7 @@ function initGraph() {
     .linkWidth((link: GraphLink) => link.hidden ? 0 : aesthetics.edgeWidth)
     .linkOpacity(aesthetics.edgeOpacity)
     .linkVisibility((link: GraphLink) => !link.hidden)
-    .linkCurvature((link: GraphLink) => {
-      if (isLayoutRunning.value) return 0;
-      return link.curvature ?? 0;
-    })
+    .linkCurvature((link: GraphLink) => link.curvature ?? 0)
     .linkDirectionalArrowLength(aesthetics.showArrows ? 4 * aesthetics.arrowSize : 0)
     .linkDirectionalArrowRelPos(1)
     .useInstancedRendering(graphStore.behaviors.useInstancedRendering)
@@ -686,11 +704,6 @@ function initGraph() {
   graph3d.onEngineStop(() => {
     layoutStabilized.value = true;
     layout.stopLayout();
-    // Force link re-partition: during layout, linkCurvature returns 0 so self-edges
-    // (src===dst) are invisible (zero-length straight lines in the instanced path).
-    // linkCurvature has triggerUpdate:false, so stopLayout() changing the accessor
-    // doesn't re-partition. Re-setting graphData triggers it with the updated accessor.
-    graph3d.warmupTicks(0).cooldownTicks(0).graphData(graph3d.graphData());
   });
 
   if (containerRef.value) {

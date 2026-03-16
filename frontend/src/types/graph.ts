@@ -281,6 +281,7 @@ export interface RandomGraphRequest {
   self_edges_ratio?: number;    // Ratio of self-edges to add (0.0-1.0, e.g. 0.3 = 30% of edges)
   multi_edges_max_count?: number;  // Max extra edges between same pair of nodes (0 = disabled)
   multi_edges_ratio?: number;      // Fraction of existing edges to duplicate (0.0-1.0)
+  bidirectional_edges_ratio?: number;  // Fraction of edges to create reverse (B->A) (0.0-1.0)
 
   // Node and edge types
   node_types: string[];

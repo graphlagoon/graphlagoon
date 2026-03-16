@@ -407,6 +407,7 @@ class RandomGraphRequest(BaseModel):
         0  # Max extra edges between same node pair (0 = disabled)
     )
     multi_edges_ratio: float = 0.3  # Fraction of existing edges to duplicate (0.0-1.0)
+    bidirectional_edges_ratio: float = 0.0  # Fraction of edges to create reverse (B->A) (0.0-1.0)
 
     # Node and edge types
     node_types: list[str] = Field(

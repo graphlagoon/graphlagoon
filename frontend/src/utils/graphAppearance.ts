@@ -21,17 +21,46 @@ export function hexToRgba(hex: string, alpha: number): string {
 }
 
 /**
- * Calculate curvature value for a multi-edge based on its index in the pair.
- * Creates symmetric spread: 0, +0.15, -0.15, +0.3, -0.3, etc.
- * Curvature is capped at +/-0.6 to prevent extreme curves.
+ * Calculate curvature for an edge in a multi-edge group that may contain
+ * both forward (A→B) and reverse (B→A) edges.
+ *
+ * Strategy: forward edges fan out on the positive side, reverse edges on the
+ * negative side. Within each sub-group, edges are spread evenly starting from
+ * the baseline. When a sub-group has a single edge, it still gets a small
+ * offset so it doesn't overlap with the other direction's edges.
+ *
+ * The caller is responsible for negating the result for reversed edges so
+ * that the force-graph's direction-dependent perpendicular places them on the
+ * correct visual side.
+ *
+ * @param indexInSubgroup  0-based index within the same-direction sub-group
+ * @param subgroupCount    total edges in the same-direction sub-group
+ * @param hasOppositeDir   whether the pair group contains edges in the other direction
  */
-export function getMultiEdgeCurvature3D(edgeIndex: number, totalEdges: number): number {
-  if (totalEdges <= 1) return 0;
-  if (edgeIndex === 0) return 0;
+export function getMultiEdgeCurvature3D(
+  indexInSubgroup: number,
+  subgroupCount: number,
+  hasOppositeDir: boolean,
+): number {
+  const STEP = 0.15;
+  const CAP = 0.6;
 
-  const magnitude = Math.ceil(edgeIndex / 2) * 0.15;
-  const sign = edgeIndex % 2 === 1 ? 1 : -1;
-  return sign * Math.min(magnitude, 0.6);
+  if (subgroupCount <= 0) return 0;
+
+  if (subgroupCount === 1 && !hasOppositeDir) {
+    // Only one edge between these nodes, no curvature needed
+    return 0;
+  }
+
+  if (subgroupCount === 1) {
+    // Single edge in this direction but opposite direction exists — offset to avoid overlap
+    return Math.min(STEP, CAP);
+  }
+
+  // Multiple same-direction edges: spread starting from STEP
+  // e.g. 2 edges: STEP, 2*STEP   |  3 edges: STEP, 2*STEP, 3*STEP
+  const magnitude = (indexInSubgroup + 1) * STEP;
+  return Math.min(magnitude, CAP);
 }
 
 /**

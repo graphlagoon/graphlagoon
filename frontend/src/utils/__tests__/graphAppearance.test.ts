@@ -97,43 +97,41 @@ describe('hexToRgba', () => {
 // ---------------------------------------------------------------------------
 
 describe('getMultiEdgeCurvature3D', () => {
-  it('returns 0 for single edge', () => {
-    expect(getMultiEdgeCurvature3D(0, 1)).toBe(0);
+  // Single edge, no opposite direction → no curvature
+  it('returns 0 for single edge without opposite', () => {
+    expect(getMultiEdgeCurvature3D(0, 1, false)).toBe(0);
   });
 
-  it('returns 0 for first edge of multi-edge pair', () => {
-    expect(getMultiEdgeCurvature3D(0, 3)).toBe(0);
+  // Single edge but opposite direction exists → offset to avoid overlap
+  it('returns 0.15 for single edge with opposite', () => {
+    expect(getMultiEdgeCurvature3D(0, 1, true)).toBeCloseTo(0.15);
   });
 
-  it('returns +0.15 for second edge', () => {
-    expect(getMultiEdgeCurvature3D(1, 3)).toBeCloseTo(0.15);
+  // Multiple same-direction edges: spread from STEP
+  it('returns 0.15 for first of 2 same-direction edges', () => {
+    expect(getMultiEdgeCurvature3D(0, 2, false)).toBeCloseTo(0.15);
   });
 
-  it('returns -0.15 for third edge', () => {
-    expect(getMultiEdgeCurvature3D(2, 3)).toBeCloseTo(-0.15);
+  it('returns 0.30 for second of 2 same-direction edges', () => {
+    expect(getMultiEdgeCurvature3D(1, 2, false)).toBeCloseTo(0.30);
   });
 
-  it('returns +0.3 for fourth edge', () => {
-    expect(getMultiEdgeCurvature3D(3, 5)).toBeCloseTo(0.3);
+  it('returns 0.15 for first of 3 same-direction edges', () => {
+    expect(getMultiEdgeCurvature3D(0, 3, true)).toBeCloseTo(0.15);
   });
 
-  it('returns -0.3 for fifth edge', () => {
-    expect(getMultiEdgeCurvature3D(4, 5)).toBeCloseTo(-0.3);
+  it('returns 0.45 for third of 3 same-direction edges', () => {
+    expect(getMultiEdgeCurvature3D(2, 3, true)).toBeCloseTo(0.45);
   });
 
-  it('caps curvature at -0.6', () => {
-    // index 8 → ceil(8/2) * 0.15 = 4 * 0.15 = 0.6, sign = 8%2===0 → -1
-    expect(getMultiEdgeCurvature3D(8, 20)).toBeCloseTo(-0.6);
-  });
-
-  it('caps curvature at +0.6', () => {
-    // index 9 → ceil(9/2) * 0.15 = 5 * 0.15 = 0.75 → capped to 0.6, sign = 9%2===1 → +1
-    expect(getMultiEdgeCurvature3D(9, 20)).toBeCloseTo(0.6);
+  // Cap at 0.6
+  it('caps curvature at 0.6', () => {
+    expect(getMultiEdgeCurvature3D(5, 6, false)).toBeCloseTo(0.6);
   });
 
   it('handles large indices without exceeding cap', () => {
-    const c = getMultiEdgeCurvature3D(15, 20);
-    expect(Math.abs(c)).toBeLessThanOrEqual(0.6);
+    const c = getMultiEdgeCurvature3D(10, 12, true);
+    expect(c).toBeLessThanOrEqual(0.6);
   });
 });
 

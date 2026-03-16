@@ -23,6 +23,8 @@ const selfEdgesRatio = ref(0.3);
 const multiEdgesEnabled = ref(false);
 const multiEdgesMaxCount = ref(3);
 const multiEdgesRatio = ref(0.3);
+const bidirectionalEdgesEnabled = ref(false);
+const bidirectionalEdgesRatio = ref(0.3);
 
 // Node/edge types (comma-separated input)
 const nodeTypesInput = ref('Person, Company, Product');
@@ -202,6 +204,9 @@ async function generateGraph() {
       request.multi_edges_max_count = multiEdgesMaxCount.value;
       request.multi_edges_ratio = multiEdgesRatio.value;
     }
+    if (bidirectionalEdgesEnabled.value) {
+      request.bidirectional_edges_ratio = bidirectionalEdgesRatio.value;
+    }
 
     // Add column config if customized
     if (showColumnConfig.value) {
@@ -369,6 +374,20 @@ async function clearAllData() {
           <input v-model.number="multiEdgesRatio" type="range" class="form-control" min="0.05" max="1" step="0.05" />
           <span class="hint">Fraction of existing edges that get duplicated</span>
         </div>
+      </div>
+
+      <div class="checkbox-group">
+        <label>
+          <input v-model="bidirectionalEdgesEnabled" type="checkbox" />
+          Generate bidirectional edges
+        </label>
+        <span class="hint">Add reverse edges (B&#8594;A for each A&#8594;B)</span>
+      </div>
+
+      <div v-if="bidirectionalEdgesEnabled" class="form-group">
+        <label>Bidirectional ratio ({{ Math.round(bidirectionalEdgesRatio * 100) }}%)</label>
+        <input v-model.number="bidirectionalEdgesRatio" type="range" class="form-control" min="0.05" max="1" step="0.05" />
+        <span class="hint">Fraction of existing edges that get a reverse counterpart</span>
       </div>
     </div>
 
