@@ -226,12 +226,15 @@ def create_frontend_router(
         manifest = load_vite_manifest()
         assets = get_assets_from_manifest(manifest)
 
+        from graphlagoon import __version__
+
         config = {
             "dev_mode": settings.dev_mode,
             "database_enabled": is_database_available(),
             "databricks_mode": settings.databricks_mode,
             "router_base": router_base,
             "allowed_share_domains": settings.allowed_share_domain_list,
+            "version": __version__,
         }
         # Inject user email so frontend auto-logins
         user_email = getattr(request.state, "user_email", None)

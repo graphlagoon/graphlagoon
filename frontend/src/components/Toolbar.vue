@@ -402,7 +402,7 @@ function handleExportPng(options: ExportPNGOptions) {
           </div>
 
           <div class="about-footer">
-            <span>MIT License</span>
+            <span>AGPL-3.0 License</span>
             <span class="about-sep">·</span>
             <span>Bruno Messias</span>
           </div>

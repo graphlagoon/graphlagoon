@@ -71,5 +71,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["graphlagoon"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"graphlagoon/alembic.ini" = "graphlagoon/alembic.ini"
+"graphlagoon/alembic/script.py.mako" = "graphlagoon/alembic/script.py.mako"
+
 [tool.uv.sources]
 gsql2rsql = { path = "../../cyper2dsql/python", editable = true }

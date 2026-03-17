@@ -143,7 +143,7 @@ async def create_tables():
     if not is_database_available():
         return
 
-    alembic_ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
+    alembic_ini = Path(__file__).resolve().parent.parent / "alembic.ini"
 
     if alembic_ini.exists():
         from alembic.config import Config

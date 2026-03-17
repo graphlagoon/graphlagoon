@@ -12,10 +12,10 @@ test:
 	uv run pytest -v
 
 migrate:
-	uv run alembic upgrade head
+	uv run alembic -c graphlagoon/alembic.ini upgrade head
 
 migrate-create:
-	uv run alembic revision --autogenerate -m "$(name)"
+	uv run alembic -c graphlagoon/alembic.ini revision --autogenerate -m "$(name)"
 
 clean:
 	rm -rf .venv __pycache__ .pytest_cache

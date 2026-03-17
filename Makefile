@@ -97,7 +97,7 @@ dev:
 dev-db: db-up
 	@cd warehouse && uv sync --extra dev
 	@cd api && uv sync --extra dev --extra postgres
-	@cd api && uv run alembic upgrade head
+	@cd api && uv run alembic -c graphlagoon/alembic.ini upgrade head
 	@mkdir -p $(CURDIR)/.logs $(CURDIR)/.pids
 	@echo "$(CYAN)Starting warehouse on :8001...$(RESET)"
 	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
@@ -134,7 +134,7 @@ dev-gsql2rsql: _ensure-gsql2rsql
 dev-gsql2rsql-db: _ensure-gsql2rsql db-up
 	@cd warehouse && uv sync --extra dev
 	@cd api && uv sync --extra dev --extra postgres
-	@cd api && uv run alembic upgrade head
+	@cd api && uv run alembic -c graphlagoon/alembic.ini upgrade head
 	@mkdir -p $(CURDIR)/.logs $(CURDIR)/.pids
 	@echo "$(CYAN)Starting warehouse on :8001...$(RESET)"
 	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
@@ -166,7 +166,7 @@ dev-databricks: _ensure-databricks-env
 # Databricks SQL + local PostgreSQL
 dev-databricks-db: _ensure-databricks-env db-up
 	@cd api && uv sync --extra dev --extra postgres
-	@cd api && uv run alembic upgrade head
+	@cd api && uv run alembic -c graphlagoon/alembic.ini upgrade head
 	@mkdir -p $(CURDIR)/.logs $(CURDIR)/.pids
 	@echo "$(CYAN)Starting API on :8000 (Databricks + database)...$(RESET)"
 	@cd api && nohup env GRAPH_LAGOON_DATABASE_ENABLED=true uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
@@ -464,12 +464,12 @@ db-logs:
 # Migrations
 migrate:
 	cd api && uv sync --extra dev --extra postgres
-	cd api && uv run alembic upgrade head
+	cd api && uv run alembic -c graphlagoon/alembic.ini upgrade head
 
 migrate-create:
 	cd api && uv sync --extra dev --extra postgres
 	@read -p "Migration name: " name; \
-	cd api && uv run alembic revision --autogenerate -m "$$name"
+	cd api && uv run alembic -c graphlagoon/alembic.ini revision --autogenerate -m "$$name"
 
 # Performance report (requires dev server running on :3000)
 perf-report:
