@@ -395,16 +395,13 @@ function handleExportPng(options: ExportPNGOptions) {
               <ExternalLink :size="14" />
               Report an Issue
             </a>
-            <a href="https://github.com/graphlagoon/graphlagoon/discussions" target="_blank" rel="noopener noreferrer" class="about-link">
-              <ExternalLink :size="14" />
-              Community & Support
-            </a>
+
           </div>
 
           <div class="about-footer">
             <span>AGPL-3.0 License</span>
             <span class="about-sep">·</span>
-            <span>Bruno Messias</span>
+            <span>Graph Lagoon</span>
           </div>
         </div>
       </div>

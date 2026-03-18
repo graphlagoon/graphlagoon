@@ -1,6 +1,6 @@
 [project]
 name = "graphlagoon"
-version = "0.10.0"
+version = "0.10.1"
 description = "Graph visualization and exploration tool with FastAPI backend"
 readme = "README.md"
 requires-python = ">=3.11"
