@@ -164,7 +164,8 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByTitle('Clusters')).toBeVisible({ timeout: 15_000 });
 
       await page.getByTitle('Clusters').click();
-      await expect(page.getByText('Cluster Programs')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Communities' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Programs' })).toBeVisible();
 
       await page.getByTitle('Clusters').click();
     });
