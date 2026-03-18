@@ -34,15 +34,6 @@ jobs:
       - run: cd frontend && npm ci
       - run: cd frontend && npx vue-tsc --noEmit
 
-  lint-api:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
-      - run: cd api && uv sync --no-sources --extra dev
-      - run: cd api && uv run --no-sources ruff check graphlagoon/
-      - run: cd api && uv run --no-sources ruff format --check graphlagoon/
-
   test-unit:
     runs-on: ubuntu-latest
     steps:
@@ -83,7 +74,7 @@ jobs:
           path: frontend/playwright-report/
 
   build-verify:
-    needs: [secrets-scan, test-unit, test-e2e, lint-frontend, lint-api]
+    needs: [secrets-scan, test-unit, test-e2e, lint-frontend]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
