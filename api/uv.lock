@@ -406,7 +406,7 @@ wheels = [
 
 [[package]]
 name = "graphlagoon"
-version = "0.9.0"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },
@@ -453,7 +453,7 @@ requires-dist = [
     { name = "databricks-sdk", marker = "extra == 'lakebase'", specifier = ">=0.38.0" },
     { name = "debugpy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "fastapi", specifier = ">=0.109.0" },
-    { name = "gsql2rsql", editable = "../../cyper2dsql/python" },
+    { name = "gsql2rsql" },
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
@@ -523,37 +523,13 @@ wheels = [
 [[package]]
 name = "gsql2rsql"
 version = "0.10.0"
-source = { editable = "../../cyper2dsql/python" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "antlr4-python3-runtime" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "antlr4-python3-runtime", specifier = ">=4.13.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
-    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.0" },
-    { name = "pyspark", marker = "extra == 'dev'", specifier = ">=3.5.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
-    { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.1.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.2.0" },
-]
-provides-extras = ["dev"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "autoflake", specifier = ">=2.3.1" },
-    { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "mkdocs", specifier = ">=1.6.1" },
-    { name = "mkdocs-awesome-pages-plugin", specifier = ">=2.10.1" },
-    { name = "mkdocs-macros-plugin", specifier = ">=1.5.0" },
-    { name = "mkdocs-material", specifier = ">=9.7.1" },
-    { name = "mkdocs-minify-plugin", specifier = ">=0.8.0" },
-    { name = "pyspark", specifier = ">=4.2.0.dev2" },
-    { name = "pytest-xdist", specifier = ">=3.8.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "vulture", specifier = ">=2.14" },
+sdist = { url = "https://files.pythonhosted.org/packages/26/1b/c1408ccf673f2d261f27f7396f67d601119763907581159fd0e461eb2282/gsql2rsql-0.10.0.tar.gz", hash = "sha256:9ae69d4c686a986c6ec01c29cc468265610ec3473e1de0eb071129b5de33a136", size = 2751797, upload-time = "2026-02-24T10:47:36.288Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/79/9abc99f69ba44120a996d1b68fb46707a48a1be15189ab7c9f533c3811d0/gsql2rsql-0.10.0-py3-none-any.whl", hash = "sha256:f5626a401c22a53576de4c0a61586c66ea0a0e9e123cdddff8183ca260d00932", size = 310727, upload-time = "2026-02-24T10:47:34.051Z" },
 ]
 
 [[package]]
