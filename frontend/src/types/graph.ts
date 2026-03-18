@@ -122,6 +122,8 @@ export interface ExplorationState {
   layout_algorithm: LayoutAlgorithm;
   graph_query?: string;
   cte_prefilter?: string;              // CTE pre-filter for edge table
+  vlp_rendering_mode?: VlpRenderingMode;         // Cypher transpilation mode (optional for backwards compat)
+  materialization_strategy?: MaterializationStrategy; // Materialization strategy (optional for backwards compat)
   textFormat?: TextFormatState;        // Label formatting rules (optional for backwards compat)
   clusters?: any;                      // ClusterState from cluster store (optional for backwards compat)
 }

@@ -1282,6 +1282,8 @@ export const useGraphStore = defineStore('graph', () => {
       layout_algorithm: layoutAlgorithm.value,
       graph_query: graphQuery.value || undefined,
       cte_prefilter: ctePrefilter.value || undefined,
+      vlp_rendering_mode: vlpRenderingMode.value,
+      materialization_strategy: materializationStrategy.value,
       textFormat: getTextFormatState(),
       clusters: clusterStore.getState() as any, // Cluster state (programs, clusters, executions)
     };
@@ -1361,6 +1363,9 @@ export const useGraphStore = defineStore('graph', () => {
       layoutAlgorithm.value = exploration.state.layout_algorithm;
       graphQuery.value = exploration.state.graph_query || '';
       ctePrefilter.value = exploration.state.cte_prefilter || '';
+      vlpRenderingMode.value = exploration.state.vlp_rendering_mode || 'cte';
+      materializationStrategy.value = exploration.state.materialization_strategy
+        || (window.__GRAPH_LAGOON_CONFIG__?.databricks_mode ? 'temp_tables' : 'numbered_views');
 
       // Load text format state (with backwards compatibility)
       loadTextFormatState(exploration.state.textFormat);

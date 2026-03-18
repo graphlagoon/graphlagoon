@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Any, Literal
+from typing import Optional, Any, Literal, TypeAlias
 from uuid import UUID
 from datetime import datetime
 
@@ -246,6 +246,10 @@ class TextFormatState(BaseModel):
     defaults: TextFormatDefaults = Field(default_factory=TextFormatDefaults)
 
 
+VlpRenderingMode: TypeAlias = Literal["cte", "procedural"]
+MaterializationStrategy: TypeAlias = Literal["temp_tables", "numbered_views"]
+
+
 class ExplorationState(BaseModel):
     nodes: list[NodeState] = Field(default_factory=list)
     edges: list[EdgeState] = Field(default_factory=list)
@@ -254,6 +258,8 @@ class ExplorationState(BaseModel):
     layout_algorithm: str = "force-atlas-2"
     graph_query: Optional[str] = None
     cte_prefilter: Optional[str] = None  # CTE pre-filter for edge table
+    vlp_rendering_mode: Optional[VlpRenderingMode] = None
+    materialization_strategy: Optional[MaterializationStrategy] = None
     textFormat: Optional[TextFormatState] = None
     clusters: Optional[dict] = None  # ClusterState JSON from frontend
 
@@ -528,10 +534,6 @@ class SchemaDiscoveryResponse(BaseModel):
 
     node_types: list[str]
     relationship_types: list[str]
-
-
-VlpRenderingMode = Literal["cte", "procedural"]
-MaterializationStrategy = Literal["temp_tables", "numbered_views"]
 
 
 class CypherQueryRequest(BaseModel):
