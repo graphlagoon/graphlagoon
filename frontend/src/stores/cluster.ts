@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { recordPerf } from '@/utils/perfMetrics'
 import type {
   Cluster,
@@ -731,6 +731,17 @@ return clusters;`,
 
   // Create default programs if this is the first time
   createDefaultPrograms()
+
+  // Clear clusters when graph data changes (query executed, subgraph loaded, etc.)
+  // Clusters reference node_ids that may no longer exist after a new query.
+  watch(
+    () => useGraphStore().nodes,
+    () => {
+      if (clusters.value.length > 0) {
+        clearClusters()
+      }
+    },
+  )
 
   // ============================================================================
   // Return

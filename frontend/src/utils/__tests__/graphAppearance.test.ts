@@ -50,6 +50,8 @@ function makeCtx(overrides: Partial<AppearanceContext> = {}): AppearanceContext 
     getNodeTypeColor: () => '#4488cc',
     getEdgeTypeColor: () => '#888888',
 
+    communityColorMap: null,
+
     ...overrides,
   };
   // Auto-derive filter Sets from arrays when not explicitly provided

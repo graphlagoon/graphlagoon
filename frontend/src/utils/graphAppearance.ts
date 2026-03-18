@@ -162,6 +162,9 @@ export interface AppearanceContext {
   // Color lookup
   getNodeTypeColor: (type: string) => string;
   getEdgeTypeColor: (type: string) => string;
+
+  // Community color override (nodeId -> hex color)
+  communityColorMap: Map<string, string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +197,7 @@ export function computeNodeAppearance(
 ): NodeAppearanceResult {
   const baseColor = isCluster
     ? (clusterColor || '#9333ea')
-    : ctx.getNodeTypeColor(nodeType);
+    : (ctx.communityColorMap?.get(nodeId) ?? ctx.getNodeTypeColor(nodeType));
   let color = baseColor;
   let size = isCluster ? clusterBaseSize : ctx.baseNodeSize;
 

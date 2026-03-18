@@ -6,7 +6,7 @@ frontend/playwright-report-integration/data
 frontend/test-results-integration/.last-run.json
 frontend/test-results-integration
 docs/dew
-
+scripts
 # =============================================================================
 # Project-specific
 # =============================================================================

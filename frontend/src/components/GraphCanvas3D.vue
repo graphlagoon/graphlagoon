@@ -4,6 +4,7 @@ import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
 import { useGraphStore } from '@/stores/graph';
 import { useMetricsStore } from '@/stores/metrics';
+import { useCommunityStore } from '@/stores/community';
 import type { Node, Edge } from '@/types/graph';
 import type { GraphNode, GraphLink, GraphData } from '@/types/graph3d';
 import { formatNodeLabel, formatEdgeLabel } from '@/utils/labelFormatter';
@@ -13,7 +14,7 @@ import {
   computeLinkAppearance,
   type AppearanceContext,
 } from '@/utils/graphAppearance';
-import { applyForceConfig, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
+import { applyForceConfig, applyCommunityRadialForce, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
 import { forcePointerRepulsion, type PointerRepulsionForce } from '@/utils/forcePointerRepulsion';
 import { useGraphLabels } from '@/composables/useGraphLabels';
 import { useGraphLayout } from '@/composables/useGraphLayout';
@@ -30,6 +31,7 @@ const emit = defineEmits<{
 
 const graphStore = useGraphStore();
 const metricsStore = useMetricsStore();
+const communityStore = useCommunityStore();
 
 const backgroundColor = '#fafafa';
 const wrapperRef = ref<HTMLDivElement | null>(null);
@@ -246,6 +248,8 @@ function collectAppearanceContext(): AppearanceContext {
 
     getNodeTypeColor: (type: string) => nodeColorMap.get(type) || '#888888',
     getEdgeTypeColor: (type: string) => edgeColorMap.get(type) || '#888888',
+
+    communityColorMap: communityStore.communityColorMap,
   };
 }
 
@@ -495,6 +499,14 @@ function updateGraph() {
 
   applyForceConfig(graph3d, { ...graphStore.force3DSettings, ...lastForceOverrides }, graphStore.aesthetics.nodeSize / 2, graphStore.behaviors.viewMode === '2d-proj');
 
+  // Re-apply community radial forces after graph data update
+  applyCommunityRadialForce(
+    graph3d,
+    communityStore.communityMap,
+    communityStore.communityRadialConfig,
+    graphStore.behaviors.viewMode === '2d-proj',
+  );
+
   if (!isLayoutRunning.value && hasNewNodes) {
     layout.reheatLayout();
   } else if (!isLayoutRunning.value) {
@@ -689,6 +701,14 @@ function initGraph() {
   if (is2D) {
     graph3d.numDimensions(2);
   }
+
+  // Re-apply community radial forces if active (survives initGraph re-init)
+  applyCommunityRadialForce(
+    graph3d,
+    communityStore.communityMap,
+    communityStore.communityRadialConfig,
+    is2D,
+  );
 
   // Register blower force (stays disabled until Shift is held)
   pointerRepulsionForce = forcePointerRepulsion();
@@ -960,6 +980,38 @@ watch(
   { deep: true }
 );
 
+// Community radial layout — apply/remove forces when toggled or recomputed
+// Also auto-switch to 2D projection when radial layout is enabled
+let viewModeBeforeRadial: '3d' | '2d-proj' | null = null;
+
+watch(
+  () => communityStore.radialLayoutEnabled,
+  (enabled) => {
+    if (enabled && graphStore.behaviors.viewMode === '3d') {
+      viewModeBeforeRadial = '3d';
+      graphStore.updateBehaviors({ viewMode: '2d-proj' });
+    } else if (!enabled && viewModeBeforeRadial === '3d') {
+      graphStore.updateBehaviors({ viewMode: viewModeBeforeRadial });
+      viewModeBeforeRadial = null;
+    }
+  },
+);
+
+watch(
+  () => [communityStore.radialLayoutEnabled, communityStore.communityRadialConfig] as const,
+  () => {
+    if (!graph3d) return;
+    applyCommunityRadialForce(
+      graph3d,
+      communityStore.communityMap,
+      communityStore.communityRadialConfig,
+      graphStore.behaviors.viewMode === '2d-proj',
+    );
+    graph3d.d3ReheatSimulation();
+  },
+  { deep: true }
+);
+
 // Pointer repulsion settings — update force parameters live (skip during ramp)
 watch(
   () => [graphStore.force3DSettings.pointerRepulsionStrength, graphStore.force3DSettings.pointerRepulsionRange] as const,
@@ -1133,6 +1185,15 @@ watch(
     colorUpdateTimeout3D = setTimeout(() => { updateVisuals(); }, 50);
   },
   { deep: true }
+);
+
+// Community color changes — debounced (same pattern as nodeTypeColors)
+watch(
+  () => communityStore.communityColorMap,
+  () => {
+    if (colorUpdateTimeout3D) clearTimeout(colorUpdateTimeout3D);
+    colorUpdateTimeout3D = setTimeout(() => { updateVisuals(); }, 50);
+  },
 );
 
 // Text format changes — update graph to refresh labels

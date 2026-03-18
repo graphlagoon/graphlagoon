@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { useGraphStore } from '@/stores/graph';
 import { useToolbarStore } from '@/stores/toolbar';
 import { useClusterStore } from '@/stores/cluster';
+import { useCommunityStore } from '@/stores/community';
 import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import SidePanel from '@/components/SidePanel.vue';
 import FilterPanel from '@/components/FilterPanel.vue';
@@ -32,6 +33,7 @@ const route = useRoute();
 const graphStore = useGraphStore();
 const toolbarStore = useToolbarStore();
 const clusterStore = useClusterStore();
+const communityStore = useCommunityStore();
 
 const showFilters = ref(false);
 const showLayoutPanel = ref(false);
@@ -150,6 +152,7 @@ onMounted(async () => {
     await graphStore.loadSubgraph({});
     // Clear clusters and reset to default programs in memory
     clusterStore.clearAll(); // This also recreates default programs
+    communityStore.clearCommunities();
     // Clear graph query - user must execute a query to save exploration
     graphStore.graphQuery = '';
   }
@@ -168,6 +171,7 @@ watch(
   async (newId) => {
     graphStore.clear();
     clusterStore.clearAll(); // Clear clusters and reset to default programs
+    communityStore.clearCommunities();
     await graphStore.loadContext(newId);
     await graphStore.loadSubgraph({});
   }

@@ -188,3 +188,66 @@ export function applyForceConfig(graph3d: any, settings: Force3DSettings, nodeRe
     graph3d.d3Force('collide', null);
   }
 }
+
+// ============================================================================
+// Community Radial Layout
+// ============================================================================
+
+/**
+ * Apply or remove community-based radial positioning forces.
+ *
+ * Each community is assigned a target (x, y) position based on its angle and
+ * radius. Nodes are pulled toward their community's position using forceX/forceY.
+ *
+ * @param graph3d - The 3d-force-graph instance
+ * @param communityMap - nodeId → communityId mapping
+ * @param communityRadialConfig - communityId → { angle, radius } or null to remove
+ * @param is2D - Whether the graph is in 2D projection mode
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function applyCommunityRadialForce(
+  graph3d: any,
+  communityMap: Map<string, number>,
+  communityRadialConfig: Map<number, { angle: number; radius: number }> | null,
+  is2D: boolean,
+): void {
+  if (!communityRadialConfig || communityMap.size === 0) {
+    graph3d.d3Force('communityX', null);
+    graph3d.d3Force('communityY', null);
+    graph3d.d3Force('communityZ', null);
+    return;
+  }
+
+  // Snapshot reactive Maps into plain Maps so d3 force closures read stable data
+  const nodeCommMap = new Map(communityMap);
+  const radialCfg = new Map(communityRadialConfig);
+
+  // Pre-compute per-node target positions for O(1) lookup in the force tick
+  const nodeTargetX = new Map<string, number>();
+  const nodeTargetY = new Map<string, number>();
+  for (const [nodeId, communityId] of nodeCommMap) {
+    const cfg = radialCfg.get(communityId);
+    if (cfg) {
+      nodeTargetX.set(nodeId, Math.cos(cfg.angle) * cfg.radius);
+      nodeTargetY.set(nodeId, Math.sin(cfg.angle) * cfg.radius);
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type D3PositionForce = { strength(s: number): any };
+
+  const STRENGTH = 0.5;
+
+  const cx = (forceX((node: any) => nodeTargetX.get(node.id) ?? 0) as D3PositionForce).strength(STRENGTH);
+  const cy = (forceY((node: any) => nodeTargetY.get(node.id) ?? 0) as D3PositionForce).strength(STRENGTH);
+
+  graph3d.d3Force('communityX', cx);
+  graph3d.d3Force('communityY', cy);
+
+  if (is2D) {
+    graph3d.d3Force('communityZ', null);
+  } else {
+    const cz = (forceZ(0) as D3PositionForce).strength(STRENGTH * 0.3);
+    graph3d.d3Force('communityZ', cz);
+  }
+}
