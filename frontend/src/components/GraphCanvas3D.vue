@@ -1001,13 +1001,29 @@ watch(
   () => [communityStore.radialLayoutEnabled, communityStore.communityRadialConfig] as const,
   () => {
     if (!graph3d) return;
+    const is2D = graphStore.behaviors.viewMode === '2d-proj';
     applyCommunityRadialForce(
       graph3d,
       communityStore.communityMap,
       communityStore.communityRadialConfig,
-      graphStore.behaviors.viewMode === '2d-proj',
+      is2D,
     );
-    graph3d.d3ReheatSimulation();
+
+    // Unpin nodes so the radial forces can move them, then restart simulation
+    const data = graph3d.graphData();
+    if (data?.nodes) {
+      data.nodes.forEach((node: GraphNode) => {
+        node.fx = undefined;
+        node.fy = undefined;
+        if (is2D) {
+          node.z = 0;
+          node.fz = 0;
+        } else {
+          node.fz = undefined;
+        }
+      });
+    }
+    layout.startLayout();
   },
   { deep: true }
 );
