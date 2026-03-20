@@ -6,9 +6,10 @@ It processes raw DataFrame results from the warehouse and constructs GraphRespon
 """
 
 import json
+import time
 from typing import Optional, Any
 
-from graphlagoon.models.schemas import Node, Edge, GraphResponse, ColumnConfig
+from graphlagoon.models.schemas import Node, Edge, GraphResponse, QueryMetadata, ColumnConfig
 
 
 class QueryExecutionError(Exception):
@@ -257,9 +258,12 @@ async def execute_graph_query_with_nodes(
     Returns:
         Complete GraphResponse with nodes and edges
     """
+    t_total_start = time.perf_counter()
+
     # Execute the edge query via statements API
     # Query should already use catalog.schema.table format
     # sql-warehouse handles conversion to local Spark format internally
+    t0 = time.perf_counter()
     if use_external_links:
         result = await warehouse_client.execute_statement_external(
             statement=query,
@@ -270,13 +274,24 @@ async def execute_graph_query_with_nodes(
             statement=query,
             row_limit=limit,
         )
+    edge_query_ms = (time.perf_counter() - t0) * 1000
 
     columns, rows = _parse_statement_result(result, query=query)
 
     if not rows:
-        return GraphResponse(nodes=[], edges=[], truncated=False)
+        total_ms = (time.perf_counter() - t_total_start) * 1000
+        return GraphResponse(
+            nodes=[],
+            edges=[],
+            truncated=False,
+            metadata=QueryMetadata(
+                edge_query_ms=round(edge_query_ms, 2),
+                total_ms=round(total_ms, 2),
+            ),
+        )
 
     # Process edges and extract node IDs
+    t0 = time.perf_counter()
     try:
         response_partial, node_ids = process_graph_query_result(
             columns, rows, column_config
@@ -287,8 +302,15 @@ async def execute_graph_query_with_nodes(
             f"(columns={columns}, row_count={len(rows)}, "
             f"first_row={rows[0] if rows else 'N/A'}): {e}"
         ) from e
+    edge_processing_ms = (time.perf_counter() - t0) * 1000
 
     if not node_ids:
+        total_ms = (time.perf_counter() - t_total_start) * 1000
+        response_partial.metadata = QueryMetadata(
+            edge_query_ms=round(edge_query_ms, 2),
+            edge_processing_ms=round(edge_processing_ms, 2),
+            total_ms=round(total_ms, 2),
+        )
         return response_partial
 
     # Build node query using actual table name
@@ -303,6 +325,7 @@ async def execute_graph_query_with_nodes(
     """
 
     # Execute node query
+    t0 = time.perf_counter()
     try:
         if use_external_links:
             node_result = await warehouse_client.execute_statement_external(
@@ -315,8 +338,10 @@ async def execute_graph_query_with_nodes(
             f"Node query execution failed (node_table={node_table}, "
             f"node_count={len(node_ids)}): {e}"
         ) from e
+    node_query_ms = (time.perf_counter() - t0) * 1000
 
     # Parse and process nodes
+    t0 = time.perf_counter()
     node_columns, node_rows = _parse_statement_result(node_result, query=node_query)
     try:
         nodes = process_nodes_result(node_columns, node_rows, column_config)
@@ -326,10 +351,20 @@ async def execute_graph_query_with_nodes(
             f"(columns={node_columns}, row_count={len(node_rows)}, "
             f"first_row={node_rows[0] if node_rows else 'N/A'}): {e}"
         ) from e
+    node_processing_ms = (time.perf_counter() - t0) * 1000
+
+    total_ms = (time.perf_counter() - t_total_start) * 1000
 
     return GraphResponse(
         nodes=nodes,
         edges=response_partial.edges,
         truncated=response_partial.truncated,
         total_count=response_partial.total_count,
+        metadata=QueryMetadata(
+            edge_query_ms=round(edge_query_ms, 2),
+            edge_processing_ms=round(edge_processing_ms, 2),
+            node_query_ms=round(node_query_ms, 2),
+            node_processing_ms=round(node_processing_ms, 2),
+            total_ms=round(total_ms, 2),
+        ),
     )

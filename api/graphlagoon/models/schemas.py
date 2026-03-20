@@ -84,11 +84,23 @@ class Edge(BaseModel):
     properties: Optional[dict] = None
 
 
+class QueryMetadata(BaseModel):
+    """Timing metadata for query execution stages (all values in milliseconds)."""
+
+    edge_query_ms: Optional[float] = None
+    edge_processing_ms: Optional[float] = None
+    node_query_ms: Optional[float] = None
+    node_processing_ms: Optional[float] = None
+    transpilation_ms: Optional[float] = None
+    total_ms: Optional[float] = None
+
+
 class GraphResponse(BaseModel):
     nodes: list[Node]
     edges: list[Edge]
     truncated: bool = False
     total_count: Optional[int] = None
+    metadata: Optional[QueryMetadata] = None
 
 
 class DatasetsResponse(BaseModel):
@@ -558,6 +570,7 @@ class CypherQueryResponse(BaseModel):
     truncated: bool = False
     total_count: Optional[int] = None
     transpiled_sql: str  # The SQL query generated from OpenCypher
+    metadata: Optional[QueryMetadata] = None
 
 
 class CypherTranspileRequest(BaseModel):

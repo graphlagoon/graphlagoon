@@ -613,12 +613,16 @@ async def execute_cypher_query(
         )
 
     # Transpile OpenCypher to SQL
+    import time
+
+    t_transpile_start = time.perf_counter()
     sql = transpile_cypher_to_sql(
         data.query,
         context,
         vlp_rendering_mode=data.vlp_rendering_mode,
         materialization_strategy=data.materialization_strategy,
     )
+    transpilation_ms = (time.perf_counter() - t_transpile_start) * 1000
 
     # Apply CTE pre-filter if provided
     if data.cte_prefilter:
@@ -710,12 +714,28 @@ async def execute_cypher_query(
             },
         )
 
+    # Merge transpilation timing into the metadata from execute_graph_query_with_nodes
+    metadata = result.metadata
+    if metadata:
+        metadata.transpilation_ms = round(transpilation_ms, 2)
+        # Recalculate total to include transpilation
+        if metadata.total_ms is not None:
+            metadata.total_ms = round(metadata.total_ms + transpilation_ms, 2)
+    else:
+        from graphlagoon.models.schemas import QueryMetadata
+
+        metadata = QueryMetadata(
+            transpilation_ms=round(transpilation_ms, 2),
+            total_ms=round(transpilation_ms, 2),
+        )
+
     return CypherQueryResponse(
         nodes=result.nodes,
         edges=result.edges,
         truncated=result.truncated,
         total_count=result.total_count,
         transpiled_sql=sql,
+        metadata=metadata,
     )
 
 

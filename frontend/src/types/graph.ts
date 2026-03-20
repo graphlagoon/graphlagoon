@@ -16,11 +16,21 @@ export interface Edge {
   selected?: boolean;
 }
 
+export interface QueryMetadata {
+  edge_query_ms?: number;
+  edge_processing_ms?: number;
+  node_query_ms?: number;
+  node_processing_ms?: number;
+  transpilation_ms?: number;
+  total_ms?: number;
+}
+
 export interface GraphResponse {
   nodes: Node[];
   edges: Edge[];
   truncated: boolean;
   total_count?: number;
+  metadata?: QueryMetadata;
 }
 
 export interface EdgeStructure {
@@ -353,6 +363,7 @@ export interface CypherQueryResponse {
   truncated: boolean;
   total_count?: number;
   transpiled_sql: string;
+  metadata?: QueryMetadata;
 }
 
 export interface CypherTranspileRequest {
