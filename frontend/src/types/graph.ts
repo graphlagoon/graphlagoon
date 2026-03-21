@@ -141,6 +141,7 @@ export interface ExplorationState {
   edgeTypeColors?: Record<string, string>; // Edge type → color hex (optional for backwards compat)
   behaviors?: Record<string, unknown>;     // Behavior settings (optional for backwards compat)
   aesthetics?: Record<string, unknown>;    // Aesthetic settings (optional for backwards compat)
+  community?: Record<string, unknown>;     // Community detection state (optional for backwards compat)
 }
 
 export interface Exploration {

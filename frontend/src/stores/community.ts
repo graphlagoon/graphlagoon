@@ -294,6 +294,43 @@ export const useCommunityStore = defineStore('community', () => {
   }
 
   /**
+   * Serialize community state for exploration persistence.
+   */
+  function getState(): Record<string, unknown> | undefined {
+    if (communityMap.value.size === 0) return undefined
+    return {
+      communityMap: Object.fromEntries(communityMap.value),
+      communityCount: communityCount.value,
+      modularity: modularity.value,
+      colorEnabled: colorEnabled.value,
+      radialLayoutEnabled: radialLayoutEnabled.value,
+      collapseEnabled: collapseEnabled.value,
+      resolution: resolution.value,
+      edgeTypeFilter: edgeTypeFilter.value,
+    }
+  }
+
+  /**
+   * Restore community state from exploration. Must be called BEFORE
+   * executeGraphQuery (which triggers the nodes watcher that clears communities).
+   */
+  function loadState(state: Record<string, unknown> | undefined): void {
+    if (!state || !state.communityMap) {
+      // No saved community state — don't clear (let the nodes watcher handle it)
+      return
+    }
+    const map = state.communityMap as Record<string, number>
+    communityMap.value = new Map(Object.entries(map).map(([k, v]) => [k, v]))
+    communityCount.value = (state.communityCount as number) || 0
+    modularity.value = (state.modularity as number) ?? null
+    colorEnabled.value = (state.colorEnabled as boolean) ?? true
+    radialLayoutEnabled.value = (state.radialLayoutEnabled as boolean) ?? false
+    collapseEnabled.value = (state.collapseEnabled as boolean) ?? false
+    resolution.value = (state.resolution as number) ?? 1.0
+    edgeTypeFilter.value = (state.edgeTypeFilter as string[]) ?? []
+  }
+
+  /**
    * Clear all community detection results.
    */
   function clearCommunities(): void {
@@ -372,5 +409,7 @@ export const useCommunityStore = defineStore('community', () => {
     runDetection,
     syncToClusters,
     clearCommunities,
+    getState,
+    loadState,
   }
 })

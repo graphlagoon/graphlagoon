@@ -19,6 +19,7 @@ import type {
 } from '@/types/graph';
 import { api } from '@/services/api';
 import { useClusterStore } from '@/stores/cluster';
+import { useCommunityStore } from '@/stores/community';
 import { useMetricsStore } from '@/stores/metrics';
 
 export const useGraphStore = defineStore('graph', () => {
@@ -1290,6 +1291,7 @@ export const useGraphStore = defineStore('graph', () => {
 
   function getExplorationState(): ExplorationState {
     const clusterStore = useClusterStore();
+    const communityStore = useCommunityStore();
 
     // Don't save nodes/edges - they are regenerated from graph_query
     return {
@@ -1315,6 +1317,7 @@ export const useGraphStore = defineStore('graph', () => {
         : undefined,
       behaviors: { ...behaviors.value },
       aesthetics: { ...aesthetics.value },
+      community: communityStore.getState(),
     };
   }
 
@@ -1442,6 +1445,12 @@ export const useGraphStore = defineStore('graph', () => {
         // No query saved - load default subgraph
         await loadSubgraph({});
       }
+
+      // Restore community state AFTER query execution (the nodes watcher
+      // in community store clears communities when nodes change, so we must
+      // restore after the query completes and the watcher has fired)
+      const communityStore = useCommunityStore();
+      communityStore.loadState(exploration.state.community);
 
       // Clear selections after loading
       selectedNodeIds.value.clear();

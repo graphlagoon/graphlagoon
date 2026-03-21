@@ -279,6 +279,7 @@ class ExplorationState(BaseModel):
     edgeTypeColors: Optional[dict[str, str]] = None
     behaviors: Optional[dict] = None
     aesthetics: Optional[dict] = None
+    community: Optional[dict] = None
 
 
 class ExplorationCreate(BaseModel):
