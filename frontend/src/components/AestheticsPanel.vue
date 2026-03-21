@@ -15,6 +15,7 @@ const aesthetics = computed(() => graphStore.aesthetics);
 // Get all unique node and edge types from the current graph
 const nodeTypes = computed(() => graphStore.nodeTypes);
 const edgeTypes = computed(() => graphStore.edgeTypes);
+const hasEdgeIcons = computed(() => graphStore.edgeTypeIcons.size > 0);
 
 function updateSetting<K extends keyof typeof aesthetics.value>(
   key: K,
@@ -47,6 +48,14 @@ function setNodeIcon(type: string, iconName: string | null) {
   graphStore.setNodeTypeIcon(type, iconName);
 }
 
+function getEdgeIcon(type: string): string | null {
+  return graphStore.getEdgeTypeIcon(type);
+}
+
+function setEdgeIcon(type: string, iconName: string | null) {
+  graphStore.setEdgeTypeIcon(type, iconName);
+}
+
 function resetAesthetics() {
   graphStore.updateAesthetics({
     showArrows: true,
@@ -60,10 +69,12 @@ function resetAesthetics() {
     showEdgeLabels3D: true,
     nodeLabelSize3D: 10,
     edgeLabelSize3D: 5,
+    edgeIconSize3D: 3,
     nodeLabelOffsetY3D: 2,
   });
   graphStore.resetTypeColors();
   graphStore.resetNodeTypeIcons();
+  graphStore.resetEdgeTypeIcons();
 }
 </script>
 
@@ -206,7 +217,7 @@ function resetAesthetics() {
     </div>
 
     <div v-if="edgeTypes.length > 0" class="settings-section">
-      <h5>Edge Colors</h5>
+      <h5>Edge Colors &amp; Icons</h5>
       <div class="color-list">
         <div v-for="type in edgeTypes" :key="type" class="color-item">
           <input
@@ -214,6 +225,10 @@ function resetAesthetics() {
             :value="getEdgeColor(type)"
             @input="setEdgeColor(type, ($event.target as HTMLInputElement).value)"
             class="color-picker"
+          />
+          <IconPicker
+            :modelValue="getEdgeIcon(type)"
+            @update:modelValue="setEdgeIcon(type, $event)"
           />
           <span class="color-type-label">{{ type }}</span>
         </div>
@@ -302,6 +317,21 @@ function resetAesthetics() {
             step="0.5"
             :value="aesthetics.edgeLabelSize3D"
             @input="updateSetting('edgeLabelSize3D', parseFloat(($event.target as HTMLInputElement).value))"
+          />
+        </div>
+
+        <div v-if="aesthetics.showEdgeLabels3D && hasEdgeIcons" class="setting-item">
+          <label>
+            <span class="setting-label">Edge icon size</span>
+            <span class="setting-value">{{ (aesthetics.edgeIconSize3D ?? 3).toFixed(1) }}</span>
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="10"
+            step="0.5"
+            :value="aesthetics.edgeIconSize3D ?? 3"
+            @input="updateSetting('edgeIconSize3D', parseFloat(($event.target as HTMLInputElement).value))"
           />
         </div>
     </div>

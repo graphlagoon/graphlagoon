@@ -18,6 +18,7 @@ import { applyForceConfig, applyCommunityRadialForce, computeAdaptiveLayoutParam
 import { forcePointerRepulsion, type PointerRepulsionForce } from '@/utils/forcePointerRepulsion';
 import { useGraphLabels } from '@/composables/useGraphLabels';
 import { useGraphIcons } from '@/composables/useGraphIcons';
+import { useGraphEdgeIcons } from '@/composables/useGraphEdgeIcons';
 import { useGraphLayout } from '@/composables/useGraphLayout';
 import { useGraphCamera } from '@/composables/useGraphCamera';
 import { useAxisConstrainedRotation } from '@/composables/useAxisConstrainedRotation';
@@ -168,6 +169,7 @@ const edgeDataMap = ref<Map<string, Edge>>(new Map());
 
 const labels = useGraphLabels(getGraph3d, initialLayoutDone, degreeDimmedNodeIds, focusedNodeIds);
 const icons = useGraphIcons(getGraph3d, initialLayoutDone);
+const edgeIcons = useGraphEdgeIcons(getGraph3d, initialLayoutDone);
 
 const layout = useGraphLayout(
   getGraph3d,
@@ -179,7 +181,7 @@ const layout = useGraphLayout(
 
 const camera = useGraphCamera(getGraph3d, containerRef, initialLayoutDone, {
   setLabelsVisible: labels.setLabelsVisible,
-  setIconsVisible: icons.setIconsVisible,
+  setIconsVisible: (visible: boolean) => { icons.setIconsVisible(visible); edgeIcons.setIconsVisible(visible); },
   setSelfEdgesVisible,
   updateVisuals,
   updateLabels: () => updateOverlays(),
@@ -386,6 +388,7 @@ function buildGraphData(): GraphData {
 function updateOverlays() {
   labels.updateLabels();
   icons.updateIcons();
+  edgeIcons.updateIcons();
 }
 
 function updateVisuals() {
@@ -745,6 +748,7 @@ function initGraph() {
 
   graph3d.onEngineTick(() => {
     icons.updateIcons();
+    edgeIcons.updateIcons();
   });
 
   graph3d.onEngineStop(() => {
@@ -761,6 +765,10 @@ function initGraph() {
   if (scene) {
     labels.initRenderer(scene);
     icons.initRenderer(scene);
+    const atlas = icons.getAtlas();
+    if (atlas) {
+      edgeIcons.initRenderer(scene, atlas);
+    }
   }
 
   const controls = graph3d.controls();
@@ -1577,6 +1585,7 @@ onUnmounted(() => {
   camera.dispose();
   labels.dispose();
   icons.dispose();
+  edgeIcons.dispose();
   axisRotation.dispose();
   if (hoverRAF) {
     cancelAnimationFrame(hoverRAF);

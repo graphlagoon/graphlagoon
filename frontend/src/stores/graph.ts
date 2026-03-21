@@ -222,6 +222,7 @@ export const useGraphStore = defineStore('graph', () => {
     showEdgeLabels3D: true,   // Show edge labels in 3D
     nodeLabelSize3D: 10,       // Node label text height in 3D
     edgeLabelSize3D: 5,       // Edge label text height in 3D (same as node for visibility)
+    edgeIconSize3D: 3,        // Edge icon size in 3D (diameter in world units)
     nodeLabelOffsetY3D: 2,    // Offset for node labels (distance from node surface)
     nodeLabelPosition3D: 'right' as 'top' | 'right' | 'left', // Label placement relative to node
   });
@@ -230,6 +231,7 @@ export const useGraphStore = defineStore('graph', () => {
   const nodeTypeColors = ref<Map<string, string>>(new Map());
   const edgeTypeColors = ref<Map<string, string>>(new Map());
   const nodeTypeIcons = ref<Map<string, string>>(new Map());
+  const edgeTypeIcons = ref<Map<string, string>>(new Map());
 
   // Default color palette (used when no custom color is set)
   const defaultColorPalette = [
@@ -1212,6 +1214,23 @@ export const useGraphStore = defineStore('graph', () => {
     nodeTypeIcons.value = new Map();
   }
 
+  function getEdgeTypeIcon(type: string): string | null {
+    return edgeTypeIcons.value.get(type) ?? null;
+  }
+
+  function setEdgeTypeIcon(type: string, iconName: string | null) {
+    if (iconName === null) {
+      edgeTypeIcons.value.delete(type);
+    } else {
+      edgeTypeIcons.value.set(type, iconName);
+    }
+    edgeTypeIcons.value = new Map(edgeTypeIcons.value);
+  }
+
+  function resetEdgeTypeIcons() {
+    edgeTypeIcons.value = new Map();
+  }
+
   function updateNodePosition(nodeId: string, x: number, y: number, pinned: boolean = false) {
     nodePositions.value.set(nodeId, { x, y, pinned });
   }
@@ -1315,6 +1334,9 @@ export const useGraphStore = defineStore('graph', () => {
       edgeTypeColors: edgeTypeColors.value.size > 0
         ? Object.fromEntries(edgeTypeColors.value)
         : undefined,
+      edgeTypeIcons: edgeTypeIcons.value.size > 0
+        ? Object.fromEntries(edgeTypeIcons.value)
+        : undefined,
       behaviors: { ...behaviors.value },
       aesthetics: { ...aesthetics.value },
       community: communityStore.getState(),
@@ -1417,6 +1439,11 @@ export const useGraphStore = defineStore('graph', () => {
         : new Map();
       edgeTypeColors.value = exploration.state.edgeTypeColors
         ? new Map(Object.entries(exploration.state.edgeTypeColors))
+        : new Map();
+
+      // Load edge type icons (backwards compatible)
+      edgeTypeIcons.value = exploration.state.edgeTypeIcons
+        ? new Map(Object.entries(exploration.state.edgeTypeIcons))
         : new Map();
 
       // Load behaviors and aesthetics (backwards compatible — merge with defaults)
@@ -1575,6 +1602,10 @@ export const useGraphStore = defineStore('graph', () => {
     getNodeTypeIcon,
     setNodeTypeIcon,
     resetNodeTypeIcons,
+    edgeTypeIcons,
+    getEdgeTypeIcon,
+    setEdgeTypeIcon,
+    resetEdgeTypeIcons,
     updateNodePosition,
     toggleNodePinned,
     getExplorationState,

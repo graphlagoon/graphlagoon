@@ -277,6 +277,7 @@ class ExplorationState(BaseModel):
     nodeTypeIcons: Optional[dict[str, str]] = None
     nodeTypeColors: Optional[dict[str, str]] = None
     edgeTypeColors: Optional[dict[str, str]] = None
+    edgeTypeIcons: Optional[dict[str, str]] = None
     behaviors: Optional[dict] = None
     aesthetics: Optional[dict] = None
     community: Optional[dict] = None

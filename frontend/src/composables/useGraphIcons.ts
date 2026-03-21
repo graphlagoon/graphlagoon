@@ -144,10 +144,15 @@ export function useGraphIcons(
     }
   }
 
+  function getAtlas(): IconAtlas | null {
+    return atlas;
+  }
+
   return {
     initRenderer,
     updateIcons,
     setIconsVisible,
     dispose,
+    getAtlas,
   };
 }
