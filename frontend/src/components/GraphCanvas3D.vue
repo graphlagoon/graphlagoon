@@ -172,7 +172,7 @@ const icons = useGraphIcons(getGraph3d, initialLayoutDone);
 const layout = useGraphLayout(
   getGraph3d,
   { isLayoutRunning, layoutStabilized, initialLayoutDone },
-  { setLabelsVisible: labels.setLabelsVisible, updateLabels: labels.updateLabels },
+  { setLabelsVisible: labels.setLabelsVisible, updateLabels: () => updateOverlays() },
   () => graphStore.layoutExecution,
   () => graphStore.behaviors.viewMode === '2d-proj',
 );
@@ -182,7 +182,7 @@ const camera = useGraphCamera(getGraph3d, containerRef, initialLayoutDone, {
   setIconsVisible: icons.setIconsVisible,
   setSelfEdgesVisible,
   updateVisuals,
-  updateLabels: labels.updateLabels,
+  updateLabels: () => updateOverlays(),
 });
 
 const axisRotation = useAxisConstrainedRotation(
@@ -381,6 +381,12 @@ function buildGraphData(): GraphData {
 // ---------------------------------------------------------------------------
 // Visual updates (no simulation restart)
 // ---------------------------------------------------------------------------
+
+/** Update labels + icons together. Use this instead of calling labels.updateLabels() alone. */
+function updateOverlays() {
+  labels.updateLabels();
+  icons.updateIcons();
+}
 
 function updateVisuals() {
   if (!graph3d) return;
@@ -737,6 +743,10 @@ function initGraph() {
 
   camera.startCameraTracking();
 
+  graph3d.onEngineTick(() => {
+    icons.updateIcons();
+  });
+
   graph3d.onEngineStop(() => {
     layoutStabilized.value = true;
     layout.stopLayout();
@@ -765,8 +775,7 @@ function initGraph() {
         const dir = new THREE.Vector3();
         cam.getWorldDirection(dir);
         clippingPlane.normal.copy(dir);
-        labels.updateLabels();
-        icons.updateIcons();
+        updateOverlays();
       }
     });
   }
@@ -976,7 +985,7 @@ watch(
         .linkOpacity(aesthetics.edgeOpacity)
         .nodeRelSize(aesthetics.nodeSize / 2)
         .nodeOpacity(aesthetics.nodeOpacity);
-      labels.updateLabels();
+      updateOverlays();
     }
   },
   { deep: true }
@@ -1071,7 +1080,7 @@ watch(
   (distance) => {
     if (isClippingActive.value) {
       clippingPlane.constant = distance;
-      labels.updateLabels();
+      updateOverlays();
     }
   }
 );
@@ -1091,12 +1100,12 @@ watch(
       clippingPlane.constant = graphStore.force3DSettings.clippingPlaneDistance;
       renderer.clippingPlanes = [clippingPlane];
       labels.setClippingPlane(clippingPlane);
-      labels.updateLabels();
+      updateOverlays();
     } else if (!enabled && isClippingActive.value) {
       isClippingActive.value = false;
       renderer.clippingPlanes = [];
       labels.setClippingPlane(null);
-      labels.updateLabels();
+      updateOverlays();
     }
   }
 );
@@ -1156,7 +1165,7 @@ watch(
   ],
   () => {
     updateVisuals();
-    labels.updateLabels();
+    updateOverlays();
   }
 );
 
@@ -1175,7 +1184,7 @@ watch(
     graphStore.behaviors.labelGridCellSize,
     graphStore.behaviors.labelSizeThreshold,
   ],
-  () => { labels.updateLabels(); }
+  () => { updateOverlays(); }
 );
 
 // Hover changes (graph lens) — debounced to avoid strobing in dense regions
@@ -1188,7 +1197,7 @@ watch(
     if (lensHoverTimeout) clearTimeout(lensHoverTimeout);
     lensHoverTimeout = setTimeout(() => {
       updateVisuals();
-      labels.updateLabels();
+      updateOverlays();
       lensHoverTimeout = null;
     }, LENS_HOVER_DEBOUNCE_MS);
   }
@@ -1200,7 +1209,7 @@ watch(
   () => [graphStore.filters.search_query, graphStore.behaviors.searchMode],
   () => {
     updateVisuals();
-    labels.updateLabels();
+    updateOverlays();
 
     const currentQuery = graphStore.filters.search_query || '';
     const matchedIds = graphStore.searchMatchedNodeIds;
@@ -1389,7 +1398,7 @@ function blowerRampTick() {
   pinNodesOutsideCylinder();
 
   // Update labels every frame so they follow node movement
-  labels.updateLabels();
+  updateOverlays();
 
   // Keep running while blower is active (not just during ramp)
   blowerRAF = requestAnimationFrame(blowerRampTick);
@@ -1544,7 +1553,7 @@ onMounted(() => {
     const delta = event.deltaY * 0.2;
     clippingPlane.constant += delta;
     graphStore.updateForce3DSettings({ clippingPlaneDistance: clippingPlane.constant });
-    labels.updateLabels();
+    updateOverlays();
   }
 
   window.addEventListener('keydown', _onKeyDown);

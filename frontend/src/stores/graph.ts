@@ -1313,6 +1313,8 @@ export const useGraphStore = defineStore('graph', () => {
       edgeTypeColors: edgeTypeColors.value.size > 0
         ? Object.fromEntries(edgeTypeColors.value)
         : undefined,
+      behaviors: { ...behaviors.value },
+      aesthetics: { ...aesthetics.value },
     };
   }
 
@@ -1413,6 +1415,14 @@ export const useGraphStore = defineStore('graph', () => {
       edgeTypeColors.value = exploration.state.edgeTypeColors
         ? new Map(Object.entries(exploration.state.edgeTypeColors))
         : new Map();
+
+      // Load behaviors and aesthetics (backwards compatible — merge with defaults)
+      if (exploration.state.behaviors) {
+        behaviors.value = { ...behaviors.value, ...exploration.state.behaviors } as typeof behaviors.value;
+      }
+      if (exploration.state.aesthetics) {
+        aesthetics.value = { ...aesthetics.value, ...exploration.state.aesthetics } as typeof aesthetics.value;
+      }
 
       // Re-execute the query to load the graph data
       if (exploration.state.graph_query) {

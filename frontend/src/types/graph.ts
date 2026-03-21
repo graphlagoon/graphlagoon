@@ -139,6 +139,8 @@ export interface ExplorationState {
   nodeTypeIcons?: Record<string, string>;  // Node type → icon name mapping (optional for backwards compat)
   nodeTypeColors?: Record<string, string>; // Node type → color hex (optional for backwards compat)
   edgeTypeColors?: Record<string, string>; // Edge type → color hex (optional for backwards compat)
+  behaviors?: Record<string, unknown>;     // Behavior settings (optional for backwards compat)
+  aesthetics?: Record<string, unknown>;    // Aesthetic settings (optional for backwards compat)
 }
 
 export interface Exploration {
