@@ -228,6 +228,7 @@ export const useGraphStore = defineStore('graph', () => {
   // Color scheme for node/edge types (custom colors override default palette)
   const nodeTypeColors = ref<Map<string, string>>(new Map());
   const edgeTypeColors = ref<Map<string, string>>(new Map());
+  const nodeTypeIcons = ref<Map<string, string>>(new Map());
 
   // Default color palette (used when no custom color is set)
   const defaultColorPalette = [
@@ -1193,6 +1194,23 @@ export const useGraphStore = defineStore('graph', () => {
     edgeTypeColors.value = new Map();
   }
 
+  function getNodeTypeIcon(type: string): string | null {
+    return nodeTypeIcons.value.get(type) ?? null;
+  }
+
+  function setNodeTypeIcon(type: string, iconName: string | null) {
+    if (iconName === null) {
+      nodeTypeIcons.value.delete(type);
+    } else {
+      nodeTypeIcons.value.set(type, iconName);
+    }
+    nodeTypeIcons.value = new Map(nodeTypeIcons.value);
+  }
+
+  function resetNodeTypeIcons() {
+    nodeTypeIcons.value = new Map();
+  }
+
   function updateNodePosition(nodeId: string, x: number, y: number, pinned: boolean = false) {
     nodePositions.value.set(nodeId, { x, y, pinned });
   }
@@ -1286,6 +1304,15 @@ export const useGraphStore = defineStore('graph', () => {
       materialization_strategy: materializationStrategy.value,
       textFormat: getTextFormatState(),
       clusters: clusterStore.getState() as any, // Cluster state (programs, clusters, executions)
+      nodeTypeIcons: nodeTypeIcons.value.size > 0
+        ? Object.fromEntries(nodeTypeIcons.value)
+        : undefined,
+      nodeTypeColors: nodeTypeColors.value.size > 0
+        ? Object.fromEntries(nodeTypeColors.value)
+        : undefined,
+      edgeTypeColors: edgeTypeColors.value.size > 0
+        ? Object.fromEntries(edgeTypeColors.value)
+        : undefined,
     };
   }
 
@@ -1373,6 +1400,19 @@ export const useGraphStore = defineStore('graph', () => {
       // Load cluster state (always, even if undefined to clear current state)
       const clusterStore = useClusterStore();
       clusterStore.loadState(exploration.state.clusters);
+
+      // Load node type icons (backwards compatible)
+      nodeTypeIcons.value = exploration.state.nodeTypeIcons
+        ? new Map(Object.entries(exploration.state.nodeTypeIcons))
+        : new Map();
+
+      // Load type colors (backwards compatible)
+      nodeTypeColors.value = exploration.state.nodeTypeColors
+        ? new Map(Object.entries(exploration.state.nodeTypeColors))
+        : new Map();
+      edgeTypeColors.value = exploration.state.edgeTypeColors
+        ? new Map(Object.entries(exploration.state.edgeTypeColors))
+        : new Map();
 
       // Re-execute the query to load the graph data
       if (exploration.state.graph_query) {
@@ -1512,6 +1552,10 @@ export const useGraphStore = defineStore('graph', () => {
     setNodeTypeColor,
     setEdgeTypeColor,
     resetTypeColors,
+    nodeTypeIcons,
+    getNodeTypeIcon,
+    setNodeTypeIcon,
+    resetNodeTypeIcons,
     updateNodePosition,
     toggleNodePinned,
     getExplorationState,

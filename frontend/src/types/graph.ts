@@ -136,6 +136,9 @@ export interface ExplorationState {
   materialization_strategy?: MaterializationStrategy; // Materialization strategy (optional for backwards compat)
   textFormat?: TextFormatState;        // Label formatting rules (optional for backwards compat)
   clusters?: any;                      // ClusterState from cluster store (optional for backwards compat)
+  nodeTypeIcons?: Record<string, string>;  // Node type → icon name mapping (optional for backwards compat)
+  nodeTypeColors?: Record<string, string>; // Node type → color hex (optional for backwards compat)
+  edgeTypeColors?: Record<string, string>; // Edge type → color hex (optional for backwards compat)
 }
 
 export interface Exploration {

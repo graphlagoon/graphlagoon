@@ -18,6 +18,7 @@ export function useGraphCamera(
   initialLayoutDone: Ref<boolean>,
   callbacks: {
     setLabelsVisible: (visible: boolean) => void;
+    setIconsVisible: (visible: boolean) => void;
     setSelfEdgesVisible: (visible: boolean) => void;
     updateVisuals: () => void;
     updateLabels: () => void;
@@ -170,6 +171,7 @@ export function useGraphCamera(
           isCameraMoving = true;
           if (initialLayoutDone.value && graphStore.behaviors.hideLabelsOnCameraMove) {
             callbacks.setLabelsVisible(false);
+            callbacks.setIconsVisible(false);
           }
           if (initialLayoutDone.value && graphStore.behaviors.hideSelfEdgesOnCameraMove) {
             callbacks.setSelfEdgesVisible(false);
@@ -186,6 +188,7 @@ export function useGraphCamera(
             callbacks.updateLabels();
             if (initialLayoutDone.value && graphStore.behaviors.hideLabelsOnCameraMove) {
               callbacks.setLabelsVisible(true);
+              callbacks.setIconsVisible(true);
             }
             if (initialLayoutDone.value && graphStore.behaviors.hideSelfEdgesOnCameraMove) {
               callbacks.setSelfEdgesVisible(true);

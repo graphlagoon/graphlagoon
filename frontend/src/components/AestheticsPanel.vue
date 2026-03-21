@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { X } from 'lucide-vue-next';
+import IconPicker from '@/components/IconPicker.vue';
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -38,6 +39,14 @@ function setEdgeColor(type: string, color: string) {
   graphStore.setEdgeTypeColor(type, color);
 }
 
+function getNodeIcon(type: string): string | null {
+  return graphStore.getNodeTypeIcon(type);
+}
+
+function setNodeIcon(type: string, iconName: string | null) {
+  graphStore.setNodeTypeIcon(type, iconName);
+}
+
 function resetAesthetics() {
   graphStore.updateAesthetics({
     showArrows: true,
@@ -54,6 +63,7 @@ function resetAesthetics() {
     nodeLabelOffsetY3D: 2,
   });
   graphStore.resetTypeColors();
+  graphStore.resetNodeTypeIcons();
 }
 </script>
 
@@ -177,7 +187,7 @@ function resetAesthetics() {
 
     <!-- Color Customization -->
     <div v-if="nodeTypes.length > 0" class="settings-section">
-      <h5>Node Colors</h5>
+      <h5>Node Colors &amp; Icons</h5>
       <div class="color-list">
         <div v-for="type in nodeTypes" :key="type" class="color-item">
           <input
@@ -185,6 +195,10 @@ function resetAesthetics() {
             :value="getNodeColor(type)"
             @input="setNodeColor(type, ($event.target as HTMLInputElement).value)"
             class="color-picker"
+          />
+          <IconPicker
+            :modelValue="getNodeIcon(type)"
+            @update:modelValue="setNodeIcon(type, $event)"
           />
           <span class="color-type-label">{{ type }}</span>
         </div>

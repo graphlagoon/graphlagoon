@@ -274,6 +274,9 @@ class ExplorationState(BaseModel):
     materialization_strategy: Optional[MaterializationStrategy] = None
     textFormat: Optional[TextFormatState] = None
     clusters: Optional[dict] = None  # ClusterState JSON from frontend
+    nodeTypeIcons: Optional[dict[str, str]] = None
+    nodeTypeColors: Optional[dict[str, str]] = None
+    edgeTypeColors: Optional[dict[str, str]] = None
 
 
 class ExplorationCreate(BaseModel):

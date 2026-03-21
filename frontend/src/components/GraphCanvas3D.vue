@@ -17,6 +17,7 @@ import {
 import { applyForceConfig, applyCommunityRadialForce, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
 import { forcePointerRepulsion, type PointerRepulsionForce } from '@/utils/forcePointerRepulsion';
 import { useGraphLabels } from '@/composables/useGraphLabels';
+import { useGraphIcons } from '@/composables/useGraphIcons';
 import { useGraphLayout } from '@/composables/useGraphLayout';
 import { useGraphCamera } from '@/composables/useGraphCamera';
 import { useAxisConstrainedRotation } from '@/composables/useAxisConstrainedRotation';
@@ -166,6 +167,7 @@ const edgeDataMap = ref<Map<string, Edge>>(new Map());
 // ---------------------------------------------------------------------------
 
 const labels = useGraphLabels(getGraph3d, initialLayoutDone, degreeDimmedNodeIds, focusedNodeIds);
+const icons = useGraphIcons(getGraph3d, initialLayoutDone);
 
 const layout = useGraphLayout(
   getGraph3d,
@@ -177,6 +179,7 @@ const layout = useGraphLayout(
 
 const camera = useGraphCamera(getGraph3d, containerRef, initialLayoutDone, {
   setLabelsVisible: labels.setLabelsVisible,
+  setIconsVisible: icons.setIconsVisible,
   setSelfEdgesVisible,
   updateVisuals,
   updateLabels: labels.updateLabels,
@@ -395,9 +398,18 @@ function updateVisuals() {
       node.id, node.nodeType, isCluster, clusterBaseSize, null, ctx,
     );
 
-    node.color = appearance.color;
     node.size = appearance.size;
     node.hidden = appearance.hidden;
+
+    // Icon replacement: hide sphere (transparent) but preserve color for icon composable
+    const hasIcon = !isCluster && graphStore.nodeTypeIcons.has(node.nodeType);
+    if (hasIcon) {
+      node.__iconColor = appearance.color;
+      node.color = 'rgba(0,0,0,0)';
+    } else {
+      node.__iconColor = undefined;
+      node.color = appearance.color;
+    }
 
     if (appearance.hidden) hiddenNodeIds.add(node.id);
   });
@@ -423,6 +435,9 @@ function updateVisuals() {
   graph3d.nodeVisibility((node: GraphNode) => !node.hidden);
   graph3d.linkColor((link: GraphLink) => link.color);
   graph3d.linkVisibility((link: GraphLink) => !link.hidden);
+
+  // Update icon billboards (must be after node appearance is computed)
+  icons.updateIcons();
 
   const t3 = performance.now();
   recordPerf('updateVisuals', t3 - t0, {
@@ -735,6 +750,7 @@ function initGraph() {
   const scene = graph3d.scene();
   if (scene) {
     labels.initRenderer(scene);
+    icons.initRenderer(scene);
   }
 
   const controls = graph3d.controls();
@@ -750,6 +766,7 @@ function initGraph() {
         cam.getWorldDirection(dir);
         clippingPlane.normal.copy(dir);
         labels.updateLabels();
+        icons.updateIcons();
       }
     });
   }
@@ -1141,6 +1158,13 @@ watch(
     updateVisuals();
     labels.updateLabels();
   }
+);
+
+// Node type icon assignment changes — full visual update (sphere transparency + icon billboards)
+watch(
+  () => graphStore.nodeTypeIcons,
+  () => { updateVisuals(); },
+  { deep: true }
 );
 
 // Label density culling settings
@@ -1543,6 +1567,7 @@ onUnmounted(() => {
   devPerf.dispose();
   camera.dispose();
   labels.dispose();
+  icons.dispose();
   axisRotation.dispose();
   if (hoverRAF) {
     cancelAnimationFrame(hoverRAF);
