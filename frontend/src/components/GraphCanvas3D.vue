@@ -22,6 +22,7 @@ import { useGraphCamera } from '@/composables/useGraphCamera';
 import { useAxisConstrainedRotation } from '@/composables/useAxisConstrainedRotation';
 import { useContextMenu } from '@/composables/useContextMenu';
 import GraphContextMenu from '@/components/GraphContextMenu.vue';
+import { Network } from 'lucide-vue-next';
 import { recordPerf } from '@/utils/perfMetrics';
 import { useDevPerf } from '@/composables/useDevPerf';
 
@@ -1377,6 +1378,18 @@ function blowerRampTick() {
 onMounted(() => {
   initGraph();
 
+  // Register "Expand neighbors" context menu action (depth 1, quick expand)
+  contextMenu.addAction({
+    id: 'expand-neighbors',
+    label: 'Expand neighbors',
+    icon: Network,
+    visible: (t) => t.type === 'node',
+    disabled: () => graphStore.loading,
+    handler: async (t) => {
+      await graphStore.expandFromNode(t.id, 1);
+    },
+  });
+
   // Track pointer over canvas — keyboard shortcuts only fire when pointer is over the 3D view
   containerRef.value?.addEventListener('mouseenter', () => { isPointerOverCanvas = true; });
   containerRef.value?.addEventListener('mouseleave', () => { isPointerOverCanvas = false; });
@@ -1545,6 +1558,7 @@ onUnmounted(() => {
   unpinAllNodes();
   pointerRepulsionForce = null;
   // Clean up keyboard/wheel event listeners
+  contextMenu.removeAction('expand-neighbors');
   if (_onKeyDown) window.removeEventListener('keydown', _onKeyDown);
   if (_onKeyUp) window.removeEventListener('keyup', _onKeyUp);
   if (_onWheel) containerRef.value?.removeEventListener('wheel', _onWheel);
