@@ -4,7 +4,7 @@
  * Manages the d3-force-3d simulation lifecycle: start, stop, reheat, scramble.
  */
 import type { Ref } from 'vue';
-import type { GraphNode, GraphLink } from '@/types/graph3d';
+import type { GraphNode } from '@/types/graph3d';
 
 interface LayoutExecutionParams {
   cooldownTicks: number;
@@ -36,7 +36,6 @@ export function useGraphLayout(
 
     const exec = getLayoutExecution?.();
 
-    graph3d.linkCurvature(0);
     callbacks.setLabelsVisible(false);
     graph3d.cooldownTicks(exec?.cooldownTicks ?? 100);
     graph3d.ticksPerFrame(exec?.ticksPerFrame ?? 1);
@@ -77,7 +76,6 @@ export function useGraphLayout(
     });
 
     graph3d.cooldownTicks(0);
-    graph3d.linkCurvature((link: GraphLink) => link.curvature ?? 0);
 
     callbacks.updateLabels();
     callbacks.setLabelsVisible(true);
@@ -91,7 +89,6 @@ export function useGraphLayout(
 
     const exec = getLayoutExecution?.();
 
-    graph3d.linkCurvature(0);
     callbacks.setLabelsVisible(false);
     graph3d.cooldownTicks(exec?.cooldownTicks ?? 100);
     graph3d.ticksPerFrame(exec?.ticksPerFrame ?? 1);
