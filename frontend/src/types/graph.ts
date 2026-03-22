@@ -124,6 +124,13 @@ export interface ViewportState {
 export type LayoutAlgorithm = "force-atlas-2" | "circular" | "grid";
 export type Layout3DEngine = "d3-force";
 
+/** Per-node-type configuration for property-based icon mapping */
+export interface PropertyIconConfig {
+  property: string;                    // Property name to use for icon lookup
+  valueIcons: Record<string, string>;  // Property value → icon name
+  fallbackIcon?: string;               // Icon for null/unspecified property values
+}
+
 export interface ExplorationState {
   nodes: NodeState[];
   edges: EdgeState[];
@@ -137,6 +144,7 @@ export interface ExplorationState {
   textFormat?: TextFormatState;        // Label formatting rules (optional for backwards compat)
   clusters?: any;                      // ClusterState from cluster store (optional for backwards compat)
   nodeTypeIcons?: Record<string, string>;  // Node type → icon name mapping (optional for backwards compat)
+  nodePropertyIconConfigs?: Record<string, PropertyIconConfig>; // Node type → property icon config (optional for backwards compat)
   nodeTypeColors?: Record<string, string>; // Node type → color hex (optional for backwards compat)
   edgeTypeColors?: Record<string, string>; // Edge type → color hex (optional for backwards compat)
   edgeTypeIcons?: Record<string, string>;  // Edge type → icon name mapping (optional for backwards compat)

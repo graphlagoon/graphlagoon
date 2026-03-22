@@ -49,6 +49,11 @@ import {
   CheckCircle, XCircle, AlertCircle, Info,
   // General
   Activity, Zap, Search, Scale,
+  // Merchant Types
+  Utensils, Coffee, Glasses, Scissors, Shirt,
+  ShoppingBag, ShoppingCart, Car, Fuel, HeartPulse,
+  Stethoscope, GraduationCap, Dumbbell, Bed, Plane,
+  Wrench, Pizza, Beer, Hammer,
 } from 'lucide';
 
 export interface IconAtlasEntry {
@@ -183,6 +188,17 @@ export const ICON_CATEGORIES: IconCategory[] = [
     ],
   },
   {
+    label: 'Merchant Types',
+    aliases: ['estabelecimento', 'comercio', 'loja', 'merchant', 'mcc', 'segmento'],
+    icons: [
+      'utensils', 'coffee', 'pizza', 'beer',
+      'glasses', 'scissors', 'shirt', 'shopping-bag', 'shopping-cart',
+      'car', 'fuel', 'heart-pulse', 'stethoscope',
+      'graduation-cap', 'dumbbell', 'bed', 'plane',
+      'wrench', 'hammer',
+    ],
+  },
+  {
     label: 'General',
     aliases: ['geral', 'outro', 'general', 'other'],
     icons: [
@@ -243,6 +259,13 @@ const ICON_DATA_MAP: Record<string, LucideIconData> = {
   // Status
   'check-circle': CheckCircle, 'x-circle': XCircle,
   'alert-circle': AlertCircle, 'info': Info,
+  // Merchant Types
+  'utensils': Utensils, 'coffee': Coffee, 'pizza': Pizza, 'beer': Beer,
+  'glasses': Glasses, 'scissors': Scissors, 'shirt': Shirt,
+  'shopping-bag': ShoppingBag, 'shopping-cart': ShoppingCart,
+  'car': Car, 'fuel': Fuel, 'heart-pulse': HeartPulse, 'stethoscope': Stethoscope,
+  'graduation-cap': GraduationCap, 'dumbbell': Dumbbell, 'bed': Bed, 'plane': Plane,
+  'wrench': Wrench, 'hammer': Hammer,
   // General
   'activity': Activity, 'zap': Zap, 'search': Search, 'scale': Scale,
 };
@@ -251,7 +274,7 @@ const ICON_DATA_MAP: Record<string, LucideIconData> = {
 export const CURATED_ICON_NAMES: string[] =
   ICON_CATEGORIES.flatMap(cat => cat.icons);
 
-const GRID_SIZE = 10;        // 10x10 grid (100 slots)
+const GRID_SIZE = 12;        // 12x12 grid (144 slots)
 const CELL_SIZE = 64;        // 64px per icon cell
 const ATLAS_SIZE = GRID_SIZE * CELL_SIZE; // 640px
 const ICON_PADDING = 8;      // padding inside each cell

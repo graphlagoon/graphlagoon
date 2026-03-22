@@ -73,9 +73,10 @@ export function useGraphIcons(
     if (!graph3d || !iconRenderer || !atlas) return;
 
     const nodeTypeIcons = graphStore.nodeTypeIcons;
+    const hasPropertyIconConfigs = graphStore.nodePropertyIconConfigs.size > 0;
 
-    // Fast path: no icons assigned
-    if (nodeTypeIcons.size === 0) {
+    // Fast path: no icons assigned at all
+    if (nodeTypeIcons.size === 0 && !hasPropertyIconConfigs) {
       iconRenderer.clear();
       iconRenderer.updateMesh();
       return;
@@ -96,7 +97,8 @@ export function useGraphIcons(
       // Skip cluster nodes (they have custom geometry)
       if (node.isCluster) continue;
 
-      const iconName = nodeTypeIcons.get(node.nodeType);
+      // Property-based icon override takes precedence over type-level icon
+      const iconName = node.iconOverride || nodeTypeIcons.get(node.nodeType);
       if (!iconName) continue;
       if (!atlas.entries.has(iconName)) continue;
 

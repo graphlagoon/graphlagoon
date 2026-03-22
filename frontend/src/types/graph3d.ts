@@ -15,6 +15,7 @@ export interface GraphNode {
   hidden?: boolean; // For search hide mode - visually hidden but keeps position
   isCluster?: boolean; // True if this is a cluster node
   __iconColor?: string; // Original appearance color (with dimming alpha) before sphere transparency override
+  iconOverride?: string; // Icon name override from property-based mapping (takes precedence over type-level icon)
   // 3d-force-graph adds these
   x?: number;
   y?: number;

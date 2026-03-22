@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, nextTick, onBeforeUnmount } from 'vue';
 import { ICON_CATEGORIES } from '@/utils/IconAtlas';
 import {
   // People
@@ -38,6 +38,12 @@ import {
   QrCode, Barcode,
   // Status
   CheckCircle, XCircle, AlertCircle, Info,
+  // Merchant Types
+  Utensils, Coffee, Pizza, Beer,
+  Glasses, Scissors, Shirt, ShoppingBag, ShoppingCart,
+  Car, Fuel, HeartPulse, Stethoscope,
+  GraduationCap, Dumbbell, Bed, Plane,
+  Wrench, Hammer,
   // General
   Activity, Zap, Search, Scale,
   // UI
@@ -54,6 +60,8 @@ const emit = defineEmits<{
 
 const showPicker = ref(false);
 const searchQuery = ref('');
+const triggerRef = ref<HTMLElement | null>(null);
+const popoverStyle = ref<Record<string, string>>({});
 
 // Map icon names to Vue components (must match IconAtlas names)
 const iconComponents: Record<string, unknown> = {
@@ -107,6 +115,13 @@ const iconComponents: Record<string, unknown> = {
   // Status
   'check-circle': CheckCircle, 'x-circle': XCircle,
   'alert-circle': AlertCircle, 'info': Info,
+  // Merchant Types
+  'utensils': Utensils, 'coffee': Coffee, 'pizza': Pizza, 'beer': Beer,
+  'glasses': Glasses, 'scissors': Scissors, 'shirt': Shirt,
+  'shopping-bag': ShoppingBag, 'shopping-cart': ShoppingCart,
+  'car': Car, 'fuel': Fuel, 'heart-pulse': HeartPulse, 'stethoscope': Stethoscope,
+  'graduation-cap': GraduationCap, 'dumbbell': Dumbbell, 'bed': Bed, 'plane': Plane,
+  'wrench': Wrench, 'hammer': Hammer,
   // General
   'activity': Activity, 'zap': Zap, 'search': Search, 'scale': Scale,
 };
@@ -139,15 +154,54 @@ function selectIcon(name: string | null) {
   searchQuery.value = '';
 }
 
+function updatePopoverPosition() {
+  if (!triggerRef.value) return;
+  const rect = triggerRef.value.getBoundingClientRect();
+  const popoverHeight = 340;
+  const popoverWidth = 240;
+  // Prefer opening below; if not enough space, open above
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const openAbove = spaceBelow < popoverHeight && rect.top > spaceBelow;
+  // Clamp left so popover doesn't overflow right edge
+  const left = Math.min(rect.left, window.innerWidth - popoverWidth - 8);
+  popoverStyle.value = {
+    position: 'fixed',
+    left: `${left}px`,
+    top: openAbove ? `${rect.top - popoverHeight - 4}px` : `${rect.bottom + 4}px`,
+    zIndex: '10000',
+  };
+}
+
+function onClickOutside(e: MouseEvent) {
+  const target = e.target as HTMLElement;
+  // Ignore clicks on the trigger button
+  if (triggerRef.value?.contains(target)) return;
+  // Ignore clicks inside the popover
+  if (target.closest('.icon-picker-popover')) return;
+  showPicker.value = false;
+  searchQuery.value = '';
+}
+
 function togglePicker() {
   showPicker.value = !showPicker.value;
-  if (!showPicker.value) searchQuery.value = '';
+  if (showPicker.value) {
+    nextTick(() => updatePopoverPosition());
+    document.addEventListener('mousedown', onClickOutside);
+  } else {
+    searchQuery.value = '';
+    document.removeEventListener('mousedown', onClickOutside);
+  }
 }
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onClickOutside);
+});
 </script>
 
 <template>
   <div class="icon-picker-wrapper">
     <button
+      ref="triggerRef"
       class="icon-picker-trigger"
       :title="modelValue ? `Icon: ${modelValue}` : 'No icon'"
       @click="togglePicker"
@@ -160,7 +214,8 @@ function togglePicker() {
       <span v-else class="no-icon">--</span>
     </button>
 
-    <div v-if="showPicker" class="icon-picker-popover">
+    <Teleport to="body">
+    <div v-if="showPicker" class="icon-picker-popover" :style="popoverStyle">
       <div class="icon-picker-header">
         <input
           v-model="searchQuery"
@@ -237,6 +292,7 @@ function togglePicker() {
         </template>
       </div>
     </div>
+    </Teleport>
   </div>
 </template>
 
@@ -268,12 +324,11 @@ function togglePicker() {
   font-size: 10px;
   color: var(--text-muted, #999);
 }
+</style>
 
+<!-- Unscoped styles for teleported popover (rendered in body) -->
+<style>
 .icon-picker-popover {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 100;
   width: 240px;
   max-height: 340px;
   background: var(--card-background, #fff);
@@ -282,7 +337,6 @@ function togglePicker() {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
-  margin-top: 4px;
 }
 
 .icon-picker-header {

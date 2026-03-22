@@ -73,7 +73,7 @@ export function useGraphEdgeIcons(
     if (!initialLayoutDone.value) return;
 
     const currentData = graph3d.graphData();
-    const edgeIconSize = (aesthetics as any).edgeIconSize3D ?? 3;
+    const edgeIconSize = (aesthetics as any).edgeIconSize3D ?? 8;
     const baseEdgeLabelScale = aesthetics.edgeLabelSize3D / 3;
 
     // Get camera up vector for offset

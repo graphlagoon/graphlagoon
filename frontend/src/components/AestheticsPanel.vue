@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { X } from 'lucide-vue-next';
 import IconPicker from '@/components/IconPicker.vue';
+import type { PropertyIconConfig } from '@/types/graph';
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -16,6 +17,13 @@ const aesthetics = computed(() => graphStore.aesthetics);
 const nodeTypes = computed(() => graphStore.nodeTypes);
 const edgeTypes = computed(() => graphStore.edgeTypes);
 const hasEdgeIcons = computed(() => graphStore.edgeTypeIcons.size > 0);
+
+// Available categorical properties from context metadata (string-type properties)
+const categoricalProperties = computed(() => {
+  const ctx = graphStore.currentContext;
+  if (!ctx) return [];
+  return ctx.node_properties.filter(p => p.data_type === 'string');
+});
 
 function updateSetting<K extends keyof typeof aesthetics.value>(
   key: K,
@@ -56,6 +64,79 @@ function setEdgeIcon(type: string, iconName: string | null) {
   graphStore.setEdgeTypeIcon(type, iconName);
 }
 
+// Property icon config helpers
+function hasPropertyIconConfig(nodeType: string): boolean {
+  return graphStore.nodePropertyIconConfigs.has(nodeType);
+}
+
+function getPropertyIconConfig(nodeType: string): PropertyIconConfig | null {
+  return graphStore.getNodePropertyIconConfig(nodeType);
+}
+
+function togglePropertyIconConfig(nodeType: string, enabled: boolean) {
+  if (enabled) {
+    // Initialize with first available property
+    const firstProp = categoricalProperties.value[0];
+    if (firstProp) {
+      graphStore.setNodePropertyIconConfig(nodeType, {
+        property: firstProp.name,
+        valueIcons: {},
+      });
+    }
+  } else {
+    graphStore.setNodePropertyIconConfig(nodeType, null);
+  }
+}
+
+function setPropertyIconProperty(nodeType: string, propertyName: string) {
+  const existing = getPropertyIconConfig(nodeType);
+  graphStore.setNodePropertyIconConfig(nodeType, {
+    property: propertyName,
+    valueIcons: {},
+    fallbackIcon: existing?.fallbackIcon,
+  });
+}
+
+function getPropertyValues(nodeType: string): string[] {
+  const config = getPropertyIconConfig(nodeType);
+  if (!config) return [];
+  return graphStore.getDistinctPropertyValues(nodeType, config.property);
+}
+
+function setPropertyValueIcon(nodeType: string, value: string, iconName: string | null) {
+  const config = getPropertyIconConfig(nodeType);
+  if (!config) return;
+  const newValueIcons = { ...config.valueIcons };
+  if (iconName === null) {
+    delete newValueIcons[value];
+  } else {
+    newValueIcons[value] = iconName;
+  }
+  graphStore.setNodePropertyIconConfig(nodeType, {
+    ...config,
+    valueIcons: newValueIcons,
+  });
+}
+
+function getPropertyValueIcon(nodeType: string, value: string): string | null {
+  const config = getPropertyIconConfig(nodeType);
+  return config?.valueIcons[value] ?? null;
+}
+
+function setFallbackIcon(nodeType: string, iconName: string | null) {
+  const config = getPropertyIconConfig(nodeType);
+  if (!config) return;
+  graphStore.setNodePropertyIconConfig(nodeType, {
+    ...config,
+    fallbackIcon: iconName ?? undefined,
+  });
+}
+
+function getFallbackIcon(nodeType: string): string | null {
+  const config = getPropertyIconConfig(nodeType);
+  return config?.fallbackIcon ?? null;
+}
+
 function resetAesthetics() {
   graphStore.updateAesthetics({
     showArrows: true,
@@ -69,12 +150,13 @@ function resetAesthetics() {
     showEdgeLabels3D: true,
     nodeLabelSize3D: 10,
     edgeLabelSize3D: 5,
-    edgeIconSize3D: 3,
+    edgeIconSize3D: 8,
     nodeLabelOffsetY3D: 2,
   });
   graphStore.resetTypeColors();
   graphStore.resetNodeTypeIcons();
   graphStore.resetEdgeTypeIcons();
+  graphStore.resetNodePropertyIconConfigs();
 }
 </script>
 
@@ -200,18 +282,68 @@ function resetAesthetics() {
     <div v-if="nodeTypes.length > 0" class="settings-section">
       <h5>Node Colors &amp; Icons</h5>
       <div class="color-list">
-        <div v-for="type in nodeTypes" :key="type" class="color-item">
-          <input
-            type="color"
-            :value="getNodeColor(type)"
-            @input="setNodeColor(type, ($event.target as HTMLInputElement).value)"
-            class="color-picker"
-          />
-          <IconPicker
-            :modelValue="getNodeIcon(type)"
-            @update:modelValue="setNodeIcon(type, $event)"
-          />
-          <span class="color-type-label">{{ type }}</span>
+        <div v-for="type in nodeTypes" :key="type" class="node-type-block">
+          <div class="color-item">
+            <input
+              type="color"
+              :value="getNodeColor(type)"
+              @input="setNodeColor(type, ($event.target as HTMLInputElement).value)"
+              class="color-picker"
+            />
+            <IconPicker
+              :modelValue="getNodeIcon(type)"
+              @update:modelValue="setNodeIcon(type, $event)"
+            />
+            <span class="color-type-label">{{ type }}</span>
+          </div>
+
+          <!-- Property-based icon toggle (only if categorical properties exist) -->
+          <div v-if="categoricalProperties.length > 0" class="property-icon-section">
+            <label class="checkbox-label checkbox-sm">
+              <input
+                type="checkbox"
+                :checked="hasPropertyIconConfig(type)"
+                @change="togglePropertyIconConfig(type, ($event.target as HTMLInputElement).checked)"
+              />
+              Icon by property
+            </label>
+
+            <!-- Property selector and value icon pickers -->
+            <div v-if="hasPropertyIconConfig(type)" class="property-icon-config">
+              <select
+                class="property-select"
+                :value="getPropertyIconConfig(type)?.property"
+                @change="setPropertyIconProperty(type, ($event.target as HTMLSelectElement).value)"
+              >
+                <option
+                  v-for="prop in categoricalProperties"
+                  :key="prop.name"
+                  :value="prop.name"
+                >
+                  {{ prop.display_name || prop.name }}
+                </option>
+              </select>
+
+              <!-- Distinct property values with icon pickers -->
+              <div class="property-value-list">
+                <div v-for="val in getPropertyValues(type)" :key="val" class="property-value-item">
+                  <IconPicker
+                    :modelValue="getPropertyValueIcon(type, val)"
+                    @update:modelValue="setPropertyValueIcon(type, val, $event)"
+                  />
+                  <span class="property-value-label" :title="val">{{ val }}</span>
+                </div>
+                <!-- Fallback for null/unspecified -->
+                <div class="property-value-item fallback-item">
+                  <IconPicker
+                    :modelValue="getFallbackIcon(type)"
+                    @update:modelValue="setFallbackIcon(type, $event)"
+                  />
+                  <span class="property-value-label fallback-label">(not specified)</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -323,14 +455,14 @@ function resetAesthetics() {
         <div v-if="aesthetics.showEdgeLabels3D && hasEdgeIcons" class="setting-item">
           <label>
             <span class="setting-label">Edge icon size</span>
-            <span class="setting-value">{{ (aesthetics.edgeIconSize3D ?? 3).toFixed(1) }}</span>
+            <span class="setting-value">{{ (aesthetics.edgeIconSize3D ?? 8).toFixed(1) }}</span>
           </label>
           <input
             type="range"
             min="1"
-            max="10"
+            max="20"
             step="0.5"
-            :value="aesthetics.edgeIconSize3D ?? 3"
+            :value="aesthetics.edgeIconSize3D ?? 8"
             @input="updateSetting('edgeIconSize3D', parseFloat(($event.target as HTMLInputElement).value))"
           />
         </div>
@@ -513,5 +645,70 @@ function resetAesthetics() {
   color: var(--text-muted, #888);
   margin-top: 2px;
   margin-left: 22px;
+}
+
+.node-type-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.property-icon-section {
+  margin-left: 12px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-color, #ddd);
+}
+
+.checkbox-sm {
+  font-size: 11px !important;
+  color: var(--text-muted, #888);
+}
+
+.property-icon-config {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.property-select {
+  width: 100%;
+  padding: 3px 24px 3px 6px;
+  font-size: 11px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-color, #fff);
+  color: var(--text-color, #333);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+
+.property-value-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.property-value-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.property-value-label {
+  font-size: 11px;
+  color: var(--text-color, #333);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.fallback-label {
+  color: var(--text-muted, #888);
+  font-style: italic;
 }
 </style>

@@ -299,6 +299,22 @@ function buildGraphData(): GraphData {
       ? (node.properties?.cluster_name as string || 'Cluster')
       : formatNodeLabel(node, graphStore.textFormatRules, graphStore.textFormatDefaults.nodeTemplate);
 
+    // Compute property-based icon override (if configured for this node type)
+    let iconOverride: string | undefined;
+    if (!isCluster) {
+      const propConfig = graphStore.getNodePropertyIconConfig(node.node_type);
+      if (propConfig) {
+        const propVal = node.properties?.[propConfig.property];
+        if (propVal != null && propVal !== '') {
+          iconOverride = propConfig.valueIcons[String(propVal)];
+        }
+        // Fall back to fallbackIcon for null/unspecified
+        if (!iconOverride && propConfig.fallbackIcon) {
+          iconOverride = propConfig.fallbackIcon;
+        }
+      }
+    }
+
     nodes.push({
       id: node.node_id,
       label: nodeLabel,
@@ -307,6 +323,7 @@ function buildGraphData(): GraphData {
       size: appearance.size,
       hidden: appearance.hidden,
       isCluster,
+      iconOverride,
     });
   });
 
@@ -410,8 +427,27 @@ function updateVisuals() {
     node.size = appearance.size;
     node.hidden = appearance.hidden;
 
+    // Recompute property-based icon override
+    if (!isCluster) {
+      const propConfig = graphStore.getNodePropertyIconConfig(node.nodeType);
+      if (propConfig) {
+        const origNode = nodeDataMap.value.get(node.id);
+        const propVal = origNode?.properties?.[propConfig.property];
+        let override: string | undefined;
+        if (propVal != null && propVal !== '') {
+          override = propConfig.valueIcons[String(propVal)];
+        }
+        if (!override && propConfig.fallbackIcon) {
+          override = propConfig.fallbackIcon;
+        }
+        node.iconOverride = override;
+      } else {
+        node.iconOverride = undefined;
+      }
+    }
+
     // Icon replacement: hide sphere (transparent) but preserve color for icon composable
-    const hasIcon = !isCluster && graphStore.nodeTypeIcons.has(node.nodeType);
+    const hasIcon = !isCluster && (graphStore.nodeTypeIcons.has(node.nodeType) || !!node.iconOverride);
     if (hasIcon) {
       node.__iconColor = appearance.color;
       node.color = 'rgba(0,0,0,0)';
@@ -1180,6 +1216,13 @@ watch(
 // Node type icon assignment changes — full visual update (sphere transparency + icon billboards)
 watch(
   () => graphStore.nodeTypeIcons,
+  () => { updateVisuals(); },
+  { deep: true }
+);
+
+// Property-based icon config changes — recompute icon overrides and update visuals
+watch(
+  () => graphStore.nodePropertyIconConfigs,
   () => { updateVisuals(); },
   { deep: true }
 );

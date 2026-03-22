@@ -222,7 +222,7 @@ export const useGraphStore = defineStore('graph', () => {
     showEdgeLabels3D: true,   // Show edge labels in 3D
     nodeLabelSize3D: 10,       // Node label text height in 3D
     edgeLabelSize3D: 5,       // Edge label text height in 3D (same as node for visibility)
-    edgeIconSize3D: 3,        // Edge icon size in 3D (diameter in world units)
+    edgeIconSize3D: 8,        // Edge icon size in 3D (diameter in world units)
     nodeLabelOffsetY3D: 2,    // Offset for node labels (distance from node surface)
     nodeLabelPosition3D: 'right' as 'top' | 'right' | 'left', // Label placement relative to node
   });
@@ -232,6 +232,9 @@ export const useGraphStore = defineStore('graph', () => {
   const edgeTypeColors = ref<Map<string, string>>(new Map());
   const nodeTypeIcons = ref<Map<string, string>>(new Map());
   const edgeTypeIcons = ref<Map<string, string>>(new Map());
+
+  // Property-based icon mapping: nodeType → { property, valueIcons, fallbackIcon }
+  const nodePropertyIconConfigs = ref<Map<string, import('@/types/graph').PropertyIconConfig>>(new Map());
 
   // Default color palette (used when no custom color is set)
   const defaultColorPalette = [
@@ -1231,6 +1234,37 @@ export const useGraphStore = defineStore('graph', () => {
     edgeTypeIcons.value = new Map();
   }
 
+  // Property-based icon config methods
+  function getNodePropertyIconConfig(nodeType: string): import('@/types/graph').PropertyIconConfig | null {
+    return nodePropertyIconConfigs.value.get(nodeType) ?? null;
+  }
+
+  function setNodePropertyIconConfig(nodeType: string, config: import('@/types/graph').PropertyIconConfig | null) {
+    if (config === null) {
+      nodePropertyIconConfigs.value.delete(nodeType);
+    } else {
+      nodePropertyIconConfigs.value.set(nodeType, config);
+    }
+    nodePropertyIconConfigs.value = new Map(nodePropertyIconConfigs.value);
+  }
+
+  function resetNodePropertyIconConfigs() {
+    nodePropertyIconConfigs.value = new Map();
+  }
+
+  /** Get distinct values of a property for nodes of a given type in the current graph */
+  function getDistinctPropertyValues(nodeType: string, propertyName: string): string[] {
+    const values = new Set<string>();
+    nodes.value.forEach((n) => {
+      if (n.node_type !== nodeType) return;
+      const val = n.properties?.[propertyName];
+      if (val != null && val !== '') {
+        values.add(String(val));
+      }
+    });
+    return Array.from(values).sort();
+  }
+
   function updateNodePosition(nodeId: string, x: number, y: number, pinned: boolean = false) {
     nodePositions.value.set(nodeId, { x, y, pinned });
   }
@@ -1327,6 +1361,9 @@ export const useGraphStore = defineStore('graph', () => {
       clusters: clusterStore.getState() as any, // Cluster state (programs, clusters, executions)
       nodeTypeIcons: nodeTypeIcons.value.size > 0
         ? Object.fromEntries(nodeTypeIcons.value)
+        : undefined,
+      nodePropertyIconConfigs: nodePropertyIconConfigs.value.size > 0
+        ? Object.fromEntries(nodePropertyIconConfigs.value)
         : undefined,
       nodeTypeColors: nodeTypeColors.value.size > 0
         ? Object.fromEntries(nodeTypeColors.value)
@@ -1433,6 +1470,11 @@ export const useGraphStore = defineStore('graph', () => {
         ? new Map(Object.entries(exploration.state.nodeTypeIcons))
         : new Map();
 
+      // Load property icon configs (backwards compatible)
+      nodePropertyIconConfigs.value = exploration.state.nodePropertyIconConfigs
+        ? new Map(Object.entries(exploration.state.nodePropertyIconConfigs))
+        : new Map();
+
       // Load type colors (backwards compatible)
       nodeTypeColors.value = exploration.state.nodeTypeColors
         ? new Map(Object.entries(exploration.state.nodeTypeColors))
@@ -1498,6 +1540,7 @@ export const useGraphStore = defineStore('graph', () => {
     selectedNodeIds.value.clear();
     selectedEdgeIds.value.clear();
     nodePositions.value.clear();
+    nodePropertyIconConfigs.value = new Map();
     graphQuery.value = '';  // Reset query so user must execute one to save exploration
     ctePrefilter.value = '';
     resetFilters();
@@ -1602,6 +1645,11 @@ export const useGraphStore = defineStore('graph', () => {
     getNodeTypeIcon,
     setNodeTypeIcon,
     resetNodeTypeIcons,
+    nodePropertyIconConfigs,
+    getNodePropertyIconConfig,
+    setNodePropertyIconConfig,
+    resetNodePropertyIconConfigs,
+    getDistinctPropertyValues,
     edgeTypeIcons,
     getEdgeTypeIcon,
     setEdgeTypeIcon,

@@ -106,6 +106,31 @@ function removeEdgeColumn(index: number) {
 
 function onDataTypeChange(col: ExtraColumnDefinition) {
   col.generator = getDefaultGenerator(col.data_type);
+  // Reset generator-specific fields
+  col.choices = undefined;
+  col.constant_value = undefined;
+  col.min_value = undefined;
+  col.max_value = undefined;
+  col.string_length = undefined;
+}
+
+function onGeneratorChange(col: ExtraColumnDefinition) {
+  // Initialize defaults for the selected generator
+  if (col.generator === 'random_choice' && !col.choices) {
+    col.choices = [];
+  }
+  if (col.generator === 'random_string' && !col.string_length) {
+    col.string_length = 10;
+  }
+  if ((col.generator === 'random_int' || col.generator === 'random_float') && col.min_value === undefined) {
+    col.min_value = 0;
+    col.max_value = 100;
+  }
+}
+
+// Helper to parse comma-separated choices input
+function setChoicesFromInput(col: ExtraColumnDefinition, input: string) {
+  col.choices = input.split(',').map(s => s.trim()).filter(Boolean);
 }
 
 // UI state
@@ -475,11 +500,43 @@ async function clearAllData() {
             </div>
             <div class="form-group">
               <label>Generator</label>
-              <select v-model="col.generator" class="form-control">
+              <select v-model="col.generator" class="form-control" @change="onGeneratorChange(col)">
                 <option v-for="gen in getAvailableGenerators(col.data_type)" :key="gen.value" :value="gen.value">
                   {{ gen.label }}
                 </option>
               </select>
+            </div>
+            <!-- Random Choice: choices input -->
+            <div v-if="col.generator === 'random_choice'" class="form-group form-group-wide">
+              <label>Choices (comma-separated)</label>
+              <input
+                type="text"
+                class="form-control"
+                placeholder="financeiro, tecnologia, saude, varejo"
+                :value="(col.choices || []).join(', ')"
+                @blur="setChoicesFromInput(col, ($event.target as HTMLInputElement).value)"
+              />
+            </div>
+            <!-- Constant: value input -->
+            <div v-if="col.generator === 'constant'" class="form-group form-group-sm">
+              <label>Value</label>
+              <input v-model="col.constant_value" type="text" class="form-control" placeholder="value" />
+            </div>
+            <!-- Random Int / Float: min/max -->
+            <template v-if="col.generator === 'random_int' || col.generator === 'random_float'">
+              <div class="form-group form-group-sm">
+                <label>Min</label>
+                <input v-model.number="col.min_value" type="number" class="form-control" placeholder="0" />
+              </div>
+              <div class="form-group form-group-sm">
+                <label>Max</label>
+                <input v-model.number="col.max_value" type="number" class="form-control" placeholder="100" />
+              </div>
+            </template>
+            <!-- Random String: length -->
+            <div v-if="col.generator === 'random_string'" class="form-group form-group-sm">
+              <label>Length</label>
+              <input v-model.number="col.string_length" type="number" class="form-control" min="1" max="1000" placeholder="10" />
             </div>
             <!-- JSON generator options -->
             <template v-if="col.generator === 'random_json_object' || col.generator === 'random_json_array'">
@@ -530,11 +587,43 @@ async function clearAllData() {
             </div>
             <div class="form-group">
               <label>Generator</label>
-              <select v-model="col.generator" class="form-control">
+              <select v-model="col.generator" class="form-control" @change="onGeneratorChange(col)">
                 <option v-for="gen in getAvailableGenerators(col.data_type)" :key="gen.value" :value="gen.value">
                   {{ gen.label }}
                 </option>
               </select>
+            </div>
+            <!-- Random Choice: choices input -->
+            <div v-if="col.generator === 'random_choice'" class="form-group form-group-wide">
+              <label>Choices (comma-separated)</label>
+              <input
+                type="text"
+                class="form-control"
+                placeholder="financeiro, tecnologia, saude, varejo"
+                :value="(col.choices || []).join(', ')"
+                @blur="setChoicesFromInput(col, ($event.target as HTMLInputElement).value)"
+              />
+            </div>
+            <!-- Constant: value input -->
+            <div v-if="col.generator === 'constant'" class="form-group form-group-sm">
+              <label>Value</label>
+              <input v-model="col.constant_value" type="text" class="form-control" placeholder="value" />
+            </div>
+            <!-- Random Int / Float: min/max -->
+            <template v-if="col.generator === 'random_int' || col.generator === 'random_float'">
+              <div class="form-group form-group-sm">
+                <label>Min</label>
+                <input v-model.number="col.min_value" type="number" class="form-control" placeholder="0" />
+              </div>
+              <div class="form-group form-group-sm">
+                <label>Max</label>
+                <input v-model.number="col.max_value" type="number" class="form-control" placeholder="100" />
+              </div>
+            </template>
+            <!-- Random String: length -->
+            <div v-if="col.generator === 'random_string'" class="form-group form-group-sm">
+              <label>Length</label>
+              <input v-model.number="col.string_length" type="number" class="form-control" min="1" max="1000" placeholder="10" />
             </div>
             <!-- JSON generator options -->
             <template v-if="col.generator === 'random_json_object' || col.generator === 'random_json_array'">
@@ -713,6 +802,10 @@ code {
 
 .column-row .form-group-sm {
   flex: 0 0 80px;
+}
+
+.column-row .form-group-wide {
+  flex: 1 1 100%;
 }
 
 .remove-btn {
