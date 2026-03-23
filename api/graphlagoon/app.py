@@ -26,6 +26,7 @@ from graphlagoon.services.warehouse import (
     configure_warehouse,
     HeaderProvider,
 )
+from graphlagoon.services.snapshot import configure_snapshot_service
 from graphlagoon.middleware.auth import AuthMiddleware, configure_auth, UserProvider
 
 # Configure logging
@@ -399,14 +400,19 @@ def create_mountable_app(
     if overrides:
         settings = Settings(**{**settings.model_dump(), **overrides})
 
-    # Configure database, warehouse, and auth with the provided settings
+    # Configure database, warehouse, snapshot service, and auth
     configure_database(settings)
     configure_warehouse(settings, header_provider=header_provider)
+    configure_snapshot_service(settings, header_provider=header_provider)
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
 
     @asynccontextmanager
     async def mountable_lifespan(app: FastAPI):
+        if not settings.databricks_mode:
+            Path(settings.exploration_snapshots_dir).mkdir(
+                parents=True, exist_ok=True
+            )
         if is_database_available():
             await create_tables()
             if settings.lakebase_enabled:
@@ -499,9 +505,10 @@ def create_app(
     if overrides:
         settings = Settings(**{**settings.model_dump(), **overrides})
 
-    # Configure database and warehouse with the provided settings (lazy initialization)
+    # Configure database, warehouse, and snapshot service (lazy initialization)
     configure_database(settings)
     configure_warehouse(settings, header_provider=header_provider)
+    configure_snapshot_service(settings, header_provider=header_provider)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -511,6 +518,14 @@ def create_app(
         logger.info(f"Database enabled: {settings.database_enabled}")
         logger.info(f"Lakebase enabled: {settings.lakebase_enabled}")
         logger.info(f"Databricks mode: {settings.databricks_mode}")
+
+        if not settings.databricks_mode:
+            Path(settings.exploration_snapshots_dir).mkdir(
+                parents=True, exist_ok=True
+            )
+            logger.info(
+                "Snapshot directory: %s", settings.exploration_snapshots_dir
+            )
 
         if is_database_available():
             await create_tables()

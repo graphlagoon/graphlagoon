@@ -1726,3 +1726,42 @@ parameters:
 **Author:** Claude (AI Assistant)
 
 ---
+
+## 2026-03-23 — Feature: File-Based Graph Snapshots for Explorations
+
+**Feature:** Explorations now save the full graph state (nodes + edges with positions and properties) as a gzip-compressed JSON file, so restoring an exploration no longer requires re-executing the SQL/Cypher query.
+
+### Problem
+
+The previous approach saved only the query string and re-executed it on load. This had three issues:
+1. **Latency** — query re-execution adds significant load time on every restore
+2. **Lost expanded nodes** — nodes added via right-click → Expand are not part of the original query and disappeared on reload
+3. **Lost community results** — community detection on expanded subgraphs was recomputed from scratch
+
+### Design Decisions
+
+**1. File format: gzip + JSON** — simplicity and wide compatibility; `snapshot_version: 1` reserved for future format migrations.
+
+**2. Storage backends** — local `api/tmp/explorations/{id}.json.gz` (gitignored, auto-created); Databricks Unity Catalog Volume via Files REST API when `databricks_mode=True`.
+
+**3. Databricks auth: httpx async + HeaderProvider** — reuses the same pattern as `WarehouseClient` (purely async, no `run_in_executor`, consistent with project). SDK rejected because it requires wrapping sync calls in a thread pool.
+
+**4. `has_snapshot` stored in existing JSON `state` column** — no DB migration needed. Existing rows default to `False` via Pydantic and degrade gracefully to query re-execution.
+
+**5. Query kept as fallback** — if snapshot file is missing, frontend logs a warning and falls back to query re-execution. Preserves backward compat with all existing explorations.
+
+**6. `databricks_volume_path` required in Databricks mode** — missing config returns HTTP 400. Silent local fallback was rejected to avoid confusion in production.
+
+**7. Save guard relaxed** — now requires nodes OR query (not just query), enabling explorations built entirely through manual node expansion.
+
+### Files Created
+- `api/graphlagoon/services/snapshot.py`
+
+### Files Modified
+- `api/graphlagoon/config.py`, `models/schemas.py`, `routers/explorations.py`, `app.py`, `db/memory_store.py`
+- `frontend/src/types/graph.ts`, `services/api.ts`, `stores/graph.ts`
+- `api/.env.example`, `api/.env.databricks`, `.gitignore`
+
+**Author:** Claude (AI Assistant)
+
+---

@@ -13,6 +13,7 @@ scripts
 frontend/ext-3d-force/exp
 .logs
 .pids
+api/tmp/
 uv.toml
 metastore_db/
 derby.log

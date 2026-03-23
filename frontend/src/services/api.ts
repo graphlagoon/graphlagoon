@@ -12,6 +12,7 @@ import type {
   CreateExplorationRequest,
   ShareRequest,
   ExplorationState,
+  GraphSnapshot,
   GraphQueryRequest,
   CypherQueryRequest,
   CypherQueryResponse,
@@ -164,9 +165,14 @@ class ApiService {
 
   async updateExploration(
     id: string,
-    data: { title?: string; state?: ExplorationState }
+    data: { title?: string; state?: ExplorationState; snapshot?: GraphSnapshot }
   ): Promise<Exploration> {
     const response = await this.client.put(`/api/explorations/${id}`, data);
+    return response.data;
+  }
+
+  async getExplorationSnapshot(id: string): Promise<GraphSnapshot> {
+    const response = await this.client.get(`/api/explorations/${id}/snapshot`);
     return response.data;
   }
 

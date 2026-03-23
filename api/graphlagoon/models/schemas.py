@@ -262,9 +262,34 @@ VlpRenderingMode: TypeAlias = Literal["cte", "procedural"]
 MaterializationStrategy: TypeAlias = Literal["temp_tables", "numbered_views"]
 
 
+class SnapshotNode(BaseModel):
+    id: str
+    type: str
+    properties: dict = Field(default_factory=dict)
+    x: Optional[float] = None
+    y: Optional[float] = None
+
+
+class SnapshotEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    type: str
+    properties: dict = Field(default_factory=dict)
+
+
+class GraphSnapshot(BaseModel):
+    """Full graph state snapshot (nodes + edges with positions and properties)."""
+
+    nodes: list[SnapshotNode]
+    edges: list[SnapshotEdge]
+    snapshot_version: int = 1
+
+
 class ExplorationState(BaseModel):
     nodes: list[NodeState] = Field(default_factory=list)
     edges: list[EdgeState] = Field(default_factory=list)
+    has_snapshot: bool = False
     filters: FilterState = Field(default_factory=FilterState)
     viewport: ViewportState = Field(default_factory=ViewportState)
     layout_algorithm: str = "force-atlas-2"
@@ -286,11 +311,13 @@ class ExplorationState(BaseModel):
 class ExplorationCreate(BaseModel):
     title: str
     state: ExplorationState
+    snapshot: Optional[GraphSnapshot] = None
 
 
 class ExplorationUpdate(BaseModel):
     title: Optional[str] = None
     state: Optional[ExplorationState] = None
+    snapshot: Optional[GraphSnapshot] = None
 
 
 class ExplorationResponse(BaseModel):

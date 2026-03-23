@@ -84,6 +84,29 @@ export interface EdgeState {
   edge_id: string;
 }
 
+// Graph snapshot — full node/edge data saved alongside an exploration
+export interface SnapshotNode {
+  id: string;
+  type: string;
+  properties: Record<string, unknown>;
+  x?: number;
+  y?: number;
+}
+
+export interface SnapshotEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphSnapshot {
+  nodes: SnapshotNode[];
+  edges: SnapshotEdge[];
+  snapshot_version?: number;
+}
+
 // Property filter types
 export type PropertyFilterOperator =
   | 'equals'           // Exact match (string or number)
@@ -151,6 +174,7 @@ export interface ExplorationState {
   behaviors?: Record<string, unknown>;     // Behavior settings (optional for backwards compat)
   aesthetics?: Record<string, unknown>;    // Aesthetic settings (optional for backwards compat)
   community?: Record<string, unknown>;     // Community detection state (optional for backwards compat)
+  has_snapshot?: boolean;                  // Whether a file-based graph snapshot exists
 }
 
 export interface Exploration {
@@ -353,6 +377,7 @@ export interface ShareRequest {
 export interface CreateExplorationRequest {
   title: string;
   state: ExplorationState;
+  snapshot?: GraphSnapshot;
 }
 
 export type VlpRenderingMode = 'cte' | 'procedural';

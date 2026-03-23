@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import type {
   Node,
   Edge,
@@ -1342,6 +1342,25 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  function buildGraphSnapshot() {
+    return {
+      nodes: nodes.value.map((n) => ({
+        id: n.node_id,
+        type: n.node_type,
+        properties: (n.properties ?? {}) as Record<string, unknown>,
+        x: n.x,
+        y: n.y,
+      })),
+      edges: edges.value.map((e) => ({
+        id: e.edge_id,
+        source: e.src,
+        target: e.dst,
+        type: e.relationship_type,
+        properties: (e.properties ?? {}) as Record<string, unknown>,
+      })),
+    };
+  }
+
   function getExplorationState(): ExplorationState {
     const clusterStore = useClusterStore();
     const communityStore = useCommunityStore();
@@ -1383,12 +1402,13 @@ export const useGraphStore = defineStore('graph', () => {
   async function saveExploration(title: string): Promise<{ success: boolean; error?: string }> {
     if (!currentContext.value) return { success: false, error: 'No context selected' };
 
-    // Require a query to save - explorations without queries cannot be reliably restored
-    // (clusters depend on specific nodes that come from the query result)
-    if (!graphQuery.value || !graphQuery.value.trim()) {
+    // Require at least nodes OR a query to save
+    const hasNodes = nodes.value.length > 0;
+    const hasQuery = !!(graphQuery.value && graphQuery.value.trim());
+    if (!hasNodes && !hasQuery) {
       return {
         success: false,
-        error: 'Cannot save exploration without a query. Please execute a query first to define which nodes are included.',
+        error: 'Cannot save an empty exploration. Execute a query or expand nodes first.',
       };
     }
 
@@ -1397,21 +1417,20 @@ export const useGraphStore = defineStore('graph', () => {
 
     try {
       const state = getExplorationState();
+      const snapshot = buildGraphSnapshot();
 
       // Update existing only if title matches, otherwise create new
       const shouldUpdate = currentExploration.value && currentExploration.value.title === title;
 
       if (shouldUpdate) {
-        // Update existing exploration with same title
         currentExploration.value = await api.updateExploration(
           currentExploration.value!.id,
-          { title, state }
+          { title, state, snapshot }
         );
       } else {
-        // Create new exploration (different title or no current exploration)
         currentExploration.value = await api.createExploration(
           currentContext.value.id,
-          { title, state }
+          { title, state, snapshot }
         );
       }
       return { success: true };
@@ -1430,6 +1449,49 @@ export const useGraphStore = defineStore('graph', () => {
       return { success: false, error: errorMessage };
     } finally {
       loading.value = false;
+    }
+  }
+
+  async function _executeQueryFallback(
+    exploration: Awaited<ReturnType<typeof api.getExploration>>,
+    communityStore: ReturnType<typeof useCommunityStore>
+  ) {
+    if (exploration.state.graph_query) {
+      const query = exploration.state.graph_query.trim();
+      if (query.toUpperCase().startsWith('MATCH')) {
+        const sql = await transpileCypher(query);
+        if (sql) {
+          await executeGraphQuery(sql, { preserveGraphQuery: true, preserveSelections: true });
+        }
+      } else {
+        await executeGraphQuery(query, { preserveGraphQuery: true, preserveSelections: true });
+      }
+    } else {
+      await loadSubgraph({});
+    }
+    // Community state must be restored AFTER query execution because the
+    // nodes watcher in community store clears communities when nodes change.
+    communityStore.loadState(exploration.state.community);
+  }
+
+  /**
+   * Auto-save a snapshot for the current exploration after a query-based load.
+   * Used as a migration path: after the first load of an old exploration (or
+   * when the snapshot file was lost), this transparently upgrades it so future
+   * loads use the fast file-based path instead of re-executing the query.
+   * Fire-and-forget — failures are logged but never surface to the user.
+   */
+  async function _autoSaveSnapshotIfWritable(): Promise<void> {
+    const exp = currentExploration.value;
+    if (!exp?.has_write_access) return;
+    if (nodes.value.length === 0) return;
+    try {
+      const snapshot = buildGraphSnapshot();
+      const updated = await api.updateExploration(exp.id, { snapshot });
+      // Reflect has_snapshot=true locally without a full reload
+      currentExploration.value = updated;
+    } catch (err) {
+      console.warn('[loadExploration] Auto-snapshot save failed:', err);
     }
   }
 
@@ -1496,30 +1558,46 @@ export const useGraphStore = defineStore('graph', () => {
         aesthetics.value = { ...aesthetics.value, ...exploration.state.aesthetics } as typeof aesthetics.value;
       }
 
-      // Re-execute the query to load the graph data
-      if (exploration.state.graph_query) {
-        const query = exploration.state.graph_query.trim();
-        // Detect if it's a Cypher query (starts with MATCH) or SQL
-        if (query.toUpperCase().startsWith('MATCH')) {
-          // Transpile and execute Cypher, preserve the original Cypher query
-          const sql = await transpileCypher(query);
-          if (sql) {
-            await executeGraphQuery(sql, { preserveGraphQuery: true, preserveSelections: true });
-          }
-        } else {
-          // Execute as SQL directly, preserve the original query
-          await executeGraphQuery(query, { preserveGraphQuery: true, preserveSelections: true });
+      // Load graph data: snapshot first (fast, includes expanded nodes),
+      // fall back to query re-execution if snapshot is unavailable.
+      const communityStore = useCommunityStore();
+
+      if (exploration.state.has_snapshot) {
+        try {
+          const snapshot = await api.getExplorationSnapshot(explorationId);
+          nodes.value = snapshot.nodes.map((n) => ({
+            node_id: n.id,
+            node_type: n.type,
+            properties: n.properties,
+            x: n.x,
+            y: n.y,
+          }));
+          edges.value = snapshot.edges.map((e) => ({
+            edge_id: e.id,
+            src: e.source,
+            dst: e.target,
+            relationship_type: e.type,
+            properties: e.properties,
+          }));
+          // Wait for the community store's nodes watcher to fire and clear
+          // communities before restoring — same timing requirement as the
+          // query-execution path (the watcher is async/next-tick).
+          await nextTick();
+          communityStore.loadState(exploration.state.community);
+        } catch (snapshotErr) {
+          console.warn(
+            '[loadExploration] Snapshot unavailable, falling back to query re-execution:',
+            snapshotErr
+          );
+          await _executeQueryFallback(exploration, communityStore);
+          // File was missing — re-save snapshot to recover (fire-and-forget)
+          _autoSaveSnapshotIfWritable();
         }
       } else {
-        // No query saved - load default subgraph
-        await loadSubgraph({});
+        await _executeQueryFallback(exploration, communityStore);
+        // Old exploration without snapshot — auto-upgrade after first load (fire-and-forget)
+        _autoSaveSnapshotIfWritable();
       }
-
-      // Restore community state AFTER query execution (the nodes watcher
-      // in community store clears communities when nodes change, so we must
-      // restore after the query completes and the watcher has fired)
-      const communityStore = useCommunityStore();
-      communityStore.loadState(exploration.state.community);
 
       // Clear selections after loading
       selectedNodeIds.value.clear();

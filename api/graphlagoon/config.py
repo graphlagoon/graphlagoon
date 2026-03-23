@@ -94,6 +94,18 @@ class Settings(BaseSettings):
         "When set, list_datasets searches all specified pairs instead of just default_catalog/default_schema.",
     )
 
+    # Exploration snapshots (file-based graph state persistence)
+    exploration_snapshots_dir: str = Field(
+        default="./tmp/explorations",
+        description="Local directory for exploration snapshot files (used when databricks_mode=False)",
+    )
+    databricks_volume_path: Optional[str] = Field(
+        default=None,
+        description="Databricks Volume path for snapshot storage "
+        "(e.g. /Volumes/catalog/schema/volume/explorations). "
+        "Required when databricks_mode=True and graph snapshots are saved.",
+    )
+
     # Warehouse timeout settings
     warehouse_http_timeout: float = Field(
         default=300.0,

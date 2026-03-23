@@ -204,16 +204,50 @@ class InMemoryStore:
         if context_id not in self.graph_contexts:
             return False
 
-        # Delete related explorations
+        # Collect explorations with snapshots before deleting them
         to_delete = [
             eid
             for eid, exp in self.explorations.items()
             if exp.graph_context_id == context_id
         ]
+        snapshot_ids = [
+            eid
+            for eid in to_delete
+            if self.explorations[eid].state.get("has_snapshot")
+        ]
+
         for eid in to_delete:
             del self.explorations[eid]
 
         del self.graph_contexts[context_id]
+
+        # Best-effort snapshot file cleanup (fire-and-forget via asyncio)
+        if snapshot_ids:
+            import asyncio
+            import logging
+
+            _log = logging.getLogger(__name__)
+
+            async def _cleanup():
+                try:
+                    from graphlagoon.services.snapshot import get_snapshot_service
+                    svc = get_snapshot_service()
+                    for eid in snapshot_ids:
+                        try:
+                            await svc.delete(eid)
+                        except Exception as exc:
+                            _log.warning(
+                                "Could not delete snapshot %s: %s", eid, exc
+                            )
+                except Exception as exc:
+                    _log.warning("Snapshot cleanup failed: %s", exc)
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_cleanup())
+            except RuntimeError:
+                pass  # No running event loop (e.g. tests) — skip cleanup
+
         return True
 
     def share_graph_context(

@@ -18,6 +18,7 @@ from graphlagoon.models.schemas import (
     ExplorationUpdate,
     ExplorationResponse,
     ExplorationState,
+    GraphSnapshot,
     ShareRequest,
 )
 from graphlagoon.middleware.auth import get_current_user
@@ -29,6 +30,38 @@ from graphlagoon.utils.sharing import (
 from graphlagoon.config import get_settings
 
 router = APIRouter(tags=["explorations"])
+
+
+# ---------------------------------------------------------------------------
+# Snapshot helpers
+# ---------------------------------------------------------------------------
+
+async def _persist_snapshot(exploration_id: UUID, snapshot: GraphSnapshot) -> None:
+    """Compress and save a snapshot file. Raises ValueError if misconfigured."""
+    from graphlagoon.services.snapshot import (
+        get_snapshot_service,
+        compress_snapshot,
+    )
+
+    svc = get_snapshot_service()
+    await svc.save(exploration_id, compress_snapshot(snapshot.model_dump()))
+
+
+async def _delete_snapshot_if_exists(state: dict, exploration_id: UUID) -> None:
+    """Delete snapshot file when exploration is deleted. Logs but never raises."""
+    if not state.get("has_snapshot"):
+        return
+    try:
+        from graphlagoon.services.snapshot import get_snapshot_service
+
+        svc = get_snapshot_service()
+        await svc.delete(exploration_id)
+    except Exception as exc:
+        logger.warning(
+            "Could not delete snapshot for exploration %s: %s",
+            exploration_id,
+            exc,
+        )
 
 
 def exploration_to_response(
@@ -287,6 +320,11 @@ async def create_exploration(
     """Create a new exploration for a graph context."""
     user_email = get_current_user(request)
 
+    # Build state dict, marking has_snapshot if a snapshot is provided
+    state_dict = data.state.model_dump()
+    if data.snapshot is not None:
+        state_dict["has_snapshot"] = True
+
     if is_database_available():
         from sqlalchemy import select
         from graphlagoon.db.models import Exploration
@@ -314,12 +352,19 @@ async def create_exploration(
                 graph_context_id=context_id,
                 title=data.title,
                 owner_email=user_email,
-                state=data.state.model_dump(),
+                state=state_dict,
             )
             session.add(exploration)
             await session.commit()
             await session.refresh(exploration)
             await session.refresh(exploration, ["shares"])
+
+            if data.snapshot is not None:
+                try:
+                    await _persist_snapshot(exploration.id, data.snapshot)
+                except Exception as exc:
+                    raise HTTPException(status_code=500, detail=str(exc)) from exc
+
             return exploration_to_response(exploration, user_email)
     else:
         # Check context access
@@ -339,8 +384,15 @@ async def create_exploration(
             graph_context_id=context_id,
             title=data.title,
             owner_email=user_email,
-            state=data.state.model_dump(),
+            state=state_dict,
         )
+
+        if data.snapshot is not None:
+            try:
+                await _persist_snapshot(exploration.id, data.snapshot)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
         return exploration_to_response(exploration, user_email)
 
 
@@ -447,11 +499,26 @@ async def update_exploration(
                 exploration.title = data.title
 
             if data.state is not None:
-                exploration.state = data.state.model_dump()
+                new_state = data.state.model_dump()
+                if data.snapshot is not None:
+                    new_state["has_snapshot"] = True
+                exploration.state = new_state
+            elif data.snapshot is not None:
+                # snapshot-only update: patch has_snapshot in existing state
+                current = dict(exploration.state or {})
+                current["has_snapshot"] = True
+                exploration.state = current
 
             await session.commit()
             await session.refresh(exploration)
             await session.refresh(exploration, ["shares"])
+
+            if data.snapshot is not None:
+                try:
+                    await _persist_snapshot(exploration.id, data.snapshot)
+                except Exception as exc:
+                    raise HTTPException(status_code=500, detail=str(exc)) from exc
+
             return exploration_to_response(exploration, user_email)
     else:
         store = get_memory_store()
@@ -486,9 +553,24 @@ async def update_exploration(
             updates["title"] = data.title
 
         if data.state is not None:
-            updates["state"] = data.state.model_dump()
+            new_state = data.state.model_dump()
+            if data.snapshot is not None:
+                new_state["has_snapshot"] = True
+            updates["state"] = new_state
+        elif data.snapshot is not None:
+            # snapshot-only update: patch has_snapshot in existing state
+            current = dict(exploration.state or {})
+            current["has_snapshot"] = True
+            updates["state"] = current
 
         exploration = store.update_exploration(exploration_id, **updates)
+
+        if data.snapshot is not None:
+            try:
+                await _persist_snapshot(exploration.id, data.snapshot)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
         return exploration_to_response(exploration, user_email)
 
 
@@ -514,8 +596,11 @@ async def delete_exploration(exploration_id: UUID, request: Request):
             if exploration.owner_email != user_email:
                 raise HTTPException(status_code=403, detail="Only owner can delete")
 
+            state = exploration.state or {}
             await session.delete(exploration)
             await session.commit()
+
+        await _delete_snapshot_if_exists(state, exploration_id)
     else:
         store = get_memory_store()
         exploration = store.get_exploration(exploration_id)
@@ -526,9 +611,80 @@ async def delete_exploration(exploration_id: UUID, request: Request):
         if exploration.owner_email != user_email:
             raise HTTPException(status_code=403, detail="Only owner can delete")
 
+        state = exploration.state or {}
         store.delete_exploration(exploration_id)
+        await _delete_snapshot_if_exists(state, exploration_id)
 
     return {"status": "deleted"}
+
+
+@router.get("/api/explorations/{exploration_id}/snapshot")
+async def get_exploration_snapshot(exploration_id: UUID, request: Request):
+    """Return the graph snapshot (nodes + edges) for an exploration.
+
+    Returns 404 if the exploration has no snapshot or the file is missing.
+    Access control mirrors get_exploration.
+    """
+    user_email = get_current_user(request)
+
+    # Resolve the exploration and check access (reuses existing logic)
+    if is_database_available():
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from graphlagoon.db.models import Exploration
+
+        session_maker = get_session_maker()
+        async with session_maker() as session:
+            result = await session.execute(
+                select(Exploration)
+                .options(selectinload(Exploration.shares))
+                .where(Exploration.id == exploration_id)
+            )
+            exploration = result.scalar_one_or_none()
+            if exploration is None:
+                raise HTTPException(status_code=404, detail="Exploration not found")
+
+            if exploration.owner_email != user_email and not user_has_share_access(
+                user_email, exploration.shares
+            ):
+                await check_context_access_db(
+                    session, exploration.graph_context_id, user_email
+                )
+
+            state = exploration.state or {}
+    else:
+        store = get_memory_store()
+        exploration = store.get_exploration(exploration_id)
+        if exploration is None:
+            raise HTTPException(status_code=404, detail="Exploration not found")
+
+        if exploration.owner_email != user_email and not user_has_share_access(
+            user_email, exploration.shares
+        ):
+            check_context_access_memory(exploration.graph_context_id, user_email)
+
+        state = exploration.state or {}
+
+    if not state.get("has_snapshot"):
+        raise HTTPException(
+            status_code=404, detail="This exploration has no snapshot"
+        )
+
+    from graphlagoon.services.snapshot import get_snapshot_service, decompress_snapshot
+
+    try:
+        svc = get_snapshot_service()
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    data = await svc.load(exploration_id)
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Snapshot file not found (may have been deleted)",
+        )
+
+    return decompress_snapshot(data)
 
 
 @router.post("/api/explorations/{exploration_id}/share")
