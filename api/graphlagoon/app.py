@@ -409,7 +409,7 @@ def create_mountable_app(
 
     @asynccontextmanager
     async def mountable_lifespan(app: FastAPI):
-        if not settings.databricks_mode:
+        if not settings.databricks_volume_path:
             Path(settings.exploration_snapshots_dir).mkdir(
                 parents=True, exist_ok=True
             )
@@ -519,7 +519,7 @@ def create_app(
         logger.info(f"Lakebase enabled: {settings.lakebase_enabled}")
         logger.info(f"Databricks mode: {settings.databricks_mode}")
 
-        if not settings.databricks_mode:
+        if not settings.databricks_volume_path:
             Path(settings.exploration_snapshots_dir).mkdir(
                 parents=True, exist_ok=True
             )

@@ -146,39 +146,110 @@ class DatabricksSnapshotService(SnapshotService):
             f"{self._volume_path}/{eid}.json.gz"
         )
 
+    def _check_response(self, resp: httpx.Response, operation: str, eid: UUID) -> None:
+        """Raise a descriptive error for non-2xx responses."""
+        if resp.is_success:
+            return
+        status = resp.status_code
+        if status == 401:
+            raise PermissionError(
+                f"Databricks snapshot {operation} [{eid}]: authentication failed (401). "
+                "Check databricks_token or header_provider."
+            )
+        if status == 403:
+            raise PermissionError(
+                f"Databricks snapshot {operation} [{eid}]: access denied (403). "
+                f"Ensure the token has READ/WRITE permission on {self._volume_path}."
+            )
+        if status == 404:
+            raise FileNotFoundError(
+                f"Databricks snapshot {operation} [{eid}]: not found (404). "
+                f"Volume path may not exist: {self._volume_path}"
+            )
+        # generic fallback — include response body for diagnostics
+        try:
+            body = resp.text[:500]
+        except Exception:
+            body = "<unreadable>"
+        raise OSError(
+            f"Databricks snapshot {operation} [{eid}]: HTTP {status}. Body: {body}"
+        )
+
     async def save(self, eid: UUID, data: bytes) -> None:
         headers = await self._auth_headers()
         headers["Content-Type"] = "application/octet-stream"
-        async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
-            resp = await client.put(
-                self._api_url(eid),
-                content=data,
-                headers=headers,
-                params={"overwrite": "true"},
-            )
-            resp.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
+                resp = await client.put(
+                    self._api_url(eid),
+                    content=data,
+                    headers=headers,
+                    params={"overwrite": "true"},
+                )
+            self._check_response(resp, "save", eid)
+        except (PermissionError, FileNotFoundError, OSError):
+            raise
+        except httpx.TimeoutException as exc:
+            raise TimeoutError(
+                f"Databricks snapshot save [{eid}]: request timed out "
+                f"after {self._HTTP_TIMEOUT}s."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ConnectionError(
+                f"Databricks snapshot save [{eid}]: network error — {exc}"
+            ) from exc
 
     async def load(self, eid: UUID) -> Optional[bytes]:
         headers = await self._auth_headers()
-        async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
-            resp = await client.get(self._api_url(eid), headers=headers)
+        try:
+            async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
+                resp = await client.get(self._api_url(eid), headers=headers)
             if resp.status_code == 404:
                 return None
-            resp.raise_for_status()
+            self._check_response(resp, "load", eid)
             return resp.content
+        except (PermissionError, OSError):
+            raise
+        except httpx.TimeoutException as exc:
+            raise TimeoutError(
+                f"Databricks snapshot load [{eid}]: request timed out "
+                f"after {self._HTTP_TIMEOUT}s."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ConnectionError(
+                f"Databricks snapshot load [{eid}]: network error — {exc}"
+            ) from exc
 
     async def delete(self, eid: UUID) -> None:
         headers = await self._auth_headers()
-        async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
-            resp = await client.delete(self._api_url(eid), headers=headers)
-            if resp.status_code not in (200, 204, 404):
-                resp.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
+                resp = await client.delete(self._api_url(eid), headers=headers)
+            if resp.status_code in (200, 204, 404):
+                return
+            self._check_response(resp, "delete", eid)
+        except (PermissionError, OSError):
+            raise
+        except httpx.TimeoutException as exc:
+            raise TimeoutError(
+                f"Databricks snapshot delete [{eid}]: request timed out "
+                f"after {self._HTTP_TIMEOUT}s."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ConnectionError(
+                f"Databricks snapshot delete [{eid}]: network error — {exc}"
+            ) from exc
 
     async def exists(self, eid: UUID) -> bool:
         headers = await self._auth_headers()
-        async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
-            resp = await client.head(self._api_url(eid), headers=headers)
-            return resp.status_code == 200
+        try:
+            async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
+                # Use GET instead of HEAD — HEAD is not officially documented
+                # for the Databricks Files API. Stream to avoid downloading the body.
+                async with client.stream("GET", self._api_url(eid), headers=headers) as resp:
+                    return resp.status_code == 200
+        except (httpx.TimeoutException, httpx.RequestError):
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -212,22 +283,14 @@ def get_snapshot_service() -> SnapshotService:
 
     settings = _snapshot_settings or get_settings()
 
-    if settings.databricks_mode:
-        if not settings.databricks_volume_path:
-            raise ValueError(
-                "GRAPH_LAGOON_DATABRICKS_VOLUME_PATH is required when "
-                "databricks_mode=True and graph snapshots are saved. "
-                "Set it to a Databricks Volume path, e.g. "
-                "/Volumes/catalog/schema/volume_name."
-            )
-
+    if settings.databricks_volume_path:
+        # Volume path configured → use Databricks Files API regardless of databricks_mode
         hp = _snapshot_header_provider
         if hp is None:
-            # Fall back to static PAT from settings
             token = settings.databricks_token
             if not token:
                 raise ValueError(
-                    "databricks_token is required when databricks_mode=True "
+                    "databricks_token is required when databricks_volume_path is set "
                     "and no header_provider is configured."
                 )
             hp = lambda: token  # noqa: E731
@@ -238,6 +301,7 @@ def get_snapshot_service() -> SnapshotService:
             header_provider=hp,
         )
     else:
+        # No volume path → local directory (works in both local and databricks_mode)
         _snapshot_service = LocalSnapshotService(
             settings.exploration_snapshots_dir
         )

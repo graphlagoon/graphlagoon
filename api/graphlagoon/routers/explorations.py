@@ -37,14 +37,34 @@ router = APIRouter(tags=["explorations"])
 # ---------------------------------------------------------------------------
 
 async def _persist_snapshot(exploration_id: UUID, snapshot: GraphSnapshot) -> None:
-    """Compress and save a snapshot file. Raises ValueError if misconfigured."""
+    """Compress and save a snapshot file.
+
+    Raises:
+        HTTPException 400: misconfiguration (missing volume path).
+        HTTPException 403: Databricks permission denied.
+        HTTPException 504: upstream timeout.
+        HTTPException 502: network/connection error.
+        HTTPException 500: unexpected storage error.
+    """
     from graphlagoon.services.snapshot import (
         get_snapshot_service,
         compress_snapshot,
     )
 
-    svc = get_snapshot_service()
-    await svc.save(exploration_id, compress_snapshot(snapshot.model_dump()))
+    try:
+        svc = get_snapshot_service()
+        await svc.save(exploration_id, compress_snapshot(snapshot.model_dump()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except (ConnectionError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Unexpected snapshot save error for %s: %s", exploration_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Snapshot storage error: {exc}") from exc
 
 
 async def _delete_snapshot_if_exists(state: dict, exploration_id: UUID) -> None:
@@ -360,10 +380,7 @@ async def create_exploration(
             await session.refresh(exploration, ["shares"])
 
             if data.snapshot is not None:
-                try:
-                    await _persist_snapshot(exploration.id, data.snapshot)
-                except Exception as exc:
-                    raise HTTPException(status_code=500, detail=str(exc)) from exc
+                await _persist_snapshot(exploration.id, data.snapshot)
 
             return exploration_to_response(exploration, user_email)
     else:
@@ -388,10 +405,7 @@ async def create_exploration(
         )
 
         if data.snapshot is not None:
-            try:
-                await _persist_snapshot(exploration.id, data.snapshot)
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=str(exc)) from exc
+            await _persist_snapshot(exploration.id, data.snapshot)
 
         return exploration_to_response(exploration, user_email)
 
@@ -514,10 +528,7 @@ async def update_exploration(
             await session.refresh(exploration, ["shares"])
 
             if data.snapshot is not None:
-                try:
-                    await _persist_snapshot(exploration.id, data.snapshot)
-                except Exception as exc:
-                    raise HTTPException(status_code=500, detail=str(exc)) from exc
+                await _persist_snapshot(exploration.id, data.snapshot)
 
             return exploration_to_response(exploration, user_email)
     else:
@@ -566,10 +577,7 @@ async def update_exploration(
         exploration = store.update_exploration(exploration_id, **updates)
 
         if data.snapshot is not None:
-            try:
-                await _persist_snapshot(exploration.id, data.snapshot)
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=str(exc)) from exc
+            await _persist_snapshot(exploration.id, data.snapshot)
 
         return exploration_to_response(exploration, user_email)
 
