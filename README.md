@@ -39,6 +39,34 @@ app.mount("/graphlagoon", create_mountable_app(
 
 For dynamic token refresh (OAuth), database persistence, and other integration modes, see the [full documentation](https://graphlagoon.github.io/graphlagoon/guide/integration).
 
+## Similarity System
+
+Register your own similarity endpoints and explore pairwise relationships directly in the graph. The parent app owns the computation — Graph Lagoon handles discovery, visualization, and layout.
+
+```python
+from graphlagoon import create_mountable_app, SimilarityEndpointSpec, SimilarityEndpointParam
+
+@app.post("/my-api/similarity/cosine")
+async def cosine_similarity(request):
+    # Your computation: embeddings, co-occurrence, etc.
+    return {"edges": [{"source": "a", "target": "b", "score": 0.95}]}
+
+app.mount("/graphlagoon", create_mountable_app(
+    similarity_endpoints=[
+        SimilarityEndpointSpec(
+            name="cosine_embedding",
+            description="Cosine similarity on embedding vectors",
+            endpoint="/my-api/similarity/cosine",
+            params=[
+                SimilarityEndpointParam(name="threshold", type="float", default=0.5),
+            ],
+        ),
+    ],
+))
+```
+
+Similarity edges are injected into the graph with display modes (overlay, exclusive, hidden) and a layout-by-edge-type feature that can drive the force simulation using only similarity edges. See the [similarity guide](https://graphlagoon.github.io/graphlagoon/guide/similarity) for details.
+
 ## Local Development
 
 **Prerequisites:** Node.js 18+, Python 3.11+, [uv](https://docs.astral.sh/uv/)

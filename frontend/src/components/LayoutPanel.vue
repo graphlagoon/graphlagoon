@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
+import { useSimilarityStore } from '@/stores/similarity';
 import { Play, Square, Flame, Shuffle, ChevronDown, ChevronRight, HelpCircle, X } from 'lucide-vue-next';
 
 const graphStore = useGraphStore();
+const similarityStore = useSimilarityStore();
 
 // Help modal state
 const showHelpModal = ref(false);
@@ -15,6 +17,7 @@ const emit = defineEmits<{
   (e: 'stop-layout'): void;
   (e: 'reheat-layout'): void;
   (e: 'scramble-layout'): void;
+  (e: 'start-edge-type-layout', edgeType: string | null, strategy: string): void;
 }>();
 
 const props = defineProps<{
@@ -195,6 +198,48 @@ function toggleLayout() {
             @input="graphStore.updateLayoutExecution({ warmupTicks: parseInt(($event.target as HTMLInputElement).value) })"
           />
         </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Layout by Edge Type -->
+      <div class="settings-group">
+        <p class="settings-group-title">Layout by Edge Type</p>
+
+        <div class="setting-item">
+          <label>
+            <span class="setting-label">Edge Type</span>
+          </label>
+          <select
+            v-model="similarityStore.layoutEdgeType"
+            class="setting-select"
+          >
+            <option :value="null">All edges (default)</option>
+            <option v-for="et in graphStore.edgeTypes" :key="et" :value="et">{{ et }}</option>
+          </select>
+        </div>
+
+        <div class="setting-item">
+          <label>
+            <span class="setting-label">Strategy</span>
+          </label>
+          <select
+            v-model="similarityStore.layoutStrategy"
+            class="setting-select"
+          >
+            <option value="fix-then-recompute">Fix then recompute</option>
+            <option value="unified">Full simulation, selected links only</option>
+            <option value="selected-only">Selected only layout</option>
+          </select>
+        </div>
+
+        <button
+          class="apply-btn"
+          :disabled="!similarityStore.layoutEdgeType"
+          @click="emit('start-edge-type-layout', similarityStore.layoutEdgeType, similarityStore.layoutStrategy)"
+        >
+          <Play :size="13" /> Apply Edge Layout
+        </button>
       </div>
 
       <div class="settings-divider"></div>

@@ -29,6 +29,10 @@ import type {
   CreateQueryTemplateRequest,
   UpdateQueryTemplateRequest,
 } from '@/types/graph';
+import type {
+  SimilarityEndpointInfo,
+  SimilarityResponse,
+} from '@/types/similarity';
 
 // API URL priority:
 // 1. Window global injected by server (production/embedded mode)
@@ -319,6 +323,27 @@ class ApiService {
 
   async deleteQueryTemplate(contextId: string, templateId: string): Promise<void> {
     await this.client.delete(`/api/graph-contexts/${contextId}/query-templates/${templateId}`);
+  }
+
+  // Similarity
+  async getSimilarityEndpoints(): Promise<SimilarityEndpointInfo[]> {
+    const response = await this.client.get('/api/similarity/endpoints');
+    return response.data;
+  }
+
+  async computeSimilarity(
+    endpoint: string,
+    body: { node_keys: string[]; params: Record<string, unknown> },
+  ): Promise<SimilarityResponse> {
+    // Parent endpoint is an absolute path on the same origin.
+    // In production (same origin): "/dummy/..." works directly.
+    // In dev (Vite on :3000, backend on :8000): prepend backend origin.
+    const backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN || '';
+    const url = backendOrigin + endpoint;
+    const response = await axios.post(url, body, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return response.data;
   }
 }
 

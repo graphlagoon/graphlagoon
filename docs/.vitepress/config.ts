@@ -21,6 +21,7 @@ export default defineConfig({
         items: [
           { text: 'Getting Started', link: '/guide/getting-started' },
           { text: 'Databricks Integration', link: '/guide/integration' },
+          { text: 'Similarity System', link: '/guide/similarity' },
           { text: 'Configuration', link: '/guide/configuration' },
         ],
       },

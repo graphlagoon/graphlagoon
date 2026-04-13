@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { useGraphStore } from '@/stores/graph';
 import { useMetricsStore } from '@/stores/metrics';
 import { useCommunityStore } from '@/stores/community';
+import { useSimilarityStore } from '@/stores/similarity';
 import type { Node, Edge } from '@/types/graph';
 import type { GraphNode, GraphLink, GraphData } from '@/types/graph3d';
 import { formatNodeLabel, formatEdgeLabel } from '@/utils/labelFormatter';
@@ -35,6 +36,7 @@ const emit = defineEmits<{
 const graphStore = useGraphStore();
 const metricsStore = useMetricsStore();
 const communityStore = useCommunityStore();
+const similarityStore = useSimilarityStore();
 
 const backgroundColor = '#fafafa';
 const wrapperRef = ref<HTMLDivElement | null>(null);
@@ -365,8 +367,10 @@ function buildGraphData(): GraphData {
       edge, graphStore.textFormatRules, graphStore.textFormatDefaults.edgeTemplate,
     );
 
+    const isSimilarity = edge.relationship_type === '__similarity__';
+    const edgeScore = isSimilarity ? (edge.properties?.score as number | undefined) : undefined;
     const appearance = computeLinkAppearance(
-      edge.edge_id, edge.relationship_type, edge.src, edge.dst, hiddenNodeIds, ctx,
+      edge.edge_id, edge.relationship_type, edge.src, edge.dst, hiddenNodeIds, ctx, edgeScore,
     );
 
     const curveInfo = edgeCurvatureInfo.get(edge.edge_id);
@@ -391,6 +395,8 @@ function buildGraphData(): GraphData {
       color: appearance.color,
       hidden: appearance.hidden,
       curvature,
+      isSimilarity,
+      score: edgeScore,
     });
   });
 
@@ -466,7 +472,7 @@ function updateVisuals() {
     const targetId = typeof link.target === 'string' ? link.target : link.target.id;
 
     const appearance = computeLinkAppearance(
-      link.id, link.relationshipType, sourceId, targetId, hiddenNodeIds, ctx,
+      link.id, link.relationshipType, sourceId, targetId, hiddenNodeIds, ctx, link.score,
     );
 
     link.color = appearance.color;
@@ -969,6 +975,7 @@ defineExpose({
   stopLayout: layout.stopLayout,
   reheatLayout: layout.reheatLayout,
   scrambleLayout: layout.scrambleLayout,
+  startEdgeTypeLayout: layout.startEdgeTypeLayout,
   isLayoutRunning,
   exportPNG,
 });
@@ -1294,6 +1301,29 @@ watch(
   () => {
     if (colorUpdateTimeout3D) clearTimeout(colorUpdateTimeout3D);
     colorUpdateTimeout3D = setTimeout(() => { updateVisuals(); }, 50);
+  },
+);
+
+// Similarity display mode changes — full graph update
+watch(
+  () => similarityStore.displayMode,
+  () => { updateGraph(); },
+);
+
+// Similarity edges injected — rebuild graph and auto-run edge-type layout
+watch(
+  () => similarityStore.similarityEdges.length,
+  (newLen, oldLen) => {
+    if (newLen > 0 && oldLen === 0) {
+      // Similarity just computed — update graph then auto-run edge-type layout
+      updateGraph();
+      setTimeout(() => {
+        layout.startEdgeTypeLayout(
+          similarityStore.layoutEdgeType,
+          similarityStore.layoutStrategy,
+        );
+      }, 100);
+    }
   },
 );
 

@@ -58,6 +58,7 @@ export default defineConfig({
   },
   // Set default API URL for development
   define: {
-    'import.meta.env.VITE_API_URL': JSON.stringify('/graphlagoon')
+    'import.meta.env.VITE_API_URL': JSON.stringify('/graphlagoon'),
+    'import.meta.env.VITE_BACKEND_ORIGIN': JSON.stringify('http://localhost:8000')
   }
 })

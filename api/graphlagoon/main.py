@@ -9,12 +9,15 @@ Run with:
 """
 
 import os
+import random
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from graphlagoon.app import create_mountable_app, add_mount_redirect
 from graphlagoon.middleware.auth import AuthMiddleware
+from graphlagoon.similarity import SimilarityEndpointSpec, SimilarityEndpointParam
 
 # Enable debugpy for VSCode debugging
 if os.environ.get("DEBUGPY_ENABLE", "").lower() in ("1", "true"):
@@ -42,8 +45,94 @@ app.add_middleware(
 # Auth middleware on the host so it covers all routes
 app.add_middleware(AuthMiddleware)
 
+# ---------------------------------------------------------------------------
+# Dummy similarity endpoint — forms a random circle from any node ids
+# ---------------------------------------------------------------------------
+
+
+class DummySimilarityRequest(BaseModel):
+    node_keys: list[str]
+    params: dict = {}
+
+
+@app.post("/dummy/similarity/circle")
+async def dummy_similarity_circle(request: DummySimilarityRequest):
+    """Shuffle the node keys and link them in a circle, with random scores.
+
+    Returns edges in both directions so the undirected force layout
+    pulls evenly.
+    """
+    keys = list(request.node_keys)
+    if len(keys) < 2:
+        return {"edges": []}
+
+    random.shuffle(keys)
+    edges = []
+    for i in range(len(keys)):
+        score = round(random.uniform(0.5, 1.0), 3)
+        a, b = keys[i], keys[(i + 1) % len(keys)]
+        edges.append({"source": a, "target": b, "score": score})
+        edges.append({"source": b, "target": a, "score": score})
+    return {"edges": edges}
+
+
+@app.post("/dummy/similarity/knn")
+async def dummy_similarity_knn(request: DummySimilarityRequest):
+    """Random k-nearest-neighbors: each node connects to k random others.
+
+    Creates clear cluster-like structures that are good for testing
+    layout-by-edge-type.
+
+    Params:
+        k: number of neighbors per node (default 3)
+    """
+    keys = list(request.node_keys)
+    k = int(request.params.get("k", 3))
+    if len(keys) < 2:
+        return {"edges": []}
+
+    k = min(k, len(keys) - 1)
+    seen = set()
+    edges = []
+
+    for key in keys:
+        others = [o for o in keys if o != key]
+        neighbors = random.sample(others, k)
+        for nb in neighbors:
+            pair = tuple(sorted([key, nb]))
+            if pair not in seen:
+                seen.add(pair)
+                score = round(random.uniform(0.3, 1.0), 3)
+                edges.append({"source": key, "target": nb, "score": score})
+                edges.append({"source": nb, "target": key, "score": score})
+
+    return {"edges": edges}
+
+
 # Create and mount Graph Lagoon
-graphlagoon_app = create_mountable_app(mount_prefix="/graphlagoon")
+graphlagoon_app = create_mountable_app(
+    mount_prefix="/graphlagoon",
+    similarity_endpoints=[
+        SimilarityEndpointSpec(
+            name="circle",
+            description="Dummy: shuffle nodes into a circle with random scores",
+            endpoint="/dummy/similarity/circle",
+        ),
+        SimilarityEndpointSpec(
+            name="knn",
+            description="Dummy: random k-nearest-neighbors graph",
+            endpoint="/dummy/similarity/knn",
+            params=[
+                SimilarityEndpointParam(
+                    name="k",
+                    type="int",
+                    default=3,
+                    description="Neighbors per node",
+                ),
+            ],
+        ),
+    ],
+)
 
 add_mount_redirect(app, "/graphlagoon")
 app.mount("/graphlagoon", graphlagoon_app)

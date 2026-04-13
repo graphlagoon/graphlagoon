@@ -5,6 +5,7 @@
  */
 import type { Ref } from 'vue';
 import type { GraphNode } from '@/types/graph3d';
+import { applyEdgeTypeLayoutForce, type EdgeTypeLayoutStrategy } from '@/utils/forceConfig3D';
 
 interface LayoutExecutionParams {
   cooldownTicks: number;
@@ -168,6 +169,78 @@ export function useGraphLayout(
     startLayout();
   }
 
+  /**
+   * Start a layout driven by a specific edge type.
+   *
+   * For "fix-then-recompute", runs two passes:
+   * 1. Layout with only the selected edge type's links
+   * 2. Pin participating nodes, then re-run with all links
+   */
+  function startEdgeTypeLayout(edgeType: string | null, strategy: EdgeTypeLayoutStrategy) {
+    const graph3d = getGraph3d();
+    if (!graph3d) return;
+
+    if (!edgeType) {
+      // Reset to default layout
+      applyEdgeTypeLayoutForce(graph3d, null, strategy);
+      startLayout();
+      return;
+    }
+
+    if (strategy === 'fix-then-recompute') {
+      // Phase 1: subgraph layout
+      isLayoutRunning.value = true;
+      layoutStabilized.value = false;
+      callbacks.setLabelsVisible(false);
+
+      const data = graph3d.graphData();
+      data.nodes.forEach((node: GraphNode) => {
+        node.fx = null;
+        node.fy = null;
+        node.fz = null;
+      });
+
+      applyEdgeTypeLayoutForce(graph3d, edgeType, strategy, 'subgraph');
+
+      // Use onEngineStop to detect stabilization, then run phase 2
+      const originalOnStop = graph3d.onEngineStop;
+      graph3d.onEngineStop(() => {
+        // Phase 1 done: pin all nodes that participate in the selected edge type
+        const graphData = graph3d.graphData();
+        const participatingIds = new Set<string>();
+        for (const link of graphData.links) {
+          const srcId = typeof link.source === 'object' ? link.source.id : link.source;
+          const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
+          if (link.relationshipType === edgeType) {
+            participatingIds.add(srcId);
+            participatingIds.add(tgtId);
+          }
+        }
+
+        graphData.nodes.forEach((node: GraphNode) => {
+          if (participatingIds.has(node.id)) {
+            if (node.x !== undefined) node.fx = node.x;
+            if (node.y !== undefined) node.fy = node.y;
+            if (node.z !== undefined) node.fz = node.z;
+          }
+        });
+
+        // Phase 2: full layout with pinned subgraph nodes
+        applyEdgeTypeLayoutForce(graph3d, edgeType, strategy, 'full');
+
+        // Restore original onEngineStop for phase 2
+        graph3d.onEngineStop(() => {
+          stopLayout();
+          if (originalOnStop) originalOnStop();
+        });
+      });
+    } else {
+      // "unified" or "selected-only": single-pass
+      applyEdgeTypeLayoutForce(graph3d, edgeType, strategy);
+      startLayout();
+    }
+  }
+
   return {
     isLayoutRunning,
     layoutStabilized,
@@ -176,5 +249,6 @@ export function useGraphLayout(
     stopLayout,
     reheatLayout,
     scrambleLayout,
+    startEdgeTypeLayout,
   };
 }

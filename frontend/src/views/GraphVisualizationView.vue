@@ -228,6 +228,7 @@ watch(
             @stop-layout="graphCanvas3DRef?.stopLayout()"
             @reheat-layout="graphCanvas3DRef?.reheatLayout()"
             @scramble-layout="graphCanvas3DRef?.scrambleLayout()"
+            @start-edge-type-layout="(et: string | null, s: string) => graphCanvas3DRef?.startEdgeTypeLayout(et, s as any)"
           />
         </div>
 

@@ -306,6 +306,7 @@ class ExplorationState(BaseModel):
     behaviors: Optional[dict] = None
     aesthetics: Optional[dict] = None
     community: Optional[dict] = None
+    similarity: Optional[dict] = None
 
 
 class ExplorationCreate(BaseModel):

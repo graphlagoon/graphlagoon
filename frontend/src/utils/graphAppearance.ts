@@ -287,6 +287,7 @@ export function computeLinkAppearance(
   targetId: string,
   hiddenNodeIds: Set<string>,
   ctx: AppearanceContext,
+  score?: number,
 ): LinkAppearanceResult {
   const isEdgeTypeHidden =
     ctx.hasEdgeTypeFilter && !ctx.edgeTypeFilterSet.has(relationshipType);
@@ -297,10 +298,19 @@ export function computeLinkAppearance(
     hiddenNodeIds.has(targetId) ||
     edgePropHidden;
 
-  const baseColor = ctx.getEdgeTypeColor(relationshipType);
-  const color = hidden
-    ? baseColor
-    : computeLinkColor(
+  // Similarity edges: orange with score-based opacity
+  const isSimilarity = relationshipType === '__similarity__';
+  const baseColor = isSimilarity ? '#ff9500' : ctx.getEdgeTypeColor(relationshipType);
+
+  let color: string;
+  if (hidden) {
+    color = baseColor;
+  } else if (isSimilarity && score !== undefined) {
+    // Map score (0-1) to opacity (0.3-1.0)
+    const alpha = 0.3 + score * 0.7;
+    color = hexToRgba(baseColor, alpha);
+  } else {
+    color = computeLinkColor(
         baseColor,
         sourceId,
         targetId,
@@ -311,6 +321,7 @@ export function computeLinkAppearance(
         ctx.degreeDimOpacity,
         ctx.edgeOpacity,
       );
+  }
 
   return { color, hidden };
 }

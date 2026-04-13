@@ -20,6 +20,7 @@ import type {
 import { api } from '@/services/api';
 import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
+import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
 
 export const useGraphStore = defineStore('graph', () => {
@@ -642,6 +643,18 @@ export const useGraphStore = defineStore('graph', () => {
           evaluatePropertyFilter(filter, {}, getMetricValue)
         );
       });
+    }
+
+    // Similarity display mode filtering
+    const similarityStore = useSimilarityStore();
+    if (similarityStore.hasResults) {
+      const mode = similarityStore.displayMode;
+      if (mode === 'hidden') {
+        result = result.filter(e => e.relationship_type !== '__similarity__');
+      } else if (mode === 'exclusive') {
+        result = result.filter(e => e.relationship_type === '__similarity__');
+      }
+      // 'overlay': no filtering — show all edges including similarity
     }
 
     return result;
@@ -1364,6 +1377,7 @@ export const useGraphStore = defineStore('graph', () => {
   function getExplorationState(): ExplorationState {
     const clusterStore = useClusterStore();
     const communityStore = useCommunityStore();
+    const similarityStore = useSimilarityStore();
 
     // Don't save nodes/edges - they are regenerated from graph_query
     return {
@@ -1396,6 +1410,7 @@ export const useGraphStore = defineStore('graph', () => {
       behaviors: { ...behaviors.value },
       aesthetics: { ...aesthetics.value },
       community: communityStore.getState(),
+      similarity: similarityStore.getState(),
     };
   }
 
@@ -1472,6 +1487,9 @@ export const useGraphStore = defineStore('graph', () => {
     // Community state must be restored AFTER query execution because the
     // nodes watcher in community store clears communities when nodes change.
     communityStore.loadState(exploration.state.community);
+    // Similarity state also restored after query execution (same reason).
+    const similarityStore = useSimilarityStore();
+    similarityStore.loadState(exploration.state.similarity);
   }
 
   /**
@@ -1561,6 +1579,7 @@ export const useGraphStore = defineStore('graph', () => {
       // Load graph data: snapshot first (fast, includes expanded nodes),
       // fall back to query re-execution if snapshot is unavailable.
       const communityStore = useCommunityStore();
+      const similarityStore = useSimilarityStore();
 
       if (exploration.state.has_snapshot) {
         try {
@@ -1584,6 +1603,7 @@ export const useGraphStore = defineStore('graph', () => {
           // query-execution path (the watcher is async/next-tick).
           await nextTick();
           communityStore.loadState(exploration.state.community);
+          similarityStore.loadState(exploration.state.similarity);
         } catch (snapshotErr) {
           console.warn(
             '[loadExploration] Snapshot unavailable, falling back to query re-execution:',

@@ -180,6 +180,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         catalog,
         config,
         query_templates,
+        similarity,
     )
 
     router = APIRouter()
@@ -189,6 +190,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(query_templates.router)
     router.include_router(graph.router)
     router.include_router(catalog.router)
+    router.include_router(similarity.router)
 
     return router
 
@@ -308,6 +310,7 @@ def create_mountable_app(
     databricks_catalog: Optional[str] = None,
     databricks_schema: Optional[str] = None,
     catalog_schemas: Optional[list[tuple[str, str]]] = None,
+    similarity_endpoints: Optional[list] = None,
 ) -> FastAPI:
     """Create a Graph Lagoon Studio app that can be mounted under a prefix.
 
@@ -407,6 +410,12 @@ def create_mountable_app(
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
 
+    # Register similarity endpoints
+    if similarity_endpoints:
+        from graphlagoon.similarity import register_similarity_endpoint
+        for ep in similarity_endpoints:
+            register_similarity_endpoint(ep)
+
     @asynccontextmanager
     async def mountable_lifespan(app: FastAPI):
         if not settings.databricks_volume_path:
@@ -471,6 +480,7 @@ def create_app(
     databricks_catalog: Optional[str] = None,
     databricks_schema: Optional[str] = None,
     catalog_schemas: Optional[list[tuple[str, str]]] = None,
+    similarity_endpoints: Optional[list] = None,
 ) -> FastAPI:
     """Create a standalone Graph Lagoon Studio FastAPI application.
 
@@ -509,6 +519,12 @@ def create_app(
     configure_database(settings)
     configure_warehouse(settings, header_provider=header_provider)
     configure_snapshot_service(settings, header_provider=header_provider)
+
+    # Register similarity endpoints
+    if similarity_endpoints:
+        from graphlagoon.similarity import register_similarity_endpoint
+        for ep in similarity_endpoints:
+            register_similarity_endpoint(ep)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -86,6 +86,11 @@ from graphlagoon.app import (
 from graphlagoon.config import Settings, get_settings
 from graphlagoon.services.warehouse import HeaderProvider
 from graphlagoon.middleware.auth import UserProvider, configure_auth
+from graphlagoon.similarity import (
+    SimilarityEndpointSpec,
+    SimilarityEndpointParam,
+    register_similarity_endpoint,
+)
 
 __all__ = [
     "create_app",
@@ -98,6 +103,9 @@ __all__ = [
     "HeaderProvider",
     "UserProvider",
     "configure_auth",
+    "SimilarityEndpointSpec",
+    "SimilarityEndpointParam",
+    "register_similarity_endpoint",
 ]
 
 

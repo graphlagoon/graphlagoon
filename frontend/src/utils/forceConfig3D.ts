@@ -251,3 +251,83 @@ export function applyCommunityRadialForce(
     graph3d.d3Force('communityZ', cz);
   }
 }
+
+// ============================================================================
+// Layout by Edge Type
+// ============================================================================
+
+export type EdgeTypeLayoutStrategy = 'unified' | 'fix-then-recompute' | 'selected-only';
+
+/**
+ * Configure the link force to only include edges of the selected type.
+ *
+ * Strategy "unified": All nodes participate in charge/gravity, but only
+ * the selected edge type contributes link forces.
+ *
+ * Strategy "selected-only": Only the selected edge type drives link forces.
+ * Non-participating nodes get no link attraction (pushed to periphery).
+ *
+ * Strategy "fix-then-recompute": Two-pass approach handled by the caller
+ * (useGraphLayout composable). This function handles the force config for
+ * each phase.
+ *
+ * @param graph3d - The 3d-force-graph instance
+ * @param edgeType - Edge type to use for layout, or null to reset
+ * @param strategy - Layout strategy
+ * @param phase - For fix-then-recompute: 'subgraph' or 'full'
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function applyEdgeTypeLayoutForce(
+  graph3d: any,
+  edgeType: string | null,
+  strategy: EdgeTypeLayoutStrategy,
+  phase?: 'subgraph' | 'full',
+): void {
+  const linkForce = graph3d.d3Force('link');
+  if (!linkForce) return;
+
+  if (!edgeType) {
+    // Reset: use all links
+    if (typeof linkForce.links === 'function') {
+      // Re-apply default links by triggering a graph data refresh
+      graph3d.d3ReheatSimulation();
+    }
+    return;
+  }
+
+  // Get current graph data
+  const graphData = graph3d.graphData();
+  if (!graphData) return;
+
+  const allLinks = graphData.links || [];
+
+  if (strategy === 'fix-then-recompute') {
+    if (phase === 'subgraph') {
+      // Phase 1: Only selected edge type links
+      const filteredLinks = allLinks.filter(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (l: any) => l.relationshipType === edgeType
+      );
+      linkForce.links(filteredLinks);
+    } else {
+      // Phase 2 (full): Restore all links
+      linkForce.links(allLinks);
+    }
+  } else if (strategy === 'selected-only') {
+    // Only selected edge type links — other nodes drift to periphery
+    const filteredLinks = allLinks.filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (l: any) => l.relationshipType === edgeType
+    );
+    linkForce.links(filteredLinks);
+  } else {
+    // "unified": All nodes and charge/gravity forces, but only selected links
+    const filteredLinks = allLinks.filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (l: any) => l.relationshipType === edgeType
+    );
+    linkForce.links(filteredLinks);
+  }
+
+  graph3d.d3ReheatSimulation();
+}

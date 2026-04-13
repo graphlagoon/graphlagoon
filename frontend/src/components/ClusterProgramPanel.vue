@@ -2,9 +2,11 @@
 import { ref, computed } from 'vue'
 import { useClusterStore } from '@/stores/cluster'
 import { useCommunityStore } from '@/stores/community'
+import { useSimilarityStore } from '@/stores/similarity'
 import { useGraphStore } from '@/stores/graph'
 import type { ClusterProgram } from '@/types/cluster'
 import JavaScriptEditor from './JavaScriptEditor.vue'
+import SimilarityPanel from './SimilarityPanel.vue'
 import { X, Play, Loader2 } from 'lucide-vue-next'
 
 const emit = defineEmits<{
@@ -13,10 +15,11 @@ const emit = defineEmits<{
 
 const clusterStore = useClusterStore()
 const communityStore = useCommunityStore()
+const similarityStore = useSimilarityStore()
 const graphStore = useGraphStore()
 
 // UI state
-const activeTab = ref<'communities' | 'programs'>('communities')
+const activeTab = ref<'communities' | 'programs' | 'similarity'>('communities')
 const showCreateForm = ref(false)
 const editingProgramId = ref<string | null>(null)
 const expandedProgramId = ref<string | null>(null)
@@ -173,6 +176,14 @@ function toggleEdgeTypeFilter(edgeType: string) {
       >
         Programs
         <span v-if="clusterStore.clusters.length > 0" class="tab-badge">{{ clusterStore.clusterStats.total }}</span>
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'similarity' }"
+        @click="activeTab = 'similarity'"
+      >
+        Similarity
+        <span v-if="similarityStore.hasResults" class="tab-badge">{{ similarityStore.resultStats?.edgeCount }}</span>
       </button>
     </div>
 
@@ -479,6 +490,13 @@ function toggleEdgeTypeFilter(edgeType: string) {
         </div>
       </div>
 
+      <!-- ================================================================ -->
+      <!-- Similarity Tab -->
+      <!-- ================================================================ -->
+      <div v-if="activeTab === 'similarity'" class="tab-pane">
+        <SimilarityPanel />
+      </div>
+
     </div>
   </div>
 </template>
@@ -492,6 +510,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
   background: #f9f9f9;
   border-radius: 8px;
   max-height: 80vh;
+  max-width: min(360px, 30vw);
   overflow-y: auto;
 }
 
