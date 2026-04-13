@@ -12,7 +12,7 @@ pip install graphlagoon
 
 ```bash
 # Start the server
-uvicorn graphlagoon.app:app --host 0.0.0.0 --port 8000
+uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000
 ```
 
 ## Usage

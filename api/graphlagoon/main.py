@@ -1,10 +1,20 @@
 """Main entry point for Graph Lagoon Studio REST API.
 
-This module provides backward compatibility with the existing entry point.
-For new deployments, use `src.app:app` or import from `src.app`.
+This module creates a host FastAPI application that mounts Graph Lagoon
+as a sub-application, dogfooding the same integration pattern that
+external users would follow.
+
+Run with:
+    uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 --reload
 """
 
 import os
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from graphlagoon.app import create_mountable_app, add_mount_redirect
+from graphlagoon.middleware.auth import AuthMiddleware
 
 # Enable debugpy for VSCode debugging
 if os.environ.get("DEBUGPY_ENABLE", "").lower() in ("1", "true"):
@@ -17,8 +27,36 @@ if os.environ.get("DEBUGPY_ENABLE", "").lower() in ("1", "true"):
         debugpy.wait_for_client()
     print("Debugger attached!")
 
-# Import app from the new location
-from graphlagoon.app import app
+# Host application — mirrors what an external integrator would write
+app = FastAPI(title="Graph Lagoon Host")
 
-# Re-export for backward compatibility
+# CORS (dev-friendly defaults)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Auth middleware on the host so it covers all routes
+app.add_middleware(AuthMiddleware)
+
+# Create and mount Graph Lagoon
+graphlagoon_app = create_mountable_app(mount_prefix="/graphlagoon")
+
+add_mount_redirect(app, "/graphlagoon")
+app.mount("/graphlagoon", graphlagoon_app)
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+@app.get("/ping")
+async def ping():
+    return {"message": "pong from host app"}
+
+
 __all__ = ["app"]

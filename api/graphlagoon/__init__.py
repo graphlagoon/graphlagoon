@@ -1,7 +1,7 @@
 """Graph Lagoon Studio - Graph visualization and exploration tool for Spark.
 
 Usage as standalone app:
-    uvicorn graphlagoon.app:app --host 0.0.0.0 --port 8000
+    uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000
 
 Usage as importable module (API only):
     from fastapi import FastAPI
