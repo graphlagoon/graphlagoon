@@ -103,7 +103,7 @@ And must return:
 
 - `source` / `target`: must match the keys sent in `node_keys`
 - `score`: float between 0 and 1
-- For undirected similarity, return edges in both directions (A->B and B->A) — this produces better force-directed layouts
+- Similarity is undirected — return **one edge per pair** (A->B only, not both A->B and B->A). The d3-force link force is undirected, so duplicating edges would double the attractive force
 
 ### Parameter Types
 

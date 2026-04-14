@@ -57,19 +57,12 @@ const API_URL = window.__GRAPH_LAGOON_API_URL__ || import.meta.env.VITE_API_URL 
 
 class ApiService {
   private client: AxiosInstance;
+  /** Client for parent-app endpoints (same origin, no baseURL prefix). */
+  private parentClient: AxiosInstance;
 
   constructor() {
-    this.client = axios.create({
-      baseURL: API_URL,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    // Add request interceptor to add auth header (only in dev mode)
-    this.client.interceptors.request.use((config) => {
-      // In dev mode, send email via X-Forwarded-Email header
-      // In production (dev_mode=false), email comes from proxy via x-forwarded-email
+    // Auth interceptor shared by both clients
+    const authInterceptor = (config: import('axios').InternalAxiosRequestConfig) => {
       if (this.devMode) {
         const email = localStorage.getItem('userEmail');
         if (email) {
@@ -77,7 +70,23 @@ class ApiService {
         }
       }
       return config;
+    };
+
+    this.client = axios.create({
+      baseURL: API_URL,
+      headers: { 'Content-Type': 'application/json' },
     });
+    this.client.interceptors.request.use(authInterceptor);
+
+    // Parent client: same origin but no graphlagoon baseURL prefix.
+    // In dev, VITE_BACKEND_ORIGIN points to the backend (http://localhost:8000).
+    // In prod, empty string = same origin.
+    const parentOrigin = import.meta.env.VITE_BACKEND_ORIGIN || '';
+    this.parentClient = axios.create({
+      baseURL: parentOrigin,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    this.parentClient.interceptors.request.use(authInterceptor);
   }
 
   /**
@@ -335,14 +344,9 @@ class ApiService {
     endpoint: string,
     body: { node_keys: string[]; params: Record<string, unknown> },
   ): Promise<SimilarityResponse> {
-    // Parent endpoint is an absolute path on the same origin.
-    // In production (same origin): "/dummy/..." works directly.
-    // In dev (Vite on :3000, backend on :8000): prepend backend origin.
-    const backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN || '';
-    const url = backendOrigin + endpoint;
-    const response = await axios.post(url, body, {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    // Uses parentClient: same origin in prod, VITE_BACKEND_ORIGIN in dev.
+    // Shares auth interceptors with the main client.
+    const response = await this.parentClient.post(endpoint, body);
     return response.data;
   }
 }

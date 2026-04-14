@@ -176,13 +176,13 @@ export function useGraphLayout(
    * 1. Layout with only the selected edge type's links
    * 2. Pin participating nodes, then re-run with all links
    */
-  function startEdgeTypeLayout(edgeType: string | null, strategy: EdgeTypeLayoutStrategy) {
+  function startEdgeTypeLayout(edgeType: string | null, strategy: EdgeTypeLayoutStrategy, useScoreAsWeight?: boolean) {
     const graph3d = getGraph3d();
     if (!graph3d) return;
 
     if (!edgeType) {
       // Reset to default layout
-      applyEdgeTypeLayoutForce(graph3d, null, strategy);
+      applyEdgeTypeLayoutForce(graph3d, null, strategy, undefined, useScoreAsWeight);
       startLayout();
       return;
     }
@@ -200,12 +200,10 @@ export function useGraphLayout(
         node.fz = null;
       });
 
-      applyEdgeTypeLayoutForce(graph3d, edgeType, strategy, 'subgraph');
+      applyEdgeTypeLayoutForce(graph3d, edgeType, strategy, 'subgraph', useScoreAsWeight);
 
-      // Use onEngineStop to detect stabilization, then run phase 2
-      const originalOnStop = graph3d.onEngineStop;
+      // Phase 1 stops → pin participating nodes → phase 2 with all links
       graph3d.onEngineStop(() => {
-        // Phase 1 done: pin all nodes that participate in the selected edge type
         const graphData = graph3d.graphData();
         const participatingIds = new Set<string>();
         for (const link of graphData.links) {
@@ -226,17 +224,16 @@ export function useGraphLayout(
         });
 
         // Phase 2: full layout with pinned subgraph nodes
-        applyEdgeTypeLayoutForce(graph3d, edgeType, strategy, 'full');
+        applyEdgeTypeLayoutForce(graph3d, edgeType, strategy, 'full', useScoreAsWeight);
 
-        // Restore original onEngineStop for phase 2
+        // Phase 2 stops → normal stopLayout (labels, pin, etc.)
         graph3d.onEngineStop(() => {
           stopLayout();
-          if (originalOnStop) originalOnStop();
         });
       });
     } else {
       // "unified" or "selected-only": single-pass
-      applyEdgeTypeLayoutForce(graph3d, edgeType, strategy);
+      applyEdgeTypeLayoutForce(graph3d, edgeType, strategy, undefined, useScoreAsWeight);
       startLayout();
     }
   }

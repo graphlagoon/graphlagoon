@@ -59,8 +59,8 @@ class DummySimilarityRequest(BaseModel):
 async def dummy_similarity_circle(request: DummySimilarityRequest):
     """Shuffle the node keys and link them in a circle, with random scores.
 
-    Returns edges in both directions so the undirected force layout
-    pulls evenly.
+    One edge per pair — d3-force link is undirected, so duplicating
+    A→B and B→A would double the attractive force.
     """
     keys = list(request.node_keys)
     if len(keys) < 2:
@@ -69,10 +69,11 @@ async def dummy_similarity_circle(request: DummySimilarityRequest):
     random.shuffle(keys)
     edges = []
     for i in range(len(keys)):
-        score = round(random.uniform(0.5, 1.0), 3)
-        a, b = keys[i], keys[(i + 1) % len(keys)]
-        edges.append({"source": a, "target": b, "score": score})
-        edges.append({"source": b, "target": a, "score": score})
+        edges.append({
+            "source": keys[i],
+            "target": keys[(i + 1) % len(keys)],
+            "score": round(random.uniform(0.5, 1.0), 3),
+        })
     return {"edges": edges}
 
 
@@ -80,8 +81,7 @@ async def dummy_similarity_circle(request: DummySimilarityRequest):
 async def dummy_similarity_knn(request: DummySimilarityRequest):
     """Random k-nearest-neighbors: each node connects to k random others.
 
-    Creates clear cluster-like structures that are good for testing
-    layout-by-edge-type.
+    One edge per pair (undirected).
 
     Params:
         k: number of neighbors per node (default 3)
@@ -102,9 +102,11 @@ async def dummy_similarity_knn(request: DummySimilarityRequest):
             pair = tuple(sorted([key, nb]))
             if pair not in seen:
                 seen.add(pair)
-                score = round(random.uniform(0.3, 1.0), 3)
-                edges.append({"source": key, "target": nb, "score": score})
-                edges.append({"source": nb, "target": key, "score": score})
+                edges.append({
+                    "source": key,
+                    "target": nb,
+                    "score": round(random.uniform(0.3, 1.0), 3),
+                })
 
     return {"edges": edges}
 

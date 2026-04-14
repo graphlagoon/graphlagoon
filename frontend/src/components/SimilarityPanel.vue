@@ -44,9 +44,12 @@ function getParamValue(param: SimilarityParamSpec): unknown {
 }
 
 function setParamValue(param: SimilarityParamSpec, value: unknown) {
+  let cast = value
+  if (param.type === 'int') cast = parseInt(String(value), 10)
+  else if (param.type === 'float') cast = parseFloat(String(value))
   similarityStore.endpointParams = {
     ...similarityStore.endpointParams,
-    [param.name]: value,
+    [param.name]: cast,
   }
 }
 
@@ -61,8 +64,14 @@ function onEndpointChange(name: string) {
 
 <template>
   <div class="similarity-panel">
+    <!-- Loading endpoints -->
+    <div v-if="similarityStore.loadingEndpoints" class="empty-state">
+      <Loader2 :size="16" class="spin" />
+      <p>Loading endpoints...</p>
+    </div>
+
     <!-- No endpoints registered -->
-    <div v-if="similarityStore.availableEndpoints.length === 0" class="empty-state">
+    <div v-else-if="similarityStore.availableEndpoints.length === 0" class="empty-state">
       <p>No similarity endpoints registered.</p>
       <small>Register endpoints via <code>similarity_endpoints</code> in <code>create_mountable_app()</code>.</small>
     </div>
@@ -144,6 +153,7 @@ function onEndpointChange(name: string) {
             <div class="key-preview-header">
               <span>{{ keyPreview.keys.length }}/{{ keyPreview.total }} extracted</span>
               <span v-if="keyPreview.skipped > 0" class="skipped-warn">{{ keyPreview.skipped }} skipped</span>
+              <span v-if="keyPreview.duplicates > 0" class="skipped-warn">{{ keyPreview.duplicates }} duplicates</span>
             </div>
             <div class="key-preview-list">
               <span v-for="(k, i) in keyPreview.keys.slice(0, 20)" :key="i" class="key-chip">{{ k }}</span>
@@ -253,6 +263,24 @@ function onEndpointChange(name: string) {
             <input type="radio" value="hidden" v-model="similarityStore.displayMode" />
             <span>Hidden</span>
           </label>
+        </div>
+
+        <!-- Score threshold -->
+        <div class="form-row" style="margin-top: 8px;">
+          <label>
+            Score threshold
+            <span class="threshold-value">{{ similarityStore.scoreThreshold.toFixed(2) }}</span>
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            v-model.number="similarityStore.scoreThreshold"
+            @change="similarityStore.injectEdges()"
+            class="form-input"
+            style="padding: 0;"
+          />
         </div>
       </div>
 
@@ -374,6 +402,13 @@ function onEndpointChange(name: string) {
 
 .skipped-warn {
   color: #e67e22;
+}
+
+.threshold-value {
+  font-family: monospace;
+  font-size: 11px;
+  color: #333;
+  float: right;
 }
 
 .key-preview-list {

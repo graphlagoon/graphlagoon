@@ -664,7 +664,9 @@ function initGraph() {
     .linkOpacity(aesthetics.edgeOpacity)
     .linkVisibility((link: GraphLink) => !link.hidden)
     .linkCurvature((link: GraphLink) => link.curvature ?? 0)
-    .linkDirectionalArrowLength(aesthetics.showArrows ? 4 * aesthetics.arrowSize : 0)
+    .linkDirectionalArrowLength((link: GraphLink) =>
+      link.isSimilarity ? 0 : (aesthetics.showArrows ? 4 * aesthetics.arrowSize : 0)
+    )
     .linkDirectionalArrowRelPos(1)
     .useInstancedRendering(graphStore.behaviors.useInstancedRendering)
     .warmupTicks(graphStore.layoutExecution.warmupTicks)
@@ -997,6 +999,16 @@ watch(
 
     if (isSearchChange && graphStore.behaviors.searchMode === 'hide') return;
     updateGraph();
+
+    // After similarity computation, auto-run edge-type layout on the rebuilt graph
+    if (similarityStore.needsLayoutAfterCompute) {
+      similarityStore.needsLayoutAfterCompute = false;
+      layout.startEdgeTypeLayout(
+        similarityStore.layoutEdgeType,
+        similarityStore.layoutStrategy,
+        similarityStore.useScoreAsWeight,
+      );
+    }
   }
 );
 
@@ -1031,7 +1043,9 @@ watch(
   (aesthetics) => {
     if (graph3d) {
       graph3d
-        .linkDirectionalArrowLength(aesthetics.showArrows ? 4 * aesthetics.arrowSize : 0)
+        .linkDirectionalArrowLength((link: GraphLink) =>
+      link.isSimilarity ? 0 : (aesthetics.showArrows ? 4 * aesthetics.arrowSize : 0)
+    )
         .linkWidth(aesthetics.edgeWidth)
         .linkOpacity(aesthetics.edgeOpacity)
         .nodeRelSize(aesthetics.nodeSize / 2)
@@ -1308,23 +1322,6 @@ watch(
 watch(
   () => similarityStore.displayMode,
   () => { updateGraph(); },
-);
-
-// Similarity edges injected — rebuild graph and auto-run edge-type layout
-watch(
-  () => similarityStore.similarityEdges.length,
-  (newLen, oldLen) => {
-    if (newLen > 0 && oldLen === 0) {
-      // Similarity just computed — update graph then auto-run edge-type layout
-      updateGraph();
-      setTimeout(() => {
-        layout.startEdgeTypeLayout(
-          similarityStore.layoutEdgeType,
-          similarityStore.layoutStrategy,
-        );
-      }, 100);
-    }
-  },
 );
 
 // Text format changes — update graph to refresh labels

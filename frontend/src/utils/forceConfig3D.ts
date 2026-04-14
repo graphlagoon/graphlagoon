@@ -282,16 +282,17 @@ export function applyEdgeTypeLayoutForce(
   edgeType: string | null,
   strategy: EdgeTypeLayoutStrategy,
   phase?: 'subgraph' | 'full',
+  useScoreAsWeight?: boolean,
 ): void {
   const linkForce = graph3d.d3Force('link');
   if (!linkForce) return;
 
   if (!edgeType) {
-    // Reset: use all links
-    if (typeof linkForce.links === 'function') {
-      // Re-apply default links by triggering a graph data refresh
-      graph3d.d3ReheatSimulation();
+    // Reset: use all links and default strength
+    if (typeof linkForce.strength === 'function') {
+      linkForce.strength(1);
     }
+    graph3d.d3ReheatSimulation();
     return;
   }
 
@@ -301,32 +302,33 @@ export function applyEdgeTypeLayoutForce(
 
   const allLinks = graphData.links || [];
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const filterByType = (l: any) => l.relationshipType === edgeType;
+
   if (strategy === 'fix-then-recompute') {
     if (phase === 'subgraph') {
-      // Phase 1: Only selected edge type links
-      const filteredLinks = allLinks.filter(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (l: any) => l.relationshipType === edgeType
-      );
-      linkForce.links(filteredLinks);
+      linkForce.links(allLinks.filter(filterByType));
     } else {
       // Phase 2 (full): Restore all links
       linkForce.links(allLinks);
     }
-  } else if (strategy === 'selected-only') {
-    // Only selected edge type links — other nodes drift to periphery
-    const filteredLinks = allLinks.filter(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (l: any) => l.relationshipType === edgeType
-    );
-    linkForce.links(filteredLinks);
   } else {
-    // "unified": All nodes and charge/gravity forces, but only selected links
-    const filteredLinks = allLinks.filter(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (l: any) => l.relationshipType === edgeType
-    );
-    linkForce.links(filteredLinks);
+    // "selected-only" and "unified": only selected edge type links
+    linkForce.links(allLinks.filter(filterByType));
+  }
+
+  // Apply score-based strength when enabled
+  if (useScoreAsWeight && typeof linkForce.strength === 'function') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    linkForce.strength((link: any) => {
+      if (link.score !== undefined && link.score !== null) {
+        // score 0-1 maps to strength 0.1-1.0 (avoid zero)
+        return 0.1 + link.score * 0.9;
+      }
+      return 1;
+    });
+  } else if (typeof linkForce.strength === 'function') {
+    linkForce.strength(1);
   }
 
   graph3d.d3ReheatSimulation();

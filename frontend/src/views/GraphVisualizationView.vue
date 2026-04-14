@@ -5,6 +5,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useToolbarStore } from '@/stores/toolbar';
 import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
+import { useSimilarityStore } from '@/stores/similarity';
 import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import SidePanel from '@/components/SidePanel.vue';
 import FilterPanel from '@/components/FilterPanel.vue';
@@ -34,6 +35,7 @@ const graphStore = useGraphStore();
 const toolbarStore = useToolbarStore();
 const clusterStore = useClusterStore();
 const communityStore = useCommunityStore();
+const similarityStore = useSimilarityStore();
 
 const showFilters = ref(false);
 const showLayoutPanel = ref(false);
@@ -228,7 +230,7 @@ watch(
             @stop-layout="graphCanvas3DRef?.stopLayout()"
             @reheat-layout="graphCanvas3DRef?.reheatLayout()"
             @scramble-layout="graphCanvas3DRef?.scrambleLayout()"
-            @start-edge-type-layout="(et: string | null, s: string) => graphCanvas3DRef?.startEdgeTypeLayout(et, s as any)"
+            @start-edge-type-layout="(et: string | null, s: string) => graphCanvas3DRef?.startEdgeTypeLayout(et, s as any, similarityStore.useScoreAsWeight)"
           />
         </div>
 

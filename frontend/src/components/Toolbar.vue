@@ -401,7 +401,7 @@ function handleExportPng(options: ExportPNGOptions) {
           <div class="about-footer">
             <span>AGPL-3.0 License</span>
             <span class="about-sep">·</span>
-            <span>Graph Lagoon</span>
+            <span>Bruno Messias</span>
           </div>
         </div>
       </div>

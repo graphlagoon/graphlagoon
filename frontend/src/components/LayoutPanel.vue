@@ -233,6 +233,14 @@ function toggleLayout() {
           </select>
         </div>
 
+        <label class="checkbox-item">
+          <input
+            type="checkbox"
+            v-model="similarityStore.useScoreAsWeight"
+          />
+          <span>Use score as weight</span>
+        </label>
+
         <button
           class="apply-btn"
           :disabled="!similarityStore.layoutEdgeType"

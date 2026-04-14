@@ -22,6 +22,8 @@ export const useSimilarityStore = defineStore('similarity', () => {
 
   const similarityEdges = ref<SimilarityEdge[]>([])
   const computing = ref(false)
+  const loadingEndpoints = ref(false)
+  const needsLayoutAfterCompute = ref(false)
   const error = ref<string | null>(null)
 
   // Endpoint selection
@@ -35,10 +37,12 @@ export const useSimilarityStore = defineStore('similarity', () => {
 
   // Display
   const displayMode = ref<SimilarityDisplayMode>('overlay')
+  const scoreThreshold = ref(0)
 
   // Layout by edge type
   const layoutStrategy = ref<LayoutStrategy>('fix-then-recompute')
   const layoutEdgeType = ref<string | null>('__similarity__')
+  const useScoreAsWeight = ref(true)
 
   // ============================================================================
   // Computed
@@ -104,32 +108,40 @@ export const useSimilarityStore = defineStore('similarity', () => {
     keys: string[];
     keyToNodeId: Map<string, string>;
     skipped: number;
+    duplicates: number;
   } {
     const keys: string[] = []
     const keyToNodeId = new Map<string, string>()
+    const seen = new Set<string>()
     let skipped = 0
+    let duplicates = 0
     for (const node of nodes) {
       const key = extractKeyFromNode(node)
       if (key && key.trim() !== '') {
-        keys.push(key)
-        keyToNodeId.set(key, node.node_id)
+        if (seen.has(key)) {
+          duplicates++
+        } else {
+          seen.add(key)
+          keys.push(key)
+          keyToNodeId.set(key, node.node_id)
+        }
       } else {
         skipped++
       }
     }
-    return { keys, keyToNodeId, skipped }
+    return { keys, keyToNodeId, skipped, duplicates }
   }
 
   /**
    * Public: extract keys for the current settings (for UI preview).
    */
-  function extractKeys(): { keys: string[]; skipped: number; total: number } {
+  function extractKeys(): { keys: string[]; skipped: number; duplicates: number; total: number } {
     const graphStore = useGraphStore()
     const targetNodes = selectedNodeType.value
       ? graphStore.filteredNodes.filter(n => n.node_type === selectedNodeType.value)
       : graphStore.filteredNodes
-    const { keys, skipped } = extractKeysFromNodes(targetNodes)
-    return { keys, skipped, total: targetNodes.length }
+    const { keys, skipped, duplicates } = extractKeysFromNodes(targetNodes)
+    return { keys, skipped, duplicates, total: targetNodes.length }
   }
 
   // ============================================================================
@@ -137,11 +149,14 @@ export const useSimilarityStore = defineStore('similarity', () => {
   // ============================================================================
 
   async function fetchEndpoints(): Promise<void> {
+    loadingEndpoints.value = true
     try {
       availableEndpoints.value = await api.getSimilarityEndpoints()
     } catch (e) {
       console.warn('[similarity] Failed to fetch endpoints:', e)
       availableEndpoints.value = []
+    } finally {
+      loadingEndpoints.value = false
     }
   }
 
@@ -164,11 +179,15 @@ export const useSimilarityStore = defineStore('similarity', () => {
       return
     }
 
-    const { keys: nodeKeys, keyToNodeId, skipped } = extractKeysFromNodes(targetNodes)
+    const { keys: nodeKeys, keyToNodeId, skipped, duplicates } = extractKeysFromNodes(targetNodes)
 
     if (nodeKeys.length < 2) {
       error.value = `Not enough nodes with property '${keyProperty.value}' (${skipped} skipped)`
       return
+    }
+
+    if (duplicates > 0) {
+      console.warn(`[similarity] ${duplicates} nodes with duplicate key values were skipped`)
     }
 
     // Resolve endpoint path from spec
@@ -195,17 +214,21 @@ export const useSimilarityStore = defineStore('similarity', () => {
 
       // Translate keys back to node_ids when using a non-id property
       const useNodeId = keyProperty.value === 'node_id'
-      const translatedEdges = response.edges.filter(e => {
-        if (useNodeId) return true
-        return keyToNodeId.has(e.source) && keyToNodeId.has(e.target)
-      }).map(e => {
-        if (useNodeId) return e
-        return {
-          source: keyToNodeId.get(e.source)!,
-          target: keyToNodeId.get(e.target)!,
-          score: e.score,
-        }
-      })
+      const nodeIdSet = new Set(graphStore.filteredNodes.map(n => n.node_id))
+
+      const translatedEdges = response.edges
+        .map(e => {
+          if (useNodeId) return e
+          const src = keyToNodeId.get(e.source)
+          const tgt = keyToNodeId.get(e.target)
+          if (!src || !tgt) return null
+          return { source: src, target: tgt, score: e.score }
+        })
+        .filter((e): e is NonNullable<typeof e> => {
+          if (!e) return false
+          // Validate that source/target exist in the current graph
+          return nodeIdSet.has(e.source) && nodeIdSet.has(e.target)
+        })
 
       similarityEdges.value = translatedEdges
 
@@ -220,6 +243,7 @@ export const useSimilarityStore = defineStore('similarity', () => {
 
       // Inject edges into graph store
       injectEdges()
+      needsLayoutAfterCompute.value = true
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
@@ -233,15 +257,17 @@ export const useSimilarityStore = defineStore('similarity', () => {
     // Remove any existing similarity edges first
     removeEdges()
 
-    // Convert similarity edges to graph Edge format and add
-    const newEdges = similarityEdges.value.map(se => ({
-      edge_id: `sim__${se.source}__${se.target}`,
+    // Convert similarity edges to graph Edge format and add (filtered by threshold)
+    const epName = selectedEndpoint.value || 'unknown'
+    const threshold = scoreThreshold.value
+    const newEdges = similarityEdges.value.filter(se => se.score >= threshold).map(se => ({
+      edge_id: `sim|${epName}|${se.source}|${se.target}`,
       src: se.source,
       dst: se.target,
       relationship_type: '__similarity__',
       properties: {
         score: se.score,
-        endpoint_name: selectedEndpoint.value,
+        endpoint_name: epName,
       },
     }))
 
@@ -280,8 +306,10 @@ export const useSimilarityStore = defineStore('similarity', () => {
       jsonPath: jsonPath.value,
       endpointParams: endpointParams.value,
       displayMode: displayMode.value,
+      scoreThreshold: scoreThreshold.value,
       layoutStrategy: layoutStrategy.value,
       layoutEdgeType: layoutEdgeType.value,
+      useScoreAsWeight: useScoreAsWeight.value,
     }
   }
 
@@ -296,8 +324,10 @@ export const useSimilarityStore = defineStore('similarity', () => {
     jsonPath.value = (state.jsonPath as string) ?? ''
     endpointParams.value = (state.endpointParams as Record<string, unknown>) ?? {}
     displayMode.value = (state.displayMode as SimilarityDisplayMode) ?? 'overlay'
+    scoreThreshold.value = (state.scoreThreshold as number) ?? 0
     layoutStrategy.value = (state.layoutStrategy as LayoutStrategy) ?? 'unified'
     layoutEdgeType.value = (state.layoutEdgeType as string) ?? null
+    useScoreAsWeight.value = (state.useScoreAsWeight as boolean) ?? true
 
     // Re-inject edges into graph
     if (similarityEdges.value.length > 0) {
@@ -314,6 +344,7 @@ export const useSimilarityStore = defineStore('similarity', () => {
     () => useGraphStore().nodes,
     () => {
       if (hasResults.value) {
+        removeEdges()
         similarityEdges.value = []
         error.value = null
       }
@@ -328,6 +359,8 @@ export const useSimilarityStore = defineStore('similarity', () => {
     // State
     similarityEdges,
     computing,
+    loadingEndpoints,
+    needsLayoutAfterCompute,
     error,
     availableEndpoints,
     selectedEndpoint,
@@ -337,8 +370,10 @@ export const useSimilarityStore = defineStore('similarity', () => {
     jsonPath,
     endpointParams,
     displayMode,
+    scoreThreshold,
     layoutStrategy,
     layoutEdgeType,
+    useScoreAsWeight,
 
     // Computed
     hasResults,

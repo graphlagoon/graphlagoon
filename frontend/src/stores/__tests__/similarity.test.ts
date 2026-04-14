@@ -134,7 +134,7 @@ describe('injectEdges / removeEdges', () => {
       e => e.relationship_type === '__similarity__'
     )
     expect(simEdges).toHaveLength(2)
-    expect(simEdges[0].edge_id).toBe('sim__n1__n2')
+    expect(simEdges[0].edge_id).toBe('sim|unknown|n1|n2')
     expect(simEdges[0].src).toBe('n1')
     expect(simEdges[0].dst).toBe('n2')
     expect(simEdges[0].properties?.score).toBe(0.9)
@@ -168,7 +168,7 @@ describe('injectEdges / removeEdges', () => {
     store.injectEdges()
     const simEdges = graphStore.edges.filter(e => e.relationship_type === '__similarity__')
     expect(simEdges).toHaveLength(2)
-    expect(simEdges[0].edge_id).toBe('sim__n1__n3')
+    expect(simEdges[0].edge_id).toBe('sim|unknown|n1|n3')
   })
 })
 
