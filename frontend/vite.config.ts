@@ -14,7 +14,7 @@ const aliases: Record<string, string> = {
   'three/webgpu': fileURLToPath(new URL('./ext-3d-force/three-webgpu-shim.js', import.meta.url)),
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [vue()],
   // Empty base = relative to where the main bundle is loaded from
   // This allows the app to work when mounted at any prefix (e.g., /graphlagoon)
@@ -56,9 +56,11 @@ export default defineConfig({
       }
     }
   },
-  // Set default API URL for development
   define: {
     'import.meta.env.VITE_API_URL': JSON.stringify('/graphlagoon'),
-    'import.meta.env.VITE_BACKEND_ORIGIN': JSON.stringify('http://localhost:8000')
+    // In dev, point to the backend directly; in prod, empty string = same origin
+    'import.meta.env.VITE_BACKEND_ORIGIN': JSON.stringify(
+      mode === 'development' ? 'http://localhost:8000' : ''
+    ),
   }
-})
+}))
