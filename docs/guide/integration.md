@@ -106,7 +106,42 @@ settings = Settings(
 
 ### Dynamic Token (OAuth / Token Refresh)
 
-For production scenarios where tokens expire, use a `header_provider`:
+For production scenarios where tokens expire, use a `header_provider` — a sync or
+async callable returning a fresh token string. It is called before each warehouse
+request, and the returned token is automatically wrapped in an
+`Authorization: Bearer` header.
+
+#### Built-in Databricks OAuth provider
+
+If you deploy as a Databricks App (or run anywhere the standard
+`DATABRICKS_HOST` / `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET`
+environment variables are set), use the built-in `get_oauth_service()` — it
+performs the OAuth M2M `client_credentials` exchange and caches/refreshes the
+token for you:
+
+```python
+from graphlagoon import Settings, create_mountable_app, get_oauth_service
+
+settings = Settings(
+    databricks_mode=True,
+    databricks_host="adb-xxx.azuredatabricks.net",
+    databricks_warehouse_id="your-warehouse-id",
+    # No databricks_token needed
+)
+
+app.mount("/graphlagoon", create_mountable_app(
+    settings=settings,
+    header_provider=get_oauth_service().get_token,
+))
+```
+
+This is the recommended setup for Databricks Apps — see
+[Deploy as a Databricks App](/guide/databricks-apps).
+
+#### Custom provider
+
+For other auth flows (Azure AD, a custom token service, etc.), pass your own
+callable:
 
 ```python
 from graphlagoon import Settings, create_mountable_app
@@ -122,7 +157,6 @@ settings = Settings(
     databricks_mode=True,
     databricks_host="adb-xxx.azuredatabricks.net",
     databricks_warehouse_id="your-warehouse-id",
-    # No databricks_token needed
 )
 
 app.mount("/graphlagoon", create_mountable_app(
@@ -130,8 +164,6 @@ app.mount("/graphlagoon", create_mountable_app(
     header_provider=token_service.get_token,
 ))
 ```
-
-The `header_provider` is called before each warehouse request. It can be sync or async.
 
 ## Integration Modes
 

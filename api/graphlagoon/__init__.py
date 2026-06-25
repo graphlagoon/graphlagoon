@@ -60,6 +60,19 @@ Usage with dynamic header provider (token refresh):
         databricks_schema="my_schema",
     ))
 
+Usage with the built-in Databricks OAuth M2M provider:
+    from fastapi import FastAPI
+    from graphlagoon import create_mountable_app, get_oauth_service
+
+    # Reads DATABRICKS_HOST / DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET
+    # from the environment (provided natively by the Databricks App).
+    app = FastAPI()
+    app.mount("/graphlagoon", create_mountable_app(
+        header_provider=get_oauth_service().get_token,
+        databricks_catalog="my_catalog",
+        databricks_schema="my_schema",
+    ))
+
 Usage with custom user provider (integrate with parent app's auth):
     from fastapi import FastAPI, Request
     from graphlagoon import create_mountable_app, UserProvider
@@ -85,6 +98,12 @@ from graphlagoon.app import (
 )
 from graphlagoon.config import Settings, get_settings
 from graphlagoon.services.warehouse import HeaderProvider
+from graphlagoon.services.databricks_oauth import (
+    DatabricksOAuthService,
+    OAuthToken,
+    get_databricks_oauth_service,
+    get_oauth_service,
+)
 from graphlagoon.middleware.auth import UserProvider, configure_auth
 from graphlagoon.similarity import (
     SimilarityEndpointSpec,
@@ -101,6 +120,10 @@ __all__ = [
     "Settings",
     "get_settings",
     "HeaderProvider",
+    "DatabricksOAuthService",
+    "OAuthToken",
+    "get_databricks_oauth_service",
+    "get_oauth_service",
     "UserProvider",
     "configure_auth",
     "SimilarityEndpointSpec",
