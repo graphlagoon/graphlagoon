@@ -48,7 +48,10 @@ class DatabricksOAuthService:
         client_secret: str,
         fallback_token: str | None = None,
     ):
-        self.workspace_url = workspace_url.rstrip("/")
+        workspace_url = workspace_url.rstrip("/")
+        if not workspace_url.startswith(("http://", "https://")):
+            workspace_url = f"https://{workspace_url}"
+        self.workspace_url = workspace_url
         self.client_id = client_id
         self.client_secret = client_secret
         self.fallback_token = fallback_token

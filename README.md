@@ -97,4 +97,4 @@ Full docs at [graphlagoon.github.io/graphlagoon](https://graphlagoon.github.io/g
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[MIT](LICENSE)
