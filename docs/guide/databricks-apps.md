@@ -139,11 +139,40 @@ Grant these to the app's service principal from the app's **Authorization** sett
 
 ## Persistence options
 
-| Mode | Setting | Notes |
+| Mode | How to enable | Use case |
 |---|---|---|
-| In-memory (default) | `GRAPH_LAGOON_DATABASE_ENABLED=false` | Resets on restart; fine for demos |
-| Snapshots on a Volume | `databricks_volume_path=/Volumes/...` | Stores explorations as gzipped JSON in Unity Catalog |
-| PostgreSQL / Lakebase | `database_enabled=true` + `database_url` (or `lakebase_enabled=true`) | Full persistence; see [Databricks Integration](/guide/integration) |
+| **In-memory** (default) | `GRAPH_LAGOON_DATABASE_ENABLED=false` | Development, demos — resets on restart |
+| **Snapshots on a Volume** | `databricks_volume_path=/Volumes/...` | Stores explorations as gzipped JSON in Unity Catalog |
+| **Lakebase** (managed Postgres) | `lakebase_enabled=true` + instance name | Production on Databricks Apps |
+| **External Postgres** | `database_enabled=true` + `database_url` | Self-hosted deployments |
+
+### Lakebase (recommended for production)
+
+[Lakebase](https://docs.databricks.com/aws/en/oltp/) is Databricks-managed PostgreSQL, and the recommended persistence layer for a Databricks App because — like the warehouse OAuth — **you never manage a database password**. Graph Lagoon mints a short-lived OAuth credential from the app's service principal and refreshes it transparently: every 50 minutes in a background loop, with exponential-backoff retries on failure, plus an on-demand refresh if it detects an auth error mid-request.
+
+Install the extra and enable it:
+
+```
+# requirements.txt
+graphlagoon[lakebase]
+```
+
+```yaml
+# app.yaml
+env:
+  - name: "GRAPH_LAGOON_LAKEBASE_ENABLED"
+    value: "true"
+  - name: "GRAPH_LAGOON_LAKEBASE_INSTANCE_NAME"
+    value: "my-lakebase-instance"
+  # Optional — defaults to the instance name:
+  - name: "GRAPH_LAGOON_LAKEBASE_DATABASE_NAME"
+    value: "graphlagoon"
+  # Optional — sets the Postgres search_path:
+  - name: "GRAPH_LAGOON_DEFAULT_POSTGRES_SCHEMA"
+    value: "graphlagoon"
+```
+
+Setting `lakebase_enabled=true` implies `database_enabled=true`. The app's service principal needs permission on the Lakebase instance.
 
 ## Troubleshooting
 

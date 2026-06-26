@@ -25,7 +25,7 @@
 
 <script setup>
 const sharedFeatures = [
-  'Open-source (AGPL-3.0)',
+  'Open-source (MIT)',
   'All features included',
   'Zero ETL — query Delta tables directly',
   'Databricks Apps deployment',
