@@ -99,6 +99,7 @@ class WarehouseClient:
         self.wait_timeout = settings.warehouse_wait_timeout
         self.max_poll_time = settings.warehouse_max_poll_time
         self.poll_interval = settings.warehouse_poll_interval
+        self.chunk_concurrency = max(1, settings.warehouse_chunk_concurrency)
 
         # Only get static headers if no dynamic provider is configured
         # This allows using header_provider without requiring databricks_token in settings
@@ -968,38 +969,63 @@ class WarehouseClient:
             return response  # Caller handles errors via _parse_statement_result
 
         # Step 4: Download all chunks from external links.
-        # Downloads are serial here (one bottleneck target for large results);
-        # timed so callers can attribute how much query time was chunk I/O.
-        all_rows: list[list[Optional[str]]] = []
+        #
+        # The statement already SUCCEEDED, so every chunk is an independent,
+        # already-materialized file in object storage addressable by index
+        # (via /result/chunks/{i} — no next-link chaining needed). We download
+        # them concurrently (bounded by chunk_concurrency to respect rate
+        # limits) and reassemble strictly by ascending chunk_index so row order
+        # is deterministic. The polling above stays serial (it must wait for
+        # the query to finish). Timed so callers can attribute chunk I/O.
         download_start = asyncio.get_event_loop().time()
-        chunk_count = 0
 
         initial_links = (
             response.result.external_links
             if response.result and response.result.external_links
             else []
         )
+        # Group any links already present in the initial response by chunk index
+        links_by_index: dict[int, list[ExternalLinkInfo]] = {}
+        for el in initial_links:
+            links_by_index.setdefault(el.chunk_index, []).append(el)
 
-        for link_info in initial_links:
-            chunk_rows = await self._download_external_chunk(link_info, statement_id)
-            all_rows.extend(chunk_rows)
-            chunk_count += 1
+        total_chunks = (
+            response.manifest.total_chunk_count
+            if response.manifest and response.manifest.total_chunk_count
+            else None
+        )
+        if total_chunks:
+            chunk_indices = list(range(total_chunks))
+        else:
+            chunk_indices = sorted(links_by_index)
 
-        # Fetch additional chunks not in the initial response
-        if response.manifest and response.manifest.total_chunk_count:
-            fetched = {el.chunk_index for el in initial_links}
-            for chunk_idx in range(response.manifest.total_chunk_count):
-                if chunk_idx in fetched:
-                    continue
-                chunk_manifest = await self._get(
-                    f"/api/2.0/sql/statements/{statement_id}/result/chunks/{chunk_idx}"
-                )
-                links_data = chunk_manifest.get("external_links", [])
-                for eli_data in links_data:
-                    eli = ExternalLinkInfo(**eli_data)
-                    chunk_rows = await self._download_external_chunk(eli, statement_id)
-                    all_rows.extend(chunk_rows)
-                    chunk_count += 1
+        sem = asyncio.Semaphore(self.chunk_concurrency)
+
+        async def fetch_chunk(idx: int) -> tuple[int, list[list[Optional[str]]]]:
+            """Fetch (and if needed resolve the presigned URL for) one chunk."""
+            async with sem:
+                links = links_by_index.get(idx)
+                if links is None:
+                    chunk_manifest = await self._get(
+                        f"/api/2.0/sql/statements/{statement_id}/result/chunks/{idx}"
+                    )
+                    links = [
+                        ExternalLinkInfo(**d)
+                        for d in chunk_manifest.get("external_links", [])
+                    ]
+                rows: list[list[Optional[str]]] = []
+                for eli in links:
+                    rows.extend(await self._download_external_chunk(eli, statement_id))
+                return idx, rows
+
+        # Download concurrently; gather preserves input order regardless of
+        # completion order, so results are already index-ordered.
+        chunk_results = await asyncio.gather(*(fetch_chunk(i) for i in chunk_indices))
+
+        all_rows: list[list[Optional[str]]] = []
+        for _idx, rows in chunk_results:
+            all_rows.extend(rows)
+        chunk_count = len(chunk_indices)
 
         download_ms = (asyncio.get_event_loop().time() - download_start) * 1000
 

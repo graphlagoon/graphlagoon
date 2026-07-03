@@ -435,7 +435,7 @@ run-api-no-debug:
 run-api-db: db-up
 	@cd api && uv sync --extra dev --extra postgres
 	@echo "$(CYAN)API on :8000 (database enabled, debugpy on :5678)$(RESET)"
-	cd api && GRAPH_LAGOON_DATABASE_ENABLED=true DEBUGPY_ENABLE=1 uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 --reload
+	cd api && GRAPH_LAGOON_DATABASE_ENABLED=true DEBUGPY_ENABLE=0 uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 --reload
 
 run-warehouse:
 	@cd warehouse && uv sync --extra dev

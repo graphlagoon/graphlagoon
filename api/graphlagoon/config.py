@@ -125,6 +125,14 @@ class Settings(BaseSettings):
     warehouse_poll_interval: float = Field(
         default=2.0, description="Interval (seconds) between polling requests"
     )
+    warehouse_chunk_concurrency: int = Field(
+        default=8,
+        description="Max concurrent chunk downloads for the EXTERNAL_LINKS "
+        "result flow. Chunks are independent files in object storage, so "
+        "downloading them in parallel cuts wall-clock for large results. "
+        "Bounded to avoid hitting Databricks rate limits; set to 1 to force "
+        "serial downloads.",
+    )
 
     def model_post_init(self, __context):
         if self.lakebase_enabled:
