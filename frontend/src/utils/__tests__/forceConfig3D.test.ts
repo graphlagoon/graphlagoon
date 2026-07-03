@@ -259,7 +259,9 @@ describe('computeAdaptiveLayoutParams', () => {
   it('returns large settings for graphs with 3000-10000 elements', () => {
     const params = computeAdaptiveLayoutParams(2000, 5000);
 
-    expect(params.warmupTicks).toBeGreaterThanOrEqual(80);
+    // warmupTicks is now work-bounded (scales down with size), capped at 150
+    expect(params.warmupTicks).toBeGreaterThan(0);
+    expect(params.warmupTicks).toBeLessThanOrEqual(150);
     expect(params.cooldownTicks).toBeGreaterThanOrEqual(500);
     expect(params.ticksPerFrame).toBeGreaterThanOrEqual(6);
     expect(params.forceOverrides.d3Theta).toBeGreaterThanOrEqual(1.5);
@@ -270,10 +272,26 @@ describe('computeAdaptiveLayoutParams', () => {
   it('returns very large settings for graphs with >10000 elements', () => {
     const params = computeAdaptiveLayoutParams(5000, 10000);
 
-    expect(params.warmupTicks).toBeGreaterThanOrEqual(150);
+    // Synchronous warmup stays bounded even for very large graphs so the
+    // first paint isn't blocked; heavier settling happens via animated cooldown.
+    expect(params.warmupTicks).toBeGreaterThan(0);
+    expect(params.warmupTicks).toBeLessThanOrEqual(150);
     expect(params.cooldownTicks).toBeGreaterThanOrEqual(800);
     expect(params.ticksPerFrame).toBeGreaterThanOrEqual(10);
     expect(params.forceOverrides.d3Theta).toBeGreaterThanOrEqual(1.7);
+  });
+
+  it('bounds synchronous warmup work — warmupTicks scales DOWN as the graph grows', () => {
+    const mid = computeAdaptiveLayoutParams(2000, 3000); // total 5000
+    const huge = computeAdaptiveLayoutParams(20000, 60000); // total 80000
+
+    // Each warmup tick costs ~O(total); a huge graph must not run as many
+    // synchronous warmup ticks as a mid-size one.
+    expect(huge.warmupTicks).toBeLessThanOrEqual(mid.warmupTicks);
+    expect(huge.warmupTicks).toBeGreaterThan(0);
+    expect(huge.warmupTicks).toBeLessThanOrEqual(150);
+    // small graphs keep a high warmup (cheap) for a well-settled first paint
+    expect(mid.warmupTicks).toBeGreaterThanOrEqual(80);
   });
 
   it('scales monotonically — larger graphs get more aggressive params', () => {

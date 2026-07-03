@@ -93,7 +93,7 @@ function resetBehaviors() {
     degreeDimPreserveBridges: true,
     searchMode: 'highlight',
     centerOnSearch: true,
-    viewMode: '3d',
+    viewMode: '2d-proj',
     hideLabelsOnCameraMove: true,
     useOrthographicCamera: false,
     useInstancedRendering: true,

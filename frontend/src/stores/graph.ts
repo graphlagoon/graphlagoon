@@ -224,7 +224,7 @@ export const useGraphStore = defineStore('graph', () => {
     searchMode: 'highlight' as 'hide' | 'highlight',  // hide = filter out non-matching, highlight = show all but highlight matches
     centerOnSearch: true,     // When true (and highlight mode), center camera on best match while typing
     inMessiWeTrust: true,    // When true, auto-execute transpiled SQL without review
-    viewMode: '3d' as '3d' | '2d-proj',  // '3d' = Three.js 3D, '2d-proj' = Three.js 2D projection
+    viewMode: '2d-proj' as '3d' | '2d-proj',  // default 2D for performance (lighter force sim + less overdraw); '3d' = Three.js 3D, '2d-proj' = Three.js 2D projection
     hideLabelsOnCameraMove:  false, // When true, hide 3D labels during camera movement for performance
     useOrthographicCamera: true, // When true, use orthographic projection instead of perspective
     useInstancedRendering: true, // When true, use InstancedMesh for nodes/links (fast, ~3 draw calls). When false, use individual Mesh per node/link (slower, correct transparency).

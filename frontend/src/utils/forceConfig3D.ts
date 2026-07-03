@@ -41,11 +41,35 @@ export function computeAdaptiveLayoutParams(
     };
   }
 
+  // Warmup ticks run SYNCHRONOUSLY before the first paint, and each tick costs
+  // roughly O(total). Fixed per-bucket warmup counts made huge graphs block for
+  // a long time (150 ticks x tens of thousands of elements). Instead we bound
+  // the synchronous pre-paint WORK: warmupTicks scales DOWN as the graph grows,
+  // so warmupTicks * total stays near a fixed budget. The animated cooldown
+  // ticks below finish the settling without blocking the main thread.
+  //
+  // The upper cap stays high (150) because small graphs are cheap to warm up
+  // (e.g. 150 ticks x 500 elements is trivial) and benefit from a well-settled
+  // first paint; the budget only kicks in to shrink warmup for large graphs,
+  // down to a floor of 20 ticks so even huge graphs get some pre-positioning.
+  const WARMUP_WORK_BUDGET = 600_000; // ~node-ticks of synchronous pre-paint work
+  const warmupTicks = Math.max(
+    20,
+    Math.min(150, Math.round(WARMUP_WORK_BUDGET / total)),
+  );
+
+  // ticksPerFrame batches simulation ticks per rendered frame. The animated
+  // settling renders the whole scene ONCE PER FRAME, so the number of (costly,
+  // for large scenes) renders during settling is ~cooldownTicks / ticksPerFrame.
+  // Larger graphs get a higher ticksPerFrame so the same total settling ticks
+  // run across far fewer rendered frames (e.g. 800/24 ~= 33 renders instead of
+  // 800/10 = 80). Trade-off: each frame does more work (chunkier animation), but
+  // total render overhead during settling drops sharply.
   if (total < 3000) {
     return {
-      warmupTicks: 30,
+      warmupTicks,
       cooldownTicks: 300,
-      ticksPerFrame: 3,
+      ticksPerFrame: 4,
       forceOverrides: {
         d3Theta: 1.2,
       },
@@ -54,9 +78,9 @@ export function computeAdaptiveLayoutParams(
 
   if (total < 10000) {
     return {
-      warmupTicks: 80,
+      warmupTicks,
       cooldownTicks: 500,
-      ticksPerFrame: 6,
+      ticksPerFrame: 12,
       forceOverrides: {
         d3Theta: 1.5,
         d3AlphaDecay: 0.04,
@@ -65,11 +89,12 @@ export function computeAdaptiveLayoutParams(
     };
   }
 
-  // Very large graph
+  // Very large graph: heavier animated settling, but the synchronous warmup
+  // stays bounded (see WARMUP_WORK_BUDGET) so first paint isn't blocked.
   return {
-    warmupTicks: 150,
+    warmupTicks,
     cooldownTicks: 800,
-    ticksPerFrame: 10,
+    ticksPerFrame: 24,
     forceOverrides: {
       d3Theta: 1.7,
       d3AlphaDecay: 0.06,
