@@ -31,6 +31,7 @@ dependencies = [
     "sqlglot>=26.0.0",
     "gsql2rsql",
     "asyncpg>=0.31.0",
+    "orjson>=3.11.9",
 ]
 
 [project.optional-dependencies]

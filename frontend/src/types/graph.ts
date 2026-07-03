@@ -23,6 +23,12 @@ export interface QueryMetadata {
   node_processing_ms?: number;
   transpilation_ms?: number;
   total_ms?: number;
+  // Chunk-download breakdown (EXTERNAL_LINKS path only)
+  chunk_download_ms?: number;
+  chunk_count?: number;
+  // Result sizes, for correlating timings with graph scale
+  node_count?: number;
+  edge_count?: number;
 }
 
 export interface GraphResponse {

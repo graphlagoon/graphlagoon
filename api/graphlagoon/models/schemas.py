@@ -93,6 +93,14 @@ class QueryMetadata(BaseModel):
     node_processing_ms: Optional[float] = None
     transpilation_ms: Optional[float] = None
     total_ms: Optional[float] = None
+    # Chunk-download breakdown (EXTERNAL_LINKS path only; None for INLINE).
+    # chunk_download_ms is a subset of edge_query_ms + node_query_ms — it isolates
+    # how much of the query time was spent downloading result chunks from storage.
+    chunk_download_ms: Optional[float] = None
+    chunk_count: Optional[int] = None
+    # Result sizes, for correlating timings with graph scale.
+    node_count: Optional[int] = None
+    edge_count: Optional[int] = None
 
 
 class GraphResponse(BaseModel):
@@ -460,7 +468,9 @@ class RandomGraphRequest(BaseModel):
         0  # Max extra edges between same node pair (0 = disabled)
     )
     multi_edges_ratio: float = 0.3  # Fraction of existing edges to duplicate (0.0-1.0)
-    bidirectional_edges_ratio: float = 0.0  # Fraction of edges to create reverse (B->A) (0.0-1.0)
+    bidirectional_edges_ratio: float = (
+        0.0  # Fraction of edges to create reverse (B->A) (0.0-1.0)
+    )
 
     # Node and edge types
     node_types: list[str] = Field(
@@ -745,3 +755,8 @@ class StatementResponse(BaseModel):
     status: StatementStatus
     manifest: Optional[StatementResultManifest] = None
     result: Optional[StatementResultData] = None
+    # Client-side telemetry (not part of the Databricks spec). Populated by
+    # execute_statement_external to expose how long chunk downloading took and
+    # how many chunks were fetched, so callers can attribute query time.
+    client_download_ms: Optional[float] = None
+    client_chunk_count: Optional[int] = None

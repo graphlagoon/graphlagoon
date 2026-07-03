@@ -374,7 +374,11 @@ class WarehouseClient:
         """List all available schemas/databases in local Spark."""
         result = await self.execute_statement(statement="SHOW DATABASES")
         schemas = []
-        if result.status.state == "SUCCEEDED" and result.result and result.result.data_array:
+        if (
+            result.status.state == "SUCCEEDED"
+            and result.result
+            and result.result.data_array
+        ):
             for row in result.result.data_array:
                 if row and row[0]:
                     schemas.append(row[0])
@@ -397,7 +401,11 @@ class WarehouseClient:
             ORDER BY table_schema, table_name
         """
         result = await self.execute_statement(statement=query)
-        if result.status.state == "SUCCEEDED" and result.result and result.result.data_array:
+        if (
+            result.status.state == "SUCCEEDED"
+            and result.result
+            and result.result.data_array
+        ):
             for row in result.result.data_array:
                 s = row[0]
                 table_name = row[1]
@@ -421,7 +429,11 @@ class WarehouseClient:
         result = await self.execute_statement(
             statement=f"SHOW TABLES IN {schema}",
         )
-        if result.status.state == "SUCCEEDED" and result.result and result.result.data_array:
+        if (
+            result.status.state == "SUCCEEDED"
+            and result.result
+            and result.result.data_array
+        ):
             for row in result.result.data_array:
                 # SHOW TABLES returns: database, tableName, isTemporary
                 s = row[0] if len(row) > 0 else schema
@@ -955,8 +967,12 @@ class WarehouseClient:
         if response.status.state != "SUCCEEDED":
             return response  # Caller handles errors via _parse_statement_result
 
-        # Step 4: Download all chunks from external links
+        # Step 4: Download all chunks from external links.
+        # Downloads are serial here (one bottleneck target for large results);
+        # timed so callers can attribute how much query time was chunk I/O.
         all_rows: list[list[Optional[str]]] = []
+        download_start = asyncio.get_event_loop().time()
+        chunk_count = 0
 
         initial_links = (
             response.result.external_links
@@ -967,6 +983,7 @@ class WarehouseClient:
         for link_info in initial_links:
             chunk_rows = await self._download_external_chunk(link_info, statement_id)
             all_rows.extend(chunk_rows)
+            chunk_count += 1
 
         # Fetch additional chunks not in the initial response
         if response.manifest and response.manifest.total_chunk_count:
@@ -982,6 +999,9 @@ class WarehouseClient:
                     eli = ExternalLinkInfo(**eli_data)
                     chunk_rows = await self._download_external_chunk(eli, statement_id)
                     all_rows.extend(chunk_rows)
+                    chunk_count += 1
+
+        download_ms = (asyncio.get_event_loop().time() - download_start) * 1000
 
         # Step 5: Construct inline-compatible response
         inline_result = StatementResultData(
@@ -996,6 +1016,8 @@ class WarehouseClient:
             status=response.status,
             manifest=response.manifest,
             result=inline_result,
+            client_download_ms=round(download_ms, 2),
+            client_chunk_count=chunk_count,
         )
 
 

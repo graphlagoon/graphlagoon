@@ -8,9 +8,15 @@ import logging
 
 from fastapi import FastAPI, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import (
+    HTMLResponse,
+    RedirectResponse,
+    JSONResponse,
+    ORJSONResponse,
+)
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from graphlagoon.config import get_settings, Settings
@@ -413,15 +419,14 @@ def create_mountable_app(
     # Register similarity endpoints
     if similarity_endpoints:
         from graphlagoon.similarity import register_similarity_endpoint
+
         for ep in similarity_endpoints:
             register_similarity_endpoint(ep)
 
     @asynccontextmanager
     async def mountable_lifespan(app: FastAPI):
         if not settings.databricks_volume_path:
-            Path(settings.exploration_snapshots_dir).mkdir(
-                parents=True, exist_ok=True
-            )
+            Path(settings.exploration_snapshots_dir).mkdir(parents=True, exist_ok=True)
         if is_database_available():
             await create_tables()
             if settings.lakebase_enabled:
@@ -438,10 +443,16 @@ def create_mountable_app(
     app = FastAPI(
         description="Graph visualization and exploration tool",
         lifespan=mountable_lifespan,
+        # Faster JSON serialization for large graph payloads (Fase 1)
+        default_response_class=ORJSONResponse,
     )
 
     # Add exception handlers for better error visibility
     add_exception_handlers(app, show_error_details=settings.show_error_details)
+
+    # Compress large responses (graph payloads). Benefit shows on real
+    # networks; negligible on loopback. minimum_size skips tiny responses.
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # Static files
     if STATIC_DIR.exists():
@@ -523,6 +534,7 @@ def create_app(
     # Register similarity endpoints
     if similarity_endpoints:
         from graphlagoon.similarity import register_similarity_endpoint
+
         for ep in similarity_endpoints:
             register_similarity_endpoint(ep)
 
@@ -536,12 +548,8 @@ def create_app(
         logger.info(f"Databricks mode: {settings.databricks_mode}")
 
         if not settings.databricks_volume_path:
-            Path(settings.exploration_snapshots_dir).mkdir(
-                parents=True, exist_ok=True
-            )
-            logger.info(
-                "Snapshot directory: %s", settings.exploration_snapshots_dir
-            )
+            Path(settings.exploration_snapshots_dir).mkdir(parents=True, exist_ok=True)
+            logger.info("Snapshot directory: %s", settings.exploration_snapshots_dir)
 
         if is_database_available():
             await create_tables()
@@ -570,10 +578,16 @@ def create_app(
         description="Graph visualization and exploration tool",
         version="0.1.0",
         lifespan=lifespan,
+        # Faster JSON serialization for large graph payloads (Fase 1)
+        default_response_class=ORJSONResponse,
     )
 
     # Add exception handlers for better error visibility
     add_exception_handlers(app, show_error_details=settings.show_error_details)
+
+    # Compress large responses (graph payloads). Benefit shows on real
+    # networks; negligible on loopback. minimum_size skips tiny responses.
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # CORS middleware
     origins = cors_origins or ["*"]

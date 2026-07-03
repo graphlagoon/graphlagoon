@@ -521,7 +521,12 @@ function setSelfEdgesVisible(visible: boolean) {
 function updateGraph() {
   if (!graph3d) return;
 
+  const tBuild = performance.now();
   const graphData = buildGraphData();
+  recordPerf('buildGraphData', performance.now() - tBuild, {
+    nodeCount: graphData.nodes.length,
+    linkCount: graphData.links.length,
+  });
 
   const currentData = graph3d.graphData();
   const positionMap = new Map<string, { x: number; y: number; z: number }>();
@@ -601,7 +606,13 @@ function initGraph() {
 
   containerRef.value.innerHTML = '';
 
+  const tBuild = performance.now();
   const graphData = buildGraphData();
+  recordPerf('buildGraphData', performance.now() - tBuild, {
+    nodeCount: graphData.nodes.length,
+    linkCount: graphData.links.length,
+    init: 1,
+  });
   const aesthetics = graphStore.aesthetics;
 
   // Compute adaptive layout params and write to store

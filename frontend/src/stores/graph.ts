@@ -22,6 +22,36 @@ import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
+import { recordPerf } from '@/utils/perfMetrics';
+import type { QueryMetadata } from '@/types/graph';
+
+/**
+ * Record load-path timings for a graph fetch (dev-only; no-op in prod).
+ *
+ * Splits the cost into three buckets so a baseline can attribute where the
+ * time goes: network+parse (`fetch`), reactive assignment (`assign`), and the
+ * backend's own stage timings surfaced from `response.metadata` (`backend`).
+ */
+function recordGraphLoad(
+  label: string,
+  response: { nodes: unknown[]; edges: unknown[]; metadata?: QueryMetadata },
+  fetchMs: number,
+  assignMs: number,
+) {
+  recordPerf(`load:${label}:fetch`, fetchMs, {
+    nodeCount: response.nodes.length,
+    edgeCount: response.edges.length,
+  });
+  recordPerf(`load:${label}:assign`, assignMs);
+  const m = response.metadata;
+  if (m) {
+    const extra: Record<string, number> = {};
+    for (const [k, v] of Object.entries(m)) {
+      if (typeof v === 'number') extra[k] = v;
+    }
+    recordPerf(`load:${label}:backend`, m.total_ms ?? 0, extra);
+  }
+}
 
 export const useGraphStore = defineStore('graph', () => {
   // Current graph data
@@ -874,14 +904,17 @@ export const useGraphStore = defineStore('graph', () => {
     queryError.value = null;
 
     try {
+      const t0 = performance.now();
       const response = await api.getSubgraph(currentContext.value.id, {
         edge_limit: request.edge_limit || 1000,
         node_types: request.node_types || [],
         edge_types: request.edge_types || [],
       });
+      const tFetched = performance.now();
 
       nodes.value = response.nodes;
       edges.value = response.edges;
+      recordGraphLoad('subgraph', response, tFetched - t0, performance.now() - tFetched);
       adjustGravityForConnectivity();
 
       // Clear selections
@@ -945,14 +978,17 @@ export const useGraphStore = defineStore('graph', () => {
     }
 
     try {
+      const t0 = performance.now();
       const response = await api.executeGraphQuery(currentContext.value.id, {
         query,
         ...(useExternalLinks.value ? { use_external_links: true } : {}),
       });
+      const tFetched = performance.now();
 
       // Replace current graph with query result
       nodes.value = response.nodes;
       edges.value = response.edges;
+      recordGraphLoad('query', response, tFetched - t0, performance.now() - tFetched);
       adjustGravityForConnectivity();
 
       // Clear selections (unless preserving for exploration restore)
@@ -982,6 +1018,7 @@ export const useGraphStore = defineStore('graph', () => {
     graphQuery.value = query;
 
     try {
+      const t0 = performance.now();
       const response = await api.executeCypherQuery(currentContext.value.id, {
         query,
         ...(ctePrefilter.value ? { cte_prefilter: ctePrefilter.value } : {}),
@@ -989,10 +1026,12 @@ export const useGraphStore = defineStore('graph', () => {
         materialization_strategy: materializationStrategy.value,
         ...(useExternalLinks.value ? { use_external_links: true } : {}),
       });
+      const tFetched = performance.now();
 
       // Replace current graph with query result
       nodes.value = response.nodes;
       edges.value = response.edges;
+      recordGraphLoad('cypher', response, tFetched - t0, performance.now() - tFetched);
       adjustGravityForConnectivity();
 
       // Store the transpiled SQL

@@ -1765,3 +1765,116 @@ The previous approach saved only the query string and re-executed it on load. Th
 **Author:** Claude (AI Assistant)
 
 ---
+
+## 2026-07-03 — Performance (Fase 0): Instrumentação + baseline para construção inicial de redes grandes
+
+**Contexto:** Para redes muito grandes, o tempo até o grafo aparecer (construção inicial) é alto. A renderização 3D em si é rápida depois de pronta — o gargalo está no caminho de carga: query que junta info dos nós, montagem quando dados chegam em chunks (EXTERNAL_LINKS/Databricks), e transformação do payload em estrutura reativa no frontend. Plano completo em `~/.claude/plans/para-redes-muito-grandes-pure-duckling.md`.
+
+**Metodologia acordada com o usuário:** *medir primeiro, depois isolar cada mudança.* Capturar um baseline cru (sem otimização), e aplicar uma otimização por fase, sempre com medição antes/depois, para comprovar o ganho de cada uma. Foco em Databricks. Manter a arquitetura atual (uma resposta completa; sem streaming progressivo por ora).
+
+Esta entrada cobre a **Fase 0** — apenas instrumentação, **comportamento inalterado**.
+
+### Decisões de design
+
+1. **Telemetria de chunk isolada do tempo de query.** `edge_query_ms`/`node_query_ms` já englobam o download de chunks no caminho EXTERNAL_LINKS. Para atribuir o custo, `execute_statement_external` agora cronometra só o loop de download (`asyncio.get_event_loop().time()`, monotônico) e conta os chunks, expondo via campos de telemetria client-side no `StatementResponse` (`client_download_ms`, `client_chunk_count`) — fora da spec Databricks, opcionais, default `None` (não afetam parsing de respostas reais).
+2. **Novos campos em `QueryMetadata`:** `chunk_download_ms`, `chunk_count`, `node_count`, `edge_count`. Preenchidos nos 3 caminhos de retorno de `execute_graph_query_with_nodes` (sem linhas, sem node_ids, e completo). `chunk_download_ms`/`chunk_count` somam edge+node query.
+3. **Frontend usa a infra `recordPerf()` existente** (dev-only, tree-shaken em prod). Helper `recordGraphLoad()` no graph store separa a carga em 3 buckets: `load:<label>:fetch` (rede+parse do axios), `load:<label>:assign` (atribuição reativa `nodes.value=…`), `load:<label>:backend` (timings do backend surfaced de `response.metadata`). Aplicado em `loadSubgraph`, `executeGraphQuery`, `executeCypherQuery`.
+4. **`buildGraphData()` cronometrado** em `initGraph` (com extra `init:1`) e `updateGraph` no GraphCanvas3D, via `recordPerf('buildGraphData', …)`.
+
+### Arquivos modificados
+
+- Backend: `api/graphlagoon/models/schemas.py` (campos em `QueryMetadata` e `StatementResponse`), `api/graphlagoon/services/warehouse.py` (timing do download em `execute_statement_external`), `api/graphlagoon/services/graph_operations.py` (preenchimento do metadata nos 3 retornos).
+- Frontend: `frontend/src/types/graph.ts` (campos em `QueryMetadata`), `frontend/src/stores/graph.ts` (`recordGraphLoad` + wiring), `frontend/src/components/GraphCanvas3D.vue` (timing de `buildGraphData`).
+
+### Testes
+
+- Backend: `uv run pytest` → **119 passed, 1 skipped** (warnings pré-existentes de Pydantic).
+- Frontend: `vitest run` → **665 passed (32 arquivos)**; `vue-tsc --noEmit` → **0 erros**.
+- Instrumentação confirmada comportamento-neutra (nenhuma mudança de lógica de query, montagem ou renderização).
+
+### Próximo passo
+
+Capturar o **baseline cru** com `make perf-report` sobre um grafo grande representativo (Databricks), registrar os números aqui, e usar o bucket dominante para ordenar as fases seguintes. Depois seguir para a **Fase 1 (compressão gzip + orjson)**, isolada e medida.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## 2026-07-03 — Performance (Fase 0): Baseline cru capturado (PySpark warehouse local)
+
+Databricks indisponível no momento → baseline capturado contra o **warehouse PySpark local** (Java 21, PySpark 4.1.1). Backend via driver HTTP direto (`/subgraph`, lê `response.metadata`); frontend via `perf-report.ts` parametrizado (grafo grande mockado, navegando direto pra `/graph/:id`) — a parametrização foi temporária e revertida após medir.
+
+### Backend — mediana de 2 reps (BA graph, avg_degree 6)
+
+| N nós | arestas | edge_query | **node_query (IN)** | edge_proc | node_proc | total |
+|------:|--------:|-----------:|--------------------:|----------:|----------:|------:|
+| 1.000 | 3k | ~90ms | **~100ms** | ~8ms | ~2,5ms | ~200ms |
+| 5.000 | 15k | ~188ms | **~230ms** | ~58ms | ~12ms | ~490ms |
+| 20.000 | 60k | ~592ms | **~640ms** | ~245ms | ~48ms | ~1,5s |
+
+- **`node_query_ms` (o `IN()` com todos os ids inline) é o maior estágio em toda escala** → confirma a Fase 3 (JOIN) como o maior alvo backend.
+- `edge_processing_ms` (construção de objetos Edge + `_parse_row_value` por valor em Python) é secundário mas cresce forte (~245ms a 20k).
+- `edge_query_ms` inflado pelo `ORDER BY RAND()` do `/subgraph` (não presente nos endpoints `/query`/`/cypher`).
+- `chunk_download_ms = None` — `/subgraph` usa INLINE; o caminho EXTERNAL_LINKS (Fase 4) é Databricks-específico e não é exercido localmente.
+
+### Frontend — grafo mockado, navegando pra `/graph/:id`
+
+| N nós | fetch+parse | **assign (`nodes.value=`)** | buildGraphData | updateVisuals | forcegraphUpdate (layout) |
+|------:|------------:|----------------------------:|---------------:|--------------:|--------------------------:|
+| 5.000 | ~50ms | **0,10ms** | ~47ms (max 87) | ~7ms | ~540ms (max 2100) |
+| 20.000 | ~191ms | **0,10ms** | ~172ms (max 300) | ~28ms | ~2400ms (max 9450) |
+
+### Insights que mudam a priorização
+
+1. **Fase 2 (`shallowRef`) NÃO se justifica.** A atribuição `nodes.value = response.nodes` custa **0,10ms mesmo a 20k** — a hipótese de "deep-reactivity na atribuição" foi **falsificada** (Vue 3 não faz proxy profundo eager na atribuição). Deve ser **removida/despriorizada**.
+2. **Fase 1 (compressão) não é mensurável localmente** — fetch (~191ms a 20k) é dominado por `JSON.parse`, não transfer; gzip ajuda a rede, que em loopback é ~0. Benefício real só em rede de verdade (Databricks/prod). Implementar como mudança de transporte de baixo risco, validar que não regride localmente, medir ganho só em prod.
+3. **Backend domina o "tempo até o grafo"** (~1,5s vs ~0,36s de construção frontend a 20k), e dentro dele `node_query` é #1 → **Fase 3 primeiro** (maior alavanca E comprovável localmente).
+4. Custos secundários reais: `buildGraphData` (~172ms, Fase 5) e `edge_processing_ms` backend (~245ms).
+5. **`forcegraphUpdate` (layout de força) é enorme** (até ~9,5s a 20k) — mas é o motor de layout, não a "construção"; provavelmente fora do escopo declarado ("render após construído é rápido"), porém vale sinalizar como alvo separado.
+
+### Próximo passo sugerido
+
+Re-sequenciar: **Fase 3 (node query → JOIN) primeiro** (comprovável localmente com o mesmo driver, antes/depois de `node_query_ms`); dropar Fase 2; tratar Fase 1 como transporte prod-only; Fase 5 + edge_processing como secundárias.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## 2026-07-03 — Performance (Fase 1 + Fase 3): compressão + node query por JOIN
+
+Aplicadas contra o warehouse PySpark local (Databricks indisponível). Cada fase medida/verificada isoladamente.
+
+### Fase 1 — Compressão (gzip + orjson)
+
+- `GZipMiddleware(minimum_size=1000)` + `default_response_class=ORJSONResponse` nas duas factories (`create_mountable_app` — a que roda — e `create_app`). Dependência `orjson` adicionada ao `api/pyproject.toml`.
+- **Verificação (subgrafo ~16k nós / 20k arestas):** `Content-Encoding: gzip`; payload **6,02 MB → 1,83 MB (~70% menor, 3,3×)**; corpo gzip decodifica para JSON válido via orjson; timings/tipos intactos.
+- Ganho de wall-clock **não** é mensurável em loopback (transfer ~0); o valor é bytes na rede → aparece em rede real (Databricks/prod). orjson também acelera o encode do payload grande (etapa após `execute_graph_query_with_nodes`, fora do `total_ms`).
+
+### Fase 3 — Node query: `IN(<literais>)` → `JOIN (VALUES …)`
+
+- Antes: `SELECT * FROM node_table WHERE node_id IN ('id1',…,'idN')` (lista gigante de literais).
+- Depois: `SELECT n.* FROM node_table n JOIN (VALUES ('id1'),…) AS _node_ids(_id) ON n.node_id = _node_ids._id`.
+- **A/B direto no warehouse (20k ids):** IN=591ms · **VALUES=354ms (−40%)** · explode(array)=432ms. Texto SQL ~igual (~800KB) → o ganho é o planner virar hash join sobre LocalRelation em vez de avaliar um IN gigante.
+- **End-to-end (`/subgraph` 20k nós):** `node_query_ms` **~640ms → ~343ms (−46%)**; `total_ms` ~1,5s → ~1,25s.
+- **Corretude:** integridade referencial exata — conjunto de nós retornado == distinct(src∪dst) das arestas (7025==7025, sem extras/faltantes); todos com `node_type` e `properties`. `node_ids` é set (dedup) e `node_id` é único → join 1:1. `process_nodes_result` inalterado (`SELECT n.*` mantém as mesmas colunas).
+- Na Databricks o ganho tende a ser maior (compilar IN com dezenas de milhares de literais é caro lá).
+
+### Arquivos
+
+- `api/graphlagoon/app.py` (gzip + orjson nas 2 factories), `api/pyproject.toml` + `uv.lock` (orjson).
+- `api/graphlagoon/services/graph_operations.py` (node query VALUES-join).
+
+### Testes
+
+- Backend `pytest` → **119 passed, 1 skipped**. `ruff check/format` limpos. Nenhum teste assertava o SQL antigo.
+
+### Ainda em aberto (não feito nesta rodada)
+
+- Fase 2 (`shallowRef`) **descartada** (baseline: assign=0,10ms).
+- Fase 4 (download de chunks paralelo) — Databricks-específico, não exercido localmente.
+- Fase 5 (`buildGraphData` ~172ms) e `edge_processing_ms` (~245ms) — secundários, pendentes.
+- `forcegraphUpdate` (layout, até ~9,5s) — grande, mas é o motor de layout (fora do escopo declarado); a avaliar.
+
+**Author:** Claude (AI Assistant)
+
+---

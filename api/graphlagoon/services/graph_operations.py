@@ -9,7 +9,13 @@ import json
 import time
 from typing import Optional, Any
 
-from graphlagoon.models.schemas import Node, Edge, GraphResponse, QueryMetadata, ColumnConfig
+from graphlagoon.models.schemas import (
+    Node,
+    Edge,
+    GraphResponse,
+    QueryMetadata,
+    ColumnConfig,
+)
 
 
 class QueryExecutionError(Exception):
@@ -278,6 +284,10 @@ async def execute_graph_query_with_nodes(
 
     columns, rows = _parse_statement_result(result, query=query)
 
+    # Client-side chunk-download telemetry (EXTERNAL_LINKS path only)
+    edge_download_ms = getattr(result, "client_download_ms", None)
+    edge_chunk_count = getattr(result, "client_chunk_count", None)
+
     if not rows:
         total_ms = (time.perf_counter() - t_total_start) * 1000
         return GraphResponse(
@@ -287,6 +297,10 @@ async def execute_graph_query_with_nodes(
             metadata=QueryMetadata(
                 edge_query_ms=round(edge_query_ms, 2),
                 total_ms=round(total_ms, 2),
+                chunk_download_ms=edge_download_ms,
+                chunk_count=edge_chunk_count,
+                node_count=0,
+                edge_count=0,
             ),
         )
 
@@ -310,18 +324,33 @@ async def execute_graph_query_with_nodes(
             edge_query_ms=round(edge_query_ms, 2),
             edge_processing_ms=round(edge_processing_ms, 2),
             total_ms=round(total_ms, 2),
+            chunk_download_ms=edge_download_ms,
+            chunk_count=edge_chunk_count,
+            node_count=0,
+            edge_count=len(response_partial.edges),
         )
         return response_partial
 
-    # Build node query using actual table name
+    # Build node query using actual table name.
+    #
+    # We fetch node attributes for the ids collected from the edge result.
+    # A JOIN against an inline VALUES relation is materially faster than a
+    # `WHERE node_id IN (<literal list>)` for large id sets, because the
+    # warehouse planner turns it into a hash join over a LocalRelation instead
+    # of evaluating a huge IN predicate (~40% faster at 20k ids on local
+    # Spark; the gap tends to widen on Databricks where large IN lists are
+    # costly to compile). `SELECT n.*` keeps the exact same columns as the
+    # previous `SELECT *`, so process_nodes_result is unchanged. node_ids is a
+    # set (deduped) and node_id is unique, so the join stays 1:1.
     from graphlagoon.services.sql_validation import sanitize_string_literal
 
     node_id_col = column_config.node_id_col
-    node_ids_str = ", ".join([f"'{sanitize_string_literal(n)}'" for n in node_ids])
+    node_values_str = ", ".join([f"('{sanitize_string_literal(n)}')" for n in node_ids])
     node_query = f"""
-        SELECT *
-        FROM {node_table}
-        WHERE `{node_id_col}` IN ({node_ids_str})
+        SELECT n.*
+        FROM {node_table} n
+        JOIN (VALUES {node_values_str}) AS _node_ids(_id)
+          ON n.`{node_id_col}` = _node_ids._id
     """
 
     # Execute node query
@@ -355,6 +384,14 @@ async def execute_graph_query_with_nodes(
 
     total_ms = (time.perf_counter() - t_total_start) * 1000
 
+    # Combine chunk-download telemetry from the edge and node queries
+    node_download_ms = getattr(node_result, "client_download_ms", None)
+    node_chunk_count = getattr(node_result, "client_chunk_count", None)
+    download_parts = [v for v in (edge_download_ms, node_download_ms) if v is not None]
+    chunk_download_ms = round(sum(download_parts), 2) if download_parts else None
+    count_parts = [v for v in (edge_chunk_count, node_chunk_count) if v is not None]
+    chunk_count = sum(count_parts) if count_parts else None
+
     return GraphResponse(
         nodes=nodes,
         edges=response_partial.edges,
@@ -366,5 +403,9 @@ async def execute_graph_query_with_nodes(
             node_query_ms=round(node_query_ms, 2),
             node_processing_ms=round(node_processing_ms, 2),
             total_ms=round(total_ms, 2),
+            chunk_download_ms=chunk_download_ms,
+            chunk_count=chunk_count,
+            node_count=len(nodes),
+            edge_count=len(response_partial.edges),
         ),
     )
