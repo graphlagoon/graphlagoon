@@ -27,6 +27,7 @@ import { useContextMenu } from '@/composables/useContextMenu';
 import GraphContextMenu from '@/components/GraphContextMenu.vue';
 import { Network } from 'lucide-vue-next';
 import { recordPerf } from '@/utils/perfMetrics';
+import { settleLayoutHeadless } from '@/utils/headlessLayout';
 import { useDevPerf } from '@/composables/useDevPerf';
 
 const emit = defineEmits<{
@@ -46,11 +47,20 @@ const containerRef = ref<HTMLDivElement | null>(null);
 let graph3d: any = null;
 const getGraph3d = () => graph3d;
 
+// E.2 — headless settle: for graphs above this edge count, compute the force
+// layout off the render loop (see settleLayoutHeadless) instead of animating it.
+const HEADLESS_SETTLE_EDGE_THRESHOLD = 2000;
+// Monotonic token to guard against overlapping async initGraph() runs.
+let initToken = 0;
+
 // Shared layout state (component owns, composables operate on)
 const isLayoutRunning = ref(true);
 const layoutStabilized = ref(false);
 const initialLayoutDone = ref(false);
 const isWarmingUp = ref(false);
+// Headless-settle overlay state
+const isHeadlessSettling = ref(false);
+const settleProgress = ref(0);
 
 // Last-computed adaptive force overrides (not user-facing — only theta/alphaDecay/velocityDecay)
 let lastForceOverrides: Partial<import('@/utils/forceConfig3D').Force3DSettings> = {};
@@ -518,8 +528,9 @@ function setSelfEdgesVisible(visible: boolean) {
 // Full graph data update (restarts simulation) - use sparingly
 // ---------------------------------------------------------------------------
 
-function updateGraph() {
+async function updateGraph() {
   if (!graph3d) return;
+  const myToken = ++initToken;
 
   const tBuild = performance.now();
   const graphData = buildGraphData();
@@ -537,6 +548,7 @@ function updateGraph() {
   });
 
   let hasNewNodes = false;
+  let newNodeCount = 0;
   graphData.nodes.forEach((node) => {
     const pos = positionMap.get(node.id);
     if (pos) {
@@ -550,17 +562,78 @@ function updateGraph() {
       }
     } else {
       hasNewNodes = true;
+      newNodeCount++;
     }
   });
 
-  // Recompute adaptive params for the new data size and write to store
+  // Recompute adaptive params for the new data size
   const adaptiveUpdate = computeAdaptiveLayoutParams(graphData.nodes.length, graphData.links.length);
-  graphStore.updateLayoutExecution({
-    cooldownTicks: adaptiveUpdate.cooldownTicks,
-    ticksPerFrame: adaptiveUpdate.ticksPerFrame,
-    warmupTicks: adaptiveUpdate.warmupTicks,
-  });
   lastForceOverrides = adaptiveUpdate.forceOverrides;
+
+  // A REPLACE op (query/subgraph/cypher) always wants a fresh layout, even when
+  // some node ids overlap the previous graph; expand/filter stay incremental.
+  const freshRequested = graphStore.freshLayoutRequested;
+  if (freshRequested) graphStore.freshLayoutRequested = false;
+
+  // E.2 — headless settle for a FRESH large layout (initial load / new query
+  // result). Incremental updates (expand adds a few nodes, filter toggles) keep
+  // their preserved positions and animate as before. Fully fallback-safe.
+  let preSettled = false;
+  const isFreshLargeLayout =
+    graphData.links.length > HEADLESS_SETTLE_EDGE_THRESHOLD &&
+    (freshRequested || newNodeCount > graphData.nodes.length * 0.9);
+  if (isFreshLargeLayout) {
+    try {
+      isHeadlessSettling.value = true;
+      settleProgress.value = 0;
+      // Destroy the old rendered graph BEFORE computing the new layout: the
+      // render loop stops drawing the (large) old scene during the settle and
+      // its GPU objects are freed early. The settle works on `graphData` (a
+      // plain JS object), independent of what the engine currently renders.
+      graph3d.graphData({ nodes: [], links: [] });
+      const is2D = graphStore.behaviors.viewMode === '2d-proj';
+      const tSettle = performance.now();
+      await settleLayoutHeadless(
+        graphData.nodes,
+        graphData.links,
+        { ...graphStore.force3DSettings, ...lastForceOverrides },
+        {
+          numDimensions: is2D ? 2 : 3,
+          nodeRelSize: graphStore.aesthetics.nodeSize / 2,
+          onProgress: (f) => { settleProgress.value = f; },
+          shouldAbort: () => initToken !== myToken,
+        },
+      );
+      recordPerf('headlessSettle', performance.now() - tSettle, {
+        nodeCount: graphData.nodes.length,
+        linkCount: graphData.links.length,
+      });
+      // Pin the settled positions so the engine renders them exactly.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const n of graphData.nodes as any[]) {
+        n.fx = n.x;
+        n.fy = n.y;
+        n.fz = is2D ? 0 : n.z;
+      }
+      preSettled = true;
+    } catch (e) {
+      console.warn('[GraphCanvas3D] headless settle (update) failed; animated', e);
+    } finally {
+      isHeadlessSettling.value = false;
+    }
+    // A newer update/init superseded this one while we awaited — bail out.
+    if (!graph3d || initToken !== myToken) return;
+  }
+
+  graphStore.updateLayoutExecution(
+    preSettled
+      ? { cooldownTicks: 0, ticksPerFrame: 1, warmupTicks: 0 }
+      : {
+          cooldownTicks: adaptiveUpdate.cooldownTicks,
+          ticksPerFrame: adaptiveUpdate.ticksPerFrame,
+          warmupTicks: adaptiveUpdate.warmupTicks,
+        },
+  );
 
   graph3d
     .warmupTicks(graphStore.layoutExecution.warmupTicks)
@@ -590,8 +663,9 @@ function updateGraph() {
 // Graph initialization
 // ---------------------------------------------------------------------------
 
-function initGraph() {
+async function initGraph() {
   if (!containerRef.value) return;
+  const myToken = ++initToken;
 
   if (graph3d) {
     // Dispose WebGL renderer to free the context (browsers limit to ~8-16 contexts)
@@ -615,18 +689,70 @@ function initGraph() {
   });
   const aesthetics = graphStore.aesthetics;
 
-  // Compute adaptive layout params and write to store
+  // Compute adaptive layout params
   const adaptive = computeAdaptiveLayoutParams(graphData.nodes.length, graphData.links.length);
-  graphStore.updateLayoutExecution({
-    cooldownTicks: adaptive.cooldownTicks,
-    ticksPerFrame: adaptive.ticksPerFrame,
-    warmupTicks: adaptive.warmupTicks,
-  });
   lastForceOverrides = adaptive.forceOverrides;
 
   initialLayoutDone.value = false;
   isLayoutRunning.value = true;
-  isWarmingUp.value = adaptive.warmupTicks > 0;
+
+  // E.2 — headless settle for large graphs: compute the layout OFF the render
+  // loop (no per-frame render), then render once already settled. Runs on the
+  // main thread in async chunks (UI stays responsive). Fully fallback-safe:
+  // any failure or NaN falls through to the normal animated path.
+  let preSettled = false;
+  if (graphData.links.length > HEADLESS_SETTLE_EDGE_THRESHOLD) {
+    try {
+      isHeadlessSettling.value = true;
+      settleProgress.value = 0;
+      const is2D = graphStore.behaviors.viewMode === '2d-proj';
+      const tSettle = performance.now();
+      await settleLayoutHeadless(
+        graphData.nodes,
+        graphData.links,
+        { ...graphStore.force3DSettings, ...lastForceOverrides },
+        {
+          numDimensions: is2D ? 2 : 3,
+          nodeRelSize: aesthetics.nodeSize / 2,
+          onProgress: (f) => { settleProgress.value = f; },
+          shouldAbort: () => initToken !== myToken,
+        },
+      );
+      recordPerf('headlessSettle', performance.now() - tSettle, {
+        nodeCount: graphData.nodes.length,
+        linkCount: graphData.links.length,
+      });
+      // Pin the settled positions (fx/fy/fz) so the engine renders them exactly
+      // and can't kick them if it reheats — consistent with how the animated
+      // path pins nodes once layout stops. A later reheat/scramble unpins them.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const n of graphData.nodes as any[]) {
+        n.fx = n.x;
+        n.fy = n.y;
+        n.fz = is2D ? 0 : n.z;
+      }
+      preSettled = true;
+    } catch (e) {
+      console.warn('[GraphCanvas3D] headless settle failed; using animated layout', e);
+    } finally {
+      isHeadlessSettling.value = false;
+    }
+    // A newer initGraph() superseded this one while we awaited — bail out.
+    if (initToken !== myToken) return;
+  }
+
+  // Pre-settled graphs render their final positions once (no warmup/cooldown so
+  // the engine doesn't re-simulate); otherwise use the adaptive animated params.
+  graphStore.updateLayoutExecution(
+    preSettled
+      ? { cooldownTicks: 0, ticksPerFrame: 1, warmupTicks: 0 }
+      : {
+          cooldownTicks: adaptive.cooldownTicks,
+          ticksPerFrame: adaptive.ticksPerFrame,
+          warmupTicks: adaptive.warmupTicks,
+        },
+  );
+  isWarmingUp.value = !preSettled && adaptive.warmupTicks > 0;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   graph3d = (ForceGraph3D as any)({ rendererConfig: { preserveDrawingBuffer: true, antialias: true } })(containerRef.value)
@@ -1704,9 +1830,10 @@ onUnmounted(() => {
     <div ref="containerRef" class="graph3d-container"></div>
 
     <!-- Warmup loading overlay (shown while simulation pre-computes without rendering) -->
-    <div v-if="isWarmingUp" class="warmup-overlay">
+    <div v-if="isWarmingUp || isHeadlessSettling" class="warmup-overlay">
       <div class="warmup-spinner"></div>
-      <span>Calculando layout...</span>
+      <span v-if="isHeadlessSettling">Computing layout... {{ Math.round(settleProgress * 100) }}%</span>
+      <span v-else>Computing layout...</span>
     </div>
 
     <!-- Context Menu -->

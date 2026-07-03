@@ -74,6 +74,14 @@ export const useGraphStore = defineStore('graph', () => {
 
   // UI state
   const loading = ref(false);
+  // Human-readable description of the in-flight operation, shown in the loading
+  // overlay (e.g. "Running query…", "Loading graph…", "Expanding node…").
+  const loadingMessage = ref('');
+  // Set by REPLACE operations (query/subgraph/cypher) to tell the canvas the
+  // next data update is a fresh layout (re-settle from scratch), regardless of
+  // how many node ids overlap the previous graph. Expand does NOT set it, so it
+  // stays an incremental update. Consumed (reset) by the canvas on update.
+  const freshLayoutRequested = ref(false);
   const error = ref<string | null>(null);
 
   // Query error state (for non-blocking alert modal)
@@ -885,6 +893,7 @@ export const useGraphStore = defineStore('graph', () => {
   // Actions
   async function loadContext(contextId: string) {
     loading.value = true;
+    loadingMessage.value = 'Loading context…';
     error.value = null;
 
     try {
@@ -901,6 +910,7 @@ export const useGraphStore = defineStore('graph', () => {
     if (!currentContext.value) return;
 
     loading.value = true;
+    loadingMessage.value = 'Loading graph…';
     queryError.value = null;
 
     try {
@@ -912,6 +922,9 @@ export const useGraphStore = defineStore('graph', () => {
       });
       const tFetched = performance.now();
 
+      // Success: request a fresh layout only now (not before the await), so a
+      // failed request never leaves the flag set to contaminate a later update.
+      freshLayoutRequested.value = true;
       nodes.value = response.nodes;
       edges.value = response.edges;
       recordGraphLoad('subgraph', response, tFetched - t0, performance.now() - tFetched);
@@ -937,6 +950,7 @@ export const useGraphStore = defineStore('graph', () => {
     if (!currentContext.value) return;
 
     loading.value = true;
+    loadingMessage.value = 'Expanding node…';
     queryError.value = null;
 
     try {
@@ -970,6 +984,7 @@ export const useGraphStore = defineStore('graph', () => {
     if (!currentContext.value) return;
 
     loading.value = true;
+    loadingMessage.value = 'Running query…';
     queryError.value = null;
 
     // Save query to state (unless preserving existing)
@@ -985,7 +1000,9 @@ export const useGraphStore = defineStore('graph', () => {
       });
       const tFetched = performance.now();
 
-      // Replace current graph with query result
+      // Replace current graph with query result. Set the fresh-layout flag only
+      // on success (after the await) so a failed query keeps the current graph.
+      freshLayoutRequested.value = true;
       nodes.value = response.nodes;
       edges.value = response.edges;
       recordGraphLoad('query', response, tFetched - t0, performance.now() - tFetched);
@@ -1011,6 +1028,7 @@ export const useGraphStore = defineStore('graph', () => {
     if (!currentContext.value) return null;
 
     loading.value = true;
+    loadingMessage.value = 'Running Cypher query…';
     queryError.value = null;
     lastTranspiledSql.value = null;
 
@@ -1028,7 +1046,9 @@ export const useGraphStore = defineStore('graph', () => {
       });
       const tFetched = performance.now();
 
-      // Replace current graph with query result
+      // Replace current graph with query result. Fresh-layout flag set only on
+      // success (after the await) so a failed query keeps the current graph.
+      freshLayoutRequested.value = true;
       nodes.value = response.nodes;
       edges.value = response.edges;
       recordGraphLoad('cypher', response, tFetched - t0, performance.now() - tFetched);
@@ -1692,6 +1712,8 @@ export const useGraphStore = defineStore('graph', () => {
     selectedNodeIds,
     selectedEdgeIds,
     loading,
+    loadingMessage,
+    freshLayoutRequested,
     error,
     queryError,
     clearQueryError,

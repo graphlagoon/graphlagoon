@@ -199,6 +199,7 @@ watch(
       <div class="graph-container" data-testid="graph-container">
         <div v-if="graphStore.loading" class="loading-overlay" data-testid="graph-loading">
           <div class="loading"></div>
+          <span v-if="graphStore.loadingMessage" class="loading-message">{{ graphStore.loadingMessage }}</span>
         </div>
 
         <div v-if="graphStore.error" class="error-overlay">
@@ -403,6 +404,17 @@ watch(
   background: rgba(255, 255, 255, 0.85);
   z-index: 10;
   pointer-events: none;
+}
+
+.loading-overlay {
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+
+.loading-message {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-text-secondary, #555);
 }
 
 .error-state,
