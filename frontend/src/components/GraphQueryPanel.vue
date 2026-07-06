@@ -3,7 +3,8 @@ import { ref, watch, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import CypherEditor from './CypherEditor.vue';
-import { X } from 'lucide-vue-next';
+import TranspileSettingsModal from './TranspileSettingsModal.vue';
+import { X, SlidersHorizontal } from 'lucide-vue-next';
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -192,22 +193,15 @@ const inMessiWeTrust = computed({
   set: (val: boolean) => graphStore.updateBehaviors({ inMessiWeTrust: val }),
 });
 
-// Procedural BFS options
-const proceduralBfs = computed({
-  get: () => graphStore.vlpRenderingMode === 'procedural',
-  set: (val: boolean) => { graphStore.vlpRenderingMode = val ? 'procedural' : 'cte'; },
-});
+// Advanced transpile & optimization settings (procedural BFS, materialization,
+// per-optimization flags, large results mode) live in a shared modal.
+const showTranspileSettings = ref(false);
 
-const materializationStrategy = computed({
-  get: () => graphStore.materializationStrategy,
-  set: (val: 'temp_tables' | 'numbered_views') => { graphStore.materializationStrategy = val; },
-});
-
-// External links (Databricks only)
-const useExternalLinks = computed({
-  get: () => graphStore.useExternalLinks,
-  set: (val: boolean) => { graphStore.useExternalLinks = val; },
-});
+// Compact summary shown next to the gear so the panel still signals the active
+// transpile mode at a glance.
+const transpileSummary = computed(() =>
+  graphStore.vlpRenderingMode === 'procedural' ? 'Procedural BFS' : 'WITH RECURSIVE',
+);
 
 const buttonLabel = computed(() => {
   if (isProcessing.value || graphStore.loading) {
@@ -290,6 +284,15 @@ function setMode(mode: QueryMode) {
     <div class="panel-header">
       <h3>Graph Query</h3>
       <div class="header-actions">
+        <button
+          class="btn-icon-only settings-btn"
+          :class="{ active: graphStore.vlpRenderingMode === 'procedural' }"
+          title="Advanced transpile & optimization settings"
+          data-testid="graph-query-settings"
+          @click="showTranspileSettings = true"
+        >
+          <SlidersHorizontal :size="16" />
+        </button>
         <button class="btn btn-outline btn-sm" @click="clearQuery">Clear</button>
         <button class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
@@ -306,6 +309,7 @@ function setMode(mode: QueryMode) {
       <button
         class="mode-btn"
         :class="{ active: queryMode === 'sql' }"
+        data-testid="graph-query-mode-sql"
         @click="setMode('sql')"
       >
         SQL
@@ -336,6 +340,7 @@ function setMode(mode: QueryMode) {
         rows="6"
         :placeholder="placeholder"
         :disabled="isProcessing"
+        data-testid="graph-query-sql"
       ></textarea>
 
       <p v-if="queryMode === 'cypher' && cypherValidation.error" class="error-text">
@@ -381,53 +386,37 @@ function setMode(mode: QueryMode) {
       </div>
     </div>
 
-    <!-- Procedural BFS Section - only in cypher mode -->
-    <div v-if="queryMode === 'cypher'" class="bfs-section">
-      <label class="checkbox-label bfs-option">
-        <input
-          type="checkbox"
-          v-model="proceduralBfs"
-          :disabled="isProcessing"
-        />
-        <span>Procedural BFS</span>
-        <span class="bfs-hint">(temp tables instead of WITH RECURSIVE)</span>
-      </label>
-
-      <div v-if="proceduralBfs" class="bfs-strategy">
-        <label class="strategy-label">Materialization</label>
-        <select
-          v-model="materializationStrategy"
-          :disabled="isProcessing"
-          class="strategy-select"
-        >
-          <option value="temp_tables">Temp Tables (Databricks)</option>
-          <option value="numbered_views">Numbered Views (PySpark 4.2+)</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- External Links Section - for large results -->
-    <div class="external-links-section">
-      <label class="checkbox-label external-links-option">
-        <input
-          type="checkbox"
-          v-model="useExternalLinks"
-          :disabled="isProcessing"
-        />
-        <span>Large results mode</span>
-        <span class="external-links-hint">(external links for results &gt; 25 MiB)</span>
-      </label>
+    <!-- Advanced transpile & optimization settings — compact entry point that
+         opens the shared modal (procedural BFS, materialization, per-flag
+         optimizations, large results mode). -->
+    <div class="transpile-summary" data-testid="graph-query-transpile-summary">
+      <button
+        class="transpile-summary-btn"
+        :disabled="isProcessing"
+        @click="showTranspileSettings = true"
+      >
+        <SlidersHorizontal :size="14" />
+        <span class="transpile-summary-label">Optimization</span>
+        <span class="transpile-summary-value">{{ transpileSummary }}</span>
+      </button>
     </div>
 
     <div class="query-actions">
       <button
         class="btn btn-primary btn-run"
+        data-testid="graph-query-run"
         @click="handleAction"
         :disabled="isActionDisabled"
       >
         {{ buttonLabel }}
       </button>
     </div>
+
+    <!-- Advanced transpile & optimization settings (shared with Query Console) -->
+    <TranspileSettingsModal
+      v-if="showTranspileSettings"
+      @close="showTranspileSettings = false"
+    />
   </div>
 </template>
 
@@ -440,6 +429,62 @@ function setMode(mode: QueryMode) {
   padding: 16px;
   display: flex;
   flex-direction: column;
+}
+
+.settings-btn {
+  color: var(--text-muted, #666);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+}
+
+.settings-btn:hover {
+  background: var(--bg-secondary, #f0f0f0);
+  color: var(--text-primary, #333);
+}
+
+.settings-btn.active {
+  color: var(--primary-color, #42b883);
+  border-color: var(--primary-color, #42b883);
+}
+
+.transpile-summary {
+  margin: 8px 0;
+}
+
+.transpile-summary-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 6px;
+  background: var(--bg-secondary, #f7f7f7);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted, #666);
+}
+
+.transpile-summary-btn:hover:not(:disabled) {
+  border-color: var(--primary-color, #42b883);
+}
+
+.transpile-summary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.transpile-summary-label {
+  font-weight: 600;
+  color: var(--text-primary, #333);
+}
+
+.transpile-summary-value {
+  margin-left: auto;
+  font-family: monospace;
+  color: var(--primary-color, #42b883);
 }
 
 .panel-header {
@@ -633,76 +678,6 @@ function setMode(mode: QueryMode) {
   outline: none;
   border-color: var(--primary-color, #42b883);
   box-shadow: 0 0 0 2px rgba(66, 184, 131, 0.2);
-}
-
-.bfs-section {
-  margin-bottom: 16px;
-}
-
-.bfs-option {
-  padding: 8px 10px;
-  background: var(--bg-secondary, #f5f5f5);
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #ddd);
-}
-
-.bfs-option:hover {
-  background: var(--bg-tertiary, #eee);
-}
-
-.bfs-hint {
-  color: var(--text-muted, #666);
-  font-size: 10px;
-}
-
-.bfs-strategy {
-  margin-top: 8px;
-  padding: 0 4px;
-}
-
-.strategy-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted, #666);
-  margin-bottom: 4px;
-}
-
-.strategy-select {
-  width: 100%;
-  padding: 6px 8px;
-  font-size: 12px;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  background: var(--bg-color, #fafafa);
-  color: var(--text-color, #333);
-  cursor: pointer;
-}
-
-.strategy-select:focus {
-  outline: none;
-  border-color: var(--primary-color, #42b883);
-  box-shadow: 0 0 0 2px rgba(66, 184, 131, 0.2);
-}
-
-.external-links-section {
-  margin-bottom: 16px;
-}
-
-.external-links-option {
-  padding: 8px 10px;
-  background: var(--bg-secondary, #f5f5f5);
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #ddd);
-}
-
-.external-links-option:hover {
-  background: var(--bg-tertiary, #eee);
-}
-
-.external-links-hint {
-  color: var(--text-muted, #666);
-  font-size: 10px;
 }
 
 .query-actions {

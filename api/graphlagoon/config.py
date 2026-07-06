@@ -133,6 +133,15 @@ class Settings(BaseSettings):
         "Bounded to avoid hitting Databricks rate limits; set to 1 to force "
         "serial downloads.",
     )
+    warehouse_submit_wait_timeout: int = Field(
+        default=0,
+        description="wait_timeout (seconds) used by the cancellable table-query "
+        "submit path. Default 0 makes the submit asynchronous: Databricks "
+        "returns a statement_id immediately (PENDING), so the Cancel button is "
+        "available from the start of the spinner and the client polls for the "
+        "result. A non-zero value (5-50s) trades that off for a fast path where "
+        "queries finishing within the window return inline on the first call.",
+    )
 
     def model_post_init(self, __context):
         if self.lakebase_enabled:

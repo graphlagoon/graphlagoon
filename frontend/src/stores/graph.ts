@@ -16,14 +16,20 @@ import type {
   TextFormatRule,
   TextFormatState,
   TextFormatDefaults,
+  ProceduralBFSOptions,
 } from '@/types/graph';
+import { DEFAULT_PROCEDURAL_BFS_OPTIONS } from '@/types/graph';
 import { api } from '@/services/api';
 import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
-import type { QueryMetadata } from '@/types/graph';
+import {
+  useCancellableQuery,
+  type StepResult,
+} from '@/composables/useCancellableQuery';
+import type { QueryMetadata, GraphJobStatusResponse } from '@/types/graph';
 
 /**
  * Record load-path timings for a graph fetch (dev-only; no-op in prod).
@@ -291,6 +297,11 @@ export const useGraphStore = defineStore('graph', () => {
   const materializationStrategy = ref<'temp_tables' | 'numbered_views'>(
     window.__GRAPH_LAGOON_CONFIG__?.databricks_mode ? 'temp_tables' : 'numbered_views'
   );
+  // Fine-grained procedural BFS optimization flags (only applied when
+  // vlpRenderingMode === 'procedural'). Defaults mirror the transpiler.
+  const proceduralOptimizations = ref<ProceduralBFSOptions>({
+    ...DEFAULT_PROCEDURAL_BFS_OPTIONS,
+  });
 
   // External links mode (for large Databricks results)
   const useExternalLinks = ref(true);
@@ -980,49 +991,92 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  // Last transpiled SQL from cypher query
+  const lastTranspiledSql = ref<string | null>(null);
+
+  // ── Cancellable graph query (shared submit → poll → cancel machine) ──
+  // executeGraphQuery / executeCypherQuery set these before invoking the run;
+  // the graph overlay reads queryChunkProgress / queryCanCancel and calls
+  // cancelGraphQuery. `loading` stays the general graph-loading flag (also used
+  // by context loads), so we wrap the run in it.
+  let pendingGraphSubmit: (() => Promise<StepResult>) | null = null;
+  let pendingGraphApply: ((status: GraphJobStatusResponse) => void) | null = null;
+  let pendingQueryText = '';
+
+  const graphJob = useCancellableQuery({
+    submit: () => pendingGraphSubmit!(),
+    poll: async (jobId: string): Promise<StepResult> => {
+      const s = await api.getGraphQueryJob(currentContext.value!.id, jobId);
+      return {
+        status: s.status,
+        statementId: jobId,
+        chunkProgress: s.progress
+          ? { done: s.progress.chunks_done, total: s.progress.chunks_total }
+          : null,
+        result: s,
+      };
+    },
+    cancel: (jobId: string) =>
+      api.cancelGraphQueryJob(currentContext.value!.id, jobId),
+    applyResult: (r) => pendingGraphApply?.(r as GraphJobStatusResponse),
+    onError: (e) => {
+      const details = extractErrorDetails(e, 'Failed to execute graph query');
+      queryError.value = { ...details, query: details.query || pendingQueryText };
+    },
+    // On cancel we keep the current graph (like a failed query) — just stop.
+  });
+
+  const queryChunkProgress = graphJob.chunkProgress;
+  const queryCanCancel = graphJob.canCancel;
+
+  async function cancelGraphQuery(): Promise<void> {
+    await graphJob.cancelQuery();
+    loading.value = false;
+  }
+
   async function executeGraphQuery(query: string, options?: { preserveGraphQuery?: boolean; preserveSelections?: boolean }) {
     if (!currentContext.value) return;
 
     loading.value = true;
     loadingMessage.value = 'Running query…';
     queryError.value = null;
+    pendingQueryText = query;
 
     // Save query to state (unless preserving existing)
     if (!options?.preserveGraphQuery) {
       graphQuery.value = query;
     }
 
-    try {
-      const t0 = performance.now();
-      const response = await api.executeGraphQuery(currentContext.value.id, {
+    const t0 = performance.now();
+    pendingGraphSubmit = async () => {
+      const resp = await api.submitGraphQueryJob(currentContext.value!.id, {
         query,
         ...(useExternalLinks.value ? { use_external_links: true } : {}),
       });
-      const tFetched = performance.now();
-
+      return { status: resp.status, statementId: resp.job_id };
+    };
+    pendingGraphApply = (status) => {
+      const response = status.result!;
       // Replace current graph with query result. Set the fresh-layout flag only
-      // on success (after the await) so a failed query keeps the current graph.
+      // on success so a failed query keeps the current graph.
       freshLayoutRequested.value = true;
       nodes.value = response.nodes;
       edges.value = response.edges;
-      recordGraphLoad('query', response, tFetched - t0, performance.now() - tFetched);
+      recordGraphLoad('query', response, performance.now() - t0, 0);
       adjustGravityForConnectivity();
-
       // Clear selections (unless preserving for exploration restore)
       if (!options?.preserveSelections) {
         selectedNodeIds.value.clear();
         selectedEdgeIds.value.clear();
       }
-    } catch (e: unknown) {
-      const details = extractErrorDetails(e, 'Failed to execute graph query');
-      queryError.value = { ...details, query: details.query || query };
+    };
+
+    try {
+      await graphJob.run();
     } finally {
       loading.value = false;
     }
   }
-
-  // Last transpiled SQL from cypher query
-  const lastTranspiledSql = ref<string | null>(null);
 
   async function executeCypherQuery(query: string): Promise<string | null> {
     if (!currentContext.value) return null;
@@ -1031,41 +1085,42 @@ export const useGraphStore = defineStore('graph', () => {
     loadingMessage.value = 'Running Cypher query…';
     queryError.value = null;
     lastTranspiledSql.value = null;
+    pendingQueryText = query;
 
     // Save query to state
     graphQuery.value = query;
 
-    try {
-      const t0 = performance.now();
-      const response = await api.executeCypherQuery(currentContext.value.id, {
+    const t0 = performance.now();
+    pendingGraphSubmit = async () => {
+      const resp = await api.submitCypherQueryJob(currentContext.value!.id, {
         query,
         ...(ctePrefilter.value ? { cte_prefilter: ctePrefilter.value } : {}),
         vlp_rendering_mode: vlpRenderingMode.value,
         materialization_strategy: materializationStrategy.value,
+        ...(vlpRenderingMode.value === 'procedural'
+          ? { procedural_optimizations: { ...proceduralOptimizations.value } }
+          : {}),
         ...(useExternalLinks.value ? { use_external_links: true } : {}),
       });
-      const tFetched = performance.now();
-
-      // Replace current graph with query result. Fresh-layout flag set only on
-      // success (after the await) so a failed query keeps the current graph.
+      // Transpiled SQL is known at submit time — surface it immediately.
+      if (resp.transpiled_sql) lastTranspiledSql.value = resp.transpiled_sql;
+      return { status: resp.status, statementId: resp.job_id };
+    };
+    pendingGraphApply = (status) => {
+      const response = status.result!;
       freshLayoutRequested.value = true;
       nodes.value = response.nodes;
       edges.value = response.edges;
-      recordGraphLoad('cypher', response, tFetched - t0, performance.now() - tFetched);
+      recordGraphLoad('cypher', response, performance.now() - t0, 0);
       adjustGravityForConnectivity();
-
-      // Store the transpiled SQL
-      lastTranspiledSql.value = response.transpiled_sql;
-
-      // Clear selections
+      if (status.transpiled_sql) lastTranspiledSql.value = status.transpiled_sql;
       selectedNodeIds.value.clear();
       selectedEdgeIds.value.clear();
+    };
 
-      return response.transpiled_sql;
-    } catch (e: unknown) {
-      const details = extractErrorDetails(e, 'Failed to execute cypher query');
-      queryError.value = { ...details, query: details.query || query };
-      return null;
+    try {
+      await graphJob.run();
+      return lastTranspiledSql.value;
     } finally {
       loading.value = false;
     }
@@ -1083,6 +1138,9 @@ export const useGraphStore = defineStore('graph', () => {
         ...(ctePrefilter.value ? { cte_prefilter: ctePrefilter.value } : {}),
         vlp_rendering_mode: vlpRenderingMode.value,
         materialization_strategy: materializationStrategy.value,
+        ...(vlpRenderingMode.value === 'procedural'
+          ? { procedural_optimizations: { ...proceduralOptimizations.value } }
+          : {}),
       });
       lastTranspiledSql.value = response.transpiled_sql;
       return response.transpiled_sql;
@@ -1449,6 +1507,7 @@ export const useGraphStore = defineStore('graph', () => {
       cte_prefilter: ctePrefilter.value || undefined,
       vlp_rendering_mode: vlpRenderingMode.value,
       materialization_strategy: materializationStrategy.value,
+      procedural_optimizations: { ...proceduralOptimizations.value },
       textFormat: getTextFormatState(),
       clusters: clusterStore.getState() as any, // Cluster state (programs, clusters, executions)
       nodeTypeIcons: nodeTypeIcons.value.size > 0
@@ -1596,6 +1655,10 @@ export const useGraphStore = defineStore('graph', () => {
       vlpRenderingMode.value = exploration.state.vlp_rendering_mode || 'cte';
       materializationStrategy.value = exploration.state.materialization_strategy
         || (window.__GRAPH_LAGOON_CONFIG__?.databricks_mode ? 'temp_tables' : 'numbered_views');
+      proceduralOptimizations.value = {
+        ...DEFAULT_PROCEDURAL_BFS_OPTIONS,
+        ...(exploration.state.procedural_optimizations || {}),
+      };
 
       // Load text format state (with backwards compatibility)
       loadTextFormatState(exploration.state.textFormat);
@@ -1730,6 +1793,7 @@ export const useGraphStore = defineStore('graph', () => {
     ctePrefilter,
     vlpRenderingMode,
     materializationStrategy,
+    proceduralOptimizations,
     useExternalLinks,
     nodePositions,
     textFormatRules,
@@ -1773,6 +1837,10 @@ export const useGraphStore = defineStore('graph', () => {
     executeCypherQuery,
     transpileCypher,
     lastTranspiledSql,
+    // Cancellable graph-query progress/cancel (consumed by the graph overlay)
+    queryChunkProgress,
+    queryCanCancel,
+    cancelGraphQuery,
     setGraphQuery,
     selectNode,
     selectEdge,

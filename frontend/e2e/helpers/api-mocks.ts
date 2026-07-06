@@ -85,6 +85,47 @@ export async function setupAPIMocks(page: Page) {
     });
   });
 
+  // Async graph query job flow (the frontend uses these now): submit → job_id,
+  // then poll returns succeeded with the graph. Cancel returns 204.
+  await page.route('**/graphlagoon/api/graph-contexts/*/query/async', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'running', job_id: 'e2e-graph-job' }),
+    }),
+  );
+  await page.route('**/graphlagoon/api/graph-contexts/*/cypher/async', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'running',
+        job_id: 'e2e-graph-job',
+        transpiled_sql: 'SELECT * FROM edges',
+      }),
+    }),
+  );
+  await page.route(
+    '**/graphlagoon/api/graph-contexts/*/query/job/*/cancel',
+    (route) => route.fulfill({ status: 204, body: '' }),
+  );
+  await page.route(
+    '**/graphlagoon/api/graph-contexts/*/query/job/*',
+    (route) => {
+      if (route.request().url().endsWith('/cancel')) return route.continue();
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'succeeded',
+          job_id: 'e2e-graph-job',
+          result: { ...MOCK_GRAPH_RESPONSE, transpiled_sql: 'SELECT * FROM edges' },
+          transpiled_sql: 'SELECT * FROM edges',
+        }),
+      });
+    },
+  );
+
   // Generic tabular query endpoint (POST) — Query Console
   await page.route('**/graphlagoon/api/graph-contexts/*/query/table', (route) => {
     route.fulfill({
@@ -99,8 +140,24 @@ export async function setupAPIMocks(page: Page) {
         row_count: 2,
         truncated: false,
         transpiled_sql: 'SELECT node_id, name FROM nodes',
+        metadata: { total_ms: 42.5, transpilation_ms: 8.1 },
       }),
     });
+  });
+
+  // Query templates (default: empty list; POST echoes back with an id)
+  await page.route('**/graphlagoon/api/graph-contexts/*/query-templates', (route) => {
+    if (route.request().method() === 'GET') {
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    } else if (route.request().method() === 'POST') {
+      route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: 'tpl-new', ...JSON.parse(route.request().postData() || '{}') }),
+      });
+    } else {
+      route.continue();
+    }
   });
 
   // Context-specific explorations
@@ -287,7 +344,9 @@ export async function seedExplorations(page: Page, explorations: any[]) {
  */
 export async function mockTableQuery(
   page: Page,
-  response: { columns?: string[]; rows?: (string | null)[][]; row_count?: number; truncated?: boolean; transpiled_sql?: string } | { status: number; body: any },
+  response:
+    | { columns?: string[]; rows?: (string | null)[][]; row_count?: number; truncated?: boolean; transpiled_sql?: string; metadata?: Record<string, number> }
+    | { status: number; body: any },
 ) {
   await page.route('**/graphlagoon/api/graph-contexts/*/query/table', (route) => {
     if ('status' in response) {
@@ -308,8 +367,112 @@ export async function mockTableQuery(
         row_count: response.row_count ?? rows.length,
         truncated: response.truncated ?? false,
         transpiled_sql: response.transpiled_sql,
+        metadata: response.metadata ?? { total_ms: 12.3, transpilation_ms: 3.4 },
       }),
     });
+  });
+}
+
+/**
+ * Simulate a long-running (cancellable) table query. The submit returns
+ * status="running" + a statement_id; polling keeps returning "running" so the
+ * Cancel button stays visible; the cancel endpoint returns 204. Call AFTER
+ * setupAPIMocks. Returns the statement_id used, for asserting the cancel URL.
+ */
+export async function mockCancellableTableQuery(
+  page: Page,
+  statementId = 'stmt-e2e',
+) {
+  // Cancel (most specific first is irrelevant — globs don't overlap, but the
+  // 204 route must exist before the poll route by glob specificity).
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/*/query/table/*/cancel`,
+    (route) => route.fulfill({ status: 204, body: '' }),
+  );
+  // Poll status — always still running.
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/*/query/table/*`,
+    (route) => {
+      if (route.request().url().endsWith('/cancel')) {
+        route.continue();
+        return;
+      }
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'running', statement_id: statementId }),
+      });
+    },
+  );
+  // Submit — comes back running.
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/*/query/table`,
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'running',
+          statement_id: statementId,
+          transpiled_sql: 'SELECT node_id FROM nodes',
+          metadata: { transpilation_ms: 3.4 },
+        }),
+      }),
+  );
+  return statementId;
+}
+
+/**
+ * Simulate a long-running graph query job: submit → running, then polls report
+ * increasing chunk-download progress and never complete (so the overlay's
+ * Cancel button + chunk bar stay visible). Cancel returns 204. Call AFTER
+ * setupAPIMocks. Returns the job_id used, for asserting the cancel URL.
+ */
+export async function mockCancellableGraphJob(page: Page, jobId = 'graph-job-e2e') {
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/*/query/job/*/cancel`,
+    (route) => route.fulfill({ status: 204, body: '' }),
+  );
+  let poll = 0;
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/*/query/job/*`,
+    (route) => {
+      if (route.request().url().endsWith('/cancel')) return route.continue();
+      poll += 1;
+      const done = Math.min(poll, 3);
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'running',
+          job_id: jobId,
+          progress: { phase: 'edges', chunks_done: done, chunks_total: 4 },
+        }),
+      });
+    },
+  );
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/*/query/async`,
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'running', job_id: jobId }),
+      }),
+  );
+  return jobId;
+}
+
+/**
+ * Seed query templates for a context (GET list). Call AFTER setupAPIMocks.
+ */
+export async function seedQueryTemplates(page: Page, contextId: string, templates: any[]) {
+  await page.route(`**/graphlagoon/api/graph-contexts/${contextId}/query-templates`, (route) => {
+    if (route.request().method() === 'GET') {
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(templates) });
+    } else {
+      route.continue();
+    }
   });
 }
 

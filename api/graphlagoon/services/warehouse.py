@@ -97,6 +97,7 @@ class WarehouseClient:
         self.catalog_schema_pairs = settings.catalog_schema_pairs
         self.http_timeout = settings.warehouse_http_timeout
         self.wait_timeout = settings.warehouse_wait_timeout
+        self.submit_wait_timeout = settings.warehouse_submit_wait_timeout
         self.max_poll_time = settings.warehouse_max_poll_time
         self.poll_interval = settings.warehouse_poll_interval
         self.chunk_concurrency = max(1, settings.warehouse_chunk_concurrency)
@@ -799,6 +800,83 @@ class WarehouseClient:
                 f"Invalid response from warehouse (failed to parse StatementResponse): {e}"
             ) from e
 
+    async def submit_statement(
+        self,
+        statement: str,
+        catalog: Optional[str] = None,
+        schema: Optional[str] = None,
+        row_limit: Optional[int] = None,
+        parameters: Optional[list[dict[str, Any]]] = None,
+        wait_timeout: Optional[int] = None,
+    ) -> StatementResponse:
+        """Submit a SQL statement for the cancellable poll flow.
+
+        Like :meth:`execute_statement` (INLINE, single POST) but with a SHORT
+        ``wait_timeout`` and ``on_wait_timeout=CONTINUE`` so that a long-running
+        query returns a ``statement_id`` in a RUNNING state instead of blocking
+        the connection. The caller then polls :meth:`get_statement` and may
+        :meth:`cancel_statement`. Queries that finish within ``wait_timeout``
+        come back SUCCEEDED with inline data on this first call (fast path).
+        """
+        if catalog is None:
+            catalog = self.default_catalog
+        if schema is None:
+            schema = self.default_schema
+        if wait_timeout is None:
+            wait_timeout = self.submit_wait_timeout
+
+        request_body: dict[str, Any] = {
+            "statement": statement,
+            "warehouse_id": self.warehouse_id,
+            "disposition": "INLINE",
+            "format": "JSON_ARRAY",
+            "wait_timeout": f"{wait_timeout}s",
+            # Keep the statement running when the wait window elapses so we can
+            # poll for it (the default; stated explicitly for clarity).
+            "on_wait_timeout": "CONTINUE",
+        }
+        if catalog:
+            request_body["catalog"] = catalog
+        if schema:
+            request_body["schema"] = schema
+        if row_limit:
+            request_body["row_limit"] = row_limit
+        if parameters:
+            request_body["parameters"] = parameters
+
+        data = await self._post("/api/2.0/sql/statements", json=request_body)
+        try:
+            return StatementResponse(**data)
+        except Exception as e:
+            logger.error(f"Failed to parse submit StatementResponse: {e}")
+            raise RuntimeError(
+                f"Invalid response from warehouse (submit_statement): {e}"
+            ) from e
+
+    async def get_statement(self, statement_id: str) -> StatementResponse:
+        """Fetch the current status (and inline result if SUCCEEDED) of a
+        previously submitted statement. Used to poll the cancellable flow."""
+        data = await self._get(f"/api/2.0/sql/statements/{statement_id}")
+        try:
+            return StatementResponse(**data)
+        except Exception as e:
+            logger.error(f"Failed to parse get_statement response: {e}")
+            raise RuntimeError(
+                f"Invalid response from warehouse (get_statement): {e}"
+            ) from e
+
+    async def cancel_statement(self, statement_id: str) -> None:
+        """Request cancellation of a running statement (Databricks API).
+
+        Best-effort: the warehouse stops executing the query and releases its
+        compute. Idempotent from the caller's perspective — cancelling an
+        already-finished statement is a no-op that may raise, which we swallow.
+        """
+        try:
+            await self._post(f"/api/2.0/sql/statements/{statement_id}/cancel")
+        except Exception as e:
+            logger.warning(f"cancel_statement({statement_id}) failed: {e}")
+
     async def _get_no_auth(self, url: str) -> bytes:
         """Download from presigned URL WITHOUT Authorization header.
 
@@ -891,6 +969,8 @@ class WarehouseClient:
         parameters: Optional[list[dict[str, Any]]] = None,
         poll_interval: Optional[float] = None,
         max_poll_time: Optional[float] = None,
+        on_submit: Optional[Callable[[str], None]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> StatementResponse:
         """Execute SQL with EXTERNAL_LINKS disposition for large results.
 
@@ -903,6 +983,12 @@ class WarehouseClient:
 
         Works with both Databricks and local warehouse (which simulates
         external links for dev testing).
+
+        ``on_submit`` fires with the statement_id right after submission so a
+        caller can cancel the underlying statement later. ``progress_callback``
+        fires ``(done, total)`` as chunks finish downloading (concurrency is
+        preserved — the callback just observes completions), enabling a live
+        download progress bar without serializing the fetch.
         """
 
         if catalog is None:
@@ -941,6 +1027,12 @@ class WarehouseClient:
 
         # Step 2: Poll if not yet completed
         statement_id = response.statement_id
+        # Expose the statement_id ASAP so a caller can cancel it mid-flight.
+        if on_submit is not None:
+            try:
+                on_submit(statement_id)
+            except Exception:
+                pass
         elapsed = 0.0
 
         while response.status.state in ("PENDING", "RUNNING"):
@@ -1001,8 +1093,17 @@ class WarehouseClient:
 
         sem = asyncio.Semaphore(self.chunk_concurrency)
 
+        total = len(chunk_indices)
+        done = 0
+        if progress_callback is not None:
+            try:
+                progress_callback(0, total)
+            except Exception:
+                pass
+
         async def fetch_chunk(idx: int) -> tuple[int, list[list[Optional[str]]]]:
             """Fetch (and if needed resolve the presigned URL for) one chunk."""
+            nonlocal done
             async with sem:
                 links = links_by_index.get(idx)
                 if links is None:
@@ -1016,7 +1117,15 @@ class WarehouseClient:
                 rows: list[list[Optional[str]]] = []
                 for eli in links:
                     rows.extend(await self._download_external_chunk(eli, statement_id))
-                return idx, rows
+            # Report completion (outside the semaphore) — chunks still download
+            # concurrently; this only observes how many have finished.
+            done += 1
+            if progress_callback is not None:
+                try:
+                    progress_callback(done, total)
+                except Exception:
+                    pass
+            return idx, rows
 
         # Download concurrently; gather preserves input order regardless of
         # completion order, so results are already index-ordered.

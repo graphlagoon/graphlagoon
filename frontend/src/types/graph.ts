@@ -170,6 +170,7 @@ export interface ExplorationState {
   cte_prefilter?: string;              // CTE pre-filter for edge table
   vlp_rendering_mode?: VlpRenderingMode;         // Cypher transpilation mode (optional for backwards compat)
   materialization_strategy?: MaterializationStrategy; // Materialization strategy (optional for backwards compat)
+  procedural_optimizations?: ProceduralBFSOptions; // Procedural BFS flags (optional for backwards compat)
   textFormat?: TextFormatState;        // Label formatting rules (optional for backwards compat)
   clusters?: any;                      // ClusterState from cluster store (optional for backwards compat)
   nodeTypeIcons?: Record<string, string>;  // Node type → icon name mapping (optional for backwards compat)
@@ -390,6 +391,32 @@ export interface CreateExplorationRequest {
 export type VlpRenderingMode = 'cte' | 'procedural';
 export type MaterializationStrategy = 'temp_tables' | 'numbered_views';
 
+/**
+ * Fine-grained toggles for the procedural BFS renderer in gsql2rsql. Field
+ * names and defaults mirror the backend `ProceduralBFSOptions` /
+ * `gsql2rsql.ProceduralBFSOptimizations`. Flags only take effect when
+ * `vlp_rendering_mode === 'procedural'`. Note `undirected_doubled_adjacency`
+ * and `undirected_union_all` are mutually exclusive (both ON → transpiler error).
+ */
+export interface ProceduralBFSOptions {
+  visited_not_exists: boolean;            // both strategies
+  loop_control_into: boolean;             // numbered_views only
+  undirected_doubled_adjacency: boolean;  // both strategies
+  deferred_edge_payload: boolean;         // temp_tables only
+  barrier_precompute: boolean;            // temp_tables only
+  undirected_union_all: boolean;          // both strategies
+}
+
+/** The transpiler defaults (mirror gsql2rsql's dataclass defaults). */
+export const DEFAULT_PROCEDURAL_BFS_OPTIONS: ProceduralBFSOptions = {
+  visited_not_exists: true,
+  loop_control_into: true,
+  undirected_doubled_adjacency: true,
+  deferred_edge_payload: true,
+  barrier_precompute: true,
+  undirected_union_all: false,
+};
+
 export interface GraphQueryRequest {
   query: string;
   cte_prefilter?: string;
@@ -401,6 +428,7 @@ export interface CypherQueryRequest {
   cte_prefilter?: string;
   vlp_rendering_mode?: VlpRenderingMode;
   materialization_strategy?: MaterializationStrategy;
+  procedural_optimizations?: ProceduralBFSOptions;
   use_external_links?: boolean;
 }
 
@@ -418,6 +446,7 @@ export interface CypherTranspileRequest {
   cte_prefilter?: string;
   vlp_rendering_mode?: VlpRenderingMode;
   materialization_strategy?: MaterializationStrategy;
+  procedural_optimizations?: ProceduralBFSOptions;
 }
 
 export interface CypherTranspileResponse {
@@ -431,15 +460,56 @@ export interface TableQueryRequest {
   mode?: TableQueryMode;
   cte_prefilter?: string;
   row_limit?: number;
+  vlp_rendering_mode?: VlpRenderingMode;
+  materialization_strategy?: MaterializationStrategy;
+  procedural_optimizations?: ProceduralBFSOptions;
 }
 
 export interface TableQueryResponse {
+  // 'succeeded' → columns/rows hold the result; 'running' → still executing,
+  // poll with statement_id (defaults omitted by older backends → treat as
+  // 'succeeded').
+  status?: 'succeeded' | 'running';
+  statement_id?: string;
   columns: string[];
   rows: (string | null)[][];
   row_count: number;
   truncated: boolean;
+  total_chunk_count?: number;
+  total_row_count?: number;
   transpiled_sql?: string;
   metadata?: QueryMetadata;
+}
+
+export interface TableQueryStatusResponse {
+  status: 'running' | 'succeeded' | 'canceled';
+  statement_id: string;
+  columns: string[];
+  rows: (string | null)[][];
+  row_count: number;
+  truncated: boolean;
+  total_chunk_count?: number;
+  total_row_count?: number;
+}
+
+export interface GraphJobProgress {
+  phase: string; // "edges" | "nodes"
+  chunks_done: number;
+  chunks_total: number;
+}
+
+export interface GraphJobSubmitResponse {
+  status: 'running' | 'succeeded';
+  job_id: string;
+  transpiled_sql?: string;
+}
+
+export interface GraphJobStatusResponse {
+  status: 'running' | 'succeeded' | 'canceled';
+  job_id: string;
+  progress?: GraphJobProgress | null;
+  result?: GraphResponse | null;
+  transpiled_sql?: string;
 }
 
 // Catalog types

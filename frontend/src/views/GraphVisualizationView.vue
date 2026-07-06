@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useGraphStore } from '@/stores/graph';
 import { useToolbarStore } from '@/stores/toolbar';
+import { useQueryConsoleStore } from '@/stores/queryConsole';
 import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
@@ -18,6 +19,7 @@ import ResourceMonitorModal from '@/components/ResourceMonitorModal.vue';
 import AestheticsPanel from '@/components/AestheticsPanel.vue';
 import TextFormatPanel from '@/components/TextFormatPanel.vue';
 import QueryErrorModal from '@/components/QueryErrorModal.vue';
+import QueryRunningState from '@/components/QueryRunningState.vue';
 import ClusterProgramPanel from '@/components/ClusterProgramPanel.vue';
 import ClusterListPanel from '@/components/ClusterListPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
@@ -37,6 +39,7 @@ const toolbarStore = useToolbarStore();
 const clusterStore = useClusterStore();
 const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
+const queryConsoleStore = useQueryConsoleStore();
 
 const showFilters = ref(false);
 const showLayoutPanel = ref(false);
@@ -53,18 +56,25 @@ const showTemplatesPanel = ref(false);
 const selectedClusterId = ref<string | null>(null);
 const showDetailModal = ref(false);
 const showDataTable = ref(false);
-const showQueryConsole = ref(false);
 
 // The Data Table and Query Console are both bottom drawers — only one at a time.
+// Query Console open-state lives in its store so other components (e.g. running
+// a table-mode template) can open it.
 function toggleDataTable() {
   showDataTable.value = !showDataTable.value;
-  if (showDataTable.value) showQueryConsole.value = false;
+  if (showDataTable.value) queryConsoleStore.close();
 }
 
 function toggleQueryConsole() {
-  showQueryConsole.value = !showQueryConsole.value;
-  if (showQueryConsole.value) showDataTable.value = false;
+  queryConsoleStore.toggle();
 }
+
+// Keep the two bottom drawers mutually exclusive even when the console is opened
+// programmatically (e.g. running a table-mode template from the templates panel).
+watch(
+  () => queryConsoleStore.isOpen,
+  (open) => { if (open) showDataTable.value = false; },
+);
 
 const detailModalItem = computed(() => {
   if (!showDetailModal.value) return null;
@@ -211,8 +221,12 @@ watch(
 
       <div class="graph-container" data-testid="graph-container">
         <div v-if="graphStore.loading" class="loading-overlay" data-testid="graph-loading">
-          <div class="loading"></div>
-          <span v-if="graphStore.loadingMessage" class="loading-message">{{ graphStore.loadingMessage }}</span>
+          <QueryRunningState
+            :label="graphStore.loadingMessage || 'Loading…'"
+            :can-cancel="graphStore.queryCanCancel"
+            :chunk-progress="graphStore.queryChunkProgress"
+            @cancel="graphStore.cancelGraphQuery()"
+          />
         </div>
 
         <div v-if="graphStore.error" class="error-overlay">
@@ -329,7 +343,7 @@ watch(
 
           <button
             class="toolbar-btn"
-            :class="{ active: showQueryConsole }"
+            :class="{ active: queryConsoleStore.isOpen }"
             @click="toggleQueryConsole"
             title="Query Console"
             data-testid="query-console-toggle"
@@ -358,8 +372,9 @@ watch(
 
     <!-- Query Console (bottom drawer) -->
     <QueryConsolePanel
-      v-if="showQueryConsole"
-      @close="showQueryConsole = false"
+      v-if="queryConsoleStore.isOpen"
+      @close="queryConsoleStore.close()"
+      @focus-node="handleFocusNode"
     />
 
     <!-- Resource Monitor Modal -->

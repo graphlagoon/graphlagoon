@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
+import { useQueryConsoleStore } from '@/stores/queryConsole';
 import type { QueryTemplate } from '@/types/graph';
 import { X } from 'lucide-vue-next';
 
@@ -10,6 +11,11 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
+const consoleStore = useQueryConsoleStore();
+
+// How to run this query THIS time — a per-execution choice, not stored on the
+// template. Default: Graph (loads the visualization, the historical behavior).
+const resultMode = ref<'graph' | 'table'>('graph');
 
 // Build initial values: use default if provided, otherwise empty string
 const values = ref<Record<string, string>>(
@@ -37,15 +43,29 @@ function substituteParameters(queryTemplate: string, vals: Record<string, string
 async function executeNow() {
   if (!canExecute.value) return;
   const substituted = substituteParameters(props.template.query, values.value);
-  graphStore.setGraphQuery(substituted);
-  emit('close');
-
-  // Apply template execution options (substitute parameters in cte_prefilter too)
   const opts = props.template.options;
-  graphStore.vlpRenderingMode = opts?.procedural_bfs ? 'procedural' : 'cte';
-  graphStore.ctePrefilter = opts?.cte_prefilter
+  const cte = opts?.cte_prefilter
     ? substituteParameters(opts.cte_prefilter, values.value)
     : '';
+
+  // Table mode runs in the Query Console (arbitrary projection allowed),
+  // NOT through the graph path (which assumes the query returns edges).
+  if (resultMode.value === 'table') {
+    graphStore.ctePrefilter = cte; // the console reads ctePrefilter from graphStore
+    consoleStore.mode = props.template.query_type;
+    if (props.template.query_type === 'cypher') consoleStore.cypherQuery = substituted;
+    else consoleStore.sqlQuery = substituted;
+    consoleStore.open();
+    emit('close');
+    await consoleStore.runQuery();
+    return;
+  }
+
+  // Graph-intent (default): load the visualization.
+  graphStore.setGraphQuery(substituted);
+  emit('close');
+  graphStore.vlpRenderingMode = opts?.procedural_bfs ? 'procedural' : 'cte';
+  graphStore.ctePrefilter = cte;
   graphStore.useExternalLinks = opts?.large_results_mode ?? true;
 
   if (props.template.query_type === 'cypher') {
@@ -74,10 +94,27 @@ async function executeNow() {
         <div class="modal-body">
           <p v-if="template.description" class="template-desc">{{ template.description }}</p>
 
+          <!-- Run as: chosen at execution time, not stored on the template -->
+          <div class="field-group">
+            <label class="field-label">Run as</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input v-model="resultMode" type="radio" value="graph" /> Graph
+              </label>
+              <label class="radio-label">
+                <input v-model="resultMode" type="radio" value="table" /> Table
+              </label>
+            </div>
+            <span class="field-hint">
+              Graph expects the query to return edges (<code>RETURN r</code>) and loads the
+              visualization. Table shows any projection as rows in the Query Console.
+            </span>
+          </div>
+
           <!-- Fixed execution options (read-only badges) -->
-          <div v-if="template.options?.procedural_bfs || template.options?.large_results_mode || template.options?.cte_prefilter" class="options-badges">
-            <span v-if="template.options?.procedural_bfs" class="option-badge">Procedural BFS</span>
-            <span v-if="template.options?.large_results_mode" class="option-badge">Large results</span>
+          <div v-if="(resultMode === 'graph' && (template.options?.procedural_bfs || template.options?.large_results_mode)) || template.options?.cte_prefilter" class="options-badges">
+            <span v-if="resultMode === 'graph' && template.options?.procedural_bfs" class="option-badge">Procedural BFS</span>
+            <span v-if="resultMode === 'graph' && template.options?.large_results_mode" class="option-badge">Large results</span>
             <span v-if="template.options?.cte_prefilter" class="option-badge">CTE pre-filter</span>
           </div>
 
@@ -245,6 +282,49 @@ async function executeNow() {
   color: var(--text-muted, #666);
   margin: 0;
   line-height: 1.5;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-color, #333);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted, #888);
+}
+
+.field-hint code {
+  background: var(--bg-secondary, #f0f0f0);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  color: var(--primary-color, #42b883);
+}
+
+.radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-color, #333);
 }
 
 .params-section {

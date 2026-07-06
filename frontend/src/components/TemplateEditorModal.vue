@@ -7,6 +7,9 @@ import { X } from 'lucide-vue-next';
 
 const props = defineProps<{
   template: QueryTemplate | null;
+  // Seed values for a fresh template (create mode only), e.g. from the console.
+  initialQuery?: string;
+  initialQueryType?: 'cypher' | 'sql';
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -27,8 +30,8 @@ const DEFAULT_PARAMETERS: TemplateParameter[] = [
 
 const name = ref(props.template?.name ?? '');
 const description = ref(props.template?.description ?? '');
-const queryType = ref<'cypher' | 'sql'>(props.template?.query_type ?? 'cypher');
-const query = ref(props.template?.query ?? DEFAULT_QUERY);
+const queryType = ref<'cypher' | 'sql'>(props.template?.query_type ?? props.initialQueryType ?? 'cypher');
+const query = ref(props.template?.query ?? props.initialQuery ?? DEFAULT_QUERY);
 const parameters = ref<TemplateParameter[]>(
   props.template?.parameters.map((p) => ({ ...p })) ?? DEFAULT_PARAMETERS.map((p) => ({ ...p })),
 );

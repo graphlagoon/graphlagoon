@@ -24,17 +24,33 @@ const props = withDefaults(
     columns: ColMeta[];
     rows: Record<string, unknown>[];
     exportFilename?: string;
+    /** When set, cells of this column field render as a clickable node link. */
+    nodeIdField?: string;
   }>(),
   {
     exportFilename: 'query-result',
+    nodeIdField: undefined,
   },
 );
+
+const emit = defineEmits<{
+  (e: 'focus-node', payload: { id: string; multi: boolean }): void;
+}>();
+
+function isNull(value: unknown): boolean {
+  return value === null || value === undefined;
+}
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (value instanceof Date) return value.toLocaleDateString();
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
+}
+
+function onNodeClick(event: MouseEvent, value: unknown) {
+  const multi = event.ctrlKey || event.metaKey || event.shiftKey;
+  emit('focus-node', { id: String(value), multi });
 }
 
 const dtRef = ref<InstanceType<typeof DataTable>>();
@@ -136,7 +152,14 @@ defineExpose({ exportCSV, clearFilters });
           :style="{ minWidth: col.type === 'date' ? '160px' : '120px' }"
         >
           <template #body="{ data }">
-            <span class="cell-text" @dblclick="onCellDblClick($event, data[col.field])">
+            <span v-if="isNull(data[col.field])" class="cell-null">NULL</span>
+            <a
+              v-else-if="col.field === nodeIdField"
+              class="cell-node-link"
+              :title="`Focus node '${formatCell(data[col.field])}' in the graph`"
+              @click.stop="onNodeClick($event, data[col.field])"
+            >{{ formatCell(data[col.field]) }}</a>
+            <span v-else class="cell-text" @dblclick="onCellDblClick($event, data[col.field])">
               {{ formatCell(data[col.field]) }}
             </span>
           </template>
@@ -249,6 +272,24 @@ defineExpose({ exportCSV, clearFilters });
   white-space: nowrap;
   max-width: 100%;
   cursor: default;
+}
+
+.cell-null {
+  color: var(--text-muted, #999);
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.cell-node-link {
+  color: var(--primary-color, #42b883);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dashed currentColor;
+}
+
+.cell-node-link:hover {
+  text-decoration: none;
+  filter: brightness(0.9);
 }
 
 /* ─── Cell popover ─── */

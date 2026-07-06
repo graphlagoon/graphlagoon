@@ -42,6 +42,7 @@ from graphlagoon.models.schemas import (  # noqa: E402
 from graphlagoon.services.graph_operations import (  # noqa: E402
     QueryExecutionError,
     execute_tabular_query,
+    parse_tabular_result,
 )
 
 
@@ -158,3 +159,90 @@ class TestExecuteTabularQuery:
         assert columns == ["c"]
         assert rows == []
         assert truncated is False
+
+
+# ── parse_tabular_result (shared by submit/poll paths) ───────────────
+
+
+class TestParseTabularResult:
+    def test_parses_succeeded_response(self):
+        resp = _make_succeeded_response(["c"], [["1"], ["2"]])
+        columns, rows, truncated = parse_tabular_result(
+            resp, query="SELECT c FROM t", row_limit=1000
+        )
+        assert columns == ["c"]
+        assert rows == [["1"], ["2"]]
+        assert truncated is False
+
+    def test_truncated_when_rows_hit_limit(self):
+        resp = _make_succeeded_response(["c"], [["1"], ["2"]])
+        _, _, truncated = parse_tabular_result(resp, row_limit=2)
+        assert truncated is True
+
+    def test_raises_on_failed_state(self):
+        resp = _make_failed_response("boom")
+        with pytest.raises(QueryExecutionError) as exc:
+            parse_tabular_result(resp, query="SELECT 1", row_limit=100)
+        assert "boom" in exc.value.message
+
+
+# ── Warehouse submit / cancel (cancellable flow primitives) ──────────
+
+
+class TestWarehouseCancellableFlow:
+    def _client(self):
+        from graphlagoon.services.warehouse import WarehouseClient
+
+        client = WarehouseClient.__new__(WarehouseClient)
+        client.warehouse_id = "wh-1"
+        client.default_catalog = "cat"
+        client.default_schema = "sch"
+        client.submit_wait_timeout = 5
+        return client
+
+    @pytest.mark.asyncio
+    async def test_submit_statement_uses_short_wait_and_continue(self):
+        client = self._client()
+        succeeded = _make_succeeded_response(["c"], [["1"]])
+        client._post = AsyncMock(return_value=succeeded.model_dump())
+
+        resp = await client.submit_statement(
+            statement="SELECT c FROM t", row_limit=100
+        )
+
+        assert resp.status.state == "SUCCEEDED"
+        _, kwargs = client._post.call_args
+        body = kwargs["json"]
+        assert body["wait_timeout"] == "5s"
+        assert body["on_wait_timeout"] == "CONTINUE"
+        assert body["row_limit"] == 100
+
+    @pytest.mark.asyncio
+    async def test_submit_statement_returns_running(self):
+        client = self._client()
+        running = StatementResponse(
+            statement_id="stmt-run",
+            status=StatementStatus(state="RUNNING"),
+        )
+        client._post = AsyncMock(return_value=running.model_dump())
+
+        resp = await client.submit_statement(statement="SELECT 1")
+        assert resp.status.state == "RUNNING"
+        assert resp.statement_id == "stmt-run"
+
+    @pytest.mark.asyncio
+    async def test_cancel_statement_hits_cancel_endpoint(self):
+        client = self._client()
+        client._post = AsyncMock(return_value={})
+
+        await client.cancel_statement("stmt-x")
+
+        called_url = client._post.call_args[0][0]
+        assert called_url.endswith("/statements/stmt-x/cancel")
+
+    @pytest.mark.asyncio
+    async def test_cancel_statement_swallows_errors(self):
+        client = self._client()
+        client._post = AsyncMock(side_effect=RuntimeError("already done"))
+        # Must not raise — cancellation is best-effort.
+        await client.cancel_statement("stmt-y")

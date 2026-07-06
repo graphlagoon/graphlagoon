@@ -104,6 +104,23 @@ async def execute_tabular_query(
     return columns, rows, truncated
 
 
+def parse_tabular_result(
+    result, query: Optional[str] = None, row_limit: int = 1000
+) -> tuple[list[str], list[list[Any]], bool]:
+    """Parse a SUCCEEDED StatementResponse into (columns, rows, truncated).
+
+    Shared by the cancellable table-query flow: both the submit fast path and
+    the poll path receive a StatementResponse and need the same raw-row shape
+    as :func:`execute_tabular_query`.
+
+    Raises:
+        QueryExecutionError: If the statement did not SUCCEED.
+    """
+    columns, rows = _parse_statement_result(result, query=query)
+    truncated = len(rows) >= row_limit
+    return columns, rows, truncated
+
+
 def _parse_row_value(value: Optional[str]) -> Any:
     """Parse string value from Databricks format back to appropriate type.
 
@@ -281,6 +298,8 @@ async def execute_graph_query_with_nodes(
     limit: int | None,
     column_config: ColumnConfig,
     use_external_links: bool = False,
+    on_submit=None,
+    progress_callback=None,
 ) -> GraphResponse:
     """
     Execute a graph query and fetch associated nodes.
@@ -293,11 +312,21 @@ async def execute_graph_query_with_nodes(
         query: The SQL query to execute (should use catalog.schema.table format)
         limit: Query result limit (applied to edge query)
         column_config: Column configuration
+        on_submit: Optional callback(statement_id) fired for each submitted
+            warehouse statement (edges then nodes) — lets the caller cancel them.
+        progress_callback: Optional callback(phase, done, total) fired as chunks
+            download; phase is "edges" or "nodes". Only fires on the
+            EXTERNAL_LINKS path.
 
     Returns:
         Complete GraphResponse with nodes and edges
     """
     t_total_start = time.perf_counter()
+
+    def _phase_progress(phase: str):
+        if progress_callback is None:
+            return None
+        return lambda done, total: progress_callback(phase, done, total)
 
     # Execute the edge query via statements API
     # Query should already use catalog.schema.table format
@@ -307,6 +336,8 @@ async def execute_graph_query_with_nodes(
         result = await warehouse_client.execute_statement_external(
             statement=query,
             row_limit=limit,
+            on_submit=on_submit,
+            progress_callback=_phase_progress("edges"),
         )
     else:
         result = await warehouse_client.execute_statement(
@@ -391,7 +422,9 @@ async def execute_graph_query_with_nodes(
     try:
         if use_external_links:
             node_result = await warehouse_client.execute_statement_external(
-                statement=node_query
+                statement=node_query,
+                on_submit=on_submit,
+                progress_callback=_phase_progress("nodes"),
             )
         else:
             node_result = await warehouse_client.execute_statement(statement=node_query)

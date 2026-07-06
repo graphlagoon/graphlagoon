@@ -14,6 +14,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Any, Literal
 from enum import Enum
+import asyncio
+import threading
 import uuid
 import re
 from datetime import datetime, timedelta, timezone
@@ -28,6 +30,12 @@ router = APIRouter(prefix="/api/2.0/sql", tags=["statements"])
 # In-memory store for external links simulation
 # Maps statement_id -> { "manifest": ..., "chunks": { index: data_array }, "external_links": [...] }
 _chunk_store: dict[str, dict] = {}
+
+# In-memory store for the async (INLINE) cancellable flow used by the Query
+# Console. Maps statement_id -> { "state": StatementState, "response":
+# StatementResponse | None, "cancel": threading.Event }. Only INLINE statements
+# go async; EXTERNAL_LINKS (graph queries) keep the synchronous path.
+_statements: dict[str, dict] = {}
 
 # Chunk size for external links simulation (rows per chunk)
 EXTERNAL_LINKS_CHUNK_SIZE = 100
@@ -297,12 +305,178 @@ async def execute_statement(
 
     This endpoint emulates the Databricks SQL Statement Execution API.
     In dev mode, warehouse_id can be any non-empty string.
+
+    By default INLINE and EXTERNAL_LINKS statements run SYNCHRONOUSLY: the query
+    executes and the full result comes back on this call, holding no per-request
+    server state (safe for large/frequent results).
+
+    Opt-in (``async_inline_execution=true``, dev-only): INLINE statements run
+    through an async, cancellable flow (background task + poll/cancel endpoints)
+    so the Query Console's Cancel button can be exercised locally. A
+    ``sleep(<seconds>)`` pseudo-function makes the query dwell in RUNNING for
+    that long (cancellable), then is rewritten to the literal so the rest of the
+    query still executes — e.g. ``SELECT sleep(8)`` runs 8s then returns 8. This
+    cancel is a simulation, not a real Spark job kill. EXTERNAL_LINKS statements
+    always use the synchronous path.
     """
     statement_id = str(uuid.uuid4())
 
+    settings = get_settings()
+    if request.disposition == "EXTERNAL_LINKS" or not settings.async_inline_execution:
+        return _execute_query(statement_id, request, spark)
+
+    # INLINE + async_inline_execution: async + cancellable (dev-only)
+    _reap_finished_statements()
+    record: dict = {
+        "state": StatementState.PENDING,
+        "response": None,
+        "cancel": threading.Event(),
+    }
+    _statements[statement_id] = record
+
+    loop = asyncio.get_event_loop()
+    task = asyncio.create_task(
+        _run_inline_statement(statement_id, request, spark, loop)
+    )
+    record["task"] = task
+
+    # Honour wait_timeout: block up to that long for completion (Databricks
+    # semantics). With wait_timeout=0s (the Query Console default) this returns
+    # immediately in RUNNING, exposing the statement_id for polling/cancel.
+    wait = parse_wait_timeout(request.wait_timeout)
+    elapsed = 0.0
+    while elapsed < wait and record["state"] in (
+        StatementState.PENDING,
+        StatementState.RUNNING,
+    ):
+        await asyncio.sleep(0.05)
+        elapsed += 0.05
+
+    if record["response"] is not None:
+        return record["response"]
+    return StatementResponse(
+        statement_id=statement_id,
+        status=StatementStatus(state=record["state"]),
+    )
+
+
+# Cap on retained async INLINE statements. Once a statement reaches a terminal
+# state its result is kept only long enough for the client to poll it once;
+# older terminal statements are dropped so the map cannot grow without bound
+# (which, holding full inline results, would otherwise leak memory in dev).
+_MAX_RETAINED_STATEMENTS = 64
+
+
+def _reap_finished_statements() -> None:
+    """Drop terminal statements beyond the retention cap (oldest first).
+
+    dict preserves insertion order, so we walk from the front removing finished
+    entries until we're back under the cap. Running/pending entries are kept.
+    """
+    if len(_statements) <= _MAX_RETAINED_STATEMENTS:
+        return
+    terminal = (
+        StatementState.SUCCEEDED,
+        StatementState.FAILED,
+        StatementState.CANCELED,
+        StatementState.CLOSED,
+    )
+    to_drop = len(_statements) - _MAX_RETAINED_STATEMENTS
+    for sid in list(_statements.keys()):
+        if to_drop <= 0:
+            break
+        if _statements[sid]["state"] in terminal:
+            del _statements[sid]
+            to_drop -= 1
+
+
+_SLEEP_RE = re.compile(r"\bsleep\s*\(\s*(\d+(?:\.\d+)?)\s*\)", re.IGNORECASE)
+
+
+def _extract_sleep_seconds(sql: str) -> float:
+    """Largest sleep(n) directive in the SQL (0 if none)."""
+    matches = _SLEEP_RE.findall(sql)
+    return max((float(m) for m in matches), default=0.0)
+
+
+def _strip_sleep(sql: str) -> str:
+    """Rewrite each sleep(n) to the literal n so the SQL runs on Spark."""
+    return _SLEEP_RE.sub(lambda m: m.group(1), sql)
+
+
+async def _run_inline_statement(
+    statement_id: str,
+    request: StatementExecutionRequest,
+    spark: SparkSession,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """Background execution for the async INLINE flow: dwell (cancellable) for
+    any sleep(n), then run the rewritten query in a thread and store the result."""
+    record = _statements[statement_id]
+    record["state"] = StatementState.RUNNING
+
+    sleep_secs = _extract_sleep_seconds(request.statement)
+    waited = 0.0
+    step = 0.1
+    while waited < sleep_secs:
+        if record["cancel"].is_set():
+            record["state"] = StatementState.CANCELED
+            return
+        await asyncio.sleep(min(step, sleep_secs - waited))
+        waited += step
+
+    if record["cancel"].is_set():
+        record["state"] = StatementState.CANCELED
+        return
+
+    rewritten = _strip_sleep(request.statement)
+    try:
+        response = await loop.run_in_executor(
+            None, _execute_query, statement_id, request, spark, rewritten
+        )
+    except Exception as e:  # pragma: no cover - defensive
+        import traceback
+        traceback.print_exc()
+        record["state"] = StatementState.FAILED
+        record["response"] = StatementResponse(
+            statement_id=statement_id,
+            status=StatementStatus(
+                state=StatementState.FAILED,
+                error=StatementError(
+                    error_code="QUERY_EXECUTION_ERROR",
+                    message=f"Query execution failed: {e}",
+                ),
+            ),
+        )
+        return
+
+    # If cancelled while the query ran, honour the cancellation.
+    if record["cancel"].is_set():
+        record["state"] = StatementState.CANCELED
+        return
+
+    record["response"] = response
+    record["state"] = response.status.state
+
+
+def _execute_query(
+    statement_id: str,
+    request: StatementExecutionRequest,
+    spark: SparkSession,
+    statement_override: Optional[str] = None,
+) -> StatementResponse:
+    """Run a statement synchronously and build its StatementResponse.
+
+    ``statement_override`` (used by the async INLINE flow after stripping any
+    sleep directive) replaces ``request.statement`` as the SQL to execute.
+    """
+    sql_source = (
+        statement_override if statement_override is not None else request.statement
+    )
+
     try:
         # Validate SQL
-        validate_sql(request.statement)
+        validate_sql(sql_source)
 
         # Set catalog/schema if provided
         if request.catalog:
@@ -320,7 +494,7 @@ async def execute_statement(
                 pass
 
         # Substitute parameters
-        final_sql = substitute_parameters(request.statement, request.parameters)
+        final_sql = substitute_parameters(sql_source, request.parameters)
 
         script_mode = is_sql_script(final_sql)
 
@@ -556,6 +730,19 @@ def _build_external_links_response(
 @router.get("/statements/{statement_id}")
 async def get_statement_status(statement_id: str):
     """Poll statement status (simulates Databricks GET statement endpoint)."""
+    # Async INLINE flow (Query Console) takes precedence.
+    record = _statements.get(statement_id)
+    if record is not None:
+        state = record["state"]
+        if record["response"] is not None:
+            # SUCCEEDED/FAILED — return the full stored response (inline data).
+            return record["response"]
+        # PENDING/RUNNING/CANCELED — no result body yet.
+        return StatementResponse(
+            statement_id=statement_id,
+            status=StatementStatus(state=state),
+        )
+
     stored = _chunk_store.get(statement_id)
     if stored is None:
         raise HTTPException(status_code=404, detail="Statement not found")
@@ -568,6 +755,23 @@ async def get_statement_status(statement_id: str):
             external_links=stored["external_links"],
         ),
     )
+
+
+@router.post("/statements/{statement_id}/cancel")
+async def cancel_statement(statement_id: str) -> dict:
+    """Cancel a running statement (simulates Databricks cancel endpoint).
+
+    Signals the async INLINE background task to stop; if it is still
+    PENDING/RUNNING it transitions to CANCELED. Idempotent and best-effort:
+    unknown or already-finished statements are a no-op (returns 200), matching
+    how the API client treats cancellation.
+    """
+    record = _statements.get(statement_id)
+    if record is not None:
+        record["cancel"].set()
+        if record["state"] in (StatementState.PENDING, StatementState.RUNNING):
+            record["state"] = StatementState.CANCELED
+    return {}
 
 
 @router.get("/statements/{statement_id}/result/chunks/{chunk_index}")
@@ -591,7 +795,17 @@ async def download_chunk_data(statement_id: str, chunk_index: int):
 
     This endpoint does NOT require authorization, mimicking
     how presigned URLs work in cloud storage.
+
+    Dev knob: set WAREHOUSE_CHUNK_DELAY_MS to sleep that long per chunk so the
+    graph overlay's chunk-download progress bar is observable on localhost
+    (real object-storage latency is instant otherwise). No effect in prod.
     """
+    import os
+
+    delay_ms = int(os.environ.get("WAREHOUSE_CHUNK_DELAY_MS", "0") or "0")
+    if delay_ms > 0:
+        await asyncio.sleep(delay_ms / 1000.0)
+
     stored = _chunk_store.get(statement_id)
     if stored is None:
         raise HTTPException(status_code=404, detail="Statement not found")

@@ -20,6 +20,9 @@ import type {
   CypherTranspileResponse,
   TableQueryRequest,
   TableQueryResponse,
+  TableQueryStatusResponse,
+  GraphJobSubmitResponse,
+  GraphJobStatusResponse,
   CatalogListResponse,
   DatabaseListResponse,
   TableListResponse,
@@ -236,6 +239,48 @@ class ApiService {
     return response.data;
   }
 
+  /** Submit a SQL graph query as a cancellable, progress-reporting job. */
+  async submitGraphQueryJob(
+    contextId: string,
+    request: GraphQueryRequest,
+  ): Promise<GraphJobSubmitResponse> {
+    const response = await this.client.post(
+      `/api/graph-contexts/${contextId}/query/async`,
+      request,
+    );
+    return response.data;
+  }
+
+  /** Submit an OpenCypher graph query as a cancellable, progress job. */
+  async submitCypherQueryJob(
+    contextId: string,
+    request: CypherQueryRequest,
+  ): Promise<GraphJobSubmitResponse> {
+    const response = await this.client.post(
+      `/api/graph-contexts/${contextId}/cypher/async`,
+      request,
+    );
+    return response.data;
+  }
+
+  /** Poll a graph query job (running + chunk progress, or succeeded + graph). */
+  async getGraphQueryJob(
+    contextId: string,
+    jobId: string,
+  ): Promise<GraphJobStatusResponse> {
+    const response = await this.client.get(
+      `/api/graph-contexts/${contextId}/query/job/${jobId}`,
+    );
+    return response.data;
+  }
+
+  /** Cancel an in-flight graph query job. */
+  async cancelGraphQueryJob(contextId: string, jobId: string): Promise<void> {
+    await this.client.post(
+      `/api/graph-contexts/${contextId}/query/job/${jobId}/cancel`,
+    );
+  }
+
   async transpileCypher(contextId: string, request: CypherTranspileRequest): Promise<CypherTranspileResponse> {
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/cypher/transpile`,
@@ -250,6 +295,26 @@ class ApiService {
       request
     );
     return response.data;
+  }
+
+  /** Poll an in-flight table query (submitted via executeTableQuery). */
+  async getTableQueryStatus(
+    contextId: string,
+    statementId: string,
+    rowLimit?: number,
+  ): Promise<TableQueryStatusResponse> {
+    const response = await this.client.get(
+      `/api/graph-contexts/${contextId}/query/table/${statementId}`,
+      { params: rowLimit != null ? { row_limit: rowLimit } : undefined },
+    );
+    return response.data;
+  }
+
+  /** Cancel an in-flight table query, releasing warehouse compute. */
+  async cancelTableQuery(contextId: string, statementId: string): Promise<void> {
+    await this.client.post(
+      `/api/graph-contexts/${contextId}/query/table/${statementId}/cancel`,
+    );
   }
 
   // Dev Mode

@@ -176,6 +176,7 @@ function handleExportPng(options: ExportPNGOptions) {
             :class="{ active: toolbarStore.activePanels.has('query') }"
             :aria-pressed="toolbarStore.activePanels.has('query')"
             title="Query"
+            data-testid="toolbar-query"
             @click="toolbarHandlers?.onToggleQuery()"
           >
             <Search :size="15" /><span class="btn-text">Query</span>

@@ -50,6 +50,23 @@ describe('exploration state serialization', () => {
       expect(state.graph_query).toBeUndefined()
     })
 
+    it('captures procedural BFS optimization flags', () => {
+      const store = useGraphStore()
+      store.vlpRenderingMode = 'procedural'
+      store.proceduralOptimizations = {
+        ...store.proceduralOptimizations,
+        visited_not_exists: false,
+        undirected_union_all: true,
+        undirected_doubled_adjacency: false,
+      }
+
+      const state = store.getExplorationState()
+      expect(state.procedural_optimizations?.visited_not_exists).toBe(false)
+      expect(state.procedural_optimizations?.undirected_union_all).toBe(true)
+      // getExplorationState snapshots a copy, not the live ref
+      expect(state.procedural_optimizations).not.toBe(store.proceduralOptimizations)
+    })
+
     it('captures textFormat state', () => {
       const store = useGraphStore()
       store.addTextFormatRule({

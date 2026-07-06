@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useGraphStore } from '@/stores/graph'
 
@@ -10,6 +10,10 @@ vi.mock('@/services/api', () => ({
     expandFromNode: vi.fn(),
     executeGraphQuery: vi.fn(),
     executeCypherQuery: vi.fn(),
+    submitGraphQueryJob: vi.fn(),
+    submitCypherQueryJob: vi.fn(),
+    getGraphQueryJob: vi.fn(),
+    cancelGraphQueryJob: vi.fn(),
     transpileCypher: vi.fn(),
     getExploration: vi.fn(),
     createExploration: vi.fn(),
@@ -18,6 +22,32 @@ vi.mock('@/services/api', () => ({
 }))
 
 import { api } from '@/services/api'
+
+/**
+ * Mock the async graph-query flow so submit → poll returns `result`. Call
+ * BEFORE invoking the store action. The store polls with a 300ms first tick,
+ * so the test must `vi.useFakeTimers()` and `advanceTimersByTimeAsync` after.
+ */
+function mockGraphJobSucceeds(
+  result: { nodes: any[]; edges: any[]; transpiled_sql?: string },
+  jobId = 'job-1',
+) {
+  vi.mocked(api.submitGraphQueryJob).mockResolvedValue({
+    status: 'running',
+    job_id: jobId,
+  } as any)
+  vi.mocked(api.submitCypherQueryJob).mockResolvedValue({
+    status: 'running',
+    job_id: jobId,
+    transpiled_sql: result.transpiled_sql,
+  } as any)
+  vi.mocked(api.getGraphQueryJob).mockResolvedValue({
+    status: 'succeeded',
+    job_id: jobId,
+    result,
+    transpiled_sql: result.transpiled_sql,
+  } as any)
+}
 
 function setupGraph() {
   const store = useGraphStore()
@@ -173,16 +203,25 @@ describe('expandFromNode', () => {
 // ============================================================================
 
 describe('executeGraphQuery', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('replaces graph with query results', async () => {
     const store = setupGraph()
     store.currentContext = { id: 'ctx-1' } as any
 
-    vi.mocked(api.executeGraphQuery).mockResolvedValue({
+    mockGraphJobSucceeds({
       nodes: [{ node_id: 'Q1', node_type: 'Result' }],
       edges: [],
-    } as any)
+    })
 
-    await store.executeGraphQuery('SELECT * FROM graph')
+    const p = store.executeGraphQuery('SELECT * FROM graph')
+    await vi.advanceTimersByTimeAsync(400)
+    await p
 
     expect(store.nodes).toHaveLength(1)
     expect(store.nodes[0].node_id).toBe('Q1')
@@ -194,11 +233,11 @@ describe('executeGraphQuery', () => {
     store.currentContext = { id: 'ctx-1' } as any
     store.graphQuery = 'original query'
 
-    vi.mocked(api.executeGraphQuery).mockResolvedValue({
-      nodes: [], edges: [],
-    } as any)
+    mockGraphJobSucceeds({ nodes: [], edges: [] })
 
-    await store.executeGraphQuery('new query', { preserveGraphQuery: true })
+    const p = store.executeGraphQuery('new query', { preserveGraphQuery: true })
+    await vi.advanceTimersByTimeAsync(400)
+    await p
 
     expect(store.graphQuery).toBe('original query')
   })
@@ -207,12 +246,72 @@ describe('executeGraphQuery', () => {
     const store = useGraphStore()
     store.currentContext = { id: 'ctx-1' } as any
 
-    vi.mocked(api.executeGraphQuery).mockRejectedValue(new Error('Syntax error'))
+    // Submit rejects → error surfaces immediately (no polling).
+    vi.mocked(api.submitGraphQueryJob).mockRejectedValue(new Error('Syntax error'))
 
     await store.executeGraphQuery('BAD QUERY')
 
     expect(store.queryError).not.toBeNull()
     expect(store.queryError!.query).toBe('BAD QUERY')
+  })
+
+  it('exposes chunk-download progress while the job is running', async () => {
+    const store = setupGraph()
+    store.currentContext = { id: 'ctx-1' } as any
+
+    vi.mocked(api.submitGraphQueryJob).mockResolvedValue({
+      status: 'running',
+      job_id: 'job-x',
+    } as any)
+    // First poll: still downloading (2/5 chunks). Second: done.
+    vi.mocked(api.getGraphQueryJob)
+      .mockResolvedValueOnce({
+        status: 'running',
+        job_id: 'job-x',
+        progress: { phase: 'edges', chunks_done: 2, chunks_total: 5 },
+      } as any)
+      .mockResolvedValueOnce({
+        status: 'succeeded',
+        job_id: 'job-x',
+        result: { nodes: [], edges: [] },
+      } as any)
+
+    const p = store.executeGraphQuery('SELECT * FROM graph')
+    await vi.advanceTimersByTimeAsync(400) // first poll → running + progress
+    expect(store.queryChunkProgress).toEqual({ done: 2, total: 5 })
+    expect(store.queryCanCancel).toBe(true)
+    await vi.advanceTimersByTimeAsync(1300) // second poll → succeeded
+    await p
+    expect(store.queryCanCancel).toBe(false)
+  })
+
+  it('cancelGraphQuery cancels the in-flight job and stops the overlay', async () => {
+    const store = setupGraph()
+    store.currentContext = { id: 'ctx-1' } as any
+
+    vi.mocked(api.submitGraphQueryJob).mockResolvedValue({
+      status: 'running',
+      job_id: 'job-c',
+    } as any)
+    vi.mocked(api.getGraphQueryJob).mockResolvedValue({
+      status: 'running',
+      job_id: 'job-c',
+      progress: { phase: 'edges', chunks_done: 1, chunks_total: 8 },
+    } as any)
+    vi.mocked(api.cancelGraphQueryJob).mockResolvedValue(undefined as any)
+
+    const p = store.executeGraphQuery('SELECT * FROM graph')
+    await vi.advanceTimersByTimeAsync(400)
+    expect(store.queryCanCancel).toBe(true)
+
+    await store.cancelGraphQuery()
+
+    expect(api.cancelGraphQueryJob).toHaveBeenCalledWith('ctx-1', 'job-c')
+    expect(store.loading).toBe(false)
+    expect(store.queryCanCancel).toBe(false)
+    // Let the abandoned poll loop's pending sleep fire so run() unwinds.
+    await vi.advanceTimersByTimeAsync(1300)
+    await p
   })
 })
 
@@ -366,7 +465,7 @@ describe('queryError', () => {
     const store = useGraphStore()
     store.currentContext = { id: 'ctx-1' } as any
 
-    vi.mocked(api.executeGraphQuery).mockRejectedValue(new Error('fail'))
+    vi.mocked(api.submitGraphQueryJob).mockRejectedValue(new Error('fail'))
 
     store.clearQueryError()
     expect(store.queryError).toBeNull()
@@ -393,7 +492,7 @@ describe('queryError', () => {
         },
       },
     }
-    vi.mocked(api.executeGraphQuery).mockRejectedValue(axiosError)
+    vi.mocked(api.submitGraphQueryJob).mockRejectedValue(axiosError)
 
     await store.executeGraphQuery('BAD SQL')
 
@@ -413,7 +512,7 @@ describe('queryError', () => {
     const axiosError = {
       response: { data: { detail: 'Something went wrong' } },
     }
-    vi.mocked(api.executeGraphQuery).mockRejectedValue(axiosError)
+    vi.mocked(api.submitGraphQueryJob).mockRejectedValue(axiosError)
 
     await store.executeGraphQuery('query')
 

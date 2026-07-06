@@ -6,14 +6,22 @@
  * results are shown as arbitrary columns/rows via <DataGrid>.
  */
 import { ref, computed, onMounted } from 'vue';
-import { X, Play } from 'lucide-vue-next';
+import { X, Play, SlidersHorizontal } from 'lucide-vue-next';
 import CypherEditor from './CypherEditor.vue';
 import DataGrid from './DataGrid.vue';
+import QueryErrorModal from './QueryErrorModal.vue';
+import QueryRunningState from './QueryRunningState.vue';
+import TemplateEditorModal from './TemplateEditorModal.vue';
+import TranspileSettingsModal from './TranspileSettingsModal.vue';
 import { useGraphStore } from '@/stores/graph';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
 import { useDrawerResize } from '@/composables/useDrawerResize';
+import { toDelimited } from '@/utils/tableExport';
 
-const emit = defineEmits<{ (e: 'close'): void }>();
+const emit = defineEmits<{
+  (e: 'close'): void;
+  (e: 'focus-node', nodeId: string): void;
+}>();
 
 const graphStore = useGraphStore();
 const consoleStore = useQueryConsoleStore();
@@ -62,8 +70,37 @@ const exportFilename = computed(
   () => `query-${graphStore.currentContext?.title || 'result'}`,
 );
 
-// Optional peek at the transpiled SQL (cypher mode).
-const showTranspiled = ref(false);
+// The active query text for the current mode (used for save-as-template).
+const activeQuery = computed(() =>
+  consoleStore.mode === 'cypher' ? consoleStore.cypherQuery : consoleStore.sqlQuery,
+);
+const canSave = computed(() => activeQuery.value.trim().length > 0);
+
+// Detect which result column holds the node id, so its cells can bridge to the
+// 3D graph. Matches the context's node_id_col (or a literal "node_id" column).
+const nodeIdField = computed<string | undefined>(() => {
+  const idCol = graphStore.currentContext?.node_structure?.node_id_col;
+  const candidates = [idCol, 'node_id']
+    .filter(Boolean)
+    .map(s => String(s).toLowerCase());
+  const col = consoleStore.columns.find(c => candidates.includes(c.header.toLowerCase()));
+  return col?.field;
+});
+
+function fmtMs(ms: number | null | undefined): string {
+  if (ms == null) return '';
+  return ms >= 100 ? `${Math.round(ms)}` : `${Math.round(ms * 10) / 10}`;
+}
+
+const showErrorModal = ref(false);
+const showSaveTemplate = ref(false);
+const showTranspileSettings = ref(false);
+const copied = ref(false);
+
+// Surface a hint on the gear when procedural BFS is active for cypher queries.
+const transpileActive = computed(
+  () => consoleStore.mode === 'cypher' && graphStore.vlpRenderingMode === 'procedural',
+);
 
 function setMode(mode: 'cypher' | 'sql') {
   consoleStore.mode = mode;
@@ -83,6 +120,19 @@ function onEditorKeydown(e: KeyboardEvent) {
 
 function exportCSV() {
   dataGridRef.value?.exportCSV();
+}
+
+async function copyResult() {
+  const tsv = toDelimited(consoleStore.rawColumns, consoleStore.rawRows, '\t');
+  await navigator.clipboard.writeText(tsv);
+  copied.value = true;
+  window.setTimeout(() => { copied.value = false; }, 1500);
+}
+
+// Clicking a node-id cell focuses + selects that node in the 3D graph.
+function onFocusNode(payload: { id: string; multi: boolean }) {
+  graphStore.selectNode(payload.id, payload.multi);
+  emit('focus-node', payload.id);
 }
 
 // Seed a helpful, editable example query the first time the console opens.
@@ -140,8 +190,28 @@ onMounted(() => {
           <Play :size="13" />
           <span>{{ runLabel }}</span>
         </button>
+        <button
+          class="action-btn btn-icon-only settings-btn"
+          :class="{ active: transpileActive }"
+          title="Advanced transpile & optimization settings"
+          data-testid="query-console-settings"
+          @click="showTranspileSettings = true"
+        >
+          <SlidersHorizontal :size="14" />
+        </button>
         <button class="action-btn" title="Clear query" @click="consoleStore.clearQuery">Clear</button>
-        <button class="action-btn" title="Export CSV" :disabled="!showResults" @click="exportCSV">CSV</button>
+        <button
+          class="action-btn"
+          title="Save this query as a reusable template"
+          :disabled="!canSave"
+          data-testid="query-console-save-template"
+          @click="showSaveTemplate = true"
+        >Save</button>
+        <span class="btn-sep"></span>
+        <button class="action-btn" title="Export CSV (respects filters)" :disabled="!showResults" @click="exportCSV">CSV</button>
+        <button class="action-btn" title="Copy result to clipboard (TSV)" :disabled="!showResults" @click="copyResult">
+          {{ copied ? 'Copied!' : 'Copy' }}
+        </button>
         <button class="action-btn btn-icon-only close-btn" aria-label="Close" @click="emit('close')">
           <X :size="16" />
         </button>
@@ -177,14 +247,31 @@ onMounted(() => {
 
     <!-- Results -->
     <div class="results-area">
-      <div v-if="consoleStore.loading" class="results-state">
-        <div class="loading"></div>
-        <span>Running query…</span>
+      <div v-if="consoleStore.loading" class="results-state" data-testid="query-console-loading">
+        <QueryRunningState
+          :can-cancel="consoleStore.canCancel"
+          :chunk-progress="consoleStore.chunkProgress"
+          @cancel="consoleStore.cancelQuery()"
+        />
+      </div>
+
+      <div
+        v-else-if="consoleStore.canceled"
+        class="results-state hint"
+        data-testid="query-console-canceled"
+      >
+        <span>Query canceled.</span>
       </div>
 
       <div v-else-if="consoleStore.error" class="results-state error" data-testid="query-console-error">
-        <p class="error-title">Query failed</p>
-        <p class="error-message">{{ consoleStore.error }}</p>
+        <p class="error-title">
+          <span v-if="consoleStore.error.code" class="error-code">{{ consoleStore.error.code }}</span>
+          Query failed
+        </p>
+        <p class="error-message">{{ consoleStore.error.message }}</p>
+        <button class="details-btn" data-testid="query-console-error-details" @click="showErrorModal = true">
+          Details
+        </button>
       </div>
 
       <DataGrid
@@ -193,6 +280,8 @@ onMounted(() => {
         :columns="consoleStore.columns"
         :rows="consoleStore.rows"
         :export-filename="exportFilename"
+        :node-id-field="nodeIdField"
+        @focus-node="onFocusNode"
       />
 
       <div v-else-if="showEmpty" class="results-state">
@@ -206,22 +295,40 @@ onMounted(() => {
 
     <!-- Footer -->
     <div class="drawer-footer">
-      <span v-if="consoleStore.hasRun && !consoleStore.error">
+      <span v-if="consoleStore.hasRun && !consoleStore.error" data-testid="query-console-footer">
         {{ consoleStore.rowCount }} row{{ consoleStore.rowCount === 1 ? '' : 's' }}
+        <template v-if="consoleStore.columns.length"> · {{ consoleStore.columns.length }} col{{ consoleStore.columns.length === 1 ? '' : 's' }}</template>
+        <template v-if="consoleStore.metadata?.total_ms != null">
+          · {{ fmtMs(consoleStore.metadata.total_ms) }} ms<template v-if="consoleStore.metadata.transpilation_ms != null"> (transpile {{ fmtMs(consoleStore.metadata.transpilation_ms) }} ms)</template>
+        </template>
         <span v-if="consoleStore.truncated" class="truncated-note">
           — showing first {{ consoleStore.rowCount }} (truncated)
         </span>
       </span>
       <span v-else></span>
-      <button
-        v-if="consoleStore.transpiledSql"
-        class="link-btn"
-        @click="showTranspiled = !showTranspiled"
-      >
-        {{ showTranspiled ? 'Hide' : 'Show' }} transpiled SQL
-      </button>
     </div>
-    <pre v-if="showTranspiled && consoleStore.transpiledSql" class="transpiled-sql">{{ consoleStore.transpiledSql }}</pre>
+
+    <!-- Full error details (opened from the inline "Details" button) -->
+    <QueryErrorModal
+      v-if="showErrorModal"
+      :error="consoleStore.error"
+      @close="showErrorModal = false"
+    />
+
+    <!-- Save the current query as a reusable template -->
+    <TemplateEditorModal
+      v-if="showSaveTemplate"
+      :template="null"
+      :initial-query="activeQuery"
+      :initial-query-type="consoleStore.mode"
+      @close="showSaveTemplate = false"
+    />
+
+    <!-- Advanced transpile & optimization settings (shared with graph panel) -->
+    <TranspileSettingsModal
+      v-if="showTranspileSettings"
+      @close="showTranspileSettings = false"
+    />
   </div>
 </template>
 
@@ -355,9 +462,27 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+}
+
+.settings-btn.active {
+  color: var(--primary-color, #42b883);
+  border-color: var(--primary-color, #42b883);
+}
+
 .close-btn {
   padding: 2px 8px;
   line-height: 1;
+}
+
+.btn-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-color, #ddd);
+  margin: 0 2px;
 }
 
 /* ─── Editor ─── */
@@ -428,6 +553,19 @@ onMounted(() => {
 .error-title {
   font-weight: 600;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.error-code {
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(229, 62, 62, 0.12);
+  color: var(--color-error, #e53e3e);
 }
 
 .error-message {
@@ -438,6 +576,21 @@ onMounted(() => {
   font-size: 11px;
   color: var(--text-muted, #777);
   word-break: break-word;
+}
+
+.details-btn {
+  border: 1px solid var(--border-color, #ddd);
+  background: var(--card-background, #fff);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-color, #333);
+}
+
+.details-btn:hover {
+  background: var(--bg-secondary, #f5f5f5);
 }
 
 /* ─── Footer ─── */
@@ -454,28 +607,5 @@ onMounted(() => {
 
 .truncated-note {
   color: var(--color-warning, #d69e2e);
-}
-
-.link-btn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 11px;
-  color: var(--primary-color, #42b883);
-  text-decoration: underline;
-}
-
-.transpiled-sql {
-  margin: 0;
-  padding: 8px 12px;
-  max-height: 120px;
-  overflow: auto;
-  font-family: monospace;
-  font-size: 11px;
-  background: var(--bg-secondary, #f5f5f5);
-  border-top: 1px solid var(--border-color, #ddd);
-  white-space: pre-wrap;
-  word-break: break-all;
-  flex-shrink: 0;
 }
 </style>

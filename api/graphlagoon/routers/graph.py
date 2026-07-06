@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from uuid import UUID
 from typing import TYPE_CHECKING, Union
 
@@ -25,15 +25,20 @@ from graphlagoon.models.schemas import (
     CypherTranspileResponse,
     TableQueryRequest,
     TableQueryResponse,
+    TableQueryStatusResponse,
+    GraphJobProgress,
+    GraphJobSubmitResponse,
+    GraphJobStatusResponse,
     QueryMetadata,
 )
 from graphlagoon.services.cypher import transpile_cypher_to_sql, validate_cypher_query
 from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
 from graphlagoon.services.graph_operations import (
     execute_graph_query_with_nodes,
-    execute_tabular_query,
+    parse_tabular_result,
     QueryExecutionError,
 )
+from graphlagoon.services.async_job import create_job, get_job, start_job, cancel_job
 from graphlagoon.services.sql_validation import (
     validate_sql_query,
     sanitize_string_literal,
@@ -620,12 +625,27 @@ async def execute_cypher_query(
     import time
 
     t_transpile_start = time.perf_counter()
-    sql = transpile_cypher_to_sql(
-        data.query,
-        context,
-        vlp_rendering_mode=data.vlp_rendering_mode,
-        materialization_strategy=data.materialization_strategy,
-    )
+    try:
+        sql = transpile_cypher_to_sql(
+            data.query,
+            context,
+            vlp_rendering_mode=data.vlp_rendering_mode,
+            materialization_strategy=data.materialization_strategy,
+            procedural_optimizations=data.procedural_optimizations,
+        )
+    except ValueError as e:
+        # Inconsistent procedural optimization flags (e.g. mutually
+        # exclusive undirected strategies) surface as a clean 400.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_TRANSPILE_OPTIONS",
+                    "message": str(e),
+                    "details": {},
+                }
+            },
+        )
     transpilation_ms = (time.perf_counter() - t_transpile_start) * 1000
 
     # Apply CTE pre-filter if provided
@@ -743,6 +763,18 @@ async def execute_cypher_query(
     )
 
 
+def _manifest_counts(response) -> tuple[Union[int, None], Union[int, None]]:
+    """Extract (total_chunk_count, total_row_count) from a warehouse response's
+    manifest, if present — used to report result-set shape to the client."""
+    manifest = getattr(response, "manifest", None)
+    if manifest is None:
+        return None, None
+    return (
+        getattr(manifest, "total_chunk_count", None),
+        getattr(manifest, "total_row_count", None),
+    )
+
+
 @router.post(
     "/graph-contexts/{context_id}/query/table",
     response_model=TableQueryResponse,
@@ -791,7 +823,9 @@ async def execute_table_query(
             sql = transpile_cypher_to_sql(
                 data.query,
                 context,
-                vlp_rendering_mode="cte",
+                vlp_rendering_mode=data.vlp_rendering_mode,
+                materialization_strategy=data.materialization_strategy,
+                procedural_optimizations=data.procedural_optimizations,
             )
         except Exception as e:
             raise HTTPException(
@@ -848,13 +882,49 @@ async def execute_table_query(
             },
         )
 
-    # Execute and return raw rows.
+    # Submit for the cancellable poll flow. The statement runs with a short
+    # wait_timeout: if it finishes in time we return the rows inline on this
+    # first call (fast path, identical to the previous behaviour); otherwise we
+    # return status="running" + statement_id so the client can poll and cancel.
     t_exec_start = time.perf_counter()
     try:
-        columns, rows, truncated = await execute_tabular_query(
-            warehouse_client=warehouse,
-            query=sql,
+        response = await warehouse.submit_statement(
+            statement=sql,
             row_limit=data.row_limit,
+        )
+    except QueryExecutionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "QUERY_EXECUTION_ERROR",
+                    "message": e.message,
+                    "details": {"query": e.query or sql},
+                }
+            },
+        )
+
+    state = response.status.state
+
+    if state in ("PENDING", "RUNNING"):
+        # Still executing — hand the statement_id back for polling/cancel.
+        metadata = QueryMetadata(
+            transpilation_ms=(
+                round(transpilation_ms, 2) if transpilation_ms is not None else None
+            ),
+            total_ms=None,
+        )
+        return TableQueryResponse(
+            status="running",
+            statement_id=response.statement_id,
+            transpiled_sql=transpiled_sql,
+            metadata=metadata,
+        )
+
+    # Terminal state — SUCCEEDED returns rows; anything else is an error.
+    try:
+        columns, rows, truncated = parse_tabular_result(
+            response, query=sql, row_limit=data.row_limit
         )
     except QueryExecutionError as e:
         raise HTTPException(
@@ -877,14 +947,403 @@ async def execute_table_query(
         total_ms=round(total_ms, 2),
     )
 
+    chunk_count, total_row_count = _manifest_counts(response)
     return TableQueryResponse(
+        status="succeeded",
+        statement_id=response.statement_id,
         columns=columns,
         rows=rows,
         row_count=len(rows),
         truncated=truncated,
+        total_chunk_count=chunk_count,
+        total_row_count=total_row_count,
         transpiled_sql=transpiled_sql,
         metadata=metadata,
     )
+
+
+@router.get(
+    "/graph-contexts/{context_id}/query/table/{statement_id}",
+    response_model=TableQueryStatusResponse,
+)
+async def get_table_query_status(
+    context_id: UUID,
+    statement_id: str,
+    request: Request,
+    row_limit: int = 1000,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """
+    Poll an in-flight table query submitted via ``POST .../query/table``.
+
+    Returns ``status="running"`` while the warehouse is still executing, or
+    ``status="succeeded"`` with the raw rows once complete. A CANCELED statement
+    returns ``status="canceled"``; a FAILED one raises HTTP 400.
+    """
+    user_email = get_current_user(request)
+    await get_context_with_access(context_id, user_email)
+
+    response = await warehouse.get_statement(statement_id)
+    state = response.status.state
+
+    if state in ("PENDING", "RUNNING"):
+        return TableQueryStatusResponse(status="running", statement_id=statement_id)
+
+    if state in ("CANCELED", "CLOSED"):
+        return TableQueryStatusResponse(status="canceled", statement_id=statement_id)
+
+    try:
+        columns, rows, truncated = parse_tabular_result(
+            response, query=None, row_limit=row_limit
+        )
+    except QueryExecutionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "QUERY_EXECUTION_ERROR",
+                    "message": e.message,
+                    "details": {"query": e.query},
+                }
+            },
+        )
+
+    chunk_count, total_row_count = _manifest_counts(response)
+    return TableQueryStatusResponse(
+        status="succeeded",
+        statement_id=statement_id,
+        columns=columns,
+        rows=rows,
+        row_count=len(rows),
+        truncated=truncated,
+        total_chunk_count=chunk_count,
+        total_row_count=total_row_count,
+    )
+
+
+@router.post(
+    "/graph-contexts/{context_id}/query/table/{statement_id}/cancel",
+    status_code=204,
+)
+async def cancel_table_query(
+    context_id: UUID,
+    statement_id: str,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """
+    Cancel an in-flight table query, releasing the warehouse compute.
+
+    Best-effort and idempotent: cancelling an already-finished statement is a
+    no-op. Targets Databricks' ``POST /statements/{id}/cancel`` endpoint.
+    """
+    user_email = get_current_user(request)
+    await get_context_with_access(context_id, user_email)
+
+    await warehouse.cancel_statement(statement_id)
+    return Response(status_code=204)
+
+
+# ── Cancellable graph query jobs (progress + cancel in the graph overlay) ──
+#
+# The blocking /query and /cypher endpoints above stay as-is. These async
+# variants submit the same work as a background job (services/async_job.py) so
+# the frontend can show live chunk-download progress and a Cancel button in the
+# graph overlay, reusing the same submit→poll→cancel shape as the table path.
+
+
+def _prepare_graph_sql(context, data: GraphQueryRequest) -> str:
+    """Validate + apply CTE prefilter for a SQL graph query (raises 400)."""
+    query_stripped = data.query.strip()
+    is_script = query_stripped.upper().startswith(
+        "BEGIN"
+    ) and query_stripped.upper().endswith("END")
+    if not is_script:
+        is_valid, error_msg = validate_sql_query(data.query)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "INVALID_SQL_QUERY",
+                        "message": error_msg,
+                        "details": {},
+                    }
+                },
+            )
+
+    final_query = data.query
+    if data.cte_prefilter:
+        is_valid, error_msg = validate_cte_prefilter(data.cte_prefilter)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "INVALID_CTE_PREFILTER",
+                        "message": error_msg,
+                        "details": {},
+                    }
+                },
+            )
+        final_query = apply_cte_prefilter(
+            data.query,
+            data.cte_prefilter,
+            context.edge_table_name,
+            context.node_table_name,
+        )
+        if not is_script:
+            is_valid, error_msg = validate_sql_query(final_query)
+            if not is_valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": {
+                            "code": "INVALID_SQL_QUERY",
+                            "message": f"SQL with CTE failed validation: {error_msg}",
+                            "details": {},
+                        }
+                    },
+                )
+    return final_query
+
+
+def _prepare_cypher_sql(context, data: CypherQueryRequest) -> tuple[str, float]:
+    """Transpile + validate a cypher query. Returns (sql, transpilation_ms).
+    Raises 400 on invalid cypher / transpiled SQL."""
+    import time
+
+    is_valid, error_msg = validate_cypher_query(data.query)
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_CYPHER_QUERY",
+                    "message": error_msg,
+                    "details": {},
+                }
+            },
+        )
+
+    t0 = time.perf_counter()
+    try:
+        sql = transpile_cypher_to_sql(
+            data.query,
+            context,
+            vlp_rendering_mode=data.vlp_rendering_mode,
+            materialization_strategy=data.materialization_strategy,
+            procedural_optimizations=data.procedural_optimizations,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_TRANSPILE_OPTIONS",
+                    "message": str(e),
+                    "details": {},
+                }
+            },
+        )
+    transpilation_ms = (time.perf_counter() - t0) * 1000
+
+    if data.cte_prefilter:
+        is_valid, error_msg = validate_cte_prefilter(data.cte_prefilter)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "INVALID_CTE_PREFILTER",
+                        "message": error_msg,
+                        "details": {},
+                    }
+                },
+            )
+        sql = apply_cte_prefilter(
+            sql,
+            data.cte_prefilter,
+            context.edge_table_name,
+            context.node_table_name,
+        )
+
+    sql_stripped = sql.strip()
+    is_script = sql_stripped.upper().startswith(
+        "BEGIN"
+    ) and sql_stripped.upper().endswith("END")
+    if not is_script:
+        is_valid, error_msg = validate_sql_query(sql)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "INVALID_TRANSPILED_SQL",
+                        "message": f"Transpiled SQL failed validation: {error_msg}",
+                        "details": {"transpiled_sql": sql},
+                    }
+                },
+            )
+    return sql, transpilation_ms
+
+
+def _start_graph_job(context, warehouse, sql: str, use_external_links: bool):
+    """Register + start a background graph-query job. Returns (job_id, record).
+    The job wires on_submit (captures warehouse statement_ids for cancel) and
+    progress_callback (records chunk progress) into the shared executor."""
+    from graphlagoon.models.schemas import ColumnConfig
+
+    column_config = ColumnConfig(**merge_column_config(context))
+    job_id, record = create_job()
+
+    def on_submit(sid: str) -> None:
+        record["statement_ids"].append(sid)
+
+    def on_progress(phase: str, done: int, total: int) -> None:
+        record["progress"] = {
+            "phase": phase,
+            "chunks_done": done,
+            "chunks_total": total,
+        }
+
+    start_job(
+        record,
+        lambda: execute_graph_query_with_nodes(
+            warehouse_client=warehouse,
+            node_table=context.node_table_name,
+            query=sql,
+            limit=None,
+            column_config=column_config,
+            use_external_links=use_external_links,
+            on_submit=on_submit,
+            progress_callback=on_progress,
+        ),
+    )
+    return job_id, record
+
+
+@router.post(
+    "/graph-contexts/{context_id}/query/async",
+    response_model=GraphJobSubmitResponse,
+)
+async def execute_graph_query_async(
+    context_id: UUID,
+    data: GraphQueryRequest,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """Submit a SQL graph query as a cancellable, progress-reporting job."""
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    final_query = _prepare_graph_sql(context, data)
+    job_id, _ = _start_graph_job(
+        context, warehouse, final_query, data.use_external_links
+    )
+    return GraphJobSubmitResponse(status="running", job_id=job_id)
+
+
+@router.post(
+    "/graph-contexts/{context_id}/cypher/async",
+    response_model=GraphJobSubmitResponse,
+)
+async def execute_cypher_query_async(
+    context_id: UUID,
+    data: CypherQueryRequest,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """Submit an OpenCypher graph query as a cancellable, progress job."""
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    sql, transpilation_ms = _prepare_cypher_sql(context, data)
+    job_id, record = _start_graph_job(
+        context, warehouse, sql, data.use_external_links
+    )
+    record["transpiled_sql"] = sql
+    record["transpilation_ms"] = transpilation_ms
+    return GraphJobSubmitResponse(
+        status="running", job_id=job_id, transpiled_sql=sql
+    )
+
+
+@router.get(
+    "/graph-contexts/{context_id}/query/job/{job_id}",
+    response_model=GraphJobStatusResponse,
+)
+async def get_graph_query_job(
+    context_id: UUID,
+    job_id: str,
+    request: Request,
+):
+    """Poll a cancellable graph query job: running (+chunk progress),
+    succeeded (+graph result), or canceled. Failed jobs raise HTTP 400."""
+    user_email = get_current_user(request)
+    await get_context_with_access(context_id, user_email)
+
+    record = get_job(job_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    state = record["state"]
+    progress = record.get("progress")
+    progress_model = GraphJobProgress(**progress) if progress else None
+
+    if state == "running":
+        return GraphJobStatusResponse(
+            status="running", job_id=job_id, progress=progress_model
+        )
+    if state == "canceled":
+        return GraphJobStatusResponse(status="canceled", job_id=job_id)
+    if state == "failed":
+        err = record.get("error") or {}
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": err.get("code", "QUERY_EXECUTION_ERROR"),
+                    "message": err.get("message", "Query failed"),
+                    "details": err.get("details", {}),
+                }
+            },
+        )
+
+    # succeeded — merge cypher transpilation timing into the result metadata.
+    result: GraphResponse = record["result"]
+    transpiled_sql = record.get("transpiled_sql")
+    transpilation_ms = record.get("transpilation_ms")
+    if transpiled_sql and result.metadata is not None and transpilation_ms:
+        result.metadata.transpilation_ms = round(transpilation_ms, 2)
+        if result.metadata.total_ms is not None:
+            result.metadata.total_ms = round(
+                result.metadata.total_ms + transpilation_ms, 2
+            )
+    return GraphJobStatusResponse(
+        status="succeeded",
+        job_id=job_id,
+        progress=progress_model,
+        result=result,
+        transpiled_sql=transpiled_sql,
+    )
+
+
+@router.post(
+    "/graph-contexts/{context_id}/query/job/{job_id}/cancel",
+    status_code=204,
+)
+async def cancel_graph_query_job(
+    context_id: UUID,
+    job_id: str,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """Cancel an in-flight graph query job: stops API-side processing/download
+    and best-effort cancels the underlying warehouse statement(s)."""
+    user_email = get_current_user(request)
+    await get_context_with_access(context_id, user_email)
+
+    await cancel_job(job_id, warehouse)
+    return Response(status_code=204)
 
 
 @router.post(
@@ -918,12 +1377,25 @@ async def transpile_cypher_query(
             },
         )
 
-    sql = transpile_cypher_to_sql(
-        data.query,
-        context,
-        vlp_rendering_mode=data.vlp_rendering_mode,
-        materialization_strategy=data.materialization_strategy,
-    )
+    try:
+        sql = transpile_cypher_to_sql(
+            data.query,
+            context,
+            vlp_rendering_mode=data.vlp_rendering_mode,
+            materialization_strategy=data.materialization_strategy,
+            procedural_optimizations=data.procedural_optimizations,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_TRANSPILE_OPTIONS",
+                    "message": str(e),
+                    "details": {},
+                }
+            },
+        )
 
     # Apply CTE pre-filter if provided
     if data.cte_prefilter:

@@ -2114,3 +2114,278 @@ Antes: durante os ~5s do settle headless, o `graph3d.graphData(novo)` só rodava
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-07-06] - Query Console: melhorias de UX (round 2)
+
+**Feature:** Cinco melhorias de UX no Query Console + um polish, escolhidas com o usuário. **Histórico de queries** foi deliberadamente adiado (feature isolada, complexidade de persistência).
+
+**1. Metadata no rodapé.** O backend já retornava `metadata` (`total_ms`/`transpilation_ms`) mas o store descartava. Agora `queryConsole.ts` guarda; rodapé mostra `N linhas · M colunas · X ms (transpile Y ms)`. Zero mudança de backend.
+
+**2. Erro rico.** O `error` do store virou objeto estruturado `{ message, code?, exceptionType?, traceback?, query? }` (extraído do envelope `detail.error.*`; `query` cai no `transpiled_sql` quando presente). O painel mostra erro inline compacto (badge de código + mensagem) + botão **Details** que abre o `QueryErrorModal` existente (reuso, sem alterá-lo). Decisão: inline+drill-down em vez de modal-por-erro — console é iterativo.
+
+**3. Ponte tabela→grafo.** `DataGrid` ganhou prop opcional `nodeIdField` + emit `focus-node`; células dessa coluna viram link clicável. O painel detecta a coluna casando o `header` com `node_structure.node_id_col` (ou `node_id`), chama `graphStore.selectNode` e re-emite; a view liga `@focus-node="handleFocusNode"` (foco de câmera). Reusa `selectNode`/`focusOnNode`/`handleFocusNode` — nada reimplementado.
+
+**4. Export JSON + Copiar.** Novo util `utils/tableExport.ts` (`resultToObjects`, `toDelimited`, `downloadBlob`) fatorado dos padrões Blob de `Toolbar`/`ClusterNodeModal`. Store guarda o resultado cru (`rawColumns`/`rawRows`) p/ export fiel. Botões JSON (download) e Copy (TSV pro clipboard) no header; CSV segue via PrimeVue (respeita filtros).
+
+**5. Salvar como template com intent grafo↔tabela.** Um template pode retornar arestas (grafo) ou projeção genérica (tabela). Adicionado `result_mode: 'graph'|'table'` (default `'graph'`) em `TemplateOptions` — **dentro do blob JSON `options`, sem migration**, retrocompatível. `TemplateEditorModal` ganhou props de seed + seletor **Graph/Table** (esconde opções graph-only no modo tabela). `TemplateExecuteModal.executeNow()` ramifica: intent `table` → dirige o `queryConsole` store (`mode`/query/`open()`/`runQuery()`) em vez do caminho de grafo (que exige `RETURN r`). `QueryTemplatesPanel` mostra badge Graph/Table. Botão **"Save as template"** no console abre o editor pré-setado como Table.
+
+**Cross-cutting:** o estado "console aberto" subiu de um `ref` local na view para o store (`isOpen`/`open`/`close`/`toggle`), permitindo abrir o console de fora (ao rodar template de tabela). Exclusão mútua com a Data Table mantida via `watch` na view.
+
+**Polish:** `DataGrid` renderiza `NULL` cinza itálico (distingue de string vazia).
+
+**Arquivos criados:** `frontend/src/utils/tableExport.ts` (+ teste), `api/tests/test_template_options.py`.
+**Modificados:** `frontend/src/stores/queryConsole.ts`, `components/{QueryConsolePanel,DataGrid,TemplateEditorModal,TemplateExecuteModal,QueryTemplatesPanel}.vue`, `views/GraphVisualizationView.vue`, `types/graph.ts`, `api/graphlagoon/models/schemas.py` (`TemplateOptions.result_mode`), testes (`queryConsole.test.ts`, `e2e/{tests/query-console.spec.ts,helpers/api-mocks.ts}`).
+
+**Reuso (não reimplementado):** `QueryErrorModal`, `selectNode`/`focusOnNode`/`handleFocusNode`, `queryConsole.runQuery`, infra de `QueryTemplates`, padrões Blob de export.
+
+**Testes:** `vue-tsc` → 0 erros; `vitest` → **699 passed** (36 arquivos); `pytest` → **127 passed, 1 skipped** (inclui 3 novos de `result_mode` + 5 de tabular); E2E `query-console.spec.ts` → **10 passed** (metadata, node-link, Details modal, JSON/Copy/Save, template table→console). `ruff` limpo.
+
+**Risco/nota:** detecção da coluna node_id é heurística (casa `node_id_col`/`node_id`); `RETURN n.node_id AS x` não ativa a ponte — documentado. Sem migration no banco (intent vive no `options` JSON).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-06] - Fix: SQL da aba "SQL" ficava obsoleto após rodar OpenCypher
+
+**Problema (feedback do usuário):** o console tinha um toggle "Show transpiled SQL" no rodapé, mas o campo da aba **SQL** continuava com o texto antigo/placeholder — se o usuário trocasse pra aba SQL depois de rodar Cypher, via um SQL desatualizado, não o que de fato executou. Confuso.
+
+**Fix:** aplicado o mesmo padrão já usado pelo `GraphQueryPanel.vue` (watch em `lastTranspiledSql` → sincroniza `sqlQuery`): em [stores/queryConsole.ts](frontend/src/stores/queryConsole.ts) `runQuery()`, sempre que a resposta traz `transpiled_sql` (modo cypher), `sqlQuery.value` é sobrescrito com o SQL real gerado. Modo SQL (sem `transpiled_sql` na resposta) não é tocado.
+
+Removido o toggle "Show transpiled SQL" + `<pre>` do rodapé (redundante agora — a aba SQL já é a fonte da verdade). No lugar, um link **"View as SQL"** (só aparece em modo cypher com transpiled SQL disponível) troca pra aba SQL, mostrando o resultado real — mesma conveniência, sem duplicar a exibição.
+
+**Arquivos:** `frontend/src/stores/queryConsole.ts`, `frontend/src/components/QueryConsolePanel.vue`, testes (`queryConsole.test.ts`: +2 casos — sobrescreve SQL obsoleto a cada run cypher, não mexe em modo SQL; `e2e/tests/query-console.spec.ts`: +1 caso end-to-end confirmando a troca de aba).
+
+**Testes:** `vue-tsc` 0 erros; `vitest` → **700 passed**; E2E `query-console.spec.ts` → **11 passed**.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-06] - Ajustes: remover export JSON e mover intent Graph/Table pro momento de uso
+
+**Feedback do usuário:** (1) export JSON não faz sentido pra dado tabular — CSV/Copy bastam; (2) o cadastro do template não deveria forçar a escolha Graph vs Table — deixar o usuário escolher **na hora de executar**, com default Graph (comportamento histórico).
+
+**1. Remoção do export JSON.** Removido o botão JSON e `exportJSON()` de [QueryConsolePanel.vue](frontend/src/components/QueryConsolePanel.vue). As funções `resultToObjects`/`downloadBlob` em `utils/tableExport.ts` ficaram sem uso — deletadas (só `toDelimited` resta, usado pelo Copy/TSV). Header agora: `Run · Clear · Save | CSV · Copy`.
+
+**2. `result_mode` deixa de ser um campo do template.** Revertido de `TemplateOptions` (backend `schemas.py` e frontend `types/graph.ts`) — volta a ser só `procedural_bfs`/`cte_prefilter`/`large_results_mode`. [TemplateEditorModal.vue](frontend/src/components/TemplateEditorModal.vue) perde o seletor Graph/Table e a prop `initialResultMode`; as opções de execução (Procedural BFS, Large results) voltam a ser sempre visíveis. [QueryTemplatesPanel.vue](frontend/src/components/QueryTemplatesPanel.vue) perde o badge Graph/Table.
+
+A escolha vira **runtime, não persistida**: [TemplateExecuteModal.vue](frontend/src/components/TemplateExecuteModal.vue) ganha um seletor **"Run as: Graph / Table"** (`resultMode` local, default `'graph'`) exibido ao abrir o modal de execução. `executeNow()` ramifica por esse valor local em vez de `template.options.result_mode`. Os badges informativos de Procedural BFS/Large results só aparecem quando "Graph" está selecionado (são graph-only); CTE pre-filter aparece sempre (útil nos dois modos).
+
+**Arquivos removidos:** `api/tests/test_template_options.py` (testava o campo revertido).
+**Modificados:** `api/graphlagoon/models/schemas.py`, `frontend/src/types/graph.ts`, `frontend/src/components/{QueryConsolePanel,TemplateEditorModal,TemplateExecuteModal,QueryTemplatesPanel}.vue`, `frontend/src/utils/tableExport.ts` (+ teste), `frontend/e2e/tests/query-console.spec.ts` (testes de preset/table-template reescritos: default Graph sem tocar o console + escolha explícita de Table no modal de execução).
+
+**Testes:** `vue-tsc` 0 erros; `vitest` → **698 passed**; `pytest` → **124 passed, 1 skipped**; E2E `query-console.spec.ts` → **12 passed** (inclui novo caso confirmando o default Graph e a escolha Table no "Use").
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-06 11:55] - Feature: Cancelamento de query em execução (Query Console)
+
+**Purpose / dor do usuário:** ao rodar uma query (especialmente no Databricks) o Query Console só mostrava um spinner "Running query…" indeterminado, sem forma de **interromper** uma query pesada/travada — deixando o warehouse queimando compute até o timeout. Pedido: um botão para cancelar a execução, usando o endpoint de cancel do Databricks se existir.
+
+**Descoberta:** o endpoint de cancel do Databricks **já existe e já era usado** internamente (`POST /api/2.0/sql/statements/{id}/cancel`, [warehouse.py](../../api/graphlagoon/services/warehouse.py) no timeout do poll do caminho de grafo). O bloqueio era o caminho do Query Console: `execute_tabular_query` → `execute_statement` com `disposition: INLINE` numa **única chamada HTTP bloqueante** — o frontend nunca recebia o `statement_id`, então não havia o que cancelar (abortar o `fetch` não para a query no warehouse).
+
+**Design decisions:**
+1. **Cancel de verdade exige submit/poll.** Para cancelar o compute no warehouse (não só largar a conexão HTTP) é preciso o `statement_id` no cliente. Refatorado o endpoint de tabela para um fluxo submit → poll → cancel.
+2. **Fast path preservado (sem regressão de performance).** O submit usa um `wait_timeout` curto (novo `warehouse_submit_wait_timeout`, default **5s**, com `on_wait_timeout=CONTINUE`). Queries que terminam em ≤5s voltam **inline na primeira chamada, idênticas ao comportamento anterior** (zero polling, zero overhead). Só queries mais longas caem no modo poll+cancel — exatamente as que justificam um botão Cancel. Custo extra no caminho lento: alguns GETs leves + até ~1 `poll_interval` (1.5s no front) de latência de cauda; **nenhuma mudança no custo de compute** (o cancel, aliás, economiza).
+3. **Compatibilidade retroativa do contrato.** `TableQueryResponse` ganhou `status`/`statement_id` opcionais; `status` ausente é tratado como `"succeeded"` no frontend, então mocks/backends antigos continuam funcionando.
+4. **Robustez de corrida no store.** Um `runToken` monotônico invalida loops de poll obsoletos (nova run, cancel, reset) para não sobrescrever estado fresco. Cancel é best-effort e idempotente (swallow de erro se a query já terminou).
+
+**Backend:**
+- [config.py](../../api/graphlagoon/config.py): novo `warehouse_submit_wait_timeout` (5s).
+- [warehouse.py](../../api/graphlagoon/services/warehouse.py): `submit_statement` (INLINE, wait curto, CONTINUE), `get_statement` (poll), `cancel_statement` (best-effort).
+- [graph_operations.py](../../api/graphlagoon/services/graph_operations.py): `parse_tabular_result` (compartilhado por submit/poll).
+- [routers/graph.py](../../api/graphlagoon/routers/graph.py): `execute_table_query` agora submete e retorna `running` + `statement_id` quando não termina no wait; novos `GET .../query/table/{statement_id}` (poll → running/succeeded/canceled) e `POST .../query/table/{statement_id}/cancel` (204).
+- [schemas.py](../../api/graphlagoon/models/schemas.py): `TableQueryResponse` estendido; novo `TableQueryStatusResponse`.
+
+**Frontend:**
+- [types/graph.ts](../../frontend/src/types/graph.ts): `status`/`statement_id` em `TableQueryResponse`; novo `TableQueryStatusResponse`.
+- [services/api.ts](../../frontend/src/services/api.ts): `getTableQueryStatus`, `cancelTableQuery`.
+- [stores/queryConsole.ts](../../frontend/src/stores/queryConsole.ts): `runQuery` submete → se `running`, guarda `statementId` e faz `pollUntilDone` (1.5s); novos `cancelQuery`, estado `statementId`/`canceled`, guarda `runToken`.
+- [components/QueryConsolePanel.vue](../../frontend/src/components/QueryConsolePanel.vue): botão **Cancel** no estado de loading (só quando há `statementId`) + aviso "Query canceled.".
+
+**Testing:**
+- Unit (store): +4 casos (poll running→succeeded; cancelQuery para o poll e chama o endpoint; poll reportando `canceled`; cancel no-op sem query em voo). `vitest` → **702 passed**.
+- Backend: +8 casos (`parse_tabular_result`; `submit_statement` wait curto/CONTINUE e estado running; `cancel_statement` acerta a URL e engole erro). `pytest` → **131 passed, 1 skipped**.
+- E2E: novo `mockCancellableTableQuery` + caso "a long-running query exposes a Cancel button that stops execution" (verifica que o clique bate no endpoint de cancel e mostra o aviso). `query-console.spec.ts` → **13 passed**.
+- `vue-tsc` → 0 erros nos arquivos tocados.
+
+**Out of scope (decisão explícita do usuário):** barra de progresso do download (chunk i/N) e streaming via SSE — ficaram de fora; só cancelamento nesta entrega.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-06 14:15] - Ajuste: Cancel visível desde o início do spinner + cronômetro de progresso
+
+**Feedback do usuário:** "o botão de cancelar não aparece no spinner? e o progresso?"
+
+**Diagnóstico.** Duas causas:
+1. O botão só aparecia quando o backend respondia `running`, o que exigia a query passar do `wait_timeout` do submit (era **5s**). Antes disso: spinner sem botão.
+2. **Warehouse local é síncrono.** [warehouse/src/routers/statements.py](../../warehouse/src/routers/statements.py) executa a query com `result_df.collect()` e sempre devolve `SUCCEEDED` na hora — nunca `RUNNING` — e **não tem endpoint `/cancel`**. Logo, em `make dev` o botão é impossível de aparecer (a query volta pronta antes de qualquer "running"). O Cancel é uma affordance **exclusiva do Databricks real**.
+
+**Mudança.**
+- **Submit assíncrono:** `warehouse_submit_wait_timeout` default **5 → 0** ([config.py](../../api/graphlagoon/config.py)). Com `wait_timeout=0s` o Databricks devolve `statement_id` + `PENDING` imediatamente, então o botão Cancel aparece desde o começo do spinner (após ~1 round-trip do submit), em vez de depois de 5s. Trade-off consciente: toda query de tabela no Databricks passa a fazer submit+poll (perde o fast-path inline), custando ~`FIRST_POLL_MS` (300ms) de latência inicial na primeira sondagem. Reversível: um valor não-zero (5-50s) restaura o fast-path.
+- **Cronômetro de progresso:** [stores/queryConsole.ts](../../frontend/src/stores/queryConsole.ts) ganha `elapsedMs` (tick de 200ms via `setInterval`, para/reseta em finally/cancel/reset), exibido no spinner ([QueryConsolePanel.vue](../../frontend/src/components/QueryConsolePanel.vue): "Running query… 3.4s"). É o **único sinal de progresso honesto** para uma query em execução — o warehouse não reporta percentual. Progresso real de download (chunk i/N) continua fora de escopo (exigiria migrar o caminho de tabela para `EXTERNAL_LINKS`).
+- **Poll com primeira sondagem rápida:** `FIRST_POLL_MS=300` depois `POLL_INTERVAL_MS=1200` (antes fixo 1500), para não penalizar demais queries curtas.
+- **Cancel durante o submit inicial:** se o usuário cancela antes do `statement_id` chegar, `cancelQuery` invalida a run (via `runToken`) e o guard pós-submit em `runQuery` dispara um cancel best-effort no statement órfão assim que o warehouse retorna o id — para não deixar compute rodando à toa. `cancelQuery` agora dispara sempre que `loading` (não exige mais `statementId`).
+
+**Testes:** `vitest` → **703 passed** (+1 caso: cancel durante submit inicial cancela o órfão e nunca inicia poll; teste de poll ajustado aos novos intervalos + assert do cronômetro). `pytest` → **131 passed, 1 skipped**. E2E `query-console` → **13 passed** (asserção do spinner troca "warehouse" pelo indicador de tempo decorrido). `vue-tsc` 0 erros.
+
+**Nota para testar em dev:** o Cancel não aparece com `make dev` (warehouse local síncrono, sem cancel). Para exercitá-lo de verdade é preciso `make dev-databricks` com uma query pesada. Alternativa futura (não feita): adicionar execução assíncrona + endpoint `/cancel` ao warehouse local para permitir testar o fluxo em dev.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-06 14:35] - Warehouse local: execução assíncrona + cancel + sleep(n) para testar em dev
+
+**Feedback do usuário:** "eu queria testar em dev, tanto o botão como a progressão."
+
+**Problema:** o warehouse local era 100% síncrono (`result_df.collect()` → sempre `SUCCEEDED`), então em `make dev` nunca havia estado `RUNNING` nem endpoint de cancel — impossível ver o botão Cancel ou o cronômetro. Cancel/progresso só existiam contra Databricks real.
+
+**Mudança em [warehouse/src/routers/statements.py](../../warehouse/src/routers/statements.py):**
+- **Fluxo INLINE assíncrono e cancelável** (só INLINE — Query Console; EXTERNAL_LINKS/grafo continua síncrono). POST `/statements` com `disposition=INLINE` cria um `statement_id`, lança um `asyncio.create_task` de background e respeita `wait_timeout` (com `0s`, retorna `RUNNING` na hora). Store em memória `_statements[id] = {state, response, cancel: threading.Event}`.
+- **GET `/statements/{id}`** agora checa `_statements` primeiro: devolve `RUNNING` enquanto executa, `SUCCEEDED` (com data inline) ao terminar, `CANCELED` se cancelado. Fallback para `_chunk_store` (EXTERNAL_LINKS) preservado.
+- **POST `/statements/{id}/cancel`** (novo): sinaliza o `Event` e transiciona `PENDING/RUNNING → CANCELED`. Idempotente/best-effort (id desconhecido = no-op 200), casando com o cliente da API.
+- **Pseudo-função `sleep(<segundos>)`**: `_extract_sleep_seconds`/`_strip_sleep`. O task de background fica em `RUNNING` por N segundos (o dwell é cancelável, checando o Event a cada 100ms), depois reescreve `sleep(n)` para o literal `n` e roda o resto no Spark via `run_in_executor`. Ex.: `SELECT sleep(8)` fica 8s em RUNNING e retorna `8`. A query real roda numa thread para não travar o event loop.
+
+**Como testar em `make dev`:** abrir o Query Console → aba **SQL** → rodar `SELECT sleep(8)` → o spinner mostra o cronômetro subindo e o botão **Cancel**; clicar cancela (statement vira `CANCELED`) ou deixar terminar retorna uma linha. (Em modo cypher não funciona — `sleep` não é Cypher.)
+
+**Testes:** novo [warehouse/tests/test_statements_async.py](../../warehouse/tests/test_statements_async.py) — **7 passed** (helpers de sleep; submit→running→poll→succeeded; cancel→canceled e não-ressurreição; query rápida sem sleep; cancel de id desconhecido no-op; EXTERNAL_LINKS síncrono). Verificado com Spark falso (a query real `SELECT 8` roda trivialmente no Spark de verdade).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-06 19:30] - Cancel + progresso REAL de chunks no overlay do grafo (peças reutilizáveis)
+
+**Pedido do usuário:** levar cancel + progresso ao overlay do grafo — "não dá pra reaproveitar? criar um componente reutilizável?" — e (ajuste) **sem contador de segundos**; a progressão aparece quando começa a leitura de chunks, mostrando **porcentagem (float-safe) + carregados/total**.
+
+**Sacada de performance:** o download de chunks já é concorrente (otimizado). Em vez de serializar (poll baixando 1 chunk por vez → mais lento), a query+download rodam como **task de background na API** (concorrência preservada) que só incrementa um contador `chunks_done/total`; o frontend faz poll barato. Progresso ao vivo, zero regressão.
+
+**Peças reutilizáveis (tabela + grafo compartilham):**
+- **[QueryRunningState.vue](../../frontend/src/components/QueryRunningState.vue)** — apresentacional: spinner + barra de chunks (`%` via `toFixed(1)`, nunca truncando a string do float, + `done/total chunks`) + botão Cancel. Sem contador de segundos.
+- **[useCancellableQuery.ts](../../frontend/src/composables/useCancellableQuery.ts)** — máquina submit→poll→cancel genérica (loading, statementId, canceled, chunkProgress, runToken anti-corrida). Recebe callbacks `submit`/`poll`/`cancel`/`applyResult`.
+- O **queryConsole store** foi **refatorado** pra usar o composable + o componente (removido o timer de segundos); o **graph store** usa os mesmos.
+
+**Backend:**
+- [warehouse.py](../../api/graphlagoon/services/warehouse.py) `execute_statement_external`: novos `on_submit(statement_id)` (pra cancelar) e `progress_callback(done,total)` (dispara por chunk concluído, concorrência mantida).
+- [graph_operations.py](../../api/graphlagoon/services/graph_operations.py) `execute_graph_query_with_nodes`: threading de `on_submit`/`progress_callback(phase, done, total)` nas duas fases (arestas, nós).
+- [async_job.py](../../api/graphlagoon/services/async_job.py) (novo): registry de jobs assíncronos na API (task de background + progress + cancel que também cancela o statement do warehouse).
+- [graph.py](../../api/graphlagoon/routers/graph.py): novos `POST .../query/async`, `POST .../cypher/async`, `GET .../query/job/{id}` (running+progress / succeeded+grafo / canceled), `POST .../query/job/{id}/cancel`. Os blocantes `/query` e `/cypher` ficaram intactos (compat/testes).
+- [statements.py](../../warehouse/src/routers/statements.py) (warehouse dev): knob `WAREHOUSE_CHUNK_DELAY_MS` — atraso por chunk pra tornar o progresso observável em localhost.
+
+**Frontend wiring:** [graph.ts](../../frontend/src/stores/graph.ts) `executeGraphQuery`/`executeCypherQuery` agora submetem via job async + poll (composable), expondo `queryChunkProgress`/`queryCanCancel`/`cancelGraphQuery`; [GraphVisualizationView.vue](../../frontend/src/views/GraphVisualizationView.vue) troca o spinner do overlay pelo `QueryRunningState`. `api.ts`: `submitGraphQueryJob`/`submitCypherQueryJob`/`getGraphQueryJob`/`cancelGraphQueryJob`.
+
+**Verificação:**
+- Unit `vitest` → **710 passed** (+ testes de `QueryRunningState` provando a % float-safe + carregados/total; store do grafo cobrindo progresso de chunks + cancel).
+- Backend `pytest` → **131 passed**; warehouse → **7 passed**.
+- E2E `playwright` → **73 passed** (novo caso: rodar query no grafo mostra barra de chunks `25% · 1/4` + Cancel que dispara o endpoint e some o overlay; testids adicionados: `toolbar-query`, `graph-query-mode-sql`/`-sql`/`-run`).
+- Ao vivo (curl no backend real): job async retornou progress `chunks_done:5/5`, 403 nós / 300 arestas — progresso real de chunks confirmado ponta-a-ponta.
+- `vue-tsc` 0 erros; bundle estático reconstruído.
+
+**Como ver em dev:** `make dev` com `WAREHOUSE_CHUNK_DELAY_MS=400` no warehouse → rodar uma query de grafo que retorne muitos chunks (ex.: `MATCH (a)-[r]->(b) RETURN r LIMIT 3000`, ~30 chunks) → o overlay mostra a barra subindo (%/carregados) e o botão Cancel.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-06] - Feature Implemented: Advanced transpile & optimization settings modal
+
+**Feature:** Um ícone de engrenagem (gear) + modal compartilhado que expõe todas as
+opções de otimização do transpiler gsql2rsql — incluindo as seis
+`ProceduralBFSOptimizations` — mais a opção não-transpiler "Large results mode".
+Disponível tanto no painel lateral (GraphQueryPanel) quanto no console tabular de
+baixo (QueryConsolePanel).
+
+**Contexto / motivação:**
+- A flag `procedural_bfs` estava **desativada por default** (`vlpRenderingMode = 'cte'`
+  no store e `CypherQueryRequest.vlp_rendering_mode = "cte"` no backend).
+- `vlp_rendering_mode`/`materialization_strategy` já iam para o `SQLRenderer`, mas a
+  classe `ProceduralBFSOptimizations` **nunca era construída** — o transpiler usava só
+  os defaults do dataclass.
+- O console tabular (`execute_table_query`) fixava `vlp_rendering_mode="cte"` no
+  código, por isso o Procedural BFS nunca aparecia no painel de baixo.
+
+**Decisões de design (confirmadas com o usuário):**
+1. **Ambos os painéis, modal compartilhado** — os checkboxes inline do painel lateral
+   foram substituídos por um botão-resumo + engrenagem que abre o mesmo
+   `TranspileSettingsModal`. Fonte única de verdade no graph store.
+2. **Full wiring nos dois endpoints** — `procedural_optimizations` é enviado ao
+   gsql2rsql tanto no `/cypher` quanto no `/query/table`; o endpoint tabular passou a
+   honrar `vlp_rendering_mode`/`materialization_strategy` em vez de fixar `cte`.
+3. **Persistência em ExplorationState** — `procedural_optimizations` é
+   salvo/restaurado junto com `vlp_rendering_mode`/`materialization_strategy`.
+
+**Regras aplicadas:**
+- Flags só são enviadas quando `vlp_rendering_mode === 'procedural'` (só valem nesse modo).
+- `undirected_doubled_adjacency` ⊕ `undirected_union_all` são mutuamente exclusivas —
+  o modal força a exclusão ao alternar; o backend converte o `ValueError` do transpiler
+  em HTTP 400 (`INVALID_TRANSPILE_OPTIONS`).
+- Escopo por estratégia: `loop_control_into` (numbered_views only),
+  `deferred_edge_payload`/`barrier_precompute` (temp_tables only) — o modal desabilita
+  os controles fora de escopo.
+
+**Backend (files):**
+- [api/graphlagoon/models/schemas.py](api/graphlagoon/models/schemas.py) — novo model
+  `ProceduralBFSOptions`; campo `procedural_optimizations` em `CypherQueryRequest`,
+  `CypherTranspileRequest`, `TableQueryRequest` (+ `vlp_rendering_mode`/
+  `materialization_strategy` neste último) e em `ExplorationState`.
+- [api/graphlagoon/services/cypher.py](api/graphlagoon/services/cypher.py) —
+  `transpile_cypher_to_sql` constrói `ProceduralBFSOptimizations` e passa ao
+  `SQLRenderer` apenas em modo procedural.
+- [api/graphlagoon/routers/graph.py](api/graphlagoon/routers/graph.py) — repassa
+  `data.procedural_optimizations` nos 3 call-sites de transpile; endpoint tabular deixa
+  de fixar `cte`; `ValueError` → 400.
+
+**Frontend (files):**
+- [frontend/src/types/graph.ts](frontend/src/types/graph.ts) — interface
+  `ProceduralBFSOptions` + `DEFAULT_PROCEDURAL_BFS_OPTIONS`; campos nos requests e em
+  `ExplorationState`.
+- [frontend/src/stores/graph.ts](frontend/src/stores/graph.ts) — ref
+  `proceduralOptimizations`, envio condicional nos requests cypher, persistência e export.
+- [frontend/src/components/TranspileSettingsModal.vue](frontend/src/components/TranspileSettingsModal.vue) — **novo** modal compartilhado.
+- [frontend/src/components/GraphQueryPanel.vue](frontend/src/components/GraphQueryPanel.vue) — engrenagem no header + botão-resumo (inline controls removidos).
+- [frontend/src/components/QueryConsolePanel.vue](frontend/src/components/QueryConsolePanel.vue) — engrenagem no header + modal.
+- [frontend/src/stores/queryConsole.ts](frontend/src/stores/queryConsole.ts) — envia as
+  opções de transpile (cypher mode) para `executeTableQuery`.
+
+**Testing:**
+- Frontend: 717 testes passando (vitest), incluindo 6 novos em
+  `TranspileSettingsModal.test.ts` (exclusividade mútua, escopo, reset, binding) e
+  round-trip de `procedural_optimizations` em `graph.exploration.test.ts`;
+  `queryConsole.test.ts` atualizado para o novo payload cypher.
+- Backend: `test_transpile_options.py` (4 testes — wiring procedural, ignorado em cte,
+  None sem opts, `ValueError` na combinação mutuamente exclusiva). `test_table_query.py`
+  (12) segue verde. `vue-tsc` 0 erros.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-06 20:00] - Warehouse INLINE async vira opt-in (default síncrono) + fix de vazamento
+
+**Preocupação do usuário:** o comportamento async INLINE do warehouse pode causar exceção com muitos dados? E: o cancel no warehouse local é só pra teste — deixar uma opção (default off) pro cancel real.
+
+**Riscos identificados (com a flag ligada / no código anterior):**
+1. **Vazamento de memória:** cada statement INLINE async criava uma entrada em `_statements` guardando o `response` completo (todas as linhas inline) e **nunca removia** → OOM com queries grandes/frequentes.
+2. **Pressão no threadpool:** `run_in_executor(None, ...)` usa o pool default do asyncio; queries Spark pesadas seguram threads → esgota sob concorrência.
+
+**Solução (alinha com o pedido):** nova config `async_inline_execution` (**default `False`**) em [warehouse/src/config.py](../../warehouse/src/config.py). Em [statements.py](../../warehouse/src/routers/statements.py) `execute_statement`:
+- **Flag OFF (default):** INLINE roda **síncrono** (caminho histórico) — devolve o resultado completo na hora, **sem estado por-request**, logo sem o `_statements` crescendo nem pressão de threadpool. Seguro pra muitos dados.
+- **Flag ON (opt-in, dev):** fluxo async/cancelável (RUNNING + poll/cancel + `sleep(n)`) pra exercitar o botão Cancel da tabela localmente. O cancel é simulação, não mata o job Spark.
+- **Reaper:** mesmo com a flag ON, `_reap_finished_statements()` limita `_statements` a `_MAX_RETAINED_STATEMENTS=64` (dropa terminais antigos) → não vaza.
+- EXTERNAL_LINKS (grafo) sempre síncrono, como antes.
+
+**Importante:** o cancel/progresso do **grafo** funciona independente dessa flag (é hospedado na API via `async_job.py`, não no warehouse). A flag só afeta o cancel da **tabela** (Query Console). Com a flag OFF, a query de tabela volta `succeeded` na hora (sem botão Cancel) — comportamento seguro e padrão.
+
+**Testes:** warehouse → **9 passed** (novos: `test_inline_is_synchronous_and_stateless_when_flag_off` prova default síncrono sem estado; `test_reaper_caps_retained_statements` prova o cap; fixture autouse liga a flag pros testes do fluxo async). Backend API → 133 passed (2 falhas pré-existentes de colisão de import entre `test_transpile_options.py` [novo, feature paralela] e o stub gsql2rsql de `test_table_query.py` — não relacionadas a esta mudança).
+
+**Como testar o cancel da TABELA em dev:** subir o warehouse com `ASYNC_INLINE_EXECUTION=true` (env). Sem isso, só o cancel/progresso do grafo aparece (que não precisa da flag).
+
+**Author:** Claude (AI Assistant)
+
+---

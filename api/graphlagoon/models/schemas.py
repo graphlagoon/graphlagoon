@@ -270,6 +270,23 @@ VlpRenderingMode: TypeAlias = Literal["cte", "procedural"]
 MaterializationStrategy: TypeAlias = Literal["temp_tables", "numbered_views"]
 
 
+class ProceduralBFSOptions(BaseModel):
+    """Fine-grained toggles for gsql2rsql's procedural BFS renderer.
+
+    Field names and defaults mirror ``gsql2rsql.ProceduralBFSOptimizations``.
+    Flags only take effect when ``vlp_rendering_mode == "procedural"``. Note
+    ``undirected_doubled_adjacency`` and ``undirected_union_all`` are mutually
+    exclusive — enabling both raises ``ValueError`` in the transpiler.
+    """
+
+    visited_not_exists: bool = True  # default; both strategies
+    loop_control_into: bool = True  # default; numbered_views only
+    undirected_doubled_adjacency: bool = True  # default; both strategies
+    deferred_edge_payload: bool = True  # default; temp_tables only
+    barrier_precompute: bool = True  # default; temp_tables only
+    undirected_union_all: bool = False  # default; both strategies
+
+
 class SnapshotNode(BaseModel):
     id: str
     type: str
@@ -305,6 +322,7 @@ class ExplorationState(BaseModel):
     cte_prefilter: Optional[str] = None  # CTE pre-filter for edge table
     vlp_rendering_mode: Optional[VlpRenderingMode] = None
     materialization_strategy: Optional[MaterializationStrategy] = None
+    procedural_optimizations: Optional[ProceduralBFSOptions] = None
     textFormat: Optional[TextFormatState] = None
     clusters: Optional[dict] = None  # ClusterState JSON from frontend
     nodeTypeIcons: Optional[dict[str, str]] = None
@@ -604,6 +622,7 @@ class CypherQueryRequest(BaseModel):
     cte_prefilter: Optional[str] = None
     vlp_rendering_mode: VlpRenderingMode = "cte"
     materialization_strategy: MaterializationStrategy = "numbered_views"
+    procedural_optimizations: Optional[ProceduralBFSOptions] = None
     use_external_links: bool = True
 
 
@@ -625,6 +644,7 @@ class CypherTranspileRequest(BaseModel):
     cte_prefilter: Optional[str] = None
     vlp_rendering_mode: VlpRenderingMode = "cte"
     materialization_strategy: MaterializationStrategy = "numbered_views"
+    procedural_optimizations: Optional[ProceduralBFSOptions] = None
 
 
 class CypherTranspileResponse(BaseModel):
@@ -645,17 +665,88 @@ class TableQueryRequest(BaseModel):
     mode: Literal["cypher", "sql"] = "cypher"
     cte_prefilter: Optional[str] = None
     row_limit: int = Field(default=1000, ge=1, le=100000)
+    # Transpile options (cypher mode only). Default to legacy "cte" so plain
+    # SQL / simple cypher table queries are unaffected.
+    vlp_rendering_mode: VlpRenderingMode = "cte"
+    materialization_strategy: MaterializationStrategy = "numbered_views"
+    procedural_optimizations: Optional[ProceduralBFSOptions] = None
 
 
 class TableQueryResponse(BaseModel):
-    """Response from a generic tabular query."""
+    """Response from a generic tabular query.
 
-    columns: list[str]
-    rows: list[list[Optional[str]]]
-    row_count: int
+    ``status`` distinguishes the two outcomes of the cancellable submit flow:
+    - ``"succeeded"``: query finished within the submit wait window; ``columns``
+      and ``rows`` hold the result (the historical fast-path shape).
+    - ``"running"``: query is still executing; ``columns``/``rows`` are empty and
+      ``statement_id`` identifies it for polling (``GET .../query/table/{id}``)
+      and cancellation (``POST .../query/table/{id}/cancel``).
+    """
+
+    status: Literal["succeeded", "running"] = "succeeded"
+    statement_id: Optional[str] = None
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[Optional[str]]] = Field(default_factory=list)
+    row_count: int = 0
     truncated: bool = False
+    # Result-set shape from the warehouse manifest (known once SUCCEEDED). For
+    # the INLINE table path this is a single chunk; surfaced so the client can
+    # log/report how the result was chunked.
+    total_chunk_count: Optional[int] = None
+    total_row_count: Optional[int] = None
     transpiled_sql: Optional[str] = None  # populated in cypher mode
     metadata: Optional[QueryMetadata] = None
+
+
+class TableQueryStatusResponse(BaseModel):
+    """Poll response for an in-flight table query.
+
+    Mirrors :class:`TableQueryResponse` but for the ``GET`` status endpoint:
+    ``status="running"`` while executing, ``status="succeeded"`` with data once
+    complete. A FAILED/timed-out statement surfaces as an HTTP 400 instead; a
+    CANCELED one as ``status="canceled"``.
+    """
+
+    status: Literal["running", "succeeded", "canceled"]
+    statement_id: str
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[Optional[str]]] = Field(default_factory=list)
+    row_count: int = 0
+    truncated: bool = False
+    # Result-set shape from the warehouse manifest (known once SUCCEEDED).
+    total_chunk_count: Optional[int] = None
+    total_row_count: Optional[int] = None
+
+
+class GraphJobProgress(BaseModel):
+    """Chunk-download progress for an in-flight graph query job."""
+
+    phase: str  # "edges" | "nodes"
+    chunks_done: int
+    chunks_total: int
+
+
+class GraphJobSubmitResponse(BaseModel):
+    """Response to submitting a cancellable graph/cypher query job."""
+
+    status: Literal["running", "succeeded"] = "running"
+    job_id: str
+    transpiled_sql: Optional[str] = None  # populated for cypher jobs
+
+
+class GraphJobStatusResponse(BaseModel):
+    """Poll response for an in-flight graph query job.
+
+    ``running`` carries chunk-download ``progress``; ``succeeded`` carries the
+    ``result`` graph (and ``transpiled_sql`` for cypher). A failed job surfaces
+    as HTTP 400; a cancelled one as ``status="canceled"``.
+    """
+
+    status: Literal["running", "succeeded", "canceled"]
+    job_id: str
+    progress: Optional[GraphJobProgress] = None
+    result: Optional[GraphResponse] = None
+    transpiled_sql: Optional[str] = None
 
 
 # --- Databricks SQL Statements API compatible models ---

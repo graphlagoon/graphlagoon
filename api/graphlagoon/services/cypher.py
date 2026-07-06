@@ -6,6 +6,7 @@ from typing import Optional
 from gsql2rsql.parser.opencypher_parser import OpenCypherParser
 from gsql2rsql.planner.logical_plan import LogicalPlan
 from gsql2rsql.planner.pass_manager import optimize_plan
+from gsql2rsql import ProceduralBFSOptimizations
 from gsql2rsql.renderer.sql_renderer import SQLRenderer
 from gsql2rsql.common.schema import NodeSchema, EdgeSchema, EntityProperty
 from gsql2rsql.renderer.schema_provider import (
@@ -166,6 +167,7 @@ def transpile_cypher_to_sql(
     context: GraphContextModel,
     vlp_rendering_mode: str = "cte",
     materialization_strategy: str = "numbered_views",
+    procedural_optimizations: Optional[object] = None,
 ) -> str:
     """
     Transpile an OpenCypher query to Spark SQL.
@@ -175,12 +177,17 @@ def transpile_cypher_to_sql(
         context: The GraphContext with schema information
         vlp_rendering_mode: "cte" (WITH RECURSIVE) or "procedural" (BFS)
         materialization_strategy: "temp_tables" or "numbered_views"
+        procedural_optimizations: Optional object exposing the six
+            ProceduralBFSOptions boolean fields (e.g. the Pydantic model).
+            Only applied when ``vlp_rendering_mode == "procedural"``.
 
     Returns:
         The transpiled SQL query string
 
     Raises:
-        ValueError: If the query cannot be parsed or transpiled
+        ValueError: If the query cannot be parsed/transpiled, or if the
+            procedural optimization flags are inconsistent (e.g. both
+            undirected_doubled_adjacency and undirected_union_all enabled).
     """
     # Build schema provider from context
     schema = build_schema_provider(context)
@@ -195,11 +202,22 @@ def transpile_cypher_to_sql(
 
     plan.resolve(original_query=cypher_query)
 
+    # Procedural BFS optimization flags only apply in procedural mode.
+    procedural_opts = None
+    if vlp_rendering_mode == "procedural" and procedural_optimizations is not None:
+        # Accept either the Pydantic model or a plain dict of the six flags.
+        if hasattr(procedural_optimizations, "model_dump"):
+            flags = procedural_optimizations.model_dump()
+        else:
+            flags = dict(procedural_optimizations)
+        procedural_opts = ProceduralBFSOptimizations(**flags)
+
     # Render to SQL
     renderer = SQLRenderer(
         db_schema_provider=schema,
         vlp_rendering_mode=vlp_rendering_mode,
         materialization_strategy=materialization_strategy,
+        procedural_optimizations=procedural_opts,
     )
 
     sql = renderer.render_plan(plan)
