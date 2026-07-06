@@ -85,6 +85,24 @@ export async function setupAPIMocks(page: Page) {
     });
   });
 
+  // Generic tabular query endpoint (POST) — Query Console
+  await page.route('**/graphlagoon/api/graph-contexts/*/query/table', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        columns: ['node_id', 'name'],
+        rows: [
+          ['n1', 'Alice'],
+          ['n2', 'Bob'],
+        ],
+        row_count: 2,
+        truncated: false,
+        transpiled_sql: 'SELECT node_id, name FROM nodes',
+      }),
+    });
+  });
+
   // Context-specific explorations
   await page.route('**/graphlagoon/api/graph-contexts/*/explorations', (route) => {
     route.fulfill({
@@ -261,6 +279,38 @@ export async function seedExplorations(page: Page, explorations: any[]) {
       }
     });
   }
+}
+
+/**
+ * Override the tabular query endpoint (Query Console). Call AFTER setupAPIMocks.
+ * Pass `{ status, body }` to simulate an error response.
+ */
+export async function mockTableQuery(
+  page: Page,
+  response: { columns?: string[]; rows?: (string | null)[][]; row_count?: number; truncated?: boolean; transpiled_sql?: string } | { status: number; body: any },
+) {
+  await page.route('**/graphlagoon/api/graph-contexts/*/query/table', (route) => {
+    if ('status' in response) {
+      route.fulfill({
+        status: response.status,
+        contentType: 'application/json',
+        body: JSON.stringify(response.body),
+      });
+      return;
+    }
+    const rows = response.rows ?? [];
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        columns: response.columns ?? [],
+        rows,
+        row_count: response.row_count ?? rows.length,
+        truncated: response.truncated ?? false,
+        transpiled_sql: response.transpiled_sql,
+      }),
+    });
+  });
 }
 
 /**

@@ -633,6 +633,31 @@ class CypherTranspileResponse(BaseModel):
     transpiled_sql: str
 
 
+class TableQueryRequest(BaseModel):
+    """Request to run a generic query and return raw tabular rows.
+
+    Unlike CypherQueryRequest, the query is NOT required to return edges
+    (RETURN r). Any projection is allowed; the result is returned as
+    columns + rows for display in a table.
+    """
+
+    query: str
+    mode: Literal["cypher", "sql"] = "cypher"
+    cte_prefilter: Optional[str] = None
+    row_limit: int = Field(default=1000, ge=1, le=100000)
+
+
+class TableQueryResponse(BaseModel):
+    """Response from a generic tabular query."""
+
+    columns: list[str]
+    rows: list[list[Optional[str]]]
+    row_count: int
+    truncated: bool = False
+    transpiled_sql: Optional[str] = None  # populated in cypher mode
+    metadata: Optional[QueryMetadata] = None
+
+
 # --- Databricks SQL Statements API compatible models ---
 
 

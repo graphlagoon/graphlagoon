@@ -210,5 +210,23 @@ describe('ApiService', () => {
       )
       expect(result).toEqual(data)
     })
+
+    it('executeTableQuery calls POST /api/graph-contexts/:id/query/table', async () => {
+      const request = { query: 'MATCH (n) RETURN n.node_id', mode: 'cypher' as const }
+      const data = {
+        columns: ['node_id'],
+        rows: [['a'], ['b']],
+        row_count: 2,
+        truncated: false,
+        transpiled_sql: 'SELECT node_id ...',
+      }
+      vi.mocked(mockClient.post).mockResolvedValue({ data })
+      const result = await api.executeTableQuery('ctx-1', request as any)
+      expect(mockClient.post).toHaveBeenCalledWith(
+        '/api/graph-contexts/ctx-1/query/table',
+        request
+      )
+      expect(result).toEqual(data)
+    })
   })
 })

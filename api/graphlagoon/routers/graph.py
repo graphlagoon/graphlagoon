@@ -23,11 +23,15 @@ from graphlagoon.models.schemas import (
     CypherQueryResponse,
     CypherTranspileRequest,
     CypherTranspileResponse,
+    TableQueryRequest,
+    TableQueryResponse,
+    QueryMetadata,
 )
 from graphlagoon.services.cypher import transpile_cypher_to_sql, validate_cypher_query
 from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
 from graphlagoon.services.graph_operations import (
     execute_graph_query_with_nodes,
+    execute_tabular_query,
     QueryExecutionError,
 )
 from graphlagoon.services.sql_validation import (
@@ -735,6 +739,150 @@ async def execute_cypher_query(
         truncated=result.truncated,
         total_count=result.total_count,
         transpiled_sql=sql,
+        metadata=metadata,
+    )
+
+
+@router.post(
+    "/graph-contexts/{context_id}/query/table",
+    response_model=TableQueryResponse,
+)
+async def execute_table_query(
+    context_id: UUID,
+    data: TableQueryRequest,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """
+    Run a generic query and return raw tabular rows (columns + rows).
+
+    Unlike ``/cypher``, the query is NOT required to return edges — any
+    projection is allowed (e.g. ``MATCH (n:Person) RETURN n.name, count(*)``).
+    In ``cypher`` mode the query is transpiled to Spark SQL; in ``sql`` mode it
+    runs directly. Both modes are restricted to read-only SELECT statements.
+    """
+    import time
+
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+
+    if not data.query or not data.query.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "EMPTY_QUERY",
+                    "message": "Query must not be empty",
+                    "details": {},
+                }
+            },
+        )
+
+    transpiled_sql: str | None = None
+    transpilation_ms: float | None = None
+
+    if data.mode == "cypher":
+        # Transpile OpenCypher to SQL. We deliberately skip the
+        # validate_cypher_query "RETURN r" gate — arbitrary projections are the
+        # whole point of this endpoint. The transpiler rejects invalid Cypher,
+        # and validate_sql_query below is the read-only security boundary.
+        t_transpile_start = time.perf_counter()
+        try:
+            sql = transpile_cypher_to_sql(
+                data.query,
+                context,
+                vlp_rendering_mode="cte",
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "CYPHER_TRANSPILE_ERROR",
+                        "message": f"{type(e).__name__}: {e}",
+                        "details": {"query": data.query},
+                    }
+                },
+            )
+        transpilation_ms = (time.perf_counter() - t_transpile_start) * 1000
+
+        # Apply CTE pre-filter if provided
+        if data.cte_prefilter:
+            is_valid, error_msg = validate_cte_prefilter(data.cte_prefilter)
+            if not is_valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": {
+                            "code": "INVALID_CTE_PREFILTER",
+                            "message": error_msg,
+                            "details": {},
+                        }
+                    },
+                )
+            sql = apply_cte_prefilter(
+                sql,
+                data.cte_prefilter,
+                context.edge_table_name,
+                context.node_table_name,
+            )
+        transpiled_sql = sql
+    else:
+        sql = data.query
+
+    # Security boundary: read-only SELECT only (both modes).
+    is_valid, error_msg = validate_sql_query(sql)
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_SQL_QUERY",
+                    "message": error_msg,
+                    "details": (
+                        {"query": sql}
+                        if data.mode == "sql"
+                        else {"transpiled_sql": sql}
+                    ),
+                }
+            },
+        )
+
+    # Execute and return raw rows.
+    t_exec_start = time.perf_counter()
+    try:
+        columns, rows, truncated = await execute_tabular_query(
+            warehouse_client=warehouse,
+            query=sql,
+            row_limit=data.row_limit,
+        )
+    except QueryExecutionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "QUERY_EXECUTION_ERROR",
+                    "message": e.message,
+                    "details": {"query": e.query or sql},
+                }
+            },
+        )
+
+    execution_ms = (time.perf_counter() - t_exec_start) * 1000
+    total_ms = execution_ms + (transpilation_ms or 0.0)
+    metadata = QueryMetadata(
+        transpilation_ms=(
+            round(transpilation_ms, 2) if transpilation_ms is not None else None
+        ),
+        total_ms=round(total_ms, 2),
+    )
+
+    return TableQueryResponse(
+        columns=columns,
+        rows=rows,
+        row_count=len(rows),
+        truncated=truncated,
+        transpiled_sql=transpiled_sql,
         metadata=metadata,
     )
 

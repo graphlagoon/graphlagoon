@@ -424,6 +424,24 @@ export interface CypherTranspileResponse {
   transpiled_sql: string;
 }
 
+export type TableQueryMode = 'cypher' | 'sql';
+
+export interface TableQueryRequest {
+  query: string;
+  mode?: TableQueryMode;
+  cte_prefilter?: string;
+  row_limit?: number;
+}
+
+export interface TableQueryResponse {
+  columns: string[];
+  rows: (string | null)[][];
+  row_count: number;
+  truncated: boolean;
+  transpiled_sql?: string;
+  metadata?: QueryMetadata;
+}
+
 // Catalog types
 export interface CatalogInfo {
   name: string;

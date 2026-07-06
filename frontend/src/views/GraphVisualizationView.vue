@@ -23,8 +23,9 @@ import ClusterListPanel from '@/components/ClusterListPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
 import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
+import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
 import QueryTemplatesPanel from '@/components/QueryTemplatesPanel.vue';
-import { Info, Settings2, Hexagon, Maximize2, Minimize2, Table2, AlertCircle, Network } from 'lucide-vue-next';
+import { Info, Settings2, Hexagon, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
 
 const props = defineProps<{
   contextId: string;
@@ -52,6 +53,18 @@ const showTemplatesPanel = ref(false);
 const selectedClusterId = ref<string | null>(null);
 const showDetailModal = ref(false);
 const showDataTable = ref(false);
+const showQueryConsole = ref(false);
+
+// The Data Table and Query Console are both bottom drawers — only one at a time.
+function toggleDataTable() {
+  showDataTable.value = !showDataTable.value;
+  if (showDataTable.value) showQueryConsole.value = false;
+}
+
+function toggleQueryConsole() {
+  showQueryConsole.value = !showQueryConsole.value;
+  if (showQueryConsole.value) showDataTable.value = false;
+}
 
 const detailModalItem = computed(() => {
   if (!showDetailModal.value) return null;
@@ -307,11 +320,22 @@ watch(
           <button
             class="toolbar-btn"
             :class="{ active: showDataTable }"
-            @click="showDataTable = !showDataTable"
+            @click="toggleDataTable"
             title="Data Table"
           >
             <Table2 :size="14" />
             <span class="btn-label">Table</span>
+          </button>
+
+          <button
+            class="toolbar-btn"
+            :class="{ active: showQueryConsole }"
+            @click="toggleQueryConsole"
+            title="Query Console"
+            data-testid="query-console-toggle"
+          >
+            <TerminalSquare :size="14" />
+            <span class="btn-label">Query</span>
           </button>
         </div>
 
@@ -330,6 +354,12 @@ watch(
       @close="showDataTable = false"
       @focus-node="handleFocusNode"
       @focus-edge="handleFocusNode"
+    />
+
+    <!-- Query Console (bottom drawer) -->
+    <QueryConsolePanel
+      v-if="showQueryConsole"
+      @close="showQueryConsole = false"
     />
 
     <!-- Resource Monitor Modal -->

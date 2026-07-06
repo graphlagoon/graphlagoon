@@ -1878,3 +1878,239 @@ Aplicadas contra o warehouse PySpark local (Databricks indisponível). Cada fase
 **Author:** Claude (AI Assistant)
 
 ---
+
+## 2026-07-03 — Performance (Fase 4): download paralelo dos chunks EXTERNAL_LINKS
+
+Alvo Databricks (não mensurável em cheio localmente, mas corretude validada no warehouse local que simula external links).
+
+### Mudança
+
+`execute_statement_external` ([warehouse.py]): o **polling continua serial** (obrigatório esperar o statement `SUCCEEDED`). Só o **download dos chunks já materializados** foi paralelizado:
+- `manifest.total_chunk_count` é conhecido de antemão; cada chunk é endereçável por índice (`/result/chunks/{i}`, sem next-link encadeado) → GETs independentes.
+- `asyncio.gather` com `asyncio.Semaphore(chunk_concurrency)` (novo setting `warehouse_chunk_concurrency`, default 8; `=1` força serial).
+- **Remontagem estrita por `chunk_index` ascendente** (gather preserva ordem da entrada) — mais determinístico que a ordem anterior. Preserva `_download_external_chunk` + refresh de URL expirada + retry 403.
+
+### Verificação (warehouse local, que fatiou em 178 chunks)
+
+- **Corretude:** query determinística (`ORDER BY edge_id`) via INLINE vs EXTERNAL_LINKS → **arestas idênticas (order-sensitive) e mesmo conjunto de nós** (8000 arestas / 9741 nós). 178 chunks baixados concorrentemente e remontados em ordem exata.
+- **A/B serial vs paralelo (178 chunks):** `chunk_download_ms` 1769ms (concorrência=1) → 1686ms (=8) — só **~5% local**, porque o warehouse local é 1 worker uvicorn servindo chunks em loopback (serializa no lado servidor). No Databricks os chunks são arquivos independentes em object storage → o ganho do paralelismo tende a ser grande lá. Localmente o que importa: **corretude + sem regressão**.
+
+### Dependência / lock
+
+- `orjson>=3.11.9` adicionado (Fase 1). O `uv add orjson` inicial reescreveu o `uv.lock` de forma malformada (entrada `gsql2rsql` editável mantendo wheels do pypi). **Corrigido regenerando o lock do zero** (`rm uv.lock && uv lock`): `gsql2rsql` fica **editable 0.10.1** (via `[tool.uv.sources]`, versão local atual — subiu, não retrocedeu) e orjson entra limpo. `uv run`/`uv sync` voltaram a funcionar.
+
+### Arquivos
+
+- `api/graphlagoon/config.py` (setting `warehouse_chunk_concurrency`), `api/graphlagoon/services/warehouse.py` (download paralelo), `api/pyproject.toml` + `uv.lock` (orjson + gsql2rsql 0.10.1).
+
+### Testes
+
+- Backend `pytest` → **119 passed**; `ruff check` limpo; `uv run --frozen` importa orjson + gsql2rsql 0.10.1.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## 2026-07-03 — Performance (Fase A): warmup de layout limitado por trabalho (não por bucket)
+
+`forcegraphUpdate` (o maior custo frontend restante, ~2,4s a 20k) inclui o **loop síncrono de `warmupTicks`** ([forcegraph-kapsule.js:1423-1444]) rodado antes do 1º paint. `computeAdaptiveLayoutParams` ([forceConfig3D.ts]) usava buckets fixos com `warmupTicks` **crescente** (30→80→**150** para >10k) — direção errada, já que cada tick custa ~O(total), então grafos enormes bloqueavam por segundos.
+
+### Mudança
+
+Warmup agora é **limitado por trabalho** (a pedido do usuário: dependente do tamanho, na direção certa): `warmupTicks = clamp(round(WARMUP_WORK_BUDGET / total), 20, 150)` com `WARMUP_WORK_BUDGET = 600_000` node-ticks. Assim `warmupTicks` **decresce** conforme o grafo cresce (mantendo o trabalho síncrono pré-paint ~constante); o assentamento restante fica nos `cooldownTicks`/`ticksPerFrame` animados (não-bloqueantes). O **teto continua alto (150), reservado a grafos pequenos** (barato: 150×500 é trivial → 1º paint bem assentado); o budget só reduz o warmup para grafos grandes, até o **piso de 20** para muito grandes. Curva: total ≤~4000 → 150; 10k → 60; 15k → 40; ≥30k → 20. Ex.: a 20k/60k, warmup 150→**20**.
+
+### Resultado (harness browser, 20k nós / 60k arestas)
+
+| `forcegraphUpdate` | warmup 150 (antes) | warmup 20 (agora) | Δ |
+|---|---:|---:|---:|
+| avg | 2394ms | **650ms** | **−73%** |
+| max (1º paint) | 9452ms | **2468ms** | **−74%** |
+
+Confirma que os warmup ticks síncronos eram o gargalo (não a construção de cena). O ~2468ms de max restante é a construção da cena THREE (8,3M triângulos) — candidato a instancing/GPU (fora desta rodada). Grafo renderiza corretamente.
+
+### Arquivos
+
+- `frontend/src/utils/forceConfig3D.ts` (warmup work-bounded), `frontend/src/utils/__tests__/forceConfig3D.test.ts` (asserções atualizadas + teste do budget).
+
+### Testes
+
+- `vitest run` → **666 passed (32 arquivos)**; `vue-tsc` → **0 erros**.
+- Validação visual do layout inicial (menos assentado no 1º frame) fica a cargo do usuário na UI real.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## 2026-07-03 — Performance (Fase B): edge/node processing com orjson + model_construct
+
+Em `process_graph_query_result`/`process_nodes_result` ([graph_operations.py]) o custo por linha era `json.loads` (parse de valores JSON das properties) + construção de `Edge(...)`/`Node(...)` Pydantic com validação.
+
+### Mudança
+
+- `_parse_row_value`: `json.loads` → `orjson.loads` (mais rápido; `import json` trocado por `import orjson`, único uso).
+- `Edge(...)`/`Node(...)` → `Edge.model_construct(...)`/`Node.model_construct(...)`. Os valores vêm do nosso próprio SQL via statements API (já são strings — ver docstring de `_parse_row_value`), então pular a revalidação Pydantic é seguro. `GraphResponse(edges=...)` não re-valida submodelos (Pydantic v2 `revalidate_instances='never'`).
+
+### Resultado (30k arestas / 10k nós, mediana)
+
+| | antes | depois | Δ |
+|---|---:|---:|---:|
+| `edge_processing_ms` | 96,8ms | 89,5ms | −8% |
+| `node_processing_ms` | 32,4ms | 23,3ms | −28% |
+
+**Ganho modesto e ruidoso** — honestamente: os modelos são flat (4–5 campos), então a validação Pydantic v2 (core Rust) já é barata e `model_construct` economiza pouco; `orjson` só rende onde há JSON nas properties. As arestas do bench não têm properties (por isso edge só −8%), os nós têm `metadata` aninhado (−28%). Em dados com properties ricas o ganho é maior.
+
+### Corretude
+
+- `node_id`/`node_type`/campos de aresta continuam `str`; properties aninhadas parseadas para `dict` (não string); counts corretos. Backend **119 passed**; `ruff` limpo.
+
+### Arquivos
+
+- `api/graphlagoon/services/graph_operations.py`.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## 2026-07-03 — Performance (Fase E.1 + default 2D): menos renders de assentamento
+
+Continuação do desacoplamento layout↔render. `_animationCycle` do 3d-force-graph renderiza a cena a cada frame, então nº de renders no assentamento ≈ `cooldownTicks / ticksPerFrame`.
+
+### Fase E.1 — `ticksPerFrame` maior para grafos grandes
+
+`computeAdaptiveLayoutParams` ([forceConfig3D.ts]): `ticksPerFrame` 3→**4** (<3000), 6→**12** (<10000), 10→**24** (>=10000). Mesmos ticks totais rodam em bem menos frames renderizados (grande: 800/10=80 → 800/24≈**33 renders**). Trade-off: cada frame faz mais trabalho (animação mais "picada"), mas o overhead de render no assentamento cai muito. Testes usam lower-bounds (`>=6`/`>=10`) → seguem passando.
+
+### Default 2D (a pedido do usuário)
+
+`behaviors.viewMode` default `'3d'` → **`'2d-proj'`** ([graph.ts:227]) + sincronizado no `resetBehaviors()` ([BehaviorPanel.vue:96]). 2D usa simulação de força em 2 dimensões (mais leve por tick) e projeção plana (menos overdraw). **Mudança visível de UX:** grafos novos abrem em 2D; usuário alterna pra 3D pelo botão de viewMode ([GraphVisualizationView.vue:284]).
+
+### Resultado (harness, 20k nós / 60k arestas)
+
+| `forcegraphUpdate` | original (3D, warmup 150, tpf 10) | Fase A (3D, warmup 20) | **E.1+2D (warmup 20, tpf 24)** |
+|---|---:|---:|---:|
+| avg | 2394ms | 650ms | **451ms** |
+| max (1º paint) | 9452ms | 2468ms | **1671ms** |
+
+Cumulativo **−81% avg / −82% max** desde o baseline. Renderiza correto (8,3M triângulos, 2D). `buildGraphData` inalterado (~187ms).
+
+### Arquivos / Testes
+
+- `frontend/src/utils/forceConfig3D.ts` (ticksPerFrame), `frontend/src/stores/graph.ts` (default 2D), `frontend/src/components/BehaviorPanel.vue` (reset).
+- `vitest run` → **666 passed**; `vue-tsc` → **0 erros**. E2E não rodado (precisa do stack completo) — rodar antes do commit.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## 2026-07-03 — Performance (Fase E.2, parte 1): motor de settle headless (util testado)
+
+Objetivo: desacoplar cálculo de layout do render — para grafos grandes, calcular o layout fora do loop de render (sem ~33-80 renders caros) e desenhar 1× no fim.
+
+### Entregue: `settleLayoutHeadless` (núcleo reutilizável, testado)
+
+`frontend/src/utils/headlessLayout.ts`: ticka uma `forceSimulation` do d3-force-3d em **chunks assíncronos** (yield entre chunks → main thread não congela) até convergir (`alpha < alphaMin`) ou teto de ticks. As forças **espelham fielmente** `applyForceConfig` (link/charge/center + gravityX/Y/Z + collide + alphaDecay/velocityDecay/alphaMin), então o layout casa com o caminho animado. **Segurança:** usa cópia dos links (o `forceLink` do d3 reescreve `source/target` p/ objetos — não pode corromper os `GraphLink` do render); dimensão-aware (2D default → 2D); callbacks de progresso e `shouldAbort`.
+
+- Testes: `frontend/src/utils/__tests__/headlessLayout.test.ts` (8) — convergência, x/y/z finitos, z=0 em 2D / não-trivial em 3D, links não mutados, progresso→1, maxTicks, abort, collide-off. Mock `d3-force-3d` estendido com `forceSimulation` funcional (o real roda no app via alias do vite; validação de qualidade fica no harness browser).
+- `vitest run` → **674 passed**; `vue-tsc` → **0 erros**.
+
+### Pendente: wiring no `initGraph` (a parte arriscada)
+
+Injeção em `GraphCanvas3D.vue::initGraph` ([~593]): tornar async; para `total > limiar` (~2000 arestas) → overlay "calculando" + `await settleLayoutHeadless(...)` antes de criar o ForceGraph, depois criar com `warmupTicks(0)`/`cooldownTicks(0)` já pré-posicionado; **fallback pro caminho animado** em qualquer erro; guarda de re-entrância (token) já que `initGraph` é chamado de 5 lugares. Precisa validar no UI real (grafo aparece? overlay some? `onEngineStop` dispara com cooldown 0?). Não feito nesta rodada por ser mudança invasiva no fluxo de init do render.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## 2026-07-03 — Performance (Fase E.2, parte 2): wiring do settle headless + achado honesto
+
+Wiring do `settleLayoutHeadless` no `GraphCanvas3D.vue`. **Descoberta importante:** o layout inicial NÃO passa pelo `initGraph` (que monta vazio no onMounted) e sim pelo `updateGraph` (dados chegam depois via watch). Então o settle foi injetado em AMBOS, mas o gatilho real de carga é o `updateGraph`.
+
+### Implementação
+
+- `initGraph` e `updateGraph` viraram `async`; guarda de re-entrância por token (`initToken`) — os dois são chamados de vários watches.
+- Gatilho no `updateGraph`: só para **layout fresco grande** (`links > 2000` E `newNodeCount > 90% dos nós`) — carga inicial / nova query. Expand/filtro (poucos nós novos) mantêm o caminho animado incremental.
+- Quando settle ok: pina posições (`fx/fy/fz`) + `cooldownTicks(0)/warmupTicks(0)` → engine só renderiza as posições prontas (sem re-simular). Overlay de progresso (reusa `.warmup-overlay`).
+- **Fallback-safe:** qualquer erro/NaN → caminho animado. Token aborta settles supersedidos.
+
+### Resultado medido (harness, carga inicial)
+
+| | 4k nós / 6k arestas | 20k nós / 60k arestas |
+|---|---|---|
+| `headlessSettle` | 984ms | **5281ms** |
+| `forcegraphUpdate` (engine) | 19ms (era ~200) | **54ms** (era 451) |
+| render | ok (1,7M tri) | ok (8,3M tri) |
+
+### Leitura honesta (importante)
+
+O `forcegraphUpdate` despenca (o motor só desenha o resultado pronto), MAS o `headlessSettle` **adiciona o tempo do cálculo** (~5,3s a 20k) — que é o MESMO cálculo que o caminho animado fazia de qualquer jeito, só que agora **headless + em chunks + com barra de progresso**, na **main thread** (não congela, mas CPU ocupado). Ou seja, E.2 **não acelera o cálculo**; ele: (1) elimina os ~33 renders de assentamento, (2) troca a animação "tremida" por barra de progresso. Perceptualmente: E.2 = "nada por ~5s → grafo limpo"; animado = "grafo em ~0,5s → treme uns segundos". Qual é melhor é **julgamento de UX** — precisa testar no UI real. O ganho de tirar o cálculo da main thread só vem com **E.3 (Web Worker)**.
+
+### Arquivos / Testes
+
+- Novo `frontend/src/utils/headlessLayout.ts` + teste (8); mock `d3-force-3d` estendido; `GraphCanvas3D.vue` (wiring em init/update + overlay).
+- `vitest run` → **674 passed**; `vue-tsc` → **0 erros**. Validado no harness (settle dispara na carga, grafo renderiza, fallback ok). E2E não rodado.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## 2026-07-03 — Fix E.2: settle em query-replace + "destruir antes de computar" + texto de fase no loading
+
+Dois problemas reportados no fluxo de query sobre grafo já carregado.
+
+### 1. Settle headless não disparava ao executar query (bug)
+
+Causa: `isFreshLargeLayout` exigia `newNodeCount > 90%`. Uma query que **substitui** o grafo mas compartilha ids de nó com o anterior mantinha posições via `positionMap` → `newNodeCount` caía < 90% → settle pulado. Um replace deve sempre re-assentar.
+
+Fix: flag `freshLayoutRequested` no store, setada por **replace ops** (`loadSubgraph`/`executeGraphQuery`/`executeCypherQuery`), NÃO por `expandFromNode`. `updateGraph` consome a flag e força `isFreshLargeLayout` para grafos grandes independentemente do overlap. Expand/filtro seguem incrementais.
+
+### 2. Performance: "destruir tudo antes de computar o layout" (intuição do usuário, correta)
+
+Antes: durante os ~5s do settle headless, o `graph3d.graphData(novo)` só rodava DEPOIS — então o loop de render continuava desenhando o **grafo antigo grande** por segundos. Fix: `graph3d.graphData({nodes:[],links:[]})` **antes** do settle → para de renderizar a cena antiga e libera os objetos THREE cedo; o settle opera no `graphData` (JS puro), independente do que o motor renderiza. (initGraph já dispunha o graph3d no início, então não renderiza antigo durante o settle.)
+
+### 3. Texto de fase no loading (pedido do usuário)
+
+`loadingMessage` no store por ação ("Running query…", "Loading graph…", "Running Cypher query…", "Expanding node…", "Loading context…"), exibido no overlay de loading da view ([GraphVisualizationView.vue:200]). Fluxo: "Running query…" (rede) → "Computing layout… X%" (settle).
+
+### Arquivos / Testes
+
+- `frontend/src/stores/graph.ts` (loadingMessage + freshLayoutRequested + set nas ações), `frontend/src/views/GraphVisualizationView.vue` (texto + css), `frontend/src/components/GraphCanvas3D.vue` (consome flag + clear antes do settle).
+- `vue-tsc` → **0 erros**; `vitest` → **674 passed**; harness regressão: carga inicial ainda assenta (`headlessSettle` + `forcegraphUpdate` ~31ms). Query-replace usa o mesmo mecanismo do loadSubgraph (validado) — validar no UI.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-07-03] - Feature: Query Console (queries genéricas OpenCypher/SQL → tabela)
+
+**Feature:** Nova ferramenta para escrever uma query **genérica** (OpenCypher ou SQL) e ver o resultado **tabular** (colunas/linhas arbitrárias) — distinta da tabela existente (`DataTablePanel`) que espelha os nós/arestas da visualização.
+
+**Problema:** Todo caminho de query hoje é forçado a retornar **arestas**: o front bloqueia queries sem `RETURN r` ([GraphQueryPanel.vue:142]) e o back valida o mesmo (`validate_cypher_query`, [cypher.py:232]). Não havia como rodar `RETURN n.name, count(*)` e apenas inspecionar as linhas.
+
+**Decisões (com o usuário via AskUserQuestion):**
+1. **Posição na UI:** gaveta inferior redimensionável (editor + grid juntos), compartilhando a região inferior com a Data Table de arestas — abrir uma **colapsa** a outra (exclusão mútua). Mesmo idioma de "tabelas ficam embaixo".
+2. **Entrada:** **OpenCypher + SQL** (toggle espelhando `GraphQueryPanel`). Cypher é transpilado; SQL roda direto. Ambos passam pelo `validate_sql_query` (SELECT-only).
+3. Precisou de **1 endpoint novo** — nem `/cypher` nem `/cypher/transpile` servem, pois ambos chamam `validate_cypher_query` (o gate `RETURN r`).
+
+**Backend:**
+- Novo endpoint `POST /api/graph-contexts/{id}/query/table` ([routers/graph.py]) → `get_context_with_access` → (cypher) `transpile_cypher_to_sql` (sem o gate `RETURN r`, `vlp_rendering_mode="cte"`) + `apply_cte_prefilter` opcional → `validate_sql_query` (fronteira de segurança, ambos os modos) → `execute_tabular_query` → `TableQueryResponse`.
+- Nova service fn `execute_tabular_query` ([services/graph_operations.py]) = `execute_statement(row_limit)` + `_parse_statement_result` → `(columns, rows, truncated)`.
+- Novos modelos `TableQueryRequest` / `TableQueryResponse` ([models/schemas.py]).
+- **Reúso:** `get_context_with_access`, `transpile_cypher_to_sql`, `validate_sql_query`, `execute_statement`, `_parse_statement_result`, `apply_cte_prefilter`. **Bypass:** `validate_cypher_query`, `process_graph_query_result`, `execute_graph_query_with_nodes`.
+
+**Frontend:**
+- Novo `DataGrid.vue` — grid genérico prop-driven, extraído do núcleo apresentacional de `DataTablePanel` (PrimeVue DataTable + filtros por tipo + CSV + popover), sem acoplamento ao graph store. `DataTablePanel` permanece intacto.
+- `buildGenericColumns` / `buildGenericRows` em `useTableColumns.ts` — colunas por índice (`col_<i>`, header = nome bruto) para não quebrar o field-resolver do PrimeVue com nomes tipo `n.name`; coerção numeric→Number / date→Date.
+- Store dedicado `stores/queryConsole.ts` (não incha o graph store) — só pega `currentContext` + `ctePrefilter`.
+- `QueryConsolePanel.vue` — gaveta (reusa `useDrawerResize`), editor (reusa `CypherEditor` + toggle), resultado via `DataGrid`, Ctrl/⌘+Enter para rodar, peek do SQL transpilado.
+- `api.executeTableQuery` + tipos em `types/graph.ts`. Wiring em `GraphVisualizationView.vue` (botão no `.graph-toolbar` ao lado de "Table" + exclusão mútua).
+
+**Arquivos criados:** `frontend/src/components/DataGrid.vue`, `frontend/src/components/QueryConsolePanel.vue`, `frontend/src/stores/queryConsole.ts`, `frontend/src/stores/__tests__/queryConsole.test.ts`, `frontend/src/composables/__tests__/useTableColumns.test.ts`, `frontend/e2e/tests/query-console.spec.ts`, `api/tests/test_table_query.py`.
+
+**Arquivos modificados:** `api/graphlagoon/{models/schemas.py, services/graph_operations.py, routers/graph.py}`, `frontend/src/{types/graph.ts, services/api.ts, composables/useTableColumns.ts, views/GraphVisualizationView.vue}`, `frontend/src/services/__tests__/api.test.ts`, `frontend/e2e/helpers/api-mocks.ts`.
+
+**Testes:** `vue-tsc` → 0 erros; `vitest` → **691 passed** (inclui 9 do store + 7 dos builders + 1 novo em api.test); `pytest tests/test_table_query.py` → **5 passed**; E2E `query-console.spec.ts` (toggle, run→grid, exclusão mútua, erro). DataGrid coberto por E2E (o repo não faz unit-mount de PrimeVue).
+
+**Risco conhecido:** cobertura de projeções arbitrárias do transpilador `gsql2rsql` (`RETURN n.prop`, agregações). Caminho SQL-cru não tem esse risco. Validar no UI.
+
+**Author:** Claude (AI Assistant)
+
+---

@@ -150,3 +150,51 @@ export function flattenNodeRows<T extends { node_id: string; node_type: string; 
     return r;
   });
 }
+
+/** Coerce a single raw cell (backend sends everything as strings) to the type
+ * detected for its column, so PrimeVue sorts/filters numerically and by date. */
+function coerceCell(val: unknown, type: ColType): unknown {
+  if (val == null) return null;
+  if (type === 'numeric') {
+    if (val === '') return null;
+    const n = Number(val);
+    return isNaN(n) ? val : n;
+  }
+  if (type === 'date') return coerceValue(val, 'date');
+  return val; // text / categorical keep their string form
+}
+
+/**
+ * Build column metadata from a raw (columns, rows) tabular result — used for
+ * arbitrary query results whose shape is unknown ahead of time.
+ *
+ * Field keys are synthetic (`col_<i>`) so raw column names containing dots,
+ * spaces, or duplicates never break PrimeVue's field resolution; the original
+ * name is preserved as the display header. Types are detected from row values.
+ */
+export function buildGenericColumns(columns: string[], rows: unknown[][]): ColMeta[] {
+  return columns.map((name, i) => {
+    const type = detectType(rows, r => r[i]);
+    const options = type === 'categorical' ? collectOptions(rows, r => r[i]) : undefined;
+    return buildColMeta(`col_${i}`, name, type, options);
+  });
+}
+
+/**
+ * Turn raw tabular rows (arrays aligned to `columns`) into keyed row objects
+ * (`{ col_0, col_1, ... }`) with each value coerced per its detected column
+ * type. Pass the `ColMeta[]` from `buildGenericColumns` so field keys and types
+ * stay in sync.
+ */
+export function buildGenericRows(
+  rows: unknown[][],
+  cols: ColMeta[],
+): Record<string, unknown>[] {
+  return rows.map(r => {
+    const obj: Record<string, unknown> = {};
+    for (let i = 0; i < cols.length; i++) {
+      obj[cols[i].field] = coerceCell(r[i], cols[i].type);
+    }
+    return obj;
+  });
+}

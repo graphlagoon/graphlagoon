@@ -71,6 +71,39 @@ def _parse_statement_result(
     return columns, rows
 
 
+async def execute_tabular_query(
+    warehouse_client,
+    query: str,
+    row_limit: int = 1000,
+) -> tuple[list[str], list[list[Any]], bool]:
+    """Execute a SQL query and return raw tabular rows.
+
+    Unlike execute_graph_query_with_nodes, this does NOT transform the result
+    into nodes/edges — it returns the columns and rows as-is for display in a
+    generic results table. The query must be a read-only SELECT (validate with
+    validate_sql_query before calling).
+
+    Args:
+        warehouse_client: The warehouse HTTP client
+        query: The SQL query to execute (catalog.schema.table format)
+        row_limit: Maximum number of rows to return (also drives truncation)
+
+    Returns:
+        (columns, rows, truncated) — truncated is True when the returned row
+        count reached the row_limit cap.
+
+    Raises:
+        QueryExecutionError: If the query execution failed.
+    """
+    result = await warehouse_client.execute_statement(
+        statement=query,
+        row_limit=row_limit,
+    )
+    columns, rows = _parse_statement_result(result, query=query)
+    truncated = len(rows) >= row_limit
+    return columns, rows, truncated
+
+
 def _parse_row_value(value: Optional[str]) -> Any:
     """Parse string value from Databricks format back to appropriate type.
 

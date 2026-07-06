@@ -18,6 +18,8 @@ import type {
   CypherQueryResponse,
   CypherTranspileRequest,
   CypherTranspileResponse,
+  TableQueryRequest,
+  TableQueryResponse,
   CatalogListResponse,
   DatabaseListResponse,
   TableListResponse,
@@ -237,6 +239,14 @@ class ApiService {
   async transpileCypher(contextId: string, request: CypherTranspileRequest): Promise<CypherTranspileResponse> {
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/cypher/transpile`,
+      request
+    );
+    return response.data;
+  }
+
+  async executeTableQuery(contextId: string, request: TableQueryRequest): Promise<TableQueryResponse> {
+    const response = await this.client.post(
+      `/api/graph-contexts/${contextId}/query/table`,
       request
     );
     return response.data;
