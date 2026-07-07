@@ -86,13 +86,22 @@ export const useCommunityStore = defineStore('community', () => {
    */
   const communityStats = computed(() => {
     const sizes = Array.from(communitiesById.value.values()).map(ids => ids.length)
+    // Loop instead of Math.max/min(...sizes): spreading a large array into a call
+    // overflows V8's argument limit (~130k) → "Maximum call stack size exceeded".
+    let maxSize = 0
+    let minSize = 0
+    let sum = 0
+    for (let i = 0; i < sizes.length; i++) {
+      const s = sizes[i]
+      if (i === 0 || s > maxSize) maxSize = s
+      if (i === 0 || s < minSize) minSize = s
+      sum += s
+    }
     return {
       count: communitiesById.value.size,
-      avgSize: sizes.length > 0
-        ? Math.round(sizes.reduce((a, b) => a + b, 0) / sizes.length)
-        : 0,
-      maxSize: sizes.length > 0 ? Math.max(...sizes) : 0,
-      minSize: sizes.length > 0 ? Math.min(...sizes) : 0,
+      avgSize: sizes.length > 0 ? Math.round(sum / sizes.length) : 0,
+      maxSize,
+      minSize,
     }
   })
 

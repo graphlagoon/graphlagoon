@@ -2389,3 +2389,35 @@ baixo (QueryConsolePanel).
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-07-07] - Frontend Bug Fixed: `RangeError: Maximum call stack size exceeded` on large graphs (150k+ edges)
+
+**Issue:** Renderizar um grafo com ~150 mil arestas ou mais (com muitos nós) quebrava com `RangeError: Maximum call stack size exceeded` **antes do usuário conseguir ver o grafo**.
+
+**Root Cause (confirmado empiricamente, não assumido):**
+`Math.max(...arr)` / `Math.min(...arr)` / `arr.push(...arr)` expandem o array em **argumentos de chamada de função**. O V8 lança exatamente esse `RangeError` a partir de **~130k argumentos** (reproduzido em Node: OK em 125k, estoura em 130k+). Spread em *array literal* (`[...a, ...b]`) usa iterador e é seguro em qualquer tamanho.
+
+**Gatilho primário (config padrão, dispara no primeiro paint):** o mapeamento visual padrão dimensiona nós pela métrica de **grau** (`types/metrics.ts` `DEFAULT_VISUAL_MAPPING.nodeSize.metricId = '__builtin_degree'`). No load, `GraphCanvas3D` lê `nodeSizeMetric` no getter do watch (setup) e em `initGraph → buildGraphData → collectAppearanceContext`, ambos antes do primeiro paint. Isso avalia `builtInDegreeMetric` → `calculateStats(Array.from(nodeDegrees.values()))` — array **de um item por nó**. Com >130k nós, `Math.max(...)` estoura. (`maxDegree` em `graph.ts` já usava loop e era seguro.)
+
+**Investigation:**
+- Reproduzido o erro exato (mesmo `name`/`message`) em V8 para `Math.max(...)` e `push(...)`; threshold ~130k bate com "150 mil ou mais".
+- Traçado o caminho de render inicial (agente Explore) confirmando avaliação da métrica de grau no setup + `initGraph`, antes do paint.
+- Varredura ampla por todos os padrões `Math.*(...)`, `.push(...)`, `.apply`, `fromCharCode(...)` em `src/` e nos submódulos.
+
+**Solution:** substituir todo spread-em-chamada sobre arrays potencialmente grandes por loops.
+
+**Files Modified:**
+- [frontend/src/types/metrics.ts](../../frontend/src/types/metrics.ts) — `calculateStats`: min/max/mean/stdDev via loop (fix primário).
+- [frontend/src/stores/community.ts](../../frontend/src/stores/community.ts) — `communityStats`: max/min/avg via loop.
+- [frontend/src/stores/similarity.ts](../../frontend/src/stores/similarity.ts) — `edges.push(...newEdges)` → `edges.concat(newEdges)`.
+- [frontend/src/utils/perfMetrics.ts](../../frontend/src/utils/perfMetrics.ts) — `getPerfSummary`: min/max/total via loop.
+- [frontend/ext-3d-force/three-forcegraph/src/forcegraph-kapsule.js](../../frontend/ext-3d-force/three-forcegraph/src/forcegraph-kapsule.js) — 3 sites: `customNodes.push(...visibleNodes)` (L894), `customLinks.push(...visibleLinks)` (L1042), `Math.max(...Object.values(nodeDepths))` (L1383). **Submódulo git** — commitar dentro do submódulo e bumpar a ref no repo principal. Consumido via alias do Vite direto do `src/` (sem build de dist separado).
+
+**Testing:**
+- [x] Teste de regressão em `frontend/src/types/__tests__/metrics.test.ts`: `calculateStats` com 150.000 valores não lança (falharia antes do fix).
+- [x] Suite unitária completa: **718 passed (38 files)**.
+- [x] `npm run build` (vue-tsc typecheck + vite build): OK, 4393 módulos.
+
+**Author:** Claude (AI Assistant)
+
+---

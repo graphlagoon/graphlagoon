@@ -240,13 +240,26 @@ export function calculateStats(values: number[]): { min: number; max: number; me
     return { min: 0, max: 0, mean: 0, stdDev: 0 };
   }
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  // NOTE: use a loop instead of Math.min/max(...values). Spreading a large array
+  // into a function call passes each element as an argument, which overflows V8's
+  // argument limit at ~130k elements → "RangeError: Maximum call stack size exceeded".
+  let min = values[0];
+  let max = values[0];
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+    sum += v;
+  }
+  const mean = sum / values.length;
 
-  const squaredDiffs = values.map(v => Math.pow(v - mean, 2));
-  const avgSquaredDiff = squaredDiffs.reduce((a, b) => a + b, 0) / values.length;
-  const stdDev = Math.sqrt(avgSquaredDiff);
+  let squaredSum = 0;
+  for (let i = 0; i < values.length; i++) {
+    const diff = values[i] - mean;
+    squaredSum += diff * diff;
+  }
+  const stdDev = Math.sqrt(squaredSum / values.length);
 
   return { min, max, mean, stdDev };
 }

@@ -73,13 +73,24 @@ export function getPerfSummary(): PerfSummary[] {
   const summaries: PerfSummary[] = []
   for (const [label, group] of byLabel) {
     const times = group.map(e => e.ms)
+    // Loop instead of Math.min/max(...times): spreading a large array into a call
+    // overflows V8's argument limit (~130k) → "Maximum call stack size exceeded".
+    let minMs = times[0]
+    let maxMs = times[0]
+    let totalMs = 0
+    for (let i = 0; i < times.length; i++) {
+      const t = times[i]
+      if (t < minMs) minMs = t
+      if (t > maxMs) maxMs = t
+      totalMs += t
+    }
     summaries.push({
       label,
       count: group.length,
-      totalMs: times.reduce((a, b) => a + b, 0),
-      avgMs: times.reduce((a, b) => a + b, 0) / times.length,
-      minMs: Math.min(...times),
-      maxMs: Math.max(...times),
+      totalMs,
+      avgMs: totalMs / times.length,
+      minMs,
+      maxMs,
       lastMs: times[times.length - 1],
     })
   }

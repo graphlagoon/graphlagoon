@@ -271,7 +271,9 @@ export const useSimilarityStore = defineStore('similarity', () => {
       },
     }))
 
-    graphStore.edges.push(...newEdges)
+    // Use concat, not push(...newEdges): spreading a large array into a call
+    // overflows V8's argument limit (~130k) → "Maximum call stack size exceeded".
+    graphStore.edges = graphStore.edges.concat(newEdges)
   }
 
   function removeEdges(): void {

@@ -88,6 +88,18 @@ describe('calculateStats', () => {
     expect(stats.max).toBe(999)
     expect(stats.mean).toBeCloseTo(499.5, 1)
   })
+
+  it('does not overflow the stack on >130k values (regression: RangeError on large graphs)', () => {
+    // Spreading an array of this size into Math.min/max(...) threw
+    // "RangeError: Maximum call stack size exceeded" before the loop-based fix.
+    // This is the per-node degree array for a graph with 150k+ edges.
+    const n = 150_000
+    const values = Array.from({ length: n }, (_, i) => i % 500)
+    expect(() => calculateStats(values)).not.toThrow()
+    const stats = calculateStats(values)
+    expect(stats.min).toBe(0)
+    expect(stats.max).toBe(499)
+  })
 })
 
 describe('getBatchSize', () => {
