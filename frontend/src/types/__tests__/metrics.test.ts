@@ -89,12 +89,15 @@ describe('calculateStats', () => {
     expect(stats.mean).toBeCloseTo(499.5, 1)
   })
 
-  it('does not overflow the stack on >130k values (regression: RangeError on large graphs)', () => {
-    // Spreading an array of this size into Math.min/max(...) threw
+  it('does not overflow the stack on a large array (regression: RangeError on large graphs)', () => {
+    // Spreading an array into Math.min/max(...) threw
     // "RangeError: Maximum call stack size exceeded" before the loop-based fix.
-    // This is the per-node degree array for a graph with 150k+ edges.
-    const n = 150_000
-    const values = Array.from({ length: n }, (_, i) => i % 500)
+    // The overflow point is stack-dependent (~130k in a browser tab, higher in
+    // Vitest's worker), so size well above the measured Vitest limit (~250k–500k)
+    // to actually exercise the overflow here.
+    const n = 600_000
+    const values = new Array(n)
+    for (let i = 0; i < n; i++) values[i] = i % 500
     expect(() => calculateStats(values)).not.toThrow()
     const stats = calculateStats(values)
     expect(stats.min).toBe(0)
