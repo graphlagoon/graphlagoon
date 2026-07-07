@@ -194,14 +194,9 @@ const inMessiWeTrust = computed({
 });
 
 // Advanced transpile & optimization settings (procedural BFS, materialization,
-// per-optimization flags, large results mode) live in a shared modal.
+// per-optimization flags, large results mode) live in a shared modal, opened
+// from the gear icon in the panel header.
 const showTranspileSettings = ref(false);
-
-// Compact summary shown next to the gear so the panel still signals the active
-// transpile mode at a glance.
-const transpileSummary = computed(() =>
-  graphStore.vlpRenderingMode === 'procedural' ? 'Procedural BFS' : 'WITH RECURSIVE',
-);
 
 const buttonLabel = computed(() => {
   if (isProcessing.value || graphStore.loading) {
@@ -265,14 +260,7 @@ async function handleAction() {
   }
 }
 
-function clearQuery() {
-  if (queryMode.value === 'cypher') {
-    cypherQuery.value = '';
-  } else {
-    sqlQuery.value = '';
-  }
-  graphStore.setGraphQuery('');
-}
+
 
 function setMode(mode: QueryMode) {
   queryMode.value = mode;
@@ -293,7 +281,6 @@ function setMode(mode: QueryMode) {
         >
           <SlidersHorizontal :size="16" />
         </button>
-        <button class="btn btn-outline btn-sm" @click="clearQuery">Clear</button>
         <button class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
     </div>
@@ -386,21 +373,6 @@ function setMode(mode: QueryMode) {
       </div>
     </div>
 
-    <!-- Advanced transpile & optimization settings — compact entry point that
-         opens the shared modal (procedural BFS, materialization, per-flag
-         optimizations, large results mode). -->
-    <div class="transpile-summary" data-testid="graph-query-transpile-summary">
-      <button
-        class="transpile-summary-btn"
-        :disabled="isProcessing"
-        @click="showTranspileSettings = true"
-      >
-        <SlidersHorizontal :size="14" />
-        <span class="transpile-summary-label">Optimization</span>
-        <span class="transpile-summary-value">{{ transpileSummary }}</span>
-      </button>
-    </div>
-
     <div class="query-actions">
       <button
         class="btn btn-primary btn-run"
@@ -447,44 +419,6 @@ function setMode(mode: QueryMode) {
 .settings-btn.active {
   color: var(--primary-color, #42b883);
   border-color: var(--primary-color, #42b883);
-}
-
-.transpile-summary {
-  margin: 8px 0;
-}
-
-.transpile-summary-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  background: var(--bg-secondary, #f7f7f7);
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-muted, #666);
-}
-
-.transpile-summary-btn:hover:not(:disabled) {
-  border-color: var(--primary-color, #42b883);
-}
-
-.transpile-summary-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.transpile-summary-label {
-  font-weight: 600;
-  color: var(--text-primary, #333);
-}
-
-.transpile-summary-value {
-  margin-left: auto;
-  font-family: monospace;
-  color: var(--primary-color, #42b883);
 }
 
 .panel-header {

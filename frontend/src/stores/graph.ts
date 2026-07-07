@@ -293,7 +293,7 @@ export const useGraphStore = defineStore('graph', () => {
   const ctePrefilter = ref('');
 
   // Cypher transpilation options
-  const vlpRenderingMode = ref<'cte' | 'procedural'>('cte');
+  const vlpRenderingMode = ref<'cte' | 'procedural'>('procedural');
   const materializationStrategy = ref<'temp_tables' | 'numbered_views'>(
     window.__GRAPH_LAGOON_CONFIG__?.databricks_mode ? 'temp_tables' : 'numbered_views'
   );
@@ -1652,7 +1652,7 @@ export const useGraphStore = defineStore('graph', () => {
       layoutAlgorithm.value = exploration.state.layout_algorithm;
       graphQuery.value = exploration.state.graph_query || '';
       ctePrefilter.value = exploration.state.cte_prefilter || '';
-      vlpRenderingMode.value = exploration.state.vlp_rendering_mode || 'cte';
+      vlpRenderingMode.value = exploration.state.vlp_rendering_mode || 'procedural';
       materializationStrategy.value = exploration.state.materialization_strategy
         || (window.__GRAPH_LAGOON_CONFIG__?.databricks_mode ? 'temp_tables' : 'numbered_views');
       proceduralOptimizations.value = {

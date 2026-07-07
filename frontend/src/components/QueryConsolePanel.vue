@@ -199,7 +199,6 @@ onMounted(() => {
         >
           <SlidersHorizontal :size="14" />
         </button>
-        <button class="action-btn" title="Clear query" @click="consoleStore.clearQuery">Clear</button>
         <button
           class="action-btn"
           title="Save this query as a reusable template"

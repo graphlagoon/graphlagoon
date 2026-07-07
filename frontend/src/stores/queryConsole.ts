@@ -236,11 +236,7 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
     await cq.cancelQuery();
   }
 
-  /** Clear the editor for the active mode. */
-  function clearQuery() {
-    if (mode.value === 'cypher') cypherQuery.value = '';
-    else sqlQuery.value = '';
-  }
+
 
   /** Dismiss the current error (keeps the last result, if any). */
   function clearError() {
@@ -288,7 +284,6 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
     toggle,
     runQuery,
     cancelQuery,
-    clearQuery,
     clearError,
     resetResult,
   };

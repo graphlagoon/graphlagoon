@@ -284,6 +284,13 @@ class ProceduralBFSOptions(BaseModel):
     undirected_doubled_adjacency: bool = True  # default; both strategies
     deferred_edge_payload: bool = True  # default; temp_tables only
     barrier_precompute: bool = True  # default; temp_tables only
+    # temp_tables only; only effective when barrier_precompute is also ON.
+    # App default is ON (diverges from gsql2rsql's own False default).
+    barrier_on_adjacency: bool = True
+    # temp_tables only; only effective when BOTH undirected_doubled_adjacency
+    # and barrier_precompute are ON. App default is ON (diverges from
+    # gsql2rsql's own False default).
+    prune_barrier_adjacency: bool = True
     undirected_union_all: bool = False  # default; both strategies
 
 
@@ -620,7 +627,7 @@ class CypherQueryRequest(BaseModel):
 
     query: str
     cte_prefilter: Optional[str] = None
-    vlp_rendering_mode: VlpRenderingMode = "cte"
+    vlp_rendering_mode: VlpRenderingMode = "procedural"
     materialization_strategy: MaterializationStrategy = "numbered_views"
     procedural_optimizations: Optional[ProceduralBFSOptions] = None
     use_external_links: bool = True
@@ -642,7 +649,7 @@ class CypherTranspileRequest(BaseModel):
 
     query: str
     cte_prefilter: Optional[str] = None
-    vlp_rendering_mode: VlpRenderingMode = "cte"
+    vlp_rendering_mode: VlpRenderingMode = "procedural"
     materialization_strategy: MaterializationStrategy = "numbered_views"
     procedural_optimizations: Optional[ProceduralBFSOptions] = None
 
@@ -667,7 +674,7 @@ class TableQueryRequest(BaseModel):
     row_limit: int = Field(default=1000, ge=1, le=100000)
     # Transpile options (cypher mode only). Default to legacy "cte" so plain
     # SQL / simple cypher table queries are unaffected.
-    vlp_rendering_mode: VlpRenderingMode = "cte"
+    vlp_rendering_mode: VlpRenderingMode = "procedural"
     materialization_strategy: MaterializationStrategy = "numbered_views"
     procedural_optimizations: Optional[ProceduralBFSOptions] = None
 

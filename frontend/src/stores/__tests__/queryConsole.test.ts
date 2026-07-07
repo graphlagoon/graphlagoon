@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
 import { useGraphStore } from '@/stores/graph';
+import { DEFAULT_PROCEDURAL_BFS_OPTIONS } from '@/types/graph';
 
 // Mock api service
 vi.mock('@/services/api', () => ({
@@ -48,8 +49,9 @@ describe('queryConsole store — runQuery', () => {
     expect(api.executeTableQuery).toHaveBeenCalledWith('ctx-1', {
       query: 'MATCH (n) RETURN n.name, n.age',
       mode: 'cypher',
-      vlp_rendering_mode: 'cte',
+      vlp_rendering_mode: 'procedural',
       materialization_strategy: 'numbered_views',
+      procedural_optimizations: DEFAULT_PROCEDURAL_BFS_OPTIONS,
     });
     expect(store.columns.map(c => c.header)).toEqual(['name', 'age']);
     expect(store.rows).toHaveLength(2);
@@ -89,8 +91,9 @@ describe('queryConsole store — runQuery', () => {
       query: 'MATCH (n) RETURN n.node_id',
       mode: 'cypher',
       cte_prefilter: 'node_type = "Person"',
-      vlp_rendering_mode: 'cte',
+      vlp_rendering_mode: 'procedural',
       materialization_strategy: 'numbered_views',
+      procedural_optimizations: DEFAULT_PROCEDURAL_BFS_OPTIONS,
     });
   });
 
@@ -351,16 +354,6 @@ describe('queryConsole store — cancellable poll flow', () => {
 });
 
 describe('queryConsole store — helpers', () => {
-  it('clearQuery clears only the active mode editor', () => {
-    const store = useQueryConsoleStore();
-    store.cypherQuery = 'MATCH ...';
-    store.sqlQuery = 'SELECT ...';
-    store.mode = 'cypher';
-    store.clearQuery();
-    expect(store.cypherQuery).toBe('');
-    expect(store.sqlQuery).toBe('SELECT ...');
-  });
-
   it('resetResult drops the current result', () => {
     const store = useQueryConsoleStore();
     store.rows = [{ col_0: 'x' }];

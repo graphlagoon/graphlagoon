@@ -2362,6 +2362,28 @@ baixo (QueryConsolePanel).
   None sem opts, `ValueError` na combinação mutuamente exclusiva). `test_table_query.py`
   (12) segue verde. `vue-tsc` 0 erros.
 
+**Addendum (E2E + nova flag):**
+- **E2E (Playwright):** `graph.spec.ts` ganhou `describe('Transpile settings modal')` (5 testes:
+  opções vivem no modal e não inline — guard de regressão; engrenagem abre modal e revela flags;
+  exclusividade mútua; escopo por materialization; botão-resumo reabre) e `query-console.spec.ts`
+  ganhou 1 teste (engrenagem abre o modal compartilhado). **35/35 passando** (contra dev server :3000,
+  provando que o modal renderiza ponta-a-ponta — o "não aparece" do usuário era view stale em :8000).
+- **Esclarecimento:** procedural BFS **NÃO** é default — `vlpRenderingMode = 'cte'` (WITH RECURSIVE).
+- **Nova flag `barrier_on_adjacency` (O11):** adicionada a `ProceduralBFSOptions` (schemas.py + types/graph.ts),
+  ao `DEFAULT_PROCEDURAL_BFS_OPTIONS` e ao modal. **Escopo: temp_tables only; depende de
+  `barrier_precompute`** (o modal desabilita a flag quando `barrier_precompute` está OFF, via `isEnabled`).
+  App default = **ON**, divergindo de propósito do default `False` do dataclass do gsql2rsql (a pedido do usuário).
+- **Nova flag `prune_barrier_adjacency` (O12):** idem. **Escopo: temp_tables only; depende de DOIS
+  pré-requisitos** (`undirected_doubled_adjacency` + `barrier_precompute`). `FlagMeta.requires` virou
+  `FlagKey[]` e `isEnabled` passou a exigir todas as dependências. App default = **ON** (gsql2rsql = False).
+- **Default mudou para Procedural BFS ON:** `vlpRenderingMode` default `'cte'` → `'procedural'`
+  ([graph.ts](../../frontend/src/stores/graph.ts) + fallback do `loadExploration`), e os 3 request models
+  do backend (`CypherQueryRequest`/`CypherTranspileRequest`/`TableQueryRequest`) default `"cte"` → `"procedural"`.
+  Testes ajustados: `queryConsole.test.ts` (payload cypher agora manda `procedural` + `procedural_optimizations`),
+  E2E de `graph.spec.ts` (não clica mais para ligar procedural; assume ON). **Caveat:** fora do Databricks a
+  materialization é `numbered_views` (PySpark 4.2+); procedural+numbered_views exige runtime compatível — o
+  `cte` (WITH RECURSIVE) era o fallback mais portável.
+
 **Author:** Claude (AI Assistant)
 
 ---

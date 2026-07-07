@@ -249,8 +249,7 @@ test.describe('Graph Visualization', () => {
     test('options live in a modal, not inline in the side panel', async ({ authenticatedPage: page }) => {
       await openQueryPanel(page);
 
-      // The new compact entry points exist...
-      await expect(page.getByTestId('graph-query-transpile-summary')).toBeVisible();
+      // The gear entry point exists...
       await expect(page.getByTestId('graph-query-settings')).toBeVisible();
       // ...and the transpile options are NOT rendered inline (they only exist
       // inside the modal, which is closed on load). Regression guard for the
@@ -259,26 +258,28 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByTestId('opt-procedural-bfs')).toHaveCount(0);
     });
 
-    test('gear opens the modal and reveals per-optimization flags', async ({ authenticatedPage: page }) => {
+    test('gear opens the modal and shows per-optimization flags (procedural on by default)', async ({ authenticatedPage: page }) => {
       await openQueryPanel(page);
 
       await page.getByTestId('graph-query-settings').click();
       const modal = page.getByTestId('transpile-settings-modal');
       await expect(modal).toBeVisible();
 
-      // Flags are hidden until procedural BFS is enabled (default is cte).
-      await expect(page.getByTestId('opt-visited_not_exists')).toHaveCount(0);
-      await page.getByTestId('opt-procedural-bfs').click();
+      // Procedural BFS is enabled by default → the per-optimization flags render.
+      await expect(page.getByTestId('opt-procedural-bfs')).toBeChecked();
       await expect(page.getByTestId('opt-visited_not_exists')).toBeVisible();
       await expect(page.getByTestId('opt-undirected_union_all')).toBeVisible();
+
+      // Toggling Procedural BFS off hides the flags.
+      await page.getByTestId('opt-procedural-bfs').click();
+      await expect(page.getByTestId('opt-visited_not_exists')).toHaveCount(0);
     });
 
     test('enforces mutual exclusivity of the undirected strategies', async ({ authenticatedPage: page }) => {
       await openQueryPanel(page);
       await page.getByTestId('graph-query-settings').click();
-      await page.getByTestId('opt-procedural-bfs').click();
 
-      // Default: doubled_adjacency ON, union_all OFF.
+      // Procedural on by default: doubled_adjacency ON, union_all OFF.
       await expect(page.getByTestId('opt-undirected_doubled_adjacency')).toBeChecked();
       await page.getByTestId('opt-undirected_union_all').click();
       await expect(page.getByTestId('opt-undirected_union_all')).toBeChecked();
@@ -288,7 +289,6 @@ test.describe('Graph Visualization', () => {
     test('disables out-of-scope flags per materialization strategy', async ({ authenticatedPage: page }) => {
       await openQueryPanel(page);
       await page.getByTestId('graph-query-settings').click();
-      await page.getByTestId('opt-procedural-bfs').click();
 
       // numbered_views: temp_tables-only flags disabled, numbered_views-only enabled.
       await page.getByTestId('opt-materialization').selectOption('numbered_views');
@@ -302,7 +302,7 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByTestId('opt-deferred_edge_payload')).toBeEnabled();
     });
 
-    test('summary button reopens the modal after closing', async ({ authenticatedPage: page }) => {
+    test('gear reopens the modal after closing', async ({ authenticatedPage: page }) => {
       await openQueryPanel(page);
       await page.getByTestId('graph-query-settings').click();
       await expect(page.getByTestId('transpile-settings-modal')).toBeVisible();
@@ -310,7 +310,7 @@ test.describe('Graph Visualization', () => {
       await page.getByRole('button', { name: 'Done' }).click();
       await expect(page.getByTestId('transpile-settings-modal')).toHaveCount(0);
 
-      await page.getByTestId('graph-query-transpile-summary').click();
+      await page.getByTestId('graph-query-settings').click();
       await expect(page.getByTestId('transpile-settings-modal')).toBeVisible();
     });
   });

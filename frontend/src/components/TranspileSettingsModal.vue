@@ -5,7 +5,7 @@
  * source of truth) so both panels — and saved explorations — stay in sync.
  *
  * Groups:
- *  - Transpilation: procedural BFS mode + materialization strategy + the six
+ *  - Transpilation: procedural BFS mode + materialization strategy + the
  *    gsql2rsql ProceduralBFSOptimizations flags.
  *  - Results: "Large results mode" (external links) — not a transpiler flag,
  *    but surfaced here per the unified settings request.
@@ -45,6 +45,7 @@ interface FlagMeta {
   label: string;
   scope: Scope;
   hint: string;
+  requires?: FlagKey[]; // flags that must ALL be ON for this one to take effect
 }
 
 // Order + copy mirror gsql2rsql's ProceduralBFSOptimizations dataclass.
@@ -54,11 +55,22 @@ const FLAGS: FlagMeta[] = [
   { key: 'undirected_doubled_adjacency', label: 'Doubled adjacency (undirected)', scope: 'both', hint: 'Mutually exclusive with UNION ALL adjacency.' },
   { key: 'deferred_edge_payload', label: 'Deferred edge payload', scope: 'temp_tables', hint: 'Applies to Temp Tables only.' },
   { key: 'barrier_precompute', label: 'Barrier precompute', scope: 'temp_tables', hint: 'Applies to Temp Tables only.' },
+  { key: 'barrier_on_adjacency', label: 'Barrier on adjacency', scope: 'temp_tables', hint: 'Carries the barrier on the adjacency; needs Barrier precompute.', requires: ['barrier_precompute'] },
+  { key: 'prune_barrier_adjacency', label: 'Prune barrier adjacency', scope: 'temp_tables', hint: 'Drops expand-from-barrier rows; needs Doubled adjacency + Barrier precompute.', requires: ['undirected_doubled_adjacency', 'barrier_precompute'] },
   { key: 'undirected_union_all', label: 'UNION ALL adjacency (undirected)', scope: 'both', hint: 'Mutually exclusive with doubled adjacency.' },
 ];
 
 function inScope(flag: FlagMeta): boolean {
   return flag.scope === 'both' || flag.scope === materialization.value;
+}
+
+/** A flag is interactive only when in scope AND all its dependencies are ON. */
+function isEnabled(flag: FlagMeta): boolean {
+  if (!inScope(flag)) return false;
+  if (flag.requires) {
+    return flag.requires.every(k => graphStore.proceduralOptimizations[k]);
+  }
+  return true;
 }
 
 function isChecked(key: FlagKey): boolean {
@@ -129,12 +141,12 @@ const isDefault = computed(() =>
                   v-for="flag in FLAGS"
                   :key="flag.key"
                   class="row flag-row"
-                  :class="{ disabled: !inScope(flag) }"
+                  :class="{ disabled: !isEnabled(flag) }"
                 >
                   <input
                     type="checkbox"
                     :checked="isChecked(flag.key)"
-                    :disabled="!inScope(flag)"
+                    :disabled="!isEnabled(flag)"
                     :data-testid="`opt-${flag.key}`"
                     @change="onToggle(flag.key, ($event.target as HTMLInputElement).checked)"
                   />

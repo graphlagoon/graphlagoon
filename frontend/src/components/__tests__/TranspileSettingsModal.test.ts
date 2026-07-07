@@ -86,6 +86,36 @@ describe('TranspileSettingsModal', () => {
     expect(checkbox('opt-deferred_edge_payload').disabled).toBe(false);
   });
 
+  it('disables barrier_on_adjacency when barrier_precompute is off', async () => {
+    const graph = useGraphStore();
+    graph.vlpRenderingMode = 'procedural';
+    graph.materializationStrategy = 'temp_tables';
+    render(TranspileSettingsModal);
+
+    // Defaults: both barrier flags ON → dependent flag is interactive.
+    expect(checkbox('opt-barrier_on_adjacency').disabled).toBe(false);
+
+    // Turning off the prerequisite disables the dependent flag.
+    await fireEvent.click(checkbox('opt-barrier_precompute'));
+    expect(graph.proceduralOptimizations.barrier_precompute).toBe(false);
+    expect(checkbox('opt-barrier_on_adjacency').disabled).toBe(true);
+  });
+
+  it('disables prune_barrier_adjacency unless BOTH prerequisites are on', async () => {
+    const graph = useGraphStore();
+    graph.vlpRenderingMode = 'procedural';
+    graph.materializationStrategy = 'temp_tables';
+    render(TranspileSettingsModal);
+
+    // Defaults: doubled_adjacency + barrier_precompute both ON → interactive.
+    expect(checkbox('opt-prune_barrier_adjacency').disabled).toBe(false);
+
+    // Dropping either prerequisite disables it.
+    await fireEvent.click(checkbox('opt-undirected_doubled_adjacency'));
+    expect(graph.proceduralOptimizations.undirected_doubled_adjacency).toBe(false);
+    expect(checkbox('opt-prune_barrier_adjacency').disabled).toBe(true);
+  });
+
   it('resets the flags to the transpiler defaults', async () => {
     const graph = useGraphStore();
     graph.vlpRenderingMode = 'procedural';

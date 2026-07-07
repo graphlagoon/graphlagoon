@@ -404,16 +404,24 @@ export interface ProceduralBFSOptions {
   undirected_doubled_adjacency: boolean;  // both strategies
   deferred_edge_payload: boolean;         // temp_tables only
   barrier_precompute: boolean;            // temp_tables only
+  barrier_on_adjacency: boolean;          // temp_tables only; needs barrier_precompute
+  prune_barrier_adjacency: boolean;       // temp_tables only; needs doubled_adjacency + barrier_precompute
   undirected_union_all: boolean;          // both strategies
 }
 
-/** The transpiler defaults (mirror gsql2rsql's dataclass defaults). */
+/**
+ * App defaults for the procedural BFS flags. These mirror gsql2rsql's dataclass
+ * defaults EXCEPT `barrier_on_adjacency` and `prune_barrier_adjacency`, which
+ * the app enables by default (gsql2rsql's own default is `false` for both).
+ */
 export const DEFAULT_PROCEDURAL_BFS_OPTIONS: ProceduralBFSOptions = {
   visited_not_exists: true,
   loop_control_into: true,
   undirected_doubled_adjacency: true,
   deferred_edge_payload: true,
   barrier_precompute: true,
+  barrier_on_adjacency: true,
+  prune_barrier_adjacency: true,
   undirected_union_all: false,
 };
 
