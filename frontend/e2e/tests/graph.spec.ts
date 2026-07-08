@@ -33,14 +33,14 @@ test.describe('Graph Visualization', () => {
       const cancelBtn = page.getByTestId('query-running-cancel');
       await expect(cancelBtn).toBeVisible();
 
-      // Cancel hits the job cancel endpoint and dismisses the overlay. Dispatch
-      // the click directly on the element: the still-open query panel overlaps
-      // the centered overlay button in the test viewport, and the 3D canvas
-      // keeps Playwright from ever seeing a "stable" frame for a real click.
+      // Perform a REAL click (not dispatchEvent). A real click exercises
+      // Playwright's pointer-events/hit-test actionability check, so it fails if
+      // the loading overlay is `pointer-events: none` — the exact regression
+      // that made the Cancel button unclickable for users.
       const cancelReq = page.waitForRequest((req) =>
         req.url().endsWith(`/query/job/${jobId}/cancel`) && req.method() === 'POST',
       );
-      await cancelBtn.dispatchEvent('click');
+      await cancelBtn.click();
       await cancelReq;
       await expect(page.getByTestId('graph-loading')).toHaveCount(0);
     });
