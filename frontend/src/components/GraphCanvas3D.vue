@@ -1125,16 +1125,28 @@ defineExpose({
 
 // Track previous search query to detect search-triggered changes
 let previousSearchQueryForDataWatch = '';
+// Track previous counts: the getter below returns a fresh array every
+// evaluation, so Vue fires this watch whenever the filtered/enhanced chain
+// recomputes — even when both lengths are identical.
+let previousCountsForDataWatch: [number, number] = [-1, -1];
 
 // Data changes (node/edge counts) — full update
 watch(
-  () => [filteredNodes.value.length, filteredEdges.value.length],
-  () => {
+  () => [filteredNodes.value.length, filteredEdges.value.length] as [number, number],
+  ([nodeCount, edgeCount]) => {
     const currentSearchQuery = graphStore.filters.search_query || '';
     const isSearchChange = currentSearchQuery !== previousSearchQueryForDataWatch;
     previousSearchQueryForDataWatch = currentSearchQuery;
+    const countsChanged =
+      nodeCount !== previousCountsForDataWatch[0] || edgeCount !== previousCountsForDataWatch[1];
+    previousCountsForDataWatch = [nodeCount, edgeCount];
 
     if (isSearchChange && graphStore.behaviors.searchMode === 'hide') return;
+    // Highlight-mode search: node/edge membership is unchanged, so a full
+    // updateGraph() (graphData() → Three.js object recreation + d3-force
+    // re-init) is pure waste and froze the tab on 200k+ graphs. The search
+    // watcher below handles highlight painting via updateVisuals().
+    if (isSearchChange && !countsChanged) return;
     updateGraph();
 
     // After similarity computation, auto-run edge-type layout on the rebuilt graph

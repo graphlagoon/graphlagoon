@@ -622,7 +622,11 @@ export const useGraphStore = defineStore('graph', () => {
 
     // Only hide non-matching nodes if searchMode is 'hide' AND there are matches
     // Note: 3D handles this visually to avoid layout recomputation
-    if (filters.value.search_query && behaviors.value.searchMode === 'hide') {
+    // searchMode is checked FIRST on purpose: in 'highlight' mode the
+    // short-circuit means search_query is never read, so this computed does not
+    // depend on it — a search keystroke leaves filteredNodes (and everything
+    // downstream) cached instead of recomputing the whole chain.
+    if (behaviors.value.searchMode === 'hide' && filters.value.search_query) {
       // Reuse the already-computed match Set instead of re-running the
       // toLowerCase scan a third time.
       const matched = searchMatchedNodeIds.value;
@@ -1200,7 +1204,12 @@ export const useGraphStore = defineStore('graph', () => {
   }
 
   function applyFilters(newFilters: Partial<FilterState>) {
-    filters.value = { ...filters.value, ...newFilters };
+    // Mutate in place instead of replacing the object: replacing `filters.value`
+    // invalidates EVERY computed that reads any filter field, so a search
+    // keystroke would needlessly recompute the whole filteredNodes →
+    // filteredEdges → enhanced* chain (O(n+m) over reactive proxies at 200k+).
+    // Vue's per-property tracking keeps unrelated readers cached.
+    Object.assign(filters.value, newFilters);
   }
 
   function resetFilters() {

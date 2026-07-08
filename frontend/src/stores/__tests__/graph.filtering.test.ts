@@ -313,6 +313,67 @@ describe('searchHiddenNodeIds', () => {
 })
 
 // ============================================================================
+// Search reactivity contract (large-graph freeze regression)
+// ============================================================================
+
+// A search keystroke in 'highlight' mode (the default) must NOT invalidate
+// filteredNodes/filteredEdges: on 200k+ graphs their recompute cascades into an
+// O(n+m) proxy scan and a full 3D graph rebuild per keystroke (UI freeze).
+// With a type filter active, filteredNodes returns a fresh array on each
+// recompute — so cached-vs-recomputed is observable via array identity.
+describe('search reactivity: highlight mode keeps filtered chain cached', () => {
+  it('search_query change does not recompute filteredNodes in highlight mode', () => {
+    const store = setupGraph()
+    store.updateBehaviors({ searchMode: 'highlight' })
+    store.applyFilters({ node_types: ['Person'] })
+    const before = store.filteredNodes
+    store.applyFilters({ search_query: 'A' })
+    expect(store.filteredNodes).toBe(before) // same ref = computed stayed cached
+  })
+
+  it('search_query change does not recompute filteredEdges in highlight mode', () => {
+    const store = setupGraph()
+    store.updateBehaviors({ searchMode: 'highlight' })
+    store.applyFilters({ edge_types: ['KNOWS'] })
+    // Warm-up read: the first-ever evaluation lazily creates useSimilarityStore()
+    // inside the computed, whose reactive writes make the very next cold read
+    // re-evaluate regardless of filters. In the app this computed always has
+    // subscribers (canvas/metrics watchers), so steady-state is what matters.
+    store.filteredEdges
+    const before = store.filteredEdges
+    store.applyFilters({ search_query: 'A' })
+    expect(store.filteredEdges).toBe(before)
+  })
+
+  it('search_query change DOES recompute filteredNodes in hide mode', () => {
+    const store = setupGraph()
+    store.updateBehaviors({ searchMode: 'hide' })
+    store.applyFilters({ node_types: ['Person', 'Company'] })
+    const before = store.filteredNodes
+    store.applyFilters({ search_query: 'Person' })
+    expect(store.filteredNodes).not.toBe(before)
+    expect(store.filteredNodes.map(n => n.node_id)).toEqual(['A', 'B'])
+  })
+
+  it('searchMatchedNodeIds still updates per keystroke in highlight mode', () => {
+    const store = setupGraph()
+    store.updateBehaviors({ searchMode: 'highlight' })
+    store.applyFilters({ search_query: 'Company' })
+    expect(store.searchMatchedNodeIds!.has('C')).toBe(true)
+    store.applyFilters({ search_query: 'ZZZ' })
+    expect(store.searchMatchedNodeIds!.size).toBe(0)
+  })
+
+  it('applyFilters merges partial updates without dropping other fields', () => {
+    const store = setupGraph()
+    store.applyFilters({ node_types: ['Person'] })
+    store.applyFilters({ search_query: 'A' })
+    expect(store.filters.node_types).toEqual(['Person'])
+    expect(store.filters.search_query).toBe('A')
+  })
+})
+
+// ============================================================================
 // nodeTypes / edgeTypes
 // ============================================================================
 

@@ -1,5 +1,92 @@
 # Decision Log
 
+## [2026-07-08 19:50] - Perf fix: search froze the UI on 200k+ graphs — full 3D rebuild per keystroke
+
+**Issue:** Even after the search index (scan ~37ms) and the debounced inputs,
+typing in the FilterPanel graph search froze the tab on 200k+ graphs. User
+hypotheses: (a) offload search to a Web Worker, or (b) "the graph layout being
+altered" — noting (b) seemed odd since zoom/pan stays fast.
+
+**Root cause (hypothesis b confirmed, exactly):** zoom/pan only moves the
+camera (GPU; no reactive data changes). A search keystroke, however, hit two
+compounding problems:
+
+1. **Full 3D rebuild per keystroke (the freeze).** The "data changes" watcher in
+   [GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue) watched
+   `() => [filteredNodes.value.length, filteredEdges.value.length]` — a getter
+   returning a **fresh array** every evaluation, so Vue fired it whenever the
+   filtered/enhanced chain recomputed even with both lengths identical. Its
+   guard only skipped in `'hide'` search mode; in the **default `'highlight'`
+   mode** it fell through to `updateGraph()` → `buildGraphData()` O(n+m) →
+   `graph3d.graphData(newArray)` = **recreation of every Three.js object +
+   d3-force simulation re-init** — seconds of main-thread block, pure waste
+   (highlight never changes node/edge membership).
+2. **Redundant store cascade.** `applyFilters` replaced the whole `filters`
+   object (`filters.value = {...filters.value, ...new}`), invalidating every
+   computed reading *any* filter field. So each keystroke recomputed
+   `filteredNodes` → `filteredEdges` (Set of all node ids + full edge filter,
+   over deep-reactive proxies) → `enhancedNodes`/`enhancedEdges`/
+   `enhancedMultiEdgeStats` — several O(n+m) proxy passes, pulled independently
+   by the canvas watcher, a metrics-store watcher, and the status bar.
+
+**Why NOT a Web Worker:** the bottleneck was not workerizable computation (the
+string scan is ~ms); it was Three.js object recreation + layout re-init, which
+is main-thread-only and simply should not run. What legitimately remains per
+settled keystroke — `updateVisuals()` + `updateLabels()` (O(n+m), in-place
+mutation, no recreation; instrumented via `recordPerf`) — must run on the main
+thread anyway to paint the highlight.
+
+**Fixes:**
+1. [GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue) — the
+   data watcher now tracks previous counts and skips `updateGraph()` when the
+   change is search-triggered and counts are unchanged (highlight mode). All
+   other triggers (new query results, type filters, cluster collapse — even
+   equal-count filter swaps, which fire exactly as before) keep the old
+   behavior; the existing `'hide'`-mode guard is preserved.
+2. [graph.ts](../../frontend/src/stores/graph.ts) `applyFilters` now mutates in
+   place (`Object.assign(filters.value, newFilters)`) — Vue's per-property
+   tracking keeps readers of unrelated filter fields cached. Audited all
+   identity-dependent watchers: only FilterPanel's own-state sync watch reads
+   the object reference, and it only needs to fire for wholesale replacements
+   (`resetFilters` :1216, `loadExploration` :1676), which still replace the
+   object. Only FilterPanel itself calls `applyFilters`, so no external caller
+   relied on the sync.
+3. [graph.ts](../../frontend/src/stores/graph.ts) `filteredNodes` hide-mode
+   condition reordered to `searchMode === 'hide' && search_query` — in
+   highlight mode the short-circuit means `search_query` is never read, so the
+   computed (and the whole downstream chain) is not even a dependency of the
+   search text.
+
+**Net effect per keystroke (highlight, default):** before — indexed scan +
+filtered/enhanced O(n+m) proxy chain (pulled 3×) + `buildGraphData` + Three.js
+recreation + d3-force re-init + updateVisuals + updateLabels; after — indexed
+scan + updateVisuals + updateLabels only.
+
+**Testing:**
+- [x] 5 new regression tests in
+  [graph.filtering.test.ts](../../frontend/src/stores/__tests__/graph.filtering.test.ts):
+  highlight-mode keystroke keeps `filteredNodes`/`filteredEdges` cached (array
+  identity), hide-mode still recomputes, `searchMatchedNodeIds` still updates,
+  `applyFilters` partial-merge preserved. Note: the `filteredEdges` test needs a
+  warm-up read — the first-ever evaluation lazily creates `useSimilarityStore()`
+  inside the computed, whose reactive writes destabilize the next *cold*
+  (subscriber-less) read; in the app the computed always has subscribers.
+- [x] 45/45 graph.filtering; 279/279 across `vitest related` on all changed
+  files; `vue-tsc --noEmit` clean.
+- [ ] Manual perf check (needs running app): type a search on a 200k+ graph and
+  confirm `window.__PERF_METRICS__` records **no new `buildGraphData` entries
+  per keystroke** (`updateVisuals` still records — legitimate); layout must not
+  jitter/restart while typing.
+
+**Deferred:**
+- `shallowRef` for `nodes`/`edges` (would kill proxy overhead app-wide; broad
+  refactor, reactivity risk).
+- Incremental (dirty-set) `updateVisuals`/`updateLabels` — only if the manual
+  measurement above shows the remaining O(n+m) paint is still material.
+- Web Worker — ruled out for this problem (see above).
+
+**Status:** Fixed (pending the manual perf confirmation above).
+
 ## [2026-07-08 19:40] - Bug fix: Procedural BFS not enabled by default when opening a new context
 
 **Report:** Opening a graph context (new or pre-existing) then opening the
