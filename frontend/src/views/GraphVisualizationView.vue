@@ -456,6 +456,17 @@ watch(
   gap: var(--space-3, 12px);
 }
 
+/*
+ * The overlays share `pointer-events: none` above so the translucent backdrop
+ * doesn't swallow graph interaction while loading. The loading overlay, unlike
+ * the error/empty ones, hosts an interactive Cancel button (in QueryRunningState)
+ * that MUST receive clicks — re-enable pointer events on it, or the click falls
+ * through to the 3D canvas and cancellation silently no-ops.
+ */
+.loading-overlay :deep(.cancel-btn) {
+  pointer-events: auto;
+}
+
 .loading-message {
   font-size: 0.9rem;
   font-weight: 500;

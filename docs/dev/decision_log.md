@@ -1,5 +1,62 @@
 # Decision Log
 
+## [2026-07-08 20:30] - Bug fix: graph-query Cancel button did nothing (overlay swallowed the click)
+
+**Issue:** Running a graph query (default path), the loading overlay showed a
+working spinner + a **Cancel** button, but clicking it did nothing — the query
+kept running and the overlay never dismissed. The table Query Console Cancel
+button worked fine.
+
+**Investigation:** Traced the full chain — `QueryRunningState.vue` button →
+`@cancel` → `graphStore.cancelGraphQuery()` → `useCancellableQuery.cancelQuery()`
+→ `api.cancelGraphQueryJob()`. All of the frontend state-machine logic and the
+backend submit→poll→cancel endpoints (`async_job.cancel_job`,
+`warehouse.cancel_statement`) were correct in isolation. The table console path
+(identical component, identical composable) worked.
+
+**Root cause:** The only difference between the two paths is the container. The
+graph Cancel button lives inside `.loading-overlay` in
+[GraphVisualizationView.vue](../../frontend/src/views/GraphVisualizationView.vue),
+which shares a CSS rule with the error/empty overlays setting
+**`pointer-events: none`** (so the translucent backdrop doesn't block orbiting
+the graph while loading). That rule also disabled the interactive Cancel button
+inside it — every click fell straight through the overlay to the 3D `<canvas>`
+behind it (the orbit-controls target). Playwright confirmed it verbatim:
+*"canvas … subtree intercepts pointer events."* The table console button isn't
+inside any `pointer-events: none` overlay, so it was unaffected.
+
+**Design decision:** Keep the overlay pass-through (preserves graph interaction
+during load) but re-enable pointer events on just the interactive element:
+```css
+.loading-overlay :deep(.cancel-btn) { pointer-events: auto; }
+```
+`:deep()` is required because `.cancel-btn` is scoped inside the child
+`QueryRunningState` component. Narrowest possible override — the error/empty
+overlays (no interactive children) are untouched.
+
+**Why the bug shipped undetected:** the existing E2E regression test
+(`graph.spec.ts`) clicked via `dispatchEvent('click')`, which **bypasses**
+Playwright's pointer-events/hit-test actionability check, so it passed against
+an unclickable button. Its comment misattributed the need for `dispatchEvent`
+to canvas "frame stability"; the real cause was `pointer-events: none`.
+
+**Files modified:**
+- [frontend/src/views/GraphVisualizationView.vue](../../frontend/src/views/GraphVisualizationView.vue) — added `.loading-overlay :deep(.cancel-btn) { pointer-events: auto; }`
+- [frontend/e2e/tests/graph.spec.ts](../../frontend/e2e/tests/graph.spec.ts) — cancel test now uses a **real** `cancelBtn.click()` (a true pointer-events regression guard) instead of `dispatchEvent('click')`
+
+**Testing:**
+- Verified the updated test **fails** with the fix reverted (canvas intercepts pointer events) and **passes** with it applied.
+- Full `graph.spec.ts` + `query-console.spec.ts` E2E suites: **35 passed**.
+
+**Note (separate, pre-existing issue, not fixed here):** on the default
+**inline** graph path (`use_external_links=false`),
+`execute_graph_query_with_nodes` calls `execute_statement` without `on_submit`,
+so the warehouse `statement_id` is never captured and `cancel_job` cannot send
+`cancel_statement` to the warehouse — cancellation stops API-side processing but
+the underlying warehouse statement keeps burning compute. Worth a follow-up
+(route the inline path through submit+poll with `on_submit`, like the
+EXTERNAL_LINKS path already does).
+
 ## [2026-07-08 19:50] - Perf fix: search froze the UI on 200k+ graphs — full 3D rebuild per keystroke
 
 **Issue:** Even after the search index (scan ~37ms) and the debounced inputs,
