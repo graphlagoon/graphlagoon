@@ -1213,6 +1213,20 @@ export const useGraphStore = defineStore('graph', () => {
     };
   }
 
+  /**
+   * Reset the Cypher transpilation options to their defaults. Procedural BFS is
+   * the default rendering mode, so a fresh context always starts with the
+   * "Procedural BFS" toggle enabled — the store is a singleton, so without this
+   * a previously-opened exploration saved with `'cte'` would leak into the next
+   * context opened in the same session (clear() is what runs between them).
+   */
+  function resetTranspileOptions() {
+    vlpRenderingMode.value = 'procedural';
+    materializationStrategy.value =
+      window.__GRAPH_LAGOON_CONFIG__?.databricks_mode ? 'temp_tables' : 'numbered_views';
+    proceduralOptimizations.value = { ...DEFAULT_PROCEDURAL_BFS_OPTIONS };
+  }
+
   function addNodePropertyFilter(filter: Omit<PropertyFilter, 'id'>) {
     const newFilter: PropertyFilter = {
       ...filter,
@@ -1773,6 +1787,7 @@ export const useGraphStore = defineStore('graph', () => {
     graphQuery.value = '';  // Reset query so user must execute one to save exploration
     ctePrefilter.value = '';
     resetFilters();
+    resetTranspileOptions();
   }
 
   return {
@@ -1856,6 +1871,7 @@ export const useGraphStore = defineStore('graph', () => {
     clearSelection,
     applyFilters,
     resetFilters,
+    resetTranspileOptions,
     addNodePropertyFilter,
     updateNodePropertyFilter,
     removeNodePropertyFilter,

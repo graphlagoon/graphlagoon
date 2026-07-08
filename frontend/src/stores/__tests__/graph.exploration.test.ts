@@ -250,4 +250,45 @@ describe('exploration state serialization', () => {
       expect(state.filters.edgePropertyFilters).toHaveLength(1)
     })
   })
+
+  describe('transpile options reset on clear', () => {
+    it('procedural BFS is the default rendering mode for a fresh store', () => {
+      const store = useGraphStore()
+      expect(store.vlpRenderingMode).toBe('procedural')
+    })
+
+    it('clear() restores procedural default after an exploration set cte', () => {
+      const store = useGraphStore()
+      // Simulate opening an exploration saved with the legacy CTE mode.
+      store.vlpRenderingMode = 'cte'
+
+      // Opening a new context runs clear() between explorations.
+      store.clear()
+
+      expect(store.vlpRenderingMode).toBe('procedural')
+    })
+
+    it('clear() restores default procedural optimization flags', () => {
+      const store = useGraphStore()
+      store.proceduralOptimizations = {
+        ...store.proceduralOptimizations,
+        visited_not_exists: false,
+        undirected_union_all: true,
+      }
+
+      store.clear()
+
+      expect(store.proceduralOptimizations.visited_not_exists).toBe(true)
+      expect(store.proceduralOptimizations.undirected_union_all).toBe(false)
+    })
+
+    it('resetTranspileOptions() re-enables procedural BFS', () => {
+      const store = useGraphStore()
+      store.vlpRenderingMode = 'cte'
+
+      store.resetTranspileOptions()
+
+      expect(store.vlpRenderingMode).toBe('procedural')
+    })
+  })
 })
