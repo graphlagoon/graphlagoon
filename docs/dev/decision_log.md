@@ -48,14 +48,56 @@ to canvas "frame stability"; the real cause was `pointer-events: none`.
 - Verified the updated test **fails** with the fix reverted (canvas intercepts pointer events) and **passes** with it applied.
 - Full `graph.spec.ts` + `query-console.spec.ts` E2E suites: **35 passed**.
 
-**Note (separate, pre-existing issue, not fixed here):** on the default
-**inline** graph path (`use_external_links=false`),
-`execute_graph_query_with_nodes` calls `execute_statement` without `on_submit`,
-so the warehouse `statement_id` is never captured and `cancel_job` cannot send
-`cancel_statement` to the warehouse — cancellation stops API-side processing but
-the underlying warehouse statement keeps burning compute. Worth a follow-up
-(route the inline path through submit+poll with `on_submit`, like the
-EXTERNAL_LINKS path already does).
+**Note (separate issue — fixed in the next entry):** on the default **inline**
+graph path (`use_external_links=false`), `execute_graph_query_with_nodes` called
+`execute_statement` without `on_submit`, so the warehouse `statement_id` was
+never captured and `cancel_job` could not send `cancel_statement` to the
+warehouse — cancellation stopped API-side processing but the underlying
+warehouse statement kept burning compute. Fixed below.
+
+## [2026-07-08 20:55] - Bug fix: inline graph query cancel didn't stop the warehouse statement
+
+**Issue (follow-up to the pointer-events fix above):** even with the Cancel
+button now clickable, cancelling a graph query on the default **inline** path
+(`use_external_links=false`) only cancelled the API-side asyncio task — it never
+told the warehouse to stop, so the underlying statement kept running and burning
+compute (a real cost issue on Databricks; a simulated no-op locally).
+
+**Root cause:** `execute_graph_query_with_nodes` forwarded the job's `on_submit`
+callback (which records the warehouse `statement_id` into the job so
+`cancel_job` → `warehouse.cancel_statement(sid)` can reach it) **only on the
+EXTERNAL_LINKS branch**. The inline branch called `warehouse.execute_statement()`
+— a single blocking POST with a long `wait_timeout` that never exposes the
+`statement_id` before completion — so `record["statement_ids"]` stayed empty and
+nothing was ever cancelled at the warehouse.
+
+**Fix (Databricks-safe):**
+- `WarehouseClient.execute_statement` gains an optional `on_submit`. When
+  provided, it routes through a new `_execute_statement_polled` that submits with
+  a short `wait_timeout` (via the existing `submit_statement`), hands the
+  `statement_id` to `on_submit` immediately, then polls `get_statement` to a
+  terminal state — the **same submit→poll shape already proven against Databricks
+  by `execute_statement_external`**, minus the external-link download (stays
+  INLINE). When `on_submit` is absent, the original single blocking POST is
+  untouched — so Databricks and every other caller behave exactly as before.
+- `execute_graph_query_with_nodes` now passes `on_submit=on_submit` on the inline
+  edge and node calls too.
+
+Net: cancelling an inline graph query now cancels the asyncio task **and** sends
+`cancel_statement` to the warehouse. Bonus: because the API task now spends its
+wait in `asyncio.sleep` between polls (instead of one long blocking POST), it is
+promptly interruptible by `task.cancel()`.
+
+**Files modified:**
+- [api/graphlagoon/services/warehouse.py](../../api/graphlagoon/services/warehouse.py) — `execute_statement(on_submit=…)` + new `_execute_statement_polled`
+- [api/graphlagoon/services/graph_operations.py](../../api/graphlagoon/services/graph_operations.py) — forward `on_submit` on the inline edge + node `execute_statement` calls
+
+**Files created:**
+- [api/tests/test_cancellable_statement.py](../../api/tests/test_cancellable_statement.py) — submit→poll captures the id before completion; blocking path unchanged without `on_submit`; fast query returns without polling
+
+**Testing:**
+- New tests + `test_graph_error_handling.py` (added an inline-forwards-`on_submit` regression test) pass.
+- Full API suite: **146 passed, 1 skipped**. The Databricks/default blocking path is explicitly asserted unchanged (no `submit_statement`/`get_statement`, single POST) so the integration can't silently regress.
 
 ## [2026-07-08 19:50] - Perf fix: search froze the UI on 200k+ graphs — full 3D rebuild per keystroke
 

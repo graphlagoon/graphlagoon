@@ -748,6 +748,7 @@ class WarehouseClient:
         schema: Optional[str] = None,
         row_limit: Optional[int] = None,
         parameters: Optional[list[dict[str, Any]]] = None,
+        on_submit: Optional[Callable[[str], None]] = None,
     ) -> StatementResponse:
         """Execute a SQL statement using Databricks-compatible API.
 
@@ -760,12 +761,33 @@ class WarehouseClient:
             schema: Default schema for the query (uses configured default if None)
             row_limit: Maximum rows to return
             parameters: Named parameters list [{"name": "x", "value": "1", "type": "INT"}]
+            on_submit: Optional callback(statement_id) fired as soon as the
+                statement is submitted so the caller can cancel it mid-flight.
+                When provided, this uses a submit→poll flow (short wait_timeout,
+                then poll to a terminal state) instead of one blocking POST, so
+                the statement_id is known before the query finishes. Behaviour is
+                otherwise identical — same INLINE result — on both the local
+                warehouse and Databricks.
         """
         # Use default catalog and schema from settings
         if catalog is None:
             catalog = self.default_catalog
         if schema is None:
             schema = self.default_schema
+
+        # Cancellable path: caller wants to be able to cancel the statement, so
+        # we must expose its id before completion. Mirrors the submit→poll shape
+        # already used (and proven against Databricks) by
+        # ``execute_statement_external``, but keeps the INLINE disposition.
+        if on_submit is not None:
+            return await self._execute_statement_polled(
+                statement=statement,
+                catalog=catalog,
+                schema=schema,
+                row_limit=row_limit,
+                parameters=parameters,
+                on_submit=on_submit,
+            )
 
         request_body = {
             "statement": statement,
@@ -799,6 +821,59 @@ class WarehouseClient:
             raise RuntimeError(
                 f"Invalid response from warehouse (failed to parse StatementResponse): {e}"
             ) from e
+
+    async def _execute_statement_polled(
+        self,
+        statement: str,
+        catalog: Optional[str],
+        schema: Optional[str],
+        row_limit: Optional[int],
+        parameters: Optional[list[dict[str, Any]]],
+        on_submit: Callable[[str], None],
+    ) -> StatementResponse:
+        """INLINE execute via submit→poll so the statement can be cancelled.
+
+        Submits with a short ``wait_timeout`` (:meth:`submit_statement`), exposes
+        the ``statement_id`` through ``on_submit`` immediately, then polls
+        :meth:`get_statement` until a terminal state and returns the final
+        response (inline data when SUCCEEDED). Same submit→poll shape as
+        :meth:`execute_statement_external` but with the INLINE disposition (no
+        external-link download); works identically on the local warehouse and
+        Databricks. Errors surface via the returned response's state, exactly
+        like the blocking :meth:`execute_statement` path.
+        """
+        response = await self.submit_statement(
+            statement=statement,
+            catalog=catalog,
+            schema=schema,
+            row_limit=row_limit,
+            parameters=parameters,
+        )
+
+        statement_id = response.statement_id
+        # Expose the id ASAP so a caller can cancel the statement mid-flight.
+        if statement_id:
+            try:
+                on_submit(statement_id)
+            except Exception:  # noqa: BLE001 — on_submit is best-effort
+                pass
+
+        elapsed = 0.0
+        while response.status.state in ("PENDING", "RUNNING"):
+            if elapsed >= self.max_poll_time:
+                try:
+                    await self.cancel_statement(statement_id)
+                except Exception:  # noqa: BLE001 — best effort
+                    pass
+                raise RuntimeError(
+                    f"Statement {statement_id} did not complete within "
+                    f"{self.max_poll_time}s (state: {response.status.state})"
+                )
+            await asyncio.sleep(self.poll_interval)
+            elapsed += self.poll_interval
+            response = await self.get_statement(statement_id)
+
+        return response
 
     async def submit_statement(
         self,

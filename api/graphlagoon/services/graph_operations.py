@@ -343,6 +343,7 @@ async def execute_graph_query_with_nodes(
         result = await warehouse_client.execute_statement(
             statement=query,
             row_limit=limit,
+            on_submit=on_submit,
         )
     edge_query_ms = (time.perf_counter() - t0) * 1000
 
@@ -427,7 +428,10 @@ async def execute_graph_query_with_nodes(
                 progress_callback=_phase_progress("nodes"),
             )
         else:
-            node_result = await warehouse_client.execute_statement(statement=node_query)
+            node_result = await warehouse_client.execute_statement(
+                statement=node_query,
+                on_submit=on_submit,
+            )
     except Exception as e:
         raise RuntimeError(
             f"Node query execution failed (node_table={node_table}, "

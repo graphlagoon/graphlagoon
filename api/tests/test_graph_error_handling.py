@@ -350,6 +350,36 @@ class TestExecuteGraphQueryWithNodes:
         assert result.edges[0].edge_id == "e1"
         assert len(result.nodes) == 2
 
+    @pytest.mark.asyncio
+    async def test_inline_path_forwards_on_submit_for_cancellation(self):
+        """On the inline path (use_external_links=False), on_submit must reach
+        execute_statement so the graph query job can capture the warehouse
+        statement_id and cancel it. Regression guard: previously the inline
+        edge/node calls dropped on_submit, making cancellation a no-op."""
+        # Empty edge result returns early after the edge query only — enough to
+        # assert the edge call forwards on_submit.
+        edge_response = _make_succeeded_response(columns=["r"], rows=[])
+
+        client = MagicMock()
+        client.execute_statement = AsyncMock(return_value=edge_response)
+
+        def _on_submit(_sid):  # pragma: no cover - identity check only
+            pass
+
+        await execute_graph_query_with_nodes(
+            warehouse_client=client,
+            node_table="cat.schema.nodes",
+            query="SELECT r FROM edges",
+            limit=100,
+            column_config=_make_column_config(),
+            use_external_links=False,
+            on_submit=_on_submit,
+        )
+
+        client.execute_statement.assert_awaited_once()
+        _, kwargs = client.execute_statement.await_args
+        assert kwargs.get("on_submit") is _on_submit
+
 
 # ── Router-level error handling (integration-like) ───────────────────
 
