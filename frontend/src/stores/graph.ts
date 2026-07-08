@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, toRaw } from 'vue';
+import { buildSearchText } from '@/utils/searchText';
 import type {
   Node,
   Edge,
@@ -501,16 +502,28 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  // Pre-computed lowercased search text per node (id + type), rebuilt only when
+  // `nodes` changes — not on every keystroke. This moves the per-node
+  // `toLowerCase()` and the reactive-Proxy property reads off the search hot
+  // path: searching then scans a plain string per node via one `includes()`.
+  const nodeSearchIndex = computed(() => {
+    const raw = toRaw(nodes.value);
+    const index = new Array<{ id: string; text: string }>(raw.length);
+    for (let i = 0; i < raw.length; i++) {
+      const n = raw[i];
+      index[i] = { id: n.node_id, text: buildSearchText([n.node_id, n.node_type]) };
+    }
+    return index;
+  });
+
   // Node IDs that match the current search query
   const searchMatchedNodeIds = computed(() => {
     if (!filters.value.search_query) return null;
     const query = filters.value.search_query.toLowerCase();
     const matched = new Set<string>();
-    nodes.value.forEach((n) => {
-      if (n.node_id.toLowerCase().includes(query) || n.node_type.toLowerCase().includes(query)) {
-        matched.add(n.node_id);
-      }
-    });
+    for (const entry of nodeSearchIndex.value) {
+      if (entry.text.includes(query)) matched.add(entry.id);
+    }
     return matched;
   });
 
@@ -521,11 +534,9 @@ export const useGraphStore = defineStore('graph', () => {
     if (!matched || matched.size === 0) return null;
     // Return all node IDs that are NOT matched
     const hidden = new Set<string>();
-    nodes.value.forEach((n) => {
-      if (!matched.has(n.node_id)) {
-        hidden.add(n.node_id);
-      }
-    });
+    for (const entry of nodeSearchIndex.value) {
+      if (!matched.has(entry.id)) hidden.add(entry.id);
+    }
     return hidden;
   });
 
@@ -612,13 +623,11 @@ export const useGraphStore = defineStore('graph', () => {
     // Only hide non-matching nodes if searchMode is 'hide' AND there are matches
     // Note: 3D handles this visually to avoid layout recomputation
     if (filters.value.search_query && behaviors.value.searchMode === 'hide') {
-      const query = filters.value.search_query.toLowerCase();
-      const filtered = result.filter((n) => {
-        return n.node_id.toLowerCase().includes(query) || n.node_type.toLowerCase().includes(query);
-      });
-      // Only apply filter if there are matches, otherwise keep all nodes
-      if (filtered.length > 0) {
-        result = filtered;
+      // Reuse the already-computed match Set instead of re-running the
+      // toLowerCase scan a third time.
+      const matched = searchMatchedNodeIds.value;
+      if (matched && matched.size > 0) {
+        result = result.filter((n) => matched.has(n.node_id));
       }
     }
 

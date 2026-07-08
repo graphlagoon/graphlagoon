@@ -1,6 +1,22 @@
 import { FilterMatchMode, FilterOperator } from '@primevue/core/api';
+import { buildSearchText, SEARCH_FIELD } from '@/utils/searchText';
 
 export const CATEGORICAL_THRESHOLD = 30;
+
+/**
+ * Upper bound on how many non-null values a single column's *expensive*
+ * type checks (`Number()` coercion + date-regex + `new Date()`) scan.
+ *
+ * On very large graphs (200k+ nodes/edges) running these per-value over the
+ * whole dataset — for every property column — blocks the main thread for
+ * seconds and freezes the tab. Sampling caps that cost at O(columns × SAMPLE)
+ * instead of O(columns × n).
+ *
+ * Only numeric/date inference is sampled. Categorical detection and its option
+ * list stay a full scan (cheap: bounded `Set` with early-exit at the threshold),
+ * so a MultiSelect filter never misses a value beyond the sample.
+ */
+export const TYPE_SAMPLE_CAP = 5000;
 
 export type ColType = 'text' | 'numeric' | 'categorical' | 'date';
 
@@ -26,25 +42,40 @@ export function looksLikeDate(val: unknown): boolean {
   return DATE_RE.test(val.trim()) && !isNaN(new Date(val).getTime());
 }
 
-/** Detect whether a column is numeric, date, categorical, or free-text. */
+/** Detect whether a column is numeric, date, categorical, or free-text.
+ *
+ * Categorical detection scans every value (cheap, early-exits once the unique
+ * count passes the threshold). The expensive numeric/date checks are evaluated
+ * only over the first `TYPE_SAMPLE_CAP` non-null values so the cost stays
+ * bounded on huge datasets. Ratios use `sampled` (the sampled denominator),
+ * not `total`, so the 80% thresholds stay meaningful. */
 export function detectType<T>(items: T[], accessor: (item: T) => unknown): ColType {
-  let numCount = 0, dateCount = 0, total = 0;
+  let numCount = 0, dateCount = 0, sampled = 0;
   const uniq = new Set<string>();
   let tooMany = false;
   for (const item of items) {
     const val = accessor(item);
     if (val == null || val === '') continue;
-    total++;
-    const n = Number(val);
-    if (!isNaN(n) && isFinite(n) && String(val).trim() !== '') numCount++;
-    if (looksLikeDate(val)) dateCount++;
+    // Categorical tracking over ALL values — cheap and early-exiting, so the
+    // option list is never truncated by sampling.
     if (!tooMany) {
       uniq.add(String(val));
       if (uniq.size > CATEGORICAL_THRESHOLD) tooMany = true;
     }
+    // Expensive numeric/date checks: sample only.
+    if (sampled < TYPE_SAMPLE_CAP) {
+      sampled++;
+      const n = Number(val);
+      if (!isNaN(n) && isFinite(n) && String(val).trim() !== '') numCount++;
+      if (looksLikeDate(val)) dateCount++;
+    } else if (tooMany) {
+      // Sample is full and the column is already high-cardinality — neither
+      // remaining check can change the outcome, so stop early.
+      break;
+    }
   }
-  if (total > 0 && dateCount / total >= 0.8) return 'date';
-  if (total > 0 && numCount / total >= 0.8) return 'numeric';
+  if (sampled > 0 && dateCount / sampled >= 0.8) return 'date';
+  if (sampled > 0 && numCount / sampled >= 0.8) return 'numeric';
   if (!tooMany && uniq.size > 0) return 'categorical';
   return 'text';
 }
@@ -142,11 +173,15 @@ export function flattenNodeRows<T extends { node_id: string; node_type: string; 
   const colMap = new Map(cols?.map(c => [c.field, c]) ?? []);
   return nodes.map(n => {
     const r: Record<string, unknown> = { node_id: n.node_id, node_type: n.node_type };
+    const searchVals: unknown[] = [n.node_id, n.node_type];
     for (const k of propKeys) {
       const field = `prop_${k}`;
       const col = colMap.get(field);
-      r[field] = coerceValue(n.properties?.[k] ?? null, col?.type ?? 'text');
+      const val = coerceValue(n.properties?.[k] ?? null, col?.type ?? 'text');
+      r[field] = val;
+      searchVals.push(val);
     }
+    r[SEARCH_FIELD] = buildSearchText(searchVals);
     return r;
   });
 }
@@ -192,9 +227,13 @@ export function buildGenericRows(
 ): Record<string, unknown>[] {
   return rows.map(r => {
     const obj: Record<string, unknown> = {};
+    const searchVals: unknown[] = [];
     for (let i = 0; i < cols.length; i++) {
-      obj[cols[i].field] = coerceCell(r[i], cols[i].type);
+      const val = coerceCell(r[i], cols[i].type);
+      obj[cols[i].field] = val;
+      searchVals.push(val);
     }
+    obj[SEARCH_FIELD] = buildSearchText(searchVals);
     return obj;
   });
 }

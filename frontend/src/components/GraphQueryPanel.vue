@@ -4,6 +4,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import CypherEditor from './CypherEditor.vue';
 import TranspileSettingsModal from './TranspileSettingsModal.vue';
+import { generateBfsExampleQuery } from '@/utils/exampleQuery';
 import { X, SlidersHorizontal } from 'lucide-vue-next';
 
 const emit = defineEmits<{
@@ -19,41 +20,14 @@ const relationshipTypes = computed(() => graphStore.currentContext?.relationship
 const nodeProperties = computed(() => graphStore.currentContext?.node_properties || []);
 const edgeProperties = computed(() => graphStore.currentContext?.edge_properties || []);
 
-// Generate example query based on context types and displayed nodes
+// Generate example query based on context schema and displayed nodes.
+// The BFS shape (RETURN r, dynamic node_id_col, no hardcoded label) lives in
+// the pure util so it can be unit-tested — see utils/exampleQuery.ts.
 function generateExampleQuery(): string {
-  const context = graphStore.currentContext;
-  if (!context) {
-    return 'MATCH (root { node_id: "{node_id_value}" })\nMATCH p = (root)-[*1..2]-()\nUNWIND relationships(p) AS r\nRETURN r';
-  }
-
-  // Get the node_id column name from context
-  const nodeIdCol = context.node_structure?.node_id_col || 'node_id';
-
-  // Try to get a random node from the displayed nodes
   const displayedNodes = graphStore.filteredNodes.length > 0
     ? graphStore.filteredNodes
     : graphStore.nodes;
-
-  if (displayedNodes.length > 0) {
-    // Pick a random node
-    const randomIndex = Math.floor(Math.random() * displayedNodes.length);
-    const randomNode = displayedNodes[randomIndex];
-    const nodeIdValue = randomNode.node_id;
-
-    // Generate traversal query from this node (BFS 1-2 hops)
-    return `MATCH (root { ${nodeIdCol}: "${nodeIdValue}" })
-MATCH p = (root)-[*1..2]-()
-UNWIND relationships(p) AS r
-RETURN r`;
-  }
-
-  // Fallback: BFS query with placeholders for user to replace
-  const nodeTypeLabel = context.node_types?.[0] ? `:${context.node_types[0]}` : '';
-
-  return `MATCH (root${nodeTypeLabel} { ${nodeIdCol}: "{${nodeIdCol}_value}" })
-MATCH p = (root)-[*1..2]-()
-UNWIND relationships(p) AS r
-RETURN r`;
+  return generateBfsExampleQuery(graphStore.currentContext, displayedNodes);
 }
 
 type QueryMode = 'cypher' | 'sql';

@@ -18,6 +18,8 @@ import MultiSelect from 'primevue/multiselect';
 import DatePicker from 'primevue/datepicker';
 import Popover from 'primevue/popover';
 import { type ColMeta, initFilters } from '@/composables/useTableColumns';
+import { useDebouncedModel } from '@/composables/useDebouncedModel';
+import { SEARCH_FIELD } from '@/utils/searchText';
 
 const props = withDefaults(
   defineProps<{
@@ -65,7 +67,16 @@ watch(
   cols => { filters.value = initFilters(cols); },
 );
 
-const globalFilterFields = computed(() => props.columns.map(c => c.field));
+// Search the single pre-built search field instead of every column (built by
+// buildGenericRows); one string scan per row rather than N.
+const globalFilterFields = [SEARCH_FIELD];
+
+// Debounced global search — writing `global.value` re-filters the whole result
+// set (O(n) per keystroke). Clearing filters flows back into the input.
+const globalSearch = useDebouncedModel(
+  () => filters.value['global'].value as string | null,
+  v => { filters.value['global'].value = v; },
+);
 
 // ─── Filtered row count ───
 const filteredCount = ref(props.rows.length);
@@ -79,6 +90,7 @@ function onFilter(event: { filteredValue?: unknown[] }) {
 
 function clearFilters() {
   filters.value = initFilters(props.columns);
+  globalSearch.value = null; // cancel any pending debounced write + blank the box
   filteredCount.value = props.rows.length;
 }
 
@@ -113,7 +125,7 @@ defineExpose({ exportCSV, clearFilters });
   <div class="data-grid">
     <div class="grid-toolbar">
       <InputText
-        v-model="filters['global'].value"
+        v-model="globalSearch"
         placeholder="Search results..."
         class="grid-search"
         data-testid="data-grid-search"

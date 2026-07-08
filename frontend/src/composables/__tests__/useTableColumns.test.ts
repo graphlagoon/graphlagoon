@@ -2,7 +2,14 @@ import { describe, it, expect } from 'vitest';
 import {
   buildGenericColumns,
   buildGenericRows,
+  buildNodeColumns,
+  flattenNodeRows,
+  detectType,
+  collectOptions,
+  TYPE_SAMPLE_CAP,
+  CATEGORICAL_THRESHOLD,
 } from '@/composables/useTableColumns';
+import { SEARCH_FIELD } from '@/utils/searchText';
 
 describe('buildGenericColumns', () => {
   it('detects numeric, date and (low-cardinality) categorical columns', () => {
@@ -41,6 +48,80 @@ describe('buildGenericColumns', () => {
     const cols = buildGenericColumns(['kind'], [['A'], ['B'], ['A']]);
     expect(cols[0].type).toBe('categorical');
     expect(cols[0].options?.map(o => o.value)).toEqual(['A', 'B']);
+  });
+});
+
+describe('detectType — sampling on large datasets (>200k freeze fix)', () => {
+  // Numeric/date inference is sampled to TYPE_SAMPLE_CAP; categorical detection
+  // and option lists stay a full scan so nothing analysis-relevant is lost.
+
+  it('detects numeric when the sampled prefix is numeric', () => {
+    const items = Array.from({ length: TYPE_SAMPLE_CAP * 4 }, (_, i) => String(i));
+    expect(detectType(items, v => v)).toBe('numeric');
+  });
+
+  it('detects date when the sampled prefix is dates', () => {
+    const items = Array.from({ length: TYPE_SAMPLE_CAP * 3 }, (_, i) => {
+      const day = String((i % 28) + 1).padStart(2, '0');
+      return `2024-01-${day}`;
+    });
+    expect(detectType(items, v => v)).toBe('date');
+  });
+
+  it('only evaluates the expensive numeric/date check on the sampled prefix', () => {
+    // A numeric prefix long enough to fill the sample, followed by text values
+    // that are never numerically inspected → column still reads as numeric.
+    const numeric = Array.from({ length: TYPE_SAMPLE_CAP }, (_, i) => String(i + 1));
+    const trailingText = Array.from({ length: 1000 }, (_, i) => `tail-${i}`);
+    const items = [...numeric, ...trailingText];
+    expect(detectType(items, v => v)).toBe('numeric');
+  });
+
+  it('still classifies a high-cardinality column as text even when unique values appear only past the sample', () => {
+    // First TYPE_SAMPLE_CAP values repeat a single token (would look categorical
+    // if we sampled), but distinct values beyond the sample must force 'text'.
+    const head = Array.from({ length: TYPE_SAMPLE_CAP }, () => 'same');
+    const tail = Array.from({ length: CATEGORICAL_THRESHOLD + 5 }, (_, i) => `only-late-${i}`);
+    expect(detectType([...head, ...tail], v => v)).toBe('text');
+  });
+
+  it('keeps a low-cardinality column categorical regardless of size', () => {
+    const items = Array.from({ length: TYPE_SAMPLE_CAP * 2 }, (_, i) => (i % 3 === 0 ? 'A' : i % 3 === 1 ? 'B' : 'C'));
+    expect(detectType(items, v => v)).toBe('categorical');
+  });
+
+  it('collectOptions returns every distinct value even beyond the sample window', () => {
+    // Options are gathered by a full scan, so a categorical value that only
+    // occurs after TYPE_SAMPLE_CAP rows is still selectable in the filter.
+    const head = Array.from({ length: TYPE_SAMPLE_CAP }, () => 'A');
+    const items = [...head, 'B', 'C'];
+    const opts = collectOptions(items, v => v);
+    expect(opts.map(o => o.value)).toEqual(['A', 'B', 'C']);
+  });
+});
+
+describe('pre-built search field (fast global search)', () => {
+  it('flattenNodeRows adds a lowercased __search field covering id, type and props', () => {
+    const nodes = [
+      { node_id: 'N1', node_type: 'Person', properties: { city: 'Berlin' } },
+    ];
+    const propKeys = ['city'];
+    const cols = buildNodeColumns(nodes, propKeys);
+    const rows = flattenNodeRows(nodes, propKeys, cols);
+
+    const search = rows[0][SEARCH_FIELD] as string;
+    expect(search).toContain('n1');       // node_id, lowercased
+    expect(search).toContain('person');   // node_type
+    expect(search).toContain('berlin');   // property value
+    expect(search).toBe(search.toLowerCase());
+  });
+
+  it('buildGenericRows adds a __search field covering every column value', () => {
+    const cols = buildGenericColumns(['name', 'city'], [['Alice', 'Berlin']]);
+    const rows = buildGenericRows([['Alice', 'Berlin']], cols);
+    const search = rows[0][SEARCH_FIELD] as string;
+    expect(search).toContain('alice');
+    expect(search).toContain('berlin');
   });
 });
 

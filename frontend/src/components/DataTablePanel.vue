@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue';
+import { ref, computed, watch, onUnmounted, toRaw } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import InputText from 'primevue/inputtext';
@@ -10,12 +10,14 @@ import Popover from 'primevue/popover';
 
 import { useGraphStore } from '@/stores/graph';
 import { useDrawerResize } from '@/composables/useDrawerResize';
+import { useDebouncedModel } from '@/composables/useDebouncedModel';
 import DatePicker from 'primevue/datepicker';
 import {
   type ColMeta,
   detectType, collectOptions, buildColMeta, buildNodeColumns,
   flattenNodeRows, initFilters, coerceValue,
 } from '@/composables/useTableColumns';
+import { buildSearchText, SEARCH_FIELD } from '@/utils/searchText';
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -40,38 +42,52 @@ const { height, isResizing, onMouseDown } = useDrawerResize({
 const activeTab = ref<'nodes' | 'edges'>('nodes');
 const dtRef = ref<InstanceType<typeof DataTable>>();
 
+// ─── Raw snapshots ───
+// filteredNodes/filteredEdges elements are deep-reactive Vue proxies; on 200k+
+// datasets every property read in the type-detection / row-flattening loops
+// below would hit the Proxy get-trap, multiplying the cost several-fold and
+// freezing the tab on open. Strip the proxy once so all downstream passes read
+// plain objects. (One O(n) map over a raw-lookup; membership/order preserved.)
+
+const rawNodes = computed(() => graphStore.filteredNodes.map(n => toRaw(n)));
+const rawEdges = computed(() => graphStore.filteredEdges.map(e => toRaw(e)));
+
 // ─── Property keys ───
 
 const nodePropKeys = computed(() => {
   const s = new Set<string>();
-  for (const n of graphStore.filteredNodes)
+  for (const n of rawNodes.value)
     if (n.properties) for (const k of Object.keys(n.properties)) s.add(k);
   return Array.from(s).sort();
 });
 
 const edgePropKeys = computed(() => {
   const s = new Set<string>();
-  for (const e of graphStore.filteredEdges)
+  for (const e of rawEdges.value)
     if (e.properties) for (const k of Object.keys(e.properties)) s.add(k);
   return Array.from(s).sort();
 });
 
 // ─── Flattened data (properties as top-level fields for PrimeVue) ───
 
-const nodeRows = computed(() => flattenNodeRows(graphStore.filteredNodes, nodePropKeys.value, nodeCols.value));
+const nodeRows = computed(() => flattenNodeRows(rawNodes.value, nodePropKeys.value, nodeCols.value));
 
 const edgeRows = computed(() => {
   const keys = edgePropKeys.value;
   const colMap = new Map(edgeCols.value.map(c => [c.field, c]));
-  return graphStore.filteredEdges.map(e => {
+  return rawEdges.value.map(e => {
     const r: Record<string, unknown> = {
       edge_id: e.edge_id, relationship_type: e.relationship_type, src: e.src, dst: e.dst,
     };
+    const searchVals: unknown[] = [e.edge_id, e.relationship_type, e.src, e.dst];
     for (const k of keys) {
       const field = `prop_${k}`;
       const col = colMap.get(field);
-      r[field] = coerceValue(e.properties?.[k] ?? null, col?.type ?? 'text');
+      const val = coerceValue(e.properties?.[k] ?? null, col?.type ?? 'text');
+      r[field] = val;
+      searchVals.push(val);
     }
+    r[SEARCH_FIELD] = buildSearchText(searchVals);
     return r;
   });
 });
@@ -81,19 +97,19 @@ const currentRows = computed(() => activeTab.value === 'nodes' ? nodeRows.value 
 // ─── Column metadata ───
 
 const nodeCols = computed<ColMeta[]>(() =>
-  buildNodeColumns(graphStore.filteredNodes, nodePropKeys.value),
+  buildNodeColumns(rawNodes.value, nodePropKeys.value),
 );
 
 const edgeCols = computed<ColMeta[]>(() => {
   const cols: ColMeta[] = [
     buildColMeta('edge_id', 'ID', 'text'),
-    buildColMeta('relationship_type', 'Type', 'categorical', collectOptions(graphStore.filteredEdges, e => e.relationship_type)),
+    buildColMeta('relationship_type', 'Type', 'categorical', collectOptions(rawEdges.value, e => e.relationship_type)),
     buildColMeta('src', 'Source', 'text'),
     buildColMeta('dst', 'Target', 'text'),
   ];
   for (const k of edgePropKeys.value) {
-    const t = detectType(graphStore.filteredEdges, e => e.properties?.[k]);
-    const opts = t === 'categorical' ? collectOptions(graphStore.filteredEdges, e => e.properties?.[k]) : undefined;
+    const t = detectType(rawEdges.value, e => e.properties?.[k]);
+    const opts = t === 'categorical' ? collectOptions(rawEdges.value, e => e.properties?.[k]) : undefined;
     cols.push(buildColMeta(`prop_${k}`, k, t, opts));
   }
   return cols;
@@ -113,16 +129,32 @@ const currentFilters = computed({
   set: v => { if (activeTab.value === 'nodes') nodeFilters.value = v; else edgeFilters.value = v; },
 });
 
-const globalFilterFields = computed(() => currentCols.value.map(c => c.field));
+// Global search scans the single pre-built search field (one string per row)
+// instead of every column — an ~O(columns)× reduction in per-keystroke work.
+const globalFilterFields = [SEARCH_FIELD];
+
+// Debounced global search: writing `global.value` re-filters the whole dataset
+// (O(n) per keystroke), so bridge the input through a debounce. Tab switch /
+// Clear reset `global.value` and flow back into the input immediately.
+const globalSearch = useDebouncedModel(
+  () => currentFilters.value['global'].value as string | null,
+  v => { currentFilters.value['global'].value = v; },
+);
 
 function clearFilters() {
   if (activeTab.value === 'nodes') nodeFilters.value = initFilters(nodeCols.value);
   else edgeFilters.value = initFilters(edgeCols.value);
+  // Reset the debounced input explicitly: a Clear pressed within the debounce
+  // window sets global→null (a no-op value change the back-sync can't observe),
+  // so cancel the pending write here and blank the box.
+  globalSearch.value = null;
   graphStore.setTableFilteredIds(null, null);
 }
 
 // Clear graph filter on tab switch (filters are per-tab, graph shouldn't keep stale IDs)
 watch(activeTab, () => {
+  // Blank the shared search box so a pending write can't land on the new tab.
+  globalSearch.value = null;
   graphStore.setTableFilteredIds(null, null);
 });
 
@@ -175,7 +207,7 @@ function syncGraphFilter(filteredRows: Record<string, unknown>[]) {
     const nodeIds = new Set(filteredRows.map(r => r.node_id as string));
     // Also keep all edges whose both endpoints are in the filtered set
     const edgeIds = new Set(
-      graphStore.filteredEdges
+      rawEdges.value
         .filter(e => nodeIds.has(e.src) && nodeIds.has(e.dst))
         .map(e => e.edge_id)
     );
@@ -238,7 +270,7 @@ function exportCSV() {
         </button>
       </div>
       <div class="header-center">
-        <InputText v-model="currentFilters['global'].value" placeholder="Search table..." class="table-search" />
+        <InputText v-model="globalSearch" placeholder="Search table..." class="table-search" />
       </div>
       <div class="header-right">
         <button class="action-btn" @click="clearFilters" title="Clear all filters">Clear</button>
