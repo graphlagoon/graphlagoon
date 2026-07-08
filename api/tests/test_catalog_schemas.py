@@ -8,7 +8,12 @@ import pytest
 # Stub gsql2rsql package tree so graphlagoon can be imported without the dep.
 # gsql2rsql is optional (only needed for Cypher transpilation).
 # MagicMock modules allow any attribute access (e.g. OpenCypherParser).
-if "gsql2rsql" not in sys.modules:
+# IMPORTANT: only stub when the real package is genuinely unavailable — this
+# file is collected first alphabetically, so a `not in sys.modules` guard would
+# stub gsql2rsql for the whole session and break test_transpile_options.
+try:
+    import gsql2rsql  # noqa: F401
+except ImportError:
     from unittest.mock import MagicMock as _MagicMock
 
     for _name in (

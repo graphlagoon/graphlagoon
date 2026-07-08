@@ -11,7 +11,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # Stub gsql2rsql package tree so graphlagoon can be imported without the dep.
-if "gsql2rsql" not in sys.modules:
+# IMPORTANT: only stub when the real package is genuinely unavailable. When
+# gsql2rsql IS installed (dev + CI), replacing it with a MagicMock in
+# sys.modules poisons the import for test_transpile_options (collected later),
+# which needs the real transpiler. A `not in sys.modules` guard is insufficient:
+# whichever stubbing test file is collected first would stub it for everyone.
+try:
+    import gsql2rsql  # noqa: F401
+except ImportError:
     from unittest.mock import MagicMock as _MagicMock
 
     for _name in (

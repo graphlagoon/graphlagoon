@@ -182,6 +182,37 @@ def merge_column_config(context) -> dict:
     }
 
 
+def build_edge_named_struct(column_config, table_alias: str = "") -> str:
+    """Build a NAMED_STRUCT projection for an edge row.
+
+    The struct is keyed by the context's OWN column names (edge_id_col,
+    src_col, dst_col, relationship_type_col) — NOT the normalized
+    'src'/'dst'/'relationship_type' aliases. This matters because
+    ``process_graph_query_result`` reads the struct back through the same
+    ``ColumnConfig`` (``item.get(column_config.src_col)`` etc.). If the struct
+    were keyed by the normalized names while the context uses a custom schema
+    (e.g. ``source_node_id``/``target_node_id``/``edge_type``), every lookup
+    would miss, producing edges with empty src/dst, no node ids to fetch (empty
+    graph), and a blank edge-type dropdown. Keying by the context's column names
+    keeps subgraph/expand consistent with the transpiled cypher path for ANY
+    schema.
+
+    Args:
+        column_config: The merged :class:`ColumnConfig` for the context.
+        table_alias: Optional table alias to qualify each column (e.g. ``"e"``
+            for the expand queries). Empty for the unqualified subgraph query.
+    """
+    prefix = f"{table_alias}." if table_alias else ""
+    cols = [
+        column_config.edge_id_col,
+        column_config.src_col,
+        column_config.dst_col,
+        column_config.relationship_type_col,
+    ]
+    fields = ", ".join(f"'{col}', {prefix}`{col}`" for col in cols)
+    return f"NAMED_STRUCT({fields})"
+
+
 @router.post("/graph-contexts/{context_id}/subgraph", response_model=GraphResponse)
 async def get_subgraph(
     context_id: UUID,
@@ -211,14 +242,11 @@ async def get_subgraph(
     where_clause = f"WHERE {' AND '.join(edge_conditions)}" if edge_conditions else ""
     order_clause = "ORDER BY RAND()" if not edge_conditions else ""
 
-    # Build SQL query with NAMED_STRUCT for edge data
+    # Build SQL query with NAMED_STRUCT for edge data. The struct is keyed by
+    # the context's own column names so the result maps correctly for any schema
+    # (see build_edge_named_struct).
     query = f"""
-        SELECT NAMED_STRUCT(
-            'edge_id', `{column_config.edge_id_col}`,
-            'src', `{column_config.src_col}`,
-            'dst', `{column_config.dst_col}`,
-            'relationship_type', `{rel_type_col}`
-        ) AS r
+        SELECT {build_edge_named_struct(column_config)} AS r
         FROM {context.edge_table_name}
         {where_clause}
         {order_clause}
@@ -295,7 +323,6 @@ async def expand_from_node(
     src_col = column_config.src_col
     dst_col = column_config.dst_col
     rel_type_col = column_config.relationship_type_col
-    edge_id_col = column_config.edge_id_col
 
     # Build edge type filter
     edge_type_filter = ""
@@ -345,12 +372,7 @@ async def expand_from_node(
                 UNION
                 {neighbor_query}
             )
-            SELECT NAMED_STRUCT(
-                'edge_id', e.`{edge_id_col}`,
-                'src', e.`{src_col}`,
-                'dst', e.`{dst_col}`,
-                'relationship_type', e.`{rel_type_col}`
-            ) AS r
+            SELECT {build_edge_named_struct(column_config, "e")} AS r
             FROM {edge_table} e
             WHERE e.`{src_col}` IN (SELECT node_id FROM visited_nodes)
               AND e.`{dst_col}` IN (SELECT node_id FROM visited_nodes)
@@ -413,12 +435,7 @@ async def expand_from_node(
             visited_nodes AS (
                 SELECT DISTINCT node_id FROM neighbors
             )
-            SELECT NAMED_STRUCT(
-                'edge_id', e.`{edge_id_col}`,
-                'src', e.`{src_col}`,
-                'dst', e.`{dst_col}`,
-                'relationship_type', e.`{rel_type_col}`
-            ) AS r
+            SELECT {build_edge_named_struct(column_config, "e")} AS r
             FROM {edge_table} e
             WHERE e.`{src_col}` IN (SELECT node_id FROM visited_nodes)
               AND e.`{dst_col}` IN (SELECT node_id FROM visited_nodes)
