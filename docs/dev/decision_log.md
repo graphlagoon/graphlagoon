@@ -928,3 +928,60 @@ right-clicking and picking a menu item each time.
   calls are already covered.
 
 **Status:** Implemented.
+
+## [2026-07-09 09:00] - Feature Implemented: `$hash(...)` query macro (client-side Databricks xxhash64)
+
+**Feature:** Users can write `$hash('some_key')` anywhere in a graph/Cypher/SQL query.
+Before the query is sent to the transpile/execute endpoint, each `$hash(...)` call is
+replaced client-side by the signed 64-bit integer that Databricks `xxhash64(<str>, 42)`
+would produce. Needed because some graphs use a Databricks `xxhash64` of a natural key as
+the node/edge ID, and typing the raw 64-bit int by hand is impractical.
+
+**Design Decisions:**
+1. **Token `$hash(...)`** (not `hash(...)`): a distinct marker so it never shadows
+   Databricks' native SQL `hash()` / `xxhash64()`. Confirmed with user.
+2. **Argument semantics:** strip one pair of surrounding `'`/`"` quotes, hash the inner
+   string as UTF-8. So `$hash('foo')` and `$hash(foo)` produce the same value.
+   Parity with Spark `xxhash64` holds for STRING inputs only (both hash UTF-8 bytes);
+   numeric/other Spark types use a different byte encoding and are out of scope — node/
+   edge IDs here are string keys.
+3. **Single choke point:** substitution applied in the four `api.ts` methods that POST a
+   query (`submitGraphQueryJob`, `submitCypherQueryJob`, `transpileCypher`,
+   `executeTableQuery`) rather than in stores/components. The editor and store state keep
+   the literal `$hash(...)` text (good UX); only the outgoing payload carries the
+   substituted ints, and the returned transpiled SQL naturally shows the real ints.
+4. **WASM fast-path:** `substituteHashCalls` returns the query unchanged, without
+   initializing xxhash-wasm, when no `$hash(` substring is present — keeps existing api
+   unit tests fast and WASM-free.
+
+**Implementation:**
+- New util `frontend/src/utils/queryHash.ts`:
+  - `databricksXxhash64(input)` — memoized `xxhash()` singleton, `h64(input, 42n)`,
+    `BigInt.asIntN(64, unsigned)`.
+  - `substituteHashCalls(query)` — regex `/\$hash\(\s*([^)]*?)\s*\)/g`, quote-strip,
+    dedup, decimal-int replace.
+  - `resetHasher()` — test hook.
+- Wired into the 4 `api.ts` methods (`const req = { ...request, query: await substituteHashCalls(request.query) }`).
+- Added `xxhash-wasm` to `frontend/package.json` (first WASM dep; Vite handles it).
+
+**Files Created:**
+- [frontend/src/utils/queryHash.ts](frontend/src/utils/queryHash.ts)
+- [frontend/src/utils/__tests__/queryHash.test.ts](frontend/src/utils/__tests__/queryHash.test.ts)
+
+**Files Modified:**
+- [frontend/src/services/api.ts](frontend/src/services/api.ts) (4 methods)
+- [frontend/package.json](frontend/package.json) + package-lock.json
+
+**Testing:**
+- [x] Unit tests added (10) — golden parity vector `xxhash64('melao_pf', 42) == -1480451197245718748`
+      (confirmed against Databricks), plus quoted/bare/double-quoted args, multiple
+      occurrences, whitespace, no-op cases.
+- [x] Full unit suite green (789 tests, 44 files).
+- [x] `vue-tsc --noEmit` clean.
+- [ ] Manual end-to-end pending (run a query with `$hash('key')` in `make dev`).
+
+**Known Limitations:**
+- Arg regex uses `[^)]*` — a quoted arg containing a literal `)` is unsupported.
+- Only string inputs match Databricks (UTF-8 bytes); numeric `xxhash64(<long>)` is out of scope.
+
+**Status:** Implemented.
