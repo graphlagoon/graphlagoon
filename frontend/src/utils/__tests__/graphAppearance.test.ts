@@ -33,6 +33,9 @@ function makeCtx(overrides: Partial<AppearanceContext> = {}): AppearanceContext 
     propFilterHiddenNodeIds: null,
     propFilterHiddenEdgeIds: null,
 
+    tableVisibleNodeIds: null,
+    tableVisibleEdgeIds: null,
+
     focusedNodeIds: null,
     edgeLensMode: 'off',
     edgeLensDimOpacity: 0.08,
@@ -573,5 +576,46 @@ describe('computeLinkAppearance', () => {
     });
     const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(), ctx);
     expect(r.color).toBe('#888888');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Table filter (visual KEEP-sets — no graph rebuild)
+// ---------------------------------------------------------------------------
+
+describe('table filter visibility', () => {
+  it('hides nodes not in tableVisibleNodeIds', () => {
+    const ctx = makeCtx({ tableVisibleNodeIds: new Set(['keep']) });
+    expect(computeNodeAppearance('keep', 'Person', false, 0, null, ctx).hidden).toBe(false);
+    expect(computeNodeAppearance('drop', 'Person', false, 0, null, ctx).hidden).toBe(true);
+  });
+
+  it('no table filter (null) leaves all nodes visible', () => {
+    const ctx = makeCtx({ tableVisibleNodeIds: null });
+    expect(computeNodeAppearance('any', 'Person', false, 0, null, ctx).hidden).toBe(false);
+  });
+
+  it('cluster nodes are exempt from the node table filter', () => {
+    const ctx = makeCtx({ tableVisibleNodeIds: new Set(['keep']) });
+    expect(computeNodeAppearance('cluster-1', '__cluster__', true, 20, null, ctx).hidden).toBe(false);
+  });
+
+  it('hides edges not in tableVisibleEdgeIds', () => {
+    const ctx = makeCtx({ tableVisibleEdgeIds: new Set(['e-keep']) });
+    expect(computeLinkAppearance('e-keep', 'KNOWS', 'a', 'b', new Set(), ctx).hidden).toBe(false);
+    expect(computeLinkAppearance('e-drop', 'KNOWS', 'a', 'b', new Set(), ctx).hidden).toBe(true);
+  });
+
+  it('cluster-aggregate edges are exempt from the edge table filter', () => {
+    const ctx = makeCtx({ tableVisibleEdgeIds: new Set(['e-keep']) });
+    const r = computeLinkAppearance('cluster_c1_b_e9', 'KNOWS', 'c1', 'b', new Set(), ctx);
+    expect(r.hidden).toBe(false);
+  });
+
+  it('edge with a table-hidden endpoint is hidden via hiddenNodeIds aggregation', () => {
+    const ctx = makeCtx({ tableVisibleNodeIds: new Set(['a']) });
+    // caller aggregates node-hidden ids; 'b' was hidden by the table filter
+    const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(['b']), ctx);
+    expect(r.hidden).toBe(true);
   });
 });

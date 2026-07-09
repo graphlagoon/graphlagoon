@@ -364,6 +364,77 @@ describe('search reactivity: highlight mode keeps filtered chain cached', () => 
     expect(store.searchMatchedNodeIds!.size).toBe(0)
   })
 
+  it('node_types toggle does not recompute the canvas chain (displayNodes/enhancedNodes)', () => {
+    // Type filters are applied VISUALLY in the canvas (graphAppearance hidden
+    // flag); the canvas data chain must stay cached so no Three.js rebuild or
+    // force-layout reheat fires on a checkbox toggle.
+    const store = setupGraph()
+    store.displayNodes // warm-up (lazy cluster/similarity store creation)
+    store.enhancedNodes
+    const displayBefore = store.displayNodes
+    const enhancedBefore = store.enhancedNodes
+    store.applyFilters({ node_types: ['Person'] })
+    expect(store.displayNodes).toBe(displayBefore)
+    expect(store.enhancedNodes).toBe(enhancedBefore)
+    // ...while the non-canvas consumers still see the filtered view
+    expect(store.filteredNodes.map(n => n.node_id)).toEqual(['A', 'B'])
+  })
+
+  it('edge_types toggle does not recompute the canvas chain (displayEdges/enhancedEdges)', () => {
+    const store = setupGraph()
+    store.displayEdges // warm-up
+    store.enhancedEdges
+    const displayBefore = store.displayEdges
+    const enhancedBefore = store.enhancedEdges
+    store.applyFilters({ edge_types: ['KNOWS'] })
+    expect(store.displayEdges).toBe(displayBefore)
+    expect(store.enhancedEdges).toBe(enhancedBefore)
+    expect(store.filteredEdges.map(e => e.edge_id)).toEqual(['e1', 'e2'])
+  })
+
+  it('canvas chain contains the full dataset while filters are active', () => {
+    const store = setupGraph()
+    store.applyFilters({ node_types: ['Person'], edge_types: ['KNOWS'] })
+    // Canvas gets everything; hiding is visual
+    expect(store.displayNodes).toHaveLength(4)
+    expect(store.displayEdges).toHaveLength(4)
+    // Non-canvas consumers get the filtered view
+    expect(store.filteredNodes).toHaveLength(2)
+  })
+
+  it('displayEdges still applies the self-edge toggle (no visual equivalent)', () => {
+    const store = setupGraph()
+    store.edges = [
+      ...store.edges,
+      { edge_id: 'self', src: 'A', dst: 'A', relationship_type: 'KNOWS' },
+    ]
+    store.updateBehaviors({ showSelfEdges: false })
+    expect(store.displayEdges.map(e => e.edge_id)).not.toContain('self')
+    store.updateBehaviors({ showSelfEdges: true })
+    expect(store.displayEdges.map(e => e.edge_id)).toContain('self')
+  })
+
+  it('table filter does not recompute the canvas chain (hidden visually via appearance)', () => {
+    // Table filtering (DataTablePanel sync) is a KEEP-set applied in
+    // graphAppearance — the canvas data must stay cached so brushing table
+    // filters never rebuilds the 3D graph or reheats the layout.
+    const store = setupGraph()
+    store.displayNodes // warm-up
+    store.enhancedNodes
+    store.displayEdges
+    store.enhancedEdges
+    const nodesBefore = store.displayNodes
+    const edgesBefore = store.displayEdges
+    store.setTableFilteredIds(new Set(['A', 'B']), new Set(['e1']))
+    expect(store.displayNodes).toBe(nodesBefore)
+    expect(store.displayEdges).toBe(edgesBefore)
+    // The sets are exposed for the canvas appearance context
+    expect(store.tableFilteredNodeIds!.has('A')).toBe(true)
+    expect(store.tableFilteredEdgeIds!.has('e1')).toBe(true)
+    store.setTableFilteredIds(null, null)
+    expect(store.tableFilteredNodeIds).toBeNull()
+  })
+
   it('applyFilters merges partial updates without dropping other fields', () => {
     const store = setupGraph()
     store.applyFilters({ node_types: ['Person'] })

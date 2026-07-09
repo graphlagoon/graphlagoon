@@ -734,14 +734,40 @@ export const useGraphStore = defineStore('graph', () => {
     tableFilteredEdgeIds.value = edgeIds;
   }
 
-  const displayNodes = computed(() => {
-    if (!tableFilteredNodeIds.value) return filteredNodes.value;
-    return filteredNodes.value.filter(n => tableFilteredNodeIds.value!.has(n.node_id));
-  });
+  // ── Canvas data chain contract ──
+  // displayNodes/displayEdges (and enhancedNodes/enhancedEdges built on them)
+  // feed ONLY the 3D canvas. They are based on the FULL dataset, NOT on
+  // filteredNodes/filteredEdges: node-type, edge-type, search-hide, property
+  // and table filters are applied VISUALLY in the canvas via graphAppearance
+  // (hidden flag), which preserves node positions and avoids a full Three.js
+  // rebuild + force-layout reheat on every filter change (froze the UI even
+  // at ~20k). Only filters with no visual equivalent stay data-level here:
+  // the self-edge toggle and similarity display mode (their toggles are rare,
+  // so the rebuild they trigger is acceptable).
+  // All other consumers (status bar, tables, metrics, community, similarity)
+  // keep using filteredNodes/filteredEdges and retain filtered semantics.
+  const displayNodes = computed(() => nodes.value);
 
   const displayEdges = computed(() => {
-    if (!tableFilteredEdgeIds.value) return filteredEdges.value;
-    return filteredEdges.value.filter(e => tableFilteredEdgeIds.value!.has(e.edge_id));
+    let result = edges.value;
+
+    // Filter out self-edges when toggle is off (no visual equivalent)
+    if (!behaviors.value.showSelfEdges) {
+      result = result.filter((e) => e.src !== e.dst);
+    }
+
+    // Similarity display mode filtering (no visual equivalent)
+    const similarityStore = useSimilarityStore();
+    if (similarityStore.hasResults) {
+      const mode = similarityStore.displayMode;
+      if (mode === 'hidden') {
+        result = result.filter(e => e.relationship_type !== '__similarity__');
+      } else if (mode === 'exclusive') {
+        result = result.filter(e => e.relationship_type === '__similarity__');
+      }
+    }
+
+    return result;
   });
 
   // ============================================================================
@@ -1853,6 +1879,8 @@ export const useGraphStore = defineStore('graph', () => {
     filteredEdges,
     displayNodes,
     displayEdges,
+    tableFilteredNodeIds,
+    tableFilteredEdgeIds,
     setTableFilteredIds,
     enhancedNodes,
     enhancedEdges,
