@@ -985,3 +985,75 @@ the node/edge ID, and typing the raw 64-bit int by hand is impractical.
 - Only string inputs match Databricks (UTF-8 bytes); numeric `xxhash64(<long>)` is out of scope.
 
 **Status:** Implemented.
+
+## [2026-07-09 11:00] - Bug Fixed: cypher transpiler schema hardcoded `edge_id` — custom `edge_id_col` contexts got a wrong gsql2rsql schema
+
+**Issue:**
+Contexts accept arbitrary structure column names (`node_id_col`, `edge_id_col`, ...
+in `NodeStructure`/`EdgeStructure` — free-form strings, no validation). A full
+audit of API + frontend for hardcoded `node_id`/`edge_id` found:
+
+1. **Real bug** — `services/cypher.py` `build_schema_provider` read `src_col`,
+   `dst_col` and `relationship_type_col` from the context's `edge_structure`
+   but hardcoded the edge-id property as the literal `"edge_id"`
+   (`edge_id_col` was never read anywhere in the file). For a context with
+   e.g. `edge_id_col="rel_id"`, the schema handed to gsql2rsql declared a
+   nonexistent `edge_id` column and omitted the real one — Cypher queries
+   touching the edge id rendered SQL that failed at the warehouse, while the
+   subgraph/expand SQL path (which honors `edge_id_col`) worked.
+2. **Latent bug** — the frontend allows `edge_id_col: ""` ("None" option),
+   but `routers/graph.py` `build_edge_named_struct` did not filter falsy
+   columns, emitting `NAMED_STRUCT('', `` , ...)` — invalid SQL.
+   (`_get_edge_id` already handles a falsy `edge_id_col` via composite keys.)
+3. **Verified correct** (now pinned by tests): `merge_column_config`,
+   subgraph/expand SQL, `process_graph_query_result`, `process_nodes_result`,
+   node fetch join. The `AS node_id` strings in graph.py are internal CTE
+   aliases, not table-column assumptions. The frontend is correct by design:
+   it consumes the canonical `Node.node_id`/`Edge.edge_id` model that the
+   backend normalizes results into; query-construction paths
+   (`exampleQuery.ts`, `QueryConsolePanel` id-column detection) use the
+   configured names.
+
+**Fix:**
+- `cypher.py`: read `edge_id_col = edge_struct.get("edge_id_col", "edge_id") or None`
+  (missing key → default `edge_id` for backward compat; `""` → no edge-id
+  property). Edge property list hoisted above the type-combination loop and
+  the edge-id property appended only when `edge_id_col` is truthy.
+- `graph.py` `build_edge_named_struct`: filter falsy column names so an empty
+  `edge_id_col` is omitted from the struct (composite ids via `_get_edge_id`).
+
+**Files Modified:**
+- api/graphlagoon/services/cypher.py
+- api/graphlagoon/routers/graph.py
+- api/tests/test_subgraph_schema_mapping.py (FULL_CUSTOM_CONFIG: merge,
+  named-struct, round-trip, `_get_edge_id`, `process_nodes_result` with all
+  six columns renamed — the existing CUSTOM_CONFIG kept both id columns at
+  their defaults, which was exactly the coverage gap)
+
+**Files Created:**
+- api/tests/test_cypher_schema_provider.py — regression tests for
+  `build_schema_provider` with custom `node_id_col`/`edge_id_col` (RED before
+  the fix), empty and missing `edge_id_col` semantics. Needs the REAL
+  gsql2rsql (property-name asserts are meaningless on a MagicMock stub), so
+  it uses `pytest.importorskip` + a module-level skip if an earlier-collected
+  test left a MagicMock stub in `sys.modules` — deliberately does NOT add a
+  stub itself (see the [2026-07-08] stub-poisoning entry).
+- frontend/src/components/__tests__/QueryConsolePanel.test.ts — nodeIdField
+  detection with a custom `node_id_col` (custom match, literal `node_id`
+  fallback, no id-like column).
+
+**Testing:**
+- [x] TDD: new cypher schema tests RED (2 failures) before the fix, GREEN after.
+- [x] Empty-`edge_id_col` named-struct test RED before the graph.py fix, GREEN after.
+- [x] Full API suite: 160 passed, 1 (pre-existing, unrelated) skip;
+      `test_transpile_options` still green (collection-order check).
+- [x] Full frontend suite: 792 tests, 45 files, green.
+
+**Known Limitations (deferred):**
+- `ContextsView.vue` pre-fills `node_id`/`edge_id` defaults and auto-select
+  only overrides them when a column literally named `node_id`/etc. exists in
+  the fetched schema — a user can still save a context pointing at a
+  nonexistent column (backend queries then fail at run time). UX validation
+  gap, not a data-correctness bug; left for a follow-up.
+
+**Status:** Implemented.

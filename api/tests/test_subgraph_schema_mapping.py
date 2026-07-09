@@ -15,6 +15,7 @@ with the result processor for ANY schema.
 """
 
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock as _MagicMock
 
 # Stub gsql2rsql package tree so graphlagoon.routers.graph can be imported
@@ -42,9 +43,14 @@ except ImportError:
         sys.modules[_name] = _MagicMock()
 
 from graphlagoon.models.schemas import ColumnConfig  # noqa: E402
-from graphlagoon.routers.graph import build_edge_named_struct  # noqa: E402
+from graphlagoon.routers.graph import (  # noqa: E402
+    build_edge_named_struct,
+    merge_column_config,
+)
 from graphlagoon.services.graph_operations import (  # noqa: E402
+    _get_edge_id,
     process_graph_query_result,
+    process_nodes_result,
 )
 
 
@@ -56,6 +62,17 @@ CUSTOM_CONFIG = ColumnConfig(
     relationship_type_col="edge_type",
     node_id_col="node_id",
     node_type_col="node_type",
+)
+
+# Every structure column renamed — including the id columns, which
+# CUSTOM_CONFIG keeps at their defaults.
+FULL_CUSTOM_CONFIG = ColumnConfig(
+    edge_id_col="rel_id",
+    src_col="from_id",
+    dst_col="to_id",
+    relationship_type_col="rel_type",
+    node_id_col="vertex_id",
+    node_type_col="vertex_type",
 )
 
 
@@ -128,3 +145,120 @@ class TestProcessCustomSchemaRoundTrip:
         )
         # All four struct keys are structure columns → no bogus properties.
         assert response.edges[0].properties is None
+
+
+class TestMergeColumnConfigFullyCustom:
+    def test_custom_ids_survive_merge(self):
+        context = SimpleNamespace(
+            edge_structure={
+                "edge_id_col": "rel_id",
+                "src_col": "from_id",
+                "dst_col": "to_id",
+                "relationship_type_col": "rel_type",
+            },
+            node_structure={
+                "node_id_col": "vertex_id",
+                "node_type_col": "vertex_type",
+            },
+        )
+        config = merge_column_config(context)
+        assert config["edge_id_col"] == "rel_id"
+        assert config["src_col"] == "from_id"
+        assert config["dst_col"] == "to_id"
+        assert config["relationship_type_col"] == "rel_type"
+        assert config["node_id_col"] == "vertex_id"
+        assert config["node_type_col"] == "vertex_type"
+
+    def test_missing_keys_fall_back_to_defaults(self):
+        config = merge_column_config(
+            SimpleNamespace(edge_structure={}, node_structure={})
+        )
+        assert config["edge_id_col"] == "edge_id"
+        assert config["src_col"] == "src"
+        assert config["dst_col"] == "dst"
+        assert config["relationship_type_col"] == "relationship_type"
+        assert config["node_id_col"] == "node_id"
+        assert config["node_type_col"] == "node_type"
+
+
+class TestBuildEdgeNamedStructFullyCustom:
+    def test_struct_keys_use_custom_edge_id(self):
+        sql = build_edge_named_struct(FULL_CUSTOM_CONFIG)
+        assert "'rel_id', `rel_id`" in sql
+        assert "'edge_id'" not in sql
+
+    def test_empty_edge_id_col_is_omitted(self):
+        """edge_id_col='' (frontend 'None' option) must not emit an empty
+        struct key — NAMED_STRUCT('', ``, ...) is invalid SQL. The processor
+        generates composite ids via _get_edge_id instead."""
+        config = ColumnConfig(
+            edge_id_col="",
+            src_col="src",
+            dst_col="dst",
+            relationship_type_col="relationship_type",
+            node_id_col="node_id",
+            node_type_col="node_type",
+        )
+        sql = build_edge_named_struct(config)
+        assert "''" not in sql
+        assert "``" not in sql
+        assert "'src', `src`" in sql
+        assert "'dst', `dst`" in sql
+        assert "'relationship_type', `relationship_type`" in sql
+
+
+class TestFullyCustomRoundTrip:
+    """Struct rows keyed by fully-custom column names (including both id
+    columns) must round-trip through process_graph_query_result."""
+
+    def _row(self):
+        return {
+            "rel_id": "e1",
+            "from_id": "n1",
+            "to_id": "n2",
+            "rel_type": "OWNS",
+            "weight": 3,
+        }
+
+    def test_edge_fields_and_custom_edge_id(self):
+        response, node_ids = process_graph_query_result(
+            columns=["r"], rows=[[self._row()]], column_config=FULL_CUSTOM_CONFIG
+        )
+        assert len(response.edges) == 1
+        edge = response.edges[0]
+        assert edge.edge_id == "e1"
+        assert edge.src == "n1"
+        assert edge.dst == "n2"
+        assert edge.relationship_type == "OWNS"
+        assert node_ids == {"n1", "n2"}
+
+    def test_structure_cols_not_leaked_property_kept(self):
+        response, _ = process_graph_query_result(
+            columns=["r"], rows=[[self._row()]], column_config=FULL_CUSTOM_CONFIG
+        )
+        assert response.edges[0].properties == {"weight": 3}
+
+    def test_get_edge_id_prefers_custom_col(self):
+        assert (
+            _get_edge_id(self._row(), "rel_id", "from_id", "to_id", "rel_type")
+            == "e1"
+        )
+
+    def test_get_edge_id_composite_when_none_or_empty(self):
+        row = {"from_id": "n1", "to_id": "n2", "rel_type": "OWNS"}
+        assert _get_edge_id(row, None, "from_id", "to_id", "rel_type") == "n1@OWNS@n2"
+        assert _get_edge_id(row, "", "from_id", "to_id", "rel_type") == "n1@OWNS@n2"
+
+
+class TestProcessNodesResultCustomNodeId:
+    def test_nodes_mapped_via_custom_columns(self):
+        nodes = process_nodes_result(
+            columns=["vertex_id", "vertex_type", "name"],
+            rows=[["n1", "Person", "Alice"]],
+            column_config=FULL_CUSTOM_CONFIG,
+        )
+        assert len(nodes) == 1
+        node = nodes[0]
+        assert node.node_id == "n1"
+        assert node.node_type == "Person"
+        assert node.properties == {"name": "Alice"}

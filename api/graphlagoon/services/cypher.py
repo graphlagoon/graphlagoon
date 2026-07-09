@@ -61,6 +61,8 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
     relationship_type_col = edge_struct.get(
         "relationship_type_col", "relationship_type"
     )
+    # "" (frontend "None" option) means the context has no edge id column.
+    edge_id_col = edge_struct.get("edge_id_col", "edge_id") or None
 
     # Convert property columns to dict {name: type}
     extra_node_attrs: dict[str, type] = {}
@@ -120,6 +122,22 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
             ),
         )
 
+    # Edge properties are invariant across type combinations. The edge id
+    # property uses the context's own column name; omitted when the context
+    # has no edge id column.
+    edge_properties = [
+        EntityProperty(property_name=prop_name, data_type=data_type)
+        for prop_name, data_type in extra_edge_attrs.items()
+    ] + [
+        EntityProperty(property_name=relationship_type_col, data_type=str),
+        EntityProperty(property_name=src_col, data_type=str),
+        EntityProperty(property_name=dst_col, data_type=str),
+    ]
+    if edge_id_col:
+        edge_properties.append(
+            EntityProperty(property_name=edge_id_col, data_type=str)
+        )
+
     # Create EdgeSchema for each (source_type, edge_type, sink_type) combination
     # Without edge_combinations discovery, we create all possible combinations
     for edge_type in edge_types:
@@ -137,18 +155,7 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
                     sink_id_property=EntityProperty(
                         property_name=dst_col, data_type=str
                     ),
-                    properties=[
-                        EntityProperty(property_name=prop_name, data_type=data_type)
-                        for prop_name, data_type in extra_edge_attrs.items()
-                    ]
-                    + [
-                        EntityProperty(
-                            property_name=relationship_type_col, data_type=str
-                        ),
-                        EntityProperty(property_name=src_col, data_type=str),
-                        EntityProperty(property_name=dst_col, data_type=str),
-                        EntityProperty(property_name="edge_id", data_type=str),
-                    ],
+                    properties=edge_properties,
                 )
                 schema.add_edge(
                     edge_schema,

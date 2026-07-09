@@ -195,7 +195,8 @@ def build_edge_named_struct(column_config, table_alias: str = "") -> str:
     would miss, producing edges with empty src/dst, no node ids to fetch (empty
     graph), and a blank edge-type dropdown. Keying by the context's column names
     keeps subgraph/expand consistent with the transpiled cypher path for ANY
-    schema.
+    schema. An empty ``edge_id_col`` (context with no edge id column) is
+    omitted from the struct; ``_get_edge_id`` generates composite ids instead.
 
     Args:
         column_config: The merged :class:`ColumnConfig` for the context.
@@ -204,10 +205,14 @@ def build_edge_named_struct(column_config, table_alias: str = "") -> str:
     """
     prefix = f"{table_alias}." if table_alias else ""
     cols = [
-        column_config.edge_id_col,
-        column_config.src_col,
-        column_config.dst_col,
-        column_config.relationship_type_col,
+        c
+        for c in (
+            column_config.edge_id_col,
+            column_config.src_col,
+            column_config.dst_col,
+            column_config.relationship_type_col,
+        )
+        if c
     ]
     fields = ", ".join(f"'{col}', {prefix}`{col}`" for col in cols)
     return f"NAMED_STRUCT({fields})"
