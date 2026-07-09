@@ -1,5 +1,114 @@
 # Decision Log
 
+## [2026-07-09 08:25] - Perf fix: "Rendering graph…" froze the UI for ~90s on large graphs — settle moved to a Web Worker
+
+**Issue:** Even after the overlay/chunked-build fixes, large graphs still took
+very long after the query and the UI still lagged/froze.
+
+**Measured first (new harness):** synthetic 100k-node/150k-edge graph via a
+Playwright script (adapted from `e2e/perf-report.ts`) with a long-task
+observer, plus new per-phase instrumentation inside the vendored kapsule's
+`forcegraphUpdate` metric (`nodesMs`/`linksMs`/`forceMs` — submodule change in
+`frontend/ext-3d-force/three-forcegraph`). Results:
+- The suspected kapsule digest was CHEAP: nodes 155ms + links 93ms + force 0.
+- The killer: **six ~14.5s long tasks (~87s of blocked main thread)** — the
+  headless settle. It yielded every **20 fixed ticks**, but one d3-force tick
+  costs ~730ms at this size (~2.9µs per node+link), so each "chunk" froze the
+  tab for ~14s. Full convergence ≈ 111 ticks ≈ 80s of pure computation.
+
+**Fixes:**
+1. **Settle runs in a Web Worker** — new
+   [workers/layoutWorker.ts](../../frontend/src/workers/layoutWorker.ts) +
+   [workers/layoutWorkerTypes.ts](../../frontend/src/workers/layoutWorkerTypes.ts)
+   (types split so the client import doesn't execute the worker's
+   `self.onmessage`) + client
+   [utils/settleLayoutClient.ts](../../frontend/src/utils/settleLayoutClient.ts)
+   (`settleLayoutAuto`: slim structured-clone payloads — id/size/xyz + endpoint
+   ids only; positions returned as a transferred Float32Array and copied back;
+   abort by polling the token and terminating the worker; automatic fallback
+   to the in-thread settle on worker failure). GraphCanvas3D's two call sites
+   just switched `settleLayoutHeadless` → `settleLayoutAuto`. Same pattern as
+   metricsWorker/communityWorker.
+2. **Time-budget chunking** in
+   [utils/headlessLayout.ts](../../frontend/src/utils/headlessLayout.ts): when
+   `ticksPerChunk` is not explicitly passed, chunks are sized by wall-clock
+   (default 40ms, min 1 tick) instead of a fixed tick count — the in-thread
+   fallback can no longer produce multi-second blocks.
+3. **Size-aware tick cap** (`computeSettleTickCap`): work budget of 8.5M
+   node+link units per settle — full estimated tick count (exact behavior) up
+   to ~75k nodes+links, degrading gradually to a 30-tick floor for huge graphs
+   (explicit quality-for-latency trade, allowed by the product decision that
+   only small graphs must stay exact).
+
+**Validated (same 100k/150k harness, before → after):**
+- Blocked main thread (long tasks): **91.5s → 5.2s** (biggest remaining: 2.7s
+  at boot ≈ 22MB JSON parse; the 14.5s settle blocks are gone entirely).
+- Wall time to scene: **91s → 41s** (35.7s = worker settle at the 34-tick cap;
+  UI responsive with animated progress throughout).
+- buildGraphData 1.26s wall (chunked), kapsule digest 452ms.
+
+**Tuning knob:** `SETTLE_WORK_BUDGET` in headlessLayout.ts controls the
+quality/latency trade for huge graphs.
+
+**Note (submodule):** the kapsule phase instrumentation lives in the
+`three-forcegraph` submodule — needs a commit inside the submodule, then a
+pointer bump in the main repo.
+
+**Testing:**
+- [x] 4 new tests (tick cap small/huge/floor; time-budget chunking yields per
+  tick and settles) — headlessLayout 12/12.
+- [x] `vitest related` 284/284; `vue-tsc --noEmit` clean; E2E `graph.spec.ts`
+  21/21 (real browser, exercises the worker path end-to-end via the harness
+  runs above).
+
+**Status:** Fixed — validated by direct measurement.
+
+## [2026-07-08 23:05] - Perf fix: "Expand from node" lagged — global layout reheat to place a handful of nodes
+
+**Issue:** Expand from node (depth ≤2, edge_limit ≤1000) should be near-instant
+but lagged for seconds on large graphs.
+
+**Root cause:** the merged new nodes have no entry in `updateGraph`'s
+`positionMap` → `hasNewNodes=true` → not a fresh layout, so no settle → falls
+into `reheatLayout()`, which (1) unpins and perturbs (±100) EVERY node — not
+just the new ones, (2) re-digests the entire scene a second time
+(`graph3d.graphData(data)` inside reheat), and (3) restarts the global
+simulation with the adaptive cooldown (≥10k: 800 ticks × 24/frame) — seconds of
+O(n log n + m)-per-tick work and a layout jolt, all to place a few nodes.
+
+**User constraint honored:** small graphs keep today's behavior EXACTLY — the
+organic global re-layout is cheap and looks good there; no approximation is
+introduced below the threshold.
+
+**Fix:**
+- New pure util
+  [seedNewNodePositions.ts](../../frontend/src/utils/seedNewNodePositions.ts):
+  every position-less node is placed at a bounded random offset (radius ~40)
+  around a positioned neighbor and pinned; multi-pass so a depth-2 ring anchors
+  on the ring-1 seeds; isolated additions fall back to the centroid of known
+  positions; `is2D` forces z=0.
+- [GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue)
+  `updateGraph`: when `hasNewNodes && !freshRequested && !isFreshLargeLayout`
+  and the graph is large (`> HEADLESS_SETTLE_EDGE_THRESHOLD` = 2000 edges, the
+  component's single "large" definition), seed the new nodes and take the
+  `stopLayout()` branch — existing positions untouched (exact, better than the
+  old reheat which perturbed everything), zero simulation, single digest.
+  Small graphs and running-layout cases keep the previous branches verbatim.
+- Camera already stays put for expand (`shouldRefit` false) and the chunked
+  build + "Rendering graph…" overlay from the previous fix cover the remaining
+  digest.
+
+**Testing:**
+- [x] 6 unit tests for the seeder (anchor radius + pinning, multi-pass chains,
+  centroid fallback, 2D mode, known positions untouched, no-op).
+- [x] `vitest related` 290/290; `vue-tsc --noEmit` clean; E2E `graph.spec.ts`
+  21/21.
+- [ ] Manual: expand on a ~20k+ graph — new nodes pop next to the expanded node
+  near-instantly, rest of the graph does not move; small graph keeps the
+  organic re-layout.
+
+**Status:** Fixed (pending manual confirmation).
+
 ## [2026-07-08 22:05] - Perf fix: post-query freeze + blank white canvas before a large graph appears
 
 **Issue:** On large graphs, after "Running query…" finished and "Computing
@@ -775,3 +884,47 @@ hide-mode dropped from three scans per keystroke to one.
 - [x] `vue-tsc --noEmit` clean.
 
 **Status:** Fixed.
+
+---
+
+## [2026-07-09 08:35] - Feature: Alt+Click to auto-expand node neighbors (3D)
+
+**Feature:** In the 3D canvas, holding **Alt** while clicking a node triggers the
+"expand neighbors" action (depth 1) — the same operation available via the
+right-click context menu — without opening any menu.
+
+**User Story:** As a graph explorer, I want to expand a node's neighbors with a
+single modifier-click, so that I can traverse the graph quickly without
+right-clicking and picking a menu item each time.
+
+**Design Decisions:**
+1. **Alt+Click, not Ctrl+Click:** The original request was Ctrl+Click, but
+   `event.ctrlKey` is already consumed by multi-select in `onNodeClick`
+   (`graphStore.selectNode(node.id, event.ctrlKey)`). Reusing Ctrl would break
+   multi-selection. Chose **Alt+Click** so multi-select (Ctrl) is preserved.
+2. **Depth 1:** Matches the existing "Expand neighbors" context-menu action
+   (`expandFromNode(id, 1)`) for consistency.
+3. **Select then expand:** Alt+Click also selects the node (single-select) so the
+   expansion origin is visible, then calls `expandFromNode`. Guarded by
+   `!graphStore.loading` to avoid overlapping expansions, mirroring the
+   context-menu action's `disabled: () => graphStore.loading`.
+4. **Discoverability:** Added an `Alt+Click Expand node` entry to the on-canvas
+   controls hint.
+
+**Implementation:**
+- `onNodeClick` handler in `GraphCanvas3D.vue`: added an early branch —
+  `if (event.altKey && !graphStore.loading) { selectNode(id); void expandFromNode(id, 1); return; }`
+  placed after the cluster check (clusters aren't expandable) and before the
+  lens/multi-select logic. Reuses the existing store action; no new store/API code.
+
+**Files Modified:**
+- [frontend/src/components/GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue) — Alt+Click branch in `onNodeClick`; controls-hint entry.
+
+**Testing:**
+- [x] `vue-tsc --noEmit` — no GraphCanvas3D errors.
+- [x] `graph.actions` 31/31 — `expandFromNode`/`selectNode` store actions unchanged and green.
+- Note: the `onNodeClick` callback is wired inside `initGraph()` (ForceGraph3D +
+  Three.js) and is not unit-testable in isolation; the underlying store actions it
+  calls are already covered.
+
+**Status:** Implemented.

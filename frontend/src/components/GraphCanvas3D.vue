@@ -27,7 +27,8 @@ import { useContextMenu } from '@/composables/useContextMenu';
 import GraphContextMenu from '@/components/GraphContextMenu.vue';
 import { Network } from 'lucide-vue-next';
 import { recordPerf } from '@/utils/perfMetrics';
-import { settleLayoutHeadless } from '@/utils/headlessLayout';
+import { settleLayoutAuto } from '@/utils/settleLayoutClient';
+import { seedNewNodePositions } from '@/utils/seedNewNodePositions';
 import { useDevPerf } from '@/composables/useDevPerf';
 
 const emit = defineEmits<{
@@ -637,6 +638,29 @@ async function updateGraph() {
   const isFreshLargeLayout =
     graphData.links.length > HEADLESS_SETTLE_EDGE_THRESHOLD &&
     (freshRequested || newNodeCount > graphData.nodes.length * 0.9);
+
+  // Incremental addition on a LARGE graph (expand-from-node etc.): place the
+  // few new nodes next to a positioned neighbor and pin them — no global
+  // reheat (which would unpin + perturb every node and re-run the whole
+  // simulation just to fit a handful of nodes). Existing positions stay
+  // exactly as they are. Small graphs (≤ threshold) keep the organic global
+  // re-layout below — exact, no approximation, and cheap at that size.
+  let incrementallyPlaced = false;
+  if (
+    hasNewNodes &&
+    !isFreshLargeLayout &&
+    !freshRequested &&
+    graphData.links.length > HEADLESS_SETTLE_EDGE_THRESHOLD
+  ) {
+    seedNewNodePositions(
+      graphData.nodes,
+      graphData.links as { source: string; target: string }[],
+      positionMap,
+      { is2D: graphStore.behaviors.viewMode === '2d-proj' },
+    );
+    incrementallyPlaced = true;
+  }
+
   if (isFreshLargeLayout) {
     try {
       isHeadlessSettling.value = true;
@@ -649,7 +673,7 @@ async function updateGraph() {
       graph3d.graphData({ nodes: [], links: [] });
       const is2D = graphStore.behaviors.viewMode === '2d-proj';
       const tSettle = performance.now();
-      await settleLayoutHeadless(
+      await settleLayoutAuto(
         graphData.nodes,
         graphData.links,
         { ...graphStore.force3DSettings, ...lastForceOverrides },
@@ -723,12 +747,13 @@ async function updateGraph() {
     graphStore.behaviors.viewMode === '2d-proj',
   );
 
-  if (preSettled) {
-    // The headless settle already produced (and pinned) the final layout.
-    // Reheating here would unpin + perturb every node AND re-digest the whole
-    // scene a second time (reheatLayout calls graph3d.graphData(data) again) —
-    // doubling the freeze and jolting the settled layout. Stop instead: pins
-    // positions, flips initialLayoutDone and shows labels immediately.
+  if (preSettled || (incrementallyPlaced && !isLayoutRunning.value)) {
+    // Positions are already final: either the headless settle produced (and
+    // pinned) the layout, or the incremental additions were seeded next to
+    // their anchors. Reheating would unpin + perturb every node AND re-digest
+    // the whole scene a second time (reheatLayout calls graph3d.graphData()
+    // again). Stop instead: pins positions, flips initialLayoutDone and shows
+    // labels immediately.
     layout.stopLayout();
   } else if (!isLayoutRunning.value && hasNewNodes) {
     layout.reheatLayout();
@@ -809,7 +834,7 @@ async function initGraph() {
       settleProgress.value = 0;
       const is2D = graphStore.behaviors.viewMode === '2d-proj';
       const tSettle = performance.now();
-      await settleLayoutHeadless(
+      await settleLayoutAuto(
         graphData.nodes,
         graphData.links,
         { ...graphStore.force3DSettings, ...lastForceOverrides },
@@ -936,6 +961,12 @@ async function initGraph() {
     .onNodeClick((node: GraphNode, event: MouseEvent) => {
       if (node.isCluster) {
         emit('cluster-node-click', node.id);
+        return;
+      }
+      // Alt+Click expands the node's neighbors (depth 1) — same as the context-menu action
+      if (event.altKey && !graphStore.loading) {
+        graphStore.selectNode(node.id);
+        void graphStore.expandFromNode(node.id, 1);
         return;
       }
       // When graph lens is active, clicking the already-selected node pauses/resumes the lens
@@ -2006,9 +2037,7 @@ onUnmounted(() => {
 
     <!-- 3D Controls hint -->
     <div class="controls-hint">
-      <span><kbd>Left-click</kbd>
-        + <kbd>Drag</kbd> Rotate</span>
-      <span><kbd>Right-click</kbd> + <kbd>Drag</kbd> Pan</span>
+      <span><kbd>Alt</kbd>+<kbd>Click</kbd> Expand node</span>
       <span><kbd>X</kbd>/<kbd>Y</kbd>/<kbd>Z</kbd> + <kbd>Drag</kbd> Axis Rotation</span>
       <span><kbd>Shift</kbd> Blower</span>
       <span><kbd>Space</kbd>+<kbd>L</kbd> Relayout</span>
