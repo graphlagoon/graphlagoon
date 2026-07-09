@@ -57,14 +57,40 @@ export interface SettleOptions {
   nodeRelSize?: number;
   /** Hard cap on ticks (safety). Default derived from alphaDecay, min 300. */
   maxTicks?: number;
-  /** Ticks to run per async chunk before yielding. Default 20. */
+  /**
+   * Fixed ticks per async chunk. When omitted, chunks are sized by TIME
+   * instead (`tickBudgetMs`): on huge graphs one tick can cost hundreds of ms,
+   * so any fixed count produces multi-second main-thread blocks.
+   */
   ticksPerChunk?: number;
+  /** Max wall-clock per chunk before yielding (time-based chunking). Default 40ms. */
+  tickBudgetMs?: number;
   /** Progress callback in [0, 1]. */
   onProgress?: (fraction: number) => void;
   /** Yield between chunks. Default: macrotask (setTimeout 0). Injectable for tests. */
   yieldToEventLoop?: () => Promise<void>;
   /** Abort signal: if it returns true between chunks, settling stops early. */
   shouldAbort?: () => boolean;
+}
+
+/**
+ * Work-budget cap on total settle ticks for huge graphs.
+ *
+ * Measured: one tick costs ~2.9µs per (node + link) — ~730ms/tick at
+ * 100k nodes + 150k links — and full alpha convergence takes ~110 ticks
+ * (~80s of pure computation). Beyond a certain size we trade layout quality
+ * for latency (explicit product decision: small graphs keep the exact,
+ * uncapped behavior). The budget keeps the full est. tick count for graphs
+ * up to ~75k (nodes+links) and degrades gradually to the floor above that.
+ */
+const SETTLE_WORK_BUDGET = 8_500_000;
+const SETTLE_MIN_TICKS = 30;
+
+/** Size-aware cap for settle ticks: full quality when small, bounded wall-clock when huge. */
+export function computeSettleTickCap(nodeCount: number, linkCount: number, estTotal: number): number {
+  const workPerTick = Math.max(1, nodeCount + linkCount);
+  const budgetTicks = Math.floor(SETTLE_WORK_BUDGET / workPerTick);
+  return Math.max(SETTLE_MIN_TICKS, Math.min(estTotal, budgetTicks));
 }
 
 function defaultYield(): Promise<void> {
@@ -86,7 +112,8 @@ export async function settleLayoutHeadless(
 ): Promise<number> {
   const numDim = opts.numDimensions ?? 2;
   const relSize = opts.nodeRelSize ?? 4;
-  const ticksPerChunk = Math.max(1, opts.ticksPerChunk ?? 20);
+  const fixedChunk = opts.ticksPerChunk !== undefined ? Math.max(1, opts.ticksPerChunk) : null;
+  const tickBudgetMs = opts.tickBudgetMs ?? 40;
   const yieldFn = opts.yieldToEventLoop ?? defaultYield;
 
   if (nodes.length === 0) {
@@ -152,15 +179,33 @@ export async function settleLayoutHeadless(
     1,
     Math.ceil(Math.log(alphaMin) / Math.log(1 - decay)),
   );
-  const maxTicks = opts.maxTicks ?? Math.max(estTotal, 300);
+  const maxTicks =
+    opts.maxTicks ??
+    computeSettleTickCap(nodes.length, links.length, Math.max(estTotal, 300));
+  // Progress denominator: what we will actually run, so the bar reaches 100%.
+  const progressTotal = Math.min(estTotal, maxTicks);
 
   let ticks = 0;
   while (sim.alpha() > alphaMin && ticks < maxTicks) {
     if (opts.shouldAbort?.()) break;
-    const n = Math.min(ticksPerChunk, maxTicks - ticks);
-    sim.tick(n);
-    ticks += n;
-    opts.onProgress?.(Math.min(1, ticks / estTotal));
+    if (fixedChunk !== null) {
+      const n = Math.min(fixedChunk, maxTicks - ticks);
+      sim.tick(n);
+      ticks += n;
+    } else {
+      // Time-based chunk: run ticks until the budget elapses (min 1). On huge
+      // graphs a single tick can exceed the budget — then we yield every tick.
+      const chunkStart = performance.now();
+      do {
+        sim.tick(1);
+        ticks++;
+      } while (
+        ticks < maxTicks &&
+        sim.alpha() > alphaMin &&
+        performance.now() - chunkStart < tickBudgetMs
+      );
+    }
+    opts.onProgress?.(Math.min(1, ticks / progressTotal));
     await yieldFn();
   }
 

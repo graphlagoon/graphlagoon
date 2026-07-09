@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { settleLayoutHeadless, type SettleNode, type SettleLink } from '../headlessLayout';
+import { settleLayoutHeadless, computeSettleTickCap, type SettleNode, type SettleLink } from '../headlessLayout';
 import type { Force3DSettings } from '../forceConfig3D';
 
 // Mirrors the store's force3DSettings defaults
@@ -134,5 +134,45 @@ describe('settleLayoutHeadless', () => {
     );
     expect(ticks).toBeGreaterThan(0);
     expect(allFinite(nodes, ['x', 'y'])).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Size-aware tick cap (large-graph latency budget)
+// ---------------------------------------------------------------------------
+
+describe('computeSettleTickCap', () => {
+  it('keeps the full estimated tick count for small graphs', () => {
+    // 1k nodes + 1.5k links → budget allows thousands of ticks → est wins
+    expect(computeSettleTickCap(1000, 1500, 111)).toBe(111);
+  });
+
+  it('caps ticks for huge graphs (quality traded for latency)', () => {
+    // 100k + 150k = 250k work/tick → 8.5M/250k = 34 ticks
+    const cap = computeSettleTickCap(100_000, 150_000, 300);
+    expect(cap).toBeLessThan(50);
+    expect(cap).toBeGreaterThanOrEqual(30); // floor
+  });
+
+  it('never goes below the floor', () => {
+    expect(computeSettleTickCap(1_000_000, 1_000_000, 300)).toBe(30);
+  });
+});
+
+describe('time-budget chunking (default when ticksPerChunk omitted)', () => {
+  it('yields between chunks and still settles', async () => {
+    const { nodes, links } = makeGraph(30);
+    let yields = 0;
+    const ticks = await settleLayoutHeadless(nodes, links, makeSettings(), {
+      numDimensions: 2,
+      tickBudgetMs: 0, // force a yield after every tick
+      yieldToEventLoop: async () => { yields++; },
+    });
+    expect(ticks).toBeGreaterThan(0);
+    expect(yields).toBeGreaterThanOrEqual(ticks); // yielded at least once per tick
+    for (const n of nodes) {
+      expect(Number.isFinite(n.x!)).toBe(true);
+      expect(Number.isFinite(n.y!)).toBe(true);
+    }
   });
 });
