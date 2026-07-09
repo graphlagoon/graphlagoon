@@ -61,6 +61,15 @@ const isWarmingUp = ref(false);
 // Headless-settle overlay state
 const isHeadlessSettling = ref(false);
 const settleProgress = ref(0);
+// Post-settle synchronous scene build ("Rendering graph…") — keeps the overlay
+// up through graph3d.graphData() (instanced-mesh build + shader compile + force
+// re-init), which is the one main-thread block we cannot chunk (vendored lib).
+const isRenderingScene = ref(false);
+
+/** Resolve after the browser has painted the current state (one full frame). */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
 
 // Last-computed adaptive force overrides (not user-facing — only theta/alphaDecay/velocityDecay)
 let lastForceOverrides: Partial<import('@/utils/forceConfig3D').Force3DSettings> = {};
@@ -248,6 +257,9 @@ function collectAppearanceContext(): AppearanceContext {
     propFilterHiddenNodeIds: propertyFilterHiddenNodeIds.value,
     propFilterHiddenEdgeIds: propertyFilterHiddenEdgeIds.value,
 
+    tableVisibleNodeIds: graphStore.tableFilteredNodeIds,
+    tableVisibleEdgeIds: graphStore.tableFilteredEdgeIds,
+
     focusedNodeIds: focusedNodeIds.value,
     edgeLensMode: graphStore.behaviors.edgeLensMode,
     edgeLensDimOpacity: graphStore.behaviors.edgeLensDimOpacity,
@@ -275,9 +287,31 @@ function collectAppearanceContext(): AppearanceContext {
 // Graph data building
 // ---------------------------------------------------------------------------
 
-function buildGraphData(): GraphData {
+/** Yield the main thread (macrotask) so input/paint can run between chunks. */
+function yieldMain(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Max synchronous work per chunk before yielding the main thread. */
+const BUILD_CHUNK_BUDGET_MS = 12;
+
+/**
+ * Build the node/link arrays for the 3D engine.
+ *
+ * Chunked: on large graphs the per-node/per-edge work (appearance + label
+ * formatting) used to block the main thread for seconds in one synchronous
+ * pass. The loops now yield every ~12ms so the UI stays responsive; the
+ * settle/render overlay communicates progress. Returns null when superseded
+ * (a newer init/update bumped the token) — callers must bail out.
+ */
+async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | null> {
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];
+
+  // Snapshot the source arrays once: the loops below yield to the main thread,
+  // and reactive recomputes mid-build must not swap arrays under the iteration.
+  const srcNodes = filteredNodes.value;
+  const srcEdges = filteredEdges.value;
 
   // Build data maps for tooltips (use all nodes/edges)
   nodeDataMap.value.clear();
@@ -286,7 +320,7 @@ function buildGraphData(): GraphData {
   allNodes.value.forEach((node) => {
     nodeDataMap.value.set(node.node_id, node);
   });
-  filteredNodes.value.forEach((node) => {
+  srcNodes.forEach((node) => {
     if (!nodeDataMap.value.has(node.node_id)) {
       nodeDataMap.value.set(node.node_id, node);
     }
@@ -297,7 +331,13 @@ function buildGraphData(): GraphData {
 
   const ctx = collectAppearanceContext();
 
-  filteredNodes.value.forEach((node) => {
+  let chunkStart = performance.now();
+  for (const node of srcNodes) {
+    if (performance.now() - chunkStart > BUILD_CHUNK_BUDGET_MS) {
+      await yieldMain();
+      if (shouldAbort?.()) return null;
+      chunkStart = performance.now();
+    }
     const isCluster = node.node_type === '__cluster__';
     const clusterNodeCount = isCluster ? ((node.properties?.node_count as number) || 1) : 0;
     const clusterBaseSize = isCluster ? Math.min(Math.sqrt(clusterNodeCount) * 5 + 10, 50) : 0;
@@ -337,7 +377,7 @@ function buildGraphData(): GraphData {
       isCluster,
       iconOverride,
     });
-  });
+  }
 
   const nodeIds = new Set(nodes.map(n => n.id));
   const hiddenNodeIds = new Set(nodes.filter(n => n.hidden).map(n => n.id));
@@ -370,8 +410,14 @@ function buildGraphData(): GraphData {
     }
   }
 
-  filteredEdges.value.forEach((edge) => {
-    if (!nodeIds.has(edge.src) || !nodeIds.has(edge.dst)) return;
+  chunkStart = performance.now();
+  for (const edge of srcEdges) {
+    if (performance.now() - chunkStart > BUILD_CHUNK_BUDGET_MS) {
+      await yieldMain();
+      if (shouldAbort?.()) return null;
+      chunkStart = performance.now();
+    }
+    if (!nodeIds.has(edge.src) || !nodeIds.has(edge.dst)) continue;
 
     const edgeLabel = formatEdgeLabel(
       edge, graphStore.textFormatRules, graphStore.textFormatDefaults.edgeTemplate,
@@ -408,7 +454,7 @@ function buildGraphData(): GraphData {
       isSimilarity,
       score: edgeScore,
     });
-  });
+  }
 
   return { nodes, links };
 }
@@ -532,8 +578,17 @@ async function updateGraph() {
   if (!graph3d) return;
   const myToken = ++initToken;
 
+  // Large graphs: show the build overlay through the (chunked) data build —
+  // the query-loading overlay has already dropped by the time we run.
+  if (filteredEdges.value.length > HEADLESS_SETTLE_EDGE_THRESHOLD) {
+    isRenderingScene.value = true;
+    await nextPaint();
+    if (!graph3d || initToken !== myToken) return;
+  }
+
   const tBuild = performance.now();
-  const graphData = buildGraphData();
+  const graphData = await buildGraphData(() => initToken !== myToken);
+  if (!graphData || !graph3d || initToken !== myToken) return; // superseded while chunking
   recordPerf('buildGraphData', performance.now() - tBuild, {
     nodeCount: graphData.nodes.length,
     linkCount: graphData.links.length,
@@ -585,6 +640,7 @@ async function updateGraph() {
   if (isFreshLargeLayout) {
     try {
       isHeadlessSettling.value = true;
+      isRenderingScene.value = false; // switch overlay to the settle-progress text
       settleProgress.value = 0;
       // Destroy the old rendered graph BEFORE computing the new layout: the
       // render loop stops drawing the (large) old scene during the settle and
@@ -618,11 +674,26 @@ async function updateGraph() {
       preSettled = true;
     } catch (e) {
       console.warn('[GraphCanvas3D] headless settle (update) failed; animated', e);
-    } finally {
       isHeadlessSettling.value = false;
     }
     // A newer update/init superseded this one while we awaited — bail out.
-    if (!graph3d || initToken !== myToken) return;
+    if (!graph3d || initToken !== myToken) {
+      isHeadlessSettling.value = false;
+      return;
+    }
+    if (preSettled) {
+      // Switch the overlay to the render stage and let it PAINT before the
+      // synchronous graph3d.graphData() below (instanced-mesh build + shader
+      // compile + force re-init — the one block we can't chunk). Previously
+      // the overlay dropped here and that block ran over a blank canvas.
+      isRenderingScene.value = true;
+      isHeadlessSettling.value = false;
+      await nextPaint();
+      if (!graph3d || initToken !== myToken) {
+        isRenderingScene.value = false;
+        return;
+      }
+    }
   }
 
   graphStore.updateLayoutExecution(
@@ -652,10 +723,32 @@ async function updateGraph() {
     graphStore.behaviors.viewMode === '2d-proj',
   );
 
-  if (!isLayoutRunning.value && hasNewNodes) {
+  if (preSettled) {
+    // The headless settle already produced (and pinned) the final layout.
+    // Reheating here would unpin + perturb every node AND re-digest the whole
+    // scene a second time (reheatLayout calls graph3d.graphData(data) again) —
+    // doubling the freeze and jolting the settled layout. Stop instead: pins
+    // positions, flips initialLayoutDone and shows labels immediately.
+    layout.stopLayout();
+  } else if (!isLayoutRunning.value && hasNewNodes) {
     layout.reheatLayout();
   } else if (!isLayoutRunning.value) {
     layout.stopLayout();
+  }
+
+  // A REPLACE op (fresh query) lands a brand-new layout the camera has never
+  // framed — updateGraph historically never re-framed, so large results could
+  // sit entirely off-screen ("blank" view until the user orbits). Frame it on
+  // the first painted frame of the new scene.
+  const shouldRefit = freshRequested || preSettled;
+
+  // Drop the build overlay only after the new scene has actually painted.
+  if (isRenderingScene.value || shouldRefit) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (initToken !== myToken) { isRenderingScene.value = false; return; }
+      if (shouldRefit && graph3d) camera.zoomToFit();
+      isRenderingScene.value = false;
+    }));
   }
 }
 
@@ -680,8 +773,16 @@ async function initGraph() {
 
   containerRef.value.innerHTML = '';
 
+  // Large graphs: show the build overlay through the (chunked) data build.
+  if (filteredEdges.value.length > HEADLESS_SETTLE_EDGE_THRESHOLD) {
+    isRenderingScene.value = true;
+    await nextPaint();
+    if (initToken !== myToken) return;
+  }
+
   const tBuild = performance.now();
-  const graphData = buildGraphData();
+  const graphData = await buildGraphData(() => initToken !== myToken);
+  if (!graphData || initToken !== myToken) return; // superseded while chunking
   recordPerf('buildGraphData', performance.now() - tBuild, {
     nodeCount: graphData.nodes.length,
     linkCount: graphData.links.length,
@@ -704,6 +805,7 @@ async function initGraph() {
   if (graphData.links.length > HEADLESS_SETTLE_EDGE_THRESHOLD) {
     try {
       isHeadlessSettling.value = true;
+      isRenderingScene.value = false; // switch overlay to the settle-progress text
       settleProgress.value = 0;
       const is2D = graphStore.behaviors.viewMode === '2d-proj';
       const tSettle = performance.now();
@@ -734,11 +836,24 @@ async function initGraph() {
       preSettled = true;
     } catch (e) {
       console.warn('[GraphCanvas3D] headless settle failed; using animated layout', e);
-    } finally {
       isHeadlessSettling.value = false;
     }
     // A newer initGraph() superseded this one while we awaited — bail out.
-    if (initToken !== myToken) return;
+    if (initToken !== myToken) {
+      isHeadlessSettling.value = false;
+      return;
+    }
+    if (preSettled) {
+      // Keep an overlay up through the synchronous ForceGraph3D creation +
+      // graphData() digest below; let the "Rendering graph…" text paint first.
+      isRenderingScene.value = true;
+      isHeadlessSettling.value = false;
+      await nextPaint();
+      if (initToken !== myToken) {
+        isRenderingScene.value = false;
+        return;
+      }
+    }
   }
 
   // Pre-settled graphs render their final positions once (no warmup/cooldown so
@@ -996,6 +1111,13 @@ async function initGraph() {
     }
   }
 
+  // Drop the render-stage overlay only after the scene's first painted frame.
+  if (isRenderingScene.value) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      isRenderingScene.value = false;
+    }));
+  }
+
   setTimeout(() => {
     if (graph3d) camera.zoomToFit();
   }, 500);
@@ -1161,7 +1283,13 @@ watch(
   }
 );
 
-// Filter changes (type filters, property filters) — visuals only
+// Filter changes (type filters, property filters) — visuals only.
+// This is the ONLY canvas reaction to these filters: the data chain
+// (displayNodes/displayEdges in the store) deliberately ignores them, so the
+// data watcher above never fires and no Three.js rebuild / layout reheat runs.
+// Hiding happens via the appearance pipeline (hidden flag), preserving
+// positions. updateOverlays keeps labels/icons in sync with newly
+// hidden/shown nodes (previously done implicitly by the full rebuild).
 watch(
   () => JSON.stringify([
     graphStore.filters.node_types,
@@ -1171,6 +1299,17 @@ watch(
   ]),
   () => {
     updateVisuals();
+    updateOverlays();
+  }
+);
+
+// Table filter (DataTablePanel sync) — visuals only, same contract as above.
+// The sets are replaced wholesale by setTableFilteredIds, so identity watch.
+watch(
+  () => [graphStore.tableFilteredNodeIds, graphStore.tableFilteredEdgeIds],
+  () => {
+    updateVisuals();
+    updateOverlays();
   }
 );
 
@@ -1841,10 +1980,12 @@ onUnmounted(() => {
   <div ref="wrapperRef" class="graph-wrapper-3d">
     <div ref="containerRef" class="graph3d-container"></div>
 
-    <!-- Warmup loading overlay (shown while simulation pre-computes without rendering) -->
-    <div v-if="isWarmingUp || isHeadlessSettling" class="warmup-overlay">
+    <!-- Warmup loading overlay (shown while the simulation pre-computes and
+         while the scene is synchronously built after the settle) -->
+    <div v-if="isWarmingUp || isHeadlessSettling || isRenderingScene" class="warmup-overlay">
       <div class="warmup-spinner"></div>
-      <span v-if="isHeadlessSettling">Computing layout... {{ Math.round(settleProgress * 100) }}%</span>
+      <span v-if="isRenderingScene">Rendering graph...</span>
+      <span v-else-if="isHeadlessSettling">Computing layout... {{ Math.round(settleProgress * 100) }}%</span>
       <span v-else>Computing layout...</span>
     </div>
 

@@ -1,5 +1,189 @@
 # Decision Log
 
+## [2026-07-08 22:05] - Perf fix: post-query freeze + blank white canvas before a large graph appears
+
+**Issue:** On large graphs, after "Running query…" finished and "Computing
+layout…" hit 100%, the canvas stayed blank white for a long period AND the UI
+froze during that window.
+
+**Root cause (four compounding problems on the post-settle path):**
+1. **Duplicate full scene digest.** With `preSettled` layouts,
+   `updateGraph` still hit the `hasNewNodes → reheatLayout()` branch (a fresh
+   query makes every node "new"). `reheatLayout()` unpins + perturbs (±100)
+   every node — jolting the just-settled layout — AND calls
+   `graph3d.graphData(data)` a second time, re-running the entire synchronous
+   kapsule digest. The freeze was ~2× the digest cost for nothing.
+2. **Synchronous O(n+m) `buildGraphData`** (appearance + label template
+   formatting per node/edge) blocked the main thread in one pass.
+3. **Overlay dropped too early.** `isHeadlessSettling=false` ran in the
+   `finally` right after the settle — BEFORE the synchronous
+   `graph3d.graphData()` digest (instanced-mesh build + shader compile + force
+   re-init). That block then ran over a blank `#fafafa` scene with no feedback.
+4. **Camera never re-framed on the query path.** Only `initGraph` calls
+   `zoomToFit` (after 500ms); `updateGraph` never did — a fresh settled layout
+   could sit entirely off-frame, indefinitely blank until the user orbits.
+
+**Fixes ([GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue)):**
+1. `preSettled` now goes to `layout.stopLayout()` instead of `reheatLayout()`:
+   no perturbation, no second digest, `initialLayoutDone` flips immediately so
+   labels/icons appear right away (they were gated on it).
+2. `buildGraphData` is now **chunked/async**: yields the main thread every
+   ~12ms (`BUILD_CHUNK_BUDGET_MS`), takes a `shouldAbort` token (superseding
+   init/update bails cleanly), and snapshots its source arrays so reactive
+   recomputes mid-build can't swap them under the iteration.
+3. **The overlay now covers the whole window**: "Rendering graph…"
+   (`isRenderingScene`) during the chunked build → "Computing layout… N%"
+   during the settle → "Rendering graph…" again through the one remaining
+   un-chunkable synchronous block (the vendored kapsule digest; `nextPaint()`
+   guarantees the overlay paints before it starts) → dropped only after the
+   new scene's first painted frame (double rAF).
+4. `updateGraph` now calls `camera.zoomToFit()` on fresh layouts
+   (`freshRequested || preSettled`), on the first painted frame — incremental
+   updates (expand) keep the camera untouched.
+
+**What remains synchronous (accepted):** one kapsule `graphData()` digest per
+rebuild — inside the vendored lib, not chunkable from the component; it now
+runs once (not twice) and under a visible overlay. Instrumented via the fork's
+`forcegraphUpdate` perf metric.
+
+**Found during investigation:**
+- **FIXED (follow-up, same day):** `InstancedNodeRenderer._sortIndices` was a
+  `Uint16Array` while `MAX_NODES_DEFAULT = 100000` — indices wrapped past
+  65535 (measured: at 100k nodes, 34,464 duplicated/lost sort entries), so the
+  camera-distance sort drew some nodes twice and dropped others, and
+  `getDataByInstanceId` picking resolved to the wrong node. One-line fix in the
+  `three-forcegraph` submodule: `Uint32Array`. Cost analysis: +195KB memory
+  (vs ~11MB the node renderer already allocates — ~1.8%), zero CPU delta (sort
+  cost is comparator calls + `_distances` lookups; index width doesn't change
+  comparison/swap counts, and the sort only runs when the camera moves). The
+  link renderer's own index arrays already used `Uint32Array` — the node one
+  was an oversight, not a design choice. The link renderer's remaining
+  `Uint16Array`s hold per-link COUNTS (≤ 24), which are safe.
+- **NOT changed (deliberate memory guards, not typo-bugs):** rendering caps of
+  100k nodes / 20k instanced links. Measured allocation at maxLinks=20k:
+  ~33MB upfront (linePositions 5.8MB + lineColors 7.7MB + 240k-instance
+  cylinder InstancedMesh 15.4MB + index arrays); raising to 200k would be
+  ~330MB upfront plus per-frame cost. Raising them is a product decision with
+  a real memory tradeoff. Open follow-up: the caps are SILENT — a 200k-edge
+  graph renders 20k edges with no indication; a "showing X of Y" UI notice
+  would be the honest cheap fix.
+
+**Testing:**
+- [x] `vue-tsc --noEmit` clean; `vitest related` 284/284; E2E `graph.spec.ts`
+  21/21 (exercises the async init/update path end-to-end).
+- [ ] Manual on a 200k graph: overlay visible through the whole pipeline, UI
+  responsive during "Rendering graph…" (chunked build), graph framed by the
+  camera when the overlay drops, no layout jolt after settle.
+
+**Status:** Fixed (pending manual confirmation on a large graph).
+
+## [2026-07-08 21:05] - Perf fix: node/edge type checkbox toggles froze the UI (full 3D rebuild + layout reheat)
+
+**Issue:** After the search freeze was fixed, toggling a node-type or edge-type
+checkbox in FilterPanel still froze the interface even at ~20k edges.
+
+**Root cause:**
+1. A type toggle shrinks the store's `filteredNodes`/`filteredEdges` → the
+   canvas data watcher fires (its search-only guards don't cover type filters)
+   → `updateGraph()` → `buildGraphData()` + `graph3d.graphData()` = full
+   Three.js object recreation + d3-force re-init.
+2. Worse, on RE-enabling a type the re-added ids are absent from the engine's
+   `positionMap` → `hasNewNodes=true` → `reheatLayout()`
+   ([useGraphLayout.ts](../../frontend/src/composables/useGraphLayout.ts))
+   unpins ALL nodes, perturbs every position by ±100 and re-runs the whole
+   layout — the violent freeze + "graph explodes" effect.
+3. Key finding: the appearance pipeline ALREADY supported visual type hiding —
+   `computeNodeAppearance` (`isTypeHidden`), `computeLinkAppearance`
+   (`isEdgeTypeHidden` + hides links whose endpoints are in `hiddenNodeIds`),
+   with `collectAppearanceContext` populating the sets from
+   `filters.node_types`/`edge_types` — but it was **dead code**, because
+   `buildGraphData` only ever iterated already-type-filtered arrays. Same for
+   property filters (`propFilterHidden*Ids`) and search-hide (`searchHiddenIds`).
+   Visual hiding is cheap and position-preserving: `nodeVisibility` accessor
+   changes re-digest only visible objects, without re-initing the simulation
+   (the kapsule feeds d3-force the full `graphData.nodes`).
+
+**Fix — feed the canvas the FULL dataset, hide visually (the architecture the
+appearance pipeline was built for):**
+- [graph.ts](../../frontend/src/stores/graph.ts): the canvas data chain
+  (`displayNodes`/`displayEdges` → `enhancedNodes`/`enhancedEdges`) is now
+  based on the full `nodes`/`edges` instead of `filteredNodes`/`filteredEdges`.
+  Only filters with no visual equivalent stay data-level in that chain:
+  table-filter ids, the self-edge toggle, and similarity display mode (their
+  toggles are rare, so the rebuild they trigger is acceptable). With this, a
+  type/property/search toggle no longer even invalidates the canvas computeds
+  (same per-property tracking mechanism as the search fix), so the data
+  watcher never fires — no rebuild, no reheat; nodes reappear at their exact
+  previous positions.
+- [GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue): the
+  existing "filter changes — visuals only" watcher now also calls
+  `updateOverlays()` (labels/icons of newly hidden/shown nodes — previously
+  refreshed implicitly by the full rebuild). `updateVisuals` and
+  `buildGraphData` already aggregate `hiddenNodeIds` and pass it to
+  `computeLinkAppearance`, so links with hidden endpoints hide correctly and
+  rebuilds while filters are active keep hidden nodes present-but-flagged.
+
+**Contract change (audited):** `enhancedNodes`/`enhancedEdges` are consumed
+only by the canvas. Status bar, DataTablePanel, metrics, community and
+similarity all read `filteredNodes`/`filteredEdges` and keep filtered
+semantics. `enhancedMultiEdgeStats`/`enhancedHasMultiEdges` (Toolbar badge,
+AestheticsPanel toggle) now reflect the full dataset rather than the filtered
+view — minor, accepted.
+
+**Bonus fix (latent bug):** previously, any full rebuild while a hide-search or
+filter was active removed hidden nodes from the engine's data entirely —
+clearing the search/filter could not un-hide them without another rebuild, and
+their positions were lost. With the full-dataset canvas chain this class of
+inconsistency is gone.
+
+**Documented caveat:** hidden nodes still participate in the force simulation
+when a layout runs (same as search-hide before) — they cost simulation time
+but no draw calls.
+
+**Testing:**
+- [x] 4 new regression tests in
+  [graph.filtering.test.ts](../../frontend/src/stores/__tests__/graph.filtering.test.ts):
+  type toggles keep `displayNodes`/`enhancedNodes`/`displayEdges`/`enhancedEdges`
+  cached (array identity, warm-up read pattern); canvas chain holds the full
+  dataset while `filteredNodes` stays filtered; self-edge toggle and table
+  filter still apply to `displayEdges`.
+- [x] 49/49 graph.filtering; 283/283 across `vitest related` on graph.ts +
+  GraphCanvas3D.vue (incl. selfEdges, clusterIntegration, largeGraph, metrics);
+  `vue-tsc --noEmit` clean.
+- [x] E2E `graph.spec.ts`: 21/21 passed.
+- [ ] Manual perf check: toggle type checkboxes on a ~20k+ graph — no freeze,
+  nodes fade in place (no layout jump), `window.__PERF_METRICS__` records no
+  new `buildGraphData` entries per toggle.
+
+**Status:** Fixed (pending manual perf confirmation).
+
+**Follow-up (same session): table filtering moved to the visual path too.**
+User asked whether filtering via the DataTablePanel (which syncs
+`setTableFilteredIds` to the graph) had the same bug — it did: the table-filter
+ids had been deliberately left data-level in `displayNodes`/`displayEdges`
+(no visual equivalent existed), so brushing a table filter still triggered the
+full rebuild, and clearing it re-added nodes through `reheatLayout()`.
+Implemented the visual equivalent:
+- [graphAppearance.ts](../../frontend/src/utils/graphAppearance.ts): new
+  `tableVisibleNodeIds`/`tableVisibleEdgeIds` KEEP-sets in `AppearanceContext`
+  (null = no filter; non-null = only those ids visible). Cluster nodes are
+  exempt (sets hold real node ids); cluster-aggregate edges (`cluster_*`
+  synthetic ids) are exempt from the edge set — hiding every aggregate while a
+  table filter is active would visually disconnect closed clusters (same
+  matched-by-id limitation as `propFilterHiddenEdgeIds`, documented).
+- [graph.ts](../../frontend/src/stores/graph.ts): table-filter ids removed from
+  `displayNodes`/`displayEdges` (canvas chain now only excludes self-edges and
+  similarity display mode); `tableFilteredNodeIds`/`tableFilteredEdgeIds`
+  exported for the appearance context.
+- [GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue):
+  `collectAppearanceContext` passes the sets; new identity watcher on the two
+  sets → `updateVisuals()` + `updateOverlays()`.
+- Tests: 6 new appearance tests (KEEP-set node/edge hiding, null = all visible,
+  cluster node/edge exemptions, endpoint aggregation) — graphAppearance 67/67;
+  updated + new store regression tests (table filter no longer recomputes the
+  canvas chain, self-edge toggle still data-level) — graph.filtering 50/50;
+  full related sweep 351/351; `vue-tsc` clean; E2E graph.spec 21/21.
+
 ## [2026-07-08 20:30] - Bug fix: graph-query Cancel button did nothing (overlay swallowed the click)
 
 **Issue:** Running a graph query (default path), the loading overlay showed a
