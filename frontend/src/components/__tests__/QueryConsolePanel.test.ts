@@ -22,7 +22,7 @@ const stubs = {
 };
 
 function col(field: string, header: string): ColMeta {
-  return { field, header, type: 'string' };
+  return { field, header, type: 'text' };
 }
 
 function setupStores(nodeIdCol: string, columns: ColMeta[]) {
