@@ -38,6 +38,7 @@ import type {
   SimilarityEndpointInfo,
   SimilarityResponse,
 } from '@/types/similarity';
+import { substituteHashCalls } from '@/utils/queryHash';
 
 // API URL priority:
 // 1. Window global injected by server (production/embedded mode)
@@ -244,9 +245,10 @@ class ApiService {
     contextId: string,
     request: GraphQueryRequest,
   ): Promise<GraphJobSubmitResponse> {
+    const req = { ...request, query: await substituteHashCalls(request.query) };
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/query/async`,
-      request,
+      req,
     );
     return response.data;
   }
@@ -256,9 +258,10 @@ class ApiService {
     contextId: string,
     request: CypherQueryRequest,
   ): Promise<GraphJobSubmitResponse> {
+    const req = { ...request, query: await substituteHashCalls(request.query) };
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/cypher/async`,
-      request,
+      req,
     );
     return response.data;
   }
@@ -282,17 +285,19 @@ class ApiService {
   }
 
   async transpileCypher(contextId: string, request: CypherTranspileRequest): Promise<CypherTranspileResponse> {
+    const req = { ...request, query: await substituteHashCalls(request.query) };
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/cypher/transpile`,
-      request
+      req
     );
     return response.data;
   }
 
   async executeTableQuery(contextId: string, request: TableQueryRequest): Promise<TableQueryResponse> {
+    const req = { ...request, query: await substituteHashCalls(request.query) };
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/query/table`,
-      request
+      req
     );
     return response.data;
   }
