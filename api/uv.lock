@@ -420,7 +420,7 @@ wheels = [
 
 [[package]]
 name = "graphlagoon"
-version = "0.19.1"
+version = "0.19.2"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },
@@ -468,7 +468,7 @@ requires-dist = [
     { name = "databricks-sdk", marker = "extra == 'lakebase'", specifier = ">=0.38.0" },
     { name = "debugpy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "fastapi", specifier = ">=0.109.0" },
-    { name = "gsql2rsql", specifier = "==0.10.4" },
+    { name = "gsql2rsql", specifier = ">=0.10.5" },
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "orjson", specifier = ">=3.11.9" },
@@ -563,14 +563,14 @@ wheels = [
 
 [[package]]
 name = "gsql2rsql"
-version = "0.10.4"
+version = "0.10.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "antlr4-python3-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/25/80df90cd2853db7c9b75fc5fd22641d7c4fe2c3e1919da44829f22170e8c/gsql2rsql-0.10.4.tar.gz", hash = "sha256:0991a6adce6a747b36e69f4a1f2811ce4980c7b532b6a794a50a9d3cce71e548", size = 2818437, upload-time = "2026-07-08T22:24:34.999Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/5d/b793b3dddfbce4262e16e4730d252838d9e52636753f02b00d67314cf5f0/gsql2rsql-0.10.5.tar.gz", hash = "sha256:5f21ae1a8eac2dd9adec6c457042e9d899f505ce3610ccf997c874129f626e29", size = 2819911, upload-time = "2026-07-09T14:12:50.605Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/68/0a5ef0e2b58dbc3761d260ea22e899d5afd09423b45c5235ea42d8e1c6ae/gsql2rsql-0.10.4-py3-none-any.whl", hash = "sha256:4ea3879715edf319852882e54ba32f692b45c6ba45676a5bf1d846275d6cf523", size = 322851, upload-time = "2026-07-08T22:24:33.495Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/95/75f4a83e89fb8ca2155558760d926173f1df131cbdb36e0e5ed9846923cf/gsql2rsql-0.10.5-py3-none-any.whl", hash = "sha256:a1b42829d8ec08c46cbef7ea2f143bf162db5af594b8c6c1fba8abe29150988e", size = 323151, upload-time = "2026-07-09T14:12:48.895Z" },
 ]
 
 [[package]]
