@@ -172,9 +172,13 @@ onMounted(async () => {
     // (otherwise we'd load all nodes, but clusters were created for the query result only)
     await graphStore.loadExploration(explorationId);
   } else {
-    // Starting a new context (not loading an exploration)
-    // Load initial subgraph with all nodes
-    await graphStore.loadSubgraph({});
+    // Starting a new context (not loading an exploration).
+    // By default we fetch nothing — the implicit "all nodes" subgraph is expensive on large
+    // graphs, so the user runs the query they actually want. A context opts in via
+    // default_behaviors: { autoLoadOnOpen: true }.
+    if (graphStore.behaviors.autoLoadOnOpen) {
+      await graphStore.loadSubgraph({});
+    }
     // Clear clusters and reset to default programs in memory
     clusterStore.clearAll(); // This also recreates default programs
     communityStore.clearCommunities();
@@ -198,7 +202,11 @@ watch(
     clusterStore.clearAll(); // Clear clusters and reset to default programs
     communityStore.clearCommunities();
     await graphStore.loadContext(newId);
-    await graphStore.loadSubgraph({});
+    // loadContext re-resolves behaviors from the new context, so this honours the context
+    // being switched TO, not the one being left.
+    if (graphStore.behaviors.autoLoadOnOpen) {
+      await graphStore.loadSubgraph({});
+    }
   }
 );
 </script>

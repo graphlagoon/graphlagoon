@@ -849,7 +849,7 @@ async function unshare(contextId: string, email: string) {
               rows="3"
               spellcheck="false"
               data-testid="create-context-default-behaviors"
-              placeholder='{"viewMode": "3d", "mapStylePan": false}'
+              placeholder='{"autoLoadOnOpen": true, "viewMode": "3d"}'
             />
             <span v-if="defaultBehaviorsError" class="hint hint-error">
               {{ defaultBehaviorsError }}

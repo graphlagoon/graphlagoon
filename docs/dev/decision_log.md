@@ -1,5 +1,428 @@
 # Decision Log
 
+## [2026-07-13 16:30] - Feature: opening a context runs no query by default (`behaviors.autoLoadOnOpen`)
+
+**Purpose:** Opening a context always fired an implicit `GET /subgraph` with `edge_limit: 1000`
+("load all nodes"). On large graphs that's expensive and almost never what the user wants in the
+first second. The default is now **fetch nothing**; a context opts in to auto-loading.
+
+**Design Decisions:**
+1. **No new DB column — reused the opaque `default_behaviors` JSON.** The user explicitly asked to
+   avoid a new parameter if possible, and it was: `graph_contexts.default_behaviors` (migration 007)
+   is `Column(JSON)` in the DB and a bare `dict` in Pydantic — the backend **never inspects the
+   keys**, it just passes the dict through. So `autoLoadOnOpen` is just another key in it: **zero
+   migration, zero backend change** (the API suite stayed at 184 passing, untouched), and it
+   inherits the whole precedence chain for free:
+   `built-in < server config < context < user's panel < saved exploration`.
+2. **Gated exactly two call sites, deliberately not a third.** `loadSubgraph` has three callers:
+   GraphVisualizationView's `onMounted` and its `watch(contextId)` — both gated — and
+   [graph.ts:1736](frontend/src/stores/graph.ts#L1736), the fallback inside `loadExploration` for
+   explorations saved without a `graph_query`. That one is **left alone**: gating it would make
+   saved explorations open empty and useless.
+3. **No new UI.** An empty state already existed
+   ([GraphVisualizationView.vue:238](frontend/src/views/GraphVisualizationView.vue#L238)): *"No nodes
+   to display — Run a query to start visualizing your graph"*. It is exactly the UX the new default
+   needs, so: no "Load graph" button, no auto-opening the query panel.
+4. **Fixed a dead end the flip would otherwise create.** The query panel pre-fills a BFS example from
+   `generateBfsExampleQuery`, which seeds from a **random node already on screen**. With an empty
+   graph there is no seed, and it fell through to a literal placeholder
+   (`MATCH (root { node_id: "{node_id_value}" })`) that **cannot run** — and the user had no node on
+   screen to copy an id from. Now, with no nodes, it emits a runnable seedless edge scan:
+   `MATCH ()-[r]-() RETURN r LIMIT 1000` (user-confirmed as working through the transpiler). With
+   nodes present, the BFS is unchanged. Both still project `RETURN r`, per the backend contract
+   documented at [exampleQuery.ts:6](frontend/src/utils/exampleQuery.ts#L6).
+
+**Files Modified:**
+- [frontend/src/stores/graph.ts](frontend/src/stores/graph.ts) — `autoLoadOnOpen: false` in `DEFAULT_BEHAVIORS`
+- [frontend/src/views/GraphVisualizationView.vue](frontend/src/views/GraphVisualizationView.vue) — gate both `loadSubgraph({})` calls (state resets stay outside the guard)
+- [frontend/src/utils/exampleQuery.ts](frontend/src/utils/exampleQuery.ts) — seedless runnable query when no nodes
+- [frontend/src/components/BehaviorPanel.vue](frontend/src/components/BehaviorPanel.vue) — "Load graph on open" checkbox (Reset needed no change — it delegates to `resolveInitialBehaviors()`)
+- [frontend/src/views/ContextsView.vue](frontend/src/views/ContextsView.vue) — placeholder now shows `{"autoLoadOnOpen": true}`
+- [frontend/e2e/fixtures/mock-data.ts](frontend/e2e/fixtures/mock-data.ts) — `MOCK_CONTEXT` opts in; new `MOCK_CONTEXT_NO_AUTOLOAD`
+- [frontend/e2e/perf-report.ts](frontend/e2e/perf-report.ts) — opt in, or the harness would silently benchmark an **empty** graph
+
+**Testing:**
+- [x] **E2E: 80 passing.** The new test is the one that matters — it opens a context without the
+      opt-in and asserts **no `/subgraph` request is ever made** (listening on `page.on('request')`),
+      plus `0 nodes` / `0 edges` and the empty state. That proves the feature end-to-end in a real
+      browser, not just the store state.
+- [x] Unit: **846 passing / 48 files** (was 838). Rewrote 3 `exampleQuery` tests that asserted the
+      old placeholder — they encoded the very dead end being fixed. New assertions: the seedless
+      query contains **no** `{`-placeholder, does contain `RETURN r`, and doesn't reference
+      `node_id_col` at all.
+- [x] Store tests: context opt-in seeds `autoLoadOnOpen`, and switching to a context **without** it
+      drops the previous context's opt-in (no leak).
+- [x] **API: 184 passing, untouched** — the proof that no backend/DB work was needed.
+- [x] `vue-tsc --noEmit` clean.
+
+**Known Limitations:**
+- Not exercised by hand in a browser (E2E covers the flow, including the no-fetch assertion).
+- Existing contexts in the DB have `default_behaviors = {}`, so they all adopt the new default and
+  will open empty. That is the intended behavior change, but it **is** a change for every existing
+  context; a user who wants the old feel ticks "Load graph on open" or sets it on the context.
+
+**Status:** Implemented.
+
+## [2026-07-13 15:52] - Feature: Google-Maps-style cursor-locked pan (`behaviors.mapStylePan`)
+
+**Purpose:** Right-drag pan felt wrong — the graph didn't follow the mouse. Make it feel like
+Google Maps: whatever you grab stays under the cursor.
+
+**Investigation (three defects, none of them taste):** The term is right — TrackballControls
+maps `RIGHT: MOUSE.PAN` and the handler is `_panCamera()`. The app never overrides its
+settings, so we inherited all three:
+1. **`panSpeed = 0.3`** — the world moves at a third of the mouse. Whatever you grab slides
+   out from under the cursor *by construction*. This is the main culprit.
+2. **Upstream ortho bug** (TrackballControls.js:268): `scale_y` divides by `clientWidth`
+   instead of `clientHeight`. Ortho is our default, so **vertical pan is off by a factor of
+   `aspect`** — ~1.78x too slow on 16:9. OrbitControls gets this right and even comments on
+   it ("we use only clientHeight here so aspect ratio does not distort speed",
+   OrbitControls.js:603). Research found **no upstream issue** for this — treat as unreported.
+3. `multiplyScalar(_eye.length())` — distance-scaled, same shape as the zoom problem.
+
+**Design Decisions:**
+1. **Kept TrackballControls; did not switch to MapControls.** MapControls is just
+   OrbitControls + `screenSpacePanning=false` + swapped buttons, and critically it **does not
+   actually lock the point under the cursor** — its `2*delta*targetDistance/clientHeight` is
+   exact only on the plane through `target`. (Tell: upstream added `zoomToCursor` but never a
+   `panToCursor`.) Swapping would also have meant re-deriving 2D lock, axis-constrained
+   rotation, and the context-menu drag detection — all for an approximation.
+2. **Exact math, no raycast.** The canonical cursor-lock technique raycasts an anchor plane
+   each move. For our *patched* ortho camera we don't need it: the projection makes the
+   visible extent `ORTHO_FRUSTUM_SIZE*aspect/zoom` wide and `ORTHO_FRUSTUM_SIZE/zoom` tall, so
+   with `aspect = clientWidth/clientHeight`, world-per-pixel collapses to the **same value on
+   both axes**: `ORTHO_FRUSTUM_SIZE / (zoom * clientHeight)`. Move camera+target by exactly
+   that and the grab cannot drift. This kills the aspect bug as a side effect.
+   Perspective has no single answer (world-per-pixel varies with depth), so we solve at the
+   target's depth — exact for anything on that plane, same as OrbitControls.
+3. **Screen basis from the camera matrix** (`setFromMatrixColumn` 0/1), not world axes — so
+   pan stays correct under any rotation, including the axis-constrained 3D views.
+4. **Default ON** (`mapStylePan: true`). Unlike the (since-reverted) constant-zoom toggle,
+   the old pan isn't a legitimate alternative — it's simply defective (panSpeed 0.3 + the
+   aspect bug), so there's no taste trade-off to preserve.
+5. **Extended the existing right-click `mousedown` handler** rather than adding a competing
+   one: it already does drag-vs-click detection so the context menu only opens on a
+   *stationary* right-click. Right-drag was therefore already the pan gesture — no conflict.
+   `mousemove`/`mouseup` listen on `window` so a drag that leaves the canvas still tracks and
+   still ends.
+
+**Files Modified:**
+- [frontend/src/stores/graph.ts](frontend/src/stores/graph.ts) — `mapStylePan: true`
+- [frontend/src/composables/useGraphCamera.ts](frontend/src/composables/useGraphCamera.ts) — `syncPanMode()`, `applyMapStylePan()`
+- [frontend/src/components/GraphCanvas3D.vue](frontend/src/components/GraphCanvas3D.vue) — pan drag handlers + listener cleanup + init/watcher
+- [frontend/src/components/BehaviorPanel.vue](frontend/src/components/BehaviorPanel.vue) — checkbox (Reset needed no change — it already delegates to `resolveInitialBehaviors()`)
+
+**Files Created:**
+- [frontend/src/composables/__tests__/useGraphCamera.pan.test.ts](frontend/src/composables/__tests__/useGraphCamera.pan.test.ts)
+
+**Testing:**
+- [x] 12 pan tests. The load-bearing ones **project the grabbed world point through the real
+      projection matrix** and assert it moved exactly `dx`/`dy` screen pixels — a genuine
+      cursor-lock proof, not a restatement of the formula. Ortho at zoom 0.25/1/4, plus
+      perspective at target depth. Also: **equal vertical and horizontal rates on a 16:9
+      viewport** (the upstream bug, pinned), world follows the drag (not against it), zoom
+      scaling, rigid camera+target translation, redraw.
+- [x] 4 panel tests: default on, untick, checkbox reflects store, Reset restores.
+- [x] Full frontend suite: **857 passed / 49 files** (was 841). `vue-tsc` clean.
+
+**Known Limitations:**
+- **Not exercised in a browser** — verification is numeric (projection-matrix round-trip).
+  The feel should be confirmed by hand.
+- **Touch/trackpad pinch-pan still goes through TrackballControls** (`TOUCH_ZOOM_PAN`), which
+  `noPan` does not cover — same gap as the zoom work. Wheel and right-drag are ours; touch
+  is not.
+- Perspective lock is exact only at the target's depth plane (unavoidable without a raycast
+  anchor); ortho — our default — is exact everywhere.
+
+**Status:** Implemented.
+
+## [2026-07-13 15:32] - Feature: per-context default behaviors (`GraphContext.default_behaviors`)
+
+**Purpose:** Set graph behavior defaults at context-creation time. Different graphs want
+different defaults — a 100k-node graph and a 500-node one don't want the same view mode,
+label density or zoom feel — and a single server-wide setting can't express that.
+
+**Design Decisions:**
+1. **Required a real DB migration (007).** Unlike the exploration `behaviors` (which rode
+   along in an existing free-form blob), `graph_contexts` has **no free-form JSON column** —
+   every field (`edge_structure`, `node_structure`, …) is structural and typed. So: new
+   `default_behaviors` JSON column + Alembic `007` (copying 006's inspector-guarded,
+   idempotent `add_column`) + `MemoryGraphContext` dataclass field + both branches of
+   create/update in the router.
+2. **Precedence: built-in < server config < context < user panel < exploration.**
+   The user chose *exploration wins* over *context wins*: the context is a **starting
+   default**, not a policy lock. If someone deliberately saved an exploration in 2D, reopening
+   it must not silently force it to 3D because the context says so.
+   **This fell out for free** — `loadContext` runs before `loadExploration`
+   (GraphVisualizationView), and `loadExploration` merges saved behaviors over whatever is
+   current. No ordering change needed.
+3. **The seam is `loadContext`, and it *re-resolves* rather than merges.** `clear()` does
+   **not** reset `behaviors`, so merging would have leaked the previous context's settings
+   into the next one on a context switch. Re-resolving from scratch
+   (`resolveInitialBehaviors(ctx.default_behaviors)`) fixes that. There's a test for exactly
+   this trap.
+4. **Reused the existing validator, generalized.** `resolveInitialBehaviors()` now takes an
+   optional context-overrides arg and layers server-then-context through a shared
+   `applyBehaviorOverrides()`. Same defence as before (unknown keys dropped, per-key typeof
+   mismatch rejected) — which matters more here, since a context's behaviors get serialized
+   into every exploration saved from it.
+5. **UI: a JSON textarea, not 23 form controls.** Replicating the whole Behaviors panel
+   inside the create-context modal would be a maintenance sink; the textarea matches the
+   opaque dict the backend already passes through. Parse errors are shown inline and
+   **disable the submit button**, with a redundant guard in the handler so a malformed dict
+   can never reach the API.
+
+**Follow-on fix:** `BehaviorPanel.resetBehaviors()` would now have been wrong — it reset to
+the *server* defaults, ignoring the context's. It now passes
+`graphStore.currentContext?.default_behaviors` to the resolver.
+
+**Files Modified:**
+- [api/graphlagoon/models/schemas.py](api/graphlagoon/models/schemas.py) — field on Create/Update/Response
+- [api/graphlagoon/db/models.py](api/graphlagoon/db/models.py) — `default_behaviors` JSON column
+- [api/graphlagoon/db/memory_store.py](api/graphlagoon/db/memory_store.py) — dataclass field + `create_graph_context` param (update path already worked via its `setattr` loop)
+- [api/graphlagoon/routers/graph_contexts.py](api/graphlagoon/routers/graph_contexts.py) — `context_to_response` (with `or {}` for pre-migration NULL rows) + both branches of create and update
+- [frontend/src/types/graph.ts](frontend/src/types/graph.ts) — `GraphContext` + `CreateGraphContextRequest`
+- [frontend/src/stores/graph.ts](frontend/src/stores/graph.ts) — `applyBehaviorOverrides()`, `resolveInitialBehaviors(contextBehaviors?)`, seeding in `loadContext`
+- [frontend/src/views/ContextsView.vue](frontend/src/views/ContextsView.vue) — JSON textarea + validation + payload + form reset
+- [frontend/src/components/BehaviorPanel.vue](frontend/src/components/BehaviorPanel.vue) — Reset honours the context
+
+**Files Created:**
+- [api/graphlagoon/alembic/versions/007_add_context_default_behaviors.py](api/graphlagoon/alembic/versions/007_add_context_default_behaviors.py)
+- [api/tests/test_context_default_behaviors.py](api/tests/test_context_default_behaviors.py)
+- [frontend/src/stores/__tests__/graph.contextBehaviors.test.ts](frontend/src/stores/__tests__/graph.contextBehaviors.test.ts)
+
+**Testing:**
+- [x] 14 new API tests: schema defaults/passthrough, memory-store create/update round-trip,
+      **no shared mutable default dict across contexts**, update of another field leaves
+      behaviors intact, migration chains 007→006 and targets the right table/column.
+- [x] 13 new frontend tests: context-over-server precedence, unknown-key/wrong-type
+      rejection, `loadContext` seeding, **context-switch does not leak** the previous
+      context's behaviors, failed load leaves behaviors alone, user-overrides-context,
+      **exploration-overrides-context**, context behaviors serialized into explorations.
+- [x] Full API suite: **184 passed, 1 skipped** (was 170 + 1).
+- [x] Full frontend suite: **841 passed / 48 files** (was 828).
+- [x] `vue-tsc --noEmit` clean.
+- [x] `test_transpile_options` still green (the new test file sorts before it; used the
+      `try/import/except ImportError` gsql2rsql stub guard per the known project gotcha).
+
+**Migration verified against a real Postgres (2026-07-13 15:40):**
+- Applied `006 → 007` on the dev DB (`alembic current` → `007 (head)`; `information_schema`
+  → `default_behaviors`, `json`, default `'{}'::json`). Existing contexts got `{}`, so their
+  behavior is unchanged. The failing `SELECT` from the traceback now runs.
+- **Deploy needs no manual step.** Both lifespans — `mountable_lifespan` (Databricks Apps)
+  and the standalone one — call `create_tables()`, which runs `alembic upgrade head` on the
+  existing connection. Simulated a fresh deploy against an empty DB via `create_tables()`:
+  it chained `001 → 007` and emitted the `ALTER TABLE`. No `make migrate` required in prod.
+- **Checked the trap:** `create_tables()` falls back to `Base.metadata.create_all` when
+  `alembic.ini` is missing — and `create_all` does **not** add columns to existing tables, so
+  a wheel without the migrations would reproduce the `UndefinedColumnError` in prod. Built
+  the wheel and inspected it: `alembic.ini` *and* all of `alembic/versions/` (incl. `007`)
+  are packaged. `pyproject.toml` only `force-include`s the `.ini`/`.mako`, but
+  `packages = ["graphlagoon"]` carries the version `.py` files.
+- Note: the original error hit because a hot-reloading dev server picks up new Python
+  without re-running the startup lifespan. A restart fixes it — a dev-loop artifact, not a
+  deploy one.
+
+**Known Limitations:**
+- Rollback caveat: redeploying an *older* app version over a `007` DB is safe (the column is
+  simply unused), but running `alembic downgrade` drops the column and loses configured
+  defaults.
+- Not exercised in a browser.
+- **No edit UI after creation.** `contextsStore.updateContext` supports the field and the
+  API accepts it, but ContextsView has no edit modal at all (only Open/Share/Delete), so
+  behaviors can only be set at creation or via the API. A natural follow-up is a "Save
+  current behaviors as this context's default" button in BehaviorPanel.
+- Still only `behaviors` — `aesthetics`/`force3DSettings` are not context-configurable.
+
+**Status:** Implemented.
+
+## [2026-07-13 15:08] - Feature: server-configurable frontend behavior defaults (`GRAPH_LAGOON_DEFAULT_BEHAVIORS`)
+
+**Purpose:** Let whoever deploys the app set the initial values of the Behaviors
+panel (e.g. ship with `mapStylePan: false`, or default to 3D) without
+patching the frontend.
+
+**Design Decisions:**
+1. **One opaque JSON env var, not ~23 typed fields.** `GRAPH_LAGOON_DEFAULT_BEHAVIORS`
+   → `Settings.default_behaviors: Optional[str]` + a `default_behaviors_dict`
+   property that parses it (mirrors the existing `allowed_share_domain_list`
+   pattern). The backend **passes the dict through without interpreting it**, so
+   any behavior the frontend adds later works with zero backend change. A field
+   per behavior would have coupled the API to every frontend visual tweak.
+2. **Validation lives on the frontend, where the schema actually is.**
+   `resolveInitialBehaviors()` (stores/graph.ts) drops unknown keys and rejects
+   per-key type mismatches, warning on each. This matters because `behaviors` is
+   serialized wholesale into every saved exploration — a typo'd key
+   (`constantZoom`) or an env-var footgun (the *string* `"false"`, which is truthy)
+   would otherwise be injected into the store and persisted forever.
+3. **Precedence (lowest→highest): built-in defaults < server defaults < user's panel
+   changes < loaded exploration.** The last one falls out for free: `loadExploration`
+   merges saved behaviors over *whatever is current*, which is now the server value.
+4. **Malformed config is a warning, not a crash.** Bad JSON / non-object JSON →
+   `{}` + a logged warning. These are cosmetic UI defaults; taking the API down over
+   one is the wrong trade.
+5. **Both config producers updated.** `render_spa` (app.py, the Jinja template path)
+   *and* `GET /api/config` (routers/config.py, what `npm run dev` fetches). Touching
+   only the first would have made the feature work in the built app but silently not
+   in dev.
+
+**Drive-by fix:** `BehaviorPanel.resetBehaviors()` hardcoded its own copy of the
+defaults, which had **already drifted** from the store (`hideLabelsOnCameraMove` and
+`useOrthographicCamera` were both inverted — Reset was *changing* behavior, not
+restoring it). It now calls `resolveInitialBehaviors()`, so Reset can't drift again
+and correctly resets to the *server's* defaults.
+
+**Files Modified:**
+- [api/graphlagoon/config.py](api/graphlagoon/config.py) — `default_behaviors` field + `default_behaviors_dict` property
+- [api/graphlagoon/app.py](api/graphlagoon/app.py) — inject into `render_spa`'s config dict
+- [api/graphlagoon/routers/config.py](api/graphlagoon/routers/config.py) — inject into `GET /api/config`
+- [api/.env.example](api/.env.example) — document the var
+- [frontend/src/services/api.ts](frontend/src/services/api.ts) — `default_behaviors` on the `Window.__GRAPH_LAGOON_CONFIG__` type
+- [frontend/src/stores/graph.ts](frontend/src/stores/graph.ts) — extracted `DEFAULT_BEHAVIORS` + `resolveInitialBehaviors()`; `behaviors` ref now seeded from it
+- [frontend/src/components/BehaviorPanel.vue](frontend/src/components/BehaviorPanel.vue) — `resetBehaviors()` reuses the resolver
+
+**Files Created:**
+- [api/tests/test_default_behaviors.py](api/tests/test_default_behaviors.py)
+- [frontend/src/stores/__tests__/graph.serverBehaviors.test.ts](frontend/src/stores/__tests__/graph.serverBehaviors.test.ts)
+
+**Gotchas hit:**
+- Extracting the `behaviors` literal to a module constant nearly collapsed its `as
+  'off' | 'hide' | 'dim'` / `'3d' | '2d-proj'` narrowings to `string`, which would
+  have broken BehaviorPanel's radio bindings. The literal is the type source
+  (`typeof DEFAULT_BEHAVIORS`); the `as` annotations are load-bearing. `vue-tsc`
+  confirms they survived.
+- `api/tests/test_default_behaviors.py` sorts **before** `test_transpile_options.py`,
+  so its gsql2rsql `sys.modules` stub uses the `try/import/except ImportError` guard
+  (not `not in sys.modules`), per the known project gotcha. Full API suite confirms
+  `test_transpile_options` still passes.
+
+**Testing:**
+- [x] 10 new API tests: parse, type preservation, unknown-key pass-through, empty
+      string, malformed JSON, non-object JSON (list/scalar/null) → all ignored not
+      fatal. Plus two tests asserting **both** config producers include the key
+      (the dev/prod parity trap).
+- [x] 13 new frontend tests: no-config fallback, override, all scalar types,
+      untouched keys keep defaults, unknown key dropped, wrong-type value rejected,
+      one bad key doesn't poison the good ones, fresh object per call, store seeding,
+      user-override-wins, exploration-override-wins, server defaults serialized.
+- [x] Full API suite: **170 passed, 1 skipped** (was 160 + 1 skip).
+- [x] Full frontend suite: **828 passed / 47 files** (was 815).
+- [x] `vue-tsc --noEmit` clean.
+
+**Known Limitations:**
+- Not exercised against a running server (no dev server driven this session);
+  verification is unit-level on both sides, incl. the two-producer parity assertion.
+- Only `behaviors` is server-configurable. `aesthetics` and `force3DSettings` are not
+  (the latter isn't even serialized into explorations — pre-existing gap).
+- Server defaults are global. No per-user or per-context override.
+
+**Status:** Implemented.
+
+## [2026-07-13 14:52] - Feature: opt-in constant zoom speed (`behaviors.constantZoomSpeed`) — **REVERTED 2026-07-13 16:05**
+
+> **REVERTED.** The setting and all its machinery were removed at the user's request
+> ("deixe só o adaptativo para simplificar"). Since the default was already `false`, the
+> revert is **behaviour-neutral** — the zoom is TrackballControls' adaptive one, exactly as
+> before this entry. Removed: `behaviors.constantZoomSpeed`, `syncZoomMode()`,
+> `applyConstantZoomStep()` and its constants (`STEP_FRACTION`, `MIN_ZOOM_DISTANCE`,
+> `MAX_ZOOM_DISTANCE_FACTOR`, `MAX_ORTHO_ZOOM`, `getGraphSpan()`), the panel checkbox, the
+> component's wheel branch/watcher, and `useGraphCamera.zoom.test.ts` (19 tests). The wheel
+> handler is back to clipping-plane-only. Tests that merely *used* the key as a probe for
+> server/context/exploration precedence were re-pointed at `mapStylePan`, not deleted.
+> Frontend suite: 838 passing.
+>
+> The investigation below is kept because it documents why TrackballControls' zoom behaves
+> as it does — still true, and directly relevant to the pan work that followed.
+
+**Purpose:** The zoom "changes speed" — it decelerates as you approach the graph
+and accelerates as you pull away. Users who want to sweep the space in
+predictable increments had no way to turn that off.
+
+**Root of today's behavior (investigated first):** the zoom is *not* our code. We
+never pass `controlType`, so `three-render-objects` gives us its default
+(`'trackball'`, three-render-objects.mjs:439) → Three.js **TrackballControls**.
+Its `_zoomCamera()` is *multiplicative*, not additive:
+
+- Perspective (TrackballControls.js:371-377): `factor = 1 + Δ*zoomSpeed`, then
+  `_eye.multiplyScalar(factor)`. `_eye` is the target→camera vector, so each
+  tick scales the **distance to target** — it moves the camera by a *percentage*
+  of the current distance (at distance 5000 a tick ≈ 60 units; at 200, ≈ 2.4).
+  That percentage-of-distance rule *is* the perceived speed change. It is also
+  asymptotic: it never reaches the target.
+- Orthographic (TrackballControls.js:381): `camera.zoom /= factor` — also
+  multiplicative, on the projection instead of the position.
+
+Our only pre-existing `wheel` handler (GraphCanvas3D.vue:1946) just intercepted
+Alt+scroll for the clipping plane; plain scroll fell through to the controls.
+
+**Design Decisions:**
+1. **Name/polarity: `constantZoomSpeed`, default `false`.** Constant zoom ships as an
+   **opt-in**; the trackball's distance-scaled zoom stays the default. Because the
+   default *is* the pre-existing behavior, nothing changes for anyone who doesn't tick
+   the box, and explorations saved before this setting existed are entirely unaffected
+   (the key is absent, so the merge-over-defaults restore falls through to `false`).
+   No migration exists or is needed.
+   *(This flip-flopped during review: shipped `false`, flipped to `true` — "the good
+   default beats the zero-churn default" — then reverted to `false` on the user's call.
+   Final state: `false`.)*
+2. **Store bucket: `behaviors`, not `force3DSettings`.** `behaviors` is already
+   serialized by `getExplorationState()` and merged over defaults on load;
+   `force3DSettings` is **not serialized at all** (pre-existing gap — Pointer
+   Tools/Clipping Plane settings are silently lost on save). Backend
+   `ExplorationState.behaviors` is `Optional[dict]` (schemas.py:339), a free-form
+   JSON blob → **zero backend/schema/migration changes**. Old explorations
+   missing the key fall back to the default via merge-over-defaults.
+3. **Mechanism: `controls.noZoom = true` + own the wheel.** Rather than forking
+   TrackballControls or fighting `zoomSpeed` (which only rescales the factor and
+   stays multiplicative), we disable the controls' zoom and extend the wheel
+   handler we already own. Alt+scroll (clipping) keeps priority and still blocks
+   zoom.
+4. **Step = fraction of graph extent (`0.04 × getGraphBbox()` span), no slider.**
+   Scales across small/large graphs with zero user configuration.
+5. **Ortho steps in reciprocal space.** `w = 1/zoom` is linear in visible world
+   width, so equal steps in `w` feel like equal steps on screen. Stepping `zoom`
+   directly would have reintroduced the very acceleration being removed.
+6. **Clamped both ends** so a fixed step can't overshoot *through* the target
+   (perspective) or invert the projection (ortho) — the multiplicative default
+   got that for free; a constant step does not.
+
+**Files Modified:**
+- [frontend/src/stores/graph.ts](frontend/src/stores/graph.ts) — `constantZoomSpeed: false` in `behaviors`
+- [frontend/src/composables/useGraphCamera.ts](frontend/src/composables/useGraphCamera.ts) — `syncZoomMode()`, `applyConstantZoomStep()`, step/clamp constants
+- [frontend/src/components/GraphCanvas3D.vue](frontend/src/components/GraphCanvas3D.vue) — wheel handler branches; `syncZoomMode()` on controls init + runtime watcher (no re-init needed)
+- [frontend/src/components/BehaviorPanel.vue](frontend/src/components/BehaviorPanel.vue) — checkbox under Advanced ▸ 3D Rendering + `resetBehaviors()` entry
+
+**Files Created:**
+- [frontend/src/composables/__tests__/useGraphCamera.zoom.test.ts](frontend/src/composables/__tests__/useGraphCamera.zoom.test.ts)
+
+**Testing:**
+- [x] 14 new zoom tests. The load-bearing one asserts the *same* wheel tick moves
+      the camera the *same* 40 units at distance 200 and at distance 5000 —
+      i.e. the distance-scaling is genuinely gone. Plus ortho equal-steps-in-
+      visible-width, both clamps, direction preservation, wheel deltaMode
+      normalization (px/line/page), zero-delta no-op.
+- [x] 9 new panel/persistence tests: default off, checkbox unchecked by default,
+      ticking opts in, checkbox reflects store, Reset restores the default.
+      Persistence round-trip deliberately saves the **non-default** (`true`) so a
+      passing restore can't be a default leaking through; a further test pins that a
+      legacy exploration (key absent) **keeps** the pre-existing zoom behavior.
+- [x] Full frontend suite green at every step (846 → 857 as later features landed).
+- [x] `vue-tsc --noEmit` clean.
+- [ ] `npm run lint` — **pre-existing failure**, unrelated: the repo has no
+      ESLint config file at all (verified by stashing my changes and re-running
+      on a clean tree; fails identically). Not introduced here.
+
+**Known Limitations:**
+- Not manually exercised in a browser (no dev server driven in this session);
+  verification is via unit tests over the zoom math + store round-trip.
+- Touch pinch-zoom still goes through TrackballControls' `TOUCH_ZOOM_PAN` branch,
+  which is multiplicative and *not* covered by `noZoom`. Constant zoom currently
+  applies to the scroll wheel only.
+- `force3DSettings` remains unserialized into explorations (pre-existing; called
+  out here because it's why this setting deliberately went into `behaviors`).
+
+**Status:** Implemented.
+
 ## [2026-07-09 08:25] - Perf fix: "Rendering graph…" froze the UI for ~90s on large graphs — settle moved to a Web Worker
 
 **Issue:** Even after the overlay/chunked-build fixes, large graphs still took

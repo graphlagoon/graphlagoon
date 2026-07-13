@@ -105,6 +105,32 @@ describe('per-context default behaviors', () => {
 
       expect(store.behaviors.viewMode).toBe('2d-proj')
       expect(store.behaviors.mapStylePan).toBe(true)
+      // Opening a context fetches nothing by default.
+      expect(store.behaviors.autoLoadOnOpen).toBe(false)
+    })
+
+    it('a context can opt into loading the graph on open', async () => {
+      stubContext(makeContext({ autoLoadOnOpen: true }))
+      const store = useGraphStore()
+
+      await store.loadContext('ctx-1')
+
+      expect(store.behaviors.autoLoadOnOpen).toBe(true)
+    })
+
+    it('switching to a context without the opt-in drops the previous one', async () => {
+      const store = useGraphStore()
+
+      stubContext(makeContext({ autoLoadOnOpen: true }))
+      await store.loadContext('ctx-1')
+      expect(store.behaviors.autoLoadOnOpen).toBe(true)
+
+      // The next context is silent about it, so it must fall back to the default —
+      // not inherit the previous context's opt-in.
+      stubContext(makeContext())
+      await store.loadContext('ctx-2')
+
+      expect(store.behaviors.autoLoadOnOpen).toBe(false)
     })
 
     it('switching contexts does not leak the previous context behaviors', async () => {

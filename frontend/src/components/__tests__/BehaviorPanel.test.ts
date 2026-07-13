@@ -148,4 +148,41 @@ describe('BehaviorPanel', () => {
       expect(store.behaviors.mapStylePan).toBe(true)
     })
   })
+
+  describe('load graph on open', () => {
+    it('defaults to off — opening a context fetches nothing', () => {
+      const store = useGraphStore()
+      expect(store.behaviors.autoLoadOnOpen).toBe(false)
+    })
+
+    it('ticking the checkbox opts into loading on open', async () => {
+      const store = useGraphStore()
+      const { getByText, getByTestId } = renderPanel()
+
+      await fireEvent.click(getByText('Advanced'))
+      await fireEvent.click(getByTestId('auto-load-on-open-checkbox'))
+
+      expect(store.behaviors.autoLoadOnOpen).toBe(true)
+    })
+
+    it('checkbox reflects the current store value', async () => {
+      const store = useGraphStore()
+      store.updateBehaviors({ autoLoadOnOpen: true })
+
+      const { getByText, getByTestId } = renderPanel()
+      await fireEvent.click(getByText('Advanced'))
+
+      expect((getByTestId('auto-load-on-open-checkbox') as HTMLInputElement).checked).toBe(true)
+    })
+
+    it('reset restores the default (off)', async () => {
+      const store = useGraphStore()
+      store.updateBehaviors({ autoLoadOnOpen: true })
+
+      const { getByText } = renderPanel()
+      await fireEvent.click(getByText('Reset'))
+
+      expect(store.behaviors.autoLoadOnOpen).toBe(false)
+    })
+  })
 })

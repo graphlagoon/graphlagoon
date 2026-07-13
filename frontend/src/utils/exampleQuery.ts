@@ -1,5 +1,8 @@
 import type { GraphContext, Node } from '@/types/graph';
 
+/** Edge cap for the seedless example query — matches loadSubgraph's default edge_limit. */
+const SEEDLESS_EDGE_LIMIT = 1000;
+
 /**
  * Generate a sample BFS OpenCypher query for the query panel.
  *
@@ -16,9 +19,16 @@ import type { GraphContext, Node } from '@/types/graph';
  *   label would silently filter out the substituted node if it is a different
  *   type).
  *
+ * Two shapes, because a BFS needs a seed node:
+ * - With nodes on screen, we seed the BFS from a real id taken from one of them.
+ * - With an empty graph — the default now that opening a context fetches nothing — there is
+ *   no id to seed from, and no node on screen for the user to copy one from. Emitting a
+ *   `{node_id_value}` placeholder would leave them with a query that cannot run, so we fall
+ *   back to a seedless edge scan that executes as-is.
+ *
  * @param context The current graph context (schema source). May be null.
- * @param displayedNodes Nodes currently on screen; when non-empty a real id is
- *   used, otherwise a `{node_id_col}_value` placeholder is emitted for the user.
+ * @param displayedNodes Nodes currently on screen; when non-empty a real id seeds the BFS,
+ *   otherwise a runnable seedless edge query is emitted.
  */
 export function generateBfsExampleQuery(
   context: GraphContext | null | undefined,
@@ -36,9 +46,9 @@ UNWIND relationships(p) AS r
 RETURN r`;
   }
 
-  // Fallback: placeholder for the user to fill in. No hardcoded node-type label.
-  return `MATCH (root { ${nodeIdCol}: "{${nodeIdCol}_value}" })
-MATCH p = (root)-[*1..2]-()
-UNWIND relationships(p) AS r
-RETURN r`;
+  // Empty graph: no seed available, so scan edges directly. Still projects `r`, per the
+  // contract above. Runnable as-is — the user can hit Run without editing anything.
+  return `MATCH ()-[r]-()
+RETURN r
+LIMIT ${SEEDLESS_EDGE_LIMIT}`;
 }

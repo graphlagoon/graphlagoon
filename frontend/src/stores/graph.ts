@@ -63,6 +63,7 @@ const DEFAULT_BEHAVIORS = {
   hideSelfEdgesOnCameraMove: true, // When true, hide self-edges during camera movement for performance
   enableNodeDrag: false,           // When true, allow dragging nodes by click-drag (pins node after release)
   mapStylePan: true,               // When true (default), right-drag pans Google-Maps-style: the point grabbed stays locked under the cursor. When false, TrackballControls' pan (panSpeed 0.3, so the world lags the mouse; its ortho branch also mis-scales the vertical axis by the aspect ratio).
+  autoLoadOnOpen: false,           // When true, opening a context immediately fetches an initial subgraph (all nodes, edge_limit 1000). Default false: open empty and let the user run a query — the implicit fetch is expensive on large graphs. Opening a saved exploration is unaffected; it always loads its own data.
 };
 
 export type GraphBehaviors = typeof DEFAULT_BEHAVIORS;

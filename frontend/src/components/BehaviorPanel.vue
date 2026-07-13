@@ -74,6 +74,10 @@ function toggleMapStylePan() {
   graphStore.updateBehaviors({ mapStylePan: !behaviors.value.mapStylePan });
 }
 
+function toggleAutoLoadOnOpen() {
+  graphStore.updateBehaviors({ autoLoadOnOpen: !behaviors.value.autoLoadOnOpen });
+}
+
 function togglePointerRepulsion() {
   graphStore.updateForce3DSettings({ pointerRepulsionEnabled: !force3D.value.pointerRepulsionEnabled });
 }
@@ -309,6 +313,20 @@ function resetBehaviors() {
           <p class="behavior-desc">
             Right-drag grabs the graph and it stays locked under the cursor, like Google Maps.
             Uncheck to use the default pan, which moves the graph slower than the mouse.
+          </p>
+          <label class="checkbox-item">
+            <input
+              type="checkbox"
+              data-testid="auto-load-on-open-checkbox"
+              :checked="behaviors.autoLoadOnOpen"
+              @change="toggleAutoLoadOnOpen"
+            />
+            Load graph on open
+          </label>
+          <p class="behavior-desc">
+            Fetch an initial subgraph as soon as the context opens. Off by default — that fetch
+            is expensive on large graphs, so the context opens empty and you run the query you
+            want. Opening a saved exploration always loads its own data regardless.
           </p>
           <label class="checkbox-item">
             <input type="checkbox" :checked="behaviors.hideLabelsOnCameraMove" @change="toggleHideLabelsOnCameraMove" />

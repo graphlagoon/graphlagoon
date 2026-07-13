@@ -67,8 +67,20 @@ export const MOCK_CONTEXT = {
   node_properties: [],
   node_types: ['Person', 'Company'],
   relationship_types: ['KNOWS', 'WORKS_AT'],
+  // Opting in keeps the existing specs meaningful: opening a context fetches nothing by
+  // default now, and most of these tests are about what you can do *with* a loaded graph.
+  // MOCK_CONTEXT_NO_AUTOLOAD below covers the default (empty) path.
+  default_behaviors: { autoLoadOnOpen: true },
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
+};
+
+/** A context with no opt-in — opening it fetches nothing (the default). */
+export const MOCK_CONTEXT_NO_AUTOLOAD = {
+  ...MOCK_CONTEXT,
+  id: 'ctx-test-empty',
+  title: 'Empty On Open',
+  default_behaviors: {},
 };
 
 export const MOCK_EXPLORATION = {

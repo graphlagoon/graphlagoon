@@ -49,6 +49,9 @@ const MOCK_CONTEXTS = [
     name: 'Perf Test Context',
     edge_table: 'edges',
     node_tables: ['nodes'],
+    // Required: opening a context fetches nothing by default, and this harness measures the
+    // render of the graph loaded on open. Without the opt-in it would benchmark an empty graph.
+    default_behaviors: { autoLoadOnOpen: true },
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },

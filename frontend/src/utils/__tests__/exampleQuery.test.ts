@@ -28,27 +28,53 @@ describe('generateBfsExampleQuery', () => {
     expect(q).toContain('MATCH (root { source_id: "X42" })');
   });
 
-  it('does NOT emit a hardcoded node-type label in the fallback', () => {
-    // node_types present, but no displayed nodes → fallback path.
-    const ctx = createGraphContext({ node_types: ['Person', 'Company'] });
-    const q = generateBfsExampleQuery(ctx, []);
-    // No `:Person` / `:Company` label forced onto root.
-    expect(q).toContain('MATCH (root { node_id: "{node_id_value}" })');
-    expect(q).not.toContain(':Person');
-    expect(q).not.toContain(':Company');
-  });
+  // With no nodes on screen (the default now that opening a context fetches nothing) a BFS
+  // has no seed to start from, and there is no node on screen to copy an id from. The query
+  // must therefore be runnable as-is — a `{node_id_value}` placeholder would be a dead end.
+  describe('empty graph (no seed available)', () => {
+    it('emits a query the user can run without editing it', () => {
+      const q = generateBfsExampleQuery(createGraphContext(), []);
 
-  it('uses a schema-driven placeholder in the fallback (custom col)', () => {
-    const ctx = createGraphContext({
-      node_structure: { node_id_col: 'source_id', node_type_col: 'node_type' },
+      // No placeholder to fill in.
+      expect(q).not.toContain('_value}');
+      expect(q).not.toContain('{');
+      // Seedless edge scan.
+      expect(q).toContain('MATCH ()-[r]-()');
+      expect(q).toContain('LIMIT 1000');
     });
-    const q = generateBfsExampleQuery(ctx, []);
-    expect(q).toContain('MATCH (root { source_id: "{source_id_value}" })');
-  });
 
-  it('falls back to node_id when context is null', () => {
-    const q = generateBfsExampleQuery(null, []);
-    expect(q).toContain('MATCH (root { node_id: "{node_id_value}" })');
-    expect(/\bRETURN\s+r\b/.test(q)).toBe(true);
+    it('still projects RETURN r (required by the visualization backend)', () => {
+      const q = generateBfsExampleQuery(createGraphContext(), []);
+
+      expect(/\bRETURN\s+r\b/.test(q)).toBe(true);
+      expect(q.includes('RETURN p')).toBe(false);
+    });
+
+    it('does NOT emit a hardcoded node-type label', () => {
+      const ctx = createGraphContext({ node_types: ['Person', 'Company'] });
+
+      const q = generateBfsExampleQuery(ctx, []);
+
+      expect(q).not.toContain(':Person');
+      expect(q).not.toContain(':Company');
+    });
+
+    it('is runnable even with no context at all', () => {
+      const q = generateBfsExampleQuery(null, []);
+
+      expect(q).toContain('MATCH ()-[r]-()');
+      expect(q).not.toContain('{');
+      expect(/\bRETURN\s+r\b/.test(q)).toBe(true);
+    });
+
+    it('does not depend on the schema node_id_col (it references no id column)', () => {
+      const ctx = createGraphContext({
+        node_structure: { node_id_col: 'source_id', node_type_col: 'node_type' },
+      });
+
+      const q = generateBfsExampleQuery(ctx, []);
+
+      expect(q).not.toContain('source_id');
+    });
   });
 });

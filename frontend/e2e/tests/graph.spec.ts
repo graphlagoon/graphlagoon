@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/test-fixtures';
-import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
+import { MOCK_CONTEXT, MOCK_CONTEXT_NO_AUTOLOAD, MOCK_EXPLORATION } from '../fixtures/mock-data';
 import { seedContexts, seedExplorations, mockCancellableGraphJob } from '../helpers/api-mocks';
 
 test.describe('Graph Visualization', () => {
@@ -57,6 +57,28 @@ test.describe('Graph Visualization', () => {
       await expect(statusBar).toBeVisible({ timeout: 15_000 });
       await expect(statusBar).toContainText('5 nodes');
       await expect(statusBar).toContainText('6 edges');
+    });
+
+    test('a context without autoLoadOnOpen opens empty and fetches nothing', async ({ authenticatedPage: page }) => {
+      await seedContexts(page, [MOCK_CONTEXT_NO_AUTOLOAD]);
+
+      // Watch for the implicit fetch we are supposed to have suppressed.
+      let subgraphRequested = false;
+      page.on('request', (req) => {
+        if (req.url().includes('/subgraph')) subgraphRequested = true;
+      });
+
+      await page.goto(`/graph/${MOCK_CONTEXT_NO_AUTOLOAD.id}`);
+
+      const statusBar = page.getByTestId('graph-status-bar');
+      await expect(statusBar).toBeVisible({ timeout: 15_000 });
+      await expect(statusBar).toContainText('0 nodes');
+      await expect(statusBar).toContainText('0 edges');
+
+      // The empty state guides the user to run a query.
+      await expect(page.getByText('No nodes to display')).toBeVisible();
+
+      expect(subgraphRequested).toBe(false);
     });
 
     test('shows context title in toolbar', async ({ authenticatedPage: page }) => {
