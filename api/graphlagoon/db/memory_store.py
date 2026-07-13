@@ -90,6 +90,7 @@ class MemoryQueryTemplate:
     description: Optional[str] = None
     parameters: List[Dict[str, Any]] = field(default_factory=list)
     options: Dict[str, Any] = field(default_factory=dict)
+    visibility: str = "shared"  # "shared" | "private"
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -394,6 +395,7 @@ class InMemoryStore:
         description: Optional[str] = None,
         parameters: Optional[List[Dict[str, Any]]] = None,
         options: Optional[Dict[str, Any]] = None,
+        visibility: str = "shared",
     ) -> MemoryQueryTemplate:
         """Create a new query template."""
         template_id = uuid4()
@@ -407,6 +409,7 @@ class InMemoryStore:
             description=description,
             parameters=parameters or [],
             options=options or {},
+            visibility=visibility,
         )
         self.query_templates[template_id] = template
         return template

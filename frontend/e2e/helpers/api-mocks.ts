@@ -153,7 +153,11 @@ export async function setupAPIMocks(page: Page) {
       route.fulfill({
         status: 201,
         contentType: 'application/json',
-        body: JSON.stringify({ id: 'tpl-new', ...JSON.parse(route.request().postData() || '{}') }),
+        body: JSON.stringify({
+          id: 'tpl-new',
+          visibility: 'shared',
+          ...JSON.parse(route.request().postData() || '{}'),
+        }),
       });
     } else {
       route.continue();
@@ -467,9 +471,11 @@ export async function mockCancellableGraphJob(page: Page, jobId = 'graph-job-e2e
  * Seed query templates for a context (GET list). Call AFTER setupAPIMocks.
  */
 export async function seedQueryTemplates(page: Page, contextId: string, templates: any[]) {
+  // Templates default to "shared" visibility, matching the backend's server default.
+  const seeded = templates.map((t) => ({ visibility: 'shared', ...t }));
   await page.route(`**/graphlagoon/api/graph-contexts/${contextId}/query-templates`, (route) => {
     if (route.request().method() === 'GET') {
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(templates) });
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(seeded) });
     } else {
       route.continue();
     }

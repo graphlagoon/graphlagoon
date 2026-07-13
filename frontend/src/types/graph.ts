@@ -222,6 +222,10 @@ export interface TemplateOptions {
   large_results_mode: boolean;
 }
 
+// 'shared': visible to everyone with context access, mutable by context writers.
+// 'private': visible and mutable only by its creator.
+export type TemplateVisibility = 'shared' | 'private';
+
 export interface QueryTemplate {
   id: string;
   graph_context_id: string;
@@ -232,6 +236,7 @@ export interface QueryTemplate {
   query: string;
   parameters: TemplateParameter[];
   options: TemplateOptions;
+  visibility: TemplateVisibility;
   created_at: string;
   updated_at: string;
 }
@@ -243,6 +248,7 @@ export interface CreateQueryTemplateRequest {
   query: string;
   parameters: TemplateParameter[];
   options?: TemplateOptions;
+  visibility?: TemplateVisibility;
 }
 
 export interface UpdateQueryTemplateRequest {
@@ -252,6 +258,7 @@ export interface UpdateQueryTemplateRequest {
   query?: string;
   parameters?: TemplateParameter[];
   options?: TemplateOptions;
+  visibility?: TemplateVisibility;
 }
 
 export interface SubgraphRequest {

@@ -406,6 +406,7 @@ class QueryTemplateCreate(BaseModel):
     query: str
     parameters: list[TemplateParameter] = Field(default_factory=list)
     options: TemplateOptions = Field(default_factory=TemplateOptions)
+    visibility: Literal["shared", "private"] = "shared"
 
 
 class QueryTemplateUpdate(BaseModel):
@@ -415,6 +416,7 @@ class QueryTemplateUpdate(BaseModel):
     query: Optional[str] = None
     parameters: Optional[list[TemplateParameter]] = None
     options: Optional[TemplateOptions] = None
+    visibility: Optional[Literal["shared", "private"]] = None
 
 
 class QueryTemplateResponse(BaseModel):
@@ -427,6 +429,7 @@ class QueryTemplateResponse(BaseModel):
     query: str
     parameters: list[TemplateParameter] = Field(default_factory=list)
     options: TemplateOptions = Field(default_factory=TemplateOptions)
+    visibility: Literal["shared", "private"] = "shared"
     created_at: datetime
     updated_at: datetime
 

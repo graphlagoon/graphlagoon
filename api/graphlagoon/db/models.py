@@ -138,6 +138,8 @@ class QueryTemplate(Base):
     query = Column(Text, nullable=False)
     parameters = Column(JSON, default=[])
     options = Column(JSON, default={})
+    # "shared" (visible to everyone with context access) | "private" (creator only)
+    visibility = Column(String(10), nullable=False, server_default="shared")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

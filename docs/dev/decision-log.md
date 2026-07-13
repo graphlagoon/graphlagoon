@@ -2443,3 +2443,55 @@ baixo (QueryConsolePanel).
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-07-13 20:05] - Feature Implemented: Query template visibility (shared vs private) + permission fixes
+
+**Feature:** Query templates gain a `visibility` field — `shared` (context-wide, previous behavior) or `private` (visible and mutable only by its creator, usable in all explorations of the context).
+
+**Problem:** Two permission gaps in the original context-scoped model:
+1. Users with only an exploration-level share could view/run templates but never create one ("Save as template" 403'd — create required context write).
+2. Edit/delete was template-creator-only, so nobody (not even the context owner) could clean up templates whose creator left.
+
+**Design Decisions:**
+1. **Personal templates instead of "Exploration templates":** The originally proposed exploration-scoped templates were rejected in design review. Templates are parameterized queries against the context's *schema* — they work identically in every exploration, and exploration shares transitively grant context access, so exploration scoping would deliver neither privacy nor good UX. A `visibility` column on the existing table is the smallest change that solves the actual problem.
+2. **Shared-template mutate rights = anyone with context write** (user's explicit choice over "creator + context owner"): the context owner is usually also the creator, so creator+owner often collapses to one person; write-sharers being able to clean up stale templates is the point. Supersedes the 2026-03-13 "Template Queries" entry's creator-only-mutate decision.
+3. **Visibility changes are creator-only**, and promoting private→shared additionally requires context write (it is equivalent to creating a shared template — otherwise a read-sharer could bypass the create gate).
+4. **Others' private templates return 404, not 403**, on mutate attempts — their existence must not leak.
+5. **No new tables/endpoints/roles:** reuses `check_context_access_db/memory` and `user_has_write_access`.
+
+**Permission matrix (target state):**
+| Action | shared | private |
+|---|---|---|
+| List/execute | anyone with context access | creator only (filtered from list) |
+| Create | context owner or write-share | anyone with context access (NEW) |
+| Edit/delete | anyone with context write (CHANGED) | creator only |
+| Change visibility | creator only (+ context write to promote to shared) | same |
+
+**Backend Changes:**
+- [api/graphlagoon/db/models.py](../../api/graphlagoon/db/models.py) — `QueryTemplate.visibility` column, `server_default="shared"`.
+- [api/graphlagoon/alembic/versions/008_add_template_visibility.py](../../api/graphlagoon/alembic/versions/008_add_template_visibility.py) — idempotent add-column migration (chains onto 007).
+- [api/graphlagoon/models/schemas.py](../../api/graphlagoon/models/schemas.py) — `visibility: Literal["shared","private"]` on Create/Update/Response.
+- [api/graphlagoon/routers/query_templates.py](../../api/graphlagoon/routers/query_templates.py) — new helpers `user_has_context_write`, `check_can_mutate_template`, `check_visibility_change`; list filters others' private templates; create gates only shared on write; update/delete use the new matrix. DB and memory branches kept in parity.
+- [api/graphlagoon/db/memory_store.py](../../api/graphlagoon/db/memory_store.py) — `MemoryQueryTemplate.visibility` + `create_query_template(visibility=...)`.
+
+**Frontend Changes:**
+- [frontend/src/types/graph.ts](../../frontend/src/types/graph.ts) — `TemplateVisibility` type; `visibility` on `QueryTemplate` and create/update requests.
+- [frontend/src/components/TemplateEditorModal.vue](../../frontend/src/components/TemplateEditorModal.vue) — "Save to" radio (Shared with this context / Only me); Shared disabled without context write; radio locked to non-creators in edit mode; defaults: shared when user has write, private otherwise. `data-testid="template-visibility-shared|private"`.
+- [frontend/src/components/QueryTemplatesPanel.vue](../../frontend/src/components/QueryTemplatesPanel.vue) — list grouped into "My templates" / "Shared templates" (empty groups hidden); PRIVATE badge; "+ New" now visible to everyone with access; Edit/Delete gated by `canMutate` (private → creator, shared → context write). Templates without the field are treated as shared (defensive).
+- [frontend/e2e/helpers/api-mocks.ts](../../frontend/e2e/helpers/api-mocks.ts) — template mocks default `visibility: 'shared'`.
+
+**Migration strategy:** Existing rows get `visibility='shared'` via server default — identical behavior to before. Older clients omitting `visibility` on create get `shared`. The one deliberate behavior change: write-sharers can now edit/delete shared templates they didn't create.
+
+**Testing:**
+- [x] NEW [api/tests/test_query_templates.py](../../api/tests/test_query_templates.py) — 28 tests: full permission matrix via TestClient in memory mode (create/list/update/delete per role: owner, write-share, read-share, exploration-share-only, stranger), visibility-change rules, 404-not-403 privacy, migration chain checks. There was previously **zero** backend coverage for template endpoints.
+- [x] NEW [frontend/src/components/__tests__/QueryTemplatesPanel.test.ts](../../frontend/src/components/__tests__/QueryTemplatesPanel.test.ts) — 8 tests: grouping, PRIVATE badge, button gating, legacy-payload fallback.
+- [x] NEW e2e case in [frontend/e2e/tests/graph.spec.ts](../../frontend/e2e/tests/graph.spec.ts): panel shows both groups.
+- [x] Backend suite: 212 passed. Frontend unit: 854 passed (49 files). E2E: 81 passed. `vue-tsc --noEmit` clean. Ruff clean on all touched files (`make lint-api` failures are pre-existing `logger` F821s in explorations.py; frontend ESLint config missing on main — both pre-date this change).
+
+**Follow-ups recorded (out of scope):**
+1. Context duplicate/copy + ownership transfer — the real fix for "context owner leaves".
+2. Security hardening candidates: ungated `GET /api/graph-contexts/{id}` metadata; unvalidated free-text `ShareRequest.permission`; create-exploration requiring only context read; exploration shares transitively granting full context query access.
+
+**Author:** Claude (AI Assistant)
+
+---

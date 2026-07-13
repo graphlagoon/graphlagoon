@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
+import { useAuthStore } from '@/stores/auth';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
-import type { QueryTemplate, TemplateParameter } from '@/types/graph';
+import type { QueryTemplate, TemplateParameter, TemplateVisibility } from '@/types/graph';
 import { X } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -14,9 +15,18 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
+const authStore = useAuthStore();
 const templatesStore = useQueryTemplatesStore();
 
 const isEditMode = computed(() => props.template !== null);
+
+const canWriteContext = computed(
+  () => graphStore.currentContext?.has_write_access ?? false,
+);
+// Only the creator may change a template's visibility.
+const isCreator = computed(
+  () => !isEditMode.value || props.template?.owner_email === authStore.email,
+);
 
 const DEFAULT_QUERY = `MATCH (root { node_id: "$node_id" })
 MATCH p = (root)-[*1..$depth]-()
@@ -34,6 +44,9 @@ const queryType = ref<'cypher' | 'sql'>(props.template?.query_type ?? props.init
 const query = ref(props.template?.query ?? props.initialQuery ?? DEFAULT_QUERY);
 const parameters = ref<TemplateParameter[]>(
   props.template?.parameters.map((p) => ({ ...p })) ?? DEFAULT_PARAMETERS.map((p) => ({ ...p })),
+);
+const visibility = ref<TemplateVisibility>(
+  props.template?.visibility ?? (canWriteContext.value ? 'shared' : 'private'),
 );
 
 // Execution options (fixed after template creation, not shown when using template)
@@ -127,6 +140,7 @@ async function handleSave() {
         cte_prefilter: ctePrefilterEnabled.value ? ctePrefilterText.value.trim() || undefined : undefined,
         large_results_mode: largeResultsMode.value,
       },
+      visibility: visibility.value,
     };
 
     if (isEditMode.value && props.template) {
@@ -162,6 +176,36 @@ async function handleSave() {
           <div class="field-group">
             <label class="field-label">Description</label>
             <input v-model="description" type="text" class="field-input" placeholder="What this template does" />
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">Save to</label>
+            <div class="radio-group">
+              <label
+                class="radio-label"
+                :class="{ 'radio-disabled': !canWriteContext || !isCreator }"
+                :title="!canWriteContext ? 'You need write access on this context to share templates' : undefined"
+              >
+                <input
+                  v-model="visibility"
+                  type="radio"
+                  value="shared"
+                  data-testid="template-visibility-shared"
+                  :disabled="!canWriteContext || !isCreator"
+                />
+                Shared with this context
+              </label>
+              <label class="radio-label" :class="{ 'radio-disabled': !isCreator }">
+                <input
+                  v-model="visibility"
+                  type="radio"
+                  value="private"
+                  data-testid="template-visibility-private"
+                  :disabled="!isCreator"
+                />
+                Only me
+              </label>
+            </div>
           </div>
 
           <div class="field-group">
@@ -446,6 +490,11 @@ async function handleSave() {
   font-size: 13px;
   cursor: pointer;
   color: var(--text-color, #333);
+}
+
+.radio-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .query-editor {

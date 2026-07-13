@@ -25,6 +25,49 @@ from graphlagoon.utils.sharing import user_has_write_access
 router = APIRouter(tags=["query-templates"])
 
 
+def user_has_context_write(context, user_email: str) -> bool:
+    """Context owner or a share with write permission."""
+    return context.owner_email == user_email or user_has_write_access(
+        user_email, context.shares
+    )
+
+
+def check_can_mutate_template(template, context, user_email: str) -> None:
+    """Raise 403 unless the user may edit/delete the template.
+
+    Private templates: creator only. Shared templates: anyone with context write.
+    """
+    if template.visibility == "private":
+        if template.owner_email != user_email:
+            # 404, not 403: don't reveal that someone else's private template exists
+            raise HTTPException(status_code=404, detail="Template not found")
+    elif not user_has_context_write(context, user_email):
+        raise HTTPException(
+            status_code=403, detail="No write access to modify shared templates"
+        )
+
+
+def check_visibility_change(
+    new_visibility, template, context, user_email: str
+) -> None:
+    """Raise 403 on a disallowed visibility change.
+
+    Only the creator may change visibility, and promoting to "shared" is
+    equivalent to creating a shared template, so it also needs context write.
+    """
+    if new_visibility is None or new_visibility == template.visibility:
+        return
+    if template.owner_email != user_email:
+        raise HTTPException(
+            status_code=403, detail="Only the template owner can change visibility"
+        )
+    if new_visibility == "shared" and not user_has_context_write(context, user_email):
+        raise HTTPException(
+            status_code=403,
+            detail="No write access to share templates with the context",
+        )
+
+
 def template_to_response(
     template: Union["QueryTemplate", MemoryQueryTemplate],
 ) -> QueryTemplateResponse:
@@ -49,6 +92,7 @@ def template_to_response(
             TemplateParameter(**p) if isinstance(p, dict) else p for p in params
         ],
         options=options,
+        visibility=getattr(template, "visibility", None) or "shared",
         created_at=template.created_at,
         updated_at=template.updated_at,
     )
@@ -59,11 +103,11 @@ def template_to_response(
     response_model=list[QueryTemplateResponse],
 )
 async def list_query_templates(context_id: UUID, request: Request):
-    """List all query templates for a context. Any user with context access can view."""
+    """List query templates for a context: shared ones plus the caller's private ones."""
     user_email = get_current_user(request)
 
     if is_database_available():
-        from sqlalchemy import select
+        from sqlalchemy import select, or_
         from graphlagoon.db.models import QueryTemplate
 
         session_maker = get_session_maker()
@@ -73,6 +117,12 @@ async def list_query_templates(context_id: UUID, request: Request):
             result = await session.execute(
                 select(QueryTemplate)
                 .where(QueryTemplate.graph_context_id == context_id)
+                .where(
+                    or_(
+                        QueryTemplate.visibility != "private",
+                        QueryTemplate.owner_email == user_email,
+                    )
+                )
                 .order_by(QueryTemplate.created_at)
             )
             templates = result.scalars().all()
@@ -80,7 +130,11 @@ async def list_query_templates(context_id: UUID, request: Request):
     else:
         check_context_access_memory(context_id, user_email)
         store = get_memory_store()
-        templates = store.list_query_templates(context_id)
+        templates = [
+            t
+            for t in store.list_query_templates(context_id)
+            if t.visibility != "private" or t.owner_email == user_email
+        ]
         return [template_to_response(t) for t in templates]
 
 
@@ -92,7 +146,11 @@ async def list_query_templates(context_id: UUID, request: Request):
 async def create_query_template(
     context_id: UUID, data: QueryTemplateCreate, request: Request
 ):
-    """Create a query template. Context owner or users with write access can create."""
+    """Create a query template.
+
+    Shared templates require context write access; private templates only
+    require context access (so exploration-share users can save their own).
+    """
     user_email = get_current_user(request)
 
     if is_database_available():
@@ -102,13 +160,12 @@ async def create_query_template(
         async with session_maker() as session:
             context = await check_context_access_db(session, context_id, user_email)
 
-            has_write = context.owner_email == user_email or user_has_write_access(
-                user_email, context.shares
-            )
-            if not has_write:
+            if data.visibility == "shared" and not user_has_context_write(
+                context, user_email
+            ):
                 raise HTTPException(
                     status_code=403,
-                    detail="No write access to create templates",
+                    detail="No write access to create shared templates",
                 )
 
             template = QueryTemplate(
@@ -120,6 +177,7 @@ async def create_query_template(
                 query=data.query,
                 parameters=[p.model_dump() for p in data.parameters],
                 options=data.options.model_dump(),
+                visibility=data.visibility,
             )
             session.add(template)
             await session.commit()
@@ -128,12 +186,12 @@ async def create_query_template(
     else:
         context = check_context_access_memory(context_id, user_email)
 
-        has_write = context.owner_email == user_email or user_has_write_access(
-            user_email, context.shares
-        )
-        if not has_write:
+        if data.visibility == "shared" and not user_has_context_write(
+            context, user_email
+        ):
             raise HTTPException(
-                status_code=403, detail="No write access to create templates"
+                status_code=403,
+                detail="No write access to create shared templates",
             )
 
         store = get_memory_store()
@@ -146,6 +204,7 @@ async def create_query_template(
             description=data.description,
             parameters=[p.model_dump() for p in data.parameters],
             options=data.options.model_dump(),
+            visibility=data.visibility,
         )
         return template_to_response(template)
 
@@ -160,7 +219,11 @@ async def update_query_template(
     data: QueryTemplateUpdate,
     request: Request,
 ):
-    """Update a query template. Only the template owner can update."""
+    """Update a query template.
+
+    Private: creator only. Shared: anyone with context write.
+    Changing visibility is restricted to the template creator.
+    """
     user_email = get_current_user(request)
 
     if is_database_available():
@@ -169,7 +232,7 @@ async def update_query_template(
 
         session_maker = get_session_maker()
         async with session_maker() as session:
-            await check_context_access_db(session, context_id, user_email)
+            context = await check_context_access_db(session, context_id, user_email)
 
             result = await session.execute(
                 select(QueryTemplate)
@@ -181,10 +244,8 @@ async def update_query_template(
             if template is None:
                 raise HTTPException(status_code=404, detail="Template not found")
 
-            if template.owner_email != user_email:
-                raise HTTPException(
-                    status_code=403, detail="Only template owner can update"
-                )
+            check_can_mutate_template(template, context, user_email)
+            check_visibility_change(data.visibility, template, context, user_email)
 
             if data.name is not None:
                 template.name = data.name
@@ -198,22 +259,22 @@ async def update_query_template(
                 template.parameters = [p.model_dump() for p in data.parameters]
             if data.options is not None:
                 template.options = data.options.model_dump()
+            if data.visibility is not None:
+                template.visibility = data.visibility
 
             await session.commit()
             await session.refresh(template)
             return template_to_response(template)
     else:
-        check_context_access_memory(context_id, user_email)
+        context = check_context_access_memory(context_id, user_email)
         store = get_memory_store()
         template = store.get_query_template(template_id)
 
         if template is None or template.graph_context_id != context_id:
             raise HTTPException(status_code=404, detail="Template not found")
 
-        if template.owner_email != user_email:
-            raise HTTPException(
-                status_code=403, detail="Only template owner can update"
-            )
+        check_can_mutate_template(template, context, user_email)
+        check_visibility_change(data.visibility, template, context, user_email)
 
         updates = {}
         if data.name is not None:
@@ -228,6 +289,8 @@ async def update_query_template(
             updates["parameters"] = [p.model_dump() for p in data.parameters]
         if data.options is not None:
             updates["options"] = data.options.model_dump()
+        if data.visibility is not None:
+            updates["visibility"] = data.visibility
 
         template = store.update_query_template(template_id, **updates)
         return template_to_response(template)
@@ -235,7 +298,7 @@ async def update_query_template(
 
 @router.delete("/api/graph-contexts/{context_id}/query-templates/{template_id}")
 async def delete_query_template(context_id: UUID, template_id: UUID, request: Request):
-    """Delete a query template. Only the template owner can delete."""
+    """Delete a query template. Private: creator only. Shared: anyone with context write."""
     user_email = get_current_user(request)
 
     if is_database_available():
@@ -244,7 +307,7 @@ async def delete_query_template(context_id: UUID, template_id: UUID, request: Re
 
         session_maker = get_session_maker()
         async with session_maker() as session:
-            await check_context_access_db(session, context_id, user_email)
+            context = await check_context_access_db(session, context_id, user_email)
 
             result = await session.execute(
                 select(QueryTemplate)
@@ -256,25 +319,19 @@ async def delete_query_template(context_id: UUID, template_id: UUID, request: Re
             if template is None:
                 raise HTTPException(status_code=404, detail="Template not found")
 
-            if template.owner_email != user_email:
-                raise HTTPException(
-                    status_code=403, detail="Only template owner can delete"
-                )
+            check_can_mutate_template(template, context, user_email)
 
             await session.delete(template)
             await session.commit()
     else:
-        check_context_access_memory(context_id, user_email)
+        context = check_context_access_memory(context_id, user_email)
         store = get_memory_store()
         template = store.get_query_template(template_id)
 
         if template is None or template.graph_context_id != context_id:
             raise HTTPException(status_code=404, detail="Template not found")
 
-        if template.owner_email != user_email:
-            raise HTTPException(
-                status_code=403, detail="Only template owner can delete"
-            )
+        check_can_mutate_template(template, context, user_email)
 
         store.delete_query_template(template_id)
 

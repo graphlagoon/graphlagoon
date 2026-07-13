@@ -22,6 +22,28 @@ function isTemplateOwner(template: QueryTemplate): boolean {
   return template.owner_email === authStore.email;
 }
 
+// Private templates: only the creator can edit/delete.
+// Shared templates: anyone with context write access can.
+function canMutate(template: QueryTemplate): boolean {
+  return template.visibility === 'private'
+    ? isTemplateOwner(template)
+    : canWrite.value;
+}
+
+const myTemplates = computed(() =>
+  templatesStore.templates.filter((t) => t.visibility === 'private'),
+);
+const sharedTemplates = computed(() =>
+  templatesStore.templates.filter((t) => t.visibility !== 'private'),
+);
+
+const templateGroups = computed(() =>
+  [
+    { label: 'My templates', items: myTemplates.value },
+    { label: 'Shared templates', items: sharedTemplates.value },
+  ].filter((g) => g.items.length > 0),
+);
+
 const showEditor = ref(false);
 const editingTemplate = ref<QueryTemplate | null>(null);
 const executingTemplate = ref<QueryTemplate | null>(null);
@@ -72,7 +94,6 @@ function cancelDelete() {
       <h3>Query Templates</h3>
       <div class="header-actions">
         <button
-          v-if="canWrite"
           class="btn btn-primary btn-sm"
           @click="openCreate"
           title="New Template"
@@ -89,64 +110,67 @@ function cancelDelete() {
 
     <div v-else-if="templatesStore.templates.length === 0" class="empty-state">
       <p>No templates yet.</p>
-      <p v-if="canWrite" class="empty-hint">Create one with the <strong>+ New</strong> button above.</p>
-      <p v-else class="empty-hint">Users with write access can create query templates.</p>
+      <p class="empty-hint">Create one with the <strong>+ New</strong> button above.</p>
     </div>
 
     <div v-else class="template-list">
-      <div
-        v-for="template in templatesStore.templates"
-        :key="template.id"
-        class="template-card"
-      >
-        <div class="template-info">
-          <div class="template-name">{{ template.name }}</div>
-          <div v-if="template.description" class="template-desc">{{ template.description }}</div>
-          <div class="template-meta">
-            <span class="badge" :class="template.query_type">{{ template.query_type.toUpperCase() }}</span>
-            <span v-if="template.parameters.length > 0" class="param-count">
-              {{ template.parameters.length }} param{{ template.parameters.length !== 1 ? 's' : '' }}
-            </span>
+      <section v-for="group in templateGroups" :key="group.label" class="template-group">
+        <h4 class="group-title">{{ group.label }}</h4>
+        <div
+          v-for="template in group.items"
+          :key="template.id"
+          class="template-card"
+        >
+          <div class="template-info">
+            <div class="template-name">{{ template.name }}</div>
+            <div v-if="template.description" class="template-desc">{{ template.description }}</div>
+            <div class="template-meta">
+              <span class="badge" :class="template.query_type">{{ template.query_type.toUpperCase() }}</span>
+              <span v-if="template.visibility === 'private'" class="badge private">PRIVATE</span>
+              <span v-if="template.parameters.length > 0" class="param-count">
+                {{ template.parameters.length }} param{{ template.parameters.length !== 1 ? 's' : '' }}
+              </span>
+            </div>
           </div>
-        </div>
 
-        <div class="template-actions">
-          <button
-            class="btn btn-primary btn-sm"
-            @click="openExecute(template)"
-            title="Use this template"
-          >
-            Use
-          </button>
-
-          <template v-if="isTemplateOwner(template)">
+          <div class="template-actions">
             <button
-              class="btn btn-outline btn-sm"
-              @click="openEdit(template)"
-              title="Edit template"
+              class="btn btn-primary btn-sm"
+              @click="openExecute(template)"
+              title="Use this template"
             >
-              Edit
+              Use
             </button>
 
-            <template v-if="deleteConfirmId === template.id">
-              <button class="btn btn-danger btn-sm" @click="handleDelete(template)">
-                Confirm
+            <template v-if="canMutate(template)">
+              <button
+                class="btn btn-outline btn-sm"
+                @click="openEdit(template)"
+                title="Edit template"
+              >
+                Edit
               </button>
-              <button class="btn btn-outline btn-sm" @click="cancelDelete">
-                Cancel
+
+              <template v-if="deleteConfirmId === template.id">
+                <button class="btn btn-danger btn-sm" @click="handleDelete(template)">
+                  Confirm
+                </button>
+                <button class="btn btn-outline btn-sm" @click="cancelDelete">
+                  Cancel
+                </button>
+              </template>
+              <button
+                v-else
+                class="btn-icon-only btn-delete"
+                @click="handleDelete(template)"
+                title="Delete template"
+              >
+                <X :size="14" />
               </button>
             </template>
-            <button
-              v-else
-              class="btn-icon-only btn-delete"
-              @click="handleDelete(template)"
-              title="Delete template"
-            >
-              <X :size="14" />
-            </button>
-          </template>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
 
     <TemplateEditorModal
@@ -218,7 +242,22 @@ function cancelDelete() {
 .template-list {
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+
+.template-group {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+}
+
+.group-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #888);
+  margin: 0;
 }
 
 .template-card {
@@ -271,6 +310,11 @@ function cancelDelete() {
 .badge.sql {
   background: #e3f2fd;
   color: #1565c0;
+}
+
+.badge.private {
+  background: #fff3e0;
+  color: #e65100;
 }
 
 .param-count {

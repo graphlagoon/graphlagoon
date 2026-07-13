@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_CONTEXT_NO_AUTOLOAD, MOCK_EXPLORATION } from '../fixtures/mock-data';
-import { seedContexts, seedExplorations, mockCancellableGraphJob } from '../helpers/api-mocks';
+import { seedContexts, seedExplorations, mockCancellableGraphJob, seedQueryTemplates } from '../helpers/api-mocks';
 
 test.describe('Graph Visualization', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
@@ -192,6 +192,49 @@ test.describe('Graph Visualization', () => {
 
       await page.getByTitle('Query Templates').click();
       await expect(page.locator('h3', { hasText: 'Query Templates' })).toBeVisible();
+
+      await page.getByTitle('Query Templates').click();
+    });
+
+    test('Query Templates panel groups private and shared templates', async ({ authenticatedPage: page }) => {
+      await seedQueryTemplates(page, MOCK_CONTEXT.id, [
+        {
+          id: 'tpl-private',
+          graph_context_id: MOCK_CONTEXT.id,
+          owner_email: 'e2e@test.com',
+          name: 'My private query',
+          description: '',
+          query_type: 'cypher',
+          query: 'MATCH (n) RETURN n',
+          parameters: [],
+          options: { procedural_bfs: false, large_results_mode: false },
+          visibility: 'private',
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'tpl-shared',
+          graph_context_id: MOCK_CONTEXT.id,
+          owner_email: 'someone@example.com',
+          name: 'Team query',
+          description: '',
+          query_type: 'sql',
+          query: 'SELECT 1',
+          parameters: [],
+          options: { procedural_bfs: false, large_results_mode: false },
+          visibility: 'shared',
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ]);
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTitle('Query Templates')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTitle('Query Templates').click();
+      await expect(page.getByRole('heading', { name: 'My templates' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Shared templates' })).toBeVisible();
+      await expect(page.getByText('My private query')).toBeVisible();
+      await expect(page.getByText('Team query')).toBeVisible();
 
       await page.getByTitle('Query Templates').click();
     });
