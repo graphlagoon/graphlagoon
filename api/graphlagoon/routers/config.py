@@ -29,5 +29,6 @@ async def get_config():
         "database_enabled": is_database_available(),
         "databricks_mode": settings.databricks_mode,
         "allowed_share_domains": settings.allowed_share_domain_list,
+        "default_behaviors": settings.default_behaviors_dict,
         "version": app_version,
     }

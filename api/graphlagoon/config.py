@@ -1,7 +1,11 @@
+import json
+import logging
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from functools import lru_cache
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -55,6 +59,17 @@ class Settings(BaseSettings):
         description="Comma-separated list of domains allowed for wildcard sharing "
         "(e.g. 'stone.com.br,company.com'). "
         "When set, users can share with *@domain for listed domains.",
+    )
+
+    # Frontend defaults
+    default_behaviors: Optional[str] = Field(
+        default=None,
+        description="JSON object of default graph behavior settings for the frontend "
+        '(e.g. \'{"mapStylePan": false, "viewMode": "3d"}\'). '
+        "Seeds the initial value of the Behaviors panel. Keys are passed through "
+        "opaquely and merged over the frontend's own defaults, so any behavior the "
+        "frontend supports can be set here without a backend change. Users can still "
+        "change them in the panel, and a saved exploration overrides them.",
     )
 
     # General settings
@@ -216,6 +231,32 @@ class Settings(BaseSettings):
                 if d.strip()
             ]
         return []
+
+    @property
+    def default_behaviors_dict(self) -> dict:
+        """Parse default_behaviors into a dict for injection into the frontend.
+
+        Returns an empty dict when unset or malformed. A bad value must not take the
+        app down: these are cosmetic UI defaults, and the frontend already falls back
+        to its own defaults for any key it doesn't receive.
+        """
+        if not self.default_behaviors:
+            return {}
+        try:
+            parsed = json.loads(self.default_behaviors)
+        except json.JSONDecodeError:
+            logger.warning(
+                "GRAPH_LAGOON_DEFAULT_BEHAVIORS is not valid JSON; ignoring it."
+            )
+            return {}
+        if not isinstance(parsed, dict):
+            logger.warning(
+                "GRAPH_LAGOON_DEFAULT_BEHAVIORS must be a JSON object, got %s; "
+                "ignoring it.",
+                type(parsed).__name__,
+            )
+            return {}
+        return parsed
 
     @property
     def catalog_schema_pairs(self) -> list[tuple[str, str]]:

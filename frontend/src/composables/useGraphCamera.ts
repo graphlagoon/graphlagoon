@@ -319,6 +319,84 @@ export function useGraphCamera(
   }
 
   /**
+   * Sync TrackballControls' built-in pan (right-drag) with the mapStylePan behavior.
+   *
+   * TrackballControls' `_panCamera()` has two problems:
+   *   1. `panSpeed` defaults to 0.3, so the world moves at a third of the mouse — whatever
+   *      you grab slides out from under the cursor as you drag.
+   *   2. Its orthographic branch computes `scale_y` by dividing by `clientWidth` instead of
+   *      `clientHeight` (OrbitControls gets this right and even comments on it: "we use only
+   *      clientHeight here so aspect ratio does not distort speed"). Ortho is our default, so
+   *      vertical panning is off by a factor of `aspect` — ~1.78x too slow on a 16:9 screen.
+   *
+   * When map-style pan is on we take `noPan` and drive it ourselves in `applyMapStylePan`.
+   */
+  function syncPanMode() {
+    const graph3d = getGraph3d();
+    const controls = graph3d?.controls();
+    if (!controls) return;
+    controls.noPan = graphStore.behaviors.mapStylePan;
+  }
+
+  /**
+   * Pan so the world point grabbed on mousedown stays locked under the cursor — the
+   * "grab the world and drag it" feel of Google Maps.
+   *
+   * Orthographic (our default) is exact, no raycast needed. The patched projection makes the
+   * visible extent `ORTHO_FRUSTUM_SIZE * aspect / zoom` wide and `ORTHO_FRUSTUM_SIZE / zoom`
+   * tall; since `aspect = clientWidth / clientHeight`, world-units-per-pixel collapses to the
+   * same value on both axes:
+   *
+   *     ORTHO_FRUSTUM_SIZE / (zoom * clientHeight)
+   *
+   * Move camera and target by exactly that per pixel of mouse travel and the grabbed point
+   * cannot drift.
+   *
+   * Perspective has no single answer (world-per-pixel varies with depth), so we solve it at
+   * the target's depth — the plane the user is effectively looking at. That is what
+   * OrbitControls does, and it is exact for anything on that plane.
+   *
+   * @param dx mouse movement in CSS pixels since the last event (+x = right)
+   * @param dy mouse movement in CSS pixels since the last event (+y = down)
+   */
+  function applyMapStylePan(dx: number, dy: number) {
+    const graph3d = getGraph3d();
+    if (!graph3d || !containerRef.value) return;
+
+    const camera = graph3d.camera();
+    const controls = graph3d.controls();
+    if (!camera || !controls) return;
+
+    const height = containerRef.value.clientHeight || 1;
+
+    let worldPerPixel: number;
+    if (camera.isOrthographicCamera) {
+      worldPerPixel = ORTHO_FRUSTUM_SIZE / ((camera.zoom || 1) * height);
+    } else {
+      // Perspective: world-per-pixel at the distance of the orbit target.
+      const distance = camera.position.distanceTo(controls.target);
+      const vFov = ((camera.fov || 50) * Math.PI) / 180;
+      worldPerPixel = (2 * Math.tan(vFov / 2) * distance) / height;
+    }
+
+    // Screen right/up in world space, straight off the camera basis — this keeps the pan
+    // correct under any rotation, including the axis-constrained 3D views.
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
+    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+
+    // Drag right => world moves right => camera moves left. Same for up/down (screen y is
+    // inverted relative to world up).
+    const offset = new THREE.Vector3()
+      .addScaledVector(right, -dx * worldPerPixel)
+      .addScaledVector(up, dy * worldPerPixel);
+
+    camera.position.add(offset);
+    controls.target.add(offset);
+    controls.update();
+    callbacks.updateVisuals();
+  }
+
+  /**
    * Reset camera orientation to default and zoom to fit.
    * In 2D: resets up vector to (0,1,0) and re-centers.
    * In 3D: resets up vector to (0,1,0) and zooms to fit.
@@ -371,6 +449,8 @@ export function useGraphCamera(
     centerOnBestMatch,
     focusOnNode,
     getIsCameraMoving,
+    syncPanMode,
+    applyMapStylePan,
     dispose,
   };
 }

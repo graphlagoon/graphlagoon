@@ -8,6 +8,55 @@ beforeEach(() => {
 })
 
 describe('exploration state serialization', () => {
+  describe('behavior persistence', () => {
+    it('serializes the default into the exploration state', () => {
+      const store = useGraphStore()
+
+      const state = store.getExplorationState()
+
+      expect(state.behaviors?.mapStylePan).toBe(true)
+    })
+
+    it('serializes an opt-out into the exploration state', () => {
+      const store = useGraphStore()
+      store.updateBehaviors({ mapStylePan: false })
+
+      const state = store.getExplorationState()
+
+      expect(state.behaviors?.mapStylePan).toBe(false)
+    })
+
+    it('restores a saved behavior when loading an exploration', () => {
+      const store = useGraphStore()
+      // Save the NON-default value, so a successful restore can't be confused
+      // with the default simply leaking through.
+      store.updateBehaviors({ mapStylePan: false })
+      const saved = store.getExplorationState()
+
+      // Simulate a fresh session, then restore the saved behaviors.
+      setActivePinia(createPinia())
+      const restored = useGraphStore()
+      expect(restored.behaviors.mapStylePan).toBe(true)
+
+      restored.updateBehaviors(saved.behaviors as Partial<typeof restored.behaviors>)
+
+      expect(restored.behaviors.mapStylePan).toBe(false)
+    })
+
+    it('explorations saved before a setting existed keep the default for it', () => {
+      const store = useGraphStore()
+
+      // An exploration saved before a setting existed has no such key, so the
+      // merge-over-defaults restore falls through to the default — no migration needed,
+      // and its other saved behaviors are untouched.
+      const legacyBehaviors = { edgeLensMode: 'hide' as const, focusDepth: 2 }
+      store.updateBehaviors(legacyBehaviors)
+
+      expect(store.behaviors.mapStylePan).toBe(true)
+      expect(store.behaviors.edgeLensMode).toBe('hide')
+    })
+  })
+
   describe('getExplorationState', () => {
     it('captures current filters', () => {
       const store = useGraphStore()

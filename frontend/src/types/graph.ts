@@ -75,6 +75,8 @@ export interface GraphContext {
   node_properties: PropertyColumn[];
   node_types: string[];
   relationship_types: string[];
+  /** Behavior settings applied when this context is opened. A saved exploration overrides them. */
+  default_behaviors?: Record<string, unknown>;
   owner_email: string;
   shared_with: string[];
   has_write_access: boolean;
@@ -375,6 +377,7 @@ export interface CreateGraphContextRequest {
   node_properties?: PropertyColumn[];
   node_types?: string[];
   relationship_types?: string[];
+  default_behaviors?: Record<string, unknown>;
 }
 
 export interface ShareRequest {

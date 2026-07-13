@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useGraphStore } from '@/stores/graph';
+import { useGraphStore, resolveInitialBehaviors } from '@/stores/graph';
 import { ChevronDown, ChevronRight, X } from 'lucide-vue-next';
 
 const showAdvanced = ref(false);
@@ -70,6 +70,10 @@ function toggleNodeDrag() {
   graphStore.updateBehaviors({ enableNodeDrag: !behaviors.value.enableNodeDrag });
 }
 
+function toggleMapStylePan() {
+  graphStore.updateBehaviors({ mapStylePan: !behaviors.value.mapStylePan });
+}
+
 function togglePointerRepulsion() {
   graphStore.updateForce3DSettings({ pointerRepulsionEnabled: !force3D.value.pointerRepulsionEnabled });
 }
@@ -83,28 +87,13 @@ function toggleClippingPlane() {
 }
 
 function resetBehaviors() {
-  graphStore.updateBehaviors({
-    edgeLensMode: 'dim',
-    edgeLensDimOpacity: 0.08,
-    focusDepth: 1,
-    degreeDimEnabled: true,
-    degreeDimThreshold: 30,
-    degreeDimOpacity: 0.08,
-    degreeDimPreserveBridges: true,
-    searchMode: 'highlight',
-    centerOnSearch: true,
-    viewMode: '2d-proj',
-    hideLabelsOnCameraMove: true,
-    useOrthographicCamera: false,
-    useInstancedRendering: true,
-    labelDensityCulling: true,
-    labelDensity: 0.5,
-    labelGridCellSize: 150,
-    labelSizeThreshold: 6,
-    showSelfEdges: true,
-    hideSelfEdgesOnCameraMove: true,
-    enableNodeDrag: false,
-  });
+  // Reset to the same defaults the graph started from — built-ins, then the server
+  // config, then this context's own default_behaviors. Reusing the resolver keeps this
+  // from drifting out of sync with the store (it previously hardcoded its own copy,
+  // which had already diverged on hideLabelsOnCameraMove and useOrthographicCamera).
+  graphStore.updateBehaviors(
+    resolveInitialBehaviors(graphStore.currentContext?.default_behaviors)
+  );
   graphStore.updateForce3DSettings({
     pointerRepulsionEnabled: true,
     pointerVacuumEnabled: false,
@@ -307,6 +296,19 @@ function resetBehaviors() {
           </label>
           <p class="behavior-desc">
             Click-drag nodes to reposition them. Dragged nodes stay pinned in place.
+          </p>
+          <label class="checkbox-item">
+            <input
+              type="checkbox"
+              data-testid="map-style-pan-checkbox"
+              :checked="behaviors.mapStylePan"
+              @change="toggleMapStylePan"
+            />
+            Map-style pan
+          </label>
+          <p class="behavior-desc">
+            Right-drag grabs the graph and it stays locked under the cursor, like Google Maps.
+            Uncheck to use the default pan, which moves the graph slower than the mouse.
           </p>
           <label class="checkbox-item">
             <input type="checkbox" :checked="behaviors.hideLabelsOnCameraMove" @change="toggleHideLabelsOnCameraMove" />

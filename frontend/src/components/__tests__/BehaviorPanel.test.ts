@@ -111,4 +111,41 @@ describe('BehaviorPanel', () => {
     const { getByText } = renderPanel()
     expect(getByText('Select or hover a node to see the effect')).toBeDefined()
   })
+
+  describe('map-style pan', () => {
+    it('defaults to on', () => {
+      const store = useGraphStore()
+      expect(store.behaviors.mapStylePan).toBe(true)
+    })
+
+    it('unticking the checkbox falls back to the default pan', async () => {
+      const store = useGraphStore()
+      const { getByText, getByTestId } = renderPanel()
+
+      await fireEvent.click(getByText('Advanced'))
+      await fireEvent.click(getByTestId('map-style-pan-checkbox'))
+
+      expect(store.behaviors.mapStylePan).toBe(false)
+    })
+
+    it('checkbox reflects the current store value', async () => {
+      const store = useGraphStore()
+      store.updateBehaviors({ mapStylePan: false })
+
+      const { getByText, getByTestId } = renderPanel()
+      await fireEvent.click(getByText('Advanced'))
+
+      expect((getByTestId('map-style-pan-checkbox') as HTMLInputElement).checked).toBe(false)
+    })
+
+    it('reset restores map-style pan', async () => {
+      const store = useGraphStore()
+      store.updateBehaviors({ mapStylePan: false })
+
+      const { getByText } = renderPanel()
+      await fireEvent.click(getByText('Reset'))
+
+      expect(store.behaviors.mapStylePan).toBe(true)
+    })
+  })
 })

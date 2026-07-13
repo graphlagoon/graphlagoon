@@ -33,6 +33,98 @@ import {
 import type { QueryMetadata, GraphJobStatusResponse } from '@/types/graph';
 
 /**
+ * Built-in defaults for the Behaviors panel.
+ *
+ * This literal is also the type source for `behaviors` (`typeof DEFAULT_BEHAVIORS`),
+ * so the `as` narrowings below are load-bearing — without them the unions collapse to
+ * `string` and BehaviorPanel's radio bindings stop type-checking.
+ */
+const DEFAULT_BEHAVIORS = {
+  edgeLensMode: 'dim' as 'off' | 'hide' | 'dim',  // off = no focus, hide = hide non-focused, dim = dim non-focused edges
+  edgeLensDimOpacity: 0.08,  // Opacity for dimmed edges in 'dim' mode (0.01-0.3)
+  focusDepth: 1,            // How many hops to include (1 = direct neighbors)
+  degreeDimEnabled: true,  // When true, dim edges connected to high-degree nodes
+  degreeDimThreshold: 30,   // Degree threshold above which edges are dimmed
+  degreeDimOpacity: 0.2,   // Opacity for degree-dimmed edges (0.01-0.3)
+  degreeDimPreserveBridges: true,  // When true, don't dim nodes that connect to non-hub neighborhoods
+  searchMode: 'highlight' as 'hide' | 'highlight',  // hide = filter out non-matching, highlight = show all but highlight matches
+  centerOnSearch: true,     // When true (and highlight mode), center camera on best match while typing
+  inMessiWeTrust: true,    // When true, auto-execute transpiled SQL without review
+  viewMode: '2d-proj' as '3d' | '2d-proj',  // default 2D for performance (lighter force sim + less overdraw); '3d' = Three.js 3D, '2d-proj' = Three.js 2D projection
+  hideLabelsOnCameraMove: false, // When true, hide 3D labels during camera movement for performance
+  useOrthographicCamera: true, // When true, use orthographic projection instead of perspective
+  useInstancedRendering: true, // When true, use InstancedMesh for nodes/links (fast, ~3 draw calls). When false, use individual Mesh per node/link (slower, correct transparency).
+  labelDensityCulling: true, // When true, use screen-space grid to limit label density (Sigma.js-style)
+  labelDensity: 0.5,         // Base labels per grid cell at default zoom (0.1-4)
+  labelGridCellSize: 150,    // Grid cell size in screen pixels (50-500)
+  labelSizeThreshold: 6,     // Min node screen-radius (px) to show its label (like Sigma.js)
+  labelOverlapThreshold: 0.4, // Max overlap ratio (0..1) before hiding a label (0=no overlap, 1=allow full overlap)
+  showSelfEdges: true,       // When true, display self-edges (loops where src === dst)
+  hideSelfEdgesOnCameraMove: true, // When true, hide self-edges during camera movement for performance
+  enableNodeDrag: false,           // When true, allow dragging nodes by click-drag (pins node after release)
+  mapStylePan: true,               // When true (default), right-drag pans Google-Maps-style: the point grabbed stays locked under the cursor. When false, TrackballControls' pan (panSpeed 0.3, so the world lags the mouse; its ortho branch also mis-scales the vertical axis by the aspect ratio).
+};
+
+export type GraphBehaviors = typeof DEFAULT_BEHAVIORS;
+
+/**
+ * Merge an untrusted `default_behaviors` dict into `target`, in place.
+ *
+ * Both the server config and the graph context carry this dict opaquely — neither knows
+ * the frontend's schema — so validation has to happen here: unknown keys are dropped and
+ * type mismatches are rejected per-key rather than trusted. A typo (`constantZoom`) or an
+ * env-var footgun (the *string* `"false"`, which is truthy) must not reach the store, or
+ * it would ride along into every saved exploration.
+ *
+ * `source` only names where the dict came from, for the warning message.
+ */
+function applyBehaviorOverrides(
+  target: GraphBehaviors,
+  overrides: Record<string, unknown> | undefined | null,
+  source: string,
+): GraphBehaviors {
+  if (!overrides) return target;
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (!(key in target)) {
+      console.warn(`[graph] Ignoring unknown ${source} default_behaviors key: "${key}"`);
+      continue;
+    }
+    const k = key as keyof GraphBehaviors;
+    if (typeof value !== typeof target[k]) {
+      console.warn(
+        `[graph] Ignoring ${source} default_behaviors."${key}": expected ${typeof target[k]}, got ${typeof value}`
+      );
+      continue;
+    }
+    (target[k] as unknown) = value;
+  }
+
+  return target;
+}
+
+/**
+ * Resolve the behaviors a graph should start from.
+ *
+ * Precedence, lowest to highest:
+ *   built-in defaults < server config < graph context < user's panel changes < exploration
+ *
+ * The last two aren't handled here: the panel mutates the store directly, and
+ * `loadExploration` merges the saved behaviors over whatever is current — and since
+ * `loadContext` runs before it, an exploration still correctly wins over its context.
+ *
+ * @param contextBehaviors the current graph context's `default_behaviors`, if any.
+ */
+export function resolveInitialBehaviors(
+  contextBehaviors?: Record<string, unknown> | null,
+): GraphBehaviors {
+  const resolved = { ...DEFAULT_BEHAVIORS };
+  applyBehaviorOverrides(resolved, window.__GRAPH_LAGOON_CONFIG__?.default_behaviors, 'server');
+  applyBehaviorOverrides(resolved, contextBehaviors, 'context');
+  return resolved;
+}
+
+/**
  * Record load-path timings for a graph fetch (dev-only; no-op in prod).
  *
  * Splits the cost into three buckets so a baseline can attribute where the
@@ -227,31 +319,8 @@ export const useGraphStore = defineStore('graph', () => {
     warmupTicks: 0,        // Pre-render ticks (computed without rendering, blocks main thread)
   });
 
-  // Behavior settings
-  const behaviors = ref({
-    edgeLensMode: 'dim' as 'off' | 'hide' | 'dim',  // off = no focus, hide = hide non-focused, dim = dim non-focused edges
-    edgeLensDimOpacity: 0.08,  // Opacity for dimmed edges in 'dim' mode (0.01-0.3)
-    focusDepth: 1,            // How many hops to include (1 = direct neighbors)
-    degreeDimEnabled: true,  // When true, dim edges connected to high-degree nodes
-    degreeDimThreshold: 30,   // Degree threshold above which edges are dimmed
-    degreeDimOpacity: 0.2,   // Opacity for degree-dimmed edges (0.01-0.3)
-    degreeDimPreserveBridges: true,  // When true, don't dim nodes that connect to non-hub neighborhoods
-    searchMode: 'highlight' as 'hide' | 'highlight',  // hide = filter out non-matching, highlight = show all but highlight matches
-    centerOnSearch: true,     // When true (and highlight mode), center camera on best match while typing
-    inMessiWeTrust: true,    // When true, auto-execute transpiled SQL without review
-    viewMode: '2d-proj' as '3d' | '2d-proj',  // default 2D for performance (lighter force sim + less overdraw); '3d' = Three.js 3D, '2d-proj' = Three.js 2D projection
-    hideLabelsOnCameraMove:  false, // When true, hide 3D labels during camera movement for performance
-    useOrthographicCamera: true, // When true, use orthographic projection instead of perspective
-    useInstancedRendering: true, // When true, use InstancedMesh for nodes/links (fast, ~3 draw calls). When false, use individual Mesh per node/link (slower, correct transparency).
-    labelDensityCulling: true, // When true, use screen-space grid to limit label density (Sigma.js-style)
-    labelDensity: 0.5,         // Base labels per grid cell at default zoom (0.1-4)
-    labelGridCellSize: 150,    // Grid cell size in screen pixels (50-500)
-    labelSizeThreshold: 6,     // Min node screen-radius (px) to show its label (like Sigma.js)
-    labelOverlapThreshold: 0.4, // Max overlap ratio (0..1) before hiding a label (0=no overlap, 1=allow full overlap)
-    showSelfEdges: true,       // When true, display self-edges (loops where src === dst)
-    hideSelfEdgesOnCameraMove: true, // When true, hide self-edges during camera movement for performance
-    enableNodeDrag: false,           // When true, allow dragging nodes by click-drag (pins node after release)
-  });
+  // Behavior settings — seeded from the server's default_behaviors, if any.
+  const behaviors = ref(resolveInitialBehaviors());
 
   // Aesthetic settings (visual appearance)
   const aesthetics = ref({
@@ -948,6 +1017,11 @@ export const useGraphStore = defineStore('graph', () => {
 
     try {
       currentContext.value = await api.getGraphContext(contextId);
+      // Re-resolve from scratch rather than merging over the current value: on a context
+      // switch the previous context's behaviors would otherwise linger (clear() doesn't
+      // reset them). A subsequent loadExploration() still wins — it runs after this and
+      // merges the saved behaviors on top.
+      behaviors.value = resolveInitialBehaviors(currentContext.value.default_behaviors);
     } catch (e: unknown) {
       const errorMessage = e instanceof Error ? e.message : 'Failed to load context';
       error.value = errorMessage;

@@ -54,6 +54,12 @@ declare global {
       databricks_user_email?: string;
       router_base?: string;
       allowed_share_domains?: string[];
+      /**
+       * Server-provided seed for the graph store's `behaviors`. Merged over the
+       * frontend's own defaults, so unknown/absent keys simply fall back. Deliberately
+       * loose: the backend passes it through opaquely and never needs to know the shape.
+       */
+      default_behaviors?: Record<string, unknown>;
       version?: string;
     };
   }

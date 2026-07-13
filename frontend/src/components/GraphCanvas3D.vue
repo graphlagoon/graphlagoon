@@ -92,6 +92,10 @@ const contextMenu = useContextMenu();
 let rightClickMouseDownPos: { x: number; y: number } | null = null;
 const RIGHT_CLICK_DRAG_THRESHOLD = 5;
 
+// Map-style pan (right-drag) state
+let isMapPanning = false;
+let lastPanPos: { x: number; y: number } | null = null;
+
 // Tooltip state
 const tooltipVisible = ref(false);
 const tooltipX = ref(0);
@@ -121,6 +125,9 @@ const isClippingActive = ref(false);
 let _onKeyDown: ((e: KeyboardEvent) => void) | null = null;
 let _onKeyUp: ((e: KeyboardEvent) => void) | null = null;
 let _onWheel: ((e: WheelEvent) => void) | null = null;
+let _onMouseDown: ((e: MouseEvent) => void) | null = null;
+let _onMouseMove: ((e: MouseEvent) => void) | null = null;
+let _onMouseUp: ((e: MouseEvent) => void) | null = null;
 
 // Pre-computed set of non-hub nodes connected to hubs (for node dimming)
 const degreeDimmedNodeIds = computed(() => {
@@ -1103,6 +1110,9 @@ async function initGraph() {
     controls.minDistance = 10;
     controls.maxDistance = 10000;
 
+    // Hand right-drag to our own cursor-locked pan if that behavior is on.
+    camera.syncPanMode();
+
     // Update clipping plane normal when camera rotates + refresh labels
     controls.addEventListener('change', () => {
       if (isClippingActive.value && graph3d) {
@@ -1534,6 +1544,12 @@ watch(
   }
 );
 
+// Map-style pan toggle — runtime toggle: hands right-drag to us or back to the controls
+watch(
+  () => graphStore.behaviors.mapStylePan,
+  () => { camera.syncPanMode(); }
+);
+
 // Selection, graph lens behavior, degree dimming params — visuals + labels
 watch(
   () => [
@@ -1836,12 +1852,34 @@ onMounted(() => {
     }
   });
 
-  // Track right-click mousedown for drag-vs-click detection
-  containerRef.value?.addEventListener('mousedown', (event: MouseEvent) => {
-    if (event.button === 2) {
-      rightClickMouseDownPos = { x: event.clientX, y: event.clientY };
+  // Track right-click mousedown for drag-vs-click detection (context menu opens only on a
+  // stationary click) and, when map-style pan is on, to start a cursor-locked pan drag.
+  _onMouseDown = function onMouseDown(event: MouseEvent) {
+    if (event.button !== 2) return;
+    rightClickMouseDownPos = { x: event.clientX, y: event.clientY };
+
+    if (graphStore.behaviors.mapStylePan) {
+      isMapPanning = true;
+      lastPanPos = { x: event.clientX, y: event.clientY };
     }
-  });
+  };
+
+  _onMouseMove = function onMouseMove(event: MouseEvent) {
+    if (!isMapPanning || !lastPanPos) return;
+    camera.applyMapStylePan(event.clientX - lastPanPos.x, event.clientY - lastPanPos.y);
+    lastPanPos = { x: event.clientX, y: event.clientY };
+  };
+
+  _onMouseUp = function onMouseUp(event: MouseEvent) {
+    if (event.button !== 2) return;
+    isMapPanning = false;
+    lastPanPos = null;
+  };
+
+  containerRef.value?.addEventListener('mousedown', _onMouseDown);
+  // Listen on window so a drag that leaves the canvas still tracks and still ends.
+  window.addEventListener('mousemove', _onMouseMove);
+  window.addEventListener('mouseup', _onMouseUp);
 
   // Keyboard shortcuts for 3D canvas — only active when pointer is over the visualizer
   _onKeyDown = function onKeyDown(event: KeyboardEvent) {
@@ -1994,6 +2032,9 @@ onUnmounted(() => {
   if (_onKeyDown) window.removeEventListener('keydown', _onKeyDown);
   if (_onKeyUp) window.removeEventListener('keyup', _onKeyUp);
   if (_onWheel) containerRef.value?.removeEventListener('wheel', _onWheel);
+  if (_onMouseDown) containerRef.value?.removeEventListener('mousedown', _onMouseDown);
+  if (_onMouseMove) window.removeEventListener('mousemove', _onMouseMove);
+  if (_onMouseUp) window.removeEventListener('mouseup', _onMouseUp);
   if (graph3d) {
     const renderer = graph3d.renderer?.() as THREE.WebGLRenderer | null;
     if (renderer) {

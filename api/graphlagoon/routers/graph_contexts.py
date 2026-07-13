@@ -73,6 +73,8 @@ def context_to_response(
         node_properties=node_props,
         node_types=context.node_types or [],
         relationship_types=context.relationship_types or [],
+        # `or {}` covers rows created before the column existed (NULL).
+        default_behaviors=context.default_behaviors or {},
         owner_email=context.owner_email,
         shared_with=shared_with,
         has_write_access=has_write,
@@ -186,6 +188,7 @@ async def create_graph_context(request: Request, data: GraphContextCreate):
                 node_properties=[p.model_dump() for p in data.node_properties],
                 node_types=data.node_types,
                 relationship_types=data.relationship_types,
+                default_behaviors=data.default_behaviors,
                 owner_email=user_email,
             )
             session.add(context)
@@ -207,6 +210,7 @@ async def create_graph_context(request: Request, data: GraphContextCreate):
             node_properties=[p.model_dump() for p in data.node_properties],
             node_types=data.node_types,
             relationship_types=data.relationship_types,
+            default_behaviors=data.default_behaviors,
             owner_email=user_email,
         )
         return context_to_response(context, user_email)
@@ -299,6 +303,8 @@ async def update_graph_context(
                 context.node_types = data.node_types
             if data.relationship_types is not None:
                 context.relationship_types = data.relationship_types
+            if data.default_behaviors is not None:
+                context.default_behaviors = data.default_behaviors
 
             await session.commit()
             await session.refresh(context)
@@ -338,6 +344,8 @@ async def update_graph_context(
             updates["node_types"] = data.node_types
         if data.relationship_types is not None:
             updates["relationship_types"] = data.relationship_types
+        if data.default_behaviors is not None:
+            updates["default_behaviors"] = data.default_behaviors
 
         context = store.update_graph_context(context_id, **updates)
         return context_to_response(context, user_email)

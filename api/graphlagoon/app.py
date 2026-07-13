@@ -243,6 +243,7 @@ def create_frontend_router(
             "databricks_mode": settings.databricks_mode,
             "router_base": router_base,
             "allowed_share_domains": settings.allowed_share_domain_list,
+            "default_behaviors": settings.default_behaviors_dict,
             "version": __version__,
         }
         # Inject user email so frontend auto-logins

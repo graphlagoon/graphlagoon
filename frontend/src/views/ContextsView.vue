@@ -79,6 +79,24 @@ const createForm = ref({
   // Schema types (comma-separated)
   node_types: '',
   relationship_types: '',
+  // Default behaviors (JSON object, optional)
+  default_behaviors: '',
+});
+
+/** Parse error for the default_behaviors textarea, or null when it's valid/empty. */
+const defaultBehaviorsError = computed(() => {
+  const raw = createForm.value.default_behaviors.trim();
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 'Not valid JSON';
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return 'Must be a JSON object, e.g. {"viewMode": "3d"}';
+  }
+  return null;
 });
 
 // Table schema state
@@ -248,7 +266,16 @@ function openGraph(context: GraphContext) {
 }
 
 async function createContext() {
+  // Guard: the submit button is disabled on a parse error, but don't rely on the UI —
+  // a malformed dict must never reach the API.
+  if (defaultBehaviorsError.value) return;
+
   try {
+    const rawBehaviors = createForm.value.default_behaviors.trim();
+    const defaultBehaviors = rawBehaviors
+      ? (JSON.parse(rawBehaviors) as Record<string, unknown>)
+      : undefined;
+
     const tags = createForm.value.tags
       .split(',')
       .map((t) => t.trim())
@@ -312,6 +339,7 @@ async function createContext() {
       node_properties: nodeProperties.length > 0 ? nodeProperties : undefined,
       node_types: nodeTypes.length > 0 ? nodeTypes : undefined,
       relationship_types: relationshipTypes.length > 0 ? relationshipTypes : undefined,
+      default_behaviors: defaultBehaviors,
     });
 
     showCreateModal.value = false;
@@ -329,6 +357,7 @@ async function createContext() {
       node_type_col: 'node_type',
       node_types: '',
       relationship_types: '',
+      default_behaviors: '',
     };
   } catch (e) {
     console.error(e);
@@ -812,11 +841,36 @@ async function unshare(contextId: string, email: string) {
             <span class="hint">Comma-separated, use name:value format (e.g., env:prod)</span>
           </div>
 
+          <div class="form-group">
+            <label>Default Behaviors</label>
+            <textarea
+              v-model="createForm.default_behaviors"
+              class="form-control"
+              rows="3"
+              spellcheck="false"
+              data-testid="create-context-default-behaviors"
+              placeholder='{"viewMode": "3d", "mapStylePan": false}'
+            />
+            <span v-if="defaultBehaviorsError" class="hint hint-error">
+              {{ defaultBehaviorsError }}
+            </span>
+            <span v-else class="hint">
+              Optional JSON. Graph settings applied when this context is opened — useful
+              when a graph's size or shape needs different defaults. Users can still change
+              them in the Behaviors panel, and a saved exploration takes precedence.
+            </span>
+          </div>
+
           <div class="modal-footer">
             <button type="button" class="btn btn-outline" @click="showCreateModal = false">
               Cancel
             </button>
-            <button type="submit" class="btn btn-primary" data-testid="create-context-submit" :disabled="contextsStore.loading">
+            <button
+              type="submit"
+              class="btn btn-primary"
+              data-testid="create-context-submit"
+              :disabled="contextsStore.loading || !!defaultBehaviorsError"
+            >
               Create
             </button>
           </div>
@@ -867,6 +921,10 @@ code {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 4px;
+}
+
+.hint-error {
+  color: var(--error-color);
 }
 
 .column-config-section {
