@@ -362,6 +362,42 @@ class TestQueryTemplates:
         assert resp.status_code == 200
 
 
+class TestGraphQueryAccess:
+    """get_context_with_access gates every /graph-contexts/{id}/* graph query
+    endpoint (subgraph, expand, query, cypher, table). Superusers must be able
+    to run queries on any context without a manually granted read/write share.
+    """
+
+    def _get_context(self, context_id, email):
+        import asyncio
+
+        from graphlagoon.routers.graph import get_context_with_access
+
+        return asyncio.run(get_context_with_access(context_id, email))
+
+    def test_superuser_accesses_unowned_unshared_context(
+        self, superuser_env, store, context
+    ):
+        result = self._get_context(context.id, SUPERUSER)
+        assert result.id == context.id
+
+    def test_stranger_is_forbidden(self, superuser_env, store, context):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            self._get_context(context.id, STRANGER)
+        assert exc_info.value.status_code == 403
+
+    def test_superuser_still_gets_404_for_missing_context(self, superuser_env, store):
+        from uuid import uuid4
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            self._get_context(uuid4(), SUPERUSER)
+        assert exc_info.value.status_code == 404
+
+
 class TestConfigEndpoint:
     def test_superuser_flag_true(self, superuser_env, client, store):
         resp = client.get("/api/config", headers=_headers(SUPERUSER))

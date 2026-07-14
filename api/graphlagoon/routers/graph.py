@@ -63,10 +63,12 @@ async def get_context_with_access(
     """Get graph context and verify access.
 
     Access is granted if the user:
+    - Is a superuser (GRAPH_LAGOON_SUPERUSER_EMAILS), OR
     - Owns the context, OR
     - Has a context-level share (GraphContextShare), OR
     - Has an exploration-level share (ExplorationShare) for any exploration in this context
     """
+    from graphlagoon.utils.authz import is_superuser
     from graphlagoon.utils.sharing import user_has_share_access, extract_domain
 
     not_found_error = HTTPException(
@@ -107,7 +109,7 @@ async def get_context_with_access(
             if context is None:
                 raise not_found_error
 
-            if context.owner_email == user_email:
+            if context.owner_email == user_email or is_superuser(user_email):
                 return context
 
             if user_has_share_access(user_email, context.shares):
@@ -141,7 +143,7 @@ async def get_context_with_access(
         if context is None:
             raise not_found_error
 
-        if context.owner_email == user_email:
+        if context.owner_email == user_email or is_superuser(user_email):
             return context
 
         if user_has_share_access(user_email, context.shares):
@@ -1279,14 +1281,10 @@ async def execute_cypher_query_async(
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
     sql, transpilation_ms = _prepare_cypher_sql(context, data)
-    job_id, record = _start_graph_job(
-        context, warehouse, sql, data.use_external_links
-    )
+    job_id, record = _start_graph_job(context, warehouse, sql, data.use_external_links)
     record["transpiled_sql"] = sql
     record["transpilation_ms"] = transpilation_ms
-    return GraphJobSubmitResponse(
-        status="running", job_id=job_id, transpiled_sql=sql
-    )
+    return GraphJobSubmitResponse(status="running", job_id=job_id, transpiled_sql=sql)
 
 
 @router.get(
