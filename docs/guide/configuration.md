@@ -45,6 +45,9 @@ A superuser bypasses ownership and sharing checks everywhere:
 - **Query templates** — sees and can edit/delete other users' *private*
   templates, change any template's visibility, and create shared templates in
   any context.
+- **Graph queries** — can open any context's graph and run queries (subgraph,
+  expand, SQL, Cypher, and table queries) without a manually granted
+  read/write share.
 
 What superusers do **not** bypass:
 

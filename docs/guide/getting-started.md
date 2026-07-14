@@ -35,6 +35,10 @@ app = FastAPI()
 app.mount("/graphlagoon", create_mountable_app(mount_prefix="/graphlagoon"))
 ```
 
+> If you enable database persistence, the parent app must also delegate the
+> mounted app's lifespan so migrations run on startup — see
+> [Databricks Integration → Minimal Setup](/guide/integration#minimal-setup).
+
 ### Development mode
 
 ```bash

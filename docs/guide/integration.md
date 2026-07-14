@@ -11,10 +11,10 @@ This guide covers how to integrate Graph Lagoon Studio with Databricks SQL Wareh
 ## Minimal Setup
 
 ```python
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from graphlagoon import create_mountable_app, Settings
-
-app = FastAPI()
 
 settings = Settings(
     databricks_mode=True,
@@ -26,10 +26,22 @@ settings = Settings(
     database_url="postgresql+asyncpg://user:pass@localhost:5432/graphlagoon",
 )
 
-app.mount("/graphlagoon", create_mountable_app(
+graphlagoon_app = create_mountable_app(
     settings=settings,
     mount_prefix="/graphlagoon",
-))
+)
+
+
+# REQUIRED: Starlette does not run lifespan events of mounted sub-apps, and
+# Graph Lagoon's lifespan applies database migrations and closes the DB pool.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with graphlagoon_app.router.lifespan_context(graphlagoon_app):
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
+app.mount("/graphlagoon", graphlagoon_app)
 ```
 
 ## Environment Variables
@@ -65,6 +77,17 @@ This means:
 - **First deploy**: all tables are created automatically
 - **Upgrades**: new columns and tables are added automatically on the next startup
 - **No manual steps**: you never need to run `alembic upgrade` yourself in production
+
+::: warning Mounted apps must delegate the lifespan
+"Automatically on startup" means *in Graph Lagoon's lifespan*. Starlette does
+**not** run lifespan events of mounted sub-apps, so when you `app.mount(...)`
+Graph Lagoon into a parent FastAPI app, the parent must delegate the lifespan
+(as in the [Minimal Setup](#minimal-setup) example above). Without it,
+migrations never run and upgrades fail with errors like
+`column graph_contexts.default_behaviors does not exist` — see
+[Databricks Apps → Troubleshooting](/guide/databricks-apps#troubleshooting)
+for recovery steps.
+:::
 
 ### How it works
 

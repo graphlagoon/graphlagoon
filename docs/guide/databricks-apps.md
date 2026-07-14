@@ -46,6 +46,8 @@ my-graphlagoon-app/
 
 ```python
 import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from graphlagoon import (
     create_mountable_app,
@@ -66,18 +68,37 @@ settings = Settings(
     # databricks_volume_path="/Volumes/main/default/graphlagoon_snapshots",
 )
 
-app = FastAPI(title="Graph Lagoon Studio")
+graphlagoon_app = create_mountable_app(
+    settings=settings,
+    header_provider=get_oauth_service().get_token,
+    mount_prefix="/graphlagoon",
+)
+
+
+# REQUIRED when mounting: Starlette does NOT run lifespan events of mounted
+# sub-apps, and Graph Lagoon's lifespan is what applies database migrations
+# (Alembic), starts the Lakebase token refresh, and closes the DB pool on
+# shutdown. Delegate it from the parent app, or schema changes will never
+# reach your database (e.g. "column ... does not exist" after an upgrade).
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with graphlagoon_app.router.lifespan_context(graphlagoon_app):
+        yield
+
+
+app = FastAPI(title="Graph Lagoon Studio", lifespan=lifespan)
 
 add_mount_redirect(app, "/graphlagoon")
-app.mount(
-    "/graphlagoon",
-    create_mountable_app(
-        settings=settings,
-        header_provider=get_oauth_service().get_token,
-        mount_prefix="/graphlagoon",
-    ),
-)
+app.mount("/graphlagoon", graphlagoon_app)
 ```
+
+::: warning Mounted apps don't get lifespan events
+If you skip the `lifespan` delegation above, the app still serves traffic —
+but `create_tables()` (Alembic `upgrade head`) never runs, so a database
+created by an older version stays on the old schema and queries fail with
+errors like `column graph_contexts.default_behaviors does not exist`. If you
+compose your own parent app, always delegate the mounted app's lifespan.
+:::
 
 > `DATABRICKS_WAREHOUSE_ID` is **not** auto-injected — set it yourself in `app.yaml` (see below) or hardcode it.
 
@@ -186,6 +207,21 @@ Setting `lakebase_enabled=true` implies `database_enabled=true`. The app's servi
 **401 / 403 from the warehouse** — the OAuth token is being minted but the app's service principal lacks permission. Grant it `CAN USE` on the warehouse and `SELECT` on the tables.
 
 **App starts but is unreachable** — make sure the server binds `0.0.0.0` and uses `$DATABRICKS_APP_PORT` (not a hardcoded port) in `app.yaml`.
+
+**`column ... does not exist` after upgrading** (e.g. `graph_contexts.default_behaviors`) — database migrations run in Graph Lagoon's lifespan, and Starlette does not run lifespan events of mounted sub-apps. Your parent `app.py` is missing the `lifespan` delegation shown in [`app.py`](#app-py) above. Add it and redeploy — pending Alembic migrations are applied on the next startup. To unblock the database immediately (or if you can't redeploy right away), apply the missing columns by hand via `psql`; the statements are idempotent:
+
+```sql
+-- If GRAPH_LAGOON_DEFAULT_POSTGRES_SCHEMA is set, first:
+-- SET search_path TO graphlagoon;
+ALTER TABLE graph_contexts
+    ADD COLUMN IF NOT EXISTS default_behaviors JSON DEFAULT '{}';
+ALTER TABLE query_templates
+    ADD COLUMN IF NOT EXISTS visibility VARCHAR(10) NOT NULL DEFAULT 'shared';
+-- Keep Alembic's bookkeeping consistent (only if the table exists):
+UPDATE alembic_version SET version_num = '008';
+```
+
+Alternatively, run the migrations from your machine against the app's database: `GRAPH_LAGOON_DATABASE_ENABLED=true GRAPH_LAGOON_DATABASE_URL=postgresql+asyncpg://... alembic upgrade head` from the `api/` directory.
 
 ## References
 
