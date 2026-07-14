@@ -11,7 +11,12 @@ async function bootstrap() {
   if (!window.__GRAPH_LAGOON_CONFIG__ && import.meta.env.DEV) {
     try {
       const apiUrl = import.meta.env.VITE_API_URL || '';
-      const res = await fetch(`${apiUrl}/api/config`);
+      // Send the dev identity so user-dependent flags (is_superuser) are
+      // computed for the logged-in user, not the backend's dev fallback.
+      const email = localStorage.getItem('userEmail');
+      const res = await fetch(`${apiUrl}/api/config`, {
+        headers: email ? { 'X-Forwarded-Email': email } : {},
+      });
       if (res.ok) {
         window.__GRAPH_LAGOON_CONFIG__ = await res.json();
       }

@@ -1,15 +1,17 @@
 """Configuration router - exposes app configuration to frontend."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from graphlagoon.config import get_settings
 from graphlagoon.db.database import is_database_available
+from graphlagoon.middleware.auth import get_current_user
+from graphlagoon.utils.authz import is_superuser
 
 router = APIRouter(prefix="/api", tags=["config"])
 
 
 @router.get("/config")
-async def get_config():
+async def get_config(request: Request):
     """Get application configuration.
 
     Returns configuration that the frontend needs to know about,
@@ -31,4 +33,5 @@ async def get_config():
         "allowed_share_domains": settings.allowed_share_domain_list,
         "default_behaviors": settings.default_behaviors_dict,
         "version": app_version,
+        "is_superuser": is_superuser(get_current_user(request)),
     }

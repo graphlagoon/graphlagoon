@@ -35,4 +35,21 @@ describe('usePersistence', () => {
     const { devMode } = usePersistence()
     expect(devMode.value).toBe(false)
   })
+
+  it('isSuperuser is true when is_superuser is true', () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { is_superuser: true }
+    const { isSuperuser } = usePersistence()
+    expect(isSuperuser.value).toBe(true)
+  })
+
+  it('isSuperuser is false when is_superuser is false', () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { is_superuser: false }
+    const { isSuperuser } = usePersistence()
+    expect(isSuperuser.value).toBe(false)
+  })
+
+  it('isSuperuser is false when config is not set', () => {
+    const { isSuperuser } = usePersistence()
+    expect(isSuperuser.value).toBe(false)
+  })
 })

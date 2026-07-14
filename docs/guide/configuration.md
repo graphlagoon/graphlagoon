@@ -22,7 +22,51 @@ GRAPH_LAGOON_DATABRICKS_CATALOG=main
 # Development
 GRAPH_LAGOON_DEV_MODE=true
 GRAPH_LAGOON_SHOW_ERROR_DETAILS=true
+
+# Access control (see "Access Control" below)
+GRAPH_LAGOON_SUPERUSER_EMAILS=admin@company.com,ops@company.com
+GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=company.com
 ```
+
+## Access Control
+
+### Superusers
+
+`GRAPH_LAGOON_SUPERUSER_EMAILS` is a comma-separated list of emails granted
+**superuser** access. Matching is case-insensitive and whitespace around each
+entry is ignored.
+
+A superuser bypasses ownership and sharing checks everywhere:
+
+- **Graph contexts** — sees all contexts in listings; can edit, delete, share,
+  and unshare any context.
+- **Explorations** — sees all explorations (including in contexts they don't
+  own); can open, edit, delete, share, and unshare any exploration.
+- **Query templates** — sees and can edit/delete other users' *private*
+  templates, change any template's visibility, and create shared templates in
+  any context.
+
+What superusers do **not** bypass:
+
+- Share-target validation: wildcard shares (`*@domain`) still require the
+  domain to be listed in `GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS`.
+- Identity: the user's email still comes from the platform
+  (`X-Forwarded-Email` header in Databricks Apps).
+
+The list is read at startup — restart the app after changing it. The list
+itself is never exposed to the frontend; each user only receives a boolean
+`is_superuser` flag for themselves.
+
+```python
+# Programmatic equivalent
+settings = Settings(superuser_emails="admin@company.com,ops@company.com")
+```
+
+### Share domains
+
+`GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS` is a comma-separated list of domains for
+which wildcard sharing (`*@domain`) is allowed. When unset, wildcard shares
+are rejected; sharing with individual emails is always allowed.
 
 ## Programmatic Configuration
 

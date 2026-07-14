@@ -11,11 +11,16 @@ const router = useRouter();
 const route = useRoute();
 const contextsStore = useContextsStore();
 const authStore = useAuthStore();
-const { sharingEnabled } = usePersistence();
+const { sharingEnabled, isSuperuser } = usePersistence();
 
 // Check if current user is the owner of a context
 function isOwner(context: GraphContext): boolean {
   return context.owner_email === authStore.email;
+}
+
+// Owner-level actions (share/delete): owner or superuser
+function canManage(context: GraphContext): boolean {
+  return isOwner(context) || isSuperuser.value;
 }
 
 // Search state
@@ -497,13 +502,13 @@ async function unshare(contextId: string, email: string) {
             Open
           </button>
           <button
-            v-if="sharingEnabled && isOwner(context)"
+            v-if="sharingEnabled && canManage(context)"
             class="btn btn-outline"
             @click="openShare(context)"
           >
             Share
           </button>
-          <button v-if="isOwner(context)" class="btn btn-danger" @click="deleteContext(context)">
+          <button v-if="canManage(context)" class="btn btn-danger" @click="deleteContext(context)">
             Delete
           </button>
         </div>

@@ -106,6 +106,11 @@ env:
   # Disable PostgreSQL persistence (in-memory store), or configure a database / Lakebase instead
   - name: "GRAPH_LAGOON_DATABASE_ENABLED"
     value: "false"
+  # Optional: grant these users full access to all contexts, explorations,
+  # and query templates (comma-separated, case-insensitive).
+  # See Configuration → Access Control.
+  - name: "GRAPH_LAGOON_SUPERUSER_EMAILS"
+    value: "admin@company.com"
 ```
 
 `app.yaml` keys: `command` (the exec sequence — defaults to `python app.py` if omitted) and `env` (a list of `{name, value}` or `{name, valueFrom}` entries). Everything `Settings` reads with the `GRAPH_LAGOON_` prefix can also be set here as `env` entries instead of in `app.py`.

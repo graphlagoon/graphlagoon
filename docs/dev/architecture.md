@@ -355,6 +355,10 @@ The transpiler requires schema information:
 - Headers: `X-User-Email` or `X-Forwarded-Email`
 - Dev mode default: `devmessias@gmail.com`
 - Custom user providers for parent app integration
+- Superusers (env-configured via `GRAPH_LAGOON_SUPERUSER_EMAILS`) bypass
+  ownership/share checks on contexts, explorations, and query templates
+  (predicates in `graphlagoon/utils/authz.py`); share-target domain
+  validation still applies
 
 ### Graph Contexts
 

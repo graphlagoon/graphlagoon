@@ -19,8 +19,15 @@ export function usePersistence() {
   // Check if dev mode is enabled (from backend config)
   const devMode = computed(() => api.devMode);
 
+  // True when the backend flagged the current user as superuser
+  // (full access to all contexts/explorations/templates)
+  const isSuperuser = computed(
+    () => window.__GRAPH_LAGOON_CONFIG__?.is_superuser === true
+  );
+
   return {
     sharingEnabled,
     devMode,
+    isSuperuser,
   };
 }

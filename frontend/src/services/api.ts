@@ -52,6 +52,11 @@ declare global {
       database_enabled?: boolean;
       databricks_mode?: boolean;
       databricks_user_email?: string;
+      /**
+       * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
+       * Backend-computed per user; the superuser list itself is never exposed.
+       */
+      is_superuser?: boolean;
       router_base?: string;
       allowed_share_domains?: string[];
       /**

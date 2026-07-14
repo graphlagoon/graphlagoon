@@ -22,9 +22,9 @@ from graphlagoon.middleware.auth import get_current_user
 from graphlagoon.utils.sharing import (
     extract_domain,
     user_has_share_access,
-    user_has_write_access,
     validate_share_email,
 )
+from graphlagoon.utils.authz import can_manage, can_write, is_superuser
 from graphlagoon.config import get_settings
 
 router = APIRouter(prefix="/api/graph-contexts", tags=["graph-contexts"])
@@ -36,9 +36,7 @@ def context_to_response(
 ) -> GraphContextResponse:
     """Convert GraphContext model to response schema."""
     shared_with = [share.shared_with_email for share in context.shares]
-    has_write = context.owner_email == user_email or user_has_write_access(
-        user_email, context.shares
-    )
+    has_write = can_write(context.owner_email, context.shares, user_email)
 
     # Parse structure configs from JSON/dict
     edge_struct = context.edge_structure or {}
@@ -130,37 +128,40 @@ async def list_graph_contexts(request: Request):
                 .where(or_(*exp_share_conditions))
             )
 
-            result = await session.execute(
-                select(GraphContext)
-                .options(selectinload(GraphContext.shares))
-                .where(
+            query = select(GraphContext).options(selectinload(GraphContext.shares))
+            if not is_superuser(user_email):
+                query = query.where(
                     or_(
                         GraphContext.owner_email == user_email,
                         GraphContext.id.in_(ctx_share_q),
                         GraphContext.id.in_(exp_share_q),
                     )
                 )
-                .order_by(GraphContext.updated_at.desc())
+            result = await session.execute(
+                query.order_by(GraphContext.updated_at.desc())
             )
             contexts = result.scalars().all()
             return [context_to_response(ctx, user_email) for ctx in contexts]
     else:
         store = get_memory_store()
-        accessible = []
-        for ctx in store.graph_contexts.values():
-            if ctx.owner_email == user_email:
-                accessible.append(ctx)
-                continue
-            if user_has_share_access(user_email, ctx.shares):
-                accessible.append(ctx)
-                continue
-            # Check exploration-level shares
-            for exp in store.explorations.values():
-                if exp.graph_context_id == ctx.id and user_has_share_access(
-                    user_email, exp.shares
-                ):
+        if is_superuser(user_email):
+            accessible = list(store.graph_contexts.values())
+        else:
+            accessible = []
+            for ctx in store.graph_contexts.values():
+                if ctx.owner_email == user_email:
                     accessible.append(ctx)
-                    break
+                    continue
+                if user_has_share_access(user_email, ctx.shares):
+                    accessible.append(ctx)
+                    continue
+                # Check exploration-level shares
+                for exp in store.explorations.values():
+                    if exp.graph_context_id == ctx.id and user_has_share_access(
+                        user_email, exp.shares
+                    ):
+                        accessible.append(ctx)
+                        break
 
         accessible.sort(key=lambda c: c.updated_at, reverse=True)
         return [context_to_response(ctx, user_email) for ctx in accessible]
@@ -278,10 +279,7 @@ async def update_graph_context(
                 raise HTTPException(status_code=404, detail="Graph context not found")
 
             # Check write access
-            has_write = context.owner_email == user_email or user_has_write_access(
-                user_email, context.shares
-            )
-            if not has_write:
+            if not can_write(context.owner_email, context.shares, user_email):
                 raise HTTPException(status_code=403, detail="No write access")
 
             # Update fields
@@ -318,10 +316,7 @@ async def update_graph_context(
             raise HTTPException(status_code=404, detail="Graph context not found")
 
         # Check write access
-        has_write = context.owner_email == user_email or user_has_write_access(
-            user_email, context.shares
-        )
-        if not has_write:
+        if not can_write(context.owner_email, context.shares, user_email):
             raise HTTPException(status_code=403, detail="No write access")
 
         # Update fields
@@ -370,7 +365,7 @@ async def delete_graph_context(context_id: UUID, request: Request):
             if context is None:
                 raise HTTPException(status_code=404, detail="Graph context not found")
 
-            if context.owner_email != user_email:
+            if not can_manage(context.owner_email, user_email):
                 raise HTTPException(status_code=403, detail="Only owner can delete")
 
             await session.delete(context)
@@ -382,7 +377,7 @@ async def delete_graph_context(context_id: UUID, request: Request):
         if context is None:
             raise HTTPException(status_code=404, detail="Graph context not found")
 
-        if context.owner_email != user_email:
+        if not can_manage(context.owner_email, user_email):
             raise HTTPException(status_code=403, detail="Only owner can delete")
 
         store.delete_graph_context(context_id)
@@ -412,7 +407,7 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
             if context is None:
                 raise HTTPException(status_code=404, detail="Graph context not found")
 
-            if context.owner_email != user_email:
+            if not can_manage(context.owner_email, user_email):
                 raise HTTPException(status_code=403, detail="Only owner can share")
 
             # Validate email/wildcard
@@ -446,7 +441,7 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
         if context is None:
             raise HTTPException(status_code=404, detail="Graph context not found")
 
-        if context.owner_email != user_email:
+        if not can_manage(context.owner_email, user_email):
             raise HTTPException(status_code=403, detail="Only owner can share")
 
         # Validate email/wildcard
@@ -482,7 +477,7 @@ async def unshare_graph_context(context_id: UUID, email: str, request: Request):
             if context is None:
                 raise HTTPException(status_code=404, detail="Graph context not found")
 
-            if context.owner_email != user_email:
+            if not can_manage(context.owner_email, user_email):
                 raise HTTPException(
                     status_code=403, detail="Only owner can manage sharing"
                 )
@@ -505,7 +500,7 @@ async def unshare_graph_context(context_id: UUID, email: str, request: Request):
         if context is None:
             raise HTTPException(status_code=404, detail="Graph context not found")
 
-        if context.owner_email != user_email:
+        if not can_manage(context.owner_email, user_email):
             raise HTTPException(status_code=403, detail="Only owner can manage sharing")
 
         store.unshare_graph_context(context_id, email)

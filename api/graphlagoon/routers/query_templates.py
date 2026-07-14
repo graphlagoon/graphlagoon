@@ -20,23 +20,24 @@ from graphlagoon.routers.explorations import (
     check_context_access_db,
     check_context_access_memory,
 )
-from graphlagoon.utils.sharing import user_has_write_access
+from graphlagoon.utils.authz import can_write, is_superuser
 
 router = APIRouter(tags=["query-templates"])
 
 
 def user_has_context_write(context, user_email: str) -> bool:
-    """Context owner or a share with write permission."""
-    return context.owner_email == user_email or user_has_write_access(
-        user_email, context.shares
-    )
+    """Context owner, a share with write permission, or superuser."""
+    return can_write(context.owner_email, context.shares, user_email)
 
 
 def check_can_mutate_template(template, context, user_email: str) -> None:
     """Raise 403 unless the user may edit/delete the template.
 
     Private templates: creator only. Shared templates: anyone with context write.
+    Superusers may mutate any template, including others' private ones.
     """
+    if is_superuser(user_email):
+        return
     if template.visibility == "private":
         if template.owner_email != user_email:
             # 404, not 403: don't reveal that someone else's private template exists
@@ -47,15 +48,16 @@ def check_can_mutate_template(template, context, user_email: str) -> None:
         )
 
 
-def check_visibility_change(
-    new_visibility, template, context, user_email: str
-) -> None:
+def check_visibility_change(new_visibility, template, context, user_email: str) -> None:
     """Raise 403 on a disallowed visibility change.
 
-    Only the creator may change visibility, and promoting to "shared" is
-    equivalent to creating a shared template, so it also needs context write.
+    Only the creator (or a superuser) may change visibility, and promoting to
+    "shared" is equivalent to creating a shared template, so it also needs
+    context write.
     """
     if new_visibility is None or new_visibility == template.visibility:
+        return
+    if is_superuser(user_email):
         return
     if template.owner_email != user_email:
         raise HTTPException(
@@ -114,17 +116,17 @@ async def list_query_templates(context_id: UUID, request: Request):
         async with session_maker() as session:
             await check_context_access_db(session, context_id, user_email)
 
-            result = await session.execute(
-                select(QueryTemplate)
-                .where(QueryTemplate.graph_context_id == context_id)
-                .where(
+            query = select(QueryTemplate).where(
+                QueryTemplate.graph_context_id == context_id
+            )
+            if not is_superuser(user_email):
+                query = query.where(
                     or_(
                         QueryTemplate.visibility != "private",
                         QueryTemplate.owner_email == user_email,
                     )
                 )
-                .order_by(QueryTemplate.created_at)
-            )
+            result = await session.execute(query.order_by(QueryTemplate.created_at))
             templates = result.scalars().all()
             return [template_to_response(t) for t in templates]
     else:
@@ -133,7 +135,9 @@ async def list_query_templates(context_id: UUID, request: Request):
         templates = [
             t
             for t in store.list_query_templates(context_id)
-            if t.visibility != "private" or t.owner_email == user_email
+            if t.visibility != "private"
+            or t.owner_email == user_email
+            or is_superuser(user_email)
         ]
         return [template_to_response(t) for t in templates]
 

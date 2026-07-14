@@ -10,7 +10,7 @@ import type { Exploration } from '@/types/graph';
 const router = useRouter();
 const contextsStore = useContextsStore();
 const authStore = useAuthStore();
-const { sharingEnabled } = usePersistence();
+const { sharingEnabled, isSuperuser } = usePersistence();
 
 const explorations = ref<Exploration[]>([]);
 const loading = ref(false);
@@ -121,6 +121,11 @@ async function deleteExploration(exploration: Exploration) {
 
 function isOwner(exploration: Exploration): boolean {
   return exploration.owner_email === authStore.email;
+}
+
+// Owner-level actions (share/delete): owner or superuser
+function canManage(exploration: Exploration): boolean {
+  return isOwner(exploration) || isSuperuser.value;
 }
 
 function openShare(exploration: Exploration) {
@@ -251,14 +256,14 @@ async function unshare(explorationId: string, email: string) {
               Open
             </button>
             <button
-              v-if="sharingEnabled && isOwner(exploration)"
+              v-if="sharingEnabled && canManage(exploration)"
               class="btn btn-outline btn-sm"
               @click="openShare(exploration)"
             >
               Share
             </button>
             <button
-              v-if="isOwner(exploration)"
+              v-if="canManage(exploration)"
               class="btn btn-danger btn-sm"
               @click="deleteExploration(exploration)"
             >

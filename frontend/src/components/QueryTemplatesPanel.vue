@@ -3,6 +3,7 @@ import { onMounted, computed, ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
+import { usePersistence } from '@/composables/usePersistence';
 import { X } from 'lucide-vue-next';
 import type { QueryTemplate } from '@/types/graph';
 import TemplateEditorModal from './TemplateEditorModal.vue';
@@ -13,6 +14,7 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 const graphStore = useGraphStore();
 const authStore = useAuthStore();
 const templatesStore = useQueryTemplatesStore();
+const { isSuperuser } = usePersistence();
 
 const canWrite = computed(
   () => graphStore.currentContext?.has_write_access ?? false,
@@ -24,7 +26,9 @@ function isTemplateOwner(template: QueryTemplate): boolean {
 
 // Private templates: only the creator can edit/delete.
 // Shared templates: anyone with context write access can.
+// Superusers can mutate any template.
 function canMutate(template: QueryTemplate): boolean {
+  if (isSuperuser.value) return true;
   return template.visibility === 'private'
     ? isTemplateOwner(template)
     : canWrite.value;

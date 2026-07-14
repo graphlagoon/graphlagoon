@@ -2495,3 +2495,60 @@ baixo (QueryConsolePanel).
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-07-13 20:45] - Feature Implemented: Superusers (GRAPH_LAGOON_SUPERUSER_EMAILS)
+
+**Feature:** Env-configured superusers with full access to all graph contexts, explorations, and query templates, regardless of ownership or shares.
+
+**Requirements:**
+- Configure superusers via env var (no DB role/table — users are header-identified emails in Databricks Apps, no FK-backed user model to attach a role to).
+- Superusers see everything in listings and can read/edit/delete/share/unshare any item ("as if owner").
+- Frontend shows owner-level buttons (Share/Delete/Edit) to superusers; the superuser list itself is never exposed to the client.
+- Documented in the configuration guide and the Databricks Apps quickstart (`app.yaml`).
+
+**Design Decisions:**
+1. **Settings allowlist, not a DB role:** `GRAPH_LAGOON_SUPERUSER_EMAILS` (comma-separated, case-insensitive, whitespace-tolerant), parsed by `Settings.superuser_email_list` mirroring the `allowed_share_domains` idiom. Read at startup (`get_settings()` is lru_cached) — restart to apply.
+2. **New `utils/authz.py` instead of extending `utils/sharing.py`:** sharing.py stays pure (no settings dependency); authz.py hosts `is_superuser(email)` plus composite predicates `can_manage` (owner|super: delete/share/unshare), `can_write` (owner|write-share|super), `can_read` (owner|any-share|super). All inline ownership checks in routers were replaced by these helpers, so `has_write_access` in responses and the write/manage gates can never disagree.
+3. **List endpoints get explicit superuser branches:** contexts list and all-explorations list skip the ownership WHERE/filter entirely for superusers (both DB and memory paths). Critical edge: the all-explorations DB path had an early `return []` when the user had no accessible contexts/shares — the superuser branch runs before it.
+4. **`check_context_access_db/memory` early-return for superusers** (after the 404), which transitively grants context access to per-context exploration listing/creation and all query-template endpoints.
+5. **Private templates:** superusers see and can mutate others' private templates; the 404-hiding of private templates is deliberately bypassed *for superusers only* (`check_can_mutate_template` / list filters / `check_visibility_change`).
+6. **What superusers do NOT bypass:** `validate_share_email` — wildcard shares still require the domain in `GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS`. Superuser share/unshare does not change `owner_email`, so the real owner keeps control.
+7. **Frontend gets only a per-user boolean:** backend injects `is_superuser` into `window.__GRAPH_LAGOON_CONFIG__` (both `render_spa()` and `GET /api/config`, which now reads the request identity). `usePersistence()` exposes `isSuperuser`; views gate Share/Delete on `canManage() = isOwner() || isSuperuser`. The `!isOwner` badge still renders, so superusers see the item owner + "Read & Write" on third-party items. `main.ts` dev-mode config fetch now sends `X-Forwarded-Email` so the flag is computed for the logged-in dev user.
+
+**Backend Changes:**
+- [api/graphlagoon/config.py](../../api/graphlagoon/config.py) — `superuser_emails` field + `superuser_email_list` property.
+- NEW [api/graphlagoon/utils/authz.py](../../api/graphlagoon/utils/authz.py) — `is_superuser`, `can_manage`, `can_write`, `can_read`.
+- [api/graphlagoon/routers/graph_contexts.py](../../api/graphlagoon/routers/graph_contexts.py) — list superuser branch (DB + memory); `context_to_response` has_write via `can_write`; PUT/DELETE/share/unshare via `can_write`/`can_manage`.
+- [api/graphlagoon/routers/explorations.py](../../api/graphlagoon/routers/explorations.py) — same treatment on all endpoints; superuser early-return in `check_context_access_db/memory`; all-explorations superuser branch (DB + memory). Also fixed pre-existing F821: `logger` was used but never defined (would NameError on snapshot error paths).
+- [api/graphlagoon/routers/query_templates.py](../../api/graphlagoon/routers/query_templates.py) — `user_has_context_write` → `can_write`; superuser early-returns in `check_can_mutate_template`/`check_visibility_change`; list includes private templates for superusers.
+- [api/graphlagoon/app.py](../../api/graphlagoon/app.py) + [api/graphlagoon/routers/config.py](../../api/graphlagoon/routers/config.py) — inject `is_superuser` (boolean, current user only).
+
+**Frontend Changes:**
+- [frontend/src/services/api.ts](../../frontend/src/services/api.ts) — `is_superuser?: boolean` on the config type.
+- [frontend/src/main.ts](../../frontend/src/main.ts) — dev config fetch sends `X-Forwarded-Email`.
+- [frontend/src/composables/usePersistence.ts](../../frontend/src/composables/usePersistence.ts) — `isSuperuser` computed.
+- [frontend/src/views/ContextsView.vue](../../frontend/src/views/ContextsView.vue) / [frontend/src/views/ExplorationsView.vue](../../frontend/src/views/ExplorationsView.vue) — `canManage()` gates Share/Delete.
+- [frontend/src/components/QueryTemplatesPanel.vue](../../frontend/src/components/QueryTemplatesPanel.vue) — `canMutate` returns true for superusers.
+
+**Docs:**
+- [docs/guide/configuration.md](../../docs/guide/configuration.md) — new "Access Control" section (superusers + share domains, which was previously undocumented).
+- [docs/guide/databricks-apps.md](../../docs/guide/databricks-apps.md) — `GRAPH_LAGOON_SUPERUSER_EMAILS` in the `app.yaml` env example.
+- [docs/dev/architecture.md](../../docs/dev/architecture.md) — superuser note in the Authentication section.
+
+**Testing:**
+- [x] NEW [api/tests/test_superuser.py](../../api/tests/test_superuser.py) — 30 tests (memory mode, header auth, `monkeypatch.setenv` + `get_settings.cache_clear()` fixture): settings parsing/case-insensitivity; superuser full matrix on contexts/explorations/templates incl. `has_write_access: true` in responses; STRANGER 403 regression guards in the same file (default-deny intact); wildcard-domain validation NOT bypassed; `/api/config` flag true/false/case-insensitive.
+- [x] Backend suite: 242 passed, 1 skipped. Frontend unit: 857 passed (3 new `isSuperuser` cases in usePersistence.test.ts). E2E: 83 passed — 2 NEW superuser cases in [frontend/e2e/tests/sharing-ui.spec.ts](../../frontend/e2e/tests/sharing-ui.spec.ts) (`is_superuser: true` fixture; Share/Delete visible on non-owned context and exploration). `vue-tsc --noEmit` clean. Ruff check + format clean on all touched files.
+
+**Security Considerations:**
+- Superuser list lives server-side only; frontend receives a per-user boolean.
+- Matching is on the platform-authenticated identity (`X-Forwarded-Email` injected by Databricks Apps). In dev mode the email is client-chosen (localStorage) — dev mode is already trust-everyone, so superuser adds no new exposure there, but do not configure superusers with `dev_mode=true` on a shared host.
+- Existing tests asserting 403/404 remain valid: default is an empty list, all predicates reduce to the previous expressions.
+
+**Known Limitations:**
+- DB-mode superuser list queries (contexts list, all-explorations list) have no automated DB coverage (suite runs memory mode); logic mirrors the memory path and shares the same helpers.
+- In dev mode, switching the localStorage email requires a page reload for the `is_superuser` flag to refresh (config fetched at bootstrap).
+- QueryTemplatesPanel groups others' private templates under "My templates" for superusers (grouping is by visibility, not ownership) — cosmetic.
+
+**Author:** Claude (AI Assistant)
+
+---

@@ -34,6 +34,7 @@ from graphlagoon.services.warehouse import (
 )
 from graphlagoon.services.snapshot import configure_snapshot_service
 from graphlagoon.middleware.auth import AuthMiddleware, configure_auth, UserProvider
+from graphlagoon.utils.authz import is_superuser
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -250,6 +251,7 @@ def create_frontend_router(
         user_email = getattr(request.state, "user_email", None)
         if user_email:
             config["databricks_user_email"] = user_email
+        config["is_superuser"] = is_superuser(user_email) if user_email else False
 
         return templates.TemplateResponse(
             "index.html",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from uuid import UUID
 from typing import TYPE_CHECKING, Union
@@ -24,10 +26,12 @@ from graphlagoon.models.schemas import (
 from graphlagoon.middleware.auth import get_current_user
 from graphlagoon.utils.sharing import (
     user_has_share_access,
-    user_has_write_access,
     validate_share_email,
 )
+from graphlagoon.utils.authz import can_manage, can_read, can_write, is_superuser
 from graphlagoon.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["explorations"])
 
@@ -35,6 +39,7 @@ router = APIRouter(tags=["explorations"])
 # ---------------------------------------------------------------------------
 # Snapshot helpers
 # ---------------------------------------------------------------------------
+
 
 async def _persist_snapshot(exploration_id: UUID, snapshot: GraphSnapshot) -> None:
     """Compress and save a snapshot file.
@@ -63,8 +68,15 @@ async def _persist_snapshot(exploration_id: UUID, snapshot: GraphSnapshot) -> No
     except (ConnectionError, OSError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
-        logger.error("Unexpected snapshot save error for %s: %s", exploration_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Snapshot storage error: {exc}") from exc
+        logger.error(
+            "Unexpected snapshot save error for %s: %s",
+            exploration_id,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Snapshot storage error: {exc}"
+        ) from exc
 
 
 async def _delete_snapshot_if_exists(state: dict, exploration_id: UUID) -> None:
@@ -91,9 +103,7 @@ def exploration_to_response(
     """Convert Exploration model to response schema."""
     shared_with = [share.shared_with_email for share in exploration.shares]
     state_data = exploration.state
-    has_write = exploration.owner_email == user_email or user_has_write_access(
-        user_email, exploration.shares
-    )
+    has_write = can_write(exploration.owner_email, exploration.shares, user_email)
     return ExplorationResponse(
         id=exploration.id,
         graph_context_id=exploration.graph_context_id,
@@ -128,6 +138,9 @@ async def check_context_access_db(session, context_id: UUID, user_email: str):
 
     if context is None:
         raise HTTPException(status_code=404, detail="Graph context not found")
+
+    if is_superuser(user_email):
+        return context
 
     if context.owner_email == user_email:
         return context
@@ -171,6 +184,9 @@ def check_context_access_memory(
     if context is None:
         raise HTTPException(status_code=404, detail="Graph context not found")
 
+    if is_superuser(user_email):
+        return context
+
     if context.owner_email == user_email:
         return context
 
@@ -212,6 +228,15 @@ async def list_all_explorations(request: Request):
 
         session_maker = get_session_maker()
         async with session_maker() as session:
+            if is_superuser(user_email):
+                result = await session.execute(
+                    select(Exploration)
+                    .options(selectinload(Exploration.shares))
+                    .order_by(Exploration.updated_at.desc())
+                )
+                explorations = result.scalars().all()
+                return [exploration_to_response(e, user_email) for e in explorations]
+
             # Get all context IDs the user has access to (via ownership or context share)
             ctx_share_conditions = [
                 GraphContextShare.shared_with_email == user_email,
@@ -269,24 +294,29 @@ async def list_all_explorations(request: Request):
             return [exploration_to_response(e, user_email) for e in explorations]
     else:
         store = get_memory_store()
-        # Get accessible context IDs (via ownership or context share)
-        accessible_context_ids = set()
-        for ctx in store.graph_contexts.values():
-            if ctx.owner_email == user_email:
-                accessible_context_ids.add(ctx.id)
-            elif user_has_share_access(user_email, ctx.shares):
-                accessible_context_ids.add(ctx.id)
+        if is_superuser(user_email):
+            explorations = list(store.explorations.values())
+        else:
+            # Get accessible context IDs (via ownership or context share)
+            accessible_context_ids = set()
+            for ctx in store.graph_contexts.values():
+                if ctx.owner_email == user_email:
+                    accessible_context_ids.add(ctx.id)
+                elif user_has_share_access(user_email, ctx.shares):
+                    accessible_context_ids.add(ctx.id)
 
-        # Collect explorations: from accessible contexts + directly shared
-        seen_ids = set()
-        explorations = []
-        for e in store.explorations.values():
-            if e.graph_context_id in accessible_context_ids:
-                explorations.append(e)
-                seen_ids.add(e.id)
-            elif e.id not in seen_ids and user_has_share_access(user_email, e.shares):
-                explorations.append(e)
-                seen_ids.add(e.id)
+            # Collect explorations: from accessible contexts + directly shared
+            seen_ids = set()
+            explorations = []
+            for e in store.explorations.values():
+                if e.graph_context_id in accessible_context_ids:
+                    explorations.append(e)
+                    seen_ids.add(e.id)
+                elif e.id not in seen_ids and user_has_share_access(
+                    user_email, e.shares
+                ):
+                    explorations.append(e)
+                    seen_ids.add(e.id)
 
         explorations.sort(key=lambda e: e.updated_at, reverse=True)
         return [exploration_to_response(e, user_email) for e in explorations]
@@ -435,10 +465,8 @@ async def get_exploration(exploration_id: UUID, request: Request):
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
 
-            # Allow if user owns the exploration or has a direct share
-            if exploration.owner_email == user_email or user_has_share_access(
-                user_email, exploration.shares
-            ):
+            # Allow if user owns the exploration, has a direct share, or is superuser
+            if can_read(exploration.owner_email, exploration.shares, user_email):
                 return exploration_to_response(exploration, user_email)
 
             # Otherwise check context-level access
@@ -453,10 +481,8 @@ async def get_exploration(exploration_id: UUID, request: Request):
         if exploration is None:
             raise HTTPException(status_code=404, detail="Exploration not found")
 
-        # Allow if user owns the exploration or has a direct share
-        if exploration.owner_email == user_email or user_has_share_access(
-            user_email, exploration.shares
-        ):
+        # Allow if user owns the exploration, has a direct share, or is superuser
+        if can_read(exploration.owner_email, exploration.shares, user_email):
             return exploration_to_response(exploration, user_email)
 
         # Otherwise check context-level access
@@ -488,10 +514,7 @@ async def update_exploration(
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
 
-            has_write = exploration.owner_email == user_email or user_has_write_access(
-                user_email, exploration.shares
-            )
-            if not has_write:
+            if not can_write(exploration.owner_email, exploration.shares, user_email):
                 raise HTTPException(
                     status_code=403,
                     detail="No write access to update exploration",
@@ -538,10 +561,7 @@ async def update_exploration(
         if exploration is None:
             raise HTTPException(status_code=404, detail="Exploration not found")
 
-        has_write = exploration.owner_email == user_email or user_has_write_access(
-            user_email, exploration.shares
-        )
-        if not has_write:
+        if not can_write(exploration.owner_email, exploration.shares, user_email):
             raise HTTPException(
                 status_code=403,
                 detail="No write access to update exploration",
@@ -601,7 +621,7 @@ async def delete_exploration(exploration_id: UUID, request: Request):
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
 
-            if exploration.owner_email != user_email:
+            if not can_manage(exploration.owner_email, user_email):
                 raise HTTPException(status_code=403, detail="Only owner can delete")
 
             state = exploration.state or {}
@@ -616,7 +636,7 @@ async def delete_exploration(exploration_id: UUID, request: Request):
         if exploration is None:
             raise HTTPException(status_code=404, detail="Exploration not found")
 
-        if exploration.owner_email != user_email:
+        if not can_manage(exploration.owner_email, user_email):
             raise HTTPException(status_code=403, detail="Only owner can delete")
 
         state = exploration.state or {}
@@ -652,9 +672,7 @@ async def get_exploration_snapshot(exploration_id: UUID, request: Request):
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
 
-            if exploration.owner_email != user_email and not user_has_share_access(
-                user_email, exploration.shares
-            ):
+            if not can_read(exploration.owner_email, exploration.shares, user_email):
                 await check_context_access_db(
                     session, exploration.graph_context_id, user_email
                 )
@@ -666,17 +684,13 @@ async def get_exploration_snapshot(exploration_id: UUID, request: Request):
         if exploration is None:
             raise HTTPException(status_code=404, detail="Exploration not found")
 
-        if exploration.owner_email != user_email and not user_has_share_access(
-            user_email, exploration.shares
-        ):
+        if not can_read(exploration.owner_email, exploration.shares, user_email):
             check_context_access_memory(exploration.graph_context_id, user_email)
 
         state = exploration.state or {}
 
     if not state.get("has_snapshot"):
-        raise HTTPException(
-            status_code=404, detail="This exploration has no snapshot"
-        )
+        raise HTTPException(status_code=404, detail="This exploration has no snapshot")
 
     from graphlagoon.services.snapshot import get_snapshot_service, decompress_snapshot
 
@@ -717,7 +731,7 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
 
-            if exploration.owner_email != user_email:
+            if not can_manage(exploration.owner_email, user_email):
                 raise HTTPException(status_code=403, detail="Only owner can share")
 
             # Validate email/wildcard
@@ -751,7 +765,7 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
         if exploration is None:
             raise HTTPException(status_code=404, detail="Exploration not found")
 
-        if exploration.owner_email != user_email:
+        if not can_manage(exploration.owner_email, user_email):
             raise HTTPException(status_code=403, detail="Only owner can share")
 
         # Validate email/wildcard
@@ -790,7 +804,7 @@ async def unshare_exploration(exploration_id: UUID, email: str, request: Request
                     detail="Exploration not found",
                 )
 
-            if exploration.owner_email != user_email:
+            if not can_manage(exploration.owner_email, user_email):
                 raise HTTPException(
                     status_code=403,
                     detail="Only owner can manage sharing",
@@ -817,7 +831,7 @@ async def unshare_exploration(exploration_id: UUID, email: str, request: Request
                 detail="Exploration not found",
             )
 
-        if exploration.owner_email != user_email:
+        if not can_manage(exploration.owner_email, user_email):
             raise HTTPException(
                 status_code=403,
                 detail="Only owner can manage sharing",

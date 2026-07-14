@@ -61,6 +61,14 @@ class Settings(BaseSettings):
         "When set, users can share with *@domain for listed domains.",
     )
 
+    # Superusers
+    superuser_emails: Optional[str] = Field(
+        default=None,
+        description="Comma-separated list of emails granted superuser access "
+        "(full read/write/delete/share on all contexts, explorations, and "
+        "query templates). E.g. 'admin@company.com,ops@company.com'.",
+    )
+
     # Frontend defaults
     default_behaviors: Optional[str] = Field(
         default=None,
@@ -229,6 +237,15 @@ class Settings(BaseSettings):
                 d.strip().lower()
                 for d in self.allowed_share_domains.split(",")
                 if d.strip()
+            ]
+        return []
+
+    @property
+    def superuser_email_list(self) -> list[str]:
+        """Get lowercased list of superuser emails."""
+        if self.superuser_emails:
+            return [
+                e.strip().lower() for e in self.superuser_emails.split(",") if e.strip()
             ]
         return []
 

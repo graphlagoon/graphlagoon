@@ -360,3 +360,67 @@ test.describe('Cross-user visibility', () => {
     await expect(deleteButtons).toHaveCount(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Superuser
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixture simulating a superuser: the backend injects is_superuser: true into
+ * the config and returns has_write_access: true on every item.
+ */
+const superuserTest = base.extend<{ superuserPage: Page }>({
+  superuserPage: async ({ page }, use) => {
+    await page.addInitScript(() => {
+      (window as any).__GRAPH_LAGOON_CONFIG__ = {
+        dev_mode: true,
+        database_enabled: true,
+        allowed_share_domains: ['company.com'],
+        is_superuser: true,
+      };
+    });
+    await page.addInitScript(() => {
+      localStorage.setItem('userEmail', 'admin@test.com');
+    });
+    await setupAPIMocks(page);
+    await use(page);
+  },
+});
+
+superuserTest.describe('Superuser', () => {
+  superuserTest('sees Share and Delete on a non-owned context', async ({ superuserPage: page }) => {
+    const foreignContext = {
+      ...MOCK_CONTEXT,
+      owner_email: OTHER_USER,
+      shared_with: [],
+      has_write_access: true, // backend reports write access for superusers
+    };
+    await seedContexts(page, [foreignContext]);
+    await page.goto('/contexts');
+    await expect(page.getByTestId('contexts-list')).toBeVisible();
+
+    // Superuser gets owner-level buttons on someone else's context
+    await expect(page.getByRole('button', { name: 'Share' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
+    // Still badged as non-owned, with write access
+    await expect(page.getByText('Read & Write')).toBeVisible();
+  });
+
+  superuserTest('sees Share and Delete on a non-owned exploration', async ({ superuserPage: page }) => {
+    const foreignExploration = {
+      ...MOCK_EXPLORATION,
+      owner_email: OTHER_USER,
+      shared_with: [],
+      has_write_access: true,
+    };
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedExplorations(page, [foreignExploration]);
+    await page.goto('/explorations');
+    await expect(page.getByText(MOCK_EXPLORATION.title)).toBeVisible();
+
+    await expect(page.getByRole('button', { name: 'Share' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
+    // Badge shows the real owner
+    await expect(page.getByText(OTHER_USER)).toBeVisible();
+  });
+});
