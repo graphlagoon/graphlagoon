@@ -393,7 +393,10 @@ export function useGraphCamera(
     camera.position.add(offset);
     controls.target.add(offset);
     controls.update();
-    callbacks.updateVisuals();
+    // No updateVisuals() here: appearance doesn't depend on camera position, the render
+    // loop redraws every frame anyway, and a full node+link recompute per mousemove is
+    // what made panning lag on graphs with tens of thousands of edges. Edge-lens resync
+    // is handled by the camera-idle detector above.
   }
 
   /**

@@ -264,7 +264,7 @@ describe('useGraphCamera — map-style pan', () => {
       expect(controls.target.x).not.toBe(0)
     })
 
-    it('redraws after a pan', () => {
+    it('updates controls without triggering a full visual recompute', () => {
       const camera = makeOrthographicCamera(1)
       applyPatchedOrthoProjection(camera)
       const { graphCamera, controls, callbacks } = setup(camera)
@@ -272,7 +272,10 @@ describe('useGraphCamera — map-style pan', () => {
       graphCamera.applyMapStylePan(10, 10)
 
       expect(controls.update).toHaveBeenCalled()
-      expect(callbacks.updateVisuals).toHaveBeenCalled()
+      // updateVisuals is O(nodes + links) and mousemove fires faster than rAF —
+      // calling it per pan event made panning lag on graphs with tens of
+      // thousands of edges. Pan must only move the camera.
+      expect(callbacks.updateVisuals).not.toHaveBeenCalled()
     })
   })
 })
