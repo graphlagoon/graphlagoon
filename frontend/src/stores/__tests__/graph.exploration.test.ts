@@ -85,6 +85,41 @@ describe('exploration state serialization', () => {
       expect(state.layout_algorithm).toBe('circular')
     })
 
+    it('captures the new layout modes (ego, hive)', () => {
+      const store = useGraphStore()
+      store.setLayoutAlgorithm('ego')
+
+      const state = store.getExplorationState()
+      expect(state.layout_algorithm).toBe('ego')
+    })
+
+    it('captures layout_mode_config with per-mode settings', () => {
+      const store = useGraphStore()
+      store.updateLayoutModeConfig({
+        ego: { focusNodeId: 'acct-42', direction: 'out', maxHops: 2 },
+        hive: { positionKey: 'prop:risk_score', scale: 'log' },
+      })
+
+      const state = store.getExplorationState()
+      expect(state.layout_mode_config?.ego.focusNodeId).toBe('acct-42')
+      expect(state.layout_mode_config?.ego.direction).toBe('out')
+      expect(state.layout_mode_config?.ego.maxHops).toBe(2)
+      expect(state.layout_mode_config?.hive.positionKey).toBe('prop:risk_score')
+      expect(state.layout_mode_config?.hive.scale).toBe('log')
+      // Untouched settings keep their defaults
+      expect(state.layout_mode_config?.ego.ringSpacing).toBe(60)
+      expect(state.layout_mode_config?.hive.axisKey).toBe('node_type')
+    })
+
+    it('serializes a snapshot, not the live config object', () => {
+      const store = useGraphStore()
+      const state = store.getExplorationState()
+
+      store.updateLayoutModeConfig({ ego: { maxHops: 5 } })
+
+      expect(state.layout_mode_config?.ego.maxHops).toBeNull()
+    })
+
     it('captures graph_query when set', () => {
       const store = useGraphStore()
       store.setGraphQuery('SELECT * FROM nodes')

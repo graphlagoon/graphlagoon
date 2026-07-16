@@ -33,6 +33,8 @@ function makeCtx(overrides: Partial<AppearanceContext> = {}): AppearanceContext 
     propFilterHiddenNodeIds: null,
     propFilterHiddenEdgeIds: null,
 
+    layoutHiddenNodeIds: null,
+
     tableVisibleNodeIds: null,
     tableVisibleEdgeIds: null,
 

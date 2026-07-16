@@ -26,6 +26,11 @@ export function useGraphLayout(
   },
   getLayoutExecution?: () => LayoutExecutionParams,
   getIs2D?: () => boolean,
+  /**
+   * When true, the active layout mode owns the node pins (e.g. hive plot's fixed
+   * analytic positions) — start/reheat/scramble must not unpin or perturb them.
+   */
+  getStaticLayout?: () => boolean,
 ) {
   const { isLayoutRunning, layoutStabilized, initialLayoutDone } = state;
 
@@ -41,18 +46,20 @@ export function useGraphLayout(
     graph3d.cooldownTicks(exec?.cooldownTicks ?? 100);
     graph3d.ticksPerFrame(exec?.ticksPerFrame ?? 1);
 
-    const data = graph3d.graphData();
-    const is2D = getIs2D?.() ?? false;
-    data.nodes.forEach((node: GraphNode) => {
-      node.fx = null;
-      node.fy = null;
-      if (is2D) {
-        node.z = 0;
-        node.fz = 0;
-      } else {
-        node.fz = null;
-      }
-    });
+    if (!(getStaticLayout?.() ?? false)) {
+      const data = graph3d.graphData();
+      const is2D = getIs2D?.() ?? false;
+      data.nodes.forEach((node: GraphNode) => {
+        node.fx = null;
+        node.fy = null;
+        if (is2D) {
+          node.z = 0;
+          node.fz = 0;
+        } else {
+          node.fz = null;
+        }
+      });
+    }
 
     graph3d.d3ReheatSimulation();
   }
@@ -85,6 +92,11 @@ export function useGraphLayout(
   function reheatLayout() {
     const graph3d = getGraph3d();
     if (!graph3d) return;
+    if (getStaticLayout?.() ?? false) {
+      // Static positions can't be perturbed — a plain start keeps flags consistent
+      startLayout();
+      return;
+    }
     isLayoutRunning.value = true;
     layoutStabilized.value = false;
 
@@ -126,6 +138,7 @@ export function useGraphLayout(
   function scrambleLayout() {
     const graph3d = getGraph3d();
     if (!graph3d) return;
+    if (getStaticLayout?.() ?? false) return;
 
     const data = graph3d.graphData();
     const perturbationStrength = 150;

@@ -140,6 +140,10 @@ export interface AppearanceContext {
   propFilterHiddenNodeIds: Set<string> | null;
   propFilterHiddenEdgeIds: Set<string> | null;
 
+  // Layout-mode hiding (e.g. ego layout's maxHops cutoff). Additive with all
+  // other hide sources — a node hidden by a filter stays hidden here too.
+  layoutHiddenNodeIds: Set<string> | null;
+
   // Table filter (DataTablePanel sync). KEEP-sets: null = no table filter;
   // non-null = only ids in the set stay visible. Applied visually (like
   // type/search/property filters) so table filtering never rebuilds the graph
@@ -214,6 +218,7 @@ export function computeNodeAppearance(
   const isTypeHidden = ctx.hasNodeTypeFilter && !ctx.nodeTypeFilterSet.has(nodeType);
   const isSearchHidden = ctx.searchHiddenIds?.has(nodeId) ?? false;
   const isPropFilterHidden = ctx.propFilterHiddenNodeIds?.has(nodeId) ?? false;
+  const isLayoutHidden = ctx.layoutHiddenNodeIds?.has(nodeId) ?? false;
   const isFocusHidden =
     ctx.edgeLensMode === 'hide' &&
     ctx.focusedNodeIds !== null &&
@@ -221,7 +226,7 @@ export function computeNodeAppearance(
   // Table filter is a KEEP-set; clusters are exempt (set holds real node ids)
   const isTableHidden =
     !isCluster && ctx.tableVisibleNodeIds !== null && !ctx.tableVisibleNodeIds.has(nodeId);
-  const hidden = isTypeHidden || isSearchHidden || isPropFilterHidden || isFocusHidden || isTableHidden;
+  const hidden = isTypeHidden || isSearchHidden || isPropFilterHidden || isLayoutHidden || isFocusHidden || isTableHidden;
 
   // Metric-based size mapping (skip for clusters)
   if (!isCluster && ctx.nodeSizeMetric) {

@@ -41,7 +41,7 @@ export function createExplorationState(overrides: Partial<ExplorationState> = {}
       edgePropertyFilters: [],
     },
     viewport: { zoom: 1, center_x: 0, center_y: 0 },
-    layout_algorithm: 'force-atlas-2',
+    layout_algorithm: 'force',
     ...overrides,
   }
 }

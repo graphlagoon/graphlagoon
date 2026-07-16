@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
+import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
+import type { LayoutAlgorithm } from '@/types/graph';
 import { Play, Square, Flame, Shuffle, ChevronDown, ChevronRight, HelpCircle, X } from 'lucide-vue-next';
 
 const graphStore = useGraphStore();
+const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
 
 // Help modal state
@@ -31,6 +34,97 @@ function toggleLayout() {
     emit('start-layout');
   }
 }
+
+// ---------------------------------------------------------------------------
+// Layout mode selector
+// ---------------------------------------------------------------------------
+
+const LAYOUT_OPTIONS: { id: LayoutAlgorithm; label: string; icon: string }[] = [
+  { id: 'force', label: 'Force', icon: '🌀' },
+  { id: 'ego', label: 'Ego Network', icon: '🎯' },
+  { id: 'hive', label: 'Hive Plot', icon: '🕸️' },
+  { id: 'hierarchical', label: 'Hierarchical', icon: '🌳' },
+];
+
+const layoutMode = computed(() => graphStore.layoutAlgorithm);
+const egoConfig = computed(() => graphStore.layoutModeConfig.ego);
+const hiveConfig = computed(() => graphStore.layoutModeConfig.hive);
+
+function selectLayout(mode: LayoutAlgorithm) {
+  graphStore.setLayoutAlgorithm(mode);
+}
+
+// ---------------------------------------------------------------------------
+// Ego mode
+// ---------------------------------------------------------------------------
+
+const egoFocusLabel = computed(() => {
+  const id = egoConfig.value.focusNodeId;
+  if (!id) return null;
+  return id.length > 20 ? id.slice(0, 20) + '...' : id;
+});
+
+function useSelectedAsFocus() {
+  const selected = graphStore.selectedNode;
+  if (!selected) return;
+  graphStore.updateLayoutModeConfig({ ego: { focusNodeId: selected.node_id } });
+}
+
+const egoUsesAllEdgeTypes = computed(() => egoConfig.value.edgeTypes === null);
+
+function toggleEgoAllEdgeTypes(checked: boolean) {
+  graphStore.updateLayoutModeConfig({ ego: { edgeTypes: checked ? null : [...graphStore.edgeTypes] } });
+}
+
+function toggleEgoEdgeType(edgeType: string, checked: boolean) {
+  const current = egoConfig.value.edgeTypes ?? [...graphStore.edgeTypes];
+  const next = checked ? [...new Set([...current, edgeType])] : current.filter((t) => t !== edgeType);
+  graphStore.updateLayoutModeConfig({ ego: { edgeTypes: next } });
+}
+
+// Slider convention: 0 = no hop limit (∞)
+function setEgoMaxHops(raw: number) {
+  graphStore.updateLayoutModeConfig({ ego: { maxHops: raw === 0 ? null : raw } });
+}
+
+// ---------------------------------------------------------------------------
+// Hive mode
+// ---------------------------------------------------------------------------
+
+const hiveAxisCategoryCount = computed(() => {
+  const key = hiveConfig.value.axisKey;
+  if (key === 'node_type') return graphStore.nodeTypes.length;
+  if (key === 'community') return communityStore.communityCount;
+  const propName = key.startsWith('prop:') ? key.slice(5) : key;
+  const values = new Set<string>();
+  for (const node of graphStore.nodes) {
+    const value = node.properties?.[propName];
+    values.add(value === null || value === undefined ? '(missing)' : String(value));
+  }
+  return values.size;
+});
+
+const hiveOthersCount = computed(() =>
+  Math.max(0, hiveAxisCategoryCount.value - hiveConfig.value.maxAxes)
+);
+
+// ---------------------------------------------------------------------------
+// Hierarchical mode
+// ---------------------------------------------------------------------------
+
+const hierarchicalConfig = computed(() => graphStore.layoutModeConfig.hierarchical);
+
+const hierarchicalUsesAllEdgeTypes = computed(() => hierarchicalConfig.value.edgeTypes === null);
+
+function toggleHierarchicalAllEdgeTypes(checked: boolean) {
+  graphStore.updateLayoutModeConfig({ hierarchical: { edgeTypes: checked ? null : [...graphStore.edgeTypes] } });
+}
+
+function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
+  const current = hierarchicalConfig.value.edgeTypes ?? [...graphStore.edgeTypes];
+  const next = checked ? [...new Set([...current, edgeType])] : current.filter((t) => t !== edgeType);
+  graphStore.updateLayoutModeConfig({ hierarchical: { edgeTypes: next } });
+}
 </script>
 
 <template>
@@ -44,7 +138,326 @@ function toggleLayout() {
       ><HelpCircle :size="14" /></button>
     </div>
 
-    <div class="fa2-controls">
+    <!-- Layout mode selector -->
+    <div class="layout-selector">
+      <button
+        v-for="opt in LAYOUT_OPTIONS"
+        :key="opt.id"
+        class="layout-option"
+        :class="{ active: layoutMode === opt.id }"
+        :title="opt.label"
+        :data-testid="`layout-option-${opt.id}`"
+        @click="selectLayout(opt.id)"
+      >
+        <span class="layout-icon">{{ opt.icon }}</span>
+        <span class="layout-label">{{ opt.label }}</span>
+      </button>
+    </div>
+
+    <div class="settings-divider"></div>
+
+    <!-- Ego network controls -->
+    <div v-if="layoutMode === 'ego'" class="settings-group">
+      <p class="settings-group-title">Ego Network</p>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Focus node</span>
+          <span class="setting-value" data-testid="ego-focus-label">{{ egoFocusLabel ?? '—' }}</span>
+        </label>
+        <button
+          class="apply-btn"
+          :disabled="!graphStore.selectedNode"
+          data-testid="ego-use-selected-btn"
+          @click="useSelectedAsFocus"
+        >
+          Use selected node
+        </button>
+        <span v-if="!egoConfig.focusNodeId" class="setting-hint" data-testid="ego-no-focus-hint">
+          Select a node in the graph, then click "Use selected node" (or right-click a node → "Ego layout from here").
+        </span>
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Direction</span>
+        </label>
+        <select
+          class="setting-select"
+          data-testid="ego-direction-select"
+          :value="egoConfig.direction"
+          @change="graphStore.updateLayoutModeConfig({ ego: { direction: ($event.target as HTMLSelectElement).value as 'both' | 'out' | 'in' } })"
+        >
+          <option value="both">Both directions</option>
+          <option value="out">Outgoing (where it goes)</option>
+          <option value="in">Incoming (where it comes from)</option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <label class="checkbox-item">
+          <input
+            type="checkbox"
+            data-testid="ego-all-edge-types"
+            :checked="egoUsesAllEdgeTypes"
+            @change="toggleEgoAllEdgeTypes(($event.target as HTMLInputElement).checked)"
+          />
+          <span>Traverse all edge types</span>
+        </label>
+        <template v-if="!egoUsesAllEdgeTypes">
+          <label v-for="et in graphStore.edgeTypes" :key="et" class="checkbox-item edge-type-item">
+            <input
+              type="checkbox"
+              :checked="(egoConfig.edgeTypes ?? []).includes(et)"
+              @change="toggleEgoEdgeType(et, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>{{ et }}</span>
+          </label>
+        </template>
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Max hops</span>
+          <span class="setting-value">{{ egoConfig.maxHops ?? '∞' }}</span>
+        </label>
+        <span class="setting-hint">Hide nodes farther than this many hops (∞ = show all)</span>
+        <input
+          type="range"
+          min="0"
+          max="6"
+          step="1"
+          data-testid="ego-max-hops"
+          :value="egoConfig.maxHops ?? 0"
+          @input="setEgoMaxHops(parseInt(($event.target as HTMLInputElement).value))"
+        />
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Ring spacing</span>
+          <span class="setting-value">{{ egoConfig.ringSpacing }}</span>
+        </label>
+        <input
+          type="range"
+          min="20"
+          max="200"
+          step="10"
+          :value="egoConfig.ringSpacing"
+          @input="graphStore.updateLayoutModeConfig({ ego: { ringSpacing: parseInt(($event.target as HTMLInputElement).value) } })"
+        />
+      </div>
+    </div>
+
+    <!-- Hive plot controls -->
+    <div v-if="layoutMode === 'hive'" class="settings-group">
+      <p class="settings-group-title">Hive Plot</p>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Axes by</span>
+        </label>
+        <select
+          class="setting-select"
+          data-testid="hive-axis-select"
+          :value="hiveConfig.axisKey"
+          @change="graphStore.updateLayoutModeConfig({ hive: { axisKey: ($event.target as HTMLSelectElement).value } })"
+        >
+          <option value="node_type">Node type</option>
+          <option value="community">Community (Louvain)</option>
+          <option v-for="p in graphStore.categoricalNodeProperties" :key="p.name" :value="`prop:${p.name}`">
+            {{ p.display_name || p.name }}
+          </option>
+        </select>
+        <span
+          v-if="hiveConfig.axisKey === 'community' && communityStore.communityMap.size === 0"
+          class="setting-hint"
+          data-testid="hive-no-communities-hint"
+        >
+          No communities detected yet — run community detection in the Communities panel first.
+        </span>
+        <span v-if="hiveOthersCount > 0" class="setting-hint" data-testid="hive-others-hint">
+          {{ hiveOthersCount }} categories grouped into "Others" (max {{ hiveConfig.maxAxes }} axes)
+        </span>
+        <span v-if="hiveAxisCategoryCount <= 1" class="setting-hint">
+          Only one category — try a different axis attribute for a readable hive plot.
+        </span>
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Position by</span>
+        </label>
+        <select
+          class="setting-select"
+          data-testid="hive-position-select"
+          :value="hiveConfig.positionKey"
+          @change="graphStore.updateLayoutModeConfig({ hive: { positionKey: ($event.target as HTMLSelectElement).value } })"
+        >
+          <option value="degree">Degree (connections)</option>
+          <option v-for="p in graphStore.numericNodeProperties" :key="p.name" :value="`prop:${p.name}`">
+            {{ p.display_name || p.name }}
+          </option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Scale</span>
+        </label>
+        <select
+          class="setting-select"
+          data-testid="hive-scale-select"
+          :value="hiveConfig.scale"
+          @change="graphStore.updateLayoutModeConfig({ hive: { scale: ($event.target as HTMLSelectElement).value as 'rank' | 'linear' | 'log' } })"
+        >
+          <option value="rank">Rank (uniform spread)</option>
+          <option value="linear">Linear</option>
+          <option value="log">Log (heavy-tailed values)</option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Max axes</span>
+          <span class="setting-value">{{ hiveConfig.maxAxes }}</span>
+        </label>
+        <input
+          type="range"
+          min="2"
+          max="12"
+          step="1"
+          :value="hiveConfig.maxAxes"
+          @input="graphStore.updateLayoutModeConfig({ hive: { maxAxes: parseInt(($event.target as HTMLInputElement).value) } })"
+        />
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Radius (inner / outer)</span>
+          <span class="setting-value">{{ hiveConfig.innerRadius }} / {{ hiveConfig.outerRadius }}</span>
+        </label>
+        <input
+          type="range"
+          min="0"
+          max="150"
+          step="10"
+          :value="hiveConfig.innerRadius"
+          @input="graphStore.updateLayoutModeConfig({ hive: { innerRadius: parseInt(($event.target as HTMLInputElement).value) } })"
+        />
+        <input
+          type="range"
+          min="150"
+          max="800"
+          step="25"
+          :value="hiveConfig.outerRadius"
+          @input="graphStore.updateLayoutModeConfig({ hive: { outerRadius: parseInt(($event.target as HTMLInputElement).value) } })"
+        />
+      </div>
+
+      <p class="layout-help">
+        Deterministic layout: same graph + same settings always produce the same picture —
+        hive plots of different cases are directly comparable.
+      </p>
+    </div>
+
+    <!-- Hierarchical controls -->
+    <div v-if="layoutMode === 'hierarchical'" class="settings-group">
+      <p class="settings-group-title">Hierarchical</p>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Direction</span>
+        </label>
+        <select
+          class="setting-select"
+          data-testid="hierarchical-direction-select"
+          :value="hierarchicalConfig.direction"
+          @change="graphStore.updateLayoutModeConfig({ hierarchical: { direction: ($event.target as HTMLSelectElement).value as 'td' | 'lr' } })"
+        >
+          <option value="td">Top → down</option>
+          <option value="lr">Left → right</option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Flow</span>
+        </label>
+        <span class="setting-hint">Which way levels descend — 'along edges' follows money flow (src → dst)</span>
+        <select
+          class="setting-select"
+          data-testid="hierarchical-traversal-select"
+          :value="hierarchicalConfig.traversal"
+          @change="graphStore.updateLayoutModeConfig({ hierarchical: { traversal: ($event.target as HTMLSelectElement).value as 'both' | 'out' | 'in' } })"
+        >
+          <option value="out">Along edges (src → dst)</option>
+          <option value="in">Against edges (dst → src)</option>
+          <option value="both">Ignore direction</option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <label class="checkbox-item">
+          <input
+            type="checkbox"
+            data-testid="hierarchical-all-edge-types"
+            :checked="hierarchicalUsesAllEdgeTypes"
+            @change="toggleHierarchicalAllEdgeTypes(($event.target as HTMLInputElement).checked)"
+          />
+          <span>Use all edge types</span>
+        </label>
+        <template v-if="!hierarchicalUsesAllEdgeTypes">
+          <label v-for="et in graphStore.edgeTypes" :key="et" class="checkbox-item edge-type-item">
+            <input
+              type="checkbox"
+              :checked="(hierarchicalConfig.edgeTypes ?? []).includes(et)"
+              @change="toggleHierarchicalEdgeType(et, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>{{ et }}</span>
+          </label>
+        </template>
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Level spacing</span>
+          <span class="setting-value">{{ hierarchicalConfig.levelSpacing }}</span>
+        </label>
+        <input
+          type="range"
+          min="40"
+          max="400"
+          step="20"
+          :value="hierarchicalConfig.levelSpacing"
+          @input="graphStore.updateLayoutModeConfig({ hierarchical: { levelSpacing: parseInt(($event.target as HTMLInputElement).value) } })"
+        />
+      </div>
+
+      <div class="setting-item">
+        <label>
+          <span class="setting-label">Node spacing</span>
+          <span class="setting-value">{{ hierarchicalConfig.nodeSpacing }}</span>
+        </label>
+        <input
+          type="range"
+          min="15"
+          max="150"
+          step="5"
+          :value="hierarchicalConfig.nodeSpacing"
+          @input="graphStore.updateLayoutModeConfig({ hierarchical: { nodeSpacing: parseInt(($event.target as HTMLInputElement).value) } })"
+        />
+      </div>
+
+      <p class="layout-help">
+        Layers by distance from source nodes (no incoming edges). Money-laundering
+        layering shows up as long chains; cycles land on the level where they were
+        first reached.
+      </p>
+    </div>
+
+    <!-- Simulation controls (not applicable to the fixed-position hive plot) -->
+    <div v-if="layoutMode === 'force'" class="fa2-controls">
         <button
           class="run-btn"
           :class="{ running: isLayoutRunning }"
@@ -69,10 +482,10 @@ function toggleLayout() {
         </button>
       </div>
 
-      <div class="settings-divider"></div>
+      <div v-if="layoutMode === 'force'" class="settings-divider"></div>
 
       <!-- Basic controls with friendly names -->
-      <div class="settings-group">
+      <div v-if="layoutMode === 'force'" class="settings-group">
         <div class="setting-item">
           <label>
             <span class="setting-label">Repulsion</span>
@@ -147,10 +560,10 @@ function toggleLayout() {
         <!-- Blower + Clipping Plane moved to BehaviorPanel (they are behaviors, not layout) -->
       </div>
 
-      <div class="settings-divider"></div>
+      <div v-if="layoutMode === 'force'" class="settings-divider"></div>
 
       <!-- Execution controls with friendly names -->
-      <div class="settings-group">
+      <div v-if="layoutMode === 'force'" class="settings-group">
         <div class="setting-item">
           <label>
             <span class="setting-label">Layout Iterations</span>
@@ -200,10 +613,10 @@ function toggleLayout() {
         </div>
       </div>
 
-      <div class="settings-divider"></div>
+      <div v-if="layoutMode === 'force'" class="settings-divider"></div>
 
-      <!-- Layout by Edge Type -->
-      <div class="settings-group">
+      <!-- Layout by Edge Type (force mode only — it would fight other modes' constraints) -->
+      <div v-if="layoutMode === 'force'" class="settings-group">
         <p class="settings-group-title">Layout by Edge Type</p>
 
         <div class="setting-item">
@@ -252,15 +665,15 @@ function toggleLayout() {
 
       <div class="settings-divider"></div>
 
-      <!-- Advanced toggle -->
-      <div class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+      <!-- Advanced toggle (simulation params — not applicable to hive) -->
+      <div v-if="layoutMode === 'force'" class="advanced-toggle" @click="showAdvanced = !showAdvanced">
         <ChevronDown v-if="showAdvanced" :size="12" class="toggle-icon" />
         <ChevronRight v-else :size="12" class="toggle-icon" />
         <span class="advanced-label">Advanced</span>
       </div>
 
       <!-- Advanced settings -->
-      <template v-if="showAdvanced">
+      <template v-if="showAdvanced && layoutMode === 'force'">
         <div class="settings-group">
           <p class="settings-group-title">Simulation</p>
 
@@ -618,6 +1031,11 @@ function toggleLayout() {
 
 .layout-label {
   flex: 1;
+}
+
+.edge-type-item {
+  margin-left: 18px;
+  font-size: 11px;
 }
 
 .fa2-controls {

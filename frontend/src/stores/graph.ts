@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed, nextTick, toRaw } from 'vue';
+import { ref, computed, nextTick, toRaw, watch } from 'vue';
 import { buildSearchText } from '@/utils/searchText';
 import type {
   Node,
@@ -9,7 +9,8 @@ import type {
   FilterState,
   ViewportState,
   LayoutAlgorithm,
-  Layout3DEngine,
+  LayoutModeConfig,
+  PropertyColumn,
   SubgraphRequest,
   ExpandRequest,
   ExplorationState,
@@ -67,6 +68,34 @@ const DEFAULT_BEHAVIORS = {
 };
 
 export type GraphBehaviors = typeof DEFAULT_BEHAVIORS;
+
+/** Fresh defaults per call — nested objects must never be shared by reference. */
+export function defaultLayoutModeConfig(): LayoutModeConfig {
+  return {
+    ego: {
+      focusNodeId: null,
+      direction: 'both',
+      edgeTypes: null,
+      maxHops: null,
+      ringSpacing: 60,
+    },
+    hive: {
+      axisKey: 'node_type',
+      maxAxes: 6,
+      positionKey: 'degree',
+      scale: 'rank',
+      innerRadius: 40,
+      outerRadius: 300,
+    },
+    hierarchical: {
+      direction: 'td',
+      traversal: 'out',
+      edgeTypes: null,
+      levelSpacing: 120,
+      nodeSpacing: 40,
+    },
+  };
+}
 
 /**
  * Merge an untrusted `default_behaviors` dict into `target`, in place.
@@ -257,26 +286,10 @@ export const useGraphStore = defineStore('graph', () => {
     center_x: 0,
     center_y: 0,
   });
-  const layoutAlgorithm = ref<LayoutAlgorithm>('force-atlas-2');
-  const layout3DEngine = ref<Layout3DEngine>('d3-force');
+  const layoutAlgorithm = ref<LayoutAlgorithm>('force');
 
-  // Force Atlas 2 settings
-  const fa2Settings = ref({
-    gravity: 1,
-    scalingRatio: 2,
-    strongGravityMode: false,
-    slowDown: 1,
-    linLogMode: false,
-    outboundAttractionDistribution: false,
-    adjustSizes: false,
-    edgeWeightInfluence: 1,
-    // Property to use as edge weight (null = uniform weight)
-    // Can be 'prop:propertyName' for edge metadata or 'metric:metricId' for computed metric
-    edgeWeightProperty: null as string | null,
-    // Property to use as node size when adjustSizes is enabled (null = uniform size)
-    // Can be 'prop:propertyName' for node metadata or 'metric:metricId' for computed metric
-    nodeSizeProperty: null as string | null,
-  });
+  // Per-layout-mode parameters (persisted with the exploration)
+  const layoutModeConfig = ref<LayoutModeConfig>(defaultLayoutModeConfig());
 
 
   // 3D Force-Directed layout settings (D3-Force only)
@@ -415,6 +428,22 @@ export const useGraphStore = defineStore('graph', () => {
     edges.value.forEach((e) => types.add(e.relationship_type));
     return Array.from(types).sort();
   });
+
+  const NUMERIC_DATA_TYPES = ['int', 'integer', 'bigint', 'smallint', 'tinyint', 'float', 'double', 'decimal', 'numeric', 'real', 'long', 'number'];
+
+  function isNumericDataType(dataType: string): boolean {
+    const dt = dataType.toLowerCase();
+    return NUMERIC_DATA_TYPES.some((t) => dt.startsWith(t));
+  }
+
+  // Node property columns split by data type (drives hive plot axis/position selectors)
+  const numericNodeProperties = computed<PropertyColumn[]>(() =>
+    (currentContext.value?.node_properties ?? []).filter((p) => isNumericDataType(p.data_type))
+  );
+
+  const categoricalNodeProperties = computed<PropertyColumn[]>(() =>
+    (currentContext.value?.node_properties ?? []).filter((p) => !isNumericDataType(p.data_type))
+  );
 
   // Multi-edge detection: edges with same src/dst pair but different edge_id
   const multiEdgeStats = computed(() => {
@@ -1375,10 +1404,25 @@ export const useGraphStore = defineStore('graph', () => {
 
   function setLayoutAlgorithm(algorithm: LayoutAlgorithm) {
     layoutAlgorithm.value = algorithm;
+    // Community radial layout and non-force layout modes are both global positional
+    // constraints — they must not stack (see the reverse-direction watch below).
+    if (algorithm !== 'force') {
+      const communityStore = useCommunityStore();
+      communityStore.radialLayoutEnabled = false;
+    }
   }
 
-  function setLayout3DEngine(engine: Layout3DEngine) {
-    layout3DEngine.value = engine;
+  /** Merge partial per-mode config (e.g. { ego: { maxHops: 2 } }) into layoutModeConfig. */
+  function updateLayoutModeConfig(partial: {
+    ego?: Partial<LayoutModeConfig['ego']>;
+    hive?: Partial<LayoutModeConfig['hive']>;
+    hierarchical?: Partial<LayoutModeConfig['hierarchical']>;
+  }) {
+    layoutModeConfig.value = {
+      ego: { ...layoutModeConfig.value.ego, ...(partial.ego ?? {}) },
+      hive: { ...layoutModeConfig.value.hive, ...(partial.hive ?? {}) },
+      hierarchical: { ...layoutModeConfig.value.hierarchical, ...(partial.hierarchical ?? {}) },
+    };
   }
 
   function updateForce3DSettings(settings: Partial<typeof force3DSettings.value>) {
@@ -1409,10 +1453,6 @@ export const useGraphStore = defineStore('graph', () => {
     for (const node of n) roots.add(find(node.node_id));
     const isConnected = roots.size <= 1;
     updateForce3DSettings({ d3GravityStrength: isConnected ? 0 : 0.03 });
-  }
-
-  function updateFA2Settings(settings: Partial<typeof fa2Settings.value>) {
-    fa2Settings.value = { ...fa2Settings.value, ...settings };
   }
 
   function updateLayoutExecution(settings: Partial<typeof layoutExecution.value>) {
@@ -1636,6 +1676,11 @@ export const useGraphStore = defineStore('graph', () => {
       filters: { ...filters.value },
       viewport: { ...viewport.value },
       layout_algorithm: layoutAlgorithm.value,
+      layout_mode_config: {
+        ego: { ...layoutModeConfig.value.ego },
+        hive: { ...layoutModeConfig.value.hive },
+        hierarchical: { ...layoutModeConfig.value.hierarchical },
+      },
       graph_query: graphQuery.value || undefined,
       cte_prefilter: ctePrefilter.value || undefined,
       vlp_rendering_mode: vlpRenderingMode.value,
@@ -1782,7 +1827,20 @@ export const useGraphStore = defineStore('graph', () => {
         edgePropertyFilters: loadedFilters.edgePropertyFilters ?? [],
       };
       viewport.value = exploration.state.viewport;
-      layoutAlgorithm.value = exploration.state.layout_algorithm;
+      // Backwards compat: old explorations saved legacy values ('force-atlas-2',
+      // 'forceAtlas2', ...) the renderer never read — any unknown value maps to 'force'
+      const savedAlgorithm = exploration.state.layout_algorithm as string | undefined;
+      const KNOWN_LAYOUTS: LayoutAlgorithm[] = ['force', 'ego', 'hive', 'hierarchical', 'circular', 'grid'];
+      layoutAlgorithm.value = KNOWN_LAYOUTS.includes(savedAlgorithm as LayoutAlgorithm)
+        ? (savedAlgorithm as LayoutAlgorithm)
+        : 'force';
+      const savedLayoutConfig = exploration.state.layout_mode_config;
+      const layoutDefaults = defaultLayoutModeConfig();
+      layoutModeConfig.value = {
+        ego: { ...layoutDefaults.ego, ...(savedLayoutConfig?.ego ?? {}) },
+        hive: { ...layoutDefaults.hive, ...(savedLayoutConfig?.hive ?? {}) },
+        hierarchical: { ...layoutDefaults.hierarchical, ...(savedLayoutConfig?.hierarchical ?? {}) },
+      };
       graphQuery.value = exploration.state.graph_query || '';
       ctePrefilter.value = exploration.state.cte_prefilter || '';
       vlpRenderingMode.value = exploration.state.vlp_rendering_mode || 'procedural';
@@ -1896,9 +1954,24 @@ export const useGraphStore = defineStore('graph', () => {
     nodePropertyIconConfigs.value = new Map();
     graphQuery.value = '';  // Reset query so user must execute one to save exploration
     ctePrefilter.value = '';
+    layoutAlgorithm.value = 'force';
+    layoutModeConfig.value = defaultLayoutModeConfig();
     resetFilters();
     resetTranspileOptions();
   }
+
+  // Reverse-direction mutual exclusion: enabling community radial layout (a plain ref
+  // toggled by v-model) reverts any non-force layout mode. setLayoutAlgorithm('force')
+  // does not touch the radial toggle, so this cannot loop.
+  const communityStoreForLayout = useCommunityStore();
+  watch(
+    () => communityStoreForLayout.radialLayoutEnabled,
+    (enabled) => {
+      if (enabled && layoutAlgorithm.value !== 'force') {
+        layoutAlgorithm.value = 'force';
+      }
+    }
+  );
 
   return {
     // State
@@ -1917,8 +1990,7 @@ export const useGraphStore = defineStore('graph', () => {
     filters,
     viewport,
     layoutAlgorithm,
-    layout3DEngine,
-    fa2Settings,
+    layoutModeConfig,
     force3DSettings,
     layoutExecution,
     behaviors,
@@ -1950,6 +2022,8 @@ export const useGraphStore = defineStore('graph', () => {
     nodeDegrees,
     maxDegree,
     hubNodeIds,
+    numericNodeProperties,
+    categoricalNodeProperties,
     filteredNodes,
     filteredEdges,
     displayNodes,
@@ -1991,10 +2065,9 @@ export const useGraphStore = defineStore('graph', () => {
     updateEdgePropertyFilter,
     removeEdgePropertyFilter,
     setLayoutAlgorithm,
-    setLayout3DEngine,
+    updateLayoutModeConfig,
     updateForce3DSettings,
     updateLayoutExecution,
-    updateFA2Settings,
     updateBehaviors,
     updateAesthetics,
     nodeTypeColors,

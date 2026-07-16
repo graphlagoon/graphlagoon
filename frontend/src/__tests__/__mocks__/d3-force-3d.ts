@@ -18,6 +18,27 @@ export const forceX = makeForceFactory();
 export const forceY = makeForceFactory();
 export const forceZ = makeForceFactory();
 
+// forceRadial keeps its radius accessor inspectable (d3-style getter/setter)
+export function forceRadial(
+  radius: number | ((node: any) => number),
+  _x?: number,
+  _y?: number,
+  _z?: number,
+) {
+  let radiusAccessor: (node: any) => number =
+    typeof radius === 'function' ? radius : () => radius;
+  const f: Record<string, any> = {};
+  f.strength = () => f;
+  f.radius = (r?: number | ((node: any) => number)) =>
+    r === undefined
+      ? radiusAccessor
+      : ((radiusAccessor = typeof r === 'function' ? r : () => r), f);
+  f.x = () => f;
+  f.y = () => f;
+  f.z = () => f;
+  return f;
+}
+
 // Link/charge/center force factories with the chainable methods the code uses.
 export function forceLink(_links?: any) {
   const f: any = () => f;

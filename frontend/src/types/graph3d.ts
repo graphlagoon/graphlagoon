@@ -39,6 +39,7 @@ export interface GraphLink {
   hidden?: boolean; // For search hide mode
   curvature?: number; // For multi-edge visualization
   curveRotation?: number; // Rotation of curve for multi-edges
+  __origCurvature?: number; // Baked curvature saved while a layout mode overrides it (hive)
   __curve?: { getPoint(t: number): { x: number; y: number; z: number } } | null; // Set by forcegraph lib for curved edges
   isSimilarity?: boolean; // True if this is a similarity edge
   score?: number; // Similarity score (0-1)

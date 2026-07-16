@@ -15,7 +15,10 @@ import {
   computeLinkAppearance,
   type AppearanceContext,
 } from '@/utils/graphAppearance';
-import { applyForceConfig, applyCommunityRadialForce, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
+import { applyForceConfig, applyCommunityRadialForce, applyEdgeTypeLayoutForce, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
+import { computeTreeLayout, computeHivePositions, computeRingGuideSpec, computeHiveAxesSpec, computeHiveLinkCurvatures } from '@/utils/layoutModes';
+import { useLayoutGuides } from '@/composables/useLayoutGuides';
+import { useToast } from '@/composables/useToast';
 import { forcePointerRepulsion, type PointerRepulsionForce } from '@/utils/forcePointerRepulsion';
 import { useGraphLabels } from '@/composables/useGraphLabels';
 import { useGraphIcons } from '@/composables/useGraphIcons';
@@ -74,6 +77,15 @@ function nextPaint(): Promise<void> {
 
 // Last-computed adaptive force overrides (not user-facing — only theta/alphaDecay/velocityDecay)
 let lastForceOverrides: Partial<import('@/utils/forceConfig3D').Force3DSettings> = {};
+
+// Store settings + adaptive overrides — single source for every applyForceConfig
+// call site (including the settings watcher, which used to clobber the overrides)
+function effectiveForceSettings() {
+  return { ...graphStore.force3DSettings, ...lastForceOverrides };
+}
+
+// Min arc length between ring neighbors in the ego layout (ring radii adapt to this)
+const EGO_MIN_NODE_ARC = 26;
 
 // Hover debounce state
 let hoverRAF: number | null = null;
@@ -178,6 +190,9 @@ const degreeDimmedNodeIds = computed(() => {
 const allNodes = computed(() => graphStore.nodes);
 const allEdges = computed(() => graphStore.edges);
 
+// Nodes hidden by the active layout mode (ego maxHops cutoff); additive with filters
+const layoutHiddenNodeIds = ref<Set<string> | null>(null);
+
 // Hidden sets for visual hiding (preserves positions unlike filtering)
 const searchHiddenNodeIds = computed(() => graphStore.searchHiddenNodeIds);
 const propertyFilterHiddenNodeIds = computed(() => graphStore.propertyFilterHiddenNodeIds);
@@ -206,7 +221,12 @@ const layout = useGraphLayout(
   { setLabelsVisible: labels.setLabelsVisible, updateLabels: () => updateOverlays() },
   () => graphStore.layoutExecution,
   () => graphStore.behaviors.viewMode === '2d-proj',
+  // Static modes own the node pins — start/reheat/scramble must not release them
+  () => ['hive', 'ego', 'hierarchical'].includes(graphStore.layoutAlgorithm),
 );
+
+const guides = useLayoutGuides(getGraph3d);
+const toast = useToast();
 
 const camera = useGraphCamera(getGraph3d, containerRef, initialLayoutDone, {
   setLabelsVisible: labels.setLabelsVisible,
@@ -264,6 +284,8 @@ function collectAppearanceContext(): AppearanceContext {
 
     propFilterHiddenNodeIds: propertyFilterHiddenNodeIds.value,
     propFilterHiddenEdgeIds: propertyFilterHiddenEdgeIds.value,
+
+    layoutHiddenNodeIds: layoutHiddenNodeIds.value,
 
     tableVisibleNodeIds: graphStore.tableFilteredNodeIds,
     tableVisibleEdgeIds: graphStore.tableFilteredEdgeIds,
@@ -683,7 +705,7 @@ async function updateGraph() {
       await settleLayoutAuto(
         graphData.nodes,
         graphData.links,
-        { ...graphStore.force3DSettings, ...lastForceOverrides },
+        effectiveForceSettings(),
         {
           numDimensions: is2D ? 2 : 3,
           nodeRelSize: graphStore.aesthetics.nodeSize / 2,
@@ -744,7 +766,7 @@ async function updateGraph() {
 
   graph3d.graphData(graphData);
 
-  applyForceConfig(graph3d, { ...graphStore.force3DSettings, ...lastForceOverrides }, graphStore.aesthetics.nodeSize / 2, graphStore.behaviors.viewMode === '2d-proj');
+  applyForceConfig(graph3d, effectiveForceSettings(), graphStore.aesthetics.nodeSize / 2, graphStore.behaviors.viewMode === '2d-proj');
 
   // Re-apply community radial forces after graph data update
   applyCommunityRadialForce(
@@ -753,6 +775,10 @@ async function updateGraph() {
     communityStore.communityRadialConfig,
     graphStore.behaviors.viewMode === '2d-proj',
   );
+
+  // Re-apply the active layout mode's constraints — hop counts and hive ranks
+  // are data-dependent and go stale on every data swap
+  applyLayoutModeForces();
 
   if (preSettled || (incrementallyPlaced && !isLayoutRunning.value)) {
     // Positions are already final: either the headless settle produced (and
@@ -793,6 +819,8 @@ async function initGraph() {
   const myToken = ++initToken;
 
   if (graph3d) {
+    // Free the old scene's guide geometry before the renderer goes away
+    guides.dispose();
     // Dispose WebGL renderer to free the context (browsers limit to ~8-16 contexts)
     const renderer = graph3d.renderer?.() as THREE.WebGLRenderer | null;
     if (renderer) {
@@ -844,7 +872,7 @@ async function initGraph() {
       await settleLayoutAuto(
         graphData.nodes,
         graphData.links,
-        { ...graphStore.force3DSettings, ...lastForceOverrides },
+        effectiveForceSettings(),
         {
           numDimensions: is2D ? 2 : 3,
           nodeRelSize: aesthetics.nodeSize / 2,
@@ -1055,7 +1083,7 @@ async function initGraph() {
     });
 
   const is2D = graphStore.behaviors.viewMode === '2d-proj';
-  applyForceConfig(graph3d, { ...graphStore.force3DSettings, ...lastForceOverrides }, graphStore.aesthetics.nodeSize / 2, is2D);
+  applyForceConfig(graph3d, effectiveForceSettings(), graphStore.aesthetics.nodeSize / 2, is2D);
 
   if (is2D) {
     graph3d.numDimensions(2);
@@ -1068,6 +1096,10 @@ async function initGraph() {
     communityStore.communityRadialConfig,
     is2D,
   );
+
+  // Re-apply the active layout mode's constraints (survives initGraph re-init,
+  // including the auto-switch to 2D that re-inits the graph)
+  applyLayoutModeForces();
 
   // Register blower force (stays disabled until Shift is held)
   pointerRepulsionForce = forcePointerRepulsion();
@@ -1391,29 +1423,43 @@ watch(
   () => { updateGraph(); }
 );
 
-// Force3D settings — single call replaces the old 50-line block
+// Force3D settings — single call replaces the old 50-line block.
+// Uses effectiveForceSettings() so adaptive/mode overrides aren't clobbered
+// by unrelated store changes while a layout mode is active.
 watch(
   () => graphStore.force3DSettings,
-  (settings) => {
+  () => {
     if (!graph3d) return;
-    applyForceConfig(graph3d, settings, graphStore.aesthetics.nodeSize / 2, graphStore.behaviors.viewMode === '2d-proj');
+    applyForceConfig(graph3d, effectiveForceSettings(), graphStore.aesthetics.nodeSize / 2, graphStore.behaviors.viewMode === '2d-proj');
   },
   { deep: true }
 );
 
-// Community radial layout — apply/remove forces when toggled or recomputed
-// Also auto-switch to 2D projection when radial layout is enabled
-let viewModeBeforeRadial: '3d' | '2d-proj' | null = null;
+// Auto-switch to 2D projection for planar layouts (community radial, ego, hive),
+// restoring the previous view mode when the layout is turned off.
+let viewModeBeforeLayout: '3d' | null = null;
+
+function autoSwitchTo2D() {
+  if (graphStore.behaviors.viewMode === '3d') {
+    viewModeBeforeLayout = '3d';
+    graphStore.updateBehaviors({ viewMode: '2d-proj' });
+  }
+}
+
+function restorePreLayoutViewMode() {
+  if (viewModeBeforeLayout === '3d') {
+    graphStore.updateBehaviors({ viewMode: viewModeBeforeLayout });
+    viewModeBeforeLayout = null;
+  }
+}
 
 watch(
   () => communityStore.radialLayoutEnabled,
   (enabled) => {
-    if (enabled && graphStore.behaviors.viewMode === '3d') {
-      viewModeBeforeRadial = '3d';
-      graphStore.updateBehaviors({ viewMode: '2d-proj' });
-    } else if (!enabled && viewModeBeforeRadial === '3d') {
-      graphStore.updateBehaviors({ viewMode: viewModeBeforeRadial });
-      viewModeBeforeRadial = null;
+    if (enabled) {
+      autoSwitchTo2D();
+    } else if (graphStore.layoutAlgorithm === 'force') {
+      restorePreLayoutViewMode();
     }
   },
 );
@@ -1431,22 +1477,239 @@ watch(
     );
 
     // Unpin nodes so the radial forces can move them, then restart simulation
-    const data = graph3d.graphData();
-    if (data?.nodes) {
-      data.nodes.forEach((node: GraphNode) => {
-        node.fx = undefined;
-        node.fy = undefined;
-        if (is2D) {
-          node.z = 0;
-          node.fz = 0;
-        } else {
-          node.fz = undefined;
-        }
-      });
-    }
+    unpinAllNodes(is2D);
     layout.startLayout();
   },
   { deep: true }
+);
+
+// ---------------------------------------------------------------------------
+// Layout modes (ego / hive)
+// ---------------------------------------------------------------------------
+
+/**
+ * Register/remove the active layout mode's positional constraints (forces,
+ * pinned positions, hidden set). No simulation lifecycle calls — initGraph and
+ * updateGraph re-apply this after data swaps; applyLayoutMode drives lifecycle.
+ */
+/** Restore link curvatures the hive mode overrode (marker: __origCurvature). */
+function restoreHiveCurvatures() {
+  if (!graph3d) return;
+  const data = graph3d.graphData();
+  if (!data?.links) return;
+  let touched = false;
+  for (const link of data.links as GraphLink[]) {
+    if (link.__origCurvature !== undefined) {
+      link.curvature = link.__origCurvature;
+      delete link.__origCurvature;
+      touched = true;
+    }
+  }
+  // Re-set the accessor to force a curve re-digest (no simulation running)
+  if (touched) graph3d.linkCurvature((l: GraphLink) => l.curvature ?? 0);
+}
+
+/** Pin every laid-out node at its computed position (static layouts). */
+function pinPositions(positions: Map<string, { x: number; y: number }>) {
+  if (!graph3d) return;
+  const data = graph3d.graphData();
+  if (!data?.nodes) return;
+  data.nodes.forEach((node: GraphNode) => {
+    const pos = positions.get(node.id);
+    if (!pos) return; // cluster/synthetic nodes keep their position
+    node.x = pos.x;
+    node.y = pos.y;
+    node.z = 0;
+    node.fx = pos.x;
+    node.fy = pos.y;
+    node.fz = 0;
+    node.vx = 0;
+    node.vy = 0;
+    node.vz = 0;
+  });
+}
+
+function applyLayoutModeForces() {
+  if (!graph3d) return;
+  const mode = graphStore.layoutAlgorithm;
+  const cfg = graphStore.layoutModeConfig;
+
+  if (mode !== 'ego') {
+    layoutHiddenNodeIds.value = null;
+  }
+  if (mode !== 'hive') {
+    restoreHiveCurvatures();
+  }
+  if (mode !== 'ego' && mode !== 'hive' && mode !== 'hierarchical') {
+    guides.clear();
+  }
+
+  if (mode === 'ego') {
+    const focusId = cfg.ego.focusNodeId;
+    const hasFocus = !!focusId && graphStore.nodes.some((n) => n.node_id === focusId);
+    if (!hasFocus) {
+      // Inert until the user picks a focus node (no silent fallback)
+      layoutHiddenNodeIds.value = null;
+      guides.clear();
+      return;
+    }
+    const result = computeTreeLayout(graphStore.nodes, graphStore.edges, {
+      mode: 'radial',
+      focusNodeId: focusId!,
+      direction: cfg.ego.direction,
+      edgeTypes: cfg.ego.edgeTypes,
+      levelSpacing: cfg.ego.ringSpacing,
+      nodeSpacing: EGO_MIN_NODE_ARC,
+      orphanPolicy: 'outer-ring',
+    });
+    pinPositions(result.positions);
+
+    if (cfg.ego.maxHops !== null) {
+      const hidden = new Set<string>();
+      for (const [nodeId, level] of result.levels) {
+        if (level > cfg.ego.maxHops) hidden.add(nodeId);
+      }
+      layoutHiddenNodeIds.value = hidden.size > 0 ? hidden : null;
+    } else {
+      layoutHiddenNodeIds.value = null;
+    }
+
+    guides.showEgoRings(
+      computeRingGuideSpec({ levelStats: result.levelStats, maxHops: cfg.ego.maxHops }),
+      { focusHalo: true, ringSpacing: cfg.ego.ringSpacing },
+    );
+  } else if (mode === 'hierarchical') {
+    const result = computeTreeLayout(graphStore.nodes, graphStore.edges, {
+      mode: 'layered',
+      focusNodeId: null,
+      direction: cfg.hierarchical.traversal,
+      edgeTypes: cfg.hierarchical.edgeTypes,
+      levelSpacing: cfg.hierarchical.levelSpacing,
+      nodeSpacing: cfg.hierarchical.nodeSpacing,
+      layeredDirection: cfg.hierarchical.direction,
+      orphanPolicy: 'adopt',
+    });
+    pinPositions(result.positions);
+
+    let minAlong = 0;
+    let maxAlong = 0;
+    for (const pos of result.positions.values()) {
+      const along = cfg.hierarchical.direction === 'td' ? pos.x : pos.y;
+      minAlong = Math.min(minAlong, along);
+      maxAlong = Math.max(maxAlong, along);
+    }
+    guides.showLayerLines({
+      layers: result.levelStats.map((stat) => ({
+        offset: stat.offset,
+        label: stat.unreachable ? 'unlinked' : `L${stat.level}`,
+        dashed: stat.unreachable,
+      })),
+      direction: cfg.hierarchical.direction,
+      extent: { min: minAlong, max: maxAlong },
+    });
+  } else if (mode === 'hive') {
+    const { positions, axes } = computeHivePositions(graphStore.nodes, cfg.hive, {
+      nodeDegrees: graphStore.nodeDegrees,
+      communityMap: communityStore.communityMap,
+    });
+    pinPositions(positions);
+    // Curve the links: intra-axis links are collinear with their axis and
+    // would be invisible straight; cross-axis links arc gently off the center
+    const data = graph3d.graphData();
+    if (data?.links) {
+      const curvatures = computeHiveLinkCurvatures(data.links as GraphLink[], positions);
+      for (const link of data.links as GraphLink[]) {
+        if (link.__origCurvature === undefined) link.__origCurvature = link.curvature ?? 0;
+        link.curvature = curvatures.get(link) ?? link.__origCurvature;
+      }
+      graph3d.linkCurvature((l: GraphLink) => l.curvature ?? 0);
+    }
+
+    guides.showHiveAxes(
+      computeHiveAxesSpec({
+        axes,
+        innerRadius: cfg.hive.innerRadius,
+        outerRadius: cfg.hive.outerRadius,
+      }),
+    );
+  }
+}
+
+/** React to a layout mode/config change: apply constraints and drive the simulation. */
+function applyLayoutMode() {
+  if (!graph3d) return;
+  const mode = graphStore.layoutAlgorithm;
+  const isModeLayout = mode === 'ego' || mode === 'hive' || mode === 'hierarchical';
+
+  if (isModeLayout) {
+    // Planar layouts read correctly only in 2D. The viewMode watcher re-inits
+    // the graph, and initGraph re-applies the mode — so bail out here.
+    if (graphStore.behaviors.viewMode === '3d') {
+      autoSwitchTo2D();
+      return;
+    }
+    // An in-flight edge-type layout would fight the mode's constraints
+    applyEdgeTypeLayoutForce(graph3d, null, 'unified');
+  }
+
+  const is2D = graphStore.behaviors.viewMode === '2d-proj';
+  const focusId = graphStore.layoutModeConfig.ego.focusNodeId;
+  const hasFocus = mode === 'ego' && !!focusId && graphStore.nodes.some((n) => n.node_id === focusId);
+
+  applyLayoutModeForces();
+
+  // Camera refit — the layout can land far outside the previous framing
+  const myToken = initToken;
+  const scheduleRefit = () => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (initToken === myToken && graph3d) camera.zoomToFit();
+    }));
+  };
+
+  if (mode === 'hive' || mode === 'hierarchical' || hasFocus) {
+    // All mode layouts are fixed analytic positions — no simulation.
+    // stopLayout pins remaining (cluster) nodes, zeroes cooldown, shows labels.
+    layout.stopLayout();
+    scheduleRefit();
+  } else if (mode !== 'ego') {
+    // Back to force: release constraints and re-run the free simulation
+    restorePreLayoutViewMode();
+    unpinAllNodes(is2D);
+    layout.startLayout();
+  }
+  // ego without focus: inert (hint shown in the panel / toast on transition)
+
+  updateVisuals();
+}
+
+watch(() => graphStore.layoutAlgorithm, (newMode, oldMode) => {
+  // Guidance only on the transition edge — applyLayoutMode re-runs on every
+  // config change and would spam a toast placed inside it
+  if (newMode === 'ego' && oldMode !== 'ego' && !graphStore.layoutModeConfig.ego.focusNodeId) {
+    toast.info('Pick a focus node: select one and use "Use selected node", or right-click a node → "Ego layout from here"');
+  }
+  applyLayoutMode();
+});
+
+let layoutConfigDebounce: ReturnType<typeof setTimeout> | null = null;
+watch(
+  () => graphStore.layoutModeConfig,
+  () => {
+    if (graphStore.layoutAlgorithm === 'force') return;
+    if (layoutConfigDebounce) clearTimeout(layoutConfigDebounce);
+    layoutConfigDebounce = setTimeout(() => { applyLayoutMode(); }, 150);
+  },
+  { deep: true }
+);
+
+// Hive axes keyed on communities go stale when detection re-runs
+watch(
+  () => communityStore.communityMap,
+  () => {
+    if (graphStore.layoutAlgorithm === 'hive' && graphStore.layoutModeConfig.hive.axisKey === 'community') {
+      applyLayoutMode();
+    }
+  }
 );
 
 // Pointer repulsion settings — update force parameters live (skip during ramp)
@@ -1761,12 +2024,22 @@ function pinNodesOutsideCylinder() {
   }
 }
 
-/** Unpin all nodes (remove fx/fy/fz) to restore normal simulation behavior. */
-function unpinAllNodes() {
+/**
+ * Unpin all nodes (remove fx/fy/fz) to restore normal simulation behavior.
+ * In 2D projection mode, z stays pinned at 0 instead of being released.
+ */
+function unpinAllNodes(is2D = false) {
   if (!graph3d) return;
   const nodes = graph3d.graphData().nodes as GraphNode[];
   for (const node of nodes) {
-    node.fx = undefined; node.fy = undefined; node.fz = undefined;
+    node.fx = undefined;
+    node.fy = undefined;
+    if (is2D) {
+      node.z = 0;
+      node.fz = 0;
+    } else {
+      node.fz = undefined;
+    }
   }
 }
 
@@ -1833,6 +2106,21 @@ onMounted(() => {
     disabled: () => graphStore.loading,
     handler: async (t) => {
       await graphStore.expandFromNode(t.id, 1);
+    },
+  });
+
+  // Register "Ego layout from here" — the investigator's gesture: right-click a
+  // suspicious node and rearrange the graph in rings around it
+  contextMenu.addAction({
+    id: 'ego-layout-focus',
+    label: 'Ego layout from here',
+    icon: '🎯',
+    visible: (t) => t.type === 'node',
+    handler: (t) => {
+      graphStore.updateLayoutModeConfig({ ego: { focusNodeId: t.id } });
+      graphStore.selectNode(t.id); // size emphasis via the selection pipeline
+      graphStore.setLayoutAlgorithm('ego');
+      toast.success(`Ego layout from ${t.label}`);
     },
   });
 
@@ -2014,6 +2302,7 @@ onUnmounted(() => {
   icons.dispose();
   edgeIcons.dispose();
   axisRotation.dispose();
+  guides.dispose();
   if (hoverRAF) {
     cancelAnimationFrame(hoverRAF);
     hoverRAF = null;
@@ -2022,6 +2311,10 @@ onUnmounted(() => {
     clearTimeout(lensHoverTimeout);
     lensHoverTimeout = null;
   }
+  if (layoutConfigDebounce) {
+    clearTimeout(layoutConfigDebounce);
+    layoutConfigDebounce = null;
+  }
   // Clean up blower
   if (blowerRAF !== null) { cancelAnimationFrame(blowerRAF); blowerRAF = null; }
   if (pointerRepulsionForce) pointerRepulsionForce.enabled(false);
@@ -2029,6 +2322,7 @@ onUnmounted(() => {
   pointerRepulsionForce = null;
   // Clean up keyboard/wheel event listeners
   contextMenu.removeAction('expand-neighbors');
+  contextMenu.removeAction('ego-layout-focus');
   if (_onKeyDown) window.removeEventListener('keydown', _onKeyDown);
   if (_onKeyUp) window.removeEventListener('keyup', _onKeyUp);
   if (_onWheel) containerRef.value?.removeEventListener('wheel', _onWheel);

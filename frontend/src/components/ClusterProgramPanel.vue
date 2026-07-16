@@ -20,6 +20,31 @@ const graphStore = useGraphStore()
 
 // UI state
 const activeTab = ref<'communities' | 'programs' | 'similarity'>('communities')
+
+// Community layout: one control for the mutually-exclusive spatial arrangements
+// (radial force vs. hive plot with one axis per community).
+type CommunityLayout = 'none' | 'radial' | 'hive'
+
+const communityLayout = computed<CommunityLayout>(() => {
+  if (communityStore.radialLayoutEnabled) return 'radial'
+  if (graphStore.layoutAlgorithm === 'hive' && graphStore.layoutModeConfig.hive.axisKey === 'community') return 'hive'
+  return 'none'
+})
+
+function setCommunityLayout(layout: CommunityLayout) {
+  if (layout === 'radial') {
+    // Enabling radial reverts any non-force layout mode (store watcher)
+    communityStore.radialLayoutEnabled = true
+  } else if (layout === 'hive') {
+    graphStore.updateLayoutModeConfig({ hive: { axisKey: 'community' } })
+    graphStore.setLayoutAlgorithm('hive') // disables radial via mutual exclusion
+  } else {
+    communityStore.radialLayoutEnabled = false
+    if (communityLayout.value === 'hive') {
+      graphStore.setLayoutAlgorithm('force')
+    }
+  }
+}
 const showCreateForm = ref(false)
 const editingProgramId = ref<string | null>(null)
 const expandedProgramId = ref<string | null>(null)
@@ -294,9 +319,18 @@ function toggleEdgeTypeFilter(edgeType: string) {
               <input v-model="communityStore.colorEnabled" type="checkbox" />
               <span>Color by community</span>
             </label>
-            <label class="toggle-row">
-              <input v-model="communityStore.radialLayoutEnabled" type="checkbox" />
-              <span>Radial layout</span>
+            <label class="toggle-row layout-select-row">
+              <span>Layout</span>
+              <select
+                class="community-layout-select"
+                data-testid="community-layout-select"
+                :value="communityLayout"
+                @change="setCommunityLayout(($event.target as HTMLSelectElement).value as CommunityLayout)"
+              >
+                <option value="none">None (force)</option>
+                <option value="radial">Radial</option>
+                <option value="hive">Hive plot</option>
+              </select>
             </label>
           </div>
 
@@ -792,6 +826,26 @@ button {
 
 .toggle-row input[type="checkbox"] {
   cursor: pointer;
+}
+
+.layout-select-row {
+  justify-content: space-between;
+}
+
+.community-layout-select {
+  flex: 1;
+  margin-left: 8px;
+  padding: 4px 6px;
+  font-size: 11px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 4px;
+  background: var(--card-background, white);
+  cursor: pointer;
+}
+
+.community-layout-select:focus {
+  outline: none;
+  border-color: var(--primary-color, #42b883);
 }
 
 .community-list {

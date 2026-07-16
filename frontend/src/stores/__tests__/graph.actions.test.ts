@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { useGraphStore } from '@/stores/graph'
+import { useCommunityStore } from '@/stores/community'
 
 // Mock api service
 vi.mock('@/services/api', () => ({
@@ -414,12 +416,37 @@ describe('settings updates', () => {
     expect(store.aesthetics.showArrows).toBe(true) // preserved
   })
 
-  it('updateFA2Settings merges with existing', () => {
+  it('updateLayoutModeConfig merges per-mode partials', () => {
     const store = useGraphStore()
-    store.updateFA2Settings({ gravity: 5 })
+    store.updateLayoutModeConfig({ ego: { maxHops: 2 } })
 
-    expect(store.fa2Settings.gravity).toBe(5)
-    expect(store.fa2Settings.scalingRatio).toBe(2) // preserved
+    expect(store.layoutModeConfig.ego.maxHops).toBe(2)
+    expect(store.layoutModeConfig.ego.direction).toBe('both') // preserved
+    expect(store.layoutModeConfig.hive.axisKey).toBe('node_type') // untouched mode preserved
+  })
+
+  it('selecting a non-force layout disables community radial layout', () => {
+    const store = useGraphStore()
+    const communityStore = useCommunityStore()
+    communityStore.radialLayoutEnabled = true
+
+    store.setLayoutAlgorithm('ego')
+
+    expect(communityStore.radialLayoutEnabled).toBe(false)
+    expect(store.layoutAlgorithm).toBe('ego')
+  })
+
+  it('enabling community radial layout reverts the layout mode to force', async () => {
+    const store = useGraphStore()
+    const communityStore = useCommunityStore()
+    store.setLayoutAlgorithm('hive')
+
+    communityStore.radialLayoutEnabled = true
+    await nextTick()
+
+    expect(store.layoutAlgorithm).toBe('force')
+    // No loop: radial stays enabled after the revert
+    expect(communityStore.radialLayoutEnabled).toBe(true)
   })
 
   it('updateForce3DSettings merges with existing', () => {
@@ -555,5 +582,76 @@ describe('filter actions', () => {
     expect(store.filters.search_query).toBeUndefined()
     expect(store.filters.nodePropertyFilters).toEqual([])
     expect(store.filters.edgePropertyFilters).toEqual([])
+  })
+})
+
+// ============================================================================
+// loadExploration — layout back-compat migration
+// ============================================================================
+
+describe('loadExploration layout migration', () => {
+  function mockExploration(state: Record<string, unknown>) {
+    vi.mocked(api.getExploration).mockResolvedValue({
+      id: 'exp-1',
+      graph_context_id: 'ctx-1',
+      title: 'Test',
+      owner_email: 'a@b.c',
+      shared_with: [],
+      has_write_access: true,
+      state: {
+        nodes: [],
+        edges: [],
+        filters: { node_types: [], edge_types: [], nodePropertyFilters: [], edgePropertyFilters: [] },
+        viewport: { zoom: 1, center_x: 0, center_y: 0 },
+        ...state,
+      },
+      created_at: '',
+      updated_at: '',
+    } as any)
+  }
+
+  it("migrates legacy 'force-atlas-2' to 'force'", async () => {
+    const store = useGraphStore()
+    mockExploration({ layout_algorithm: 'force-atlas-2' })
+
+    await store.loadExploration('exp-1')
+
+    expect(store.layoutAlgorithm).toBe('force')
+  })
+
+  it("defaults a missing layout_algorithm to 'force'", async () => {
+    const store = useGraphStore()
+    mockExploration({ layout_algorithm: undefined })
+
+    await store.loadExploration('exp-1')
+
+    expect(store.layoutAlgorithm).toBe('force')
+  })
+
+  it('restores a saved layout mode and merges its config over defaults', async () => {
+    const store = useGraphStore()
+    mockExploration({
+      layout_algorithm: 'ego',
+      layout_mode_config: { ego: { focusNodeId: 'acct-7', maxHops: 3 } },
+    })
+
+    await store.loadExploration('exp-1')
+
+    expect(store.layoutAlgorithm).toBe('ego')
+    expect(store.layoutModeConfig.ego.focusNodeId).toBe('acct-7')
+    expect(store.layoutModeConfig.ego.maxHops).toBe(3)
+    // Fields absent from the saved blob fall back to defaults
+    expect(store.layoutModeConfig.ego.direction).toBe('both')
+    expect(store.layoutModeConfig.hive.axisKey).toBe('node_type')
+  })
+
+  it('explorations without layout_mode_config get full defaults', async () => {
+    const store = useGraphStore()
+    store.updateLayoutModeConfig({ ego: { maxHops: 5 } }) // dirty state from a previous session
+    mockExploration({ layout_algorithm: 'force' })
+
+    await store.loadExploration('exp-1')
+
+    expect(store.layoutModeConfig.ego.maxHops).toBeNull()
   })
 })

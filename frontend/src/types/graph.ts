@@ -152,8 +152,53 @@ export interface ViewportState {
   center_y: number;
 }
 
-export type LayoutAlgorithm = "force-atlas-2" | "circular" | "grid";
-export type Layout3DEngine = "d3-force";
+export type LayoutAlgorithm = "force" | "ego" | "hive" | "hierarchical" | "circular" | "grid";
+
+/** BFS direction for the ego layout: follow outgoing edges, incoming edges, or both */
+export type EgoDirection = "both" | "out" | "in";
+
+/** Radial scale for hive plot axis positioning */
+export type HiveScale = "rank" | "linear" | "log";
+
+export interface EgoLayoutConfig {
+  /** Node the rings radiate from. Layout is inert while null. */
+  focusNodeId: string | null;
+  direction: EgoDirection;
+  /** Restrict BFS traversal to these relationship types (null = all). Other edges stay drawn. */
+  edgeTypes: string[] | null;
+  /** Hide nodes farther than this many hops (null = no cutoff) */
+  maxHops: number | null;
+  ringSpacing: number;
+}
+
+export interface HiveLayoutConfig {
+  /** 'node_type' or 'prop:<name>' of a categorical node property */
+  axisKey: string;
+  /** Categories beyond this count are bucketed into an "Others" axis */
+  maxAxes: number;
+  /** 'degree' or 'prop:<name>' of a numeric node property */
+  positionKey: string;
+  scale: HiveScale;
+  innerRadius: number;
+  outerRadius: number;
+}
+
+export interface HierarchicalLayoutConfig {
+  /** 'td' = levels grow downward, 'lr' = levels grow rightward */
+  direction: "td" | "lr";
+  /** Edge traversal for the hierarchy: 'out' = src→dst flows down (money flow) */
+  traversal: EgoDirection;
+  /** Restrict hierarchy edges to these relationship types (null = all) */
+  edgeTypes: string[] | null;
+  levelSpacing: number;
+  nodeSpacing: number;
+}
+
+export interface LayoutModeConfig {
+  ego: EgoLayoutConfig;
+  hive: HiveLayoutConfig;
+  hierarchical: HierarchicalLayoutConfig;
+}
 
 /** Per-node-type configuration for property-based icon mapping */
 export interface PropertyIconConfig {
@@ -180,6 +225,7 @@ export interface ExplorationState {
   nodeTypeColors?: Record<string, string>; // Node type → color hex (optional for backwards compat)
   edgeTypeColors?: Record<string, string>; // Edge type → color hex (optional for backwards compat)
   edgeTypeIcons?: Record<string, string>;  // Edge type → icon name mapping (optional for backwards compat)
+  layout_mode_config?: LayoutModeConfig;   // Per-layout-mode parameters (optional for backwards compat)
   behaviors?: Record<string, unknown>;     // Behavior settings (optional for backwards compat)
   aesthetics?: Record<string, unknown>;    // Aesthetic settings (optional for backwards compat)
   community?: Record<string, unknown>;     // Community detection state (optional for backwards compat)

@@ -329,4 +329,51 @@ test.describe('ExplorationState round-trip', () => {
     expect(loaded.state.nodes).toHaveLength(2);
     expect(loaded.state.edges).toHaveLength(1);
   });
+
+  test('layout mode and layout_mode_config survive save and load', async ({ api }) => {
+    const contextId = await createContext(api, 'Layout Mode RT');
+
+    const layoutModeConfig = {
+      ego: {
+        focusNodeId: 'acct-42',
+        direction: 'out',
+        edgeTypes: ['KNOWS'],
+        maxHops: 2,
+        ringSpacing: 80,
+      },
+      hive: {
+        axisKey: 'node_type',
+        maxAxes: 4,
+        positionKey: 'prop:age',
+        scale: 'log',
+        innerRadius: 50,
+        outerRadius: 400,
+      },
+    };
+
+    const createRes = await api.post(
+      `api/graph-contexts/${contextId}/explorations`,
+      {
+        data: {
+          title: 'Layout Mode',
+          state: {
+            nodes: [],
+            edges: [],
+            filters: { node_types: [], edge_types: [] },
+            viewport: { zoom: 1, center_x: 0, center_y: 0 },
+            layout_algorithm: 'ego',
+            layout_mode_config: layoutModeConfig,
+          },
+        },
+      }
+    );
+    expect(createRes.ok()).toBeTruthy();
+    const explorationId = (await createRes.json()).id;
+
+    const loaded = await (
+      await api.get(`api/explorations/${explorationId}`)
+    ).json();
+    expect(loaded.state.layout_algorithm).toBe('ego');
+    expect(loaded.state.layout_mode_config).toEqual(layoutModeConfig);
+  });
 });
