@@ -180,6 +180,16 @@ export type UpdateClusterProgramInput = Partial<
 >;
 
 /**
+ * Community algorithm selector value.
+ *
+ * Either the built-in Louvain worker, or a cluster program used as a community
+ * algorithm (encoded as `cluster-program:<programId>`). In the latter mode the
+ * program's `Cluster[]` output is converted into a node→community assignment
+ * WITHOUT generating the collapsed cluster geometry.
+ */
+export type CommunityAlgorithm = 'louvain' | `cluster-program:${string}`;
+
+/**
  * Options for creating a cluster manually
  * (without running a program)
  * cluster_id is optional - if not provided, uses cluster_name as ID

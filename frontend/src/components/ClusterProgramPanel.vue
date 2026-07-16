@@ -7,7 +7,8 @@ import { useGraphStore } from '@/stores/graph'
 import type { ClusterProgram } from '@/types/cluster'
 import JavaScriptEditor from './JavaScriptEditor.vue'
 import SimilarityPanel from './SimilarityPanel.vue'
-import { X, Play, Loader2 } from 'lucide-vue-next'
+import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
+import { X, Play, Loader2, HelpCircle } from 'lucide-vue-next'
 
 const emit = defineEmits<{
   close: []
@@ -46,6 +47,7 @@ function setCommunityLayout(layout: CommunityLayout) {
   }
 }
 const showCreateForm = ref(false)
+const showSkillModal = ref(false)
 const editingProgramId = ref<string | null>(null)
 const expandedProgramId = ref<string | null>(null)
 
@@ -220,7 +222,31 @@ function toggleEdgeTypeFilter(edgeType: string) {
       <!-- ================================================================ -->
       <div v-if="activeTab === 'communities'" class="tab-pane">
         <div class="community-config">
+          <!-- Algorithm selector: Louvain or a cluster program used as a community algorithm -->
           <div class="form-row">
+            <label for="community-algorithm">Algorithm</label>
+            <select
+              id="community-algorithm"
+              v-model="communityStore.algorithm"
+              class="community-algorithm-select"
+              data-testid="community-algorithm-select"
+            >
+              <option value="louvain">Louvain</option>
+              <option
+                v-for="program in clusterStore.programs"
+                :key="program.program_id"
+                :value="`cluster-program:${program.program_id}`"
+              >
+                {{ program.program_name }}
+              </option>
+            </select>
+            <small v-if="!communityStore.isLouvain" class="help-text">
+              Runs the cluster program as a community algorithm (no collapsed nodes).
+              Nodes in multiple clusters use the first; uncovered nodes form an "others" community.
+            </small>
+          </div>
+
+          <div v-if="communityStore.isLouvain" class="form-row">
             <label for="community-resolution">Resolution</label>
             <div class="slider-row">
               <input
@@ -237,8 +263,8 @@ function toggleEdgeTypeFilter(edgeType: string) {
             <small class="help-text">Higher = more communities, lower = fewer</small>
           </div>
 
-          <!-- Edge type filter -->
-          <div v-if="graphStore.edgeTypes.length > 1" class="form-row">
+          <!-- Edge type filter (Louvain only) -->
+          <div v-if="communityStore.isLouvain && graphStore.edgeTypes.length > 1" class="form-row">
             <label>Edge types</label>
             <div class="edge-type-chips">
               <button
@@ -361,6 +387,15 @@ function toggleEdgeTypeFilter(edgeType: string) {
             @click="showCreateForm = true; resetForm()"
           >
             + New
+          </button>
+          <button
+            class="btn-skill-help btn-icon-only"
+            data-testid="cluster-skill-help"
+            title="Not sure how? Get an AI prompt to write a cluster program"
+            aria-label="Get help writing a cluster program"
+            @click="showSkillModal = true"
+          >
+            <HelpCircle :size="16" />
           </button>
           <button
             v-if="clusterStore.clusters.length > 0"
@@ -532,6 +567,9 @@ function toggleEdgeTypeFilter(edgeType: string) {
       </div>
 
     </div>
+
+    <!-- AI skill helper modal -->
+    <ClusterProgramSkillModal v-model="showSkillModal" />
   </div>
 </template>
 
@@ -848,6 +886,21 @@ button {
   border-color: var(--primary-color, #42b883);
 }
 
+.community-algorithm-select {
+  width: 100%;
+  padding: 5px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 4px;
+  background: var(--card-background, white);
+  cursor: pointer;
+}
+
+.community-algorithm-select:focus {
+  outline: none;
+  border-color: var(--primary-color, #42b883);
+}
+
 .community-list {
   display: flex;
   flex-direction: column;
@@ -898,6 +951,20 @@ button {
 
 .btn-create:hover {
   background: #35a372;
+}
+
+.btn-skill-help {
+  background: transparent;
+  color: #409eff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cfe4ff;
+}
+
+.btn-skill-help:hover {
+  background: #ecf5ff;
+  color: #3a8ee6;
 }
 
 .btn-clear {

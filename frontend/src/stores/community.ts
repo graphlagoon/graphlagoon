@@ -10,7 +10,7 @@ import { ref, computed, watch } from 'vue'
 import { useClusterStore } from './cluster'
 import { useGraphStore } from './graph'
 import type { SerializedGraph } from '@/types/metrics'
-import type { Cluster } from '@/types/cluster'
+import type { Cluster, CommunityAlgorithm } from '@/types/cluster'
 import type { CommunityWorkerInput, CommunityWorkerOutput } from '@/workers/communityWorker'
 
 // 19-color qualitative palette for community coloring
@@ -40,7 +40,10 @@ export const useCommunityStore = defineStore('community', () => {
   const radialLayoutEnabled = ref(false)
   const collapseEnabled = ref(false)
 
-  // Algorithm params
+  // Algorithm selection: 'louvain' (worker) or 'cluster-program:<programId>'
+  const algorithm = ref<CommunityAlgorithm>('louvain')
+
+  // Algorithm params (Louvain-specific)
   const resolution = ref(1.0)
   const edgeTypeFilter = ref<string[]>([])
 
@@ -50,6 +53,19 @@ export const useCommunityStore = defineStore('community', () => {
   // ============================================================================
   // Computed
   // ============================================================================
+
+  /**
+   * Whether the built-in Louvain algorithm is selected (vs. a cluster program).
+   */
+  const isLouvain = computed(() => algorithm.value === 'louvain')
+
+  /**
+   * The cluster program ID when a program is selected as the community
+   * algorithm, or null for Louvain.
+   */
+  const selectedProgramId = computed((): string | null =>
+    isLouvain.value ? null : algorithm.value.slice('cluster-program:'.length)
+  )
 
   /**
    * Whether communities have been detected
@@ -145,7 +161,12 @@ export const useCommunityStore = defineStore('community', () => {
 
   /**
    * Run community detection on the current graph.
-   * Creates a dedicated worker, sends the graph, and processes results.
+   *
+   * Branches on the selected algorithm:
+   * - Louvain: serializes the graph and runs the dedicated worker.
+   * - Cluster program: runs the program synchronously (no worker) and converts
+   *   its Cluster[] output into the community map — WITHOUT creating collapsed
+   *   cluster geometry.
    */
   async function runDetection(): Promise<void> {
     if (computing.value) return
@@ -156,27 +177,32 @@ export const useCommunityStore = defineStore('community', () => {
     progressValue.value = 0
 
     try {
-      const graph = serializeGraph()
+      if (!isLouvain.value) {
+        runClusterProgramAsCommunity(selectedProgramId.value!)
+      } else {
+        const graph = serializeGraph()
 
-      if (graph.nodes.length === 0) {
-        error.value = 'No nodes in graph'
-        return
+        if (graph.nodes.length === 0) {
+          error.value = 'No nodes in graph'
+          return
+        }
+
+        const result = await runWorker(graph)
+
+        // Store results
+        const map = new Map<string, number>()
+        for (const [nodeId, communityId] of Object.entries(result.communities)) {
+          map.set(nodeId, communityId)
+        }
+        communityMap.value = map
+        communityCount.value = result.count
+        modularity.value = result.modularity
+        lastComputedAt.value = Date.now()
       }
 
-      const result = await runWorker(graph)
-
-      // Store results
-      const map = new Map<string, number>()
-      for (const [nodeId, communityId] of Object.entries(result.communities)) {
-        map.set(nodeId, communityId)
-      }
-      communityMap.value = map
-      communityCount.value = result.count
-      modularity.value = result.modularity
-      lastComputedAt.value = Date.now()
-
-      // Sync clusters if collapse is enabled
-      if (collapseEnabled.value) {
+      // Sync clusters only if collapse is explicitly enabled (independent opt-in).
+      // The cluster-program path never creates geometry on its own.
+      if (collapseEnabled.value && hasResults.value) {
         syncToClusters()
       }
     } catch (e) {
@@ -186,6 +212,71 @@ export const useCommunityStore = defineStore('community', () => {
       progressMessage.value = null
       progressValue.value = 0
     }
+  }
+
+  /**
+   * Build a node → communityId map from a cluster program's Cluster[] output.
+   *
+   * - communityId = the cluster's index in the array (integer, palette-friendly).
+   * - Multi-membership: the first cluster (array order) wins.
+   * - Nodes not covered by any cluster are collected into a single "others"
+   *   community (id = clusters.length) so every node has a community.
+   */
+  function buildCommunityMapFromClusters(
+    programClusters: Cluster[],
+    allNodeIds: string[]
+  ): Map<string, number> {
+    const map = new Map<string, number>()
+
+    programClusters.forEach((cluster, index) => {
+      for (const nodeId of cluster.node_ids) {
+        // First cluster wins for nodes appearing in multiple clusters
+        if (!map.has(nodeId)) {
+          map.set(nodeId, index)
+        }
+      }
+    })
+
+    // Assign any uncovered node to a single "others" community
+    const othersId = programClusters.length
+    let hasOthers = false
+    for (const nodeId of allNodeIds) {
+      if (!map.has(nodeId)) {
+        map.set(nodeId, othersId)
+        hasOthers = true
+      }
+    }
+
+    // Drop the "others" bucket if nothing landed in it (avoids an empty extra community)
+    return hasOthers || map.size > 0 ? map : new Map()
+  }
+
+  /**
+   * Run a cluster program as a community algorithm.
+   *
+   * Executes the program NON-mutatingly (no cluster geometry) and populates
+   * communityMap from its output. Modularity is undefined for this path.
+   */
+  function runClusterProgramAsCommunity(programId: string): void {
+    const clusterStore = useClusterStore()
+    const graphStore = useGraphStore()
+
+    const result = clusterStore.computeClustersFromProgram(programId)
+
+    if (!result.success) {
+      error.value = result.error ?? 'Cluster program execution failed'
+      return
+    }
+
+    const programClusters = result.clusters ?? []
+    const allNodeIds = graphStore.filteredNodes.map(n => n.node_id)
+    const map = buildCommunityMapFromClusters(programClusters, allNodeIds)
+
+    communityMap.value = map
+    // Count distinct community ids actually present in the map
+    communityCount.value = new Set(map.values()).size
+    modularity.value = null
+    lastComputedAt.value = Date.now()
   }
 
   /**
@@ -311,6 +402,7 @@ export const useCommunityStore = defineStore('community', () => {
       communityMap: Object.fromEntries(communityMap.value),
       communityCount: communityCount.value,
       modularity: modularity.value,
+      algorithm: algorithm.value,
       colorEnabled: colorEnabled.value,
       radialLayoutEnabled: radialLayoutEnabled.value,
       collapseEnabled: collapseEnabled.value,
@@ -332,6 +424,7 @@ export const useCommunityStore = defineStore('community', () => {
     communityMap.value = new Map(Object.entries(map).map(([k, v]) => [k, v]))
     communityCount.value = (state.communityCount as number) || 0
     modularity.value = (state.modularity as number) ?? null
+    algorithm.value = (state.algorithm as CommunityAlgorithm) ?? 'louvain'
     colorEnabled.value = (state.colorEnabled as boolean) ?? true
     radialLayoutEnabled.value = (state.radialLayoutEnabled as boolean) ?? false
     collapseEnabled.value = (state.collapseEnabled as boolean) ?? false
@@ -399,6 +492,9 @@ export const useCommunityStore = defineStore('community', () => {
     progressMessage,
     progressValue,
 
+    // Algorithm selection
+    algorithm,
+
     // UI toggles
     colorEnabled,
     radialLayoutEnabled,
@@ -407,6 +503,8 @@ export const useCommunityStore = defineStore('community', () => {
     edgeTypeFilter,
 
     // Computed
+    isLouvain,
+    selectedProgramId,
     hasResults,
     communityColorMap,
     communitiesById,
@@ -416,6 +514,8 @@ export const useCommunityStore = defineStore('community', () => {
 
     // Actions
     runDetection,
+    runClusterProgramAsCommunity,
+    buildCommunityMapFromClusters,
     syncToClusters,
     clearCommunities,
     getState,

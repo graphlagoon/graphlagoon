@@ -270,6 +270,63 @@ describe('cluster store', () => {
   })
 
   // ==========================================================================
+  // computeClustersFromProgram (pure, non-mutating)
+  // ==========================================================================
+
+  describe('computeClustersFromProgram', () => {
+    it('returns clusters WITHOUT mutating the store', () => {
+      setupGraphForCluster()
+      const store = useClusterStore()
+      const prog = store.createProgram({
+        program_name: 'Pure',
+        code: `return [{ cluster_name: 'C', node_ids: ['n1', 'n2'] }]`,
+      })
+
+      const result = store.computeClustersFromProgram(prog.program_id)
+
+      expect(result.success).toBe(true)
+      expect(result.clusters).toHaveLength(1)
+      expect(result.clusters?.[0].cluster_name).toBe('C')
+      // No side effects: clusters and executions untouched
+      expect(store.clusters).toHaveLength(0)
+      expect(store.getExecutionHistory(prog.program_id)).toHaveLength(0)
+    })
+
+    it('tags returned clusters with source_program_id', () => {
+      setupGraphForCluster()
+      const store = useClusterStore()
+      const prog = store.createProgram({
+        program_name: 'Tagged',
+        code: `return [{ cluster_name: 'C', node_ids: ['n1'] }]`,
+      })
+
+      const result = store.computeClustersFromProgram(prog.program_id)
+      expect(result.clusters?.[0].source_program_id).toBe(prog.program_id)
+    })
+
+    it('returns failure (not throw) on invalid output, without mutating', () => {
+      setupGraphForCluster()
+      const store = useClusterStore()
+      const prog = store.createProgram({
+        program_name: 'Bad',
+        code: `return [{ node_ids: ['n1'] }]`,
+      })
+
+      const result = store.computeClustersFromProgram(prog.program_id)
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('cluster_name')
+      expect(store.clusters).toHaveLength(0)
+    })
+
+    it('returns error for nonexistent program', () => {
+      const store = useClusterStore()
+      const result = store.computeClustersFromProgram('nonexistent')
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('not found')
+    })
+  })
+
+  // ==========================================================================
   // Cluster Actions
   // ==========================================================================
 

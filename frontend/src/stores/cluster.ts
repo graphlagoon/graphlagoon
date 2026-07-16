@@ -204,21 +204,20 @@ export const useClusterStore = defineStore('cluster', () => {
   }
 
   /**
-   * Execute a cluster program
+   * Compute the clusters produced by a program WITHOUT mutating store state.
    *
-   * The program receives a context with graph data and must return an array of clusters.
-   * Generated clusters replace any existing clusters.
+   * Runs the program's user code and validates its output, returning the
+   * normalized `Cluster[]` (each tagged with `source_program_id`). This does
+   * NOT touch `clusters.value`, `executions`, `loading`, or `error`, and does
+   * NOT record perf — so it can be reused by callers that only want the result
+   * (e.g. using a cluster program as a community algorithm) without creating
+   * the collapsed geometry side effects.
    */
-  async function executeProgram(programId: string): Promise<ClusterProgramResult> {
+  function computeClustersFromProgram(programId: string): ClusterProgramResult {
     const program = programs.value.find(p => p.program_id === programId)
     if (!program) {
-      const errorMsg = 'Program not found'
-      error.value = errorMsg
-      return { success: false, error: errorMsg }
+      return { success: false, error: 'Program not found' }
     }
-
-    loading.value = true
-    error.value = null
 
     const startTime = performance.now()
 
@@ -315,7 +314,65 @@ export const useClusterStore = defineStore('cluster', () => {
         return cluster
       })
 
-      const duration = performance.now() - startTime
+      return {
+        success: true,
+        clusters: newClusters,
+        duration_ms: Math.round(performance.now() - startTime),
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Unknown error during execution'
+      return {
+        success: false,
+        error: errorMsg,
+        duration_ms: Math.round(performance.now() - startTime),
+      }
+    }
+  }
+
+  /**
+   * Execute a cluster program
+   *
+   * The program receives a context with graph data and must return an array of clusters.
+   * Generated clusters replace any existing clusters from the same program.
+   *
+   * Thin wrapper around `computeClustersFromProgram` that applies the store-level
+   * side effects: merging into `clusters.value`, recording execution history, and
+   * perf metrics.
+   */
+  async function executeProgram(programId: string): Promise<ClusterProgramResult> {
+    if (!programs.value.some(p => p.program_id === programId)) {
+      const errorMsg = 'Program not found'
+      error.value = errorMsg
+      return { success: false, error: errorMsg }
+    }
+
+    loading.value = true
+    error.value = null
+
+    try {
+      const result = computeClustersFromProgram(programId)
+      const duration = result.duration_ms ?? 0
+
+      if (!result.success) {
+        recordPerf('clusterProgramExec:error', duration)
+        error.value = result.error ?? 'Unknown error during execution'
+
+        // Record failed execution
+        executions.value.push({
+          program_id: programId,
+          executed_at: new Date().toISOString(),
+          clusters_generated: 0,
+          error: error.value,
+          duration_ms: duration,
+        })
+        if (executions.value.length > 50) {
+          executions.value = executions.value.slice(-50)
+        }
+
+        return result
+      }
+
+      const newClusters = result.clusters ?? []
       recordPerf('clusterProgramExec', duration, { clustersGenerated: newClusters.length })
 
       // Merge clusters: replace all clusters from this program, keep clusters from other programs
@@ -325,54 +382,18 @@ export const useClusterStore = defineStore('cluster', () => {
       clusters.value = [...existingClusters, ...newClusters]
 
       // Record execution
-      const execution: ClusterProgramExecution = {
+      executions.value.push({
         program_id: programId,
         executed_at: new Date().toISOString(),
         clusters_generated: newClusters.length,
-        duration_ms: Math.round(duration),
-      }
-      executions.value.push(execution)
-
-      // Keep only last 50 executions
+        duration_ms: duration,
+      })
       if (executions.value.length > 50) {
         executions.value = executions.value.slice(-50)
       }
 
       // Don't auto-save to localStorage - clusters are saved as part of exploration state
-
-      return {
-        success: true,
-        clusters: newClusters,
-        duration_ms: Math.round(duration),
-      }
-    } catch (e) {
-      const duration = performance.now() - startTime
-      const errorDuration = performance.now() - startTime
-      recordPerf('clusterProgramExec:error', errorDuration)
-      const errorMsg = e instanceof Error ? e.message : 'Unknown error during execution'
-      error.value = errorMsg
-
-      // Record failed execution
-      const execution: ClusterProgramExecution = {
-        program_id: programId,
-        executed_at: new Date().toISOString(),
-        clusters_generated: 0,
-        error: errorMsg,
-        duration_ms: Math.round(duration),
-      }
-      executions.value.push(execution)
-
-      if (executions.value.length > 50) {
-        executions.value = executions.value.slice(-50)
-      }
-
-      // Don't auto-save to localStorage - clusters are saved as part of exploration state
-
-      return {
-        success: false,
-        error: errorMsg,
-        duration_ms: Math.round(duration),
-      }
+      return result
     } finally {
       loading.value = false
     }
@@ -769,6 +790,7 @@ return clusters;`,
     deleteProgram,
     getProgram,
     executeProgram,
+    computeClustersFromProgram,
 
     // Cluster Actions
     createCluster,
