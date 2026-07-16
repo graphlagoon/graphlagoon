@@ -252,3 +252,123 @@ class TestApplyCtePrefilter:
         assert "MY_FINAL_EDGES e" in result
         # The similar table should NOT be replaced
         assert f"{EDGE_TABLE}_backup" in result
+
+
+# ── apply_cte_prefilter on procedural BEGIN...END scripts ───────────
+
+
+# A minimal stand-in for the procedural BFS output: a BEGIN...END compound
+# block with a DECLARE, a numbered-view build that reads the edge table, and a
+# final SELECT. Real gsql2rsql output is exercised in test_transpile_options.py.
+PROCEDURAL_SCRIPT = f"""BEGIN
+  DECLARE frontier ARRAY<STRING>;
+  CREATE OR REPLACE TEMPORARY VIEW bfs_1 AS
+    SELECT e.src, e.dst FROM {EDGE_TABLE} e WHERE e.src = 'start';
+  WITH paths_1 AS (
+    SELECT src AS start_node, dst AS end_node FROM {EDGE_TABLE}
+  )
+  SELECT start_node, end_node FROM paths_1;
+END"""
+
+
+class TestApplyCtePrefilterProcedural:
+    def test_injects_temp_view_inside_block(self):
+        """A BEGIN...END script gets a CREATE TEMP VIEW after BEGIN, not a
+        WITH clause prepended before it."""
+        cte = "MY_FINAL_EDGES AS (SELECT * FROM __EDGES__ WHERE amount > 100)"
+        result = apply_cte_prefilter(
+            PROCEDURAL_SCRIPT, cte, EDGE_TABLE, NODE_TABLE
+        )
+
+        stripped = result.strip()
+        upper = stripped.upper()
+        # Still a compound block.
+        assert upper.startswith("BEGIN")
+        assert upper.endswith("END")
+        # CTE materialized as a temp view, NOT a prepended WITH.
+        assert "CREATE OR REPLACE TEMPORARY VIEW MY_FINAL_EDGES AS" in upper
+        assert not upper.startswith("WITH")
+
+    def test_body_references_view_not_edge_table(self):
+        """Edge-table references in the BFS body/final SELECT are rewritten to
+        MY_FINAL_EDGES; the only remaining raw edge-table reference is inside
+        the view definition itself."""
+        cte = "MY_FINAL_EDGES AS (SELECT * FROM __EDGES__ WHERE amount > 100)"
+        result = apply_cte_prefilter(
+            PROCEDURAL_SCRIPT, cte, EDGE_TABLE, NODE_TABLE
+        )
+
+        # The BFS body and final SELECT now read the pre-filtered view.
+        assert "FROM MY_FINAL_EDGES e" in result
+        # Exactly one raw edge-table reference remains — the view definition.
+        edge_ref_lines = [
+            line for line in result.split("\n") if EDGE_TABLE in line
+        ]
+        assert len(edge_ref_lines) == 1
+        assert "CREATE OR REPLACE TEMPORARY VIEW MY_FINAL_EDGES" in (
+            edge_ref_lines[0]
+        )
+
+    def test_placeholders_resolved_in_view_body(self):
+        """__EDGES__/__NODES__ in the CTE resolve to real table names inside
+        the injected view definition."""
+        cte = (
+            "MY_FINAL_EDGES AS (\n"
+            "  SELECT e.* FROM __EDGES__ e\n"
+            "  JOIN __NODES__ n ON e.src = n.node_id\n"
+            "  WHERE n.node_type = 'Person'\n"
+            ")"
+        )
+        result = apply_cte_prefilter(
+            PROCEDURAL_SCRIPT, cte, EDGE_TABLE, NODE_TABLE
+        )
+
+        assert "__EDGES__" not in result
+        assert "__NODES__" not in result
+        assert NODE_TABLE in result  # node table read directly by the view
+
+    def test_chained_ctes_become_ordered_views(self):
+        """Multiple/chained user CTEs each become a temp view, in definition
+        order, so a helper referenced by MY_FINAL_EDGES is created first."""
+        cte = (
+            "helper AS (SELECT * FROM __EDGES__ WHERE status = 'active'),\n"
+            "MY_FINAL_EDGES AS (SELECT * FROM helper WHERE weight > 0.5)"
+        )
+        result = apply_cte_prefilter(
+            PROCEDURAL_SCRIPT, cte, EDGE_TABLE, NODE_TABLE
+        )
+
+        helper_idx = result.find(
+            "CREATE OR REPLACE TEMPORARY VIEW helper AS"
+        )
+        final_idx = result.find(
+            "CREATE OR REPLACE TEMPORARY VIEW MY_FINAL_EDGES AS"
+        )
+        assert helper_idx != -1
+        assert final_idx != -1
+        # helper must be created before MY_FINAL_EDGES references it.
+        assert helper_idx < final_idx
+
+    def test_output_statements_parse(self):
+        """Each statement of the resulting BEGIN...END block parses under the
+        Spark dialect (BEGIN/END wrappers excluded)."""
+        import sqlglot
+
+        cte = "MY_FINAL_EDGES AS (SELECT * FROM __EDGES__ WHERE amount > 100)"
+        result = apply_cte_prefilter(
+            PROCEDURAL_SCRIPT, cte, EDGE_TABLE, NODE_TABLE
+        )
+
+        body = result.strip()
+        assert body.upper().startswith("BEGIN")
+        assert body.upper().endswith("END")
+        inner = body[len("BEGIN") : -len("END")]
+        statements = [s.strip() for s in inner.split(";") if s.strip()]
+        assert statements  # non-empty
+        for stmt in statements:
+            # DECLARE is Spark-scripting-only; sqlglot may not model it, so
+            # skip it — the CREATE VIEW / SELECT statements are what matter.
+            if stmt.upper().startswith("DECLARE"):
+                continue
+            parsed = sqlglot.parse(stmt, dialect="spark")
+            assert parsed and parsed[0] is not None

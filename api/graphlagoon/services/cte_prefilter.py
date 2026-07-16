@@ -78,6 +78,42 @@ def validate_cte_prefilter(cte_text: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _cte_text_to_temp_views(cte_resolved: str) -> str:
+    """Convert a WITH-less CTE definition list into CREATE TEMP VIEW statements.
+
+    A procedural ``BEGIN...END`` script is a multi-statement compound block; a
+    ``WITH`` clause cannot scope it, so the user CTEs are instead materialized as
+    ``CREATE OR REPLACE TEMPORARY VIEW`` statements injected inside the block.
+    Views are visible to every subsequent statement (including numbered-views
+    ``EXECUTE IMMEDIATE`` bodies and ``temp_tables`` CREATE/INSERT blocks).
+
+    Definition order is preserved so a helper CTE that a later CTE
+    references is created first.
+
+    Args:
+        cte_resolved: CTE definitions (without leading WITH), placeholders
+            already resolved to real table names.
+
+    Returns:
+        Newline-joined ``CREATE OR REPLACE TEMPORARY VIEW <name> AS <select>;``
+        statements, one per CTE.
+    """
+    wrapped = f"WITH {cte_resolved} SELECT 1 FROM MY_FINAL_EDGES"
+    statement = sqlglot.parse_one(wrapped, dialect="spark")
+    with_clause = statement.find(exp.With)
+
+    view_stmts: list[str] = []
+    for cte in with_clause.find_all(exp.CTE):
+        name = cte.alias
+        # cte.this is the inner query (SELECT ...); render it without the alias
+        # wrapper so it becomes the view body.
+        body = cte.this.sql(dialect="spark")
+        view_stmts.append(
+            f"CREATE OR REPLACE TEMPORARY VIEW {name} AS {body};"
+        )
+    return "\n".join(view_stmts)
+
+
 def apply_cte_prefilter(
     sql: str,
     cte_prefilter: str,
@@ -92,7 +128,11 @@ def apply_cte_prefilter(
     Steps:
       1. Replace __EDGES__/__NODES__ placeholders in CTE text.
       2. Replace edge table references in SQL with MY_FINAL_EDGES.
-      3. Prepend user CTE to the SQL (merging with existing WITH clause).
+      3. Merge the user CTE into the SQL. For a single ``WITH...SELECT`` query
+         the CTE is prepended/merged into the WITH clause; for a procedural
+         ``BEGIN...END`` script the CTEs are injected as CREATE TEMP VIEW
+         statements inside the block (a WITH clause cannot scope a compound
+         block — see _cte_text_to_temp_views).
 
     Args:
         sql: The original SQL query (from transpiler or user).
@@ -101,7 +141,7 @@ def apply_cte_prefilter(
         node_table_name: Actual node table name (for __NODES__ placeholder).
 
     Returns:
-        Final SQL with CTE prepended and edge table replaced.
+        Final SQL with CTE applied and edge table replaced.
     """
     # 1. Replace placeholders in CTE text
     cte_resolved = cte_prefilter.replace("__EDGES__", edge_table_name)
@@ -120,7 +160,17 @@ def apply_cte_prefilter(
     stripped = sql_modified.strip()
     upper = stripped.upper()
 
-    if upper.startswith("WITH RECURSIVE"):
+    if upper.startswith("BEGIN") and upper.endswith("END"):
+        # Procedural BFS script: inject the user CTEs as temp views right after
+        # BEGIN so every statement in the block reads the pre-filtered edges.
+        # Split on the leading BEGIN keyword rather than re.sub — the view
+        # block may contain backslashes/group-like text that re.sub would
+        # misinterpret as replacement escapes.
+        view_block = _cte_text_to_temp_views(cte_text)
+        indented = "\n".join(f"  {line}" for line in view_block.split("\n"))
+        rest = stripped[len("BEGIN") :]
+        result = f"BEGIN\n{indented}{rest}"
+    elif upper.startswith("WITH RECURSIVE"):
         # Insert user CTE after "WITH RECURSIVE" keyword
         result = re.sub(
             r"^(WITH\s+RECURSIVE\s+)",
