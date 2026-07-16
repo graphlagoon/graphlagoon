@@ -23,6 +23,8 @@ import QueryRunningState from '@/components/QueryRunningState.vue';
 import ClusterProgramPanel from '@/components/ClusterProgramPanel.vue';
 import ClusterListPanel from '@/components/ClusterListPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
+import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
+import { useCommunityTableAction } from '@/composables/useCommunityTableAction';
 import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
 import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
@@ -54,6 +56,7 @@ const showClusterPrograms = ref(false);
 const showClusterList = ref(false);
 const showTemplatesPanel = ref(false);
 const selectedClusterId = ref<string | null>(null);
+const communityTable = useCommunityTableAction();
 const showDetailModal = ref(false);
 const showDataTable = ref(false);
 
@@ -154,6 +157,9 @@ onMounted(async () => {
 
   document.addEventListener('fullscreenchange', onFullscreenChange);
 
+  // Right-click a node → "View community members" (when communities are detected)
+  communityTable.register();
+
   // Track canvas dimensions for the export modal
   const graphContainer = graphContainerRef.value?.querySelector('.graph-container');
   if (graphContainer) {
@@ -188,6 +194,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  communityTable.unregister();
   toolbarStore.unregisterHandlers();
   document.removeEventListener('fullscreenchange', onFullscreenChange);
   canvasResizeObserver?.disconnect();
@@ -401,6 +408,12 @@ watch(
     <ClusterNodeModal
       :cluster-id="selectedClusterId"
       @close="selectedClusterId = null"
+    />
+
+    <!-- Community Node Modal (opened via node context menu) -->
+    <CommunityNodeModal
+      :community-id="communityTable.selectedCommunityId.value"
+      @close="communityTable.close()"
     />
 
     <!-- Detail Modal (full properties view) -->
