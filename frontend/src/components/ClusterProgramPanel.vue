@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useClusterStore } from '@/stores/cluster'
+import { ref, computed, watch } from 'vue'
+import { useClusterStore, isDefaultProgramId } from '@/stores/cluster'
 import { useCommunityStore } from '@/stores/community'
 import { useSimilarityStore } from '@/stores/similarity'
 import { useGraphStore } from '@/stores/graph'
 import type { ClusterProgram } from '@/types/cluster'
-import JavaScriptEditor from './JavaScriptEditor.vue'
+import { missingRequiredParams } from '@/utils/clusterProgramParams'
 import SimilarityPanel from './SimilarityPanel.vue'
 import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
+import ClusterProgramEditorModal from './ClusterProgramEditorModal.vue'
+import ClusterProgramRunModal from './ClusterProgramRunModal.vue'
+import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
 import { X, Play, Loader2, HelpCircle } from 'lucide-vue-next'
 
 const emit = defineEmits<{
@@ -46,95 +49,24 @@ function setCommunityLayout(layout: CommunityLayout) {
     }
   }
 }
-const showCreateForm = ref(false)
 const showSkillModal = ref(false)
-const editingProgramId = ref<string | null>(null)
 const expandedProgramId = ref<string | null>(null)
 
-// Form data
-const formData = ref({
-  program_name: '',
-  description: '',
-  code: `// Write JavaScript code that returns an array of clusters
-// Available context: { nodes, edges, selectedNodeIds, selectedEdgeIds }
+// Editor modal: null = closed; { program: null } = create; { program } = edit
+const showEditor = ref(false)
+const editorProgram = ref<ClusterProgram | null>(null)
 
-// Example: Group nodes by type
-const clustersByType = new Map();
+// Run modal: set when executing a program that declares parameters
+const runProgram = ref<ClusterProgram | null>(null)
 
-nodes.forEach(node => {
-  if (!clustersByType.has(node.node_type)) {
-    clustersByType.set(node.node_type, []);
-  }
-  clustersByType.get(node.node_type).push(node.node_id);
-});
-
-const clusters = [];
-clustersByType.forEach((nodeIds, nodeType) => {
-  clusters.push({
-    cluster_name: \`\${nodeType} Cluster\`,
-    cluster_class: 'by-type',
-    figure: 'circle',
-    state: 'closed',
-    node_ids: nodeIds
-  });
-});
-
-return clusters;
-`
-})
-
-const isEditing = computed(() => editingProgramId.value !== null)
-
-function resetForm() {
-  formData.value = {
-    program_name: '',
-    description: '',
-    code: formData.value.code // Keep the template
-  }
-  editingProgramId.value = null
-}
-
-function handleCreate() {
-  if (!formData.value.program_name.trim()) {
-    alert('Program name is required')
-    return
-  }
-
-  clusterStore.createProgram({
-    program_name: formData.value.program_name,
-    description: formData.value.description || undefined,
-    code: formData.value.code
-  })
-
-  showCreateForm.value = false
-  resetForm()
+function openCreate() {
+  editorProgram.value = null
+  showEditor.value = true
 }
 
 function handleEdit(program: ClusterProgram) {
-  editingProgramId.value = program.program_id
-  formData.value = {
-    program_name: program.program_name,
-    description: program.description || '',
-    code: program.code
-  }
-  showCreateForm.value = true
-}
-
-function handleUpdate() {
-  if (!editingProgramId.value) return
-  if (!formData.value.program_name.trim()) {
-    alert('Program name is required')
-    return
-  }
-
-  clusterStore.updateProgram(editingProgramId.value, {
-    program_name: formData.value.program_name,
-    description: formData.value.description || undefined,
-    code: formData.value.code
-  })
-
-  showCreateForm.value = false
-  resetForm()
+  editorProgram.value = program
+  showEditor.value = true
 }
 
 function handleDelete(programId: string) {
@@ -143,8 +75,14 @@ function handleDelete(programId: string) {
   }
 }
 
-async function handleExecute(programId: string) {
-  const result = await clusterStore.executeProgram(programId)
+async function handleExecute(program: ClusterProgram) {
+  // Programs with parameters prompt for values first
+  if ((program.parameters?.length ?? 0) > 0) {
+    runProgram.value = program
+    return
+  }
+
+  const result = await clusterStore.executeProgram(program.program_id)
 
   if (result.success) {
     const count = result.clusters?.length || 0
@@ -152,6 +90,35 @@ async function handleExecute(programId: string) {
   } else {
     alert(`Execution failed:\n${result.error}`)
   }
+}
+
+// Communities tab: cluster program selected as algorithm, with inline params
+const selectedCommunityProgram = computed(() =>
+  communityStore.selectedProgramId
+    ? clusterStore.getProgram(communityStore.selectedProgramId)
+    : undefined
+)
+
+watch(
+  () => communityStore.selectedProgramId,
+  (id) => {
+    if (id) communityStore.ensureProgramParams(id)
+  },
+  { immediate: true }
+)
+
+const communityMissingParams = computed(() => {
+  const program = selectedCommunityProgram.value
+  if (!program) return []
+  return missingRequiredParams(
+    program.parameters,
+    communityStore.programParams[program.program_id] ?? {}
+  )
+})
+
+function setCommunityProgramParams(values: Record<string, string | number | boolean>) {
+  if (!communityStore.selectedProgramId) return
+  communityStore.programParams[communityStore.selectedProgramId] = values
 }
 
 function toggleExpand(programId: string) {
@@ -165,6 +132,11 @@ function formatDate(dateStr: string) {
 
 function getExecutionHistory(programId: string) {
   return clusterStore.getExecutionHistory(programId).slice(0, 5) // Last 5 executions
+}
+
+function scopeLabel(program: ClusterProgram): string {
+  if (isDefaultProgramId(program.program_id)) return 'built-in'
+  return program.scope === 'exploration' ? 'exploration' : 'context'
 }
 
 function toggleEdgeTypeFilter(edgeType: string) {
@@ -246,6 +218,24 @@ function toggleEdgeTypeFilter(edgeType: string) {
             </small>
           </div>
 
+          <!-- Cluster program parameters (inline, like the Louvain resolution slider) -->
+          <div
+            v-if="selectedCommunityProgram && (selectedCommunityProgram.parameters?.length ?? 0) > 0"
+            class="form-row"
+            data-testid="community-program-params"
+          >
+            <label>Parameters</label>
+            <ClusterProgramParamInputs
+              compact
+              :parameters="selectedCommunityProgram.parameters ?? []"
+              :model-value="communityStore.programParams[selectedCommunityProgram.program_id] ?? {}"
+              @update:model-value="setCommunityProgramParams"
+            />
+            <small v-if="communityMissingParams.length > 0" class="help-text params-missing-hint">
+              Required: {{ communityMissingParams.map(p => p.label || p.id).join(', ') }}
+            </small>
+          </div>
+
           <div v-if="communityStore.isLouvain" class="form-row">
             <label for="community-resolution">Resolution</label>
             <div class="slider-row">
@@ -292,7 +282,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
           <div class="community-actions">
             <button
               class="btn-detect"
-              :disabled="communityStore.computing"
+              :disabled="communityStore.computing || communityMissingParams.length > 0"
               @click="communityStore.runDetection()"
             >
               <Loader2 v-if="communityStore.computing" :size="12" class="spin" />
@@ -368,7 +358,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
               class="community-item"
             >
               <span class="color-swatch" :style="{ backgroundColor: comm.color }"></span>
-              <span class="community-name">Community {{ comm.id }}</span>
+              <span class="community-name">{{ comm.label }}</span>
               <span class="community-count">{{ comm.nodeCount }}</span>
             </div>
           </div>
@@ -382,9 +372,9 @@ function toggleEdgeTypeFilter(edgeType: string) {
         <!-- Programs toolbar -->
         <div class="programs-toolbar">
           <button
-            v-if="!showCreateForm"
             class="btn-create"
-            @click="showCreateForm = true; resetForm()"
+            data-testid="cluster-program-new"
+            @click="openCreate"
           >
             + New
           </button>
@@ -419,60 +409,8 @@ function toggleEdgeTypeFilter(edgeType: string) {
           </div>
         </div>
 
-        <!-- Create/Edit Form -->
-        <div v-if="showCreateForm" class="program-form">
-          <h4>{{ isEditing ? 'Edit Program' : 'Create Program' }}</h4>
-
-          <div class="form-group">
-            <label for="program-name">Program Name *</label>
-            <input
-              id="program-name"
-              v-model="formData.program_name"
-              type="text"
-              placeholder="e.g., Group by Node Type"
-              required
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="program-description">Description</label>
-            <input
-              id="program-description"
-              v-model="formData.description"
-              type="text"
-              placeholder="Optional description"
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="program-code">JavaScript Code *</label>
-            <JavaScriptEditor
-              v-model="formData.code"
-              placeholder="return [{ cluster_name: '...', node_ids: [...] }]"
-            />
-            <small class="help-text">
-              Must return an array of cluster objects with: cluster_name, node_ids, cluster_class (optional), figure (optional), state (optional), color (optional)
-            </small>
-          </div>
-
-          <div class="form-actions">
-            <button
-              class="btn-primary"
-              @click="isEditing ? handleUpdate() : handleCreate()"
-            >
-              {{ isEditing ? 'Update' : 'Create' }}
-            </button>
-            <button
-              class="btn-secondary"
-              @click="showCreateForm = false; resetForm()"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-
         <!-- Programs List -->
-        <div v-if="clusterStore.programs.length === 0 && !showCreateForm" class="empty-state">
+        <div v-if="clusterStore.programs.length === 0" class="empty-state">
           <p>No cluster programs yet.</p>
           <p>Create a program to group nodes into clusters programmatically.</p>
         </div>
@@ -486,18 +424,26 @@ function toggleEdgeTypeFilter(edgeType: string) {
           >
             <div class="program-header" @click="toggleExpand(program.program_id)">
               <div class="program-info">
-                <h4>{{ program.program_name }}</h4>
+                <h4>
+                  {{ program.program_name }}
+                  <span class="scope-badge" :class="`scope-${scopeLabel(program)}`">
+                    {{ scopeLabel(program) }}
+                  </span>
+                </h4>
                 <p v-if="program.description" class="program-description">
                   {{ program.description }}
                 </p>
                 <small class="program-meta">
                   Updated: {{ formatDate(program.updated_at) }}
+                  <template v-if="(program.parameters?.length ?? 0) > 0">
+                    · Params: {{ program.parameters!.length }}
+                  </template>
                 </small>
               </div>
               <div class="program-actions" @click.stop>
                 <button
                   class="btn-execute"
-                  @click="handleExecute(program.program_id)"
+                  @click="handleExecute(program)"
                   title="Execute program"
                   :disabled="clusterStore.loading"
                 >
@@ -511,6 +457,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
                   ✏️
                 </button>
                 <button
+                  v-if="!isDefaultProgramId(program.program_id)"
                   class="btn-delete"
                   @click="handleDelete(program.program_id)"
                   title="Delete program"
@@ -570,6 +517,20 @@ function toggleEdgeTypeFilter(edgeType: string) {
 
     <!-- AI skill helper modal -->
     <ClusterProgramSkillModal v-model="showSkillModal" />
+
+    <!-- Create/Edit program modal -->
+    <ClusterProgramEditorModal
+      v-if="showEditor"
+      :program="editorProgram"
+      @close="showEditor = false"
+    />
+
+    <!-- Parameter-fill modal for programs with declared parameters -->
+    <ClusterProgramRunModal
+      v-if="runProgram"
+      :program="runProgram"
+      @close="runProgram = null"
+    />
   </div>
 </template>
 
@@ -976,65 +937,8 @@ button {
   background: #e54545;
 }
 
-.program-form {
-  background: white;
-  padding: 12px;
-  border-radius: 4px;
-}
-
-.program-form h4 {
-  margin: 0 0 12px 0;
-  font-size: 14px;
-}
-
-.form-group {
-  margin-bottom: 12px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 3px;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.form-group input,
-.form-group textarea {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-family: inherit;
-  font-size: 13px;
-}
-
-.form-group textarea {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  font-size: 12px;
-  resize: vertical;
-}
-
-.form-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.btn-primary {
-  background: #42b883;
-  color: white;
-}
-
-.btn-primary:hover {
-  background: #35a372;
-}
-
-.btn-secondary {
-  background: #ddd;
-  color: #333;
-}
-
-.btn-secondary:hover {
-  background: #ccc;
+.params-missing-hint {
+  color: #f56c6c;
 }
 
 .programs-list {
@@ -1069,6 +973,32 @@ button {
 .program-info h4 {
   margin: 0 0 2px 0;
   font-size: 13px;
+}
+
+.scope-badge {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+
+.scope-context {
+  background: #e7f6ef;
+  color: #2f9e6e;
+}
+
+.scope-exploration {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.scope-built-in {
+  background: #f0f0f0;
+  color: #888;
 }
 
 .program-description {

@@ -48,7 +48,8 @@ const propKeys = computed(() => {
 
 // ─── Column metadata + flat rows ───
 
-const cols = computed<ColMeta[]>(() => buildNodeColumns(nodes.value, propKeys.value))
+const cols = computed<ColMeta[]>(() =>
+  buildNodeColumns(nodes.value, propKeys.value, graphStore.currentContext?.node_structure?.node_id_col || undefined))
 const rows = computed(() => flattenNodeRows(nodes.value, propKeys.value))
 
 // ─── Search & Sort ───
@@ -131,7 +132,7 @@ function exportCSV() {
         <div class="header-info">
           <h2>
             <span class="color-dot" :style="{ backgroundColor: community.color }" />
-            Community {{ community.id }}
+            {{ community.label }}
           </h2>
           <div class="header-meta">
             <span class="badge">{{ algorithmLabel }}</span>

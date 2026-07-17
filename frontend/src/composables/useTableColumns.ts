@@ -136,13 +136,18 @@ export function initRowFilters(cols: ColMeta[]) {
   return f;
 }
 
-/** Build column metadata for a set of nodes, detecting property types automatically. */
+/** Build column metadata for a set of nodes, detecting property types automatically.
+ *
+ * `idColName` is the context's configured node id column (e.g. `id_hash`). When
+ * given, it disambiguates the ID header from a literal `node_id` property column
+ * that may also exist in the table (shown as its own `prop_node_id` column). */
 export function buildNodeColumns<T extends { node_id: string; node_type: string; properties?: Record<string, unknown> }>(
   nodes: T[],
   propKeys: string[],
+  idColName?: string,
 ): ColMeta[] {
   const cols: ColMeta[] = [
-    buildColMeta('node_id', 'ID', 'text'),
+    buildColMeta('node_id', idColName && idColName !== 'node_id' ? `ID (${idColName})` : 'ID', 'text'),
     buildColMeta('node_type', 'Type', 'categorical', collectOptions(nodes, n => n.node_type)),
   ];
   for (const k of propKeys) {

@@ -84,11 +84,13 @@ const currentSlide = ref(0);
 const slides = [
   {
     title: 'Basic Placeholders',
-    description: 'Use curly braces to insert property values into your labels.',
+    description: 'Use curly braces to insert property values into your labels. '
+      + '{node_id} is the configured ID column; {prop:x} reads the raw table column x — '
+      + 'so if your table has its own node_id column, {prop:node_id} shows it.',
     examples: [
-      { template: '{node_id}', result: 'user_123', note: 'Node identifier' },
+      { template: '{node_id}', result: 'user_123', note: 'Node identifier (configured ID column)' },
       { template: '{node_type}', result: 'Person', note: 'Node type/label' },
-      { template: '{prop:name}', result: 'John Doe', note: 'Metadata property' },
+      { template: '{prop:name}', result: 'John Doe', note: 'Metadata property (raw table column)' },
       { template: '{prop:email}', result: 'john@example.com', note: 'Any metadata field' },
     ],
   },

@@ -1,4 +1,4 @@
-import type { Cluster, ClusterProgram } from '@/types/cluster'
+import type { Cluster, ClusterProgram, ClusterProgramParameter } from '@/types/cluster'
 
 export function createCluster(overrides: Partial<Cluster> = {}): Cluster {
   return {
@@ -20,6 +20,19 @@ export function createClusterProgram(overrides: Partial<ClusterProgram> = {}): C
     code: 'return []',
     created_at: '2025-01-01T00:00:00Z',
     updated_at: '2025-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+export function createClusterProgramParameter(
+  overrides: Partial<ClusterProgramParameter> = {}
+): ClusterProgramParameter {
+  return {
+    id: 'threshold',
+    type: 'number',
+    label: 'Threshold',
+    default: 1,
+    required: true,
     ...overrides,
   }
 }

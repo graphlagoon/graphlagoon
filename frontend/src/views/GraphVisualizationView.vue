@@ -25,6 +25,7 @@ import ClusterListPanel from '@/components/ClusterListPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
 import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
 import { useCommunityTableAction } from '@/composables/useCommunityTableAction';
+import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
 import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
 import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
@@ -57,6 +58,7 @@ const showClusterList = ref(false);
 const showTemplatesPanel = ref(false);
 const selectedClusterId = ref<string | null>(null);
 const communityTable = useCommunityTableAction();
+const clusterProgramActions = useClusterProgramMenuActions();
 const showDetailModal = ref(false);
 const showDataTable = ref(false);
 
@@ -160,6 +162,9 @@ onMounted(async () => {
   // Right-click a node → "View community members" (when communities are detected)
   communityTable.register();
 
+  // Right-click a node → run flagged cluster programs as community algorithms
+  clusterProgramActions.register();
+
   // Track canvas dimensions for the export modal
   const graphContainer = graphContainerRef.value?.querySelector('.graph-container');
   if (graphContainer) {
@@ -185,8 +190,8 @@ onMounted(async () => {
     if (graphStore.behaviors.autoLoadOnOpen) {
       await graphStore.loadSubgraph({});
     }
-    // Clear clusters and reset to default programs in memory
-    clusterStore.clearAll(); // This also recreates default programs
+    // Clear clusters and rebuild programs (built-in defaults + this context's programs)
+    clusterStore.clearAll();
     communityStore.clearCommunities();
     // Clear graph query - user must execute a query to save exploration
     graphStore.graphQuery = '';
@@ -194,7 +199,10 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  // Push any pending debounced cluster-program save before leaving the context
+  void clusterStore.flushPersist();
   communityTable.unregister();
+  clusterProgramActions.unregister();
   toolbarStore.unregisterHandlers();
   document.removeEventListener('fullscreenchange', onFullscreenChange);
   canvasResizeObserver?.disconnect();
@@ -206,7 +214,10 @@ watch(
   () => props.contextId,
   async (newId) => {
     graphStore.clear();
-    clusterStore.clearAll(); // Clear clusters and reset to default programs
+    // Clear clusters; graphStore.clear() nulled currentContext, so this resets
+    // programs to the built-in defaults. loadContext() below hydrates the new
+    // context's programs on top.
+    clusterStore.clearAll();
     communityStore.clearCommunities();
     await graphStore.loadContext(newId);
     // loadContext re-resolves behaviors from the new context, so this honours the context

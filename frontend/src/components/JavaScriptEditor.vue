@@ -35,6 +35,7 @@ const CONTEXT_API = [
   { label: 'edges', type: 'variable', detail: 'Array<{edge_id, src, dst, relationship_type, properties}>' },
   { label: 'selectedNodeIds', type: 'variable', detail: 'string[]' },
   { label: 'selectedEdgeIds', type: 'variable', detail: 'string[]' },
+  { label: 'params', type: 'variable', detail: 'Record<string, string|number|boolean> — declared program parameters' },
 ];
 
 // Common cluster properties

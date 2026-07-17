@@ -7,14 +7,32 @@ import type {
   ClusterProgramContext,
   ClusterProgramResult,
   ClusterProgramExecution,
+  ClusterProgramParamValues,
   ClusterStoreState,
   CreateClusterProgramInput,
   UpdateClusterProgramInput,
   CreateClusterInput,
 } from '@/types/cluster'
+import { resolveParamValues } from '@/utils/clusterProgramParams'
 import { useGraphStore } from '@/stores/graph'
+import { api } from '@/services/api'
 
 const STORAGE_KEY = 'graphlagoon-studio-clusters'
+
+// Fixed IDs for the built-in default programs (consistent across sessions).
+// Built-ins are recreated from code on every hydration and never persisted.
+export const DEFAULT_PROGRAM_IDS = {
+  ORPHAN_CLUSTERS: 'default-orphan-clusters',
+  GROUP_BY_TYPE: 'default-group-by-node-type',
+  BFS_FROM_NODE: 'default-bfs-from-node',
+}
+
+export function isDefaultProgramId(programId: string): boolean {
+  return Object.values(DEFAULT_PROGRAM_IDS).includes(programId)
+}
+
+/** Delay before a program mutation is pushed to the context (batches rapid edits). */
+const PERSIST_DEBOUNCE_MS = 500
 
 /**
  * Cluster Store
@@ -141,19 +159,33 @@ export const useClusterStore = defineStore('cluster', () => {
 
   /**
    * Create a new cluster program
+   *
+   * Scope defaults to 'context' when the user can write to the current context,
+   * 'exploration' otherwise. Built-in default programs get no scope.
    */
   function createProgram(input: CreateClusterProgramInput): ClusterProgram {
+    const programId = input.program_id || crypto.randomUUID()
+    const scope = isDefaultProgramId(programId)
+      ? undefined
+      : input.scope ?? (contextWritable() ? 'context' : 'exploration')
+
     const newProgram: ClusterProgram = {
-      program_id: input.program_id || crypto.randomUUID(), // Use provided ID or generate one
+      program_id: programId,
       program_name: input.program_name,
       description: input.description,
       code: input.code,
+      parameters: input.parameters,
+      show_in_context_menu: input.show_in_context_menu,
+      scope,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
 
     programs.value.push(newProgram)
-    // Don't auto-save to localStorage - programs are saved as part of exploration state
+
+    if (scope === 'context') {
+      persistProgramsToContext()
+    }
 
     return newProgram
   }
@@ -168,32 +200,44 @@ export const useClusterStore = defineStore('cluster', () => {
       return false
     }
 
+    const wasContextScoped = programs.value[index].scope === 'context'
+
     programs.value[index] = {
       ...programs.value[index],
       ...updates,
       updated_at: new Date().toISOString(),
     }
 
-    // Don't auto-save to localStorage - programs are saved as part of exploration state
+    // A scope change in either direction alters the context's program set
+    if (wasContextScoped || programs.value[index].scope === 'context') {
+      persistProgramsToContext()
+    }
     return true
   }
 
   /**
-   * Delete a cluster program
+   * Delete a cluster program (built-in defaults cannot be deleted)
    */
   function deleteProgram(programId: string): boolean {
-    const initialLength = programs.value.length
-    programs.value = programs.value.filter(p => p.program_id !== programId)
-
-    if (programs.value.length < initialLength) {
-      // Also remove execution history for this program
-      executions.value = executions.value.filter(e => e.program_id !== programId)
-      // Don't auto-save to localStorage - programs are saved as part of exploration state
-      return true
+    if (isDefaultProgramId(programId)) {
+      error.value = 'Default programs cannot be deleted'
+      return false
     }
 
-    error.value = 'Program not found'
-    return false
+    const removed = programs.value.find(p => p.program_id === programId)
+    if (!removed) {
+      error.value = 'Program not found'
+      return false
+    }
+
+    programs.value = programs.value.filter(p => p.program_id !== programId)
+    // Also remove execution history for this program
+    executions.value = executions.value.filter(e => e.program_id !== programId)
+
+    if (removed.scope === 'context') {
+      persistProgramsToContext()
+    }
+    return true
   }
 
   /**
@@ -212,14 +256,29 @@ export const useClusterStore = defineStore('cluster', () => {
    * NOT record perf — so it can be reused by callers that only want the result
    * (e.g. using a cluster program as a community algorithm) without creating
    * the collapsed geometry side effects.
+   *
+   * `paramValues` fills the program's declared parameters (exposed to the code
+   * as `params.<id>`). When omitted, declared defaults are used.
    */
-  function computeClustersFromProgram(programId: string): ClusterProgramResult {
+  function computeClustersFromProgram(
+    programId: string,
+    paramValues?: ClusterProgramParamValues
+  ): ClusterProgramResult {
     const program = programs.value.find(p => p.program_id === programId)
     if (!program) {
       return { success: false, error: 'Program not found' }
     }
 
     const startTime = performance.now()
+
+    const resolved = resolveParamValues(program.parameters, paramValues)
+    if (!resolved.success) {
+      return {
+        success: false,
+        error: resolved.error,
+        duration_ms: Math.round(performance.now() - startTime),
+      }
+    }
 
     try {
       // Prepare execution context
@@ -239,6 +298,7 @@ export const useClusterStore = defineStore('cluster', () => {
         })),
         selectedNodeIds: Array.from(graphStore.selectedNodeIds),
         selectedEdgeIds: Array.from(graphStore.selectedEdgeIds),
+        params: resolved.params,
       }
 
       // Execute user code in a function context
@@ -246,7 +306,7 @@ export const useClusterStore = defineStore('cluster', () => {
       // The code should return an array of cluster objects
       const fn = new Function('context', `
         'use strict';
-        const { nodes, edges, selectedNodeIds, selectedEdgeIds } = context;
+        const { nodes, edges, selectedNodeIds, selectedEdgeIds, params } = context;
 
         // User code:
         ${program.code}
@@ -339,7 +399,10 @@ export const useClusterStore = defineStore('cluster', () => {
    * side effects: merging into `clusters.value`, recording execution history, and
    * perf metrics.
    */
-  async function executeProgram(programId: string): Promise<ClusterProgramResult> {
+  async function executeProgram(
+    programId: string,
+    paramValues?: ClusterProgramParamValues
+  ): Promise<ClusterProgramResult> {
     if (!programs.value.some(p => p.program_id === programId)) {
       const errorMsg = 'Program not found'
       error.value = errorMsg
@@ -349,8 +412,11 @@ export const useClusterStore = defineStore('cluster', () => {
     loading.value = true
     error.value = null
 
+    const paramsUsed =
+      paramValues && Object.keys(paramValues).length > 0 ? paramValues : undefined
+
     try {
-      const result = computeClustersFromProgram(programId)
+      const result = computeClustersFromProgram(programId, paramValues)
       const duration = result.duration_ms ?? 0
 
       if (!result.success) {
@@ -364,6 +430,7 @@ export const useClusterStore = defineStore('cluster', () => {
           clusters_generated: 0,
           error: error.value,
           duration_ms: duration,
+          params_used: paramsUsed,
         })
         if (executions.value.length > 50) {
           executions.value = executions.value.slice(-50)
@@ -387,6 +454,7 @@ export const useClusterStore = defineStore('cluster', () => {
         executed_at: new Date().toISOString(),
         clusters_generated: newClusters.length,
         duration_ms: duration,
+        params_used: paramsUsed,
       })
       if (executions.value.length > 50) {
         executions.value = executions.value.slice(-50)
@@ -493,55 +561,169 @@ export const useClusterStore = defineStore('cluster', () => {
   }
 
   /**
-   * Clear all programs
+   * Clear all programs (resets to built-in defaults + current context's programs)
    */
   function clearPrograms() {
-    programs.value = []
     executions.value = []
-    // Recreate default programs in memory
-    createDefaultPrograms()
+    hydrateProgramsFromContext(useGraphStore().currentContext?.cluster_programs)
   }
 
   /**
    * Clear everything (programs, clusters, executions)
    */
   function clearAll() {
-    programs.value = []
     clusters.value = []
     executions.value = []
     error.value = null
-    // Recreate default programs in memory
-    createDefaultPrograms()
+    hydrateProgramsFromContext(useGraphStore().currentContext?.cluster_programs)
   }
 
   // ============================================================================
   // Persistence
   // ============================================================================
 
+  function contextWritable(): boolean {
+    return useGraphStore().currentContext?.has_write_access === true
+  }
+
+  // Guards against persisting while programs are being rebuilt from
+  // context/exploration data (hydration must never trigger a PUT).
+  let isHydrating = false
+  let persistTimer: ReturnType<typeof setTimeout> | null = null
+
   /**
-   * Get complete cluster state for persistence
+   * Push context-scoped programs to the backend (debounced, fire-and-forget).
+   * Built-in defaults and exploration-scoped programs are never sent.
+   */
+  function persistProgramsToContext() {
+    if (isHydrating) return
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = setTimeout(() => {
+      persistTimer = null
+      void doPersist()
+    }, PERSIST_DEBOUNCE_MS)
+  }
+
+  async function doPersist(): Promise<void> {
+    const graphStore = useGraphStore()
+    const context = graphStore.currentContext
+    if (!context || !context.has_write_access) return
+
+    const payload = programs.value.filter(
+      p => p.scope === 'context' && !isDefaultProgramId(p.program_id)
+    )
+
+    try {
+      const updated = await api.updateGraphContext(context.id, {
+        cluster_programs: payload,
+      })
+      // Keep the local context record in sync so a later hydrate is consistent
+      if (graphStore.currentContext?.id === updated.id) {
+        graphStore.currentContext = updated
+      }
+    } catch (e) {
+      console.warn('Failed to persist cluster programs to context:', e)
+      error.value = 'Failed to save cluster programs to the context'
+    }
+  }
+
+  /**
+   * Immediately run any pending debounced persist (used on unmount and in tests)
+   */
+  async function flushPersist(): Promise<void> {
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+      await doPersist()
+    }
+  }
+
+  /**
+   * Rebuild the program list from the built-in defaults plus the given
+   * context-level programs. A context program with a default's id replaces the
+   * built-in (defensive; persist filters defaults out). Exploration-scoped
+   * programs are dropped — callers re-add them via loadState.
+   */
+  function hydrateProgramsFromContext(contextPrograms?: ClusterProgram[]) {
+    isHydrating = true
+    try {
+      createDefaultPrograms()
+      for (const program of contextPrograms ?? []) {
+        const normalized: ClusterProgram = { ...program, scope: 'context' }
+        const index = programs.value.findIndex(p => p.program_id === program.program_id)
+        if (index === -1) {
+          programs.value.push(normalized)
+        } else {
+          programs.value[index] = normalized
+        }
+      }
+    } finally {
+      isHydrating = false
+    }
+  }
+
+  /**
+   * Get cluster state for exploration persistence.
+   *
+   * Programs now live on the graph context (`graph_contexts.cluster_programs`);
+   * only exploration-scoped programs are embedded in the exploration state.
    */
   function getState(): ClusterStoreState {
     return {
-      programs: programs.value,
+      programs: programs.value.filter(
+        p => p.scope === 'exploration' && !isDefaultProgramId(p.program_id)
+      ),
       clusters: clusters.value,
       executions: executions.value,
     }
   }
 
   /**
-   * Load cluster state from external source
+   * Load cluster state from a saved exploration.
+   *
+   * Clusters/executions are replaced wholesale (they are per-exploration).
+   * Programs are NOT replaced: context-scoped programs and built-in defaults
+   * survive; the exploration only contributes its exploration-scoped programs.
+   * Legacy programs (saved before scopes existed) are imported into the context
+   * when the user has write access there, kept exploration-local otherwise.
    */
   function loadState(state: ClusterStoreState | null | undefined) {
-    if (state) {
-      programs.value = state.programs || []
-      clusters.value = state.clusters || []
-      executions.value = state.executions || []
-    } else {
-      // Reset to empty state
-      programs.value = []
-      clusters.value = []
-      executions.value = []
+    clusters.value = state?.clusters || []
+    executions.value = state?.executions || []
+
+    isHydrating = true
+    let importedToContext = false
+    try {
+      // Drop the previous exploration's programs
+      programs.value = programs.value.filter(p => p.scope !== 'exploration')
+
+      for (const saved of state?.programs || []) {
+        if (isDefaultProgramId(saved.program_id)) continue
+        if (programs.value.some(p => p.program_id === saved.program_id)) continue
+
+        if (saved.scope === 'exploration') {
+          programs.value.push(saved)
+        } else if (saved.scope === 'context') {
+          // Context-scoped but missing from the context (e.g. saved from a
+          // session whose persist failed) — restore it to the context set.
+          programs.value.push(saved)
+          importedToContext = true
+        } else {
+          // Legacy program without scope
+          if (contextWritable()) {
+            programs.value.push({ ...saved, scope: 'context' })
+            importedToContext = true
+          } else {
+            programs.value.push({ ...saved, scope: 'exploration' })
+          }
+        }
+      }
+    } finally {
+      isHydrating = false
+    }
+
+    if (importedToContext) {
+      persistProgramsToContext()
     }
     error.value = null
   }
@@ -631,14 +813,8 @@ export const useClusterStore = defineStore('cluster', () => {
 
   /**
    * Create default programs in memory (always called on initialization)
-   * These are NOT saved to localStorage - they're just default templates
+   * These are NOT persisted - they're just default templates
    */
-  // Fixed IDs for default programs (consistent across sessions)
-  const DEFAULT_PROGRAM_IDS = {
-    ORPHAN_CLUSTERS: 'default-orphan-clusters',
-    GROUP_BY_TYPE: 'default-group-by-node-type',
-  }
-
   function createDefaultPrograms() {
     // Clear existing programs first
     programs.value = []
@@ -739,6 +915,136 @@ clustersByType.forEach((nodeIds, nodeType) => {
 return clusters;`,
     })
 
+    // Program 3: BFS from Node
+    // Parameterized: start node id, depth (1-3), and an optional node-type allow list
+    createProgram({
+      program_id: DEFAULT_PROGRAM_IDS.BFS_FROM_NODE,
+      program_name: 'BFS from Node',
+      description: 'Clusters nodes by BFS depth from a start node, optionally traversing only allowed node types',
+      show_in_context_menu: true,
+      parameters: [
+        {
+          id: 'start_node_id',
+          type: 'text',
+          label: 'Start node ID',
+          placeholder: 'e.g. a1738368-...',
+          required: true,
+          node_binding: 'node_id',
+        },
+        {
+          id: 'depth',
+          type: 'select',
+          label: 'Depth',
+          options: ['1', '2', '3'],
+          default: '3',
+          required: true,
+        },
+        {
+          id: 'allow_types',
+          type: 'text',
+          label: 'Allowed node types',
+          description: 'Comma-separated node types the BFS may traverse. Empty = all types allowed.',
+          placeholder: 'e.g. Person, Company',
+          required: false,
+        },
+        {
+          id: 'group_by_level',
+          type: 'boolean',
+          label: 'One cluster per depth level',
+          description: 'Off = a single cluster with every reached node (root included). On = start + one ring per depth.',
+          default: false,
+          required: false,
+        },
+      ],
+      code: `// BFS from a start node.
+// Default: returns ONE cluster with the start node plus everything reached
+// (so, used as a community algorithm, you get exactly two communities: the
+// BFS set and "others"). With params.group_by_level, returns the start node
+// plus one cluster per depth ring instead.
+// Only traverses nodes whose type is in the allow list (params.allow_types,
+// comma-separated; empty = all types). Nodes outside the allow list are
+// dropped (not visited and not traversed through). The start node is always
+// included since it is explicitly requested by id.
+
+const depth = Number(params.depth);
+const allowRaw = (params.allow_types || '').trim();
+const allowedTypes = allowRaw
+  ? new Set(allowRaw.split(',').map(s => s.trim()).filter(Boolean))
+  : null;
+
+const typeById = new Map(nodes.map(n => [n.node_id, n.node_type]));
+if (!typeById.has(params.start_node_id)) {
+  throw new Error('Start node "' + params.start_node_id + '" not found in the graph');
+}
+
+// Undirected adjacency map
+const adj = new Map();
+edges.forEach(edge => {
+  if (!adj.has(edge.src)) adj.set(edge.src, []);
+  if (!adj.has(edge.dst)) adj.set(edge.dst, []);
+  adj.get(edge.src).push(edge.dst);
+  adj.get(edge.dst).push(edge.src);
+});
+
+const visited = new Set([params.start_node_id]);
+let frontier = [params.start_node_id];
+const levels = [];
+
+for (let level = 1; level <= depth; level++) {
+  const next = [];
+  for (const nodeId of frontier) {
+    for (const neighbor of (adj.get(nodeId) || [])) {
+      if (visited.has(neighbor)) continue;
+      if (allowedTypes && !allowedTypes.has(typeById.get(neighbor))) continue;
+      visited.add(neighbor);
+      next.push(neighbor);
+    }
+  }
+  if (next.length === 0) break;
+  levels.push(next);
+  frontier = next;
+}
+
+if (!params.group_by_level) {
+  // Single cluster: start node + everything reached (visited already holds both)
+  const reached = Array.from(visited);
+  return [{
+    cluster_name: 'BFS from ' + params.start_node_id,
+    cluster_class: 'bfs',
+    figure: 'circle',
+    state: 'open',
+    node_ids: reached,
+    color: '#3b82f6',
+    description: reached.length + ' node(s) within depth ' + depth + ' of ' + params.start_node_id
+  }];
+}
+
+const colors = ['#3b82f6', '#10b981', '#f59e0b'];
+const clusters = [{
+  cluster_name: 'BFS start: ' + params.start_node_id,
+  cluster_class: 'bfs',
+  figure: 'star',
+  state: 'open',
+  node_ids: [params.start_node_id],
+  color: '#ef4444',
+  description: 'Start node of the BFS'
+}];
+
+levels.forEach((nodeIds, i) => {
+  clusters.push({
+    cluster_name: 'BFS depth ' + (i + 1),
+    cluster_class: 'bfs',
+    figure: 'circle',
+    state: 'open',
+    node_ids: nodeIds,
+    color: colors[i % colors.length],
+    description: nodeIds.length + ' node(s) at depth ' + (i + 1) + ' from ' + params.start_node_id
+  });
+});
+
+return clusters;`,
+    })
+
     // Don't save to localStorage - these are just in-memory defaults
   }
 
@@ -806,6 +1112,8 @@ return clusters;`,
     // Persistence
     getState,
     loadState,
+    hydrateProgramsFromContext,
+    flushPersist,
     saveToLocalStorage,
     loadFromLocalStorage,
     clearLocalStorage,

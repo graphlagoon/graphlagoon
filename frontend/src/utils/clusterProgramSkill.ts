@@ -68,7 +68,11 @@ I don't know exactly what I want yet, so **start by asking me questions** (see t
 
 - Your code runs as the **body of a function** that receives a single \`context\`
   object. These variables are already destructured and in scope:
-  \`nodes\`, \`edges\`, \`selectedNodeIds\`, \`selectedEdgeIds\`.
+  \`nodes\`, \`edges\`, \`selectedNodeIds\`, \`selectedEdgeIds\`, \`params\`.
+- Programs can declare **parameters** in the editor UI (text, number, boolean, or
+  dropdown). Their values arrive already typed in \`params\` and are read as
+  \`params.<id>\` (e.g. \`params.threshold\`). Prefer a parameter over a hardcoded
+  constant when a value is likely to be tweaked between runs.
 - Your code MUST \`return\` an **array of cluster objects**. Returning anything
   else is an error.
 - Do NOT wrap the code in a function, do NOT use \`import\`/\`require\`, and do NOT
@@ -91,6 +95,7 @@ edges: Array<{
 }>
 selectedNodeIds: string[]
 selectedEdgeIds: string[]
+params: Record<string, string | number | boolean>  // values of parameters declared in the editor UI
 \`\`\`
 
 ## Output shape (return value) — array of clusters

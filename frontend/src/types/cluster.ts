@@ -54,6 +54,68 @@ export interface Cluster {
 }
 
 /**
+ * Supported value types for a cluster program parameter.
+ * Values reach the program code already coerced (number/boolean, not strings).
+ */
+export type ClusterProgramParameterType = 'text' | 'number' | 'boolean' | 'select';
+
+/**
+ * Source of a parameter value pulled from the right-clicked node when a
+ * program runs from the node context menu. 'prop:<name>' reads
+ * node.properties[name].
+ */
+export type ClusterProgramNodeBinding = 'node_id' | 'node_type' | `prop:${string}`;
+
+/**
+ * A parameter declared on a cluster program.
+ * At execution time its value is exposed to the program code as `params.<id>`.
+ */
+export interface ClusterProgramParameter {
+  /** Identifier used in program code as params.<id> — must be a valid JS identifier */
+  id: string;
+
+  /** Value type; controls the input widget and coercion */
+  type: ClusterProgramParameterType;
+
+  /** Display label (UI falls back to id) */
+  label?: string;
+
+  /** Optional description shown below the input */
+  description?: string;
+
+  /** Input placeholder (text/number types) */
+  placeholder?: string;
+
+  /** Default value, typed according to `type` */
+  default?: string | number | boolean;
+
+  /** Allowed values (select type only) */
+  options?: string[];
+
+  /** Whether a value must be provided (ignored for boolean — always has a value) */
+  required: boolean;
+
+  /** When set, the context-menu run pulls this param's value from the clicked node */
+  node_binding?: ClusterProgramNodeBinding;
+}
+
+/**
+ * Parameter values passed to a program execution, keyed by parameter id.
+ */
+export type ClusterProgramParamValues = Record<string, string | number | boolean>;
+
+/**
+ * Where a cluster program is persisted:
+ * - 'context': stored on the graph context (`graph_contexts.cluster_programs`),
+ *   shared by all explorations of that context
+ * - 'exploration': stored inside the exploration's saved state, local to it
+ *
+ * Built-in default programs have no persisted scope — they are recreated from
+ * code on every hydration and never saved anywhere.
+ */
+export type ClusterProgramScope = 'context' | 'exploration';
+
+/**
  * A cluster program is JavaScript code that generates clusters
  *
  * The program receives a context object with { nodes, edges, selectedNodeIds }
@@ -71,6 +133,19 @@ export interface ClusterProgram {
 
   /** JavaScript code that returns Cluster[] */
   code: string;
+
+  /** Declared parameters, exposed to the code as params.<id> (absent = no parameters) */
+  parameters?: ClusterProgramParameter[];
+
+  /** Show this program as a node right-click menu item (runs as community algorithm) */
+  show_in_context_menu?: boolean;
+
+  /**
+   * Persistence scope. Absent on legacy programs (saved before scopes existed);
+   * those are normalized on load — imported into the context when the user has
+   * write access there, kept exploration-local otherwise.
+   */
+  scope?: ClusterProgramScope;
 
   /** Timestamp when program was created */
   created_at: string;
@@ -98,6 +173,9 @@ export interface ClusterProgramExecution {
 
   /** Execution time in milliseconds */
   duration_ms?: number;
+
+  /** Parameter values used in this execution (absent when run without explicit values) */
+  params_used?: ClusterProgramParamValues;
 }
 
 /**
@@ -141,6 +219,9 @@ export interface ClusterProgramContext {
 
   /** IDs of currently selected edges */
   selectedEdgeIds: string[];
+
+  /** Resolved values of the program's declared parameters, keyed by id */
+  params: ClusterProgramParamValues;
 }
 
 /**

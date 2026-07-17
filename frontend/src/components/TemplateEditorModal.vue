@@ -28,7 +28,11 @@ const isCreator = computed(
   () => !isEditMode.value || props.template?.owner_email === authStore.email,
 );
 
-const DEFAULT_QUERY = `MATCH (root { node_id: "$node_id" })
+// Match on the context's configured node id column — a hardcoded `node_id`
+// would hit a same-named literal column (or nothing) when the context uses a
+// different id column such as `id_hash`.
+const nodeIdCol = graphStore.currentContext?.node_structure?.node_id_col || 'node_id';
+const DEFAULT_QUERY = `MATCH (root { ${nodeIdCol}: "$node_id" })
 MATCH p = (root)-[*1..$depth]-()
 UNWIND relationships(p) AS r
 RETURN r`;

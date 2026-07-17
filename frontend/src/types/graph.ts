@@ -1,3 +1,5 @@
+import type { ClusterProgram } from './cluster';
+
 export interface Node {
   node_id: string;
   node_type: string;
@@ -77,6 +79,8 @@ export interface GraphContext {
   relationship_types: string[];
   /** Behavior settings applied when this context is opened. A saved exploration overrides them. */
   default_behaviors?: Record<string, unknown>;
+  /** Context-level cluster programs, shared by all explorations. Built-in defaults are never stored here. */
+  cluster_programs?: ClusterProgram[];
   owner_email: string;
   shared_with: string[];
   has_write_access: boolean;
@@ -431,6 +435,7 @@ export interface CreateGraphContextRequest {
   node_types?: string[];
   relationship_types?: string[];
   default_behaviors?: Record<string, unknown>;
+  cluster_programs?: ClusterProgram[];
 }
 
 export interface ShareRequest {

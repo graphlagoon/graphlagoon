@@ -96,13 +96,18 @@ const currentRows = computed(() => activeTab.value === 'nodes' ? nodeRows.value 
 
 // ─── Column metadata ───
 
+// Configured id column names disambiguate the ID headers from literal
+// `node_id`/`edge_id` property columns (shown as their own prop_* columns).
+const nodeIdCol = computed(() => graphStore.currentContext?.node_structure?.node_id_col || undefined);
+const edgeIdCol = computed(() => graphStore.currentContext?.edge_structure?.edge_id_col || undefined);
+
 const nodeCols = computed<ColMeta[]>(() =>
-  buildNodeColumns(rawNodes.value, nodePropKeys.value),
+  buildNodeColumns(rawNodes.value, nodePropKeys.value, nodeIdCol.value),
 );
 
 const edgeCols = computed<ColMeta[]>(() => {
   const cols: ColMeta[] = [
-    buildColMeta('edge_id', 'ID', 'text'),
+    buildColMeta('edge_id', edgeIdCol.value && edgeIdCol.value !== 'edge_id' ? `ID (${edgeIdCol.value})` : 'ID', 'text'),
     buildColMeta('relationship_type', 'Type', 'categorical', collectOptions(rawEdges.value, e => e.relationship_type)),
     buildColMeta('src', 'Source', 'text'),
     buildColMeta('dst', 'Target', 'text'),

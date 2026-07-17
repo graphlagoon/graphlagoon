@@ -22,6 +22,12 @@ interface ParsedToken {
   type: 'text' | 'placeholder' | 'conditional' | 'date';
   value: string;
   property?: string;
+  /**
+   * True when the token was written with the `prop:` prefix. These resolve
+   * from `item.properties` first, so a literal table column named e.g.
+   * `node_id` is reachable even though a built-in of the same name exists.
+   */
+  fromProps?: boolean;
   modifier?: TextFormatModifier;
   modifierArgs?: string[];
   condition?: ParsedCondition;
@@ -278,6 +284,7 @@ function parseTokenContent(content: string): ParsedToken {
         type: 'date',
         value: content,
         property: dateMatch[1],
+        fromProps: true,
         dateFormat: dateMatch[2] || 'YYYY-MM-DD',
       };
     }
@@ -315,6 +322,7 @@ function parseTokenContent(content: string): ParsedToken {
       type: 'placeholder',
       value: content,
       property,
+      fromProps: true,
       modifier,
       modifierArgs,
     };
@@ -373,8 +381,17 @@ function parseTemplate(template: string): ParsedToken[] {
 // Value Resolution
 // ============================================================================
 
-function getPropertyValue(ctx: FormatContext, property: string): string {
+function getPropertyValue(ctx: FormatContext, property: string, fromProps = false): string {
   const { target, item } = ctx;
+
+  // `prop:`-prefixed tokens read the raw table column first, so a literal
+  // column named like a built-in (e.g. `node_id` when the configured id
+  // column is `id_hash`) is not shadowed. Falls through to the built-ins
+  // when no such property exists (backward compatible).
+  if (fromProps && item.properties && property in item.properties) {
+    const val = item.properties[property];
+    return val != null ? String(val) : '';
+  }
 
   // Built-in properties
   if (property === 'node_type' && target === 'node') {
@@ -421,7 +438,7 @@ function formatWithTokens(tokens: ParsedToken[], ctx: FormatContext): string {
         return token.value;
 
       case 'placeholder': {
-        const value = getPropertyValue(ctx, token.property || '');
+        const value = getPropertyValue(ctx, token.property || '', token.fromProps);
         if (value === '' && token.value?.startsWith('prop:')) {
           return `[${token.property}]`; // Fallback for missing props
         }
@@ -430,7 +447,8 @@ function formatWithTokens(tokens: ParsedToken[], ctx: FormatContext): string {
 
       case 'conditional': {
         if (!token.condition) return '';
-        const propValue = getPropertyValue(ctx, token.condition.property);
+        // Conditions are always written as `prop:field...`
+        const propValue = getPropertyValue(ctx, token.condition.property, true);
         const result = evaluateCondition(token.condition, propValue);
         const valueToFormat = result ? (token.trueValue || '') : (token.falseValue || '');
         const innerTokens = parseTemplate(valueToFormat);
@@ -438,7 +456,7 @@ function formatWithTokens(tokens: ParsedToken[], ctx: FormatContext): string {
       }
 
       case 'date': {
-        const value = getPropertyValue(ctx, token.property || '');
+        const value = getPropertyValue(ctx, token.property || '', token.fromProps);
         const date = parseDate(value);
         if (!date) return value || `[${token.property}]`;
         return formatDate(date, token.dateFormat || 'YYYY-MM-DD');
@@ -576,22 +594,23 @@ export function getAvailablePlaceholders(
 ): { placeholder: string; description: string }[] {
   const result: { placeholder: string; description: string }[] = [];
 
-  // Built-in placeholders
+  // Built-in placeholders (structural fields from the context's configured columns)
   if (target === 'node') {
     result.push(
-      { placeholder: '{node_id}', description: 'Node identifier' },
+      { placeholder: '{node_id}', description: 'Node identifier (configured ID column)' },
       { placeholder: '{node_type}', description: 'Node type/label' },
     );
   } else {
     result.push(
-      { placeholder: '{edge_id}', description: 'Edge identifier' },
+      { placeholder: '{edge_id}', description: 'Edge identifier (configured ID column)' },
       { placeholder: '{relationship_type}', description: 'Edge relationship type' },
       { placeholder: '{src}', description: 'Source node ID' },
       { placeholder: '{dst}', description: 'Destination node ID' },
     );
   }
 
-  // Property placeholders
+  // Property placeholders (raw table columns — take precedence over
+  // same-named built-ins when written with the `prop:` prefix)
   for (const prop of properties) {
     result.push({ placeholder: `{prop:${prop}}`, description: `Property: ${prop}` });
   }

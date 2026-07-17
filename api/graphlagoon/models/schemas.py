@@ -166,6 +166,11 @@ class GraphContextCreate(BaseModel):
         "opened (e.g. {'viewMode': '3d'}). Passed through opaquely; the frontend "
         "validates keys against its own schema. A saved exploration overrides these.",
     )
+    cluster_programs: list[dict] = Field(
+        default_factory=list,
+        description="Context-level cluster programs shared by all explorations of "
+        "this context. Passed through opaquely; the frontend owns the shape.",
+    )
 
 
 class GraphContextUpdate(BaseModel):
@@ -179,6 +184,7 @@ class GraphContextUpdate(BaseModel):
     node_types: Optional[list[str]] = None
     relationship_types: Optional[list[str]] = None
     default_behaviors: Optional[dict] = None
+    cluster_programs: Optional[list[dict]] = None
 
 
 class GraphContextResponse(BaseModel):
@@ -195,6 +201,7 @@ class GraphContextResponse(BaseModel):
     node_types: list[str] = Field(default_factory=list)
     relationship_types: list[str] = Field(default_factory=list)
     default_behaviors: dict = Field(default_factory=dict)
+    cluster_programs: list[dict] = Field(default_factory=list)
     owner_email: str
     shared_with: list[str] = Field(default_factory=list)
     has_write_access: bool = False

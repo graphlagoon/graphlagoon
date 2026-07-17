@@ -1052,6 +1052,9 @@ export const useGraphStore = defineStore('graph', () => {
       // reset them). A subsequent loadExploration() still wins — it runs after this and
       // merges the saved behaviors on top.
       behaviors.value = resolveInitialBehaviors(currentContext.value.default_behaviors);
+      // Programs are context-level: rebuild built-in defaults + this context's
+      // programs. A subsequent loadExploration() only adds exploration-scoped ones.
+      useClusterStore().hydrateProgramsFromContext(currentContext.value.cluster_programs);
     } catch (e: unknown) {
       const errorMessage = e instanceof Error ? e.message : 'Failed to load context';
       error.value = errorMessage;
@@ -1687,7 +1690,9 @@ export const useGraphStore = defineStore('graph', () => {
       materialization_strategy: materializationStrategy.value,
       procedural_optimizations: { ...proceduralOptimizations.value },
       textFormat: getTextFormatState(),
-      clusters: clusterStore.getState() as any, // Cluster state (programs, clusters, executions)
+      // Cluster state: clusters/executions + exploration-scoped programs only.
+      // Context-scoped programs live on graph_contexts.cluster_programs.
+      clusters: clusterStore.getState() as any,
       nodeTypeIcons: nodeTypeIcons.value.size > 0
         ? Object.fromEntries(nodeTypeIcons.value)
         : undefined,
@@ -1854,7 +1859,9 @@ export const useGraphStore = defineStore('graph', () => {
       // Load text format state (with backwards compatibility)
       loadTextFormatState(exploration.state.textFormat);
 
-      // Load cluster state (always, even if undefined to clear current state)
+      // Load cluster state (always, even if undefined to clear clusters/executions).
+      // Programs are context-level and survive this; the exploration only
+      // contributes its exploration-scoped programs (legacy ones are imported).
       const clusterStore = useClusterStore();
       clusterStore.loadState(exploration.state.clusters);
 

@@ -725,3 +725,67 @@ describe('conditionals with formatNodeLabel and formatEdgeLabel (rules)', () => 
     expect(formatNodeLabel(node, [rule], defaultTpl)).toBe('z1')
   })
 })
+
+// ============================================================================
+// prop: escapes built-in shadowing (literal node_id/edge_id table columns)
+// ============================================================================
+
+describe('prop: precedence over same-named built-ins', () => {
+  // Context configured with an unusual id column (e.g. id_hash): the top-level
+  // node_id holds the configured id value, while the table's literal node_id
+  // column arrives as properties.node_id.
+  const nodeWithLiteralIdCol = () =>
+    makeNode({
+      node_id: 'hash123',
+      properties: { node_id: 'legacy-42', created: '2024-01-15' },
+    })
+
+  const edgeWithLiteralIdCol = () =>
+    makeEdge({
+      edge_id: 'ehash9',
+      properties: { edge_id: 'legacy-e7', src: 'raw-src' },
+    })
+
+  it('{node_id} still resolves to the configured (top-level) id', () => {
+    expect(formatLabel('{node_id}', 'node', nodeWithLiteralIdCol())).toBe('hash123')
+  })
+
+  it('{prop:node_id} resolves to the literal node_id property column', () => {
+    expect(formatLabel('{prop:node_id}', 'node', nodeWithLiteralIdCol())).toBe('legacy-42')
+  })
+
+  it('{edge_id} still resolves to the configured (top-level) id', () => {
+    expect(formatLabel('{edge_id}', 'edge', edgeWithLiteralIdCol())).toBe('ehash9')
+  })
+
+  it('{prop:edge_id} resolves to the literal edge_id property column', () => {
+    expect(formatLabel('{prop:edge_id}', 'edge', edgeWithLiteralIdCol())).toBe('legacy-e7')
+  })
+
+  it('{prop:src} resolves to a literal src property column', () => {
+    expect(formatLabel('{prop:src}', 'edge', edgeWithLiteralIdCol())).toBe('raw-src')
+  })
+
+  it('{prop:node_type} falls back to the built-in when no such property exists', () => {
+    // Backward compat: prop: only takes precedence when the property is present.
+    expect(formatLabel('{prop:node_type}', 'node', nodeWithLiteralIdCol())).toBe('Person')
+  })
+
+  it('modifiers apply to the property value, not the built-in', () => {
+    expect(formatLabel('{prop:node_id|upper}', 'node', nodeWithLiteralIdCol())).toBe('LEGACY-42')
+  })
+
+  it('conditionals compare against the literal property column', () => {
+    expect(
+      formatLabel('{if:prop:node_id==legacy-42|A|B}', 'node', nodeWithLiteralIdCol()),
+    ).toBe('A')
+  })
+
+  it('date tokens read the literal property column', () => {
+    const node = makeNode({
+      node_id: 'hash123',
+      properties: { node_id: '2020-05-01T12:00:00' },
+    })
+    expect(formatLabel('{date:prop:node_id|DD/MM/YYYY}', 'node', node)).toBe('01/05/2020')
+  })
+})

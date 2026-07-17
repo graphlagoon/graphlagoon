@@ -10,8 +10,9 @@ import { ref, computed, watch } from 'vue'
 import { useClusterStore } from './cluster'
 import { useGraphStore } from './graph'
 import type { SerializedGraph } from '@/types/metrics'
-import type { Cluster, CommunityAlgorithm } from '@/types/cluster'
+import type { Cluster, ClusterProgramParamValues, CommunityAlgorithm } from '@/types/cluster'
 import type { CommunityWorkerInput, CommunityWorkerOutput } from '@/workers/communityWorker'
+import { defaultParamValues } from '@/utils/clusterProgramParams'
 
 // 19-color qualitative palette for community coloring
 const COMMUNITY_PALETTE = [
@@ -29,6 +30,10 @@ export const useCommunityStore = defineStore('community', () => {
   const communityMap = ref<Map<string, number>>(new Map())
   const communityCount = ref(0)
   const modularity = ref<number | null>(null)
+  // Human-readable community names, keyed by community id. Populated by the
+  // cluster-program path (cluster names + "Others"); empty for Louvain, where
+  // the UI falls back to "Community <id>".
+  const communityLabels = ref<Record<number, string>>({})
   const computing = ref(false)
   const error = ref<string | null>(null)
   const lastComputedAt = ref<number | null>(null)
@@ -46,6 +51,10 @@ export const useCommunityStore = defineStore('community', () => {
   // Algorithm params (Louvain-specific)
   const resolution = ref(1.0)
   const edgeTypeFilter = ref<string[]>([])
+
+  // Parameter values for cluster programs used as community algorithms,
+  // keyed by program id (survives switching between algorithms)
+  const programParams = ref<Record<string, ClusterProgramParamValues>>({})
 
   // Worker reference
   let worker: Worker | null = null
@@ -128,6 +137,7 @@ export const useCommunityStore = defineStore('community', () => {
     return Array.from(communitiesById.value.entries())
       .map(([id, nodeIds]) => ({
         id,
+        label: communityLabels.value[id] ?? `Community ${id}`,
         nodeCount: nodeIds.length,
         color: COMMUNITY_PALETTE[id % COMMUNITY_PALETTE.length],
       }))
@@ -197,6 +207,7 @@ export const useCommunityStore = defineStore('community', () => {
         communityMap.value = map
         communityCount.value = result.count
         modularity.value = result.modularity
+        communityLabels.value = {} // Louvain communities are anonymous
         lastComputedAt.value = Date.now()
       }
 
@@ -252,6 +263,28 @@ export const useCommunityStore = defineStore('community', () => {
   }
 
   /**
+   * Seed/refresh the stored parameter values for a program from its current
+   * declaration: declared defaults overlaid with any previously stored values,
+   * dropping keys the declaration no longer has (stale after edits).
+   */
+  function ensureProgramParams(programId: string): void {
+    const program = useClusterStore().getProgram(programId)
+    if (!program) return
+
+    const seeded = defaultParamValues(program.parameters)
+    const existing = programParams.value[programId] ?? {}
+    const declaredIds = new Set((program.parameters ?? []).map(p => p.id))
+
+    for (const [key, value] of Object.entries(existing)) {
+      if (declaredIds.has(key)) {
+        seeded[key] = value
+      }
+    }
+
+    programParams.value[programId] = seeded
+  }
+
+  /**
    * Run a cluster program as a community algorithm.
    *
    * Executes the program NON-mutatingly (no cluster geometry) and populates
@@ -261,7 +294,11 @@ export const useCommunityStore = defineStore('community', () => {
     const clusterStore = useClusterStore()
     const graphStore = useGraphStore()
 
-    const result = clusterStore.computeClustersFromProgram(programId)
+    ensureProgramParams(programId)
+    const result = clusterStore.computeClustersFromProgram(
+      programId,
+      programParams.value[programId]
+    )
 
     if (!result.success) {
       error.value = result.error ?? 'Cluster program execution failed'
@@ -272,10 +309,22 @@ export const useCommunityStore = defineStore('community', () => {
     const allNodeIds = graphStore.filteredNodes.map(n => n.node_id)
     const map = buildCommunityMapFromClusters(programClusters, allNodeIds)
 
+    // Carry the cluster names over as community labels (index = community id);
+    // the uncovered-nodes bucket, when present, is labeled "Others".
+    const labels: Record<number, string> = {}
+    programClusters.forEach((cluster, index) => {
+      labels[index] = cluster.cluster_name
+    })
+    const othersId = programClusters.length
+    if (Array.from(map.values()).includes(othersId)) {
+      labels[othersId] = 'Others'
+    }
+
     communityMap.value = map
     // Count distinct community ids actually present in the map
     communityCount.value = new Set(map.values()).size
     modularity.value = null
+    communityLabels.value = labels
     lastComputedAt.value = Date.now()
   }
 
@@ -408,6 +457,8 @@ export const useCommunityStore = defineStore('community', () => {
       collapseEnabled: collapseEnabled.value,
       resolution: resolution.value,
       edgeTypeFilter: edgeTypeFilter.value,
+      programParams: programParams.value,
+      communityLabels: communityLabels.value,
     }
   }
 
@@ -430,6 +481,9 @@ export const useCommunityStore = defineStore('community', () => {
     collapseEnabled.value = (state.collapseEnabled as boolean) ?? false
     resolution.value = (state.resolution as number) ?? 1.0
     edgeTypeFilter.value = (state.edgeTypeFilter as string[]) ?? []
+    programParams.value =
+      (state.programParams as Record<string, ClusterProgramParamValues>) ?? {}
+    communityLabels.value = (state.communityLabels as Record<number, string>) ?? {}
   }
 
   /**
@@ -439,6 +493,7 @@ export const useCommunityStore = defineStore('community', () => {
     communityMap.value = new Map()
     communityCount.value = 0
     modularity.value = null
+    communityLabels.value = {}
     lastComputedAt.value = null
     error.value = null
 
@@ -486,6 +541,7 @@ export const useCommunityStore = defineStore('community', () => {
     communityMap,
     communityCount,
     modularity,
+    communityLabels,
     computing,
     error,
     lastComputedAt,
@@ -501,6 +557,7 @@ export const useCommunityStore = defineStore('community', () => {
     collapseEnabled,
     resolution,
     edgeTypeFilter,
+    programParams,
 
     // Computed
     isLouvain,
@@ -514,6 +571,7 @@ export const useCommunityStore = defineStore('community', () => {
 
     // Actions
     runDetection,
+    ensureProgramParams,
     runClusterProgramAsCommunity,
     buildCommunityMapFromClusters,
     syncToClusters,

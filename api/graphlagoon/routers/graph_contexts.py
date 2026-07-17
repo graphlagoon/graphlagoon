@@ -71,8 +71,9 @@ def context_to_response(
         node_properties=node_props,
         node_types=context.node_types or [],
         relationship_types=context.relationship_types or [],
-        # `or {}` covers rows created before the column existed (NULL).
+        # `or {}` / `or []` cover rows created before the columns existed (NULL).
         default_behaviors=context.default_behaviors or {},
+        cluster_programs=context.cluster_programs or [],
         owner_email=context.owner_email,
         shared_with=shared_with,
         has_write_access=has_write,
@@ -190,6 +191,7 @@ async def create_graph_context(request: Request, data: GraphContextCreate):
                 node_types=data.node_types,
                 relationship_types=data.relationship_types,
                 default_behaviors=data.default_behaviors,
+                cluster_programs=data.cluster_programs,
                 owner_email=user_email,
             )
             session.add(context)
@@ -212,6 +214,7 @@ async def create_graph_context(request: Request, data: GraphContextCreate):
             node_types=data.node_types,
             relationship_types=data.relationship_types,
             default_behaviors=data.default_behaviors,
+            cluster_programs=data.cluster_programs,
             owner_email=user_email,
         )
         return context_to_response(context, user_email)
@@ -303,6 +306,8 @@ async def update_graph_context(
                 context.relationship_types = data.relationship_types
             if data.default_behaviors is not None:
                 context.default_behaviors = data.default_behaviors
+            if data.cluster_programs is not None:
+                context.cluster_programs = data.cluster_programs
 
             await session.commit()
             await session.refresh(context)
@@ -341,6 +346,8 @@ async def update_graph_context(
             updates["relationship_types"] = data.relationship_types
         if data.default_behaviors is not None:
             updates["default_behaviors"] = data.default_behaviors
+        if data.cluster_programs is not None:
+            updates["cluster_programs"] = data.cluster_programs
 
         context = store.update_graph_context(context_id, **updates)
         return context_to_response(context, user_email)

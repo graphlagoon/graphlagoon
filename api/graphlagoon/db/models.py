@@ -51,6 +51,8 @@ class GraphContext(Base):
     relationship_types = Column(ARRAY(Text), default=[])
     # Default frontend behavior settings applied when this context is opened
     default_behaviors = Column(JSON, default={})
+    # Context-level cluster programs (list of ClusterProgram dicts, opaque to the backend)
+    cluster_programs = Column(JSON, default=[])
     # Owner email from request header (no FK - users identified by headers in Databricks mode)
     owner_email = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())

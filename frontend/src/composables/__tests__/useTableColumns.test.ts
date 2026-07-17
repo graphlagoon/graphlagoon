@@ -161,3 +161,36 @@ describe('buildGenericRows', () => {
     expect(built[4].col_0).toBe('oops');
   });
 });
+
+describe('buildNodeColumns ID header disambiguation', () => {
+  const nodes = [
+    { node_id: 'hash123', node_type: 'Person', properties: { node_id: 'legacy-42' } },
+  ];
+
+  it('shows the configured id column name when it differs from node_id', () => {
+    const cols = buildNodeColumns(nodes, ['node_id'], 'id_hash');
+    expect(cols[0].field).toBe('node_id');
+    expect(cols[0].header).toBe('ID (id_hash)');
+    // The literal node_id table column stays its own prop_ column.
+    const propCol = cols.find(c => c.field === 'prop_node_id');
+    expect(propCol?.header).toBe('node_id');
+  });
+
+  it('keeps the plain ID header when the configured column is literally node_id', () => {
+    const cols = buildNodeColumns(nodes, [], 'node_id');
+    expect(cols[0].header).toBe('ID');
+  });
+
+  it('keeps the plain ID header when no column name is given', () => {
+    const cols = buildNodeColumns(nodes, []);
+    expect(cols[0].header).toBe('ID');
+  });
+
+  it('prop_node_id rows carry the literal property value, ID rows the configured id', () => {
+    const propKeys = ['node_id'];
+    const cols = buildNodeColumns(nodes, propKeys, 'id_hash');
+    const rows = flattenNodeRows(nodes, propKeys, cols);
+    expect(rows[0].node_id).toBe('hash123');
+    expect(rows[0].prop_node_id).toBe('legacy-42');
+  });
+});

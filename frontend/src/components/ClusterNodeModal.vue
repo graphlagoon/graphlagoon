@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useClusterStore } from '@/stores/cluster'
+import { useGraphStore } from '@/stores/graph'
 import {
   type ColMeta,
   buildNodeColumns, flattenNodeRows,
@@ -17,6 +18,7 @@ const emit = defineEmits<{
 }>()
 
 const clusterStore = useClusterStore()
+const graphStore = useGraphStore()
 
 const cluster = computed(() => {
   if (!props.clusterId) return null
@@ -39,7 +41,8 @@ const propKeys = computed(() => {
 
 // ─── Column metadata + flat rows ───
 
-const cols = computed<ColMeta[]>(() => buildNodeColumns(nodes.value, propKeys.value))
+const cols = computed<ColMeta[]>(() =>
+  buildNodeColumns(nodes.value, propKeys.value, graphStore.currentContext?.node_structure?.node_id_col || undefined))
 const rows = computed(() => flattenNodeRows(nodes.value, propKeys.value))
 
 // ─── Search & Sort ───
