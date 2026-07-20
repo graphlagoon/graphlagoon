@@ -13,6 +13,26 @@ import { seedContexts } from '../helpers/api-mocks';
 const CANVAS = '.graph3d-container canvas';
 
 /**
+ * Stops the force simulation via the Layout panel. Stop pins every node
+ * (fx/fy/fz), so screen positions stay put no matter how slow the runner is —
+ * without this, CI's low frame rate keeps the layout drifting for the whole
+ * test and nodes escape between hover and click.
+ */
+async function freezeLayout(page: Page) {
+  await page.getByTestId('graph-toolbar-layout').click();
+  const runBtn = page.getByTestId('layout-run-btn');
+  await expect(runBtn).toBeVisible();
+  // Toggle until it reads "Run" (= stopped). The retry absorbs the race where
+  // the simulation self-stops between reading the label and clicking.
+  await expect(async () => {
+    if ((await runBtn.innerText()).includes('Stop')) await runBtn.click();
+    expect(await runBtn.innerText()).toContain('Run');
+  }).toPass({ timeout: 10_000 });
+  // Close the panel so it doesn't overlap the canvas
+  await page.getByTestId('graph-toolbar-layout').click();
+}
+
+/**
  * Moves the pointer over the given node and waits until the hover raycast
  * actually engages (the graph lib adds a `clickable` class to the canvas when a
  * node is hovered). Node screen coords come from the dev-only
@@ -35,16 +55,18 @@ async function hoverNode(page: Page, nodeId: string): Promise<{ x: number; y: nu
         const y = box.y + coords.y;
         await page.mouse.move(x, y);
         try {
-          await expect(canvas).toHaveClass(/clickable/, { timeout: 500 });
+          // Generous timeout: the hover raycast runs once per frame and CI's
+          // software-rendered frames can be several hundred ms apart
+          await expect(canvas).toHaveClass(/clickable/, { timeout: 2_000 });
           return { x, y };
         } catch {
-          // Layout/camera still moving — node not under the pointer yet, retry
+          // Camera still animating — node not under the pointer yet, retry
         }
       }
     }
     await page.waitForTimeout(250);
   }
-  throw new Error(`could not hover node ${nodeId} (layout never settled?)`);
+  throw new Error(`could not hover node ${nodeId}`);
 }
 
 test.describe('Graph context menu', () => {
@@ -54,6 +76,7 @@ test.describe('Graph context menu', () => {
     const statusBar = page.getByTestId('graph-status-bar');
     await expect(statusBar).toBeVisible({ timeout: 15_000 });
     await expect(statusBar).toContainText('5 nodes');
+    await freezeLayout(page);
   });
 
   test('right-click with small pointer jitter opens the node context menu', async ({ authenticatedPage: page }) => {
@@ -61,7 +84,7 @@ test.describe('Graph context menu', () => {
 
     // With the old library-driven path this NEVER opened (any jitter counted as
     // a drag), so retrying doesn't mask the regression — it only absorbs
-    // layout-drift flake under load.
+    // slow-frame flake on CI runners.
     let opened = false;
     for (let attempt = 0; attempt < 3 && !opened; attempt++) {
       const pos = await hoverNode(page, 'n1');
@@ -72,8 +95,10 @@ test.describe('Graph context menu', () => {
       await page.mouse.move(pos.x + 2, pos.y + 1);
       await page.mouse.up({ button: 'right' });
 
-      opened = await menu.isVisible();
-      if (!opened) await page.waitForTimeout(300);
+      opened = await menu
+        .waitFor({ state: 'visible', timeout: 2_000 })
+        .then(() => true)
+        .catch(() => false);
     }
 
     expect(opened).toBe(true);

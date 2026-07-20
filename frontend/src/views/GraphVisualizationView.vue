@@ -316,6 +316,7 @@ watch(
             :class="{ active: showLayoutPanel }"
             @click="showLayoutPanel = !showLayoutPanel"
             title="Layout Settings"
+            data-testid="graph-toolbar-layout"
           >
             <Settings2 :size="14" />
             <span class="btn-label">Layout</span>

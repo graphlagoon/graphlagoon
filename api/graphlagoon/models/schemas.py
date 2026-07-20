@@ -340,6 +340,7 @@ class ExplorationState(BaseModel):
     filters: FilterState = Field(default_factory=FilterState)
     viewport: ViewportState = Field(default_factory=ViewportState)
     layout_algorithm: str = "force-atlas-2"
+    layout_mode_config: Optional[dict] = None  # Per-layout-mode params (ego/hive/hierarchical)
     graph_query: Optional[str] = None
     cte_prefilter: Optional[str] = None  # CTE pre-filter for edge table
     vlp_rendering_mode: Optional[VlpRenderingMode] = None
@@ -348,11 +349,13 @@ class ExplorationState(BaseModel):
     textFormat: Optional[TextFormatState] = None
     clusters: Optional[dict] = None  # ClusterState JSON from frontend
     nodeTypeIcons: Optional[dict[str, str]] = None
+    nodePropertyIconConfigs: Optional[dict] = None  # node type → PropertyIconConfig from frontend
     nodeTypeColors: Optional[dict[str, str]] = None
     edgeTypeColors: Optional[dict[str, str]] = None
     edgeTypeIcons: Optional[dict[str, str]] = None
     behaviors: Optional[dict] = None
     aesthetics: Optional[dict] = None
+    force3d_settings: Optional[dict] = None  # d3-force-3d simulation params
     community: Optional[dict] = None
     similarity: Optional[dict] = None
 

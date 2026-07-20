@@ -26,7 +26,7 @@ import { useGraphEdgeIcons } from '@/composables/useGraphEdgeIcons';
 import { useGraphLayout } from '@/composables/useGraphLayout';
 import { useGraphCamera } from '@/composables/useGraphCamera';
 import { useAxisConstrainedRotation } from '@/composables/useAxisConstrainedRotation';
-import { useContextMenu } from '@/composables/useContextMenu';
+import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
 import GraphContextMenu from '@/components/GraphContextMenu.vue';
 import { Network } from 'lucide-vue-next';
 import { recordPerf } from '@/utils/perfMetrics';
@@ -103,7 +103,12 @@ const devPerf = useDevPerf();
 // Context menu
 const contextMenu = useContextMenu();
 let rightClickMouseDownPos: { x: number; y: number } | null = null;
-// Hovered node/link tracked synchronously (no RAF debounce) so the right-click mouseup
+// Menu target captured at right-button PRESS time. Resolving it at mouseup is unreliable:
+// any pointer jitter while the button is held makes the library flag a drag, and its next
+// render tick then force-fires a hover-out that wipes the hover state before mouseup runs
+// (a tick lands mid-click whenever frames are slower than the click itself).
+let rightClickDownTarget: ContextMenuTarget | null = null;
+// Hovered node/link tracked synchronously (no RAF debounce) so the right-click mousedown
 // handler can resolve its target — the library's onNodeRightClick is unreliable because
 // any 1px pointer jitter while the button is held makes it treat the click as a drag
 // and skip the callback entirely (see maybeOpenContextMenu).
@@ -2135,6 +2140,7 @@ onMounted(() => {
   _onMouseDown = function onMouseDown(event: MouseEvent) {
     if (event.button !== 2) return;
     rightClickMouseDownPos = { x: event.clientX, y: event.clientY };
+    rightClickDownTarget = resolveContextMenuTarget(hoveredNodeSync, hoveredLinkSync);
 
     if (graphStore.behaviors.mapStylePan) {
       isMapPanning = true;
@@ -2142,15 +2148,19 @@ onMounted(() => {
     }
   };
 
-  // Opens the context menu on a stationary right-click, resolving the target from the
-  // synchronously tracked hover state. The native contextmenu event stays suppressed by
-  // the graph library, so this mouseup path is the single trigger for the menu.
+  // Opens the context menu on a stationary right-click, targeting whatever was hovered
+  // when the button was PRESSED (see rightClickDownTarget). The native contextmenu event
+  // stays suppressed by the graph library, so this mouseup path is the single trigger.
   function maybeOpenContextMenu(event: MouseEvent) {
     const stationary = isStationaryRightClick(rightClickMouseDownPos, event.clientX, event.clientY);
     rightClickMouseDownPos = null;
+    const downTarget = rightClickDownTarget;
+    rightClickDownTarget = null;
     if (!stationary || !isPointerOverCanvas) return;
 
-    const target = resolveContextMenuTarget(hoveredNodeSync, hoveredLinkSync);
+    // Fall back to the mouseup-time hover for a stationary press where the throttled
+    // raycast only caught the node after the button went down
+    const target = downTarget ?? resolveContextMenuTarget(hoveredNodeSync, hoveredLinkSync);
     if (!target) return;
     contextMenu.show(event, target);
     tooltipVisible.value = false;

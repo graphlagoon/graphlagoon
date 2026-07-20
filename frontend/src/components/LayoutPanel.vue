@@ -462,6 +462,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
           class="run-btn"
           :class="{ running: isLayoutRunning }"
           @click="toggleLayout"
+          data-testid="layout-run-btn"
         >
           <Square v-if="isLayoutRunning" :size="13" /> <Play v-else :size="13" />
           {{ isLayoutRunning ? 'Stop' : 'Run' }}
