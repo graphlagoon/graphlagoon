@@ -232,6 +232,7 @@ export interface ExplorationState {
   layout_mode_config?: LayoutModeConfig;   // Per-layout-mode parameters (optional for backwards compat)
   behaviors?: Record<string, unknown>;     // Behavior settings (optional for backwards compat)
   aesthetics?: Record<string, unknown>;    // Aesthetic settings (optional for backwards compat)
+  force3d_settings?: Record<string, unknown>; // 3D force simulation params (optional for backwards compat)
   community?: Record<string, unknown>;     // Community detection state (optional for backwards compat)
   similarity?: Record<string, unknown>;    // Similarity system state (optional for backwards compat)
   has_snapshot?: boolean;                  // Whether a file-based graph snapshot exists

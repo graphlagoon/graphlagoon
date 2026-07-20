@@ -654,4 +654,78 @@ describe('loadExploration layout migration', () => {
 
     expect(store.layoutModeConfig.ego.maxHops).toBeNull()
   })
+
+  it('restores saved force3d_settings and merges them over defaults', async () => {
+    const store = useGraphStore()
+    mockExploration({
+      force3d_settings: { d3ChargeStrength: -200, d3GravityStrength: 0.1 },
+    })
+
+    await store.loadExploration('exp-1')
+
+    expect(store.force3DSettings.d3ChargeStrength).toBe(-200)
+    expect(store.force3DSettings.d3GravityStrength).toBe(0.1)
+    // Fields absent from the saved blob fall back to defaults
+    expect(store.force3DSettings.d3LinkDistance).toBe(30)
+  })
+
+  it('explorations without force3d_settings get full defaults', async () => {
+    const store = useGraphStore()
+    store.updateForce3DSettings({ d3ChargeStrength: -999 }) // dirty state from a previous session
+    mockExploration({})
+
+    await store.loadExploration('exp-1')
+
+    expect(store.force3DSettings.d3ChargeStrength).toBe(-80)
+  })
+
+  it('ignores corrupted or stale force3d_settings values', async () => {
+    const store = useGraphStore()
+    mockExploration({
+      force3d_settings: {
+        d3DistanceMax: null,     // Infinity serializes to null through JSON — must not reach d3-force
+        d3LinkDistance: 'abc',   // wrong type
+        someRemovedSetting: 123, // key no longer in the schema
+        d3ChargeStrength: -200,  // valid value still applies
+      },
+    })
+
+    await store.loadExploration('exp-1')
+
+    expect(store.force3DSettings.d3DistanceMax).toBe(Infinity)
+    expect(store.force3DSettings.d3LinkDistance).toBe(30)
+    expect('someRemovedSetting' in store.force3DSettings).toBe(false)
+    expect(store.force3DSettings.d3ChargeStrength).toBe(-200)
+  })
+
+  it('restores saved nodePropertyIconConfigs', async () => {
+    const store = useGraphStore()
+    mockExploration({
+      nodePropertyIconConfigs: {
+        Person: { property: 'role', valueIcons: { admin: 'shield' }, fallbackIcon: 'user' },
+      },
+    })
+
+    await store.loadExploration('exp-1')
+
+    expect(store.nodePropertyIconConfigs.get('Person')).toEqual({
+      property: 'role',
+      valueIcons: { admin: 'shield' },
+      fallbackIcon: 'user',
+    })
+  })
+
+  it('falls back to full defaults when force3d_settings is not an object', async () => {
+    const store = useGraphStore()
+
+    for (const corrupted of ['corrupted', 42, [1, 2, 3], true]) {
+      store.updateForce3DSettings({ d3ChargeStrength: -999 }) // dirty state that must not survive
+      mockExploration({ force3d_settings: corrupted })
+
+      await store.loadExploration('exp-1')
+
+      expect(store.force3DSettings.d3ChargeStrength).toBe(-80)
+      expect(store.force3DSettings.d3DistanceMax).toBe(Infinity)
+    }
+  })
 })

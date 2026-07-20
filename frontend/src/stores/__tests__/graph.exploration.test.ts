@@ -57,6 +57,51 @@ describe('exploration state serialization', () => {
     })
   })
 
+  describe('force3DSettings persistence', () => {
+    it('serializes the default into the exploration state', () => {
+      const store = useGraphStore()
+
+      const state = store.getExplorationState()
+
+      expect(state.force3d_settings?.d3ChargeStrength).toBe(-80)
+    })
+
+    it('serializes an updated value into the exploration state', () => {
+      const store = useGraphStore()
+      store.updateForce3DSettings({ d3ChargeStrength: -200 })
+
+      const state = store.getExplorationState()
+
+      expect(state.force3d_settings?.d3ChargeStrength).toBe(-200)
+    })
+
+    it('restores saved force3DSettings when loading an exploration', () => {
+      const store = useGraphStore()
+      store.updateForce3DSettings({ d3ChargeStrength: -200, d3GravityStrength: 0.1 })
+      const saved = store.getExplorationState()
+
+      // Simulate a fresh session, then restore the saved settings the way
+      // loadExploration merges them over the current defaults.
+      setActivePinia(createPinia())
+      const restored = useGraphStore()
+      expect(restored.force3DSettings.d3ChargeStrength).toBe(-80)
+
+      restored.updateForce3DSettings(
+        saved.force3d_settings as Partial<typeof restored.force3DSettings>
+      )
+
+      expect(restored.force3DSettings.d3ChargeStrength).toBe(-200)
+      expect(restored.force3DSettings.d3GravityStrength).toBe(0.1)
+    })
+
+    it('explorations saved before the field existed keep the defaults', () => {
+      const store = useGraphStore()
+
+      expect(store.force3DSettings.d3ChargeStrength).toBe(-80)
+      expect(store.force3DSettings.d3LinkDistance).toBe(30)
+    })
+  })
+
   describe('getExplorationState', () => {
     it('captures current filters', () => {
       const store = useGraphStore()

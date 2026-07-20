@@ -67,6 +67,64 @@ const DEFAULT_BEHAVIORS = {
   autoLoadOnOpen: false,           // When true, opening a context immediately fetches an initial subgraph (all nodes, edge_limit 1000). Default false: open empty and let the user run a query — the implicit fetch is expensive on large graphs. Opening a saved exploration is unaffected; it always loads its own data.
 };
 
+/** 3D Force-Directed layout defaults (D3-Force only). Fresh object per call — never share by reference. */
+function defaultForce3DSettings() {
+  return {
+    // D3-Force simulation settings
+    d3AlphaDecay: 0.0228,      // Cooling rate (lower = slower stabilization)
+    d3VelocityDecay: 0.4,      // Friction factor (higher = more damping)
+    d3AlphaMin: 0.001,         // Threshold to stop simulation (lower = run longer)
+    d3AlphaTarget: 0,          // Target alpha for heating/cooling (0 = cool down, higher = keep running)
+    // Charge force (manyBody) settings
+    d3ChargeStrength: -80,    // Node repulsion (negative = repel, more negative = stronger)
+    d3Theta: 0.9,              // Barnes-Hut approximation (lower = more accurate but slower)
+    d3DistanceMin: 1,          // Minimum distance for repulsion (avoids extreme forces)
+    d3DistanceMax: Infinity,   // Maximum distance for repulsion (Infinity = no limit)
+    // Link force settings
+    d3LinkDistance: 30,        // Target link distance
+    // Center force settings
+    d3CenterStrength: 1,       // Centering force strength
+    // Gravity — pulls each node toward origin (keeps disconnected components together)
+    d3GravityStrength: 0.03,   // Per-node force toward origin (0 = disabled, ~0.01-0.1 typical)
+    // Collide force settings (prevents node overlap)
+    d3CollideEnabled: true,   // Whether to enable collision detection
+    d3CollideRadius: 10,       // Minimum collision radius (actual radius = max(this, node visual radius))
+    d3CollideStrength: 0.7,    // Collision strength (0-1)
+    d3CollideIterations: 1,    // Iterations per tick (higher = more accurate but slower)
+    // Pointer repulsion (cylindrical blower) / attraction (vacuum) settings
+    pointerRepulsionEnabled: true,  // Whether the blower tool is available (Shift+mouse)
+    pointerVacuumEnabled: false,    // Whether the vacuum tool is available (Ctrl+mouse)
+    pointerRepulsionStrength: 150,  // Repulsion/attraction intensity
+    pointerRepulsionRange: 200,     // Maximum radius of effect (screen pixels)
+    pointerSizeInertia: true,       // Larger nodes resist blower/vacuum more
+    // Clipping plane settings
+    clippingPlaneEnabled: false,    // Whether clipping plane is active
+    clippingPlaneDistance: 0,       // Offset from graph center (controlled by scroll or slider)
+  };
+}
+
+export type Force3DSettings = ReturnType<typeof defaultForce3DSettings>;
+
+/**
+ * Merge a saved force3d_settings blob over fresh defaults. Only known keys whose
+ * value type matches the default's survive: JSON cannot represent Infinity, so
+ * d3DistanceMax round-trips as null — spreading it raw would feed null into
+ * d3-force's distanceMax (null*null = 0) and silently disable node repulsion.
+ * The typeof guard also drops keys removed from the schema and corrupted values.
+ */
+export function mergeForce3DSettings(
+  saved: Record<string, unknown> | undefined
+): Force3DSettings {
+  const defaults = defaultForce3DSettings();
+  if (!saved) return defaults;
+  return Object.fromEntries(
+    Object.entries(defaults).map(([key, defaultVal]) => {
+      const savedVal = saved[key];
+      return [key, typeof savedVal === typeof defaultVal ? savedVal : defaultVal];
+    })
+  ) as Force3DSettings;
+}
+
 export type GraphBehaviors = typeof DEFAULT_BEHAVIORS;
 
 /** Fresh defaults per call — nested objects must never be shared by reference. */
@@ -292,39 +350,8 @@ export const useGraphStore = defineStore('graph', () => {
   const layoutModeConfig = ref<LayoutModeConfig>(defaultLayoutModeConfig());
 
 
-  // 3D Force-Directed layout settings (D3-Force only)
-  const force3DSettings = ref({
-    // D3-Force simulation settings
-    d3AlphaDecay: 0.0228,      // Cooling rate (lower = slower stabilization)
-    d3VelocityDecay: 0.4,      // Friction factor (higher = more damping)
-    d3AlphaMin: 0.001,         // Threshold to stop simulation (lower = run longer)
-    d3AlphaTarget: 0,          // Target alpha for heating/cooling (0 = cool down, higher = keep running)
-    // Charge force (manyBody) settings
-    d3ChargeStrength: -80,    // Node repulsion (negative = repel, more negative = stronger)
-    d3Theta: 0.9,              // Barnes-Hut approximation (lower = more accurate but slower)
-    d3DistanceMin: 1,          // Minimum distance for repulsion (avoids extreme forces)
-    d3DistanceMax: Infinity,   // Maximum distance for repulsion (Infinity = no limit)
-    // Link force settings
-    d3LinkDistance: 30,        // Target link distance
-    // Center force settings
-    d3CenterStrength: 1,       // Centering force strength
-    // Gravity — pulls each node toward origin (keeps disconnected components together)
-    d3GravityStrength: 0.03,   // Per-node force toward origin (0 = disabled, ~0.01-0.1 typical)
-    // Collide force settings (prevents node overlap)
-    d3CollideEnabled: true,   // Whether to enable collision detection
-    d3CollideRadius: 10,       // Minimum collision radius (actual radius = max(this, node visual radius))
-    d3CollideStrength: 0.7,    // Collision strength (0-1)
-    d3CollideIterations: 1,    // Iterations per tick (higher = more accurate but slower)
-    // Pointer repulsion (cylindrical blower) / attraction (vacuum) settings
-    pointerRepulsionEnabled: true,  // Whether the blower tool is available (Shift+mouse)
-    pointerVacuumEnabled: false,    // Whether the vacuum tool is available (Ctrl+mouse)
-    pointerRepulsionStrength: 150,  // Repulsion/attraction intensity
-    pointerRepulsionRange: 200,     // Maximum radius of effect (screen pixels)
-    pointerSizeInertia: true,       // Larger nodes resist blower/vacuum more
-    // Clipping plane settings
-    clippingPlaneEnabled: false,    // Whether clipping plane is active
-    clippingPlaneDistance: 0,       // Offset from graph center (controlled by scroll or slider)
-  });
+  // 3D Force-Directed layout settings (D3-Force only, persisted with the exploration)
+  const force3DSettings = ref(defaultForce3DSettings());
 
   // Layout execution settings (simulation lifecycle — not d3 force params)
   const layoutExecution = ref({
@@ -1710,6 +1737,7 @@ export const useGraphStore = defineStore('graph', () => {
         : undefined,
       behaviors: { ...behaviors.value },
       aesthetics: { ...aesthetics.value },
+      force3d_settings: { ...force3DSettings.value },
       community: communityStore.getState(),
       similarity: similarityStore.getState(),
     };
@@ -1846,6 +1874,7 @@ export const useGraphStore = defineStore('graph', () => {
         hive: { ...layoutDefaults.hive, ...(savedLayoutConfig?.hive ?? {}) },
         hierarchical: { ...layoutDefaults.hierarchical, ...(savedLayoutConfig?.hierarchical ?? {}) },
       };
+      force3DSettings.value = mergeForce3DSettings(exploration.state.force3d_settings);
       graphQuery.value = exploration.state.graph_query || '';
       ctePrefilter.value = exploration.state.cte_prefilter || '';
       vlpRenderingMode.value = exploration.state.vlp_rendering_mode || 'procedural';
@@ -1963,6 +1992,7 @@ export const useGraphStore = defineStore('graph', () => {
     ctePrefilter.value = '';
     layoutAlgorithm.value = 'force';
     layoutModeConfig.value = defaultLayoutModeConfig();
+    force3DSettings.value = defaultForce3DSettings();
     resetFilters();
     resetTranspileOptions();
   }
