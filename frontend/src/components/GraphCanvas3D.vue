@@ -30,6 +30,7 @@ import { useContextMenu } from '@/composables/useContextMenu';
 import GraphContextMenu from '@/components/GraphContextMenu.vue';
 import { Network } from 'lucide-vue-next';
 import { recordPerf } from '@/utils/perfMetrics';
+import { isStationaryRightClick, resolveContextMenuTarget } from '@/utils/contextMenuTrigger';
 import { settleLayoutAuto } from '@/utils/settleLayoutClient';
 import { seedNewNodePositions } from '@/utils/seedNewNodePositions';
 import { useDevPerf } from '@/composables/useDevPerf';
@@ -102,7 +103,12 @@ const devPerf = useDevPerf();
 // Context menu
 const contextMenu = useContextMenu();
 let rightClickMouseDownPos: { x: number; y: number } | null = null;
-const RIGHT_CLICK_DRAG_THRESHOLD = 5;
+// Hovered node/link tracked synchronously (no RAF debounce) so the right-click mouseup
+// handler can resolve its target — the library's onNodeRightClick is unreliable because
+// any 1px pointer jitter while the button is held makes it treat the click as a drag
+// and skip the callback entirely (see maybeOpenContextMenu).
+let hoveredNodeSync: GraphNode | null = null;
+let hoveredLinkSync: GraphLink | null = null;
 
 // Map-style pan (right-drag) state
 let isMapPanning = false;
@@ -832,6 +838,8 @@ async function initGraph() {
   }
 
   containerRef.value.innerHTML = '';
+  hoveredNodeSync = null;
+  hoveredLinkSync = null;
 
   // Large graphs: show the build overlay through the (chunked) data build.
   if (filteredEdges.value.length > HEADLESS_SETTLE_EDGE_THRESHOLD) {
@@ -1021,6 +1029,7 @@ async function initGraph() {
       graphStore.clearSelection();
     })
     .onNodeHover((node: GraphNode | null, _prevNode: GraphNode | null) => {
+      hoveredNodeSync = node;
       const newHoverId = node?.id ?? null;
       if (hoverRAF !== null) cancelAnimationFrame(hoverRAF);
       hoverRAF = requestAnimationFrame(() => {
@@ -1039,6 +1048,7 @@ async function initGraph() {
       }
     })
     .onLinkHover((link: GraphLink | null, _prevLink: GraphLink | null) => {
+      hoveredLinkSync = link;
       if (link) {
         tooltipX.value = mouseX.value + 12;
         tooltipY.value = mouseY.value - 12;
@@ -1048,39 +1058,11 @@ async function initGraph() {
         tooltipVisible.value = false;
         tooltipContent.value = null;
       }
-    })
-    .onNodeRightClick((node: GraphNode, event: MouseEvent) => {
-      if (rightClickMouseDownPos) {
-        const dx = event.clientX - rightClickMouseDownPos.x;
-        const dy = event.clientY - rightClickMouseDownPos.y;
-        rightClickMouseDownPos = null;
-        if (Math.sqrt(dx * dx + dy * dy) > RIGHT_CLICK_DRAG_THRESHOLD) {
-          return;
-        }
-      }
-      contextMenu.show(event, {
-        type: 'node',
-        id: node.id,
-        label: node.label.length > 24 ? node.label.slice(0, 24) + '...' : node.label,
-      });
-      tooltipVisible.value = false;
-    })
-    .onLinkRightClick((link: GraphLink, event: MouseEvent) => {
-      if (rightClickMouseDownPos) {
-        const dx = event.clientX - rightClickMouseDownPos.x;
-        const dy = event.clientY - rightClickMouseDownPos.y;
-        rightClickMouseDownPos = null;
-        if (Math.sqrt(dx * dx + dy * dy) > RIGHT_CLICK_DRAG_THRESHOLD) {
-          return;
-        }
-      }
-      contextMenu.show(event, {
-        type: 'edge',
-        id: link.id,
-        label: link.id.length > 24 ? link.id.slice(0, 24) + '...' : link.id,
-      });
-      tooltipVisible.value = false;
     });
+  // Context menu is NOT wired through onNodeRightClick/onLinkRightClick: the library
+  // suppresses those callbacks whenever the pointer moved at all while the button was
+  // held (any 1px jitter counts as a drag), which made the menu open only sometimes.
+  // Instead the app-level mouseup handler (maybeOpenContextMenu) opens it.
 
   const is2D = graphStore.behaviors.viewMode === '2d-proj';
   applyForceConfig(graph3d, effectiveForceSettings(), graphStore.aesthetics.nodeSize / 2, is2D);
@@ -1170,6 +1152,14 @@ async function initGraph() {
 
   // Dev-only: expose renderer info + attach stats-gl overlay
   if (import.meta.env.DEV) {
+    // Lets e2e tests locate a node on the canvas (WebGL is opaque to DOM selectors)
+    (window as any).__GRAPH_NODE_SCREEN_COORDS__ = (nodeId: string) => {
+      if (!graph3d) return null;
+      const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
+      if (!node || typeof node.x !== 'number') return null;
+      return graph3d.graph2ScreenCoords(node.x, node.y ?? 0, node.z ?? 0);
+    };
+
     const devRenderer = graph3d.renderer?.() as THREE.WebGLRenderer | null;
     if (devRenderer) {
       (window as any).__THREE_RENDERER_INFO__ = () => ({
@@ -2152,6 +2142,20 @@ onMounted(() => {
     }
   };
 
+  // Opens the context menu on a stationary right-click, resolving the target from the
+  // synchronously tracked hover state. The native contextmenu event stays suppressed by
+  // the graph library, so this mouseup path is the single trigger for the menu.
+  function maybeOpenContextMenu(event: MouseEvent) {
+    const stationary = isStationaryRightClick(rightClickMouseDownPos, event.clientX, event.clientY);
+    rightClickMouseDownPos = null;
+    if (!stationary || !isPointerOverCanvas) return;
+
+    const target = resolveContextMenuTarget(hoveredNodeSync, hoveredLinkSync);
+    if (!target) return;
+    contextMenu.show(event, target);
+    tooltipVisible.value = false;
+  }
+
   _onMouseMove = function onMouseMove(event: MouseEvent) {
     if (!isMapPanning || !lastPanPos) return;
     camera.applyMapStylePan(event.clientX - lastPanPos.x, event.clientY - lastPanPos.y);
@@ -2162,6 +2166,7 @@ onMounted(() => {
     if (event.button !== 2) return;
     isMapPanning = false;
     lastPanPos = null;
+    maybeOpenContextMenu(event);
   };
 
   containerRef.value?.addEventListener('mousedown', _onMouseDown);
