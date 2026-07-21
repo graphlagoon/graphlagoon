@@ -16,7 +16,7 @@ import {
   type AppearanceContext,
 } from '@/utils/graphAppearance';
 import { applyForceConfig, applyCommunityRadialForce, applyEdgeTypeLayoutForce, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
-import { computeTreeLayout, computeHivePositions, computeRingGuideSpec, computeHiveAxesSpec, computeHiveLinkCurvatures } from '@/utils/layoutModes';
+import { computeTreeLayout, computeHivePositions, computeRingGuideSpec, computeHiveAxesSpec, computeHiveLinkCurvatures, computeEgoLinkCurvatures } from '@/utils/layoutModes';
 import { useLayoutGuides } from '@/composables/useLayoutGuides';
 import { useToast } from '@/composables/useToast';
 import { forcePointerRepulsion, type PointerRepulsionForce } from '@/utils/forcePointerRepulsion';
@@ -1487,8 +1487,8 @@ watch(
  * pinned positions, hidden set). No simulation lifecycle calls — initGraph and
  * updateGraph re-apply this after data swaps; applyLayoutMode drives lifecycle.
  */
-/** Restore link curvatures the hive mode overrode (marker: __origCurvature). */
-function restoreHiveCurvatures() {
+/** Restore link curvatures a layout mode overrode (marker: __origCurvature). */
+function restoreModeCurvatures() {
   if (!graph3d) return;
   const data = graph3d.graphData();
   if (!data?.links) return;
@@ -1531,9 +1531,11 @@ function applyLayoutModeForces() {
 
   if (mode !== 'ego') {
     layoutHiddenNodeIds.value = null;
+    graphStore.egoLayoutStats = null;
   }
-  if (mode !== 'hive') {
-    restoreHiveCurvatures();
+  // Both hive and ego override curvatures; restore before a mode that doesn't
+  if (mode !== 'hive' && mode !== 'ego') {
+    restoreModeCurvatures();
   }
   if (mode !== 'ego' && mode !== 'hive' && mode !== 'hierarchical') {
     guides.clear();
@@ -1545,6 +1547,7 @@ function applyLayoutModeForces() {
     if (!hasFocus) {
       // Inert until the user picks a focus node (no silent fallback)
       layoutHiddenNodeIds.value = null;
+      graphStore.egoLayoutStats = null;
       guides.clear();
       return;
     }
@@ -1556,8 +1559,46 @@ function applyLayoutModeForces() {
       levelSpacing: cfg.ego.ringSpacing,
       nodeSpacing: EGO_MIN_NODE_ARC,
       orphanPolicy: 'outer-ring',
+      ringOrdering: cfg.ego.ringOrdering,
+      ringOrderingKey: cfg.ego.ringOrderingKey,
+      crossingHeuristic: cfg.ego.crossingHeuristic,
+      crossingSweeps: cfg.ego.crossingSweeps,
+      communityMap: cfg.ego.ringOrdering === 'community' ? communityStore.communityMap : null,
     });
     pinPositions(result.positions);
+    graphStore.egoLayoutStats = {
+      nonTreeEdgeCount: result.nonTreeEdgeCount,
+      sameRingEdgeCount: result.sameRingEdgeCount,
+      siftingSkippedLargeRing: result.siftingSkippedLargeRing,
+    };
+
+    // Same-ring edges arc along their ring instead of chording across the
+    // interior, freeing it for the radial tree. Mirrors the hive curvature path.
+    const egoData = graph3d.graphData();
+    if (egoData?.links) {
+      const links = egoData.links as GraphLink[];
+      if (cfg.ego.arcIntraRingEdges) {
+        // Snapshot the multi-edge fan value BEFORE mutating, so re-runs compose
+        // from the original rather than from a previous run's arc
+        for (const link of links) {
+          if (link.__origCurvature === undefined) link.__origCurvature = link.curvature ?? 0;
+        }
+        const curvatures = computeEgoLinkCurvatures(links, {
+          positions: result.positions,
+          levels: result.levels,
+          parents: result.parents,
+          levelStats: result.levelStats,
+          levelSpacing: cfg.ego.ringSpacing,
+          baseCurvature: (link) => (link as GraphLink).__origCurvature ?? 0,
+        });
+        for (const link of links) {
+          link.curvature = curvatures.get(link) ?? link.__origCurvature;
+        }
+        graph3d.linkCurvature((l: GraphLink) => l.curvature ?? 0);
+      } else {
+        restoreModeCurvatures();
+      }
+    }
 
     if (cfg.ego.maxHops !== null) {
       const hidden = new Set<string>();
@@ -1697,11 +1738,14 @@ watch(
   { deep: true }
 );
 
-// Hive axes keyed on communities go stale when detection re-runs
+// Layouts keyed on communities go stale when detection re-runs
 watch(
   () => communityStore.communityMap,
   () => {
-    if (graphStore.layoutAlgorithm === 'hive' && graphStore.layoutModeConfig.hive.axisKey === 'community') {
+    const mode = graphStore.layoutAlgorithm;
+    if (mode === 'hive' && graphStore.layoutModeConfig.hive.axisKey === 'community') {
+      applyLayoutMode();
+    } else if (mode === 'ego' && graphStore.layoutModeConfig.ego.ringOrdering === 'community') {
       applyLayoutMode();
     }
   }

@@ -161,6 +161,23 @@ export type LayoutAlgorithm = "force" | "ego" | "hive" | "hierarchical" | "circu
 /** BFS direction for the ego layout: follow outgoing edges, incoming edges, or both */
 export type EgoDirection = "both" | "out" | "in";
 
+/**
+ * Angular ordering strategy for ego rings.
+ * - 'id': sorted-id order (purely structural baseline)
+ * - 'barycenter': radial-Sugiyama crossing reduction (Bachmaier, IEEE TVCG 2007)
+ * - 'node-type' | 'community' | 'property': contiguous angular sectors by attribute
+ */
+export type RingOrdering = "id" | "barycenter" | "node-type" | "community" | "property";
+
+/**
+ * Heuristic behind the "fewest crossings" ordering. All deterministic; they
+ * trade cost for strength.
+ * - 'barycenter': sibling sweeps by mean neighbour angle — cheap, weak on stars
+ * - 'median': same sweeps, circular median (Eades & Wormald 3-approximation)
+ * - 'sifting': circular sifting (Baur & Brandes 2004) — far stronger, costlier
+ */
+export type CrossingHeuristic = "barycenter" | "median" | "sifting";
+
 /** Radial scale for hive plot axis positioning */
 export type HiveScale = "rank" | "linear" | "log";
 
@@ -173,6 +190,24 @@ export interface EgoLayoutConfig {
   /** Hide nodes farther than this many hops (null = no cutoff) */
   maxHops: number | null;
   ringSpacing: number;
+  /**
+   * How nodes are ordered angularly within each ring. Strategies are mutually
+   * exclusive — the ring's angle carries one meaning at a time, so two runs of
+   * the layout stay comparable (the point of a deterministic radial layout).
+   */
+  ringOrdering: RingOrdering;
+  /** Property name used by ringOrdering 'property' (null = none selected yet) */
+  ringOrderingKey: string | null;
+  /** Which heuristic ringOrdering 'barycenter' runs */
+  crossingHeuristic: CrossingHeuristic;
+  /** Sweeps for the barycenter/median heuristics (sifting ignores this) */
+  crossingSweeps: number;
+  /**
+   * Draw edges between nodes on the SAME ring as arcs hugging that ring instead
+   * of straight chords across the interior. Every edge stays individually
+   * traceable — this is arc routing, not bundling.
+   */
+  arcIntraRingEdges: boolean;
 }
 
 export interface HiveLayoutConfig {

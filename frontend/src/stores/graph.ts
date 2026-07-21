@@ -136,6 +136,15 @@ export function defaultLayoutModeConfig(): LayoutModeConfig {
       edgeTypes: null,
       maxHops: null,
       ringSpacing: 60,
+      ringOrdering: 'barycenter',
+      ringOrderingKey: null,
+      // Barycenter by default — the cheapest option, and the one already in
+      // production. Median and sifting uncross more (sifting far more), but
+      // sifting costs up to ~440ms on a dense ring and the layout re-runs on
+      // every config nudge inside a 150ms debounce, so strength is opt-in.
+      crossingHeuristic: 'barycenter',
+      crossingSweeps: 3,
+      arcIntraRingEdges: true,
     },
     hive: {
       axisKey: 'node_type',
@@ -348,6 +357,18 @@ export const useGraphStore = defineStore('graph', () => {
 
   // Per-layout-mode parameters (persisted with the exploration)
   const layoutModeConfig = ref<LayoutModeConfig>(defaultLayoutModeConfig());
+
+  /**
+   * Shape stats from the last ego layout pass (derived, NOT persisted). Lets the
+   * layout panel say when a control is a no-op on this particular graph — e.g.
+   * crossing reduction has nothing to do in a pure convergence star — instead of
+   * leaving the user toggling something with no visible effect.
+   */
+  const egoLayoutStats = ref<{
+    nonTreeEdgeCount: number;
+    sameRingEdgeCount: number;
+    siftingSkippedLargeRing: boolean;
+  } | null>(null);
 
 
   // 3D Force-Directed layout settings (D3-Force only, persisted with the exploration)
@@ -1992,6 +2013,7 @@ export const useGraphStore = defineStore('graph', () => {
     ctePrefilter.value = '';
     layoutAlgorithm.value = 'force';
     layoutModeConfig.value = defaultLayoutModeConfig();
+    egoLayoutStats.value = null;
     force3DSettings.value = defaultForce3DSettings();
     resetFilters();
     resetTranspileOptions();
@@ -2028,6 +2050,7 @@ export const useGraphStore = defineStore('graph', () => {
     viewport,
     layoutAlgorithm,
     layoutModeConfig,
+    egoLayoutStats,
     force3DSettings,
     layoutExecution,
     behaviors,

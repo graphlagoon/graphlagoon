@@ -3,7 +3,7 @@ import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
-import type { LayoutAlgorithm } from '@/types/graph';
+import type { LayoutAlgorithm, RingOrdering, CrossingHeuristic } from '@/types/graph';
 import { Play, Square, Flame, Shuffle, ChevronDown, ChevronRight, HelpCircle, X } from 'lucide-vue-next';
 
 const graphStore = useGraphStore();
@@ -14,6 +14,8 @@ const similarityStore = useSimilarityStore();
 const showHelpModal = ref(false);
 // Advanced mode toggle for 3D settings
 const showAdvanced = ref(false);
+// Advanced disclosure for the ego block (ring geometry / edge drawing refinements)
+const showEgoAdvanced = ref(false);
 
 const emit = defineEmits<{
   (e: 'start-layout'): void;
@@ -86,6 +88,60 @@ function toggleEgoEdgeType(edgeType: string, checked: boolean) {
 function setEgoMaxHops(raw: number) {
   graphStore.updateLayoutModeConfig({ ego: { maxHops: raw === 0 ? null : raw } });
 }
+
+/**
+ * How many nodes actually carry the attribute the chosen sector strategy groups
+ * by. Graphs here are heterogeneous — a node may simply not have the field — so
+ * the panel reports coverage instead of letting the layout degrade silently.
+ */
+const egoSectorCoverage = computed(() => {
+  const ordering = egoConfig.value.ringOrdering;
+  const nodes = graphStore.nodes;
+  if (ordering === 'id' || ordering === 'barycenter' || nodes.length === 0) return null;
+
+  let withValue = 0;
+  for (const node of nodes) {
+    let value: unknown;
+    if (ordering === 'node-type') value = node.node_type;
+    else if (ordering === 'community') value = communityStore.communityMap.get(node.node_id);
+    else {
+      const key = (egoConfig.value.ringOrderingKey ?? '').replace(/^prop:/, '');
+      value = key ? node.properties?.[key] : undefined;
+    }
+    if (value !== undefined && value !== null && value !== '') withValue++;
+  }
+  return { withValue, total: nodes.length, missing: nodes.length - withValue };
+});
+
+const egoOrderingDegraded = computed(
+  () => egoSectorCoverage.value !== null && egoSectorCoverage.value.withValue === 0
+);
+
+/**
+ * Crossing reduction only has something to work with when edges exist outside
+ * the BFS tree. A pure convergence star (the common fraud-attribute shape) has
+ * none, so the strategy is a silent no-op — say so rather than let the user
+ * toggle it looking for a change.
+ */
+const egoCrossingReductionIsNoop = computed(
+  () =>
+    egoConfig.value.ringOrdering === 'barycenter' &&
+    graphStore.egoLayoutStats !== null &&
+    graphStore.egoLayoutStats.nonTreeEdgeCount === 0
+);
+
+/** Sifting was requested but a ring exceeded the interaction-time budget. */
+const egoSiftingSkipped = computed(
+  () =>
+    egoConfig.value.ringOrdering === 'barycenter' &&
+    egoConfig.value.crossingHeuristic === 'sifting' &&
+    graphStore.egoLayoutStats?.siftingSkippedLargeRing === true
+);
+
+/** Same-ring arcs are equally a no-op when no edge joins two nodes on one ring. */
+const egoHasNoSameRingEdges = computed(
+  () => graphStore.egoLayoutStats !== null && graphStore.egoLayoutStats.sameRingEdgeCount === 0
+);
 
 // ---------------------------------------------------------------------------
 // Hive mode
@@ -235,18 +291,186 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 
       <div class="setting-item">
         <label>
-          <span class="setting-label">Ring spacing</span>
-          <span class="setting-value">{{ egoConfig.ringSpacing }}</span>
+          <span class="setting-label">Ring ordering</span>
         </label>
-        <input
-          type="range"
-          min="20"
-          max="200"
-          step="10"
-          :value="egoConfig.ringSpacing"
-          @input="graphStore.updateLayoutModeConfig({ ego: { ringSpacing: parseInt(($event.target as HTMLInputElement).value) } })"
-        />
+        <span class="setting-hint">
+          What the angle around each ring means. One meaning at a time, so two runs stay comparable.
+        </span>
+        <select
+          data-testid="ego-ring-ordering"
+          :value="egoConfig.ringOrdering"
+          @change="graphStore.updateLayoutModeConfig({ ego: { ringOrdering: ($event.target as HTMLSelectElement).value as RingOrdering } })"
+        >
+          <option value="barycenter">Fewest crossings</option>
+          <option value="node-type">Sector by node type</option>
+          <option value="community">Sector by community</option>
+          <option value="property">Sector by property</option>
+          <option value="id">None (by id)</option>
+        </select>
+
+        <select
+          v-if="egoConfig.ringOrdering === 'property'"
+          class="ego-ordering-key"
+          data-testid="ego-ring-ordering-key"
+          :value="egoConfig.ringOrderingKey ?? ''"
+          @change="graphStore.updateLayoutModeConfig({ ego: { ringOrderingKey: ($event.target as HTMLSelectElement).value || null } })"
+        >
+          <option value="">Select a property…</option>
+          <option v-for="p in graphStore.categoricalNodeProperties" :key="p.name" :value="p.name">
+            {{ p.name }}
+          </option>
+        </select>
+
+        <span
+          v-if="egoCrossingReductionIsNoop"
+          class="setting-hint setting-hint-warn"
+          data-testid="ego-crossing-noop-hint"
+        >
+          No edges outside the tree — nothing to uncross here. Sector by type or property to
+          give the angle meaning.
+        </span>
+        <span
+          v-if="egoOrderingDegraded"
+          class="setting-hint setting-hint-warn"
+          data-testid="ego-ordering-degraded-hint"
+        >
+          No node carries this attribute — falling back to id order.
+        </span>
+        <span
+          v-else-if="egoSectorCoverage && egoSectorCoverage.missing > 0"
+          class="setting-hint"
+          data-testid="ego-ordering-coverage-hint"
+        >
+          {{ egoSectorCoverage.missing }} of {{ egoSectorCoverage.total }} nodes lack this
+          attribute — they form their own sector, never hidden.
+        </span>
       </div>
+
+      <!-- Advanced: ring geometry and edge drawing refinements -->
+      <div class="advanced-toggle" data-testid="ego-advanced-toggle" @click="showEgoAdvanced = !showEgoAdvanced">
+        <ChevronDown v-if="showEgoAdvanced" :size="12" class="toggle-icon" />
+        <ChevronRight v-else :size="12" class="toggle-icon" />
+        <span class="advanced-label">Advanced</span>
+      </div>
+
+      <template v-if="showEgoAdvanced">
+        <div v-if="egoConfig.ringOrdering === 'barycenter'" class="setting-item">
+          <label>
+            <span class="setting-label">Crossing heuristic</span>
+          </label>
+          <span class="setting-hint">
+            How hard the layout works to uncross edges. All are deterministic.
+          </span>
+          <select
+            class="setting-select"
+            data-testid="ego-crossing-heuristic"
+            :value="egoConfig.crossingHeuristic"
+            @change="graphStore.updateLayoutModeConfig({ ego: { crossingHeuristic: ($event.target as HTMLSelectElement).value as CrossingHeuristic } })"
+          >
+            <option value="barycenter">Barycenter — fastest (default)</option>
+            <option value="median">Median — fast, outlier-resistant</option>
+            <option value="sifting">Sifting — far stronger, slower</option>
+          </select>
+          <span
+            v-if="egoConfig.crossingHeuristic !== 'sifting'"
+            class="setting-hint"
+            data-testid="ego-heuristic-weak-hint"
+          >
+            The fast heuristics only reorder siblings, so they barely help when most nodes hang
+            off one hub. Sifting uncrosses far more there, at up to ~90ms per layout pass.
+          </span>
+          <span
+            v-if="egoSiftingSkipped"
+            class="setting-hint setting-hint-warn"
+            data-testid="ego-sifting-skipped-hint"
+          >
+            A ring was too large to sift within the interaction budget — it kept the faster sweep
+            result.
+          </span>
+        </div>
+
+        <div
+          v-if="egoConfig.ringOrdering === 'barycenter' && egoConfig.crossingHeuristic !== 'sifting'"
+          class="setting-item"
+        >
+          <label>
+            <span class="setting-label">Sweeps</span>
+            <span class="setting-value">{{ egoConfig.crossingSweeps }}</span>
+          </label>
+          <span class="setting-hint">More sweeps settle further; 0 keeps the plain id order.</span>
+          <input
+            type="range"
+            min="0"
+            max="8"
+            step="1"
+            data-testid="ego-crossing-sweeps"
+            :value="egoConfig.crossingSweeps"
+            @input="graphStore.updateLayoutModeConfig({ ego: { crossingSweeps: parseInt(($event.target as HTMLInputElement).value) } })"
+          />
+        </div>
+
+        <div class="setting-item">
+          <label>
+            <span class="setting-label">Ring spacing</span>
+            <span class="setting-value">{{ egoConfig.ringSpacing }}</span>
+          </label>
+          <input
+            type="range"
+            min="20"
+            max="200"
+            step="10"
+            data-testid="ego-ring-spacing"
+            :value="egoConfig.ringSpacing"
+            @input="graphStore.updateLayoutModeConfig({ ego: { ringSpacing: parseInt(($event.target as HTMLInputElement).value) } })"
+          />
+        </div>
+
+        <div class="setting-item">
+          <label class="checkbox-item">
+            <input
+              type="checkbox"
+              data-testid="ego-arc-intra-ring"
+              :checked="egoConfig.arcIntraRingEdges"
+              @change="graphStore.updateLayoutModeConfig({ ego: { arcIntraRingEdges: ($event.target as HTMLInputElement).checked } })"
+            />
+            <span class="setting-label">Arc same-ring edges</span>
+          </label>
+          <span class="setting-hint">
+            Edges between nodes on the same ring follow the ring instead of cutting across the
+            middle. Each edge stays individually selectable.
+          </span>
+          <span
+            v-if="egoHasNoSameRingEdges"
+            class="setting-hint setting-hint-warn"
+            data-testid="ego-no-same-ring-hint"
+          >
+            No edges join two nodes on the same ring in this graph — this has nothing to redraw.
+          </span>
+        </div>
+
+        <div class="setting-item">
+          <span class="setting-hint" data-testid="ego-pinned-hint">
+            Nodes are placed analytically and pinned, so the simulation controls do not apply in
+            this mode. The same graph always produces the same picture — that is what makes two
+            ego views comparable.
+          </span>
+        </div>
+
+        <div v-if="graphStore.behaviors.edgeLensMode === 'off'" class="setting-item">
+          <span class="setting-hint" data-testid="ego-lens-hint">
+            Tip: Graph Lens dims everything but a hovered node's edges — the cheapest way to read
+            a dense ring.
+            <button
+              type="button"
+              class="inline-action"
+              data-testid="ego-enable-lens"
+              @click="graphStore.behaviors.edgeLensMode = 'dim'"
+            >
+              Enable
+            </button>
+          </span>
+        </div>
+      </template>
     </div>
 
     <!-- Hive plot controls -->
@@ -1193,6 +1417,25 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
   font-size: 10px;
   color: var(--text-muted, #999);
   margin-top: 4px;
+}
+
+.setting-hint-warn {
+  color: var(--warning-color, #e0a030);
+}
+
+.ego-ordering-key {
+  margin-top: 6px;
+}
+
+.inline-action {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 4px;
+  color: var(--primary-color, #42b883);
+  font-size: 10px;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .mode-info {
