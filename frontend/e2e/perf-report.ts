@@ -22,25 +22,53 @@ import { chromium } from 'playwright';
 const BASE_URL = process.argv[2] || 'http://localhost:3000';
 const WAIT_MS = parseInt(process.env.PERF_WAIT_MS || '5000', 10);
 
+// Graph size for the mocked payload. The defaults are deliberately small (fast
+// smoke run); raise them to profile the load path at a realistic scale, e.g.
+//   PERF_NODES=20000 PERF_EDGES=40000 PERF_PROPS=30 make perf-report
+const NODE_COUNT = parseInt(process.env.PERF_NODES || '50', 10);
+const EDGE_COUNT = parseInt(process.env.PERF_EDGES || '80', 10);
+// Properties per node: the field that dominates payload size and reactive-wrap
+// cost while contributing nothing to rendering — the whole premise of the
+// progressive-load work, so it must be tunable in the baseline.
+const PROPS_PER_NODE = parseInt(process.env.PERF_PROPS || '1', 10);
+
 // ---------------------------------------------------------------------------
 // Minimal mock data (inline to avoid import issues outside of Playwright test)
 // ---------------------------------------------------------------------------
 
 const MOCK_CONFIG = { dev_mode: true, database_enabled: false };
 
+function buildNodeProperties(i: number): Record<string, unknown> {
+  const props: Record<string, unknown> = { name: `Node ${i}` };
+  for (let p = 1; p < PROPS_PER_NODE; p++) {
+    props[`prop_${p}`] = `value_${i}_${p}`;
+  }
+  return props;
+}
+
 const MOCK_GRAPH_RESPONSE = {
-  nodes: Array.from({ length: 50 }, (_, i) => ({
+  nodes: Array.from({ length: NODE_COUNT }, (_, i) => ({
     node_id: `n${i}`,
     node_type: i % 3 === 0 ? 'Person' : i % 3 === 1 ? 'Company' : 'Product',
-    properties: { name: `Node ${i}` },
+    properties: buildNodeProperties(i),
   })),
-  edges: Array.from({ length: 80 }, (_, i) => ({
+  edges: Array.from({ length: EDGE_COUNT }, (_, i) => ({
     edge_id: `e${i}`,
-    src: `n${i % 50}`,
-    dst: `n${(i * 3 + 7) % 50}`,
+    src: `n${i % NODE_COUNT}`,
+    dst: `n${(i * 3 + 7) % NODE_COUNT}`,
     relationship_type: i % 2 === 0 ? 'WORKS_AT' : 'BOUGHT',
     properties: {},
   })),
+  truncated: false,
+  // Mirrors the shape the backend sends so the load:*:backend entries are
+  // exercised end-to-end rather than silently skipped.
+  metadata: {
+    total_ms: 0,
+    edge_query_ms: 0,
+    node_query_ms: 0,
+    node_count: NODE_COUNT,
+    edge_count: EDGE_COUNT,
+  },
 };
 
 const MOCK_CONTEXTS = [
@@ -83,6 +111,15 @@ async function main() {
   await page.route('**/graphlagoon/api/graph-contexts', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_CONTEXTS) }),
   );
+  // Single-context fetch: loadContext() hits this before any graph data, and it
+  // gates autoLoadOnOpen. Without it the view errors out and nothing renders.
+  await page.route('**/graphlagoon/api/graph-contexts/perf-ctx', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MOCK_CONTEXTS[0]),
+    }),
+  );
   await page.route('**/graphlagoon/api/graph-contexts/*/subgraph', (route) =>
     route.fulfill({
       status: 200,
@@ -122,17 +159,34 @@ async function main() {
     }),
   );
 
-  // Navigate to the app
+  // Navigate straight to the graph route. Landing on the app root only renders
+  // the context list, so the load path under measurement never runs and the
+  // report comes back empty.
+  const graphUrl = `${BASE_URL.replace(/\/$/, '')}/graph/${MOCK_CONTEXTS[0].id}`;
   try {
-    await page.goto(BASE_URL, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto(graphUrl, { waitUntil: 'networkidle', timeout: 30_000 });
   } catch {
-    console.error(`Failed to connect to ${BASE_URL}. Is the dev server running? (make dev or make run-frontend)`);
+    console.error(`Failed to connect to ${graphUrl}. Is the dev server running? (make dev or make run-frontend)`);
     await browser.close();
     process.exit(1);
   }
 
   // Wait for rendering + force layout to settle
   await page.waitForTimeout(WAIT_MS);
+
+  // Fail loudly rather than emitting an empty report that looks like a
+  // successful zero-cost run.
+  const entryCount = await page.evaluate(
+    () => ((window as any).__PERF_METRICS__?.entries ?? []).length,
+  );
+  if (entryCount === 0) {
+    console.error(
+      `No perf entries recorded at ${graphUrl}. The graph never loaded — check the API mocks ` +
+        `and that the dev server is running a DEV build (recordPerf is a no-op in PROD).`,
+    );
+    await browser.close();
+    process.exit(1);
+  }
 
   // Collect all metrics
   const report = await page.evaluate(() => {

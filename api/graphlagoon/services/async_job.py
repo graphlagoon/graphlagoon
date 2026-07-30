@@ -30,6 +30,13 @@ def create_job() -> tuple[str, dict[str, Any]]:
         # progress: {"phase": str, "chunks_done": int, "chunks_total": int}
         "progress": None,
         "result": None,  # the coroutine's return value on success
+        # A renderable intermediate result published before the job finishes,
+        # so the client can draw the graph while properties are still loading.
+        # `partial_seq` increments on each publish; the poller applies a partial
+        # only when the sequence advances, since it polls far more often than
+        # partials are produced.
+        "partial": None,
+        "partial_seq": 0,
         "error": None,  # {"code", "message", "details"} on failure
         "task": None,  # the asyncio.Task
         "statement_ids": [],  # underlying warehouse statements, for cancel

@@ -3,6 +3,7 @@ import type {
   DatasetsResponse,
   GraphContext,
   GraphResponse,
+  NodeBatchResponse,
   Exploration,
   SubgraphRequest,
   ExpandRequest,
@@ -227,6 +228,25 @@ class ApiService {
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/subgraph`,
       request
+    );
+    return response.data;
+  }
+
+  /**
+   * Fetch properties for a known set of node ids (progressive load).
+   *
+   * `columns` may only NARROW the context's configured projection — the
+   * backend intersects it with what the context exposes. Used to fetch the
+   * few label/icon columns first on wide node tables.
+   */
+  async getNodesBatch(
+    contextId: string,
+    nodeIds: string[],
+    columns?: string[],
+  ): Promise<NodeBatchResponse> {
+    const response = await this.client.post(
+      `/api/graph-contexts/${contextId}/nodes/batch`,
+      { node_ids: nodeIds, ...(columns ? { columns } : {}) }
     );
     return response.data;
   }

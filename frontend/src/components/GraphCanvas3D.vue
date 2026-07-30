@@ -597,6 +597,46 @@ function updateVisuals() {
   });
 }
 
+/**
+ * Refresh what node properties feed into, after a progressive-load patch.
+ *
+ * Labels are baked once in buildGraphData, so they must be recomputed here;
+ * icon overrides and appearance are handled by updateVisuals, which reads the
+ * (patched) originals out of nodeDataMap. Crucially this does NOT call
+ * graph3d.graphData() — no Three.js rebuild, no layout reheat, positions
+ * untouched.
+ */
+function refreshNodeContent() {
+  if (!graph3d) return;
+
+  const t0 = performance.now();
+  const currentData = graph3d.graphData();
+
+  for (const node of currentData.nodes as GraphNode[]) {
+    if (node.isCluster) continue;
+    const original = nodeDataMap.value.get(node.id);
+    if (!original) continue;
+    node.label = formatNodeLabel(
+      original,
+      graphStore.textFormatRules,
+      graphStore.textFormatDefaults.nodeTemplate,
+    );
+  }
+
+  updateVisuals();
+  updateOverlays();
+  recordPerf('refreshNodeContent', performance.now() - t0, {
+    nodeCount: currentData.nodes.length,
+  });
+}
+
+// Progressive load: properties arriving in background batches change labels and
+// icons but never node/edge counts, so the data watcher above stays silent by
+// design. This explicit signal is the only refresh path.
+watch(() => graphStore.nodePatchVersion, (version) => {
+  if (version > 0) refreshNodeContent();
+});
+
 // ---------------------------------------------------------------------------
 // Self-edge visibility toggle (O(n) scan, O(1) Three.js toggle per self-edge)
 // ---------------------------------------------------------------------------
@@ -775,7 +815,17 @@ async function updateGraph() {
     .cooldownTicks(graphStore.layoutExecution.cooldownTicks)
     .ticksPerFrame(graphStore.layoutExecution.ticksPerFrame);
 
+  // Measures only the synchronous part of the data swap (d3-force re-init +
+  // the kapsule's state set). The kapsule defers its mesh build to a digest
+  // tick, so the bulk of the cost lands in 'forcegraphUpdate' instead — read
+  // the two together when attributing time to the swap.
+  const tGraphData = performance.now();
   graph3d.graphData(graphData);
+  recordPerf('graphDataApply', performance.now() - tGraphData, {
+    nodes: graphData.nodes.length,
+    links: graphData.links.length,
+    preSettled: preSettled ? 1 : 0,
+  });
 
   applyForceConfig(graph3d, effectiveForceSettings(), graphStore.aesthetics.nodeSize / 2, graphStore.behaviors.viewMode === '2d-proj');
 
@@ -942,6 +992,11 @@ async function initGraph() {
   );
   isWarmingUp.value = !preSettled && adaptive.warmupTicks > 0;
 
+  // First-mount counterpart to 'graphDataApply'. Covers the whole ForceGraph3D
+  // construction because graphData() is chained into it and can't be isolated;
+  // as there, the deferred mesh build shows up in 'forcegraphUpdate'.
+  const tInitGraphData = performance.now();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   graph3d = (ForceGraph3D as any)({ rendererConfig: { preserveDrawingBuffer: true, antialias: true } })(containerRef.value)
     .graphData(graphData)
@@ -1026,6 +1081,9 @@ async function initGraph() {
         return;
       }
       graphStore.selectNode(node.id, event.ctrlKey);
+      // Progressive load: a node the user just opened jumps the enrichment
+      // queue, so the detail panel fills in without waiting for its batch.
+      void graphStore.prioritizeNodeProperties(node.id);
     })
     .onLinkClick((link: GraphLink, event: MouseEvent) => {
       graphStore.selectEdge(link.id, event.ctrlKey);
@@ -1068,6 +1126,12 @@ async function initGraph() {
   // suppresses those callbacks whenever the pointer moved at all while the button was
   // held (any 1px jitter counts as a drag), which made the menu open only sometimes.
   // Instead the app-level mouseup handler (maybeOpenContextMenu) opens it.
+
+  recordPerf('initGraphDataApply', performance.now() - tInitGraphData, {
+    nodes: graphData.nodes.length,
+    links: graphData.links.length,
+    preSettled: preSettled ? 1 : 0,
+  });
 
   const is2D = graphStore.behaviors.viewMode === '2d-proj';
   applyForceConfig(graph3d, effectiveForceSettings(), graphStore.aesthetics.nodeSize / 2, is2D);

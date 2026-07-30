@@ -6,6 +6,7 @@ It processes raw DataFrame results from the warehouse and constructs GraphRespon
 """
 
 import json
+import logging
 import time
 from typing import Optional, Any
 
@@ -16,6 +17,9 @@ from graphlagoon.models.schemas import (
     QueryMetadata,
     ColumnConfig,
 )
+from graphlagoon.services.sql_validation import extract_query_limit
+
+logger = logging.getLogger(__name__)
 
 
 class QueryExecutionError(Exception):
@@ -239,9 +243,217 @@ def process_graph_query_result(
     return GraphResponse(
         nodes=[],  # Nodes will be populated by a separate query
         edges=edges,
+        # Both are set by the caller, which is the only place that knows the
+        # requested limit (see execute_graph_query_with_nodes).
         truncated=False,
         total_count=len(edges),
     ), node_ids
+
+
+def _stringify_scalar(value: Any) -> Any:
+    """Render a struct-field scalar the way the statements API renders columns.
+
+    Top-level column values arrive as strings (the warehouse applies ``str()``
+    to every scalar), but values nested inside a NAMED_STRUCT survive JSON
+    decoding as real numbers and booleans. Without this, the same property is a
+    float on the harvested path and a string on the node-query path.
+
+    Containers are left alone: nested structs/arrays are already dicts/lists on
+    both paths, since ``_parse_row_value`` JSON-decodes them.
+
+    Verified against the local warehouse: ``SELECT true, 1.5`` returns
+    ``['True', '1.5']`` — plain Python ``str()``, including the capitalised
+    boolean — while the same values inside a NAMED_STRUCT come back as JSON
+    ``true``/``1.5``.
+    """
+    if isinstance(value, (bool, int, float)):
+        return str(value)
+    return value
+
+
+def harvest_nodes_from_result(
+    columns: list[str],
+    rows: list[list[Any]],
+    column_config: ColumnConfig,
+) -> dict[str, Node]:
+    """Collect nodes already present in a query result, keyed by node id.
+
+    A transpiled Cypher query that returns node variables (``RETURN a, b``)
+    renders them as NAMED_STRUCTs keyed by the context's own column names — the
+    same names ``process_nodes_result`` reads. Those structs carry everything a
+    Node needs, so re-fetching the same rows in the follow-up node query is a
+    wholly redundant warehouse round-trip.
+
+    Only structs that actually carry the node id column are harvested; anything
+    else (the edge ``r`` column, scalar projections, aggregates) is ignored, so
+    a query that returns no node variables simply yields nothing and the normal
+    node fetch runs unchanged.
+    """
+    node_id_col = column_config.node_id_col
+    node_type_col = column_config.node_type_col
+    structure_cols = {node_id_col, node_type_col}
+
+    harvested: dict[str, Node] = {}
+    for row in rows:
+        for i, col in enumerate(columns):
+            # The edge column is handled by process_graph_query_result.
+            if col == "r" or i >= len(row):
+                continue
+
+            value = row[i]
+            if isinstance(value, str):
+                value = _parse_row_value(value)
+
+            # A node variable may be returned bare or inside collect().
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                node_id = item.get(node_id_col)
+                if not node_id:
+                    continue
+
+                properties = {}
+                for prop_col, prop_value in item.items():
+                    if prop_col in structure_cols or prop_value is None:
+                        continue
+                    if isinstance(prop_value, str):
+                        prop_value = _parse_row_value(prop_value)
+                    else:
+                        # Struct fields arrive already typed (JSON numbers,
+                        # booleans), while the node-query path gets everything
+                        # as strings from the statements API. Normalise to the
+                        # string form so a property does not change type
+                        # depending on which path produced the node — property
+                        # filters and sorting on the client compare raw values.
+                        prop_value = _stringify_scalar(prop_value)
+                    properties[prop_col] = prop_value
+
+                existing = harvested.get(node_id)
+                # Prefer the richest struct: the same node can appear in several
+                # projections, some carrying only the id.
+                if existing is not None and len(existing.properties or {}) >= len(
+                    properties
+                ):
+                    continue
+
+                harvested[node_id] = Node(
+                    node_id=node_id,
+                    node_type=item.get(node_type_col, "") or "",
+                    properties=properties if properties else None,
+                )
+
+    return harvested
+
+
+def _quote_identifier(name: str) -> str:
+    """Backtick-quote a SQL identifier, escaping embedded backticks.
+
+    Column names reach the query builder from stored context configuration, not
+    from request bodies, but quoting keeps names with spaces/reserved words
+    working and closes the injection path if a context is ever attacker-shaped.
+    """
+    escaped = name.replace("`", "``")
+    return f"`{escaped}`"
+
+
+def build_node_projection(
+    column_config: ColumnConfig,
+    node_columns: Optional[list[str]] = None,
+) -> str:
+    """Build the SELECT list for the node query.
+
+    Returns ``n.*`` when no explicit projection is requested, preserving the
+    historical behaviour for contexts that have no configured properties.
+
+    When ``node_columns`` is given, only the structural columns plus those
+    properties are selected. Node ``properties`` are by far the largest part of
+    a graph payload and are not needed to render — narrowing the projection cuts
+    scan cost, wire size and the client's reactive-wrap cost in one step.
+
+    Duplicates (a property column that is also structural, or listed twice) are
+    dropped while preserving order, so the result never selects the same column
+    twice.
+    """
+    if node_columns is None:
+        return "n.*"
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for col in (column_config.node_id_col, column_config.node_type_col, *node_columns):
+        if col and col not in seen:
+            seen.add(col)
+            ordered.append(col)
+
+    # An empty/whitespace-only property list still yields the structural
+    # columns, which is exactly the "types-only" projection Phase 2 needs.
+    return ", ".join(f"n.{_quote_identifier(col)}" for col in ordered)
+
+
+def build_node_query(
+    node_table: str,
+    node_ids,
+    column_config: ColumnConfig,
+    node_columns: Optional[list[str]] = None,
+) -> str:
+    """Build the SQL that fetches node rows for a set of ids.
+
+    A JOIN against an inline VALUES relation is materially faster than a
+    ``WHERE node_id IN (<literal list>)`` for large id sets: the warehouse
+    planner turns it into a hash join over a LocalRelation instead of
+    evaluating a huge IN predicate (~40% faster at 20k ids on local Spark; the
+    gap widens on Databricks, where large IN lists are costly to compile).
+
+    Ids are deduped by the caller and node_id is unique, so the join stays 1:1.
+    """
+    from graphlagoon.services.sql_validation import sanitize_string_literal
+
+    node_values_str = ", ".join(
+        [f"('{sanitize_string_literal(n)}')" for n in node_ids]
+    )
+    projection = build_node_projection(column_config, node_columns)
+    return f"""
+        SELECT {projection}
+        FROM {node_table} n
+        JOIN (VALUES {node_values_str}) AS _node_ids(_id)
+          ON n.{_quote_identifier(column_config.node_id_col)} = _node_ids._id
+    """
+
+
+async def fetch_nodes_by_ids(
+    warehouse_client,
+    node_table: str,
+    node_ids,
+    column_config: ColumnConfig,
+    node_columns: Optional[list[str]] = None,
+    use_external_links: bool = False,
+    on_submit=None,
+) -> tuple[list[Node], float, str]:
+    """Fetch node rows for a set of ids.
+
+    Shared by the graph funnel's second phase and the standalone
+    ``/nodes/batch`` endpoint that backs progressive loading.
+
+    Returns (nodes, query_ms, query) — the query is returned so callers can
+    attach it to error responses.
+    """
+    query = build_node_query(node_table, node_ids, column_config, node_columns)
+
+    t0 = time.perf_counter()
+    if use_external_links:
+        result = await warehouse_client.execute_statement_external(
+            statement=query,
+            on_submit=on_submit,
+        )
+    else:
+        result = await warehouse_client.execute_statement(
+            statement=query,
+            on_submit=on_submit,
+        )
+    query_ms = (time.perf_counter() - t0) * 1000
+
+    columns, rows = _parse_statement_result(result, query=query)
+    return process_nodes_result(columns, rows, column_config), query_ms, query
 
 
 def process_nodes_result(
@@ -300,6 +512,9 @@ async def execute_graph_query_with_nodes(
     use_external_links: bool = False,
     on_submit=None,
     progress_callback=None,
+    node_columns: Optional[list[str]] = None,
+    nodes_mode: str = "full",
+    on_partial=None,
 ) -> GraphResponse:
     """
     Execute a graph query and fetch associated nodes.
@@ -317,6 +532,20 @@ async def execute_graph_query_with_nodes(
         progress_callback: Optional callback(phase, done, total) fired as chunks
             download; phase is "edges" or "nodes". Only fires on the
             EXTERNAL_LINKS path.
+        node_columns: Optional property columns to select on the node query.
+            ``None`` keeps the historical ``SELECT n.*``; a list narrows the
+            projection to the structural columns plus these (an empty list
+            yields structural columns only). See :func:`build_node_projection`.
+        nodes_mode: ``"full"`` (default) returns nodes with their properties.
+            ``"types"`` returns only the structural columns, so the client can
+            render immediately and fetch properties in the background; the
+            response is flagged with ``properties_deferred``.
+        on_partial: Optional callback(GraphResponse) invoked once with a
+            renderable intermediate result — edges plus nodes carrying only
+            their structural columns — before the full property fetch runs.
+            Lets a polling client draw the graph roughly twice as early
+            (measured 8046ms -> ~4115ms on a 100-column table). Ignored when
+            ``nodes_mode="types"``, where the main query already is that.
 
     Returns:
         Complete GraphResponse with nodes and edges
@@ -383,6 +612,23 @@ async def execute_graph_query_with_nodes(
         ) from e
     edge_processing_ms = (time.perf_counter() - t0) * 1000
 
+    # Truncation: the warehouse returned exactly as many rows as the cap
+    # allowed, so there are almost certainly more. `/subgraph` and `/expand`
+    # pass the cap explicitly; the query endpoints take it from the user's own
+    # SQL, so read it back out of the statement.
+    #
+    # An exact-fit result is reported as truncated too. The alternative — a
+    # COUNT(*) to distinguish "exactly N" from "N of many" — would re-run the
+    # expensive half of every load to remove a rare false positive.
+    #
+    # `total_count` reports how many edges this response carries. It
+    # deliberately does NOT claim the table total: the edge query is arbitrary
+    # user SQL, so counting honestly means running it again wrapped in a COUNT.
+    effective_limit = limit if limit is not None else extract_query_limit(query)
+    if effective_limit is not None and len(rows) >= effective_limit:
+        response_partial.truncated = True
+    response_partial.total_count = len(response_partial.edges)
+
     if not node_ids:
         total_ms = (time.perf_counter() - t_total_start) * 1000
         response_partial.metadata = QueryMetadata(
@@ -396,27 +642,84 @@ async def execute_graph_query_with_nodes(
         )
         return response_partial
 
-    # Build node query using actual table name.
-    #
-    # We fetch node attributes for the ids collected from the edge result.
-    # A JOIN against an inline VALUES relation is materially faster than a
-    # `WHERE node_id IN (<literal list>)` for large id sets, because the
-    # warehouse planner turns it into a hash join over a LocalRelation instead
-    # of evaluating a huge IN predicate (~40% faster at 20k ids on local
-    # Spark; the gap tends to widen on Databricks where large IN lists are
-    # costly to compile). `SELECT n.*` keeps the exact same columns as the
-    # previous `SELECT *`, so process_nodes_result is unchanged. node_ids is a
-    # set (deduped) and node_id is unique, so the join stays 1:1.
-    from graphlagoon.services.sql_validation import sanitize_string_literal
+    # A transpiled Cypher query that returns node variables already joined the
+    # node table and carries the rows in its result. Reuse them instead of
+    # fetching the same data again; only the remainder needs a round-trip.
+    harvested = harvest_nodes_from_result(columns, rows, column_config)
+    missing_ids = node_ids - harvested.keys()
 
-    node_id_col = column_config.node_id_col
-    node_values_str = ", ".join([f"('{sanitize_string_literal(n)}')" for n in node_ids])
-    node_query = f"""
-        SELECT n.*
-        FROM {node_table} n
-        JOIN (VALUES {node_values_str}) AS _node_ids(_id)
-          ON n.`{node_id_col}` = _node_ids._id
-    """
+    if not missing_ids:
+        total_ms = (time.perf_counter() - t_total_start) * 1000
+        nodes = [harvested[nid] for nid in node_ids if nid in harvested]
+        return GraphResponse(
+            nodes=nodes,
+            edges=response_partial.edges,
+            truncated=response_partial.truncated,
+            total_count=response_partial.total_count,
+            # Harvested nodes carry the properties the query already returned;
+            # they cost nothing extra, so they are kept even in "types" mode and
+            # nothing is left pending.
+            properties_deferred=False,
+            metadata=QueryMetadata(
+                edge_query_ms=round(edge_query_ms, 2),
+                edge_processing_ms=round(edge_processing_ms, 2),
+                # No node query ran: every node came from the edge result.
+                node_query_ms=0.0,
+                total_ms=round(total_ms, 2),
+                chunk_download_ms=edge_download_ms,
+                chunk_count=edge_chunk_count,
+                node_count=len(nodes),
+                edge_count=len(response_partial.edges),
+            ),
+        )
+
+    # Two-step delivery for callers that can render an intermediate result:
+    # fetch just the structural columns (cheap — measured 1.6s vs 4.4s for the
+    # full 98-column projection on a 20k-node graph), publish that so the graph
+    # can be drawn, then continue to the full fetch below.
+    #
+    # Only worth doing when the full projection is actually wider: in "types"
+    # mode the single query below already IS the types query.
+    if on_partial is not None and nodes_mode != "types":
+        try:
+            types_nodes, _, _ = await fetch_nodes_by_ids(
+                warehouse_client=warehouse_client,
+                node_table=node_table,
+                node_ids=missing_ids,
+                column_config=column_config,
+                node_columns=[],
+                use_external_links=use_external_links,
+                on_submit=on_submit,
+            )
+            partial_nodes = list(types_nodes)
+            if harvested:
+                fetched = {n.node_id for n in partial_nodes}
+                partial_nodes.extend(
+                    n for nid, n in harvested.items() if nid not in fetched
+                )
+            on_partial(
+                GraphResponse(
+                    nodes=partial_nodes,
+                    edges=response_partial.edges,
+                    truncated=response_partial.truncated,
+                    total_count=response_partial.total_count,
+                    properties_deferred=True,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            # A failed partial must never fail the job — the full fetch below
+            # still produces the complete result.
+            logger.warning(f"partial node fetch failed, continuing: {e}")
+
+    # Fetch attributes for the ids collected from the edge result. In "types"
+    # mode the projection collapses to the structural columns only, which is
+    # what lets the client render before any property has been fetched.
+    node_query = build_node_query(
+        node_table,
+        missing_ids,
+        column_config,
+        [] if nodes_mode == "types" else node_columns,
+    )
 
     # Execute node query
     t0 = time.perf_counter()
@@ -435,21 +738,32 @@ async def execute_graph_query_with_nodes(
     except Exception as e:
         raise RuntimeError(
             f"Node query execution failed (node_table={node_table}, "
-            f"node_count={len(node_ids)}): {e}"
+            f"node_count={len(missing_ids)}): {e}"
         ) from e
     node_query_ms = (time.perf_counter() - t0) * 1000
 
-    # Parse and process nodes
+    # Parse and process nodes. Named distinctly from the `node_columns`
+    # PARAMETER (the requested projection) — these are the columns the
+    # warehouse actually returned.
     t0 = time.perf_counter()
-    node_columns, node_rows = _parse_statement_result(node_result, query=node_query)
+    result_columns, node_rows = _parse_statement_result(node_result, query=node_query)
     try:
-        nodes = process_nodes_result(node_columns, node_rows, column_config)
+        nodes = process_nodes_result(result_columns, node_rows, column_config)
     except Exception as e:
         raise RuntimeError(
             f"Failed to process node query result "
-            f"(columns={node_columns}, row_count={len(node_rows)}, "
+            f"(columns={result_columns}, row_count={len(node_rows)}, "
             f"first_row={node_rows[0] if node_rows else 'N/A'}): {e}"
         ) from e
+
+    # Merge in nodes that came from the edge result (transpiled Cypher path).
+    if harvested:
+        fetched_ids = {n.node_id for n in nodes}
+        nodes.extend(
+            node
+            for node_id, node in harvested.items()
+            if node_id not in fetched_ids
+        )
     node_processing_ms = (time.perf_counter() - t0) * 1000
 
     total_ms = (time.perf_counter() - t_total_start) * 1000
@@ -467,6 +781,10 @@ async def execute_graph_query_with_nodes(
         edges=response_partial.edges,
         truncated=response_partial.truncated,
         total_count=response_partial.total_count,
+        # Only the fetched nodes were stripped of properties; harvested ones
+        # kept theirs. Either way the client must enrich, so the flag is set
+        # whenever a types-only fetch actually ran.
+        properties_deferred=nodes_mode == "types",
         metadata=QueryMetadata(
             edge_query_ms=round(edge_query_ms, 2),
             edge_processing_ms=round(edge_processing_ms, 2),

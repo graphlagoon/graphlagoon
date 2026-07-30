@@ -2428,3 +2428,800 @@ public" and "Share with my domain".
   feature (verified via stash), including the two routers touched here.
 - No DB-mode (PostgreSQL) integration test for the new SQL conditions; the
   `.in_()` substitution is covered by `share_match_emails` unit tests.
+
+## [2026-07-30] - Analysis: Initial graph load performance (evaluation only, no code)
+
+**Feature:** Avaliação de abordagens para acelerar o fetch inicial do grafo
+(construção incremental, edges-first, re-avaliação de joins).
+
+**Deliverable:** [initial_load_perf_analysis.md](initial_load_perf_analysis.md)
+— mapeia 6 problemas com localização exata no código, propõe 5 fases
+independentes e documenta trade-offs e alternativas rejeitadas.
+
+**Key findings:**
+1. `ORDER BY RAND()` no `/subgraph` sem filtro (routers/graph.py:250) — shuffle
+   da tabela inteira de arestas em todo auto-load.
+2. `SELECT n.*` na fase 2 (graph_operations.py:410-419) — todas as colunas de
+   todos os nós, sempre; `properties` domina o payload mas não é usada para
+   renderizar (só tooltip/detalhes/busca).
+3. Sequencialidade estrita arestas→nós + resposta em blob único; resposta
+   edges-only já existe internamente (graph_operations.py:386-397), não exposta.
+4. Caminho Cypher refaz o fetch de nós mesmo quando o SQL transpilado já os
+   trouxe (redundância).
+5. `nodes`/`edges` são ref profundo no Pinia — Proxy em cada dict de properties.
+6. Buracos de instrumentação: loadContext, graph3d.graphData(), computed chain.
+
+**Design decisions (validated in code):**
+- Patch-in-place de properties é seguro: o data watcher do canvas
+  (GraphCanvas3D.vue:1324) só dispara em mudança de contagem; watchers de
+  community/similarity observam identidade do array.
+- "Types-first" (SELECT node_id, node_type) em vez de esqueleto puro: node_type
+  dita cor/tamanho/ícone e é assado no build do canvas.
+- Polling com partials preferido a streaming SSE (reaproveita job machine,
+  preserva mocks E2E).
+- Carga progressiva será padrão ligado no auto-load (decisão do usuário).
+- markRaw preferido a shallowRef total (raio de explosão nos ~905 testes).
+- **P1 (`ORDER BY RAND()`) mantido como está** (decisão do usuário, 2026-07-30):
+  a amostra aleatória é intencional e o custo só incide no auto-load — fora de
+  escopo. Fase 1 fica restrita a P2 (projeção de colunas) e P4 (redundância
+  Cypher).
+
+**Files created:**
+- docs/dev/initial_load_perf_analysis.md
+
+**Testing:** n/a (análise; nenhum código alterado).
+
+**Next steps:** decidir escopo do branch feat/improve_perf (recomendação:
+Fases 0–2, com Fase 1 restrita a P2/P4 após exclusão do P1).
+
+## [2026-07-30] - Phase 0: Instrumentação baseline do carregamento inicial
+
+**Feature:** Fechar os buracos de medição (P6 de
+[initial_load_perf_analysis.md](initial_load_perf_analysis.md)) para que as
+fases seguintes tenham antes/depois mensurável.
+
+**Design decisions:**
+1. **`recordChainRecompute` dentro do store, não em `recordGraphLoad`:** a
+   cadeia derivada (`enhancedNodes`/`enhancedEdges`) só é alcançável do escopo
+   do setup do store. Forçar a avaliação logo após o assign mede um recompute
+   real (computeds sujos), e não adiciona custo — o canvas dispararia o mesmo
+   trabalho instantes depois via data watcher.
+2. **`assignMs` real nos caminhos query/cypher:** estava hardcoded como `0`,
+   escondendo justamente o custo de wrap reativo que a Fase 4 pretende atacar.
+3. **Snapshot sem `recordChainRecompute`:** o caminho depende de ordenação
+   `nextTick()` frágil com o community store; medir fetch/assign é suficiente e
+   não vale o risco de perturbar a ordem.
+4. **`graphDataApply` mede só a parte síncrona:** o kapsule (`three-forcegraph`)
+   adia o build de meshes para um digest tick, então o grosso do custo aparece
+   em `forcegraphUpdate` (já instrumentado). Comentários no código explicitam
+   que os dois devem ser lidos juntos — medido: 0.0ms vs 207ms em 7 chamadas.
+
+**Bug encontrado e corrigido no harness:** `e2e/perf-report.ts` navegava para
+`BASE_URL` (lista de contextos) e nunca abria a rota do grafo, produzindo
+relatórios com **zero entradas** que pareciam execuções bem-sucedidas. Agora
+navega para `/graph/{id}`, mocka o GET de contexto individual (faltava, e o
+`loadContext` depende dele para resolver `autoLoadOnOpen`) e **falha com exit 1**
+se nenhuma entrada for registrada.
+
+**Files modified:**
+- `frontend/src/stores/graph.ts` — `load:context:fetch`; `assignMs` real em
+  query/cypher; `recordChainRecompute()` + chamadas em subgraph/query/cypher;
+  `load:snapshot:*` no caminho de exploration.
+- `frontend/src/components/GraphCanvas3D.vue` — `graphDataApply` e
+  `initGraphDataApply`.
+- `frontend/e2e/perf-report.ts` — navegação corrigida, rota de contexto
+  individual, guarda de relatório vazio, payload escalável via
+  `PERF_NODES`/`PERF_EDGES`/`PERF_PROPS`, metadata no mock.
+
+**Files created:**
+- `frontend/src/stores/__tests__/graph.perfInstrumentation.test.ts` (9 testes)
+- `docs/dev/perf_baseline_initial_load.json` — baseline versionado
+
+**Baseline (10k nós / 20k arestas / 30 props, payload mockado, sem warehouse):**
+
+| Etapa | ms |
+|---|---|
+| `load:context:fetch` | 138.4 |
+| `load:subgraph:fetch` | 293.5 |
+| `load:subgraph:assign` | 0.1 |
+| `load:subgraph:chain` | 29.9 |
+| `buildGraphData` | 126.0 |
+| `headlessSettle` | 3401.4 |
+| `forcegraphUpdate` (7×) | 207.7 |
+
+Leitura: com payload mockado o fetch é otimista (sem custo de warehouse) e
+`headlessSettle` domina — mas ele já roda em Web Worker, fora do main thread.
+O que as Fases 1–2 atacam (`fetch` + `chain` + parte de `buildGraphData`) soma
+~450ms aqui e cresce com a largura da tabela de nós, que o mock não reproduz.
+**Baseline contra warehouse real ainda é necessário** para dimensionar P2.
+
+**Testing:**
+- [x] 9 testes novos; verificado que 3 deles falham se a instrumentação for
+      removida (não são tautológicos).
+- [x] Suite unit: 1179 passed (65 arquivos). E2E: 92 passed. `vue-tsc` limpo.
+
+**Known Limitations:**
+- Baseline usa payload mockado: não mede `ORDER BY RAND()` (P1, fora de escopo)
+  nem o custo real do `SELECT n.*` (P2). Rodar contra `make dev-db` com dataset
+  grande antes de dimensionar a Fase 1.
+- Falta uma métrica end-to-end "mount → primeiro frame pintado"; hoje é preciso
+  somar labels manualmente.
+
+## [2026-07-30] - Phase 1: Projeção de colunas + eliminação do refetch Cypher
+
+**Feature:** P2 e P4 de
+[initial_load_perf_analysis.md](initial_load_perf_analysis.md). P1
+(`ORDER BY RAND()`) permanece fora de escopo por decisão do usuário.
+
+**Implementação:**
+
+*P2 — projeção de colunas.* `build_node_projection()` substitui o
+`SELECT n.*` incondicional. Quando o contexto declara `node_properties`,
+seleciona apenas as colunas estruturais + essas propriedades;
+`resolve_node_columns()` (router) deriva a lista do contexto. Contextos **sem**
+propriedades configuradas mantêm `n.*` — não fomos informados de quais colunas
+importam, e estreitar silenciosamente quebraria tooltips e a data table.
+
+*P4 — colheita de nós.* `harvest_nodes_from_result()` reaproveita os nós que o
+SQL transpilado do Cypher já retornou (`RETURN r, a, b`). Só a diferença
+(`node_ids - harvested`) vai para a segunda query; quando nada falta, a query
+de nós **não roda** (`node_query_ms=0.0`).
+
+**Bug encontrado durante a validação contra warehouse real:**
+os dois caminhos produziam **tipos diferentes** para a mesma propriedade —
+`isFraud` vinha como `float` (1.0) no caminho colhido e `str` ("1.0") no
+caminho antigo, porque campos dentro de um NAMED_STRUCT sobrevivem à decodificação
+JSON como números reais, enquanto colunas de topo chegam já stringificadas pela
+statements API. Isso quebraria filtros de propriedade e ordenação no frontend,
+que comparam valores crus. Corrigido com `_stringify_scalar()`.
+
+Verificado empiricamente contra o warehouse (`SELECT true, 1.5` →
+`['True', '1.5']`): a serialização é `str()` do Python, **incluindo o booleano
+capitalizado**. Minha suposição inicial (`'true'` minúsculo, à la Spark) estava
+errada e foi corrigida antes de virar código.
+
+**Design decisions:**
+1. **Narrowing opt-in por dados, não por flag:** o contexto já declara quais
+   colunas a UI exibe; usar isso evita um parâmetro novo na API e mantém
+   contextos legados intactos.
+2. **Colheita é aditiva:** uma query sem variáveis de nó colhe zero e o fluxo
+   antigo roda inalterado — o caminho `/subgraph` não muda em nada.
+3. **Preferir o struct mais rico:** o mesmo nó pode aparecer em várias
+   projeções, algumas só com o id.
+4. **Renomeada a variável local `node_columns` → `result_columns`** no funil:
+   colidia com o novo parâmetro homônimo (funcionava por ordem de uso, mas era
+   uma armadilha para a próxima edição).
+
+**Medições contra warehouse real** (`fraud.nodes_ieee_cis`, 25 colunas;
+contexto largo `SELECT n.*` vs. estreito com 3 propriedades; melhor de 3):
+
+| limit | payload | node_query | wall |
+|---|---|---|---|
+| 3.000 arestas | 0.99 → 0.64 MB (**-35%**) | 110 → 106 ms (-3%) | 243 → 229 ms (-6%) |
+| 20.000 arestas | 1.37 → 0.90 MB (**-34%**) | 163 → 106 ms (-35%) | 309 → 241 ms (-22%) |
+
+Leitura honesta: a **redução de payload (~35%) é o efeito consistente**; o ganho
+de tempo de query varia muito com o cache do Spark (numa primeira medição a frio
+chegou a -51%, no melhor-de-3 caiu a -3% no limit menor). O payload menor é o que
+importa para a Fase 2, porque também reduz o custo de wrap reativo no cliente.
+
+*P4 validado end-to-end:* `MATCH (a)-[r]->(b) RETURN r, a, b LIMIT 300` →
+`node_query_ms=0.0` (segunda query eliminada); mesmos 218 nós e **zero** valores
+divergentes vs. `RETURN r`.
+
+**Files modified:**
+- `api/graphlagoon/services/graph_operations.py` — `build_node_projection`,
+  `harvest_nodes_from_result`, `_stringify_scalar`, `_quote_identifier`,
+  parâmetro `node_columns` no funil, merge dos nós colhidos.
+- `api/graphlagoon/routers/graph.py` — `resolve_node_columns` + wiring nos 5
+  call sites (subgraph, expand, query, cypher, job assíncrono).
+
+**Files created:**
+- `api/tests/test_node_projection.py` (35 testes)
+
+**Testing:**
+- [x] 35 testes novos; verificado que removendo a colheita 2 deles falham.
+- [x] Backend: 325 passed, 1 skipped. Frontend: 1179 passed. E2E: 92 passed.
+- [x] Validação manual contra warehouse local com dataset real (25 colunas).
+
+**Known Limitations:**
+- `make lint-api` (black) continua falhando em `graph.py` e
+  `graph_operations.py` — **pré-existente**, verificado com `git show HEAD:`.
+- A colheita depende do transpiler emitir NAMED_STRUCT com os nomes de coluna do
+  contexto (garantido hoje por `build_schema_provider`). Se o gsql2rsql mudar
+  para nomes lógicos, a colheita silenciosamente para de encontrar nós — degrada
+  para o comportamento antigo, sem quebrar.
+
+## [2026-07-30] - Phase 2: Carga progressiva (render primeiro, properties depois)
+
+**Feature:** P3 de [initial_load_perf_analysis.md](initial_load_perf_analysis.md).
+`/subgraph` com `nodes_mode='types'` devolve nós renderizáveis (id + type,
+`properties: null`); o canvas pinta imediatamente e o store busca as
+propriedades em lotes de background via `POST /graph-contexts/{id}/nodes/batch`,
+aplicando-as com **patch in-place**.
+
+**Por que o patch in-place é seguro (verificado no código e por teste):**
+- `nodes.value` mantém a **identidade do array** → watchers de
+  community/similarity (que observam identidade) não disparam;
+- **contagens** de nós/arestas não mudam → o data watcher do canvas
+  (GraphCanvas3D.vue:1324, que só reage a contagens) não reconstrói a cena nem
+  reaquece o layout;
+- o refresh visual passa por um sinal explícito (`nodePatchVersion`) →
+  `refreshNodeContent()` recalcula labels e chama `updateVisuals()`/
+  `updateOverlays()`, **sem** `graph3d.graphData()`. Medido em ~1ms para 3086 nós.
+
+**MEDIÇÃO — o resultado mais importante, e ele qualifica a premissa do plano.**
+Live browser + warehouse real (`fraud.nodes_ieee_cis`, 25 colunas, 13 props/nó):
+
+| escala | primeiro paint | total |
+|---|---|---|
+| 970 nós | 700 → 759 ms (**pior**) | pior |
+| 3086 nós | 972 → **827 ms (-15%)** | 972 → ~1330 ms (+37%) |
+
+Backend isolado (limit 20k): payload do primeiro paint **-44%**, primeiro
+fetch **-25%**; enriquecimento adiciona ~350ms.
+
+**Conclusão honesta: a carga progressiva NÃO é ganho universal.** Ela troca
+custo total maior por primeiro paint menor, e só compensa quando o payload de
+properties é grande o suficiente. Em grafos pequenos (~1k nós) ela é
+*mensuravelmente pior*. Por isso o comportamento é uma flag
+(`behaviors.progressiveLoad`, default `true` conforme decidido) e não um
+caminho único — e por isso vale considerar ligá-la por limiar de tamanho numa
+iteração futura, em vez de sempre.
+
+**Design decisions:**
+1. **"Types-first", não esqueleto puro:** `node_type` dita cor/tamanho/ícone e é
+   assado no `buildGraphData`; trazê-lo já no primeiro fetch evita rebuild
+   visual quando as properties chegam. Confirmado: o refresh custa ~1ms.
+2. **Nós colhidos (Fase 1) mantêm properties mesmo em modo "types":** já vieram
+   de graça no resultado da query; descartá-las seria desperdício. Nesse caso
+   `properties_deferred=false` e nada fica pendente.
+3. **Endpoint aceita apenas ids:** a projeção vem do contexto, então o cliente
+   não pode ampliar a query nem nomear colunas arbitrárias.
+4. **Enriquecimento é best-effort:** um lote que falha loga e para; o grafo já
+   está renderizado e usável. Erro bloqueante ali seria pior que tooltip vazio.
+5. **Token de cancelamento:** troca de contexto/novo load/`clear()` incrementa
+   `enrichmentToken`; lotes em voo abandonam seus patches (testado).
+6. **Ids sem retorno saem do pending:** linha deletada no warehouse deixaria o
+   id pendente para sempre e o loop nunca terminaria (testado).
+
+**Bugs encontrados durante a implementação:**
+- **Teste com objeto compartilhado:** `TYPES_RESPONSE` era um literal de módulo;
+  como o store atribui `response.nodes` direto e o patch muta in-place, um teste
+  contaminava o seguinte com nós já enriquecidos. Trocado por factory.
+- **`mockReturnValue` com Promise:** devolve *a mesma instância* a todas as
+  chamadas; uma promise resolvida por outro teste fazia o lote resolver na hora.
+  Trocado por `mockImplementation`.
+- Ambos eram defeitos de teste, não de produção — mas só apareceram porque os
+  testes rodaram em conjunto.
+
+**Files modified:**
+- `api/graphlagoon/models/schemas.py` — `nodes_mode`, `NodeBatchRequest/Response`,
+  `properties_deferred`.
+- `api/graphlagoon/services/graph_operations.py` — `build_node_query`,
+  `fetch_nodes_by_ids` (extraídos e reutilizados), `nodes_mode` no funil.
+- `api/graphlagoon/routers/graph.py` — endpoint `POST .../nodes/batch`.
+- `frontend/src/stores/graph.ts` — `patchNodeProperties`,
+  `enrichNodeProperties`, `prioritizeNodeProperties`, estado
+  `pendingPropertyNodeIds`/`nodePatchVersion`/`enriching`, behavior
+  `progressiveLoad`.
+- `frontend/src/components/GraphCanvas3D.vue` — `refreshNodeContent()` + watcher.
+- `frontend/src/types/graph.ts`, `services/api.ts` — tipos + `getNodesBatch`.
+- `frontend/e2e/helpers/api-mocks.ts` — rota `/nodes/batch`.
+- `frontend/src/stores/__tests__/graph.actions.test.ts` — asserção do payload
+  atualizada para o novo contrato.
+
+**Files created:**
+- `frontend/src/stores/__tests__/graph.progressiveLoad.test.ts` (19 testes)
+- `frontend/e2e/tests/progressive-load.spec.ts` (3 testes)
+
+**Testing:**
+- [x] Backend 325 passed; frontend 1198 passed; E2E 95 passed; `vue-tsc` limpo.
+- [x] E2E verificados contra regressão (desligando `progressiveLoad`, 1 falha).
+- [x] Validação live: browser real + warehouse real, ambos os modos comparados.
+
+**Known Limitations:**
+- Só `/subgraph` é progressivo. Exploration snapshots, `expandFromNode` e o job
+  de query/Cypher continuam em modo `full` — intencional (Fase 3 cobriria o job).
+- Só o clique em nó dispara `prioritizeNodeProperties`; hover não (evita uma
+  requisição por nó sobrevoado). Se o tooltip de hover se mostrar lento na
+  prática, vale um debounce em vez de chamada direta.
+- Enriquecimento não tem retry: um lote que falha deixa aqueles nós sem
+  properties até o próximo load. Aceitável por ora (best-effort), mas é a
+  primeira coisa a endurecer se aparecer em uso real.
+
+**Follow-up aplicado na mesma sessão:** `prioritizeNodeProperties` ligado ao
+clique em nó (GraphCanvas3D `onNodeClick`) e indicador discreto
+"loading properties…" na status bar (`graph-status-enriching`), com E2E
+cobrindo aparecer/desaparecer. Suites finais: backend 325, frontend 1198,
+E2E 96.
+
+## [2026-07-30] - Phase 2b: Tabelas largas (100 colunas) — limiar + enriquecimento em 2 ondas
+
+**Contexto:** o usuário apontou que tabelas de nós podem ter **100 colunas**.
+Isso invalida a conclusão da Fase 2 (medida em tabela de 13 propriedades, onde
+a carga progressiva era marginal ou até pior). Criei
+`graphs.nodes_wide100` (100 colunas, 20k nós) + `graphs.edges_wide100` (40k
+arestas) no warehouse local e remedi tudo.
+
+**Medições — 100 colunas, 20k arestas, ~18,7k nós:**
+
+| variante | payload 1º fetch | tempo até o grafo |
+|---|---|---|
+| `SELECT n.*` (hoje) | 35,8 MB | 3151 ms (backend) / **7898 ms (browser)** |
+| projeção estreita (5 props) | 4,5 MB (-87%) | 847 ms |
+| progressiva types-only | 2,95 MB (**-92%**) | 741 ms / **1731 ms (browser)** |
+
+**Achado que só apareceu no browser:** o backend responde os 35,8 MB em ~3,0 s,
+mas o `load:subgraph:fetch` do cliente marca **7,3 s** — ou seja, ~4,2 s são
+puramente download + parse de JSON no browser. As medições server-side
+subestimavam o problema pela metade. **Browser real: 7898 ms → 1731 ms (-78%).**
+
+**Mudança 1 — `progressiveLoad` vira `'auto' | 'always' | 'never'`.**
+A Fase 2 media que a carga progressiva é *pior* em tabelas estreitas; com 100
+colunas é dramaticamente melhor. Nenhum default fixo serve aos dois casos, então
+`'auto'` decide por largura (`PROGRESSIVE_LOAD_MIN_PROPERTIES = 20`, ponto
+conservador dentro do intervalo medido). Um contexto **sem** `node_properties`
+conta como largo: o backend cai em `SELECT n.*`, largura desconhecida e
+potencialmente enorme — exatamente o caso que a feature existe para resolver.
+
+**Mudança 2 — enriquecimento em 2 ondas.** Buscar as 98 colunas de todos os nós
+custava +76% de trabalho total (5054 ms). Agora a primeira onda pede só as
+colunas que *mudam o que é desenhado* (referenciadas por templates de label
+`{prop:...}` e por ícones por propriedade) e a segunda pede o resto:
+
+- onda 1 (3 colunas): 1482 ms, 1,96 MB — **6% do payload, 29% do tempo**
+- onda 2 (98 colunas): 5054 ms, 33,8 MB
+
+Resultado: grafo em 741 ms, **labels/ícones corretos em 2223 ms** (vs 3151 ms
+do monolítico) e o bulk chega depois sem bloquear nada.
+
+**Mudança 3 — `columns` opcional no `/nodes/batch`.** Validado contra o
+`node_properties` do contexto: só pode **estreitar**, nunca ampliar. Um contexto
+sem propriedades configuradas **ignora** o campo — honrar nomes arbitrários ali
+deixaria um caller sondar o schema da tabela observando quais dão erro. (O
+quoting em `build_node_projection` já impede injeção — verificado: um nome com
+`` ` `` e `;` vira um identificador único e inerte — mas não impede a sondagem.)
+
+**Bug pego por teste durante a implementação:** a segunda onda **apagava** as
+colunas da primeira (`node.properties = props` substitui o dict inteiro). O
+teste "keeps first-wave columns when the full wave lands" falhou e expôs isso;
+`patchNodeProperties` ganhou a opção `merge`. Minha primeira tentativa de
+correção (`merge: !clearPending`) estava com a lógica invertida — reescrita para
+parâmetros explícitos por onda.
+
+**Files modified:**
+- `frontend/src/stores/graph.ts` — `ProgressiveLoadMode`,
+  `PROGRESSIVE_LOAD_MIN_PROPERTIES`, `shouldLoadProgressively()`,
+  `visualPropertyColumns()`, enriquecimento em 2 ondas, `patchNodeProperties`
+  com `merge`/`clearPending`.
+- `frontend/src/services/api.ts` — `getNodesBatch(ctx, ids, columns?)`.
+- `api/graphlagoon/models/schemas.py` — `NodeBatchRequest.columns`.
+- `api/graphlagoon/routers/graph.py` — validação/estreitamento de `columns`.
+- `frontend/src/stores/__tests__/graph.progressiveLoad.test.ts` — +11 testes.
+- `api/tests/test_node_projection.py` — +7 testes.
+
+**Testing:** backend 332, frontend 1209, E2E 96, `vue-tsc` limpo. Validação
+live em browser real contra tabela de 100 colunas.
+
+**Known Limitations:**
+- O limiar usa a contagem de `node_properties` do contexto, não a largura real
+  da tabela. Um contexto que declara 5 propriedades sobre uma tabela de 100
+  colunas é classificado como estreito — correto, porque a projeção da Fase 1 já
+  o torna barato.
+- A onda 1 detecta colunas visuais por regex `{prop:...}` nos templates. Um
+  template construído dinamicamente em runtime não seria detectado; nesse caso a
+  degradação é apenas perder a onda rápida, não incorreção.
+
+## [2026-07-30] - Phase 2c: Exposição no painel + validação de enum
+
+**Pergunta que originou:** "progressive load é configurado no settings e é salvo
+no contexto?" A resposta era **meio sim**, e a investigação achou um bug.
+
+**Como a persistência realmente funciona (verificado, não suposto):**
+`progressiveLoad` vive em `behaviors`, que é resolvido por
+`resolveInitialBehaviors()` na ordem: DEFAULTS → `window.__GRAPH_LAGOON_CONFIG__
+.default_behaviors` (servidor) → `context.default_behaviors`. Explorations
+salvas mesclam por cima ao carregar. Então **sim, persiste** por contexto e por
+exploration — mas NÃO por sessão: mudar no painel vale só até o reload, igual a
+todos os outros behaviors. Isso é consistente com o resto do app, e o teste E2E
+diz isso explicitamente em vez de fingir o contrário.
+
+**Bug encontrado — validação de enum ausente.** `applyBehaviorOverrides`
+validava por `typeof`, que não distingue `'auto'` de `'banana'`: um valor
+inválido vindo de um contexto salvo ou de config do servidor era **aceito** e
+virava o modo ativo, contaminando toda exploration salva depois. Não era
+específico do `progressiveLoad` — `edgeLensMode`, `searchMode` e `viewMode`
+tinham o mesmo buraco desde antes desta sessão.
+
+Corrigido com `BEHAVIOR_ENUMS`: cada behavior de união de strings declara seus
+valores válidos e o resto é rejeitado com warning. Cobre também o formato antigo
+(`progressiveLoad: true`, boolean), que já era rejeitado por `typeof` mas agora
+tem teste.
+
+**Exposição na UI.** O painel de Behaviors ganhou a seção "Property Loading"
+(radio Automatic / Always progressive / All at once) ao lado de "Load graph on
+open", com descrição por modo citando o ganho medido. Antes disso o único jeito
+de mexer era escrever JSON cru no `default_behaviors` do contexto — inaceitável
+para uma opção cujo default correto depende dos dados.
+
+**Files modified:**
+- `frontend/src/stores/graph.ts` — `BEHAVIOR_ENUMS` + checagem.
+- `frontend/src/components/BehaviorPanel.vue` — seção "Property Loading".
+
+**Files modified (tests):**
+- `graph.progressiveLoad.test.ts` +5 (persistência via contexto, rejeição de
+  valor inválido, rejeição do boolean legado, os outros enums, round-trip).
+- `progressive-load.spec.ts` +2 (painel muda o modo sem refetch; default 'auto'
+  refletido no radio).
+
+**Testing:** frontend 1214, E2E 98, backend 332, `vue-tsc` limpo. Verificado que
+os testes novos falham se a checagem de enum for removida (2 falhas).
+
+**O QUE AINDA FALTA (avaliação honesta do estado):**
+1. **`node_properties` não é auto-descoberto.** Um contexto de 100 colunas criado
+   sem preencher as propriedades cai em `SELECT n.*` — a Fase 1 não ajuda e o
+   usuário nem sabe. Existe `POST /api/schema-discovery`; ligá-lo ao formulário
+   de contexto é provavelmente o maior ganho restante por esforço.
+2. **Expand e exploration snapshots não são progressivos.** Um snapshot salvo
+   guarda todas as properties; reabrir uma exploration de 100 colunas ainda paga
+   o custo inteiro.
+3. **Enriquecimento sem retry nem cancelamento por prioridade.** Um lote que
+   falha deixa aqueles nós vazios até o próximo load.
+4. **Fase 3 (partials no job de query/Cypher) e Fase 4 (markRaw) não feitas.**
+   Com 100 colunas o custo de wrap reativo da Fase 4 provavelmente é maior do
+   que eu estimei — vale medir antes de decidir.
+5. **`total_count` é `len(edges)`, não um COUNT real** — o cliente não consegue
+   dizer ao usuário quanto do grafo está vendo.
+
+## [2026-07-30] - Phase 2d: Limiar 10 + correção de duas afirmações minhas erradas
+
+**Mudança:** `PROGRESSIVE_LOAD_MIN_PROPERTIES` 20 → **10** (decisão do usuário:
+"por default sempre vamos ter tabelas com muitas propriedades"). Teste de
+fronteira adicionado — 9 colunas → monolítico, 10 → progressivo.
+
+**CORREÇÃO 1 — "node_properties não é auto-descoberto" estava ERRADO.**
+Verifiquei `ContextsView.vue:320`: ao criar um contexto, o formulário já carrega
+o schema das tabelas e deriva `node_properties` de TODAS as colunas
+não-estruturais, automaticamente. Não há passo manual. (O que o botão
+"discover schema" faz é outra coisa: preenche `node_types` e
+`relationship_types`.) O item 1 da minha lista de pendências não existia.
+
+O gap real, bem menor: **não há caminho de edição** de um contexto já criado, e
+`resolve_node_columns` retorna `None` (→ `SELECT n.*`) para contextos legados
+salvos antes desse preenchimento automático. Esses caem no ramo "assume largo"
+de `shouldLoadProgressively()`, então a carga progressiva os cobre — só a
+projeção da Fase 1 não os beneficia.
+
+**CORREÇÃO 2 — "expand não é progressivo" estava tecnicamente certo mas
+irrelevante.** `ExpandRequest.edge_limit` é `le=1000` (default 100), duas ordens
+de magnitude abaixo do load inicial. O usuário apontou corretamente que o expand
+só busca as linhas retornadas. Não vale complexidade; removido das pendências.
+
+**Snapshots — medido, não suposto.** Um snapshot de 18,7k nós × 98 colunas:
+31,9 MB crus → **5,6 MB gzipados** (83% de compressão, `snapshot.py:44`). Não
+toca o warehouse. O custo residual é descompressão + parse no browser, bem menor
+que os 35,8 MB do `SELECT n.*`. Baixa prioridade.
+
+**RESPOSTA À PERGUNTA SOBRE A FASE 4 (markRaw) — agora com número.**
+Medido com 18.700 nós × 98 colunas:
+
+| operação | deep reactive | `markRaw(properties)` |
+|---|---|---|
+| atribuir `nodes.value = [...]` | **0 ms** | 0 ms |
+| percorrer todas as properties | **381 ms** | **12 ms** |
+
+A atribuição é grátis — o Vue proxifica sob demanda, não na hora. O custo
+aparece em quem **lê**: `DataTablePanel.vue:60` itera `Object.keys(n.properties)`
+de todo nó para montar as colunas, e cada acesso atravessa um Proxy. Com 100
+colunas isso é ~370 ms de main thread travado ao abrir a tabela de dados.
+
+`markRaw` no dict de properties elimina isso porque nada no app depende de
+reatividade *dentro* do dict — o patch da Fase 2 já substitui o objeto inteiro.
+Custo: a convenção "substitua o objeto, não mute dentro" vira obrigatória.
+
+**Nota sobre minha medição inicial:** o primeiro teste que escrevi percorria as
+properties dentro do que eu chamei de "cadeia de computeds", sugerindo 358 ms no
+caminho de carregamento. Isso estava errado — `nodeSearchIndex` usa `toRaw()` e
+lê só `node_id`/`node_type`. O custo real não é no load, é ao abrir painéis que
+leem properties. Refiz a medição antes de reportar.
+
+**Files modified:** `frontend/src/stores/graph.ts` (limiar 10),
+`graph.progressiveLoad.test.ts` (+1 teste de fronteira).
+
+**Testing:** frontend 1215, E2E 98, backend 332, `vue-tsc` limpo.
+
+**PENDÊNCIAS ATUALIZADAS (revisadas):**
+1. **Fase 4 (markRaw)** — agora quantificada: ~370 ms de travamento ao abrir a
+   tabela de dados com 100 colunas. Melhor relação impacto/esforço restante.
+2. **Sem edição de `node_properties`** em contexto existente; contextos legados
+   ficam em `SELECT n.*`.
+3. **Fase 3 (partials no job de query/Cypher)** — o console ainda espera o job
+   inteiro.
+4. **Enriquecimento sem retry.**
+5. **`total_count` é `len(edges)`**, não um COUNT real.
+
+## [2026-07-30] - Phase 4: markRaw nas properties — implementada, mas o ganho previsto NÃO se confirmou
+
+**O que eu previ:** ~370 ms de main thread destravado ao abrir a tabela de dados
+com 100 colunas.
+
+**O que medi no app real (A/B, mesma página, tabela de 100 colunas, 18,7k nós):**
+
+| | abrir a tabela de dados |
+|---|---|
+| sem markRaw | 1542 ms |
+| com markRaw | 1587 ms |
+
+**Sem diferença mensurável.** A previsão estava errada.
+
+**Por quê.** `DataTablePanel.vue:52` já faz `toRaw(n)` em cada nó antes de ler
+as properties — o painel nunca pagou o custo do Proxy. Meu benchmark original
+percorria as chaves através do Proxy reativo, o que **nenhum consumidor real
+faz**. Microbenchmark refinado por padrão de acesso (18,7k × 98):
+
+| acesso | reativo | markRaw |
+|---|---|---|
+| percorrer todas as chaves | 398 ms | 11 ms |
+| ler 1 chave por nó (`getDistinctPropertyValues`) | 20 ms | 13 ms |
+| passar o dict por referência (`buildGraphSnapshot`) | 10 ms | 6 ms |
+
+Só a primeira linha é dramática, e é justamente a que o único candidato já
+evitava com `toRaw`. Os consumidores que de fato existem tocam poucas chaves,
+onde a diferença é de milissegundos.
+
+**Decisão: manter mesmo assim.** Não pelo ganho hoje (é ruído), mas porque
+elimina uma classe de precipício latente: qualquer código futuro que percorra
+properties sem lembrar de `toRaw` custaria ~400 ms, e a guarda é gratuita
+(`markRaw` não tem custo de runtime perceptível — a atribuição já era 0 ms).
+O comentário no código diz exatamente isso, com os números, para que ninguém
+leia a mudança como uma otimização que ela não é.
+
+**Trade-off que passa a valer:** "substitua o objeto de properties inteiro,
+nunca mute uma chave in-place". Verificado que nenhum código atual viola isso
+(grep por `properties.x =` / `properties[k] =` / `delete properties` não
+retorna nada fora do patch da Fase 2, que já substitui o objeto). 6 testes
+travam a invariante e falham se o `markRaw` for removido (verificado).
+
+**Files modified:**
+- `frontend/src/stores/graph.ts` — helper `rawProperties()` aplicado nos 5
+  pontos de ingestão (subgraph, expand, query, cypher, snapshot) +
+  `patchNodeProperties` marcando o dict resultante.
+
+**Files modified (tests):**
+- `graph.progressiveLoad.test.ts` +6 (nó/aresta carregados são raw, enriquecido
+  é raw, merge preserva raw, substituir o dict ainda notifica readers, nós sem
+  properties não quebram).
+
+**Testing:** frontend 1221, E2E 98, backend 332, `vue-tsc` limpo.
+
+**Lição de método:** o microbenchmark sintético mediu um padrão de acesso que o
+app não usa. Só o A/B contra a aplicação real revelou isso — vale desconfiar de
+qualquer estimativa de perf que não tenha passado pelo caminho de código
+verdadeiro.
+
+**PENDÊNCIAS RESTANTES:**
+1. **Fase 3 (partials no job de query/Cypher)** — o console ainda espera o job
+   inteiro. Agora é a maior pendência real.
+2. **Sem edição de `node_properties`** em contexto existente; contextos legados
+   ficam em `SELECT n.*` (cobertos pela carga progressiva, mas sem a projeção).
+3. **Enriquecimento sem retry.**
+4. **`total_count` é `len(edges)`**, não um COUNT real.
+
+## [2026-07-30] - Phase 4 REVERTIDA — ganho zero não paga uma restrição permanente
+
+**Decisão do usuário, e ele está certo.** Eu tinha mantido o `markRaw` alegando
+que "elimina um precipício latente" — mas isso trocava um ganho **medido como
+zero** por uma regra permanente no código ("nunca mute uma chave de properties
+in-place"), que todo desenvolvedor futuro precisaria conhecer e respeitar.
+Otimizar contra um problema hipotético ao custo de uma restrição real é uma
+troca ruim. Revertido.
+
+**O que foi desfeito:**
+- helper `rawProperties()` e o import de `markRaw` (graph.ts);
+- os 5 pontos de ingestão voltaram a `nodes.value = response.nodes` etc.;
+- `patchNodeProperties` voltou a atribuir o dict sem envolver;
+- os 6 testes que travavam a invariante foram removidos (a invariante não
+  existe mais — mantê-los seria testar uma regra que ninguém precisa seguir).
+
+Verificado: `git diff` das linhas de ingestão contra HEAD está vazio, e a
+contagem de `markRaw` bate com a do HEAD (zero).
+
+**O que fica registrado (a medição continua útil):**
+
+| acesso a properties, 18,7k nós × 98 colunas | reativo | markRaw |
+|---|---|---|
+| percorrer todas as chaves | 398 ms | 11 ms |
+| ler 1 chave por nó | 20 ms | 13 ms |
+| passar o dict por referência | 10 ms | 6 ms |
+
+A primeira linha é a única dramática, e o único consumidor que faria isso
+(`DataTablePanel`) já chama `toRaw()` antes (DataTablePanel.vue:52). A/B contra
+o app real: abrir a tabela de dados num grafo de 100 colunas levou 1542 ms sem
+markRaw e 1587 ms com — sem diferença.
+
+**Se um dia isso voltar a importar:** o sinal é alguém escrever um loop que
+percorre `node.properties` de todos os nós SEM `toRaw`. Aí a correção certa é
+`toRaw` naquele call site (localizada, sem regra global), não markRaw no ingest.
+
+**Testing pós-reversão:** frontend 1215, E2E 98, backend 332, `vue-tsc` limpo.
+
+**PENDÊNCIAS (inalteradas pela reversão):**
+1. **Fase 3 (partials no job de query/Cypher)** — maior pendência real.
+2. **Sem edição de `node_properties`** em contexto existente.
+3. **Enriquecimento sem retry.**
+4. **`total_count` é `len(edges)`**, não um COUNT real.
+
+## [2026-07-30] - Phase 3: Resultados parciais no caminho de query (o que os usuários usam)
+
+**Contexto que mudou a prioridade:** o usuário informou que seus usuários "fazem
+queries específicas, novas, várias vezes" — ou seja, usam o **painel Query**, não
+o auto-load. As Fases 1 e 2 tinham otimizado o caminho errado: o auto-load caiu
+de 7898→1731 ms, mas quem roda query no painel continuava esperando ~8 s.
+
+**Medição antes de implementar** (tabela de 100 colunas, 20k arestas):
+
+| etapa | tempo |
+|---|---|
+| fase de arestas | 2511 ms |
+| query de nós (98 colunas) | 4408 ms |
+| **total até aparecer algo** | **8046 ms** |
+
+Busca types-only dos mesmos 20k nós: **1604 ms / 1,15 MB** → previsão de
+~4115 ms para o primeiro paint (-49%).
+
+**Implementação.** `execute_graph_query_with_nodes` ganhou `on_partial`: quando
+fornecido (e `nodes_mode != "types"`), roda primeiro um fetch de nós só com as
+colunas estruturais, publica isso como `GraphResponse` renderizável e depois
+segue para o fetch completo. `_start_graph_job` grava em `record["partial"]` e
+incrementa `partial_seq`; o endpoint de polling devolve os dois; o
+`useCancellableQuery` chama `applyPartial` **uma vez por seq** (o mesmo parcial
+viaja em todo poll subsequente).
+
+**A parte delicada — `applyGraphResponse()`.** Quando o resultado final cobre
+exatamente os mesmos nós do parcial, substituir os arrays descartaria a cena já
+renderizada e reaqueceria o layout: o grafo saltaria na tela sem motivo. O
+helper detecta esse caso e faz **patch in-place** das properties (mesmo
+mecanismo da Fase 2), preservando posições e identidade do array. Se o conjunto
+de nós mudou, aí sim substitui e pede layout novo.
+
+Removi também dois `freshLayoutRequested = true` que estavam nos dois
+`pendingGraphApply` — eles anulariam o benefício do patch, forçando relayout
+mesmo no caminho patcheado. A flag agora é decidida só dentro do helper.
+
+**RESULTADO — browser real, painel Query, tabela de 100 colunas:**
+
+| | tempo |
+|---|---|
+| grafo aparece | **5616 ms** |
+| resultado completo | 15385 ms |
+| **ganho** | **63% mais cedo** |
+
+Backend isolado: parcial em 4641 ms vs 10418 ms completo (55% mais cedo).
+
+**Design decisions:**
+1. **Parcial só quando há callback:** sem `on_partial` o comportamento é
+   idêntico ao anterior (2 statements), então `/subgraph` e `/expand` não pagam
+   o round-trip extra.
+2. **Pulado em `nodes_mode="types"`:** ali a query principal já É a de tipos.
+3. **Falha no parcial não derruba o job:** capturada e logada; o fetch completo
+   abaixo produz o resultado real de qualquer forma (testado).
+4. **`partial_seq` em vez de comparar payloads:** o poller vê o mesmo parcial em
+   todo poll; comparar objetos seria caro e frágil.
+
+**Files modified:**
+- `api/graphlagoon/services/async_job.py` — `partial`/`partial_seq` no registro.
+- `api/graphlagoon/services/graph_operations.py` — parâmetro `on_partial` +
+  fetch types-only antecipado; `logging` importado.
+- `api/graphlagoon/routers/graph.py` — `on_partial` no job, `partial` no status.
+- `api/graphlagoon/models/schemas.py` — `partial`/`partial_seq` no
+  `GraphJobStatusResponse`.
+- `frontend/src/composables/useCancellableQuery.ts` — `applyPartial` + guarda
+  por `partialSeq`.
+- `frontend/src/stores/graph.ts` — `applyGraphResponse()` (patch vs replace),
+  `applyPartial` no job machine.
+- `frontend/src/types/graph.ts` — tipos do parcial.
+
+**Files created:**
+- `frontend/src/stores/__tests__/graph.partialResults.test.ts` (8 testes)
+- `api/tests/test_node_projection.py` +5 testes de parcial
+
+**Testing:** backend 337, frontend 1223, E2E 98, `vue-tsc` limpo. Verificado que
+os testes falham nas duas regressões plausíveis: parcial não aplicado (4 falhas)
+e replace-em-vez-de-patch (2 falhas). Validado no browser real.
+
+**Known Limitations:**
+- A fase de arestas (~2,5 s) é irredutível nesta abordagem: os ids dos nós só
+  são conhecidos depois que TODAS as arestas foram baixadas e parseadas. Para ir
+  abaixo disso seria preciso streaming real de arestas em chunks.
+- O parcial não é publicado no caminho síncrono `/query` e `/cypher` (não-async),
+  que não tem para onde entregar um intermediário.
+- O job registry ainda retém resultados para sempre (sem TTL) — agora guarda
+  também o parcial, então o vazamento cresceu um pouco. Continua na lista.
+
+## [2026-07-30] - total_count / truncated: o problema real era o `truncated`
+
+**O que eu encontrei ao investigar** (e que muda o pedido):
+1. `total_count` **nunca é lido pelo frontend** — existe só no tipo TypeScript.
+2. `truncated` estava **hardcoded como `False`** em `process_graph_query_result`
+   (linha 246). O usuário **nunca** era avisado quando o grafo foi cortado.
+
+O segundo é o problema de verdade: um grafo truncado é visualmente idêntico a
+um completo, e conclusões tiradas dele podem simplesmente não valer. Consertar
+o `total_count` sem consertar isso seria polir o campo errado.
+
+**Decisão sobre o significado de `total_count`.** Mantive "quantas arestas esta
+resposta carrega", explicitamente documentado. A alternativa — o total
+disponível na tabela — exigiria rodar a query de arestas de novo dentro de um
+`COUNT(*)`, dobrando o custo da metade cara de todo carregamento. Para um campo
+que ninguém lê, é um preço absurdo. Se um dia a UI quiser mostrar "1.000 de
+53.412", aí sim vale discutir um COUNT opcional sob demanda.
+
+**Truncation detection.** `/subgraph` e `/expand` passam o cap explicitamente;
+os endpoints de query passam `limit=None`, porque o LIMIT vive no SQL do
+usuário. Criei `extract_query_limit()` usando **sqlglot** (já é dependência do
+projeto) em vez de regex — assim um `LIMIT` dentro de um CTE ou subquery não é
+confundido com o externo. SQL não-parseável devolve `None`: sem cap conhecido,
+não dá para afirmar truncamento.
+
+Falso positivo aceito conscientemente: um resultado que bate exatamente no cap é
+marcado como truncado. Distinguir "exatamente N" de "N de muitos" exigiria o
+COUNT que estamos evitando.
+
+**UI.** Badge `⚠ truncated` na status bar, com cor (diferente do
+"loading properties…", que é discreto e some sozinho). Truncamento muda quais
+conclusões o grafo sustenta, então não deve se misturar ao ruído de fundo. O
+tooltip explica o que fazer: aumentar o limite ou estreitar a query.
+
+**Validado contra warehouse real** (tabela de 40.000 arestas):
+
+| caminho | cap | arestas | truncated |
+|---|---|---|---|
+| /subgraph | 100 | 100 | **True** |
+| /subgraph | 100.000 | 40.000 | False |
+| query SQL | `LIMIT 50` | 50 | **True** |
+| query SQL | `LIMIT 999999` | 40.000 | False |
+
+**Falha do meu próprio processo, registrada:** ao verificar se os testes pegavam
+regressão, sabotei a linha errada (a do `loadSubgraph`) e os testes passaram —
+o que me fez pensar por um momento que eram tautológicos. Na verdade eles
+cobriam só o caminho de query. Sabotando a linha certa, 3 falharam. Depois
+adicionei 2 testes para o caminho `/subgraph`, que não tinha cobertura — e
+confirmei que falham quando aquela linha é removida. **A lição: "os testes
+passaram após sabotagem" pode significar que sabotei a linha errada, não que os
+testes são fracos.**
+
+**Files modified:**
+- `api/graphlagoon/services/sql_validation.py` — `extract_query_limit()`.
+- `api/graphlagoon/services/graph_operations.py` — detecção de truncamento no
+  funil; comentário corrigido em `process_graph_query_result`.
+- `frontend/src/stores/graph.ts` — ref `truncated`, setado no subgraph e em
+  `applyGraphResponse`, resetado em `clear()`.
+- `frontend/src/views/GraphVisualizationView.vue` — badge + estilo.
+
+**Testing:** backend 345 (+8), frontend 1229 (+6), E2E 100 (+2), `vue-tsc`
+limpo. Regressões verificadas nos dois caminhos.
+
+**PENDÊNCIAS RESTANTES:**
+1. **Job registry sem TTL** — retém resultados (e agora parciais) para sempre.
+2. **Sem edição de `node_properties`** em contexto existente.
+3. **Enriquecimento sem retry.**
+
+## [2026-07-30] - schema-discovery: avaliado, NENHUMA mudança necessária
+
+**Avaliação do usuário, confirmada no código e por medição:** o
+`POST /api/schema-discovery` roda `SELECT DISTINCT` em `node_type_col` e
+`relationship_type_col` (warehouse.py:489 e :511), **uma única vez**, no
+formulário de criação de contexto. Não há paginação, limite nem entrega parcial
+envolvidos — e não faz sentido haver: o resultado é um punhado de strings, o
+usuário está preenchendo um formulário (não olhando um grafo), e nada é
+desenhado enquanto isso.
+
+**Medido** contra a tabela de 100 colunas (20k nós / 40k arestas):
+**211 ms**, retornando `['Alpha','Beta','Gamma']` e `['LINKS','REFERS']`.
+
+Nenhuma otimização aplicada. Registrado para que a pergunta não volte.
+
+**Nota:** isto é diferente do preenchimento de `node_properties`, que vem do
+schema das tabelas em `ContextsView.vue:320` — também automático, também uma vez
+só. Os dois caminhos estão corretos como estão.

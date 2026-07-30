@@ -109,6 +109,14 @@ class GraphResponse(BaseModel):
     truncated: bool = False
     total_count: Optional[int] = None
     metadata: Optional[QueryMetadata] = None
+    properties_deferred: bool = Field(
+        default=False,
+        description=(
+            "True when nodes were returned without their properties "
+            "(nodes_mode='types'). Tells the client to schedule background "
+            "enrichment via /nodes/batch; false keeps the historical contract."
+        ),
+    )
 
 
 class DatasetsResponse(BaseModel):
@@ -467,6 +475,45 @@ class SubgraphRequest(BaseModel):
     edge_limit: int = 1000
     node_types: list[str] = Field(default_factory=list)
     edge_types: list[str] = Field(default_factory=list)
+    nodes_mode: Literal["full", "types"] = Field(
+        default="full",
+        description=(
+            "'full' returns nodes with all configured properties (default, "
+            "unchanged behaviour). 'types' returns only node_id and node_type "
+            "— everything needed to render — leaving properties null so the "
+            "client can paint the graph immediately and fetch properties in "
+            "the background via /nodes/batch."
+        ),
+    )
+
+
+class NodeBatchRequest(BaseModel):
+    """Fetch properties for a known set of node ids (progressive load)."""
+
+    node_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Node ids to fetch. Capped so one batch stays a bounded "
+        "query; the client chunks larger sets.",
+    )
+    columns: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Optional subset of property columns to fetch. Every name is "
+            "validated against the context's configured node_properties, so "
+            "this can only ever NARROW the projection — never widen it or "
+            "reach columns the context does not expose. Unknown names are "
+            "ignored. Omit to fetch everything the context exposes; that is "
+            "expensive on wide tables (a 100-column table costs ~36 MB for "
+            "19k nodes), which is what this field exists to avoid."
+        ),
+    )
+
+
+class NodeBatchResponse(BaseModel):
+    nodes: list[Node]
+    metadata: Optional[QueryMetadata] = None
 
 
 class ExpandRequest(BaseModel):
@@ -784,6 +831,23 @@ class GraphJobStatusResponse(BaseModel):
     progress: Optional[GraphJobProgress] = None
     result: Optional[GraphResponse] = None
     transpiled_sql: Optional[str] = None
+    partial: Optional[GraphResponse] = Field(
+        default=None,
+        description=(
+            "A renderable intermediate result — edges plus nodes carrying only "
+            "their structural columns — published while the job is still "
+            "fetching properties. Lets the client draw the graph before the "
+            "job completes."
+        ),
+    )
+    partial_seq: int = Field(
+        default=0,
+        description=(
+            "Increments on each published partial. The client polls far more "
+            "often than partials are produced, so it applies a partial only "
+            "when this advances."
+        ),
+    )
 
 
 # --- Databricks SQL Statements API compatible models ---

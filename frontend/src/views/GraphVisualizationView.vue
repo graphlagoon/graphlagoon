@@ -383,6 +383,27 @@ watch(
         <div class="status-bar" data-testid="graph-status-bar">
           <span>{{ graphStore.filteredNodes.length }} nodes</span>
           <span>{{ graphStore.filteredEdges.length }} edges</span>
+          <!-- Progressive load: the graph is already interactive here; this only
+               explains why some tooltips are still empty. -->
+          <span
+            v-if="graphStore.enriching"
+            class="status-enriching"
+            data-testid="graph-status-enriching"
+            :title="`Loading properties for ${graphStore.pendingPropertyNodeIds.size} nodes`"
+          >
+            loading properties…
+          </span>
+          <!-- The edge result hit its cap, so this graph is a slice of a larger
+               one. Worth stating plainly: a truncated graph looks exactly like
+               a complete one, and conclusions drawn from it may not hold. -->
+          <span
+            v-if="graphStore.truncated"
+            class="status-truncated"
+            data-testid="graph-status-truncated"
+            title="The edge limit was reached — this graph is a partial view. Raise the limit or narrow the query to see more."
+          >
+            ⚠ truncated
+          </span>
         </div>
       </div>
 
@@ -562,6 +583,20 @@ watch(
   border-top: 1px solid var(--border-color);
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* Deliberately understated: background enrichment is not something the user
+   needs to act on, and the graph is already usable while it runs. */
+.status-enriching {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+/* Truncation, unlike enrichment, changes what conclusions the graph supports —
+   so it gets colour rather than fading into the status bar. */
+.status-truncated {
+  color: var(--warning-color, #b45309);
+  font-weight: 600;
 }
 
 .panel-wrapper {

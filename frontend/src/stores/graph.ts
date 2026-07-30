@@ -31,7 +31,7 @@ import {
   useCancellableQuery,
   type StepResult,
 } from '@/composables/useCancellableQuery';
-import type { QueryMetadata, GraphJobStatusResponse } from '@/types/graph';
+import type { QueryMetadata, GraphJobStatusResponse, GraphResponse } from '@/types/graph';
 
 /**
  * Built-in defaults for the Behaviors panel.
@@ -40,6 +40,19 @@ import type { QueryMetadata, GraphJobStatusResponse } from '@/types/graph';
  * so the `as` narrowings below are load-bearing — without them the unions collapse to
  * `string` and BehaviorPanel's radio bindings stop type-checking.
  */
+export type ProgressiveLoadMode = 'auto' | 'always' | 'never';
+
+/**
+ * Node-table width (property columns) at or above which 'auto' turns
+ * progressive loading on.
+ *
+ * Measured against a real warehouse: a 100-column table went from 3099ms to
+ * 659ms to first paint (-79%), while a 13-column one gained 15% at 3k nodes and
+ * LOST time at 1k. The cost is always the same extra round-trips, so the
+ * benefit has to come from properties being genuinely heavy.
+ */
+export const PROGRESSIVE_LOAD_MIN_PROPERTIES = 10;
+
 const DEFAULT_BEHAVIORS = {
   edgeLensMode: 'dim' as 'off' | 'hide' | 'dim',  // off = no focus, hide = hide non-focused, dim = dim non-focused edges
   edgeLensDimOpacity: 0.08,  // Opacity for dimmed edges in 'dim' mode (0.01-0.3)
@@ -65,6 +78,7 @@ const DEFAULT_BEHAVIORS = {
   enableNodeDrag: false,           // When true, allow dragging nodes by click-drag (pins node after release)
   mapStylePan: true,               // When true (default), right-drag pans Google-Maps-style: the point grabbed stays locked under the cursor. When false, TrackballControls' pan (panSpeed 0.3, so the world lags the mouse; its ortho branch also mis-scales the vertical axis by the aspect ratio).
   autoLoadOnOpen: false,           // When true, opening a context immediately fetches an initial subgraph (all nodes, edge_limit 1000). Default false: open empty and let the user run a query — the implicit fetch is expensive on large graphs. Opening a saved exploration is unaffected; it always loads its own data.
+  progressiveLoad: 'auto' as ProgressiveLoadMode, // 'auto' (default) uses progressive loading only when the node table is wide enough to pay for it — see shouldLoadProgressively(). 'always' forces it, 'never' fetches everything in one request. Progressive load trades a HIGHER TOTAL cost for a much faster first paint: measured on a 100-column table it cut first paint by 79% while raising total work by 76%, and on a narrow table it was simply slower. 'auto' exists so neither extreme is the default.
 };
 
 /** 3D Force-Directed layout defaults (D3-Force only). Fresh object per call — never share by reference. */
@@ -165,6 +179,20 @@ export function defaultLayoutModeConfig(): LayoutModeConfig {
 }
 
 /**
+ * Allowed values for behaviors whose type is a string union.
+ *
+ * A `typeof` check cannot tell `'auto'` from `'banana'` — both are strings — so
+ * without this an invalid value from a stale context or a typo in server config
+ * would be accepted and then ride along into every saved exploration.
+ */
+const BEHAVIOR_ENUMS: Partial<Record<keyof GraphBehaviors, readonly string[]>> = {
+  edgeLensMode: ['off', 'hide', 'dim'],
+  searchMode: ['hide', 'highlight'],
+  viewMode: ['3d', '2d-proj'],
+  progressiveLoad: ['auto', 'always', 'never'],
+};
+
+/**
  * Merge an untrusted `default_behaviors` dict into `target`, in place.
  *
  * Both the server config and the graph context carry this dict opaquely — neither knows
@@ -191,6 +219,13 @@ function applyBehaviorOverrides(
     if (typeof value !== typeof target[k]) {
       console.warn(
         `[graph] Ignoring ${source} default_behaviors."${key}": expected ${typeof target[k]}, got ${typeof value}`
+      );
+      continue;
+    }
+    const allowed = BEHAVIOR_ENUMS[k];
+    if (allowed && !allowed.includes(value as string)) {
+      console.warn(
+        `[graph] Ignoring ${source} default_behaviors."${key}": expected one of ${allowed.join(' | ')}, got ${JSON.stringify(value)}`
       );
       continue;
     }
@@ -267,6 +302,20 @@ export const useGraphStore = defineStore('graph', () => {
 
   // Lens pause: when true, graph lens effect is suppressed (selection/details stay open)
   const lensPaused = ref(false);
+
+  // Progressive load: node ids whose properties have not arrived yet, plus an
+  // explicit signal the canvas watches to refresh labels/icons after a patch
+  // (deep reactivity is deliberately NOT relied upon — see patchNodeProperties).
+  const pendingPropertyNodeIds = ref<Set<string>>(new Set());
+  const nodePatchVersion = ref(0);
+  const enriching = ref(false);
+
+  // True when the backend capped the edge result, so the graph on screen is a
+  // slice of a larger one. Without this the user has no way to tell a complete
+  // graph from a truncated one — both just look like a graph.
+  const truncated = ref(false);
+  // Bumped on every load/clear so stale batches abandon their patches.
+  let enrichmentToken = 0;
 
   // UI state
   const loading = ref(false);
@@ -1052,6 +1101,21 @@ export const useGraphStore = defineStore('graph', () => {
 
   const enhancedHasMultiEdges = computed(() => enhancedMultiEdgeStats.value.hasMultiEdges);
 
+  /**
+   * Force-evaluate the derived chain the canvas consumes and record its cost
+   * (dev-only). Called right after a wholesale nodes/edges assignment, so the
+   * computeds are dirty and this measures a real recompute rather than a cache
+   * hit. The canvas would trigger the same work moments later via its data
+   * watcher; doing it here only moves the cost, it doesn't add any.
+   */
+  function recordChainRecompute(label: string) {
+    if (import.meta.env.PROD) return;
+    const t0 = performance.now();
+    const nodeCount = enhancedNodes.value.length;
+    const edgeCount = enhancedEdges.value.length;
+    recordPerf(`load:${label}:chain`, performance.now() - t0, { nodeCount, edgeCount });
+  }
+
   // Use raw edges (not filteredEdges) so the toggle remains visible even when self-edges are hidden
   const hasSelfEdges = computed(() => edges.value.some(e => e.src === e.dst));
 
@@ -1093,8 +1157,10 @@ export const useGraphStore = defineStore('graph', () => {
     loadingMessage.value = 'Loading context…';
     error.value = null;
 
+    const t0 = performance.now();
     try {
       currentContext.value = await api.getGraphContext(contextId);
+      recordPerf('load:context:fetch', performance.now() - t0);
       // Re-resolve from scratch rather than merging over the current value: on a context
       // switch the previous context's behaviors would otherwise linger (clear() doesn't
       // reset them). A subsequent loadExploration() still wins — it runs after this and
@@ -1111,19 +1177,222 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  /**
+   * Decide whether this context should load progressively.
+   *
+   * Progressive load is not a free win: it always costs extra round-trips, and
+   * only pays off when node properties are heavy enough that skipping them
+   * makes the first fetch dramatically smaller. 'auto' therefore looks at how
+   * wide the node table is.
+   *
+   * A context with NO configured node_properties is the interesting case: the
+   * backend falls back to `SELECT n.*`, so the payload is the full table width
+   * — unknown to us and potentially enormous (a 100-column table costs ~36 MB
+   * for 19k nodes). Unknown-and-unbounded is treated as wide, because that is
+   * exactly the case progressive load exists for.
+   */
+  function shouldLoadProgressively(): boolean {
+    const mode = behaviors.value.progressiveLoad;
+    if (mode === 'always') return true;
+    if (mode === 'never') return false;
+
+    const configured = currentContext.value?.node_properties;
+    // Not configured → backend does SELECT n.*; assume wide.
+    if (!configured || configured.length === 0) return true;
+    return configured.length >= PROGRESSIVE_LOAD_MIN_PROPERTIES;
+  }
+
+  /**
+   * Patch node properties IN PLACE.
+   *
+   * The in-place mutation is load-bearing, not a micro-optimisation:
+   *  - `nodes.value` keeps its array identity, so the community/similarity
+   *    watchers (which watch identity) do not fire and wipe their state;
+   *  - node/edge COUNTS are unchanged, so the canvas data watcher — which only
+   *    reacts to counts — does not rebuild the scene or reheat the layout.
+   *
+   * Visual refresh is signalled explicitly via `nodePatchVersion` instead, so
+   * correctness never depends on deep reactivity tracking these dicts.
+   */
+  function patchNodeProperties(
+    patch: Map<string, Record<string, unknown> | undefined>,
+    options: { clearPending?: boolean; merge?: boolean } = {},
+  ) {
+    if (patch.size === 0) return;
+    const { clearPending = true, merge = false } = options;
+
+    let patched = 0;
+    for (const node of nodes.value) {
+      if (!patch.has(node.node_id)) continue;
+      const props = patch.get(node.node_id);
+      // Replace the whole dict rather than mutating inside it, so the change is
+      // visible to anything holding the node. `merge` builds a NEW object for
+      // the same reason.
+      node.properties = merge ? { ...node.properties, ...props } : props;
+      if (clearPending) pendingPropertyNodeIds.value.delete(node.node_id);
+      patched++;
+    }
+
+    if (patched > 0) nodePatchVersion.value++;
+  }
+
+  /**
+   * Property columns that change what is drawn on screen: the ones referenced
+   * by label templates/rules and by property-driven node icons.
+   *
+   * On a wide table these are a handful out of ~100, so fetching them first
+   * makes the visible graph correct long before the bulk arrives. Returns null
+   * when nothing specific is referenced — then there is no useful first wave
+   * and enrichment goes straight to fetching everything.
+   */
+  function visualPropertyColumns(): string[] | null {
+    const cols = new Set<string>();
+
+    // `prop:`-prefixed tokens in label templates read raw table columns.
+    const templates = [
+      textFormatDefaults.value.nodeTemplate,
+      ...textFormatRules.value
+        .filter((r) => r.target === 'node')
+        .map((r) => r.template),
+    ];
+    for (const template of templates) {
+      if (!template) continue;
+      for (const match of template.matchAll(/\{prop:([^}|]+)/g)) {
+        cols.add(match[1].trim());
+      }
+    }
+
+    for (const config of nodePropertyIconConfigs.value.values()) {
+      if (config?.property) cols.add(config.property);
+    }
+
+    return cols.size > 0 ? [...cols] : null;
+  }
+
+  /**
+   * Background pump: fetch properties for every node still pending, in batches.
+   *
+   * Runs in two waves on wide tables — visual columns first (labels/icons are
+   * wrong until they land), then everything else. On a 100-column table the
+   * full fetch costs more than the single request progressive loading
+   * replaced, so getting the visible state right early matters more than
+   * finishing fast.
+   *
+   * Guarded by `enrichmentToken` — a context switch, a new load or clear()
+   * bumps it and any in-flight enrichment abandons its remaining batches
+   * instead of patching nodes that no longer belong to the current graph.
+   */
+  async function enrichNodeProperties(batchSize = 1500) {
+    if (!currentContext.value || pendingPropertyNodeIds.value.size === 0) return;
+
+    const contextId = currentContext.value.id;
+    const myToken = ++enrichmentToken;
+    enriching.value = true;
+    const t0 = performance.now();
+    let enrichedCount = 0;
+
+    /**
+     * Fetch one wave over `ids`; returns false if superseded.
+     *
+     * `clearPending` marks the LAST wave (nodes owe nothing more afterwards).
+     * `merge` keeps columns an earlier wave already wrote.
+     */
+    const runWave = async (
+      ids: string[],
+      columns: string[] | undefined,
+      { clearPending, merge }: { clearPending: boolean; merge: boolean },
+    ): Promise<boolean> => {
+      for (let i = 0; i < ids.length; i += batchSize) {
+        if (enrichmentToken !== myToken) return false;
+        const batch = ids.slice(i, i + batchSize);
+        const response = await api.getNodesBatch(contextId, batch, columns);
+        if (enrichmentToken !== myToken) return false;
+
+        const patch = new Map<string, Record<string, unknown> | undefined>();
+        for (const node of response.nodes) patch.set(node.node_id, node.properties);
+        if (clearPending) {
+          // Ids the warehouse returned nothing for (deleted rows, id mismatch)
+          // must still leave the pending set, or they stay pending forever.
+          for (const id of batch) if (!patch.has(id)) patch.set(id, undefined);
+        }
+        patchNodeProperties(patch, { clearPending, merge });
+        enrichedCount += response.nodes.length;
+      }
+      return true;
+    };
+
+    try {
+      const ids = [...pendingPropertyNodeIds.value];
+      const visualCols = visualPropertyColumns();
+
+      // Wave 1 (optional): just the columns that change what is drawn.
+      // Nothing to merge over yet, and the nodes still owe the rest.
+      if (visualCols) {
+        if (!(await runWave(ids, visualCols, { clearPending: false, merge: false }))) {
+          return;
+        }
+      }
+      // Wave 2: everything. Merges so it cannot wipe the labels/icons wave 1
+      // already put on screen, and clears pending — nothing is owed after it.
+      if (
+        !(await runWave(ids, undefined, {
+          clearPending: true,
+          merge: Boolean(visualCols),
+        }))
+      ) {
+        return;
+      }
+
+      recordPerf('load:enrichProperties', performance.now() - t0, {
+        nodeCount: enrichedCount,
+        waves: visualCols ? 2 : 1,
+      });
+    } catch (e: unknown) {
+      // Enrichment is best-effort: the graph is already rendered and usable.
+      // Surfacing a blocking error here would be worse than missing tooltips.
+      console.warn('[graph] node property enrichment failed:', e);
+    } finally {
+      if (enrichmentToken === myToken) enriching.value = false;
+    }
+  }
+
+  /**
+   * Move a node to the front of the enrichment queue (hover/selection).
+   * Returns immediately if the node already has its properties.
+   */
+  async function prioritizeNodeProperties(nodeId: string) {
+    if (!currentContext.value || !pendingPropertyNodeIds.value.has(nodeId)) return;
+
+    try {
+      const response = await api.getNodesBatch(currentContext.value.id, [nodeId]);
+      const patch = new Map<string, Record<string, unknown> | undefined>();
+      for (const node of response.nodes) patch.set(node.node_id, node.properties);
+      if (!patch.has(nodeId)) patch.set(nodeId, undefined);
+      patchNodeProperties(patch);
+    } catch (e: unknown) {
+      console.warn('[graph] priority property fetch failed:', e);
+    }
+  }
+
   async function loadSubgraph(request: SubgraphRequest = {}) {
     if (!currentContext.value) return;
 
     loading.value = true;
     loadingMessage.value = 'Loading graph…';
     queryError.value = null;
+    // Abandon any enrichment still running for the previous graph.
+    enrichmentToken++;
+    pendingPropertyNodeIds.value.clear();
 
     try {
       const t0 = performance.now();
+      const nodesMode = request.nodes_mode
+        ?? (shouldLoadProgressively() ? 'types' : 'full');
       const response = await api.getSubgraph(currentContext.value.id, {
         edge_limit: request.edge_limit || 1000,
         node_types: request.node_types || [],
         edge_types: request.edge_types || [],
+        nodes_mode: nodesMode,
       });
       const tFetched = performance.now();
 
@@ -1132,12 +1401,24 @@ export const useGraphStore = defineStore('graph', () => {
       freshLayoutRequested.value = true;
       nodes.value = response.nodes;
       edges.value = response.edges;
+      truncated.value = response.truncated === true;
       recordGraphLoad('subgraph', response, tFetched - t0, performance.now() - tFetched);
+      recordChainRecompute('subgraph');
       adjustGravityForConnectivity();
 
       // Clear selections
       selectedNodeIds.value.clear();
       selectedEdgeIds.value.clear();
+
+      if (response.properties_deferred) {
+        for (const node of response.nodes) {
+          if (!node.properties) pendingPropertyNodeIds.value.add(node.node_id);
+        }
+        // Deliberately not awaited: the graph is already renderable, and
+        // `loading` must drop so the canvas paints now rather than after
+        // every property has arrived.
+        void enrichNodeProperties();
+      }
     } catch (e: unknown) {
       queryError.value = extractErrorDetails(e, 'Failed to load subgraph');
     } finally {
@@ -1196,6 +1477,47 @@ export const useGraphStore = defineStore('graph', () => {
   let pendingGraphSubmit: (() => Promise<StepResult>) | null = null;
   let pendingGraphApply: ((status: GraphJobStatusResponse) => void) | null = null;
   let pendingQueryText = '';
+  // Node ids drawn from a partial, so the final result can tell "same graph,
+  // now with properties" from "different graph" (see applyGraphResponse).
+  let partialNodeIds: Set<string> | null = null;
+
+  /**
+   * Apply a graph payload from the query job, choosing between a wholesale
+   * replace and an in-place property patch.
+   *
+   * When a partial was already drawn and the final result covers exactly the
+   * same nodes, replacing the arrays would throw away the rendered scene and
+   * reheat the layout — the graph would visibly jump for no reason. Patching
+   * instead keeps positions, identity and the layout untouched, which is the
+   * same trick the background enrichment uses.
+   */
+  function applyGraphResponse(response: GraphResponse, isPartial: boolean) {
+    truncated.value = response.truncated === true;
+
+    if (isPartial) {
+      freshLayoutRequested.value = true;
+      nodes.value = response.nodes;
+      edges.value = response.edges;
+      partialNodeIds = new Set(response.nodes.map((n) => n.node_id));
+      return;
+    }
+
+    const sameNodes =
+      partialNodeIds !== null &&
+      partialNodeIds.size === response.nodes.length &&
+      response.nodes.every((n) => partialNodeIds!.has(n.node_id));
+
+    if (sameNodes) {
+      const patch = new Map<string, Record<string, unknown> | undefined>();
+      for (const node of response.nodes) patch.set(node.node_id, node.properties);
+      patchNodeProperties(patch);
+    } else {
+      freshLayoutRequested.value = true;
+      nodes.value = response.nodes;
+      edges.value = response.edges;
+    }
+    partialNodeIds = null;
+  }
 
   const graphJob = useCancellableQuery({
     submit: () => pendingGraphSubmit!(),
@@ -1208,10 +1530,20 @@ export const useGraphStore = defineStore('graph', () => {
           ? { done: s.progress.chunks_done, total: s.progress.chunks_total }
           : null,
         result: s,
+        partial: s.partial,
+        partialSeq: s.partial_seq,
       };
     },
     cancel: (jobId: string) =>
       api.cancelGraphQueryJob(currentContext.value!.id, jobId),
+    applyPartial: (p) => {
+      const response = p as GraphResponse;
+      applyGraphResponse(response, true);
+      adjustGravityForConnectivity();
+      // The full result is already on its way, so no enrichment is scheduled
+      // here — but the indicator explains the momentarily empty tooltips.
+      enriching.value = true;
+    },
     applyResult: (r) => pendingGraphApply?.(r as GraphJobStatusResponse),
     onError: (e) => {
       const details = extractErrorDetails(e, 'Failed to execute graph query');
@@ -1251,12 +1583,18 @@ export const useGraphStore = defineStore('graph', () => {
     };
     pendingGraphApply = (status) => {
       const response = status.result!;
-      // Replace current graph with query result. Set the fresh-layout flag only
-      // on success so a failed query keeps the current graph.
-      freshLayoutRequested.value = true;
-      nodes.value = response.nodes;
-      edges.value = response.edges;
-      recordGraphLoad('query', response, performance.now() - t0, 0);
+      // The fresh-layout flag is set inside applyGraphResponse, and ONLY on the
+      // replace branch: when a partial already drew this graph, re-flagging it
+      // would reheat the layout and make the scene jump for nothing.
+      // fetchMs here is submit+poll wall-clock, not pure network — the job
+      // machine polls, so it includes idle time between polls. The backend's
+      // own stage timings (load:query:backend) are the accurate server-side
+      // split; assignMs isolates the reactive-wrap cost.
+      const tAssign = performance.now();
+      applyGraphResponse(response, false);
+      const assignMs = performance.now() - tAssign;
+      recordGraphLoad('query', response, tAssign - t0, assignMs);
+      recordChainRecompute('query');
       adjustGravityForConnectivity();
       // Clear selections (unless preserving for exploration restore)
       if (!options?.preserveSelections) {
@@ -1302,10 +1640,11 @@ export const useGraphStore = defineStore('graph', () => {
     };
     pendingGraphApply = (status) => {
       const response = status.result!;
-      freshLayoutRequested.value = true;
-      nodes.value = response.nodes;
-      edges.value = response.edges;
-      recordGraphLoad('cypher', response, performance.now() - t0, 0);
+      // fresh-layout is decided inside applyGraphResponse (see the SQL path).
+      const tAssign = performance.now();
+      applyGraphResponse(response, false);
+      recordGraphLoad('cypher', response, tAssign - t0, performance.now() - tAssign);
+      recordChainRecompute('cypher');
       adjustGravityForConnectivity();
       if (status.transpiled_sql) lastTranspiledSql.value = status.transpiled_sql;
       selectedNodeIds.value.clear();
@@ -1953,7 +2292,9 @@ export const useGraphStore = defineStore('graph', () => {
 
       if (exploration.state.has_snapshot) {
         try {
+          const tSnapshot = performance.now();
           const snapshot = await api.getExplorationSnapshot(explorationId);
+          const tFetched = performance.now();
           nodes.value = snapshot.nodes.map((n) => ({
             node_id: n.id,
             node_type: n.type,
@@ -1968,6 +2309,12 @@ export const useGraphStore = defineStore('graph', () => {
             relationship_type: e.type,
             properties: e.properties,
           }));
+          recordGraphLoad(
+            'snapshot',
+            { nodes: snapshot.nodes, edges: snapshot.edges },
+            tFetched - tSnapshot,
+            performance.now() - tFetched,
+          );
           // Wait for the community store's nodes watcher to fire and clear
           // communities before restoring — same timing requirement as the
           // query-execution path (the watcher is async/next-tick).
@@ -2005,6 +2352,12 @@ export const useGraphStore = defineStore('graph', () => {
     edges.value = [];
     currentContext.value = null;
     currentExploration.value = null;
+    // Abandon in-flight enrichment: its patches would target a graph that no
+    // longer exists.
+    enrichmentToken++;
+    pendingPropertyNodeIds.value.clear();
+    enriching.value = false;
+    truncated.value = false;
     selectedNodeIds.value.clear();
     selectedEdgeIds.value.clear();
     nodePositions.value.clear();
@@ -2043,6 +2396,11 @@ export const useGraphStore = defineStore('graph', () => {
     loading,
     loadingMessage,
     freshLayoutRequested,
+    // Progressive load
+    pendingPropertyNodeIds,
+    nodePatchVersion,
+    enriching,
+    truncated,
     error,
     queryError,
     clearQueryError,
@@ -2103,6 +2461,10 @@ export const useGraphStore = defineStore('graph', () => {
     loadContext,
     loadSubgraph,
     expandFromNode,
+    shouldLoadProgressively,
+    patchNodeProperties,
+    enrichNodeProperties,
+    prioritizeNodeProperties,
     executeGraphQuery,
     executeCypherQuery,
     transpileCypher,

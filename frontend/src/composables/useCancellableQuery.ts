@@ -19,6 +19,13 @@ export interface StepResult {
   chunkProgress?: ChunkProgress | null;
   /** Opaque result payload handed to `applyResult` on success. */
   result?: unknown;
+  /**
+   * A renderable intermediate result published while the job is still running.
+   * Paired with `partialSeq` so the poller can tell a new partial from one it
+   * has already applied — polls happen far more often than partials arrive.
+   */
+  partial?: unknown;
+  partialSeq?: number;
 }
 
 export interface CancellableQueryOptions {
@@ -30,6 +37,11 @@ export interface CancellableQueryOptions {
   cancel: (statementId: string) => Promise<void>;
   /** Apply a succeeded result (build the grid / replace the graph). */
   applyResult: (result: unknown) => void;
+  /**
+   * Apply a partial result, if the backend publishes one. Called at most once
+   * per distinct `partialSeq`, and never after `applyResult`.
+   */
+  applyPartial?: (partial: unknown) => void;
   /** Handle a thrown error from submit/poll. */
   onError: (e: unknown) => void;
   /** Called when the run is cancelled (by the user or the backend). */
@@ -113,6 +125,7 @@ export function useCancellableQuery(opts: CancellableQueryOptions) {
   async function pollUntilDone(id: string, token: number): Promise<void> {
     let interval = FIRST_POLL_MS;
     let pollN = 0;
+    let appliedPartialSeq = 0;
     // eslint-disable-next-line no-constant-condition
     while (true) {
       await sleep(interval);
@@ -125,6 +138,19 @@ export function useCancellableQuery(opts: CancellableQueryOptions) {
 
       if (s.chunkProgress) chunkProgress.value = s.chunkProgress;
       log(`… poll #${pollN}`, { status: s.status, chunks: s.chunkProgress });
+
+      // Draw what the backend has so far. Guarded by the sequence number: the
+      // same partial rides along on every subsequent poll, and re-applying it
+      // would redo the graph rebuild for nothing.
+      if (
+        s.partial != null &&
+        (s.partialSeq ?? 0) > appliedPartialSeq &&
+        opts.applyPartial
+      ) {
+        appliedPartialSeq = s.partialSeq ?? 0;
+        log(`◐ partial #${appliedPartialSeq}`);
+        opts.applyPartial(s.partial);
+      }
 
       if (s.status === 'running') continue;
       if (s.status === 'canceled') {
