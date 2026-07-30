@@ -20,7 +20,7 @@ from graphlagoon.models.schemas import (
 )
 from graphlagoon.middleware.auth import get_current_user
 from graphlagoon.utils.sharing import (
-    extract_domain,
+    share_match_emails,
     user_has_share_access,
     validate_share_email,
 )
@@ -103,22 +103,13 @@ async def list_graph_contexts(request: Request):
             ExplorationShare,
         )
 
-        user_domain = extract_domain(user_email)
-        ctx_share_conditions = [GraphContextShare.shared_with_email == user_email]
-        exp_share_conditions = [ExplorationShare.shared_with_email == user_email]
-        if user_domain:
-            ctx_share_conditions.append(
-                GraphContextShare.shared_with_email == f"*@{user_domain}"
-            )
-            exp_share_conditions.append(
-                ExplorationShare.shared_with_email == f"*@{user_domain}"
-            )
+        match_emails = share_match_emails(user_email)
 
         session_maker = get_session_maker()
         async with session_maker() as session:
-            # Context IDs shared directly with user
+            # Context IDs shared directly with user (exact, domain wildcard or public)
             ctx_share_q = select(GraphContextShare.graph_context_id).where(
-                or_(*ctx_share_conditions)
+                GraphContextShare.shared_with_email.in_(match_emails)
             )
             # Context IDs accessible via exploration shares
             exp_share_q = (
@@ -126,7 +117,7 @@ async def list_graph_contexts(request: Request):
                 .join(
                     ExplorationShare, ExplorationShare.exploration_id == Exploration.id
                 )
-                .where(or_(*exp_share_conditions))
+                .where(ExplorationShare.shared_with_email.in_(match_emails))
             )
 
             query = select(GraphContext).options(selectinload(GraphContext.shares))

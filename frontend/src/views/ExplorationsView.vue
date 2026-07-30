@@ -167,6 +167,42 @@ async function unshare(explorationId: string, email: string) {
     console.error('Failed to unshare exploration:', e);
   }
 }
+
+const PUBLIC_SHARE_EMAIL = '*';
+
+const myDomain = computed(() => {
+  const email = authStore.email ?? '';
+  return email.includes('@') ? email.split('@')[1].toLowerCase() : '';
+});
+
+const canShareWithMyDomain = computed(
+  () =>
+    !!myDomain.value &&
+    allowedShareDomains.value.some(d => d.toLowerCase() === myDomain.value)
+);
+
+function isPublic(exploration: Exploration | null): boolean {
+  return exploration?.shared_with?.includes(PUBLIC_SHARE_EMAIL) ?? false;
+}
+
+function isDomainShared(exploration: Exploration | null): boolean {
+  return exploration?.shared_with?.includes(`*@${myDomain.value}`) ?? false;
+}
+
+async function quickShare(email: string) {
+  if (!shareExploration.value) return;
+  const explorationId = shareExploration.value.id;
+
+  try {
+    // Keep the modal open so the new entry shows in the shared list
+    await api.shareExploration(explorationId, { email, permission: 'read' });
+    await loadAllExplorations();
+    const updated = explorations.value.find(e => e.id === explorationId);
+    if (updated) shareExploration.value = updated;
+  } catch (e) {
+    console.error('Failed to share exploration:', e);
+  }
+}
 </script>
 
 <template>
@@ -249,6 +285,7 @@ async function unshare(explorationId: string, email: string) {
               <span v-if="!isOwner(exploration)" class="badge" :class="exploration.has_write_access ? 'badge-write' : 'badge-readonly'">
                 {{ exploration.owner_email }} · {{ exploration.has_write_access ? 'Read & Write' : 'Read only' }}
               </span>
+              <span v-if="isPublic(exploration)" class="badge badge-public">Public</span>
             </div>
           </div>
           <div class="list-item-actions">
@@ -287,12 +324,42 @@ async function unshare(explorationId: string, email: string) {
           <ul>
             <li v-for="email in shareExploration.shared_with" :key="email">
               <span class="shared-email">
-                <span v-if="email.startsWith('*@')" class="badge badge-domain">Domain</span>
-                {{ email }}
+                <span v-if="email === PUBLIC_SHARE_EMAIL" class="badge badge-public">Public</span>
+                <span v-else-if="email.startsWith('*@')" class="badge badge-domain">Domain</span>
+                {{ email === PUBLIC_SHARE_EMAIL ? 'Everyone (public)' : email }}
               </span>
               <button class="btn-remove" @click="unshare(shareExploration!.id, email)">&times;</button>
             </li>
           </ul>
+        </div>
+
+        <div class="quick-share">
+          <button
+            v-if="!isPublic(shareExploration)"
+            type="button"
+            class="btn btn-outline"
+            data-testid="make-public-btn"
+            @click="quickShare(PUBLIC_SHARE_EMAIL)"
+          >
+            Make public (read-only for everyone)
+          </button>
+          <p v-else class="form-hint">
+            This exploration is public — anyone can view it. Remove "Everyone (public)" above to unpublish.
+          </p>
+          <template v-if="canShareWithMyDomain">
+            <button
+              v-if="!isDomainShared(shareExploration)"
+              type="button"
+              class="btn btn-outline"
+              data-testid="share-domain-btn"
+              @click="quickShare(`*@${myDomain}`)"
+            >
+              Share with my domain (*@{{ myDomain }})
+            </button>
+            <p v-else class="form-hint">
+              Shared with everyone at @{{ myDomain }}.
+            </p>
+          </template>
         </div>
 
         <form @submit.prevent="share">
@@ -584,6 +651,19 @@ async function unshare(explorationId: string, email: string) {
   background: var(--primary-color, #4a90d9);
   color: white;
   margin-right: 4px;
+}
+
+.badge-public {
+  background: #2e7d32;
+  color: white;
+  margin-right: 4px;
+}
+
+.quick-share {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
 }
 
 .form-hint {

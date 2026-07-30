@@ -161,7 +161,9 @@ class ApiService {
   }
 
   async unshareGraphContext(id: string, email: string): Promise<void> {
-    await this.client.delete(`/api/graph-contexts/${id}/share/${email}`);
+    await this.client.delete(
+      `/api/graph-contexts/${id}/share/${encodeURIComponent(email)}`
+    );
   }
 
   // Explorations
@@ -215,7 +217,9 @@ class ApiService {
   }
 
   async unshareExploration(id: string, email: string): Promise<void> {
-    await this.client.delete(`/api/explorations/${id}/share/${email}`);
+    await this.client.delete(
+      `/api/explorations/${id}/share/${encodeURIComponent(email)}`
+    );
   }
 
   // Graph Data
