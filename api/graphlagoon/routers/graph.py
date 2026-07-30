@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from uuid import UUID
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
     from graphlagoon.db.models import GraphContext
@@ -13,6 +13,8 @@ from graphlagoon.models.schemas import (
     DatasetsResponse,
     GraphResponse,
     SubgraphRequest,
+    NodeBatchRequest,
+    NodeBatchResponse,
     ExpandRequest,
     RandomGraphRequest,
     RandomGraphResponse,
@@ -35,6 +37,7 @@ from graphlagoon.services.cypher import transpile_cypher_to_sql, validate_cypher
 from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
 from graphlagoon.services.graph_operations import (
     execute_graph_query_with_nodes,
+    fetch_nodes_by_ids,
     parse_tabular_result,
     QueryExecutionError,
 )
@@ -220,6 +223,32 @@ def build_edge_named_struct(column_config, table_alias: str = "") -> str:
     return f"NAMED_STRUCT({fields})"
 
 
+def resolve_node_columns(context) -> Optional[list[str]]:
+    """Derive the node-query projection from a context's configured properties.
+
+    Returns ``None`` when the context declares no ``node_properties``, which
+    keeps the historical ``SELECT n.*`` — the context has not told us which
+    columns matter, so narrowing could silently drop data the user expects to
+    see in tooltips and the data table.
+
+    When properties ARE configured they are the complete set the UI can display,
+    so selecting anything beyond them is pure waste on every graph load.
+    """
+    props = getattr(context, "node_properties", None)
+    if not props:
+        return None
+
+    names: list[str] = []
+    for prop in props:
+        # Contexts round-trip through both Pydantic models and raw dicts
+        # (memory store vs DB), so accept either shape.
+        name = prop.get("name") if isinstance(prop, dict) else getattr(prop, "name", None)
+        if name:
+            names.append(name)
+
+    return names or None
+
+
 @router.post("/graph-contexts/{context_id}/subgraph", response_model=GraphResponse)
 async def get_subgraph(
     context_id: UUID,
@@ -267,6 +296,8 @@ async def get_subgraph(
             query=query,
             limit=data.edge_limit,
             column_config=column_config,
+            node_columns=resolve_node_columns(context),
+            nodes_mode=data.nodes_mode,
         )
     except QueryExecutionError as e:
         raise HTTPException(
@@ -296,6 +327,95 @@ async def get_subgraph(
                 }
             },
         )
+
+
+@router.post(
+    "/graph-contexts/{context_id}/nodes/batch", response_model=NodeBatchResponse
+)
+async def get_nodes_batch(
+    context_id: UUID,
+    data: NodeBatchRequest,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """Fetch properties for a known set of node ids.
+
+    Backs progressive loading: the client renders a graph returned with
+    ``nodes_mode='types'`` immediately, then fills in properties in background
+    batches through this endpoint.
+
+    The projection comes from the context's configured ``node_properties``. An
+    optional ``columns`` list may NARROW it further (unknown names are dropped),
+    which matters on wide tables: fetching all 100 columns for every node costs
+    more than the single request progressive loading replaced.
+    """
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+
+    from graphlagoon.models.schemas import ColumnConfig
+
+    column_config = ColumnConfig(**merge_column_config(context))
+
+    # Dedupe while preserving order: the join is 1:1 on a unique node id, so
+    # repeated ids would only bloat the inlined VALUES list.
+    seen: set[str] = set()
+    node_ids = [
+        nid for nid in data.node_ids if nid and not (nid in seen or seen.add(nid))
+    ]
+    if not node_ids:
+        return NodeBatchResponse(nodes=[])
+
+    node_columns = resolve_node_columns(context)
+    if data.columns is not None and node_columns is not None:
+        # Intersect with what the context exposes: the request can only ever
+        # narrow, never widen. Unknown names are dropped rather than rejected,
+        # so a stale client asking for a removed column still gets the rest.
+        allowed = set(node_columns)
+        node_columns = [c for c in dict.fromkeys(data.columns) if c in allowed]
+    # When the context configures no properties there is no allow-list to check
+    # against, so `columns` is ignored entirely and the query stays SELECT n.*.
+    # Honouring arbitrary names here would let a caller probe the table's schema
+    # by observing which ones error — the quoting in build_node_projection stops
+    # injection, but not that.
+
+    try:
+        nodes, query_ms, _ = await fetch_nodes_by_ids(
+            warehouse_client=warehouse,
+            node_table=context.node_table_name,
+            node_ids=node_ids,
+            column_config=column_config,
+            node_columns=node_columns,
+        )
+    except QueryExecutionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "QUERY_EXECUTION_ERROR",
+                    "message": e.message,
+                    "details": {"query": e.query} if e.query else {},
+                }
+            },
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "QUERY_EXECUTION_ERROR",
+                    "message": f"{type(e).__name__}: {e}",
+                    "details": {"exception_type": type(e).__name__},
+                }
+            },
+        )
+
+    return NodeBatchResponse(
+        nodes=nodes,
+        metadata=QueryMetadata(
+            node_query_ms=round(query_ms, 2),
+            node_count=len(nodes),
+        ),
+    )
 
 
 @router.post("/graph-contexts/{context_id}/expand", response_model=GraphResponse)
@@ -457,6 +577,7 @@ async def expand_from_node(
             query=query,
             limit=data.edge_limit,
             column_config=column_config,
+            node_columns=resolve_node_columns(context),
         )
     except QueryExecutionError as e:
         raise HTTPException(
@@ -580,6 +701,7 @@ async def execute_graph_query(
             limit=None,
             column_config=column_config,
             use_external_links=data.use_external_links,
+            node_columns=resolve_node_columns(context),
         )
     except QueryExecutionError as e:
         raise HTTPException(
@@ -729,6 +851,7 @@ async def execute_cypher_query(
             limit=None,
             column_config=column_config,
             use_external_links=data.use_external_links,
+            node_columns=resolve_node_columns(context),
         )
     except QueryExecutionError as e:
         raise HTTPException(
@@ -1231,6 +1354,11 @@ def _start_graph_job(context, warehouse, sql: str, use_external_links: bool):
             "chunks_total": total,
         }
 
+    def on_partial(response) -> None:
+        """Publish a renderable intermediate result for the poller to apply."""
+        record["partial"] = response
+        record["partial_seq"] += 1
+
     start_job(
         record,
         lambda: execute_graph_query_with_nodes(
@@ -1242,6 +1370,8 @@ def _start_graph_job(context, warehouse, sql: str, use_external_links: bool):
             use_external_links=use_external_links,
             on_submit=on_submit,
             progress_callback=on_progress,
+            node_columns=resolve_node_columns(context),
+            on_partial=on_partial,
         ),
     )
     return job_id, record
@@ -1310,8 +1440,15 @@ async def get_graph_query_job(
     progress_model = GraphJobProgress(**progress) if progress else None
 
     if state == "running":
+        # Carry any published partial so the client can draw the graph while
+        # the job is still fetching properties. `partial_seq` lets the poller
+        # tell a new partial from one it has already applied.
         return GraphJobStatusResponse(
-            status="running", job_id=job_id, progress=progress_model
+            status="running",
+            job_id=job_id,
+            progress=progress_model,
+            partial=record.get("partial"),
+            partial_seq=record.get("partial_seq", 0),
         )
     if state == "canceled":
         return GraphJobStatusResponse(status="canceled", job_id=job_id)

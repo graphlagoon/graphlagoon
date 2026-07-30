@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useGraphStore, resolveInitialBehaviors } from '@/stores/graph';
+import { useGraphStore, resolveInitialBehaviors, type ProgressiveLoadMode } from '@/stores/graph';
 import { ChevronDown, ChevronRight, X } from 'lucide-vue-next';
 
 const showAdvanced = ref(false);
@@ -27,6 +27,10 @@ function updateFocusDepth(depth: number) {
 
 function setSearchMode(mode: 'hide' | 'highlight') {
   graphStore.updateBehaviors({ searchMode: mode });
+}
+
+function setProgressiveLoad(mode: ProgressiveLoadMode) {
+  graphStore.updateBehaviors({ progressiveLoad: mode });
 }
 
 function toggleCenterOnSearch() {
@@ -327,6 +331,48 @@ function resetBehaviors() {
             Fetch an initial subgraph as soon as the context opens. Off by default — that fetch
             is expensive on large graphs, so the context opens empty and you run the query you
             want. Opening a saved exploration always loads its own data regardless.
+          </p>
+
+          <h4>Property Loading</h4>
+          <div class="radio-list">
+            <label class="radio-item">
+              <input type="radio" name="progressiveLoad" value="auto"
+                data-testid="progressive-load-auto"
+                :checked="behaviors.progressiveLoad === 'auto'"
+                @change="setProgressiveLoad('auto')" />
+              Automatic
+            </label>
+            <label class="radio-item">
+              <input type="radio" name="progressiveLoad" value="always"
+                data-testid="progressive-load-always"
+                :checked="behaviors.progressiveLoad === 'always'"
+                @change="setProgressiveLoad('always')" />
+              Always progressive
+            </label>
+            <label class="radio-item">
+              <input type="radio" name="progressiveLoad" value="never"
+                data-testid="progressive-load-never"
+                :checked="behaviors.progressiveLoad === 'never'"
+                @change="setProgressiveLoad('never')" />
+              All at once
+            </label>
+          </div>
+          <p class="behavior-desc">
+            <template v-if="behaviors.progressiveLoad === 'auto'">
+              Draws the graph as soon as node types arrive and fills properties in afterwards,
+              but only when this context's node table is wide enough to be worth it. On a
+              100-column table that cut time-to-graph from ~8s to ~1.7s; on a narrow one the
+              extra requests would just cost more.
+            </template>
+            <template v-else-if="behaviors.progressiveLoad === 'always'">
+              Always draw first and load properties in the background, whatever the table
+              width. Tooltips and the data table stay empty for a moment after the graph
+              appears.
+            </template>
+            <template v-else>
+              Wait for every property before drawing anything. Simplest behaviour, but slow to
+              first paint on wide node tables.
+            </template>
           </p>
           <label class="checkbox-item">
             <input type="checkbox" :checked="behaviors.hideLabelsOnCameraMove" @change="toggleHideLabelsOnCameraMove" />

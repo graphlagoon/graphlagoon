@@ -128,6 +128,9 @@ describe('loadSubgraph', () => {
       edge_limit: 500,
       node_types: [],
       edge_types: [],
+      // Progressive load is on by default: nodes come back renderable
+      // (id + type) and properties are filled in by background batches.
+      nodes_mode: 'types',
     })
     expect(store.nodes).toHaveLength(1)
     expect(store.nodes[0].node_id).toBe('X')

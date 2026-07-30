@@ -55,6 +55,21 @@ export async function setupAPIMocks(page: Page) {
     });
   });
 
+  // Node property batch endpoint (POST) — progressive load enrichment.
+  // Answers from MOCK_GRAPH_RESPONSE so enriched properties match what the
+  // non-progressive path would have returned in one shot.
+  await page.route('**/graphlagoon/api/graph-contexts/*/nodes/batch', (route) => {
+    const requested: string[] = route.request().postDataJSON()?.node_ids ?? [];
+    const wanted = new Set(requested);
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        nodes: MOCK_GRAPH_RESPONSE.nodes.filter((n) => wanted.has(n.node_id)),
+      }),
+    });
+  });
+
   // Expand endpoint (POST)
   await page.route('**/graphlagoon/api/graph-contexts/*/expand', (route) => {
     route.fulfill({

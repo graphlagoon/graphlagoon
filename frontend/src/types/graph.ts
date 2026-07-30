@@ -39,6 +39,17 @@ export interface GraphResponse {
   truncated: boolean;
   total_count?: number;
   metadata?: QueryMetadata;
+  /**
+   * Set when nodes came back without properties (nodes_mode: 'types'), so the
+   * graph can render immediately. The store schedules background enrichment
+   * via getNodesBatch when this is true.
+   */
+  properties_deferred?: boolean;
+}
+
+export interface NodeBatchResponse {
+  nodes: Node[];
+  metadata?: QueryMetadata;
 }
 
 export interface EdgeStructure {
@@ -351,6 +362,12 @@ export interface SubgraphRequest {
   edge_limit?: number;
   node_types?: string[];
   edge_types?: string[];
+  /**
+   * 'full' (default) returns nodes with their properties. 'types' returns only
+   * node_id/node_type — enough to render — so the canvas can paint before the
+   * properties are fetched in background batches.
+   */
+  nodes_mode?: 'full' | 'types';
 }
 
 export interface ExpandRequest {
@@ -615,6 +632,14 @@ export interface GraphJobStatusResponse {
   progress?: GraphJobProgress | null;
   result?: GraphResponse | null;
   transpiled_sql?: string;
+  /**
+   * A renderable intermediate result — edges plus nodes carrying only their
+   * structural columns — published while the job is still fetching properties,
+   * so the graph can be drawn roughly twice as early.
+   */
+  partial?: GraphResponse | null;
+  /** Increments per published partial; the poller applies each one once. */
+  partial_seq?: number;
 }
 
 // Catalog types

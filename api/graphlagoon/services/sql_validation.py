@@ -4,6 +4,8 @@ Validates that user-provided SQL is read-only (SELECT only) and blocks
 dangerous DDL/DML statements (deny list approach).
 """
 
+from typing import Optional
+
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
@@ -100,3 +102,33 @@ def sanitize_string_literal(value: str) -> str:
     sanitized = sanitized.replace("\\", "\\\\")
     sanitized = sanitized.replace("'", "''")
     return sanitized
+
+
+def extract_query_limit(sql: str) -> Optional[int]:
+    """Return the top-level LIMIT of a SELECT, or None if it has none.
+
+    The graph query endpoints take the LIMIT from the user's own SQL rather
+    than a parameter, so this is the only way to know whether a result that
+    came back "full" was actually capped — which is what tells the client the
+    graph is truncated.
+
+    Parsed with sqlglot rather than a regex so a LIMIT inside a CTE or a
+    subquery is not mistaken for the outer one. Returns None when the query
+    cannot be parsed or the limit is not a plain integer (e.g. a parameter),
+    in which case the caller simply cannot claim truncation.
+    """
+    try:
+        parsed = sqlglot.parse_one(sql, dialect="spark")
+    except Exception:
+        return None
+    if parsed is None:
+        return None
+
+    limit = parsed.args.get("limit")
+    if limit is None:
+        return None
+
+    try:
+        return int(limit.expression.this)
+    except (AttributeError, TypeError, ValueError):
+        return None

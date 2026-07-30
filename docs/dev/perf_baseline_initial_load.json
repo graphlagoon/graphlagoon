@@ -1,0 +1,352 @@
+{
+  "note": "Phase 0 baseline for the initial-load work. Mocked payload (no warehouse): 10k nodes / 20k edges / 30 props per node. Regenerate with: PERF_NODES=10000 PERF_EDGES=20000 PERF_PROPS=30 PERF_WAIT_MS=25000 npx tsx e2e/perf-report.ts",
+  "payload": {
+    "nodes": 10000,
+    "edges": 20000,
+    "propsPerNode": 30
+  },
+  "perfEntries": [
+    {
+      "label": "buildGraphData",
+      "ms": 24.400000005960464,
+      "ts": 1785420073224,
+      "extra": {
+        "nodeCount": 0,
+        "linkCount": 0,
+        "init": 1
+      }
+    },
+    {
+      "label": "initGraphDataApply",
+      "ms": 31.600000001490116,
+      "ts": 1785420073256,
+      "extra": {
+        "nodes": 0,
+        "links": 0,
+        "preSettled": 0
+      }
+    },
+    {
+      "label": "forcegraphUpdate",
+      "ms": 1.9000000059604645,
+      "ts": 1785420073284,
+      "extra": {
+        "changedPropsCount": 60,
+        "nodesMs": 0,
+        "linksMs": 2,
+        "forceMs": 0,
+        "nodeCount": 0,
+        "linkCount": 0
+      }
+    },
+    {
+      "label": "forcegraphUpdate",
+      "ms": 7.799999997019768,
+      "ts": 1785420073292,
+      "extra": {
+        "changedPropsCount": 60,
+        "nodesMs": 0,
+        "linksMs": 8,
+        "forceMs": 0,
+        "nodeCount": 0,
+        "linkCount": 0
+      }
+    },
+    {
+      "label": "load:context:fetch",
+      "ms": 138.39999999850988,
+      "ts": 1785420073361
+    },
+    {
+      "label": "updateVisuals",
+      "ms": 0.20000000298023224,
+      "ts": 1785420073363,
+      "extra": {
+        "nodes": 0.10000000149011612,
+        "links": 0,
+        "kapsule": 0.10000000149011612,
+        "nodeCount": 0,
+        "linkCount": 0
+      }
+    },
+    {
+      "label": "updateVisuals",
+      "ms": 0,
+      "ts": 1785420073368,
+      "extra": {
+        "nodes": 0,
+        "links": 0,
+        "kapsule": 0,
+        "nodeCount": 0,
+        "linkCount": 0
+      }
+    },
+    {
+      "label": "forcegraphUpdate",
+      "ms": 0.20000000298023224,
+      "ts": 1785420073390,
+      "extra": {
+        "changedPropsCount": 5,
+        "nodesMs": 0,
+        "linksMs": 0,
+        "forceMs": 0,
+        "nodeCount": 0,
+        "linkCount": 0
+      }
+    },
+    {
+      "label": "load:subgraph:fetch",
+      "ms": 293.5,
+      "ts": 1785420073662,
+      "extra": {
+        "nodeCount": 10000,
+        "edgeCount": 20000
+      }
+    },
+    {
+      "label": "load:subgraph:assign",
+      "ms": 0.10000000149011612,
+      "ts": 1785420073662
+    },
+    {
+      "label": "load:subgraph:backend",
+      "ms": 0,
+      "ts": 1785420073662,
+      "extra": {
+        "total_ms": 0,
+        "edge_query_ms": 0,
+        "node_query_ms": 0,
+        "node_count": 10000,
+        "edge_count": 20000
+      }
+    },
+    {
+      "label": "load:subgraph:chain",
+      "ms": 29.900000005960464,
+      "ts": 1785420073692,
+      "extra": {
+        "nodeCount": 10000,
+        "edgeCount": 20000
+      }
+    },
+    {
+      "label": "forcegraphUpdate",
+      "ms": 0,
+      "ts": 1785420073829,
+      "extra": {
+        "changedPropsCount": 3,
+        "nodesMs": 0,
+        "linksMs": 0,
+        "forceMs": 0,
+        "nodeCount": 0,
+        "linkCount": 0
+      }
+    },
+    {
+      "label": "buildGraphData",
+      "ms": 126,
+      "ts": 1785420073955,
+      "extra": {
+        "nodeCount": 10000,
+        "linkCount": 20000
+      }
+    },
+    {
+      "label": "forcegraphUpdate",
+      "ms": 0.20000000298023224,
+      "ts": 1785420073963,
+      "extra": {
+        "changedPropsCount": 1,
+        "nodesMs": 0,
+        "linksMs": 0,
+        "forceMs": 0,
+        "nodeCount": 0,
+        "linkCount": 0
+      }
+    },
+    {
+      "label": "headlessSettle",
+      "ms": 3401.39999999851,
+      "ts": 1785420077357,
+      "extra": {
+        "nodeCount": 10000,
+        "linkCount": 20000
+      }
+    },
+    {
+      "label": "graphDataApply",
+      "ms": 0,
+      "ts": 1785420077364,
+      "extra": {
+        "nodes": 10000,
+        "links": 20000,
+        "preSettled": 1
+      }
+    },
+    {
+      "label": "forcegraphUpdate",
+      "ms": 101.20000000298023,
+      "ts": 1785420077471,
+      "extra": {
+        "changedPropsCount": 7,
+        "nodesMs": 22,
+        "linksMs": 70,
+        "forceMs": 9,
+        "nodeCount": 10000,
+        "linkCount": 20000
+      }
+    },
+    {
+      "label": "updateVisuals",
+      "ms": 16.69999999552965,
+      "ts": 1785420078045,
+      "extra": {
+        "nodes": 15.699999995529652,
+        "links": 1,
+        "kapsule": 0,
+        "nodeCount": 10000,
+        "linkCount": 20000
+      }
+    },
+    {
+      "label": "forcegraphUpdate",
+      "ms": 96.40000000596046,
+      "ts": 1785420078183,
+      "extra": {
+        "changedPropsCount": 6,
+        "nodesMs": 17,
+        "linksMs": 79,
+        "forceMs": 0,
+        "nodeCount": 10000,
+        "linkCount": 20000
+      }
+    }
+  ],
+  "perfSummary": [
+    {
+      "label": "headlessSettle",
+      "count": 1,
+      "totalMs": 3401.39999999851,
+      "avgMs": 3401.39999999851,
+      "minMs": 3401.39999999851,
+      "maxMs": 3401.39999999851,
+      "lastMs": 3401.39999999851
+    },
+    {
+      "label": "load:subgraph:fetch",
+      "count": 1,
+      "totalMs": 293.5,
+      "avgMs": 293.5,
+      "minMs": 293.5,
+      "maxMs": 293.5,
+      "lastMs": 293.5
+    },
+    {
+      "label": "forcegraphUpdate",
+      "count": 7,
+      "totalMs": 207.7000000178814,
+      "avgMs": 29.671428573983057,
+      "minMs": 0,
+      "maxMs": 101.20000000298023,
+      "lastMs": 96.40000000596046
+    },
+    {
+      "label": "buildGraphData",
+      "count": 2,
+      "totalMs": 150.40000000596046,
+      "avgMs": 75.20000000298023,
+      "minMs": 24.400000005960464,
+      "maxMs": 126,
+      "lastMs": 126
+    },
+    {
+      "label": "load:context:fetch",
+      "count": 1,
+      "totalMs": 138.39999999850988,
+      "avgMs": 138.39999999850988,
+      "minMs": 138.39999999850988,
+      "maxMs": 138.39999999850988,
+      "lastMs": 138.39999999850988
+    },
+    {
+      "label": "initGraphDataApply",
+      "count": 1,
+      "totalMs": 31.600000001490116,
+      "avgMs": 31.600000001490116,
+      "minMs": 31.600000001490116,
+      "maxMs": 31.600000001490116,
+      "lastMs": 31.600000001490116
+    },
+    {
+      "label": "load:subgraph:chain",
+      "count": 1,
+      "totalMs": 29.900000005960464,
+      "avgMs": 29.900000005960464,
+      "minMs": 29.900000005960464,
+      "maxMs": 29.900000005960464,
+      "lastMs": 29.900000005960464
+    },
+    {
+      "label": "updateVisuals",
+      "count": 3,
+      "totalMs": 16.899999998509884,
+      "avgMs": 5.633333332836628,
+      "minMs": 0,
+      "maxMs": 16.69999999552965,
+      "lastMs": 16.69999999552965
+    },
+    {
+      "label": "load:subgraph:assign",
+      "count": 1,
+      "totalMs": 0.10000000149011612,
+      "avgMs": 0.10000000149011612,
+      "minMs": 0.10000000149011612,
+      "maxMs": 0.10000000149011612,
+      "lastMs": 0.10000000149011612
+    },
+    {
+      "label": "load:subgraph:backend",
+      "count": 1,
+      "totalMs": 0,
+      "avgMs": 0,
+      "minMs": 0,
+      "maxMs": 0,
+      "lastMs": 0
+    },
+    {
+      "label": "graphDataApply",
+      "count": 1,
+      "totalMs": 0,
+      "avgMs": 0,
+      "minMs": 0,
+      "maxMs": 0,
+      "lastMs": 0
+    }
+  ],
+  "threeInfo": {
+    "render": {
+      "frame": 1526,
+      "calls": 4,
+      "triangles": 7200204,
+      "points": 0,
+      "lines": 0
+    },
+    "memory": {
+      "geometries": 6,
+      "textures": 2
+    },
+    "programs": 5
+  },
+  "memory": {
+    "usedJSHeapSize": 239000000,
+    "totalJSHeapSize": 269000000,
+    "jsHeapSizeLimit": 3760000000
+  },
+  "cdpMetrics": {
+    "JSHeapUsedSize": 102827704,
+    "JSHeapTotalSize": 128827392,
+    "Nodes": 437,
+    "LayoutCount": 27,
+    "RecalcStyleCount": 236
+  }
+}
