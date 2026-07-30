@@ -1,5 +1,414 @@
 # Decision Log
 
+## [2026-07-20] - Feature: Ego ring ordering strategies + same-ring edge arcs
+
+**Purpose:** Dense ego networks rendered as a hairball. Two independent causes: (1) angular
+position within each ring was decided by sorted-node-id — carrying neither meaning nor any
+crossing optimization; (2) edges between nodes on the *same* ring were drawn as straight
+chords across the disc interior, obscuring the radial BFS tree that is the layout's main
+reading. This adds a ring-ordering strategy selector and arc routing for same-ring edges.
+
+**Domain research shaped the design as much as the graph-drawing literature.** The tool
+targets financial fraud/AML analysis, which rules out several standard decluttering moves:
+
+- **Edge bundling rejected outright** (not deferred). It creates false connections that users
+  demonstrably follow; it is topology-independent, so bundles are layout artifacts rather than
+  structure; it finds apparent structure even in random disconnected edges; and it measurably
+  degrades path-tracing — the analyst's second most common task. In an artifact that may be
+  attached to a SAR filing, visually merging a legitimate transfer with one to a sanctioned
+  shell fabricates a relationship.
+- **Density-based edge fade rejected.** Fraud is low-frequency/high-consequence: the single
+  transaction to the shell company *is* the case, and is exactly the outlier a fade discards.
+  (Cf. OpenOwnership practice: ceased relationships are greyed, never removed.)
+- **Degree-based filtering rejected.** The high-degree node is frequently the investigation
+  target (mule aggregator, shared terminal, nominee director).
+
+**Design decisions:**
+
+1. **Strategies are mutually exclusive, not composable.** `ringOrdering` is one of
+   `id | barycenter | node-type | community | property`. A ring's angle carries one meaning at
+   a time, so two runs remain comparable. Composition (sector + barycenter tiebreak) was
+   considered and rejected as harder to explain and test for marginal benefit.
+2. **Determinism is the feature, not a side effect.** Ehlers et al. (*Computers & Graphics*
+   125:104123, 2024) found **no significant task-performance difference between radial,
+   layered and straight-line** ego representations. The justification for investing in the ring
+   is therefore reproducibility/comparability — Krzywinski et al.'s hive-plot argument
+   (*Brief. Bioinform.* 13(5), 2012) that force layouts lack a coordinate system and cannot be
+   compared across runs. Fixed sweep counts, stable sorts and id tiebreaks throughout.
+3. **Heterogeneity is a first-class requirement.** Graphs here are attribute-sparse: a node may
+   simply lack the field being sectored by. Such nodes get a sentinel key and form **one
+   contiguous trailing sector** — never scattered, never hidden ("these N nodes lack this
+   field" is itself analyst-relevant). If *no* node carries the attribute, the layout falls
+   back to id order and sets `ringOrderingDegraded`, which the panel surfaces rather than
+   silently drawing a meaningless ordering. The panel also reports partial coverage.
+4. **Arc routing, explicitly not bundling.** Same-ring edges follow their ring; the BFS tree
+   stays dead straight; every edge remains individually traceable and selectable — precisely
+   what bundling gives up. Curvature is clamped so an arc's peak never reaches the neighbouring
+   ring (an arc invading its neighbour would read as passing through nodes it does not touch).
+
+**Implementation:**
+
+- `computeTreeLayout` gained `ringOrdering` / `ringOrderingKey` / `communityMap` options and
+  now returns `parents` (BFS forest) and `ringOrderingDegraded`. Sibling reordering is the only
+  degree of freedom used — it never breaks the DFS slot pass's subtree contiguity.
+- Barycenter strategy: radial-Sugiyama sweeps (Bachmaier, *IEEE TVCG* 2007 — radial crossing
+  minimization is NP-hard, hence a heuristic). Each subtree rotates toward the vector sum of
+  its non-tree neighbours' angles, measured *relative to the parent's angle* so the 0/2π seam
+  is harmless. 3 fixed sweeps.
+- `computeEgoLinkCurvatures`: tree edges → 0; same-ring → `sign(Δ)·min(1.15·tan(|Δ|/4), kMax)`
+  where `tan(|Δ|/4)` puts the Bézier peak exactly on the ring and `kMax` caps it at
+  `r + 0.6·gap`; cross-ring non-tree → bounded gentle fan. The multi-edge fan value is
+  composed additively and bounded on its own — clamping the *total* would have pulled wide arcs
+  back inside their ring (caught by a test).
+- Unreachable ring: under any non-`id` ordering, orphans are sorted by the circular mean of
+  their reachable neighbours' angles instead of by id, removing the longest chords.
+
+**Files Modified:**
+- frontend/src/utils/layoutModes.ts — strategies, `circularMean`, `computeEgoLinkCurvatures`.
+- frontend/src/types/graph.ts — `RingOrdering` type; 3 new `EgoLayoutConfig` fields.
+- frontend/src/stores/graph.ts — defaults (`barycenter`, arcs on). Saved-state merge already
+  spread defaults first, so old explorations pick up the new fields unchanged.
+- frontend/src/components/GraphCanvas3D.vue — ego branch options; curvature application
+  mirroring the hive path; `restoreHiveCurvatures` → `restoreModeCurvatures`; community watcher
+  extended to ego.
+- frontend/src/components/LayoutPanel.vue — ordering select, property picker, arc toggle,
+  degradation/coverage hints, Graph Lens suggestion.
+- frontend/src/utils/__tests__/layoutModes.test.ts, .../LayoutPanel.test.ts — 21 new tests.
+
+**Testing:**
+- [x] Full frontend suite green: **1140 tests / 64 files** (was 1119). `vue-tsc --noEmit` clean.
+- [x] Regression test asserts the default path is bit-identical to explicit `ringOrdering: 'id'`.
+- [x] Arc geometry verified numerically (Bézier midpoint evaluated against ring radius/headroom).
+- [ ] Manual browser verification pending.
+
+**Known limitations / follow-ups (deliberately out of scope):**
+- **Parallel-edge aggregation** is likely the next largest win: multi-edge curvature saturates
+  at ~4 edges (`STEP=0.15`, `CAP=0.6` in `graphAppearance.ts`), so N repeated transfers between
+  one pair — the norm in transaction graphs, and the signature of structuring/smurfing — become
+  a solid smear. NEVA (*CGF* 39(6), 2020) aggregates to one edge with width = frequency plus a
+  linked temporal view. Blocked on there being no per-edge weight encoding at all today
+  (`edgeWidth` is a single global slider; no `numericEdgeProperties` counterpart exists).
+- **Tapered edges** for direction (Holten et al., PacificVis 2011 — beat arrowheads specifically
+  at high-degree vertices, i.e. the dense hub case). Requires submodule geometry changes.
+- **Motif glyphs** (fan = smurfing, connector = intermediary; Dunne & Shneiderman, CHI 2013).
+- Semantic-angle-by-flow-direction was considered and dropped: it presumes meaningfully
+  bidirectional edges, which the shipped IEEE-CIS pipeline does not have (all edges radiate
+  outward from Transaction nodes, so in/out hemispheres would be degenerate).
+
+**Status:** Superseded by the follow-up below (3 bugs found and fixed).
+
+## [2026-07-21] - Fix: 3 geometry bugs in the ego ring layout + UX for no-op controls
+
+**Purpose:** Post-implementation introspection of the entry above, with every claim measured
+against the real `computeTreeLayout` / `computeEgoLinkCurvatures` (not standalone simulation).
+Found 3 confirmed bugs and 2 fragilities; also closed the UX gap where several ego controls
+could be silent no-ops depending on graph shape.
+
+**Bugs found and fixed (measured before → after):**
+
+1. **`nodeSpacing` was an average, not a minimum.** `capacityRadius = count·nodeSpacing/2π`
+   assumes an even angular spread, but the tidy-tree allocates angular width per **leaf**, not
+   per ring member. A ring mixing a deep bushy subtree with a shallow one packed the shallow
+   side far tighter than the average implied. Measured on a hub(10×5 leaves) + chain(5 leaves)
+   fixture — the convergence-star shape of the IEEE-CIS pipeline, so the worst case is the
+   common case: **ring 2 arc 13.7 against a contract of 26** (1.9×, nodes overlapping).
+   Fix: resolve angles first (they depend only on slots, never on radius), then size each ring
+   by its actual tightest circular gap: `radius = max(prev + levelSpacing, capacityRadius,
+   nodeSpacing / minCircularGap)`. Bounded by `nodeSpacing·totalSlots/2π` since two ring
+   members are always ≥ 1 slot apart. `capacityRadius` retained as a floor, so uniform fixtures
+   (and the `[60,145,210]` radius regression) are unchanged. **After: 26.0.**
+
+2. **The "never invade the next ring" clamp was defeated by multi-edges.** The arc was clamped
+   to peak ≤ `r + 0.6·gap`, then the multi-edge fan was added *afterwards*. With the fan at its
+   CAP of 0.6: **peak 343.8 with the next ring at 260**. Parallel transfers are the norm in
+   transaction graphs, so this fired constantly. Fix: compute the headroom left by the arc and
+   rescale the fan linearly into it (`fanScale = min(1, headroom / 0.6)`, ceiling
+   `r + 0.9·gap`). Parallel edges stay ordered and distinct, just compressed. **After: 254.0.**
+
+3. **Single-ring ego graphs lost their arcs entirely.** `gapByLevel` seeded `lastGap = 0`, so a
+   lone `levelStat` yielded `gap = 0` → `peakLimit = radius` → the arc flattened exactly onto
+   the ring. `maxHops = 1` is a common setting and hit this every time. Fix: fall back to
+   `levelSpacing` (passed through `EgoCurvatureDeps`) when there is no ring outward.
+   **After: peak 201.02 vs radius 200.**
+
+**Fragilities also fixed:** (a) near-antipodal endpoints sat on the `wrapToPi` seam where
+sub-pixel jitter flipped the arc's side — now resolved by the same id-based tiebreak already
+used for radially collinear pairs; (b) the cross-ring bow scaled with chord length
+(chord 521 × k 0.3 = 156px displacement), letting a ring-1→ring-5 edge sweep across every ring
+between — now capped in world units at `0.5·levelSpacing`.
+
+**Checked and found NOT to be bugs:** the quadratic Bézier's midpoint *is* its true maximum
+(the curve is symmetric — verified by sweeping t ∈ [0,1]), so clamping the midpoint does bound
+the whole arc; and measuring the outermost real ring's gap against the unreachable ring is
+acceptable behaviour.
+
+**UX — the rings now explain themselves:**
+- Ring guide labels carry population: `"1 · 3"`, `"2 · 450"`, `"unreachable · 12"`. "Where is
+  the mass?" is the first thing read off an ego view and previously required counting dots.
+- `computeTreeLayout` now returns `nonTreeEdgeCount` / `sameRingEdgeCount`, published to
+  `graphStore.egoLayoutStats` (derived, not persisted). The panel uses them to say when a
+  control is a **no-op on this graph**: crossing reduction has nothing to uncross in a pure
+  convergence star (zero non-tree edges — the common fraud-attribute shape), and same-ring arcs
+  have nothing to redraw when no edge joins two nodes on one ring. Previously the user toggled
+  these and nothing happened, with no explanation.
+- A hint states that ego pins nodes analytically, so the simulation controls do not apply — and
+  that the same graph always yields the same picture, which is the property that makes two ego
+  views comparable (the reason to prefer radial at all, per Ehlers et al. 2024).
+- **Progressive disclosure**, matching the force-directed block's existing `Advanced` toggle.
+  The ego block had grown to ~8 controls and 5 hints, all flat. Split by "what does the analyst
+  reach for to answer a question?": **visible** = focus node, direction, edge types, max hops,
+  ring ordering (the analytical choices); **Advanced** = ring spacing, same-ring arcs, and the
+  pinning/lens explanations (visual refinement, set once). Reuses the existing
+  `.advanced-toggle` markup and CSS rather than inventing a second disclosure idiom.
+
+**Files Modified:**
+- frontend/src/utils/layoutModes.ts — `minCircularGap`; angles-before-radii; fan rescaling;
+  gap fallback; sign stability; cross-ring offset cap; edge-shape counts; labels with counts.
+- frontend/src/stores/graph.ts — `egoLayoutStats` (+ reset).
+- frontend/src/components/GraphCanvas3D.vue — publish/clear stats; pass `levelSpacing`.
+- frontend/src/components/LayoutPanel.vue — 3 new hints; `Advanced` disclosure for the ego block.
+- frontend/src/utils/__tests__/layoutModes.test.ts, .../LayoutPanel.test.ts — 12 new tests.
+
+**Testing:**
+- [x] Full suite green: **1152 tests / 64 files** (was 1140). `vue-tsc --noEmit` clean.
+- [x] All three bugs re-measured against the fixed code (numbers above).
+- [x] Two pre-existing curvature tests updated — they had encoded the broken additive
+      composition; the contract is now "fan compressed into remaining headroom, order preserved".
+- [ ] Manual browser verification still pending (unchanged from the previous entry).
+
+**Status:** Implemented, unit-tested and numerically verified; manual verification pending.
+
+## [2026-07-21] - Feature: circular sifting — the crossing reduction was nearly useless
+
+**Purpose:** Asked whether "fewest crossings" had tunable parameters, we benchmarked what it
+actually achieves. The answer was uncomfortable: on a 40-node convergence star with 60 lateral
+edges, **455 → 443 crossings, a 2.6% reduction** — against the ~30% the radial-Sugiyama
+literature reports. The shipped default was close to a placebo.
+
+**Root cause (structural, not a tuning problem):** the barycenter implementation reorders
+*siblings within each parent*. On a convergence star — one focus, every alter a direct child —
+there is exactly one parent, so the algorithm degenerates to "sort 40 siblings by mean neighbour
+angle". That is a **circular seriation** problem: the target angles are computed from positions
+the sort is about to change, so a single ordering pass cannot converge. More sweeps do not help.
+This is precisely the shape the IEEE-CIS pipeline produces, so the weakest case was the common
+one. Note the existing no-op hint did *not* cover this: there were 58 non-tree edges, so nothing
+warned that the pass was achieving almost nothing.
+
+**Implementation — `crossingHeuristic`, three deterministic options:**
+
+| Heuristic | Crossings (40-node star) | Time | Notes |
+|---|---|---|---|
+| `barycenter` | 443 (−2.6%) | 1.4ms | previous default; sibling sweeps by mean angle |
+| `median` | 429 (−5.7%) | 2.7ms | circular median; Eades & Wormald (1994) 3-approximation, which the mean lacks |
+| **`sifting`** | **71 (−84%)** | 29ms | circular sifting (Baur & Brandes, GD 2004) — **new default** |
+
+Sifting lifts each node out of the ring, tries every position, and keeps the one that crosses
+least, counting real chord crossings. It works on the ring itself rather than on sibling order,
+which is the lever the sweeps do not have. Applied per sibling group so subtree sectors stay
+contiguous; strict-improvement-only with lowest-index tie-breaks keeps it deterministic.
+
+**Cost control (the interesting engineering constraint).** A naive implementation recounted all
+crossings for every trial position — O(n³·E²), measured at 40→77ms, 150→9.4s, **250→68s**, which
+would freeze the UI. Rewritten to count only the crossings involving the moved node (its delta
+is all sifting needs): 40→29ms, 80→217ms, 150→1.4s, 250→7.5s. Still steep, so
+`siftingMaxRingSize` defaults to **100** — the layout re-runs inside a 150ms debounce, and rings
+past that keep the cheap sweeps and set `siftingSkippedLargeRing`, which the panel reports.
+Earlier draft used 400; the measurements showed that was ~30 seconds of frozen UI.
+
+**Parameters exposed** (in the ego Advanced disclosure, per the previous entry's split):
+`crossingHeuristic` select, and a `crossingSweeps` slider (0–8) shown only for the sweep-based
+heuristics, since sifting ignores it. Determinism is preserved — the user picks *which*
+deterministic algorithm runs, not a randomness level; the same graph plus the same settings still
+yields the same picture, which is the property the whole radial layout is justified on.
+A hint warns that the sweep heuristics are weak on hub-dominated graphs.
+
+**Files Modified:**
+- frontend/src/utils/layoutModes.ts — `circularMedian`, `chordsCross`, `siftRingOrder`;
+  `crossingHeuristic` / `crossingSweeps` / `siftingMaxRingSize` options; `siftingSkippedLargeRing`.
+- frontend/src/types/graph.ts — `CrossingHeuristic`; 2 new `EgoLayoutConfig` fields.
+- frontend/src/stores/graph.ts — defaults (`sifting`, 3 sweeps); stat field.
+- frontend/src/components/GraphCanvas3D.vue — pass the options through, publish the skip flag.
+- frontend/src/components/LayoutPanel.vue — heuristic select, sweeps slider, 2 hints.
+- frontend/src/utils/__tests__/layoutModes.test.ts, .../LayoutPanel.test.ts — 14 new tests,
+  including a geometric crossing counter asserting sifting beats the sweeps by >50%.
+
+**Testing:**
+- [x] Full suite green: **1166 tests / 64 files** (was 1152). `vue-tsc --noEmit` clean.
+- [x] Crossing counts and timings measured directly (tables above), not estimated.
+- [ ] Manual browser verification still pending.
+
+**Known limitation:** sifting's cost is superlinear, so the largest rings — arguably where
+uncrossing matters most — fall back to the weak sweeps. A bounded-window variant (only trying
+positions near the node's current one) would extend the budget considerably and is the obvious
+next step if large rings prove important.
+
+**Follow-up the same day — the default was wrong, and the guard was one-dimensional.**
+
+Shipping sifting as the default was a bad call, made from a single 40-node fixture. Broader
+measurement showed the cost curve depends on **size × density**, which a size-only cap misses:
+
+| ring | lateral edges | sifting | median |
+|---|---|---|---|
+| 40 | 1.5·N | 25ms | 0.4ms |
+| 80 | 1.5·N | 199ms | 0.4ms |
+| 100 | 0.5·N | 66ms | 0.4ms |
+| 100 | 1.5·N | **440ms** | 0.8ms |
+
+440ms is ~3× the 150ms debounce, and the layout re-runs on *every* config nudge — dragging the
+ring-spacing slider would have stuttered badly. Two corrections:
+
+1. **Default reverted to `barycenter`** — the cheapest option and the one already in production,
+   so this feature adds capability without changing anyone's default behaviour or cost. (An
+   intermediate revision defaulted to `median`, which is marginally better for the same order of
+   cost — 429 vs 443 crossings — but that was an unforced change of a shipped default; keeping
+   the incumbent is the smaller claim.) Median and sifting are both selectable, and the UI states
+   sifting's cost. The strongest algorithm should be opt-in when it is 500× more expensive.
+2. **`siftingWorkBudget`** (ring size × ring chords) replaces the size-only cap as the real
+   guard, since density matters as much as size. Calibrated empirically rather than derived:
+   20000 still allowed a 209ms ring; 6000 rejected nearly every ring above 60 nodes; **10000**
+   lands at ~89ms worst case while still sifting about half the sampled shapes. `siftingMaxRingSize`
+   remains as a coarse first gate (150).
+
+Added a test asserting the budget rejects a ring that is too **dense** at a size the cap allows —
+the case the previous guard would have waved through.
+
+## [2026-07-17] - Fix: `nodePropertyIconConfigs` silently dropped by backend on exploration save
+
+**Purpose:** Same bug class as the `layout_mode_config` fix below, found during that
+investigation and fixed as a follow-up: the frontend saves and restores
+`nodePropertyIconConfigs` (per-node-type property→icon mapping) in the exploration state, but
+the backend `ExplorationState` Pydantic schema never declared the field, so Pydantic v2's
+default `extra="ignore"` stripped it on every save — the mapping was lost on reload.
+
+**Implementation:** one-line schema addition (`nodePropertyIconConfigs: Optional[dict] = None`,
+opaque-dict pattern), plus a first frontend restore test for the field (the existing
+save/load wiring in `graph.ts` was already correct and needed no changes).
+
+**Files Modified:**
+- api/graphlagoon/models/schemas.py — added `nodePropertyIconConfigs: Optional[dict]` to
+  `ExplorationState`.
+- frontend/src/stores/__tests__/graph.actions.test.ts — added `loadExploration` restore test
+  (field previously had zero test coverage).
+
+**Testing:**
+- [x] Full frontend suite green: 1097 tests. Full backend suite green: 266 passed, 1 skipped.
+
+**Status:** Implemented.
+
+## [2026-07-17] - Fix: layout persistence gap in Exploration (`layout_mode_config`, `force3DSettings`)
+
+**Purpose:** User asked whether the selected layout is saved in an exploration the same way
+communities are. Investigation found `layout_algorithm` (which layout mode is active) already
+round-trips correctly, but two other layout-related pieces of state did not:
+
+1. **Bug:** `layout_mode_config` (per-mode params for ego/hive/hierarchical layouts) was already
+   built and sent by the frontend on every save (`getExplorationState()`), and `loadExploration()`
+   already knew how to restore it — but the backend `ExplorationState` Pydantic schema never
+   declared the field. Since no `model_config = {"extra": ...}` is set anywhere in
+   `schemas.py`, Pydantic v2's default `extra="ignore"` silently dropped it on every save, so any
+   saved exploration lost its ego/hive/hierarchical parameters on reload.
+2. **Gap:** `force3DSettings` (the d3-force-3d simulation params used in `LayoutPanel.vue` — charge
+   strength, link distance, gravity, collision, pointer repulsion/vacuum, clipping plane) was not
+   persisted anywhere at all, frontend or backend. It always reset to hardcoded defaults on reload.
+
+**Design Decisions:**
+1. **`Optional[dict]` opaque fields on the backend**, matching the exact existing pattern used by
+   `community`, `clusters`, `behaviors`, `aesthetics`, `similarity` — no typed Pydantic sub-schema.
+   The `Exploration.state` DB column is a single generic JSON blob, so no migration was needed.
+2. **`force3d_settings` (snake_case) as the wire/schema field name**, distinct from the store's
+   `force3DSettings` (camelCase) ref — mirrors the existing `layout_mode_config`/`layoutModeConfig`
+   naming split.
+3. **Extracted `defaultForce3DSettings()` factory** (previously an inline object literal on the ref
+   declaration) so the same defaults can be reused for initialization, the `loadExploration()`
+   merge-over-defaults restore, and `resetExploration()` — same pattern as `DEFAULT_BEHAVIORS`.
+4. **No backend test added**: confirmed the same-pattern fields (`community`, `clusters`,
+   `behaviors`, `aesthetics`) have no dedicated backend round-trip test either — the convention
+   relies on frontend tests plus the fields being untyped passthrough JSON.
+5. **Sanitizing merge on restore (`mergeForce3DSettings`)**, found in self-review: the initial
+   naive spread (`{...defaults, ...saved}`) had a real bug — `d3DistanceMax: Infinity` cannot be
+   represented in JSON and round-trips as `null`; spread raw, that `null` reaches d3-force's
+   `distanceMax()` setter (`null*null = 0`) and silently disables node repulsion after a single
+   save/load cycle. The merge now keeps only keys present in the defaults whose saved value has
+   the same `typeof` as the default — which simultaneously fixes the Infinity/null round-trip,
+   drops wrong-typed corrupted values, and prevents keys removed from the schema in the future
+   from riding along in store state.
+
+**Files Modified:**
+- api/graphlagoon/models/schemas.py — added `layout_mode_config: Optional[dict]` and
+  `force3d_settings: Optional[dict]` to `ExplorationState`.
+- frontend/src/types/graph.ts — added `force3d_settings?: Record<string, unknown>` to
+  `ExplorationState` (`layout_mode_config` was already declared).
+- frontend/src/stores/graph.ts — extracted `defaultForce3DSettings()`; wired `force3DSettings` into
+  `getExplorationState()`, `loadExploration()` (merge over defaults), and `resetExploration()`.
+- frontend/src/stores/__tests__/graph.exploration.test.ts — added `force3DSettings persistence`
+  describe block (default/updated capture, cross-Pinia-instance restore, legacy-exploration
+  defaults).
+- frontend/src/stores/__tests__/graph.actions.test.ts — added `force3d_settings` cases to the
+  existing `loadExploration layout migration` describe block (mocked `api.getExploration`),
+  including corrupted/stale-value cases (null from JSON Infinity, wrong type, removed key,
+  non-object blob).
+
+**Testing:**
+- [x] Full frontend suite green: 1096 tests, 63 files.
+- [x] `npx vue-tsc --noEmit` clean.
+- [x] Full backend suite green: 266 passed, 1 skipped (pre-existing).
+
+**Status:** Implemented.
+
+## [2026-07-17 10:25] - Feature: cluster programs with context/exploration scope (`graph_contexts.cluster_programs`)
+
+**Purpose:** A cluster program created today did not appear when opening an already-saved
+exploration of the same context. Root cause: programs were persisted **only** inside each
+exploration's `state.clusters.programs` blob, and `clusterStore.loadState()` replaced the whole
+`programs` array with that snapshot — a program created after the exploration was saved was wiped.
+
+**Design Decisions:**
+1. **New JSON column `graph_contexts.cluster_programs` (migration 009)**, mirroring the
+   `default_behaviors` pattern exactly: opaque `list[dict]` pass-through in Pydantic, the frontend
+   owns the shape. The existing `PUT /api/graph-contexts/{id}` already does partial updates (all
+   `GraphContextUpdate` fields are `Optional`), so no new endpoint.
+2. **Dual scope (user-requested):** `ClusterProgram.scope: 'context' | 'exploration'`.
+   Context-scoped programs are shared by all explorations and auto-saved (debounced 500 ms) on
+   create/update/delete; exploration-scoped ones keep living inside the exploration state as
+   before. The editor modal shows a "Save to" radio **only when the user has write access to the
+   context** — otherwise the program is silently exploration-scoped (users with write access only
+   on a shared exploration can't write to the context anyway).
+3. **Built-in defaults are never persisted.** The 3 built-ins (orphan / group-by-type / BFS,
+   stable ids in `DEFAULT_PROGRAM_IDS`) are recreated from code on every hydration, filtered out
+   of every persist payload, and now **formally undeletable** (`deleteProgram` returns false; the
+   panel hides the delete button). Editing a built-in works in-session but reverts on reload —
+   documented limitation; a context program with a default's id defensively shadows the built-in.
+4. **Back-compat by merge-import:** `loadState()` no longer replaces programs. Legacy programs
+   (no `scope`) found in old exploration states are imported into the context (and persisted)
+   when the user has context write access, kept exploration-local otherwise; ids already present
+   are skipped (context wins). New exploration saves embed only exploration-scoped programs.
+5. **Hydration is the single reset path:** `loadContext` and `clearAll`/`clearPrograms` all go
+   through `hydrateProgramsFromContext(currentContext?.cluster_programs)` — no cross-context
+   leakage, and an `isHydrating` guard ensures hydration never fires a PUT.
+
+**Files Created:**
+- [api/graphlagoon/alembic/versions/009_add_context_cluster_programs.py](../../api/graphlagoon/alembic/versions/009_add_context_cluster_programs.py)
+- [api/tests/test_context_cluster_programs.py](../../api/tests/test_context_cluster_programs.py) (29 tests)
+- [frontend/src/stores/__tests__/graph.contextClusterPrograms.test.ts](../../frontend/src/stores/__tests__/graph.contextClusterPrograms.test.ts)
+
+**Files Modified:**
+- Backend: `db/models.py`, `db/memory_store.py`, `models/schemas.py`, `routers/graph_contexts.py` (all four `default_behaviors` touch points mirrored)
+- Frontend core: `stores/cluster.ts` (scope resolution, debounced `persistProgramsToContext`, `hydrateProgramsFromContext`, merge-`loadState`, filtered `getState`, delete guard, exported `DEFAULT_PROGRAM_IDS`/`isDefaultProgramId`), `stores/graph.ts` (`loadContext` hydrates)
+- Frontend types: `types/cluster.ts` (`ClusterProgramScope`), `types/graph.ts` (`cluster_programs` on context + create request)
+- UI: `ClusterProgramEditorModal.vue` (scope radio, permission-gated), `ClusterProgramPanel.vue` (scope badges, delete hidden for built-ins), `GraphVisualizationView.vue` (`flushPersist()` on unmount)
+- Tests updated: `cluster.test.ts` (+19 new), `useClusterProgramMenuActions.test.ts`, `ClusterProgramEditorModal.test.ts` (+3)
+
+**Testing:** frontend 1088/1088 (`npm run test:run`), backend 266 passed + 1 skipped
+(`uv run pytest`), `vue-tsc --noEmit` clean.
+
+**Known Limitations / accepted risks:**
+- One-time resurrection: a pre-change exploration saved with program P re-imports P after it was
+  deleted from the context; re-saving that exploration ends the loop.
+- Exploration-scoped programs not yet saved into an exploration are lost on reload (same as before).
+- Multi-tab: last-write-wins on the whole `cluster_programs` array.
+- A debounced persist within 500 ms of navigation is flushed by `onUnmounted`, but a hard tab
+  close can still drop it.
+
 ## [2026-07-13 16:30] - Feature: opening a context runs no query by default (`behaviors.autoLoadOnOpen`)
 
 **Purpose:** Opening a context always fired an implicit `GET /subgraph` with `edge_limit: 1000`
@@ -1480,3 +1889,542 @@ audit of API + frontend for hardcoded `node_id`/`edge_id` found:
   gap, not a data-correctness bug; left for a follow-up.
 
 **Status:** Implemented.
+
+## [2026-07-16 16:00] - Feature Implemented: "View community members" context menu action + CommunityNodeModal
+
+**Feature:** Right-clicking a node that belongs to a detected community
+(Louvain or a cluster program run as the community algorithm) now shows a
+"View community members" context menu action that opens a modal table listing
+every node in that community — same table UX as the existing cluster-program
+`ClusterNodeModal` (search, sortable columns, CSV export).
+
+**Requirements:**
+- Action only visible when the right-clicked target is a node AND it has an
+  entry in `communityStore.communityMap` (works for both Louvain and
+  cluster-program-derived communities).
+- Modal shows all community members with node_id, node_type, and all property
+  columns (auto-detected via `useTableColumns` helpers), community color dot,
+  algorithm badge, node count.
+
+**Design Decisions:**
+1. **New `CommunityNodeModal.vue` instead of reusing `ClusterNodeModal.vue`:**
+   communities only exist as `Cluster` objects when `collapseEnabled` is on —
+   the community map is the always-available source of truth. The modal reads
+   `communityStore.communitiesById` + `graphStore.nodes` directly, so it works
+   regardless of the collapse toggle. Table logic reuses the shared
+   `buildNodeColumns`/`flattenNodeRows` composables (same as ClusterNodeModal).
+2. **Action registration via a dedicated composable
+   (`useCommunityTableAction`)** rather than inline in `GraphCanvas3D.vue`:
+   the modal lives in `GraphVisualizationView.vue`, which owns all other
+   modals; the composable owns the `selectedCommunityId` ref + explicit
+   `register()`/`unregister()` so the logic is unit-testable without mounting
+   the whole view. The view calls register/unregister in its
+   onMounted/onUnmounted (pattern documented in skill_context_menu_action).
+3. **No toggle open/close button in the modal** (unlike ClusterNodeModal):
+   communities are not collapsible entities unless synced to clusters —
+   out of scope here.
+4. **Community naming:** modal shows "Community {id}". For cluster-program
+   communities the original cluster names are not retained by the community
+   store (it only keeps node→index) — surfacing program cluster names is a
+   future enhancement.
+
+**Files Created:**
+- frontend/src/components/CommunityNodeModal.vue
+- frontend/src/composables/useCommunityTableAction.ts
+- frontend/src/components/__tests__/CommunityNodeModal.test.ts (9 tests)
+- frontend/src/composables/__tests__/useCommunityTableAction.test.ts (10 tests)
+
+**Files Modified:**
+- frontend/src/views/GraphVisualizationView.vue — mounts the modal, wires
+  register/unregister, binds `selectedCommunityId`.
+
+**Testing gotcha discovered (worth knowing for future tests):**
+The community store watches `graphStore.nodes` and clears communities when it
+changes. In tests, seeding `graphStore.nodes` leaves that watcher job pending;
+the first reactive flush (e.g. `render()` mount) then wipes a just-seeded
+`communityMap`. Fix: `await nextTick()` between seeding nodes and seeding
+`communityMap` (see `seedStores()` in CommunityNodeModal.test.ts).
+
+**Testing:**
+- [x] 19 new unit tests (composable visibility/handler/register-unregister;
+      modal rendering, search, sort, empty state, close events, algorithm badge).
+- [x] Full frontend suite green: 968 tests, 57 files.
+- [x] `npx vue-tsc --noEmit` clean.
+- [ ] E2E: not added — single-page feature; context menu + modal covered by
+      unit/component tests (repo-wide ESLint config still broken, vue-tsc +
+      tests used as quality gate per existing convention).
+
+**Status:** Implemented.
+
+## [2026-07-16] - Fix: literal `node_id`/`edge_id` columns shadowed by configured id columns in the UI
+
+**Problem (user report):** With an unusual configured id column (e.g.
+`node_id_col = "id_hash"`) and a table that ALSO has a literal `node_id`
+column, the UI appeared to "overwrite" `node_id` with `id_hash` values.
+Same suspicion for `edge_id`.
+
+**Diagnosis (full-stack verification):**
+- Data is NEVER overwritten. Backend puts the configured id into the dedicated
+  `Node.node_id`/`Edge.edge_id` model fields and excludes only the *configured*
+  columns from `properties` (`graph_operations.py` `structure_cols`); a literal
+  `node_id` column survives as `properties["node_id"]`. Node fetch is
+  `SELECT n.*` (no aliasing); the `AS node_id` in `routers/graph.py` are
+  intermediate BFS CTEs only. Cypher schema provider registers properties by
+  real column names — no query-layer collision. Frontend store assigns API
+  responses verbatim; cluster programs and snapshots keep `properties` nested.
+- Real bug 1 (main): `labelFormatter.getPropertyValue` resolved built-ins
+  (`node_id`, `edge_id`, `node_type`, `relationship_type`, `src`, `dst`)
+  BEFORE `item.properties`, and the parser discarded the `prop:` prefix — so
+  `{prop:node_id}` collapsed to the built-in and a literal `node_id`/`edge_id`
+  column was unreachable in labels, conditionals and date tokens. Default node
+  template is `{node_id|truncate:10:...}`, so every node label showed the
+  configured id. Applies equally to `edge_id`.
+- Real bug 2: `TemplateEditorModal.vue` DEFAULT_QUERY hardcoded
+  `MATCH (root { node_id: "$node_id" })` — with `id_hash` configured, the
+  Cypher filter hit the wrong (literal) column or nothing.
+- Real bug 3 (cosmetic): node/edge tables showed a generic "ID" header next to
+  a `prop_node_id`/`prop_edge_id` column — correct values, ambiguous headers.
+
+**Design decisions:**
+1. **`prop:` = properties-first with built-in fallback.** Tokens written with
+   the `prop:` prefix (placeholders, `date:prop:`, all conditionals) now carry
+   `fromProps: true` and look up `item.properties[name]` first, falling back to
+   the built-in when the property is absent (backward compatible — e.g.
+   `{prop:node_type}` keeps working on nodes without such a property). Bare
+   `{node_id}`/`{edge_id}` keep resolving to the configured id (unchanged).
+2. **Template default query uses the configured column** (same pattern as
+   `exampleQuery.ts`: `node_structure?.node_id_col || 'node_id'`).
+3. **Table ID headers show the configured column name** when it differs from
+   the literal name: `ID (id_hash)` instead of `ID`. `buildNodeColumns` gained
+   an optional `idColName` param; DataTablePanel also disambiguates the edge ID
+   header from `edge_structure.edge_id_col`.
+
+**Files Modified:**
+- frontend/src/utils/labelFormatter.ts — `fromProps` flag on ParsedToken;
+  properties-first lookup in `getPropertyValue`; placeholder docs.
+- frontend/src/components/TemplateEditorModal.vue — DEFAULT_QUERY uses
+  configured `node_id_col`.
+- frontend/src/composables/useTableColumns.ts — `buildNodeColumns(…, idColName?)`.
+- frontend/src/components/DataTablePanel.vue — passes configured node/edge id
+  column names into column builders.
+- frontend/src/components/CommunityNodeModal.vue, ClusterNodeModal.vue — pass
+  configured `node_id_col` to `buildNodeColumns`.
+- frontend/src/components/TextFormatHelpModal.vue — documents `{node_id}` vs
+  `{prop:node_id}` semantics.
+
+**Testing:**
+- [x] 9 new labelFormatter tests (prop: precedence for node_id/edge_id/src,
+      built-in fallback regression, modifier/conditional/date paths).
+- [x] 4 new useTableColumns tests (header disambiguation + row values).
+- [x] Full frontend suite green: 981 tests, 57 files.
+- [x] `npx vue-tsc --noEmit` clean.
+
+**Status:** Implemented.
+
+## [2026-07-16 18:40] - Feature Implemented: Parameters for cluster programs
+
+**Feature:** Cluster programs can now declare typed parameters (text, number,
+boolean, select), mirroring the query-template pattern. Create/edit moved from
+the inline Programs-tab form to a dedicated modal; running a parameterized
+program prompts for values; and when a program is used as a community
+algorithm, its parameters render inline in the Communities tab.
+
+**Design Decisions:**
+1. **`context.params` injection, not `$param` substitution.** Values reach the
+   program code as a typed `params` object (`const { nodes, edges,
+   selectedNodeIds, selectedEdgeIds, params } = context`). Textual substitution
+   (the template approach) is fragile in JS (string literals, no types);
+   number/boolean values arrive already coerced.
+2. **Inline params in the Communities tab** (user choice over a modal on
+   Detect), consistent with the Louvain resolution slider. Values live in the
+   community store keyed by program id (`programParams`) and persist through
+   the exploration state; Detect is disabled while required params are empty.
+3. **Resolution rules centralized in a pure util**
+   (`utils/clusterProgramParams.ts`): defaults overlaid by provided values,
+   stale keys (removed from the declaration) dropped, number coercion with NaN
+   rejection, select values validated against options, boolean always resolves
+   (`default ?? false`), required-empty fails with a clear error. Store-level
+   `computeClustersFromProgram(programId, paramValues?)` falls back to declared
+   defaults when no values are passed, keeping all pre-existing call sites and
+   the zero-param behavior identical.
+4. **Backward compatibility:** `parameters?` is optional on `ClusterProgram`,
+   so old exploration states load unchanged; parameterless programs (incl. the
+   two defaults) run immediately from the Run button exactly as before.
+5. **Run modal seeds from defaults each open** (no last-used memory), matching
+   TemplateExecuteModal. Execution history records `params_used`.
+
+**Frontend Changes:**
+- Types: `ClusterProgramParameter`, `ClusterProgramParamValues`;
+  `ClusterProgram.parameters?`, `ClusterProgramContext.params`,
+  `ClusterProgramExecution.params_used?` (types/cluster.ts).
+- Cluster store: `computeClustersFromProgram`/`executeProgram` accept optional
+  `paramValues`; `createProgram` persists `parameters`; `params` added to the
+  `new Function` destructure.
+- Community store: `programParams` state + `ensureProgramParams(programId)`
+  (seed defaults, drop stale keys); `runClusterProgramAsCommunity` passes the
+  stored values; `getState`/`loadState` round-trip `programParams`.
+- New components: `ClusterProgramEditorModal.vue` (create/edit + param cards,
+  modeled on TemplateEditorModal, embeds JavaScriptEditor),
+  `ClusterProgramRunModal.vue` (parameter fill + run, inline error),
+  `ClusterProgramParamInputs.vue` (shared typed inputs; `compact` variant for
+  the panel).
+- `ClusterProgramPanel.vue`: inline create/edit form removed in favor of the
+  editor modal; Run opens the run modal only for parameterized programs;
+  Communities tab renders inline param inputs below the algorithm select and
+  gates Detect on missing required params; program meta shows param count.
+- `JavaScriptEditor.vue` autocomplete and `clusterProgramSkill.ts` prompt now
+  document `params`.
+
+**Files Created:**
+- frontend/src/utils/clusterProgramParams.ts
+- frontend/src/components/ClusterProgramParamInputs.vue
+- frontend/src/components/ClusterProgramEditorModal.vue
+- frontend/src/components/ClusterProgramRunModal.vue
+
+**Files Modified:**
+- frontend/src/types/cluster.ts
+- frontend/src/stores/cluster.ts
+- frontend/src/stores/community.ts
+- frontend/src/components/ClusterProgramPanel.vue
+- frontend/src/components/JavaScriptEditor.vue
+- frontend/src/utils/clusterProgramSkill.ts
+- frontend/src/__tests__/fixtures/clusters.ts (createClusterProgramParameter)
+
+**Testing:**
+- [x] New: utils/clusterProgramParams.test.ts (13 tests — defaults, overlay,
+      stale keys, coercion, select validation, required).
+- [x] New: ClusterProgramParamInputs / ClusterProgramEditorModal /
+      ClusterProgramRunModal component tests (16 tests, Teleport →
+      document.body convention, JavaScriptEditor stubbed).
+- [x] Extended: cluster.test.ts (+8 param tests incl. legacy-state load),
+      community.clusterProgram.test.ts (+6 programParams tests).
+- [x] Full frontend suite green: 1026 tests, 61 files.
+- [x] `npx vue-tsc --noEmit` clean.
+
+**Known Limitations:**
+- Community-store `getState()` still returns `undefined` before the first
+  detection, so param values chosen before ever clicking Detect are not
+  persisted (same contract as `resolution`/`edgeTypeFilter`).
+
+**Status:** Implemented.
+
+## [2026-07-16 18:45] - Feature: "BFS from Node" default cluster program (parameterized)
+
+**Feature:** Third built-in cluster program (`default-bfs-from-node`), the first
+default to use the new parameter system. Runs a BFS from a start node and
+clusters the reached nodes by depth level.
+
+**Parameters:**
+- `start_node_id` (text, required) — BFS anchor; clear error if not in graph.
+- `depth` (select `1|2|3`, default `3`) — max BFS levels.
+- `allow_types` (text, optional, default empty = all) — comma-separated node
+  types the traversal may visit; nodes outside the list are dropped AND not
+  traversed through (they block paths). The start node is always included
+  since it is explicitly requested by id.
+
+**Design Decisions:**
+1. One cluster per BFS level (`BFS start: <id>`, `BFS depth 1..N`), all
+   `state: 'open'` with per-level colors — the point is visualizing rings, not
+   collapsing them. Empty levels are skipped (BFS stops early).
+2. `depth` as a select of `'1'|'2'|'3'` (per request) — code converts with
+   `Number(params.depth)`.
+3. Undirected adjacency (same convention as the Orphan Clusters default).
+
+**Files Modified:**
+- frontend/src/stores/cluster.ts — new program in `createDefaultPrograms()`,
+  `DEFAULT_PROGRAM_IDS.BFS_FROM_NODE`.
+- frontend/src/stores/__tests__/cluster.test.ts — init tests now expect 3
+  defaults + param declaration checks; 7 behavior tests (depth limiting,
+  default depth, allow-list drop/block, empty allow list, missing/nonexistent
+  start node).
+
+**Testing:**
+- [x] Full frontend suite green: 1034 tests, 61 files.
+- [x] `npx vue-tsc --noEmit` clean.
+
+**Status:** Implemented.
+
+## [2026-07-16 18:56] - Fix: BFS default returns one cluster; community labels carry cluster names
+
+**Problem (user report):** Running "BFS from Node" as a community algorithm
+produced many communities (one per depth ring + a singleton with just the
+root), when the expected result was two: the BFS set and "others". Separately,
+communities were displayed as anonymous "Community 0/1/2..." — no way to tell
+which one was the BFS and which was "others" (cluster names were dropped by
+`buildCommunityMapFromClusters`).
+
+**Changes:**
+1. **BFS default now returns a SINGLE cluster** (`BFS from <id>`) containing
+   the start node plus everything reached — as a community algorithm this
+   yields exactly two communities (BFS set + "Others"). The per-level rings
+   remain available via a new boolean parameter `group_by_level`
+   (default false), which also exercises the boolean param type in a default
+   program.
+2. **Community labels:** new `communityLabels` state
+   (`Record<number, string>`) in the community store. The cluster-program path
+   fills it with the clusters' `cluster_name` (community id = cluster index)
+   and labels the uncovered-nodes bucket "Others". Louvain resets it (UI falls
+   back to "Community <id>"). `communitiesSorted` gained a `label` field;
+   `ClusterProgramPanel` community list and `CommunityNodeModal` header render
+   it. Labels persist via `getState`/`loadState` and are cleared by
+   `clearCommunities`.
+
+**Files Modified:**
+- frontend/src/stores/cluster.ts — BFS default program: single-cluster default
+  + `group_by_level` param.
+- frontend/src/stores/community.ts — `communityLabels` state, label fill in
+  `runClusterProgramAsCommunity`, Louvain/clear resets, persistence,
+  `communitiesSorted.label`.
+- frontend/src/components/ClusterProgramPanel.vue,
+  CommunityNodeModal.vue — render `label` instead of `Community {{ id }}`.
+- Tests: cluster.test.ts (single-cluster default, `group_by_level` rings),
+  community.clusterProgram.test.ts (two-community BFS assertion, labels +
+  "Others", Louvain fallback, label persistence).
+
+**Testing:**
+- [x] Full frontend suite green: 1040 tests, 61 files.
+- [x] `npx vue-tsc --noEmit` clean.
+
+**Status:** Implemented.
+
+## [2026-07-16 19:47] - Feature Implemented: Cluster programs in the node context menu (with node-property bindings)
+
+**Feature:** Cluster programs flagged with `show_in_context_menu` appear as
+items in the node right-click menu (labeled with the program name). Clicking
+one runs the program as a COMMUNITY algorithm on that node: parameter
+defaults, overridden by node-bound parameters whose values come from the
+clicked node (`node_id`, `node_type`, or a named property such as
+`id_simples`). Replaces the manual flow (open panel → Communities tab →
+select program → copy-paste node id → Detect).
+
+**Design Decisions:**
+1. **Flat optional fields, not a nested config object.**
+   `ClusterProgram.show_in_context_menu?: boolean` +
+   `ClusterProgramParameter.node_binding?: 'node_id'|'node_type'|'prop:<name>'`.
+   A per-param field dies with its param card (no stale bindings keyed by
+   param id), maps 1:1 to the editor UI, and rides through exploration
+   persistence for free. Optional → old states load unchanged.
+2. **Menu runs use DEFAULTS + bound values**, intentionally overwriting
+   panel-edited `programParams` so the Communities tab afterwards shows
+   exactly what ran (honest, persisted state).
+3. **Missing binding = hard abort with a clear toast** (user choice), even
+   when the param has a default — a silent default would substitute a value
+   from the wrong context. Missing = property absent/null/empty-string/
+   non-primitive.
+4. **Toast-only feedback** (user choice): success shows
+   `"<count> communities: <top labels>"` (labels from `communitiesSorted`);
+   graph recolors via existing community reactivity. No panel opens.
+5. **BFS default ships enabled** (`show_in_context_menu: true`,
+   `start_node_id` bound to `node_id`) — the flagship use case works out of
+   the box.
+6. **Reconcile-by-replace action registry.** New composable
+   `useClusterProgramMenuActions` watches a computed of eligible programs
+   (id + name) and drop-and-re-adds its actions — covers create/delete/
+   rename/flag-toggle and wholesale replacement by exploration `loadState`.
+   `visible` requires the target id to exist in `graphStore.nodes` (excludes
+   cluster synthetic nodes); `disabled` while `communityStore.computing`.
+
+**Files Created:**
+- frontend/src/composables/useClusterProgramMenuActions.ts
+- frontend/src/composables/__tests__/useClusterProgramMenuActions.test.ts
+
+**Files Modified:**
+- frontend/src/types/cluster.ts — `ClusterProgramNodeBinding`, `node_binding`,
+  `show_in_context_menu`.
+- frontend/src/utils/clusterProgramParams.ts — `resolveNodeBoundValues`
+  (+ `NodeBindingSource`, `ResolveNodeBoundResult`).
+- frontend/src/stores/cluster.ts — `createProgram` pass-through; BFS default
+  flag + binding.
+- frontend/src/components/ClusterProgramEditorModal.vue — "Show in node
+  right-click menu" checkbox; per-param "Node binding" select
+  (None/Node ID/Node type/Property…) with property-name input + validation.
+- frontend/src/views/GraphVisualizationView.vue — register()/unregister()
+  wiring alongside useCommunityTableAction.
+- Tests extended: clusterProgramParams.test.ts (+5 binding tests),
+  ClusterProgramEditorModal.test.ts (+3), cluster.test.ts (+2).
+
+**Testing:**
+- [x] 12 new composable tests (registration reconciliation, visible/disabled,
+      handler success with bound values, missing-property/deleted-program/
+      ghost-node/program-throw error paths — toasts asserted via the useToast
+      singleton).
+- [x] Full frontend suite green: 1062 tests, 62 files.
+- [x] `npx vue-tsc --noEmit` clean.
+
+**Known Limitations:**
+- Explorations saved before this feature carry the old BFS declaration
+  without the flag — the menu item won't appear for them (accepted, no
+  migration).
+- No editor warning yet when enabling the menu flag on a program that has a
+  required, unbound, default-less parameter (run fails with a clear toast).
+
+**Status:** Implemented.
+
+## [2026-07-20 09:49] - Fix: Intermittent right-click context menu on nodes/edges
+
+**Bug:** Right-clicking a node sometimes opened the context menu, sometimes did
+nothing (only the hover tooltip showed).
+
+**Root cause:** `three-render-objects` (under `3d-force-graph`) marks
+`isPointerDragging = true` on ANY `pointermove` while a mouse button is held —
+for mouse pointers there is no pixel threshold. On `pointerup` it then skips
+`onRightClick` entirely (`clickAfterDrag` is hardcoded to `false` by
+`3d-force-graph`). A natural human right-click almost always includes 1–3px of
+jitter between press and release, so the library's `onNodeRightClick` fired
+only when the hand was perfectly still. The app-level 5px drag threshold in
+`GraphCanvas3D` never ran because the library discarded the event first. The
+hover tooltip kept working because the hover raycast is a separate path.
+
+**Design Decisions:**
+1. **App-level mouseup trigger, not a library patch:** the menu now opens from
+   the component's own `window` `mouseup` (button 2) handler
+   (`maybeOpenContextMenu`), keeping the fix out of the `3d-force-graph`
+   submodule / npm `three-render-objects`. The library still `preventDefault()`s
+   the native `contextmenu` event, so no browser menu appears.
+2. **Synchronous hover tracking:** `hoveredNodeSync`/`hoveredLinkSync` are set
+   directly inside `onNodeHover`/`onLinkHover` (no RAF debounce, unlike
+   `graphStore.hoveredNodeId`) so the mouseup handler resolves the same target
+   the user sees under the tooltip. Reset on `initGraph` re-init.
+3. **Existing 5px threshold kept:** `isStationaryRightClick` still suppresses
+   the menu after a right-drag (camera pan / map-style pan).
+4. **Library right-click callbacks removed:** `.onNodeRightClick`/
+   `.onLinkRightClick` are no longer registered — a single trigger path avoids
+   double-opens.
+5. **Dev-only e2e hook:** `window.__GRAPH_NODE_SCREEN_COORDS__(nodeId)`
+   (guarded by `import.meta.env.DEV`, same pattern as
+   `__THREE_RENDERER_INFO__`) exposes node screen coords so Playwright can
+   target WebGL nodes deterministically.
+
+**Files Created:**
+- frontend/src/utils/contextMenuTrigger.ts — `isStationaryRightClick`,
+  `resolveContextMenuTarget`, `truncateMenuLabel` (pure, unit-tested).
+- frontend/src/utils/__tests__/contextMenuTrigger.test.ts — 14 tests.
+- frontend/e2e/tests/context-menu.spec.ts — regression e2e: right-click with
+  2px jitter opens the menu (always failed pre-fix); right-drag does not.
+  Hover is made deterministic by waiting for the lib's `clickable` class on
+  the canvas before clicking.
+
+**Files Modified:**
+- frontend/src/components/GraphCanvas3D.vue — sync hover refs, mouseup-driven
+  `maybeOpenContextMenu`, removed `.onNodeRightClick`/`.onLinkRightClick`,
+  dev-only screen-coords hook.
+
+**Testing:**
+- [x] Unit suite green: 1111 tests, 64 files (14 new).
+- [x] Full e2e suite green: 85 tests (2 new); new spec passed 3x repeated.
+- [x] `npx vue-tsc --noEmit` clean.
+
+**Known Limitations:**
+- Touch long-press still doesn't open the menu (was already the case — the
+  library only right-click-dispatches on `pointerup` with `button === 2`).
+
+**Status:** Implemented.
+
+## [2026-07-20 10:25] - Fix follow-up: context menu target latched at mousedown (CI failure)
+
+**Bug:** The new e2e regression test failed on CI (passed locally). Reproduced
+locally with CDP `Emulation.setCPUThrottlingRate` (6x): the previous fix
+resolved the menu target at MOUSEUP from the synchronous hover state, but when
+the pointer jitters while the right button is held, `three-render-objects`
+flags `isPointerDragging` and its next render tick forces `topObject = null`,
+firing a hover-out that wipes `hoveredNodeSync` BEFORE mouseup. On fast
+machines the down→jitter→up sequence fits inside one frame (~16ms) so no tick
+lands mid-click; on slow runners (CI SwiftShader) one always does.
+
+**Fix:** capture the menu target at right-button mousedown
+(`rightClickDownTarget`) — what the user saw when they pressed — and use it at
+mouseup, falling back to mouseup-time hover for stationary presses where the
+throttled raycast only caught the node after the press.
+
+**Test hardening (e2e):**
+- `freezeLayout()` helper: stops the simulation via the Layout panel Stop
+  button before interacting (Stop pins fx/fy/fz), so node screen positions
+  can't drift on slow runners. Added `data-testid="graph-toolbar-layout"`
+  (GraphVisualizationView) and `data-testid="layout-run-btn"` (LayoutPanel).
+- Hover-engage timeout raised to 2s; explicit `menu.waitFor(visible)`.
+- Verified with 6x and 12x CPU throttling, 3x repeats: all green.
+
+**Files Modified:**
+- frontend/src/components/GraphCanvas3D.vue — `rightClickDownTarget` latch.
+- frontend/src/views/GraphVisualizationView.vue — testid on Layout button.
+- frontend/src/components/LayoutPanel.vue — testid on Run/Stop button.
+- frontend/e2e/tests/context-menu.spec.ts — freezeLayout + robustness.
+
+**Testing:**
+- [x] Unit suite green: 1111 tests. `vue-tsc --noEmit` clean.
+- [x] Full e2e green: 85 tests; new spec green under 12x CPU throttle.
+
+**Status:** Implemented.
+
+## [2026-07-29 10:00] - Feature Implemented: Public sharing ("*") + "Share with my domain" quick action
+
+**Feature:** Contexts and explorations can now be shared publicly with ALL
+users (read-only), in addition to the existing per-email and `*@domain`
+wildcard sharing. The share modal also gained quick-action buttons: "Make
+public" and "Share with my domain".
+
+**Design Decisions:**
+1. **Sentinel share row (`shared_with_email = "*"`)** instead of an
+   `is_public` column: no migration, reuses the existing share tables,
+   endpoints (`POST /{id}/share`, `DELETE /{id}/share/{email}`), response
+   shape (`shared_with`) and the established `*@domain` sentinel pattern.
+2. **Public is always read-only.** `ShareRequest` coerces
+   `{email: "*", permission: "write"}` to `read` (model validator), and
+   `user_has_write_access` excludes public shares unconditionally
+   (defense-in-depth against hand-inserted DB rows).
+3. **Owner or superuser can publish** — existing `can_manage` rule, no change.
+4. **No new config flag** — available whenever sharing is enabled
+   (`database_enabled`). The public sentinel bypasses
+   `allowed_share_domains` validation.
+5. **`share_match_emails()` helper** replaces the 3x duplicated SQL wildcard
+   blocks (graph_contexts list, explorations list, context-access check) so
+   DB-mode matching can't drift from `email_matches_share` again.
+6. **"Share with my domain" button** only renders when the logged-in user's
+   domain is in `allowed_share_domains` (backend would reject otherwise);
+   shares as `read` — write remains available via the manual form.
+
+**Backend Changes:**
+- `api/graphlagoon/utils/sharing.py` — `PUBLIC_SHARE_EMAIL`,
+  `is_public_share()`, public match in `email_matches_share()`, public
+  exclusion in `user_has_write_access()`, public branch first in
+  `validate_share_email()` (before the `@` format check, which would reject
+  `"*"`), new `share_match_emails()`.
+- `api/graphlagoon/models/schemas.py` — `ShareRequest` model validator
+  coercing public shares to read.
+- `api/graphlagoon/routers/graph_contexts.py`,
+  `api/graphlagoon/routers/explorations.py` — list/access SQL now uses
+  `shared_with_email.in_(share_match_emails(user))`. Memory-mode branches
+  needed no changes (they funnel through `email_matches_share`).
+- `db/memory_store.py` — unchanged (exact-string store/delete works for `"*"`).
+
+**Frontend Changes:**
+- `frontend/src/services/api.ts` — `encodeURIComponent()` on unshare path
+  params (hardening; `"*"` passes through unchanged).
+- `frontend/src/views/ContextsView.vue`, `ExplorationsView.vue` — share modal
+  quick actions (`make-public-btn`, `share-domain-btn` testids), `"*"`
+  rendered as "Everyone (public)" with a `badge-public` chip, Public badge on
+  list cards (owner included), modal stays open after quick-share so the new
+  entry is visible (mirrors `unshare()` refresh, unlike `share()` which
+  closes).
+
+**Testing:**
+- [x] `api/tests/test_sharing_utils.py` +13 tests: public matching, write
+  exclusion (key security assertion), validation ordering,
+  `share_match_emails`, ShareRequest coercion.
+- [x] New `api/tests/test_public_sharing.py` (TestClient, memory mode):
+  publish → stranger sees read-only, PUT/DELETE 403, stranger cannot publish,
+  literal `*` in DELETE path (regression), exact write share survives public
+  read, public exploration reveals parent context, superuser
+  publish/unpublish. Backend: 290 passed.
+- [x] `frontend/src/services/__tests__/api.test.ts` — `"*"` share/unshare
+  paths (note: existing unshare assertion updated to `a%40b.com` due to
+  encodeURIComponent).
+- [x] `frontend/e2e/tests/sharing-ui.spec.ts` +7 tests (Public sharing +
+  Share with my domain describes). E2E: 20 passed. Full unit suite: 1170
+  passed. `vue-tsc --noEmit` clean.
+
+**Known Limitations:**
+- `make lint-api` (black --check) fails on 6 files — pre-existing before this
+  feature (verified via stash), including the two routers touched here.
+- No DB-mode (PostgreSQL) integration test for the new SQL conditions; the
+  `.in_()` substitution is covered by `share_match_emails` unit tests.

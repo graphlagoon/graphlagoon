@@ -93,7 +93,28 @@ describe('ApiService', () => {
     it('unshareGraphContext calls DELETE /api/graph-contexts/:id/share/:email', async () => {
       vi.mocked(mockClient.delete).mockResolvedValue({})
       await api.unshareGraphContext('ctx-1', 'a@b.com')
-      expect(mockClient.delete).toHaveBeenCalledWith('/api/graph-contexts/ctx-1/share/a@b.com')
+      expect(mockClient.delete).toHaveBeenCalledWith('/api/graph-contexts/ctx-1/share/a%40b.com')
+    })
+
+    it('shareGraphContext with public sentinel posts email "*"', async () => {
+      vi.mocked(mockClient.post).mockResolvedValue({})
+      await api.shareGraphContext('ctx-1', { email: '*', permission: 'read' })
+      expect(mockClient.post).toHaveBeenCalledWith(
+        '/api/graph-contexts/ctx-1/share',
+        { email: '*', permission: 'read' }
+      )
+    })
+
+    it('unshareGraphContext keeps "*" intact in the path', async () => {
+      vi.mocked(mockClient.delete).mockResolvedValue({})
+      await api.unshareGraphContext('ctx-1', '*')
+      expect(mockClient.delete).toHaveBeenCalledWith('/api/graph-contexts/ctx-1/share/*')
+    })
+
+    it('unshareExploration keeps "*" intact in the path', async () => {
+      vi.mocked(mockClient.delete).mockResolvedValue({})
+      await api.unshareExploration('exp-1', '*')
+      expect(mockClient.delete).toHaveBeenCalledWith('/api/explorations/exp-1/share/*')
     })
   })
 

@@ -124,10 +124,10 @@ async def check_context_access_db(session, context_id: UUID, user_email: str):
 
     Access granted via context ownership, context share, or exploration share.
     """
-    from sqlalchemy import select, or_
+    from sqlalchemy import select
     from sqlalchemy.orm import selectinload
     from graphlagoon.db.models import GraphContext, Exploration, ExplorationShare
-    from graphlagoon.utils.sharing import extract_domain
+    from graphlagoon.utils.sharing import share_match_emails
 
     result = await session.execute(
         select(GraphContext)
@@ -148,20 +148,13 @@ async def check_context_access_db(session, context_id: UUID, user_email: str):
     if user_has_share_access(user_email, context.shares):
         return context
 
-    # Check exploration-level shares
-    user_domain = extract_domain(user_email)
-    share_conditions = [ExplorationShare.shared_with_email == user_email]
-    if user_domain:
-        share_conditions.append(
-            ExplorationShare.shared_with_email == f"*@{user_domain}"
-        )
-
+    # Check exploration-level shares (exact, domain wildcard or public)
     exp_share_result = await session.execute(
         select(ExplorationShare.id)
         .join(Exploration, ExplorationShare.exploration_id == Exploration.id)
         .where(
             Exploration.graph_context_id == context_id,
-            or_(*share_conditions),
+            ExplorationShare.shared_with_email.in_(share_match_emails(user_email)),
         )
         .limit(1)
     )
@@ -221,10 +214,9 @@ async def list_all_explorations(request: Request):
             GraphContextShare,
             ExplorationShare,
         )
-        from graphlagoon.utils.sharing import extract_domain
+        from graphlagoon.utils.sharing import share_match_emails
 
-        user_domain = extract_domain(user_email)
-        wildcard_pattern = f"*@{user_domain}" if user_domain else ""
+        match_emails = share_match_emails(user_email)
 
         session_maker = get_session_maker()
         async with session_maker() as session:
@@ -237,37 +229,24 @@ async def list_all_explorations(request: Request):
                 explorations = result.scalars().all()
                 return [exploration_to_response(e, user_email) for e in explorations]
 
-            # Get all context IDs the user has access to (via ownership or context share)
-            ctx_share_conditions = [
-                GraphContextShare.shared_with_email == user_email,
-            ]
-            if wildcard_pattern:
-                ctx_share_conditions.append(
-                    GraphContextShare.shared_with_email == wildcard_pattern,
-                )
-
+            # Get all context IDs the user has access to (via ownership or
+            # context share — exact, domain wildcard or public)
             contexts_result = await session.execute(
                 select(GraphContext.id)
                 .outerjoin(GraphContextShare)
                 .where(
                     or_(
                         GraphContext.owner_email == user_email,
-                        *ctx_share_conditions,
+                        GraphContextShare.shared_with_email.in_(match_emails),
                     )
                 )
             )
             accessible_context_ids = [row[0] for row in contexts_result.fetchall()]
 
             # Get exploration IDs directly shared with the user
-            exp_share_conditions = [ExplorationShare.shared_with_email == user_email]
-            if wildcard_pattern:
-                exp_share_conditions.append(
-                    ExplorationShare.shared_with_email == wildcard_pattern,
-                )
-
             direct_exp_result = await session.execute(
                 select(ExplorationShare.exploration_id).where(
-                    or_(*exp_share_conditions)
+                    ExplorationShare.shared_with_email.in_(match_emails)
                 )
             )
             direct_exploration_ids = [row[0] for row in direct_exp_result.fetchall()]

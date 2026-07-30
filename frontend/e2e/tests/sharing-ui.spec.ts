@@ -202,6 +202,210 @@ test.describe('Context sharing', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Public sharing ("*" sentinel)
+// ---------------------------------------------------------------------------
+test.describe('Public sharing', () => {
+  test('modal renders "*" as Everyone (public) with Public badge', async ({ authenticatedPage: page }) => {
+    const publicContext = { ...MOCK_CONTEXT, shared_with: ['*'] };
+    await seedContexts(page, [publicContext]);
+    await page.goto('/contexts');
+    await page.getByRole('button', { name: 'Share' }).click();
+
+    const sharedList = page.locator('.shared-list');
+    await expect(sharedList.getByText('Everyone (public)')).toBeVisible();
+    await expect(sharedList.locator('.badge-public')).toBeVisible();
+    // "Make public" button is replaced by the unpublish hint
+    await expect(page.getByTestId('make-public-btn')).not.toBeVisible();
+  });
+
+  test('Make public button posts read-only public share and keeps modal open', async ({ authenticatedPage: page }) => {
+    let sharedWith: string[] = [];
+
+    await page.route('**/graphlagoon/api/graph-contexts', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{ ...MOCK_CONTEXT, shared_with: [...sharedWith] }]),
+        });
+      } else {
+        route.fallback();
+      }
+    });
+
+    let sharePayload: any = null;
+    await page.route(`**/graphlagoon/api/graph-contexts/${MOCK_CONTEXT.id}/share`, (route) => {
+      if (route.request().method() === 'POST') {
+        sharePayload = JSON.parse(route.request().postData() || '{}');
+        sharedWith.push(sharePayload.email);
+        route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        route.fallback();
+      }
+    });
+
+    await page.goto('/contexts');
+    await page.getByRole('button', { name: 'Share' }).click();
+
+    await page.getByTestId('make-public-btn').click();
+
+    expect(sharePayload).toEqual({ email: '*', permission: 'read' });
+    // Modal stays open and now shows the public entry
+    await expect(page.locator('.shared-list').getByText('Everyone (public)')).toBeVisible();
+  });
+
+  test('removing public share sends DELETE .../share/*', async ({ authenticatedPage: page }) => {
+    let sharedWith = ['*'];
+
+    await page.route('**/graphlagoon/api/graph-contexts', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{ ...MOCK_CONTEXT, shared_with: [...sharedWith] }]),
+        });
+      } else {
+        route.fallback();
+      }
+    });
+
+    let unshareUrl: string | null = null;
+    await page.route('**/graphlagoon/api/graph-contexts/*/share/*', (route) => {
+      if (route.request().method() === 'DELETE') {
+        unshareUrl = route.request().url();
+        sharedWith = [];
+        route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        route.fallback();
+      }
+    });
+
+    await page.goto('/contexts');
+    await page.getByRole('button', { name: 'Share' }).click();
+    await expect(page.locator('.shared-list').getByText('Everyone (public)')).toBeVisible();
+
+    await page.locator('.shared-list .btn-remove').click();
+
+    expect(unshareUrl).not.toBeNull();
+    expect(decodeURIComponent(unshareUrl!.split('/share/')[1])).toBe('*');
+    await expect(page.locator('.shared-list')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('list card shows Public badge, including for the owner', async ({ authenticatedPage: page }) => {
+    const publicContext = { ...MOCK_CONTEXT, shared_with: ['*'] }; // owned by e2e@test.com
+    await seedContexts(page, [publicContext]);
+    await page.goto('/contexts');
+
+    const list = page.getByTestId('contexts-list');
+    await expect(list.locator('.badge-public')).toBeVisible();
+    // Owner keeps Share/Delete buttons on their public context
+    await expect(page.getByRole('button', { name: 'Share' })).toBeVisible();
+  });
+
+  test('exploration modal supports Make public', async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+
+    let sharedWith: string[] = [];
+    await page.route('**/graphlagoon/api/explorations', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{ ...MOCK_EXPLORATION, shared_with: [...sharedWith] }]),
+        });
+      } else {
+        route.fallback();
+      }
+    });
+
+    let sharePayload: any = null;
+    await page.route(`**/graphlagoon/api/explorations/${MOCK_EXPLORATION.id}/share`, (route) => {
+      if (route.request().method() === 'POST') {
+        sharePayload = JSON.parse(route.request().postData() || '{}');
+        sharedWith.push(sharePayload.email);
+        route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        route.fallback();
+      }
+    });
+
+    await page.goto('/explorations');
+    await expect(page.getByText(MOCK_EXPLORATION.title)).toBeVisible();
+    await page.getByRole('button', { name: 'Share' }).click();
+
+    await page.getByTestId('make-public-btn').click();
+
+    expect(sharePayload).toEqual({ email: '*', permission: 'read' });
+    await expect(page.locator('.shared-list').getByText('Everyone (public)')).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Share with my domain quick action
+// ---------------------------------------------------------------------------
+test.describe('Share with my domain', () => {
+  test('hidden when user domain is not in allowed_share_domains', async ({ authenticatedPage: page }) => {
+    // Logged in as e2e@test.com; allowed domains are ['company.com']
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await page.goto('/contexts');
+    await page.getByRole('button', { name: 'Share' }).click();
+
+    await expect(page.getByTestId('make-public-btn')).toBeVisible();
+    await expect(page.getByTestId('share-domain-btn')).not.toBeVisible();
+  });
+
+  test('visible and posts *@domain when user domain is allowed', async ({ authenticatedPage: page }) => {
+    // Override config so the logged-in user's domain (test.com) is allowed
+    await page.addInitScript(() => {
+      (window as any).__GRAPH_LAGOON_CONFIG__ = {
+        dev_mode: true,
+        database_enabled: true,
+        allowed_share_domains: ['test.com'],
+      };
+    });
+
+    let sharedWith: string[] = [];
+    await page.route('**/graphlagoon/api/graph-contexts', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{ ...MOCK_CONTEXT, shared_with: [...sharedWith] }]),
+        });
+      } else {
+        route.fallback();
+      }
+    });
+
+    let sharePayload: any = null;
+    await page.route(`**/graphlagoon/api/graph-contexts/${MOCK_CONTEXT.id}/share`, (route) => {
+      if (route.request().method() === 'POST') {
+        sharePayload = JSON.parse(route.request().postData() || '{}');
+        sharedWith.push(sharePayload.email);
+        route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        route.fallback();
+      }
+    });
+
+    await page.goto('/contexts');
+    await page.getByRole('button', { name: 'Share' }).click();
+
+    const domainBtn = page.getByTestId('share-domain-btn');
+    await expect(domainBtn).toBeVisible();
+    await domainBtn.click();
+
+    expect(sharePayload).toEqual({ email: '*@test.com', permission: 'read' });
+    // Modal stays open showing the wildcard entry with the Domain badge
+    const sharedList = page.locator('.shared-list');
+    await expect(sharedList.getByText('*@test.com')).toBeVisible();
+    await expect(sharedList.locator('.badge-domain')).toBeVisible();
+    // Button replaced by hint once domain-shared
+    await expect(domainBtn).not.toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Exploration Sharing
 // ---------------------------------------------------------------------------
 test.describe('Exploration sharing', () => {

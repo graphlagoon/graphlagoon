@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, Any, Literal, TypeAlias
 from uuid import UUID
 from datetime import datetime
@@ -451,6 +451,15 @@ class QueryTemplateResponse(BaseModel):
 class ShareRequest(BaseModel):
     email: str
     permission: str = "read"
+
+    @model_validator(mode="after")
+    def _public_share_is_read_only(self) -> "ShareRequest":
+        # Public shares ("*") are always read-only; coerce instead of
+        # rejecting so re-sharing an existing public share can't flip it
+        # to write.
+        if self.email == "*":
+            self.permission = "read"
+        return self
 
 
 # Query models

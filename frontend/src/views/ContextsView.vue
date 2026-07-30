@@ -422,6 +422,41 @@ async function unshare(contextId: string, email: string) {
   }
 }
 
+const PUBLIC_SHARE_EMAIL = '*';
+
+const myDomain = computed(() => {
+  const email = authStore.email ?? '';
+  return email.includes('@') ? email.split('@')[1].toLowerCase() : '';
+});
+
+const canShareWithMyDomain = computed(
+  () =>
+    !!myDomain.value &&
+    allowedShareDomains.value.some(d => d.toLowerCase() === myDomain.value)
+);
+
+function isPublic(context: GraphContext | null): boolean {
+  return context?.shared_with?.includes(PUBLIC_SHARE_EMAIL) ?? false;
+}
+
+function isDomainShared(context: GraphContext | null): boolean {
+  return context?.shared_with?.includes(`*@${myDomain.value}`) ?? false;
+}
+
+async function quickShare(email: string) {
+  if (!shareContextRef.value) return;
+  const contextId = shareContextRef.value.id;
+
+  try {
+    // Keep the modal open so the new entry shows in the shared list
+    await contextsStore.shareContext(contextId, email, 'read');
+    const updated = contextsStore.contexts.find(c => c.id === contextId);
+    if (updated) shareContextRef.value = updated;
+  } catch (e) {
+    console.error('Failed to share context:', e);
+  }
+}
+
 </script>
 
 <template>
@@ -486,6 +521,7 @@ async function unshare(contextId: string, email: string) {
             <span v-if="!isOwner(context)" class="badge" :class="context.has_write_access ? 'badge-write' : 'badge-readonly'">
               {{ context.has_write_access ? 'Read & Write' : 'Read only' }}
             </span>
+            <span v-if="isPublic(context)" class="badge badge-public">Public</span>
           </div>
           <div v-if="context.tags?.length" class="tags">
             <span v-for="tag in context.tags" :key="tag" class="tag">
@@ -528,12 +564,42 @@ async function unshare(contextId: string, email: string) {
           <ul>
             <li v-for="email in shareContextRef.shared_with" :key="email">
               <span class="shared-email">
-                <span v-if="email.startsWith('*@')" class="badge badge-domain">Domain</span>
-                {{ email }}
+                <span v-if="email === PUBLIC_SHARE_EMAIL" class="badge badge-public">Public</span>
+                <span v-else-if="email.startsWith('*@')" class="badge badge-domain">Domain</span>
+                {{ email === PUBLIC_SHARE_EMAIL ? 'Everyone (public)' : email }}
               </span>
               <button class="btn-remove" @click="unshare(shareContextRef!.id, email)">&times;</button>
             </li>
           </ul>
+        </div>
+
+        <div class="quick-share">
+          <button
+            v-if="!isPublic(shareContextRef)"
+            type="button"
+            class="btn btn-outline"
+            data-testid="make-public-btn"
+            @click="quickShare(PUBLIC_SHARE_EMAIL)"
+          >
+            Make public (read-only for everyone)
+          </button>
+          <p v-else class="form-hint">
+            This context is public — anyone can view it. Remove "Everyone (public)" above to unpublish.
+          </p>
+          <template v-if="canShareWithMyDomain">
+            <button
+              v-if="!isDomainShared(shareContextRef)"
+              type="button"
+              class="btn btn-outline"
+              data-testid="share-domain-btn"
+              @click="quickShare(`*@${myDomain}`)"
+            >
+              Share with my domain (*@{{ myDomain }})
+            </button>
+            <p v-else class="form-hint">
+              Shared with everyone at @{{ myDomain }}.
+            </p>
+          </template>
         </div>
 
         <form @submit.prevent="share">
@@ -1032,8 +1098,21 @@ code {
   margin-right: 4px;
 }
 
+.badge-public {
+  background: #2e7d32;
+  color: white;
+  margin-right: 4px;
+}
+
 .share-modal {
   max-width: 400px;
+}
+
+.quick-share {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
 }
 
 .shared-list {
