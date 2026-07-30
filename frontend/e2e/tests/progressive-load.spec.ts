@@ -161,6 +161,75 @@ test.describe('Progressive load', () => {
     await expect(page.getByTestId('progressive-load-auto')).toBeChecked();
   });
 
+  test('the enrichment indicator clears after a query, not just a subgraph', async ({
+    authenticatedPage: page,
+  }) => {
+    // Regression: the query path raised the indicator when it drew a partial
+    // but never lowered it, so "loading properties…" stayed up for good.
+    // A plain flag, not a promise race: racing against Promise.resolve(false)
+    // always settles false, so the job would never reach "succeeded".
+    let jobDone = false;
+    const releaseJob = () => {
+      jobDone = true;
+    };
+
+    const partial = {
+      nodes: MOCK_GRAPH_RESPONSE.nodes.map((n) => ({
+        node_id: n.node_id,
+        node_type: n.node_type,
+        properties: null,
+      })),
+      edges: MOCK_GRAPH_RESPONSE.edges,
+      truncated: false,
+      properties_deferred: true,
+    };
+
+    await page.route('**/graphlagoon/api/graph-contexts/*/query/async', (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ job_id: 'job-1', status: 'running' }),
+      });
+    });
+    await page.route('**/graphlagoon/api/graph-contexts/*/query/job/**', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      // Hold in "running with a partial" until released, then succeed.
+      const done = jobDone;
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          done
+            ? {
+                job_id: 'job-1',
+                status: 'succeeded',
+                result: { ...MOCK_GRAPH_RESPONSE, truncated: false },
+                partial_seq: 1,
+              }
+            : { job_id: 'job-1', status: 'running', partial, partial_seq: 1 },
+        ),
+      });
+    });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    await page.getByTestId('toolbar-query').click();
+    await page.getByTestId('graph-query-mode-sql').click();
+    await page.getByTestId('graph-query-sql').fill('SELECT 1 AS r');
+    await page.getByTestId('graph-query-run').click();
+
+    await expect(page.getByTestId('graph-status-enriching')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    releaseJob();
+
+    await expect(page.getByTestId('graph-status-enriching')).toHaveCount(0, {
+      timeout: 20_000,
+    });
+  });
+
   test('shows a truncation warning when the edge limit was hit', async ({
     authenticatedPage: page,
   }) => {

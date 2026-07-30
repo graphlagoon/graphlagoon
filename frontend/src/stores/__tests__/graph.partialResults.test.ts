@@ -220,6 +220,94 @@ describe('partial results on the query path', () => {
     })
   })
 
+  describe('the enrichment indicator clears on every terminal path', () => {
+    // Regression: applyPartial set `enriching` to explain the momentarily
+    // empty tooltips, but nothing on the query path ever cleared it — the
+    // status bar showed "loading properties…" forever.
+
+    it('clears once the full result lands', async () => {
+      const store = useGraphStore()
+      store.currentContext = { id: 'ctx-1' } as any
+      mockJobWithPartial(fullNodes())
+
+      const p = store.executeGraphQuery('SELECT 1')
+      await vi.advanceTimersByTimeAsync(1600)
+      expect(store.enriching).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(5000)
+      await p
+
+      expect(store.enriching).toBe(false)
+    })
+
+    it('clears when the query fails after a partial', async () => {
+      const store = useGraphStore()
+      store.currentContext = { id: 'ctx-1' } as any
+      vi.mocked(api.submitGraphQueryJob).mockResolvedValue({
+        status: 'running',
+        job_id: 'job-1',
+      } as any)
+      let call = 0
+      vi.mocked(api.getGraphQueryJob).mockImplementation(async () => {
+        call += 1
+        if (call <= 2) {
+          return {
+            status: 'running',
+            job_id: 'job-1',
+            partial: {
+              nodes: typedNodes(),
+              edges: EDGES,
+              truncated: false,
+              properties_deferred: true,
+            },
+            partial_seq: 1,
+          } as any
+        }
+        throw new Error('query blew up')
+      })
+
+      const p = store.executeGraphQuery('SELECT 1')
+      await vi.advanceTimersByTimeAsync(1600)
+      expect(store.enriching).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(5000)
+      await p
+
+      expect(store.enriching).toBe(false)
+    })
+
+    it('clears when the query is cancelled after a partial', async () => {
+      const store = useGraphStore()
+      store.currentContext = { id: 'ctx-1' } as any
+      vi.mocked(api.submitGraphQueryJob).mockResolvedValue({
+        status: 'running',
+        job_id: 'job-1',
+      } as any)
+      vi.mocked(api.cancelGraphQueryJob).mockResolvedValue(undefined as any)
+      vi.mocked(api.getGraphQueryJob).mockResolvedValue({
+        status: 'running',
+        job_id: 'job-1',
+        partial: {
+          nodes: typedNodes(),
+          edges: EDGES,
+          truncated: false,
+          properties_deferred: true,
+        },
+        partial_seq: 1,
+      } as any)
+
+      const p = store.executeGraphQuery('SELECT 1')
+      await vi.advanceTimersByTimeAsync(1600)
+      expect(store.enriching).toBe(true)
+
+      await store.cancelGraphQuery()
+      await vi.advanceTimersByTimeAsync(2000)
+      await p
+
+      expect(store.enriching).toBe(false)
+    })
+  })
+
   describe('truncation reporting', () => {
     // A truncated graph looks exactly like a complete one, so the flag is the
     // only thing telling the user their conclusions rest on a partial view.

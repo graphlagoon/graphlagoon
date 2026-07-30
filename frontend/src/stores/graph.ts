@@ -1607,6 +1607,10 @@ export const useGraphStore = defineStore('graph', () => {
       await graphJob.run();
     } finally {
       loading.value = false;
+      // applyPartial raises this to explain the momentarily empty tooltips;
+      // the query path schedules no background enrichment, so the run itself
+      // owns clearing it — on success, failure and cancellation alike.
+      enriching.value = false;
     }
   }
 
@@ -1656,6 +1660,7 @@ export const useGraphStore = defineStore('graph', () => {
       return lastTranspiledSql.value;
     } finally {
       loading.value = false;
+      enriching.value = false;  // see executeGraphQuery
     }
   }
 
