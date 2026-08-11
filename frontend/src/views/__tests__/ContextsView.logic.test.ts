@@ -1,38 +1,13 @@
 /**
- * Tests for pure logic functions extracted from ContextsView.vue.
- * These functions are tested directly without mounting the component.
+ * Tests for the pure logic functions used by ContextsView.vue and
+ * GraphContextFormModal.vue.
+ *
+ * These import the REAL functions from utils/contextForm.ts — previously this
+ * file re-declared copies of them because the SFC didn't export them, which
+ * meant it was testing copies rather than the actual logic.
  */
 import { describe, it, expect } from 'vitest'
-
-// The functions below mirror the logic in ContextsView.vue.
-// We redefine them here since they're not exported from the SFC.
-
-function fuzzyMatch(text: string, query: string): boolean {
-  const textLower = text.toLowerCase()
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
-  return terms.every(term => textLower.includes(term))
-}
-
-function parseTag(tag: string): { name: string; value: string } | null {
-  const colonIndex = tag.indexOf(':')
-  if (colonIndex > 0) {
-    return {
-      name: tag.substring(0, colonIndex).trim(),
-      value: tag.substring(colonIndex + 1).trim(),
-    }
-  }
-  return null
-}
-
-function parseTableName(fullName: string): { catalog: string; database: string; table: string } | null {
-  const parts = fullName.split('.')
-  if (parts.length === 2) {
-    return { catalog: 'spark_catalog', database: parts[0], table: parts[1] }
-  } else if (parts.length === 3) {
-    return { catalog: parts[0], database: parts[1], table: parts[2] }
-  }
-  return null
-}
+import { fuzzyMatch, parseTag, parseTableName } from '@/utils/contextForm'
 
 describe('fuzzyMatch', () => {
   it('matches single term', () => {

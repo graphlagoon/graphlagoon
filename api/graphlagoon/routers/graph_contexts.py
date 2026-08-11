@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from uuid import UUID
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
     from graphlagoon.db.models import GraphContext
@@ -26,8 +26,47 @@ from graphlagoon.utils.sharing import (
 )
 from graphlagoon.utils.authz import can_manage, can_write, is_superuser
 from graphlagoon.config import get_settings
+from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
+from graphlagoon.services.schema_drift import (
+    validate_context_tables,
+    ContextValidationError,
+)
 
 router = APIRouter(prefix="/api/graph-contexts", tags=["graph-contexts"])
+
+
+def get_warehouse() -> WarehouseClient:
+    return get_warehouse_client()
+
+
+async def _validate_or_400(
+    warehouse: WarehouseClient,
+    node_table_name: str,
+    edge_table_name: str,
+    node_structure: Optional[dict],
+    edge_structure: Optional[dict],
+) -> None:
+    """Run ``validate_context_tables`` and translate a failure into the
+    standard error envelope. Shared by create and update."""
+    try:
+        await validate_context_tables(
+            warehouse,
+            node_table_name,
+            edge_table_name,
+            node_structure,
+            edge_structure,
+        )
+    except ContextValidationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": e.code,
+                    "message": e.message,
+                    "details": e.details,
+                }
+            },
+        )
 
 
 def context_to_response(
@@ -61,12 +100,16 @@ def context_to_response(
         tags=context.tags or [],
         edge_table_name=context.edge_table_name,
         node_table_name=context.node_table_name,
-        edge_structure=EdgeStructure(**edge_struct)
-        if isinstance(edge_struct, dict)
-        else edge_struct,
-        node_structure=NodeStructure(**node_struct)
-        if isinstance(node_struct, dict)
-        else node_struct,
+        edge_structure=(
+            EdgeStructure(**edge_struct)
+            if isinstance(edge_struct, dict)
+            else edge_struct
+        ),
+        node_structure=(
+            NodeStructure(**node_struct)
+            if isinstance(node_struct, dict)
+            else node_struct
+        ),
         edge_properties=edge_props,
         node_properties=node_props,
         node_types=context.node_types or [],
@@ -160,9 +203,21 @@ async def list_graph_contexts(request: Request):
 
 
 @router.post("", response_model=GraphContextResponse)
-async def create_graph_context(request: Request, data: GraphContextCreate):
+async def create_graph_context(
+    request: Request,
+    data: GraphContextCreate,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
     """Create a new graph context."""
     user_email = get_current_user(request)
+
+    await _validate_or_400(
+        warehouse,
+        data.node_table_name,
+        data.edge_table_name,
+        data.node_structure.model_dump(),
+        data.edge_structure.model_dump(),
+    )
 
     if is_database_available():
         from graphlagoon.db.models import GraphContext
@@ -250,7 +305,10 @@ async def get_graph_context(context_id: UUID, request: Request):
 
 @router.put("/{context_id}", response_model=GraphContextResponse)
 async def update_graph_context(
-    context_id: UUID, data: GraphContextUpdate, request: Request
+    context_id: UUID,
+    data: GraphContextUpdate,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
 ):
     """Update a graph context."""
     user_email = get_current_user(request)
@@ -275,6 +333,28 @@ async def update_graph_context(
             # Check write access
             if not can_write(context.owner_email, context.shares, user_email):
                 raise HTTPException(status_code=403, detail="No write access")
+
+            # Table names are immutable — validate the EFFECTIVE structure (new
+            # if provided, else the stored one) against the existing tables, and
+            # only when structure is actually part of this request; skip the
+            # warehouse round-trip entirely for e.g. the cluster_programs-only
+            # writer in stores/cluster.ts.
+            if data.node_structure is not None or data.edge_structure is not None:
+                await _validate_or_400(
+                    warehouse,
+                    context.node_table_name,
+                    context.edge_table_name,
+                    (
+                        data.node_structure.model_dump()
+                        if data.node_structure is not None
+                        else context.node_structure
+                    ),
+                    (
+                        data.edge_structure.model_dump()
+                        if data.edge_structure is not None
+                        else context.edge_structure
+                    ),
+                )
 
             # Update fields
             if data.title is not None:
@@ -314,6 +394,23 @@ async def update_graph_context(
         # Check write access
         if not can_write(context.owner_email, context.shares, user_email):
             raise HTTPException(status_code=403, detail="No write access")
+
+        if data.node_structure is not None or data.edge_structure is not None:
+            await _validate_or_400(
+                warehouse,
+                context.node_table_name,
+                context.edge_table_name,
+                (
+                    data.node_structure.model_dump()
+                    if data.node_structure is not None
+                    else context.node_structure
+                ),
+                (
+                    data.edge_structure.model_dump()
+                    if data.edge_structure is not None
+                    else context.edge_structure
+                ),
+            )
 
         # Update fields
         updates = {}

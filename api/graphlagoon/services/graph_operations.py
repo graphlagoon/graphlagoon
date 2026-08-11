@@ -18,6 +18,10 @@ from graphlagoon.models.schemas import (
     ColumnConfig,
 )
 from graphlagoon.services.sql_validation import extract_query_limit
+from graphlagoon.services.warehouse_errors import (
+    classify_query_error,
+    STALE_SCHEMA_CODE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +33,34 @@ class QueryExecutionError(Exception):
     structured error response (not a 500 error).
     """
 
-    def __init__(self, message: str, query: Optional[str] = None):
+    def __init__(
+        self, message: str, query: Optional[str] = None, code: Optional[str] = None
+    ):
         self.message = message
         self.query = query
+        # Classified once here so every raise site (the warehouse failure path
+        # below, and the "empty graph" guard in process_graph_query_result) gets
+        # the same STALE_CONTEXT_SCHEMA / QUERY_EXECUTION_ERROR code without
+        # each caller re-deriving it. `code` overrides the classifier when a
+        # caller already knows better (e.g. the empty-graph guard's own message).
+        self.code = code or classify_query_error(message)[0]
         super().__init__(message)
+
+
+def merge_column_config(context) -> dict:
+    """Merge edge_structure and node_structure from context into a single ColumnConfig."""
+    edge_struct = context.edge_structure or {}
+    node_struct = context.node_structure or {}
+    return {
+        "edge_id_col": edge_struct.get("edge_id_col", "edge_id"),
+        "src_col": edge_struct.get("src_col", "src"),
+        "dst_col": edge_struct.get("dst_col", "dst"),
+        "relationship_type_col": edge_struct.get(
+            "relationship_type_col", "relationship_type"
+        ),
+        "node_id_col": node_struct.get("node_id_col", "node_id"),
+        "node_type_col": node_struct.get("node_type_col", "node_type"),
+    }
 
 
 def _get_edge_id(
@@ -45,8 +73,15 @@ def _get_edge_id(
     """Get edge_id from row, or generate composite key if edge_id_col is None."""
     if edge_id_col and edge_id_col in row_dict:
         return row_dict[edge_id_col]
-    # Generate composite key: {src}@{relationship_type}@{dst}
-    return f"{row_dict[src_col]}@{row_dict[rel_type_col]}@{row_dict[dst_col]}"
+    # Generate composite key: {src}@{relationship_type}@{dst}. `.get()`, not direct
+    # indexing: src_col/dst_col can be absent from the row when the context's
+    # structural columns no longer match the query result (a stale/renamed
+    # column) — that case must reach the guard in process_graph_query_result as a
+    # classified error, not crash here with an unhandled KeyError (500).
+    return (
+        f"{row_dict.get(src_col, '')}@{row_dict.get(rel_type_col, '')}"
+        f"@{row_dict.get(dst_col, '')}"
+    )
 
 
 def _parse_statement_result(
@@ -189,6 +224,15 @@ def process_graph_query_result(
     edges = []
     node_ids = set()
     seen_edge_ids: set[str] = set()
+    # Counts feeding the stale-structural-column guard below: `missing_key_count`
+    # tracks rows where src_col/dst_col are ABSENT AS KEYS — distinct from
+    # present-but-NULL, which is legitimate data. A renamed src_col/dst_col makes
+    # every item miss the key, which otherwise builds a full edge list with
+    # src="", dst="" and an empty node_ids set: an HTTP 200, empty canvas, and no
+    # error anywhere.
+    processed_count = 0
+    missing_key_count = 0
+    sample_keys: Optional[list[str]] = None
     for row in rows:
         r_data = row[r_idx]
 
@@ -206,6 +250,11 @@ def process_graph_query_result(
         for item in items_to_process:
             if not isinstance(item, dict):
                 continue  # Skip invalid format
+            processed_count += 1
+            if sample_keys is None:
+                sample_keys = sorted(item.keys())
+            if src_col not in item or dst_col not in item:
+                missing_key_count += 1
             edge_id = _get_edge_id(item, edge_id_col, src_col, dst_col, rel_type_col)
 
             # Skip duplicate edges
@@ -240,14 +289,29 @@ def process_graph_query_result(
             )
             edges.append(edge)
 
-    return GraphResponse(
-        nodes=[],  # Nodes will be populated by a separate query
-        edges=edges,
-        # Both are set by the caller, which is the only place that knows the
-        # requested limit (see execute_graph_query_with_nodes).
-        truncated=False,
-        total_count=len(edges),
-    ), node_ids
+    if processed_count > 0 and missing_key_count == processed_count:
+        # This message doesn't itself contain a Spark marker classify_query_error
+        # would recognize, so the code is set explicitly rather than left to the
+        # classifier — this IS a stale-schema failure by construction.
+        raise QueryExecutionError(
+            f"Every edge row is missing the configured columns `{src_col}`/"
+            f"`{dst_col}` — the context's structural columns may no longer "
+            f"match this query result. Columns present in the result: "
+            f"{sample_keys}.",
+            code=STALE_SCHEMA_CODE,
+        )
+
+    return (
+        GraphResponse(
+            nodes=[],  # Nodes will be populated by a separate query
+            edges=edges,
+            # Both are set by the caller, which is the only place that knows the
+            # requested limit (see execute_graph_query_with_nodes).
+            truncated=False,
+            total_count=len(edges),
+        ),
+        node_ids,
+    )
 
 
 def _stringify_scalar(value: Any) -> Any:
@@ -408,9 +472,7 @@ def build_node_query(
     """
     from graphlagoon.services.sql_validation import sanitize_string_literal
 
-    node_values_str = ", ".join(
-        [f"('{sanitize_string_literal(n)}')" for n in node_ids]
-    )
+    node_values_str = ", ".join([f"('{sanitize_string_literal(n)}')" for n in node_ids])
     projection = build_node_projection(column_config, node_columns)
     return f"""
         SELECT {projection}
@@ -604,6 +666,11 @@ async def execute_graph_query_with_nodes(
         response_partial, node_ids = process_graph_query_result(
             columns, rows, column_config
         )
+    except QueryExecutionError:
+        # Let a classified failure (e.g. the stale-structural-column guard) reach
+        # the router as-is — wrapping it in RuntimeError below would lose its
+        # `.code` and turn an actionable 400 into an opaque 500.
+        raise
     except Exception as e:
         raise RuntimeError(
             f"Failed to process edge query result "
@@ -760,9 +827,7 @@ async def execute_graph_query_with_nodes(
     if harvested:
         fetched_ids = {n.node_id for n in nodes}
         nodes.extend(
-            node
-            for node_id, node in harvested.items()
-            if node_id not in fetched_ids
+            node for node_id, node in harvested.items() if node_id not in fetched_ids
         )
     node_processing_ms = (time.perf_counter() - t0) * 1000
 

@@ -27,6 +27,7 @@ import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
+import { useToast } from '@/composables/useToast';
 import {
   useCancellableQuery,
   type StepResult,
@@ -309,6 +310,14 @@ export const useGraphStore = defineStore('graph', () => {
   const pendingPropertyNodeIds = ref<Set<string>>(new Set());
   const nodePatchVersion = ref(0);
   const enriching = ref(false);
+  // Set when a background enrichment batch fails. Non-blocking (the graph is
+  // already rendered) but no longer silent — previously this was a bare
+  // console.warn and nodes stayed permanently property-less with no signal.
+  const enrichmentError = ref<{ message: string; code?: string } | null>(null);
+  // True once a STALE_CONTEXT_SCHEMA error has been observed for the current
+  // context — read by the Phase 5 drift banner; enrichment failures are the
+  // one place drift can surface without the user running any query at all.
+  const schemaDriftSuspected = ref(false);
 
   // True when the backend capped the edge result, so the graph on screen is a
   // slice of a larger one. Without this the user has no way to tell a complete
@@ -336,6 +345,9 @@ export const useGraphStore = defineStore('graph', () => {
     code?: string;
     exceptionType?: string;
     traceback?: string[];
+    hint?: string;
+    unresolvedName?: string;
+    contextId?: string;
   } | null>(null);
 
   // Helper: extract error details from API errors
@@ -347,6 +359,9 @@ export const useGraphStore = defineStore('graph', () => {
         query?: string;
         exception_type?: string;
         traceback?: string[];
+        hint?: string;
+        unresolved_name?: string;
+        context_id?: string;
       };
     };
   }
@@ -357,6 +372,9 @@ export const useGraphStore = defineStore('graph', () => {
     code?: string;
     exceptionType?: string;
     traceback?: string[];
+    hint?: string;
+    unresolvedName?: string;
+    contextId?: string;
   } {
     if (e && typeof e === 'object' && 'response' in e) {
       const axiosError = e as { response?: { data?: { detail?: ApiErrorDetail | string } } };
@@ -374,6 +392,9 @@ export const useGraphStore = defineStore('graph', () => {
           query: error?.details?.query,
           exceptionType: error?.details?.exception_type,
           traceback: error?.details?.traceback,
+          hint: error?.details?.hint,
+          unresolvedName: error?.details?.unresolved_name,
+          contextId: error?.details?.context_id,
         };
       }
     }
@@ -1169,6 +1190,11 @@ export const useGraphStore = defineStore('graph', () => {
       // Programs are context-level: rebuild built-in defaults + this context's
       // programs. A subsequent loadExploration() only adds exploration-scoped ones.
       useClusterStore().hydrateProgramsFromContext(currentContext.value.cluster_programs);
+      // Deliberately NOT an automatic schema-drift check here: two DESCRIBEs on
+      // every single graph open is real cost for an event (drift) that is rare.
+      // Detection stays user-initiated — the "Check schema" action in
+      // ContextsView / ContextInfoPanel — plus reactive detection when a query
+      // actually fails (QueryErrorModal's STALE_CONTEXT_SCHEMA CTA).
     } catch (e: unknown) {
       const errorMessage = e instanceof Error ? e.message : 'Failed to load context';
       error.value = errorMessage;
@@ -1349,8 +1375,20 @@ export const useGraphStore = defineStore('graph', () => {
       });
     } catch (e: unknown) {
       // Enrichment is best-effort: the graph is already rendered and usable.
-      // Surfacing a blocking error here would be worse than missing tooltips.
+      // Surfacing a BLOCKING error here would be worse than missing tooltips —
+      // but silence is also wrong: previously this was a bare console.warn and
+      // nodes stayed permanently property-less with no user-visible signal.
       console.warn('[graph] node property enrichment failed:', e);
+      const details = extractErrorDetails(e, 'Failed to load node properties');
+      enrichmentError.value = { message: details.message, code: details.code };
+      if (details.code === 'STALE_CONTEXT_SCHEMA') {
+        schemaDriftSuspected.value = true;
+        useToast().warning(
+          "Some node details couldn't load — this context's schema may be out of date.",
+        );
+      } else {
+        useToast().warning('Some node details failed to load.');
+      }
     } finally {
       if (enrichmentToken === myToken) enriching.value = false;
     }
@@ -2362,6 +2400,8 @@ export const useGraphStore = defineStore('graph', () => {
     enrichmentToken++;
     pendingPropertyNodeIds.value.clear();
     enriching.value = false;
+    enrichmentError.value = null;
+    schemaDriftSuspected.value = false;
     truncated.value = false;
     selectedNodeIds.value.clear();
     selectedEdgeIds.value.clear();
@@ -2405,6 +2445,8 @@ export const useGraphStore = defineStore('graph', () => {
     pendingPropertyNodeIds,
     nodePatchVersion,
     enriching,
+    enrichmentError,
+    schemaDriftSuspected,
     truncated,
     error,
     queryError,

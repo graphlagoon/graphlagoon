@@ -8,6 +8,7 @@ import {
   getAvailablePlaceholders,
   getAvailableModifiers,
   clearTemplateCache,
+  extractTemplateProperties,
 } from '@/utils/labelFormatter'
 import type { Node, Edge, TextFormatRule } from '@/types/graph'
 
@@ -787,5 +788,45 @@ describe('prop: precedence over same-named built-ins', () => {
       properties: { node_id: '2020-05-01T12:00:00' },
     })
     expect(formatLabel('{date:prop:node_id|DD/MM/YYYY}', 'node', node)).toBe('01/05/2020')
+  })
+})
+
+describe('extractTemplateProperties', () => {
+  it('extracts a simple placeholder', () => {
+    expect(extractTemplateProperties('{prop:name}')).toEqual(['name'])
+  })
+
+  it('extracts a placeholder with a modifier', () => {
+    expect(extractTemplateProperties('{prop:name|upper}')).toEqual(['name'])
+  })
+
+  it('does not report built-ins without the prop: prefix', () => {
+    expect(extractTemplateProperties('{node_type} - {src} - {dst}')).toEqual([])
+  })
+
+  it('extracts a date token property', () => {
+    expect(extractTemplateProperties('{date:prop:created_at|DD/MM/YYYY}')).toEqual(['created_at'])
+  })
+
+  it('extracts the condition property from a conditional', () => {
+    expect(extractTemplateProperties('{if:prop:score>10|High|Low}')).toEqual(['score'])
+  })
+
+  it('recurses into trueValue and falseValue of a conditional', () => {
+    const props = extractTemplateProperties('{if:prop:score>10|{prop:name|upper}|{prop:fallback}}')
+    expect(props.sort()).toEqual(['fallback', 'name', 'score'])
+  })
+
+  it('deduplicates repeated references', () => {
+    expect(extractTemplateProperties('{prop:name} and {prop:name}')).toEqual(['name'])
+  })
+
+  it('returns an empty array for a template with no property references', () => {
+    expect(extractTemplateProperties('Just plain text')).toEqual([])
+  })
+
+  it('collects every distinct property across a mixed template', () => {
+    const props = extractTemplateProperties('{prop:a} {node_type} {if:prop:b==x|{prop:c}|{prop:d}}')
+    expect(props.sort()).toEqual(['a', 'b', 'c', 'd'])
   })
 })

@@ -218,9 +218,7 @@ class InMemoryStore:
             if exp.graph_context_id == context_id
         ]
         snapshot_ids = [
-            eid
-            for eid in to_delete
-            if self.explorations[eid].state.get("has_snapshot")
+            eid for eid in to_delete if self.explorations[eid].state.get("has_snapshot")
         ]
 
         for eid in to_delete:
@@ -238,14 +236,13 @@ class InMemoryStore:
             async def _cleanup():
                 try:
                     from graphlagoon.services.snapshot import get_snapshot_service
+
                     svc = get_snapshot_service()
                     for eid in snapshot_ids:
                         try:
                             await svc.delete(eid)
                         except Exception as exc:
-                            _log.warning(
-                                "Could not delete snapshot %s: %s", eid, exc
-                            )
+                            _log.warning("Could not delete snapshot %s: %s", eid, exc)
                 except Exception as exc:
                     _log.warning("Snapshot cleanup failed: %s", exc)
 

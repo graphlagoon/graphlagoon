@@ -32,6 +32,10 @@ from graphlagoon.models.schemas import (
     GraphJobSubmitResponse,
     GraphJobStatusResponse,
     QueryMetadata,
+    SchemaDriftResponse,
+    SchemaDriftTable,
+    SchemaDriftFinding,
+    SchemaDriftProposal,
 )
 from graphlagoon.services.cypher import transpile_cypher_to_sql, validate_cypher_query
 from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
@@ -39,8 +43,10 @@ from graphlagoon.services.graph_operations import (
     execute_graph_query_with_nodes,
     fetch_nodes_by_ids,
     parse_tabular_result,
+    merge_column_config,
     QueryExecutionError,
 )
+from graphlagoon.services.warehouse_errors import query_execution_http_error
 from graphlagoon.services.async_job import create_job, get_job, start_job, cancel_job
 from graphlagoon.services.sql_validation import (
     validate_sql_query,
@@ -171,22 +177,6 @@ async def list_datasets(
     return await warehouse.list_datasets()
 
 
-def merge_column_config(context) -> dict:
-    """Merge edge_structure and node_structure from context into a single ColumnConfig."""
-    edge_struct = context.edge_structure or {}
-    node_struct = context.node_structure or {}
-    return {
-        "edge_id_col": edge_struct.get("edge_id_col", "edge_id"),
-        "src_col": edge_struct.get("src_col", "src"),
-        "dst_col": edge_struct.get("dst_col", "dst"),
-        "relationship_type_col": edge_struct.get(
-            "relationship_type_col", "relationship_type"
-        ),
-        "node_id_col": node_struct.get("node_id_col", "node_id"),
-        "node_type_col": node_struct.get("node_type_col", "node_type"),
-    }
-
-
 def build_edge_named_struct(column_config, table_alias: str = "") -> str:
     """Build a NAMED_STRUCT projection for an edge row.
 
@@ -242,11 +232,117 @@ def resolve_node_columns(context) -> Optional[list[str]]:
     for prop in props:
         # Contexts round-trip through both Pydantic models and raw dicts
         # (memory store vs DB), so accept either shape.
-        name = prop.get("name") if isinstance(prop, dict) else getattr(prop, "name", None)
+        name = (
+            prop.get("name") if isinstance(prop, dict) else getattr(prop, "name", None)
+        )
         if name:
             names.append(name)
 
     return names or None
+
+
+@router.get(
+    "/graph-contexts/{context_id}/schema-drift", response_model=SchemaDriftResponse
+)
+async def get_schema_drift(
+    context_id: UUID,
+    request: Request,
+    check_types: bool = False,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """Diff a context's stored schema snapshot against the live warehouse tables.
+
+    Read-only — never fails on drift itself; an unreachable table surfaces as a
+    ``TABLE_NOT_FOUND`` finding with HTTP 200, not an error response. Column
+    checks (``DESCRIBE``) always run; type checks (``SELECT DISTINCT``, a full
+    table scan) only run when ``check_types=true``.
+
+    The ``proposed`` snapshot in the response can be echoed back verbatim through
+    ``PUT /graph-contexts/{id}`` to apply the resync — this endpoint never writes.
+    """
+    from datetime import datetime, timezone
+    from graphlagoon.services.schema_drift import (
+        compute_drift,
+        parse_qualified_table,
+    )
+
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+
+    async def describe(table_name: str) -> tuple[bool, list]:
+        parsed = parse_qualified_table(table_name)
+        if parsed is None:
+            return False, []
+        catalog, database, table = parsed
+        try:
+            table_schema = await warehouse.get_table_schema(table, database, catalog)
+        except Exception:
+            return False, []
+        if not table_schema.columns:
+            return False, []
+        return True, table_schema.columns
+
+    node_reachable, node_columns = await describe(context.node_table_name)
+    edge_reachable, edge_columns = await describe(context.edge_table_name)
+
+    discovered_node_types = None
+    discovered_relationship_types = None
+    if check_types:
+        try:
+            from graphlagoon.models.schemas import ColumnConfig
+
+            column_config = ColumnConfig(**merge_column_config(context))
+            discovery = await warehouse.discover_schema(
+                edge_table=context.edge_table_name,
+                node_table=context.node_table_name,
+                columns=column_config,
+            )
+            discovered_node_types = discovery.node_types
+            discovered_relationship_types = discovery.relationship_types
+        except Exception:
+            # Type discovery is best-effort on top of the column diff — a failed
+            # discovery must not hide the (more actionable) column-level findings.
+            discovered_node_types = None
+            discovered_relationship_types = None
+
+    result = compute_drift(
+        context,
+        node_reachable,
+        node_columns,
+        edge_reachable,
+        edge_columns,
+        discovered_node_types=discovered_node_types,
+        discovered_relationship_types=discovered_relationship_types,
+    )
+
+    return SchemaDriftResponse(
+        context_id=context_id,
+        checked_at=datetime.now(timezone.utc),
+        status=result["status"],
+        types_checked=check_types
+        and (
+            discovered_node_types is not None
+            or discovered_relationship_types is not None
+        ),
+        counts=result["counts"],
+        node_table=SchemaDriftTable(
+            table_name=context.node_table_name,
+            reachable=node_reachable,
+            columns=node_columns,
+        ),
+        edge_table=SchemaDriftTable(
+            table_name=context.edge_table_name,
+            reachable=edge_reachable,
+            columns=edge_columns,
+        ),
+        findings=[SchemaDriftFinding(**f.to_dict()) for f in result["findings"]],
+        proposed=SchemaDriftProposal(
+            node_properties=result["proposed_node_properties"],
+            edge_properties=result["proposed_edge_properties"],
+            node_types=result["proposed_node_types"],
+            relationship_types=result["proposed_relationship_types"],
+        ),
+    )
 
 
 @router.post("/graph-contexts/{context_id}/subgraph", response_model=GraphResponse)
@@ -300,16 +396,7 @@ async def get_subgraph(
             nodes_mode=data.nodes_mode,
         )
     except QueryExecutionError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "QUERY_EXECUTION_ERROR",
-                    "message": e.message,
-                    "details": {"query": e.query} if e.query else {},
-                }
-            },
-        )
+        raise query_execution_http_error(e, context_id)
     except Exception as e:
         import traceback
 
@@ -387,16 +474,7 @@ async def get_nodes_batch(
             node_columns=node_columns,
         )
     except QueryExecutionError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "QUERY_EXECUTION_ERROR",
-                    "message": e.message,
-                    "details": {"query": e.query} if e.query else {},
-                }
-            },
-        )
+        raise query_execution_http_error(e, context_id)
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -580,16 +658,7 @@ async def expand_from_node(
             node_columns=resolve_node_columns(context),
         )
     except QueryExecutionError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "QUERY_EXECUTION_ERROR",
-                    "message": e.message,
-                    "details": {"query": e.query} if e.query else {},
-                }
-            },
-        )
+        raise query_execution_http_error(e, context_id)
     except Exception as e:
         import traceback
 
@@ -704,16 +773,7 @@ async def execute_graph_query(
             node_columns=resolve_node_columns(context),
         )
     except QueryExecutionError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "QUERY_EXECUTION_ERROR",
-                    "message": e.message,
-                    "details": {"query": e.query} if e.query else {},
-                }
-            },
-        )
+        raise query_execution_http_error(e, context_id)
     except Exception as e:
         import traceback
 
@@ -854,17 +914,8 @@ async def execute_cypher_query(
             node_columns=resolve_node_columns(context),
         )
     except QueryExecutionError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "QUERY_EXECUTION_ERROR",
-                    "message": e.message,
-                    "details": {"query": e.query, "transpiled_sql": sql}
-                    if e.query
-                    else {"transpiled_sql": sql},
-                }
-            },
+        raise query_execution_http_error(
+            e, context_id, extra_details={"transpiled_sql": sql}
         )
     except Exception as e:
         import traceback
@@ -1040,16 +1091,7 @@ async def execute_table_query(
             row_limit=data.row_limit,
         )
     except QueryExecutionError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "QUERY_EXECUTION_ERROR",
-                    "message": e.message,
-                    "details": {"query": e.query or sql},
-                }
-            },
-        )
+        raise query_execution_http_error(e, context_id, fallback_query=sql)
 
     state = response.status.state
 
@@ -1074,16 +1116,7 @@ async def execute_table_query(
             response, query=sql, row_limit=data.row_limit
         )
     except QueryExecutionError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "QUERY_EXECUTION_ERROR",
-                    "message": e.message,
-                    "details": {"query": e.query or sql},
-                }
-            },
-        )
+        raise query_execution_http_error(e, context_id, fallback_query=sql)
 
     execution_ms = (time.perf_counter() - t_exec_start) * 1000
     total_ms = execution_ms + (transpilation_ms or 0.0)
@@ -1144,16 +1177,7 @@ async def get_table_query_status(
             response, query=None, row_limit=row_limit
         )
     except QueryExecutionError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "QUERY_EXECUTION_ERROR",
-                    "message": e.message,
-                    "details": {"query": e.query},
-                }
-            },
-        )
+        raise query_execution_http_error(e, context_id)
 
     chunk_count, total_row_count = _manifest_counts(response)
     return TableQueryStatusResponse(

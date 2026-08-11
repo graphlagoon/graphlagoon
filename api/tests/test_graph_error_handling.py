@@ -466,6 +466,68 @@ class TestRouterErrorHandling:
             assert error["details"]["query"] == "SELECT * FROM edges_bad"
 
     @pytest.mark.asyncio
+    async def test_query_endpoint_classifies_unresolved_column_as_stale_schema(
+        self, mock_context, mock_warehouse
+    ):
+        """A Spark UNRESOLVED_COLUMN message is reclassified as an actionable
+        stale-context-schema error, with a hint and the unresolved column name —
+        while an unrelated failure (the test above) keeps QUERY_EXECUTION_ERROR."""
+        from fastapi import HTTPException
+        from graphlagoon.routers.graph import execute_graph_query
+
+        request = MagicMock()
+        request.state = MagicMock()
+        request.state.user_email = "test@example.com"
+
+        data = MagicMock()
+        data.query = "SELECT * FROM edges"
+        data.cte_prefilter = None
+        data.use_external_links = False
+
+        with (
+            patch(
+                "graphlagoon.routers.graph.get_current_user",
+                return_value="test@example.com",
+            ),
+            patch(
+                "graphlagoon.routers.graph.get_context_with_access",
+                new_callable=AsyncMock,
+                return_value=mock_context,
+            ),
+            patch(
+                "graphlagoon.routers.graph.validate_sql_query",
+                return_value=(True, ""),
+            ),
+            patch(
+                "graphlagoon.routers.graph.merge_column_config",
+                return_value={},
+            ),
+            patch(
+                "graphlagoon.routers.graph.execute_graph_query_with_nodes",
+                new_callable=AsyncMock,
+                side_effect=QueryExecutionError(
+                    "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or "
+                    "function parameter with name `email` cannot be resolved.",
+                    query="SELECT * FROM edges",
+                ),
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await execute_graph_query(
+                    context_id=mock_context.id,
+                    data=data,
+                    request=request,
+                    warehouse=mock_warehouse,
+                )
+
+            assert exc_info.value.status_code == 400
+            error = exc_info.value.detail["error"]
+            assert error["code"] == "STALE_CONTEXT_SCHEMA"
+            assert "hint" in error["details"]
+            assert error["details"]["unresolved_name"] == "email"
+            assert error["details"]["context_id"] == str(mock_context.id)
+
+    @pytest.mark.asyncio
     async def test_query_endpoint_catches_generic_exception_with_traceback(
         self, mock_context, mock_warehouse
     ):

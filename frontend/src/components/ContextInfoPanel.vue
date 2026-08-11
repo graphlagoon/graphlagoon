@@ -1,12 +1,31 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
-import { X } from 'lucide-vue-next';
+import { useSchemaDrift } from '@/composables/useSchemaDrift';
+import SchemaDriftBanner from '@/components/SchemaDriftBanner.vue';
+import { X, SearchCheck } from 'lucide-vue-next';
 
 defineEmits<{
   close: [];
+  'review-schema': [];
 }>();
 
 const graphStore = useGraphStore();
+
+// User-initiated only — no automatic check on graph load (two DESCRIBEs on
+// every open is real cost for a rare event). Shares its cache with the
+// ContextsView row action and the query-error CTA via useSchemaDrift.
+const { state: schemaDriftState, check: checkSchemaDrift } = useSchemaDrift();
+const drift = computed(() =>
+  graphStore.currentContext ? schemaDriftState(graphStore.currentContext.id).drift : null,
+);
+const checking = computed(() =>
+  graphStore.currentContext ? schemaDriftState(graphStore.currentContext.id).loading : false,
+);
+
+function checkSchema() {
+  if (graphStore.currentContext) void checkSchemaDrift(graphStore.currentContext.id);
+}
 </script>
 
 <template>
@@ -17,6 +36,24 @@ const graphStore = useGraphStore();
     </div>
 
     <div class="panel-content" v-if="graphStore.currentContext">
+      <SchemaDriftBanner
+        v-if="drift"
+        :status="drift.status"
+        :counts="drift.counts"
+        class="drift-banner-slot"
+        @review="$emit('review-schema')"
+      />
+      <button
+        v-else
+        type="button"
+        class="check-schema-btn"
+        data-testid="context-info-check-schema"
+        :disabled="checking"
+        @click="checkSchema"
+      >
+        <SearchCheck :size="13" /> {{ checking ? 'Checking schema…' : 'Check schema' }}
+      </button>
+
       <div class="info-section">
         <h4>General</h4>
         <div class="info-row">
@@ -185,6 +222,33 @@ const graphStore = useGraphStore();
   padding: 12px 16px;
   overflow-y: auto;
   flex: 1;
+}
+
+.drift-banner-slot {
+  margin-bottom: 12px;
+}
+
+.check-schema-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  margin-bottom: 12px;
+  background: var(--bg-secondary, #f5f5f5);
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-color, #333);
+  cursor: pointer;
+}
+
+.check-schema-btn:hover {
+  background: var(--bg-tertiary, #ebebeb);
+}
+
+.check-schema-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .info-section {

@@ -300,6 +300,20 @@ export async function seedContexts(page: Page, contexts: any[]) {
 }
 
 /**
+ * Mock GET .../graph-contexts/{id}/schema-drift. Call AFTER seedContexts —
+ * seedContexts' per-context route pattern has no trailing wildcard, so it
+ * never matches this path and the two coexist without needing precedence.
+ */
+export async function mockSchemaDrift(page: Page, contextId: string, drift: any) {
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/${contextId}/schema-drift**`,
+    (route) => {
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(drift) });
+    },
+  );
+}
+
+/**
  * Seed explorations via API mock. Call AFTER setupAPIMocks (later routes take precedence).
  */
 export async function seedExplorations(page: Page, explorations: any[]) {

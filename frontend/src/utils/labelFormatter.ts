@@ -586,6 +586,39 @@ export function validateTemplate(template: string): { valid: boolean; errors: st
 }
 
 /**
+ * Extract every real property-column name a template references — i.e.
+ * `{prop:x}` and `{if:prop:x>10|...}`, NOT built-ins like `{node_type}`.
+ *
+ * Built on the same `parseTemplate` the renderer uses, so this can never
+ * disagree with what the label actually resolves — the point of building the
+ * exploration-reference validator (contextReferences.ts) on top of it rather
+ * than a fresh regex.
+ */
+export function extractTemplateProperties(template: string): string[] {
+  const properties = new Set<string>();
+
+  function walk(tmpl: string) {
+    for (const token of parseTemplate(tmpl)) {
+      if ((token.type === 'placeholder' || token.type === 'date') && token.fromProps && token.property) {
+        properties.add(token.property);
+      }
+      if (token.type === 'conditional') {
+        // parseConditionExpression only ever matches a `prop:`-prefixed
+        // expression, so a present condition.property is always a real column.
+        if (token.condition?.property) properties.add(token.condition.property);
+        // trueValue/falseValue are themselves template strings and may nest
+        // further placeholders, e.g. {if:prop:x>10|{prop:y|upper}|-}.
+        if (token.trueValue) walk(token.trueValue);
+        if (token.falseValue) walk(token.falseValue);
+      }
+    }
+  }
+
+  walk(template);
+  return [...properties];
+}
+
+/**
  * Get available placeholders for autocomplete
  */
 export function getAvailablePlaceholders(

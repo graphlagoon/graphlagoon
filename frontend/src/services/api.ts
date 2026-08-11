@@ -31,6 +31,7 @@ import type {
   TablePreviewResponse,
   SchemaDiscoveryRequest,
   SchemaDiscoveryResponse,
+  SchemaDriftResponse,
   QueryTemplate,
   CreateQueryTemplateRequest,
   UpdateQueryTemplateRequest,
@@ -150,6 +151,16 @@ class ApiService {
     data: Partial<CreateGraphContextRequest>
   ): Promise<GraphContext> {
     const response = await this.client.put(`/api/graph-contexts/${id}`, data);
+    return response.data;
+  }
+
+  async getSchemaDrift(
+    contextId: string,
+    opts?: { checkTypes?: boolean }
+  ): Promise<SchemaDriftResponse> {
+    const response = await this.client.get(`/api/graph-contexts/${contextId}/schema-drift`, {
+      params: opts?.checkTypes ? { check_types: true } : undefined,
+    });
     return response.data;
   }
 

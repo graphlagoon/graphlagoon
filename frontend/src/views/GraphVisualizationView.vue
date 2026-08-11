@@ -30,6 +30,7 @@ import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
 import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
 import QueryTemplatesPanel from '@/components/QueryTemplatesPanel.vue';
+import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
 import { Info, Settings2, Hexagon, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -37,6 +38,16 @@ const props = defineProps<{
 }>();
 
 const route = useRoute();
+
+// Opened by the "Check context schema" CTA in QueryErrorModal (a stale-schema
+// query failure) and by the drift banner below (an enrichment failure, or a
+// clean automatic column check surfacing a warning/info-level finding).
+const schemaDriftModalOpen = ref(false);
+
+function reviewContextSchema() {
+  schemaDriftModalOpen.value = true;
+}
+
 const graphStore = useGraphStore();
 const toolbarStore = useToolbarStore();
 const clusterStore = useClusterStore();
@@ -292,7 +303,11 @@ watch(
         <SidePanel v-if="isFullscreen" variant="floating" @show-details="showDetailModal = true" />
 
         <!-- Context Info Panel -->
-        <ContextInfoPanel v-if="showContextInfo" @close="showContextInfo = false" />
+        <ContextInfoPanel
+          v-if="showContextInfo"
+          @close="showContextInfo = false"
+          @review-schema="reviewContextSchema"
+        />
 
         <!-- Cluster List Panel (right side) -->
         <div v-if="showClusterList" class="panel-wrapper panel-right">
@@ -435,6 +450,16 @@ watch(
     <QueryErrorModal
       :error="graphStore.queryError"
       @close="graphStore.clearQueryError()"
+      @review-schema="reviewContextSchema"
+    />
+
+    <SchemaDriftModal
+      v-if="graphStore.currentContext"
+      :open="schemaDriftModalOpen"
+      :context-id="graphStore.currentContext.id"
+      :has-write-access="graphStore.currentContext.has_write_access"
+      @close="schemaDriftModalOpen = false"
+      @applied="schemaDriftModalOpen = false"
     />
 
     <!-- Cluster Node Modal -->

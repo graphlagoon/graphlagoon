@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { AlertTriangle, ChevronDown, ChevronRight, X } from 'lucide-vue-next';
+import { AlertTriangle, ChevronDown, ChevronRight, SearchCheck, X } from 'lucide-vue-next';
 
 const props = defineProps<{
   error: {
@@ -9,11 +9,15 @@ const props = defineProps<{
     code?: string;
     exceptionType?: string;
     traceback?: string[];
+    hint?: string;
+    unresolvedName?: string;
+    contextId?: string;
   } | null;
 }>();
 
 const emit = defineEmits<{
   close: [];
+  'review-schema': [contextId: string];
 }>();
 
 const isVisible = computed(() => props.error !== null);
@@ -22,6 +26,17 @@ const showTraceback = ref(false);
 const hasDetailedInfo = computed(() => {
   return props.error?.code || props.error?.exceptionType || props.error?.traceback;
 });
+
+// STALE_CONTEXT_SCHEMA: the context's stored snapshot no longer matches the
+// live table (dropped/renamed column, or the table itself). The raw Spark
+// message stays available below, but the actionable summary leads.
+const isStaleSchema = computed(() => props.error?.code === 'STALE_CONTEXT_SCHEMA');
+
+function reviewSchema() {
+  if (props.error?.contextId) {
+    emit('review-schema', props.error.contextId);
+  }
+}
 
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text);
@@ -46,11 +61,27 @@ function copyFullError() {
       <div class="modal-content">
         <div class="modal-header">
           <AlertTriangle :size="18" class="error-icon" />
-          <h3>{{ error?.code === 'INTERNAL_SERVER_ERROR' ? 'Server Error' : 'Query Execution Error' }}</h3>
+          <h3>
+            {{
+              isStaleSchema
+                ? 'Context schema may be stale'
+                : error?.code === 'INTERNAL_SERVER_ERROR'
+                  ? 'Server Error'
+                  : 'Query Execution Error'
+            }}
+          </h3>
           <button class="close-btn btn-icon-only" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
         </div>
 
         <div class="modal-body">
+          <!-- Actionable summary, leads for a classified stale-schema failure -->
+          <div v-if="isStaleSchema && error?.hint" class="hint-message" data-testid="stale-schema-hint">
+            <p>{{ error.hint }}</p>
+            <p v-if="error.unresolvedName" class="hint-detail">
+              Column referenced: <code>{{ error.unresolvedName }}</code>
+            </p>
+          </div>
+
           <div class="error-message">
             <p>{{ error?.message }}</p>
           </div>
@@ -109,6 +140,14 @@ function copyFullError() {
         <div class="modal-footer">
           <button v-if="hasDetailedInfo" class="copy-all-btn" @click="copyFullError">
             Copy Full Error
+          </button>
+          <button
+            v-if="isStaleSchema && error?.contextId"
+            class="review-schema-btn"
+            data-testid="review-schema-btn"
+            @click="reviewSchema"
+          >
+            <SearchCheck :size="14" /> Check context schema
           </button>
           <button class="dismiss-btn" @click="emit('close')">
             Dismiss
@@ -182,6 +221,33 @@ function copyFullError() {
   padding: 20px;
   overflow-y: auto;
   flex: 1;
+}
+
+.hint-message {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.hint-message p {
+  margin: 0;
+  color: #92400e;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.hint-detail {
+  margin-top: 6px !important;
+  font-size: 13px !important;
+}
+
+.hint-detail code {
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 
 .error-message {
@@ -351,6 +417,24 @@ function copyFullError() {
 
 .copy-all-btn:hover {
   background: var(--bg-tertiary, #e0e0e0);
+}
+
+.review-schema-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #f59e0b;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.review-schema-btn:hover {
+  background: #d97706;
 }
 
 .dismiss-btn {

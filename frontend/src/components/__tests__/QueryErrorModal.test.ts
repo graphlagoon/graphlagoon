@@ -157,4 +157,66 @@ describe('QueryErrorModal', () => {
       expect(document.body.querySelector('.copy-all-btn')).toBeNull()
     })
   })
+
+  describe('stale-schema classification', () => {
+    it('shows the actionable title instead of the generic one', () => {
+      renderModal({ message: 'raw spark text', code: 'STALE_CONTEXT_SCHEMA' })
+      expect(document.body.textContent).toContain('Context schema may be stale')
+      expect(document.body.textContent).not.toContain('Query Execution Error')
+    })
+
+    it('renders the hint above the raw message', () => {
+      renderModal({
+        message: 'raw spark text',
+        code: 'STALE_CONTEXT_SCHEMA',
+        hint: 'This context’s stored schema may be out of date — run a schema check and resync.',
+      })
+      const hint = document.body.querySelector('[data-testid="stale-schema-hint"]')
+      expect(hint).not.toBeNull()
+      expect(hint!.textContent).toContain('out of date')
+    })
+
+    it('renders the unresolved column name when present', () => {
+      renderModal({
+        message: 'raw spark text',
+        code: 'STALE_CONTEXT_SCHEMA',
+        hint: 'stale',
+        unresolvedName: 'email',
+      })
+      expect(document.body.textContent).toContain('email')
+    })
+
+    it('does not render the hint block for a non-stale error', () => {
+      renderModal({ message: 'err', code: 'QUERY_EXECUTION_ERROR' })
+      expect(document.body.querySelector('[data-testid="stale-schema-hint"]')).toBeNull()
+    })
+
+    it('shows the CTA only when contextId is present', () => {
+      renderModal({
+        message: 'err',
+        code: 'STALE_CONTEXT_SCHEMA',
+        hint: 'stale',
+      })
+      expect(document.body.querySelector('[data-testid="review-schema-btn"]')).toBeNull()
+    })
+
+    it('CTA click emits review-schema with the context id', async () => {
+      const { emitted } = renderModal({
+        message: 'err',
+        code: 'STALE_CONTEXT_SCHEMA',
+        hint: 'stale',
+        contextId: 'ctx-123',
+      })
+      const btn = document.body.querySelector('[data-testid="review-schema-btn"]') as HTMLElement
+      expect(btn).not.toBeNull()
+      await fireEvent.click(btn)
+      expect(emitted()['review-schema']).toBeTruthy()
+      expect(emitted()['review-schema'][0]).toEqual(['ctx-123'])
+    })
+
+    it('CTA not shown for a non-stale error even with a contextId-shaped detail', () => {
+      renderModal({ message: 'err', code: 'QUERY_EXECUTION_ERROR', contextId: 'ctx-123' })
+      expect(document.body.querySelector('[data-testid="review-schema-btn"]')).toBeNull()
+    })
+  })
 })
