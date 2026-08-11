@@ -192,36 +192,41 @@ async function handleAction() {
 
   try {
     if (queryMode.value === 'cypher') {
-      // Transpile the query
-      const sql = await graphStore.transpileCypher(cypherQuery.value);
-      if (sql) {
-        sqlQuery.value = sql;
-
-        if (inMessiWeTrust.value) {
-          // In Messi We Trust: auto-execute without review
-          await graphStore.executeGraphQuery(sql);
-          // Save the original Cypher query (not the SQL) for exploration state
-          graphStore.setGraphQuery(cypherQuery.value);
-          if (graphStore.error) {
-            toast.error(`Query failed: ${graphStore.error}`);
-          } else {
-            toast.success(`Loaded ${graphStore.nodes.length} nodes and ${graphStore.edges.length} edges`);
-          }
+      if (inMessiWeTrust.value) {
+        // In Messi We Trust: submit the Cypher itself — the backend transpiles
+        // at submit time and the store owns the CTE fallback, so a failed
+        // procedural run (transpile OR execution) is retried in CTE mode.
+        // The transpile-then-execute-SQL two-step would bypass that fallback.
+        const sql = await graphStore.executeCypherQuery(cypherQuery.value);
+        // Keep the SQL tab in sync with what actually ran (fallback included).
+        if (sql) sqlQuery.value = sql;
+        if (graphStore.queryError) {
+          toast.error(`Query failed: ${graphStore.queryError.message}`);
         } else {
-          // Normal flow: switch to SQL mode for review
+          toast.success(`Loaded ${graphStore.nodes.length} nodes and ${graphStore.edges.length} edges`);
+        }
+      } else {
+        // Normal flow: transpile (with CTE fallback) and switch to SQL mode
+        // for review.
+        const sql = await graphStore.transpileCypher(cypherQuery.value);
+        if (sql) {
+          sqlQuery.value = sql;
           // Save the Cypher query for exploration state
           graphStore.setGraphQuery(cypherQuery.value);
           queryMode.value = 'sql';
           toast.success('Query transpiled successfully');
+        } else if (graphStore.queryError) {
+          toast.error(`Transpile failed: ${graphStore.queryError.message}`);
         }
-      } else if (graphStore.error) {
-        toast.error(`Transpile failed: ${graphStore.error}`);
       }
     } else {
       // Execute SQL query
       await graphStore.executeGraphQuery(sqlQuery.value);
-      if (graphStore.error) {
-        toast.error(`Query failed: ${graphStore.error}`);
+      // queryError, not error — query failures land in queryError; `error` is
+      // the context-load error and stays null here, which made the old check
+      // report success for failed runs.
+      if (graphStore.queryError) {
+        toast.error(`Query failed: ${graphStore.queryError.message}`);
       } else {
         toast.success(`Loaded ${graphStore.nodes.length} nodes and ${graphStore.edges.length} edges`);
       }

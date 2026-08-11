@@ -41,6 +41,58 @@ describe('TranspileSettingsModal', () => {
     expect(q('opt-visited_not_exists')).not.toBeNull();
   });
 
+  it('shows the CTE fallback toggle checked by default under procedural BFS', () => {
+    const graph = useGraphStore();
+    graph.vlpRenderingMode = 'procedural';
+    render(TranspileSettingsModal);
+
+    expect(checkbox('opt-cte-fallback').checked).toBe(true);
+  });
+
+  it('hides the CTE fallback toggle in CTE mode', () => {
+    const graph = useGraphStore();
+    graph.vlpRenderingMode = 'cte';
+    render(TranspileSettingsModal);
+
+    expect(q('opt-cte-fallback')).toBeNull();
+  });
+
+  it('binds the CTE fallback toggle to the store', async () => {
+    const graph = useGraphStore();
+    graph.vlpRenderingMode = 'procedural';
+    render(TranspileSettingsModal);
+
+    await fireEvent.click(checkbox('opt-cte-fallback'));
+    expect(graph.cteFallbackEnabled).toBe(false);
+
+    await fireEvent.click(checkbox('opt-cte-fallback'));
+    expect(graph.cteFallbackEnabled).toBe(true);
+  });
+
+  it('shows the silent sub-toggle checked by default, only while the fallback is on', async () => {
+    const graph = useGraphStore();
+    graph.vlpRenderingMode = 'procedural';
+    render(TranspileSettingsModal);
+
+    expect(checkbox('opt-cte-fallback-silent').checked).toBe(true);
+
+    // Turning the fallback off hides the silent sub-option.
+    await fireEvent.click(checkbox('opt-cte-fallback'));
+    expect(q('opt-cte-fallback-silent')).toBeNull();
+  });
+
+  it('binds the silent toggle to the store', async () => {
+    const graph = useGraphStore();
+    graph.vlpRenderingMode = 'procedural';
+    render(TranspileSettingsModal);
+
+    await fireEvent.click(checkbox('opt-cte-fallback-silent'));
+    expect(graph.cteFallbackSilent).toBe(false);
+
+    await fireEvent.click(checkbox('opt-cte-fallback-silent'));
+    expect(graph.cteFallbackSilent).toBe(true);
+  });
+
   it('binds the large-results toggle to the store', async () => {
     const graph = useGraphStore();
     graph.useExternalLinks = true;

@@ -32,6 +32,16 @@ const materialization = computed({
   set: (v: 'temp_tables' | 'numbered_views') => { graphStore.materializationStrategy = v; },
 });
 
+const cteFallback = computed({
+  get: () => graphStore.cteFallbackEnabled,
+  set: (v: boolean) => { graphStore.cteFallbackEnabled = v; },
+});
+
+const cteFallbackSilent = computed({
+  get: () => graphStore.cteFallbackSilent,
+  set: (v: boolean) => { graphStore.cteFallbackSilent = v; },
+});
+
 const useExternalLinks = computed({
   get: () => graphStore.useExternalLinks,
   set: (v: boolean) => { graphStore.useExternalLinks = v; },
@@ -127,6 +137,26 @@ const isDefault = computed(() =>
             </label>
 
             <template v-if="proceduralBfs">
+              <label class="row toggle-row">
+                <input
+                  type="checkbox"
+                  v-model="cteFallback"
+                  data-testid="opt-cte-fallback"
+                />
+                <span class="row-label">CTE fallback on error</span>
+                <span class="row-hint">retry a failed procedural query in WITH RECURSIVE mode</span>
+              </label>
+
+              <label v-if="cteFallback" class="row toggle-row sub-row">
+                <input
+                  type="checkbox"
+                  v-model="cteFallbackSilent"
+                  data-testid="opt-cte-fallback-silent"
+                />
+                <span class="row-label">Silent fallback</span>
+                <span class="row-hint">don't show notifications when the fallback runs</span>
+              </label>
+
               <div class="row select-row">
                 <span class="row-label">Materialization</span>
                 <select v-model="materialization" class="strategy-select" data-testid="opt-materialization">
@@ -293,6 +323,10 @@ const isDefault = computed(() =>
 .toggle-row,
 .flag-row {
   cursor: pointer;
+}
+
+.sub-row {
+  padding-left: 22px;
 }
 
 .row input[type='checkbox'] {

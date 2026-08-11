@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api } from '@/services/api';
 import { useGraphStore } from '@/stores/graph';
+import { useToast } from '@/composables/useToast';
 import {
   type ColMeta,
   buildGenericColumns,
@@ -149,6 +150,11 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
     truncated.value = false;
   }
 
+  // Rendering mode for the CURRENT submit. Normally mirrors the graph store's
+  // option; the CTE fallback overrides it to 'cte' for the retry run only, so
+  // the saved option is never touched.
+  let submitRenderingMode: 'cte' | 'procedural' = 'procedural';
+
   const cq = useCancellableQuery({
     submit: async (): Promise<StepResult> => {
       const graphStore = useGraphStore();
@@ -165,9 +171,9 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
         // Transpile options (cypher mode only) shared with the graph panel.
         ...(mode.value === 'cypher'
           ? {
-              vlp_rendering_mode: graphStore.vlpRenderingMode,
+              vlp_rendering_mode: submitRenderingMode,
               materialization_strategy: graphStore.materializationStrategy,
-              ...(graphStore.vlpRenderingMode === 'procedural'
+              ...(submitRenderingMode === 'procedural'
                 ? {
                     procedural_optimizations: {
                       ...graphStore.proceduralOptimizations,
@@ -228,7 +234,40 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
     if (!query) return;
 
     error.value = null;
+    submitRenderingMode = graphStore.vlpRenderingMode;
     await cq.run();
+    // CTE fallback, same contract as the graph path: a failed procedural
+    // cypher run is retried once in CTE (WITH RECURSIVE) mode. On the table
+    // endpoint this matters even more — procedural mode emits a BEGIN…END SQL
+    // script that the endpoint's read-only SELECT validation rejects outright,
+    // so without the fallback a procedural table query can never run.
+    if (
+      error.value !== null &&
+      !cq.canceled.value &&
+      mode.value === 'cypher' &&
+      submitRenderingMode === 'procedural' &&
+      graphStore.cteFallbackEnabled
+    ) {
+      if (!graphStore.cteFallbackSilent) {
+        useToast().warning(
+          'Procedural query failed — retrying in CTE (WITH RECURSIVE) mode…',
+          5000,
+        );
+      }
+      error.value = null;
+      submitRenderingMode = 'cte';
+      await cq.run();
+      if (
+        error.value === null &&
+        !cq.canceled.value &&
+        !graphStore.cteFallbackSilent
+      ) {
+        useToast().warning(
+          'Result produced by the CTE fallback — the procedural transpile failed for this query.',
+          6000,
+        );
+      }
+    }
   }
 
   /** Cancel the in-flight query, releasing warehouse compute. No-op if idle. */
