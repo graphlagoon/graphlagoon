@@ -223,5 +223,52 @@ describe('GraphContextFormModal', () => {
       const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
       expect(payload.edge_structure?.src_col).toBe('source_id')
     })
+
+    it('offers type Discover, using the context\'s own tables and structural columns', async () => {
+      const context = createGraphContext({
+        edge_table_name: 'db.edges',
+        node_table_name: 'db.nodes',
+      })
+      vi.mocked(api.discoverSchema).mockResolvedValue({
+        node_types: ['Person', 'Company'],
+        relationship_types: ['KNOWS'],
+      })
+
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+
+      await fireEvent.click(getByTestId('discover-types-btn'))
+      await flush()
+
+      expect(api.discoverSchema).toHaveBeenCalledTimes(1)
+      const [request] = vi.mocked(api.discoverSchema).mock.calls[0]
+      expect(request.edge_table).toBe('db.edges')
+      expect(request.node_table).toBe('db.nodes')
+      expect(request.columns?.node_type_col).toBe(context.node_structure.node_type_col)
+    })
+
+    it('discovered types land in the payload, and properties still do not', async () => {
+      const context = createGraphContext({ id: 'ctx-edit' })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+      vi.mocked(api.discoverSchema).mockResolvedValue({
+        node_types: ['Person', 'Company'],
+        relationship_types: ['KNOWS'],
+      })
+
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+
+      await fireEvent.click(getByTestId('discover-types-btn'))
+      await flush()
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+      expect(payload.node_types).toEqual(['Person', 'Company'])
+      expect(payload.relationship_types).toEqual(['KNOWS'])
+      // Discovery must not have pulled property columns in as a side effect.
+      expect(payload).not.toHaveProperty('node_properties')
+      expect(payload).not.toHaveProperty('edge_properties')
+    })
   })
 })

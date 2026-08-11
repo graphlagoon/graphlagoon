@@ -31,11 +31,11 @@ beforeEach(() => {
 })
 
 describe('SchemaDriftModal', () => {
-  it('fetches drift when opened without a cached result', async () => {
+  it('fetches drift when opened without a cached result, types included', async () => {
     vi.mocked(api.getSchemaDrift).mockResolvedValue(createSchemaDrift({ context_id: 'ctx-1' }))
     render(SchemaDriftModal, { props: { open: true, contextId: 'ctx-1', hasWriteAccess: true } })
     await flush()
-    expect(api.getSchemaDrift).toHaveBeenCalledWith('ctx-1', { checkTypes: false })
+    expect(api.getSchemaDrift).toHaveBeenCalledWith('ctx-1', { checkTypes: true })
   })
 
   it('shows a clean-state message when status is ok', async () => {
@@ -196,15 +196,32 @@ describe('SchemaDriftModal', () => {
     expect(queryByTestId('schema-drift-apply')).toBeNull()
   })
 
-  it('"Also refresh types" re-checks with checkTypes true', async () => {
-    vi.mocked(api.getSchemaDrift).mockResolvedValue(createSchemaDrift({ context_id: 'ctx-1', status: 'ok' }))
+  // types_checked comes back false only when discovery actually FAILED — the
+  // request always asks for it now — so the modal surfaces a retry, not an opt-in.
+  it('surfaces a retry when type discovery failed', async () => {
+    vi.mocked(api.getSchemaDrift).mockResolvedValue(
+      createSchemaDrift({ context_id: 'ctx-1', status: 'ok', types_checked: false }),
+    )
     const { getByTestId } = render(SchemaDriftModal, { props: { open: true, contextId: 'ctx-1', hasWriteAccess: true } })
     await flush()
+
+    expect(getByTestId('schema-drift-types-failed').textContent).toContain('discovery failed')
 
     await fireEvent.click(getByTestId('schema-drift-check-types'))
     await flush()
 
     expect(api.getSchemaDrift).toHaveBeenNthCalledWith(2, 'ctx-1', { checkTypes: true })
+  })
+
+  it('reports types as included when discovery succeeded, with no retry offered', async () => {
+    vi.mocked(api.getSchemaDrift).mockResolvedValue(
+      createSchemaDrift({ context_id: 'ctx-1', status: 'ok', types_checked: true }),
+    )
+    const { queryByTestId } = render(SchemaDriftModal, { props: { open: true, contextId: 'ctx-1', hasWriteAccess: true } })
+    await flush()
+
+    expect(queryByTestId('schema-drift-types-failed')).toBeNull()
+    expect(queryByTestId('schema-drift-check-types')).toBeNull()
   })
 
   describe('dangling references', () => {

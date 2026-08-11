@@ -144,6 +144,11 @@ const hasCertainDangling = computed(() =>
 
 const showDanglingPanel = computed(() => explorationsLoaded.value && danglingByExploration.value.length > 0);
 
+/**
+ * Retry the check. Types are requested on every check now, so reaching this
+ * means discovery itself failed (the backend reports `types_checked: false`
+ * when the `SELECT DISTINCT` errored, not merely when it was skipped).
+ */
 async function refreshWithTypes() {
   checkingTypes.value = true;
   try {
@@ -338,16 +343,21 @@ function severityLabel(f: SchemaDriftFinding): string {
         </div>
 
         <div class="types-section">
-          <button
-            v-if="!drift.types_checked"
-            type="button"
-            class="btn btn-sm btn-outline"
-            :disabled="checkingTypes"
-            data-testid="schema-drift-check-types"
-            @click="refreshWithTypes"
-          >
-            {{ checkingTypes ? 'Checking types…' : 'Also refresh node/relationship types' }}
-          </button>
+          <template v-if="!drift.types_checked">
+            <span class="hint hint-warn" data-testid="schema-drift-types-failed">
+              Node/relationship type discovery failed, so type changes are not included below.
+              Column findings are unaffected.
+            </span>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline"
+              :disabled="checkingTypes"
+              data-testid="schema-drift-check-types"
+              @click="refreshWithTypes"
+            >
+              {{ checkingTypes ? 'Retrying…' : 'Retry type discovery' }}
+            </button>
+          </template>
           <span v-else class="hint">Node and relationship types were included in this check.</span>
         </div>
 
@@ -493,6 +503,14 @@ function severityLabel(f: SchemaDriftFinding): string {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border-color, #eee);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.hint-warn {
+  color: #92400e;
 }
 
 .dangling-panel {

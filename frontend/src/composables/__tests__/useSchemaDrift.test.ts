@@ -68,6 +68,24 @@ describe('useSchemaDrift', () => {
     expect(api.getSchemaDrift).toHaveBeenNthCalledWith(2, 'ctx-a', { checkTypes: true })
   })
 
+  it('includes type discovery by default — a check must not silently skip types', async () => {
+    const { check } = useSchemaDrift()
+    vi.mocked(api.getSchemaDrift).mockResolvedValue(createSchemaDrift({ context_id: 'ctx-a' }))
+
+    await check('ctx-a')
+
+    expect(api.getSchemaDrift).toHaveBeenCalledWith('ctx-a', { checkTypes: true })
+  })
+
+  it('still honours an explicit columns-only check', async () => {
+    const { check } = useSchemaDrift()
+    vi.mocked(api.getSchemaDrift).mockResolvedValue(createSchemaDrift({ context_id: 'ctx-a' }))
+
+    await check('ctx-a', false)
+
+    expect(api.getSchemaDrift).toHaveBeenCalledWith('ctx-a', { checkTypes: false })
+  })
+
   it('surfaces an error without throwing', async () => {
     vi.mocked(api.getSchemaDrift).mockRejectedValue(new Error('network down'))
 

@@ -3288,9 +3288,19 @@ em contexto existente").
    view (both share the `useSchemaDrift` cache). Reactive detection — the case that actually
    matters — is unaffected: a query that fails because of drift still surfaces the classified
    `STALE_CONTEXT_SCHEMA` error with the "Check context schema" CTA regardless of whether
-   anyone ran a manual check first. `SELECT DISTINCT` for node/relationship types was always
-   opt-in (a full-table scan) via `?check_types=true` / the "Also refresh types" button, and
-   stays that way.
+   anyone ran a manual check first.
+   **Corollary, decided immediately after:** *because* the check is now manual, type discovery
+   (`SELECT DISTINCT`, a full scan of both tables) flipped from opt-in to **on by default** —
+   `useSchemaDrift.check()` sends `check_types=true` unless told otherwise. Types were opt-in
+   only to keep the once-automatic on-load check cheap; that justification died with the
+   automatic check. A check whose cost is bounded by a deliberate click should return the
+   complete answer, and the two-step version had a real failure mode: a user clicks "Check
+   schema", sees "ok", and walks away from a context whose new node types are invisible to
+   Cypher — precisely the silent drift this feature exists to catch. Cost control moved to the
+   right place (the user decides *whether* to check); apply control stays per-finding in the
+   review modal. `types_checked: false` in a response now means discovery **failed**, not that
+   it was skipped, so the modal shows an honest "discovery failed / Retry" instead of an
+   "Also refresh types" opt-in.
 6. **Structural validation is strict but skippable.** `validate_context_tables` runs on
    `POST`/`PUT` whenever a structure is present in the payload — a structural column absent
    from the live table is a 400 `CONTEXT_STRUCTURE_INVALID`. But if the table can't be
@@ -3304,12 +3314,20 @@ em contexto existente").
    gets only a best-effort word-boundary substring scan (`certain: false`) since it can't be
    parsed. The review modal requires an explicit "I understand" checkbox before Apply when any
    *certain* dangling reference exists.
-8. **The generic edit form (Phase 4) never touches `node_properties`/`edge_properties`.**
-   Editing title/description/tags/structural-column-names/types/default-behaviors always omits
-   the properties keys from the `PUT` payload (`None` = unchanged in `GraphContextUpdate`).
-   Property resync is exclusively the schema-diff review flow's job — otherwise a plain "rename
-   this context" edit would silently resync properties as a side effect and bypass the
-   rename-mapping/dangling-reference review entirely.
+8. **The generic edit form (Phase 4) never touches `node_properties`/`edge_properties` — but
+   it does offer type "Discover".** Editing title/description/tags/structural-column-names/
+   types/default-behaviors always omits the properties keys from the `PUT` payload (`None` =
+   unchanged in `GraphContextUpdate`). Property resync is exclusively the schema-diff review
+   flow's job — otherwise a plain "rename this context" edit would silently resync properties
+   as a side effect and bypass the rename-mapping/dangling-reference review entirely.
+   The first pass over-applied that rule and hid the "Discover" button in edit mode too,
+   conflating "must not recompute properties" with "must not read anything live". Corrected:
+   discovery runs `SELECT DISTINCT` on the two *type* columns and writes only the
+   `node_types`/`relationship_types` text fields — fields this form already lets you edit by
+   hand. It touches no property column, so it bypasses no review; withholding it merely forced
+   people to retype values a button one line away could fetch. `GraphContextFormModal.test.ts`
+   pins both halves: discovery populates the payload's types in edit mode, *and* the payload
+   still carries no `node_properties`/`edge_properties`.
 9. **Access control follows the read/write split already in place, not a new tier.** Checking
    drift is read-only (`GET .../schema-drift` uses the existing `get_context_with_access`,
    which any share level satisfies) — the frontend originally gated the "Check schema" row
@@ -3376,8 +3394,9 @@ across findings; `ok` when empty.
   imported — `ContextsView.logic.test.ts` used to **re-declare copies** of these three
   functions because the SFC didn't export them, so it was testing copies, not the real logic)
   and `components/GraphContextFormModal.vue` (`mode: 'create' | 'edit'`). Edit mode shows table
-  names as disabled text (immutable) and structural columns as plain text inputs — no live-
-  schema fetch, no property recomputation, per decision 8 above.
+  names as disabled text (immutable) and structural columns as plain text inputs — no
+  per-column live-schema fetch and no property recomputation, per decision 8 above; type
+  "Discover" is available in both modes.
 - **Phase 5** — `composables/useSchemaDrift.ts` (module-level cache keyed by context id, so the
   row action, the review modal, and the query-error CTA all read the same result),
   `components/SchemaDriftBanner.vue`, `components/SchemaDriftModal.vue` (findings grouped by
@@ -3419,13 +3438,16 @@ validation on `POST`/`PUT`), `services/graph_operations.py` (`merge_column_confi
 starting, and unaffected by it throughout); 66 tests across the 5 new dedicated files
 (`test_schema_drift.py`, `test_schema_drift_endpoint.py`, `test_warehouse_errors.py`,
 `test_edge_column_absent.py`, `test_context_table_validation.py`) plus new cases added to
-`test_graph_error_handling.py`. Frontend unit suite ends at 1326 passing, `vue-tsc --noEmit`
-clean throughout. E2E ends at 108/108 passing — 6 dedicated cases in `schema-drift.spec.ts`
-(including the read-only-can-check/cannot-apply case from decision 9) plus 1 cross-page journey
-in `user-journeys.spec.ts` ("user finds and fixes a stale context schema, then the graph
-loads"); all 7 pre-existing `contexts.spec.ts` cases passed **unchanged** throughout, the
-Phase 4 acceptance bar (`ContextsView.vue` decomposition must not require touching the existing
-e2e spec).
+`test_graph_error_handling.py`. Frontend unit suite ends at 1363 passing, `vue-tsc --noEmit`
+clean throughout. E2E ends at 109/109 passing — 7 dedicated cases in `schema-drift.spec.ts`
+(including the read-only-can-check/cannot-apply case from decision 9 and the
+`check_types=true`-by-default assertion from decision 5) plus 1 cross-page journey in
+`user-journeys.spec.ts` ("user finds and fixes a stale context schema, then the graph loads");
+all 7 pre-existing `contexts.spec.ts` cases passed **unchanged** throughout, the Phase 4
+acceptance bar (`ContextsView.vue` decomposition must not require touching the existing e2e
+spec). One `progressive-load.spec.ts` case failed on a loaded machine mid-session and passed
+both in isolation and on a clean full re-run — timing flake, unrelated to this work (it
+exercises the Behaviors panel, which this feature does not touch).
 
 **Known limitations (accepted, per decisions 2 and 7):**
 1. Table rename/move is still unrecoverable — delete-and-recreate remains the only path.
