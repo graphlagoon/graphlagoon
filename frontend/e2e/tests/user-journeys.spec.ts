@@ -127,7 +127,7 @@ test.describe('User Journeys', () => {
       context_id: MOCK_CONTEXT.id,
       checked_at: '2026-08-11T00:00:00Z',
       status: 'error',
-      types_checked: false,
+      types_checked: true,
       counts: { error: 1, warning: 0, info: 0 },
       node_table: { table_name: MOCK_CONTEXT.node_table_name, reachable: true, columns: [] },
       edge_table: { table_name: MOCK_CONTEXT.edge_table_name, reachable: true, columns: [] },

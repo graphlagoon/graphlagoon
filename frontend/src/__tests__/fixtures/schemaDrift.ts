@@ -22,7 +22,10 @@ export function createSchemaDrift(overrides: Partial<SchemaDriftResponse> = {}):
     context_id: 'ctx-1',
     checked_at: '2026-08-11T00:00:00Z',
     status: 'ok',
-    types_checked: false,
+    // Every check requests type discovery, so a successful response has this
+    // true; false specifically means discovery errored. Override it to false
+    // when exercising that failure path.
+    types_checked: true,
     counts: { error: 0, warning: 0, info: 0 },
     node_table: { table_name: 'cat.db.nodes', reachable: true, columns: [] },
     edge_table: { table_name: 'cat.db.edges', reachable: true, columns: [] },
@@ -30,8 +33,8 @@ export function createSchemaDrift(overrides: Partial<SchemaDriftResponse> = {}):
     proposed: {
       node_properties: [],
       edge_properties: [],
-      node_types: null,
-      relationship_types: null,
+      node_types: [],
+      relationship_types: [],
     },
     ...overrides,
   }

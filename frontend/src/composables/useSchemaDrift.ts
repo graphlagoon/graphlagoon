@@ -30,12 +30,21 @@ export function useSchemaDrift() {
 
   /**
    * Run (or re-run) the drift check for a context. Always hits the API — this
-   * is not a request-dedup cache, only a shared-state one; `checkTypes` runs
-   * the expensive type discovery on top of the (always-run) column check.
+   * is not a request-dedup cache, only a shared-state one.
+   *
+   * `checkTypes` defaults to TRUE: node/relationship type discovery is a
+   * `SELECT DISTINCT` (a full scan of both tables), which is why it used to be
+   * opt-in — that was to keep the once-automatic on-load check cheap. Now that
+   * every check is explicitly user-initiated, the cost is bounded by a
+   * deliberate click and the right default is the complete answer. A check that
+   * silently skipped types would report "ok" on a context whose new node types
+   * are invisible to Cypher — exactly the silent drift this feature exists to
+   * catch. Which findings actually get *applied* is still per-finding opt-in in
+   * the review modal.
    */
   async function check(
     contextId: string,
-    checkTypes = false,
+    checkTypes = true,
   ): Promise<SchemaDriftResponse | null> {
     const entry = ensureEntry(contextId);
     entry.loading = true;

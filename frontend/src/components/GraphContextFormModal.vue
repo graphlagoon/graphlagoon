@@ -14,12 +14,18 @@ import type { GraphContext, ColumnInfo } from '@/types/graph';
  * minus the structural ones).
  *
  * EDIT mode deliberately does LESS: table names are immutable (shown as
- * static text — see docs/dev/decision-log.md for why), and structural columns/
- * types are plain text fields with no live-schema fetch. Submitting an edit
- * never touches node_properties/edge_properties — that is what the schema-diff
- * review flow (SchemaDriftModal) is for. A generic edit form silently
- * resyncing properties as a side effect of renaming a tag would bypass that
- * review entirely.
+ * static text — see docs/dev/decision-log.md for why) and structural columns
+ * are plain text fields with no per-column live-schema fetch. Submitting an
+ * edit never touches node_properties/edge_properties — that is what the
+ * schema-diff review flow (SchemaDriftModal) is for. A generic edit form
+ * silently resyncing properties as a side effect of renaming a tag would
+ * bypass that review entirely.
+ *
+ * Type "Discover" IS available in both modes: it only reads the two type
+ * columns and rewrites the node_types/relationship_types text fields, which
+ * are already hand-editable here. It touches no property column, so it does
+ * not bypass anything — withholding it in edit mode just forced people to
+ * retype values the button could fetch.
  */
 const props = defineProps<{
   open: boolean;
@@ -577,10 +583,14 @@ async function submit() {
         <div class="column-config-section">
           <div class="section-header-row">
             <h4>Schema Types</h4>
+            <!-- Available in edit mode too: discovery only reads the type columns
+                 (SELECT DISTINCT) and rewrites these two text fields. It never
+                 touches node_properties/edge_properties, so it does not bypass the
+                 schema-diff review the way a property recomputation here would. -->
             <button
-              v-if="mode === 'create'"
               type="button"
               class="btn btn-sm btn-outline"
+              data-testid="discover-types-btn"
               :disabled="loadingSchemaDiscovery || !form.edge_table_name || !form.node_table_name"
               @click="discoverTypes"
             >
@@ -598,7 +608,7 @@ async function submit() {
                 class="form-control"
                 placeholder="Person, Company, Product"
               />
-              <span class="hint">Comma-separated{{ mode === 'create' ? ' (or click Discover)' : '' }}</span>
+              <span class="hint">Comma-separated (or click Discover)</span>
             </div>
             <div class="form-group">
               <label>Relationship Types</label>
@@ -608,7 +618,7 @@ async function submit() {
                 class="form-control"
                 placeholder="KNOWS, WORKS_AT, OWNS"
               />
-              <span class="hint">Comma-separated{{ mode === 'create' ? ' (or click Discover)' : '' }}</span>
+              <span class="hint">Comma-separated (or click Discover)</span>
             </div>
           </div>
         </div>

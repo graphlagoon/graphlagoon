@@ -6,7 +6,7 @@ const OK_DRIFT = {
   context_id: MOCK_CONTEXT.id,
   checked_at: '2026-08-11T00:00:00Z',
   status: 'ok',
-  types_checked: false,
+  types_checked: true,
   counts: { error: 0, warning: 0, info: 0 },
   node_table: { table_name: MOCK_CONTEXT.node_table_name, reachable: true, columns: [] },
   edge_table: { table_name: MOCK_CONTEXT.edge_table_name, reachable: true, columns: [] },
@@ -72,6 +72,17 @@ test.describe('Schema drift', () => {
     await page.getByTestId('check-schema-btn').click();
     await expect(page.getByTestId('schema-drift-banner')).toBeVisible();
     await expect(page.getByTestId('schema-drift-banner')).toContainText('1 error');
+  });
+
+  test('the check asks for type discovery, so types are never silently skipped', async ({ authenticatedPage: page }) => {
+    await mockSchemaDrift(page, MOCK_CONTEXT.id, OK_DRIFT);
+
+    await page.goto('/contexts');
+    const driftReq = page.waitForRequest((req) => req.url().includes('/schema-drift'));
+    await page.getByTestId('check-schema-btn').click();
+    const req = await driftReq;
+
+    expect(new URL(req.url()).searchParams.get('check_types')).toBe('true');
   });
 
   test('review modal lists the dropped column', async ({ authenticatedPage: page }) => {
