@@ -705,6 +705,47 @@ export interface SchemaDiscoveryResponse {
   relationship_types: string[];
 }
 
+// Schema drift — see api/graphlagoon/services/schema_drift.py for the source of truth.
+export type SchemaDriftSeverity = 'ok' | 'error' | 'warning' | 'info';
+
+export interface SchemaDriftFinding {
+  code: string;
+  severity: 'error' | 'warning' | 'info';
+  side: 'node' | 'edge';
+  kind: 'table' | 'structure' | 'property' | 'type';
+  name: string;
+  message: string;
+  role?: string | null;
+  stored?: Record<string, unknown> | null;
+  live?: Record<string, unknown> | null;
+  auto_fixable: boolean;
+}
+
+export interface SchemaDriftTable {
+  table_name: string;
+  reachable: boolean;
+  columns: ColumnInfo[];
+}
+
+export interface SchemaDriftProposal {
+  node_properties: PropertyColumn[];
+  edge_properties: PropertyColumn[];
+  node_types: string[] | null;
+  relationship_types: string[] | null;
+}
+
+export interface SchemaDriftResponse {
+  context_id: string;
+  checked_at: string;
+  status: SchemaDriftSeverity;
+  types_checked: boolean;
+  counts: { error: number; warning: number; info: number };
+  node_table: SchemaDriftTable;
+  edge_table: SchemaDriftTable;
+  findings: SchemaDriftFinding[];
+  proposed: SchemaDriftProposal;
+}
+
 // ============================================================================
 // Text Format Rules - Label formatting for nodes and edges
 // ============================================================================

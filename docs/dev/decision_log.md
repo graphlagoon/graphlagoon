@@ -3225,3 +3225,212 @@ Nenhuma otimização aplicada. Registrado para que a pergunta não volte.
 **Nota:** isto é diferente do preenchimento de `node_properties`, que vem do
 schema das tabelas em `ContextsView.vue:320` — também automático, também uma vez
 só. Os dois caminhos estão corretos como estão.
+
+## [2026-08-11] - Feature: Context schema drift detection, resync, edit UI and guard rails
+
+**Purpose:** `GraphContext` stores a frozen snapshot of its source warehouse tables' schema
+(`node_structure`/`edge_structure`, `node_properties`/`edge_properties`, `node_types`/
+`relationship_types`), captured once in the browser at creation time and never revalidated.
+When the underlying table changes, the context silently rots. Directly resolves the second
+"PENDÊNCIA RESTANTE" logged in the 2026-07-30 entry above ("Sem edição de `node_properties`
+em contexto existente").
+
+**Verified failure modes (before this feature):**
+- Property column dropped/renamed → hard failure of every graph load (`resolve_node_columns`
+  turns `node_properties` into an explicit `SELECT` projection).
+- Column added → silently invisible (projection stays narrowed to the stored list).
+- Structural column renamed → **worst case, empty graph, zero error**: `merge_column_config`
+  substituted hardcoded defaults for missing keys, and `process_graph_query_result` built
+  `src=src_id or ""` without ever populating `node_ids` — HTTP 200, blank canvas, no signal.
+  A related latent bug was found and fixed along the way: `_get_edge_id`'s composite-key
+  fallback used direct dict indexing (`row_dict[src_col]`) instead of `.get()`, so the same
+  scenario could instead crash with an unhandled `KeyError` → 500, before the new guard even
+  had a chance to classify it.
+- New node/relationship type → invisible to Cypher (`build_schema_provider` builds the
+  transpiler schema only from stored `node_types`), while raw-SQL subgraph queries return the
+  same nodes — the canvas shows nodes the query layer denies exist.
+- Table dropped/renamed → unrecoverable (delete-and-recreate, losing explorations/templates/
+  cluster programs).
+
+**Design decisions:**
+
+1. **No dedicated write endpoint for resync.** `GET .../schema-drift` returns a `proposed`
+   snapshot; the frontend reviews it (optionally editing rename mappings / deselecting fixes)
+   and echoes the result back through the existing `PUT /graph-contexts/{id}` — which was
+   already implemented, unit-tested, and had zero production callers. A second write endpoint
+   would mean a second dual-path (DB + memory-store) implementation, and computing-then-
+   applying server-side would open a TOCTOU window between what the user reviewed and what
+   gets written.
+2. **Table names stay immutable.** No repointing to a different/renamed table. A missing table
+   is diagnosed instantly (`TABLE_NOT_FOUND` finding, `status: "error"`) instead of an opaque
+   Spark error, but recovery is still delete-and-recreate. Reopening this later is a small
+   change — `validate_context_tables` (built for structural-column validation, see below)
+   already does everything repointing would need; it would just gain two more fields on
+   `GraphContextUpdate`.
+3. **Renames are never inferred.** A renamed column surfaces as a `PROPERTY_COLUMN_MISSING` +
+   a `PROPERTY_COLUMN_ADDED` finding; the review UI offers an explicit "was this renamed to…?"
+   mapping control that carries `display_name`/`description` across. Heuristic name-matching
+   would silently repoint label templates and filters at data the user never confirmed was
+   the same thing.
+4. **Missing columns are dropped on apply, not retired.** Dropping is what un-breaks graph
+   loading. Deselecting a `PROPERTY_COLUMN_MISSING` finding in the review modal reconstructs
+   the old entry from `finding.stored` (which the diff always carries) rather than requiring a
+   second round-trip or a `retired_properties` field/migration for a case assumed to be rare
+   (a column that vanished and is expected to reappear).
+5. **Drift detection is entirely user-initiated — no automatic check anywhere, columns or
+   types.** The first pass fired a fire-and-forget column `DESCRIBE` (2 statements) at the end
+   of every `loadContext()`, reasoning that it was cheap. Reconsidered mid-review: "cheap" per
+   call still means two extra warehouse round-trips on *every single graph open*, for an event
+   (schema drift) that is rare — the wrong tradeoff in a codebase with a standing perf-focused
+   branch and profiling tooling for exactly this kind of load-path cost. Detection is instead:
+   a "Check schema" action in `ContextsView` (row-level, never on mount — which would fire 2N
+   statements for N contexts) and a matching manual action in `ContextInfoPanel` on the graph
+   view (both share the `useSchemaDrift` cache). Reactive detection — the case that actually
+   matters — is unaffected: a query that fails because of drift still surfaces the classified
+   `STALE_CONTEXT_SCHEMA` error with the "Check context schema" CTA regardless of whether
+   anyone ran a manual check first. `SELECT DISTINCT` for node/relationship types was always
+   opt-in (a full-table scan) via `?check_types=true` / the "Also refresh types" button, and
+   stays that way.
+6. **Structural validation is strict but skippable.** `validate_context_tables` runs on
+   `POST`/`PUT` whenever a structure is present in the payload — a structural column absent
+   from the live table is a 400 `CONTEXT_STRUCTURE_INVALID`. But if the table can't be
+   described at all (warehouse down, dev mode without it running), validation is **skipped**,
+   not failed: editing or creating a context must never be blocked by warehouse unavailability.
+7. **Exploration references: warn-only, never rewritten.** A resync never edits saved
+   exploration state. `contextReferences.ts` walks every structured field that embeds a column
+   name (label templates via the real tokenizer, icon configs, hive/ego layout keys, property
+   filters, similarity `keyProperty`, cluster-program `node_binding`) and reports dangling
+   references before Apply; raw Cypher/SQL (`graph_query`, `cte_prefilter`, query templates)
+   gets only a best-effort word-boundary substring scan (`certain: false`) since it can't be
+   parsed. The review modal requires an explicit "I understand" checkbox before Apply when any
+   *certain* dangling reference exists.
+8. **The generic edit form (Phase 4) never touches `node_properties`/`edge_properties`.**
+   Editing title/description/tags/structural-column-names/types/default-behaviors always omits
+   the properties keys from the `PUT` payload (`None` = unchanged in `GraphContextUpdate`).
+   Property resync is exclusively the schema-diff review flow's job — otherwise a plain "rename
+   this context" edit would silently resync properties as a side effect and bypass the
+   rename-mapping/dangling-reference review entirely.
+9. **Access control follows the read/write split already in place, not a new tier.** Checking
+   drift is read-only (`GET .../schema-drift` uses the existing `get_context_with_access`,
+   which any share level satisfies) — the frontend originally gated the "Check schema" row
+   action on `has_write_access` too, which was an inconsistency caught on review: the graph
+   view's equivalent action was never gated at all, and there is no reason a read-only
+   collaborator shouldn't be able to see whether a context they can't fix is stale. Fixed by
+   dropping the write-access `v-if` from both call sites — checking is universal. **Editing**
+   (`GraphContextFormModal`, the "Edit" row action) and **applying a fix** (`SchemaDriftModal`'s
+   Apply, disabled — not hidden — without write access, so a read-only user can still walk
+   through a review and see exactly what they'd be missing) both still require write access,
+   matching every other mutating context action (share, delete).
+
+**Severity taxonomy** (`services/schema_drift.py`): `error` = `TABLE_NOT_FOUND` /
+`STRUCTURAL_COLUMN_MISSING` / `PROPERTY_COLUMN_MISSING` (query-breaking) · `warning` =
+`STRUCTURAL_COLUMN_TYPE_CHANGED` (declared but never emitted — no prior type is stored for
+structural columns, so there is nothing to diff against) / `PROPERTY_TYPE_CHANGED` /
+`TYPE_VALUE_REMOVED` · `info` = `PROPERTY_COLUMN_ADDED` / `TYPE_VALUE_ADDED`. `status = max`
+across findings; `ok` when empty.
+
+**Implementation (phased, each independently shippable):**
+
+- **Phase 0** — `services/schema_drift.py`: pure diff engine (`diff_table`, `diff_structure`,
+  `diff_types`, `merge_properties` — this function *is* the resync semantics, `overall_status`,
+  `compute_drift`). Zero I/O, fully unit-testable without a warehouse. `merge_column_config`
+  moved here from `routers/graph.py` (re-imported under the same name so existing test patches/
+  imports keep working) since the drift service needed it too.
+- **Phase 1** — `GET /api/graph-contexts/{id}/schema-drift?check_types=false`: parses both
+  table names, `get_table_schema` per table (caught independently — one bad table still yields
+  a useful diff), optional `discover_schema`, then `compute_drift`. Always HTTP 200 — a drift
+  *report* is never a failure, even when a table is unreachable.
+- **Phase 2** — Guard rails, shippable before any UI exists:
+  - `services/warehouse_errors.py`: `classify_query_error` recognizes `UNRESOLVED_COLUMN`/
+    `TABLE_OR_VIEW_NOT_FOUND` substrings → new code `STALE_CONTEXT_SCHEMA` with a `hint` and
+    (when present) the unresolved column name. `QueryExecutionError` gained a `code` attribute
+    set at construction; the async-job path already read `getattr(e, "code", …)`, so `/query`
+    and `/cypher` picked this up for free. All 8 hand-rolled 400-envelope blocks in
+    `routers/graph.py` replaced by one `query_execution_http_error(exc, context_id, …)` builder.
+  - The silent-empty-graph fix: `process_graph_query_result` now counts edge items where
+    `src_col`/`dst_col` are **absent as keys** (not just falsy — present-but-`None` is
+    legitimate data) and raises a classified `QueryExecutionError` when every item is missing
+    them. The `_get_edge_id` bug fix (above) was required for this guard to ever be reached
+    instead of crashing first.
+  - `QueryErrorModal.vue`: a `STALE_CONTEXT_SCHEMA` error leads with the hint (and unresolved
+    column name) above the raw Spark text, plus a "Check context schema" CTA.
+  - `enrichNodeProperties`'s catch (`stores/graph.ts`) — previously a bare `console.warn`
+    leaving nodes permanently property-less with no signal — now sets a visible
+    `enrichmentError` and toasts; a `STALE_CONTEXT_SCHEMA` code also flags `schemaDriftSuspected`.
+  - `validate_context_tables` in `schema_drift.py` (the one function in that module that does
+    I/O, kept there because it shares `parse_qualified_table`), wired into both `POST` and
+    `PUT` in `routers/graph_contexts.py`.
+- **Phase 3 — reverted.** Originally added `schema_synced_at` (nullable `DateTime`, migration
+  `010`, stamped on create and on a `PUT` touching the schema fields) to show "last synced".
+  Pulled after review against a real Postgres instance: the field was never actually surfaced
+  in any UI (a straight `grep` across every `.vue` file confirmed zero references), so it was a
+  migration requirement — the exact friction that surfaced as a live `UndefinedColumnError`
+  against a database that hadn't run it — bought for a display that didn't exist. It is also
+  strictly less useful than what the app already has: now that drift-checking is user-initiated
+  (see decision 5), "when was this last stamped" tells you less than the on-demand check's "is
+  it stale *right now*". Reopening this later needs the migration back, the DB/memory-store
+  field, the `GraphContextResponse` field, and the create/`PUT` stamping logic — all removed
+  cleanly, no remnants.
+- **Phase 4** — `ContextsView.vue` (1168 lines, create modal inlined) decomposed:
+  `utils/contextForm.ts` (`parseTableName`/`fuzzyMatch`/`parseTag`, now actually exported and
+  imported — `ContextsView.logic.test.ts` used to **re-declare copies** of these three
+  functions because the SFC didn't export them, so it was testing copies, not the real logic)
+  and `components/GraphContextFormModal.vue` (`mode: 'create' | 'edit'`). Edit mode shows table
+  names as disabled text (immutable) and structural columns as plain text inputs — no live-
+  schema fetch, no property recomputation, per decision 8 above.
+- **Phase 5** — `composables/useSchemaDrift.ts` (module-level cache keyed by context id, so the
+  row action, the review modal, and the query-error CTA all read the same result),
+  `components/SchemaDriftBanner.vue`, `components/SchemaDriftModal.vue` (findings grouped by
+  severity with a per-finding checkbox defaulting to "apply the fix"; unchecking reconstructs
+  the stored value from `finding.stored` rather than a second round-trip; rename mapping;
+  Apply hidden entirely for `TABLE_NOT_FOUND`, disabled without write access). Wired into
+  `ContextsView` (row action) and, in `GraphVisualizationView`/`ContextInfoPanel`, opened
+  **in place** rather than navigating to `/contexts?edit=<id>` as originally sketched mid-Phase-2
+  — a strictly better outcome than the plan called for.
+- **Phase 6** — `labelFormatter.ts` gained `extractTemplateProperties`, built on the existing
+  private `parseTemplate` rather than a fresh regex, so it can never disagree with what the
+  label actually renders. `utils/contextReferences.ts` (`collectPropertyReferences`,
+  `findRawQueryReferences`, `findDanglingReferences`) wired into `SchemaDriftModal`: an
+  expandable "N references across M explorations" panel plus the "I understand" checkbox gate.
+
+**Files created:**
+- `api/graphlagoon/services/schema_drift.py`, `api/graphlagoon/services/warehouse_errors.py`
+- `frontend/src/utils/contextForm.ts`, `frontend/src/utils/contextReferences.ts`
+- `frontend/src/composables/useSchemaDrift.ts`
+- `frontend/src/components/GraphContextFormModal.vue`, `SchemaDriftBanner.vue`, `SchemaDriftModal.vue`
+- `frontend/src/__tests__/fixtures/schemaDrift.ts`
+- `frontend/e2e/tests/schema-drift.spec.ts`
+- 6 new backend test files (`test_schema_drift.py`, `test_schema_drift_endpoint.py`,
+  `test_warehouse_errors.py`, `test_edge_column_absent.py`, `test_context_table_validation.py`)
+  plus additions to `test_graph_error_handling.py`
+
+**Files modified (selected):** `api/graphlagoon/routers/graph.py` (new endpoint, 8-site error
+handler consolidation, `merge_column_config` re-import), `routers/graph_contexts.py` (structural
+validation on `POST`/`PUT`), `services/graph_operations.py` (`merge_column_config` relocated,
+`_get_edge_id` fix, empty-graph guard), `db/models.py`, `db/memory_store.py`, `models/schemas.py`
+— `frontend/src/stores/graph.ts` (`extractErrorDetails` hint/unresolvedName/contextId,
+`enrichmentError`/`schemaDriftSuspected`), `components/QueryErrorModal.vue`,
+`views/ContextsView.vue`, `views/GraphVisualizationView.vue`, `components/ContextInfoPanel.vue`
+(manual "Check schema" action — both the row-level one in `ContextsView` and this one), `types/graph.ts`,
+`services/api.ts`.
+
+**Testing:** Backend suite ends at 415 passing / 1 skipped (the 5 `test_cypher_comments.py`/
+`test_transpile_options.py` failures pre-date this work — confirmed via `git stash` before
+starting, and unaffected by it throughout); 66 tests across the 5 new dedicated files
+(`test_schema_drift.py`, `test_schema_drift_endpoint.py`, `test_warehouse_errors.py`,
+`test_edge_column_absent.py`, `test_context_table_validation.py`) plus new cases added to
+`test_graph_error_handling.py`. Frontend unit suite ends at 1326 passing, `vue-tsc --noEmit`
+clean throughout. E2E ends at 108/108 passing — 6 dedicated cases in `schema-drift.spec.ts`
+(including the read-only-can-check/cannot-apply case from decision 9) plus 1 cross-page journey
+in `user-journeys.spec.ts` ("user finds and fixes a stale context schema, then the graph
+loads"); all 7 pre-existing `contexts.spec.ts` cases passed **unchanged** throughout, the
+Phase 4 acceptance bar (`ContextsView.vue` decomposition must not require touching the existing
+e2e spec).
+
+**Known limitations (accepted, per decisions 2 and 7):**
+1. Table rename/move is still unrecoverable — delete-and-recreate remains the only path.
+2. Query templates' and saved queries' raw Cypher/SQL is checked only by substring scan, never
+   parsed; a column reference inside a string literal or comment would also (harmlessly) match.
+3. `STRUCTURAL_COLUMN_TYPE_CHANGED` is declared in the severity taxonomy but never emitted — no
+   prior type is stored for structural columns to diff against. Would need a schema/migration
+   change to close.

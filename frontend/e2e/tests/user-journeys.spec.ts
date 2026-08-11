@@ -7,7 +7,7 @@
  */
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
-import { seedContexts, seedExplorations } from '../helpers/api-mocks';
+import { seedContexts, seedExplorations, mockSchemaDrift } from '../helpers/api-mocks';
 
 test.describe('User Journeys', () => {
   // ---------------------------------------------------------------------------
@@ -116,5 +116,55 @@ test.describe('User Journeys', () => {
     await page.getByTitle('Metrics').click();
     await expect(page.getByText('Graph Metrics')).toBeVisible();
     await page.getByTitle('Metrics').click();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Journey: Contexts → check schema → review & resync → Graph loads clean
+  // ---------------------------------------------------------------------------
+  test('user finds and fixes a stale context schema, then the graph loads', async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await mockSchemaDrift(page, MOCK_CONTEXT.id, {
+      context_id: MOCK_CONTEXT.id,
+      checked_at: '2026-08-11T00:00:00Z',
+      status: 'error',
+      types_checked: false,
+      counts: { error: 1, warning: 0, info: 0 },
+      node_table: { table_name: MOCK_CONTEXT.node_table_name, reachable: true, columns: [] },
+      edge_table: { table_name: MOCK_CONTEXT.edge_table_name, reachable: true, columns: [] },
+      findings: [
+        {
+          code: 'PROPERTY_COLUMN_MISSING',
+          severity: 'error',
+          side: 'node',
+          kind: 'property',
+          name: 'legacy_score',
+          message: 'Node property column `legacy_score` no longer exists.',
+          stored: { data_type: 'string' },
+          live: null,
+          auto_fixable: true,
+        },
+      ],
+      proposed: {
+        node_properties: [{ name: 'name', data_type: 'string' }],
+        edge_properties: [],
+        node_types: null,
+        relationship_types: null,
+      },
+    });
+
+    // Start at contexts, notice drift, review and apply the fix
+    await page.goto('/contexts');
+    await page.getByTestId('check-schema-btn').click();
+    await expect(page.getByTestId('schema-drift-banner')).toContainText('1 error');
+
+    await page.getByTestId('schema-drift-review-btn').click();
+    await expect(page.getByTestId('schema-drift-modal')).toContainText('legacy_score');
+    await page.getByTestId('schema-drift-apply').click();
+    await expect(page.getByTestId('schema-drift-modal')).not.toBeVisible();
+
+    // Then continue on to open the graph — the fixed context loads normally
+    await page.getByRole('button', { name: 'Open' }).click();
+    await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
   });
 });

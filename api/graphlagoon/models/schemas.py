@@ -348,7 +348,9 @@ class ExplorationState(BaseModel):
     filters: FilterState = Field(default_factory=FilterState)
     viewport: ViewportState = Field(default_factory=ViewportState)
     layout_algorithm: str = "force-atlas-2"
-    layout_mode_config: Optional[dict] = None  # Per-layout-mode params (ego/hive/hierarchical)
+    layout_mode_config: Optional[dict] = (
+        None  # Per-layout-mode params (ego/hive/hierarchical)
+    )
     graph_query: Optional[str] = None
     cte_prefilter: Optional[str] = None  # CTE pre-filter for edge table
     vlp_rendering_mode: Optional[VlpRenderingMode] = None
@@ -357,7 +359,9 @@ class ExplorationState(BaseModel):
     textFormat: Optional[TextFormatState] = None
     clusters: Optional[dict] = None  # ClusterState JSON from frontend
     nodeTypeIcons: Optional[dict[str, str]] = None
-    nodePropertyIconConfigs: Optional[dict] = None  # node type → PropertyIconConfig from frontend
+    nodePropertyIconConfigs: Optional[dict] = (
+        None  # node type → PropertyIconConfig from frontend
+    )
     nodeTypeColors: Optional[dict[str, str]] = None
     edgeTypeColors: Optional[dict[str, str]] = None
     edgeTypeIcons: Optional[dict[str, str]] = None
@@ -693,6 +697,59 @@ class SchemaDiscoveryResponse(BaseModel):
 
     node_types: list[str]
     relationship_types: list[str]
+
+
+# Schema drift models — see graphlagoon.services.schema_drift for the diff logic.
+class SchemaDriftFinding(BaseModel):
+    """One detected difference between a context's stored snapshot and the live table."""
+
+    code: str
+    severity: Literal["error", "warning", "info"]
+    side: Literal["node", "edge"]
+    kind: Literal["table", "structure", "property", "type"]
+    name: str
+    message: str
+    role: Optional[str] = None
+    stored: Optional[dict] = None
+    live: Optional[dict] = None
+    auto_fixable: bool = False
+
+
+class SchemaDriftTable(BaseModel):
+    """Live state of one side's table, as seen by the drift check."""
+
+    table_name: str
+    reachable: bool
+    columns: list[ColumnInfo] = Field(default_factory=list)
+
+
+class SchemaDriftProposal(BaseModel):
+    """The resync payload — echo this back through PUT to apply it.
+
+    ``node_types``/``relationship_types`` are ``None`` unless the check was run
+    with ``check_types=true``; ``None`` already means "leave unchanged" on
+    ``GraphContextUpdate``, so this can be forwarded verbatim.
+    """
+
+    node_properties: list[PropertyColumn] = Field(default_factory=list)
+    edge_properties: list[PropertyColumn] = Field(default_factory=list)
+    node_types: Optional[list[str]] = None
+    relationship_types: Optional[list[str]] = None
+
+
+class SchemaDriftResponse(BaseModel):
+    """Full drift report for a context. A read-only diff — never an HTTP failure
+    on its own; an unreachable table surfaces as a `TABLE_NOT_FOUND` finding."""
+
+    context_id: UUID
+    checked_at: datetime
+    status: Literal["ok", "error", "warning", "info"]
+    types_checked: bool
+    counts: dict[str, int]
+    node_table: SchemaDriftTable
+    edge_table: SchemaDriftTable
+    findings: list[SchemaDriftFinding]
+    proposed: SchemaDriftProposal
 
 
 class CypherQueryRequest(BaseModel):

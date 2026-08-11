@@ -460,6 +460,57 @@ describe('progressive load', () => {
       expect(store.enriching).toBe(false)
     })
 
+    it('sets enrichmentError instead of failing silently', async () => {
+      // Previously a bare console.warn — nodes stayed permanently
+      // property-less with no user-visible signal.
+      const store = storeWithContext()
+      vi.mocked(api.getSubgraph).mockResolvedValue(typesResponse() as any)
+      vi.mocked(api.getNodesBatch).mockRejectedValue(new Error('warehouse down'))
+
+      expect(store.enrichmentError).toBeNull()
+      await store.loadSubgraph({})
+      await settle()
+
+      expect(store.enrichmentError).not.toBeNull()
+      expect(store.enrichmentError!.message).toBe('warehouse down')
+    })
+
+    it('flags schemaDriftSuspected on a STALE_CONTEXT_SCHEMA enrichment failure', async () => {
+      const store = storeWithContext()
+      vi.mocked(api.getSubgraph).mockResolvedValue(typesResponse() as any)
+      vi.mocked(api.getNodesBatch).mockRejectedValue({
+        response: {
+          data: {
+            detail: {
+              error: {
+                code: 'STALE_CONTEXT_SCHEMA',
+                message: 'stale',
+                details: { hint: 'resync me' },
+              },
+            },
+          },
+        },
+      })
+
+      expect(store.schemaDriftSuspected).toBe(false)
+      await store.loadSubgraph({})
+      await settle()
+
+      expect(store.schemaDriftSuspected).toBe(true)
+      expect(store.enrichmentError!.code).toBe('STALE_CONTEXT_SCHEMA')
+    })
+
+    it('does not flag schemaDriftSuspected for an unrelated failure', async () => {
+      const store = storeWithContext()
+      vi.mocked(api.getSubgraph).mockResolvedValue(typesResponse() as any)
+      vi.mocked(api.getNodesBatch).mockRejectedValue(new Error('warehouse down'))
+
+      await store.loadSubgraph({})
+      await settle()
+
+      expect(store.schemaDriftSuspected).toBe(false)
+    })
+
     it('abandons in-flight enrichment when a new load starts', async () => {
       const store = storeWithContext()
       vi.mocked(api.getSubgraph).mockResolvedValue(typesResponse() as any)
