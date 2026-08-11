@@ -3434,3 +3434,148 @@ e2e spec).
 3. `STRUCTURAL_COLUMN_TYPE_CHANGED` is declared in the severity taxonomy but never emitted — no
    prior type is stored for structural columns to diff against. Would need a schema/migration
    change to close.
+
+## [2026-08-11 16:15] - Feature: CTE fallback para queries procedurais que falham
+
+**Feature:** Quando uma query Cypher roda em modo procedural BFS e falha (seja no transpile,
+seja na execução no warehouse), o app re-submete a query automaticamente UMA vez em modo CTE
+(`WITH RECURSIVE`) e avisa o usuário via toast. A opção "CTE fallback on error" fica no modal
+de transpile settings, visível quando Procedural BFS está ativo, e vem **ligada por default**.
+
+**User Story:** Como usuário explorando grafos, quero que uma query procedural que falhe seja
+automaticamente reexecutada em modo CTE, para não perder o resultado por causa de uma limitação
+do renderer procedural (mais rápido, porém mais novo/menos maduro que o CTE).
+
+**Design Decisions:**
+1. **Fallback orquestrado no frontend, não no backend.** O backend transpila no submit do job
+   (`/cypher/async`) e job falho vira HTTP 400 no poll — o frontend já recebe ambos os tipos de
+   falha por `graphJob.onError` → `queryError`. Re-submeter do frontend com
+   `vlp_rendering_mode: 'cte'` reaproveita toda a máquina de job (submit → poll → cancel →
+   partials) sem tocar em nenhum endpoint. Zero mudança de API.
+2. **Retry único, sem tocar nas opções salvas.** `vlpRenderingMode` continua `'procedural'`
+   após o fallback — só a re-submissão daquela run usa `'cte'`. Se o CTE também falhar, o erro
+   do CTE é o que aparece no QueryErrorModal (é o mais recente e o mais acionável).
+3. **Cancelamento não dispara fallback.** `graphJob.canceled` é checado antes do retry — o
+   usuário parou a query; reexecutar seria contrariá-lo.
+4. **Aviso em dois momentos** (toasts warning): ao iniciar o retry ("Procedural query failed —
+   retrying in CTE mode…") e, se o fallback der certo, um aviso de que o resultado veio do
+   fallback — para o usuário saber que o modo procedural tem um problema com aquela query.
+5. **Persistência na exploração** como `cte_fallback_enabled?: boolean`, restaurada com
+   `?? true` (não `||`) para que explorações salvas com o fallback OFF continuem OFF, e
+   explorações antigas (sem o campo) caiam no default ON. `resetTranspileOptions()` também
+   restaura `true`.
+6. **Escopo: caminho de graph query** (`executeCypherQuery`). O Query Console (tabela) não
+   ganhou fallback nesta iteração — fica como possível extensão futura.
+
+**Files created:**
+- `frontend/src/stores/__tests__/graph.cteFallback.test.ts` (11 testes: retry com modo cte e
+  sem procedural_optimizations, toggle off, modo já-cte, sucesso sem retry, falha dupla com
+  retry único, falha no submit/transpile, cancelamento, defaults, persistência, reset)
+
+**Files modified:**
+- `frontend/src/stores/graph.ts` — `cteFallbackEnabled` ref (default true); `executeCypherQuery`
+  refatorado com `submitWithMode(mode)` + bloco de retry pós-`graphJob.run()`;
+  `resetTranspileOptions`; `getExplorationState`/`loadExploration`; export do store.
+- `frontend/src/types/graph.ts` — `cte_fallback_enabled?: boolean` em `ExplorationState`.
+- `frontend/src/components/TranspileSettingsModal.vue` — toggle "CTE fallback on error"
+  (`data-testid="opt-cte-fallback"`) dentro da seção procedural.
+- `frontend/src/components/__tests__/TranspileSettingsModal.test.ts` — 3 testes novos
+  (default checked, oculto em modo cte, binding com o store).
+
+**Testing:** 22 testes novos/atualizados passando; suite completa 1340/1340 verde;
+`vue-tsc --noEmit` limpo. Sem E2E novo: feature contida em um painel/fluxo já coberto
+(erro de query → retry transparente), sem fluxo cross-page novo.
+
+**Known limitations:**
+- O Query Console (modo tabela) usa as mesmas opções de transpile mas não faz fallback.
+- O fallback re-executa a query inteira (não há cache do erro procedural para pular o retry
+  em re-execuções subsequentes da mesma query — cada run procedural falha e refaz o fallback).
+
+## [2026-08-11 16:20] - Fix/extensão: CTE fallback também no Query Console (tabela)
+
+**Problema reportado:** query Cypher no console de tabela com procedural BFS ativo falhou com
+`INVALID_SQL_QUERY` ("Unexpected token … BEGIN DECLARE bfs_depth_1 …") e o fallback não rodou.
+
+**Causa raiz:** o fallback da entrada anterior cobria só o caminho de grafo
+(`executeCypherQuery`). Pior: no endpoint de tabela (`POST .../query/table`) o modo procedural
+**nunca** funciona — `validate_sql_query` (fronteira de segurança read-only SELECT, linha
+~1066 de `routers/graph.py`) rejeita o script `BEGIN…END` que o procedural emite. O caminho de
+grafo tem uma exceção explícita para script blocks; o de tabela, deliberadamente, não.
+
+**Decisões:**
+1. **Mesmo contrato do grafo, no frontend** — retry único em CTE + toasts, respeitando o mesmo
+   toggle `cteFallbackEnabled`. Não mexer na validação do backend: afrouxar a fronteira
+   read-only do endpoint de tabela para aceitar scripts seria uma mudança de segurança, e a
+   tentativa procedural falha barato (a validação acontece ANTES do submit ao warehouse — o
+   custo é só um transpile).
+2. **Modo por-run, não por-store** — `submitRenderingMode` capturado em `runQuery()` e usado
+   pelo submit callback no lugar de `graphStore.vlpRenderingMode`; o override para `'cte'`
+   vale só para a re-submissão. Runs seguintes voltam a tentar procedural.
+3. **Só em modo cypher** — falha de SQL cru não tem o que re-transpilar.
+
+**Files modified:**
+- `frontend/src/stores/queryConsole.ts` — `submitRenderingMode` + bloco de fallback em
+  `runQuery()` espelhando o do graph store.
+
+**Files created:**
+- `frontend/src/stores/__tests__/queryConsole.cteFallback.test.ts` (8 testes: retry com modo
+  cte sem procedural_optimizations, opção do store intocada, override é por-run, falha dupla
+  com retry único, toggle off, modo já-cte, modo sql, sucesso sem retry).
+
+**Testing:** 24 testes do console verdes (16 existentes intactos); suite completa 1348/1348;
+`vue-tsc --noEmit` limpo.
+
+**Limitação conhecida atualizada:** o console agora TEM fallback; permanece o fato de que o
+modo procedural é estruturalmente incompatível com o endpoint de tabela — toda query cypher de
+tabela com procedural ativo paga um round-trip de transpile antes de cair no CTE. Se isso
+incomodar, a otimização futura é o console enviar `'cte'` direto (pulando a tentativa fadada a
+falhar), mas isso esconderia do usuário que o procedural não se aplica ali.
+
+## [2026-08-11 16:30] - Fix: CTE fallback no sidebar de graph query + opção "Silent fallback"
+
+**Problema reportado:** o fallback funcionava no Query Console mas não no painel lateral de
+query que renderiza o grafo (GraphQueryPanel).
+
+**Causa raiz:** o GraphQueryPanel nunca chamava `executeCypherQuery` (que tem o fallback). O
+fluxo era `transpileCypher()` → `executeGraphQuery(sql)` — o caminho SQL puro, que não sabe
+nada de Cypher e portanto não pode refazer o transpile.
+
+**Decisões:**
+1. **Fluxo "In Messi We Trust" agora submete o Cypher direto** via
+   `graphStore.executeCypherQuery()` — o backend transpila no submit e o store cobre o
+   fallback para falha de transpile E de execução. De quebra elimina um round-trip (antes:
+   transpile + execute-SQL; agora: um submit). O editor SQL é sincronizado com o SQL que
+   de fato rodou (fallback incluso) via retorno da função.
+2. **`transpileCypher` no store ganhou fallback próprio** (retry do transpile em CTE) para o
+   fluxo de revisão "Transpile to SQL" e para o TemplateExecuteModal, que rodam o SQL
+   retornado por conta própria. Ali o fallback cobre só o passo de transpile — de propósito:
+   o usuário revisa/roda exatamente o SQL que viu, nunca SQL trocado silenciosamente depois
+   da revisão.
+3. **Bug latente corrigido de carona:** o painel checava `graphStore.error` (erro de load de
+   contexto, sempre null nos caminhos de query) após executar — o toast de sucesso disparava
+   mesmo com query falha. Agora checa `graphStore.queryError`.
+4. **Opção "Silent fallback" (pedido do usuário), ativada por default:** novo
+   `cteFallbackSilent` (default `true`) suprime os toasts de aviso do fallback em todos os
+   caminhos (grafo, transpile, console) via helper `notifyCteFallback()` no graph store e
+   guard no queryConsole. Sub-toggle no modal (`opt-cte-fallback-silent`), visível só com o
+   fallback ligado; persiste na exploração como `cte_fallback_silent` (`?? true`);
+   `resetTranspileOptions()` restaura. Com silent ON (default) o fallback é transparente; a
+   notificação vira opt-in desligando o silent.
+
+**Files modified:**
+- `frontend/src/stores/graph.ts` — fallback em `transpileCypher`; `cteFallbackSilent` +
+  `notifyCteFallback()`; reset/persistência/export.
+- `frontend/src/components/GraphQueryPanel.vue` — fluxo messi usa `executeCypherQuery`;
+  checks de erro corrigidos para `queryError`.
+- `frontend/src/stores/queryConsole.ts` — toasts condicionados ao silent.
+- `frontend/src/components/TranspileSettingsModal.vue` — sub-toggle "Silent fallback".
+- `frontend/src/types/graph.ts` — `cte_fallback_silent?: boolean`.
+- Testes: `graph.cteFallback.test.ts` (18), `queryConsole.cteFallback.test.ts` (9),
+  `TranspileSettingsModal.test.ts` (13) — silent-por-default coberto nos três caminhos.
+
+**Testing:** suite completa 1358/1358 verde; `vue-tsc --noEmit` limpo.
+
+**Limitação conhecida:** no fluxo de revisão ("Transpile to SQL" com messi OFF) e no
+TemplateExecuteModal, uma falha de EXECUÇÃO do SQL procedural revisado não faz fallback — só a
+falha de transpile. Intencional (decisão 2): substituir SQL revisado pelo usuário seria
+surpreendente.

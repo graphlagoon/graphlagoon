@@ -504,6 +504,18 @@ export const useGraphStore = defineStore('graph', () => {
   const proceduralOptimizations = ref<ProceduralBFSOptions>({
     ...DEFAULT_PROCEDURAL_BFS_OPTIONS,
   });
+  // When a procedural query fails (transpile or execution), retry it once in
+  // CTE (WITH RECURSIVE) mode. The procedural renderer is faster but younger;
+  // the fallback keeps queries answerable while it matures.
+  const cteFallbackEnabled = ref(true);
+  // Silent fallback: skip the warning toasts when the fallback kicks in.
+  const cteFallbackSilent = ref(true);
+
+  /** Warn about a CTE fallback step — no-op when silent mode is on. */
+  function notifyCteFallback(message: string, duration: number) {
+    if (cteFallbackSilent.value) return;
+    useToast().warning(message, duration);
+  }
 
   // External links mode (for large Databricks results)
   const useExternalLinks = ref(true);
@@ -1665,13 +1677,13 @@ export const useGraphStore = defineStore('graph', () => {
     graphQuery.value = query;
 
     const t0 = performance.now();
-    pendingGraphSubmit = async () => {
+    const submitWithMode = (mode: 'cte' | 'procedural') => async () => {
       const resp = await api.submitCypherQueryJob(currentContext.value!.id, {
         query,
         ...(ctePrefilter.value ? { cte_prefilter: ctePrefilter.value } : {}),
-        vlp_rendering_mode: vlpRenderingMode.value,
+        vlp_rendering_mode: mode,
         materialization_strategy: materializationStrategy.value,
-        ...(vlpRenderingMode.value === 'procedural'
+        ...(mode === 'procedural'
           ? { procedural_optimizations: { ...proceduralOptimizations.value } }
           : {}),
         ...(useExternalLinks.value ? { use_external_links: true } : {}),
@@ -1680,6 +1692,7 @@ export const useGraphStore = defineStore('graph', () => {
       if (resp.transpiled_sql) lastTranspiledSql.value = resp.transpiled_sql;
       return { status: resp.status, statementId: resp.job_id };
     };
+    pendingGraphSubmit = submitWithMode(vlpRenderingMode.value);
     pendingGraphApply = (status) => {
       const response = status.result!;
       // fresh-layout is decided inside applyGraphResponse (see the SQL path).
@@ -1695,6 +1708,32 @@ export const useGraphStore = defineStore('graph', () => {
 
     try {
       await graphJob.run();
+      // CTE fallback: a failed procedural run — whether the transpile itself or
+      // the warehouse execution — is retried once in CTE (WITH RECURSIVE)
+      // mode. Cancellation is respected: the user stopped the query, so no
+      // retry. The store options stay untouched; only this run is re-submitted.
+      if (
+        queryError.value !== null &&
+        !graphJob.canceled.value &&
+        vlpRenderingMode.value === 'procedural' &&
+        cteFallbackEnabled.value
+      ) {
+        notifyCteFallback(
+          'Procedural query failed — retrying in CTE (WITH RECURSIVE) mode…',
+          5000,
+        );
+        queryError.value = null;
+        lastTranspiledSql.value = null;
+        loadingMessage.value = 'Retrying in CTE mode…';
+        pendingGraphSubmit = submitWithMode('cte');
+        await graphJob.run();
+        if (queryError.value === null && !graphJob.canceled.value) {
+          notifyCteFallback(
+            'Result produced by the CTE fallback — the procedural transpile failed for this query.',
+            6000,
+          );
+        }
+      }
       return lastTranspiledSql.value;
     } finally {
       loading.value = false;
@@ -1708,19 +1747,51 @@ export const useGraphStore = defineStore('graph', () => {
     loading.value = true;
     queryError.value = null;
 
+    const requestWith = (mode: 'cte' | 'procedural') => ({
+      query,
+      ...(ctePrefilter.value ? { cte_prefilter: ctePrefilter.value } : {}),
+      vlp_rendering_mode: mode,
+      materialization_strategy: materializationStrategy.value,
+      ...(mode === 'procedural'
+        ? { procedural_optimizations: { ...proceduralOptimizations.value } }
+        : {}),
+    });
+
     try {
-      const response = await api.transpileCypher(currentContext.value.id, {
-        query,
-        ...(ctePrefilter.value ? { cte_prefilter: ctePrefilter.value } : {}),
-        vlp_rendering_mode: vlpRenderingMode.value,
-        materialization_strategy: materializationStrategy.value,
-        ...(vlpRenderingMode.value === 'procedural'
-          ? { procedural_optimizations: { ...proceduralOptimizations.value } }
-          : {}),
-      });
+      const response = await api.transpileCypher(
+        currentContext.value.id,
+        requestWith(vlpRenderingMode.value),
+      );
       lastTranspiledSql.value = response.transpiled_sql;
       return response.transpiled_sql;
     } catch (e: unknown) {
+      // CTE fallback, transpile-only flavour: callers of this function (the
+      // "Transpile to SQL" review flow, template execution) run the returned
+      // SQL themselves, so the retry here covers the transpile step — the user
+      // reviews/runs the CTE SQL, never SQL that silently differs from what
+      // they saw.
+      if (vlpRenderingMode.value === 'procedural' && cteFallbackEnabled.value) {
+        notifyCteFallback(
+          'Procedural transpile failed — retrying in CTE (WITH RECURSIVE) mode…',
+          5000,
+        );
+        try {
+          const response = await api.transpileCypher(
+            currentContext.value.id,
+            requestWith('cte'),
+          );
+          lastTranspiledSql.value = response.transpiled_sql;
+          notifyCteFallback(
+            'SQL produced by the CTE fallback — the procedural transpile failed for this query.',
+            6000,
+          );
+          return response.transpiled_sql;
+        } catch (e2: unknown) {
+          const details = extractErrorDetails(e2, 'Failed to transpile cypher query');
+          queryError.value = { ...details, query: details.query || query };
+          return null;
+        }
+      }
       const details = extractErrorDetails(e, 'Failed to transpile cypher query');
       queryError.value = { ...details, query: details.query || query };
       return null;
@@ -1797,6 +1868,8 @@ export const useGraphStore = defineStore('graph', () => {
     materializationStrategy.value =
       window.__GRAPH_LAGOON_CONFIG__?.databricks_mode ? 'temp_tables' : 'numbered_views';
     proceduralOptimizations.value = { ...DEFAULT_PROCEDURAL_BFS_OPTIONS };
+    cteFallbackEnabled.value = true;
+    cteFallbackSilent.value = true;
   }
 
   function addNodePropertyFilter(filter: Omit<PropertyFilter, 'id'>) {
@@ -2119,6 +2192,8 @@ export const useGraphStore = defineStore('graph', () => {
       vlp_rendering_mode: vlpRenderingMode.value,
       materialization_strategy: materializationStrategy.value,
       procedural_optimizations: { ...proceduralOptimizations.value },
+      cte_fallback_enabled: cteFallbackEnabled.value,
+      cte_fallback_silent: cteFallbackSilent.value,
       textFormat: getTextFormatState(),
       // Cluster state: clusters/executions + exploration-scoped programs only.
       // Context-scoped programs live on graph_contexts.cluster_programs.
@@ -2287,6 +2362,9 @@ export const useGraphStore = defineStore('graph', () => {
         ...DEFAULT_PROCEDURAL_BFS_OPTIONS,
         ...(exploration.state.procedural_optimizations || {}),
       };
+      // ?? not || — explorations saved with the fallback OFF must stay OFF.
+      cteFallbackEnabled.value = exploration.state.cte_fallback_enabled ?? true;
+      cteFallbackSilent.value = exploration.state.cte_fallback_silent ?? true;
 
       // Load text format state (with backwards compatibility)
       loadTextFormatState(exploration.state.textFormat);
@@ -2465,6 +2543,8 @@ export const useGraphStore = defineStore('graph', () => {
     vlpRenderingMode,
     materializationStrategy,
     proceduralOptimizations,
+    cteFallbackEnabled,
+    cteFallbackSilent,
     useExternalLinks,
     nodePositions,
     textFormatRules,

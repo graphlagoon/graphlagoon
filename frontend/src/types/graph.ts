@@ -268,6 +268,8 @@ export interface ExplorationState {
   vlp_rendering_mode?: VlpRenderingMode;         // Cypher transpilation mode (optional for backwards compat)
   materialization_strategy?: MaterializationStrategy; // Materialization strategy (optional for backwards compat)
   procedural_optimizations?: ProceduralBFSOptions; // Procedural BFS flags (optional for backwards compat)
+  cte_fallback_enabled?: boolean;      // Retry failed procedural queries in CTE mode (optional for backwards compat, defaults to true)
+  cte_fallback_silent?: boolean;       // Skip the fallback warning toasts (optional for backwards compat, defaults to true)
   textFormat?: TextFormatState;        // Label formatting rules (optional for backwards compat)
   clusters?: any;                      // ClusterState from cluster store (optional for backwards compat)
   nodeTypeIcons?: Record<string, string>;  // Node type → icon name mapping (optional for backwards compat)
