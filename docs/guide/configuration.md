@@ -19,6 +19,12 @@ GRAPH_LAGOON_DATABRICKS_TOKEN=dapi-xxx
 GRAPH_LAGOON_DATABRICKS_WAREHOUSE_ID=xxx
 GRAPH_LAGOON_DATABRICKS_CATALOG=main
 
+# Amazon Neptune (see "Datasources" below)
+GRAPH_LAGOON_NEPTUNE_ENDPOINT=my-cluster.cluster-abc.us-east-1.neptune.amazonaws.com
+GRAPH_LAGOON_NEPTUNE_PORT=8182
+GRAPH_LAGOON_NEPTUNE_USE_IAM=false
+GRAPH_LAGOON_NEPTUNE_REGION=us-east-1
+
 # Development
 GRAPH_LAGOON_DEV_MODE=true
 GRAPH_LAGOON_SHOW_ERROR_DETAILS=true
@@ -27,6 +33,64 @@ GRAPH_LAGOON_SHOW_ERROR_DETAILS=true
 GRAPH_LAGOON_SUPERUSER_EMAILS=admin@company.com,ops@company.com
 GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=company.com
 ```
+
+## Datasources
+
+A graph context is queried through one of two backends, chosen when the context
+is created.
+
+### SQL Warehouse (default)
+
+The graph lives in two tables — an edge table and a node table — and Cypher is
+transpiled to Spark SQL. This is what Databricks mode and the local PySpark
+warehouse serve, and what every context created before datasources were
+pluggable uses. Creating one of these contexts requires naming both tables and
+mapping their structural columns.
+
+### Amazon Neptune (openCypher)
+
+A native property graph. Set `GRAPH_LAGOON_NEPTUNE_ENDPOINT` to enable it; the
+"Amazon Neptune" option then appears when creating a context. Such a context
+defines **no tables and no column mapping** — openCypher is sent to the cluster
+as-is and its nodes and relationships map straight onto the graph.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_NEPTUNE_ENDPOINT` | *(unset)* | Cluster endpoint host, no scheme. Unset disables the datasource. |
+| `GRAPH_LAGOON_NEPTUNE_PORT` | `8182` | |
+| `GRAPH_LAGOON_NEPTUNE_USE_IAM` | `false` | SigV4 signing for IAM-auth clusters. Requires the `neptune-iam` extra. |
+| `GRAPH_LAGOON_NEPTUNE_REGION` | *(unset)* | Required when `USE_IAM=true`. |
+| `GRAPH_LAGOON_NEPTUNE_USE_TLS` | `true` | Set `false` only for the local emulator. |
+| `GRAPH_LAGOON_NEPTUNE_TLS_VERIFY` | `true` | |
+| `GRAPH_LAGOON_NEPTUNE_HTTP_TIMEOUT` | `120` | Seconds. |
+| `GRAPH_LAGOON_NEPTUNE_DISCOVERY_SAMPLE_LIMIT` | `10000` | Row cap when discovering labels by sampling. |
+
+For IAM auth, install the extra and configure the standard AWS credential chain:
+
+```bash
+uv sync --extra neptune-iam
+```
+
+**What differs for a Neptune context.** Queries are read-only openCypher, sent
+unchanged. Everything that exists only because of the SQL warehouse is hidden in
+the UI and rejected by the API: raw SQL queries, the transpile-to-SQL review and
+its options, CTE pre-filters, schema-drift checking, and catalog/table browsing.
+Explorations, snapshots, sharing, cluster programs, layouts and every
+visualization feature work identically — they consume the same normalized graph.
+
+**Connection scope.** Like the warehouse, the connection is server-level: one
+cluster per deployment, shared by every user of that deployment.
+
+**Cancellation.** Neptune's openCypher HTTP API returns no query id at submit
+time, so cancelling stops the API-side request but does not guarantee the
+cluster stops executing.
+
+### Trying Neptune locally
+
+There is no official local Neptune. `make dev-neptune` starts a Neo4j container
+(which speaks openCypher natively) behind a small emulator that presents
+Neptune's HTTP contract, seeds a sample graph, and points the API at it — so the
+real Neptune code path runs without an AWS account.
 
 ## Access Control
 

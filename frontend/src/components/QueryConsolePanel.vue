@@ -14,6 +14,7 @@ import QueryRunningState from './QueryRunningState.vue';
 import TemplateEditorModal from './TemplateEditorModal.vue';
 import TranspileSettingsModal from './TranspileSettingsModal.vue';
 import { useGraphStore } from '@/stores/graph';
+import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
 import { useDrawerResize } from '@/composables/useDrawerResize';
 import { toDelimited } from '@/utils/tableExport';
@@ -37,6 +38,8 @@ const nodeTypes = computed(() => graphStore.currentContext?.node_types || []);
 const relationshipTypes = computed(() => graphStore.currentContext?.relationship_types || []);
 const nodeProperties = computed(() => graphStore.currentContext?.node_properties || []);
 const edgeProperties = computed(() => graphStore.currentContext?.edge_properties || []);
+
+const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
 
 const dataGridRef = ref<InstanceType<typeof DataGrid>>();
 
@@ -79,8 +82,12 @@ const canSave = computed(() => activeQuery.value.trim().length > 0);
 // Detect which result column holds the node id, so its cells can bridge to the
 // 3D graph. Matches the context's node_id_col (or a literal "node_id" column).
 const nodeIdField = computed<string | undefined>(() => {
-  const idCol = graphStore.currentContext?.node_structure?.node_id_col;
-  const candidates = [idCol, 'node_id']
+  const idCol = capabilities.value.supportsCatalog
+    ? graphStore.currentContext?.node_structure?.node_id_col
+    : undefined;
+  // '~id' is what a native graph database labels its identity column when a
+  // query projects one (e.g. RETURN id(n) AS `~id`).
+  const candidates = [idCol, 'node_id', '~id']
     .filter(Boolean)
     .map(s => String(s).toLowerCase());
   const col = consoleStore.columns.find(c => candidates.includes(c.header.toLowerCase()));
@@ -139,14 +146,20 @@ function onFocusNode(payload: { id: string; multi: boolean }) {
 onMounted(() => {
   if (!consoleStore.cypherQuery) {
     const ctx = graphStore.currentContext;
-    const idCol = ctx?.node_structure?.node_id_col || 'node_id';
     const label = ctx?.node_types?.[0] ? `:${ctx.node_types[0]}` : '';
-    consoleStore.cypherQuery = `MATCH (n${label})\nRETURN n.${idCol}\nLIMIT 100`;
+    if (capabilities.value.supportsCatalog) {
+      const idCol = ctx?.node_structure?.node_id_col || 'node_id';
+      consoleStore.cypherQuery = `MATCH (n${label})\nRETURN n.${idCol}\nLIMIT 100`;
+    } else {
+      consoleStore.cypherQuery = `MATCH (n${label})\nRETURN n\nLIMIT 100`;
+    }
   }
-  if (!consoleStore.sqlQuery) {
+  if (!consoleStore.sqlQuery && capabilities.value.supportsSql) {
     const table = graphStore.currentContext?.node_table_name || 'nodes';
     consoleStore.sqlQuery = `SELECT * FROM ${table} LIMIT 100`;
   }
+  // Never leave the console in a mode this datasource cannot run.
+  if (!capabilities.value.supportsSql) consoleStore.mode = 'cypher';
 });
 </script>
 
@@ -161,7 +174,7 @@ onMounted(() => {
     <div class="drawer-header">
       <div class="header-left">
         <span class="drawer-title">Query Console</span>
-        <div class="mode-toggle">
+        <div v-if="capabilities.supportsSql" class="mode-toggle">
           <button
             class="mode-btn"
             :class="{ active: consoleStore.mode === 'cypher' }"
@@ -191,6 +204,7 @@ onMounted(() => {
           <span>{{ runLabel }}</span>
         </button>
         <button
+          v-if="capabilities.supportsTranspile"
           class="action-btn btn-icon-only settings-btn"
           :class="{ active: transpileActive }"
           title="Advanced transpile & optimization settings"

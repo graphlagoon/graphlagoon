@@ -4,6 +4,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { usePersistence } from '@/composables/usePersistence';
+import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
 import { X } from 'lucide-vue-next';
 import type { QueryTemplate } from '@/types/graph';
 import TemplateEditorModal from './TemplateEditorModal.vue';
@@ -12,6 +13,7 @@ import TemplateExecuteModal from './TemplateExecuteModal.vue';
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
+const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
 const authStore = useAuthStore();
 const templatesStore = useQueryTemplatesStore();
 const { isSuperuser } = usePersistence();
@@ -34,11 +36,19 @@ function canMutate(template: QueryTemplate): boolean {
     : canWrite.value;
 }
 
+// A SQL template cannot run against a native graph database, so it is hidden
+// rather than offered and rejected.
+const runnableTemplates = computed(() =>
+  templatesStore.templates.filter(
+    (t) => capabilities.value.supportsSql || t.query_type !== 'sql',
+  ),
+);
+
 const myTemplates = computed(() =>
-  templatesStore.templates.filter((t) => t.visibility === 'private'),
+  runnableTemplates.value.filter((t) => t.visibility === 'private'),
 );
 const sharedTemplates = computed(() =>
-  templatesStore.templates.filter((t) => t.visibility !== 'private'),
+  runnableTemplates.value.filter((t) => t.visibility !== 'private'),
 );
 
 const templateGroups = computed(() =>
@@ -112,7 +122,7 @@ function cancelDelete() {
       Loading templates...
     </div>
 
-    <div v-else-if="templatesStore.templates.length === 0" class="empty-state">
+    <div v-else-if="runnableTemplates.length === 0" class="empty-state">
       <p>No templates yet.</p>
       <p class="empty-hint">Create one with the <strong>+ New</strong> button above.</p>
     </div>

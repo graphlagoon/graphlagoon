@@ -436,15 +436,15 @@ class TestRouterErrorHandling:
                 return_value=mock_context,
             ),
             patch(
-                "graphlagoon.routers.graph.validate_sql_query",
+                "graphlagoon.services.datasource.sql_warehouse.validate_sql_query",
                 return_value=(True, ""),
             ),
             patch(
-                "graphlagoon.routers.graph.merge_column_config",
+                "graphlagoon.services.datasource.sql_warehouse.merge_column_config",
                 return_value={},
             ),
             patch(
-                "graphlagoon.routers.graph.execute_graph_query_with_nodes",
+                "graphlagoon.services.datasource.sql_warehouse.execute_graph_query_with_nodes",
                 new_callable=AsyncMock,
                 side_effect=QueryExecutionError(
                     "Table not found: edges_bad", query="SELECT * FROM edges_bad"
@@ -456,7 +456,6 @@ class TestRouterErrorHandling:
                     context_id=mock_context.id,
                     data=data,
                     request=request,
-                    warehouse=mock_warehouse,
                 )
 
             assert exc_info.value.status_code == 400
@@ -495,15 +494,15 @@ class TestRouterErrorHandling:
                 return_value=mock_context,
             ),
             patch(
-                "graphlagoon.routers.graph.validate_sql_query",
+                "graphlagoon.services.datasource.sql_warehouse.validate_sql_query",
                 return_value=(True, ""),
             ),
             patch(
-                "graphlagoon.routers.graph.merge_column_config",
+                "graphlagoon.services.datasource.sql_warehouse.merge_column_config",
                 return_value={},
             ),
             patch(
-                "graphlagoon.routers.graph.execute_graph_query_with_nodes",
+                "graphlagoon.services.datasource.sql_warehouse.execute_graph_query_with_nodes",
                 new_callable=AsyncMock,
                 side_effect=QueryExecutionError(
                     "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or "
@@ -517,7 +516,6 @@ class TestRouterErrorHandling:
                     context_id=mock_context.id,
                     data=data,
                     request=request,
-                    warehouse=mock_warehouse,
                 )
 
             assert exc_info.value.status_code == 400
@@ -555,15 +553,15 @@ class TestRouterErrorHandling:
                 return_value=mock_context,
             ),
             patch(
-                "graphlagoon.routers.graph.validate_sql_query",
+                "graphlagoon.services.datasource.sql_warehouse.validate_sql_query",
                 return_value=(True, ""),
             ),
             patch(
-                "graphlagoon.routers.graph.merge_column_config",
+                "graphlagoon.services.datasource.sql_warehouse.merge_column_config",
                 return_value={},
             ),
             patch(
-                "graphlagoon.routers.graph.execute_graph_query_with_nodes",
+                "graphlagoon.services.datasource.sql_warehouse.execute_graph_query_with_nodes",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError(
                     "Failed to process edge query result (columns=['r'], "
@@ -576,7 +574,6 @@ class TestRouterErrorHandling:
                     context_id=mock_context.id,
                     data=data,
                     request=request,
-                    warehouse=mock_warehouse,
                 )
 
             assert exc_info.value.status_code == 400
@@ -617,15 +614,15 @@ class TestRouterErrorHandling:
                 return_value=mock_context,
             ),
             patch(
-                "graphlagoon.routers.graph.validate_sql_query",
+                "graphlagoon.services.datasource.sql_warehouse.validate_sql_query",
                 return_value=(True, ""),
             ),
             patch(
-                "graphlagoon.routers.graph.merge_column_config",
+                "graphlagoon.services.datasource.sql_warehouse.merge_column_config",
                 return_value={},
             ),
             patch(
-                "graphlagoon.routers.graph.execute_graph_query_with_nodes",
+                "graphlagoon.services.datasource.sql_warehouse.execute_graph_query_with_nodes",
                 new_callable=AsyncMock,
                 side_effect=ConnectionError(
                     "Cannot connect to warehouse at https://db.net"
@@ -637,7 +634,6 @@ class TestRouterErrorHandling:
                     context_id=mock_context.id,
                     data=data,
                     request=request,
-                    warehouse=mock_warehouse,
                 )
 
             assert exc_info.value.status_code == 400

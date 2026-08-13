@@ -6,6 +6,14 @@
 export const MOCK_CONFIG = {
   database_enabled: false,
   dev_mode: true,
+  datasources: { sql_warehouse: true, neptune: false },
+};
+
+/** Server that can also serve Neptune-backed contexts. */
+export const MOCK_CONFIG_WITH_NEPTUNE = {
+  database_enabled: false,
+  dev_mode: true,
+  datasources: { sql_warehouse: true, neptune: true },
 };
 
 export const MOCK_CONFIG_PROD = {
@@ -48,6 +56,7 @@ export const MOCK_CONTEXT = {
   title: 'Test Context',
   description: 'A test context for E2E',
   tags: ['env:test', 'team:qa'],
+  datasource_type: 'sql_warehouse',
   edge_table_name: 'test_db.edges',
   node_table_name: 'test_db.nodes',
   owner_email: 'e2e@test.com',
@@ -81,6 +90,24 @@ export const MOCK_CONTEXT_NO_AUTOLOAD = {
   id: 'ctx-test-empty',
   title: 'Empty On Open',
   default_behaviors: {},
+};
+
+/**
+ * A context backed by a native graph database.
+ *
+ * No tables, no column mapping, no property columns — that absence is what the
+ * UI branches on, so filling any of it in would defeat the point.
+ */
+export const MOCK_NEPTUNE_CONTEXT = {
+  ...MOCK_CONTEXT,
+  id: 'ctx-neptune-1',
+  title: 'Neptune Graph',
+  description: 'A native graph database context',
+  datasource_type: 'neptune',
+  edge_table_name: null,
+  node_table_name: null,
+  edge_properties: [],
+  node_properties: [],
 };
 
 export const MOCK_EXPLORATION = {

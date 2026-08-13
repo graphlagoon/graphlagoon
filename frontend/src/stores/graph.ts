@@ -29,6 +29,10 @@ import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
 import { useToast } from '@/composables/useToast';
 import {
+  capabilitiesFor,
+  resolveDatasourceType,
+} from '@/composables/useDatasourceCapabilities';
+import {
   useCancellableQuery,
   type StepResult,
 } from '@/composables/useCancellableQuery';
@@ -1664,6 +1668,18 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  /**
+   * Whether the open context's backend transpiles Cypher to SQL.
+   *
+   * Everything downstream of transpilation — VLP rendering modes, procedural
+   * BFS optimizations, the CTE pre-filter and the CTE fallback retry — is
+   * meaningless for a backend that runs Cypher natively, and the API rejects
+   * those options outright. Sending them anyway would turn every query into a
+   * 400.
+   */
+  const contextTranspiles = () =>
+    capabilitiesFor(resolveDatasourceType(currentContext.value)).supportsTranspile;
+
   async function executeCypherQuery(query: string): Promise<string | null> {
     if (!currentContext.value) return null;
 
@@ -1677,16 +1693,21 @@ export const useGraphStore = defineStore('graph', () => {
     graphQuery.value = query;
 
     const t0 = performance.now();
+    const transpiles = contextTranspiles();
     const submitWithMode = (mode: 'cte' | 'procedural') => async () => {
       const resp = await api.submitCypherQueryJob(currentContext.value!.id, {
         query,
-        ...(ctePrefilter.value ? { cte_prefilter: ctePrefilter.value } : {}),
-        vlp_rendering_mode: mode,
-        materialization_strategy: materializationStrategy.value,
-        ...(mode === 'procedural'
-          ? { procedural_optimizations: { ...proceduralOptimizations.value } }
+        ...(transpiles
+          ? {
+              ...(ctePrefilter.value ? { cte_prefilter: ctePrefilter.value } : {}),
+              vlp_rendering_mode: mode,
+              materialization_strategy: materializationStrategy.value,
+              ...(mode === 'procedural'
+                ? { procedural_optimizations: { ...proceduralOptimizations.value } }
+                : {}),
+              ...(useExternalLinks.value ? { use_external_links: true } : {}),
+            }
           : {}),
-        ...(useExternalLinks.value ? { use_external_links: true } : {}),
       });
       // Transpiled SQL is known at submit time — surface it immediately.
       if (resp.transpiled_sql) lastTranspiledSql.value = resp.transpiled_sql;
@@ -1715,6 +1736,7 @@ export const useGraphStore = defineStore('graph', () => {
       if (
         queryError.value !== null &&
         !graphJob.canceled.value &&
+        transpiles &&
         vlpRenderingMode.value === 'procedural' &&
         cteFallbackEnabled.value
       ) {
@@ -1743,6 +1765,17 @@ export const useGraphStore = defineStore('graph', () => {
 
   async function transpileCypher(query: string): Promise<string | null> {
     if (!currentContext.value) return null;
+    // The UI hides the review flow for a native-Cypher backend; this guard
+    // covers programmatic callers (saved templates) so they fail with a clear
+    // message instead of a backend 400.
+    if (!contextTranspiles()) {
+      queryError.value = {
+        message: 'This datasource runs Cypher directly — there is no SQL to transpile.',
+        code: 'DATASOURCE_UNSUPPORTED_OPERATION',
+        query,
+      };
+      return null;
+    }
 
     loading.value = true;
     queryError.value = null;

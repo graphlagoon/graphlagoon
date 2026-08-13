@@ -69,11 +69,13 @@ async def dummy_similarity_circle(request: DummySimilarityRequest):
     random.shuffle(keys)
     edges = []
     for i in range(len(keys)):
-        edges.append({
-            "source": keys[i],
-            "target": keys[(i + 1) % len(keys)],
-            "score": round(random.uniform(0.5, 1.0), 3),
-        })
+        edges.append(
+            {
+                "source": keys[i],
+                "target": keys[(i + 1) % len(keys)],
+                "score": round(random.uniform(0.5, 1.0), 3),
+            }
+        )
     return {"edges": edges}
 
 
@@ -102,11 +104,13 @@ async def dummy_similarity_knn(request: DummySimilarityRequest):
             pair = tuple(sorted([key, nb]))
             if pair not in seen:
                 seen.add(pair)
-                edges.append({
-                    "source": key,
-                    "target": nb,
-                    "score": round(random.uniform(0.3, 1.0), 3),
-                })
+                edges.append(
+                    {
+                        "source": key,
+                        "target": nb,
+                        "score": round(random.uniform(0.3, 1.0), 3),
+                    }
+                )
 
     return {"edges": edges}
 

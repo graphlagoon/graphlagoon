@@ -4,6 +4,10 @@ import { api } from '@/services/api';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import {
+  capabilitiesFor,
+  resolveDatasourceType,
+} from '@/composables/useDatasourceCapabilities';
+import {
   type ColMeta,
   buildGenericColumns,
   buildGenericRows,
@@ -162,14 +166,19 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
       const query = (
         mode.value === 'cypher' ? cypherQuery.value : sqlQuery.value
       ).trim();
+      // A backend that runs Cypher natively rejects every option below, so
+      // they are omitted entirely rather than sent and 400'd.
+      const transpiles = capabilitiesFor(
+        resolveDatasourceType(graphStore.currentContext),
+      ).supportsTranspile;
       const resp = await api.executeTableQuery(contextId, {
         query,
         mode: mode.value,
-        ...(graphStore.ctePrefilter
+        ...(transpiles && graphStore.ctePrefilter
           ? { cte_prefilter: graphStore.ctePrefilter }
           : {}),
         // Transpile options (cypher mode only) shared with the graph panel.
-        ...(mode.value === 'cypher'
+        ...(transpiles && mode.value === 'cypher'
           ? {
               vlp_rendering_mode: submitRenderingMode,
               materialization_strategy: graphStore.materializationStrategy,
@@ -245,6 +254,8 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
       error.value !== null &&
       !cq.canceled.value &&
       mode.value === 'cypher' &&
+      capabilitiesFor(resolveDatasourceType(graphStore.currentContext))
+        .supportsTranspile &&
       submitRenderingMode === 'procedural' &&
       graphStore.cteFallbackEnabled
     ) {

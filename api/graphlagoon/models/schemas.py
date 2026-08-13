@@ -15,6 +15,17 @@ GraphModel = Literal[
     "random_tree",
 ]
 
+# Which backend a graph context is queried through.
+#
+# "sql_warehouse" is a graph stored as an edge table + a node table, queried by
+# transpiling Cypher to Spark SQL. "neptune" is Amazon Neptune's openCypher
+# endpoint — a native graph database, so it defines no tables at all.
+DatasourceType = Literal["sql_warehouse", "neptune"]
+
+# Contexts created before datasources were pluggable are all warehouse contexts,
+# so this default is what keeps every existing context working untouched.
+DEFAULT_DATASOURCE_TYPE: DatasourceType = "sql_warehouse"
+
 # Data types for extra columns
 ColumnDataType = Literal["string", "int", "float", "boolean", "date", "timestamp"]
 
@@ -160,8 +171,9 @@ class GraphContextCreate(BaseModel):
     title: str
     description: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
-    edge_table_name: str
-    node_table_name: str
+    datasource_type: DatasourceType = DEFAULT_DATASOURCE_TYPE
+    edge_table_name: Optional[str] = None
+    node_table_name: Optional[str] = None
     edge_structure: EdgeStructure = Field(default_factory=EdgeStructure)
     node_structure: NodeStructure = Field(default_factory=NodeStructure)
     edge_properties: list[PropertyColumn] = Field(default_factory=list)
@@ -180,8 +192,34 @@ class GraphContextCreate(BaseModel):
         "this context. Passed through opaquely; the frontend owns the shape.",
     )
 
+    @model_validator(mode="after")
+    def _validate_datasource_fields(self) -> "GraphContextCreate":
+        """Enforce the shape each datasource type actually needs.
+
+        A warehouse context is meaningless without its two tables. A Neptune
+        context is the opposite: tables and column properties describe nothing,
+        so they are normalized away rather than rejected — a client that sends
+        leftovers from the warehouse form still gets a valid context instead of
+        a validation error it cannot act on.
+        """
+        if self.datasource_type == "sql_warehouse":
+            if not self.edge_table_name or not self.node_table_name:
+                raise ValueError(
+                    "edge_table_name and node_table_name are required for "
+                    "sql_warehouse contexts"
+                )
+        else:
+            self.edge_table_name = None
+            self.node_table_name = None
+            self.edge_properties = []
+            self.node_properties = []
+        return self
+
 
 class GraphContextUpdate(BaseModel):
+    # datasource_type is deliberately absent: changing a context's backend
+    # would silently invalidate every exploration, template and cluster program
+    # saved against it. Create a new context instead.
     title: Optional[str] = None
     description: Optional[str] = None
     tags: Optional[list[str]] = None
@@ -200,8 +238,10 @@ class GraphContextResponse(BaseModel):
     title: str
     description: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
-    edge_table_name: str
-    node_table_name: str
+    datasource_type: DatasourceType = DEFAULT_DATASOURCE_TYPE
+    # Null for native graph databases, which define no tables.
+    edge_table_name: Optional[str] = None
+    node_table_name: Optional[str] = None
     edge_structure: EdgeStructure = Field(default_factory=EdgeStructure)
     node_structure: NodeStructure = Field(default_factory=NodeStructure)
     edge_properties: list[PropertyColumn] = Field(default_factory=list)
@@ -685,11 +725,27 @@ class TablePreviewResponse(BaseModel):
 
 
 class SchemaDiscoveryRequest(BaseModel):
-    """Request to discover schema (distinct types) from tables."""
+    """Request to discover the types a datasource exposes.
 
-    edge_table: str
-    node_table: str
+    A SQL warehouse needs the two tables and their structural columns to run
+    ``SELECT DISTINCT``; a native graph database reads its own label catalog and
+    ignores all three, which is why they are optional.
+    """
+
+    datasource_type: DatasourceType = DEFAULT_DATASOURCE_TYPE
+    edge_table: Optional[str] = None
+    node_table: Optional[str] = None
     columns: ColumnConfig = Field(default_factory=ColumnConfig)
+
+    @model_validator(mode="after")
+    def _require_tables_for_sql(self) -> "SchemaDiscoveryRequest":
+        if self.datasource_type == "sql_warehouse" and not (
+            self.edge_table and self.node_table
+        ):
+            raise ValueError(
+                "edge_table and node_table are required for sql_warehouse discovery"
+            )
+        return self
 
 
 class SchemaDiscoveryResponse(BaseModel):
@@ -774,7 +830,9 @@ class CypherQueryResponse(BaseModel):
     edges: list[Edge]
     truncated: bool = False
     total_count: Optional[int] = None
-    transpiled_sql: str  # The SQL query generated from OpenCypher
+    # The SQL generated from the OpenCypher. Null for backends that speak
+    # Cypher natively and therefore transpile nothing.
+    transpiled_sql: Optional[str] = None
     metadata: Optional[QueryMetadata] = None
 
 

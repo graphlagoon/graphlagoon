@@ -7,6 +7,11 @@ import { usePersistence } from '@/composables/usePersistence';
 import { api } from '@/services/api';
 import { fuzzyMatch, parseTag } from '@/utils/contextForm';
 import { useSchemaDrift } from '@/composables/useSchemaDrift';
+import {
+  DATASOURCE_LABELS,
+  capabilitiesFor,
+  resolveDatasourceType,
+} from '@/composables/useDatasourceCapabilities';
 import GraphContextFormModal from '@/components/GraphContextFormModal.vue';
 import SchemaDriftBanner from '@/components/SchemaDriftBanner.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
@@ -39,13 +44,14 @@ const filteredContexts = computed(() => {
   }
   const query = searchQuery.value.trim();
   return contextsStore.contexts.filter(ctx => {
-    // Search in title, description, tags, and table names
+    // Search in title, description, tags, datasource and table names
     const searchableText = [
       ctx.title,
       ctx.description || '',
       ctx.tags?.join(' ') || '',
-      ctx.edge_table_name,
-      ctx.node_table_name,
+      DATASOURCE_LABELS[resolveDatasourceType(ctx)],
+      ctx.edge_table_name || '',
+      ctx.node_table_name || '',
     ].join(' ');
     return fuzzyMatch(searchableText, query);
   });
@@ -275,8 +281,14 @@ async function quickShare(email: string) {
         <div class="list-item-content">
           <div class="list-item-title">{{ context.title }}</div>
           <div class="list-item-subtitle">
-            <code>{{ context.edge_table_name }}</code> /
-            <code>{{ context.node_table_name }}</code>
+            <span class="datasource-badge" :data-datasource="resolveDatasourceType(context)">
+              {{ DATASOURCE_LABELS[resolveDatasourceType(context)] }}
+            </span>
+            <template v-if="context.edge_table_name && context.node_table_name">
+              <code>{{ context.edge_table_name }}</code> /
+              <code>{{ context.node_table_name }}</code>
+            </template>
+            <span v-else class="subtitle-note">openCypher · native graph</span>
           </div>
           <div class="list-item-meta">
             Created by {{ context.owner_email }}
@@ -307,6 +319,7 @@ async function quickShare(email: string) {
             Open
           </button>
           <button
+            v-if="capabilitiesFor(resolveDatasourceType(context)).supportsDrift"
             class="btn btn-outline"
             data-testid="check-schema-btn"
             :disabled="schemaDriftState(context.id).loading"
@@ -445,6 +458,27 @@ async function quickShare(email: string) {
 </template>
 
 <style scoped>
+.datasource-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--badge-bg, rgba(125, 125, 125, 0.16));
+}
+
+.datasource-badge[data-datasource='neptune'] {
+  background: rgba(56, 139, 253, 0.18);
+  color: var(--accent-color, #0969da);
+}
+
+.subtitle-note {
+  opacity: 0.7;
+}
+
 .search-bar {
   display: flex;
   align-items: center;

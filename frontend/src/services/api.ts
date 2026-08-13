@@ -59,6 +59,14 @@ declare global {
        * Backend-computed per user; the superuser list itself is never exposed.
        */
       is_superuser?: boolean;
+      /**
+       * Which datasource types this server can serve, e.g.
+       * `{ sql_warehouse: true, neptune: false }`. Drives whether the context
+       * creation form offers a backend beyond the SQL warehouse; what each
+       * backend can *do* is the frontend's own matrix
+       * (see `useDatasourceCapabilities`).
+       */
+      datasources?: Record<string, boolean>;
       router_base?: string;
       allowed_share_domains?: string[];
       /**

@@ -39,6 +39,7 @@ _snapshot_header_provider: Optional[HeaderProvider] = None
 # Compress / decompress helpers
 # ---------------------------------------------------------------------------
 
+
 def compress_snapshot(data: dict) -> bytes:
     """Serialize and gzip-compress a snapshot dict."""
     return gzip.compress(json.dumps(data).encode("utf-8"))
@@ -52,6 +53,7 @@ def decompress_snapshot(data: bytes) -> dict:
 # ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
+
 
 class SnapshotService(ABC):
     @abstractmethod
@@ -70,6 +72,7 @@ class SnapshotService(ABC):
 # ---------------------------------------------------------------------------
 # Local implementation
 # ---------------------------------------------------------------------------
+
 
 class LocalSnapshotService(SnapshotService):
     """Saves snapshots as gzip files in a local directory.
@@ -107,6 +110,7 @@ class LocalSnapshotService(SnapshotService):
 # ---------------------------------------------------------------------------
 # Databricks implementation (httpx async + HeaderProvider)
 # ---------------------------------------------------------------------------
+
 
 class DatabricksSnapshotService(SnapshotService):
     """Saves snapshots to a Databricks Unity Catalog Volume via Files API.
@@ -153,14 +157,15 @@ class DatabricksSnapshotService(SnapshotService):
             token = token.replace("Bearer ", "").strip()
             return {"Authorization": f"Bearer {token}"}
         except Exception as exc:
-            logger.error("Snapshot header_provider error: %s: %s", type(exc).__name__, exc)
-            raise RuntimeError(f"Failed to obtain auth token for snapshot: {exc}") from exc
+            logger.error(
+                "Snapshot header_provider error: %s: %s", type(exc).__name__, exc
+            )
+            raise RuntimeError(
+                f"Failed to obtain auth token for snapshot: {exc}"
+            ) from exc
 
     def _api_url(self, eid: UUID) -> str:
-        return (
-            f"{self._base_url}/api/2.0/fs/files"
-            f"{self._volume_path}/{eid}.json.gz"
-        )
+        return f"{self._base_url}/api/2.0/fs/files{self._volume_path}/{eid}.json.gz"
 
     def _check_response(
         self, resp: httpx.Response, operation: str, eid: UUID, url: str
@@ -175,7 +180,11 @@ class DatabricksSnapshotService(SnapshotService):
             body = "<unreadable>"
         logger.error(
             "Databricks snapshot %s [%s] failed: HTTP %s url=%s body=%s",
-            operation, eid, status, url, body,
+            operation,
+            eid,
+            status,
+            url,
+            body,
         )
         # Databricks returns 401 for missing/expired tokens, but may return
         # 400 with INVALID_TOKEN in the body for malformed token values.
@@ -223,7 +232,9 @@ class DatabricksSnapshotService(SnapshotService):
                 f"{self._HTTP_TIMEOUT}s. url={url}"
             ) from exc
         except httpx.RequestError as exc:
-            logger.error("Databricks snapshot save [%s] network error: %s url=%s", eid, exc, url)
+            logger.error(
+                "Databricks snapshot save [%s] network error: %s url=%s", eid, exc, url
+            )
             raise ConnectionError(
                 f"Databricks snapshot save [{eid}]: network error — {exc}. url={url}"
             ) from exc
@@ -247,7 +258,9 @@ class DatabricksSnapshotService(SnapshotService):
                 f"{self._HTTP_TIMEOUT}s. url={url}"
             ) from exc
         except httpx.RequestError as exc:
-            logger.error("Databricks snapshot load [%s] network error: %s url=%s", eid, exc, url)
+            logger.error(
+                "Databricks snapshot load [%s] network error: %s url=%s", eid, exc, url
+            )
             raise ConnectionError(
                 f"Databricks snapshot load [{eid}]: network error — {exc}. url={url}"
             ) from exc
@@ -270,7 +283,12 @@ class DatabricksSnapshotService(SnapshotService):
                 f"{self._HTTP_TIMEOUT}s. url={url}"
             ) from exc
         except httpx.RequestError as exc:
-            logger.error("Databricks snapshot delete [%s] network error: %s url=%s", eid, exc, url)
+            logger.error(
+                "Databricks snapshot delete [%s] network error: %s url=%s",
+                eid,
+                exc,
+                url,
+            )
             raise ConnectionError(
                 f"Databricks snapshot delete [{eid}]: network error — {exc}. url={url}"
             ) from exc
@@ -285,13 +303,16 @@ class DatabricksSnapshotService(SnapshotService):
                 async with client.stream("GET", url, headers=headers) as resp:
                     return resp.status_code == 200
         except (httpx.TimeoutException, httpx.RequestError) as exc:
-            logger.warning("Databricks snapshot exists [%s] check failed: %s url=%s", eid, exc, url)
+            logger.warning(
+                "Databricks snapshot exists [%s] check failed: %s url=%s", eid, exc, url
+            )
             return False
 
 
 # ---------------------------------------------------------------------------
 # Singleton management (mirrors warehouse.py pattern)
 # ---------------------------------------------------------------------------
+
 
 def configure_snapshot_service(
     settings: "Settings",
@@ -344,9 +365,7 @@ def get_snapshot_service() -> SnapshotService:
         )
     else:
         # No volume path → local directory (works in both local and databricks_mode)
-        _snapshot_service = LocalSnapshotService(
-            settings.exploration_snapshots_dir
-        )
+        _snapshot_service = LocalSnapshotService(settings.exploration_snapshots_dir)
 
     return _snapshot_service
 

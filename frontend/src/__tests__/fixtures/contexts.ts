@@ -5,6 +5,7 @@ export function createGraphContext(overrides: Partial<GraphContext> = {}): Graph
     id: 'ctx-1',
     title: 'Test Context',
     tags: [],
+    datasource_type: 'sql_warehouse',
     edge_table_name: 'test_edges',
     node_table_name: 'test_nodes',
     edge_structure: {
@@ -28,6 +29,28 @@ export function createGraphContext(overrides: Partial<GraphContext> = {}): Graph
     updated_at: '2025-01-01T00:00:00Z',
     ...overrides,
   }
+}
+
+/**
+ * A context backed by a native graph database.
+ *
+ * Deliberately carries no tables and no property columns — that absence is the
+ * point: it is what the UI branches on, so a fixture that quietly filled them
+ * in would let table-shaped bugs pass.
+ */
+export function createNeptuneGraphContext(
+  overrides: Partial<GraphContext> = {},
+): GraphContext {
+  return createGraphContext({
+    id: 'ctx-neptune-1',
+    title: 'Neptune Context',
+    datasource_type: 'neptune',
+    edge_table_name: null,
+    node_table_name: null,
+    edge_properties: [],
+    node_properties: [],
+    ...overrides,
+  })
 }
 
 export function createExplorationState(overrides: Partial<ExplorationState> = {}): ExplorationState {

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
+import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
 import type { QueryTemplate, TemplateParameter, TemplateVisibility } from '@/types/graph';
 import { X } from 'lucide-vue-next';
 
@@ -15,6 +16,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
+const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
 const authStore = useAuthStore();
 const templatesStore = useQueryTemplatesStore();
 
@@ -218,7 +220,7 @@ async function handleSave() {
               <label class="radio-label">
                 <input v-model="queryType" type="radio" value="cypher" /> Cypher
               </label>
-              <label class="radio-label">
+              <label v-if="capabilities.supportsSql" class="radio-label">
                 <input v-model="queryType" type="radio" value="sql" /> SQL
               </label>
             </div>

@@ -33,6 +33,11 @@ from graphlagoon.services.warehouse import (
     HeaderProvider,
 )
 from graphlagoon.services.snapshot import configure_snapshot_service
+from graphlagoon.services.datasource import (
+    available_datasource_types,
+    close_datasources,
+    configure_datasources,
+)
 from graphlagoon.middleware.auth import AuthMiddleware, configure_auth, UserProvider
 from graphlagoon.utils.authz import is_superuser
 
@@ -242,6 +247,7 @@ def create_frontend_router(
             "dev_mode": settings.dev_mode,
             "database_enabled": is_database_available(),
             "databricks_mode": settings.databricks_mode,
+            "datasources": available_datasource_types(),
             "router_base": router_base,
             "allowed_share_domains": settings.allowed_share_domain_list,
             "default_behaviors": settings.default_behaviors_dict,
@@ -412,9 +418,10 @@ def create_mountable_app(
     if overrides:
         settings = Settings(**{**settings.model_dump(), **overrides})
 
-    # Configure database, warehouse, snapshot service, and auth
+    # Configure database, warehouse, datasources, snapshot service, and auth
     configure_database(settings)
     configure_warehouse(settings, header_provider=header_provider)
+    configure_datasources(settings, header_provider=header_provider)
     configure_snapshot_service(settings, header_provider=header_provider)
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
@@ -529,9 +536,11 @@ def create_app(
     if overrides:
         settings = Settings(**{**settings.model_dump(), **overrides})
 
-    # Configure database, warehouse, and snapshot service (lazy initialization)
+    # Configure database, warehouse, datasources, and snapshot service
+    # (lazy initialization)
     configure_database(settings)
     configure_warehouse(settings, header_provider=header_provider)
+    configure_datasources(settings, header_provider=header_provider)
     configure_snapshot_service(settings, header_provider=header_provider)
 
     # Register similarity endpoints
@@ -572,6 +581,7 @@ def create_app(
             from graphlagoon.db.lakebase import stop_lakebase_token_refresh
 
             await stop_lakebase_token_refresh()
+        await close_datasources()
         await close_warehouse_client()
         await close_database()
         logger.info("Cleanup complete")
