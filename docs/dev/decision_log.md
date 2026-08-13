@@ -3601,3 +3601,155 @@ nada de Cypher e portanto não pode refazer o transpile.
 TemplateExecuteModal, uma falha de EXECUÇÃO do SQL procedural revisado não faz fallback — só a
 falha de transpile. Intencional (decisão 2): substituir SQL revisado pelo usuário seria
 surpreendente.
+
+## [2026-08-13] - Feature Implemented: Pluggable Datasources + Amazon Neptune (openCypher)
+
+**Feature:** A graph context can now be backed by a native graph database instead of two warehouse tables. Amazon Neptune is the first such backend, queried with openCypher passthrough.
+
+**Purpose:** Until now a context was hard-wired to "an edge table + a node table in a SQL warehouse", with Cypher transpiled to Spark SQL by gsql2rsql. Querying a native graph database was impossible, and every new backend would have meant another fork in `routers/graph.py`. Neptune in particular needs *no* table or column configuration at all — the database already knows its own shape.
+
+**User Story:** As an analyst with a graph already in Neptune, I want to create a context by picking "Amazon Neptune" and typing a title, so that I can query and visualize it without defining a node table, an edge triple-store, or any column mapping.
+
+**Design Decisions:**
+
+1. **Adapter behind a `GraphDatasource` ABC, not `if datasource_type ==` in the routers.** Ten endpoints share the same shape (prepare → execute → normalize → 400-envelope). Branching per endpoint would duplicate the envelope and validation logic once per backend, and multiply with each new one. The ABC keeps routers to auth, request validation and error translation — all genuinely backend-agnostic. Pattern copied from `services/snapshot.py` (ABC + settings-driven lazy singleton factory), which is the repo's existing precedent for a pluggable backend.
+
+2. **The seam is `GraphResponse{nodes, edges}`.** Everything above it — routers, async jobs, explorations, snapshots, sharing, and the whole frontend visualization stack — already speaks the normalized shape. That is why the 3D canvas, layouts, filters, metrics, community and cluster stores needed *zero* changes.
+
+3. **SQL-only operations are deliberately NOT on the interface.** Raw SQL execution, transpile-to-SQL and schema drift are meaningless for a native graph database. Rather than force every backend to implement `raise NotImplementedError`, they live on the SQL implementation and are gated at the router with `require_capability(ds, flag, operation)` → 400 `DATASOURCE_UNSUPPORTED_OPERATION`.
+
+4. **Capabilities are a matrix, not a type check.** Backend: `DatasourceCapabilities` frozen dataclass, all flags defaulting to `False` so a new backend opts in explicitly. Frontend: `useDatasourceCapabilities` composable with the same shape. Components ask "does this support SQL?", never "is this Neptune?" — adding a backend is one row, not a hunt through panels. The matrix is duplicated on purpose: the server decides what it *accepts*, the frontend decides what it *renders*, and each is versioned with its own deploy.
+
+5. **`datasource_type` defaults to `sql_warehouse` everywhere.** Alembic `010` adds the column with `server_default='sql_warehouse'`, backfilling every existing row atomically — no data migration, no behavior change. The frontend type is optional and `resolveDatasourceType` treats absent/unknown as the warehouse. Existing contexts, API clients and test fixtures were untouched.
+
+6. **Neptune context creation normalizes rather than rejects table fields.** A client reusing the warehouse form gets a valid context instead of a 422 it cannot act on. `GraphContextCreate`'s `model_validator` is the single choke point: warehouse requires both tables, everything else nulls them.
+
+7. **`datasource_type` is immutable after creation** (absent from `GraphContextUpdate`). Changing it would silently orphan every exploration, template and cluster program saved against the context.
+
+8. **The `RETURN r` rule is relaxed for native backends.** That requirement exists because the transpiler projects edges as a NAMED_STRUCT column literally named `r`. Neptune returns real nodes and relationships from any projection, so requiring the name would reject valid queries like `RETURN p`. Replaced with "starts with MATCH, has a RETURN", plus a read-only deny-list guard (the openCypher counterpart of `validate_sql_query`).
+
+9. **Dangling-endpoint resolution.** `MATCH ()-[r]->() RETURN r` names two nodes it never returned. One follow-up `MATCH (n) WHERE id(n) IN $ids RETURN n` fills them in — the direct analogue of the warehouse path's second, node-fetching query. Without it that query renders an empty canvas.
+
+10. **Local dev without AWS.** No official local Neptune exists (LocalStack emulates it only in its paid tier). Following `warehouse/`'s precedent of emulating the Databricks statements API, `neptune-emulator/` presents Neptune's HTTP contract over a Neo4j container. The production `NeptuneClient`/`NeptuneDatasource` run unchanged against it — only the network is local.
+
+**Alternatives Considered:**
+- *Router-level dispatch* — rejected: duplicates error handling per endpoint per backend.
+- *Per-context connection config* — rejected by the user in favour of server-level settings, matching the existing warehouse model (no credential storage/encryption needed).
+- *Gremlin support in v1* — deferred; openCypher reuses the existing editor and result mapping.
+- *Discovery by sampling only* — rejected as the primary path: the cluster summary API is exact and free. Sampling is the fallback for clusters with DFE statistics disabled.
+- *Mocking Neptune for local dev* — rejected: a mock would not exercise the real client, request building, or error translation.
+
+**Implementation:**
+
+**Backend — new:**
+- `api/graphlagoon/services/datasource/base.py` — `GraphDatasource` ABC, `DatasourceCapabilities`, `PreparedGraphQuery`, `GraphExecutionFailure`, `require_capability`, `invalid_request`
+- `.../datasource/factory.py` — `configure_datasources` / `get_datasource` / `get_datasource_for_context` / `available_datasource_types` / `close_datasources` / `reset_datasources`
+- `.../datasource/sql_warehouse.py` — `SqlWarehouseDatasource` (moved code: `build_edge_named_struct`, `resolve_node_columns`, subgraph/expand SQL builders, `_prepare_graph_sql`, `_prepare_cypher_sql`, table-query flow, discovery)
+- `.../datasource/neptune/{client,mapping,validation,datasource}.py` — httpx client (+optional SigV4), openCypher JSON → Node/Edge/tabular mapping, read-only guard, the datasource itself
+- `api/graphlagoon/alembic/versions/010_add_datasource_type.py`
+
+**Backend — modified:**
+- `routers/graph.py` — every graph endpoint delegates to the datasource; `execution_failure_http_error` added; `_merge_transpilation_timing` extracted; capability guards on `/query`, `/cypher/transpile`, `/schema-drift`, SQL console mode
+- `routers/graph_contexts.py` — `_validate_datasource_or_400`, table validation branched, `datasource_type` persisted and returned
+- `routers/config.py`, `app.py` — `datasources` in `/api/config` and the SPA template; `configure_datasources`/`close_datasources` wired into startup/shutdown
+- `models/schemas.py` — `DatasourceType`, `DEFAULT_DATASOURCE_TYPE`, create/response fields + validator, `SchemaDiscoveryRequest.datasource_type`, `CypherQueryResponse.transpiled_sql` now optional
+- `db/models.py`, `db/memory_store.py` — `datasource_type` column/field, nullable table names
+- `config.py` — nine `neptune_*` settings + `neptune_enabled` / `neptune_base_url`
+- `services/async_job.py` — `cancel_job(job_id, canceler)` generalized from `warehouse`
+- `services/cypher.py` — unchanged (Neptune has its own validation module)
+
+**Frontend:**
+- NEW `composables/useDatasourceCapabilities.ts` — the capability matrix, labels, `resolveDatasourceType`, `useAvailableDatasources`
+- `types/graph.ts` — `DatasourceType`, optional `datasource_type`, nullable table names
+- `components/GraphContextFormModal.vue` — datasource picker (create mode; disabled in edit), table/column half conditional, discovery dispatch, per-datasource submit payload
+- `views/ContextsView.vue` — datasource badge, subtitle fallback, check-schema gated, searchable by datasource
+- `components/ContextInfoPanel.vue` — Datasource row; Tables/Structure sections and drift affordance gated
+- `components/GraphQueryPanel.vue` — SQL toggle / transpile gear / CTE pre-filter / "Trust transpiled SQL" gated; relaxed validation; `runsDirectly`
+- `components/QueryConsolePanel.vue` + `stores/queryConsole.ts` — SQL mode and settings gated, per-datasource seeds, `~id` node bridge, transpile options and CTE fallback omitted
+- `stores/graph.ts` — `contextTranspiles()`; transpile options and CTE-fallback retry skipped; `transpileCypher` guarded
+- `components/QueryTemplatesPanel.vue`, `TemplateEditorModal.vue` — SQL templates filtered/hidden
+- `utils/exampleQuery.ts` — seeds with `id(root)` where identity is not a property
+
+**Dev infrastructure:**
+- NEW `neptune-emulator/` (FastAPI + Neo4j driver, `src/main.py` + `src/seed.py`)
+- `docker-compose.yml` — `neo4j` service (`db-up` narrowed to `postgres` so it is not dragged in)
+- `Makefile` — `dev-neptune`, `dev-neptune-db`, `neptune-up`, `neptune-down`, `neptune-seed`; emulator hooked into `dev-stop`/`dev-logs`
+
+**Testing:**
+- [x] Phase 1 refactor verified with the existing suite unmodified except patch targets: `test_graph_error_handling.py`'s 4 router tests patch `execute_graph_query_with_nodes` / `validate_sql_query` / `merge_column_config`, which moved to `services.datasource.sql_warehouse`. Every assertion unchanged.
+- [x] NEW `api/tests/test_neptune_mapping.py` (24) — entity detection incl. missing `~entityType`, multi-label, paths, `collect()` lists, map literals, dangling endpoints, tabular flattening, limit extraction.
+- [x] NEW `api/tests/test_neptune_datasource.py` (32, `httpx.MockTransport`) — passthrough, dangling follow-up, generated openCypher for subgraph/expand (direction × depth matrix), label quoting incl. a backtick-injection attempt, write-query rejection, error translation (never `STALE_CONTEXT_SCHEMA`), summary-then-sampling discovery.
+- [x] NEW `api/tests/test_neptune_endpoints.py` (17) — creation without tables, table fields normalized away, warehouse still requires tables, omitted type defaults to warehouse, 400 guards on `/query` `/cypher/transpile` `/schema-drift` `sql` console mode `cte_prefilter`, working cypher/subgraph/expand/nodes-batch/console/discovery, `DATASOURCE_NOT_CONFIGURED`, `/api/config` datasources.
+- [x] Backend: **488 passed** (was 415), 1 skipped. The 5 failures (`test_cypher_comments` ×4, `test_transpile_options` ×1) are pre-existing on `main` — verified by stashing.
+- [x] NEW `useDatasourceCapabilities.test.ts` (12), `GraphContextFormModal.datasource.test.ts` (9), `GraphQueryPanel.datasource.test.ts` (7). Frontend: **1391 passed**, `vue-tsc --noEmit` clean.
+- [x] NEW `e2e/tests/neptune-context.spec.ts` (7) + `enableDatasources` / `mockNeptuneQueries` helpers, `MOCK_NEPTUNE_CONTEXT` fixture. E2E: **116 passed**.
+- [x] **Live verification against a real graph database.** Ran the actual `NeptuneDatasource` against Neo4j via the emulator: discovery (sampling fallback), subgraph with and without type filter, `RETURN r`-only with dangling resolution, expand at depth 1/2 × directed/undirected × type-filtered, `fetch_nodes`, console table mode, and Neptune-side error translation. This surfaced a real defect the mocked tests could not: Neo4j's `id()` returns a legacy integer while Neptune's returns the string `~id`, so every id lookup silently returned nothing. Fixed in the emulator (`translate_query` rewrites `id(` → `elementId(`) — the production query is correct for Neptune as written.
+- [x] Ruff check + format clean on all touched files (the one remaining `F401` in `services/schema_drift.py` is pre-existing).
+
+**Performance Considerations:**
+- Discovery prefers the cluster summary API (no scan) and falls back to a bounded `LIMIT`-capped sample.
+- The dangling-endpoint follow-up is one extra round-trip and only when a query projects relationships without their endpoints — the same two-phase shape the warehouse path already has.
+- Neptune returns whole property maps in one response, so progressive/deferred property loading is inapplicable and correctly reports as unsupported.
+
+**Security Considerations:**
+- `validate_readonly_opencypher` is the openCypher counterpart of the SQL SELECT-only boundary: a word-boundary deny-list on `CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP|LOAD|CALL|FOREACH`, failing closed. A keyword inside a string literal is a deliberate false positive — the same trade the SQL validator makes.
+- Generated queries parameterize everything they can (`$ids`, `$types`, `$node_id`). Relationship types cannot be parameters inside a pattern, so they are backtick-quoted with embedded backticks stripped; covered by an injection test.
+- Neptune credentials are server-level; nothing is stored per context.
+- SigV4 signs the exact serialized body (`json.dumps` once, sent as `content=`), so the signature matches the bytes on the wire.
+
+**Known Limitations:**
+- Cancellation is API-side only for Neptune (no query id at submit time) — documented in the config guide.
+- Subgraph sampling is deterministic: openCypher has no `ORDER BY rand()` equivalent.
+- The emulator's `id()` rewrite is a Neo4j-compat shim; real Neptune needs no translation.
+- `botocore` (IAM auth) is an optional extra and is not exercised by CI.
+
+**Future Enhancements:**
+- Gremlin as a second query language for the same datasource.
+- Cancellation by matching the running query via `/openCypher/status`.
+- Redefine "drift" for a native graph database as label/property-key re-discovery.
+
+**Related:**
+- Supersedes the consequence noted in ADR-001 ("Spark SQL over Neo4j"): query syntax is no longer necessarily SQL — a context may now speak Cypher natively.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-08-13] - Revision: datasource picker copy + expanded local Neptune seed
+
+**Trigger:** Review of the shipped picker. The two cards described *how each backend is built* ("a graph stored as an edge table and a node table", "a native graph database queried with openCypher") — accurate, and useless at the moment of choosing. Storage layout is not something the person creating a context can act on.
+
+**Decision 1 — copy describes the workload, not the implementation.** Each card is now four layers with distinct jobs:
+
+| Layer | Job | Databricks | Amazon Neptune |
+|---|---|---|---|
+| label | the product, recognized instantly | Databricks | Amazon Neptune |
+| kind | the generic category, secondary | SQL Warehouse | openCypher |
+| tagline | **the line that decides the choice** | ANALYTICAL · EXPLORATORY | OPERATIONAL (OLTP) · LOW LATENCY |
+| description | what you get | the complete graph, every property | tuned for serving, traversals come back fast |
+| caveat | what you give up | higher latency, breadth over speed | may not carry the full analytical picture |
+
+The caveat sits below a dashed rule rather than appended to the description: separated, it reads as a condition of the choice instead of more marketing. `caveat` is a required field on `DatasourceCopy` and a test asserts every type has one — a card without it sells the datasource rather than explaining the trade-off.
+
+**Decision 2 — the product is the headline, the category is secondary.** First pass had "SQL Warehouse" bold with "Databricks" as small print. Inverted: people recognize *Databricks* and *Amazon Neptune* instantly where the generic category takes a beat to place. This also fixed a mislabeled field — `vendor: "openCypher"` was never a vendor, it is the query language; renamed to `kind`.
+
+*Known imprecision:* `DATASOURCE_LABELS` now derives from `label`, so the listing badge reads "Databricks" even under `make dev`, where the warehouse is local PySpark. Accepted because the deployed case dominates; decoupling the badge from the card headline is the fix if it ever bites.
+
+**Decision 3 — the same framing propagates.** The context listing shows the tagline where it used to show "openCypher · native graph" (implementation framing again), and the context info panel shows it under the datasource name. One vocabulary everywhere the datasource is mentioned, including `docs/guide/configuration.md`, which now opens with a completeness-vs-latency comparison table.
+
+**Decision 4 — the local seed is shaped, not merely bigger.** The original 9 nodes / 14 relationships could not distinguish an expand at depth 1 from depth 2. Now 106 nodes / 349 relationships across 4 labels and 7 relationship types, generated deterministically (`random.Random(20260813)`), with each structure earning its place by making one control observable:
+
+- 9-level `REPORTS_TO` chain — a pure chain, so out-expand at depth *k* reaches exactly *k* people; repeated expands walk it one rung at a time
+- 24-employee hub (Graph Lagoon) — overflows any reasonable edge limit, so the cap is visible
+- `KNOWS` ring + 30 chords — cycles and density, so undirected expansion grows fast and revisits
+- layered `DEPENDS_ON` DAG — multi-hop paths of a *different* type through the same nodes, so the type filter produces a clean subgraph
+- sink repositories — no outgoing edges, so out-expand returns empty while in-expand returns plenty
+- disconnected component (Sandbox Co) — proves expand respects its boundary
+
+Verified against the real `NeptuneDatasource` through the emulator, not mocks: REPORTS_TO from Alice gives 2 nodes at depth 1 and 3 at depth 2; the hub gives 27 nodes undirected and 3 directed-out; the sink gives 0 out and 9 undirected; `edge_limit` 50/150/1000 yields exactly 50/150/349 edges.
+
+*Constraint discovered:* `ExpandRequest.depth` is capped at `le=2` (pre-existing, applies to both datasources), so the 9-level ladder is for *repeated* expands rather than a single deeper one.
+
+**Files:** `frontend/src/composables/useDatasourceCapabilities.ts` (`DatasourceCopy` + `DATASOURCE_COPY`, `DATASOURCE_LABELS` derived), `GraphContextFormModal.vue` (four-layer card + styles), `ContextsView.vue`, `ContextInfoPanel.vue`, `neptune-emulator/src/seed.py` (rewritten as a deterministic generator), `docs/guide/configuration.md`, e2e + composable tests.
+
+**Also corrected:** the original entry was appended to `docs/dev/decision-log.md`; the project's active log is `docs/dev/decision_log.md` (underscore — the one recent commits touch). Entry moved, hyphenated file restored.

@@ -4,8 +4,7 @@ import { useContextsStore } from '@/stores/contexts';
 import { api } from '@/services/api';
 import { parseTableName } from '@/utils/contextForm';
 import {
-  DATASOURCE_DESCRIPTIONS,
-  DATASOURCE_LABELS,
+  DATASOURCE_COPY,
   capabilitiesFor,
   resolveDatasourceType,
   useAvailableDatasources,
@@ -424,8 +423,13 @@ async function submit() {
               :data-testid="`datasource-option-${type}`"
               @click="selectDatasource(type)"
             >
-              <span class="datasource-name">{{ DATASOURCE_LABELS[type] }}</span>
-              <span class="datasource-desc">{{ DATASOURCE_DESCRIPTIONS[type] }}</span>
+              <span class="datasource-head">
+                <span class="datasource-name">{{ DATASOURCE_COPY[type].label }}</span>
+                <span class="datasource-kind">{{ DATASOURCE_COPY[type].kind }}</span>
+              </span>
+              <span class="datasource-tagline">{{ DATASOURCE_COPY[type].tagline }}</span>
+              <span class="datasource-desc">{{ DATASOURCE_COPY[type].description }}</span>
+              <span class="datasource-caveat">{{ DATASOURCE_COPY[type].caveat }}</span>
             </button>
           </div>
           <span v-if="mode === 'edit'" class="hint">
@@ -804,15 +808,47 @@ async function submit() {
   opacity: 0.65;
 }
 
+.datasource-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .datasource-name {
   font-weight: 600;
   font-size: 0.9rem;
+}
+
+.datasource-kind {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+/* The workload, not the product — this is the line that decides the choice. */
+.datasource-tagline {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent-color, #0969da);
 }
 
 .datasource-desc {
   font-size: 0.75rem;
   opacity: 0.75;
   line-height: 1.35;
+}
+
+/* The trade-off. Set apart so it reads as a condition of the choice rather
+   than more marketing, and never collapsed into the description above. */
+.datasource-caveat {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-color, #d0d7de);
+  opacity: 0.8;
 }
 
 .hint {

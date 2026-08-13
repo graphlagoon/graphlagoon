@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ref } from 'vue';
 import {
+  DATASOURCE_COPY,
   DATASOURCE_LABELS,
   capabilitiesFor,
   resolveDatasourceType,
@@ -105,5 +106,31 @@ describe('DATASOURCE_LABELS', () => {
   it('names every datasource type', () => {
     expect(DATASOURCE_LABELS.sql_warehouse).toBeTruthy();
     expect(DATASOURCE_LABELS.neptune).toBeTruthy();
+  });
+
+  it('agrees with the picker copy', () => {
+    expect(DATASOURCE_LABELS.sql_warehouse).toBe(DATASOURCE_COPY.sql_warehouse.label);
+    expect(DATASOURCE_LABELS.neptune).toBe(DATASOURCE_COPY.neptune.label);
+  });
+});
+
+describe('DATASOURCE_COPY', () => {
+  it.each(['sql_warehouse', 'neptune'] as const)(
+    'gives %s a complete card',
+    (type) => {
+      const copy = DATASOURCE_COPY[type];
+      // A card missing its caveat sells the datasource instead of explaining
+      // the trade-off, which is the whole point of the picker.
+      for (const field of ['label', 'kind', 'tagline', 'description', 'caveat'] as const) {
+        expect(copy[field]).toBeTruthy();
+      }
+    },
+  );
+
+  it('says what each one is for, not how it is built', () => {
+    // Storage layout is not something the person creating a context can act
+    // on; the workload is.
+    expect(DATASOURCE_COPY.sql_warehouse.tagline.toLowerCase()).toContain('analytical');
+    expect(DATASOURCE_COPY.neptune.tagline.toLowerCase()).toContain('oltp');
   });
 });

@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useSchemaDrift } from '@/composables/useSchemaDrift';
 import {
+  DATASOURCE_COPY,
   DATASOURCE_LABELS,
   resolveDatasourceType,
   useDatasourceCapabilities,
@@ -37,6 +38,10 @@ const capabilities = useDatasourceCapabilities(
 );
 const datasourceLabel = computed(
   () => DATASOURCE_LABELS[resolveDatasourceType(graphStore.currentContext)],
+);
+/** The workload this context is served by — what to expect from its results. */
+const datasourceTagline = computed(
+  () => DATASOURCE_COPY[resolveDatasourceType(graphStore.currentContext)].tagline,
 );
 </script>
 
@@ -82,7 +87,10 @@ const datasourceLabel = computed(
         </div>
         <div class="info-row">
           <span class="label">Datasource</span>
-          <span class="value">{{ datasourceLabel }}</span>
+          <span class="value">
+            {{ datasourceLabel }}
+            <span class="value-note">{{ datasourceTagline }}</span>
+          </span>
         </div>
       </div>
 
@@ -308,6 +316,13 @@ const datasourceLabel = computed(
   text-align: right;
   word-break: break-all;
   color: var(--text-color, #333);
+}
+
+/* Second line under a value: the workload, so results read in context. */
+.value-note {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted, #888);
 }
 
 .mono {

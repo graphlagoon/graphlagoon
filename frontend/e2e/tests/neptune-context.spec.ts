@@ -78,7 +78,7 @@ test.describe('Neptune context listing', () => {
 
     const neptuneRow = page.locator('.list-item', { hasText: 'Neptune Graph' });
     await expect(neptuneRow.getByText('Amazon Neptune')).toBeVisible();
-    await expect(neptuneRow.getByText('openCypher · native graph')).toBeVisible();
+    await expect(neptuneRow.getByText('Operational (OLTP) · low latency')).toBeVisible();
 
     // The warehouse row still shows its tables.
     const warehouseRow = page.locator('.list-item', { hasText: 'Test Context' });
