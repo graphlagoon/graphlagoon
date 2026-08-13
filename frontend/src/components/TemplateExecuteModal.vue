@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
+import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
 import type { QueryTemplate } from '@/types/graph';
 import { X } from 'lucide-vue-next';
 
@@ -12,6 +13,15 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
 const consoleStore = useQueryConsoleStore();
+const capabilities = useDatasourceCapabilities(
+  computed(() => graphStore.currentContext),
+);
+
+// A datasource that speaks Cypher natively has no SQL to review, so the
+// transpile-then-execute two-step below cannot run there at all — it would
+// stop at the transpile guard and load nothing. Send the Cypher itself, the
+// same thing GraphQueryPanel does for these contexts.
+const runsDirectly = computed(() => !capabilities.value.supportsTranspile);
 
 // How to run this query THIS time — a per-execution choice, not stored on the
 // template. Default: Graph (loads the visualization, the historical behavior).
@@ -44,9 +54,12 @@ async function executeNow() {
   if (!canExecute.value) return;
   const substituted = substituteParameters(props.template.query, values.value);
   const opts = props.template.options;
-  const cte = opts?.cte_prefilter
-    ? substituteParameters(opts.cte_prefilter, values.value)
-    : '';
+  // A stored CTE pre-filter is SQL over the edge table. On a native-graph
+  // context it cannot be honoured, and sending it would earn a 400 — drop it.
+  const cte =
+    opts?.cte_prefilter && capabilities.value.supportsCtePrefilter
+      ? substituteParameters(opts.cte_prefilter, values.value)
+      : '';
 
   // Table mode runs in the Query Console (arbitrary projection allowed),
   // NOT through the graph path (which assumes the query returns edges).
@@ -64,14 +77,23 @@ async function executeNow() {
   // Graph-intent (default): load the visualization.
   graphStore.setGraphQuery(substituted);
   emit('close');
-  graphStore.vlpRenderingMode = opts?.procedural_bfs ? 'procedural' : 'cte';
   graphStore.ctePrefilter = cte;
-  graphStore.useExternalLinks = opts?.large_results_mode ?? true;
+  // Transpiler and result-transport settings only reach a warehouse backend;
+  // leaving them untouched elsewhere keeps stored options from silently
+  // rewriting store state a native-graph query will never consult.
+  if (capabilities.value.supportsTranspile) {
+    graphStore.vlpRenderingMode = opts?.procedural_bfs ? 'procedural' : 'cte';
+    graphStore.useExternalLinks = opts?.large_results_mode ?? true;
+  }
 
   if (props.template.query_type === 'cypher') {
-    const sql = await graphStore.transpileCypher(substituted);
-    if (sql) {
-      await graphStore.executeGraphQuery(sql, { preserveGraphQuery: true });
+    if (runsDirectly.value) {
+      await graphStore.executeCypherQuery(substituted);
+    } else {
+      const sql = await graphStore.transpileCypher(substituted);
+      if (sql) {
+        await graphStore.executeGraphQuery(sql, { preserveGraphQuery: true });
+      }
     }
   } else {
     await graphStore.executeGraphQuery(substituted, { preserveGraphQuery: true });

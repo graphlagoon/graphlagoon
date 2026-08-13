@@ -17,6 +17,14 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
 const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
+
+// Every execution option below is warehouse machinery: procedural BFS picks a
+// transpilation strategy, large-results mode picks a result transport, and the
+// CTE pre-filter rewrites generated SQL. A datasource that runs Cypher natively
+// has none of them, so the block is hidden and no options are persisted —
+// storing values that will never be read would make the template look
+// configured in ways it is not.
+const showExecutionOptions = computed(() => capabilities.value.supportsTranspile);
 const authStore = useAuthStore();
 const templatesStore = useQueryTemplatesStore();
 
@@ -141,11 +149,13 @@ async function handleSave() {
         id: p.id.trim(),
         label: p.id.trim(),
       })),
-      options: {
-        procedural_bfs: proceduralBfs.value,
-        cte_prefilter: ctePrefilterEnabled.value ? ctePrefilterText.value.trim() || undefined : undefined,
-        large_results_mode: largeResultsMode.value,
-      },
+      options: showExecutionOptions.value
+        ? {
+            procedural_bfs: proceduralBfs.value,
+            cte_prefilter: ctePrefilterEnabled.value ? ctePrefilterText.value.trim() || undefined : undefined,
+            large_results_mode: largeResultsMode.value,
+          }
+        : undefined,
       visibility: visibility.value,
     };
 
@@ -241,7 +251,7 @@ async function handleSave() {
           </div>
 
           <!-- Execution options (fixed after creation) -->
-          <div class="execution-options">
+          <div v-if="showExecutionOptions" class="execution-options">
             <span class="field-label" style="margin-bottom: 4px">Execution Options</span>
             <span class="field-hint" style="display: block; margin-bottom: 8px">
               These options are fixed after creation and applied automatically when running the template.
