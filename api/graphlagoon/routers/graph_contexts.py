@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from graphlagoon.db.database import is_database_available, get_session_maker
 from graphlagoon.db.memory_store import get_memory_store, MemoryGraphContext
 from graphlagoon.models.schemas import (
+    DEFAULT_DATASOURCE_TYPE,
     GraphContextCreate,
     GraphContextUpdate,
     GraphContextResponse,
@@ -31,12 +32,50 @@ from graphlagoon.services.schema_drift import (
     validate_context_tables,
     ContextValidationError,
 )
+from graphlagoon.services.datasource import (
+    DatasourceNotConfiguredError,
+    UnknownDatasourceError,
+    get_datasource,
+)
 
 router = APIRouter(prefix="/api/graph-contexts", tags=["graph-contexts"])
 
 
 def get_warehouse() -> WarehouseClient:
     return get_warehouse_client()
+
+
+async def _validate_datasource_or_400(datasource_type: str) -> None:
+    """Reject a context whose backend this server cannot reach.
+
+    Creating a Neptune context on a server with no Neptune endpoint would
+    produce a context that fails on its first query with a confusing error;
+    failing at creation says exactly what is missing.
+    """
+    try:
+        get_datasource(datasource_type)
+    except DatasourceNotConfiguredError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "DATASOURCE_NOT_CONFIGURED",
+                    "message": str(e),
+                    "details": {"datasource_type": datasource_type},
+                }
+            },
+        )
+    except UnknownDatasourceError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "UNKNOWN_DATASOURCE",
+                    "message": str(e),
+                    "details": {"datasource_type": datasource_type},
+                }
+            },
+        )
 
 
 async def _validate_or_400(
@@ -98,6 +137,9 @@ def context_to_response(
         title=context.title,
         description=context.description,
         tags=context.tags or [],
+        # Rows predating the column report the default rather than failing.
+        datasource_type=getattr(context, "datasource_type", None)
+        or DEFAULT_DATASOURCE_TYPE,
         edge_table_name=context.edge_table_name,
         node_table_name=context.node_table_name,
         edge_structure=(
@@ -211,13 +253,18 @@ async def create_graph_context(
     """Create a new graph context."""
     user_email = get_current_user(request)
 
-    await _validate_or_400(
-        warehouse,
-        data.node_table_name,
-        data.edge_table_name,
-        data.node_structure.model_dump(),
-        data.edge_structure.model_dump(),
-    )
+    await _validate_datasource_or_400(data.datasource_type)
+
+    # Table validation only means something for a table-backed context; a
+    # schemaless graph database has nothing to check here.
+    if data.datasource_type == "sql_warehouse":
+        await _validate_or_400(
+            warehouse,
+            data.node_table_name,
+            data.edge_table_name,
+            data.node_structure.model_dump(),
+            data.edge_structure.model_dump(),
+        )
 
     if is_database_available():
         from graphlagoon.db.models import GraphContext
@@ -228,6 +275,7 @@ async def create_graph_context(
                 title=data.title,
                 description=data.description,
                 tags=data.tags,
+                datasource_type=data.datasource_type,
                 edge_table_name=data.edge_table_name,
                 node_table_name=data.node_table_name,
                 edge_structure=data.edge_structure.model_dump(),
@@ -251,6 +299,7 @@ async def create_graph_context(
             title=data.title,
             description=data.description,
             tags=data.tags,
+            datasource_type=data.datasource_type,
             edge_table_name=data.edge_table_name,
             node_table_name=data.node_table_name,
             edge_structure=data.edge_structure.model_dump(),
@@ -339,7 +388,13 @@ async def update_graph_context(
             # only when structure is actually part of this request; skip the
             # warehouse round-trip entirely for e.g. the cluster_programs-only
             # writer in stores/cluster.ts.
-            if data.node_structure is not None or data.edge_structure is not None:
+            # Warehouse-only: a schemaless graph database has no tables whose
+            # columns could disagree with the structure.
+            if (
+                getattr(context, "datasource_type", None) or DEFAULT_DATASOURCE_TYPE
+            ) == "sql_warehouse" and (
+                data.node_structure is not None or data.edge_structure is not None
+            ):
                 await _validate_or_400(
                     warehouse,
                     context.node_table_name,
@@ -395,7 +450,13 @@ async def update_graph_context(
         if not can_write(context.owner_email, context.shares, user_email):
             raise HTTPException(status_code=403, detail="No write access")
 
-        if data.node_structure is not None or data.edge_structure is not None:
+        # Warehouse-only: a schemaless graph database has no tables whose
+        # columns could disagree with the structure.
+        if (
+            getattr(context, "datasource_type", None) or DEFAULT_DATASOURCE_TYPE
+        ) == "sql_warehouse" and (
+            data.node_structure is not None or data.edge_structure is not None
+        ):
             await _validate_or_400(
                 warehouse,
                 context.node_table_name,

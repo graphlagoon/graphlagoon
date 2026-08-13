@@ -32,9 +32,13 @@ class MemoryGraphContextShare:
 class MemoryGraphContext:
     id: UUID
     title: str
-    edge_table_name: str
-    node_table_name: str
+    # Optional because a native graph database (Neptune) context defines no
+    # tables; the positional slots stay put so existing construction sites are
+    # unaffected.
+    edge_table_name: Optional[str]
+    node_table_name: Optional[str]
     owner_email: str
+    datasource_type: str = "sql_warehouse"
     description: Optional[str] = None
     tags: List[str] = field(default_factory=list)
     edge_structure: Dict[str, str] = field(
@@ -132,9 +136,10 @@ class InMemoryStore:
     def create_graph_context(
         self,
         title: str,
-        edge_table_name: str,
-        node_table_name: str,
+        edge_table_name: Optional[str],
+        node_table_name: Optional[str],
         owner_email: str,
+        datasource_type: str = "sql_warehouse",
         description: Optional[str] = None,
         tags: Optional[List[str]] = None,
         edge_structure: Optional[Dict[str, str]] = None,
@@ -154,6 +159,7 @@ class InMemoryStore:
             edge_table_name=edge_table_name,
             node_table_name=node_table_name,
             owner_email=owner_email,
+            datasource_type=datasource_type,
             description=description,
             tags=tags or [],
             edge_structure=edge_structure

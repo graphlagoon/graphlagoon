@@ -134,9 +134,7 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
         EntityProperty(property_name=dst_col, data_type=str),
     ]
     if edge_id_col:
-        edge_properties.append(
-            EntityProperty(property_name=edge_id_col, data_type=str)
-        )
+        edge_properties.append(EntityProperty(property_name=edge_id_col, data_type=str))
 
     # Create EdgeSchema for each (source_type, edge_type, sink_type) combination
     # Without edge_combinations discovery, we create all possible combinations

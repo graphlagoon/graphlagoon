@@ -4,6 +4,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import CypherEditor from './CypherEditor.vue';
 import TranspileSettingsModal from './TranspileSettingsModal.vue';
+import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
 import { generateBfsExampleQuery } from '@/utils/exampleQuery';
 import { X, SlidersHorizontal } from 'lucide-vue-next';
 
@@ -57,14 +58,25 @@ watch(() => graphStore.ctePrefilter, (val) => {
   }
 }, { immediate: true });
 
-// Show edge structure columns as a hint
+const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
+
+// Show edge structure columns as a hint. Column names only mean something for a
+// table-backed datasource; a native graph database has labels, not columns.
 const edgeStructureHint = computed(() => {
+  if (!capabilities.value.supportsCatalog) return '';
   const ctx = graphStore.currentContext;
   if (!ctx?.edge_structure) return '';
   const es = ctx.edge_structure;
   const cols = [es.src_col, es.dst_col, es.relationship_type_col, es.edge_id_col].filter(Boolean);
   return `Required columns: ${cols.join(', ')}`;
 });
+
+// A backend that speaks Cypher natively always runs the query directly: there
+// is no SQL to review, so the transpile two-step (and the "In Messi We Trust"
+// toggle that governs it) simply does not exist there.
+const runsDirectly = computed(
+  () => !capabilities.value.supportsTranspile || inMessiWeTrust.value,
+);
 
 // Watch for context changes to update example query
 watch(() => graphStore.currentContext, (context) => {
@@ -86,11 +98,21 @@ watch(() => graphStore.graphQuery, (newQuery) => {
   if (newQuery.trim().toUpperCase().startsWith('MATCH')) {
     cypherQuery.value = newQuery;
     queryMode.value = 'cypher';
-  } else if (newQuery.trim().toUpperCase().startsWith('SELECT')) {
+  } else if (newQuery.trim().toUpperCase().startsWith('SELECT') && capabilities.value.supportsSql) {
     sqlQuery.value = newQuery;
     queryMode.value = 'sql';
   }
 });
+
+// Switching to a context without SQL must not leave the panel stuck in a mode
+// it can no longer run (e.g. after loading an exploration from another context).
+watch(
+  () => capabilities.value.supportsSql,
+  (supportsSql) => {
+    if (!supportsSql) queryMode.value = 'cypher';
+  },
+  { immediate: true },
+);
 
 // Sync transpiled SQL (immediate to catch value set while panel was closed)
 watch(() => graphStore.lastTranspiledSql, (sql) => {
@@ -113,9 +135,16 @@ function validateCypherQuery(query: string): { valid: boolean; error: string | n
     return { valid: false, error: 'Query must start with MATCH' };
   }
 
-  // Must have RETURN r (with optional DISTINCT)
-  if (!/\bRETURN\s+(?:DISTINCT\s+)?r\b/i.test(trimmed)) {
-    return { valid: false, error: 'Must have RETURN r (or RETURN DISTINCT r)' };
+  // "RETURN r" is a transpiler contract: the generated SQL projects edges as a
+  // NAMED_STRUCT column literally named `r`. A native graph database returns
+  // real nodes and relationships from any projection, so requiring a specific
+  // variable name there would reject perfectly good queries (RETURN p).
+  if (capabilities.value.supportsTranspile) {
+    if (!/\bRETURN\s+(?:DISTINCT\s+)?r\b/i.test(trimmed)) {
+      return { valid: false, error: 'Must have RETURN r (or RETURN DISTINCT r)' };
+    }
+  } else if (!/\bRETURN\b/i.test(trimmed)) {
+    return { valid: false, error: 'Query must have a RETURN clause' };
   }
 
   return { valid: true, error: null };
@@ -175,12 +204,12 @@ const showTranspileSettings = ref(false);
 const buttonLabel = computed(() => {
   if (isProcessing.value || graphStore.loading) {
     if (queryMode.value === 'cypher') {
-      return inMessiWeTrust.value ? 'Running...' : 'Transpiling...';
+      return runsDirectly.value ? 'Running...' : 'Transpiling...';
     }
     return 'Running...';
   }
   if (queryMode.value === 'cypher') {
-    return inMessiWeTrust.value ? 'Run Query' : 'Transpile to SQL';
+    return runsDirectly.value ? 'Run Query' : 'Transpile to SQL';
   }
   return 'Run Query';
 });
@@ -192,7 +221,7 @@ async function handleAction() {
 
   try {
     if (queryMode.value === 'cypher') {
-      if (inMessiWeTrust.value) {
+      if (runsDirectly.value) {
         // In Messi We Trust: submit the Cypher itself — the backend transpiles
         // at submit time and the store owns the CTE fallback, so a failed
         // procedural run (transpile OR execution) is retried in CTE mode.
@@ -252,6 +281,7 @@ function setMode(mode: QueryMode) {
       <h3>Graph Query</h3>
       <div class="header-actions">
         <button
+          v-if="capabilities.supportsTranspile"
           class="btn-icon-only settings-btn"
           :class="{ active: graphStore.vlpRenderingMode === 'procedural' }"
           title="Advanced transpile & optimization settings"
@@ -264,7 +294,7 @@ function setMode(mode: QueryMode) {
       </div>
     </div>
 
-    <div class="mode-toggle">
+    <div v-if="capabilities.supportsSql" class="mode-toggle">
       <button
         class="mode-btn"
         :class="{ active: queryMode === 'cypher' }"
@@ -315,7 +345,10 @@ function setMode(mode: QueryMode) {
       <p v-else class="help-text">{{ helpText }}</p>
 
       <!-- In Messi We Trust option - only visible in cypher mode -->
-      <label v-if="queryMode === 'cypher'" class="checkbox-label messi-option">
+      <label
+        v-if="queryMode === 'cypher' && capabilities.supportsTranspile"
+        class="checkbox-label messi-option"
+      >
         <input
           type="checkbox"
           v-model="inMessiWeTrust"
@@ -327,7 +360,10 @@ function setMode(mode: QueryMode) {
     </div>
 
     <!-- CTE Pre-filter Section - only in cypher mode -->
-    <div v-if="queryMode === 'cypher'" class="cte-section">
+    <div
+      v-if="queryMode === 'cypher' && capabilities.supportsCtePrefilter"
+      class="cte-section"
+    >
       <label class="checkbox-label cte-option">
         <input
           type="checkbox"

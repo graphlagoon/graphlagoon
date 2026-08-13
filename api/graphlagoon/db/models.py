@@ -28,8 +28,14 @@ class GraphContext(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text)
     tags = Column(ARRAY(Text), default=[])
-    edge_table_name = Column(String(255), nullable=False)
-    node_table_name = Column(String(255), nullable=False)
+    # Which backend this context is queried through ("sql_warehouse" | "neptune").
+    # Server default backfills every pre-existing row, so contexts created before
+    # datasources were pluggable keep behaving exactly as they did.
+    datasource_type = Column(String(50), nullable=False, server_default="sql_warehouse")
+    # Nullable since a native graph database (Neptune) defines no tables at all.
+    # Required for sql_warehouse contexts — enforced by GraphContextCreate.
+    edge_table_name = Column(String(255), nullable=True)
+    node_table_name = Column(String(255), nullable=True)
     # Structural column mapping configuration
     edge_structure = Column(
         JSON,

@@ -166,6 +166,47 @@ class Settings(BaseSettings):
         "queries finishing within the window return inline on the first call.",
     )
 
+    # ── Amazon Neptune (openCypher) ──────────────────────────────────────
+    #
+    # Connection is server-level, exactly like the warehouse above: one cluster
+    # per deployment, and a graph context only records that it is a "neptune"
+    # context. Setting neptune_endpoint is what enables the datasource.
+    neptune_endpoint: Optional[str] = Field(
+        default=None,
+        description="Neptune cluster endpoint host, without scheme "
+        "(e.g. my-cluster.cluster-abc123.us-east-1.neptune.amazonaws.com). "
+        "Unset disables the Neptune datasource entirely.",
+    )
+    neptune_port: int = Field(default=8182, description="Neptune endpoint port")
+    neptune_use_iam: bool = Field(
+        default=False,
+        description="Sign requests with AWS SigV4 (required for IAM-auth "
+        "enabled clusters). Needs the 'neptune-iam' extra for botocore.",
+    )
+    neptune_region: Optional[str] = Field(
+        default=None,
+        description="AWS region used for SigV4 signing. Required when "
+        "neptune_use_iam=True.",
+    )
+    neptune_use_tls: bool = Field(
+        default=True,
+        description="Use https for the Neptune endpoint. Set False only for "
+        "the local emulator (make dev-neptune), which speaks plain http.",
+    )
+    neptune_tls_verify: bool = Field(
+        default=True,
+        description="Verify the endpoint's TLS certificate",
+    )
+    neptune_http_timeout: float = Field(
+        default=120.0,
+        description="HTTP timeout (seconds) for Neptune openCypher calls",
+    )
+    neptune_discovery_sample_limit: int = Field(
+        default=10000,
+        description="Row cap when discovering labels/relationship types by "
+        "sampling, used when the cluster's summary API is unavailable.",
+    )
+
     def model_post_init(self, __context):
         if self.lakebase_enabled:
             object.__setattr__(self, "database_enabled", True)
@@ -173,6 +214,19 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "lakebase_instance_name is required when lakebase_enabled=True"
                 )
+        if self.neptune_use_iam and not self.neptune_region:
+            raise ValueError("neptune_region is required when neptune_use_iam=True")
+
+    @property
+    def neptune_enabled(self) -> bool:
+        """Whether this server can serve Neptune-backed contexts."""
+        return bool(self.neptune_endpoint)
+
+    @property
+    def neptune_base_url(self) -> str:
+        """Base URL for Neptune API calls."""
+        scheme = "https" if self.neptune_use_tls else "http"
+        return f"{scheme}://{self.neptune_endpoint}:{self.neptune_port}"
 
     @property
     def warehouse_base_url(self) -> str:

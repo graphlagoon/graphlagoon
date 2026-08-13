@@ -1,6 +1,10 @@
 import { reactive } from 'vue';
 import { api } from '@/services/api';
-import type { SchemaDriftResponse } from '@/types/graph';
+import {
+  capabilitiesFor,
+  resolveDatasourceType,
+} from '@/composables/useDatasourceCapabilities';
+import type { GraphContext, SchemaDriftResponse } from '@/types/graph';
 
 export interface SchemaDriftState {
   drift: SchemaDriftResponse | null;
@@ -20,6 +24,19 @@ function ensureEntry(contextId: string): SchemaDriftState {
     cache[contextId] = { drift: null, loading: false, error: null };
   }
   return cache[contextId];
+}
+
+/**
+ * Whether drift checking means anything for a context.
+ *
+ * Drift is the gap between a context's stored table snapshot and the live
+ * tables. A schemaless graph database has neither, so the check is not merely
+ * unavailable — the question does not apply, and the backend rejects it.
+ */
+export function supportsSchemaDrift(
+  context?: Pick<GraphContext, 'datasource_type'> | null,
+): boolean {
+  return capabilitiesFor(resolveDatasourceType(context)).supportsDrift;
 }
 
 export function useSchemaDrift() {

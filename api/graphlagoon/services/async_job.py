@@ -80,10 +80,16 @@ def start_job(
     record["task"] = asyncio.create_task(runner())
 
 
-async def cancel_job(job_id: str, warehouse=None) -> bool:
+async def cancel_job(job_id: str, canceler=None) -> bool:
     """Cancel a running job: flag it, cancel the asyncio task, and best-effort
-    cancel any underlying warehouse statements. Idempotent; returns whether a
-    job was found."""
+    cancel any statements the backend is still running. Idempotent; returns
+    whether a job was found.
+
+    ``canceler`` is anything exposing ``cancel_statement(id)`` — the warehouse
+    client or, since datasources became pluggable, whichever datasource submitted
+    the work. A backend that hands out no statement ids simply has nothing to
+    cancel here; the asyncio task cancellation above is what stops it.
+    """
     record = _jobs.get(job_id)
     if record is None:
         return False
@@ -96,11 +102,11 @@ async def cancel_job(job_id: str, warehouse=None) -> bool:
     if task is not None and not task.done():
         task.cancel()
 
-    if warehouse is not None:
+    if canceler is not None:
         for sid in list(record["statement_ids"]):
             try:
-                await warehouse.cancel_statement(sid)
+                await canceler.cancel_statement(sid)
             except Exception as e:  # noqa: BLE001 — best effort
-                logger.warning(f"warehouse cancel_statement({sid}) failed: {e}")
+                logger.warning(f"cancel_statement({sid}) failed: {e}")
 
     return True

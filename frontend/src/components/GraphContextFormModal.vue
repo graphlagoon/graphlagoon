@@ -3,7 +3,14 @@ import { ref, computed, watch } from 'vue';
 import { useContextsStore } from '@/stores/contexts';
 import { api } from '@/services/api';
 import { parseTableName } from '@/utils/contextForm';
-import type { GraphContext, ColumnInfo } from '@/types/graph';
+import {
+  DATASOURCE_DESCRIPTIONS,
+  DATASOURCE_LABELS,
+  capabilitiesFor,
+  resolveDatasourceType,
+  useAvailableDatasources,
+} from '@/composables/useDatasourceCapabilities';
+import type { DatasourceType, GraphContext, ColumnInfo } from '@/types/graph';
 
 /**
  * Create/edit modal for a graph context.
@@ -26,6 +33,11 @@ import type { GraphContext, ColumnInfo } from '@/types/graph';
  * are already hand-editable here. It touches no property column, so it does
  * not bypass anything — withholding it in edit mode just forced people to
  * retype values the button could fetch.
+ *
+ * The DATASOURCE picker comes first because it decides how much of the rest of
+ * the form exists. A native graph database (Neptune) has no tables and no
+ * column mapping, so choosing it collapses the form to name/description/tags
+ * plus optional types — everything table-shaped is warehouse-only.
  */
 const props = defineProps<{
   open: boolean;
@@ -48,6 +60,7 @@ function emptyForm() {
     title: '',
     description: '',
     tags: '',
+    datasource_type: 'sql_warehouse' as DatasourceType,
     edge_table_name: '',
     node_table_name: '',
     edge_id_col: 'edge_id',
@@ -67,8 +80,9 @@ function formFromContext(context: GraphContext) {
     title: context.title,
     description: context.description || '',
     tags: (context.tags || []).join(', '),
-    edge_table_name: context.edge_table_name,
-    node_table_name: context.node_table_name,
+    datasource_type: resolveDatasourceType(context),
+    edge_table_name: context.edge_table_name || '',
+    node_table_name: context.node_table_name || '',
     edge_id_col: context.edge_structure.edge_id_col,
     src_col: context.edge_structure.src_col,
     dst_col: context.edge_structure.dst_col,
@@ -85,6 +99,20 @@ function formFromContext(context: GraphContext) {
 }
 
 const form = ref(emptyForm());
+
+const availableDatasources = useAvailableDatasources();
+/** Only worth showing a picker when there is more than one backend to pick. */
+const showDatasourcePicker = computed(() => availableDatasources.value.length > 1);
+const capabilities = computed(() => capabilitiesFor(form.value.datasource_type));
+/** Table/column configuration only exists for table-backed datasources. */
+const showTableConfig = computed(() => capabilities.value.supportsCatalog);
+
+function selectDatasource(type: DatasourceType) {
+  // Immutable after creation: switching backends would orphan every
+  // exploration, template and cluster program saved against the context.
+  if (props.mode === 'edit') return;
+  form.value.datasource_type = type;
+}
 
 /** Parse error for the default_behaviors textarea, or null when it's valid/empty. */
 const defaultBehaviorsError = computed(() => {
@@ -178,11 +206,19 @@ async function fetchNodeTableSchema() {
   }
 }
 
+/** Both tables chosen (warehouse), or a datasource that needs none. */
+const canDiscoverTypes = computed(
+  () =>
+    !showTableConfig.value ||
+    Boolean(form.value.edge_table_name && form.value.node_table_name),
+);
+
 async function discoverTypes() {
   const edgeTable = form.value.edge_table_name;
   const nodeTable = form.value.node_table_name;
+  const needsTables = showTableConfig.value;
 
-  if (!edgeTable || !nodeTable) {
+  if (needsTables && (!edgeTable || !nodeTable)) {
     schemaDiscoveryError.value = 'Please select both edge and node tables first';
     return;
   }
@@ -191,22 +227,31 @@ async function discoverTypes() {
   schemaDiscoveryError.value = null;
 
   try {
-    const result = await api.discoverSchema({
-      edge_table: edgeTable,
-      node_table: nodeTable,
-      columns: {
-        node_id_col: form.value.node_id_col,
-        node_type_col: form.value.node_type_col,
-        edge_id_col: form.value.edge_id_col,
-        src_col: form.value.src_col,
-        dst_col: form.value.dst_col,
-        relationship_type_col: form.value.relationship_type_col,
-      },
-    });
+    // A native graph database reads its own label catalog; the tables and
+    // column mapping below mean nothing to it.
+    const result = await api.discoverSchema(
+      needsTables
+        ? {
+            datasource_type: form.value.datasource_type,
+            edge_table: edgeTable,
+            node_table: nodeTable,
+            columns: {
+              node_id_col: form.value.node_id_col,
+              node_type_col: form.value.node_type_col,
+              edge_id_col: form.value.edge_id_col,
+              src_col: form.value.src_col,
+              dst_col: form.value.dst_col,
+              relationship_type_col: form.value.relationship_type_col,
+            },
+          }
+        : { datasource_type: form.value.datasource_type },
+    );
     form.value.node_types = result.node_types.join(', ');
     form.value.relationship_types = result.relationship_types.join(', ');
     if (!result.node_types.length && !result.relationship_types.length) {
-      schemaDiscoveryError.value = 'No types found. Tables may be empty or columns may not match.';
+      schemaDiscoveryError.value = needsTables
+        ? 'No types found. Tables may be empty or columns may not match.'
+        : 'No labels found. The graph may be empty.';
     }
   } catch (e: any) {
     console.error('Failed to discover schema types:', e);
@@ -220,10 +265,15 @@ async function discoverTypes() {
 const availableEdgeTables = computed(() => [...contextsStore.datasets.edge_tables].sort());
 const availableNodeTables = computed(() => [...contextsStore.datasets.node_tables].sort());
 
-// Only wired in create mode (v-if in the template) — edit mode's table names
-// never change, so there's nothing for these to react to there.
-watch(() => form.value.edge_table_name, fetchEdgeTableSchema);
-watch(() => form.value.node_table_name, fetchNodeTableSchema);
+// Only meaningful in create mode for a table-backed datasource: edit mode's
+// table names never change, and a native graph database has no table schema
+// to fetch (the request would 400 on a null table name).
+watch(() => form.value.edge_table_name, () => {
+  if (showTableConfig.value) fetchEdgeTableSchema();
+});
+watch(() => form.value.node_table_name, () => {
+  if (showTableConfig.value) fetchNodeTableSchema();
+});
 
 // --- Open/close lifecycle ----------------------------------------------------
 
@@ -283,7 +333,19 @@ async function submit() {
 
     let saved: GraphContext;
 
-    if (props.mode === 'create') {
+    if (props.mode === 'create' && !showTableConfig.value) {
+      // Table-less datasource: the backend discovers structure itself, so the
+      // whole table/column half of this form is simply not sent.
+      saved = await contextsStore.createContext({
+        title: form.value.title,
+        description: form.value.description || undefined,
+        tags,
+        datasource_type: form.value.datasource_type,
+        node_types: nodeTypes.length > 0 ? nodeTypes : undefined,
+        relationship_types: relationshipTypes.length > 0 ? relationshipTypes : undefined,
+        default_behaviors: defaultBehaviors,
+      });
+    } else if (props.mode === 'create') {
       // Property columns = every live column minus the structural ones —
       // create mode always has live schema loaded (the selects require it).
       const edgeStructuralCols = new Set(Object.values(edge_structure).filter(Boolean));
@@ -299,6 +361,7 @@ async function submit() {
         title: form.value.title,
         description: form.value.description || undefined,
         tags,
+        datasource_type: form.value.datasource_type,
         edge_table_name: form.value.edge_table_name,
         node_table_name: form.value.node_table_name,
         edge_structure,
@@ -317,8 +380,9 @@ async function submit() {
         title: form.value.title,
         description: form.value.description || undefined,
         tags,
-        edge_structure,
-        node_structure,
+        // Structure is meaningless without tables, so a table-less context
+        // sends only what it actually has.
+        ...(showTableConfig.value ? { edge_structure, node_structure } : {}),
         node_types: nodeTypes,
         relationship_types: relationshipTypes,
         default_behaviors: defaultBehaviors ?? {},
@@ -346,6 +410,29 @@ async function submit() {
       </div>
 
       <form @submit.prevent="submit">
+        <!-- Picked first: the datasource decides how much of this form exists. -->
+        <div v-if="showDatasourcePicker" class="form-group">
+          <label>Datasource</label>
+          <div class="datasource-picker" data-testid="datasource-picker">
+            <button
+              v-for="type in availableDatasources"
+              :key="type"
+              type="button"
+              class="datasource-option"
+              :class="{ selected: form.datasource_type === type, disabled: mode === 'edit' }"
+              :disabled="mode === 'edit'"
+              :data-testid="`datasource-option-${type}`"
+              @click="selectDatasource(type)"
+            >
+              <span class="datasource-name">{{ DATASOURCE_LABELS[type] }}</span>
+              <span class="datasource-desc">{{ DATASOURCE_DESCRIPTIONS[type] }}</span>
+            </button>
+          </div>
+          <span v-if="mode === 'edit'" class="hint">
+            The datasource cannot be changed after creation.
+          </span>
+        </div>
+
         <div class="form-group">
           <label>Title *</label>
           <input
@@ -367,6 +454,9 @@ async function submit() {
           ></textarea>
         </div>
 
+        <!-- Everything below is table-backed configuration; a native graph
+             database has no tables and discovers its own structure. -->
+        <template v-if="showTableConfig">
         <!-- Table selection: live selects in create mode, immutable text in edit mode -->
         <template v-if="mode === 'create'">
           <div class="form-group">
@@ -579,7 +669,10 @@ async function submit() {
           </div>
         </div>
 
-        <!-- Schema Types -->
+        </template>
+
+        <!-- Schema Types — every datasource has types; only how they are
+             discovered differs. -->
         <div class="column-config-section">
           <div class="section-header-row">
             <h4>Schema Types</h4>
@@ -591,7 +684,7 @@ async function submit() {
               type="button"
               class="btn btn-sm btn-outline"
               data-testid="discover-types-btn"
-              :disabled="loadingSchemaDiscovery || !form.edge_table_name || !form.node_table_name"
+              :disabled="loadingSchemaDiscovery || !canDiscoverTypes"
               @click="discoverTypes"
             >
               <span v-if="loadingSchemaDiscovery">Discovering...</span>
@@ -678,6 +771,50 @@ async function submit() {
 </template>
 
 <style scoped>
+.datasource-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.datasource-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+}
+
+.datasource-option:hover:not(.disabled) {
+  border-color: var(--accent-color, #0969da);
+}
+
+.datasource-option.selected {
+  border-color: var(--accent-color, #0969da);
+  box-shadow: inset 0 0 0 1px var(--accent-color, #0969da);
+}
+
+.datasource-option.disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.datasource-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.datasource-desc {
+  font-size: 0.75rem;
+  opacity: 0.75;
+  line-height: 1.35;
+}
+
 .hint {
   font-size: 12px;
   color: var(--text-muted);

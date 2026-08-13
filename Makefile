@@ -1,6 +1,7 @@
 .PHONY: help \
         dev dev-db dev-gsql2rsql dev-gsql2rsql-db \
         dev-databricks dev-databricks-db dev-databricks-lakebase \
+        dev-neptune dev-neptune-db \
         dev-stop dev-logs dev-logs-follow \
         lint lint-frontend lint-api format \
         test test-unit test-coverage test-e2e test-e2e-headed test-e2e-ui test-e2e-report \
@@ -10,6 +11,7 @@
         install setup-gsql2rsql \
         run-api run-api-no-debug run-api-db run-warehouse run-warehouse-no-debug run-frontend \
         db-up db-down db-logs migrate migrate-create \
+        neptune-up neptune-down neptune-seed \
         perf-report \
         clean
 
@@ -149,6 +151,50 @@ dev-gsql2rsql-db: _ensure-gsql2rsql db-up
 	@echo "$(GREEN)Ready!$(RESET)  PostgreSQL :5432 | warehouse :8001 | API :8000 (gsql2rsql + db) | frontend :3000"
 	@echo "$(DIM)make dev-logs · make dev-stop$(RESET)"
 
+# Amazon Neptune (openCypher) against the local emulator — no AWS needed.
+# Neo4j speaks openCypher; neptune-emulator/ fronts it with Neptune's HTTP
+# contract, so the real NeptuneClient/NeptuneDatasource code path runs unchanged.
+dev-neptune: neptune-seed
+	@cd api && uv sync --extra dev
+	@mkdir -p $(CURDIR)/.logs $(CURDIR)/.pids
+	@echo "$(CYAN)Starting Neptune emulator on :8183...$(RESET)"
+	@cd neptune-emulator && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8183 > $(CURDIR)/.logs/neptune-emulator.log 2>&1 & echo $$! > $(CURDIR)/.pids/neptune-emulator.pid
+	@sleep 2
+	@echo "$(CYAN)Starting warehouse on :8001...$(RESET)"
+	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
+	@sleep 2
+	@echo "$(CYAN)Starting API on :8000 (Neptune + warehouse)...$(RESET)"
+	@cd api && nohup env $(_NEPTUNE_ENV) uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
+	@sleep 2
+	@echo "$(CYAN)Starting frontend on :3000...$(RESET)"
+	@cd frontend && nohup npm run dev > $(CURDIR)/.logs/frontend.log 2>&1 & echo $$! > $(CURDIR)/.pids/frontend.pid
+	@sleep 3
+	@echo ""
+	@echo "$(GREEN)Ready!$(RESET)  Neo4j :7687 | Neptune emulator :8183 | warehouse :8001 | API :8000 | frontend :3000"
+	@echo "$(DIM)Create a context with datasource 'Amazon Neptune' to query the seeded graph$(RESET)"
+	@echo "$(DIM)make dev-logs · make dev-stop$(RESET)"
+
+# Same, plus PostgreSQL so contexts/explorations persist
+dev-neptune-db: neptune-seed db-up
+	@cd api && uv sync --extra dev --extra postgres
+	@cd api && uv run alembic -c graphlagoon/alembic.ini upgrade head
+	@mkdir -p $(CURDIR)/.logs $(CURDIR)/.pids
+	@echo "$(CYAN)Starting Neptune emulator on :8183...$(RESET)"
+	@cd neptune-emulator && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8183 > $(CURDIR)/.logs/neptune-emulator.log 2>&1 & echo $$! > $(CURDIR)/.pids/neptune-emulator.pid
+	@sleep 2
+	@echo "$(CYAN)Starting warehouse on :8001...$(RESET)"
+	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
+	@sleep 2
+	@echo "$(CYAN)Starting API on :8000 (Neptune + warehouse + database)...$(RESET)"
+	@cd api && nohup env GRAPH_LAGOON_DATABASE_ENABLED=true $(_NEPTUNE_ENV) uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
+	@sleep 2
+	@echo "$(CYAN)Starting frontend on :3000...$(RESET)"
+	@cd frontend && nohup env VITE_DATABASE_ENABLED=true npm run dev > $(CURDIR)/.logs/frontend.log 2>&1 & echo $$! > $(CURDIR)/.pids/frontend.pid
+	@sleep 3
+	@echo ""
+	@echo "$(GREEN)Ready!$(RESET)  PostgreSQL :5432 | Neo4j :7687 | Neptune emulator :8183 | API :8000 (db) | frontend :3000"
+	@echo "$(DIM)make dev-logs · make dev-stop$(RESET)"
+
 # Databricks SQL — no local warehouse, no persistence
 dev-databricks: _ensure-databricks-env
 	@mkdir -p $(CURDIR)/.logs $(CURDIR)/.pids
@@ -196,6 +242,7 @@ dev-stop:
 	@if [ -f .pids/frontend.pid ]; then kill $$(cat .pids/frontend.pid) 2>/dev/null || true; rm -f .pids/frontend.pid; fi
 	@if [ -f .pids/api.pid ]; then kill $$(cat .pids/api.pid) 2>/dev/null || true; rm -f .pids/api.pid; fi
 	@if [ -f .pids/warehouse.pid ]; then kill $$(cat .pids/warehouse.pid) 2>/dev/null || true; rm -f .pids/warehouse.pid; fi
+	@if [ -f .pids/neptune-emulator.pid ]; then kill $$(cat .pids/neptune-emulator.pid) 2>/dev/null || true; rm -f .pids/neptune-emulator.pid; fi
 	@pkill -f "uvicorn src.main:app" 2>/dev/null || true
 	@pkill -f "uvicorn graphlagoon.main:app" 2>/dev/null || true
 	@pkill -f "node.*vite" 2>/dev/null || true
@@ -205,6 +252,11 @@ dev-logs:
 	@echo "$(CYAN)=== warehouse ===$(RESET)"
 	@tail -20 .logs/warehouse.log 2>/dev/null || echo "No logs"
 	@echo ""
+	@if [ -f .logs/neptune-emulator.log ]; then \
+		echo "$(CYAN)=== neptune emulator ===$(RESET)"; \
+		tail -20 .logs/neptune-emulator.log; \
+		echo ""; \
+	fi
 	@echo "$(CYAN)=== API ===$(RESET)"
 	@tail -20 .logs/api.log 2>/dev/null || echo "No logs"
 	@echo ""
@@ -233,6 +285,11 @@ _ensure-databricks-env:
 		echo "  Then edit with your Databricks credentials"; \
 		exit 1; \
 	fi
+
+# Point the API at the local emulator instead of a real Neptune cluster.
+_NEPTUNE_ENV = GRAPH_LAGOON_NEPTUNE_ENDPOINT=localhost \
+	GRAPH_LAGOON_NEPTUNE_PORT=8183 \
+	GRAPH_LAGOON_NEPTUNE_USE_TLS=false
 
 # Resolve Databricks user email from SDK (best-effort)
 _DATABRICKS_EMAIL = $(shell cd api && uv run python -c \
@@ -452,8 +509,28 @@ run-frontend:
 # Database
 db-up:
 	@echo "$(CYAN)Starting PostgreSQL...$(RESET)"
-	docker-compose up -d
+	docker-compose up -d postgres
 	@echo "$(GREEN)PostgreSQL running on :5432$(RESET)"
+
+# Local stand-in for Neptune: Neo4j + the openCypher emulator that fronts it.
+neptune-up:
+	@echo "$(CYAN)Starting Neo4j (local Neptune stand-in)...$(RESET)"
+	docker-compose up -d neo4j
+	@echo "$(DIM)Waiting for Neo4j to accept connections...$(RESET)"
+	@for i in $$(seq 1 30); do \
+		if docker-compose exec -T neo4j cypher-shell -u neo4j -p graphlagoon 'RETURN 1' >/dev/null 2>&1; then \
+			break; \
+		fi; \
+		sleep 2; \
+	done
+	@echo "$(GREEN)Neo4j running on :7687 (browser :7474, neo4j/graphlagoon)$(RESET)"
+
+neptune-down:
+	docker-compose stop neo4j
+
+neptune-seed: neptune-up
+	@cd neptune-emulator && uv sync --extra dev
+	@cd neptune-emulator && uv run python -m src.seed
 
 db-down:
 	docker-compose down

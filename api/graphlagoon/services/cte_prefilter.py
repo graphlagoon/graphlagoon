@@ -108,9 +108,7 @@ def _cte_text_to_temp_views(cte_resolved: str) -> str:
         # cte.this is the inner query (SELECT ...); render it without the alias
         # wrapper so it becomes the view body.
         body = cte.this.sql(dialect="spark")
-        view_stmts.append(
-            f"CREATE OR REPLACE TEMPORARY VIEW {name} AS {body};"
-        )
+        view_stmts.append(f"CREATE OR REPLACE TEMPORARY VIEW {name} AS {body};")
     return "\n".join(view_stmts)
 
 

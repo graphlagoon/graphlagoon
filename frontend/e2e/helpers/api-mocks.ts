@@ -300,6 +300,83 @@ export async function seedContexts(page: Page, contexts: any[]) {
 }
 
 /**
+ * Advertise extra datasource types to the app.
+ *
+ * The config is injected as a window global before any script runs (see
+ * test-fixtures), so a route mock alone would never be read — this merges into
+ * that global as well. Call BEFORE `page.goto`.
+ */
+export async function enableDatasources(
+  page: Page,
+  datasources: Record<string, boolean>,
+) {
+  await page.addInitScript((ds) => {
+    const w = window as any;
+    w.__GRAPH_LAGOON_CONFIG__ = { ...(w.__GRAPH_LAGOON_CONFIG__ || {}), datasources: ds };
+  }, datasources);
+
+  await page.route('**/graphlagoon/api/config', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ dev_mode: true, database_enabled: false, datasources }),
+    });
+  });
+}
+
+/**
+ * Mock the query endpoints for a native-graph context: openCypher runs as-is,
+ * so `transpiled_sql` comes back null and the console returns rows inline with
+ * no statement id.
+ */
+export async function mockNeptuneQueries(page: Page, graph: any) {
+  await page.route('**/graphlagoon/api/graph-contexts/*/cypher', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...graph, transpiled_sql: null }),
+    });
+  });
+
+  await page.route('**/graphlagoon/api/graph-contexts/*/cypher/async', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'running', job_id: 'job-neptune-1' }),
+    });
+  });
+
+  await page.route('**/graphlagoon/api/graph-contexts/*/query/job/*', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'succeeded',
+        job_id: 'job-neptune-1',
+        result: graph,
+        transpiled_sql: null,
+      }),
+    });
+  });
+
+  await page.route('**/graphlagoon/api/graph-contexts/*/query/table', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'succeeded',
+        statement_id: null,
+        columns: ['name'],
+        rows: [['Alice'], ['Bob']],
+        row_count: 2,
+        truncated: false,
+        transpiled_sql: null,
+      }),
+    });
+  });
+}
+
+/**
  * Mock GET .../graph-contexts/{id}/schema-drift. Call AFTER seedContexts —
  * seedContexts' per-context route pattern has no trailing wildcard, so it
  * never matches this path and the two coexist without needing precedence.

@@ -75,13 +75,25 @@ export interface PropertyColumn {
 export type EdgeColumnConfig = EdgeStructure;
 export type NodeColumnConfig = NodeStructure;
 
+/**
+ * Which backend a context is queried through.
+ *
+ * `sql_warehouse` is a graph stored as an edge table + a node table, queried by
+ * transpiling Cypher to Spark SQL. `neptune` is Amazon Neptune's openCypher
+ * endpoint — a native graph database, so it defines no tables at all.
+ */
+export type DatasourceType = "sql_warehouse" | "neptune";
+
 export interface GraphContext {
   id: string;
   title: string;
   description?: string;
   tags: string[];
-  edge_table_name: string;
-  node_table_name: string;
+  /** Absent on contexts created before datasources were pluggable — treat as `sql_warehouse`. */
+  datasource_type?: DatasourceType;
+  /** Null for native graph databases, which define no tables. */
+  edge_table_name: string | null;
+  node_table_name: string | null;
   edge_structure: EdgeStructure;
   node_structure: NodeStructure;
   edge_properties: PropertyColumn[];
@@ -481,8 +493,11 @@ export interface CreateGraphContextRequest {
   title: string;
   description?: string;
   tags?: string[];
-  edge_table_name: string;
-  node_table_name: string;
+  /** Omitted means `sql_warehouse`, keeping older callers valid. */
+  datasource_type?: DatasourceType;
+  /** Required for `sql_warehouse`; omitted for native graph databases. */
+  edge_table_name?: string;
+  node_table_name?: string;
   edge_structure?: EdgeStructure;
   node_structure?: NodeStructure;
   edge_properties?: PropertyColumn[];
@@ -697,8 +712,11 @@ export interface TablePreviewResponse {
 }
 
 export interface SchemaDiscoveryRequest {
-  edge_table: string;
-  node_table: string;
+  /** Omitted means `sql_warehouse`. */
+  datasource_type?: DatasourceType;
+  /** Required for `sql_warehouse`; a native graph database reads its own label catalog. */
+  edge_table?: string;
+  node_table?: string;
   columns?: ColumnConfig;
 }
 

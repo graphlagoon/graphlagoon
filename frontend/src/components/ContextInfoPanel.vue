@@ -2,6 +2,11 @@
 import { computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useSchemaDrift } from '@/composables/useSchemaDrift';
+import {
+  DATASOURCE_LABELS,
+  resolveDatasourceType,
+  useDatasourceCapabilities,
+} from '@/composables/useDatasourceCapabilities';
 import SchemaDriftBanner from '@/components/SchemaDriftBanner.vue';
 import { X, SearchCheck } from 'lucide-vue-next';
 
@@ -26,6 +31,13 @@ const checking = computed(() =>
 function checkSchema() {
   if (graphStore.currentContext) void checkSchemaDrift(graphStore.currentContext.id);
 }
+
+const capabilities = useDatasourceCapabilities(
+  computed(() => graphStore.currentContext),
+);
+const datasourceLabel = computed(
+  () => DATASOURCE_LABELS[resolveDatasourceType(graphStore.currentContext)],
+);
 </script>
 
 <template>
@@ -37,14 +49,14 @@ function checkSchema() {
 
     <div class="panel-content" v-if="graphStore.currentContext">
       <SchemaDriftBanner
-        v-if="drift"
+        v-if="capabilities.supportsDrift && drift"
         :status="drift.status"
         :counts="drift.counts"
         class="drift-banner-slot"
         @review="$emit('review-schema')"
       />
       <button
-        v-else
+        v-else-if="capabilities.supportsDrift"
         type="button"
         class="check-schema-btn"
         data-testid="context-info-check-schema"
@@ -68,9 +80,13 @@ function checkSchema() {
           <span class="label">Tags</span>
           <span class="value">{{ graphStore.currentContext.tags.join(', ') }}</span>
         </div>
+        <div class="info-row">
+          <span class="label">Datasource</span>
+          <span class="value">{{ datasourceLabel }}</span>
+        </div>
       </div>
 
-      <div class="info-section">
+      <div class="info-section" v-if="capabilities.supportsCatalog">
         <h4>Tables</h4>
         <div class="info-row">
           <span class="label">Edge Table</span>
@@ -82,7 +98,10 @@ function checkSchema() {
         </div>
       </div>
 
-      <div class="info-section" v-if="graphStore.currentContext.node_structure">
+      <div
+        class="info-section"
+        v-if="capabilities.supportsCatalog && graphStore.currentContext.node_structure"
+      >
         <h4>Node Structure</h4>
         <div class="info-row">
           <span class="label">Node ID</span>
@@ -94,7 +113,10 @@ function checkSchema() {
         </div>
       </div>
 
-      <div class="info-section" v-if="graphStore.currentContext.edge_structure">
+      <div
+        class="info-section"
+        v-if="capabilities.supportsCatalog && graphStore.currentContext.edge_structure"
+      >
         <h4>Edge Structure</h4>
         <div class="info-row">
           <span class="label">Edge ID</span>
