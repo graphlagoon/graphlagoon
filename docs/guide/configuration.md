@@ -37,9 +37,22 @@ GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=company.com
 ## Datasources
 
 A graph context is queried through one of two backends, chosen when the context
-is created.
+is created and fixed from then on. The choice is a trade-off between
+completeness and latency:
 
-### SQL Warehouse (default)
+| | Databricks (SQL Warehouse) | Amazon Neptune |
+|---|---|---|
+| **Workload** | Analytical, exploratory | Operational (OLTP) |
+| **Data** | The complete graph — every node, edge and property | Whatever the serving graph carries, which may omit analytical properties |
+| **Latency** | Higher; optimized for breadth | Low; optimized for traversal speed |
+| **Use it to** | Investigate, cross-reference, follow a question wherever it leads | Answer known questions fast over live data |
+
+The practical consequence: a Neptune context is the right tool when you know
+what you are looking for and need it quickly, and the wrong one for drawing
+analytical conclusions — confirm the properties you need are actually present
+before you trust an answer.
+
+### Databricks — SQL Warehouse (default)
 
 The graph lives in two tables — an edge table and a node table — and Cypher is
 transpiled to Spark SQL. This is what Databricks mode and the local PySpark
@@ -91,6 +104,14 @@ There is no official local Neptune. `make dev-neptune` starts a Neo4j container
 (which speaks openCypher natively) behind a small emulator that presents
 Neptune's HTTP contract, seeds a sample graph, and points the API at it — so the
 real Neptune code path runs without an AWS account.
+
+The seed is deterministic (106 nodes, 349 relationships, 4 labels, 7
+relationship types) and shaped so the query controls are observable rather than
+merely exercised: a 9-level `REPORTS_TO` chain where expanding outward reaches
+exactly `depth` nodes, a 24-employee hub that overflows any sane edge limit, a
+`KNOWS` ring with chords for dense undirected expansion, a layered `DEPENDS_ON`
+DAG ending in sinks with no outgoing edges, and one component deliberately
+disconnected from everything else.
 
 ## Access Control
 

@@ -8,6 +8,7 @@ import { api } from '@/services/api';
 import { fuzzyMatch, parseTag } from '@/utils/contextForm';
 import { useSchemaDrift } from '@/composables/useSchemaDrift';
 import {
+  DATASOURCE_COPY,
   DATASOURCE_LABELS,
   capabilitiesFor,
   resolveDatasourceType,
@@ -288,7 +289,9 @@ async function quickShare(email: string) {
               <code>{{ context.edge_table_name }}</code> /
               <code>{{ context.node_table_name }}</code>
             </template>
-            <span v-else class="subtitle-note">openCypher · native graph</span>
+            <span v-else class="subtitle-note">
+              {{ DATASOURCE_COPY[resolveDatasourceType(context)].tagline }}
+            </span>
           </div>
           <div class="list-item-meta">
             Created by {{ context.owner_email }}

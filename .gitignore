@@ -1,3 +1,7 @@
+.part*
+part-*
+_SUCCESS*
+._SUCCESS*
 scripts/ieee_cis_fraud/data/
 frontend/playwright-report-integration/trace/
 .vitepres

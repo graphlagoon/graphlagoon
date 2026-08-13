@@ -60,17 +60,58 @@ const CAPABILITIES: Record<DatasourceType, DatasourceCapabilities> = {
 
 export const DEFAULT_DATASOURCE_TYPE: DatasourceType = "sql_warehouse";
 
-/** Human-readable name for a datasource, for badges and pickers. */
-export const DATASOURCE_LABELS: Record<DatasourceType, string> = {
-  sql_warehouse: "SQL Warehouse",
-  neptune: "Amazon Neptune",
+/**
+ * Copy for the datasource picker.
+ *
+ * Deliberately about *when to choose which*, not about how each one is built.
+ * Whether a graph lives in two tables or in a native store is an implementation
+ * detail the person creating a context cannot act on; what they can act on is
+ * the trade-off they are accepting — completeness against latency — and what it
+ * costs them if they pick wrong.
+ */
+export interface DatasourceCopy {
+  /**
+   * The concrete product, and the headline of the card: people recognize
+   * "Databricks" and "Amazon Neptune" instantly, where the generic category
+   * takes a beat to place. Also used on its own in badges and info panels.
+   */
+  label: string;
+  /** The generic category, secondary — what kind of thing the product is. */
+  kind: string;
+  /** The workload this datasource is for, in three words. */
+  tagline: string;
+  /** What you get out of it. */
+  description: string;
+  /** What you give up. Rendered with emphasis; never omit it. */
+  caveat: string;
+}
+
+export const DATASOURCE_COPY: Record<DatasourceType, DatasourceCopy> = {
+  sql_warehouse: {
+    label: "Databricks",
+    kind: "SQL Warehouse",
+    tagline: "Analytical · exploratory",
+    description:
+      "The complete graph — every node, edge and property is there to be " +
+      "queried, cross-referenced and explored.",
+    caveat: "Expect higher latency: queries are optimized for breadth, not speed.",
+  },
+  neptune: {
+    label: "Amazon Neptune",
+    kind: "openCypher",
+    tagline: "Operational (OLTP) · low latency",
+    description:
+      "A graph tuned for serving live traffic, so traversals come back fast.",
+    caveat:
+      "It may not carry the full analytical picture — confirm the data you " +
+      "need is present before drawing conclusions from it.",
+  },
 };
 
-export const DATASOURCE_DESCRIPTIONS: Record<DatasourceType, string> = {
-  sql_warehouse:
-    "A graph stored as an edge table and a node table. Cypher is transpiled to SQL.",
-  neptune:
-    "A native graph database queried with openCypher. No tables to configure.",
+/** Human-readable name for a datasource, for badges and pickers. */
+export const DATASOURCE_LABELS: Record<DatasourceType, string> = {
+  sql_warehouse: DATASOURCE_COPY.sql_warehouse.label,
+  neptune: DATASOURCE_COPY.neptune.label,
 };
 
 /**
