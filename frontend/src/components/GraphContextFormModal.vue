@@ -4,10 +4,10 @@ import { useContextsStore } from '@/stores/contexts';
 import { api } from '@/services/api';
 import { parseTableName } from '@/utils/contextForm';
 import {
-  DATASOURCE_COPY,
-  capabilitiesFor,
+  resolveDatasourceDescriptor,
   resolveDatasourceType,
-  useAvailableDatasources,
+  useDatasourceDescriptors,
+  type DatasourceDescriptor,
 } from '@/composables/useDatasourceCapabilities';
 import type { DatasourceType, GraphContext, ColumnInfo } from '@/types/graph';
 
@@ -60,6 +60,7 @@ function emptyForm() {
     description: '',
     tags: '',
     datasource_type: 'sql_warehouse' as DatasourceType,
+    datasource_name: '',
     edge_table_name: '',
     node_table_name: '',
     edge_id_col: 'edge_id',
@@ -80,6 +81,7 @@ function formFromContext(context: GraphContext) {
     description: context.description || '',
     tags: (context.tags || []).join(', '),
     datasource_type: resolveDatasourceType(context),
+    datasource_name: context.datasource_name || '',
     edge_table_name: context.edge_table_name || '',
     node_table_name: context.node_table_name || '',
     edge_id_col: context.edge_structure.edge_id_col,
@@ -99,18 +101,26 @@ function formFromContext(context: GraphContext) {
 
 const form = ref(emptyForm());
 
-const availableDatasources = useAvailableDatasources();
+const datasourceOptions = useDatasourceDescriptors();
 /** Only worth showing a picker when there is more than one backend to pick. */
-const showDatasourcePicker = computed(() => availableDatasources.value.length > 1);
-const capabilities = computed(() => capabilitiesFor(form.value.datasource_type));
+const showDatasourcePicker = computed(() => datasourceOptions.value.length > 1);
+/** The full descriptor of what the form currently points at. */
+const selectedDatasource = computed(() =>
+  resolveDatasourceDescriptor({
+    datasource_type: form.value.datasource_type,
+    datasource_name: form.value.datasource_name || null,
+  }),
+);
+const capabilities = computed(() => selectedDatasource.value.capabilities);
 /** Table/column configuration only exists for table-backed datasources. */
 const showTableConfig = computed(() => capabilities.value.supportsCatalog);
 
-function selectDatasource(type: DatasourceType) {
+function selectDatasource(option: DatasourceDescriptor) {
   // Immutable after creation: switching backends would orphan every
   // exploration, template and cluster program saved against the context.
   if (props.mode === 'edit') return;
-  form.value.datasource_type = type;
+  form.value.datasource_type = option.type;
+  form.value.datasource_name = option.name || '';
 }
 
 /** Parse error for the default_behaviors textarea, or null when it's valid/empty. */
@@ -212,6 +222,17 @@ const canDiscoverTypes = computed(
     Boolean(form.value.edge_table_name && form.value.node_table_name),
 );
 
+/**
+ * Whether discovery exists at all for the selection. A REST connection only
+ * has it when its spec declared a handler; offering the button otherwise
+ * would promise a 400.
+ */
+const showDiscoverButton = computed(
+  () =>
+    selectedDatasource.value.type !== 'rest' ||
+    selectedDatasource.value.restOps?.schemaDiscovery === true,
+);
+
 async function discoverTypes() {
   const edgeTable = form.value.edge_table_name;
   const nodeTable = form.value.node_table_name;
@@ -243,7 +264,12 @@ async function discoverTypes() {
               relationship_type_col: form.value.relationship_type_col,
             },
           }
-        : { datasource_type: form.value.datasource_type },
+        : {
+            datasource_type: form.value.datasource_type,
+            ...(form.value.datasource_name
+              ? { datasource_name: form.value.datasource_name }
+              : {}),
+          },
     );
     form.value.node_types = result.node_types.join(', ');
     form.value.relationship_types = result.relationship_types.join(', ');
@@ -340,6 +366,9 @@ async function submit() {
         description: form.value.description || undefined,
         tags,
         datasource_type: form.value.datasource_type,
+        ...(form.value.datasource_name
+          ? { datasource_name: form.value.datasource_name }
+          : {}),
         node_types: nodeTypes.length > 0 ? nodeTypes : undefined,
         relationship_types: relationshipTypes.length > 0 ? relationshipTypes : undefined,
         default_behaviors: defaultBehaviors,
@@ -414,22 +443,25 @@ async function submit() {
           <label>Datasource</label>
           <div class="datasource-picker" data-testid="datasource-picker">
             <button
-              v-for="type in availableDatasources"
-              :key="type"
+              v-for="option in datasourceOptions"
+              :key="option.id"
               type="button"
               class="datasource-option"
-              :class="{ selected: form.datasource_type === type, disabled: mode === 'edit' }"
+              :class="{
+                selected: selectedDatasource.id === option.id,
+                disabled: mode === 'edit',
+              }"
               :disabled="mode === 'edit'"
-              :data-testid="`datasource-option-${type}`"
-              @click="selectDatasource(type)"
+              :data-testid="`datasource-option-${option.id}`"
+              @click="selectDatasource(option)"
             >
               <span class="datasource-head">
-                <span class="datasource-name">{{ DATASOURCE_COPY[type].label }}</span>
-                <span class="datasource-kind">{{ DATASOURCE_COPY[type].kind }}</span>
+                <span class="datasource-name">{{ option.copy.label }}</span>
+                <span class="datasource-kind">{{ option.copy.kind }}</span>
               </span>
-              <span class="datasource-tagline">{{ DATASOURCE_COPY[type].tagline }}</span>
-              <span class="datasource-desc">{{ DATASOURCE_COPY[type].description }}</span>
-              <span class="datasource-caveat">{{ DATASOURCE_COPY[type].caveat }}</span>
+              <span class="datasource-tagline">{{ option.copy.tagline }}</span>
+              <span class="datasource-desc">{{ option.copy.description }}</span>
+              <span class="datasource-caveat">{{ option.copy.caveat }}</span>
             </button>
           </div>
           <span v-if="mode === 'edit'" class="hint">
@@ -685,6 +717,7 @@ async function submit() {
                  touches node_properties/edge_properties, so it does not bypass the
                  schema-diff review the way a property recomputation here would. -->
             <button
+              v-if="showDiscoverButton"
               type="button"
               class="btn btn-sm btn-outline"
               data-testid="discover-types-btn"

@@ -34,6 +34,7 @@ from graphlagoon.services.warehouse import (
 )
 from graphlagoon.services.snapshot import configure_snapshot_service
 from graphlagoon.services.datasource import (
+    available_datasource_connections,
     available_datasource_types,
     close_datasources,
     configure_datasources,
@@ -248,6 +249,7 @@ def create_frontend_router(
             "database_enabled": is_database_available(),
             "databricks_mode": settings.databricks_mode,
             "datasources": available_datasource_types(),
+            "datasource_connections": available_datasource_connections(),
             "router_base": router_base,
             "allowed_share_domains": settings.allowed_share_domain_list,
             "default_behaviors": settings.default_behaviors_dict,
@@ -326,6 +328,7 @@ def create_mountable_app(
     databricks_schema: Optional[str] = None,
     catalog_schemas: Optional[list[tuple[str, str]]] = None,
     similarity_endpoints: Optional[list] = None,
+    rest_connections: Optional[list] = None,
 ) -> FastAPI:
     """Create a Graph Lagoon Studio app that can be mounted under a prefix.
 
@@ -433,6 +436,13 @@ def create_mountable_app(
         for ep in similarity_endpoints:
             register_similarity_endpoint(ep)
 
+    # Register REST graph connections (named datasource instances)
+    if rest_connections:
+        from graphlagoon.services.datasource.rest import register_rest_connection
+
+        for spec in rest_connections:
+            register_rest_connection(spec)
+
     @asynccontextmanager
     async def mountable_lifespan(app: FastAPI):
         if not settings.databricks_volume_path:
@@ -502,6 +512,7 @@ def create_app(
     databricks_schema: Optional[str] = None,
     catalog_schemas: Optional[list[tuple[str, str]]] = None,
     similarity_endpoints: Optional[list] = None,
+    rest_connections: Optional[list] = None,
 ) -> FastAPI:
     """Create a standalone Graph Lagoon Studio FastAPI application.
 
@@ -549,6 +560,13 @@ def create_app(
 
         for ep in similarity_endpoints:
             register_similarity_endpoint(ep)
+
+    # Register REST graph connections (named datasource instances)
+    if rest_connections:
+        from graphlagoon.services.datasource.rest import register_rest_connection
+
+        for spec in rest_connections:
+            register_rest_connection(spec)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

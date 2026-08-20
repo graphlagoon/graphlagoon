@@ -36,9 +36,9 @@ GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=company.com
 
 ## Datasources
 
-A graph context is queried through one of two backends, chosen when the context
-is created and fixed from then on. The choice is a trade-off between
-completeness and latency:
+A graph context is queried through one of three kinds of backend, chosen when
+the context is created and fixed from then on. For the two built-in kinds the
+choice is a trade-off between completeness and latency:
 
 | | Databricks (SQL Warehouse) | Amazon Neptune |
 |---|---|---|
@@ -97,6 +97,20 @@ cluster per deployment, shared by every user of that deployment.
 **Cancellation.** Neptune's openCypher HTTP API returns no query id at submit
 time, so cancelling stops the API-side request but does not guarantee the
 cluster stops executing.
+
+### REST connections
+
+The third kind: any number of **named connections** to external graph-serving
+HTTP APIs, registered in code by the app embedding Graph Lagoon (not by env
+vars — there is nothing to configure here at the server level). A REST context
+records the connection's name; the query language, the response mapping, auth
+and which operations exist are all declared per connection.
+
+See [REST Connections](/guide/rest-connections) for the full spec API. Under
+`make dev-neptune`, three demo connections cover every feature (all
+operations, response mapper, custom request builder, degraded query-only UI)
+— all executing real openCypher against the seeded local graph database
+through a REST facade mounted on the dev host.
 
 ### Trying Neptune locally
 

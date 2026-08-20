@@ -5,7 +5,10 @@ from fastapi import APIRouter, Request
 from graphlagoon.config import get_settings
 from graphlagoon.db.database import is_database_available
 from graphlagoon.middleware.auth import get_current_user
-from graphlagoon.services.datasource import available_datasource_types
+from graphlagoon.services.datasource import (
+    available_datasource_connections,
+    available_datasource_types,
+)
 from graphlagoon.utils.authz import is_superuser
 
 router = APIRouter(prefix="/api", tags=["config"])
@@ -35,6 +38,10 @@ async def get_config(request: Request):
         # creation form offers a datasource beyond the SQL warehouse; what each
         # backend can *do* is the frontend's own matrix.
         "datasources": available_datasource_types(),
+        # Named datasource instances (REST connections): UI copy plus
+        # per-connection operation flags. Transport and auth never leave the
+        # process.
+        "datasource_connections": available_datasource_connections(),
         "allowed_share_domains": settings.allowed_share_domain_list,
         "default_behaviors": settings.default_behaviors_dict,
         "version": app_version,

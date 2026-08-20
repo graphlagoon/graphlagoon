@@ -82,7 +82,31 @@ export type NodeColumnConfig = NodeStructure;
  * transpiling Cypher to Spark SQL. `neptune` is Amazon Neptune's openCypher
  * endpoint — a native graph database, so it defines no tables at all.
  */
-export type DatasourceType = "sql_warehouse" | "neptune";
+export type DatasourceType = "sql_warehouse" | "neptune" | "rest";
+
+/**
+ * A named REST connection as the server advertises it in
+ * `config.datasource_connections` — UI copy plus per-connection operation
+ * flags. Transport and auth never leave the server.
+ */
+export interface DatasourceConnectionConfig {
+  type: "rest";
+  name: string;
+  label: string;
+  kind: string;
+  tagline: string;
+  description: string;
+  caveat: string;
+  query_language: string;
+  query_placeholder: string;
+  example_query: string;
+  capabilities: {
+    expand: boolean;
+    subgraph: boolean;
+    fetch_nodes: boolean;
+    schema_discovery: boolean;
+  };
+}
 
 export interface GraphContext {
   id: string;
@@ -91,6 +115,8 @@ export interface GraphContext {
   tags: string[];
   /** Absent on contexts created before datasources were pluggable — treat as `sql_warehouse`. */
   datasource_type?: DatasourceType;
+  /** Which named connection a `rest` context uses; null for the other types. */
+  datasource_name?: string | null;
   /** Null for native graph databases, which define no tables. */
   edge_table_name: string | null;
   node_table_name: string | null;
@@ -495,6 +521,8 @@ export interface CreateGraphContextRequest {
   tags?: string[];
   /** Omitted means `sql_warehouse`, keeping older callers valid. */
   datasource_type?: DatasourceType;
+  /** Required for `rest`: the registered connection to query. */
+  datasource_name?: string;
   /** Required for `sql_warehouse`; omitted for native graph databases. */
   edge_table_name?: string;
   node_table_name?: string;
@@ -714,6 +742,8 @@ export interface TablePreviewResponse {
 export interface SchemaDiscoveryRequest {
   /** Omitted means `sql_warehouse`. */
   datasource_type?: DatasourceType;
+  /** Required for `rest`: the connection whose types to discover. */
+  datasource_name?: string;
   /** Required for `sql_warehouse`; a native graph database reads its own label catalog. */
   edge_table?: string;
   node_table?: string;

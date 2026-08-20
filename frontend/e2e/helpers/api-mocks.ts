@@ -309,17 +309,30 @@ export async function seedContexts(page: Page, contexts: any[]) {
 export async function enableDatasources(
   page: Page,
   datasources: Record<string, boolean>,
+  datasourceConnections: any[] = [],
 ) {
-  await page.addInitScript((ds) => {
-    const w = window as any;
-    w.__GRAPH_LAGOON_CONFIG__ = { ...(w.__GRAPH_LAGOON_CONFIG__ || {}), datasources: ds };
-  }, datasources);
+  await page.addInitScript(
+    (cfg) => {
+      const w = window as any;
+      w.__GRAPH_LAGOON_CONFIG__ = {
+        ...(w.__GRAPH_LAGOON_CONFIG__ || {}),
+        datasources: cfg.datasources,
+        datasource_connections: cfg.datasourceConnections,
+      };
+    },
+    { datasources, datasourceConnections },
+  );
 
   await page.route('**/graphlagoon/api/config', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ dev_mode: true, database_enabled: false, datasources }),
+      body: JSON.stringify({
+        dev_mode: true,
+        database_enabled: false,
+        datasources,
+        datasource_connections: datasourceConnections,
+      }),
     });
   });
 }

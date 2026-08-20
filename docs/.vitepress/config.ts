@@ -23,6 +23,7 @@ export default defineConfig({
           { text: 'Databricks Integration', link: '/guide/integration' },
           { text: 'Deploy as a Databricks App', link: '/guide/databricks-apps' },
           { text: 'Similarity System', link: '/guide/similarity' },
+          { text: 'REST Connections', link: '/guide/rest-connections' },
           { text: 'Configuration', link: '/guide/configuration' },
         ],
       },

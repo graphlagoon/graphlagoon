@@ -13,7 +13,11 @@
  */
 
 import { computed, unref, type ComputedRef, type Ref } from "vue";
-import type { DatasourceType, GraphContext } from "@/types/graph";
+import type {
+  DatasourceConnectionConfig,
+  DatasourceType,
+  GraphContext,
+} from "@/types/graph";
 
 export interface DatasourceCapabilities {
   /** Raw SQL graph queries and the query console's `sql` mode. */
@@ -53,9 +57,25 @@ const NEPTUNE: DatasourceCapabilities = {
   supportsProgressiveLoad: false,
 };
 
+/**
+ * A REST connection is even further from the warehouse than Neptune: the query
+ * language itself is opaque, so every SQL-shaped affordance is off. What a
+ * given connection CAN do (expand, subgraph, …) is per-instance, not per-type —
+ * that arrives from the server as `restOps` on its descriptor.
+ */
+const REST: DatasourceCapabilities = {
+  supportsSql: false,
+  supportsTranspile: false,
+  supportsCtePrefilter: false,
+  supportsDrift: false,
+  supportsCatalog: false,
+  supportsProgressiveLoad: false,
+};
+
 const CAPABILITIES: Record<DatasourceType, DatasourceCapabilities> = {
   sql_warehouse: SQL_WAREHOUSE,
   neptune: NEPTUNE,
+  rest: REST,
 };
 
 export const DEFAULT_DATASOURCE_TYPE: DatasourceType = "sql_warehouse";
@@ -87,6 +107,18 @@ export interface DatasourceCopy {
 }
 
 export const DATASOURCE_COPY: Record<DatasourceType, DatasourceCopy> = {
+  // The `rest` entry is a FALLBACK: real REST connections carry their own copy
+  // from the server (see DatasourceDescriptor); this renders only for a
+  // context whose connection is no longer configured.
+  rest: {
+    label: "REST connection",
+    kind: "REST API",
+    tagline: "Operational · external API",
+    description: "A graph served by an external API this deployment registered.",
+    caveat:
+      "What you can query — and how complete the answer is — is defined by " +
+      "the connection, not by Graph Lagoon.",
+  },
   sql_warehouse: {
     label: "Databricks",
     kind: "SQL Warehouse",
@@ -112,6 +144,7 @@ export const DATASOURCE_COPY: Record<DatasourceType, DatasourceCopy> = {
 export const DATASOURCE_LABELS: Record<DatasourceType, string> = {
   sql_warehouse: DATASOURCE_COPY.sql_warehouse.label,
   neptune: DATASOURCE_COPY.neptune.label,
+  rest: DATASOURCE_COPY.rest.label,
 };
 
 /**
@@ -144,11 +177,174 @@ export function useDatasourceCapabilities(
   return computed(() => capabilitiesFor(resolveDatasourceType(unref(context))));
 }
 
+// ── Instance descriptors ─────────────────────────────────────────────────
+//
+// REST connections broke the per-type model: one type, N named instances,
+// each with its own copy and its own operation flags, all declared on the
+// server. A descriptor is the unified answer to "what backend is this?" —
+// static for the built-in types, config-sourced for REST connections.
+
+/** Per-connection operation flags a REST connection declared handlers for. */
+export interface RestOperations {
+  expand: boolean;
+  subgraph: boolean;
+  fetchNodes: boolean;
+  schemaDiscovery: boolean;
+}
+
+/** Copy fields only a named connection carries (the query language is its own). */
+export interface ConnectionCopy extends DatasourceCopy {
+  queryLanguage?: string;
+  queryPlaceholder?: string;
+  exampleQuery?: string;
+}
+
+export interface DatasourceDescriptor {
+  /** Stable identity: the type for built-ins, `rest:<name>` for connections. */
+  id: string;
+  type: DatasourceType;
+  /** The connection name for `rest`; null for the single-instance types. */
+  name: string | null;
+  copy: ConnectionCopy;
+  capabilities: DatasourceCapabilities;
+  /** Present only for `rest` descriptors. */
+  restOps?: RestOperations;
+  /**
+   * False for the synthetic descriptor of a context whose connection is no
+   * longer registered on the server — render it, but expect queries to fail.
+   */
+  available: boolean;
+}
+
+function staticDescriptor(type: DatasourceType): DatasourceDescriptor {
+  return {
+    id: type,
+    type,
+    name: null,
+    copy: DATASOURCE_COPY[type],
+    capabilities: CAPABILITIES[type],
+    available: true,
+  };
+}
+
+function connectionDescriptor(
+  connection: DatasourceConnectionConfig,
+): DatasourceDescriptor {
+  return {
+    id: `rest:${connection.name}`,
+    type: "rest",
+    name: connection.name,
+    copy: {
+      label: connection.label,
+      kind: connection.kind || DATASOURCE_COPY.rest.kind,
+      tagline: connection.tagline,
+      description: connection.description,
+      caveat: connection.caveat,
+      queryLanguage: connection.query_language,
+      queryPlaceholder: connection.query_placeholder,
+      exampleQuery: connection.example_query,
+    },
+    capabilities: REST,
+    restOps: {
+      expand: connection.capabilities?.expand === true,
+      subgraph: connection.capabilities?.subgraph === true,
+      fetchNodes: connection.capabilities?.fetch_nodes === true,
+      schemaDiscovery: connection.capabilities?.schema_discovery === true,
+    },
+    available: true,
+  };
+}
+
+/**
+ * A context still pointing at a connection the server no longer registers.
+ * Everything is off; the caveat says why instead of pretending it works.
+ */
+function orphanDescriptor(name: string): DatasourceDescriptor {
+  return {
+    id: `rest:${name}`,
+    type: "rest",
+    name,
+    copy: {
+      ...DATASOURCE_COPY.rest,
+      label: name,
+      caveat:
+        "This connection is no longer configured on the server — queries " +
+        "against it will fail until it is registered again.",
+    },
+    capabilities: REST,
+    restOps: {
+      expand: false,
+      subgraph: false,
+      fetchNodes: false,
+      schemaDiscovery: false,
+    },
+    available: false,
+  };
+}
+
+function restConnectionConfigs(): DatasourceConnectionConfig[] {
+  return window.__GRAPH_LAGOON_CONFIG__?.datasource_connections ?? [];
+}
+
+/**
+ * Resolve the full descriptor for a context — the instance-aware counterpart
+ * of `resolveDatasourceType`, and the only way to reach a REST context's
+ * per-connection copy and operation flags.
+ */
+export function resolveDatasourceDescriptor(
+  context?: Pick<GraphContext, "datasource_type" | "datasource_name"> | null,
+): DatasourceDescriptor {
+  const type = resolveDatasourceType(context);
+  if (type !== "rest") return staticDescriptor(type);
+
+  const name = context?.datasource_name ?? "";
+  const connection = restConnectionConfigs().find((c) => c.name === name);
+  if (connection) return connectionDescriptor(connection);
+  return orphanDescriptor(name || "unknown");
+}
+
+/** Reactive descriptor for a context (or a plain object / null). */
+export function useDatasourceDescriptor(
+  context:
+    | Ref<
+        Pick<GraphContext, "datasource_type" | "datasource_name"> | null | undefined
+      >
+    | ComputedRef<
+        Pick<GraphContext, "datasource_type" | "datasource_name"> | null | undefined
+      >
+    | Pick<GraphContext, "datasource_type" | "datasource_name">
+    | null
+    | undefined,
+): ComputedRef<DatasourceDescriptor> {
+  return computed(() => resolveDatasourceDescriptor(unref(context)));
+}
+
+/**
+ * Everything the context-creation picker should offer: the built-in types the
+ * server can serve, then every registered REST connection.
+ */
+export function useDatasourceDescriptors(): ComputedRef<DatasourceDescriptor[]> {
+  return computed(() => {
+    const configured = window.__GRAPH_LAGOON_CONFIG__?.datasources;
+    const staticTypes: DatasourceType[] = ["sql_warehouse", "neptune"];
+    // Without a server answer, offer only the warehouse: it is the one backend
+    // guaranteed to exist, and offering a type the server cannot serve would
+    // fail at creation time.
+    const offered = configured
+      ? staticTypes.filter((type) => configured[type] === true)
+      : [DEFAULT_DATASOURCE_TYPE];
+    return [
+      ...offered.map(staticDescriptor),
+      ...restConnectionConfigs().map(connectionDescriptor),
+    ];
+  });
+}
+
 /** Which datasource types this server can serve, from the injected config. */
 export function useAvailableDatasources(): ComputedRef<DatasourceType[]> {
   return computed(() => {
     const configured = window.__GRAPH_LAGOON_CONFIG__?.datasources;
-    const types = Object.keys(CAPABILITIES) as DatasourceType[];
+    const types: DatasourceType[] = ["sql_warehouse", "neptune"];
     // Without a server answer, offer only the warehouse: it is the one backend
     // guaranteed to exist, and offering a type the server cannot serve would
     // fail at creation time.

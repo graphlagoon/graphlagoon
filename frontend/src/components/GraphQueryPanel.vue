@@ -4,7 +4,10 @@ import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import CypherEditor from './CypherEditor.vue';
 import TranspileSettingsModal from './TranspileSettingsModal.vue';
-import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
+import {
+  useDatasourceCapabilities,
+  useDatasourceDescriptor,
+} from '@/composables/useDatasourceCapabilities';
 import { generateBfsExampleQuery } from '@/utils/exampleQuery';
 import { X, SlidersHorizontal } from 'lucide-vue-next';
 
@@ -59,6 +62,10 @@ watch(() => graphStore.ctePrefilter, (val) => {
 }, { immediate: true });
 
 const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
+const datasource = useDatasourceDescriptor(computed(() => graphStore.currentContext));
+// A REST connection's query language is opaque to the frontend: no Cypher
+// heuristics apply, and placeholder/example text comes from the connection.
+const isRestContext = computed(() => datasource.value.type === 'rest');
 
 // Show edge structure columns as a hint. Column names only mean something for a
 // table-backed datasource; a native graph database has labels, not columns.
@@ -82,9 +89,14 @@ const runsDirectly = computed(
 watch(() => graphStore.currentContext, (context) => {
   if (!context) return;
 
-  // Check if there's a saved query from exploration
+  // Check if there's a saved query from exploration. The MATCH gate is a
+  // Cypher heuristic — an opaque REST query language has no such marker, so
+  // any non-empty saved query is accepted there.
   const savedQuery = graphStore.graphQuery;
-  if (savedQuery && savedQuery.trim().toUpperCase().startsWith('MATCH')) {
+  const looksUsable = isRestContext.value
+    ? Boolean(savedQuery && savedQuery.trim())
+    : Boolean(savedQuery && savedQuery.trim().toUpperCase().startsWith('MATCH'));
+  if (savedQuery && looksUsable) {
     cypherQuery.value = savedQuery;
   } else {
     // Generate example based on context types
@@ -95,7 +107,7 @@ watch(() => graphStore.currentContext, (context) => {
 // Watch for exploration load or template execution to update query
 watch(() => graphStore.graphQuery, (newQuery) => {
   if (!newQuery) return;
-  if (newQuery.trim().toUpperCase().startsWith('MATCH')) {
+  if (isRestContext.value || newQuery.trim().toUpperCase().startsWith('MATCH')) {
     cypherQuery.value = newQuery;
     queryMode.value = 'cypher';
   } else if (newQuery.trim().toUpperCase().startsWith('SELECT') && capabilities.value.supportsSql) {
@@ -126,6 +138,12 @@ function validateCypherQuery(query: string): { valid: boolean; error: string | n
   const trimmed = query.trim();
   if (!trimmed) {
     return { valid: false, error: null }; // Empty is invalid but no error shown
+  }
+
+  // Opaque query language: the connection defines its own grammar, so the
+  // only thing worth checking client-side is that something was typed.
+  if (isRestContext.value) {
+    return { valid: true, error: null };
   }
 
   const upper = trimmed.toUpperCase();
@@ -180,12 +198,19 @@ watch(query, (newQuery) => {
 });
 
 const placeholder = computed(() => {
+  if (isRestContext.value) {
+    return datasource.value.copy.queryPlaceholder || 'Query for this connection';
+  }
   return queryMode.value === 'cypher'
     ? 'MATCH (s:Person)-[r:KNOWS]->(d) RETURN r'
     : 'SELECT * FROM nodes WHERE node_type = \'Person\'';
 });
 
 const helpText = computed(() => {
+  if (isRestContext.value) {
+    const language = datasource.value.copy.queryLanguage || 'query';
+    return `${language} — sent to the connection as-is.`;
+  }
   return queryMode.value === 'cypher'
     ? 'OpenCypher query. Must end with RETURN r.'
     : 'Spark SQL query. Click "Run" to execute and visualize results.';

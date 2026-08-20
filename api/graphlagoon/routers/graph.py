@@ -43,6 +43,7 @@ from graphlagoon.services.graph_operations import (
     QueryExecutionError,
 )
 from graphlagoon.services.datasource import (
+    DatasourceNotConfiguredError,
     GraphExecutionFailure,
     PreparedGraphQuery,
     get_datasource,
@@ -66,6 +67,32 @@ router = APIRouter(prefix="/api", tags=["graph"])
 
 def get_warehouse() -> WarehouseClient:
     return get_warehouse_client()
+
+
+def resolve_datasource_or_400(context):
+    """Resolve a context's datasource, translating "gone" into a clear 400.
+
+    A context can outlive its backend: a REST connection removed from the
+    parent app's config, or a Neptune endpoint unset since the context was
+    created. Every query endpoint resolves through here so those orphans fail
+    with DATASOURCE_NOT_CONFIGURED instead of a 500.
+    """
+    try:
+        return get_datasource_for_context(context)
+    except DatasourceNotConfiguredError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "DATASOURCE_NOT_CONFIGURED",
+                    "message": str(e),
+                    "details": {
+                        "datasource_type": getattr(context, "datasource_type", None),
+                        "datasource_name": getattr(context, "datasource_name", None),
+                    },
+                }
+            },
+        )
 
 
 def execution_failure_http_error(
@@ -239,7 +266,7 @@ async def get_schema_drift(
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
     require_capability(
-        get_datasource_for_context(context), "supports_schema_drift", "Schema drift"
+        resolve_datasource_or_400(context), "supports_schema_drift", "Schema drift"
     )
 
     async def describe(table_name: str) -> tuple[bool, list]:
@@ -327,7 +354,7 @@ async def get_subgraph(
     """Get a subgraph for a graph context."""
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
 
     try:
         return await datasource.get_subgraph(context, data)
@@ -358,7 +385,7 @@ async def get_nodes_batch(
     """
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
 
     # Dedupe while preserving order: the join is 1:1 on a unique node id, so
     # repeated ids would only bloat the inlined VALUES list.
@@ -414,7 +441,7 @@ async def expand_from_node(
     """
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
 
     try:
         return await datasource.expand(context, data)
@@ -444,7 +471,7 @@ async def execute_graph_query(
     """
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
     require_capability(datasource, "supports_sql", "Raw SQL graph queries")
 
     prepared = datasource.prepare_sql(context, data)
@@ -479,7 +506,7 @@ async def execute_cypher_query(
     """
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
 
     prepared = datasource.prepare_cypher(context, data)
     transpiled_sql = prepared.transpiled_sql
@@ -550,7 +577,7 @@ async def execute_table_query(
     """
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
 
     if data.mode == "sql":
         require_capability(datasource, "supports_sql", "SQL console queries")
@@ -592,7 +619,7 @@ async def get_table_query_status(
     """
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
 
     try:
         return await datasource.get_table_query_status(context, statement_id, row_limit)
@@ -617,7 +644,7 @@ async def cancel_table_query(
     """
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
 
     await datasource.cancel_statement(statement_id)
     return Response(status_code=204)
@@ -683,7 +710,7 @@ async def execute_graph_query_async(
     """Submit a SQL graph query as a cancellable, progress-reporting job."""
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
     require_capability(datasource, "supports_sql", "Raw SQL graph queries")
 
     prepared = datasource.prepare_sql(context, data)
@@ -703,7 +730,7 @@ async def execute_cypher_query_async(
     """Submit an OpenCypher graph query as a cancellable, progress job."""
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
 
     prepared = datasource.prepare_cypher(context, data)
     job_id, record = _start_graph_job(
@@ -797,7 +824,7 @@ async def cancel_graph_query_job(
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
 
-    await cancel_job(job_id, get_datasource_for_context(context))
+    await cancel_job(job_id, resolve_datasource_or_400(context))
     return Response(status_code=204)
 
 
@@ -818,7 +845,7 @@ async def transpile_cypher_query(
     """
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
-    datasource = get_datasource_for_context(context)
+    datasource = resolve_datasource_or_400(context)
     require_capability(datasource, "supports_transpile", "Cypher transpilation")
 
     return CypherTranspileResponse(
@@ -840,7 +867,12 @@ async def schema_discovery(
     """
     get_current_user(request)  # Ensure authenticated
     try:
-        return await get_datasource(data.datasource_type).discover_types(data)
+        return await get_datasource(
+            data.datasource_type, data.datasource_name
+        ).discover_types(data)
+    except HTTPException:
+        # Already the shared envelope (unsupported operation, not configured).
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=400,

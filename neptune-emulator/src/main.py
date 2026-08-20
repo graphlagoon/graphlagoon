@@ -194,6 +194,138 @@ async def status():
     return {"status": "healthy", "role": "writer", "dbEngineVersion": "emulator"}
 
 
+# ── REST-connection contract ─────────────────────────────────────────────
+#
+# The same Neo4j, exposed a second way: as a plain graph-serving REST API in
+# the shape Graph Lagoon's REST-connection datasource expects
+# ({"nodes": [...], "edges": [...]}). This is what lets `make dev-neptune`
+# also register a REST demo connection backed by REAL data and a REAL query
+# language, instead of only the canned in-process demo graph.
+
+
+def to_contract(value: Any, nodes: dict, edges: dict) -> None:
+    """Walk one result value, collecting contract-shaped nodes and edges."""
+    if isinstance(value, Neo4jNode):
+        nodes.setdefault(
+            str(value.element_id),
+            {
+                "id": str(value.element_id),
+                "label": next(iter(value.labels), ""),
+                "properties": dict(value),
+            },
+        )
+        return
+    if isinstance(value, Neo4jRelationship):
+        # Endpoints ride along: the contract mapper only synthesizes untyped
+        # placeholders for endpoints it never saw, so include the real ones.
+        to_contract(value.start_node, nodes, edges)
+        to_contract(value.end_node, nodes, edges)
+        edges.setdefault(
+            str(value.element_id),
+            {
+                "id": str(value.element_id),
+                "source": str(value.start_node.element_id),
+                "target": str(value.end_node.element_id),
+                "label": value.type,
+                "properties": dict(value),
+            },
+        )
+        return
+    if isinstance(value, Neo4jPath):
+        to_contract(value.start_node, nodes, edges)
+        for rel in value.relationships:
+            to_contract(rel, nodes, edges)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            to_contract(item, nodes, edges)
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            to_contract(item, nodes, edges)
+
+
+async def _run_to_contract(query: str, parameters: Optional[dict] = None) -> dict:
+    nodes: dict = {}
+    edges: dict = {}
+    async with _driver.session() as session:
+        result = await session.run(translate_query(query), parameters or {})
+        async for record in result:
+            for key in record.keys():
+                to_contract(record[key], nodes, edges)
+    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
+
+
+def _contract_error(message: str, status_code: int = 400) -> JSONResponse:
+    """Plain REST-API error shape — NOT Neptune's envelope; this side of the
+    emulator plays an ordinary graph service."""
+    return JSONResponse(status_code=status_code, content={"detail": message})
+
+
+@app.post("/rest/query")
+async def rest_query(request: Request):
+    """openCypher in, contract graph out."""
+    payload = await _read_payload(request)
+    query = (payload or {}).get("query")
+    if not query:
+        return _contract_error("Missing 'query'")
+    try:
+        return await _run_to_contract(query, (payload or {}).get("parameters"))
+    except (CypherSyntaxError, Neo4jError) as e:
+        return _contract_error(str(e))
+    except Exception as e:  # noqa: BLE001 — dev-only service
+        logger.exception("rest query failed")
+        return _contract_error(str(e), status_code=500)
+
+
+@app.post("/rest/expand")
+async def rest_expand(request: Request):
+    payload = await _read_payload(request) or {}
+    node_id = payload.get("node")
+    if not node_id:
+        return _contract_error("Missing 'node'")
+    depth = max(1, min(int(payload.get("depth", 1)), 2))
+    limit = max(1, min(int(payload.get("edge_limit", 100)), 1000))
+    arrow = "->" if payload.get("directed") else "-"
+    query = (
+        f"MATCH p = (s)-[*1..{depth}]{arrow}(m) "
+        f"WHERE elementId(s) = $node_id RETURN p LIMIT {limit}"
+    )
+    try:
+        return await _run_to_contract(query, {"node_id": node_id})
+    except Exception as e:  # noqa: BLE001
+        logger.exception("rest expand failed")
+        return _contract_error(str(e), status_code=500)
+
+
+@app.post("/rest/subgraph")
+async def rest_subgraph(request: Request):
+    payload = await _read_payload(request) or {}
+    limit = max(1, min(int(payload.get("limit", 500)), 5000))
+    try:
+        return await _run_to_contract(
+            f"MATCH (a)-[r]->(b) RETURN a, r, b LIMIT {limit}"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("rest subgraph failed")
+        return _contract_error(str(e), status_code=500)
+
+
+@app.post("/rest/schema")
+async def rest_schema():
+    try:
+        async with _driver.session() as session:
+            labels = await (await session.run("CALL db.labels()")).values()
+            types = await (await session.run("CALL db.relationshipTypes()")).values()
+        return {
+            "node_types": sorted(row[0] for row in labels),
+            "relationship_types": sorted(row[0] for row in types),
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.exception("rest schema failed")
+        return _contract_error(str(e), status_code=500)
+
+
 async def _read_payload(request: Request) -> Optional[dict]:
     try:
         return await request.json()

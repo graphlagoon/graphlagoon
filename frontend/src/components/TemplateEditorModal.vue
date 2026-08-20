@@ -3,7 +3,10 @@ import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
-import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
+import {
+  useDatasourceCapabilities,
+  useDatasourceDescriptor,
+} from '@/composables/useDatasourceCapabilities';
 import type { QueryTemplate, TemplateParameter, TemplateVisibility } from '@/types/graph';
 import { X } from 'lucide-vue-next';
 
@@ -17,6 +20,13 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
 const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
+const datasource = useDatasourceDescriptor(computed(() => graphStore.currentContext));
+/** The single query type's display name — the connection's own language for REST. */
+const cypherTypeLabel = computed(() =>
+  datasource.value.type === 'rest'
+    ? datasource.value.copy.queryLanguage || 'Query'
+    : 'Cypher',
+);
 
 // Every execution option below is warehouse machinery: procedural BFS picks a
 // transpilation strategy, large-results mode picks a result transport, and the
@@ -55,9 +65,20 @@ const DEFAULT_PARAMETERS: TemplateParameter[] = [
 const name = ref(props.template?.name ?? '');
 const description = ref(props.template?.description ?? '');
 const queryType = ref<'cypher' | 'sql'>(props.template?.query_type ?? props.initialQueryType ?? 'cypher');
-const query = ref(props.template?.query ?? props.initialQuery ?? DEFAULT_QUERY);
+// The Cypher BFS default would be gibberish to a REST connection — seed its
+// own example instead (possibly empty; blank beats unrunnable).
+const query = ref(
+  props.template?.query ??
+    props.initialQuery ??
+    (datasource.value.type === 'rest'
+      ? datasource.value.copy.exampleQuery || ''
+      : DEFAULT_QUERY),
+);
 const parameters = ref<TemplateParameter[]>(
-  props.template?.parameters.map((p) => ({ ...p })) ?? DEFAULT_PARAMETERS.map((p) => ({ ...p })),
+  props.template?.parameters.map((p) => ({ ...p })) ??
+    // The default parameters exist for the default BFS query; a REST seed has
+    // no $node_id/$depth placeholders to fill.
+    (datasource.value.type === 'rest' ? [] : DEFAULT_PARAMETERS.map((p) => ({ ...p }))),
 );
 const visibility = ref<TemplateVisibility>(
   props.template?.visibility ?? (canWriteContext.value ? 'shared' : 'private'),
@@ -228,7 +249,7 @@ async function handleSave() {
             <label class="field-label">Query type <span class="required-mark">*</span></label>
             <div class="radio-group">
               <label class="radio-label">
-                <input v-model="queryType" type="radio" value="cypher" /> Cypher
+                <input v-model="queryType" type="radio" value="cypher" /> {{ cypherTypeLabel }}
               </label>
               <label v-if="capabilities.supportsSql" class="radio-label">
                 <input v-model="queryType" type="radio" value="sql" /> SQL

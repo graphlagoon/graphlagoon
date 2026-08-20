@@ -32,6 +32,9 @@ class GraphContext(Base):
     # Server default backfills every pre-existing row, so contexts created before
     # datasources were pluggable keep behaving exactly as they did.
     datasource_type = Column(String(50), nullable=False, server_default="sql_warehouse")
+    # Which named connection a "rest" context uses. Null for the single-instance
+    # types (warehouse, neptune) — only "rest" has multiple named instances.
+    datasource_name = Column(String(100), nullable=True)
     # Nullable since a native graph database (Neptune) defines no tables at all.
     # Required for sql_warehouse contexts — enforced by GraphContextCreate.
     edge_table_name = Column(String(255), nullable=True)

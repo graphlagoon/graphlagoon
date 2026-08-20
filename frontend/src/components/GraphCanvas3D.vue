@@ -1067,7 +1067,7 @@ async function initGraph() {
         return;
       }
       // Alt+Click expands the node's neighbors (depth 1) — same as the context-menu action
-      if (event.altKey && !graphStore.loading) {
+      if (event.altKey && !graphStore.loading && graphStore.supportsExpand) {
         graphStore.selectNode(node.id);
         void graphStore.expandFromNode(node.id, 1);
         return;
@@ -2205,7 +2205,9 @@ onMounted(() => {
     id: 'expand-neighbors',
     label: 'Expand neighbors',
     icon: Network,
-    visible: (t) => t.type === 'node',
+    // Hidden entirely (not just disabled) on a connection without expand
+    // support — a permanently disabled action reads as a bug.
+    visible: (t) => t.type === 'node' && graphStore.supportsExpand,
     disabled: () => graphStore.loading,
     handler: async (t) => {
       await graphStore.expandFromNode(t.id, 1);

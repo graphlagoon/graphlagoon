@@ -30,6 +30,7 @@ import { recordPerf } from '@/utils/perfMetrics';
 import { useToast } from '@/composables/useToast';
 import {
   capabilitiesFor,
+  resolveDatasourceDescriptor,
   resolveDatasourceType,
 } from '@/composables/useDatasourceCapabilities';
 import {
@@ -1480,6 +1481,18 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  // ── Per-instance operation gates ─────────────────────────────────────
+  // Static backends (warehouse, Neptune) support every canned operation, so
+  // restOps is undefined there and `!== false` reads true. A REST connection
+  // only supports what its spec declared; an orphaned one supports nothing.
+  const supportsExpand = computed(
+    () => resolveDatasourceDescriptor(currentContext.value).restOps?.expand !== false,
+  );
+  const supportsSubgraph = computed(
+    () =>
+      resolveDatasourceDescriptor(currentContext.value).restOps?.subgraph !== false,
+  );
+
   async function expandFromNode(
     nodeId: string,
     depth: number = 2,
@@ -1488,6 +1501,9 @@ export const useGraphStore = defineStore('graph', () => {
     directed: boolean = false
   ) {
     if (!currentContext.value) return;
+    // Belt to the UI's suspenders: expansion affordances are hidden for a
+    // connection without expand support, but programmatic callers land here.
+    if (!supportsExpand.value) return;
 
     loading.value = true;
     loadingMessage.value = 'Expanding node…';
@@ -2313,7 +2329,11 @@ export const useGraphStore = defineStore('graph', () => {
   ) {
     if (exploration.state.graph_query) {
       const query = exploration.state.graph_query.trim();
-      if (query.toUpperCase().startsWith('MATCH')) {
+      if (!contextTranspiles()) {
+        // Native-Cypher and REST backends run the saved query directly: the
+        // transpile step below would stop at its guard and replay nothing.
+        await executeCypherQuery(query);
+      } else if (query.toUpperCase().startsWith('MATCH')) {
         const sql = await transpileCypher(query);
         if (sql) {
           await executeGraphQuery(sql, { preserveGraphQuery: true, preserveSelections: true });
@@ -2321,7 +2341,7 @@ export const useGraphStore = defineStore('graph', () => {
       } else {
         await executeGraphQuery(query, { preserveGraphQuery: true, preserveSelections: true });
       }
-    } else {
+    } else if (supportsSubgraph.value) {
       await loadSubgraph({});
     }
     // Community state must be restored AFTER query execution because the
@@ -2621,6 +2641,8 @@ export const useGraphStore = defineStore('graph', () => {
     loadContext,
     loadSubgraph,
     expandFromNode,
+    supportsExpand,
+    supportsSubgraph,
     shouldLoadProgressively,
     patchNodeProperties,
     enrichNodeProperties,

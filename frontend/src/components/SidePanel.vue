@@ -246,7 +246,9 @@ async function expandFromNode() {
         </div>
       </div>
 
-      <template v-if="selectedItem.type === 'node'">
+      <!-- Expansion needs backend support: hidden (not disabled) when the
+           context's connection declared no expand handler. -->
+      <template v-if="selectedItem.type === 'node' && graphStore.supportsExpand">
         <div class="detail-section">
           <h4>Actions</h4>
 

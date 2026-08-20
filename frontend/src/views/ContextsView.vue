@@ -8,9 +8,8 @@ import { api } from '@/services/api';
 import { fuzzyMatch, parseTag } from '@/utils/contextForm';
 import { useSchemaDrift } from '@/composables/useSchemaDrift';
 import {
-  DATASOURCE_COPY,
-  DATASOURCE_LABELS,
   capabilitiesFor,
+  resolveDatasourceDescriptor,
   resolveDatasourceType,
 } from '@/composables/useDatasourceCapabilities';
 import GraphContextFormModal from '@/components/GraphContextFormModal.vue';
@@ -50,7 +49,7 @@ const filteredContexts = computed(() => {
       ctx.title,
       ctx.description || '',
       ctx.tags?.join(' ') || '',
-      DATASOURCE_LABELS[resolveDatasourceType(ctx)],
+      resolveDatasourceDescriptor(ctx).copy.label,
       ctx.edge_table_name || '',
       ctx.node_table_name || '',
     ].join(' ');
@@ -283,14 +282,14 @@ async function quickShare(email: string) {
           <div class="list-item-title">{{ context.title }}</div>
           <div class="list-item-subtitle">
             <span class="datasource-badge" :data-datasource="resolveDatasourceType(context)">
-              {{ DATASOURCE_LABELS[resolveDatasourceType(context)] }}
+              {{ resolveDatasourceDescriptor(context).copy.label }}
             </span>
             <template v-if="context.edge_table_name && context.node_table_name">
               <code>{{ context.edge_table_name }}</code> /
               <code>{{ context.node_table_name }}</code>
             </template>
             <span v-else class="subtitle-note">
-              {{ DATASOURCE_COPY[resolveDatasourceType(context)].tagline }}
+              {{ resolveDatasourceDescriptor(context).copy.tagline }}
             </span>
           </div>
           <div class="list-item-meta">
@@ -476,6 +475,11 @@ async function quickShare(email: string) {
 .datasource-badge[data-datasource='neptune'] {
   background: rgba(56, 139, 253, 0.18);
   color: var(--accent-color, #0969da);
+}
+
+.datasource-badge[data-datasource='rest'] {
+  background: rgba(163, 113, 247, 0.18);
+  color: var(--purple-color, #8250df);
 }
 
 .subtitle-note {

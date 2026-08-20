@@ -14,7 +14,10 @@ import QueryRunningState from './QueryRunningState.vue';
 import TemplateEditorModal from './TemplateEditorModal.vue';
 import TranspileSettingsModal from './TranspileSettingsModal.vue';
 import { useGraphStore } from '@/stores/graph';
-import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
+import {
+  useDatasourceCapabilities,
+  useDatasourceDescriptor,
+} from '@/composables/useDatasourceCapabilities';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
 import { useDrawerResize } from '@/composables/useDrawerResize';
 import { toDelimited } from '@/utils/tableExport';
@@ -40,6 +43,14 @@ const nodeProperties = computed(() => graphStore.currentContext?.node_properties
 const edgeProperties = computed(() => graphStore.currentContext?.edge_properties || []);
 
 const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
+const datasource = useDatasourceDescriptor(computed(() => graphStore.currentContext));
+const isRestContext = computed(() => datasource.value.type === 'rest');
+/** What the single query mode is called — the connection's own language for REST. */
+const queryModeLabel = computed(() =>
+  isRestContext.value
+    ? datasource.value.copy.queryLanguage || 'Query'
+    : 'OpenCypher',
+);
 
 const dataGridRef = ref<InstanceType<typeof DataGrid>>();
 
@@ -49,11 +60,14 @@ const placeholder = computed(() =>
     : 'SELECT * FROM nodes LIMIT 100',
 );
 
-const helpText = computed(() =>
-  consoleStore.mode === 'cypher'
+const helpText = computed(() => {
+  if (isRestContext.value) {
+    return `${queryModeLabel.value} — sent to the connection as-is; nodes come back as rows.`;
+  }
+  return consoleStore.mode === 'cypher'
     ? 'OpenCypher — any projection allowed (e.g. RETURN n.name, count(*)).'
-    : 'Read-only Spark SQL (SELECT only).',
-);
+    : 'Read-only Spark SQL (SELECT only).';
+});
 
 const runLabel = computed(() => (consoleStore.loading ? 'Running…' : 'Run'));
 const runDisabled = computed(() => {
@@ -147,7 +161,11 @@ onMounted(() => {
   if (!consoleStore.cypherQuery) {
     const ctx = graphStore.currentContext;
     const label = ctx?.node_types?.[0] ? `:${ctx.node_types[0]}` : '';
-    if (capabilities.value.supportsCatalog) {
+    if (isRestContext.value) {
+      // Cypher shapes mean nothing to a REST connection; its spec ships the
+      // example (possibly empty — better blank than gibberish).
+      consoleStore.cypherQuery = datasource.value.copy.exampleQuery || '';
+    } else if (capabilities.value.supportsCatalog) {
       const idCol = ctx?.node_structure?.node_id_col || 'node_id';
       consoleStore.cypherQuery = `MATCH (n${label})\nRETURN n.${idCol}\nLIMIT 100`;
     } else {
@@ -181,7 +199,7 @@ onMounted(() => {
             data-testid="query-console-mode-cypher"
             @click="setMode('cypher')"
           >
-            OpenCypher
+            {{ queryModeLabel }}
           </button>
           <button
             class="mode-btn"
