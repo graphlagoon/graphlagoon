@@ -67,6 +67,11 @@ declare global {
        * (see `useDatasourceCapabilities`).
        */
       datasources?: Record<string, boolean>;
+      /**
+       * Named REST connections registered on the server: UI copy plus
+       * per-connection operation flags. See `DatasourceConnectionConfig`.
+       */
+      datasource_connections?: import("@/types/graph").DatasourceConnectionConfig[];
       router_base?: string;
       allowed_share_domains?: string[];
       /**

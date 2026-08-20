@@ -3,10 +3,8 @@ import { computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useSchemaDrift } from '@/composables/useSchemaDrift';
 import {
-  DATASOURCE_COPY,
-  DATASOURCE_LABELS,
-  resolveDatasourceType,
   useDatasourceCapabilities,
+  useDatasourceDescriptor,
 } from '@/composables/useDatasourceCapabilities';
 import SchemaDriftBanner from '@/components/SchemaDriftBanner.vue';
 import { X, SearchCheck } from 'lucide-vue-next';
@@ -36,13 +34,12 @@ function checkSchema() {
 const capabilities = useDatasourceCapabilities(
   computed(() => graphStore.currentContext),
 );
-const datasourceLabel = computed(
-  () => DATASOURCE_LABELS[resolveDatasourceType(graphStore.currentContext)],
+const datasourceDescriptor = useDatasourceDescriptor(
+  computed(() => graphStore.currentContext),
 );
+const datasourceLabel = computed(() => datasourceDescriptor.value.copy.label);
 /** The workload this context is served by — what to expect from its results. */
-const datasourceTagline = computed(
-  () => DATASOURCE_COPY[resolveDatasourceType(graphStore.currentContext)].tagline,
-);
+const datasourceTagline = computed(() => datasourceDescriptor.value.copy.tagline);
 </script>
 
 <template>

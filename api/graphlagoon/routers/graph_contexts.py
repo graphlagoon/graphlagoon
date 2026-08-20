@@ -45,15 +45,21 @@ def get_warehouse() -> WarehouseClient:
     return get_warehouse_client()
 
 
-async def _validate_datasource_or_400(datasource_type: str) -> None:
+async def _validate_datasource_or_400(
+    datasource_type: str, datasource_name: str | None = None
+) -> None:
     """Reject a context whose backend this server cannot reach.
 
-    Creating a Neptune context on a server with no Neptune endpoint would
-    produce a context that fails on its first query with a confusing error;
-    failing at creation says exactly what is missing.
+    Creating a Neptune context on a server with no Neptune endpoint — or a
+    REST context naming a connection nobody registered — would produce a
+    context that fails on its first query with a confusing error; failing at
+    creation says exactly what is missing.
     """
+    details = {"datasource_type": datasource_type}
+    if datasource_name:
+        details["datasource_name"] = datasource_name
     try:
-        get_datasource(datasource_type)
+        get_datasource(datasource_type, datasource_name)
     except DatasourceNotConfiguredError as e:
         raise HTTPException(
             status_code=400,
@@ -61,7 +67,7 @@ async def _validate_datasource_or_400(datasource_type: str) -> None:
                 "error": {
                     "code": "DATASOURCE_NOT_CONFIGURED",
                     "message": str(e),
-                    "details": {"datasource_type": datasource_type},
+                    "details": details,
                 }
             },
         )
@@ -72,7 +78,7 @@ async def _validate_datasource_or_400(datasource_type: str) -> None:
                 "error": {
                     "code": "UNKNOWN_DATASOURCE",
                     "message": str(e),
-                    "details": {"datasource_type": datasource_type},
+                    "details": details,
                 }
             },
         )
@@ -140,6 +146,7 @@ def context_to_response(
         # Rows predating the column report the default rather than failing.
         datasource_type=getattr(context, "datasource_type", None)
         or DEFAULT_DATASOURCE_TYPE,
+        datasource_name=getattr(context, "datasource_name", None),
         edge_table_name=context.edge_table_name,
         node_table_name=context.node_table_name,
         edge_structure=(
@@ -253,7 +260,7 @@ async def create_graph_context(
     """Create a new graph context."""
     user_email = get_current_user(request)
 
-    await _validate_datasource_or_400(data.datasource_type)
+    await _validate_datasource_or_400(data.datasource_type, data.datasource_name)
 
     # Table validation only means something for a table-backed context; a
     # schemaless graph database has nothing to check here.
@@ -276,6 +283,7 @@ async def create_graph_context(
                 description=data.description,
                 tags=data.tags,
                 datasource_type=data.datasource_type,
+                datasource_name=data.datasource_name,
                 edge_table_name=data.edge_table_name,
                 node_table_name=data.node_table_name,
                 edge_structure=data.edge_structure.model_dump(),
@@ -300,6 +308,7 @@ async def create_graph_context(
             description=data.description,
             tags=data.tags,
             datasource_type=data.datasource_type,
+            datasource_name=data.datasource_name,
             edge_table_name=data.edge_table_name,
             node_table_name=data.node_table_name,
             edge_structure=data.edge_structure.model_dump(),

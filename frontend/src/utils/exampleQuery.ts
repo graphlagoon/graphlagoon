@@ -1,5 +1,6 @@
 import {
   capabilitiesFor,
+  resolveDatasourceDescriptor,
   resolveDatasourceType,
 } from '@/composables/useDatasourceCapabilities';
 import type { GraphContext, Node } from '@/types/graph';
@@ -40,6 +41,12 @@ export function generateBfsExampleQuery(
   context: GraphContext | null | undefined,
   displayedNodes: readonly Node[] = [],
 ): string {
+  // A REST connection's query language is its own — every Cypher shape below
+  // would be gibberish to it. Its spec ships the example instead.
+  if (resolveDatasourceType(context) === 'rest') {
+    return resolveDatasourceDescriptor(context).copy.exampleQuery || '';
+  }
+
   const nodeIdCol = context?.node_structure?.node_id_col || 'node_id';
   // A native graph database stores identity outside the property map, so a
   // `{ node_id: "..." }` pattern would match nothing there.

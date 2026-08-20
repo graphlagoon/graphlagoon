@@ -198,7 +198,9 @@ onMounted(async () => {
     // By default we fetch nothing — the implicit "all nodes" subgraph is expensive on large
     // graphs, so the user runs the query they actually want. A context opts in via
     // default_behaviors: { autoLoadOnOpen: true }.
-    if (graphStore.behaviors.autoLoadOnOpen) {
+    // supportsSubgraph: a REST connection without a subgraph handler cannot
+    // serve the implicit load — open empty and let the user run a query.
+    if (graphStore.behaviors.autoLoadOnOpen && graphStore.supportsSubgraph) {
       await graphStore.loadSubgraph({});
     }
     // Clear clusters and rebuild programs (built-in defaults + this context's programs)
@@ -233,7 +235,7 @@ watch(
     await graphStore.loadContext(newId);
     // loadContext re-resolves behaviors from the new context, so this honours the context
     // being switched TO, not the one being left.
-    if (graphStore.behaviors.autoLoadOnOpen) {
+    if (graphStore.behaviors.autoLoadOnOpen && graphStore.supportsSubgraph) {
       await graphStore.loadSubgraph({});
     }
   }

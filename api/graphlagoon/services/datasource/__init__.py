@@ -18,6 +18,7 @@ from graphlagoon.services.datasource.base import (
 )
 from graphlagoon.services.datasource.factory import (
     DEFAULT_DATASOURCE_TYPE,
+    available_datasource_connections,
     available_datasource_types,
     close_datasources,
     configure_datasources,
@@ -35,6 +36,7 @@ __all__ = [
     "GraphExecutionFailure",
     "PreparedGraphQuery",
     "UnknownDatasourceError",
+    "available_datasource_connections",
     "available_datasource_types",
     "close_datasources",
     "configure_datasources",

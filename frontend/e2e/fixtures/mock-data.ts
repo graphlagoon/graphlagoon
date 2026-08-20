@@ -110,6 +110,39 @@ export const MOCK_NEPTUNE_CONTEXT = {
   node_properties: [],
 };
 
+/** What the server advertises for a registered REST connection. */
+export const MOCK_REST_CONNECTION = {
+  type: 'rest',
+  name: 'fraud-api',
+  label: 'Fraud Graph Service',
+  kind: 'REST API',
+  tagline: 'Operational · curated subgraph',
+  description: 'Precomputed fraud neighborhoods served by the fraud team.',
+  caveat: 'Carries only the curated fraud subgraph.',
+  query_language: 'FraudQL',
+  query_placeholder: 'accounts linked to case…',
+  example_query: 'accounts linked to case 42',
+  capabilities: {
+    expand: true,
+    subgraph: true,
+    fetch_nodes: true,
+    schema_discovery: true,
+  },
+};
+
+export const MOCK_REST_CONTEXT = {
+  ...MOCK_CONTEXT,
+  id: 'ctx-rest-1',
+  title: 'Fraud REST Graph',
+  description: 'A context backed by a named REST connection',
+  datasource_type: 'rest',
+  datasource_name: 'fraud-api',
+  edge_table_name: null,
+  node_table_name: null,
+  edge_properties: [],
+  node_properties: [],
+};
+
 export const MOCK_EXPLORATION = {
   id: 'exp-test-1',
   title: 'Test Exploration',

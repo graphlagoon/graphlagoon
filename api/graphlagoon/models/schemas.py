@@ -19,8 +19,10 @@ GraphModel = Literal[
 #
 # "sql_warehouse" is a graph stored as an edge table + a node table, queried by
 # transpiling Cypher to Spark SQL. "neptune" is Amazon Neptune's openCypher
-# endpoint — a native graph database, so it defines no tables at all.
-DatasourceType = Literal["sql_warehouse", "neptune"]
+# endpoint — a native graph database, so it defines no tables at all. "rest" is
+# a dev-registered named connection to an external graph-serving API: the only
+# type with multiple instances, selected by datasource_name.
+DatasourceType = Literal["sql_warehouse", "neptune", "rest"]
 
 # Contexts created before datasources were pluggable are all warehouse contexts,
 # so this default is what keeps every existing context working untouched.
@@ -172,6 +174,9 @@ class GraphContextCreate(BaseModel):
     description: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
     datasource_type: DatasourceType = DEFAULT_DATASOURCE_TYPE
+    # Which named connection a "rest" context uses. Meaningless (and forced to
+    # None) for the single-instance types.
+    datasource_name: Optional[str] = None
     edge_table_name: Optional[str] = None
     node_table_name: Optional[str] = None
     edge_structure: EdgeStructure = Field(default_factory=EdgeStructure)
@@ -213,6 +218,17 @@ class GraphContextCreate(BaseModel):
             self.node_table_name = None
             self.edge_properties = []
             self.node_properties = []
+
+        if self.datasource_type == "rest":
+            # Whether the name is REGISTERED is the router's job (it needs the
+            # registry); that it exists at all is shape validation.
+            if not self.datasource_name or not self.datasource_name.strip():
+                raise ValueError(
+                    "datasource_name is required for rest contexts — it names "
+                    "the registered REST connection to query"
+                )
+        else:
+            self.datasource_name = None
         return self
 
 
@@ -239,6 +255,8 @@ class GraphContextResponse(BaseModel):
     description: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
     datasource_type: DatasourceType = DEFAULT_DATASOURCE_TYPE
+    # Which named connection a "rest" context uses; null for the other types.
+    datasource_name: Optional[str] = None
     # Null for native graph databases, which define no tables.
     edge_table_name: Optional[str] = None
     node_table_name: Optional[str] = None
@@ -733,6 +751,9 @@ class SchemaDiscoveryRequest(BaseModel):
     """
 
     datasource_type: DatasourceType = DEFAULT_DATASOURCE_TYPE
+    # Which named connection a "rest" discovery targets — this endpoint is the
+    # one context-free dispatch, so the instance selector travels in the body.
+    datasource_name: Optional[str] = None
     edge_table: Optional[str] = None
     node_table: Optional[str] = None
     columns: ColumnConfig = Field(default_factory=ColumnConfig)
@@ -745,6 +766,8 @@ class SchemaDiscoveryRequest(BaseModel):
             raise ValueError(
                 "edge_table and node_table are required for sql_warehouse discovery"
             )
+        if self.datasource_type == "rest" and not self.datasource_name:
+            raise ValueError("datasource_name is required for rest discovery")
         return self
 
 

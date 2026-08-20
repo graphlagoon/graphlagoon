@@ -110,6 +110,12 @@ from graphlagoon.similarity import (
     SimilarityEndpointParam,
     register_similarity_endpoint,
 )
+from graphlagoon.services.datasource.rest import (
+    RestConnectionSpec,
+    RestConnectionUI,
+    RestRequest,
+    register_rest_connection,
+)
 
 __all__ = [
     "create_app",
@@ -129,6 +135,10 @@ __all__ = [
     "SimilarityEndpointSpec",
     "SimilarityEndpointParam",
     "register_similarity_endpoint",
+    "RestConnectionSpec",
+    "RestConnectionUI",
+    "RestRequest",
+    "register_rest_connection",
 ]
 
 

@@ -18,6 +18,8 @@ from pydantic import BaseModel
 from graphlagoon.app import create_mountable_app, add_mount_redirect
 from graphlagoon.middleware.auth import AuthMiddleware
 from graphlagoon.similarity import SimilarityEndpointSpec, SimilarityEndpointParam
+from graphlagoon.rest_demo import register_rest_demo
+from graphlagoon.config import get_settings
 
 # Enable debugpy for VSCode debugging
 if os.environ.get("DEBUGPY_ENABLE", "").lower() in ("1", "true"):
@@ -115,6 +117,17 @@ async def dummy_similarity_knn(request: DummySimilarityRequest):
     return {"edges": edges}
 
 
+# Demo REST connections (see graphlagoon/rest_demo.py): a REST facade mounted
+# on this host that executes real openCypher against the Neptune endpoint —
+# locally, the emulator + seeded Neo4j from `make dev-neptune`. Registered
+# only when that endpoint exists; a card that fails on first query would be
+# worse than no card.
+# Gate on Settings, not raw os.environ: the endpoint may live in api/.env,
+# which pydantic-settings reads without populating the process environment.
+_REST_DEMO_CONNECTIONS = (
+    register_rest_demo(app) if get_settings().neptune_enabled else []
+)
+
 # Create and mount Graph Lagoon
 graphlagoon_app = create_mountable_app(
     mount_prefix="/graphlagoon",
@@ -138,6 +151,7 @@ graphlagoon_app = create_mountable_app(
             ],
         ),
     ],
+    rest_connections=_REST_DEMO_CONNECTIONS,
 )
 
 add_mount_redirect(app, "/graphlagoon")

@@ -53,6 +53,46 @@ export function createNeptuneGraphContext(
   })
 }
 
+/** A context backed by a named REST connection — no tables, no columns. */
+export function createRestGraphContext(
+  overrides: Partial<GraphContext> = {},
+): GraphContext {
+  return createGraphContext({
+    id: 'ctx-rest-1',
+    title: 'REST Context',
+    datasource_type: 'rest',
+    datasource_name: 'fraud-api',
+    edge_table_name: null,
+    node_table_name: null,
+    edge_properties: [],
+    node_properties: [],
+    ...overrides,
+  })
+}
+
+/** The config entry the server advertises for the fixture connection above. */
+export function createRestConnectionConfig(overrides: Record<string, any> = {}) {
+  return {
+    type: 'rest' as const,
+    name: 'fraud-api',
+    label: 'Fraud Graph Service',
+    kind: 'REST API',
+    tagline: 'Operational · curated subgraph',
+    description: 'Precomputed fraud neighborhoods served by the fraud team.',
+    caveat: 'Carries only the curated fraud subgraph.',
+    query_language: 'FraudQL',
+    query_placeholder: 'accounts linked to case…',
+    example_query: 'accounts linked to case 42',
+    capabilities: {
+      expand: true,
+      subgraph: true,
+      fetch_nodes: true,
+      schema_discovery: true,
+    },
+    ...overrides,
+  }
+}
+
 export function createExplorationState(overrides: Partial<ExplorationState> = {}): ExplorationState {
   return {
     nodes: [],

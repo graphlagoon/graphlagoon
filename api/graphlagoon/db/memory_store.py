@@ -39,6 +39,8 @@ class MemoryGraphContext:
     node_table_name: Optional[str]
     owner_email: str
     datasource_type: str = "sql_warehouse"
+    # Named connection for "rest" contexts; None for the single-instance types.
+    datasource_name: Optional[str] = None
     description: Optional[str] = None
     tags: List[str] = field(default_factory=list)
     edge_structure: Dict[str, str] = field(
@@ -140,6 +142,7 @@ class InMemoryStore:
         node_table_name: Optional[str],
         owner_email: str,
         datasource_type: str = "sql_warehouse",
+        datasource_name: Optional[str] = None,
         description: Optional[str] = None,
         tags: Optional[List[str]] = None,
         edge_structure: Optional[Dict[str, str]] = None,
@@ -160,6 +163,7 @@ class InMemoryStore:
             node_table_name=node_table_name,
             owner_email=owner_email,
             datasource_type=datasource_type,
+            datasource_name=datasource_name,
             description=description,
             tags=tags or [],
             edge_structure=edge_structure

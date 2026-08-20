@@ -49,7 +49,7 @@ def _get_settings() -> "Settings":
     return get_settings()
 
 
-def _build(type_name: str) -> GraphDatasource:
+def _build(type_name: str, name: Optional[str] = None) -> GraphDatasource:
     if type_name == "sql_warehouse":
         from graphlagoon.services.datasource.sql_warehouse import SqlWarehouseDatasource
 
@@ -66,17 +66,37 @@ def _build(type_name: str) -> GraphDatasource:
 
         return NeptuneDatasource.from_settings(settings)
 
+    if type_name == "rest":
+        from graphlagoon.services.datasource.rest import (
+            RestDatasource,
+            get_rest_connection,
+        )
+
+        spec = get_rest_connection(name) if name else None
+        if spec is None:
+            raise DatasourceNotConfiguredError(
+                f"REST connection '{name}' is not registered on this server. "
+                f"Register it with create_mountable_app(rest_connections=[...])."
+            )
+        return RestDatasource(spec)
+
     raise UnknownDatasourceError(f"Unknown datasource type: '{type_name}'")
 
 
-def get_datasource(type_name: str) -> GraphDatasource:
-    """Return the configured datasource for a type (lazy singleton)."""
-    existing = _datasources.get(type_name)
+def get_datasource(type_name: str, name: Optional[str] = None) -> GraphDatasource:
+    """Return the configured datasource for a type (lazy singleton).
+
+    ``rest`` is the one type with named instances — ``name`` selects the
+    connection, and each connection gets its own singleton (its own HTTP
+    client, its own spec). The other types ignore ``name``.
+    """
+    key = f"rest:{name}" if type_name == "rest" else type_name
+    existing = _datasources.get(key)
     if existing is not None:
         return existing
 
-    datasource = _build(type_name)
-    _datasources[type_name] = datasource
+    datasource = _build(type_name, name)
+    _datasources[key] = datasource
     return datasource
 
 
@@ -87,12 +107,16 @@ def get_datasource_for_context(context) -> GraphDatasource:
     created before this attribute existed carry no value at all, and test
     doubles built from ``MagicMock`` auto-generate a truthy attribute for every
     name asked of them. Both describe a context that has not chosen a backend,
-    which is exactly what the default is for.
+    which is exactly what the default is for. The same guard applies to
+    ``datasource_name`` for the identical reason.
     """
     type_name = getattr(context, "datasource_type", None)
     if not isinstance(type_name, str) or not type_name:
         type_name = DEFAULT_DATASOURCE_TYPE
-    return get_datasource(type_name)
+    name = getattr(context, "datasource_name", None)
+    if not isinstance(name, str) or not name:
+        name = None
+    return get_datasource(type_name, name)
 
 
 def available_datasource_types() -> dict[str, bool]:
@@ -107,6 +131,20 @@ def available_datasource_types() -> dict[str, bool]:
         "sql_warehouse": True,
         "neptune": bool(getattr(settings, "neptune_enabled", False)),
     }
+
+
+def available_datasource_connections() -> list[dict]:
+    """Named datasource instances this server can serve, for ``GET /api/config``.
+
+    One entry per registered REST connection: UI copy plus the per-connection
+    operation flags, and nothing else — transport and auth stay in-process.
+    Kept separate from :func:`available_datasource_types` (a frozen
+    ``{type: bool}`` record) so legacy consumers keep their shape while named
+    instances carry the richer payload they need.
+    """
+    from graphlagoon.services.datasource.rest import get_registered_rest_connections
+
+    return [spec.ui_payload() for spec in get_registered_rest_connections()]
 
 
 async def close_datasources() -> None:

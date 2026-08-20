@@ -338,5 +338,8 @@ class TestNeptuneNotConfigured:
         with TestClient(build_app()) as test_client:
             body = test_client.get("/api/config", headers=HEADERS).json()
             assert body["datasources"] == {"sql_warehouse": True, "neptune": False}
+            # Named instances live under their own key; with no REST
+            # connections registered the list is empty, not absent.
+            assert body["datasource_connections"] == []
 
         reset_datasources()
