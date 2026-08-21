@@ -538,6 +538,97 @@ async def get_context(context_id: str):
 
 **Effort:** Medium (3-4 days)
 
+**Partially addressed (2026-08-20):** the named graph cache
+([services/graph_cache.py](api/graphlagoon/services/graph_cache.py)) covers the
+third bullet for the case that mattered most — a query result someone wants to
+reopen, or hand to a colleague, without paying for the query again. It is
+explicit rather than automatic: entries are named and written deliberately, not
+keyed by query text and evicted on a timer. Contexts and catalog metadata are
+still uncached, and `GraphCacheService` is the seam a second, automatic cache
+would implement.
+
+---
+
+### 24. 🟢 Databricks Files-API Client Duplicated
+
+**Location:** [api/graphlagoon/services/blob_storage.py](api/graphlagoon/services/blob_storage.py)
+and [api/graphlagoon/services/snapshot.py](api/graphlagoon/services/snapshot.py)
+
+**Issue:**
+`DatabricksBlobStore` and `DatabricksSnapshotService` carry near-identical copies
+of `_auth_headers` (including the `"Bearer "` strip) and `_check_response` (the
+status→exception taxonomy). `blob_storage.py` is the generalization —
+path-keyed, listable — and `snapshot.py` could become a thin adapter over it.
+
+**Why it was left duplicated:**
+`snapshot.py` sits on the critical path of every exploration open and has **no
+test coverage**. Its error taxonomy is load-bearing: `_persist_snapshot` maps
+`PermissionError`/`TimeoutError`/`OSError` onto distinct HTTP codes, and
+`loadExploration` in the frontend depends on the load path *throwing* to trigger
+its query re-execution fallback. A refactor that flattened one of those into a
+generic `OSError` would silently convert "fall back to re-running the query" into
+"this exploration is broken", with no user-visible upside.
+
+**Recommendation:**
+Write characterization tests for `snapshot.py` first (`httpx.MockTransport`,
+pinning each status→exception mapping and `load()` returning `None` on 404), then
+re-express it over `BlobStore`. `blob_storage.py` was designed to make this
+possible: keys can sit at the volume root, and `load()` already returns `None`
+rather than raising.
+
+**Effort:** Small (1 day, once the characterization tests exist)
+
+---
+
+### 25. 🟡 Snapshot Temp-File Collision on Concurrent Writes
+
+**Location:** [api/graphlagoon/services/snapshot.py](api/graphlagoon/services/snapshot.py)
+(`LocalSnapshotService.save`)
+
+**Issue:**
+```python
+tmp = self._path(eid).with_suffix(".tmp")   # {uuid}.json.gz → {uuid}.json.tmp
+tmp.write_bytes(data)
+tmp.replace(self._path(eid))
+```
+The temp path is derived from the target, so two concurrent saves of the *same*
+exploration share one temp file. Their writes interleave and `replace()`
+publishes a corrupt blob — the atomic-write pattern defeating itself.
+
+Narrow in practice (it needs two overlapping saves of one exploration), but the
+failure is silent data corruption rather than an error.
+
+**Recommendation:**
+Use a unique temp name per write, as `LocalBlobStore._save_sync` does
+(`.tmp-{uuid4().hex}`), and filter dot-prefixed files out of any listing so a
+crashed write cannot surface as a phantom entry.
+
+**Effort:** Trivial (few lines) — bundle with #24.
+
+---
+
+### 26. 🟢 Exploration Snapshots Leak on Context Deletion
+
+**Location:** [api/graphlagoon/routers/graph_contexts.py](api/graphlagoon/routers/graph_contexts.py)
+(`delete_graph_context`)
+
+**Issue:**
+Deleting a context removes its database rows (explorations cascade) but never
+touches the snapshot files those explorations owned, so they accumulate on the
+volume with nothing left pointing at them.
+
+Graph caches got the matching cleanup when they were added
+(`_purge_graph_caches`, best-effort and never able to fail the deletion);
+snapshots did not, because their keys are flat per-exploration UUIDs with no
+per-context prefix to purge — the ids have to be collected before the rows go.
+
+**Recommendation:**
+Collect the exploration ids inside the delete transaction, then delete their
+snapshots after the commit, in the same never-raises style as
+`_delete_snapshot_if_exists`.
+
+**Effort:** Small (half a day)
+
 ---
 
 ## Shared Technical Debts

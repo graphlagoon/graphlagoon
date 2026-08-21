@@ -30,6 +30,7 @@ import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
 import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
 import QueryTemplatesPanel from '@/components/QueryTemplatesPanel.vue';
+import GraphCachePanel from '@/components/GraphCachePanel.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
 import { Info, Settings2, Hexagon, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
 
@@ -67,6 +68,7 @@ const showTextFormatPanel = ref(false);
 const showClusterPrograms = ref(false);
 const showClusterList = ref(false);
 const showTemplatesPanel = ref(false);
+const showGraphCachePanel = ref(false);
 const selectedClusterId = ref<string | null>(null);
 const communityTable = useCommunityTableAction();
 const clusterProgramActions = useClusterProgramMenuActions();
@@ -154,6 +156,87 @@ function updateCanvasDimensions() {
   }
 }
 
+function formatCacheDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'at an unknown time' : date.toLocaleString();
+}
+
+/**
+ * Open whatever the URL asks for: a named cache, an exploration, or neither.
+ *
+ * A cache failing here deliberately does NOT fall through to the default load —
+ * a mistyped or deleted link must surface as an error, not silently launch an
+ * expensive warehouse query the user never asked for.
+ */
+async function loadFromRoute(contextId: string) {
+  const cacheName = route.query.graph as string | undefined;
+  const explorationId = route.query.exploration as string | undefined;
+
+  await loadGraphFromRoute(contextId, cacheName, explorationId);
+  await applyStyleFromRoute(contextId);
+}
+
+/**
+ * Apply `?style=<name>` on top of whatever graph just loaded.
+ *
+ * Runs last, so it wins over the look an exploration restored — the URL is the
+ * more specific instruction. A preset that does not exist changes nothing and
+ * leaves the graph fully usable; the store records why and the status bar says
+ * so, because a silent no-op would make a broken link look like a working one.
+ */
+async function applyStyleFromRoute(contextId: string) {
+  const styleName = route.query.style as string | undefined;
+  if (!styleName) return;
+  await graphStore.loadStylePreset(contextId, styleName);
+}
+
+async function loadGraphFromRoute(
+  contextId: string,
+  cacheName: string | undefined,
+  explorationId: string | undefined,
+) {
+
+  if (cacheName) {
+    if (explorationId) {
+      console.warn(
+        '[graph] URL carries both ?graph and ?exploration; loading the exploration.',
+      );
+    } else {
+      try {
+        await graphStore.loadGraphCache(contextId, cacheName);
+      } catch {
+        // graphStore.queryError already carries the message for the UI.
+      }
+      clusterStore.clearAll();
+      communityStore.clearCommunities();
+      return;
+    }
+  }
+
+  if (explorationId) {
+    // Loads the exploration with its saved clusters and programs. This
+    // re-executes the saved graph_query, so we DON'T call loadSubgraph first
+    // (otherwise we'd load all nodes, but clusters were created for the query
+    // result only).
+    await graphStore.loadExploration(explorationId);
+    return;
+  }
+
+  // Starting a new context. By default we fetch nothing — the implicit "all
+  // nodes" subgraph is expensive on large graphs, so the user runs the query
+  // they actually want. A context opts in via default_behaviors:
+  // { autoLoadOnOpen: true }.
+  // supportsSubgraph: a REST connection without a subgraph handler cannot serve
+  // the implicit load — open empty and let the user run a query.
+  if (graphStore.behaviors.autoLoadOnOpen && graphStore.supportsSubgraph) {
+    await graphStore.loadSubgraph({});
+  }
+  clusterStore.clearAll();
+  communityStore.clearCommunities();
+  // Clear graph query - user must execute a query to save exploration
+  graphStore.graphQuery = '';
+}
+
 onMounted(async () => {
   // Register toolbar handlers for the global Toolbar component
   toolbarStore.registerHandlers({
@@ -165,6 +248,7 @@ onMounted(async () => {
     onToggleLabels: () => { showTextFormatPanel.value = !showTextFormatPanel.value; toolbarStore.setPanelActive('labels', showTextFormatPanel.value); },
     onToggleClusterPrograms: () => { showClusterPrograms.value = !showClusterPrograms.value; toolbarStore.setPanelActive('clusters', showClusterPrograms.value); },
     onToggleTemplates: () => { showTemplatesPanel.value = !showTemplatesPanel.value; toolbarStore.setPanelActive('templates', showTemplatesPanel.value); },
+    onToggleGraphCache: () => { showGraphCachePanel.value = !showGraphCachePanel.value; toolbarStore.setPanelActive('graphCache', showGraphCachePanel.value); },
     onExportPNG: handleExportPNG,
   });
 
@@ -185,30 +269,7 @@ onMounted(async () => {
   }
 
   await graphStore.loadContext(props.contextId);
-
-  // Load exploration if specified
-  const explorationId = route.query.exploration as string;
-  if (explorationId) {
-    // Load exploration with its saved clusters and programs
-    // This will re-execute the saved graph_query, so we DON'T call loadSubgraph first
-    // (otherwise we'd load all nodes, but clusters were created for the query result only)
-    await graphStore.loadExploration(explorationId);
-  } else {
-    // Starting a new context (not loading an exploration).
-    // By default we fetch nothing — the implicit "all nodes" subgraph is expensive on large
-    // graphs, so the user runs the query they actually want. A context opts in via
-    // default_behaviors: { autoLoadOnOpen: true }.
-    // supportsSubgraph: a REST connection without a subgraph handler cannot
-    // serve the implicit load — open empty and let the user run a query.
-    if (graphStore.behaviors.autoLoadOnOpen && graphStore.supportsSubgraph) {
-      await graphStore.loadSubgraph({});
-    }
-    // Clear clusters and rebuild programs (built-in defaults + this context's programs)
-    clusterStore.clearAll();
-    communityStore.clearCommunities();
-    // Clear graph query - user must execute a query to save exploration
-    graphStore.graphQuery = '';
-  }
+  await loadFromRoute(props.contextId);
 });
 
 onUnmounted(() => {
@@ -235,9 +296,35 @@ watch(
     await graphStore.loadContext(newId);
     // loadContext re-resolves behaviors from the new context, so this honours the context
     // being switched TO, not the one being left.
-    if (graphStore.behaviors.autoLoadOnOpen && graphStore.supportsSubgraph) {
-      await graphStore.loadSubgraph({});
+    await loadFromRoute(newId);
+  }
+);
+
+// The cache name lives in the query string, which `props: true` does not track —
+// switching caches from the panel changes only the query, so without this watcher
+// the graph would not reload.
+watch(
+  () => route.query.graph,
+  async (name, previous) => {
+    if (name === previous) return;
+    if (!graphStore.currentContext) return;
+    await loadFromRoute(props.contextId);
+  }
+);
+
+// A style change is cheaper than a graph change: re-applying the preset is
+// enough, and re-running loadFromRoute would needlessly reload the graph too.
+watch(
+  () => route.query.style,
+  async (name, previous) => {
+    if (name === previous) return;
+    if (!graphStore.currentContext) return;
+    if (!name) {
+      graphStore.currentStylePreset = null;
+      graphStore.stylePresetError = null;
+      return;
     }
+    await applyStyleFromRoute(props.contextId);
   }
 );
 </script>
@@ -257,6 +344,7 @@ watch(
       <TextFormatPanel v-if="showTextFormatPanel" @close="showTextFormatPanel = false; toolbarStore.setPanelActive('labels', false)" />
       <ClusterProgramPanel v-if="showClusterPrograms" @close="showClusterPrograms = false; toolbarStore.setPanelActive('clusters', false)" />
       <QueryTemplatesPanel v-if="showTemplatesPanel" @close="showTemplatesPanel = false; toolbarStore.setPanelActive('templates', false)" />
+      <GraphCachePanel v-if="showGraphCachePanel" @close="showGraphCachePanel = false; toolbarStore.setPanelActive('graphCache', false)" />
 
       <div class="graph-container" data-testid="graph-container">
         <div v-if="graphStore.loading" class="loading-overlay" data-testid="graph-loading">
@@ -420,6 +508,36 @@ watch(
             title="The edge limit was reached — this graph is a partial view. Raise the limit or narrow the query to see more."
           >
             ⚠ truncated
+          </span>
+          <!-- Replayed from a named cache rather than queried just now. The
+               graph may not reflect the current state of the warehouse, so say
+               so where the other qualifiers about this graph already live. -->
+          <span
+            v-if="graphStore.currentGraphCache"
+            class="status-cached"
+            data-testid="graph-status-cached"
+            :title="`Cached graph, saved ${formatCacheDate(graphStore.currentGraphCache.created_at)} by ${graphStore.currentGraphCache.created_by}. It does not reflect changes made since.`"
+          >
+            cached: {{ graphStore.currentGraphCache.name }}
+          </span>
+          <!-- Which named look is on, when the URL asked for one. -->
+          <span
+            v-if="graphStore.currentStylePreset"
+            class="status-styled"
+            data-testid="graph-status-style"
+            :title="`Style preset “${graphStore.currentStylePreset.name}”, saved by ${graphStore.currentStylePreset.created_by}`"
+          >
+            style: {{ graphStore.currentStylePreset.name }}
+          </span>
+          <!-- A preset the URL named but could not be applied. The graph is
+               unaffected, so this is a notice rather than an error state. -->
+          <span
+            v-else-if="graphStore.stylePresetError"
+            class="status-style-error"
+            data-testid="graph-status-style-error"
+            :title="graphStore.stylePresetError"
+          >
+            style not applied
           </span>
         </div>
       </div>
@@ -621,6 +739,21 @@ watch(
 
 /* Truncation, unlike enrichment, changes what conclusions the graph supports —
    so it gets colour rather than fading into the status bar. */
+.status-styled {
+  color: var(--primary-color, #007bff);
+  font-weight: 600;
+}
+
+.status-style-error {
+  color: var(--warning-color, #b8860b);
+  font-weight: 600;
+}
+
+.status-cached {
+  color: var(--primary-color, #007bff);
+  font-weight: 600;
+}
+
 .status-truncated {
   color: var(--warning-color, #b45309);
   font-weight: 600;

@@ -621,3 +621,227 @@ export async function setupAPIErrorMocks(page: Page) {
     });
   });
 }
+
+/**
+ * Serve named graph caches for one context. Call AFTER setupAPIMocks — later
+ * routes take precedence.
+ *
+ * `entries` maps a cache name to the graph it replays. There is no listing
+ * route because the API has none: caches are addressed by name. Writes and
+ * deletes mutate the same map, so a spec can walk the whole round trip without
+ * a backend.
+ */
+export async function seedGraphCaches(
+  page: Page,
+  contextId: string,
+  entries: Record<string, { nodes: any[]; edges: any[]; truncated?: boolean }>,
+) {
+  const store: Record<string, any> = {};
+
+  const wrap = (name: string, graph: any, source?: any) => ({
+    cache_version: 1,
+    name,
+    context_id: contextId,
+    created_at: '2026-08-20T12:00:00.000Z',
+    created_by: 'e2e@test.com',
+    node_count: graph?.nodes?.length ?? 0,
+    edge_count: graph?.edges?.length ?? 0,
+    properties_complete: true,
+    source: source ?? { kind: 'cypher', query: 'MATCH (n) RETURN n' },
+    graph: {
+      nodes: graph.nodes,
+      edges: graph.edges,
+      truncated: graph.truncated ?? false,
+      properties_deferred: false,
+    },
+  });
+
+  for (const [name, graph] of Object.entries(entries)) {
+    store[name] = wrap(name, graph);
+  }
+
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/${contextId}/graph-cache/*`,
+    (route) => {
+      const method = route.request().method();
+      const name = decodeURIComponent(
+        route.request().url().split('/graph-cache/')[1].split('?')[0],
+      );
+
+      if (method === 'GET') {
+        if (!store[name]) {
+          route.fulfill({
+            status: 404,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              detail: {
+                error: {
+                  code: 'GRAPH_CACHE_NOT_FOUND',
+                  message: `No cached graph named '${name}' for this context.`,
+                  details: {},
+                },
+              },
+            }),
+          });
+          return;
+        }
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(store[name]),
+        });
+        return;
+      }
+
+      if (method === 'PUT') {
+        const body = JSON.parse(route.request().postData() || '{}');
+        store[name] = wrap(name, body.graph, body.source);
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            name,
+            size_bytes: JSON.stringify(store[name]).length,
+            modified_at: store[name].created_at,
+          }),
+        });
+        return;
+      }
+
+      if (method === 'DELETE') {
+        // Idempotent, like the API: without a listing there is no way to check
+        // first, so a delete of something absent must still succeed.
+        delete store[name];
+        route.fulfill({ status: 204, body: '' });
+        return;
+      }
+
+      route.continue();
+    },
+  );
+}
+
+/**
+ * Serve named style presets for one context. Call AFTER setupAPIMocks.
+ *
+ * Unlike graph caches these do have a listing route, because presets are
+ * hand-authored and bounded. `owners` optionally maps a preset name to the
+ * email that created it, so a spec can exercise the creator-only delete rule.
+ */
+export async function seedStylePresets(
+  page: Page,
+  contextId: string,
+  entries: Record<string, Record<string, any>>,
+  owners: Record<string, string> = {},
+) {
+  const store: Record<string, any> = {};
+  const ME = 'e2e@test.com';
+
+  const wrap = (name: string, settings: any, description?: string | null) => ({
+    preset_version: 1,
+    name,
+    context_id: contextId,
+    created_at: '2026-08-20T12:00:00.000Z',
+    created_by: owners[name] ?? store[name]?.created_by ?? ME,
+    updated_at: null,
+    description: description ?? null,
+    settings,
+  });
+
+  for (const [name, settings] of Object.entries(entries)) {
+    store[name] = wrap(name, settings);
+  }
+
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/${contextId}/style-presets`,
+    (route) => {
+      if (route.request().method() !== 'GET') {
+        route.continue();
+        return;
+      }
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          presets: Object.values(store).map((p: any) => ({
+            name: p.name,
+            size_bytes: JSON.stringify(p).length,
+            modified_at: p.created_at,
+          })),
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/${contextId}/style-presets/*`,
+    (route) => {
+      const method = route.request().method();
+      const name = decodeURIComponent(
+        route.request().url().split('/style-presets/')[1].split('?')[0],
+      );
+
+      const notFound = () =>
+        route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            detail: {
+              error: {
+                code: 'STYLE_PRESET_NOT_FOUND',
+                message: `No style preset named '${name}' for this context.`,
+                details: {},
+              },
+            },
+          }),
+        });
+
+      if (method === 'GET') {
+        if (!store[name]) return notFound();
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(store[name]),
+        });
+        return;
+      }
+
+      if (method === 'PUT') {
+        const body = JSON.parse(route.request().postData() || '{}');
+        store[name] = wrap(name, body.settings, body.description);
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(store[name]),
+        });
+        return;
+      }
+
+      if (method === 'DELETE') {
+        const owner = store[name]?.created_by;
+        // Mirrors the real rule: only the creator may remove a preset.
+        if (owner && owner !== ME) {
+          route.fulfill({
+            status: 403,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              detail: {
+                error: {
+                  code: 'FORBIDDEN',
+                  message: `Style preset '${name}' was created by ${owner}. Only its creator can delete it.`,
+                  details: { created_by: owner },
+                },
+              },
+            }),
+          });
+          return;
+        }
+        delete store[name];
+        route.fulfill({ status: 204, body: '' });
+        return;
+      }
+
+      route.continue();
+    },
+  );
+}

@@ -118,6 +118,53 @@ describe('ApiService', () => {
     })
   })
 
+  describe('Graph cache', () => {
+    it('has no listing method — entries are addressed by name', () => {
+      // Enumerating caches is O(entries) and is the one operation that stops
+      // working as the store grows, so the API deliberately does not offer it.
+      expect((api as unknown as Record<string, unknown>).listGraphCaches).toBeUndefined()
+    })
+
+    it('getGraphCache calls GET /api/graph-contexts/:id/graph-cache/:name', async () => {
+      vi.mocked(mockClient.get).mockResolvedValue({ data: { name: 'c1' } })
+      await api.getGraphCache('ctx-1', 'fraude-2024')
+      expect(mockClient.get).toHaveBeenCalledWith(
+        '/api/graph-contexts/ctx-1/graph-cache/fraude-2024'
+      )
+    })
+
+    it('putGraphCache calls PUT with the graph and its source', async () => {
+      vi.mocked(mockClient.put).mockResolvedValue({ data: { name: 'c1', size_bytes: 1 } })
+      const body = {
+        graph: { nodes: [], edges: [], truncated: false, properties_deferred: false },
+        source: { kind: 'cypher' as const, query: 'MATCH (n) RETURN n' },
+      }
+      await api.putGraphCache('ctx-1', 'c1', body)
+      expect(mockClient.put).toHaveBeenCalledWith(
+        '/api/graph-contexts/ctx-1/graph-cache/c1',
+        body
+      )
+    })
+
+    it('deleteGraphCache calls DELETE /api/graph-contexts/:id/graph-cache/:name', async () => {
+      vi.mocked(mockClient.delete).mockResolvedValue({ data: null })
+      await api.deleteGraphCache('ctx-1', 'c1')
+      expect(mockClient.delete).toHaveBeenCalledWith(
+        '/api/graph-contexts/ctx-1/graph-cache/c1'
+      )
+    })
+
+    it('encodes a name with characters that would change the path', async () => {
+      // The backend rejects such names anyway; encoding keeps a bad name from
+      // silently becoming a different URL on the way there.
+      vi.mocked(mockClient.get).mockResolvedValue({ data: {} })
+      await api.getGraphCache('ctx-1', 'a b')
+      expect(mockClient.get).toHaveBeenCalledWith(
+        '/api/graph-contexts/ctx-1/graph-cache/a%20b'
+      )
+    })
+  })
+
   describe('Exploration CRUD', () => {
     it('getAllExplorations calls GET /api/explorations', async () => {
       const data = [{ id: 'exp-1' }]

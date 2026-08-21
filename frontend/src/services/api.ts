@@ -14,6 +14,13 @@ import type {
   ShareRequest,
   ExplorationState,
   GraphSnapshot,
+  CachedGraph,
+  GraphCacheEntry,
+  GraphCachePayload,
+  GraphCacheSource,
+  StylePreset,
+  StylePresetEntry,
+  StylePresetSettings,
   GraphQueryRequest,
   CypherQueryRequest,
   CypherQueryResponse,
@@ -53,6 +60,14 @@ declare global {
       dev_mode?: boolean;
       database_enabled?: boolean;
       databricks_mode?: boolean;
+      /**
+       * Whether the server serves named graph caches at all. Reading one only
+       * needs context access; creating and deleting additionally need dev mode,
+       * which the UI gates on separately via `devMode`.
+       */
+      graph_cache_enabled?: boolean;
+      /** Whether this server serves named style presets. */
+      style_presets_enabled?: boolean;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
@@ -231,6 +246,76 @@ class ApiService {
   async getExplorationSnapshot(id: string): Promise<GraphSnapshot> {
     const response = await this.client.get(`/api/explorations/${id}/snapshot`);
     return response.data;
+  }
+
+  // Graph cache — named, per-context query results (see types/graph.ts)
+
+  // There is no listGraphCaches: the API has no listing endpoint, because
+  // enumerating entries is O(entries) and is the one operation that stops
+  // working as the store grows. Caches are addressed by name.
+
+  async getGraphCache(
+    contextId: string,
+    name: string
+  ): Promise<GraphCachePayload> {
+    const response = await this.client.get(
+      `/api/graph-contexts/${contextId}/graph-cache/${encodeURIComponent(name)}`
+    );
+    return response.data;
+  }
+
+  async putGraphCache(
+    contextId: string,
+    name: string,
+    data: { graph: CachedGraph; source: GraphCacheSource }
+  ): Promise<GraphCacheEntry> {
+    const response = await this.client.put(
+      `/api/graph-contexts/${contextId}/graph-cache/${encodeURIComponent(name)}`,
+      data
+    );
+    return response.data;
+  }
+
+  async deleteGraphCache(contextId: string, name: string): Promise<void> {
+    await this.client.delete(
+      `/api/graph-contexts/${contextId}/graph-cache/${encodeURIComponent(name)}`
+    );
+  }
+
+  // Style presets — named style + label + layout settings (see types/graph.ts).
+  // Unlike graph caches these are listable: they are hand-authored, so a context
+  // holds a handful, and the count is capped server-side rather than paginated.
+
+  async listStylePresets(contextId: string): Promise<StylePresetEntry[]> {
+    const response = await this.client.get(
+      `/api/graph-contexts/${contextId}/style-presets`
+    );
+    return response.data.presets;
+  }
+
+  async getStylePreset(contextId: string, name: string): Promise<StylePreset> {
+    const response = await this.client.get(
+      `/api/graph-contexts/${contextId}/style-presets/${encodeURIComponent(name)}`
+    );
+    return response.data;
+  }
+
+  async putStylePreset(
+    contextId: string,
+    name: string,
+    data: { settings: StylePresetSettings; description?: string | null }
+  ): Promise<StylePreset> {
+    const response = await this.client.put(
+      `/api/graph-contexts/${contextId}/style-presets/${encodeURIComponent(name)}`,
+      data
+    );
+    return response.data;
+  }
+
+  async deleteStylePreset(contextId: string, name: string): Promise<void> {
+    await this.client.delete(
+      `/api/graph-contexts/${contextId}/style-presets/${encodeURIComponent(name)}`
+    );
   }
 
   async deleteExploration(id: string): Promise<void> {

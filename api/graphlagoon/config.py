@@ -129,6 +129,50 @@ class Settings(BaseSettings):
         "Required when databricks_mode=True and graph snapshots are saved.",
     )
 
+    # Graph cache (named, per-context query results shared by URL)
+    graph_cache_enabled: bool = Field(
+        default=True,
+        description="Enable the named graph cache (read is always allowed; "
+        "writing through the API additionally requires dev_mode)",
+    )
+    graph_cache_dir: str = Field(
+        default="./tmp/graph-cache",
+        description="Local directory for graph cache files "
+        "(used when no cache volume path is configured)",
+    )
+    graph_cache_volume_path: Optional[str] = Field(
+        default=None,
+        description="Databricks Volume path for graph cache storage "
+        "(e.g. /Volumes/catalog/schema/volume/graph-cache). Defaults to a "
+        "'graph-cache' subdirectory of databricks_volume_path when that is set.",
+    )
+    graph_cache_max_bytes: int = Field(
+        default=200 * 1024 * 1024,
+        description="Maximum compressed size of a single graph cache entry, in bytes",
+    )
+
+    # Style presets (named style + label + layout settings, applied by URL)
+    style_presets_enabled: bool = Field(
+        default=True,
+        description="Enable named style presets (style, labels and layout per context)",
+    )
+    style_presets_dir: str = Field(
+        default="./tmp/style-presets",
+        description="Local directory for style preset files "
+        "(used when no preset volume path is configured)",
+    )
+    style_presets_volume_path: Optional[str] = Field(
+        default=None,
+        description="Databricks Volume path for style presets. Defaults to a "
+        "'style-presets' subdirectory of databricks_volume_path when that is set.",
+    )
+    style_presets_max_per_context: int = Field(
+        default=100,
+        description="Maximum presets one context may hold. Presets are listed in "
+        "full for the picker, so the count is bounded at write time rather than "
+        "paginated at read time.",
+    )
+
     # Warehouse timeout settings
     warehouse_http_timeout: float = Field(
         default=300.0,
@@ -216,6 +260,34 @@ class Settings(BaseSettings):
                 )
         if self.neptune_use_iam and not self.neptune_region:
             raise ValueError("neptune_region is required when neptune_use_iam=True")
+
+    @property
+    def style_presets_volume_path_effective(self) -> Optional[str]:
+        """Volume path style presets should use, if any.
+
+        Same fallback rule as the graph cache: a deployment that already
+        configured a volume gets a correct, non-colliding location without
+        another environment variable.
+        """
+        if self.style_presets_volume_path:
+            return self.style_presets_volume_path
+        if self.databricks_volume_path:
+            return f"{self.databricks_volume_path.rstrip('/')}/style-presets"
+        return None
+
+    @property
+    def graph_cache_volume_path_effective(self) -> Optional[str]:
+        """Volume path the graph cache should use, if any.
+
+        Falls back to a 'graph-cache' subdirectory of the snapshot volume, so a
+        deployment that already configured a volume gets a correct, non-colliding
+        location without a second environment variable.
+        """
+        if self.graph_cache_volume_path:
+            return self.graph_cache_volume_path
+        if self.databricks_volume_path:
+            return f"{self.databricks_volume_path.rstrip('/')}/graph-cache"
+        return None
 
     @property
     def neptune_enabled(self) -> bool:

@@ -19,6 +19,10 @@ import type {
   TextFormatState,
   TextFormatDefaults,
   ProceduralBFSOptions,
+  GraphCachePayload,
+  GraphCacheSource,
+  StylePreset,
+  StylePresetSettings,
 } from '@/types/graph';
 import { DEFAULT_PROCEDURAL_BFS_OPTIONS } from '@/types/graph';
 import { api } from '@/services/api';
@@ -148,6 +152,11 @@ export function mergeForce3DSettings(
 export type GraphBehaviors = typeof DEFAULT_BEHAVIORS;
 
 /** Fresh defaults per call — nested objects must never be shared by reference. */
+/** Layout algorithms a saved state may name. Anything else falls back to 'force'. */
+const KNOWN_LAYOUTS: LayoutAlgorithm[] = [
+  'force', 'ego', 'hive', 'hierarchical', 'circular', 'grid',
+];
+
 export function defaultLayoutModeConfig(): LayoutModeConfig {
   return {
     ego: {
@@ -1481,6 +1490,104 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  /**
+   * Replay a named cache into the graph, as if its query had just run.
+   *
+   * Deliberately does not go through `applyGraphResponse`: that function
+   * branches on `partialNodeIds`, and its patch branch updates properties
+   * *without reassigning edges*. If a query job had already drawn a partial
+   * when the cache loads, we would end up with the cache's nodes and the
+   * previous graph's edges. Assigning explicitly, the way `loadSubgraph` does,
+   * has no such failure mode.
+   */
+  async function loadGraphCache(contextId: string, name: string) {
+    loading.value = true;
+    loadingMessage.value = `Loading cached graph “${name}”…`;
+    queryError.value = null;
+    currentGraphCache.value = null;
+    // Deliberately does NOT touch currentStylePreset: a style applies to
+    // whatever graph is on screen, so swapping the graph keeps the look.
+    // Abandon any enrichment still running for the previous graph: its patches
+    // are keyed by node id and would otherwise land on same-named cached nodes.
+    enrichmentToken++;
+    pendingPropertyNodeIds.value.clear();
+    // A cache is never a partial result; forget any partial in flight so the
+    // assignment below cannot be mistaken for one.
+    partialNodeIds = null;
+
+    try {
+      const t0 = performance.now();
+      const payload = await api.getGraphCache(contextId, name);
+      const tFetched = performance.now();
+
+      freshLayoutRequested.value = true;
+      nodes.value = payload.graph.nodes;
+      edges.value = payload.graph.edges;
+      truncated.value = payload.graph.truncated === true;
+      currentGraphCache.value = payload;
+      // Show where the cached graph came from, so the query panel is not blank.
+      graphQuery.value = payload.source.query ?? '';
+
+      recordGraphLoad(
+        'graphCache',
+        payload.graph,
+        tFetched - t0,
+        performance.now() - tFetched,
+      );
+      recordChainRecompute('graphCache');
+      adjustGravityForConnectivity();
+
+      selectedNodeIds.value.clear();
+      selectedEdgeIds.value.clear();
+
+      return payload;
+    } catch (e: unknown) {
+      // Deliberately no fallback to running the query: a broken or mistyped
+      // cache link must not silently launch an expensive warehouse query.
+      queryError.value = extractErrorDetails(e, `Failed to load cached graph “${name}”`);
+      throw e;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
+   * Store the graph currently on screen as a named cache.
+   *
+   * Refuses while properties are still arriving. `shouldLoadProgressively()` is
+   * true whenever a context has no configured `node_properties` — the common
+   * case — so those nodes land with `properties: null` and are filled in later
+   * by /nodes/batch. Caching mid-flight would persist the nulls, and the entry
+   * would replay an empty-looking graph.
+   */
+  async function saveGraphCache(name: string, kind: GraphCacheSource['kind'] = 'manual') {
+    if (!currentContext.value) throw new Error('No graph context loaded');
+    if (!nodes.value.length) throw new Error('Nothing to cache — the graph is empty');
+    if (enriching.value || pendingPropertyNodeIds.value.size > 0) {
+      throw new Error(
+        'Node properties are still loading. Wait for enrichment to finish, ' +
+        'otherwise the cache would store empty properties.'
+      );
+    }
+
+    const descriptor = resolveDatasourceDescriptor(currentContext.value);
+
+    return api.putGraphCache(currentContext.value.id, name, {
+      graph: {
+        nodes: nodes.value,
+        edges: edges.value,
+        truncated: truncated.value,
+        properties_deferred: false,
+      },
+      source: {
+        kind,
+        query: graphQuery.value || null,
+        datasource_type: descriptor.type ?? null,
+        datasource_name: currentContext.value.datasource_name ?? null,
+      },
+    });
+  }
+
   // ── Per-instance operation gates ─────────────────────────────────────
   // Static backends (warehouse, Neptune) support every canned operation, so
   // restOps is undefined there and `!== false` reads true. A REST connection
@@ -1549,6 +1656,15 @@ export const useGraphStore = defineStore('graph', () => {
   let pendingQueryText = '';
   // Node ids drawn from a partial, so the final result can tell "same graph,
   // now with properties" from "different graph" (see applyGraphResponse).
+  /**
+   * The named cache currently on screen, when the view was opened with
+   * `?graph=<name>`. Drives the status-bar chip; null for an ordinary query.
+   */
+  const currentGraphCache = ref<GraphCachePayload | null>(null);
+
+  /** Why the URL's ?style= could not be applied. The graph is unaffected. */
+  const stylePresetError = ref<string | null>(null);
+
   let partialNodeIds: Set<string> | null = null;
 
   /**
@@ -2219,6 +2335,158 @@ export const useGraphStore = defineStore('graph', () => {
     };
   }
 
+  /**
+   * The presentation subset of the store: style, labels and layout.
+   *
+   * Style presets and explorations both persist this, so it lives in one place —
+   * `getExplorationState` spreads it, and both `loadExploration` and
+   * `applyStylePreset` consume it. Two copies would drift apart the first time a
+   * field is added.
+   *
+   * Deliberately excluded: nodes, edges, filters, viewport, the query and its
+   * transpile options, clusters, communities, similarity and behaviors. This
+   * says how a graph *looks*, never which data it shows.
+   */
+  function buildStylePreset(): StylePresetSettings &
+    { layout_algorithm: LayoutAlgorithm } {
+    return {
+      // Style
+      aesthetics: { ...aesthetics.value },
+      nodeTypeColors: nodeTypeColors.value.size > 0
+        ? Object.fromEntries(nodeTypeColors.value)
+        : undefined,
+      edgeTypeColors: edgeTypeColors.value.size > 0
+        ? Object.fromEntries(edgeTypeColors.value)
+        : undefined,
+      nodeTypeIcons: nodeTypeIcons.value.size > 0
+        ? Object.fromEntries(nodeTypeIcons.value)
+        : undefined,
+      edgeTypeIcons: edgeTypeIcons.value.size > 0
+        ? Object.fromEntries(edgeTypeIcons.value)
+        : undefined,
+      nodePropertyIconConfigs: nodePropertyIconConfigs.value.size > 0
+        ? Object.fromEntries(nodePropertyIconConfigs.value)
+        : undefined,
+      // Labels
+      textFormat: getTextFormatState(),
+      // Layout
+      layout_algorithm: layoutAlgorithm.value,
+      layout_mode_config: {
+        ego: { ...layoutModeConfig.value.ego },
+        hive: { ...layoutModeConfig.value.hive },
+        hierarchical: { ...layoutModeConfig.value.hierarchical },
+      },
+      force3d_settings: { ...force3DSettings.value },
+    };
+  }
+
+  /**
+   * Apply saved style, labels and layout to whatever graph is on screen.
+   *
+   * A full replace, not a merge: a field the preset omits resets to its default,
+   * so applying one always produces the look that was saved rather than that
+   * look mixed with whatever happened to be set before. Same semantics
+   * `loadExploration` has always had.
+   *
+   * Touches no nodes or edges, so it is safe before, during or after a graph
+   * load — and a graph loaded later inherits it, because this is store state,
+   * not something derived per query.
+   */
+  function applyStylePreset(settings: StylePresetSettings | undefined) {
+    if (!settings) return;
+
+    // Style
+    if (settings.aesthetics) {
+      aesthetics.value = {
+        ...aesthetics.value,
+        ...settings.aesthetics,
+      } as typeof aesthetics.value;
+    }
+    nodeTypeColors.value = settings.nodeTypeColors
+      ? new Map(Object.entries(settings.nodeTypeColors))
+      : new Map();
+    edgeTypeColors.value = settings.edgeTypeColors
+      ? new Map(Object.entries(settings.edgeTypeColors))
+      : new Map();
+    nodeTypeIcons.value = settings.nodeTypeIcons
+      ? new Map(Object.entries(settings.nodeTypeIcons))
+      : new Map();
+    edgeTypeIcons.value = settings.edgeTypeIcons
+      ? new Map(Object.entries(settings.edgeTypeIcons))
+      : new Map();
+    nodePropertyIconConfigs.value = settings.nodePropertyIconConfigs
+      ? new Map(Object.entries(settings.nodePropertyIconConfigs) as [string, any][])
+      : new Map();
+
+    // Labels
+    loadTextFormatState(settings.textFormat);
+
+    // Layout
+    const savedAlgorithm = settings.layout_algorithm;
+    layoutAlgorithm.value = KNOWN_LAYOUTS.includes(savedAlgorithm as LayoutAlgorithm)
+      ? (savedAlgorithm as LayoutAlgorithm)
+      : 'force';
+    const layoutDefaults = defaultLayoutModeConfig();
+    const savedLayoutConfig = settings.layout_mode_config;
+    layoutModeConfig.value = {
+      ego: { ...layoutDefaults.ego, ...(savedLayoutConfig?.ego ?? {}) },
+      hive: { ...layoutDefaults.hive, ...(savedLayoutConfig?.hive ?? {}) },
+      hierarchical: {
+        ...layoutDefaults.hierarchical,
+        ...(savedLayoutConfig?.hierarchical ?? {}),
+      },
+    };
+    force3DSettings.value = mergeForce3DSettings(settings.force3d_settings);
+
+    // A new layout only takes effect when the simulation restarts.
+    freshLayoutRequested.value = true;
+  }
+
+  /**
+   * The style preset currently applied from the URL, for the status chip.
+   * Null when the look came from anywhere else — an exploration, or the user.
+   */
+  const currentStylePreset = ref<StylePreset | null>(null);
+
+  /**
+   * Fetch a named preset and apply it to the graph.
+   *
+   * A missing preset is not an error the page has to survive: it leaves the
+   * graph exactly as it was and reports through `stylePresetError`. Unlike a
+   * missing `?graph=`, which leaves nothing to look at, a missing `?style=`
+   * costs only the styling — so the view stays usable and merely says so.
+   */
+  async function loadStylePreset(contextId: string, name: string) {
+    stylePresetError.value = null;
+    try {
+      const preset = await api.getStylePreset(contextId, name);
+      applyStylePreset(preset.settings);
+      currentStylePreset.value = preset;
+      return preset;
+    } catch (e: unknown) {
+      currentStylePreset.value = null;
+      // Only the message: a failed preset is a one-line notice, not the
+      // structured query-error panel.
+      stylePresetError.value = extractErrorDetails(
+        e,
+        `Failed to load style preset “${name}”`,
+      ).message;
+      return null;
+    }
+  }
+
+  /** Save the current look under a name. Overwriting keeps the original author. */
+  async function saveStylePreset(name: string, description?: string) {
+    if (!currentContext.value) throw new Error('No graph context loaded');
+    const preset = await api.putStylePreset(currentContext.value.id, name, {
+      settings: buildStylePreset(),
+      description: description || null,
+    });
+    // Saving the look you are already looking at makes it the active one.
+    currentStylePreset.value = preset;
+    return preset;
+  }
+
   function getExplorationState(): ExplorationState {
     const clusterStore = useClusterStore();
     const communityStore = useCommunityStore();
@@ -2230,12 +2498,6 @@ export const useGraphStore = defineStore('graph', () => {
       edges: [],
       filters: { ...filters.value },
       viewport: { ...viewport.value },
-      layout_algorithm: layoutAlgorithm.value,
-      layout_mode_config: {
-        ego: { ...layoutModeConfig.value.ego },
-        hive: { ...layoutModeConfig.value.hive },
-        hierarchical: { ...layoutModeConfig.value.hierarchical },
-      },
       graph_query: graphQuery.value || undefined,
       cte_prefilter: ctePrefilter.value || undefined,
       vlp_rendering_mode: vlpRenderingMode.value,
@@ -2243,28 +2505,13 @@ export const useGraphStore = defineStore('graph', () => {
       procedural_optimizations: { ...proceduralOptimizations.value },
       cte_fallback_enabled: cteFallbackEnabled.value,
       cte_fallback_silent: cteFallbackSilent.value,
-      textFormat: getTextFormatState(),
       // Cluster state: clusters/executions + exploration-scoped programs only.
       // Context-scoped programs live on graph_contexts.cluster_programs.
       clusters: clusterStore.getState() as any,
-      nodeTypeIcons: nodeTypeIcons.value.size > 0
-        ? Object.fromEntries(nodeTypeIcons.value)
-        : undefined,
-      nodePropertyIconConfigs: nodePropertyIconConfigs.value.size > 0
-        ? Object.fromEntries(nodePropertyIconConfigs.value)
-        : undefined,
-      nodeTypeColors: nodeTypeColors.value.size > 0
-        ? Object.fromEntries(nodeTypeColors.value)
-        : undefined,
-      edgeTypeColors: edgeTypeColors.value.size > 0
-        ? Object.fromEntries(edgeTypeColors.value)
-        : undefined,
-      edgeTypeIcons: edgeTypeIcons.value.size > 0
-        ? Object.fromEntries(edgeTypeIcons.value)
-        : undefined,
       behaviors: { ...behaviors.value },
-      aesthetics: { ...aesthetics.value },
-      force3d_settings: { ...force3DSettings.value },
+      // Style, labels and layout — the same block a style preset stores, so the
+      // two can never describe the same thing differently.
+      ...buildStylePreset(),
       community: communityStore.getState(),
       similarity: similarityStore.getState(),
     };
@@ -2393,19 +2640,11 @@ export const useGraphStore = defineStore('graph', () => {
       viewport.value = exploration.state.viewport;
       // Backwards compat: old explorations saved legacy values ('force-atlas-2',
       // 'forceAtlas2', ...) the renderer never read — any unknown value maps to 'force'
-      const savedAlgorithm = exploration.state.layout_algorithm as string | undefined;
-      const KNOWN_LAYOUTS: LayoutAlgorithm[] = ['force', 'ego', 'hive', 'hierarchical', 'circular', 'grid'];
-      layoutAlgorithm.value = KNOWN_LAYOUTS.includes(savedAlgorithm as LayoutAlgorithm)
-        ? (savedAlgorithm as LayoutAlgorithm)
-        : 'force';
-      const savedLayoutConfig = exploration.state.layout_mode_config;
-      const layoutDefaults = defaultLayoutModeConfig();
-      layoutModeConfig.value = {
-        ego: { ...layoutDefaults.ego, ...(savedLayoutConfig?.ego ?? {}) },
-        hive: { ...layoutDefaults.hive, ...(savedLayoutConfig?.hive ?? {}) },
-        hierarchical: { ...layoutDefaults.hierarchical, ...(savedLayoutConfig?.hierarchical ?? {}) },
-      };
-      force3DSettings.value = mergeForce3DSettings(exploration.state.force3d_settings);
+      // Style, labels and layout — the same block a style preset carries, applied
+      // by the same code, so an exploration and a preset can never restore the
+      // same settings differently.
+      applyStylePreset(exploration.state);
+
       graphQuery.value = exploration.state.graph_query || '';
       ctePrefilter.value = exploration.state.cte_prefilter || '';
       vlpRenderingMode.value = exploration.state.vlp_rendering_mode || 'procedural';
@@ -2419,44 +2658,16 @@ export const useGraphStore = defineStore('graph', () => {
       cteFallbackEnabled.value = exploration.state.cte_fallback_enabled ?? true;
       cteFallbackSilent.value = exploration.state.cte_fallback_silent ?? true;
 
-      // Load text format state (with backwards compatibility)
-      loadTextFormatState(exploration.state.textFormat);
-
       // Load cluster state (always, even if undefined to clear clusters/executions).
       // Programs are context-level and survive this; the exploration only
       // contributes its exploration-scoped programs (legacy ones are imported).
       const clusterStore = useClusterStore();
       clusterStore.loadState(exploration.state.clusters);
 
-      // Load node type icons (backwards compatible)
-      nodeTypeIcons.value = exploration.state.nodeTypeIcons
-        ? new Map(Object.entries(exploration.state.nodeTypeIcons))
-        : new Map();
-
-      // Load property icon configs (backwards compatible)
-      nodePropertyIconConfigs.value = exploration.state.nodePropertyIconConfigs
-        ? new Map(Object.entries(exploration.state.nodePropertyIconConfigs))
-        : new Map();
-
-      // Load type colors (backwards compatible)
-      nodeTypeColors.value = exploration.state.nodeTypeColors
-        ? new Map(Object.entries(exploration.state.nodeTypeColors))
-        : new Map();
-      edgeTypeColors.value = exploration.state.edgeTypeColors
-        ? new Map(Object.entries(exploration.state.edgeTypeColors))
-        : new Map();
-
-      // Load edge type icons (backwards compatible)
-      edgeTypeIcons.value = exploration.state.edgeTypeIcons
-        ? new Map(Object.entries(exploration.state.edgeTypeIcons))
-        : new Map();
-
-      // Load behaviors and aesthetics (backwards compatible — merge with defaults)
+      // Behaviors are not part of a style preset — they govern how the app
+      // fetches, not how the graph looks — so they stay here.
       if (exploration.state.behaviors) {
         behaviors.value = { ...behaviors.value, ...exploration.state.behaviors } as typeof behaviors.value;
-      }
-      if (exploration.state.aesthetics) {
-        aesthetics.value = { ...aesthetics.value, ...exploration.state.aesthetics } as typeof aesthetics.value;
       }
 
       // Load graph data: snapshot first (fast, includes expanded nodes),
@@ -2526,6 +2737,9 @@ export const useGraphStore = defineStore('graph', () => {
     edges.value = [];
     currentContext.value = null;
     currentExploration.value = null;
+    currentGraphCache.value = null;
+    currentStylePreset.value = null;
+    stylePresetError.value = null;
     // Abandon in-flight enrichment: its patches would target a graph that no
     // longer exists.
     enrichmentToken++;
@@ -2567,6 +2781,9 @@ export const useGraphStore = defineStore('graph', () => {
     edges,
     currentContext,
     currentExploration,
+    currentGraphCache,
+    currentStylePreset,
+    stylePresetError,
     selectedNodeIds,
     selectedEdgeIds,
     loading,
@@ -2640,6 +2857,12 @@ export const useGraphStore = defineStore('graph', () => {
     // Actions
     loadContext,
     loadSubgraph,
+    loadGraphCache,
+    saveGraphCache,
+    loadStylePreset,
+    saveStylePreset,
+    buildStylePreset,
+    applyStylePreset,
     expandFromNode,
     supportsExpand,
     supportsSubgraph,

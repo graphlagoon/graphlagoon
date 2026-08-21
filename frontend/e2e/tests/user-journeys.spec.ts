@@ -7,7 +7,7 @@
  */
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
-import { seedContexts, seedExplorations, mockSchemaDrift } from '../helpers/api-mocks';
+import { seedContexts, seedExplorations, mockSchemaDrift, seedGraphCaches } from '../helpers/api-mocks';
 
 test.describe('User Journeys', () => {
   // ---------------------------------------------------------------------------
@@ -166,5 +166,36 @@ test.describe('User Journeys', () => {
     await page.getByRole('button', { name: 'Open' }).click();
     await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Journey: Graph → save a cache → share its link → open it fresh
+  // ---------------------------------------------------------------------------
+  test('user caches the current graph and reopens it from its own link', async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedGraphCaches(page, MOCK_CONTEXT.id, {});
+
+    // Open the context normally — this is a live graph, not a cache yet.
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    const statusBar = page.getByTestId('graph-status-bar');
+    await expect(statusBar).toBeVisible({ timeout: 15_000 });
+    await expect(statusBar).toContainText('5 nodes');
+    await expect(page.getByTestId('graph-status-cached')).toHaveCount(0);
+
+    // Save it under a name (dev-only affordance).
+    await page.getByTestId('toolbar-graph-cache').click();
+    await page.getByTestId('graph-cache-name-input').fill('investigacao-agosto');
+    await page.getByTestId('graph-cache-save-button').click();
+    // The panel hands back the link at save time — nothing lists caches later.
+    await expect(page.getByTestId('graph-cache-last-saved')).toContainText(
+      '?graph=investigacao-agosto',
+    );
+
+    // Reopen from the URL alone, as a colleague following a shared link would.
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?graph=investigacao-agosto`);
+
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('graph-status-bar')).toContainText('5 nodes');
+    await expect(page.getByTestId('graph-status-cached')).toContainText('investigacao-agosto');
   });
 });
