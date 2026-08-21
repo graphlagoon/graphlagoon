@@ -32,13 +32,13 @@ export interface ClusterProgramSkillInput {
 }
 
 /** Render a list of values as a bullet list, or a placeholder when empty. */
-function bulletList(values: string[], emptyText: string): string {
+export function bulletList(values: string[], emptyText: string): string {
   if (values.length === 0) return `  (${emptyText})`
   return values.map((v) => `  - ${v}`).join('\n')
 }
 
 /** Render property columns as `name (data_type) — description` bullets. */
-function propertyList(props: SkillProperty[], emptyText: string): string {
+export function propertyList(props: SkillProperty[], emptyText: string): string {
   if (props.length === 0) return `  (${emptyText})`
   return props
     .map((p) => {

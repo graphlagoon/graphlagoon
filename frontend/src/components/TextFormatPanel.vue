@@ -3,6 +3,15 @@
     <div class="panel-header">
       <h3>Labels</h3>
       <div class="header-actions">
+        <button
+          class="btn-icon-only btn-skill-ai"
+          data-testid="label-skill-help"
+          title="Ask an AI to write label templates"
+          aria-label="Ask an AI to write label templates"
+          @click="showSkill = true"
+        >
+          <Bot :size="16" />
+        </button>
         <button class="btn-icon-only" @click="showHelp = true" title="Help"><HelpCircle :size="16" /></button>
         <button class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
@@ -196,6 +205,9 @@
 
     <!-- Help Modal -->
     <TextFormatHelpModal v-model="showHelp" />
+
+    <!-- AI skill helper modal -->
+    <LabelTemplateSkillModal v-model="showSkill" />
   </div>
 </template>
 
@@ -205,7 +217,8 @@ import { useGraphStore } from '@/stores/graph';
 import type { TextFormatRule, TextFormatScope } from '@/types/graph';
 import { getAvailablePlaceholders, getAvailableModifiers, validateTemplate } from '@/utils/labelFormatter';
 import TextFormatHelpModal from './TextFormatHelpModal.vue';
-import { X, HelpCircle } from 'lucide-vue-next';
+import LabelTemplateSkillModal from './LabelTemplateSkillModal.vue';
+import { X, HelpCircle, Bot } from 'lucide-vue-next';
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -215,6 +228,9 @@ const graphStore = useGraphStore();
 
 // Help modal
 const showHelp = ref(false);
+
+// AI skill helper modal
+const showSkill = ref(false);
 
 // Default templates (synced with store)
 const nodeDefaultTemplate = ref(graphStore.textFormatDefaults.nodeTemplate);
@@ -526,6 +542,15 @@ function deleteRule(ruleId: string) {
 .header-actions {
   display: flex;
   gap: 4px;
+}
+
+.btn-skill-ai {
+  color: #409eff;
+}
+
+.btn-skill-ai:hover {
+  background-color: #ecf5ff;
+  color: #3a8ee6;
 }
 
 .btn-sm {
