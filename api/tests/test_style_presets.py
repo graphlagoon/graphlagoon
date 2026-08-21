@@ -380,6 +380,26 @@ class TestLimits:
         assert resp.status_code == 413
         assert resp.json()["detail"]["error"]["code"] == "PRESET_TOO_LARGE"
 
+    def test_oversized_body_is_rejected_before_parsing(
+        self, client, store, context, monkeypatch
+    ):
+        """Content-Length is the only signal available before Starlette reads
+        the body, so the pre-check has to run there — otherwise a multi-GB
+        payload gets fully buffered and JSON-decoded before the post-
+        compression size check ever runs."""
+        import orjson
+
+        import graphlagoon.services.style_presets as svc
+
+        monkeypatch.setattr(svc, "MAX_PRESET_BYTES", 16)
+        resp = client.put(
+            _url(context.id, "big"),
+            content=orjson.dumps({"settings": _settings_payload(blob="x" * 10_000)}),
+            headers={**_headers(OWNER), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 413
+        assert resp.json()["detail"]["error"]["code"] == "PRESET_TOO_LARGE"
+
     def test_description_length_is_bounded(self, client, store, context):
         resp = client.put(
             _url(context.id, "p1"),

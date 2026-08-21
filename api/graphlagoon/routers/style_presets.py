@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from graphlagoon.middleware.auth import get_current_user
 from graphlagoon.models.schemas import (
@@ -31,6 +31,7 @@ from graphlagoon.models.schemas import (
     StylePresetListResponse,
     StylePresetWriteRequest,
 )
+from graphlagoon.services import style_presets as style_presets_service
 from graphlagoon.services.named_store import InvalidArtifactName
 from graphlagoon.services.style_presets import (
     CorruptPreset,
@@ -106,6 +107,35 @@ def _storage_error(operation: str, name: str, exc: Exception) -> HTTPException:
     return _error(500, "STORAGE_ERROR", f"Style preset storage error: {exc}")
 
 
+async def enforce_body_limit(request: Request) -> None:
+    """Reject an oversized body before Starlette materializes it.
+
+    Mirrors graph_cache.py's guard: the handler's own size check happens after
+    Pydantic has already parsed the whole JSON body (and `StylePresetSettings`
+    allows arbitrary extra keys), so a multi-gigabyte payload would be fully
+    buffered and decoded before ever hitting the post-compression limit.
+    Content-Length is the only signal available that early.
+    """
+    limit = style_presets_service.MAX_PRESET_BYTES
+    raw_length = request.headers.get("content-length")
+    if raw_length is None:
+        return
+    try:
+        length = int(raw_length)
+    except ValueError:
+        return
+    # The body is uncompressed JSON while the limit applies to the compressed
+    # entry, so allow generous headroom here and let the real check run on the
+    # compressed bytes.
+    if length > limit * 10:
+        raise _error(
+            413,
+            "PRESET_TOO_LARGE",
+            f"Request body is {length} bytes, far above the "
+            f"{limit}-byte compressed preset limit.",
+        )
+
+
 def _require_context_write(context, user_email: str) -> None:
     """Writing a preset needs write access to the context it belongs to.
 
@@ -161,7 +191,11 @@ async def get_style_preset(context_id: UUID, name: str, request: Request):
     return preset
 
 
-@router.put("/{context_id}/style-presets/{name}", response_model=StylePreset)
+@router.put(
+    "/{context_id}/style-presets/{name}",
+    response_model=StylePreset,
+    dependencies=[Depends(enforce_body_limit)],
+)
 async def put_style_preset(
     context_id: UUID,
     name: str,

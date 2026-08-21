@@ -3975,3 +3975,27 @@ Labels panel shows them side by side.
 **Verified:** ran `npx playwright test --config e2e/playwright.config.ts e2e/tests/progressive-load.spec.ts` locally — all 9 tests in the file pass; `npx vue-tsc --noEmit` clean. No backend or store change was needed — this was purely an E2E test-timing bug, not an application regression.
 
 **Files:** `frontend/e2e/tests/progressive-load.spec.ts`.
+
+## [2026-08-21 09:02] - Security Review: graph cache (`?graph=`) and style presets (`?style=`)
+
+**Trigger:** user request to review the two named-artifact-by-URL features (graph cache, style presets) for security flaws.
+
+**Method:** dispatched a read-only exploration agent to audit both features end-to-end — routers, services, DB/blob-storage layer, and the frontend URL-param handling — against authorization/IDOR, path traversal/injection, stored-XSS, mass assignment, rate limiting, and CSRF. Verified the agent's specific claims by reading the actual router/service files and re-diffing commit `7508843` (the prior superuser-restriction fix) myself before acting on any finding.
+
+**Findings:**
+
+1. **Medium — style-preset PUT had no early body-size guard (memory-exhaustion DoS), unlike graph-cache PUT.** `graph_cache.py`'s PUT rejects an oversized body via a `Content-Length` pre-check (`enforce_body_limit` dependency) *before* Starlette/Pydantic buffers and parses it. `style_presets.py`'s PUT had no equivalent — its only size check (`MAX_PRESET_BYTES`, 1 MB) ran *after* the full JSON body was already parsed into memory by `StylePresetWriteRequest` (whose nested `StylePresetSettings` uses `extra="allow"`, so it happily materializes arbitrarily large/deeply-nested JSON). Since preset writes require only context *write* access (not superuser — reachable via a domain-wildcard share), any such user could send a multi-GB body to exhaust worker memory before the size limit ever triggered. **Fixed** by adding the same `Content-Length`-based `enforce_body_limit` dependency (mirroring `graph_cache.py`, generous ×10 headroom since the check is pre-compression) to `put_style_preset`, sourcing the limit dynamically from `style_presets_service.MAX_PRESET_BYTES` so it stays in sync with the service's real (test-overridable) constant.
+
+2. **Low — stale config docstring.** `Settings.graph_cache_enabled`'s field description still said writing "requires dev_mode", left over from before `7508843` (which switched the gate to superuser-only). Not exploitable, but could mislead an operator locking down a deployment. **Fixed**: description now points at `GRAPH_LAGOON_SUPERUSER_EMAILS`.
+
+**Confirmed non-findings (verified directly, not just accepted from the agent):**
+- **Superuser-restriction completeness (`7508843`):** re-diffed against current `graph_cache.py` — the superuser gate is applied to *both* PUT and DELETE; no mutating endpoint was missed, and there's deliberately no list endpoint to worry about.
+- **Path traversal / injection:** cache/preset names (`graph=`/`style=` values) are validated against a strict allow-list, `ARTIFACT_NAME_RE = ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` (`services/named_store.py:28`), applied both at the router and again inside the service before touching storage — blocks `/`, `\`, `..`, null bytes, unicode, and any shell/SQL metacharacters outright. A second, independent barrier lives in `blob_storage.py` (`normalize_key` + `LocalBlobStore._resolve()`'s `is_relative_to(base)` check), so even a hypothetical regex bypass can't escape the storage root. Neither name is ever interpolated into a Cypher/SQL query.
+- **Stored XSS via preset settings:** no `v-html`/`innerHTML` sink anywhere in the frontend; preset fields feed typed Vue/Three.js state, not raw HTML.
+- **Mass assignment:** `owner_email`/`created_by`/`context_id` are never accepted from the request body on either feature — always set server-side from the authenticated identity or the URL path.
+- **IDOR:** by design, read access to *any* named cache/preset requires only read access to the parent context (not per-artifact ownership) — this is the documented intent (a cache/preset is a per-context artifact), not a bug. Flagged as a design point worth confirming against org data-sensitivity expectations if a context is ever shared with a public (`*`) or wide-domain share, since that would expose all of its caches/presets to that whole audience.
+- **CSRF:** auth is header-based (`X-Forwarded-Email` via a trusted reverse proxy), no cookies used by `axios` — classic same-site-cookie CSRF doesn't apply here.
+
+**Verified:** `uv run pytest tests/test_style_presets.py tests/test_graph_cache.py` — 103 passed (102 existing + 1 new regression test for the body-size guard, `test_oversized_body_is_rejected_before_parsing`, mirroring the graph-cache test of the same name). Full API suite: 758 passed / 5 pre-existing unrelated failures (confirmed pre-existing by re-running against the unmodified branch via `git stash`) / 1 skipped — none touch these two features.
+
+**Files:** `api/graphlagoon/routers/style_presets.py` (added `enforce_body_limit` dependency on PUT), `api/graphlagoon/config.py` (docstring fix), `api/tests/test_style_presets.py` (new regression test).
