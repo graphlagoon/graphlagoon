@@ -30,6 +30,32 @@ export const test = base.extend<{ authenticatedPage: Page }>({
 });
 
 /**
+ * Superuser page fixture: `is_superuser: true` in the injected config, logged
+ * in as a distinct email. Needed for anything gated on superuser status rather
+ * than plain authentication — e.g. authoring a graph cache, which (unlike a
+ * style preset) is restricted to superusers.
+ */
+export const superuserTest = base.extend<{ superuserPage: Page }>({
+  superuserPage: async ({ page }, use) => {
+    await page.addInitScript(() => {
+      (window as any).__GRAPH_LAGOON_CONFIG__ = {
+        dev_mode: true,
+        database_enabled: false,
+        is_superuser: true,
+      };
+    });
+
+    await page.addInitScript(() => {
+      localStorage.setItem('userEmail', 'admin@test.com');
+    });
+
+    await setupAPIMocks(page);
+
+    await use(page);
+  },
+});
+
+/**
  * Unauthenticated page fixture (dev mode, but no email in localStorage).
  */
 export const unauthenticatedTest = base.extend<{ unauthenticatedPage: Page }>({

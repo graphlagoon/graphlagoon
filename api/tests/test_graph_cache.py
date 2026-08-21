@@ -1,4 +1,13 @@
-"""Tests for the named graph cache — service selection and HTTP endpoints."""
+"""Tests for the named graph cache — service selection and HTTP endpoints.
+
+Authorization note: creating and deleting a cache entry is restricted to
+superusers (GRAPH_LAGOON_SUPERUSER_EMAILS) — unlike a style preset, a graph
+cache is treated as a published, administered artifact, not something context
+ownership or a write-share grants power over. The `client` fixture configures
+SUPERUSER as the superuser for the whole module, so every "arrange" write below
+is performed by SUPERUSER; OWNER/WRITER/READER/STRANGER exist to exercise
+context-level *read* access and to prove none of them can write or delete.
+"""
 
 import gzip
 import sys
@@ -44,6 +53,7 @@ from graphlagoon.services.graph_cache import (  # noqa: E402
 )
 
 OWNER = "owner@example.com"
+WRITER = "writer@example.com"
 READER = "reader@example.com"
 STRANGER = "stranger@example.com"
 SUPERUSER = "admin@example.com"
@@ -94,9 +104,12 @@ def store():
 
 @pytest.fixture
 def context(store):
-    return store.create_graph_context(
+    ctx = store.create_graph_context(
         title="ctx", edge_table_name="e", node_table_name="n", owner_email=OWNER
     )
+    store.share_graph_context(ctx.id, WRITER, permission="write")
+    store.share_graph_context(ctx.id, READER, permission="read")
+    return ctx
 
 
 def _configure(tmp_path, **overrides):
@@ -111,24 +124,27 @@ def _configure(tmp_path, **overrides):
     return settings
 
 
+def _make_superuser(monkeypatch, *emails):
+    """Configure GRAPH_LAGOON_SUPERUSER_EMAILS on the global settings cache.
+
+    `is_superuser` (utils/authz.py) always reads `get_settings()`, not the
+    settings object handed to `configure_graph_cache_service` — the same
+    convention every other router in this codebase follows, so this mirrors it
+    rather than special-casing the cache.
+    """
+    monkeypatch.setenv("GRAPH_LAGOON_SUPERUSER_EMAILS", ",".join(emails))
+    get_settings.cache_clear()
+
+
 @pytest.fixture
-def client(tmp_path):
-    """Dev mode on: writes allowed."""
-    _configure(tmp_path, dev_mode=True)
+def client(tmp_path, monkeypatch):
+    _make_superuser(monkeypatch, SUPERUSER)
+    _configure(tmp_path)
     app = FastAPI()
     app.include_router(graph_cache_router.router)
     yield TestClient(app)
     reset_graph_cache_service()
-
-
-@pytest.fixture
-def prod_client(tmp_path):
-    """Dev mode off: reads allowed, writes refused."""
-    _configure(tmp_path, dev_mode=True)  # seed through the writable service first
-    app = FastAPI()
-    app.include_router(graph_cache_router.router)
-    yield TestClient(app), (lambda: _configure(tmp_path, dev_mode=False))
-    reset_graph_cache_service()
+    get_settings.cache_clear()
 
 
 def _url(context_id, name=None):
@@ -139,7 +155,7 @@ def _url(context_id, name=None):
 class TestRoundTrip:
     def test_put_then_get_replays_the_graph(self, client, store, context):
         resp = client.put(
-            _url(context.id, "fraude-2024"), json=_body(), headers=_headers(OWNER)
+            _url(context.id, "fraude-2024"), json=_body(), headers=_headers(SUPERUSER)
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["name"] == "fraude-2024"
@@ -149,7 +165,7 @@ class TestRoundTrip:
         assert resp.status_code == 200
         payload = resp.json()
         assert payload["name"] == "fraude-2024"
-        assert payload["created_by"] == OWNER
+        assert payload["created_by"] == SUPERUSER
         assert payload["node_count"] == 2
         assert payload["edge_count"] == 1
         assert payload["source"]["query"] == "MATCH (n) RETURN n"
@@ -160,7 +176,7 @@ class TestRoundTrip:
         """The read path hands back the stored bytes untouched — that is why the
         codec is gzip. Checked at the transport level, with automatic decoding off.
         """
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
 
         resp = client.get(
             _url(context.id, "c1"),
@@ -180,9 +196,9 @@ class TestRoundTrip:
         assert orjson.loads(gzip.decompress(stored))["name"] == "c1"
 
     def test_delete_removes_the_entry(self, client, store, context):
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
 
-        resp = client.delete(_url(context.id, "c1"), headers=_headers(OWNER))
+        resp = client.delete(_url(context.id, "c1"), headers=_headers(SUPERUSER))
         assert resp.status_code == 204
 
         assert (
@@ -193,12 +209,14 @@ class TestRoundTrip:
     def test_deleting_a_missing_entry_is_not_an_error(self, client, store, context):
         """Without a listing there is no way to check first, so delete has to be
         idempotent — otherwise a retry after a lost response reports failure."""
-        resp = client.delete(_url(context.id, "never-existed"), headers=_headers(OWNER))
+        resp = client.delete(
+            _url(context.id, "never-existed"), headers=_headers(SUPERUSER)
+        )
         assert resp.status_code == 204
 
     def test_overwrite_replaces_content(self, client, store, context):
-        client.put(_url(context.id, "c1"), json=_body(2), headers=_headers(OWNER))
-        client.put(_url(context.id, "c1"), json=_body(5), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(2), headers=_headers(SUPERUSER))
+        client.put(_url(context.id, "c1"), json=_body(5), headers=_headers(SUPERUSER))
 
         payload = client.get(_url(context.id, "c1"), headers=_headers(OWNER)).json()
         assert payload["node_count"] == 5
@@ -248,7 +266,7 @@ class TestNameValidation:
     )
     def test_rejects_unsafe_names(self, client, store, context, name):
         resp = client.put(
-            _url(context.id, name), json=_body(), headers=_headers(OWNER)
+            _url(context.id, name), json=_body(), headers=_headers(SUPERUSER)
         )
         assert resp.status_code == 400, resp.text
         assert resp.json()["detail"]["error"]["code"] == "INVALID_CACHE_NAME"
@@ -260,14 +278,14 @@ class TestNameValidation:
         """A slash or a dot-segment is resolved by the URL layer before routing,
         so these can only ever 404/405 — never land as a key."""
         resp = client.put(
-            _url(context.id, name), json=_body(), headers=_headers(OWNER)
+            _url(context.id, name), json=_body(), headers=_headers(SUPERUSER)
         )
         assert resp.status_code in (400, 404, 405), resp.text
 
     @pytest.mark.parametrize("name", ["a", "fraude-2024", "v1.2_final", "A1"])
     def test_accepts_reasonable_names(self, client, store, context, name):
         resp = client.put(
-            _url(context.id, name), json=_body(), headers=_headers(OWNER)
+            _url(context.id, name), json=_body(), headers=_headers(SUPERUSER)
         )
         assert resp.status_code == 200, resp.text
 
@@ -286,7 +304,7 @@ class TestNameValidation:
         other = store.create_graph_context(
             title="other", edge_table_name="e", node_table_name="n", owner_email=OWNER
         )
-        client.put(_url(other.id, "secret"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(other.id, "secret"), json=_body(), headers=_headers(SUPERUSER))
 
         resp = client.get(
             _url(context.id, f"..{'%2F'}{other.id}{'%2F'}secret"),
@@ -300,7 +318,9 @@ class TestIsolation:
         other = store.create_graph_context(
             title="other", edge_table_name="e", node_table_name="n", owner_email=OWNER
         )
-        client.put(_url(context.id, "shared-name"), json=_body(), headers=_headers(OWNER))
+        client.put(
+            _url(context.id, "shared-name"), json=_body(), headers=_headers(SUPERUSER)
+        )
 
         resp = client.get(_url(other.id, "shared-name"), headers=_headers(OWNER))
         assert resp.status_code == 404
@@ -311,8 +331,8 @@ class TestIsolation:
         other = store.create_graph_context(
             title="other", edge_table_name="e", node_table_name="n", owner_email=OWNER
         )
-        client.put(_url(context.id, "n"), json=_body(2), headers=_headers(OWNER))
-        client.put(_url(other.id, "n"), json=_body(4), headers=_headers(OWNER))
+        client.put(_url(context.id, "n"), json=_body(2), headers=_headers(SUPERUSER))
+        client.put(_url(other.id, "n"), json=_body(4), headers=_headers(SUPERUSER))
 
         assert (
             client.get(_url(context.id, "n"), headers=_headers(OWNER)).json()[
@@ -328,45 +348,29 @@ class TestIsolation:
         )
 
 
-class TestAuthorization:
+class TestReadAuthorization:
+    """Reading is gated only by context access — unaffected by the superuser
+    write/delete rule below."""
+
     def test_stranger_cannot_read(self, client, store, context):
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
 
         assert (
             client.get(_url(context.id, "c1"), headers=_headers(STRANGER)).status_code
             == 403
         )
 
-    def test_stranger_cannot_write(self, client, store, context):
-        resp = client.put(
-            _url(context.id, "c1"), json=_body(), headers=_headers(STRANGER)
-        )
-        assert resp.status_code == 403
-
     def test_shared_reader_can_read(self, client, store, context):
-        store.share_graph_context(context.id, READER, permission="read")
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
 
         assert (
             client.get(_url(context.id, "c1"), headers=_headers(READER)).status_code
             == 200
         )
 
-    def test_shared_reader_cannot_delete(self, client, store, context):
-        store.share_graph_context(context.id, READER, permission="write")
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
-
-        resp = client.delete(_url(context.id, "c1"), headers=_headers(READER))
-        assert resp.status_code == 403
-        # ...and the entry survives.
-        assert (
-            client.get(_url(context.id, "c1"), headers=_headers(OWNER)).status_code
-            == 200
-        )
-
     def test_public_share_grants_read(self, client, store, context):
         store.share_graph_context(context.id, "*", permission="read")
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
 
         assert (
             client.get(
@@ -375,51 +379,77 @@ class TestAuthorization:
             == 200
         )
 
-    def test_superuser_can_read_any_context(self, client, store, context, monkeypatch):
-        monkeypatch.setenv("GRAPH_LAGOON_SUPERUSER_EMAILS", SUPERUSER)
-        get_settings.cache_clear()
-        try:
-            client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+    def test_reads_never_require_superuser(self, client, store, context):
+        """The whole point of the feature: anyone with context access replays a
+        cache, superuser or not."""
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
+
+        for email in (OWNER, WRITER, READER):
             assert (
-                client.get(
-                    _url(context.id, "c1"), headers=_headers(SUPERUSER)
-                ).status_code
+                client.get(_url(context.id, "c1"), headers=_headers(email)).status_code
                 == 200
             )
-        finally:
-            get_settings.cache_clear()
 
 
-class TestDevGate:
-    def test_writes_are_refused_outside_dev_mode(self, prod_client, store, context):
-        client, make_prod = prod_client
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
-        make_prod()
+class TestSuperuserGate:
+    """Creating and deleting a cache entry is superuser-only.
 
-        resp = client.put(_url(context.id, "c2"), json=_body(), headers=_headers(OWNER))
+    Unlike a style preset — which anyone with context write access can save,
+    and only its own creator can delete — a graph cache carries no notion of
+    per-entry ownership and context ownership grants no special power over it:
+    it is a published artifact administered by GRAPH_LAGOON_SUPERUSER_EMAILS,
+    full stop.
+    """
+
+    @pytest.mark.parametrize("email", [OWNER, WRITER, READER, STRANGER])
+    def test_non_superusers_cannot_write(self, client, store, context, email):
+        resp = client.put(
+            _url(context.id, "c1"), json=_body(), headers=_headers(email)
+        )
         assert resp.status_code == 403
         assert resp.json()["detail"]["error"]["code"] == "FORBIDDEN"
+        assert "superuser" in resp.json()["detail"]["error"]["message"].lower()
 
-    def test_deletes_are_refused_outside_dev_mode(self, prod_client, store, context):
-        client, make_prod = prod_client
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
-        make_prod()
-
-        assert (
-            client.delete(_url(context.id, "c1"), headers=_headers(OWNER)).status_code
-            == 403
+    def test_superuser_can_write(self, client, store, context):
+        resp = client.put(
+            _url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER)
         )
+        assert resp.status_code == 200
 
-    def test_reads_still_work_outside_dev_mode(self, prod_client, store, context):
-        """The whole point of the feature: production replays caches."""
-        client, make_prod = prod_client
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
-        make_prod()
+    @pytest.mark.parametrize("email", [OWNER, WRITER, READER, STRANGER])
+    def test_non_superusers_cannot_delete(self, client, store, context, email):
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
 
+        resp = client.delete(_url(context.id, "c1"), headers=_headers(email))
+        assert resp.status_code == 403
+        # ...and the entry survives.
         assert (
             client.get(_url(context.id, "c1"), headers=_headers(OWNER)).status_code
             == 200
         )
+
+    def test_owning_the_context_grants_no_special_power(self, client, store, context):
+        """The context owner is, deliberately, just another non-superuser here."""
+        resp = client.put(
+            _url(context.id, "c1"), json=_body(), headers=_headers(OWNER)
+        )
+        assert resp.status_code == 403
+
+    def test_superuser_can_delete(self, client, store, context):
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
+
+        resp = client.delete(_url(context.id, "c1"), headers=_headers(SUPERUSER))
+        assert resp.status_code == 204
+
+    def test_a_stranger_to_the_context_gets_403_not_404(self, client, store, context):
+        """FORBIDDEN, not GRAPH_CONTEXT_NOT_FOUND: the superuser check runs before
+        the context lookup, so a stranger learns nothing about the context either
+        way — but the error code names the actual reason."""
+        resp = client.put(
+            _url(uuid4(), "c1"), json=_body(), headers=_headers(STRANGER)
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"]["error"]["code"] == "FORBIDDEN"
 
 
 class TestIncompleteGraphs:
@@ -429,37 +459,42 @@ class TestIncompleteGraphs:
         resp = client.put(
             _url(context.id, "c1"),
             json=_body(properties_deferred=True),
-            headers=_headers(OWNER),
+            headers=_headers(SUPERUSER),
         )
         assert resp.status_code == 400
         assert resp.json()["detail"]["error"]["code"] == "CACHE_INCOMPLETE"
 
     def test_stored_entries_record_completeness(self, client, store, context):
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
         payload = client.get(_url(context.id, "c1"), headers=_headers(OWNER)).json()
         assert payload["properties_complete"] is True
         assert payload["graph"]["properties_deferred"] is False
 
 
 class TestSizeLimit:
-    def test_oversized_entry_is_rejected(self, tmp_path, store, context):
-        _configure(tmp_path, dev_mode=True, graph_cache_max_bytes=64)
+    def test_oversized_entry_is_rejected(self, tmp_path, store, context, monkeypatch):
+        _make_superuser(monkeypatch, SUPERUSER)
+        _configure(tmp_path, graph_cache_max_bytes=64)
         app = FastAPI()
         app.include_router(graph_cache_router.router)
         client = TestClient(app)
         try:
             resp = client.put(
-                _url(context.id, "big"), json=_body(200), headers=_headers(OWNER)
+                _url(context.id, "big"), json=_body(200), headers=_headers(SUPERUSER)
             )
             assert resp.status_code == 413
             assert resp.json()["detail"]["error"]["code"] == "CACHE_TOO_LARGE"
         finally:
             reset_graph_cache_service()
+            get_settings.cache_clear()
 
-    def test_oversized_body_is_rejected_before_parsing(self, tmp_path, store, context):
+    def test_oversized_body_is_rejected_before_parsing(
+        self, tmp_path, store, context, monkeypatch
+    ):
         """Content-Length is the only signal available before Starlette reads the
         body, so the pre-check has to run there."""
-        _configure(tmp_path, dev_mode=True, graph_cache_max_bytes=16)
+        _make_superuser(monkeypatch, SUPERUSER)
+        _configure(tmp_path, graph_cache_max_bytes=16)
         app = FastAPI()
         app.include_router(graph_cache_router.router)
         client = TestClient(app)
@@ -467,11 +502,12 @@ class TestSizeLimit:
             resp = client.put(
                 _url(context.id, "big"),
                 content=orjson.dumps(_body(400)),
-                headers={**_headers(OWNER), "Content-Type": "application/json"},
+                headers={**_headers(SUPERUSER), "Content-Type": "application/json"},
             )
             assert resp.status_code == 413
         finally:
             reset_graph_cache_service()
+            get_settings.cache_clear()
 
 
 class TestCorruptEntries:
@@ -480,7 +516,7 @@ class TestCorruptEntries:
     ):
         """A volume overwrite is not atomic, so a reader can catch a partial
         object. That must say so, not render an empty canvas."""
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
 
         path = tmp_path / "cache" / "cache" / str(context.id) / "c1.jsonz"
         assert path.is_file()
@@ -501,19 +537,21 @@ class TestGzipMiddlewareInteraction:
     """
 
     @pytest.fixture
-    def gzipped_client(self, tmp_path):
+    def gzipped_client(self, tmp_path, monkeypatch):
         from starlette.middleware.gzip import GZipMiddleware
 
-        _configure(tmp_path, dev_mode=True)
+        _make_superuser(monkeypatch, SUPERUSER)
+        _configure(tmp_path)
         app = FastAPI()
         app.add_middleware(GZipMiddleware, minimum_size=1)
         app.include_router(graph_cache_router.router)
         yield TestClient(app)
         reset_graph_cache_service()
+        get_settings.cache_clear()
 
     def test_body_is_not_compressed_twice(self, gzipped_client, store, context):
         gzipped_client.put(
-            _url(context.id, "c1"), json=_body(50), headers=_headers(OWNER)
+            _url(context.id, "c1"), json=_body(50), headers=_headers(SUPERUSER)
         )
 
         resp = gzipped_client.get(
@@ -534,7 +572,7 @@ class TestGzipMiddlewareInteraction:
         resp = gzipped_client.put(
             _url(context.id, "c1"),
             json=_body(),
-            headers={**_headers(OWNER), "Accept-Encoding": "gzip"},
+            headers={**_headers(SUPERUSER), "Accept-Encoding": "gzip"},
         )
         assert resp.status_code == 200
         assert resp.json()["name"] == "c1"
@@ -542,12 +580,14 @@ class TestGzipMiddlewareInteraction:
 
 class TestStorageLayout:
     def test_files_land_where_the_spec_says(self, client, store, context, tmp_path):
-        client.put(_url(context.id, "fraude-2024"), json=_body(), headers=_headers(OWNER))
+        client.put(
+            _url(context.id, "fraude-2024"), json=_body(), headers=_headers(SUPERUSER)
+        )
         expected = tmp_path / "cache" / "cache" / str(context.id) / "fraude-2024.jsonz"
         assert expected.is_file()
 
     def test_stored_file_is_gzip_json(self, client, store, context, tmp_path):
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
         raw = (tmp_path / "cache" / "cache" / str(context.id) / "c1.jsonz").read_bytes()
         assert raw[:2] == b"\x1f\x8b"
         assert orjson.loads(gzip.decompress(raw))["name"] == "c1"
@@ -558,7 +598,7 @@ class TestServiceSelection:
         from graphlagoon.services.blob_storage import LocalBlobStore
         from graphlagoon.services.graph_cache import get_graph_cache_service
 
-        _configure(tmp_path, dev_mode=True)
+        _configure(tmp_path)
         try:
             assert isinstance(get_graph_cache_service()._store, LocalBlobStore)
         finally:
@@ -619,8 +659,13 @@ class TestServiceSelection:
 
 
 class TestDisabled:
-    def test_every_endpoint_reports_disabled(self, tmp_path, store, context):
-        _configure(tmp_path, dev_mode=True, graph_cache_enabled=False)
+    def test_every_endpoint_reports_disabled_before_any_authz_check(
+        self, tmp_path, store, context
+    ):
+        """graph_cache_enabled gates the whole feature — even for a caller who
+        would otherwise be forbidden, disabled wins, so the 404 here says
+        nothing about who OWNER is."""
+        _configure(tmp_path, graph_cache_enabled=False)
         app = FastAPI()
         app.include_router(graph_cache_router.router)
         client = TestClient(app)
@@ -635,18 +680,18 @@ class TestDisabled:
         finally:
             reset_graph_cache_service()
 
-    def test_writable_requires_both_flags(self, tmp_path):
-        from graphlagoon.services.graph_cache import graph_cache_writable
+    def test_enabled_flag_is_independent_of_who_may_write(self, tmp_path):
+        """graph_cache_enabled is the only feature-level toggle left; authorization
+        (superuser) is a separate, per-request check with no boolean equivalent —
+        there used to be a graph_cache_writable() combining enabled+dev_mode, and
+        it no longer exists."""
+        from graphlagoon.services.graph_cache import graph_cache_enabled
 
-        for enabled, dev, expected in (
-            (True, True, True),
-            (True, False, False),
-            (False, True, False),
-            (False, False, False),
-        ):
-            _configure(tmp_path, dev_mode=dev, graph_cache_enabled=enabled)
-            assert graph_cache_writable() is expected
-        reset_graph_cache_service()
+        _configure(tmp_path, graph_cache_enabled=True)
+        assert graph_cache_enabled() is True
+
+        _configure(tmp_path, graph_cache_enabled=False)
+        assert graph_cache_enabled() is False
 
 
 class TestContextDeletionCascade:
@@ -657,7 +702,7 @@ class TestContextDeletionCascade:
 
         from graphlagoon.routers.graph_contexts import _purge_graph_caches
 
-        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(OWNER))
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
         directory = tmp_path / "cache" / "cache" / str(context.id)
         assert directory.is_dir()
 

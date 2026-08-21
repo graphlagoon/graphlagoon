@@ -2,8 +2,9 @@
 
 A cache entry is a query result — nodes and edges — stored under a name, so
 `/graph/{context_id}?graph={name}` replays it without touching the warehouse.
-Anyone who can read the context can read its caches; writing through the API
-additionally requires dev mode.
+Anyone who can read the context can read its caches; creating and deleting one
+through the API is restricted to superusers (see routers/graph_cache.py) — a
+cache is treated as a published, administered artifact, not a personal one.
 
 Entries are addressed by name and never enumerated. There is no `list` here on
 purpose: enumeration is O(entries) and is the one operation that stops working
@@ -226,18 +227,6 @@ def _settings():
 
 def graph_cache_enabled() -> bool:
     return bool(_settings().graph_cache_enabled)
-
-
-def graph_cache_writable() -> bool:
-    """Whether the API may create or delete cache entries.
-
-    Reads the settings handed to `configure_graph_cache_service`, not
-    `get_settings()`: a mounted app can be constructed with a Settings object
-    that differs from the cached global one, and the two must not disagree about
-    whether writing is allowed.
-    """
-    settings = _settings()
-    return bool(settings.graph_cache_enabled and settings.dev_mode)
 
 
 def get_graph_cache_service() -> GraphCacheService:

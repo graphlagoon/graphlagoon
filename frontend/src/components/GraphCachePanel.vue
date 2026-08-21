@@ -10,8 +10,10 @@
  * only have moved the cost, since the Databricks Files API has no server-side
  * name filter to page toward.
  *
- * So: type a name to save, type a name to delete. Both are dev-only, matching
- * the backend. Reading a cache needs no panel at all — it is a URL.
+ * So: type a name to save, type a name to delete. Both are superuser-only,
+ * matching the backend — a graph cache is a published, administered artifact,
+ * unlike a style preset, which anyone with context write access can save.
+ * Reading a cache needs no panel at all — it is a URL.
  */
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -28,7 +30,7 @@ const graphStore = useGraphStore();
 const router = useRouter();
 const route = useRoute();
 const toast = useToast();
-const { devMode } = usePersistence();
+const { isSuperuser } = usePersistence();
 
 const saveName = ref('');
 const deleteName = ref('');
@@ -171,7 +173,7 @@ function openLast() {
       Viewing <strong>{{ route.query.graph }}</strong>
     </p>
 
-    <template v-if="devMode">
+    <template v-if="isSuperuser">
       <section class="field-section" data-testid="graph-cache-save">
         <label class="field-label" for="cache-save-name">Save current graph as</label>
         <div class="field-row">
@@ -258,8 +260,9 @@ function openLast() {
     </template>
 
     <p v-else class="panel-hint" data-testid="graph-cache-readonly">
-      Caches are read-only here. Open one by adding
-      <code>?graph=&lt;name&gt;</code> to this page's URL.
+      Only superusers create and delete graph caches. Anyone with access to this
+      context can still open one by adding <code>?graph=&lt;name&gt;</code> to
+      this page's URL.
     </p>
   </div>
 </template>

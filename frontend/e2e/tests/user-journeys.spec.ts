@@ -5,7 +5,7 @@
  * simulating what a real user would do in a typical session.
  * A PM can read these test names and understand what user flows are covered.
  */
-import { test, expect } from '../fixtures/test-fixtures';
+import { test, superuserTest, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
 import { seedContexts, seedExplorations, mockSchemaDrift, seedGraphCaches } from '../helpers/api-mocks';
 
@@ -167,11 +167,17 @@ test.describe('User Journeys', () => {
     await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
   });
+});
 
-  // ---------------------------------------------------------------------------
-  // Journey: Graph → save a cache → share its link → open it fresh
-  // ---------------------------------------------------------------------------
-  test('user caches the current graph and reopens it from its own link', async ({ authenticatedPage: page }) => {
+// ---------------------------------------------------------------------------
+// Journey: Graph → save a cache → share its link → open it fresh
+// ---------------------------------------------------------------------------
+// A separate describe block: Playwright requires every test in one describe
+// to share the same test object, and this journey needs the superuser fixture
+// — creating a graph cache, unlike a style preset, is restricted to superusers
+// (GRAPH_LAGOON_SUPERUSER_EMAILS).
+superuserTest.describe('User Journeys (superuser)', () => {
+  superuserTest('user caches the current graph and reopens it from its own link', async ({ superuserPage: page }) => {
     await seedContexts(page, [MOCK_CONTEXT]);
     await seedGraphCaches(page, MOCK_CONTEXT.id, {});
 
@@ -182,7 +188,7 @@ test.describe('User Journeys', () => {
     await expect(statusBar).toContainText('5 nodes');
     await expect(page.getByTestId('graph-status-cached')).toHaveCount(0);
 
-    // Save it under a name (dev-only affordance).
+    // Save it under a name.
     await page.getByTestId('toolbar-graph-cache').click();
     await page.getByTestId('graph-cache-name-input').fill('investigacao-agosto');
     await page.getByTestId('graph-cache-save-button').click();
@@ -199,3 +205,5 @@ test.describe('User Journeys', () => {
     await expect(page.getByTestId('graph-status-cached')).toContainText('investigacao-agosto');
   });
 });
+
+

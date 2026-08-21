@@ -1,11 +1,17 @@
 /**
- * Named graph caches — replayed from a URL, authored only in dev mode.
+ * Named graph caches — replayed from a URL, authored only by superusers.
  *
  * Nothing here lists caches, because the API does not offer it: entries are
  * addressed by a name their author chose, and enumerating them is the one
  * operation that does not survive scale.
+ *
+ * Reading a cache needs only context access, so those tests run as an ordinary
+ * authenticated user. Creating and deleting are superuser-only — a graph cache
+ * is a published, administered artifact, unlike a style preset, which anyone
+ * with context write access can save — so those tests run through the shared
+ * `superuserTest`/`superuserPage` fixture.
  */
-import { test, expect } from '../fixtures/test-fixtures';
+import { test, superuserTest, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT } from '../fixtures/mock-data';
 import { seedContexts, seedGraphCaches } from '../helpers/api-mocks';
 
@@ -19,7 +25,7 @@ const EDGES = [
   { edge_id: 'e2', src: 'n2', dst: 'n3', relationship_type: 'USED', properties: {} },
 ];
 
-test.describe('Graph cache', () => {
+test.describe('Graph cache — reading', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
     await seedContexts(page, [MOCK_CONTEXT]);
   });
@@ -92,28 +98,48 @@ test.describe('Graph cache', () => {
     await expect(page.getByTestId('graph-status-bar')).toContainText('1 nodes');
   });
 
-  test('the dev panel saves the current graph and hands back its link', async ({
+  test('a non-superuser can open a cache but never sees the Cache button', async ({
     authenticatedPage: page,
   }) => {
-    await seedGraphCaches(page, MOCK_CONTEXT.id, {});
+    await seedGraphCaches(page, MOCK_CONTEXT.id, {
+      'fraude-2024': { nodes: NODES, edges: EDGES },
+    });
 
-    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
-    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?graph=fraude-2024`);
 
-    await page.getByTestId('toolbar-graph-cache').click();
-    await expect(page.getByTestId('graph-cache-panel')).toBeVisible();
-
-    await page.getByTestId('graph-cache-name-input').fill('fraude-2024');
-    await page.getByTestId('graph-cache-save-button').click();
-
-    // Nothing lists caches, so the link has to be handed over at save time.
-    const saved = page.getByTestId('graph-cache-last-saved');
-    await expect(saved).toBeVisible();
-    await expect(saved).toContainText('fraude-2024');
-    await expect(saved).toContainText('?graph=fraude-2024');
+    await expect(page.getByTestId('graph-status-cached')).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByTestId('toolbar-graph-cache')).toHaveCount(0);
   });
+});
 
-  test('a just-saved cache opens from the panel', async ({ authenticatedPage: page }) => {
+superuserTest.describe('Graph cache — superuser authoring', () => {
+  superuserTest(
+    'the panel saves the current graph and hands back its link',
+    async ({ superuserPage: page }) => {
+      await seedContexts(page, [MOCK_CONTEXT]);
+      await seedGraphCaches(page, MOCK_CONTEXT.id, {});
+
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTestId('toolbar-graph-cache').click();
+      await expect(page.getByTestId('graph-cache-panel')).toBeVisible();
+
+      await page.getByTestId('graph-cache-name-input').fill('fraude-2024');
+      await page.getByTestId('graph-cache-save-button').click();
+
+      // Nothing lists caches, so the link has to be handed over at save time.
+      const saved = page.getByTestId('graph-cache-last-saved');
+      await expect(saved).toBeVisible();
+      await expect(saved).toContainText('fraude-2024');
+      await expect(saved).toContainText('?graph=fraude-2024');
+    },
+  );
+
+  superuserTest('a just-saved cache opens from the panel', async ({ superuserPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
     await seedGraphCaches(page, MOCK_CONTEXT.id, {});
 
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
@@ -130,7 +156,8 @@ test.describe('Graph cache', () => {
     await expect(page.getByTestId('graph-status-cached')).toContainText('recem-salvo');
   });
 
-  test('deleting by name removes the cache', async ({ authenticatedPage: page }) => {
+  superuserTest('deleting by name removes the cache', async ({ superuserPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
     await seedGraphCaches(page, MOCK_CONTEXT.id, {
       descartavel: { nodes: NODES, edges: EDGES },
     });
@@ -151,49 +178,56 @@ test.describe('Graph cache', () => {
     await expect(page.getByTestId('graph-status-cached')).toHaveCount(0);
   });
 
-  test('the panel names the cache currently on screen', async ({
-    authenticatedPage: page,
-  }) => {
-    await seedGraphCaches(page, MOCK_CONTEXT.id, {
-      'em-tela': { nodes: NODES, edges: EDGES },
-    });
+  superuserTest(
+    'the panel names the cache currently on screen',
+    async ({ superuserPage: page }) => {
+      await seedContexts(page, [MOCK_CONTEXT]);
+      await seedGraphCaches(page, MOCK_CONTEXT.id, {
+        'em-tela': { nodes: NODES, edges: EDGES },
+      });
 
-    await page.goto(`/graph/${MOCK_CONTEXT.id}?graph=em-tela`);
-    await expect(page.getByTestId('graph-status-cached')).toBeVisible({ timeout: 15_000 });
+      await page.goto(`/graph/${MOCK_CONTEXT.id}?graph=em-tela`);
+      await expect(page.getByTestId('graph-status-cached')).toBeVisible({
+        timeout: 15_000,
+      });
 
-    await page.getByTestId('toolbar-graph-cache').click();
-    await expect(page.getByTestId('graph-cache-viewing')).toContainText('em-tela');
-  });
+      await page.getByTestId('toolbar-graph-cache').click();
+      await expect(page.getByTestId('graph-cache-viewing')).toContainText('em-tela');
+    },
+  );
 
-  test('the panel stays a sidebar instead of eating the canvas', async ({
-    authenticatedPage: page,
-  }) => {
-    await seedGraphCaches(page, MOCK_CONTEXT.id, {});
+  superuserTest(
+    'the panel stays a sidebar instead of eating the canvas',
+    async ({ superuserPage: page }) => {
+      await seedContexts(page, [MOCK_CONTEXT]);
+      await seedGraphCaches(page, MOCK_CONTEXT.id, {});
 
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
-    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
-    await page.getByTestId('toolbar-graph-cache').click();
-    const panel = page.getByTestId('graph-cache-panel');
-    await expect(panel).toBeVisible();
+      await page.getByTestId('toolbar-graph-cache').click();
+      const panel = page.getByTestId('graph-cache-panel');
+      await expect(panel).toBeVisible();
 
-    // A long name plus the full URL is the widest content the panel ever holds.
-    await page
-      .getByTestId('graph-cache-name-input')
-      .fill('um-nome-de-cache-bastante-longo-para-forcar-overflow');
-    await page.getByTestId('graph-cache-save-button').click();
-    await expect(page.getByTestId('graph-cache-last-saved')).toBeVisible();
+      // A long name plus the full URL is the widest content the panel ever holds.
+      await page
+        .getByTestId('graph-cache-name-input')
+        .fill('um-nome-de-cache-bastante-longo-para-forcar-overflow');
+      await page.getByTestId('graph-cache-save-button').click();
+      await expect(page.getByTestId('graph-cache-last-saved')).toBeVisible();
 
-    const box = (await panel.boundingBox())!;
-    expect(box.width).toBeLessThanOrEqual(300);
-    expect(box.width).toBeGreaterThanOrEqual(200);
+      const box = (await panel.boundingBox())!;
+      expect(box.width).toBeLessThanOrEqual(300);
+      expect(box.width).toBeGreaterThanOrEqual(200);
 
-    const overflow = await panel.evaluate((el) => el.scrollWidth - el.clientWidth);
-    expect(overflow).toBeLessThanOrEqual(1);
-  });
+      const overflow = await panel.evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+    },
+  );
 
-  test('the panel narrows on a small viewport', async ({ authenticatedPage: page }) => {
+  superuserTest('the panel narrows on a small viewport', async ({ superuserPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
     await seedGraphCaches(page, MOCK_CONTEXT.id, {});
 
     await page.setViewportSize({ width: 900, height: 700 });
@@ -207,21 +241,23 @@ test.describe('Graph cache', () => {
     expect(box.width).toBeLessThan(280);
   });
 
-  test('the save button stays disabled for an invalid name', async ({
-    authenticatedPage: page,
-  }) => {
-    await seedGraphCaches(page, MOCK_CONTEXT.id, {
-      base: { nodes: NODES, edges: EDGES },
-    });
+  superuserTest(
+    'the save button stays disabled for an invalid name',
+    async ({ superuserPage: page }) => {
+      await seedContexts(page, [MOCK_CONTEXT]);
+      await seedGraphCaches(page, MOCK_CONTEXT.id, {
+        base: { nodes: NODES, edges: EDGES },
+      });
 
-    await page.goto(`/graph/${MOCK_CONTEXT.id}?graph=base`);
-    await expect(page.getByTestId('graph-status-bar')).toContainText('3 nodes', {
-      timeout: 15_000,
-    });
+      await page.goto(`/graph/${MOCK_CONTEXT.id}?graph=base`);
+      await expect(page.getByTestId('graph-status-bar')).toContainText('3 nodes', {
+        timeout: 15_000,
+      });
 
-    await page.getByTestId('toolbar-graph-cache').click();
-    await page.getByTestId('graph-cache-name-input').fill('nome invalido');
+      await page.getByTestId('toolbar-graph-cache').click();
+      await page.getByTestId('graph-cache-name-input').fill('nome invalido');
 
-    await expect(page.getByTestId('graph-cache-save-button')).toBeDisabled();
-  });
+      await expect(page.getByTestId('graph-cache-save-button')).toBeDisabled();
+    },
+  );
 });

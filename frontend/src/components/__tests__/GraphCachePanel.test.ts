@@ -6,8 +6,10 @@
  * entries is O(entries) and stops working as the store grows, while every real
  * use of a cache already knows the name it wants.
  *
- * Both fields are dev-only, matching the backend, which answers 403 for those
- * two verbs outside dev mode. Reading a cache needs no panel at all: it is a URL.
+ * Both fields are superuser-only, matching the backend, which answers 403 for
+ * those two verbs to anyone else — a graph cache is a published, administered
+ * artifact, unlike a style preset, which anyone with context write access can
+ * save. Reading a cache needs no panel at all: it is a URL.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -19,11 +21,6 @@ import { useGraphStore } from '@/stores/graph';
 
 vi.mock('@/services/api', () => ({
   api: {
-    // usePersistence().devMode reads this getter, so mirror the real
-    // implementation and let setDevMode() below drive it.
-    get devMode() {
-      return window.__GRAPH_LAGOON_CONFIG__?.dev_mode ?? false;
-    },
     getGraphContext: vi.fn(),
     getGraphCache: vi.fn(),
     putGraphCache: vi.fn(),
@@ -52,8 +49,8 @@ async function flush() {
   await nextTick();
 }
 
-function setDevMode(enabled: boolean) {
-  window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: enabled } as any;
+function setSuperuser(enabled: boolean) {
+  window.__GRAPH_LAGOON_CONFIG__ = { is_superuser: enabled } as any;
 }
 
 async function renderPanel(options: { nodes?: number } = {}) {
@@ -89,7 +86,7 @@ describe('GraphCachePanel', () => {
     vi.clearAllMocks();
     replace.mockClear();
     for (const key of Object.keys(routeQuery)) delete routeQuery[key];
-    setDevMode(true);
+    setSuperuser(true);
     vi.mocked(api.putGraphCache).mockResolvedValue({
       name: 'c1',
       size_bytes: 512,
@@ -119,15 +116,15 @@ describe('GraphCachePanel', () => {
     });
   });
 
-  describe('dev gating', () => {
-    it('offers both fields in dev mode', async () => {
+  describe('superuser gating', () => {
+    it('offers both fields to a superuser', async () => {
       const { container } = await renderPanel();
       expect(container.querySelector('[data-testid="graph-cache-save"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="graph-cache-delete"]')).not.toBeNull();
     });
 
-    it('hides both fields outside dev mode and says how to open one', async () => {
-      setDevMode(false);
+    it('hides both fields for anyone else and says how to open one', async () => {
+      setSuperuser(false);
       const { container } = await renderPanel();
       expect(container.querySelector('[data-testid="graph-cache-save"]')).toBeNull();
       expect(container.querySelector('[data-testid="graph-cache-delete"]')).toBeNull();

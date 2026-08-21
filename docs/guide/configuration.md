@@ -94,17 +94,21 @@ shows the link immediately after saving, and a cache URL is the durable handle.
 ### Who can write
 
 Reading is available wherever the feature is enabled. **Creating and deleting
-through the API require `GRAPH_LAGOON_DEV_MODE=true`**, so in production entries
-reach the volume through a separate process — a job that writes the file
-directly. In dev, the toolbar grows a **Cache** button with two fields: save the
-graph on screen under a name, and delete a cache by name.
+through the API are restricted to superusers** (`GRAPH_LAGOON_SUPERUSER_EMAILS`)
+— a graph cache is treated as a published, administered artifact, not a
+personal one. Context ownership grants no special power over it: the context
+owner gets no more write access to its caches than a stranger does, unlike a
+[style preset](#style-presets), which anyone with context write access can
+save. The toolbar's **Cache** button is visible only to a superuser, and its
+two fields — save the graph on screen under a name, delete a cache by name —
+answer 403 for anyone else.
 
 Deletion is idempotent — with nothing to enumerate there is no way to check
 first, so removing a name that was never there also succeeds.
 
-Deleting a context purges its cache directory; that cleanup is not dev-gated,
-since skipping it would leak storage permanently. It is one request per entry
-against a volume, run with bounded concurrency.
+Deleting a context purges its cache directory; that cleanup is not gated on
+superuser status, since skipping it would leak storage permanently. It is one
+request per entry against a volume, run with bounded concurrency.
 
 ::: warning Multi-replica deployments
 Without a volume path, the cache is a directory local to one process. Behind more
@@ -123,6 +127,7 @@ confuse. They answer different questions:
 |---|---|---|
 | **Addressed by** | a name you chose | an opaque UUID |
 | **Belongs to** | the context — everyone with access sees it | the user who saved it, plus whoever it is shared with |
+| **Who can write** | superusers only | the user, for their own explorations |
 | **Stores** | the query result: nodes, edges, properties | the result **plus** UI state — positions, communities, clusters, filters |
 | **On open** | layout runs fresh | the saved layout is restored |
 | **Use it for** | "here is the graph, look at this link" | "let me pick up where I left off" |
@@ -169,9 +174,9 @@ same name rules as a graph cache.
 Three levels, one more than elsewhere:
 
 - **Read** — anyone with access to the context.
-- **Write** — anyone with *write* access to it. Unlike a graph cache this is not
-  gated on dev mode: a preset is a few kilobytes of preference, not a
-  materialized query result.
+- **Write** — anyone with *write* access to it. Unlike a graph cache, which is
+  superuser-only: a preset is a few kilobytes of preference, not a published,
+  administered artifact.
 - **Delete** — only the person who created that particular preset, or a
   superuser. Ownership is per preset, so one person's saved look cannot be
   thrown away by another — not even by whoever owns the context.
