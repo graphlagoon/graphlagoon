@@ -20,6 +20,7 @@ import {
   FileText,
   FolderOpen,
   Save,
+  DatabaseZap,
   Download,
   User,
   Loader2,
@@ -269,6 +270,20 @@ function handleExportPng(options: ExportPNGOptions) {
           >
             <Save :size="15" /><span class="btn-text">Save</span>
           </button>
+
+          <!-- Graph caches are read-only in production; only authoring them is
+               dev-gated, which is why this button is and the URL is not. -->
+          <button
+            v-if="devMode && toolbarHandlers"
+            class="toolbar-btn"
+            :class="{ active: toolbarStore.activePanels.has('graphCache') }"
+            title="Graph Cache (dev)"
+            data-testid="toolbar-graph-cache"
+            @click="toolbarHandlers.onToggleGraphCache()"
+          >
+            <DatabaseZap :size="15" /><span class="btn-text">Cache</span>
+          </button>
+
         </div>
       </template>
     </div>

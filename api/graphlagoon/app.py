@@ -33,6 +33,8 @@ from graphlagoon.services.warehouse import (
     HeaderProvider,
 )
 from graphlagoon.services.snapshot import configure_snapshot_service
+from graphlagoon.services.graph_cache import configure_graph_cache_service
+from graphlagoon.services.style_presets import configure_style_preset_service
 from graphlagoon.services.datasource import (
     available_datasource_connections,
     available_datasource_types,
@@ -190,6 +192,8 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         graph_contexts,
         explorations,
         graph,
+        graph_cache,
+        style_presets,
         catalog,
         config,
         query_templates,
@@ -202,6 +206,8 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(explorations.router)
     router.include_router(query_templates.router)
     router.include_router(graph.router)
+    router.include_router(graph_cache.router)
+    router.include_router(style_presets.router)
     router.include_router(catalog.router)
     router.include_router(similarity.router)
 
@@ -248,6 +254,8 @@ def create_frontend_router(
             "dev_mode": settings.dev_mode,
             "database_enabled": is_database_available(),
             "databricks_mode": settings.databricks_mode,
+            "graph_cache_enabled": settings.graph_cache_enabled,
+            "style_presets_enabled": settings.style_presets_enabled,
             "datasources": available_datasource_types(),
             "datasource_connections": available_datasource_connections(),
             "router_base": router_base,
@@ -316,6 +324,63 @@ def add_mount_redirect(app: FastAPI, mount_path: str) -> None:
     @app.get(mount_path)
     async def redirect_to_mounted_app():
         return RedirectResponse(url=f"{mount_path}/")
+
+
+def _prepare_style_preset_storage(settings, *, verbose: bool) -> None:
+    """Create the local preset directory and warn about the multi-replica trap."""
+    if not settings.style_presets_enabled:
+        return
+
+    volume_path = settings.style_presets_volume_path_effective
+    if volume_path:
+        if verbose:
+            logger.info("Style preset volume: %s", volume_path)
+        return
+
+    Path(settings.style_presets_dir).mkdir(parents=True, exist_ok=True)
+    if verbose:
+        logger.info("Style preset directory: %s", settings.style_presets_dir)
+
+    if settings.databricks_mode:
+        logger.warning(
+            "Style presets are using a local directory (%s) in Databricks mode. "
+            "With more than one replica each holds its own copy, so a ?style= link "
+            "will work intermittently. Set "
+            "GRAPH_LAGOON_STYLE_PRESETS_VOLUME_PATH (or "
+            "GRAPH_LAGOON_DATABRICKS_VOLUME_PATH) to a Unity Catalog Volume.",
+            settings.style_presets_dir,
+        )
+
+
+def _prepare_graph_cache_storage(settings, *, verbose: bool) -> None:
+    """Create the local cache directory and warn about the multi-replica trap.
+
+    Without a volume path the cache is a directory local to one process. Behind
+    more than one replica the same URL then lands on different replicas and a
+    cache appears and disappears at random — so say so at startup rather than
+    letting it surface as an intermittent bug report.
+    """
+    if not settings.graph_cache_enabled:
+        return
+
+    volume_path = settings.graph_cache_volume_path_effective
+    if volume_path:
+        if verbose:
+            logger.info("Graph cache volume: %s", volume_path)
+        return
+
+    Path(settings.graph_cache_dir).mkdir(parents=True, exist_ok=True)
+    if verbose:
+        logger.info("Graph cache directory: %s", settings.graph_cache_dir)
+
+    if settings.databricks_mode:
+        logger.warning(
+            "Graph cache is using a local directory (%s) in Databricks mode. "
+            "With more than one replica each holds its own copy, so a cache URL "
+            "will work intermittently. Set GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH "
+            "(or GRAPH_LAGOON_DATABRICKS_VOLUME_PATH) to a Unity Catalog Volume.",
+            settings.graph_cache_dir,
+        )
 
 
 def create_mountable_app(
@@ -426,6 +491,8 @@ def create_mountable_app(
     configure_warehouse(settings, header_provider=header_provider)
     configure_datasources(settings, header_provider=header_provider)
     configure_snapshot_service(settings, header_provider=header_provider)
+    configure_graph_cache_service(settings, header_provider=header_provider)
+    configure_style_preset_service(settings, header_provider=header_provider)
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
 
@@ -447,6 +514,8 @@ def create_mountable_app(
     async def mountable_lifespan(app: FastAPI):
         if not settings.databricks_volume_path:
             Path(settings.exploration_snapshots_dir).mkdir(parents=True, exist_ok=True)
+        _prepare_graph_cache_storage(settings, verbose=False)
+        _prepare_style_preset_storage(settings, verbose=False)
         if is_database_available():
             await create_tables()
             if settings.lakebase_enabled:
@@ -553,6 +622,8 @@ def create_app(
     configure_warehouse(settings, header_provider=header_provider)
     configure_datasources(settings, header_provider=header_provider)
     configure_snapshot_service(settings, header_provider=header_provider)
+    configure_graph_cache_service(settings, header_provider=header_provider)
+    configure_style_preset_service(settings, header_provider=header_provider)
 
     # Register similarity endpoints
     if similarity_endpoints:
@@ -580,6 +651,9 @@ def create_app(
         if not settings.databricks_volume_path:
             Path(settings.exploration_snapshots_dir).mkdir(parents=True, exist_ok=True)
             logger.info("Snapshot directory: %s", settings.exploration_snapshots_dir)
+
+        _prepare_graph_cache_storage(settings, verbose=True)
+        _prepare_style_preset_storage(settings, verbose=True)
 
         if is_database_available():
             await create_tables()

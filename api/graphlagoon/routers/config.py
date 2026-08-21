@@ -34,6 +34,10 @@ async def get_config(request: Request):
         "dev_mode": settings.dev_mode,
         "database_enabled": is_database_available(),
         "databricks_mode": settings.databricks_mode,
+        # Reading a cache only needs context access; creating and deleting
+        # additionally needs dev mode, which the frontend gates on separately.
+        "graph_cache_enabled": settings.graph_cache_enabled,
+        "style_presets_enabled": settings.style_presets_enabled,
         # Which backends this server can serve. Drives whether the context
         # creation form offers a datasource beyond the SQL warehouse; what each
         # backend can *do* is the frontend's own matrix.

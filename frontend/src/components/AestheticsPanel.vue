@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { X } from 'lucide-vue-next';
+import StylePresetModal from './StylePresetModal.vue';
 import IconPicker from '@/components/IconPicker.vue';
 import type { PropertyIconConfig } from '@/types/graph';
 
 const emit = defineEmits<{
   (e: 'close'): void;
 }>();
+
+const showPresets = ref(false);
 
 const graphStore = useGraphStore();
 
@@ -165,6 +168,17 @@ function resetAesthetics() {
     <div class="panel-header">
       <h3>Style</h3>
       <div class="header-actions">
+        <!-- A preset is this panel's contents under a name, so it belongs here
+             rather than behind a second "Style" button in the toolbar — and in a
+             modal rather than inline, so the sliders stay uncluttered. -->
+        <button
+          class="btn btn-outline btn-sm"
+          title="Save or apply a named preset of the settings on this panel"
+          data-testid="style-preset-open"
+          @click="showPresets = true"
+        >
+          Presets
+        </button>
         <button class="btn btn-outline btn-sm" @click="resetAesthetics">Reset</button>
         <button class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
@@ -467,6 +481,8 @@ function resetAesthetics() {
           />
         </div>
     </div>
+
+    <StylePresetModal v-if="showPresets" @close="showPresets = false" />
   </div>
 </template>
 

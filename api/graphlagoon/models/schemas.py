@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, Any, Literal, TypeAlias
 from uuid import UUID
 from datetime import datetime
@@ -130,6 +130,157 @@ class GraphResponse(BaseModel):
             "enrichment via /nodes/batch; false keeps the historical contract."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Graph cache — named, per-context query results addressable by URL
+# ---------------------------------------------------------------------------
+
+
+class CachedGraph(BaseModel):
+    """The graph a cache entry replays.
+
+    Deliberately the *API* node/edge shape rather than the snapshot shape, so a
+    cached graph feeds the frontend store without a field-by-field remap. It is
+    GraphResponse minus `metadata`, which is query timing and meaningless once
+    replayed.
+
+    No node positions: a cache replays a query result, and layout runs fresh on
+    load. Positions with their surrounding visual state are what explorations
+    and their snapshots are for.
+    """
+
+    nodes: list[Node]
+    edges: list[Edge]
+    truncated: bool = False
+    total_count: Optional[int] = None
+    properties_deferred: bool = Field(
+        default=False,
+        description=(
+            "Always false for a cache entry — writes are refused while node "
+            "properties are still being enriched, so a cache is never half-filled."
+        ),
+    )
+
+
+class GraphCacheSource(BaseModel):
+    """Where a cached graph came from, for display and for judging staleness."""
+
+    kind: Literal["cypher", "sql", "subgraph", "manual"] = "manual"
+    query: Optional[str] = None
+    datasource_type: Optional[str] = None
+    datasource_name: Optional[str] = None
+
+
+class GraphCacheWriteRequest(BaseModel):
+    """Body of PUT /api/graph-contexts/{id}/graph-cache/{name}."""
+
+    graph: CachedGraph
+    source: GraphCacheSource = Field(default_factory=GraphCacheSource)
+
+
+class GraphCachePayload(BaseModel):
+    """What actually gets written to the volume."""
+
+    cache_version: int = 1
+    name: str
+    context_id: str
+    created_at: datetime
+    created_by: str
+    node_count: int = 0
+    edge_count: int = 0
+    properties_complete: bool = True
+    source: GraphCacheSource = Field(default_factory=GraphCacheSource)
+    graph: CachedGraph
+
+
+class GraphCacheEntry(BaseModel):
+    """What a write reports back about the entry it just stored.
+
+    There is no listing endpoint to return these in bulk — entries are addressed
+    by name, and enumerating them is the one operation that does not survive
+    scale. Richer metadata lives inside the file itself.
+    """
+
+    name: str
+    size_bytes: int
+    modified_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Style presets — named style + label + layout settings, applied by URL
+# ---------------------------------------------------------------------------
+
+
+class StylePresetSettings(BaseModel):
+    """The presentation subset of an exploration's state.
+
+    Every field here already exists in `ExplorationState` and is produced and
+    consumed by the same frontend code, so a preset and an exploration can never
+    describe the same thing two different ways.
+
+    Deliberately excluded: nodes, edges, filters, viewport, the query and its
+    transpile options, clusters, communities and behaviors. A preset says how a
+    graph *looks*, never which data it shows — otherwise applying one would
+    silently hide nodes and the graph would look like it came back incomplete.
+
+    The server does not interpret any of it. Shapes are owned by the frontend
+    (`buildStylePreset`/`applyStylePreset` in stores/graph.ts) and validated
+    there; typing them here would mean two definitions drifting apart.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    # Style
+    aesthetics: Optional[dict[str, Any]] = None
+    nodeTypeColors: Optional[dict[str, str]] = None
+    edgeTypeColors: Optional[dict[str, str]] = None
+    nodeTypeIcons: Optional[dict[str, str]] = None
+    edgeTypeIcons: Optional[dict[str, str]] = None
+    nodePropertyIconConfigs: Optional[dict[str, Any]] = None
+    # Labels
+    textFormat: Optional[dict[str, Any]] = None
+    # Layout
+    layout_algorithm: Optional[str] = None
+    layout_mode_config: Optional[dict[str, Any]] = None
+    force3d_settings: Optional[dict[str, Any]] = None
+
+
+class StylePresetWriteRequest(BaseModel):
+    """Body of PUT /api/graph-contexts/{id}/style-presets/{name}."""
+
+    settings: StylePresetSettings
+    description: Optional[str] = Field(default=None, max_length=280)
+
+
+class StylePreset(BaseModel):
+    """What gets written to the volume, and what a read returns."""
+
+    preset_version: int = 1
+    name: str
+    context_id: str
+    created_at: datetime
+    created_by: str
+    updated_at: Optional[datetime] = None
+    description: Optional[str] = None
+    settings: StylePresetSettings
+
+
+class StylePresetEntry(BaseModel):
+    """One row of the preset listing.
+
+    Only what a directory listing reports — no `created_by`, because ownership
+    lives inside each file and reading every one of them to build a list would
+    be a request per preset. Delete checks ownership server-side instead.
+    """
+
+    name: str
+    size_bytes: int
+    modified_at: Optional[datetime] = None
+
+
+class StylePresetListResponse(BaseModel):
+    presets: list[StylePresetEntry]
 
 
 class DatasetsResponse(BaseModel):

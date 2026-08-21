@@ -25,6 +25,18 @@ GRAPH_LAGOON_NEPTUNE_PORT=8182
 GRAPH_LAGOON_NEPTUNE_USE_IAM=false
 GRAPH_LAGOON_NEPTUNE_REGION=us-east-1
 
+# Graph cache (see "Graph cache" below)
+GRAPH_LAGOON_GRAPH_CACHE_ENABLED=true
+GRAPH_LAGOON_GRAPH_CACHE_DIR=./tmp/graph-cache
+# GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH=/Volumes/catalog/schema/volume/graph-cache
+GRAPH_LAGOON_GRAPH_CACHE_MAX_BYTES=209715200
+
+# Style presets (see "Style presets" below)
+GRAPH_LAGOON_STYLE_PRESETS_ENABLED=true
+GRAPH_LAGOON_STYLE_PRESETS_DIR=./tmp/style-presets
+# GRAPH_LAGOON_STYLE_PRESETS_VOLUME_PATH=/Volumes/catalog/schema/volume/style-presets
+GRAPH_LAGOON_STYLE_PRESETS_MAX_PER_CONTEXT=100
+
 # Development
 GRAPH_LAGOON_DEV_MODE=true
 GRAPH_LAGOON_SHOW_ERROR_DETAILS=true
@@ -33,6 +45,162 @@ GRAPH_LAGOON_SHOW_ERROR_DETAILS=true
 GRAPH_LAGOON_SUPERUSER_EMAILS=admin@company.com,ops@company.com
 GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=company.com
 ```
+
+## Graph cache
+
+A **graph cache** is a query result stored under a name and reopened from a URL:
+
+```
+/graph/{context_id}?graph=fraude-2024
+```
+
+Anyone who can read the context can open its caches. Nothing is queried — the
+stored nodes and edges are served straight from the volume — so a link opens in
+about the time it takes to download them, no matter how expensive the original
+query was.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_GRAPH_CACHE_ENABLED` | `true` | `false` makes every cache endpoint answer 404. |
+| `GRAPH_LAGOON_GRAPH_CACHE_DIR` | `./tmp/graph-cache` | Local directory, used when no volume path applies. |
+| `GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to a `graph-cache` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set. |
+| `GRAPH_LAGOON_GRAPH_CACHE_MAX_BYTES` | `209715200` (200 MB) | Cap on one compressed entry. |
+
+Entries live at `{root}/cache/{context_id}/{name}.jsonz` — gzip'd JSON. The
+extension deliberately does not name the codec, and reads dispatch on magic
+bytes, so the compression can change later without migrating a single file.
+gzip specifically, rather than something denser, because the read endpoint hands
+the stored bytes back untouched under `Content-Encoding: gzip`: the server never
+decompresses or re-serializes the graph, and the browser unpacks it natively.
+
+Names must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` and are **case-sensitive**
+— on a case-insensitive local filesystem (macOS) `Foo` and `foo` are one entry;
+on a volume they are two.
+
+### There is no way to list them
+
+Entries are addressed by name, and the API deliberately offers **no listing
+endpoint**. Enumeration is the one operation that does not survive scale: a
+directory listing costs about 16 µs and 100 bytes of JSON per entry (measured
+locally), so a context holding a million entries would mean a 16-second call
+returning a 100 MB response. Paging would only have moved that cost around,
+because the Databricks Files API has no server-side name filter to page
+*toward*. Since every real use of a cache already knows the name it wants,
+not offering the operation is the only answer that stays correct at every size.
+
+The practical consequence: **keep the name when you create one.** The dev panel
+shows the link immediately after saving, and a cache URL is the durable handle.
+
+### Who can write
+
+Reading is available wherever the feature is enabled. **Creating and deleting
+through the API require `GRAPH_LAGOON_DEV_MODE=true`**, so in production entries
+reach the volume through a separate process — a job that writes the file
+directly. In dev, the toolbar grows a **Cache** button with two fields: save the
+graph on screen under a name, and delete a cache by name.
+
+Deletion is idempotent — with nothing to enumerate there is no way to check
+first, so removing a name that was never there also succeeds.
+
+Deleting a context purges its cache directory; that cleanup is not dev-gated,
+since skipping it would leak storage permanently. It is one request per entry
+against a volume, run with bounded concurrency.
+
+::: warning Multi-replica deployments
+Without a volume path, the cache is a directory local to one process. Behind more
+than one replica the same URL lands on different replicas, and a cache appears
+and disappears at random. Set `GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH` (or
+`GRAPH_LAGOON_DATABRICKS_VOLUME_PATH`) for any deployment that is not a single
+process. The API logs a warning at startup when it detects this combination.
+:::
+
+### Cache or exploration?
+
+Both persist a graph to the same kind of volume, which makes them easy to
+confuse. They answer different questions:
+
+| | Graph cache | Exploration |
+|---|---|---|
+| **Addressed by** | a name you chose | an opaque UUID |
+| **Belongs to** | the context — everyone with access sees it | the user who saved it, plus whoever it is shared with |
+| **Stores** | the query result: nodes, edges, properties | the result **plus** UI state — positions, communities, clusters, filters |
+| **On open** | layout runs fresh | the saved layout is restored |
+| **Use it for** | "here is the graph, look at this link" | "let me pick up where I left off" |
+
+If you need node positions preserved, you want an exploration. A cache
+deliberately does not carry them: it replays a query result, and the layout
+settles again on load.
+
+## Style presets
+
+A **style preset** is how a context's graph looks, saved under a name and
+applied from the URL:
+
+```
+/graph/{context_id}?style=investigacao
+```
+
+It carries three things — **style** (colors, icons, aesthetics), **labels**
+(text formatting) and **layout** (algorithm, its parameters, 3D forces) — and
+nothing about which data is shown. Applying one therefore never changes what is
+on screen, only how it is drawn, which is why it is safe on any graph in the
+context, before or after that graph loads. A graph loaded afterwards inherits
+the look.
+
+The two URL parameters compose, so a single link can pin both the data and its
+appearance:
+
+```
+/graph/{context_id}?graph=fraude-2024&style=investigacao
+```
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_STYLE_PRESETS_ENABLED` | `true` | `false` makes every preset endpoint answer 404. |
+| `GRAPH_LAGOON_STYLE_PRESETS_DIR` | `./tmp/style-presets` | Local directory, used when no volume path applies. |
+| `GRAPH_LAGOON_STYLE_PRESETS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to a `style-presets` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set. |
+| `GRAPH_LAGOON_STYLE_PRESETS_MAX_PER_CONTEXT` | `100` | Presets are listed in full for the picker, so the count is bounded here rather than paginated at read time. |
+
+Entries live at `{root}/style/{context_id}/{name}.jsonz`, gzip'd JSON, with the
+same name rules as a graph cache.
+
+### Permissions
+
+Three levels, one more than elsewhere:
+
+- **Read** — anyone with access to the context.
+- **Write** — anyone with *write* access to it. Unlike a graph cache this is not
+  gated on dev mode: a preset is a few kilobytes of preference, not a
+  materialized query result.
+- **Delete** — only the person who created that particular preset, or a
+  superuser. Ownership is per preset, so one person's saved look cannot be
+  thrown away by another — not even by whoever owns the context.
+
+Overwriting an existing name keeps its original author, precisely so write
+access cannot be used to take over someone else's preset and then delete it.
+
+A preset the URL names but that does not exist **changes nothing and does not
+break the page** — the graph loads and stays fully usable, and the status bar
+reports that the styling was not applied. This differs from a missing `?graph=`,
+which leaves nothing to look at.
+
+::: warning Multi-replica deployments
+The same caveat as the graph cache: without a volume path each replica keeps its
+own copy, so a `?style=` link works intermittently. The API logs a warning at
+startup when it detects this.
+:::
+
+### Preset, cache, or exploration?
+
+| | Style preset | Graph cache | Exploration |
+|---|---|---|---|
+| **Stores** | how it looks | which nodes and edges | both, plus positions |
+| **Scope** | the context | the context | one user, plus shares |
+| **Addressed by** | `?style=name` | `?graph=name` | `?exploration=uuid` |
+| **Combines with** | any graph | any style | — |
+
+A preset and a cache are orthogonal on purpose: the same look applies to any
+data, and the same data can be viewed in any look.
 
 ## Datasources
 

@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from uuid import UUID
-from typing import TYPE_CHECKING, Optional, Union
-
-if TYPE_CHECKING:
-    from graphlagoon.db.models import GraphContext
+from typing import Optional
 
 from graphlagoon.db.database import is_database_available, get_session_maker
-from graphlagoon.db.memory_store import get_memory_store, MemoryGraphContext
+from graphlagoon.db.memory_store import get_memory_store
 from graphlagoon.models.schemas import (
     DatasetsResponse,
     GraphResponse,
@@ -58,6 +55,10 @@ from graphlagoon.services.datasource.sql_warehouse import (  # noqa: F401
     resolve_node_columns,
 )
 from graphlagoon.services.warehouse_errors import query_execution_http_error
+
+# `get_context_with_access` moved to utils/context_access.py when the graph cache
+# needed it too. Re-exported here for callers that import it from this module.
+from graphlagoon.utils.context_access import get_context_with_access  # noqa: F401
 from graphlagoon.services.async_job import create_job, get_job, start_job, cancel_job
 from graphlagoon.middleware.auth import get_current_user
 from graphlagoon.config import get_settings
@@ -121,108 +122,6 @@ def execution_failure_http_error(
             }
         },
     )
-
-
-async def get_context_with_access(
-    context_id: UUID, user_email: str
-) -> Union["GraphContext", MemoryGraphContext]:
-    """Get graph context and verify access.
-
-    Access is granted if the user:
-    - Is a superuser (GRAPH_LAGOON_SUPERUSER_EMAILS), OR
-    - Owns the context, OR
-    - Has a context-level share (GraphContextShare), OR
-    - Has an exploration-level share (ExplorationShare) for any exploration in this context
-    """
-    from graphlagoon.utils.authz import is_superuser
-    from graphlagoon.utils.sharing import user_has_share_access, extract_domain
-
-    not_found_error = HTTPException(
-        status_code=404,
-        detail={
-            "error": {
-                "code": "GRAPH_CONTEXT_NOT_FOUND",
-                "message": f"Graph context with id '{context_id}' not found",
-                "details": {},
-            }
-        },
-    )
-    forbidden_error = HTTPException(
-        status_code=403,
-        detail={
-            "error": {
-                "code": "FORBIDDEN",
-                "message": "You don't have access to this graph context",
-                "details": {},
-            }
-        },
-    )
-
-    if is_database_available():
-        from sqlalchemy import select, or_
-        from sqlalchemy.orm import selectinload
-        from graphlagoon.db.models import GraphContext, Exploration, ExplorationShare
-
-        session_maker = get_session_maker()
-        async with session_maker() as session:
-            result = await session.execute(
-                select(GraphContext)
-                .options(selectinload(GraphContext.shares))
-                .where(GraphContext.id == context_id)
-            )
-            context = result.scalar_one_or_none()
-
-            if context is None:
-                raise not_found_error
-
-            if context.owner_email == user_email or is_superuser(user_email):
-                return context
-
-            if user_has_share_access(user_email, context.shares):
-                return context
-
-            # Check exploration-level shares
-            user_domain = extract_domain(user_email)
-            share_conditions = [ExplorationShare.shared_with_email == user_email]
-            if user_domain:
-                share_conditions.append(
-                    ExplorationShare.shared_with_email == f"*@{user_domain}"
-                )
-
-            exp_share_result = await session.execute(
-                select(ExplorationShare.id)
-                .join(Exploration, ExplorationShare.exploration_id == Exploration.id)
-                .where(
-                    Exploration.graph_context_id == context_id,
-                    or_(*share_conditions),
-                )
-                .limit(1)
-            )
-            if exp_share_result.scalar_one_or_none() is not None:
-                return context
-
-            raise forbidden_error
-    else:
-        store = get_memory_store()
-        context = store.get_graph_context(context_id)
-
-        if context is None:
-            raise not_found_error
-
-        if context.owner_email == user_email or is_superuser(user_email):
-            return context
-
-        if user_has_share_access(user_email, context.shares):
-            return context
-
-        # Check exploration-level shares
-        for exp in store.explorations.values():
-            if exp.graph_context_id == context_id and user_has_share_access(
-                user_email, exp.shares
-            ):
-                return context
-
-        raise forbidden_error
 
 
 @router.get("/datasets", response_model=DatasetsResponse)

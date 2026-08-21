@@ -15,6 +15,7 @@ export interface ToolbarHandlers {
   onToggleLabels: () => void;
   onToggleClusterPrograms: () => void;
   onToggleTemplates: () => void;
+  onToggleGraphCache: () => void;
   onExportPNG: (options: ExportPNGOptions) => void;
 }
 
@@ -26,7 +27,8 @@ export type PanelId =
   | 'aesthetics'
   | 'labels'
   | 'clusters'
-  | 'templates';
+  | 'templates'
+  | 'graphCache';
 
 export const useToolbarStore = defineStore('toolbar', () => {
   const handlers = ref<ToolbarHandlers | null>(null);

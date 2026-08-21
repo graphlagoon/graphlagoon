@@ -168,6 +168,98 @@ export interface GraphSnapshot {
   snapshot_version?: number;
 }
 
+// Graph cache — named, per-context query results replayed from a volume.
+//
+// Distinct from a snapshot: a snapshot belongs to one exploration and one user
+// and carries UI state (positions, communities, clusters); a cache is named,
+// visible to everyone with context access, and carries nothing but the query
+// result. That is why it reuses the API's Node/Edge shape instead of the
+// snapshot's — it feeds the store with no field remapping.
+
+export interface CachedGraph {
+  nodes: Node[];
+  edges: Edge[];
+  truncated: boolean;
+  total_count?: number | null;
+  properties_deferred?: boolean;
+}
+
+export interface GraphCacheSource {
+  kind: 'cypher' | 'sql' | 'subgraph' | 'manual';
+  query?: string | null;
+  datasource_type?: string | null;
+  datasource_name?: string | null;
+}
+
+export interface GraphCachePayload {
+  cache_version: number;
+  name: string;
+  context_id: string;
+  created_at: string;
+  created_by: string;
+  node_count: number;
+  edge_count: number;
+  properties_complete: boolean;
+  source: GraphCacheSource;
+  graph: CachedGraph;
+}
+
+/** What a write reports back. There is no listing endpoint to return these in
+ *  bulk — entries are addressed by name. */
+export interface GraphCacheEntry {
+  name: string;
+  size_bytes: number;
+  modified_at?: string | null;
+}
+
+/** Mirrors CACHE_NAME_RE in api/graphlagoon/services/graph_cache.py. */
+export const GRAPH_CACHE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+
+// Style presets — named style + label + layout settings, applied by URL.
+//
+// Every field here also exists in ExplorationState, and both are produced by
+// `buildStylePreset()` and consumed by `applyStylePreset()` in stores/graph.ts.
+// Keeping one definition is the point: a preset and an exploration must never
+// describe the same setting two different ways.
+//
+// Deliberately absent: nodes, edges, filters, viewport, query, clusters,
+// communities and behaviors. A preset says how a graph looks, not what it shows.
+
+export interface StylePresetSettings {
+  // Style
+  aesthetics?: Record<string, unknown>;
+  nodeTypeColors?: Record<string, string>;
+  edgeTypeColors?: Record<string, string>;
+  nodeTypeIcons?: Record<string, string>;
+  edgeTypeIcons?: Record<string, string>;
+  nodePropertyIconConfigs?: Record<string, PropertyIconConfig>;
+  // Labels
+  textFormat?: TextFormatState;
+  // Layout
+  layout_algorithm?: LayoutAlgorithm;
+  layout_mode_config?: LayoutModeConfig;
+  force3d_settings?: Record<string, unknown>;
+}
+
+export interface StylePreset {
+  preset_version: number;
+  name: string;
+  context_id: string;
+  created_at: string;
+  created_by: string;
+  updated_at?: string | null;
+  description?: string | null;
+  settings: StylePresetSettings;
+}
+
+/** One row of the preset picker. No owner: the listing reports only what a
+ *  directory listing knows, and delete checks ownership server-side. */
+export interface StylePresetEntry {
+  name: string;
+  size_bytes: number;
+  modified_at?: string | null;
+}
+
 // Property filter types
 export type PropertyFilterOperator =
   | 'equals'           // Exact match (string or number)

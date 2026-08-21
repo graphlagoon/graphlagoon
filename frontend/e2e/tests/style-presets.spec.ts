@@ -1,0 +1,222 @@
+/**
+ * Named style presets — style, labels and layout applied from the URL.
+ */
+import { test, expect } from '../fixtures/test-fixtures';
+import { MOCK_CONTEXT } from '../fixtures/mock-data';
+import { seedContexts, seedStylePresets, seedGraphCaches } from '../helpers/api-mocks';
+
+const INVESTIGACAO = {
+  aesthetics: { nodeSize: 9 },
+  nodeTypeColors: { Person: '#ff0000' },
+  edgeTypeColors: {},
+  textFormat: { rules: [], defaults: {} },
+  layout_algorithm: 'hive',
+  layout_mode_config: { ego: {}, hive: {}, hierarchical: {} },
+  force3d_settings: {},
+};
+
+/**
+ * Presets open from a button inside the existing Style (aesthetics) panel — not
+ * from a toolbar entry of their own, and not inline in the sidebar.
+ */
+async function openPresets(page: any) {
+  if (!(await page.getByTestId('style-preset-open').isVisible().catch(() => false))) {
+    await page.getByTitle('Style', { exact: true }).click();
+  }
+  await page.getByTestId('style-preset-open').click();
+  await expect(page.getByTestId('style-preset-modal')).toBeVisible();
+}
+
+test.describe('Style presets', () => {
+  test.beforeEach(async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+  });
+
+  test('?style=<name> applies the preset to the loaded graph', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?style=investigacao`);
+
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('graph-status-style')).toContainText('investigacao');
+    // The graph itself is untouched — a preset never changes what is shown.
+    await expect(page.getByTestId('graph-status-bar')).toContainText('5 nodes');
+  });
+
+  test('a missing preset leaves the graph fully usable and says so', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, {});
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?style=nao-existe`);
+
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    // Unlike a missing ?graph=, the graph still loaded.
+    await expect(page.getByTestId('graph-status-bar')).toContainText('5 nodes');
+    await expect(page.getByTestId('graph-status-style')).toHaveCount(0);
+    await expect(page.getByTestId('graph-status-style-error')).toBeVisible();
+  });
+
+  test('an ordinary open shows no style chip', async ({ authenticatedPage: page }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('graph-status-style')).toHaveCount(0);
+  });
+
+  test('style and cache compose in one URL', async ({ authenticatedPage: page }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
+    await seedGraphCaches(page, MOCK_CONTEXT.id, {
+      'fraude-2024': {
+        nodes: [
+          { node_id: 'n1', node_type: 'Person', properties: {} },
+          { node_id: 'n2', node_type: 'Person', properties: {} },
+        ],
+        edges: [],
+      },
+    });
+
+    await page.goto(
+      `/graph/${MOCK_CONTEXT.id}?graph=fraude-2024&style=investigacao`,
+    );
+
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('graph-status-cached')).toContainText('fraude-2024');
+    await expect(page.getByTestId('graph-status-style')).toContainText('investigacao');
+    await expect(page.getByTestId('graph-status-bar')).toContainText('2 nodes');
+  });
+
+  test('the panel lists presets and applies one through the URL', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, {
+      investigacao: INVESTIGACAO,
+      apresentacao: INVESTIGACAO,
+    });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    await openPresets(page);
+    await expect(page.getByTestId('style-preset-item-investigacao')).toBeVisible();
+    await expect(page.getByTestId('style-preset-item-apresentacao')).toBeVisible();
+
+    await page.getByTestId('style-preset-apply-investigacao').click();
+
+    await expect(page).toHaveURL(/style=investigacao/);
+    await expect(page.getByTestId('graph-status-style')).toContainText('investigacao');
+  });
+
+  test('saving the current look creates a preset and applies it', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, {});
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    await openPresets(page);
+    await page.getByTestId('style-preset-name-input').fill('meu-estilo');
+    await page.getByTestId('style-preset-description-input').fill('For reviews');
+    await page.getByTestId('style-preset-save-button').click();
+
+    await expect(page.getByTestId('style-preset-item-meu-estilo')).toBeVisible();
+    await expect(page).toHaveURL(/style=meu-estilo/);
+  });
+
+  test('stopping a style drops only that URL param', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?style=investigacao`);
+    await expect(page.getByTestId('graph-status-style')).toBeVisible({ timeout: 15_000 });
+
+    await openPresets(page);
+    await page.getByTestId('style-preset-clear').click();
+
+    await expect(page).not.toHaveURL(/style=/);
+    await expect(page.getByTestId('graph-status-style')).toHaveCount(0);
+    // The graph is still there — only the styling stopped.
+    await expect(page.getByTestId('graph-status-bar')).toContainText('5 nodes');
+  });
+
+  test('deleting someone else\'s preset reports who owns it', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(
+      page,
+      MOCK_CONTEXT.id,
+      { alheio: INVESTIGACAO },
+      { alheio: 'alice@example.com' },
+    );
+    page.on('dialog', (dialog) => dialog.accept());
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    await openPresets(page);
+    await page.getByTestId('style-preset-delete-alheio').click();
+
+    // The listing carries no owner, so this message is the only place it appears.
+    await expect(page.getByTestId('style-preset-error')).toContainText(
+      'alice@example.com',
+    );
+    await expect(page.getByTestId('style-preset-item-alheio')).toBeVisible();
+  });
+
+  test('deleting your own preset removes it', async ({ authenticatedPage: page }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { meu: INVESTIGACAO });
+    page.on('dialog', (dialog) => dialog.accept());
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    await openPresets(page);
+    await page.getByTestId('style-preset-delete-meu').click();
+
+    await expect(page.getByTestId('style-preset-item-meu')).toHaveCount(0);
+    await expect(page.getByTestId('style-preset-empty')).toBeVisible();
+  });
+
+  test('presets open from the Style panel, not a second Style button', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    // Exactly one toolbar entry says "Style".
+    await expect(page.getByTitle('Style', { exact: true })).toHaveCount(1);
+
+    // Opening it shows sliders, not a preset list — that lives behind a button.
+    await page.getByTitle('Style', { exact: true }).click();
+    await expect(page.getByTestId('style-preset-list')).toHaveCount(0);
+    await expect(page.getByTestId('style-preset-open')).toBeVisible();
+
+    await page.getByTestId('style-preset-open').click();
+    await expect(page.getByTestId('style-preset-modal')).toBeVisible();
+    await expect(page.getByTestId('style-preset-item-investigacao')).toBeVisible();
+  });
+
+  test('closing the modal leaves the applied style in place', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    await openPresets(page);
+    await page.getByTestId('style-preset-apply-investigacao').click();
+    await page.getByTestId('style-preset-close').click();
+
+    await expect(page.getByTestId('style-preset-modal')).toHaveCount(0);
+    await expect(page.getByTestId('graph-status-style')).toContainText('investigacao');
+  });
+});
