@@ -195,13 +195,66 @@ own copy, so a `?style=` link works intermittently. The API logs a warning at
 startup when it detects this.
 :::
 
+### Overriding the layout from a link
+
+A preset is all-or-nothing: applying one replaces the whole layout block. That
+makes "the investigation look, but centred on *this* account" cost a new preset
+per account. Layout parameters can instead be set in the URL, on top of whatever
+the preset restored:
+
+```
+/graph/{context_id}?style=investigacao&layout=ego&layout.ego.focusNodeId=acct-9931
+```
+
+The grammar is `?layout=<algorithm>` for the algorithm itself, and
+`?layout.<mode>.<field>=<value>` for a single parameter of one mode. The URL wins
+field by field; everything it does not name keeps the preset's value.
+
+Only **semantic** parameters can be set from a link — the ones that change what
+you are looking at, not how it is drawn:
+
+| Mode | Settable from a link |
+|---|---|
+| `ego` | `focusNodeId`, `direction`, `maxHops`, `edgeTypes` |
+| `hierarchical` | `traversal`, `direction`, `edgeTypes` |
+| `hive` | *(none)* |
+
+Appearance — spacings, radii, ring ordering, crossing heuristics — is
+deliberately excluded. That is what a style preset is for, and a URL that could
+set it would be a worse copy of one. Two parameters are excluded for their own
+reasons: the ring-ordering and hive axis keys name dataset properties, so a typo
+would silently degrade the layout instead of being reported; and the crossing
+heuristic gates an algorithm expensive enough that turning it on is a decision
+the recipient of a link should make, not the sender.
+
+Conventions for values:
+
+- An **empty value** means "none" for a parameter that allows it:
+  `?layout.ego.maxHops=` removes the hop cutoff.
+- **Lists are comma-separated**, and empty means all:
+  `?layout.ego.edgeTypes=KNOWS,WORKS_AT` restricts ego traversal to those two.
+- Field overrides **configure** a mode without switching to it.
+  `?layout.ego.focusNodeId=x` alone sets ego's focus for whenever ego is turned
+  on; add `?layout=ego` to switch.
+
+A parameter the URL names but cannot apply **changes nothing and does not break
+the page**, the same as a missing preset: the graph loads and stays fully usable,
+and the status bar reports how many settings were dropped, with the reason for
+each in its tooltip.
+
+The focus node is checked against the graph on screen — there is no lookup, so a
+focus link is only as good as the query or cache it travels with. If the node is
+not there, the layout has nothing to centre on and says so rather than sitting
+inert. A context that opens empty is not treated as a failure: there is nothing
+to check against until you run a query.
+
 ### Preset, cache, or exploration?
 
 | | Style preset | Graph cache | Exploration |
 |---|---|---|---|
 | **Stores** | how it looks | which nodes and edges | both, plus positions |
 | **Scope** | the context | the context | one user, plus shares |
-| **Addressed by** | `?style=name` | `?graph=name` | `?exploration=uuid` |
+| **Addressed by** | `?style=name`, overridden per field by `?layout…` | `?graph=name` | `?exploration=uuid` |
 | **Combines with** | any graph | any style | — |
 
 A preset and a cache are orthogonal on purpose: the same look applies to any

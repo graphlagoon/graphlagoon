@@ -1,5 +1,108 @@
 # Decision Log
 
+## [2026-08-21] - Feature: layout parameters overridable from the URL
+
+**Purpose:** A style preset carries labels, styles and layout as one snapshot —
+`applyStylePreset` replaces `layoutAlgorithm` and `layoutModeConfig` wholesale. That makes
+a preset all-or-nothing, so "the investigation look, but centred on *this* suspect" costs a
+new preset per suspect. This lets a link override layout parameters field by field on top of
+whatever the preset restored. Explicit requirement from the request: it must be robust to
+failure — a focus node that does not exist, a preset that does not exist, an unparseable value.
+
+**Design decisions:**
+
+1. **Schema-driven, not per-field parsing code.** `?layout=<algo>` plus
+   `?layout.<mode>.<field>=<value>`, with a declarative spec (expects + parse) per field.
+   Field names are the TS property names verbatim, so the URL is self-documenting against
+   `types/graph.ts` and a new parameter costs one schema entry.
+
+2. **A restricted allowlist, not every layout field.** Only parameters that change *what you
+   are looking at*: `ego.{focusNodeId,direction,maxHops,edgeTypes}` and
+   `hierarchical.{traversal,direction,edgeTypes}`. Hive exposes nothing. Excluded, each for
+   its own reason rather than as a blanket cut:
+   - *Appearance* (spacings, radii, `ringOrdering`, `arcIntraRingEdges`) — that is what a
+     preset is for; a URL that set it would be a worse duplicate of one.
+   - `ringOrderingKey`, `hive.axisKey`, `hive.positionKey` — free strings naming dataset
+     properties. The parser cannot tell a typo from a real property, so a wrong value would
+     degrade the layout in silence: exactly the failure this feature exists to prevent,
+     reintroduced by another door.
+   - `crossingHeuristic` — gates sifting, which the store's own comment measures at ~440ms on
+     a dense ring inside a 150ms debounce, "so strength is opt-in". A link must not spend that
+     on the recipient's behalf.
+   The user was offered the full-generic option and chose the restricted one.
+
+3. **`circular` and `grid` rejected** despite being members of `LayoutAlgorithm` and
+   `KNOWN_LAYOUTS`. They have no implementation, no UI entry and no branch in
+   `applyLayoutModeForces`; accepting them would hand someone a link that renders nothing.
+   `SUPPORTED_LAYOUTS` uses `satisfies readonly LayoutAlgorithm[]` so the divergence stays
+   type-checked.
+
+4. **Ordering is load-bearing, not cosmetic.** Overrides apply *after* `applyStyleFromRoute`,
+   because `applyStylePreset` replaces the whole `layoutModeConfig` ref — overrides applied
+   first would be silently erased. Pinned by a store test that asserts the reverse order loses.
+
+5. **Issues live in the view, not the graph store.** `stylePresetError` is in the store because
+   `loadStylePreset` does the failing I/O there. Parsing does no I/O and is driven by the
+   router, which `graph.ts` deliberately does not depend on; store state would also risk
+   leaking into `buildStylePreset`/`getExplorationState`, which serialize a broad slice.
+   **The store is unchanged by this feature.**
+
+6. **A missing focus node is a notice, not an error.** Persistent status chip plus one
+   `toast.warning`, following the doctrine already stated for a missing `?style=`: the graph
+   is fully usable, so a full error state would overstate it — but a silent no-op would make
+   a broken link look like a working one. The canvas *already* renders ego inert on an unknown
+   focus (`GraphCanvas3D.vue:1610`), so this adds the explanation, not the safety.
+
+7. **An empty graph is not an answer.** A context with no `autoLoadOnOpen`, or a REST
+   connection without subgraph support, opens with zero nodes. Reporting "not found" there
+   would blame the link for the user not having run a query yet, so the check does not apply
+   until nodes exist.
+
+8. **One chip for all issues**, count in the text and full list in the tooltip. The status bar
+   is a row of terse qualifiers; N chips for N typos would push the node count off the row and
+   imply N distinct kinds of problem. Only the focus-node issue also toasts — a rejected
+   number still leaves a sensible picture, a wrong focus does not.
+
+**Implementation:** the grammar lives entirely in a pure module. Decisive reason:
+`GraphVisualizationView.vue` has no unit test in this repo (its URL logic is e2e-only), so
+pushing the rules out of the view is what makes them directly testable; ~30 lines of
+orchestration remain there, covered behaviourally by e2e.
+
+Verified rather than assumed, since both drove design choices:
+- The progressive-load path (`applyGraphResponse`, `partialNodeIds`) patches properties while
+  keeping the same node ids, so a partial→final swap of equal length cannot change the focus
+  answer. That is what makes watching `nodes.length` — instead of a deep watcher over tens of
+  thousands of nodes — sound.
+- `setLayoutAlgorithm` disables `communityStore.radialLayoutEnabled` for non-force algorithms.
+  Called deliberately (not the raw ref) so two global positional constraints cannot stack, and
+  only when `?layout=` is present: field overrides configure a mode without switching to it,
+  or `?layout.hive.scale=log` would yank someone out of a force layout.
+- `setLayoutAlgorithm` and `updateLayoutModeConfig` must stay synchronous and adjacent, or
+  GraphCanvas3D's watcher fires its own "Pick a focus node" toast. An e2e case asserts exactly
+  one toast to keep that from regressing silently.
+
+**Files created:**
+- [frontend/src/utils/layoutUrlOverrides.ts](frontend/src/utils/layoutUrlOverrides.ts)
+- [frontend/src/utils/__tests__/layoutUrlOverrides.test.ts](frontend/src/utils/__tests__/layoutUrlOverrides.test.ts)
+- [frontend/e2e/tests/layout-url-overrides.spec.ts](frontend/e2e/tests/layout-url-overrides.spec.ts)
+
+**Files modified:**
+- [frontend/src/views/GraphVisualizationView.vue](frontend/src/views/GraphVisualizationView.vue) — two functions, two watchers, chip, CSS
+- [frontend/src/stores/__tests__/graph.stylePreset.test.ts](frontend/src/stores/__tests__/graph.stylePreset.test.ts) — composition/ordering tests
+- [docs/guide/configuration.md](docs/guide/configuration.md) — new "Overriding the layout from a link" section
+
+**Testing:** 68 new unit tests (parser: grammar, allowlist refusals, every field, repeated
+params, prototype-pollution, hostile values) + 5 store tests (URL-beats-preset, the reverse
+order losing, untouched modes, the community-radial side effect, allowlist fields existing on
+the real config) + 10 e2e. Full suite green: 1597 unit / 88 files, 155 e2e, `vue-tsc --noEmit`
+clean. No regressions.
+
+**Note on this skill's references:** `code_patterns.md`, `technical_debts.md` and
+`potential_bugs.md`, which SKILL.md links, do not exist in the repo — only `architecture.md`
+and this log do. Patterns were taken from the surrounding code instead.
+
+
+
 ## [2026-07-20] - Feature: Ego ring ordering strategies + same-ring edge arcs
 
 **Purpose:** Dense ego networks rendered as a hairball. Two independent causes: (1) angular
