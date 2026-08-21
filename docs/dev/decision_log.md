@@ -3963,3 +3963,15 @@ Labels panel shows them side by side.
 **Verified:** 757 API tests (63 in the rewritten `test_graph_cache.py` alone), 1524 frontend unit tests, 145 E2E, all green apart from the same 5 pre-existing Cypher failures. Live-equivalent coverage: `TestSuperuserGate` exercises owner/write-share/read-share/stranger all getting 403 on both verbs, superuser getting 200/204, and reads working for everyone regardless of superuser status.
 
 **Files:** `api/graphlagoon/routers/graph_cache.py`, `services/graph_cache.py`, `tests/test_graph_cache.py` (rewritten); `frontend/src/components/GraphCachePanel.vue`, `Toolbar.vue`, `components/__tests__/GraphCachePanel.test.ts`; `frontend/e2e/fixtures/test-fixtures.ts` (new `superuserTest` export), `e2e/tests/graph-cache.spec.ts` (rewritten), `e2e/tests/user-journeys.spec.ts`; `docs/guide/configuration.md`, `api/.env.example`.
+
+## [2026-08-21] - Bug Fix: flaky `progressive-load.spec.ts` E2E test (CI-only failure)
+
+**Trigger:** CI run reported `progressive-load.spec.ts:117 › the Behaviors panel switches property loading for the current session` failing on both the initial attempt and its retry with `TypeError: Cannot read properties of undefined (reading 'nodes_mode')` at `bodies[0].nodes_mode`.
+
+**Root cause:** the test attaches `page.on('request', ...)` before `page.goto()`, then asserts on `bodies[0]` synchronously right after `await expect(graph-status-bar).toBeVisible()` resolves. The status bar becomes visible as soon as the app renders the (immediately-fulfilled) types-only subgraph response, but Playwright's `'request'` event listener callback runs on a separate microtask/IPC turn from the page's own rendering — there is no guarantee the callback has fired and pushed into `bodies` by the time the visibility assertion settles. Under a loaded CI runner (this suite already logs "Slow test file" warnings and a 5-minute total run) that race can lose, leaving `bodies` empty when the array is indexed. The identical pattern already existed one test above (`requests types-only nodes, then enriches in a second call`, line 89) using `?.` to avoid the hard crash, which just masks the same race as an assertion-value mismatch instead of a `TypeError`.
+
+**Fix:** replace the synchronous `bodies[0]` index with `await expect.poll(() => bodies.length, { timeout: 15_000 }).toBeGreaterThan(0)` before reading `bodies[0]`, in both the failing test and the earlier `subgraphBodies` case that had the same latent race. This makes the assertion wait for the actual network event instead of assuming it already happened, without changing what's being verified (types-only mode on the first `/subgraph` call).
+
+**Verified:** ran `npx playwright test --config e2e/playwright.config.ts e2e/tests/progressive-load.spec.ts` locally — all 9 tests in the file pass; `npx vue-tsc --noEmit` clean. No backend or store change was needed — this was purely an E2E test-timing bug, not an application regression.
+
+**Files:** `frontend/e2e/tests/progressive-load.spec.ts`.
