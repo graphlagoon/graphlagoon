@@ -133,7 +133,8 @@ class Settings(BaseSettings):
     graph_cache_enabled: bool = Field(
         default=True,
         description="Enable the named graph cache (read is always allowed; "
-        "writing through the API additionally requires dev_mode)",
+        "writing/deleting through the API is restricted to superusers, see "
+        "GRAPH_LAGOON_SUPERUSER_EMAILS)",
     )
     graph_cache_dir: str = Field(
         default="./tmp/graph-cache",
