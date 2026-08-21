@@ -34,7 +34,7 @@ const router = useRouter();
 const graphStore = useGraphStore();
 const authStore = useAuthStore();
 const toolbarStore = useToolbarStore();
-const { devMode } = usePersistence();
+const { devMode, isSuperuser } = usePersistence();
 
 const isGraphPage = computed(() => route.name === 'graph');
 const toolbarHandlers = computed(() => toolbarStore.handlers);
@@ -271,13 +271,14 @@ function handleExportPng(options: ExportPNGOptions) {
             <Save :size="15" /><span class="btn-text">Save</span>
           </button>
 
-          <!-- Graph caches are read-only in production; only authoring them is
-               dev-gated, which is why this button is and the URL is not. -->
+          <!-- Reading a graph cache never needs this panel — it is a URL. Only
+               superusers can author one, so the button (and the panel's save/delete
+               controls) are gated on that, not on dev mode. -->
           <button
-            v-if="devMode && toolbarHandlers"
+            v-if="isSuperuser && toolbarHandlers"
             class="toolbar-btn"
             :class="{ active: toolbarStore.activePanels.has('graphCache') }"
-            title="Graph Cache (dev)"
+            title="Graph Cache (superuser)"
             data-testid="toolbar-graph-cache"
             @click="toolbarHandlers.onToggleGraphCache()"
           >

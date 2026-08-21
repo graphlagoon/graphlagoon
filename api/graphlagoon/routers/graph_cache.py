@@ -1,12 +1,15 @@
 """Named graph caches, addressable by URL.
 
     GET    /api/graph-contexts/{context_id}/graph-cache/{name}   replay one
-    PUT    /api/graph-contexts/{context_id}/graph-cache/{name}   write one   (dev only)
-    DELETE /api/graph-contexts/{context_id}/graph-cache/{name}   remove one  (dev only)
+    PUT    /api/graph-contexts/{context_id}/graph-cache/{name}   write one   (superuser only)
+    DELETE /api/graph-contexts/{context_id}/graph-cache/{name}   remove one  (superuser only)
 
 Reading is gated only by access to the context — that is the whole point of the
-feature. Creating and deleting through the API additionally requires dev mode;
-in production, entries reach the volume through an external process.
+feature. Creating and deleting are restricted to superusers (GRAPH_LAGOON_
+SUPERUSER_EMAILS): a graph cache is treated as a published, administered
+artifact rather than a personal one — unlike a style preset, which anyone with
+context write access can create. Context ownership grants no special power over
+a cache; only superuser status does.
 
 **There is deliberately no listing endpoint.** Entries are addressed by a name
 their author chose, so nothing needs to enumerate them — and enumeration is the
@@ -36,10 +39,9 @@ from graphlagoon.services.graph_cache import (
     InvalidCacheName,
     get_graph_cache_service,
     graph_cache_enabled,
-    graph_cache_writable,
     validate_cache_name,
 )
-from graphlagoon.utils.authz import can_manage
+from graphlagoon.utils.authz import is_superuser
 from graphlagoon.utils.context_access import get_context_with_access
 
 logger = logging.getLogger(__name__)
@@ -63,13 +65,20 @@ def _require_enabled() -> None:
         )
 
 
-def _require_writable() -> None:
-    """Writes are dev-only, mirroring /api/dev/* in routers/graph.py."""
-    if not graph_cache_writable():
+def _require_superuser(user_email: str) -> None:
+    """Creating and deleting a graph cache is a superuser-only action.
+
+    Unlike a style preset — a few kilobytes of personal preference anyone with
+    context write access can save — a graph cache is a published artifact
+    shared by everyone who reads the context, so authoring it is treated as an
+    administrative action rather than an ownership one. The context owner gets
+    no special power here; only GRAPH_LAGOON_SUPERUSER_EMAILS does.
+    """
+    if not is_superuser(user_email):
         raise _error(
             403,
             "FORBIDDEN",
-            "Creating and deleting graph caches is only available in dev mode.",
+            "Creating and deleting graph caches is restricted to superusers.",
         )
 
 
@@ -195,10 +204,10 @@ async def put_graph_cache(
     data: GraphCacheWriteRequest,
     request: Request,
 ):
-    """Write a cache entry from a graph the client already holds. Dev mode only."""
+    """Write a cache entry from a graph the client already holds. Superuser only."""
     _require_enabled()
     user_email = get_current_user(request)
-    _require_writable()
+    _require_superuser(user_email)
     await get_context_with_access(context_id, user_email)
     validated = _validated_name(name)
 
@@ -227,20 +236,14 @@ async def put_graph_cache(
 
 @router.delete("/{context_id}/graph-cache/{name}", status_code=204)
 async def delete_graph_cache(context_id: UUID, name: str, request: Request):
-    """Delete a cache entry. Dev mode only, and only for someone who can manage
-    the context — a cache is shared, so removing one affects every viewer."""
+    """Delete a cache entry. Superuser only — a cache is shared, so removing one
+    affects every viewer, and (unlike a style preset) authoring one is not tied
+    to context ownership in the first place."""
     _require_enabled()
     user_email = get_current_user(request)
-    _require_writable()
-    context = await get_context_with_access(context_id, user_email)
+    _require_superuser(user_email)
+    await get_context_with_access(context_id, user_email)
     validated = _validated_name(name)
-
-    if not can_manage(context.owner_email, user_email):
-        raise _error(
-            403,
-            "FORBIDDEN",
-            "Only the context owner can delete a cached graph.",
-        )
 
     try:
         await _service().delete(context_id, validated)
