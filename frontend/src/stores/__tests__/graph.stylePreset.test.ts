@@ -9,7 +9,12 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-import { useGraphStore } from '@/stores/graph';
+import { defaultLayoutModeConfig, useGraphStore } from '@/stores/graph';
+import { useCommunityStore } from '@/stores/community';
+import {
+  parseLayoutOverrides,
+  settableFieldNames,
+} from '@/utils/layoutUrlOverrides';
 
 vi.mock('@/services/api', () => ({
   api: {
@@ -347,5 +352,88 @@ describe('clear()', () => {
 
     expect(store.currentStylePreset).toBeNull();
     expect(store.stylePresetError).toBeNull();
+  });
+});
+
+/**
+ * URL layout overrides compose with a preset. The parser is tested on its own in
+ * utils/__tests__/layoutUrlOverrides.test.ts; what matters here is the seam —
+ * that its output is shaped to survive `updateLayoutModeConfig`, and that the
+ * ordering the view relies on is the only one that works.
+ */
+describe('layout overrides compose with a preset', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('a URL override survives the preset it is applied after', () => {
+    const store = useGraphStore();
+    store.applyStylePreset(
+      makeSettings({
+        layout_algorithm: 'ego',
+        layout_mode_config: {
+          ego: { focusNodeId: 'from-preset', maxHops: 1, direction: 'out' },
+        },
+      }) as never,
+    );
+
+    const { modeConfig } = parseLayoutOverrides({
+      'layout.ego.focusNodeId': 'from-url',
+    });
+    store.updateLayoutModeConfig(modeConfig);
+
+    expect(store.layoutModeConfig.ego.focusNodeId).toBe('from-url');
+    // Everything the URL did not name keeps the preset's value — that is what
+    // makes "that look, this suspect" possible without a preset per suspect.
+    expect(store.layoutModeConfig.ego.maxHops).toBe(1);
+    expect(store.layoutModeConfig.ego.direction).toBe('out');
+  });
+
+  it('the preset would erase overrides applied before it', () => {
+    const store = useGraphStore();
+    store.updateLayoutModeConfig(
+      parseLayoutOverrides({ 'layout.ego.focusNodeId': 'from-url' }).modeConfig,
+    );
+    store.applyStylePreset(
+      makeSettings({
+        layout_algorithm: 'ego',
+        layout_mode_config: { ego: { focusNodeId: 'from-preset' } },
+      }) as never,
+    );
+
+    // Documents why the view applies overrides AFTER applyStyleFromRoute: this
+    // ordering is load-bearing, not cosmetic.
+    expect(store.layoutModeConfig.ego.focusNodeId).toBe('from-preset');
+  });
+
+  it('leaves untouched modes alone', () => {
+    const store = useGraphStore();
+    const before = store.layoutModeConfig.hive.axisKey;
+    store.updateLayoutModeConfig(
+      parseLayoutOverrides({ 'layout.ego.maxHops': '3' }).modeConfig,
+    );
+    expect(store.layoutModeConfig.hive.axisKey).toBe(before);
+  });
+
+  it('setLayoutAlgorithm from a URL disables community radial', () => {
+    const store = useGraphStore();
+    const community = useCommunityStore();
+    community.radialLayoutEnabled = true;
+
+    const { algorithm } = parseLayoutOverrides({ layout: 'ego' });
+    store.setLayoutAlgorithm(algorithm!);
+
+    // Two global positional constraints must not stack. Pinned here so a
+    // refactor of the override path notices if the invariant moves.
+    expect(community.radialLayoutEnabled).toBe(false);
+  });
+
+  it('every allowlisted field exists on the real layout config', () => {
+    const defaults = defaultLayoutModeConfig();
+    for (const mode of ['ego', 'hive', 'hierarchical'] as const) {
+      for (const field of settableFieldNames(mode)) {
+        expect(defaults[mode], `${mode}.${field}`).toHaveProperty(field);
+      }
+    }
   });
 });

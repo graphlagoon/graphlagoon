@@ -33,12 +33,34 @@ import QueryTemplatesPanel from '@/components/QueryTemplatesPanel.vue';
 import GraphCachePanel from '@/components/GraphCachePanel.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
 import { Info, Settings2, Hexagon, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
+import { useToast } from '@/composables/useToast';
+import {
+  layoutQuerySignature,
+  parseLayoutOverrides,
+  summarizeLayoutIssues,
+  type LayoutOverrideIssue,
+  type QueryLike,
+} from '@/utils/layoutUrlOverrides';
 
 const props = defineProps<{
   contextId: string;
 }>();
 
 const route = useRoute();
+const toast = useToast();
+
+/**
+ * Layout parameters the URL asked for but could not be applied.
+ *
+ * View-local rather than store state: parsing does no I/O and is driven entirely
+ * by the router, which the graph store deliberately does not depend on. Keeping
+ * it here also stops it leaking into buildStylePreset/getExplorationState, which
+ * serialize a broad slice of the store.
+ */
+const layoutOverrideIssues = ref<LayoutOverrideIssue[]>([]);
+const layoutOverrideIssuesTitle = computed(() =>
+  summarizeLayoutIssues(layoutOverrideIssues.value),
+);
 
 // Opened by the "Check context schema" CTA in QueryErrorModal (a stale-schema
 // query failure) and by the drift banner below (an enrichment failure, or a
@@ -174,6 +196,8 @@ async function loadFromRoute(contextId: string) {
 
   await loadGraphFromRoute(contextId, cacheName, explorationId);
   await applyStyleFromRoute(contextId);
+  applyLayoutOverridesFromRoute();
+  validateLayoutOverridesAgainstGraph();
 }
 
 /**
@@ -188,6 +212,84 @@ async function applyStyleFromRoute(contextId: string) {
   const styleName = route.query.style as string | undefined;
   if (!styleName) return;
   await graphStore.loadStylePreset(contextId, styleName);
+}
+
+/**
+ * Apply `?layout=` / `?layout.<mode>.<field>=` on top of whatever the preset
+ * restored.
+ *
+ * Runs after applyStyleFromRoute, and that order is load-bearing rather than
+ * cosmetic: applyStylePreset replaces the whole layoutModeConfig ref, so
+ * overrides applied first would be silently erased. A preset is the saved
+ * default; the URL is the specific instruction in the link someone was sent.
+ */
+function applyLayoutOverridesFromRoute() {
+  const parsed = parseLayoutOverrides(route.query as QueryLike);
+  layoutOverrideIssues.value = parsed.issues;
+  if (!parsed.present) return;
+
+  // Only when the URL actually named an algorithm. `?layout.ego.focusNodeId=`
+  // on its own configures ego for whenever it is switched on — it must not
+  // switch to it, or `?layout.hive.scale=log` would yank someone out of the
+  // force layout they were using.
+  //
+  // Via setLayoutAlgorithm, not the ref, so its invariant holds: a non-force
+  // algorithm disables community radial, and two global positional constraints
+  // must not stack.
+  if (parsed.algorithm) graphStore.setLayoutAlgorithm(parsed.algorithm);
+
+  // Keep this synchronous and adjacent to the call above. GraphCanvas3D's
+  // layoutAlgorithm watcher toasts "Pick a focus node" when ego turns on
+  // without one; being a Vue watcher it runs after both calls and so never
+  // sees the intermediate state. An await slipped in between would resurrect
+  // that spurious toast.
+  if (Object.keys(parsed.modeConfig).length > 0) {
+    graphStore.updateLayoutModeConfig(parsed.modeConfig);
+  }
+}
+
+/**
+ * Confirm a focus node named in the URL is actually in the graph.
+ *
+ * The canvas already renders the ego layout inert when the focus is unknown, so
+ * nothing here is load-bearing for safety — what is missing without it is the
+ * explanation, and an inert layout with no explanation is exactly the broken
+ * link that looks like a working one.
+ *
+ * An empty graph is not an answer. A context that does not auto-load, or a REST
+ * connection with no subgraph support, opens with nothing on screen; calling the
+ * focus node missing there would blame the link for the user not having run a
+ * query yet.
+ */
+function validateLayoutOverridesAgainstGraph() {
+  const focusParam = 'layout.ego.focusNodeId';
+  const wasMissing = layoutOverrideIssues.value.some(
+    (issue) => issue.code === 'focus-node-not-found',
+  );
+  layoutOverrideIssues.value = layoutOverrideIssues.value.filter(
+    (issue) => issue.code !== 'focus-node-not-found',
+  );
+
+  // Only a focus the URL asked for. One inherited from a preset is the Layout
+  // panel's story to tell, not this link's.
+  if (!(focusParam in route.query)) return;
+  const focusId = graphStore.layoutModeConfig.ego.focusNodeId;
+  if (!focusId) return;
+  if (graphStore.nodes.length === 0) return;
+  if (graphStore.nodes.some((node) => node.node_id === focusId)) return;
+
+  const message =
+    `The ego focus node “${focusId}” is not in this graph, so the ego layout has ` +
+    `nothing to centre on. Run a query that includes it, or pick a focus node in ` +
+    `the Layout panel.`;
+  layoutOverrideIssues.value = [
+    ...layoutOverrideIssues.value,
+    { code: 'focus-node-not-found', param: focusParam, value: focusId, message },
+  ];
+  // Longer than the default: this lands while the graph is still appearing and
+  // the user is not yet looking for a message. Not sticky — the chip is the
+  // surface that persists.
+  if (!wasMissing) toast.warning(message, 6000);
 }
 
 async function loadGraphFromRoute(
@@ -326,6 +428,36 @@ watch(
     }
     await applyStyleFromRoute(props.contextId);
   }
+);
+
+// The override keys are open-ended (layout.<mode>.<field>), so unlike ?style=
+// there is no single key to watch — the signature stands in for the whole set.
+watch(
+  () => layoutQuerySignature(route.query as QueryLike),
+  (next, previous) => {
+    if (next === previous) return;
+    if (!graphStore.currentContext) return;
+    if (next === '') {
+      // Every layout param dropped. That clears the notice but deliberately
+      // does NOT undo the layout: unlike a preset, an override is a field edit
+      // with no snapshot to restore, and the user may have adjusted the Layout
+      // panel since — editing the URL must not throw that away.
+      layoutOverrideIssues.value = [];
+      return;
+    }
+    applyLayoutOverridesFromRoute();
+    validateLayoutOverridesAgainstGraph();
+  }
+);
+
+// The focus node can stop existing without the URL changing — a new query, a
+// different cache. Watching length rather than the array itself: a deep watcher
+// over tens of thousands of nodes is a performance disaster, and the progressive
+// path patches properties while keeping the same ids, so a partial-to-final swap
+// of equal length cannot change the answer.
+watch(
+  () => graphStore.nodes.length,
+  () => validateLayoutOverridesAgainstGraph()
 );
 </script>
 
@@ -539,6 +671,20 @@ watch(
           >
             style not applied
           </span>
+          <!-- Layout parameters the URL named but could not be applied. One chip
+               for all of them: the status bar is a row of terse qualifiers, and
+               N chips for N typos would push the node count off the row and
+               imply N different kinds of problem. Full list in the tooltip. -->
+          <span
+            v-if="layoutOverrideIssues.length"
+            class="status-layout-error"
+            data-testid="graph-status-layout-error"
+            :title="layoutOverrideIssuesTitle"
+          >
+            {{ layoutOverrideIssues.length === 1
+              ? 'layout setting not applied'
+              : `${layoutOverrideIssues.length} layout settings not applied` }}
+          </span>
         </div>
       </div>
 
@@ -745,6 +891,13 @@ watch(
 }
 
 .status-style-error {
+  color: var(--warning-color, #b8860b);
+  font-weight: 600;
+}
+
+/* Same register as an unapplied style preset: the link asked for something the
+   graph could not honour, and nothing about the data itself is in doubt. */
+.status-layout-error {
   color: var(--warning-color, #b8860b);
   font-weight: 600;
 }
