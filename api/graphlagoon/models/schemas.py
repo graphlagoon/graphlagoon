@@ -164,12 +164,22 @@ class CachedGraph(BaseModel):
 
 
 class GraphCacheSource(BaseModel):
-    """Where a cached graph came from, for display and for judging staleness."""
+    """Where a cached graph came from.
+
+    Both fields are optional, and a `source` omitted entirely is valid: a graph
+    assembled by a batch job from Delta tables, or built by hand, never had a
+    query to record. `kind="manual"` is how such an entry says so, which is not
+    the same as a query-derived entry whose query was lost.
+
+    `datasource_type`/`datasource_name` used to live here and were removed: a
+    cache is already scoped to a context, the context knows its own datasource,
+    and nothing ever read the copies back. Worse, repointing a context at another
+    datasource would have left them silently lying. Entries written before the
+    removal still decode — `model_config` ignores the leftover keys.
+    """
 
     kind: Literal["cypher", "sql", "subgraph", "manual"] = "manual"
     query: Optional[str] = None
-    datasource_type: Optional[str] = None
-    datasource_name: Optional[str] = None
 
 
 class GraphCacheWriteRequest(BaseModel):

@@ -1,5 +1,66 @@
 # Decision Log
 
+## [2026-08-21] - Graph cache: producer contract documented, dead provenance fields removed
+
+**Purpose:** A batch job will generate graph caches from Delta tables so the visualizer can
+open them without touching the warehouse. That job writes the payload itself, so the contract
+had to be written down — and the question that prompted it ("is `source` really necessary? I
+may have a graph not derived from a query") exposed two fields that were written but never
+read.
+
+**Findings:**
+- A graph with no query was already representable: `GraphCacheSource` has total defaults and
+  `GraphCacheWriteRequest` defaults `source` entirely, so `{"graph": {...}}` is a valid write
+  storing `kind: "manual"`. That was undocumented, hence the doubt.
+- `datasource_type` / `datasource_name` were written by `saveGraphCache` and read by **nobody**
+  (grep across `frontend/src`, `frontend/e2e`, `api/`). They are also denormalization of
+  something the context already owns, and would silently lie if a context were repointed at a
+  different datasource. The "survives context deletion" argument fails too — `delete_context`
+  purges caches with the context.
+
+**Design decisions:**
+1. **Cut `datasource_type`/`datasource_name`; keep `kind`, `query`, `created_by`,
+   `cache_version`.** Criterion applied: not "is it necessary?" (no metadata field is
+   measurable next to `graph.nodes`) but "does anyone read it, and what breaks without it?"
+   `query` is read by `loadGraphCache` to populate the query panel; `created_by` is attribution
+   for a shared, superuser-administered artifact; `cache_version` is the only thing separating
+   format evolution from breaking every stored entry; `kind` distinguishes "never had a query"
+   from "query lost". The two removed fields answered none of these.
+2. **`source` stays an object with defaults rather than becoming nullable.** Making it optional
+   would push a null-check into every consumer to save ~40 bytes in a file measured in megabytes.
+3. **Backward compatibility by omission, not migration.** Pydantic ignores unknown keys, so
+   entries already on the volume decode unchanged. Pinned by a test so a future `extra="forbid"`
+   cannot silently make every pre-existing cache unreadable.
+4. **Documented direct-volume writes as the recommended path for the batch job**, over the API:
+   no HTTP body ceiling, no superuser token in a job, no multi-hundred-MB upload. The trade is
+   that four server-side guarantees (envelope derivation, schema validation, the
+   `properties_deferred` refusal, atomic replace) become the producer's responsibility — each
+   documented with a one-line mitigation.
+
+**Emphasised for producers** (the failure modes a batch job hits that an interactive save does not):
+- **Dangling edge endpoints.** Nothing validates `src`/`dst` against the node set; the result is
+  silently fewer edges, not an error. Delta pipelines hit this via post-join node filters and
+  node-cap truncation.
+- **`properties_deferred: false` is an invariant, not a default.** Trivial for a batch job (no
+  enrichment phase) but its violation produces a graph that looks empty with no error anywhere.
+- **Writes are not atomic.** Temp-file + rename, mirroring `LocalBlobStore._save_sync`.
+
+**Files created:** [docs/dev/graph-cache-contract.md](graph-cache-contract.md)
+
+**Files modified:** `api/graphlagoon/models/schemas.py` (`GraphCacheSource`: two fields removed,
+docstring explains why and records backward compatibility), `frontend/src/types/graph.ts`
+(mirrored), `frontend/src/stores/graph.ts` (`saveGraphCache` no longer sends them; the
+now-unused `resolveDatasourceDescriptor` call dropped), `api/tests/test_graph_cache.py`
+(+3 tests: `TestSourceContract`).
+
+**Verified:** every code example and claim in the document executed against the real schemas —
+`GraphCachePayload.model_validate`, `decode_payload` round-trip, gzip magic bytes, and
+`cache_key` output (`cache/{context_id}/{name}.jsonz`). `pytest tests/test_graph_cache.py`
+66 passed (63 + 3 new). Frontend `vitest run` 1597 passed / 88 files, `vue-tsc --noEmit` clean.
+Full API suite 760 passed / 6 failures confirmed pre-existing by re-running against the
+unmodified branch via `git stash` (`test_cypher_comments`, `test_superuser`,
+`test_transpile_options` — none touch the cache).
+
 ## [2026-08-21] - Feature: layout parameters overridable from the URL
 
 **Purpose:** A style preset carries labels, styles and layout as one snapshot —
@@ -100,7 +161,6 @@ clean. No regressions.
 **Note on this skill's references:** `code_patterns.md`, `technical_debts.md` and
 `potential_bugs.md`, which SKILL.md links, do not exist in the repo — only `architecture.md`
 and this log do. Patterns were taken from the surrounding code instead.
-
 
 
 ## [2026-07-20] - Feature: Ego ring ordering strategies + same-ring edge arcs
