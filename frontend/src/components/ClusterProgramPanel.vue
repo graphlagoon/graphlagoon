@@ -11,7 +11,7 @@ import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
 import ClusterProgramEditorModal from './ClusterProgramEditorModal.vue'
 import ClusterProgramRunModal from './ClusterProgramRunModal.vue'
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
-import { X, Play, Loader2, HelpCircle } from 'lucide-vue-next'
+import { X, Play, Loader2, Bot } from 'lucide-vue-next'
 
 const emit = defineEmits<{
   close: []
@@ -385,7 +385,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
             aria-label="Get help writing a cluster program"
             @click="showSkillModal = true"
           >
-            <HelpCircle :size="16" />
+            <Bot :size="16" />
           </button>
           <button
             v-if="clusterStore.clusters.length > 0"

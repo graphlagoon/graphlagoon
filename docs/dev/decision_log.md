@@ -3894,3 +3894,58 @@ Gone: `GET /api/graph-contexts/{id}/graph-cache`, `GraphCacheService.list`, `Gra
 **Verified:** 1509 frontend unit tests, 144 E2E (full suite, zero failures — the collision above was the only casualty and is fixed), 750 API tests, same 5 pre-existing Cypher failures.
 
 **Files:** `frontend/src/components/StylePresetModal.vue` (new, replaces the removed `StylePresetPanel.vue`), `AestheticsPanel.vue`, `Toolbar.vue`, `stores/toolbar.ts`; tests `frontend/src/components/__tests__/StylePresetModal.test.ts` (replaces the removed panel test), `e2e/tests/style-presets.spec.ts`.
+
+## [2026-08-21] - Feature: "Ask AI" prompt for label templates
+
+**Trigger:** the Cluster Programs panel already had an "Ask AI" button that hands the user a long,
+graph-aware prompt to paste into an LLM. The Labels panel only had Help — a slide deck — even though
+the label mini-language (placeholders, modifiers, date formats, conditionals, rule priority) is at
+least as fiddly as writing a cluster program. Same affordance, same shape, for labels.
+
+**Decision — mirror the cluster helper rather than invent a second pattern.** `labelTemplateSkill.ts`
+is a pure builder with the same input (`nodeTypes`, `edgeTypes`, `nodeProperties`, `edgeProperties`)
+and the same interview-style ending; `LabelTemplateSkillModal.vue` is structurally the cluster modal
+with different copy and `label-skill-*` testids. One mental model for "Ask AI" across the app, and a
+user who has used one already knows the other.
+
+**Decision — share the rendering helpers, don't copy them.** `bulletList`, `propertyList` and the
+`SkillProperty` interface were promoted to exports on `clusterProgramSkill.ts` and imported by the new
+builder. Duplicating them would have guaranteed the two prompts' metadata sections drifted apart on
+the first formatting tweak.
+
+**Decision — copy-to-clipboard only, no "Open in Gemini" button.** The user's ask named Gemini, but a
+deep link cannot carry a prompt this long in a URL: the button would open a blank chat and the user
+would still paste. So the intro names Gemini/ChatGPT/Claude and the single action stays Copy, exactly
+as in the cluster modal.
+
+**The prompt is written against the parser, not against the Help modal.** Reading
+`utils/labelFormatter.ts` turned up three things the existing help slides get wrong or omit, all of
+which the new prompt states correctly:
+
+- Conditional operators are parsed **inline with no separator** —
+  `/^prop:([^=!<>]+)(==|!=|>=|<=|>|<|contains|startsWith|endsWith)(.+)$/` — so the real syntax is
+  `{if:prop:namecontainsjohn|Match|No}`. `TextFormatHelpModal.vue`'s slide shows
+  `{if:prop:name|contains:john|...}`, which `parseConditionExpression` returns `null` for and which
+  therefore renders as an empty string. **Left unfixed here (pre-existing, outside this change) —
+  worth a follow-up.**
+- Modifiers do **not** chain: `parseTokenContent` reads only `parts[1]`, so `{prop:x|upper|truncate:5}`
+  silently applies `upper` alone.
+- A `prop:` placeholder that resolves to nothing renders the visible fallback `[<column>]`, not an
+  empty string — a typo in a column name shows up on the canvas.
+
+The prompt also states the `TextFormatRule` shape (target / types / template / priority / enabled) and
+the selection rule from `findMatchingRule` (highest priority wins; on a tie, explicit `types` beats an
+empty list), and asks for output in a form that can be typed straight into the rule form.
+
+**Icon:** the cluster "Ask AI" button used `HelpCircle`, indistinguishable from actual help. Both
+buttons now use lucide's `Bot`, so "ask a robot" and "read the docs" are visually separate — the
+Labels panel shows them side by side.
+
+**Verified:** 1524 frontend unit tests across 87 files, all green (up from 1509 — 15 new); `vue-tsc
+--noEmit` clean.
+
+**Files:** `frontend/src/utils/labelTemplateSkill.ts`, `components/LabelTemplateSkillModal.vue` (new);
+`utils/clusterProgramSkill.ts` (helpers exported), `components/TextFormatPanel.vue`,
+`components/ClusterProgramPanel.vue`; tests `frontend/src/utils/__tests__/labelTemplateSkill.test.ts`,
+`components/__tests__/LabelTemplateSkillModal.test.ts`, `components/__tests__/TextFormatPanel.test.ts`
+(new).
