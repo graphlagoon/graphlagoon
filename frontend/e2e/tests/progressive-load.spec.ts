@@ -86,6 +86,10 @@ test.describe('Progressive load', () => {
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
+    // The 'request' event fires asynchronously relative to the status bar
+    // becoming visible — poll instead of indexing synchronously, or a slow
+    // CI runner can observe the array before it's populated.
+    await expect.poll(() => subgraphBodies.length, { timeout: 15_000 }).toBeGreaterThan(0);
     expect(subgraphBodies[0]?.nodes_mode).toBe('types');
 
     releaseBatch();
@@ -130,6 +134,12 @@ test.describe('Progressive load', () => {
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
     releaseBatch();
+
+    // The 'request' event fires asynchronously relative to the status bar
+    // becoming visible — poll instead of indexing synchronously, or a slow
+    // CI runner can observe the array before it's populated (flaky
+    // "Cannot read properties of undefined" on bodies[0]).
+    await expect.poll(() => bodies.length, { timeout: 15_000 }).toBeGreaterThan(0);
     expect(bodies[0].nodes_mode).toBe('types');
 
     await page.getByRole('button', { name: 'Behaviors' }).click();
