@@ -1570,8 +1570,6 @@ export const useGraphStore = defineStore('graph', () => {
       );
     }
 
-    const descriptor = resolveDatasourceDescriptor(currentContext.value);
-
     return api.putGraphCache(currentContext.value.id, name, {
       graph: {
         nodes: nodes.value,
@@ -1582,8 +1580,6 @@ export const useGraphStore = defineStore('graph', () => {
       source: {
         kind,
         query: graphQuery.value || null,
-        datasource_type: descriptor.type ?? null,
-        datasource_name: currentContext.value.datasource_name ?? null,
       },
     });
   }

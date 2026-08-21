@@ -184,11 +184,15 @@ export interface CachedGraph {
   properties_deferred?: boolean;
 }
 
+/** Where a cached graph came from.
+ *
+ *  Both fields are optional, and a graph that never came from a query — one a
+ *  batch job assembled from Delta tables, say — says so with `kind: 'manual'`.
+ *  `datasource_type`/`datasource_name` were removed: the cache is already
+ *  scoped to a context that knows its own datasource, and nothing read them. */
 export interface GraphCacheSource {
   kind: 'cypher' | 'sql' | 'subgraph' | 'manual';
   query?: string | null;
-  datasource_type?: string | null;
-  datasource_name?: string | null;
 }
 
 export interface GraphCachePayload {

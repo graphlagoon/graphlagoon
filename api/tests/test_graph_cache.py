@@ -715,3 +715,77 @@ class TestContextDeletionCascade:
         from graphlagoon.routers.graph_contexts import _purge_graph_caches
 
         asyncio.run(_purge_graph_caches(uuid4()))
+
+
+class TestSourceContract:
+    """`source` describes provenance, and a graph need not have any.
+
+    A batch job that assembles a graph from Delta tables never ran a query, so
+    every field must be omittable and the entry must still round-trip.
+    """
+
+    def test_a_write_may_omit_source_entirely(self, client, context):
+        body = _body()
+        body.pop("source", None)
+
+        response = client.put(
+            _url(context.id, "no-source"), json=body, headers=_headers(SUPERUSER)
+        )
+        assert response.status_code == 200
+
+        # httpx decodes Content-Encoding transparently, so .content is plain JSON.
+        stored = orjson.loads(
+            client.get(_url(context.id, "no-source"), headers=_headers(SUPERUSER)).content
+        )
+        assert stored["source"] == {"kind": "manual", "query": None}
+
+    def test_a_manual_kind_survives_the_round_trip(self, client, context):
+        body = _body()
+        body["source"] = {"kind": "manual"}
+
+        client.put(
+            _url(context.id, "manual"), json=body, headers=_headers(SUPERUSER)
+        )
+        # httpx decodes Content-Encoding transparently, so .content is plain JSON.
+        stored = orjson.loads(
+            client.get(_url(context.id, "manual"), headers=_headers(SUPERUSER)).content
+        )
+        assert stored["source"]["kind"] == "manual"
+        assert stored["source"]["query"] is None
+
+    def test_entries_written_before_the_datasource_fields_were_removed_still_decode(
+        self, client, context
+    ):
+        """Backward compatibility: the removed keys must be ignored, not fatal.
+
+        Entries already on the volume still carry `datasource_type` and
+        `datasource_name`. Pydantic's default is to ignore unknown keys, and
+        this test pins that so a future `extra="forbid"` cannot silently make
+        every pre-existing cache unreadable.
+        """
+        from graphlagoon.services.graph_cache import decode_payload
+
+        legacy = {
+            "cache_version": 1,
+            "name": "legacy",
+            "context_id": str(context.id),
+            "created_at": "2026-01-01T00:00:00Z",
+            "created_by": "someone@example.com",
+            "node_count": 0,
+            "edge_count": 0,
+            "properties_complete": True,
+            "source": {
+                "kind": "cypher",
+                "query": "MATCH (n) RETURN n",
+                "datasource_type": "databricks",
+                "datasource_name": "prod",
+            },
+            "graph": {"nodes": [], "edges": [], "truncated": False},
+        }
+
+        payload = decode_payload(gzip.compress(orjson.dumps(legacy)), "legacy")
+
+        assert payload.source.kind == "cypher"
+        assert payload.source.query == "MATCH (n) RETURN n"
+        assert not hasattr(payload.source, "datasource_type")
+
