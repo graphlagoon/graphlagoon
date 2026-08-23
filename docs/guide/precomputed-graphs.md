@@ -41,6 +41,44 @@ Two details are worth knowing up front:
   deployment says "we serve no precomputed graphs" — distinct from disabling the
   feature with `GRAPH_LAGOON_PRECOMPUTED_GRAPHS_ENABLED=false`.
 
+### Reads and writes walk the chain differently
+
+Reading tries every matching provider in order until one **answers**:
+`matches` says no → skipped; `resolve` returns `None` → declines, next
+provider. Publishing and deleting are not that forgiving — the write goes to
+the **first provider that matches**, full stop:
+
+```python
+def first_match(request):
+    claimed = matching_providers(request)   # every provider whose matches() said yes
+    return claimed[0] if claimed else None  # the first one, in registration order
+```
+
+If that provider has no `save`, the answer is `405` — the chain does **not**
+keep looking for a later provider that happens to be writable. That is
+deliberate: falling through would let a `PUT` land on a different provider than
+the `GET` that reads the same name back, and a name that resolves from one
+place but publishes to another is the worst surprise this feature could
+produce.
+
+The practical consequence is that **`matches` is also your write-routing
+rule**. If you want a context to be publishable, put its writable provider
+**first** in the chain for that context — not merely present somewhere in it:
+
+```python
+create_mountable_app(precomputed_graph_providers=[
+    # First for its context ⇒ owns both reads (until it declines) and every write.
+    volume_provider(matches=lambda r: r.context_id == PUBLISHABLE_CTX),
+    # A read-only provider elsewhere never receives a PUT/DELETE that would
+    # otherwise fall through to it.
+    lakebase_bfs,
+])
+```
+
+See [Example 4](#example-4-layers-a-volume-with-a-lakebase-fallback) for what
+this means when one context layers a writable volume in front of a computed
+fallback.
+
 ## Writing a provider
 
 ```python
@@ -143,7 +181,7 @@ app = create_mountable_app(precomputed_graph_providers=[volume_provider()])
 ```
 
 Files live at `{root}/precomputed/{context_id}/{name}.jsonz`, gzipped JSON in
-the shape the [payload contract](../dev/precomputed-graphs-contract.md)
+the shape the [payload contract](https://github.com/graphlagoon/graphlagoon/blob/main/docs/dev/precomputed-graphs-contract.md)
 describes. The read path returns those bytes **untouched** under
 `Content-Encoding: gzip`, so nothing decompresses a large graph server-side just
 to serialize it again.
@@ -289,7 +327,28 @@ link carrying `?seed=` reaches whichever answers first. See
 Note what does **not** cascade: a `PUT` goes to the first provider that
 *matches*, and if that one cannot be written to the answer is 405 — the chain
 never falls through to a writable provider further down. Writing somewhere other
-than where you read from is the worst surprise this feature could produce.
+than where you read from is the worst surprise this feature could produce. Here
+both providers refuse writes (`writable=False`, no `save`/`delete` on
+`lakebase_bfs`), so every `PUT`/`DELETE` for this context is `405` regardless of
+which one would have answered the `GET` — consistent, if not writable.
+
+If instead you want this layering **and** the ability to publish through the
+app — "let the nightly job feed the common cases, but let a superuser also save
+one by hand" — drop `writable=False`. Being first in the chain, the volume
+provider then owns every write for this context:
+
+```python
+create_mountable_app(precomputed_graph_providers=[
+    volume_provider(),   # first ⇒ answers reads that exist, AND every write
+    lakebase_bfs,        # only ever reached when the volume declines the read
+])
+```
+
+`lakebase_bfs` still never receives a `PUT` — it is not first, so `first_match`
+never reaches it. Publishing under a name the volume does not yet have creates
+it there; publishing under a name that would otherwise resolve from Lakebase
+now shadows it, since the volume answers reads first too. That shadowing is the
+same first-match rule doing both jobs at once, not a special case.
 
 ## Example 5 — A Delta table through the SQL warehouse
 
@@ -329,7 +388,7 @@ Still the right approach for large graphs: no HTTP body ceiling, no superuser
 token in the job, no multi-hundred-megabyte upload. The job builds the payload
 itself and writes `{name}.jsonz.tmp`, then renames.
 
-See the [payload contract](../dev/precomputed-graphs-contract.md) for the
+See the [payload contract](https://github.com/graphlagoon/graphlagoon/blob/main/docs/dev/precomputed-graphs-contract.md) for the
 complete envelope, the atomicity requirement, and a runnable reference producer.
 
 ---
