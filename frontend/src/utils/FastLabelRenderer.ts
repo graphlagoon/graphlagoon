@@ -38,13 +38,21 @@ interface FontData {
 
 interface LabelData {
   id: string;
-  text: string;
+  text: string;  // May contain '\n' — rendered as a line break
   position: THREE.Vector3;
   color?: THREE.Color;
   scale?: number;
   visible?: boolean;
   alpha?: number;  // Per-label opacity (0..1), default 1
   textAlign?: 'center' | 'left' | 'right'; // Horizontal anchor: center (default), left, right
+  /**
+   * Vertical anchor of the text block relative to the label origin.
+   * 'center' (default): block is centered on the origin — identical to the old
+   * single-line baseline for one-line labels. 'bottom': the LAST line's
+   * baseline sits at the origin, so extra lines grow upward (use for labels
+   * placed above a node).
+   */
+  verticalAnchor?: 'center' | 'bottom';
 }
 
 // Vertex shader with billboarding
@@ -138,7 +146,6 @@ export class FastLabelRenderer {
   private material: THREE.ShaderMaterial;
   private geometry: THREE.PlaneGeometry;
   private atlas: THREE.Texture | null = null;
-  private charMap: Map<string, FontChar> = new Map();
   private fontData: FontData;
 
   // Label management
@@ -173,11 +180,6 @@ export class FastLabelRenderer {
     this.scene = scene;
     this.maxInstances = maxInstances;
     this.fontData = fontData as FontData;
-
-    // Build character map
-    for (const char of this.fontData.chars) {
-      this.charMap.set(char.char, char);
-    }
 
     // Initialize arrays
     this.instancePositions = new Float32Array(maxInstances * 3);
@@ -303,6 +305,7 @@ export class FastLabelRenderer {
       visible: data.visible !== false,
       alpha: data.alpha ?? 1,
       textAlign: data.textAlign ?? 'center',
+      verticalAnchor: data.verticalAnchor ?? 'center',
     });
   }
 
@@ -353,93 +356,112 @@ export class FastLabelRenderer {
     const base = this.fontData.common?.base || 50;
 
     let instanceIdx = 0;
+    let capacityExceeded = false;
 
     for (const label of this.labels.values()) {
+      if (capacityExceeded) break;
       if (!label.visible) continue;
 
-      const text = label.text;
+      const lines = label.text.split('\n');
+      const lineCount = lines.length;
 
-      // Calculate total width for centering (normalized by lineHeight)
-      let totalWidth = 0;
-      for (const char of text) {
-        const charData = this.charMap.get(char);
-        if (charData) {
-          totalWidth += charData.xadvance / lineHeight;
+      // Per-line widths (normalized by lineHeight) for horizontal alignment
+      const lineWidths: number[] = new Array(lineCount);
+      for (let li = 0; li < lineCount; li++) {
+        let w = 0;
+        for (const char of lines[li]) {
+          const charData = resolveCharData(char);
+          if (charData) w += charData.xadvance / lineHeight;
         }
+        lineWidths[li] = w;
       }
 
-      // Cursor position based on text alignment
       const align = label.textAlign ?? 'center';
-      let cursorX = align === 'center' ? -totalWidth / 2
-        : align === 'left' ? 0
-        : -totalWidth;
+      // Baseline of line 0 (topmost). 'center' keeps the block centered on the
+      // origin — for a single line this is baseline 0, exactly the old layout.
+      // 'bottom' pins the LAST baseline at 0 so extra lines grow upward.
+      const firstBaselineY = (label.verticalAnchor ?? 'center') === 'bottom'
+        ? lineCount - 1
+        : (lineCount - 1) / 2;
 
-      for (const char of text) {
-        if (instanceIdx >= this.maxInstances) {
-          console.warn(`[FastLabelRenderer] Max instances (${this.maxInstances}) reached. Some labels may not be visible.`);
-          break;
-        }
+      for (let li = 0; li < lineCount && !capacityExceeded; li++) {
+        const baselineY = firstBaselineY - li;
+        const lineWidth = lineWidths[li];
 
-        const charData = this.charMap.get(char);
-        if (!charData) continue;
+        // Cursor position based on text alignment
+        let cursorX = align === 'center' ? -lineWidth / 2
+          : align === 'left' ? 0
+          : -lineWidth;
 
-        // Skip space (no visual, just advance cursor)
-        if (char === ' ') {
+        for (const char of lines[li]) {
+          if (instanceIdx >= this.maxInstances) {
+            console.warn(`[FastLabelRenderer] Max instances (${this.maxInstances}) reached. Some labels may not be visible.`);
+            capacityExceeded = true;
+            break;
+          }
+
+          const charData = resolveCharData(char);
+          if (!charData) continue;
+
+          // Skip space (no visual, just advance cursor)
+          if (char === ' ') {
+            cursorX += charData.xadvance / lineHeight;
+            continue;
+          }
+
+          const idx = instanceIdx;
+          const idx2 = idx * 2;
+          const idx3 = idx * 3;
+          const idx4 = idx * 4;
+
+          // Position (label origin)
+          this.instancePositions[idx3] = label.position.x;
+          this.instancePositions[idx3 + 1] = label.position.y;
+          this.instancePositions[idx3 + 2] = label.position.z;
+
+          // UV offset (normalized coordinates in atlas)
+          this.instanceUvOffsets[idx4] = charData.x / atlasWidth;
+          this.instanceUvOffsets[idx4 + 1] = charData.y / atlasHeight;
+          this.instanceUvOffsets[idx4 + 2] = charData.width / atlasWidth;
+          this.instanceUvOffsets[idx4 + 3] = charData.height / atlasHeight;
+
+          // Character size (normalized by lineHeight)
+          const charWidth = charData.width / lineHeight;
+          const charHeight = charData.height / lineHeight;
+          this.instanceCharSizes[idx2] = charWidth;
+          this.instanceCharSizes[idx2 + 1] = charHeight;
+
+          // Character offset (x, y) - position of character center relative to label origin
+          // x: cursor + xoffset + width/2 (center)
+          const charCenterX = cursorX + (charData.xoffset + charData.width / 2) / lineHeight;
+          // y: In font data, yoffset is from TOP of cell. We want Y-up with baseline at ~0.
+          // base = pixels from top to baseline
+          // yoffset = pixels from top to glyph top
+          // So glyph top is at: base - yoffset (positive = above baseline)
+          // Glyph bottom is at: base - yoffset - height
+          // Glyph center is at: base - yoffset - height/2
+          // baselineY shifts the whole glyph to its line (one lineHeight per line).
+          const charCenterY = baselineY + (base - charData.yoffset - charData.height / 2) / lineHeight;
+          this.instanceCharOffsets[idx2] = charCenterX;
+          this.instanceCharOffsets[idx2 + 1] = charCenterY;
+
+          // Scale (user-defined label scale)
+          this.instanceScales[idx] = label.scale!;
+
+          // Visible
+          this.instanceVisibles[idx] = 1;
+
+          // Alpha (per-label opacity)
+          this.instanceAlphas[idx] = label.alpha ?? 1;
+
+          // Color
+          this.instanceColors[idx3] = label.color!.r;
+          this.instanceColors[idx3 + 1] = label.color!.g;
+          this.instanceColors[idx3 + 2] = label.color!.b;
+
           cursorX += charData.xadvance / lineHeight;
-          continue;
+          instanceIdx++;
         }
-
-        const idx = instanceIdx;
-        const idx2 = idx * 2;
-        const idx3 = idx * 3;
-        const idx4 = idx * 4;
-
-        // Position (label origin)
-        this.instancePositions[idx3] = label.position.x;
-        this.instancePositions[idx3 + 1] = label.position.y;
-        this.instancePositions[idx3 + 2] = label.position.z;
-
-        // UV offset (normalized coordinates in atlas)
-        this.instanceUvOffsets[idx4] = charData.x / atlasWidth;
-        this.instanceUvOffsets[idx4 + 1] = charData.y / atlasHeight;
-        this.instanceUvOffsets[idx4 + 2] = charData.width / atlasWidth;
-        this.instanceUvOffsets[idx4 + 3] = charData.height / atlasHeight;
-
-        // Character size (normalized by lineHeight)
-        const charWidth = charData.width / lineHeight;
-        const charHeight = charData.height / lineHeight;
-        this.instanceCharSizes[idx2] = charWidth;
-        this.instanceCharSizes[idx2 + 1] = charHeight;
-
-        // Character offset (x, y) - position of character center relative to label origin
-        // x: cursor + xoffset + width/2 (center)
-        const charCenterX = cursorX + (charData.xoffset + charData.width / 2) / lineHeight;
-        // y: In font data, yoffset is from TOP of cell. We want Y-up with baseline at ~0.
-        // base = pixels from top to baseline
-        // yoffset = pixels from top to glyph top
-        // So glyph top is at: base - yoffset (positive = above baseline)
-        // Glyph bottom is at: base - yoffset - height
-        // Glyph center is at: base - yoffset - height/2
-        const charCenterY = (base - charData.yoffset - charData.height / 2) / lineHeight;
-        this.instanceCharOffsets[idx2] = charCenterX;
-        this.instanceCharOffsets[idx2 + 1] = charCenterY;
-
-        // Scale (user-defined label scale)
-        this.instanceScales[idx] = label.scale!;
-
-        // Visible
-        this.instanceVisibles[idx] = 1;
-
-        // Alpha (per-label opacity)
-        this.instanceAlphas[idx] = label.alpha ?? 1;
-
-        // Color
-        this.instanceColors[idx3] = label.color!.r;
-        this.instanceColors[idx3 + 1] = label.color!.g;
-        this.instanceColors[idx3 + 2] = label.color!.b;
-
-        cursorX += charData.xadvance / lineHeight;
-        instanceIdx++;
       }
     }
 
@@ -497,28 +519,69 @@ export class FastLabelRenderer {
   }
 }
 
-/**
- * Compute normalized text width using the actual font metrics.
- * Returns width in lineHeight-normalized units (same as internal layout).
- * Multiply by labelScale * BASE_SCALE to get world units.
- */
+// ============================================================================
+// Glyph resolution + text metrics (shared by the renderer and the AABB filter)
+// ============================================================================
+
 const _fontData = fontData as FontData;
 const _lineHeight = _fontData.common?.lineHeight || 63;
-const _charWidthMap = new Map<string, number>();
+const _charDataMap = new Map<string, FontChar>();
 for (const c of _fontData.chars) {
-  _charWidthMap.set(c.char, c.xadvance / _lineHeight);
+  _charDataMap.set(c.char, c);
 }
+const _fallbackCharData = _charDataMap.get('?') ?? null;
 
-export function computeNormalizedTextWidth(text: string): number {
-  let w = 0;
-  for (const ch of text) {
-    w += _charWidthMap.get(ch) ?? 0.5;
+// Per-char resolution cache — normalize() runs once per distinct character.
+const _resolvedCharCache = new Map<string, FontChar | null>();
+
+/**
+ * Resolve glyph data for a character. The atlas only covers ASCII 32–126, so
+ * unknown characters fall back to their de-accented base ('é' → 'e') and
+ * finally to '?' — instead of silently vanishing. Control characters ('\n' is
+ * handled by the line splitter before reaching here) resolve to '?' too.
+ */
+function resolveCharData(char: string): FontChar | null {
+  let data = _resolvedCharCache.get(char);
+  if (data !== undefined) return data;
+  data = _charDataMap.get(char) ?? null;
+  if (!data) {
+    const base = char.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    data = _charDataMap.get(base) ?? _fallbackCharData;
   }
-  return w;
+  _resolvedCharCache.set(char, data);
+  return data;
 }
 
-/** Normalized text height is always 1.0 (one lineHeight). */
-export const NORMALIZED_TEXT_HEIGHT = 1.0;
+export interface NormalizedTextMetrics {
+  /** Width of the widest line, in lineHeight-normalized units. */
+  width: number;
+  /** Total height (lineCount lineHeights), in lineHeight-normalized units. */
+  height: number;
+  lineCount: number;
+}
+
+/**
+ * Compute normalized text metrics using the actual font metrics, honoring
+ * '\n' line breaks exactly like updateMesh's layout does.
+ * Multiply by labelScale * LABEL_BASE_SCALE to get world units.
+ */
+export function computeNormalizedTextMetrics(text: string): NormalizedTextMetrics {
+  let maxWidth = 0;
+  let lineWidth = 0;
+  let lineCount = 1;
+  for (const ch of text) {
+    if (ch === '\n') {
+      if (lineWidth > maxWidth) maxWidth = lineWidth;
+      lineWidth = 0;
+      lineCount++;
+      continue;
+    }
+    const data = resolveCharData(ch);
+    if (data) lineWidth += data.xadvance / _lineHeight;
+  }
+  if (lineWidth > maxWidth) maxWidth = lineWidth;
+  return { width: maxWidth, height: lineCount, lineCount };
+}
 
 /** Base scale used in the MSDF shader (world units per text height). */
 export const LABEL_BASE_SCALE = 5.0;
