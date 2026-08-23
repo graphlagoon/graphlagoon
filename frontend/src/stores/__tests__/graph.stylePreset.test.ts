@@ -201,7 +201,7 @@ describe('loadStylePreset', () => {
   });
 
   it('leaves the graph and its look alone when the preset is missing', async () => {
-    // Unlike a missing ?graph=, a missing ?style= costs only the styling, so the
+    // Unlike a missing ?precomputed=, a missing ?style= costs only the styling, so the
     // view must stay exactly as usable as it was.
     const store = useGraphStore();
     store.nodes = [{ node_id: 'n1', node_type: 'A', properties: {} }] as any;
@@ -307,13 +307,15 @@ describe('a style outlives the graph it was applied to', () => {
     expect(store.layoutAlgorithm).toBe('hive');
   });
 
-  it('survives a cached graph being swapped in', async () => {
+  it('survives a precomputed graph being swapped in', async () => {
     const store = useGraphStore();
     vi.mocked(api.getStylePreset).mockResolvedValue(makePreset());
     await store.loadStylePreset(CONTEXT_ID, 'investigacao');
 
-    vi.mocked((api as any).getGraphCache = vi.fn()).mockResolvedValue({
-      cache_version: 1,
+    vi.mocked((api as any).getPrecomputedGraph = vi.fn()).mockResolvedValue({
+      payload_version: 1,
+      provider: 'volume',
+      params: {},
       name: 'c1',
       context_id: CONTEXT_ID,
       created_at: '2026-08-20T12:00:00Z',
@@ -330,7 +332,7 @@ describe('a style outlives the graph it was applied to', () => {
       },
     } as any);
 
-    await store.loadGraphCache(CONTEXT_ID, 'c1');
+    await store.loadPrecomputedGraph(CONTEXT_ID, 'c1');
 
     expect(store.currentStylePreset?.name).toBe('investigacao');
     expect(store.getNodeTypeColor('Account')).toBe('#ff0000');

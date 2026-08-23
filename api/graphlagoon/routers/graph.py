@@ -56,7 +56,7 @@ from graphlagoon.services.datasource.sql_warehouse import (  # noqa: F401
 )
 from graphlagoon.services.warehouse_errors import query_execution_http_error
 
-# `get_context_with_access` moved to utils/context_access.py when the graph cache
+# `get_context_with_access` moved to utils/context_access.py when precomputed graphs
 # needed it too. Re-exported here for callers that import it from this module.
 from graphlagoon.utils.context_access import get_context_with_access  # noqa: F401
 from graphlagoon.services.async_job import create_job, get_job, start_job, cancel_job

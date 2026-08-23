@@ -4,7 +4,7 @@ One helper, used by every router that reaches for a context on the graph side:
 it collapses the database/in-memory split into a single call and raises the
 `{"error": {"code", "message", "details"}}` envelope the frontend parses.
 
-Lived in `routers/graph.py` until the graph cache needed it too; `graph.py`
+Lived in `routers/graph.py` until precomputed graphs needed it too; `graph.py`
 re-exports it for callers that import it from its historical home.
 """
 

@@ -3,7 +3,7 @@
  */
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT } from '../fixtures/mock-data';
-import { seedContexts, seedStylePresets, seedGraphCaches } from '../helpers/api-mocks';
+import { seedContexts, seedStylePresets, seedPrecomputedGraphs } from '../helpers/api-mocks';
 
 const INVESTIGACAO = {
   aesthetics: { nodeSize: 9 },
@@ -53,7 +53,7 @@ test.describe('Style presets', () => {
     await page.goto(`/graph/${MOCK_CONTEXT.id}?style=nao-existe`);
 
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
-    // Unlike a missing ?graph=, the graph still loaded.
+    // Unlike a missing ?precomputed=, the graph still loaded.
     await expect(page.getByTestId('graph-status-bar')).toContainText('5 nodes');
     await expect(page.getByTestId('graph-status-style')).toHaveCount(0);
     await expect(page.getByTestId('graph-status-style-error')).toBeVisible();
@@ -68,9 +68,9 @@ test.describe('Style presets', () => {
     await expect(page.getByTestId('graph-status-style')).toHaveCount(0);
   });
 
-  test('style and cache compose in one URL', async ({ authenticatedPage: page }) => {
+  test('style and a precomputed graph compose in one URL', async ({ authenticatedPage: page }) => {
     await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
-    await seedGraphCaches(page, MOCK_CONTEXT.id, {
+    await seedPrecomputedGraphs(page, MOCK_CONTEXT.id, {
       'fraude-2024': {
         nodes: [
           { node_id: 'n1', node_type: 'Person', properties: {} },
@@ -81,11 +81,11 @@ test.describe('Style presets', () => {
     });
 
     await page.goto(
-      `/graph/${MOCK_CONTEXT.id}?graph=fraude-2024&style=investigacao`,
+      `/graph/${MOCK_CONTEXT.id}?precomputed=fraude-2024&style=investigacao`,
     );
 
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('graph-status-cached')).toContainText('fraude-2024');
+    await expect(page.getByTestId('graph-status-precomputed')).toContainText('fraude-2024');
     await expect(page.getByTestId('graph-status-style')).toContainText('investigacao');
     await expect(page.getByTestId('graph-status-bar')).toContainText('2 nodes');
   });

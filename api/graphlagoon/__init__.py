@@ -87,6 +87,49 @@ Usage with custom user provider (integrate with parent app's auth):
         databricks_catalog="my_catalog",
         databricks_schema="my_schema",
     ))
+
+Usage with precomputed graph providers (what `?precomputed=<name>` resolves to):
+    from graphlagoon import (
+        create_mountable_app, volume_provider,
+        PrecomputedGraphProvider, PrecomputedGraphResult, ParamSpec,
+    )
+
+    async def bfs(request):
+        rows = await run_bound_query(
+            seed=request.params["seed"], hops=request.params["hops"]
+        )
+        if not rows:
+            return None          # decline; the next provider is tried
+        return PrecomputedGraphResult.from_graph(
+            build_graph(rows),
+            name=request.name, context_id=request.context_id,
+            provider="lakebase-bfs", params=request.params,
+        )
+
+    app = FastAPI()
+    app.mount("/graphlagoon", create_mountable_app(
+        precomputed_graph_providers=[
+            # Serve the nightly job's file when there is one...
+            volume_provider(writable=False),
+            # ...otherwise compute it from the link's own arguments.
+            PrecomputedGraphProvider(
+                name="lakebase-bfs",
+                resolve=bfs,
+                params=[
+                    ParamSpec("seed", "str", required=True, max_length=64),
+                    ParamSpec("hops", "int", default=2, min=1, max=4),
+                ],
+                # No save/delete: this graph is computed, not stored, so PUT and
+                # DELETE answer 405 and the UI hides its publish panel.
+            ),
+        ],
+    ))
+
+    # Omitting `precomputed_graph_providers` registers the built-in volume
+    # provider alone; passing [] serves no precomputed graphs at all.
+    # See docs/guide/precomputed-graphs.md, and read the security contract in
+    # services/precomputed/spec.py before writing a provider — URL arguments
+    # reach your query.
 """
 
 from graphlagoon.app import (
@@ -116,6 +159,22 @@ from graphlagoon.services.datasource.rest import (
     RestRequest,
     register_rest_connection,
 )
+from graphlagoon.models.schemas import (
+    Edge,
+    Node,
+    PrecomputedGraphData,
+    PrecomputedGraphPayload,
+    PrecomputedGraphSource,
+)
+from graphlagoon.services.precomputed import (
+    ParamSpec,
+    PrecomputedGraphProvider,
+    PrecomputedGraphRequest,
+    PrecomputedGraphResult,
+    PrecomputedGraphUI,
+    register_precomputed_graph_provider,
+    volume_provider,
+)
 
 __all__ = [
     "create_app",
@@ -139,6 +198,18 @@ __all__ = [
     "RestConnectionUI",
     "RestRequest",
     "register_rest_connection",
+    "Node",
+    "Edge",
+    "ParamSpec",
+    "PrecomputedGraphData",
+    "PrecomputedGraphPayload",
+    "PrecomputedGraphProvider",
+    "PrecomputedGraphRequest",
+    "PrecomputedGraphResult",
+    "PrecomputedGraphSource",
+    "PrecomputedGraphUI",
+    "register_precomputed_graph_provider",
+    "volume_provider",
 ]
 
 

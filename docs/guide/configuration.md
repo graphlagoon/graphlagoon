@@ -25,11 +25,11 @@ GRAPH_LAGOON_NEPTUNE_PORT=8182
 GRAPH_LAGOON_NEPTUNE_USE_IAM=false
 GRAPH_LAGOON_NEPTUNE_REGION=us-east-1
 
-# Graph cache (see "Graph cache" below)
-GRAPH_LAGOON_GRAPH_CACHE_ENABLED=true
-GRAPH_LAGOON_GRAPH_CACHE_DIR=./tmp/graph-cache
-# GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH=/Volumes/catalog/schema/volume/graph-cache
-GRAPH_LAGOON_GRAPH_CACHE_MAX_BYTES=209715200
+# Precomputed graphs (see "Precomputed graphs" below)
+GRAPH_LAGOON_PRECOMPUTED_GRAPHS_ENABLED=true
+GRAPH_LAGOON_PRECOMPUTED_GRAPHS_DIR=./tmp/precomputed-graphs
+# GRAPH_LAGOON_PRECOMPUTED_GRAPHS_VOLUME_PATH=/Volumes/catalog/schema/volume/precomputed-graphs
+GRAPH_LAGOON_PRECOMPUTED_GRAPHS_MAX_BYTES=209715200
 
 # Style presets (see "Style presets" below)
 GRAPH_LAGOON_STYLE_PRESETS_ENABLED=true
@@ -46,28 +46,36 @@ GRAPH_LAGOON_SUPERUSER_EMAILS=admin@company.com,ops@company.com
 GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=company.com
 ```
 
-## Graph cache
+## Precomputed graphs
 
-A **graph cache** is a query result stored under a name and reopened from a URL:
+A **precomputed graph** is a named graph resource resolved on the server and
+opened from a URL:
 
 ```
-/graph/{context_id}?graph=fraude-2024
+/graph/{context_id}?precomputed=fraude-2024
+/graph/{context_id}?precomputed=vizinhanca&seed=99872&hops=3
 ```
 
-Anyone who can read the context can open its caches. Nothing is queried — the
-stored nodes and edges are served straight from the volume — so a link opens in
-about the time it takes to download them, no matter how expensive the original
-query was.
+Anyone who can read the context can open one. Where the graph comes from is the
+deploying developer's decision, expressed as a **provider**: a file published by
+a batch job, a query against Lakebase computed from the link's own arguments, a
+Delta table. Providers are registered in an ordered chain and each may decline,
+so one deployment can serve a volume in one context and a live query in another.
+
+The full guide, including worked examples for each of those, is
+[Precomputed Graphs](./precomputed-graphs.md). What follows is the configuration
+of the built-in **volume provider** — the default, and what the in-app publish
+panel writes to.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `GRAPH_LAGOON_GRAPH_CACHE_ENABLED` | `true` | `false` makes every cache endpoint answer 404. |
-| `GRAPH_LAGOON_GRAPH_CACHE_DIR` | `./tmp/graph-cache` | Local directory, used when no volume path applies. |
-| `GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to a `graph-cache` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set. |
-| `GRAPH_LAGOON_GRAPH_CACHE_MAX_BYTES` | `209715200` (200 MB) | Cap on one compressed entry. |
+| `GRAPH_LAGOON_PRECOMPUTED_GRAPHS_ENABLED` | `true` | `false` makes every endpoint answer 404, before any authorization check. |
+| `GRAPH_LAGOON_PRECOMPUTED_GRAPHS_DIR` | `./tmp/precomputed-graphs` | Local directory, used when no volume path applies. |
+| `GRAPH_LAGOON_PRECOMPUTED_GRAPHS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to a `precomputed-graphs` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set. |
+| `GRAPH_LAGOON_PRECOMPUTED_GRAPHS_MAX_BYTES` | `209715200` (200 MB) | Cap on one compressed entry written through the volume provider. |
 
-Entries live at `{root}/cache/{context_id}/{name}.jsonz` — gzip'd JSON. The
-extension deliberately does not name the codec, and reads dispatch on magic
+Entries live at `{root}/precomputed/{context_id}/{name}.jsonz` — gzip'd JSON.
+The extension deliberately does not name the codec, and reads dispatch on magic
 bytes, so the compression can change later without migrating a single file.
 gzip specifically, rather than something denser, because the read endpoint hands
 the stored bytes back untouched under `Content-Encoding: gzip`: the server never
@@ -77,6 +85,18 @@ Names must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` and are **case-sensitive**
 — on a case-insensitive local filesystem (macOS) `Foo` and `foo` are one entry;
 on a volume they are two.
 
+### Arguments are part of the link
+
+Every query parameter the frontend does not own is forwarded to the resolving
+provider as an argument. The provider declares which it accepts, with types and
+bounds; anything undeclared is a 400 rather than a silently ignored key, because
+a typo in an argument would otherwise return *different data* with nothing on
+screen to say so.
+
+Reserved keys, never forwarded: `precomputed`, `style`, `exploration`, anything
+starting with `layout`, and the usual tracking parameters (`utm_*`, `fbclid`,
+`gclid`) so a link pasted into a chat client still works.
+
 ### There is no way to list them
 
 Entries are addressed by name, and the API deliberately offers **no listing
@@ -85,56 +105,66 @@ directory listing costs about 16 µs and 100 bytes of JSON per entry (measured
 locally), so a context holding a million entries would mean a 16-second call
 returning a 100 MB response. Paging would only have moved that cost around,
 because the Databricks Files API has no server-side name filter to page
-*toward*. Since every real use of a cache already knows the name it wants,
-not offering the operation is the only answer that stays correct at every size.
+*toward*. Since every real use of a link already knows the name it wants, not
+offering the operation is the only answer that stays correct at every size.
 
-The practical consequence: **keep the name when you create one.** The dev panel
-shows the link immediately after saving, and a cache URL is the durable handle.
+The collection URL answers with **capabilities** — what this context can do —
+never with an inventory.
+
+The practical consequence: **keep the name when you create one.** The panel
+shows the link immediately after publishing, and that URL is the durable handle.
 
 ### Who can write
 
-Reading is available wherever the feature is enabled. **Creating and deleting
-through the API are restricted to superusers** (`GRAPH_LAGOON_SUPERUSER_EMAILS`)
-— a graph cache is treated as a published, administered artifact, not a
-personal one. Context ownership grants no special power over it: the context
-owner gets no more write access to its caches than a stranger does, unlike a
-[style preset](#style-presets), which anyone with context write access can
-save. The toolbar's **Cache** button is visible only to a superuser, and its
-two fields — save the graph on screen under a name, delete a cache by name —
-answer 403 for anyone else.
+Reading is available wherever the feature is enabled. Writing needs two
+independent things:
+
+1. **Superuser status** (`GRAPH_LAGOON_SUPERUSER_EMAILS`). A precomputed graph
+   is a published, administered artifact, not a personal one. Context ownership
+   grants no special power over it — the owner gets no more write access than a
+   stranger does, unlike a [style preset](#style-presets), which anyone with
+   context write access can save.
+2. **A provider that declares the capability.** Most do not: a graph computed
+   from a Lakebase query has nowhere to write back to, and answers 405. The
+   toolbar's **Precomputed** panel asks the server what this context supports
+   rather than assuming, so it shows an explanation instead of a button that
+   would fail.
 
 Deletion is idempotent — with nothing to enumerate there is no way to check
 first, so removing a name that was never there also succeeds.
 
-Deleting a context purges its cache directory; that cleanup is not gated on
-superuser status, since skipping it would leak storage permanently. It is one
-request per entry against a volume, run with bounded concurrency.
+Deleting a context asks **every** registered provider to purge it, not just the
+one that would have served a read: a context's graphs can live in several
+backends at once. That cleanup is not gated on superuser status, since skipping
+it would leak storage permanently.
 
 ::: warning Multi-replica deployments
-Without a volume path, the cache is a directory local to one process. Behind more
-than one replica the same URL lands on different replicas, and a cache appears
-and disappears at random. Set `GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH` (or
+Without a volume path, the volume provider is a directory local to one process.
+Behind more than one replica the same URL lands on different replicas, and a
+graph appears and disappears at random. Set
+`GRAPH_LAGOON_PRECOMPUTED_GRAPHS_VOLUME_PATH` (or
 `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH`) for any deployment that is not a single
-process. The API logs a warning at startup when it detects this combination.
+process. The API logs a warning at startup when it detects this combination —
+and only when a registered provider actually uses that directory.
 :::
 
-### Cache or exploration?
+### Precomputed graph or exploration?
 
 Both persist a graph to the same kind of volume, which makes them easy to
 confuse. They answer different questions:
 
-| | Graph cache | Exploration |
+| | Precomputed graph | Exploration |
 |---|---|---|
-| **Addressed by** | a name you chose | an opaque UUID |
+| **Addressed by** | a name you chose, plus arguments | an opaque UUID |
 | **Belongs to** | the context — everyone with access sees it | the user who saved it, plus whoever it is shared with |
-| **Who can write** | superusers only | the user, for their own explorations |
-| **Stores** | the query result: nodes, edges, properties | the result **plus** UI state — positions, communities, clusters, filters |
+| **Who can write** | superusers, where the provider allows it | the user, for their own explorations |
+| **Stores** | the data: nodes, edges, properties | the result **plus** UI state — positions, communities, clusters, filters |
 | **On open** | layout runs fresh | the saved layout is restored |
 | **Use it for** | "here is the graph, look at this link" | "let me pick up where I left off" |
 
-If you need node positions preserved, you want an exploration. A cache
-deliberately does not carry them: it replays a query result, and the layout
-settles again on load.
+If you need node positions preserved, you want an exploration. A precomputed
+graph deliberately does not carry them: it is data, and the layout settles again
+on load.
 
 ## Style presets
 
@@ -156,7 +186,7 @@ The two URL parameters compose, so a single link can pin both the data and its
 appearance:
 
 ```
-/graph/{context_id}?graph=fraude-2024&style=investigacao
+/graph/{context_id}?precomputed=fraude-2024&style=investigacao
 ```
 
 | Variable | Default | Notes |
@@ -167,14 +197,14 @@ appearance:
 | `GRAPH_LAGOON_STYLE_PRESETS_MAX_PER_CONTEXT` | `100` | Presets are listed in full for the picker, so the count is bounded here rather than paginated at read time. |
 
 Entries live at `{root}/style/{context_id}/{name}.jsonz`, gzip'd JSON, with the
-same name rules as a graph cache.
+same name rules as a precomputed graph.
 
 ### Permissions
 
 Three levels, one more than elsewhere:
 
 - **Read** — anyone with access to the context.
-- **Write** — anyone with *write* access to it. Unlike a graph cache, which is
+- **Write** — anyone with *write* access to it. Unlike a precomputed graph, which is
   superuser-only: a preset is a few kilobytes of preference, not a published,
   administered artifact.
 - **Delete** — only the person who created that particular preset, or a
@@ -186,11 +216,12 @@ access cannot be used to take over someone else's preset and then delete it.
 
 A preset the URL names but that does not exist **changes nothing and does not
 break the page** — the graph loads and stays fully usable, and the status bar
-reports that the styling was not applied. This differs from a missing `?graph=`,
+reports that the styling was not applied. This differs from a missing
+`?precomputed=`,
 which leaves nothing to look at.
 
 ::: warning Multi-replica deployments
-The same caveat as the graph cache: without a volume path each replica keeps its
+The same caveat as precomputed graphs: without a volume path each replica keeps its
 own copy, so a `?style=` link works intermittently. The API logs a warning at
 startup when it detects this.
 :::
@@ -250,11 +281,11 @@ to check against until you run a query.
 
 ### Preset, cache, or exploration?
 
-| | Style preset | Graph cache | Exploration |
+| | Style preset | Precomputed graph | Exploration |
 |---|---|---|---|
 | **Stores** | how it looks | which nodes and edges | both, plus positions |
 | **Scope** | the context | the context | one user, plus shares |
-| **Addressed by** | `?style=name`, overridden per field by `?layout…` | `?graph=name` | `?exploration=uuid` |
+| **Addressed by** | `?style=name`, overridden per field by `?layout…` | `?precomputed=name`, plus provider arguments | `?exploration=uuid` |
 | **Combines with** | any graph | any style | — |
 
 A preset and a cache are orthogonal on purpose: the same look applies to any

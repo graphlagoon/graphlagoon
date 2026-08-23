@@ -536,26 +536,32 @@ async def _purge_style_presets(context_id: UUID) -> None:
         )
 
 
-async def _purge_graph_caches(context_id: UUID) -> None:
-    """Drop a deleted context's cache entries, best effort.
+async def _purge_precomputed_graphs(context_id: UUID) -> None:
+    """Drop a deleted context's precomputed graphs, best effort.
 
-    Deliberately not gated on dev mode, unlike the cache write endpoints: this is
-    cleanup the owner asked for, not authoring, and skipping it in production
+    Every provider that declares `delete_context` is asked, not just the first
+    one that would have served a read: a context's entries can live in several
+    backends at once.
+
+    Deliberately not gated on who is deleting, unlike the write endpoints: this
+    is cleanup the owner asked for, not authoring, and skipping it in production
     would leak volume storage permanently. Never fails the deletion — the same
     stance `_delete_snapshot_if_exists` takes in explorations.py.
     """
-    from graphlagoon.services.graph_cache import (
-        get_graph_cache_service,
-        graph_cache_enabled,
+    from graphlagoon.services.precomputed import (
+        precomputed_graphs_enabled,
+        purge_context,
     )
 
     try:
-        if not graph_cache_enabled():
+        if not precomputed_graphs_enabled():
             return
-        await get_graph_cache_service().delete_context(context_id)
+        await purge_context(context_id)
     except Exception as exc:
         logger.warning(
-            "Failed to purge graph caches for deleted context %s: %s", context_id, exc
+            "Failed to purge precomputed graphs for deleted context %s: %s",
+            context_id,
+            exc,
         )
 
 
@@ -595,7 +601,7 @@ async def delete_graph_context(context_id: UUID, request: Request):
 
         store.delete_graph_context(context_id)
 
-    await _purge_graph_caches(context_id)
+    await _purge_precomputed_graphs(context_id)
     await _purge_style_presets(context_id)
 
     return {"status": "deleted"}

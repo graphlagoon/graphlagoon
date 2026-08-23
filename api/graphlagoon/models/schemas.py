@@ -133,19 +133,19 @@ class GraphResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Graph cache — named, per-context query results addressable by URL
+# Precomputed graphs — named, per-context graphs resolved by a provider
 # ---------------------------------------------------------------------------
 
 
-class CachedGraph(BaseModel):
-    """The graph a cache entry replays.
+class PrecomputedGraphData(BaseModel):
+    """The graph a precomputed entry replays.
 
     Deliberately the *API* node/edge shape rather than the snapshot shape, so a
-    cached graph feeds the frontend store without a field-by-field remap. It is
-    GraphResponse minus `metadata`, which is query timing and meaningless once
-    replayed.
+    precomputed graph feeds the frontend store without a field-by-field remap.
+    It is GraphResponse minus `metadata`, which is query timing and meaningless
+    once replayed.
 
-    No node positions: a cache replays a query result, and layout runs fresh on
+    No node positions: a precomputed graph is data, and layout runs fresh on
     load. Positions with their surrounding visual state are what explorations
     and their snapshots are for.
     """
@@ -157,59 +157,67 @@ class CachedGraph(BaseModel):
     properties_deferred: bool = Field(
         default=False,
         description=(
-            "Always false for a cache entry — writes are refused while node "
-            "properties are still being enriched, so a cache is never half-filled."
+            "Always false for a precomputed graph — writes are refused while "
+            "node properties are still being enriched, so an entry is never "
+            "half-filled."
         ),
     )
 
 
-class GraphCacheSource(BaseModel):
-    """Where a cached graph came from.
+class PrecomputedGraphSource(BaseModel):
+    """Where a precomputed graph came from.
 
     Both fields are optional, and a `source` omitted entirely is valid: a graph
     assembled by a batch job from Delta tables, or built by hand, never had a
     query to record. `kind="manual"` is how such an entry says so, which is not
     the same as a query-derived entry whose query was lost.
 
-    `datasource_type`/`datasource_name` used to live here and were removed: a
-    cache is already scoped to a context, the context knows its own datasource,
+    `datasource_type`/`datasource_name` used to live here and were removed: an
+    entry is already scoped to a context, the context knows its own datasource,
     and nothing ever read the copies back. Worse, repointing a context at another
-    datasource would have left them silently lying. Entries written before the
-    removal still decode — `model_config` ignores the leftover keys.
+    datasource would have left them silently lying.
     """
 
     kind: Literal["cypher", "sql", "subgraph", "manual"] = "manual"
     query: Optional[str] = None
 
 
-class GraphCacheWriteRequest(BaseModel):
-    """Body of PUT /api/graph-contexts/{id}/graph-cache/{name}."""
+class PrecomputedGraphWriteRequest(BaseModel):
+    """Body of PUT /api/graph-contexts/{id}/precomputed-graphs/{name}."""
 
-    graph: CachedGraph
-    source: GraphCacheSource = Field(default_factory=GraphCacheSource)
+    graph: PrecomputedGraphData
+    source: PrecomputedGraphSource = Field(default_factory=PrecomputedGraphSource)
 
 
-class GraphCachePayload(BaseModel):
-    """What actually gets written to the volume."""
+class PrecomputedGraphPayload(BaseModel):
+    """The envelope that is stored, or that a provider returns.
 
-    cache_version: int = 1
+    `provider` and `params` record *who* produced this graph and *with what*,
+    which is the difference between the old cache — where a name was the whole
+    identity — and a resolved resource that may have been computed on demand
+    from URL arguments.
+    """
+
+    payload_version: int = 1
     name: str
     context_id: str
+    provider: str = ""
+    params: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     created_by: str
     node_count: int = 0
     edge_count: int = 0
     properties_complete: bool = True
-    source: GraphCacheSource = Field(default_factory=GraphCacheSource)
-    graph: CachedGraph
+    source: PrecomputedGraphSource = Field(default_factory=PrecomputedGraphSource)
+    graph: PrecomputedGraphData
 
 
-class GraphCacheEntry(BaseModel):
+class PrecomputedGraphEntry(BaseModel):
     """What a write reports back about the entry it just stored.
 
     There is no listing endpoint to return these in bulk — entries are addressed
     by name, and enumerating them is the one operation that does not survive
-    scale. Richer metadata lives inside the file itself.
+    scale. Richer metadata lives inside the payload itself.
     """
 
     name: str

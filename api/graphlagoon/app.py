@@ -33,7 +33,13 @@ from graphlagoon.services.warehouse import (
     HeaderProvider,
 )
 from graphlagoon.services.snapshot import configure_snapshot_service
-from graphlagoon.services.graph_cache import configure_graph_cache_service
+from graphlagoon.services.precomputed import (
+    clear_precomputed_graph_registry,
+    configure_precomputed_storage,
+    register_precomputed_graph_provider,
+    uses_default_store,
+    volume_provider,
+)
 from graphlagoon.services.style_presets import configure_style_preset_service
 from graphlagoon.services.datasource import (
     available_datasource_connections,
@@ -192,7 +198,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         graph_contexts,
         explorations,
         graph,
-        graph_cache,
+        precomputed_graphs,
         style_presets,
         catalog,
         config,
@@ -206,7 +212,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(explorations.router)
     router.include_router(query_templates.router)
     router.include_router(graph.router)
-    router.include_router(graph_cache.router)
+    router.include_router(precomputed_graphs.router)
     router.include_router(style_presets.router)
     router.include_router(catalog.router)
     router.include_router(similarity.router)
@@ -254,7 +260,7 @@ def create_frontend_router(
             "dev_mode": settings.dev_mode,
             "database_enabled": is_database_available(),
             "databricks_mode": settings.databricks_mode,
-            "graph_cache_enabled": settings.graph_cache_enabled,
+            "precomputed_graphs_enabled": settings.precomputed_graphs_enabled,
             "style_presets_enabled": settings.style_presets_enabled,
             "datasources": available_datasource_types(),
             "datasource_connections": available_datasource_connections(),
@@ -352,34 +358,43 @@ def _prepare_style_preset_storage(settings, *, verbose: bool) -> None:
         )
 
 
-def _prepare_graph_cache_storage(settings, *, verbose: bool) -> None:
-    """Create the local cache directory and warn about the multi-replica trap.
+def _prepare_precomputed_graph_storage(settings, *, verbose: bool) -> None:
+    """Create the local directory and warn about the multi-replica trap.
 
-    Without a volume path the cache is a directory local to one process. Behind
+    Only relevant when a registered provider actually uses the settings-built
+    store: a deployment serving graphs exclusively from Lakebase or Delta has no
+    directory to prepare, and warning it about one would be noise.
+
+    Without a volume path that store is a directory local to one process. Behind
     more than one replica the same URL then lands on different replicas and a
-    cache appears and disappears at random — so say so at startup rather than
+    graph appears and disappears at random — so say so at startup rather than
     letting it surface as an intermittent bug report.
     """
-    if not settings.graph_cache_enabled:
+    if not settings.precomputed_graphs_enabled:
+        return
+    if not uses_default_store():
         return
 
-    volume_path = settings.graph_cache_volume_path_effective
+    volume_path = settings.precomputed_graphs_volume_path_effective
     if volume_path:
         if verbose:
-            logger.info("Graph cache volume: %s", volume_path)
+            logger.info("Precomputed graph volume: %s", volume_path)
         return
 
-    Path(settings.graph_cache_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.precomputed_graphs_dir).mkdir(parents=True, exist_ok=True)
     if verbose:
-        logger.info("Graph cache directory: %s", settings.graph_cache_dir)
+        logger.info(
+            "Precomputed graph directory: %s", settings.precomputed_graphs_dir
+        )
 
     if settings.databricks_mode:
         logger.warning(
-            "Graph cache is using a local directory (%s) in Databricks mode. "
-            "With more than one replica each holds its own copy, so a cache URL "
-            "will work intermittently. Set GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH "
-            "(or GRAPH_LAGOON_DATABRICKS_VOLUME_PATH) to a Unity Catalog Volume.",
-            settings.graph_cache_dir,
+            "Precomputed graphs are using a local directory (%s) in Databricks "
+            "mode. With more than one replica each holds its own copy, so a link "
+            "will work intermittently. Set "
+            "GRAPH_LAGOON_PRECOMPUTED_GRAPHS_VOLUME_PATH (or "
+            "GRAPH_LAGOON_DATABRICKS_VOLUME_PATH) to a Unity Catalog Volume.",
+            settings.precomputed_graphs_dir,
         )
 
 
@@ -394,6 +409,7 @@ def create_mountable_app(
     catalog_schemas: Optional[list[tuple[str, str]]] = None,
     similarity_endpoints: Optional[list] = None,
     rest_connections: Optional[list] = None,
+    precomputed_graph_providers: Optional[list] = None,
 ) -> FastAPI:
     """Create a Graph Lagoon Studio app that can be mounted under a prefix.
 
@@ -491,7 +507,7 @@ def create_mountable_app(
     configure_warehouse(settings, header_provider=header_provider)
     configure_datasources(settings, header_provider=header_provider)
     configure_snapshot_service(settings, header_provider=header_provider)
-    configure_graph_cache_service(settings, header_provider=header_provider)
+    configure_precomputed_storage(settings, header_provider=header_provider)
     configure_style_preset_service(settings, header_provider=header_provider)
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
@@ -510,11 +526,31 @@ def create_mountable_app(
         for spec in rest_connections:
             register_rest_connection(spec)
 
+    # Register precomputed graph providers, in chain order.
+    #
+    # None and [] mean different things, and the difference is the point:
+    # omitting the argument keeps the built-in volume provider, so a deployment
+    # that never heard of providers behaves as it always did; passing an empty
+    # list says "this deployment serves no precomputed graphs" and every read
+    # answers 404.
+    # The argument is the complete chain, so it replaces whatever was there:
+    # each call builds a fresh default volume_provider(), and registering by
+    # name would otherwise make a second app construction (tests, re-mounts)
+    # collide with the first.
+    clear_precomputed_graph_registry()
+    _providers = (
+        [volume_provider()]
+        if precomputed_graph_providers is None
+        else precomputed_graph_providers
+    )
+    for _provider in _providers:
+        register_precomputed_graph_provider(_provider)
+
     @asynccontextmanager
     async def mountable_lifespan(app: FastAPI):
         if not settings.databricks_volume_path:
             Path(settings.exploration_snapshots_dir).mkdir(parents=True, exist_ok=True)
-        _prepare_graph_cache_storage(settings, verbose=False)
+        _prepare_precomputed_graph_storage(settings, verbose=False)
         _prepare_style_preset_storage(settings, verbose=False)
         if is_database_available():
             await create_tables()
@@ -582,6 +618,7 @@ def create_app(
     catalog_schemas: Optional[list[tuple[str, str]]] = None,
     similarity_endpoints: Optional[list] = None,
     rest_connections: Optional[list] = None,
+    precomputed_graph_providers: Optional[list] = None,
 ) -> FastAPI:
     """Create a standalone Graph Lagoon Studio FastAPI application.
 
@@ -622,7 +659,7 @@ def create_app(
     configure_warehouse(settings, header_provider=header_provider)
     configure_datasources(settings, header_provider=header_provider)
     configure_snapshot_service(settings, header_provider=header_provider)
-    configure_graph_cache_service(settings, header_provider=header_provider)
+    configure_precomputed_storage(settings, header_provider=header_provider)
     configure_style_preset_service(settings, header_provider=header_provider)
 
     # Register similarity endpoints
@@ -639,6 +676,26 @@ def create_app(
         for spec in rest_connections:
             register_rest_connection(spec)
 
+    # Register precomputed graph providers, in chain order.
+    #
+    # None and [] mean different things, and the difference is the point:
+    # omitting the argument keeps the built-in volume provider, so a deployment
+    # that never heard of providers behaves as it always did; passing an empty
+    # list says "this deployment serves no precomputed graphs" and every read
+    # answers 404.
+    # The argument is the complete chain, so it replaces whatever was there:
+    # each call builds a fresh default volume_provider(), and registering by
+    # name would otherwise make a second app construction (tests, re-mounts)
+    # collide with the first.
+    clear_precomputed_graph_registry()
+    _providers = (
+        [volume_provider()]
+        if precomputed_graph_providers is None
+        else precomputed_graph_providers
+    )
+    for _provider in _providers:
+        register_precomputed_graph_provider(_provider)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup
@@ -652,7 +709,7 @@ def create_app(
             Path(settings.exploration_snapshots_dir).mkdir(parents=True, exist_ok=True)
             logger.info("Snapshot directory: %s", settings.exploration_snapshots_dir)
 
-        _prepare_graph_cache_storage(settings, verbose=True)
+        _prepare_precomputed_graph_storage(settings, verbose=True)
         _prepare_style_preset_storage(settings, verbose=True)
 
         if is_database_available():

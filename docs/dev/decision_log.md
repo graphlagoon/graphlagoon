@@ -1,5 +1,226 @@
 # Decision Log
 
+## [2026-08-23] - Feature: precomputed graphs replace the graph cache
+
+**Purpose:** user directive — "a feature atual de sistema de cache não faz sentido". It
+was never a cache: nothing keyed by query text, no invalidation, no TTL, no eviction. It
+was *a graph someone produced earlier and published under a name*, and the only way one
+could exist was as a file in a volume. The correct model is that the deploying developer
+declares explicitly what a named graph resolves to — a volume path, a Lakebase query, a
+Delta table, a REST service — reading the URL parameters including `context_id` to decide.
+Full freedom to break what exists was granted.
+
+**Design decisions:**
+
+1. **Ordered provider chain with a predicate, not a per-context binding.** Providers are
+   registered via `create_mountable_app(precomputed_graph_providers=[...])`; each may
+   declare `matches(request) -> bool`, and `resolve` returning `None` declines so the next
+   is tried. The rejected alternative was a `precomputed_provider` column on `GraphContext`:
+   more inspectable in the UI, but it needs a schema migration, a context-editor change, and
+   — decisively — it cannot express **layered fallback**. `[volume_provider(), lakebase_bfs]`
+   is "serve the nightly file when it exists, compute it otherwise" with no extra machinery,
+   and that composition falls straight out of `None` meaning *decline* rather than *empty*.
+   Mirrors the `RestConnectionSpec` registry, which is the most complete extension idiom in
+   the repo.
+
+2. **Three traversals of the chain, deliberately different.** Read: first provider that
+   matches *and* answers. Write/delete: the first provider that **matches**, full stop — if
+   it has no `save` that is a 405, and the chain does **not** fall through to a writable
+   provider further down, because writing somewhere other than where you read from is the
+   worst surprise this feature could produce. Purge on context deletion: **every** provider
+   declaring `delete_context`, because a context's graphs can live in several backends at
+   once. A test pins each.
+
+3. **Write is a provider capability, not a global flag.** `save`/`delete` absent ⇒ the
+   endpoint answers 405 with an `Allow: GET` header and the panel hides its controls —
+   "absence == capability off", the same doctrine `RestConnectionSpec.rest_ops` follows, so
+   there is no override knob that could drift from reality. A Lakebase-backed graph has
+   nowhere to write back to; the old model would have offered a Save button that always
+   failed. The panel learns this from a new capabilities endpoint rather than re-deriving a
+   rule the server owns: `can_write` already folds in superuser status, so the template gates
+   on one flag.
+
+4. **`?graph=` → `?precomputed=`.** Chosen over keeping the old name for consistency with
+   everything else being renamed; the user accepted breaking existing links. The endpoint
+   moved to `/precomputed-graphs/{name}` in the same breath.
+
+5. **Every non-reserved query parameter is forwarded as a provider argument.** This is the
+   real new capability: `?precomputed=vizinhanca&seed=99872&hops=3`. The frontend cannot
+   allowlist argument keys (only the provider knows them), so it forwards what it does not
+   own and lets the server reject the rest. Reserved: `precomputed`, `style`, `exploration`,
+   `layout*`, plus tracking prefixes (`utm_`, `fbclid`, `gclid`) — without that last group a
+   link pasted into Slack would come back as "unknown parameter".
+
+6. **Declared, coerced, bounded parameters — and a written security contract.** `ParamSpec`
+   borrows `SimilarityEndpointParam`'s field names so both read alike, but is a new dataclass:
+   `SimilarityEndpointParam` has no validation code anywhere (the router only echoes it to the
+   frontend), and these values land in SQL the deploying developer wrote. Unknown key → 400
+   naming the declared set; **repeated key → 400 rather than last-wins**, since
+   `dict(request.query_params)` silently keeps the last value and a security-relevant value
+   decided by luck is exactly the failure mode to prevent (the router iterates `.multi_items()`).
+   Numbers are strict decimals — the `parseStrictNumber` doctrine from `layoutUrlOverrides.ts`,
+   so a value never parses one way in Python and another in JavaScript. Registration-time
+   failures (unknown type, `choices` on a number, `min > max`, a default failing its own spec,
+   a reserved param name) raise at app construction, not on the first request.
+
+   Deliberately stricter than `layoutUrlOverrides`, which collects issues and carries on: a
+   layout typo draws the graph slightly wrong and you can see it; a parameter typo returns
+   *different data* with nothing on screen to say so.
+
+   **Coercion is per provider** (see the correction below), so a chain may mix providers with
+   entirely different declared arguments. Three failures, deliberately not the same: a key no
+   provider in the chain declares → 400 (typo protection, checked against the union); a value
+   outside a provider's bounds → 400 even when a provider behind it would have answered
+   (falling through would serve a graph that silently ignored the argument); a required
+   argument a provider did not get → that provider *stands down*, exactly as if `matches` had
+   said no. When every provider stands down for a missing required argument the answer is a
+   400 naming it, not a bare 404 — which would send someone hunting for a name that was fine.
+
+   `spec.py`'s docstring states both halves explicitly — what the framework guarantees
+   (declared names only, typed, bounded; validated `name`; read access already checked) and
+   what the provider author owes (bind, never interpolate; `choices` for identifier position;
+   `min`/`max` as the only cost control; re-authorize for narrower data; bound result size;
+   own your timeout).
+
+7. **Clean break, no migration affordances at all.** URL param, endpoint path, env vars,
+   storage prefix and envelope all move at once. An earlier revision of this change added two
+   safety nets — a `decode_payload` guard rejecting `cache_version` payloads by name, and a
+   `warn_about_renamed_env_vars()` startup check for leftover `GRAPH_LAGOON_GRAPH_CACHE_*`.
+   Both were **removed** on the user's confirmation that no production deployment exists: they
+   were carrying weight for a migration nobody has to perform, and the docs they forced
+   (a `::: danger` block in two guides plus a contract section) described a hazard that is not
+   real here. Carrying compatibility machinery for a case that does not exist is its own debt.
+
+8. **The payload contract is kept, with two fields added.** Still `gzip(orjson.dumps(...))`
+   level 6, `.jsonz`, and the raw-bytes pass-through is preserved *by construction*: the
+   volume provider's `resolve` returns `PrecomputedGraphResult.from_raw(store.load(...))` and
+   the router hands those bytes to the browser untouched under `Content-Encoding: gzip`. New:
+   `provider` and `params`, so a graph computed on demand records what produced it — the
+   difference from a cache, where a name was the whole identity.
+
+9. **`None` vs `[]` on the registration argument.** Omitted ⇒ the built-in volume provider
+   alone, so a deployment that never heard of providers behaves as before. `[]` ⇒ nothing
+   registered and every read 404s, which is how a deployment says "we serve none" — distinct
+   from disabling the feature. The registration block clears the registry first: each
+   construction builds a fresh `volume_provider()`, so registering by name would make a second
+   app construction (tests, re-mounts) collide with the first.
+
+10. **A per-call token in the store.** `?graph=` changed rarely; `?seed=` in the address bar
+    makes overlapping requests routine, and the response path had no guard. `precomputedToken`
+    mirrors the existing `enrichmentToken` so a slow answer cannot overwrite a newer one, and a
+    stale *failure* cannot clobber a fresh success's error state. Two tests pin both directions.
+
+11. **The watcher is a signature, not a property.** Argument keys are open-ended, so there is
+    no `route.query.style`-style property to watch — `precomputedQuerySignature` plays the role
+    `layoutQuerySignature` plays for `layout.*`. Two of its properties are load-bearing rather
+    than cosmetic: it is `''` when no graph is named (otherwise a stray `?foo=1` on an ordinary
+    URL fires the watcher and re-runs the default auto-load), and it excludes `style`/`layout*`
+    (otherwise a style change, which deliberately does *not* reload the graph, would become a
+    full refetch). Both are tested.
+
+12. **`named_store.py` and `blob_storage.py` were not touched functionally.** `ARTIFACT_NAME_RE`
+    is the single source of truth for precomputed-graph *and* style-preset names, mirrored in
+    `frontend/src/types/graph.ts` and consumed by `StylePresetModal.vue` — which is why the TS
+    constant was renamed `GRAPH_CACHE_NAME_PATTERN` → `ARTIFACT_NAME_PATTERN` in the same commit
+    as the type file, and why its comment now points at the real owner. A provider needing
+    another backend *implements* `BlobStore`; it does not modify it.
+
+**Implementation:**
+
+New package `api/graphlagoon/services/precomputed/` — `spec.py` (provider dataclass,
+capabilities derived, `validate_provider`, the security contract), `params.py` (`ParamSpec`,
+coercion, registration validation), `request.py` (`PrecomputedGraphRequest`,
+`PrecomputedGraphResult` with `from_raw`/`from_graph`/`to_bytes`), `registry.py`,
+`resolver.py` (`resolve`, `first_match`, `purge_context`, `ProviderFailed`), `volume.py`
+(`volume_provider()` factory, lazy settings-built store, `decode_payload`).
+
+`routers/graph_cache.py` → `routers/precomputed_graphs.py`, carrying forward verbatim
+`_error`, `_validated_name` **with its comment about uvicorn already unescaping `%2F`**,
+`_storage_error`, `enforce_body_limit`, and above all the bare `Response(...)` construction
+that makes the gzip pass-through work. New: parameter coercion before `resolve`, a
+capabilities endpoint on the collection URL, 405 branches with an explicit `Allow` header.
+Handler order — enabled → superuser → context access → name → params → capability → resolve —
+puts capability last so a stranger cannot probe whether a provider is writable.
+
+`services/graph_cache.py` deleted. Frontend: `GraphCachePanel.vue` →
+`PrecomputedGraphPanel.vue` (13 testids, capability gate, `openLast()` no longer spreading
+`route.query`), new `utils/precomputedUrlParams.ts`, and renames through types → api → store
+→ view → toolbar.
+
+**Files created:** `api/graphlagoon/services/precomputed/{__init__,spec,params,request,registry,resolver,volume}.py`,
+`api/graphlagoon/routers/precomputed_graphs.py`, `api/tests/test_precomputed_providers.py`,
+`api/tests/test_precomputed_params.py`, `frontend/src/utils/precomputedUrlParams.ts`,
+`frontend/src/utils/__tests__/precomputedUrlParams.test.ts`,
+`docs/guide/precomputed-graphs.md`.
+
+**Files renamed:** `api/tests/test_graph_cache.py` → `test_precomputed_graphs.py`,
+`frontend/src/components/GraphCachePanel.vue` → `PrecomputedGraphPanel.vue` (+ its test),
+`frontend/src/stores/__tests__/graph.cache.test.ts` → `graph.precomputed.test.ts`,
+`frontend/e2e/tests/graph-cache.spec.ts` → `precomputed-graphs.spec.ts`,
+`docs/dev/graph-cache-contract.md` → `docs/dev/precomputed-graphs-contract.md`.
+
+**Files deleted:** `api/graphlagoon/services/graph_cache.py`,
+`api/graphlagoon/routers/graph_cache.py`.
+
+**Files modified:** `api/graphlagoon/{app,config,__init__}.py`, `models/schemas.py`,
+`routers/{config,graph,graph_contexts,style_presets}.py`,
+`services/{named_store,blob_storage,style_presets}.py`, `utils/context_access.py`
+(prose only for the last four); `api/tests/test_style_presets.py`;
+`frontend/src/{types/graph.ts,services/api.ts,stores/graph.ts,stores/toolbar.ts,components/Toolbar.vue,components/StylePresetModal.vue,views/GraphVisualizationView.vue}`;
+`frontend/src/stores/__tests__/{graph.stylePreset,toolbar}.test.ts`,
+`frontend/src/services/__tests__/api.test.ts`;
+`frontend/e2e/helpers/api-mocks.ts`, `e2e/tests/{style-presets,user-journeys}.spec.ts`;
+`docs/guide/configuration.md`, `docs/.vitepress/config.ts`, `docs/dev/technical-debts.md`.
+
+**Testing:**
+- API: **893 passed**, 6 failures confirmed pre-existing on a clean tree (4 in
+  `test_cypher_comments.py`, 1 in `test_transpile_options.py` — both need the real
+  `gsql2rsql`; 1 in `test_superuser.py::test_default_is_empty`, which reads the developer's
+  local `.env`). `test_precomputed_graphs.py` 71, `test_precomputed_providers.py` 57,
+  `test_precomputed_params.py` 71.
+- Frontend unit: **1648 passed**, 89 files, 0 failures. `npx vue-tsc --noEmit` clean.
+- E2E: **158 passed**, 0 failures (Chromium).
+
+New coverage worth naming: a declining provider chaining to the next; `matches` false ⇒
+`resolve` never called (asserted by call count, not by result); ordering, and reversing
+registration reversing the answer; a raising `matches` aborting rather than being read as
+"no match"; `resolve` raising → 502 with the provider name **in the log** and the exception
+text **not** in the response (plus the `show_error_details` opt-in tested separately, with
+the fixture pinning the production posture so a local `.env` cannot flip it); 405 with
+`Allow`, checked *after* the 403; a write never falling through to a later writable provider,
+and nothing written behind the 405; purge visiting every provider, and one failing not
+stopping the rest; raw bytes served under `Content-Encoding: gzip`; a provider returning zstd
+reported rather than mislabelled; a parameter value never reaching a storage key; the
+duplicate-parameter refusal end to end; and, on the frontend, the two race directions and the
+signature's two negative properties.
+
+**Correction, same day — the chain could not mix parameter specs.** The first version coerced
+the query string once against the **first matching provider** and handed that one request to
+every provider in the chain. A chain whose providers declare different arguments was therefore
+impossible: `[volume_provider(), lakebase_bfs]` with `?seed=n1` answered
+`400 UNKNOWN_PARAM` because the volume declares no parameters — Example 4 of the guide this
+same change shipped was broken on arrival. Caught by running the documented example rather
+than by a test, which is the lesson: the chain tests all used providers with identical (empty)
+specs, so nothing exercised the case the feature exists for.
+
+Fixed by moving coercion into the chain walk (`plan_resolution` in `resolver.py`): each
+provider is paired with the arguments *it* declared, and the router hands `resolve` a plan
+rather than a single pre-coerced request. `TestMixedParameterSpecs` (8 tests) pins the
+regression and each of the three failure modes.
+
+**Known limitations / deliberately out of scope:**
+- `matches` runs before coercion — a provider is what *declares* the arguments, so there is no
+  way around the ordering. Inside a matcher `params` is empty and `raw_params` holds the
+  untouched query string, which is enough to route on; a test pins that.
+- The capabilities endpoint reports the union across providers claiming the context, since it
+  cannot know which name will be asked for. Deliberate: `matches` almost always routes by
+  context, making the union exact, and a name-routed chain is rare enough not to justify a
+  request per keystroke. The write path still resolves the real provider for the real name, so
+  in such a chain the panel can offer a publish that 405s — the error names the provider and
+  the panel surfaces it.
+- No provider-level result caching or timeout. Both are explicitly the provider author's
+  responsibility and are stated as such in the security contract.
+
 ## [2026-08-21] - Graph cache: producer contract documented, dead provenance fields removed
 
 **Purpose:** A batch job will generate graph caches from Delta tables so the visualizer can

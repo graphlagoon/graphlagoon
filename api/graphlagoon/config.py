@@ -129,27 +129,30 @@ class Settings(BaseSettings):
         "Required when databricks_mode=True and graph snapshots are saved.",
     )
 
-    # Graph cache (named, per-context query results shared by URL)
-    graph_cache_enabled: bool = Field(
+    # Precomputed graphs (named graphs resolved by a registered provider)
+    precomputed_graphs_enabled: bool = Field(
         default=True,
-        description="Enable the named graph cache (read is always allowed; "
-        "writing/deleting through the API is restricted to superusers, see "
-        "GRAPH_LAGOON_SUPERUSER_EMAILS)",
+        description="Enable precomputed graphs (read is always allowed; writing "
+        "and deleting through the API is restricted to superusers, see "
+        "GRAPH_LAGOON_SUPERUSER_EMAILS, and only where the resolving provider "
+        "declares those capabilities)",
     )
-    graph_cache_dir: str = Field(
-        default="./tmp/graph-cache",
-        description="Local directory for graph cache files "
-        "(used when no cache volume path is configured)",
+    precomputed_graphs_dir: str = Field(
+        default="./tmp/precomputed-graphs",
+        description="Local directory the built-in volume provider uses "
+        "(when no volume path is configured)",
     )
-    graph_cache_volume_path: Optional[str] = Field(
+    precomputed_graphs_volume_path: Optional[str] = Field(
         default=None,
-        description="Databricks Volume path for graph cache storage "
-        "(e.g. /Volumes/catalog/schema/volume/graph-cache). Defaults to a "
-        "'graph-cache' subdirectory of databricks_volume_path when that is set.",
+        description="Databricks Volume path for precomputed graph storage "
+        "(e.g. /Volumes/catalog/schema/volume/precomputed-graphs). Defaults to "
+        "a 'precomputed-graphs' subdirectory of databricks_volume_path when "
+        "that is set.",
     )
-    graph_cache_max_bytes: int = Field(
+    precomputed_graphs_max_bytes: int = Field(
         default=200 * 1024 * 1024,
-        description="Maximum compressed size of a single graph cache entry, in bytes",
+        description="Maximum compressed size of a single precomputed graph "
+        "written through the volume provider, in bytes",
     )
 
     # Style presets (named style + label + layout settings, applied by URL)
@@ -266,7 +269,7 @@ class Settings(BaseSettings):
     def style_presets_volume_path_effective(self) -> Optional[str]:
         """Volume path style presets should use, if any.
 
-        Same fallback rule as the graph cache: a deployment that already
+        Same fallback rule as precomputed graphs: a deployment that already
         configured a volume gets a correct, non-colliding location without
         another environment variable.
         """
@@ -277,17 +280,17 @@ class Settings(BaseSettings):
         return None
 
     @property
-    def graph_cache_volume_path_effective(self) -> Optional[str]:
-        """Volume path the graph cache should use, if any.
+    def precomputed_graphs_volume_path_effective(self) -> Optional[str]:
+        """Volume path the built-in volume provider should use, if any.
 
-        Falls back to a 'graph-cache' subdirectory of the snapshot volume, so a
-        deployment that already configured a volume gets a correct, non-colliding
-        location without a second environment variable.
+        Falls back to a 'precomputed-graphs' subdirectory of the snapshot volume,
+        so a deployment that already configured a volume gets a correct,
+        non-colliding location without a second environment variable.
         """
-        if self.graph_cache_volume_path:
-            return self.graph_cache_volume_path
+        if self.precomputed_graphs_volume_path:
+            return self.precomputed_graphs_volume_path
         if self.databricks_volume_path:
-            return f"{self.databricks_volume_path.rstrip('/')}/graph-cache"
+            return f"{self.databricks_volume_path.rstrip('/')}/precomputed-graphs"
         return None
 
     @property
@@ -423,3 +426,4 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+

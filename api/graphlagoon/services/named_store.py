@@ -1,6 +1,6 @@
 """Shared plumbing for named, per-context artifacts kept on a volume.
 
-Two features store things this way — graph caches and style presets — and they
+Two features store things this way — precomputed graphs and style presets — and they
 agree on everything except what the payload means: a name the author chose, a
 context that scopes it, gzip'd JSON in a blob store that is a local directory or
 a Databricks Volume depending on configuration.

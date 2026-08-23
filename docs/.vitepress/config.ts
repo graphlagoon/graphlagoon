@@ -24,6 +24,7 @@ export default defineConfig({
           { text: 'Deploy as a Databricks App', link: '/guide/databricks-apps' },
           { text: 'Similarity System', link: '/guide/similarity' },
           { text: 'REST Connections', link: '/guide/rest-connections' },
+          { text: 'Precomputed Graphs', link: '/guide/precomputed-graphs' },
           { text: 'Configuration', link: '/guide/configuration' },
         ],
       },

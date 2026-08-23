@@ -17,7 +17,7 @@ from graphlagoon.services.graph_codec import (
 
 def _graph_payload(node_count: int = 3) -> dict:
     return {
-        "cache_version": 1,
+        "payload_version": 1,
         "graph": {
             "nodes": [
                 {

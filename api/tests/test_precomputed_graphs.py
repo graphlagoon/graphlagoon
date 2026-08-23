@@ -1,12 +1,17 @@
-"""Tests for the named graph cache — service selection and HTTP endpoints.
+"""Tests for precomputed graphs served by the built-in volume provider.
 
-Authorization note: creating and deleting a cache entry is restricted to
-superusers (GRAPH_LAGOON_SUPERUSER_EMAILS) — unlike a style preset, a graph
-cache is treated as a published, administered artifact, not something context
-ownership or a write-share grants power over. The `client` fixture configures
-SUPERUSER as the superuser for the whole module, so every "arrange" write below
-is performed by SUPERUSER; OWNER/WRITER/READER/STRANGER exist to exercise
-context-level *read* access and to prove none of them can write or delete.
+This module covers the HTTP surface and the volume provider specifically. The
+provider *chain* — declining, matching, ordering, capabilities — lives in
+test_precomputed_providers.py, and parameter coercion in
+test_precomputed_params.py.
+
+Authorization note: writing and deleting is restricted to superusers
+(GRAPH_LAGOON_SUPERUSER_EMAILS) — unlike a style preset, a precomputed graph is
+a published, administered artifact, not something context ownership or a
+write-share grants power over. The `client` fixture configures SUPERUSER as the
+superuser for the whole module, so every "arrange" write below is performed by
+SUPERUSER; OWNER/WRITER/READER/STRANGER exist to exercise context-level *read*
+access and to prove none of them can write or delete.
 """
 
 import gzip
@@ -46,10 +51,13 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from graphlagoon.config import Settings, get_settings  # noqa: E402
 from graphlagoon.db.memory_store import InMemoryStore  # noqa: E402
-from graphlagoon.routers import graph_cache as graph_cache_router  # noqa: E402
-from graphlagoon.services.graph_cache import (  # noqa: E402
-    configure_graph_cache_service,
-    reset_graph_cache_service,
+from graphlagoon.routers import precomputed_graphs as precomputed_router  # noqa: E402
+from graphlagoon.services.precomputed import (  # noqa: E402
+    clear_precomputed_graph_registry,
+    configure_precomputed_storage,
+    register_precomputed_graph_provider,
+    reset_precomputed_storage,
+    volume_provider,
 )
 
 OWNER = "owner@example.com"
@@ -113,14 +121,22 @@ def context(store):
 
 
 def _configure(tmp_path, **overrides):
+    """Point the default store at a temp directory and register a volume provider.
+
+    Registering is part of configuring here because the router resolves through
+    the registry: settings alone no longer make a graph readable, a provider
+    claiming the request does.
+    """
     settings = Settings(
-        graph_cache_dir=str(tmp_path / "cache"),
+        precomputed_graphs_dir=str(tmp_path / "store"),
         databricks_volume_path=None,
-        graph_cache_volume_path=None,
+        precomputed_graphs_volume_path=None,
         **overrides,
     )
-    reset_graph_cache_service()
-    configure_graph_cache_service(settings)
+    reset_precomputed_storage()
+    clear_precomputed_graph_registry()
+    configure_precomputed_storage(settings)
+    register_precomputed_graph_provider(volume_provider())
     return settings
 
 
@@ -128,9 +144,9 @@ def _make_superuser(monkeypatch, *emails):
     """Configure GRAPH_LAGOON_SUPERUSER_EMAILS on the global settings cache.
 
     `is_superuser` (utils/authz.py) always reads `get_settings()`, not the
-    settings object handed to `configure_graph_cache_service` — the same
+    settings object handed to `configure_precomputed_storage` — the same
     convention every other router in this codebase follows, so this mirrors it
-    rather than special-casing the cache.
+    rather than special-casing this feature.
     """
     monkeypatch.setenv("GRAPH_LAGOON_SUPERUSER_EMAILS", ",".join(emails))
     get_settings.cache_clear()
@@ -141,14 +157,15 @@ def client(tmp_path, monkeypatch):
     _make_superuser(monkeypatch, SUPERUSER)
     _configure(tmp_path)
     app = FastAPI()
-    app.include_router(graph_cache_router.router)
+    app.include_router(precomputed_router.router)
     yield TestClient(app)
-    reset_graph_cache_service()
+    reset_precomputed_storage()
+    clear_precomputed_graph_registry()
     get_settings.cache_clear()
 
 
 def _url(context_id, name=None):
-    base = f"/api/graph-contexts/{context_id}/graph-cache"
+    base = f"/api/graph-contexts/{context_id}/precomputed-graphs"
     return base if name is None else f"{base}/{name}"
 
 
@@ -191,7 +208,7 @@ class TestRoundTrip:
 
         # And the bytes on disk are exactly what was served: no re-encoding.
         stored = (
-            tmp_path / "cache" / "cache" / str(context.id) / "c1.jsonz"
+            tmp_path / "store" / "precomputed" / str(context.id) / "c1.jsonz"
         ).read_bytes()
         assert orjson.loads(gzip.decompress(stored))["name"] == "c1"
 
@@ -224,7 +241,7 @@ class TestRoundTrip:
     def test_missing_entry_is_404(self, client, store, context):
         resp = client.get(_url(context.id, "nope"), headers=_headers(OWNER))
         assert resp.status_code == 404
-        assert resp.json()["detail"]["error"]["code"] == "GRAPH_CACHE_NOT_FOUND"
+        assert resp.json()["detail"]["error"]["code"] == "PRECOMPUTED_GRAPH_NOT_FOUND"
 
     def test_missing_context_is_404(self, client, store):
         resp = client.get(_url(uuid4(), "c1"), headers=_headers(OWNER))
@@ -239,14 +256,30 @@ class TestNoListingEndpoint:
     no server-side name filter to page toward. So the endpoint does not exist.
     """
 
-    def test_the_collection_url_is_not_routable(self, client, store, context):
+    def test_the_collection_url_returns_capabilities_not_a_listing(
+        self, client, store, context
+    ):
+        """The collection URL exists, but answers "what can this context do",
+        never "what is in it"."""
+        client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
+
         resp = client.get(_url(context.id), headers=_headers(OWNER))
-        assert resp.status_code in (404, 405)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert set(body) == {"enabled", "can_write", "can_delete", "providers"}
+        # Nothing that could grow with the number of entries.
+        assert "entries" not in body and "names" not in body
+        serialized = orjson.dumps(body).decode()
+        assert "c1" not in serialized
 
-    def test_the_service_exposes_no_list_method(self):
-        from graphlagoon.services.graph_cache import GraphCacheService
+    def test_no_provider_api_exposes_a_list_method(self):
+        from graphlagoon.services.precomputed import PrecomputedGraphProvider
 
-        assert not hasattr(GraphCacheService, "list")
+        assert not hasattr(PrecomputedGraphProvider, "list")
+        assert not any(
+            field.name == "list"
+            for field in PrecomputedGraphProvider.__dataclass_fields__.values()
+        )
 
 
 class TestNameValidation:
@@ -269,7 +302,7 @@ class TestNameValidation:
             _url(context.id, name), json=_body(), headers=_headers(SUPERUSER)
         )
         assert resp.status_code == 400, resp.text
-        assert resp.json()["detail"]["error"]["code"] == "INVALID_CACHE_NAME"
+        assert resp.json()["detail"]["error"]["code"] == "INVALID_PRECOMPUTED_NAME"
 
     @pytest.mark.parametrize("name", ["with/slash", ".."])
     def test_names_that_change_the_url_shape_never_reach_storage(
@@ -462,7 +495,7 @@ class TestIncompleteGraphs:
             headers=_headers(SUPERUSER),
         )
         assert resp.status_code == 400
-        assert resp.json()["detail"]["error"]["code"] == "CACHE_INCOMPLETE"
+        assert resp.json()["detail"]["error"]["code"] == "PRECOMPUTED_GRAPH_INCOMPLETE"
 
     def test_stored_entries_record_completeness(self, client, store, context):
         client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
@@ -474,18 +507,18 @@ class TestIncompleteGraphs:
 class TestSizeLimit:
     def test_oversized_entry_is_rejected(self, tmp_path, store, context, monkeypatch):
         _make_superuser(monkeypatch, SUPERUSER)
-        _configure(tmp_path, graph_cache_max_bytes=64)
+        _configure(tmp_path, precomputed_graphs_max_bytes=64)
         app = FastAPI()
-        app.include_router(graph_cache_router.router)
+        app.include_router(precomputed_router.router)
         client = TestClient(app)
         try:
             resp = client.put(
                 _url(context.id, "big"), json=_body(200), headers=_headers(SUPERUSER)
             )
             assert resp.status_code == 413
-            assert resp.json()["detail"]["error"]["code"] == "CACHE_TOO_LARGE"
+            assert resp.json()["detail"]["error"]["code"] == "PRECOMPUTED_GRAPH_TOO_LARGE"
         finally:
-            reset_graph_cache_service()
+            reset_precomputed_storage()
             get_settings.cache_clear()
 
     def test_oversized_body_is_rejected_before_parsing(
@@ -494,9 +527,9 @@ class TestSizeLimit:
         """Content-Length is the only signal available before Starlette reads the
         body, so the pre-check has to run there."""
         _make_superuser(monkeypatch, SUPERUSER)
-        _configure(tmp_path, graph_cache_max_bytes=16)
+        _configure(tmp_path, precomputed_graphs_max_bytes=16)
         app = FastAPI()
-        app.include_router(graph_cache_router.router)
+        app.include_router(precomputed_router.router)
         client = TestClient(app)
         try:
             resp = client.put(
@@ -506,7 +539,7 @@ class TestSizeLimit:
             )
             assert resp.status_code == 413
         finally:
-            reset_graph_cache_service()
+            reset_precomputed_storage()
             get_settings.cache_clear()
 
 
@@ -518,13 +551,13 @@ class TestCorruptEntries:
         object. That must say so, not render an empty canvas."""
         client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
 
-        path = tmp_path / "cache" / "cache" / str(context.id) / "c1.jsonz"
+        path = tmp_path / "store" / "precomputed" / str(context.id) / "c1.jsonz"
         assert path.is_file()
         path.write_bytes(b"not gzip at all")
 
         resp = client.get(_url(context.id, "c1"), headers=_headers(OWNER))
         assert resp.status_code == 502
-        assert resp.json()["detail"]["error"]["code"] == "CACHE_UNREADABLE"
+        assert resp.json()["detail"]["error"]["code"] == "PRECOMPUTED_GRAPH_UNREADABLE"
 
 
 class TestGzipMiddlewareInteraction:
@@ -544,9 +577,9 @@ class TestGzipMiddlewareInteraction:
         _configure(tmp_path)
         app = FastAPI()
         app.add_middleware(GZipMiddleware, minimum_size=1)
-        app.include_router(graph_cache_router.router)
+        app.include_router(precomputed_router.router)
         yield TestClient(app)
-        reset_graph_cache_service()
+        reset_precomputed_storage()
         get_settings.cache_clear()
 
     def test_body_is_not_compressed_twice(self, gzipped_client, store, context):
@@ -583,43 +616,43 @@ class TestStorageLayout:
         client.put(
             _url(context.id, "fraude-2024"), json=_body(), headers=_headers(SUPERUSER)
         )
-        expected = tmp_path / "cache" / "cache" / str(context.id) / "fraude-2024.jsonz"
+        expected = tmp_path / "store" / "precomputed" / str(context.id) / "fraude-2024.jsonz"
         assert expected.is_file()
 
     def test_stored_file_is_gzip_json(self, client, store, context, tmp_path):
         client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
-        raw = (tmp_path / "cache" / "cache" / str(context.id) / "c1.jsonz").read_bytes()
+        raw = (tmp_path / "store" / "precomputed" / str(context.id) / "c1.jsonz").read_bytes()
         assert raw[:2] == b"\x1f\x8b"
         assert orjson.loads(gzip.decompress(raw))["name"] == "c1"
 
 
-class TestServiceSelection:
+class TestVolumeProviderSelection:
     def test_local_backend_without_a_volume_path(self, tmp_path):
         from graphlagoon.services.blob_storage import LocalBlobStore
-        from graphlagoon.services.graph_cache import get_graph_cache_service
+        from graphlagoon.services.precomputed import default_store
 
         _configure(tmp_path)
         try:
-            assert isinstance(get_graph_cache_service()._store, LocalBlobStore)
+            assert isinstance(default_store(), LocalBlobStore)
         finally:
-            reset_graph_cache_service()
+            reset_precomputed_storage()
 
     def test_databricks_backend_when_a_volume_path_is_set(self, tmp_path):
         from graphlagoon.services.blob_storage import DatabricksBlobStore
-        from graphlagoon.services.graph_cache import get_graph_cache_service
+        from graphlagoon.services.precomputed import default_store
 
         settings = Settings(
-            graph_cache_dir=str(tmp_path),
-            graph_cache_volume_path="/Volumes/main/default/vol/graph-cache",
+            precomputed_graphs_dir=str(tmp_path),
+            precomputed_graphs_volume_path="/Volumes/main/default/vol/precomputed",
             databricks_host="adb-test.azuredatabricks.net",
             databricks_token="dapi-xxx",
         )
-        reset_graph_cache_service()
-        configure_graph_cache_service(settings)
+        reset_precomputed_storage()
+        configure_precomputed_storage(settings)
         try:
-            assert isinstance(get_graph_cache_service()._store, DatabricksBlobStore)
+            assert isinstance(default_store(), DatabricksBlobStore)
         finally:
-            reset_graph_cache_service()
+            reset_precomputed_storage()
 
     def test_snapshot_volume_supplies_a_default_subdirectory(self, tmp_path):
         """An existing Databricks deployment gets a correct location without a
@@ -628,46 +661,66 @@ class TestServiceSelection:
             databricks_volume_path="/Volumes/main/default/vol/explorations",
         )
         assert (
-            settings.graph_cache_volume_path_effective
-            == "/Volumes/main/default/vol/explorations/graph-cache"
+            settings.precomputed_graphs_volume_path_effective
+            == "/Volumes/main/default/vol/explorations/precomputed-graphs"
         )
 
-    def test_explicit_cache_volume_wins(self, tmp_path):
+    def test_explicit_volume_wins(self, tmp_path):
         settings = Settings(
             databricks_volume_path="/Volumes/a/b/c",
-            graph_cache_volume_path="/Volumes/x/y/z",
+            precomputed_graphs_volume_path="/Volumes/x/y/z",
         )
-        assert settings.graph_cache_volume_path_effective == "/Volumes/x/y/z"
+        assert settings.precomputed_graphs_volume_path_effective == "/Volumes/x/y/z"
 
     def test_no_volume_means_no_effective_path(self):
-        assert Settings().graph_cache_volume_path_effective is None
+        assert Settings().precomputed_graphs_volume_path_effective is None
 
     def test_missing_host_is_a_clear_error(self, tmp_path):
-        from graphlagoon.services.graph_cache import get_graph_cache_service
+        from graphlagoon.services.precomputed import default_store
 
         settings = Settings(
-            graph_cache_volume_path="/Volumes/main/default/vol/graph-cache",
+            precomputed_graphs_volume_path="/Volumes/main/default/vol/precomputed",
             databricks_token="dapi-xxx",
         )
-        reset_graph_cache_service()
-        configure_graph_cache_service(settings)
+        reset_precomputed_storage()
+        configure_precomputed_storage(settings)
         try:
             with pytest.raises(ValueError, match="DATABRICKS_HOST"):
-                get_graph_cache_service()
+                default_store()
         finally:
-            reset_graph_cache_service()
+            reset_precomputed_storage()
+
+    def test_an_explicit_store_bypasses_settings_entirely(self, tmp_path):
+        """A provider given a store never consults configuration — which is what
+        lets one deployment serve two different volumes."""
+        from graphlagoon.services.blob_storage import LocalBlobStore
+        from graphlagoon.services.precomputed import uses_default_store
+
+        reset_precomputed_storage()
+        clear_precomputed_graph_registry()
+        configure_precomputed_storage(Settings())
+        register_precomputed_graph_provider(
+            volume_provider(store=LocalBlobStore(str(tmp_path / "explicit")))
+        )
+        try:
+            # The startup directory prep must not fire for a provider that does
+            # not use the settings-built store.
+            assert uses_default_store() is False
+        finally:
+            reset_precomputed_storage()
+            clear_precomputed_graph_registry()
 
 
 class TestDisabled:
     def test_every_endpoint_reports_disabled_before_any_authz_check(
         self, tmp_path, store, context
     ):
-        """graph_cache_enabled gates the whole feature — even for a caller who
-        would otherwise be forbidden, disabled wins, so the 404 here says
-        nothing about who OWNER is."""
-        _configure(tmp_path, graph_cache_enabled=False)
+        """precomputed_graphs_enabled gates the whole feature — even for a
+        caller who would otherwise be forbidden, disabled wins, so the 404 here
+        says nothing about who OWNER is."""
+        _configure(tmp_path, precomputed_graphs_enabled=False)
         app = FastAPI()
-        app.include_router(graph_cache_router.router)
+        app.include_router(precomputed_router.router)
         client = TestClient(app)
         try:
             for resp in (
@@ -676,45 +729,124 @@ class TestDisabled:
                 client.delete(_url(context.id, "c1"), headers=_headers(OWNER)),
             ):
                 assert resp.status_code == 404
-                assert resp.json()["detail"]["error"]["code"] == "GRAPH_CACHE_DISABLED"
+                assert resp.json()["detail"]["error"]["code"] == "PRECOMPUTED_GRAPHS_DISABLED"
         finally:
-            reset_graph_cache_service()
+            reset_precomputed_storage()
 
     def test_enabled_flag_is_independent_of_who_may_write(self, tmp_path):
-        """graph_cache_enabled is the only feature-level toggle left; authorization
-        (superuser) is a separate, per-request check with no boolean equivalent —
-        there used to be a graph_cache_writable() combining enabled+dev_mode, and
-        it no longer exists."""
-        from graphlagoon.services.graph_cache import graph_cache_enabled
+        """Three independent axes, and none of them collapses into another.
 
-        _configure(tmp_path, graph_cache_enabled=True)
-        assert graph_cache_enabled() is True
+        `precomputed_graphs_enabled` is the feature toggle; superuser status is
+        a per-request authorization check; and whether the resolving provider
+        declares `save` is a capability. There used to be a single
+        graph_cache_writable() combining enabled+dev_mode, and conflating them
+        is exactly what this pins against.
+        """
+        from graphlagoon.services.precomputed import precomputed_graphs_enabled
 
-        _configure(tmp_path, graph_cache_enabled=False)
-        assert graph_cache_enabled() is False
+        _configure(tmp_path, precomputed_graphs_enabled=True)
+        assert precomputed_graphs_enabled() is True
+        assert volume_provider().capabilities()["write"] is True
+        assert volume_provider(writable=False).capabilities()["write"] is False
+
+        _configure(tmp_path, precomputed_graphs_enabled=False)
+        assert precomputed_graphs_enabled() is False
 
 
 class TestContextDeletionCascade:
-    def test_deleting_a_context_purges_its_caches(
+    def test_deleting_a_context_purges_its_graphs(
         self, client, store, context, tmp_path
     ):
         import asyncio
 
-        from graphlagoon.routers.graph_contexts import _purge_graph_caches
+        from graphlagoon.routers.graph_contexts import _purge_precomputed_graphs
 
         client.put(_url(context.id, "c1"), json=_body(), headers=_headers(SUPERUSER))
-        directory = tmp_path / "cache" / "cache" / str(context.id)
+        directory = tmp_path / "store" / "precomputed" / str(context.id)
         assert directory.is_dir()
 
-        asyncio.run(_purge_graph_caches(context.id))
+        asyncio.run(_purge_precomputed_graphs(context.id))
         assert not directory.exists()
 
-    def test_purge_never_raises_for_an_uncached_context(self, client, store):
+    def test_purge_never_raises_for_a_context_with_nothing_stored(self, client, store):
         import asyncio
 
-        from graphlagoon.routers.graph_contexts import _purge_graph_caches
+        from graphlagoon.routers.graph_contexts import _purge_precomputed_graphs
 
-        asyncio.run(_purge_graph_caches(uuid4()))
+        asyncio.run(_purge_precomputed_graphs(uuid4()))
+
+    def test_purge_visits_every_provider_not_just_the_first(self, tmp_path):
+        """A context's graphs can live in several backends, so purge fans out.
+
+        This is the one traversal that is deliberately *not* first-match — a
+        read stops at the first answer, a purge must not.
+        """
+        import asyncio
+
+        from graphlagoon.routers.graph_contexts import _purge_precomputed_graphs
+        from graphlagoon.services.precomputed import (
+            PrecomputedGraphProvider,
+        )
+
+        visited = []
+
+        def _recorder(tag):
+            async def _delete_context(context_id):
+                visited.append(tag)
+
+            return _delete_context
+
+        async def _never(request):
+            return None
+
+        _configure(tmp_path)
+        clear_precomputed_graph_registry()
+        for tag in ("first", "second", "third"):
+            register_precomputed_graph_provider(
+                PrecomputedGraphProvider(
+                    name=tag,
+                    resolve=_never,
+                    delete_context=_recorder(tag),
+                )
+            )
+        try:
+            asyncio.run(_purge_precomputed_graphs(uuid4()))
+            assert visited == ["first", "second", "third"]
+        finally:
+            reset_precomputed_storage()
+            clear_precomputed_graph_registry()
+
+    def test_one_provider_failing_to_purge_does_not_stop_the_others(self, tmp_path):
+        import asyncio
+
+        from graphlagoon.routers.graph_contexts import _purge_precomputed_graphs
+        from graphlagoon.services.precomputed import PrecomputedGraphProvider
+
+        visited = []
+
+        async def _boom(context_id):
+            raise RuntimeError("volume unreachable")
+
+        async def _ok(context_id):
+            visited.append("ok")
+
+        async def _never(request):
+            return None
+
+        _configure(tmp_path)
+        clear_precomputed_graph_registry()
+        register_precomputed_graph_provider(
+            PrecomputedGraphProvider(name="broken", resolve=_never, delete_context=_boom)
+        )
+        register_precomputed_graph_provider(
+            PrecomputedGraphProvider(name="healthy", resolve=_never, delete_context=_ok)
+        )
+        try:
+            asyncio.run(_purge_precomputed_graphs(uuid4()))
+            assert visited == ["ok"]
+        finally:
+            reset_precomputed_storage()
+            clear_precomputed_graph_registry()
 
 
 class TestSourceContract:
@@ -753,22 +885,22 @@ class TestSourceContract:
         assert stored["source"]["kind"] == "manual"
         assert stored["source"]["query"] is None
 
-    def test_entries_written_before_the_datasource_fields_were_removed_still_decode(
-        self, client, context
-    ):
-        """Backward compatibility: the removed keys must be ignored, not fatal.
+    def test_unknown_keys_inside_source_are_ignored_not_fatal(self, client, context):
+        """Pydantic's default is to ignore unknown keys, and this pins it.
 
-        Entries already on the volume still carry `datasource_type` and
-        `datasource_name`. Pydantic's default is to ignore unknown keys, and
-        this test pins that so a future `extra="forbid"` cannot silently make
-        every pre-existing cache unreadable.
+        `datasource_type`/`datasource_name` used to live in `source` and were
+        removed. A future `extra="forbid"` would make every entry carrying a
+        field this version has not heard of unreadable — a decision worth
+        making deliberately rather than by editing a model_config.
         """
-        from graphlagoon.services.graph_cache import decode_payload
+        from graphlagoon.services.precomputed import decode_payload
 
-        legacy = {
-            "cache_version": 1,
-            "name": "legacy",
+        payload = {
+            "payload_version": 1,
+            "name": "extra-keys",
             "context_id": str(context.id),
+            "provider": "volume",
+            "params": {},
             "created_at": "2026-01-01T00:00:00Z",
             "created_by": "someone@example.com",
             "node_count": 0,
@@ -783,9 +915,34 @@ class TestSourceContract:
             "graph": {"nodes": [], "edges": [], "truncated": False},
         }
 
-        payload = decode_payload(gzip.compress(orjson.dumps(legacy)), "legacy")
+        decoded = decode_payload(gzip.compress(orjson.dumps(payload)), "extra-keys")
 
-        assert payload.source.kind == "cypher"
-        assert payload.source.query == "MATCH (n) RETURN n"
-        assert not hasattr(payload.source, "datasource_type")
+        assert decoded.source.kind == "cypher"
+        assert decoded.source.query == "MATCH (n) RETURN n"
+        assert not hasattr(decoded.source, "datasource_type")
 
+
+class TestProvenance:
+    """`provider` and `params` say who produced a graph and with what.
+
+    This is the difference from the old cache, where a name was the whole
+    identity: a graph computed on demand from URL arguments needs to record the
+    arguments, or a stored copy cannot be told apart from any other.
+    """
+
+    def test_a_write_records_the_resolving_provider(self, client, context):
+        client.put(_url(context.id, "p1"), json=_body(), headers=_headers(SUPERUSER))
+        stored = orjson.loads(
+            client.get(_url(context.id, "p1"), headers=_headers(SUPERUSER)).content
+        )
+        assert stored["provider"] == "volume"
+        assert stored["payload_version"] == 1
+
+    def test_a_provider_with_no_declared_params_stores_an_empty_dict(
+        self, client, context
+    ):
+        client.put(_url(context.id, "p2"), json=_body(), headers=_headers(SUPERUSER))
+        stored = orjson.loads(
+            client.get(_url(context.id, "p2"), headers=_headers(SUPERUSER)).content
+        )
+        assert stored["params"] == {}
