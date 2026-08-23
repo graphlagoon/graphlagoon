@@ -127,14 +127,17 @@ export class ScreenAABBFilter {
    * @param sx - screen X of label anchor
    * @param sy - screen Y of label anchor
    * @param sw - label width in screen pixels
-   * @param sh - label height in screen pixels
+   * @param sh - label height in screen pixels (may span multiple lines)
    * @param align - text alignment ('center' | 'left' | 'right')
+   * @param vAnchor - vertical anchor: 'center' = block centered on anchor,
+   *                  'bottom' = block bottom at anchor (text grows upward)
    * @param threshold - max overlap ratio (0..1) before rejecting (default 0.5)
    */
   tryPlace(
     sx: number, sy: number,
     sw: number, sh: number,
     align: 'center' | 'left' | 'right',
+    vAnchor: 'center' | 'bottom',
     threshold: number,
   ): boolean {
     // Compute AABB based on text alignment relative to anchor
@@ -146,7 +149,8 @@ export class ScreenAABBFilter {
     } else {
       left = sx - sw / 2;
     }
-    const top = sy - sh / 2;
+    // Screen Y grows downward: a bottom-anchored block occupies [sy - sh, sy]
+    const top = vAnchor === 'bottom' ? sy - sh : sy - sh / 2;
 
     // Grid cell range
     const c0 = Math.max(0, Math.floor(left / this.cellSize));

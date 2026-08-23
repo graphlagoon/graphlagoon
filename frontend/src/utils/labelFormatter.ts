@@ -10,6 +10,7 @@
  * - Conditionals: {if:prop:x>10|High|Low}, {if:prop:status==active|Active|Inactive}
  * - Date formatting: {date:prop:created_at|DD/MM/YYYY}
  * - Date conditionals: {if:prop:date|daysAgo:<7|Recent|Old}
+ * - Line break: {br} — renders the label on multiple lines
  */
 
 import type { Node, Edge, TextFormatRule, TextFormatModifier, TextFormatConditionOperator } from '@/types/graph';
@@ -276,6 +277,11 @@ function findMatchingBrace(template: string, start: number): number {
 }
 
 function parseTokenContent(content: string): ParsedToken {
+  // Line break: {br} — the 3D label renderer treats '\n' as a line break
+  if (content === 'br') {
+    return { type: 'text', value: '\n' };
+  }
+
   // Date formatting: date:prop:field|format
   if (content.startsWith('date:')) {
     const dateMatch = content.match(/^date:prop:([^|]+)\|?(.*)$/);
@@ -641,6 +647,8 @@ export function getAvailablePlaceholders(
       { placeholder: '{dst}', description: 'Destination node ID' },
     );
   }
+
+  result.push({ placeholder: '{br}', description: 'Line break (multi-line label)' });
 
   // Property placeholders (raw table columns — take precedence over
   // same-named built-ins when written with the `prop:` prefix)

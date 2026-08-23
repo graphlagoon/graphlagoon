@@ -830,3 +830,43 @@ describe('extractTemplateProperties', () => {
     expect(props.sort()).toEqual(['a', 'b', 'c', 'd'])
   })
 })
+
+// ============================================================================
+// {br} line-break token
+// ============================================================================
+
+describe('{br} line-break token', () => {
+  it('renders {br} as a newline character', () => {
+    expect(formatLabel('a{br}b', 'node', makeNode())).toBe('a\nb')
+  })
+
+  it('breaks between placeholders (name over metric)', () => {
+    const node = makeNode({ properties: { name: 'Alice', score: '42' } })
+    expect(formatLabel('{prop:name}{br}{prop:score}', 'node', node)).toBe('Alice\n42')
+  })
+
+  it('works inside conditional branches', () => {
+    const node = makeNode({ properties: { score: '90', name: 'Alice' } })
+    expect(formatLabel('{if:prop:score>80|{prop:name}{br}top|low}', 'node', node)).toBe('Alice\ntop')
+  })
+
+  it('supports multiple {br} tokens', () => {
+    expect(formatLabel('a{br}b{br}c', 'node', makeNode())).toBe('a\nb\nc')
+  })
+
+  it('does not treat "br" as a token when it has extra content', () => {
+    // {brx} is an unknown placeholder → resolves to empty string
+    expect(formatLabel('a{brx}b', 'node', makeNode())).toBe('ab')
+  })
+
+  it('validateTemplate accepts {br}', () => {
+    expect(validateTemplate('{prop:name}{br}{prop:score}').valid).toBe(true)
+  })
+
+  it('is listed in autocomplete placeholders for both targets', () => {
+    const nodePlaceholders = getAvailablePlaceholders('node', []).map(r => r.placeholder)
+    const edgePlaceholders = getAvailablePlaceholders('edge', []).map(r => r.placeholder)
+    expect(nodePlaceholders).toContain('{br}')
+    expect(edgePlaceholders).toContain('{br}')
+  })
+})

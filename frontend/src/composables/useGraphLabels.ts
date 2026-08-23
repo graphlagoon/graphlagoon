@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import type { Ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
-import { FastLabelRenderer, computeNormalizedTextWidth, LABEL_BASE_SCALE, NORMALIZED_TEXT_HEIGHT } from '@/utils/FastLabelRenderer';
+import { FastLabelRenderer, computeNormalizedTextMetrics, LABEL_BASE_SCALE } from '@/utils/FastLabelRenderer';
 import { LabelGrid, ScreenAABBFilter } from '@/utils/LabelGrid';
 import type { GraphNode, GraphLink } from '@/types/graph3d';
 
@@ -91,6 +91,7 @@ export function useGraphLabels(
     text: string;
     posIdx: number;  // index into candidatePositions (i*3)
     textAlign: 'center' | 'left' | 'right';
+    verticalAnchor: 'center' | 'bottom';
     labelScale: number;
     alpha: number;
     nodeSize: number;
@@ -98,7 +99,8 @@ export function useGraphLabels(
     screenSy: number;
     screenSz: number; // NDC depth for priority
     forced: boolean;
-    normalizedWidth: number; // pre-computed text width
+    normalizedWidth: number;  // pre-computed text metrics ('\n'-aware)
+    normalizedHeight: number;
   }
   let candidates: NodeLabelCandidate[] = [];
 
@@ -317,6 +319,9 @@ export function useGraphLabels(
           const labelScale = baseLabelScale * zoomCompensation * importance;
 
           // Compute label position into scratch vector
+          // 'top' labels grow upward from the anchor (block bottom pinned above
+          // the node); side labels stay vertically centered on the node.
+          const verticalAnchor: 'center' | 'bottom' = labelPosition === 'top' ? 'bottom' : 'center';
           let textAlign: 'center' | 'left' | 'right';
           if (labelPosition === 'right') {
             _labelPos.set(
@@ -353,11 +358,13 @@ export function useGraphLabels(
             }
           }
 
+          const textMetrics = computeNormalizedTextMetrics(node.label);
           candidates.push({
             id: `node-${node.id}`,
             text: node.label,
             posIdx,
             textAlign,
+            verticalAnchor,
             labelScale,
             alpha,
             nodeSize: node.size ?? 1,
@@ -365,7 +372,8 @@ export function useGraphLabels(
             screenSy,
             screenSz,
             forced: isForced,
-            normalizedWidth: computeNormalizedTextWidth(node.label),
+            normalizedWidth: textMetrics.width,
+            normalizedHeight: textMetrics.height,
           });
           candidateIdx++;
         }
@@ -392,13 +400,13 @@ export function useGraphLabels(
           const ppu = pixelsPerUnitAtDepth(c.screenSz, camera!, halfH);
           const worldScale = c.labelScale * LABEL_BASE_SCALE;
           const screenWidth = c.normalizedWidth * worldScale * ppu;
-          const screenHeight = NORMALIZED_TEXT_HEIGHT * worldScale * ppu;
+          const screenHeight = c.normalizedHeight * worldScale * ppu;
 
           if (c.forced) {
             // Forced labels always render but MUST occupy space
-            aabbFilter.tryPlace(c.screenSx, c.screenSy, screenWidth, screenHeight, c.textAlign, 1.0);
+            aabbFilter.tryPlace(c.screenSx, c.screenSy, screenWidth, screenHeight, c.textAlign, c.verticalAnchor, 1.0);
           } else {
-            if (!aabbFilter.tryPlace(c.screenSx, c.screenSy, screenWidth, screenHeight, c.textAlign, labelOverlapThreshold)) {
+            if (!aabbFilter.tryPlace(c.screenSx, c.screenSy, screenWidth, screenHeight, c.textAlign, c.verticalAnchor, labelOverlapThreshold)) {
               continue;
             }
           }
@@ -414,6 +422,7 @@ export function useGraphLabels(
           scale: c.labelScale,
           alpha: c.alpha,
           textAlign: c.textAlign,
+          verticalAnchor: c.verticalAnchor,
         });
       }
     }

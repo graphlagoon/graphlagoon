@@ -4435,3 +4435,60 @@ Labels panel shows them side by side.
 **Files:** `api/graphlagoon/models/schemas.py` (field), `api/tests/test_query_templates.py` (4 round-trip/back-compat tests, incl. the pre-existing-row pin), `frontend/src/types/graph.ts`, `frontend/src/utils/templateUrlParams.ts` (issue code + gate), `frontend/src/components/TemplateEditorModal.vue` (checkbox `template-allow-url-execution` + always-send options), `frontend/src/components/TemplateExecuteModal.vue` (Copy link guard), `frontend/src/utils/__tests__/templateUrlParams.test.ts` (3 tests: false blocks, absent linkable, explicit true linkable), `frontend/e2e/tests/template-url-autoexec.spec.ts` (fail-closed case, zero outbound requests), `docs/guide/query-templates.md`, `docs/guide/configuration.md`.
 
 **Verified:** API `pytest tests/test_query_templates.py` 32 passed; `vue-tsc --noEmit` clean; full frontend unit suite 1719 passed; template + user-journeys E2E 19 passed; `make docs-build` clean.
+
+## [2026-08-23 14:10] - Investigation: label line-break support (`\n`) — no implementation
+
+**Trigger:** a user asked to see one piece of information above a node and another below it. That raised: why doesn't `\n` in a label break the line, and should we support multi-line labels or build a dedicated two-slot (above/below) label feature? **Decision: do not implement now — investigation recorded for future reference.** Option (a) `{br}` multi-line is the recommended path when/if this is picked up.
+
+### Why `\n` does nothing
+
+- Labels render via a **pre-baked MSDF bitmap font** (Roboto, ASCII 32–126 only) as **GPU-instanced quads** — 1 character = 1 instance, all node+edge labels in a single draw call (`frontend/src/utils/FastLabelRenderer.ts:259`). No canvas 2D / `fillText`, no troika, no CSS2D.
+- The atlas has no glyph for char 10; `charMap.get('\n')` is `undefined` and the glyph loop does `if (!charData) continue` (`FastLabelRenderer.ts:383-384`) — the `\n` is **silently dropped**: no break, no cursor advance. `"foo\nbar"` renders as `foobar`.
+- The same silent drop swallows **any non-ASCII character**: `…`, accented letters, and emoji vanish. Latent doc bug: the label template skill prompt recommends `{prop:name|truncate:24:…}` and `🔥` (`frontend/src/utils/labelTemplateSkill.ts:176,188`), both of which render as nothing.
+- Users cannot even type `\n` into a template today — TextFormatPanel inputs are single-line `<input type="text">`; a `\n` can only arrive from a data property value.
+
+### Why it can cause problems
+
+1. **Inconsistent metrics:** `computeNormalizedTextWidth` (`FastLabelRenderer.ts:512-518`) uses a `?? 0.5` fallback, so `\n` counts as 0.5 width units in the overlap filter (`frontend/src/composables/useGraphLabels.ts:394`) but 0 in the renderer — the label reserves more screen space than it draws.
+2. **Whole pipeline assumes one line:** hard-coded `NORMALIZED_TEXT_HEIGHT = 1.0`, one-line-tall collision AABB, `charCenterY` has no line-index term, and `ScreenAABBFilter.tryPlace` (`frontend/src/utils/LabelGrid.ts:134-179`) assumes a vertical-center anchor (already slightly wrong for baseline-anchored text).
+3. **No sanitization:** `formatLabel` strips no control chars and enforces no global max length; `|truncate:N` can cut mid-surrogate-pair.
+
+### Option comparison (for when this is picked up)
+
+**(a) Multi-line via a `{br}` template token — RECOMMENDED.** ~5 localized changes, shaders untouched:
+1. `FastLabelRenderer.updateMesh` (`:357-444`): split per line, per-line width, reset `cursorX`, add `-lineIndex * lineGap` to Y (~25 lines).
+2. Replace `computeNormalizedTextWidth` + `NORMALIZED_TEXT_HEIGHT` with `computeNormalizedTextMetrics(text): {width, height, lineCount}`.
+3. `useGraphLabels.ts:368,394-395`: use the new metrics in the AABB.
+4. `ScreenAABBFilter.tryPlace`: vertical-anchor parameter (fixes an existing imprecision).
+5. `{br}` token in `parseTokenContent` (`frontend/src/utils/labelFormatter.ts:278`) — fits the existing template mini-language; a design decision remains on whether raw `\n` from DB values becomes a break or is stripped.
+- Perf cost: **zero extra glyph instances**; taller labels reject more overlap-filter candidates (may need to retune `labelOverlapThreshold`, default 0.4).
+- While in there: fall back unknown glyphs to `?`/space instead of dropping — fixes `…`/accents/emoji in one line.
+
+**(b) Two label slots (above + below node).** Renderer untouched (two `addLabel` calls), but wide plumbing: `TextFormatDefaults`/`TextFormatRule` secondary template, serialize/restore + persistence, second TextFormatPanel input, `GraphNode.label2`, 3 format call sites (incl. `refreshNodeContent`), and the culling must treat the pair as a unit (else the primary shows with the secondary culled). **Doubles** consumption of the `maxInstances = 50000` shared glyph budget (~2500 → ~1250 visible labels at ~20 chars/label).
+
+### Performance constraints observed (independent of the decision)
+
+- Hard 50k-glyph cap shared across node+edge labels; instance buffers pre-allocated (~3.4 MB); `updateMesh` rewrites and re-uploads **all** attributes on every call (camera idle, aesthetics, filters, debounced hover) — no partial `updateRange`.
+- `computeNormalizedTextWidth` runs per candidate per update with no memoization — caching by string is a free win.
+- `useGraphLabels.ts:412` allocates a `new THREE.Vector3` per label per update, defeating the `Float64Array` pooling directly above it.
+
+**Files modified:** none (documentation-only entry).
+
+## [2026-08-23 12:55] - Feature Implemented: multi-line labels via `{br}` template token
+
+**Feature:** labels can now span multiple lines. A new `{br}` token in the label template mini-language emits `\n`, and the MSDF renderer lays out `\n`-separated lines (per-line horizontal alignment, one lineHeight of vertical spacing). Covers the "one piece of info above, another below" request as a 2-line block (e.g. `{prop:name}{br}{prop:score}`), per the option-(a) recommendation in the investigation entry above. Frontend-only.
+
+**Design decisions:**
+1. **`{br}` as a template token, not a `\n` escape or `<textarea>`** — fits the existing `{...}` mini-language, works in the single-line panel inputs, and is discoverable via autocomplete. Raw `\n` arriving from a DB property value also breaks lines now (the renderer treats `\n` as the separator), consistent with `{br}`.
+2. **Vertical anchor per label** (`verticalAnchor: 'center' | 'bottom'` on `LabelData`): `'center'` keeps the block centered on the origin — for one line this is byte-identical to the old baseline layout, so single-line visuals are unchanged; `'bottom'` pins the LAST baseline at the origin so extra lines grow upward. `useGraphLabels` maps label position `top → 'bottom'` (block never dips into the node) and `right/left → 'center'`.
+3. **Unknown-glyph fallback instead of silent drop** — the atlas covers ASCII 32–126 only; previously `…`, accents, and emoji vanished (and desynced the width metrics). `resolveCharData()` now falls back to the NFD de-accented base (`é → e`) then `?`, with a per-char resolution cache. Fixes the latent bug where the skill prompt's own `…`/🔥 recommendations rendered as nothing.
+4. **Unified metrics:** `computeNormalizedTextWidth` + `NORMALIZED_TEXT_HEIGHT` replaced by `computeNormalizedTextMetrics(text) → {width, height, lineCount}` (width = widest line, height = lineCount), using the same glyph resolution as the renderer — the overlap filter's AABB can no longer disagree with what is drawn (`\n` used to count 0.5 width units in the filter and 0 in the renderer).
+5. **`ScreenAABBFilter.tryPlace` gained a `vAnchor` param** ('center' | 'bottom') so bottom-anchored blocks reserve the screen space ABOVE their anchor. Shaders untouched; zero extra glyph instances per line break. Capacity-exceeded warning now fires once and stops the whole rebuild (previously warned per char and kept iterating labels).
+6. **Prompt generator (`labelTemplateSkill.ts`) updated:** documents `{br}` (with the "name over metric" pattern and a 2-3 line guideline), documents the ASCII-only font (de-accent/`?` fallback), and the worked examples no longer recommend `…`/🔥 (now `...`/`NEW`). Interview questions now probe for second-line info.
+
+**Files modified:** `frontend/src/utils/FastLabelRenderer.ts` (multi-line layout, verticalAnchor, glyph fallback, new metrics), `frontend/src/composables/useGraphLabels.ts` (metrics + anchor plumbing), `frontend/src/utils/LabelGrid.ts` (tryPlace vAnchor), `frontend/src/utils/labelFormatter.ts` (`{br}` token + autocomplete entry), `frontend/src/utils/labelTemplateSkill.ts` (prompt update), tests for all of the above.
+**Files created:** `frontend/src/utils/__tests__/fastLabelRendererMetrics.test.ts` (9 tests), `frontend/src/utils/__tests__/labelGrid.test.ts` (7 tests, first coverage for `ScreenAABBFilter`).
+
+**Testing:** `npx vue-tsc --noEmit` clean; full unit suite **1744 passed** (93 files) including 7 new `{br}` formatter tests and 5 new skill-prompt assertions. Visual smoke via a throwaway Playwright run (mocked API, real WebGL): single-line rendering unchanged; `{node_id}{br}t: {node_type}` renders two aligned lines at position right; position top grows the block upward without covering the node. Throwaway spec deleted after verification.
+
+**Known limitations:** taller labels are rejected more often by the overlap filter at the default `labelOverlapThreshold` (0.4) — deliberate, they really occupy the space; no cap on line count (guidance says 2-3 lines); `|truncate` counts characters across the whole string including `\n`.

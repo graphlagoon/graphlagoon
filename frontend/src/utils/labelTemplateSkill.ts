@@ -96,6 +96,12 @@ spot). Missing values never raise an error.
 
 Anything outside \`{...}\` is literal text: \`[{node_type}] {prop:name}\` works.
 
+Line break:
+- \`{br}\` — splits the label into multiple lines, e.g. \`{prop:name}{br}{prop:score|number}\`
+  renders the name with the score on a second line under it. Use at most 2-3
+  lines; every line still counts toward the label's screen footprint, so
+  multi-line labels get hidden more often by the overlap filter.
+
 ### Modifiers (pipe syntax)
 
 Append \`|modifier\` inside the braces. Arguments are colon-separated.
@@ -152,7 +158,13 @@ Branch values may themselves contain placeholders:
 - Unknown modifiers are ignored (the raw value is rendered).
 - Labels are drawn in a **3D canvas** — keep them SHORT. Roughly 20-30 characters
   reads well; use \`truncate\` for anything that can be long (names, descriptions,
-  URLs). Avoid stacking many fields into one label.
+  URLs). Prefer \`{br}\` over stacking many fields into one long line, and keep it
+  to 2-3 lines.
+- The label font only covers **basic ASCII** (letters, digits, common
+  punctuation). Accented letters are drawn without the accent (e.g. "Jose" for
+  "José"); any other character — emoji, the single-char ellipsis, arrows — is
+  drawn as \`?\`. Use ASCII in literal text: \`...\` (three dots) as a truncate
+  suffix, a word like \`NEW\` instead of an emoji badge.
 
 ## This graph's metadata (use these real values)
 
@@ -173,19 +185,20 @@ ${propertyList(edgeProperties, 'none declared')}
 Default node template:
 
 \`\`\`
-{prop:name|truncate:24:…}
+{prop:name|truncate:24:...}
 \`\`\`
 
-Rule "Company labels" — target \`node\`, types \`[Company]\`, priority \`20\`:
+Rule "Company labels" — target \`node\`, types \`[Company]\`, priority \`20\`
+(two lines: name on top, revenue under it):
 
 \`\`\`
-[{node_type}] {prop:name|truncate:18:…}
+{prop:name|truncate:18:...}{br}{prop:revenue|currency:USD}
 \`\`\`
 
 Rule "Recent transactions" — target \`edge\`, types \`[PAID]\`, priority \`30\`:
 
 \`\`\`
-{prop:amount|currency:USD} {if:prop:created|daysAgo:<7|🔥|}
+{prop:amount|currency:USD} {if:prop:created|daysAgo:<7|NEW|}
 \`\`\`
 
 ## How to help me
@@ -202,6 +215,8 @@ Good questions to ask me include:
 - Should the type be shown as a prefix/suffix, or is it obvious from color/shape?
 - How long can a label be before it clutters the canvas? Should long values be
   truncated, and at what length?
+- Should any label show a second piece of information on its own line (with
+  \`{br}\`), like a name with a metric under it?
 - Should numbers be formatted (thousands separator, currency + which currency,
   percentage)? Which properties are numeric?
 - Are there date properties worth showing, and in what format?

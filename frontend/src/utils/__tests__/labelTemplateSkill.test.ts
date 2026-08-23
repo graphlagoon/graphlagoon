@@ -80,6 +80,20 @@ describe('buildLabelTemplateSkill', () => {
     expect(text).toContain('truncate')
   })
 
+  it('documents the {br} line-break token', () => {
+    const text = buildLabelTemplateSkill(fullInput)
+    expect(text).toContain('{br}')
+    expect(text).toContain('multiple lines')
+  })
+
+  it('warns about the ASCII-only label font and avoids non-ASCII in examples', () => {
+    const text = buildLabelTemplateSkill(fullInput)
+    expect(text).toContain('basic ASCII')
+    // The worked examples must not recommend characters the font cannot draw
+    expect(text).not.toContain('…')
+    expect(text).not.toContain('🔥')
+  })
+
   it('asks the AI to interview me before writing templates', () => {
     const text = buildLabelTemplateSkill(fullInput)
     expect(text).toContain('Do NOT write templates immediately')
