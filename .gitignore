@@ -108,3 +108,10 @@ CHANGELOG-release.md
 # Data (warehouse)
 # =============================================================================
 warehouse/data
+
+# =============================================================================
+# Raw datasets — large, downloaded, never committed
+# =============================================================================
+# Root-anchored on purpose: a bare `data/` would also swallow any nested
+# directory named data/ that a future subproject might actually want tracked.
+/data/
