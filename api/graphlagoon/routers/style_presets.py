@@ -5,7 +5,7 @@
     PUT    /api/graph-contexts/{context_id}/style-presets/{name}   create/update
     DELETE /api/graph-contexts/{context_id}/style-presets/{name}   remove one
 
-Unlike the graph cache, this **is** listable and **is** writable in production.
+Unlike precomputed graphs, this **is** listable and **is** writable in production.
 Both differences follow from what a preset is: a few kilobytes of hand-authored
 presentation settings. There are a handful per context, choosing one means
 seeing what exists, and the count is bounded at write time rather than paginated
@@ -82,7 +82,7 @@ def _service() -> StylePresetService:
 
 
 def _storage_error(operation: str, name: str, exc: Exception) -> HTTPException:
-    """Map storage exceptions onto HTTP, as the graph cache router does."""
+    """Map storage exceptions onto HTTP, as the precomputed graph router does."""
     if isinstance(exc, InvalidArtifactName):
         return _error(400, "INVALID_PRESET_NAME", str(exc))
     if isinstance(exc, TooManyPresets):
@@ -110,7 +110,7 @@ def _storage_error(operation: str, name: str, exc: Exception) -> HTTPException:
 async def enforce_body_limit(request: Request) -> None:
     """Reject an oversized body before Starlette materializes it.
 
-    Mirrors graph_cache.py's guard: the handler's own size check happens after
+    Mirrors precomputed_graphs.py's guard: the handler's own check happens after
     Pydantic has already parsed the whole JSON body (and `StylePresetSettings`
     allows arbitrary extra keys), so a multi-gigabyte payload would be fully
     buffered and decoded before ever hitting the post-compression limit.

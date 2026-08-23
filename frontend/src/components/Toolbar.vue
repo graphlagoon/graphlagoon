@@ -271,18 +271,19 @@ function handleExportPng(options: ExportPNGOptions) {
             <Save :size="15" /><span class="btn-text">Save</span>
           </button>
 
-          <!-- Reading a graph cache never needs this panel — it is a URL. Only
-               superusers can author one, so the button (and the panel's save/delete
-               controls) are gated on that, not on dev mode. -->
+          <!-- Reading a precomputed graph never needs this panel — it is a URL.
+               Only superusers can publish one, so the button is gated on that;
+               whether any provider is actually writable is a second question the
+               panel answers from the server. -->
           <button
             v-if="isSuperuser && toolbarHandlers"
             class="toolbar-btn"
-            :class="{ active: toolbarStore.activePanels.has('graphCache') }"
-            title="Graph Cache (superuser)"
-            data-testid="toolbar-graph-cache"
-            @click="toolbarHandlers.onToggleGraphCache()"
+            :class="{ active: toolbarStore.activePanels.has('precomputed') }"
+            title="Precomputed graphs (superuser)"
+            data-testid="toolbar-precomputed"
+            @click="toolbarHandlers.onTogglePrecomputed()"
           >
-            <DatabaseZap :size="15" /><span class="btn-text">Cache</span>
+            <DatabaseZap :size="15" /><span class="btn-text">Precomputed</span>
           </button>
 
         </div>

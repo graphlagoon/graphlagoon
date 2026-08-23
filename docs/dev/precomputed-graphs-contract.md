@@ -1,25 +1,33 @@
-# Graph cache — data contract for batch producers
+# Precomputed graphs — the payload contract
 
-Reference for writing graph cache entries from **outside** the application —
-a Spark/Databricks job that turns Delta tables into a graph the visualizer can
-open without touching the warehouse.
+Reference for producing precomputed graph payloads: the shape a **provider**
+returns, and the file a batch job writes when it publishes straight to a volume
+— a Spark/Databricks job turning Delta tables into a graph the visualizer opens
+without touching the warehouse.
 
-The contract itself is owned by two files, and they are the tie-breaker if this
-document ever drifts from them:
+For *how* to register a provider and route between several of them, see
+[the guide](../guide/precomputed-graphs.md). This document is only about the
+payload.
+
+The contract itself is owned by three files, and they are the tie-breaker if
+this document ever drifts from them:
 
 | What | Where |
 |---|---|
 | Schemas (source of truth) | [`api/graphlagoon/models/schemas.py`](../../api/graphlagoon/models/schemas.py) |
-| Storage key, size limit, codec | [`api/graphlagoon/services/graph_cache.py`](../../api/graphlagoon/services/graph_cache.py) |
+| Storage key, size limit, decode guard | [`api/graphlagoon/services/precomputed/volume.py`](../../api/graphlagoon/services/precomputed/volume.py) |
+| Provider protocol and its security contract | [`api/graphlagoon/services/precomputed/spec.py`](../../api/graphlagoon/services/precomputed/spec.py) |
 | Compression | [`api/graphlagoon/services/graph_codec.py`](../../api/graphlagoon/services/graph_codec.py) |
 | Mirrored TS types | [`frontend/src/types/graph.ts`](../../frontend/src/types/graph.ts) |
 
 ---
 
-## 1. What a cache entry is (and is not)
+## 1. What a precomputed graph is (and is not)
 
-A cache entry is **a set of nodes and edges stored under a name**, so that
-`/graph/{context_id}?graph={name}` renders it without running a query.
+A precomputed graph is **a set of nodes and edges resolved under a name**, so
+that `/graph/{context_id}?precomputed={name}` renders it without running a
+query. Where it comes from is the provider's business — a file, a Lakebase
+query computed from the link's own arguments, a Delta table.
 
 It is deliberately *not* a saved view. Three things are excluded, each for a
 reason a batch producer needs to understand:
@@ -28,9 +36,9 @@ reason a batch producer needs to understand:
   try to precompute coordinates — there is nowhere to put them, and the loader
   sets `freshLayoutRequested = true` regardless.
 - **No styling, filters, clusters or communities.** Those are *style presets*
-  and *explorations*. A cache says **which data**; a preset says **how it
-  looks**. Loading a cache deliberately leaves the current style untouched, so
-  one published style can be applied over many generated graphs.
+  and *explorations*. A precomputed graph says **which data**; a preset says
+  **how it looks**. Loading one deliberately leaves the current style untouched,
+  so a single published style can be applied over many generated graphs.
 - **No query timing metadata.** Meaningless once replayed.
 
 If your job needs to ship a *look* alongside the data, publish a style preset
@@ -45,9 +53,11 @@ read, nothing less is accepted.
 
 ```jsonc
 {
-  "cache_version": 1,
+  "payload_version": 1,
   "name": "fraud-ring-2026-08",
   "context_id": "3f2b...uuid",
+  "provider": "volume",
+  "params": {},
   "created_at": "2026-08-21T03:14:00Z",
   "created_by": "batch-job@company.com",
   "node_count": 12043,
@@ -90,18 +100,22 @@ read, nothing less is accepted.
 
 | Field | Who sets it | Why it exists |
 |---|---|---|
-| `cache_version` | producer (`1`) | The only thing separating "evolve the format" from "break every entry ever written". Two bytes. |
+| `payload_version` | producer (`1`) | The only thing separating "evolve the format" from "break every entry ever written". Two bytes. |
 | `name` | producer | Must match `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` and equal the filename stem. |
 | `context_id` | producer | Must equal the directory it is written into. |
+| `provider` | producer / server | Which provider resolved this graph. A batch job writing to a volume should put the name of the volume provider that will serve it (`"volume"` by default), so a wrong graph can be traced to what produced it. |
+| `params` | producer / server | The arguments the graph was resolved with. `{}` for a plain published file; populated for a graph computed on demand, so two links differing only by `?seed=` are distinguishable after the fact. |
 | `created_at` | producer | ISO-8601, UTC. |
-| `created_by` | producer | Attribution. Use a stable job identity, not a person. When a published cache is wrong, "who produced this?" is the first question. |
+| `created_by` | producer | Attribution. Use a stable job identity, not a person. When a published graph is wrong, "who produced this?" is the first question. |
 | `node_count` / `edge_count` | producer | Lets the UI describe an entry without decompressing megabytes of graph. Keep them honest — nothing recomputes them. |
 | `properties_complete` | producer | `= not properties_deferred`. |
 | `source` | producer | See §3. |
 
 > **When writing through the API instead, you send only `{graph, source}`** —
-> the server derives every other envelope field. Direct volume writes get no
-> such help, which is exactly the trade discussed in §6.
+> the server derives every other envelope field. A provider computing a graph
+> in memory gets the same help from
+> `PrecomputedGraphResult.from_graph(...)`. Direct volume writes get neither,
+> which is exactly the trade discussed in §6.
 
 ---
 
@@ -134,22 +148,23 @@ the graph was built. If the pipeline is many joins across many tables, leave it
 Earlier entries carried these. They were cut, and a batch job should not emit
 them:
 
-- A cache is already scoped to a `context_id`, and the context knows its own
+- An entry is already scoped to a `context_id`, and the context knows its own
   datasource — they were pure denormalization.
 - Nothing ever read them back (verified across the frontend and API).
 - They could *lie*: repointing a context at another datasource left stale
   copies behind, with no mechanism to notice.
 
-**Entries already on disk that still contain them keep working** — Pydantic
+**An entry carrying an unknown key inside `source` still decodes** — Pydantic
 ignores unknown keys, and a test pins that behaviour so a future
-`extra="forbid"` cannot silently make every pre-existing cache unreadable.
+`extra="forbid"` cannot silently make every pre-existing entry unreadable.
 
 ---
 
 ## 4. The one hard invariant: `properties_deferred: false`
 
 The API **refuses** a write with `properties_deferred: true` (HTTP 400,
-`CACHE_INCOMPLETE`), and a direct writer must uphold the same rule by hand.
+`PRECOMPUTED_GRAPH_INCOMPLETE`), and a direct writer must uphold the same
+rule by hand.
 
 The reason is specific to how the app loads graphs interactively: contexts
 without configured `node_properties` return nodes with `properties: null` and
@@ -196,14 +211,18 @@ Also worth asserting: `node_id` uniqueness (duplicates silently overwrite) and
 ### Location
 
 ```
-{cache_root}/cache/{context_id}/{name}.jsonz
+{root}/precomputed/{context_id}/{name}.jsonz
 ```
 
-`cache_root` is `GRAPH_LAGOON_GRAPH_CACHE_VOLUME_PATH`, falling back to
-`{GRAPH_LAGOON_DATABRICKS_VOLUME_PATH}/graph-cache`, falling back to
-`GRAPH_LAGOON_GRAPH_CACHE_DIR` (`./tmp/graph-cache`) for local runs. Note the
-literal `cache/` segment **inside** the root — it exists so a root shared with
-other artifacts stays legible.
+`root` is `GRAPH_LAGOON_PRECOMPUTED_GRAPHS_VOLUME_PATH`, falling back to
+`{GRAPH_LAGOON_DATABRICKS_VOLUME_PATH}/precomputed-graphs`, falling back to
+`GRAPH_LAGOON_PRECOMPUTED_GRAPHS_DIR` (`./tmp/precomputed-graphs`) for local
+runs. Note the literal `precomputed/` segment **inside** the root — it exists so
+a root shared with style presets or snapshots stays legible.
+
+This section applies to the built-in volume provider only. A provider reading
+from Lakebase or Delta has no file and no path; it returns the same payload from
+memory and never touches this layout.
 
 ### Encoding
 
@@ -214,12 +233,16 @@ magic bytes, so a future codec swap needs no file migration.
 gzip is not an arbitrary choice and **should not be swapped for zstd**: the
 read endpoint returns the stored bytes *untouched* under `Content-Encoding:
 gzip`, so the server never decompresses a large graph. An entry written in
-another codec is rejected at read time with `CACHE_UNREADABLE`.
+another codec is rejected at read time with `PRECOMPUTED_GRAPH_UNREADABLE` —
+including one returned by a provider, not just one read off a volume.
 
 ### Size
 
-Compressed entries must stay under `GRAPH_LAGOON_GRAPH_CACHE_MAX_BYTES`
-(default **200 MB**). Check after compressing — graphs compress well, so a
+Compressed entries must stay under
+`GRAPH_LAGOON_PRECOMPUTED_GRAPHS_MAX_BYTES` (default **200 MB**). Note that this
+ceiling is enforced on volume **writes** only: a provider computing a payload in
+memory can return an unbounded graph, so bounding it is the provider author's
+job — see the security contract in `spec.py`. Check after compressing — graphs compress well, so a
 pre-compression estimate will mislead. Over the limit, reduce the graph and set
 `truncated: true`; do not split one logical graph across names, since nothing
 recombines them.
@@ -230,7 +253,7 @@ A volume write is **not atomic**, and a reader can catch a half-written object.
 The API's local store writes to a temp file then `os.replace`s it; a batch job
 writing to the same volume should do the same — write `{name}.jsonz.tmp`, then
 rename. Without it, someone loading the graph mid-write gets a
-`CACHE_UNREADABLE` 502 rather than a stale-but-valid entry.
+`PRECOMPUTED_GRAPH_UNREADABLE` 502 rather than a stale-but-valid entry.
 
 ### Minimal producer
 
@@ -243,9 +266,11 @@ def build_payload(context_id, name, nodes, edges, created_by, truncated=False):
     edges = [e for e in edges if e["src"] in node_ids and e["dst"] in node_ids]
 
     return {
-        "cache_version": 1,
+        "payload_version": 1,
         "name": name,
         "context_id": str(context_id),
+        "provider": "volume",
+        "params": {},
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": created_by,
         "node_count": len(nodes),
@@ -265,7 +290,7 @@ def write_entry(root, payload, max_bytes=200 * 1024 * 1024):
     if len(data) > max_bytes:
         raise ValueError(f"{len(data)} bytes compressed, above the {max_bytes} limit")
 
-    target = f"{root}/cache/{payload['context_id']}/{payload['name']}.jsonz"
+    target = f"{root}/precomputed/{payload['context_id']}/{payload['name']}.jsonz"
     tmp = f"{target}.tmp"
     write_bytes(tmp, data)      # your volume client
     rename(tmp, target)         # atomic within a filesystem
@@ -276,8 +301,8 @@ def write_entry(root, payload, max_bytes=200 * 1024 * 1024):
 The schemas are importable, so a job can typecheck its own output:
 
 ```python
-from graphlagoon.models.schemas import GraphCachePayload
-GraphCachePayload.model_validate(payload)   # raises on a malformed entry
+from graphlagoon.models.schemas import PrecomputedGraphPayload
+PrecomputedGraphPayload.model_validate(payload)   # raises on a malformed entry
 ```
 
 This is the cheapest possible guard and catches most producer bugs — but note
@@ -288,14 +313,14 @@ it will **not** catch dangling edge endpoints or dishonest counts, which is why
 
 ## 7. Direct volume write vs. the API
 
-| | Direct volume | `PUT …/graph-cache/{name}` |
-|---|---|---|
-| Envelope fields | **producer's job** | server derives them |
-| Validation | none (add `model_validate` yourself) | full, plus `CACHE_INCOMPLETE` |
-| Auth | volume credentials | superuser only |
-| Size ceiling | 200 MB compressed | same, plus an HTTP body limit |
-| Atomicity | **your responsibility** | handled |
-| Right for | large batch output | interactive saves, modest sizes |
+| | Direct volume | `PUT …/precomputed-graphs/{name}` | A provider's `resolve` |
+|---|---|---|---|
+| Envelope fields | **producer's job** | server derives them | `from_graph()` derives them |
+| Validation | none (add `model_validate` yourself) | full, plus `PRECOMPUTED_GRAPH_INCOMPLETE` | Pydantic on the payload |
+| Auth | volume credentials | superuser **and** a writable provider | the app's own credentials |
+| Size ceiling | 200 MB compressed | same, plus an HTTP body limit | **none — yours to enforce** |
+| Atomicity | **your responsibility** | handled | not applicable |
+| Right for | large batch output | interactive publishing, modest sizes | graphs computed per request |
 
 For a Delta-backed batch job producing large graphs, **direct volume writes are
 the right call** — no HTTP body ceiling, no superuser token in the job, no
@@ -308,7 +333,14 @@ Each has a one-line mitigation above; implement all four.
 
 ## 8. Naming entries
 
-`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` — no slashes, 64 chars max.
+`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` — no slashes, 64 chars max. The same rule
+governs style preset names; it lives in
+[`services/named_store.py`](../../api/graphlagoon/services/named_store.py) so
+the two cannot drift.
+
+Provider **arguments** are a separate axis and are not part of the name: one
+name plus `?seed=` can resolve to many graphs. Do not fold arguments into the
+name unless the results are genuinely separate published artifacts.
 
 **There is no listing endpoint, by design.** Enumeration is O(entries) and is
 the one operation that stops working at scale, so nothing discovers entries;
@@ -330,7 +362,11 @@ rewritten each run for the "current" URL.
 
 ## 9. Lifecycle
 
-Deleting a graph context purges every cache entry under its `context_id`
-prefix, so a job never needs to clean up after a removed context. Nothing else
-expires entries: an unnamed, unreferenced entry lives until something deletes
-it.
+Deleting a graph context asks **every** registered provider to purge that
+`context_id` — not only the one that would have served a read, because a
+context's graphs can live in several backends at once. For the volume provider
+that means dropping the whole `precomputed/{context_id}` prefix, so a job never
+needs to clean up after a removed context.
+
+Nothing else expires entries: an unreferenced entry lives until something
+deletes it.

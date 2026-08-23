@@ -6,9 +6,9 @@ icons, aesthetics), labels (text formatting) and layout (algorithm, parameters,
 therefore never changes what is on screen, only how it is drawn.
 
 `/graph/{context_id}?style={name}` applies it to whatever graph is loaded, and
-composes with `?graph=` so a link can pin both the data and its look.
+composes with `?precomputed=` so a link can pin both the data and its look.
 
-Two things differ deliberately from the graph cache, which otherwise shares this
+Two things differ deliberately from precomputed graphs, which otherwise share this
 storage:
 
 - **Presets are listable.** They are hand-authored, so a context holds a handful,
@@ -203,7 +203,7 @@ class VolumeStylePresetService(StylePresetService):
 
 
 # ---------------------------------------------------------------------------
-# Singleton management (mirrors graph_cache.py / snapshot.py)
+# Singleton management (mirrors snapshot.py / precomputed/volume.py)
 # ---------------------------------------------------------------------------
 
 _preset_service: Optional[StylePresetService] = None

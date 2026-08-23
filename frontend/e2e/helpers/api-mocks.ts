@@ -623,25 +623,44 @@ export async function setupAPIErrorMocks(page: Page) {
 }
 
 /**
- * Serve named graph caches for one context. Call AFTER setupAPIMocks — later
+ * Serve precomputed graphs for one context. Call AFTER setupAPIMocks — later
  * routes take precedence.
  *
- * `entries` maps a cache name to the graph it replays. There is no listing
- * route because the API has none: caches are addressed by name. Writes and
- * deletes mutate the same map, so a spec can walk the whole round trip without
- * a backend.
+ * `entries` maps a key to the graph it resolves to. A key is either a bare name
+ * (`'fraude-2024'`) or a name plus its provider arguments in sorted order
+ * (`'vizinhanca?hops=3&seed=99872'`), which is what lets a spec prove that
+ * changing `?seed=` resolves to a different graph rather than replaying the
+ * same one.
+ *
+ * There is no listing route because the API has none. The collection URL serves
+ * capabilities instead — and it must be mocked, or the panel's on-mount fetch
+ * escapes to the dev server in every spec that opens it.
+ *
+ * Writes and deletes mutate the same map, so a spec can walk the whole round
+ * trip without a backend.
  */
-export async function seedGraphCaches(
+export async function seedPrecomputedGraphs(
   page: Page,
   contextId: string,
   entries: Record<string, { nodes: any[]; edges: any[]; truncated?: boolean }>,
+  capabilities: { can_write?: boolean; can_delete?: boolean } = {},
 ) {
   const store: Record<string, any> = {};
 
-  const wrap = (name: string, graph: any, source?: any) => ({
-    cache_version: 1,
+  /** Name plus sorted arguments — the identity of one resolution. */
+  const keyFor = (name: string, search: string) => {
+    const params = new URLSearchParams(search);
+    const sorted = [...params.entries()].sort(([a], [b]) => a.localeCompare(b));
+    if (sorted.length === 0) return name;
+    return `${name}?${sorted.map(([k, v]) => `${k}=${v}`).join('&')}`;
+  };
+
+  const wrap = (name: string, graph: any, source?: any, params: any = {}) => ({
+    payload_version: 1,
     name,
     context_id: contextId,
+    provider: 'volume',
+    params,
     created_at: '2026-08-20T12:00:00.000Z',
     created_by: 'e2e@test.com',
     node_count: graph?.nodes?.length ?? 0,
@@ -656,29 +675,60 @@ export async function seedGraphCaches(
     },
   });
 
-  for (const [name, graph] of Object.entries(entries)) {
-    store[name] = wrap(name, graph);
+  for (const [key, graph] of Object.entries(entries)) {
+    const [name, search = ''] = key.split('?');
+    store[key] = wrap(name, graph, undefined, Object.fromEntries(new URLSearchParams(search)));
   }
 
+  // The collection URL: capabilities, never an inventory.
   await page.route(
-    `**/graphlagoon/api/graph-contexts/${contextId}/graph-cache/*`,
+    `**/graphlagoon/api/graph-contexts/${contextId}/precomputed-graphs`,
+    (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          enabled: true,
+          can_write: capabilities.can_write ?? true,
+          can_delete: capabilities.can_delete ?? capabilities.can_write ?? true,
+          providers: [
+            {
+              name: 'volume',
+              label: 'Volume',
+              description: '',
+              caveat: '',
+              capabilities: {
+                write: capabilities.can_write ?? true,
+                delete: capabilities.can_delete ?? capabilities.can_write ?? true,
+              },
+              params: [],
+            },
+          ],
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    `**/graphlagoon/api/graph-contexts/${contextId}/precomputed-graphs/*`,
     (route) => {
       const method = route.request().method();
-      const name = decodeURIComponent(
-        route.request().url().split('/graph-cache/')[1].split('?')[0],
-      );
+      const tail = route.request().url().split('/precomputed-graphs/')[1];
+      const [rawName, search = ''] = tail.split('?');
+      const name = decodeURIComponent(rawName);
+      const key = keyFor(name, search);
 
       if (method === 'GET') {
-        if (!store[name]) {
+        if (!store[key]) {
           route.fulfill({
             status: 404,
             contentType: 'application/json',
             body: JSON.stringify({
               detail: {
                 error: {
-                  code: 'GRAPH_CACHE_NOT_FOUND',
-                  message: `No cached graph named '${name}' for this context.`,
-                  details: {},
+                  code: 'PRECOMPUTED_GRAPH_NOT_FOUND',
+                  message: `No precomputed graph named '${name}' for this context.`,
+                  details: { name },
                 },
               },
             }),
@@ -688,21 +738,21 @@ export async function seedGraphCaches(
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(store[name]),
+          body: JSON.stringify(store[key]),
         });
         return;
       }
 
       if (method === 'PUT') {
         const body = JSON.parse(route.request().postData() || '{}');
-        store[name] = wrap(name, body.graph, body.source);
+        store[key] = wrap(name, body.graph, body.source);
         route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
             name,
-            size_bytes: JSON.stringify(store[name]).length,
-            modified_at: store[name].created_at,
+            size_bytes: JSON.stringify(store[key]).length,
+            modified_at: store[key].created_at,
           }),
         });
         return;
@@ -711,7 +761,7 @@ export async function seedGraphCaches(
       if (method === 'DELETE') {
         // Idempotent, like the API: without a listing there is no way to check
         // first, so a delete of something absent must still succeed.
-        delete store[name];
+        delete store[key];
         route.fulfill({ status: 204, body: '' });
         return;
       }

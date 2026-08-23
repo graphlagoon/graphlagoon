@@ -19,8 +19,8 @@ import type {
   TextFormatState,
   TextFormatDefaults,
   ProceduralBFSOptions,
-  GraphCachePayload,
-  GraphCacheSource,
+  PrecomputedGraphPayload,
+  PrecomputedGraphSource,
   StylePreset,
   StylePresetSettings,
 } from '@/types/graph';
@@ -339,6 +339,10 @@ export const useGraphStore = defineStore('graph', () => {
   const truncated = ref(false);
   // Bumped on every load/clear so stale batches abandon their patches.
   let enrichmentToken = 0;
+  // The same idea for precomputed graph resolutions: editing `?seed=` in the
+  // address bar makes overlapping requests routine, so a slow answer must not
+  // overwrite a fast one that started later.
+  let precomputedToken = 0;
 
   // UI state
   const loading = ref(false);
@@ -1491,50 +1495,67 @@ export const useGraphStore = defineStore('graph', () => {
   }
 
   /**
-   * Replay a named cache into the graph, as if its query had just run.
+   * Resolve a named precomputed graph and put it on screen.
+   *
+   * `params` are the provider's arguments, taken from the URL — the same link
+   * with a different `?seed=` is a different graph, which is why this takes
+   * them rather than caching on the name alone.
    *
    * Deliberately does not go through `applyGraphResponse`: that function
    * branches on `partialNodeIds`, and its patch branch updates properties
    * *without reassigning edges*. If a query job had already drawn a partial
-   * when the cache loads, we would end up with the cache's nodes and the
-   * previous graph's edges. Assigning explicitly, the way `loadSubgraph` does,
-   * has no such failure mode.
+   * when this lands, we would end up with the new nodes and the previous
+   * graph's edges. Assigning explicitly, the way `loadSubgraph` does, has no
+   * such failure mode.
    */
-  async function loadGraphCache(contextId: string, name: string) {
+  async function loadPrecomputedGraph(
+    contextId: string,
+    name: string,
+    params: Record<string, string> = {},
+  ) {
     loading.value = true;
-    loadingMessage.value = `Loading cached graph “${name}”…`;
+    loadingMessage.value = `Loading precomputed graph “${name}”…`;
     queryError.value = null;
-    currentGraphCache.value = null;
+    currentPrecomputedGraph.value = null;
     // Deliberately does NOT touch currentStylePreset: a style applies to
     // whatever graph is on screen, so swapping the graph keeps the look.
     // Abandon any enrichment still running for the previous graph: its patches
-    // are keyed by node id and would otherwise land on same-named cached nodes.
+    // are keyed by node id and would otherwise land on same-named nodes here.
     enrichmentToken++;
     pendingPropertyNodeIds.value.clear();
-    // A cache is never a partial result; forget any partial in flight so the
-    // assignment below cannot be mistaken for one.
+    // A precomputed graph is never a partial result; forget any partial in
+    // flight so the assignment below cannot be mistaken for one.
     partialNodeIds = null;
+
+    // Editing `?seed=` in the address bar makes rapid successive loads routine
+    // in a way a bare name never did, so responses have to be able to lose a
+    // race. Mirrors enrichmentToken.
+    const token = ++precomputedToken;
 
     try {
       const t0 = performance.now();
-      const payload = await api.getGraphCache(contextId, name);
+      const payload = await api.getPrecomputedGraph(contextId, name, params);
       const tFetched = performance.now();
+
+      // A newer request started while this one was in flight; its answer is the
+      // one the URL is asking for.
+      if (token !== precomputedToken) return payload;
 
       freshLayoutRequested.value = true;
       nodes.value = payload.graph.nodes;
       edges.value = payload.graph.edges;
       truncated.value = payload.graph.truncated === true;
-      currentGraphCache.value = payload;
-      // Show where the cached graph came from, so the query panel is not blank.
+      currentPrecomputedGraph.value = payload;
+      // Show where the graph came from, so the query panel is not blank.
       graphQuery.value = payload.source.query ?? '';
 
       recordGraphLoad(
-        'graphCache',
+        'precomputed',
         payload.graph,
         tFetched - t0,
         performance.now() - tFetched,
       );
-      recordChainRecompute('graphCache');
+      recordChainRecompute('precomputed');
       adjustGravityForConnectivity();
 
       selectedNodeIds.value.clear();
@@ -1543,34 +1564,47 @@ export const useGraphStore = defineStore('graph', () => {
       return payload;
     } catch (e: unknown) {
       // Deliberately no fallback to running the query: a broken or mistyped
-      // cache link must not silently launch an expensive warehouse query.
-      queryError.value = extractErrorDetails(e, `Failed to load cached graph “${name}”`);
+      // link must not silently launch an expensive warehouse query.
+      if (token === precomputedToken) {
+        queryError.value = extractErrorDetails(
+          e,
+          `Failed to load precomputed graph “${name}”`,
+        );
+      }
       throw e;
     } finally {
-      loading.value = false;
+      if (token === precomputedToken) loading.value = false;
     }
   }
 
   /**
-   * Store the graph currently on screen as a named cache.
+   * Publish the graph currently on screen under a name.
+   *
+   * Only possible where the resolving provider declares the capability — the
+   * panel gates on that, and the server answers 405 otherwise.
    *
    * Refuses while properties are still arriving. `shouldLoadProgressively()` is
    * true whenever a context has no configured `node_properties` — the common
    * case — so those nodes land with `properties: null` and are filled in later
-   * by /nodes/batch. Caching mid-flight would persist the nulls, and the entry
-   * would replay an empty-looking graph.
+   * by /nodes/batch. Publishing mid-flight would persist the nulls, and the
+   * entry would replay an empty-looking graph.
    */
-  async function saveGraphCache(name: string, kind: GraphCacheSource['kind'] = 'manual') {
+  async function savePrecomputedGraph(
+    name: string,
+    kind: PrecomputedGraphSource['kind'] = 'manual',
+  ) {
     if (!currentContext.value) throw new Error('No graph context loaded');
-    if (!nodes.value.length) throw new Error('Nothing to cache — the graph is empty');
+    if (!nodes.value.length) {
+      throw new Error('Nothing to publish — the graph is empty');
+    }
     if (enriching.value || pendingPropertyNodeIds.value.size > 0) {
       throw new Error(
         'Node properties are still loading. Wait for enrichment to finish, ' +
-        'otherwise the cache would store empty properties.'
+        'otherwise the entry would store empty properties.'
       );
     }
 
-    return api.putGraphCache(currentContext.value.id, name, {
+    return api.putPrecomputedGraph(currentContext.value.id, name, {
       graph: {
         nodes: nodes.value,
         edges: edges.value,
@@ -1653,10 +1687,11 @@ export const useGraphStore = defineStore('graph', () => {
   // Node ids drawn from a partial, so the final result can tell "same graph,
   // now with properties" from "different graph" (see applyGraphResponse).
   /**
-   * The named cache currently on screen, when the view was opened with
-   * `?graph=<name>`. Drives the status-bar chip; null for an ordinary query.
+   * The precomputed graph currently on screen, when the view was opened with
+   * `?precomputed=<name>`. Carries the resolving provider and the arguments it
+   * used, which is what the status-bar chip reports; null for an ordinary query.
    */
-  const currentGraphCache = ref<GraphCachePayload | null>(null);
+  const currentPrecomputedGraph = ref<PrecomputedGraphPayload | null>(null);
 
   /** Why the URL's ?style= could not be applied. The graph is unaffected. */
   const stylePresetError = ref<string | null>(null);
@@ -2449,7 +2484,7 @@ export const useGraphStore = defineStore('graph', () => {
    *
    * A missing preset is not an error the page has to survive: it leaves the
    * graph exactly as it was and reports through `stylePresetError`. Unlike a
-   * missing `?graph=`, which leaves nothing to look at, a missing `?style=`
+   * missing `?precomputed=`, which leaves nothing to look at, a missing `?style=`
    * costs only the styling — so the view stays usable and merely says so.
    */
   async function loadStylePreset(contextId: string, name: string) {
@@ -2733,7 +2768,7 @@ export const useGraphStore = defineStore('graph', () => {
     edges.value = [];
     currentContext.value = null;
     currentExploration.value = null;
-    currentGraphCache.value = null;
+    currentPrecomputedGraph.value = null;
     currentStylePreset.value = null;
     stylePresetError.value = null;
     // Abandon in-flight enrichment: its patches would target a graph that no
@@ -2777,7 +2812,7 @@ export const useGraphStore = defineStore('graph', () => {
     edges,
     currentContext,
     currentExploration,
-    currentGraphCache,
+    currentPrecomputedGraph,
     currentStylePreset,
     stylePresetError,
     selectedNodeIds,
@@ -2853,8 +2888,8 @@ export const useGraphStore = defineStore('graph', () => {
     // Actions
     loadContext,
     loadSubgraph,
-    loadGraphCache,
-    saveGraphCache,
+    loadPrecomputedGraph,
+    savePrecomputedGraph,
     loadStylePreset,
     saveStylePreset,
     buildStylePreset,

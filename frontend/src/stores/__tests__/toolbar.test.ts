@@ -23,7 +23,7 @@ describe('toolbar store', () => {
       onToggleLabels: vi.fn(),
       onToggleClusterPrograms: vi.fn(),
       onToggleTemplates: vi.fn(),
-    onToggleGraphCache: vi.fn(),
+    onTogglePrecomputed: vi.fn(),
       onExportPNG: vi.fn(),
     }
 
@@ -43,7 +43,7 @@ describe('toolbar store', () => {
       onToggleLabels: vi.fn(),
       onToggleClusterPrograms: vi.fn(),
       onToggleTemplates: vi.fn(),
-    onToggleGraphCache: vi.fn(),
+    onTogglePrecomputed: vi.fn(),
       onExportPNG: vi.fn(),
     })
 
@@ -63,7 +63,7 @@ describe('toolbar store', () => {
       onToggleLabels: vi.fn(),
       onToggleClusterPrograms: vi.fn(),
       onToggleTemplates: vi.fn(),
-    onToggleGraphCache: vi.fn(),
+    onTogglePrecomputed: vi.fn(),
       onExportPNG: vi.fn(),
     })
 

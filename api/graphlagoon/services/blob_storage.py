@@ -248,7 +248,7 @@ class DatabricksBlobStore(BlobStore):
     ) -> None:
         # base_url: "https://adb-xxx.azuredatabricks.net"
         self._base_url = base_url.rstrip("/")
-        # root_path: "/Volumes/catalog/schema/vol_name/graph-cache"
+        # root_path: "/Volumes/catalog/schema/vol_name/precomputed-graphs"
         self._root = "/" + root_path.strip("/")
         self._header_provider = header_provider
         self._client: Optional[httpx.AsyncClient] = None

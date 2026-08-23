@@ -184,7 +184,7 @@ class TestLocalConcurrency:
 # ---------------------------------------------------------------------------
 
 HOST = "https://adb-test.azuredatabricks.net"
-ROOT = "/Volumes/main/default/vol/graph-cache"
+ROOT = "/Volumes/main/default/vol/precomputed-graphs"
 
 
 def _databricks_store(handler, header_provider=None):

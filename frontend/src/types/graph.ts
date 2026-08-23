@@ -168,15 +168,20 @@ export interface GraphSnapshot {
   snapshot_version?: number;
 }
 
-// Graph cache — named, per-context query results replayed from a volume.
+// Precomputed graphs — named graph resources resolved server-side by a provider.
+//
+// Where one comes from is the deploying developer's decision: a file in a
+// volume, a query against Lakebase parameterised by the URL, a Delta table.
+// The frontend does not care which — it asks for a name plus arguments and
+// gets this shape back.
 //
 // Distinct from a snapshot: a snapshot belongs to one exploration and one user
-// and carries UI state (positions, communities, clusters); a cache is named,
-// visible to everyone with context access, and carries nothing but the query
-// result. That is why it reuses the API's Node/Edge shape instead of the
+// and carries UI state (positions, communities, clusters); a precomputed graph
+// is named, visible to everyone with context access, and carries nothing but
+// data. That is why it reuses the API's Node/Edge shape instead of the
 // snapshot's — it feeds the store with no field remapping.
 
-export interface CachedGraph {
+export interface PrecomputedGraphData {
   nodes: Node[];
   edges: Edge[];
   truncated: boolean;
@@ -184,40 +189,75 @@ export interface CachedGraph {
   properties_deferred?: boolean;
 }
 
-/** Where a cached graph came from.
+/** Where a precomputed graph came from.
  *
  *  Both fields are optional, and a graph that never came from a query — one a
  *  batch job assembled from Delta tables, say — says so with `kind: 'manual'`.
- *  `datasource_type`/`datasource_name` were removed: the cache is already
+ *  `datasource_type`/`datasource_name` were removed: an entry is already
  *  scoped to a context that knows its own datasource, and nothing read them. */
-export interface GraphCacheSource {
+export interface PrecomputedGraphSource {
   kind: 'cypher' | 'sql' | 'subgraph' | 'manual';
   query?: string | null;
 }
 
-export interface GraphCachePayload {
-  cache_version: number;
+export interface PrecomputedGraphPayload {
+  payload_version: number;
   name: string;
   context_id: string;
+  /** Which provider resolved this graph. */
+  provider: string;
+  /** The URL arguments it was resolved with — empty for a plain stored file. */
+  params: Record<string, string | number | boolean | null>;
   created_at: string;
   created_by: string;
   node_count: number;
   edge_count: number;
   properties_complete: boolean;
-  source: GraphCacheSource;
-  graph: CachedGraph;
+  source: PrecomputedGraphSource;
+  graph: PrecomputedGraphData;
 }
 
 /** What a write reports back. There is no listing endpoint to return these in
  *  bulk — entries are addressed by name. */
-export interface GraphCacheEntry {
+export interface PrecomputedGraphEntry {
   name: string;
   size_bytes: number;
   modified_at?: string | null;
 }
 
-/** Mirrors CACHE_NAME_RE in api/graphlagoon/services/graph_cache.py. */
-export const GRAPH_CACHE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+/** One provider, as advertised by the capabilities endpoint. */
+export interface PrecomputedGraphProviderInfo {
+  name: string;
+  label: string;
+  description: string;
+  caveat: string;
+  capabilities: { write: boolean; delete: boolean };
+  params: Array<{
+    name: string;
+    type: string;
+    required: boolean;
+    default: unknown;
+    description: string;
+    choices: string[] | null;
+    min: number | null;
+    max: number | null;
+  }>;
+}
+
+/** What this context can do — deliberately not a listing of entries.
+ *
+ *  `can_write` already folds in superuser status, so the panel gates on one
+ *  flag rather than re-deriving the rule the server owns. */
+export interface PrecomputedGraphCapabilities {
+  enabled: boolean;
+  can_write: boolean;
+  can_delete: boolean;
+  providers: PrecomputedGraphProviderInfo[];
+}
+
+/** Mirrors ARTIFACT_NAME_RE in api/graphlagoon/services/named_store.py, which
+ *  owns the rule for precomputed graphs and style presets alike. */
+export const ARTIFACT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 
 // Style presets — named style + label + layout settings, applied by URL.
 //

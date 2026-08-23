@@ -230,14 +230,14 @@ describe('StylePresetModal', () => {
       );
     });
 
-    it('keeps other query params, so ?graph= survives', async () => {
-      routeQuery.graph = 'fraude-2024';
+    it('keeps other query params, so ?precomputed= survives', async () => {
+      routeQuery.precomputed = 'fraude-2024';
       vi.mocked(api.listStylePresets).mockResolvedValue([entry('investigacao')] as any);
       await renderModal();
 
       await fireEvent.click(el('style-preset-apply-investigacao')!);
 
-      expect(replace.mock.calls[0][0].query.graph).toBe('fraude-2024');
+      expect(replace.mock.calls[0][0].query.precomputed).toBe('fraude-2024');
     });
 
     it('does nothing when already applied', async () => {
@@ -252,14 +252,14 @@ describe('StylePresetModal', () => {
 
     it('offers to stop using the active one, dropping only that param', async () => {
       routeQuery.style = 'investigacao';
-      routeQuery.graph = 'fraude-2024';
+      routeQuery.precomputed = 'fraude-2024';
       vi.mocked(api.listStylePresets).mockResolvedValue([entry('investigacao')] as any);
       await renderModal();
 
       await fireEvent.click(el('style-preset-clear')!);
 
       expect(replace.mock.calls[0][0].query.style).toBeUndefined();
-      expect(replace.mock.calls[0][0].query.graph).toBe('fraude-2024');
+      expect(replace.mock.calls[0][0].query.precomputed).toBe('fraude-2024');
     });
   });
 

@@ -14,10 +14,11 @@ import type {
   ShareRequest,
   ExplorationState,
   GraphSnapshot,
-  CachedGraph,
-  GraphCacheEntry,
-  GraphCachePayload,
-  GraphCacheSource,
+  PrecomputedGraphCapabilities,
+  PrecomputedGraphData,
+  PrecomputedGraphEntry,
+  PrecomputedGraphPayload,
+  PrecomputedGraphSource,
   StylePreset,
   StylePresetEntry,
   StylePresetSettings,
@@ -61,11 +62,12 @@ declare global {
       database_enabled?: boolean;
       databricks_mode?: boolean;
       /**
-       * Whether the server serves named graph caches at all. Reading one only
-       * needs context access; creating and deleting additionally need dev mode,
-       * which the UI gates on separately via `devMode`.
+       * Whether the server serves precomputed graphs at all. Reading one only
+       * needs context access; writing additionally needs superuser status *and*
+       * a resolving provider that declares the capability, which the panel
+       * learns from the capabilities endpoint rather than inferring here.
        */
-      graph_cache_enabled?: boolean;
+      precomputed_graphs_enabled?: boolean;
       /** Whether this server serves named style presets. */
       style_presets_enabled?: boolean;
       databricks_user_email?: string;
@@ -248,43 +250,63 @@ class ApiService {
     return response.data;
   }
 
-  // Graph cache — named, per-context query results (see types/graph.ts)
+  // Precomputed graphs — named graphs resolved by a provider (see types/graph.ts)
 
-  // There is no listGraphCaches: the API has no listing endpoint, because
+  // There is no listPrecomputedGraphs: the API has no listing endpoint, because
   // enumerating entries is O(entries) and is the one operation that stops
-  // working as the store grows. Caches are addressed by name.
+  // working as the store grows. Graphs are addressed by name. The collection URL
+  // answers with capabilities — what this context can do — never an inventory.
 
-  async getGraphCache(
-    contextId: string,
-    name: string
-  ): Promise<GraphCachePayload> {
+  async getPrecomputedGraphCapabilities(
+    contextId: string
+  ): Promise<PrecomputedGraphCapabilities> {
     const response = await this.client.get(
-      `/api/graph-contexts/${contextId}/graph-cache/${encodeURIComponent(name)}`
+      `/api/graph-contexts/${contextId}/precomputed-graphs`
     );
     return response.data;
   }
 
-  async putGraphCache(
+  /**
+   * Resolve a precomputed graph by name.
+   *
+   * `params` are the provider's declared arguments, taken from the URL. They go
+   * through axios' `params` rather than into the path string: a value holding
+   * `&` or `#` would otherwise silently corrupt the request.
+   */
+  async getPrecomputedGraph(
     contextId: string,
     name: string,
-    data: { graph: CachedGraph; source: GraphCacheSource }
-  ): Promise<GraphCacheEntry> {
+    params: Record<string, string> = {}
+  ): Promise<PrecomputedGraphPayload> {
+    const response = await this.client.get(
+      `/api/graph-contexts/${contextId}/precomputed-graphs/${encodeURIComponent(name)}`,
+      Object.keys(params).length > 0 ? { params } : undefined
+    );
+    return response.data;
+  }
+
+  async putPrecomputedGraph(
+    contextId: string,
+    name: string,
+    data: { graph: PrecomputedGraphData; source: PrecomputedGraphSource }
+  ): Promise<PrecomputedGraphEntry> {
     const response = await this.client.put(
-      `/api/graph-contexts/${contextId}/graph-cache/${encodeURIComponent(name)}`,
+      `/api/graph-contexts/${contextId}/precomputed-graphs/${encodeURIComponent(name)}`,
       data
     );
     return response.data;
   }
 
-  async deleteGraphCache(contextId: string, name: string): Promise<void> {
+  async deletePrecomputedGraph(contextId: string, name: string): Promise<void> {
     await this.client.delete(
-      `/api/graph-contexts/${contextId}/graph-cache/${encodeURIComponent(name)}`
+      `/api/graph-contexts/${contextId}/precomputed-graphs/${encodeURIComponent(name)}`
     );
   }
 
   // Style presets — named style + label + layout settings (see types/graph.ts).
-  // Unlike graph caches these are listable: they are hand-authored, so a context
-  // holds a handful, and the count is capped server-side rather than paginated.
+  // Unlike precomputed graphs these are listable: they are hand-authored, so a
+  // context holds a handful, and the count is capped server-side rather than
+  // paginated.
 
   async listStylePresets(contextId: string): Promise<StylePresetEntry[]> {
     const response = await this.client.get(

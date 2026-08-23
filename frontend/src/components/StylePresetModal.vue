@@ -15,7 +15,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { Check, Link2, Trash2, X } from 'lucide-vue-next';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
-import { GRAPH_CACHE_NAME_PATTERN, type StylePresetEntry } from '@/types/graph';
+import { ARTIFACT_NAME_PATTERN, type StylePresetEntry } from '@/types/graph';
 import { api } from '@/services/api';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -39,7 +39,7 @@ const nameError = computed(() => {
   const value = name.value.trim();
   if (!value) return null;
   // Same alphabet the backend enforces for every named artifact.
-  if (!GRAPH_CACHE_NAME_PATTERN.test(value)) {
+  if (!ARTIFACT_NAME_PATTERN.test(value)) {
     return 'Letters, digits, _ - . only, up to 64, starting with a letter or digit';
   }
   return null;

@@ -538,14 +538,21 @@ async def get_context(context_id: str):
 
 **Effort:** Medium (3-4 days)
 
-**Partially addressed (2026-08-20):** the named graph cache
-([services/graph_cache.py](api/graphlagoon/services/graph_cache.py)) covers the
-third bullet for the case that mattered most — a query result someone wants to
-reopen, or hand to a colleague, without paying for the query again. It is
-explicit rather than automatic: entries are named and written deliberately, not
-keyed by query text and evicted on a timer. Contexts and catalog metadata are
-still uncached, and `GraphCacheService` is the seam a second, automatic cache
-would implement.
+**Partially addressed (2026-08-20, reframed 2026-08-23):** what began as the
+"named graph cache" is now **precomputed graphs**
+([services/precomputed/](api/graphlagoon/services/precomputed/)), which covers
+the third bullet for the case that mattered most — a graph someone wants to
+reopen, or hand to a colleague, without paying for the query again.
+
+It was never a cache, and the rename says so: nothing is keyed by query text,
+nothing is invalidated, nothing is evicted on a timer. A deployment declares
+providers that decide what a named graph resolves to.
+
+Contexts and catalog metadata are still uncached, and **precomputed graphs are
+no longer the seam a real cache would implement** — a cache is about
+invalidation and lifetime, which the provider protocol deliberately says nothing
+about. An automatic cache would be a new mechanism, not an implementation of
+this one.
 
 ---
 
@@ -617,10 +624,11 @@ Deleting a context removes its database rows (explorations cascade) but never
 touches the snapshot files those explorations owned, so they accumulate on the
 volume with nothing left pointing at them.
 
-Graph caches got the matching cleanup when they were added
-(`_purge_graph_caches`, best-effort and never able to fail the deletion);
-snapshots did not, because their keys are flat per-exploration UUIDs with no
-per-context prefix to purge — the ids have to be collected before the rows go.
+Precomputed graphs got the matching cleanup when they were added
+(`_purge_precomputed_graphs`, best-effort and never able to fail the deletion,
+now fanning out across every registered provider); snapshots did not, because
+their keys are flat per-exploration UUIDs with no per-context prefix to purge —
+the ids have to be collected before the rows go.
 
 **Recommendation:**
 Collect the exploration ids inside the delete transaction, then delete their

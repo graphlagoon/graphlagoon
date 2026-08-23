@@ -30,7 +30,7 @@ import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
 import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
 import QueryTemplatesPanel from '@/components/QueryTemplatesPanel.vue';
-import GraphCachePanel from '@/components/GraphCachePanel.vue';
+import PrecomputedGraphPanel from '@/components/PrecomputedGraphPanel.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
 import { Info, Settings2, Hexagon, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
 import { useToast } from '@/composables/useToast';
@@ -41,6 +41,11 @@ import {
   type LayoutOverrideIssue,
   type QueryLike,
 } from '@/utils/layoutUrlOverrides';
+import {
+  precomputedName,
+  precomputedParams,
+  precomputedQuerySignature,
+} from '@/utils/precomputedUrlParams';
 
 const props = defineProps<{
   contextId: string;
@@ -90,7 +95,7 @@ const showTextFormatPanel = ref(false);
 const showClusterPrograms = ref(false);
 const showClusterList = ref(false);
 const showTemplatesPanel = ref(false);
-const showGraphCachePanel = ref(false);
+const showPrecomputedPanel = ref(false);
 const selectedClusterId = ref<string | null>(null);
 const communityTable = useCommunityTableAction();
 const clusterProgramActions = useClusterProgramMenuActions();
@@ -178,23 +183,51 @@ function updateCanvasDimensions() {
   }
 }
 
-function formatCacheDate(value: string): string {
+function formatPayloadDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'at an unknown time' : date.toLocaleString();
 }
 
 /**
- * Open whatever the URL asks for: a named cache, an exploration, or neither.
+ * What the status chip explains on hover.
  *
- * A cache failing here deliberately does NOT fall through to the default load —
- * a mistyped or deleted link must surface as an error, not silently launch an
- * expensive warehouse query the user never asked for.
+ * Names the provider and, when the graph was computed from URL arguments, the
+ * arguments themselves — otherwise two links differing only by `?seed=` would
+ * produce two identical-looking chips.
+ */
+const precomputedChipTitle = computed(() => {
+  const payload = graphStore.currentPrecomputedGraph;
+  if (!payload) return '';
+
+  const origin = payload.provider ? ` by the “${payload.provider}” provider` : '';
+  const when = `${formatPayloadDate(payload.created_at)}`;
+  const who = payload.created_by ? ` by ${payload.created_by}` : '';
+
+  const args = Object.entries(payload.params ?? {})
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(([key, value]) => `${key}=${value}`);
+  const withArgs = args.length ? ` Arguments: ${args.join(', ')}.` : '';
+
+  return (
+    `Precomputed graph “${payload.name}”, resolved${origin} ${when}${who}. ` +
+    `It does not reflect changes made since.${withArgs}`
+  );
+});
+
+/**
+ * Open whatever the URL asks for: a precomputed graph, an exploration, or neither.
+ *
+ * A precomputed graph failing here deliberately does NOT fall through to the
+ * default load — a mistyped or deleted link must surface as an error, not
+ * silently launch an expensive warehouse query the user never asked for.
  */
 async function loadFromRoute(contextId: string) {
-  const cacheName = route.query.graph as string | undefined;
+  const query = route.query as QueryLike;
+  const name = precomputedName(query);
+  const params = precomputedParams(query);
   const explorationId = route.query.exploration as string | undefined;
 
-  await loadGraphFromRoute(contextId, cacheName, explorationId);
+  await loadGraphFromRoute(contextId, name, params, explorationId);
   await applyStyleFromRoute(contextId);
   applyLayoutOverridesFromRoute();
   validateLayoutOverridesAgainstGraph();
@@ -294,18 +327,19 @@ function validateLayoutOverridesAgainstGraph() {
 
 async function loadGraphFromRoute(
   contextId: string,
-  cacheName: string | undefined,
+  name: string | undefined,
+  params: Record<string, string>,
   explorationId: string | undefined,
 ) {
 
-  if (cacheName) {
+  if (name) {
     if (explorationId) {
       console.warn(
-        '[graph] URL carries both ?graph and ?exploration; loading the exploration.',
+        '[graph] URL carries both ?precomputed and ?exploration; loading the exploration.',
       );
     } else {
       try {
-        await graphStore.loadGraphCache(contextId, cacheName);
+        await graphStore.loadPrecomputedGraph(contextId, name, params);
       } catch {
         // graphStore.queryError already carries the message for the UI.
       }
@@ -350,7 +384,7 @@ onMounted(async () => {
     onToggleLabels: () => { showTextFormatPanel.value = !showTextFormatPanel.value; toolbarStore.setPanelActive('labels', showTextFormatPanel.value); },
     onToggleClusterPrograms: () => { showClusterPrograms.value = !showClusterPrograms.value; toolbarStore.setPanelActive('clusters', showClusterPrograms.value); },
     onToggleTemplates: () => { showTemplatesPanel.value = !showTemplatesPanel.value; toolbarStore.setPanelActive('templates', showTemplatesPanel.value); },
-    onToggleGraphCache: () => { showGraphCachePanel.value = !showGraphCachePanel.value; toolbarStore.setPanelActive('graphCache', showGraphCachePanel.value); },
+    onTogglePrecomputed: () => { showPrecomputedPanel.value = !showPrecomputedPanel.value; toolbarStore.setPanelActive('precomputed', showPrecomputedPanel.value); },
     onExportPNG: handleExportPNG,
   });
 
@@ -402,13 +436,23 @@ watch(
   }
 );
 
-// The cache name lives in the query string, which `props: true` does not track —
-// switching caches from the panel changes only the query, so without this watcher
-// the graph would not reload.
+// The name AND its provider arguments live in the query string, which
+// `props: true` does not track. The argument keys are open-ended, so — as with
+// layout.* below — there is no single property to watch and the signature
+// stands in for the whole set. This is what makes editing `?seed=` in the
+// address bar re-resolve the graph.
+//
+// The signature deliberately excludes `style` and `layout*`: those have their
+// own, cheaper watchers, and folding them in here would turn a style change
+// into a full graph refetch.
 watch(
-  () => route.query.graph,
-  async (name, previous) => {
-    if (name === previous) return;
+  () => precomputedQuerySignature(route.query as QueryLike),
+  async (next, previous) => {
+    if (next === previous) return;
+    // Empty means the URL names no precomputed graph. Leaving it alone rather
+    // than reloading: dropping `?precomputed=` should not re-run the default
+    // auto-load over whatever the user is currently looking at.
+    if (next === '') return;
     if (!graphStore.currentContext) return;
     await loadFromRoute(props.contextId);
   }
@@ -476,7 +520,7 @@ watch(
       <TextFormatPanel v-if="showTextFormatPanel" @close="showTextFormatPanel = false; toolbarStore.setPanelActive('labels', false)" />
       <ClusterProgramPanel v-if="showClusterPrograms" @close="showClusterPrograms = false; toolbarStore.setPanelActive('clusters', false)" />
       <QueryTemplatesPanel v-if="showTemplatesPanel" @close="showTemplatesPanel = false; toolbarStore.setPanelActive('templates', false)" />
-      <GraphCachePanel v-if="showGraphCachePanel" @close="showGraphCachePanel = false; toolbarStore.setPanelActive('graphCache', false)" />
+      <PrecomputedGraphPanel v-if="showPrecomputedPanel" @close="showPrecomputedPanel = false; toolbarStore.setPanelActive('precomputed', false)" />
 
       <div class="graph-container" data-testid="graph-container">
         <div v-if="graphStore.loading" class="loading-overlay" data-testid="graph-loading">
@@ -641,16 +685,16 @@ watch(
           >
             ⚠ truncated
           </span>
-          <!-- Replayed from a named cache rather than queried just now. The
-               graph may not reflect the current state of the warehouse, so say
-               so where the other qualifiers about this graph already live. -->
+          <!-- Resolved from a name rather than queried just now. It may not
+               reflect the current state of the source, so say so where the
+               other qualifiers about this graph already live. -->
           <span
-            v-if="graphStore.currentGraphCache"
-            class="status-cached"
-            data-testid="graph-status-cached"
-            :title="`Cached graph, saved ${formatCacheDate(graphStore.currentGraphCache.created_at)} by ${graphStore.currentGraphCache.created_by}. It does not reflect changes made since.`"
+            v-if="graphStore.currentPrecomputedGraph"
+            class="status-item status-precomputed"
+            data-testid="graph-status-precomputed"
+            :title="precomputedChipTitle"
           >
-            cached: {{ graphStore.currentGraphCache.name }}
+            precomputed: {{ graphStore.currentPrecomputedGraph.name }}
           </span>
           <!-- Which named look is on, when the URL asked for one. -->
           <span
@@ -902,7 +946,7 @@ watch(
   font-weight: 600;
 }
 
-.status-cached {
+.status-precomputed {
   color: var(--primary-color, #007bff);
   font-weight: 600;
 }

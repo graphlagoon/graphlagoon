@@ -118,39 +118,63 @@ describe('ApiService', () => {
     })
   })
 
-  describe('Graph cache', () => {
-    it('has no listing method — entries are addressed by name', () => {
-      // Enumerating caches is O(entries) and is the one operation that stops
+  describe('Precomputed graphs', () => {
+    it('has no listing method — graphs are addressed by name', () => {
+      // Enumerating entries is O(entries) and is the one operation that stops
       // working as the store grows, so the API deliberately does not offer it.
-      expect((api as unknown as Record<string, unknown>).listGraphCaches).toBeUndefined()
+      expect(
+        (api as unknown as Record<string, unknown>).listPrecomputedGraphs
+      ).toBeUndefined()
     })
 
-    it('getGraphCache calls GET /api/graph-contexts/:id/graph-cache/:name', async () => {
+    it('getPrecomputedGraph calls GET /api/graph-contexts/:id/precomputed-graphs/:name', async () => {
       vi.mocked(mockClient.get).mockResolvedValue({ data: { name: 'c1' } })
-      await api.getGraphCache('ctx-1', 'fraude-2024')
+      await api.getPrecomputedGraph('ctx-1', 'fraude-2024')
       expect(mockClient.get).toHaveBeenCalledWith(
-        '/api/graph-contexts/ctx-1/graph-cache/fraude-2024'
+        '/api/graph-contexts/ctx-1/precomputed-graphs/fraude-2024',
+        undefined
       )
     })
 
-    it('putGraphCache calls PUT with the graph and its source', async () => {
+    it('passes provider arguments through axios params, not the path', async () => {
+      // A value holding & or # would silently corrupt a hand-built URL.
+      vi.mocked(mockClient.get).mockResolvedValue({ data: { name: 'c1' } })
+      await api.getPrecomputedGraph('ctx-1', 'vizinhanca', {
+        seed: 'a&b#c',
+        hops: '3',
+      })
+      expect(mockClient.get).toHaveBeenCalledWith(
+        '/api/graph-contexts/ctx-1/precomputed-graphs/vizinhanca',
+        { params: { seed: 'a&b#c', hops: '3' } }
+      )
+    })
+
+    it('getPrecomputedGraphCapabilities calls GET on the collection URL', async () => {
+      vi.mocked(mockClient.get).mockResolvedValue({ data: { can_write: false } })
+      await api.getPrecomputedGraphCapabilities('ctx-1')
+      expect(mockClient.get).toHaveBeenCalledWith(
+        '/api/graph-contexts/ctx-1/precomputed-graphs'
+      )
+    })
+
+    it('putPrecomputedGraph calls PUT with the graph and its source', async () => {
       vi.mocked(mockClient.put).mockResolvedValue({ data: { name: 'c1', size_bytes: 1 } })
       const body = {
         graph: { nodes: [], edges: [], truncated: false, properties_deferred: false },
         source: { kind: 'cypher' as const, query: 'MATCH (n) RETURN n' },
       }
-      await api.putGraphCache('ctx-1', 'c1', body)
+      await api.putPrecomputedGraph('ctx-1', 'c1', body)
       expect(mockClient.put).toHaveBeenCalledWith(
-        '/api/graph-contexts/ctx-1/graph-cache/c1',
+        '/api/graph-contexts/ctx-1/precomputed-graphs/c1',
         body
       )
     })
 
-    it('deleteGraphCache calls DELETE /api/graph-contexts/:id/graph-cache/:name', async () => {
+    it('deletePrecomputedGraph calls DELETE /api/graph-contexts/:id/precomputed-graphs/:name', async () => {
       vi.mocked(mockClient.delete).mockResolvedValue({ data: null })
-      await api.deleteGraphCache('ctx-1', 'c1')
+      await api.deletePrecomputedGraph('ctx-1', 'c1')
       expect(mockClient.delete).toHaveBeenCalledWith(
-        '/api/graph-contexts/ctx-1/graph-cache/c1'
+        '/api/graph-contexts/ctx-1/precomputed-graphs/c1'
       )
     })
 
@@ -158,9 +182,10 @@ describe('ApiService', () => {
       // The backend rejects such names anyway; encoding keeps a bad name from
       // silently becoming a different URL on the way there.
       vi.mocked(mockClient.get).mockResolvedValue({ data: {} })
-      await api.getGraphCache('ctx-1', 'a b')
+      await api.getPrecomputedGraph('ctx-1', 'a b')
       expect(mockClient.get).toHaveBeenCalledWith(
-        '/api/graph-contexts/ctx-1/graph-cache/a%20b'
+        '/api/graph-contexts/ctx-1/precomputed-graphs/a%20b',
+        undefined
       )
     })
   })

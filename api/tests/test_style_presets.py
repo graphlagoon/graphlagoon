@@ -473,11 +473,11 @@ class TestServiceSelection:
             == "/Volumes/main/default/vol/style-presets"
         )
 
-    def test_presets_and_caches_do_not_share_a_directory(self):
+    def test_presets_and_precomputed_graphs_do_not_share_a_directory(self):
         settings = Settings(databricks_volume_path="/Volumes/main/default/vol")
         assert (
             settings.style_presets_volume_path_effective
-            != settings.graph_cache_volume_path_effective
+            != settings.precomputed_graphs_volume_path_effective
         )
 
     def test_disabled_reports_disabled(self, tmp_path, store, context):
