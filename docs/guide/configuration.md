@@ -94,8 +94,8 @@ a typo in an argument would otherwise return *different data* with nothing on
 screen to say so.
 
 Reserved keys, never forwarded: `precomputed`, `style`, `exploration`, anything
-starting with `layout`, and the usual tracking parameters (`utm_*`, `fbclid`,
-`gclid`) so a link pasted into a chat client still works.
+starting with `layout` or `template`, and the usual tracking parameters
+(`utm_*`, `fbclid`, `gclid`) so a link pasted into a chat client still works.
 
 ### There is no way to list them
 
@@ -169,25 +169,9 @@ on load.
 ## Style presets
 
 A **style preset** is how a context's graph looks, saved under a name and
-applied from the URL:
-
-```
-/graph/{context_id}?style=investigacao
-```
-
-It carries three things — **style** (colors, icons, aesthetics), **labels**
-(text formatting) and **layout** (algorithm, its parameters, 3D forces) — and
-nothing about which data is shown. Applying one therefore never changes what is
-on screen, only how it is drawn, which is why it is safe on any graph in the
-context, before or after that graph loads. A graph loaded afterwards inherits
-the look.
-
-The two URL parameters compose, so a single link can pin both the data and its
-appearance:
-
-```
-/graph/{context_id}?precomputed=fraude-2024&style=investigacao
-```
+applied via `?style=<name>` — see [Style Presets](./style-presets.md) for
+saving, applying, permissions, and how it composes with a precomputed graph
+and with layout URL overrides.
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -196,100 +180,21 @@ appearance:
 | `GRAPH_LAGOON_STYLE_PRESETS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to a `style-presets` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set. |
 | `GRAPH_LAGOON_STYLE_PRESETS_MAX_PER_CONTEXT` | `100` | Presets are listed in full for the picker, so the count is bounded here rather than paginated at read time. |
 
-Entries live at `{root}/style/{context_id}/{name}.jsonz`, gzip'd JSON, with the
-same name rules as a precomputed graph.
+## Layout URL overrides
 
-### Permissions
+Layout parameters — which node an ego layout centers on, traversal direction,
+hop limits — can be set field by field from the URL, on top of whatever a
+style preset restored. There is no dedicated setting: see
+[Layout URL Overrides](./layout-url-overrides.md) for the full grammar,
+settable fields per mode, and worked examples.
 
-Three levels, one more than elsewhere:
+## Run a saved query template from a link
 
-- **Read** — anyone with access to the context.
-- **Write** — anyone with *write* access to it. Unlike a precomputed graph, which is
-  superuser-only: a preset is a few kilobytes of preference, not a published,
-  administered artifact.
-- **Delete** — only the person who created that particular preset, or a
-  superuser. Ownership is per preset, so one person's saved look cannot be
-  thrown away by another — not even by whoever owns the context.
-
-Overwriting an existing name keeps its original author, precisely so write
-access cannot be used to take over someone else's preset and then delete it.
-
-A preset the URL names but that does not exist **changes nothing and does not
-break the page** — the graph loads and stays fully usable, and the status bar
-reports that the styling was not applied. This differs from a missing
-`?precomputed=`,
-which leaves nothing to look at.
-
-::: warning Multi-replica deployments
-The same caveat as precomputed graphs: without a volume path each replica keeps its
-own copy, so a `?style=` link works intermittently. The API logs a warning at
-startup when it detects this.
-:::
-
-### Overriding the layout from a link
-
-A preset is all-or-nothing: applying one replaces the whole layout block. That
-makes "the investigation look, but centred on *this* account" cost a new preset
-per account. Layout parameters can instead be set in the URL, on top of whatever
-the preset restored:
-
-```
-/graph/{context_id}?style=investigacao&layout=ego&layout.ego.focusNodeId=acct-9931
-```
-
-The grammar is `?layout=<algorithm>` for the algorithm itself, and
-`?layout.<mode>.<field>=<value>` for a single parameter of one mode. The URL wins
-field by field; everything it does not name keeps the preset's value.
-
-Only **semantic** parameters can be set from a link — the ones that change what
-you are looking at, not how it is drawn:
-
-| Mode | Settable from a link |
-|---|---|
-| `ego` | `focusNodeId`, `direction`, `maxHops`, `edgeTypes` |
-| `hierarchical` | `traversal`, `direction`, `edgeTypes` |
-| `hive` | *(none)* |
-
-Appearance — spacings, radii, ring ordering, crossing heuristics — is
-deliberately excluded. That is what a style preset is for, and a URL that could
-set it would be a worse copy of one. Two parameters are excluded for their own
-reasons: the ring-ordering and hive axis keys name dataset properties, so a typo
-would silently degrade the layout instead of being reported; and the crossing
-heuristic gates an algorithm expensive enough that turning it on is a decision
-the recipient of a link should make, not the sender.
-
-Conventions for values:
-
-- An **empty value** means "none" for a parameter that allows it:
-  `?layout.ego.maxHops=` removes the hop cutoff.
-- **Lists are comma-separated**, and empty means all:
-  `?layout.ego.edgeTypes=KNOWS,WORKS_AT` restricts ego traversal to those two.
-- Field overrides **configure** a mode without switching to it.
-  `?layout.ego.focusNodeId=x` alone sets ego's focus for whenever ego is turned
-  on; add `?layout=ego` to switch.
-
-A parameter the URL names but cannot apply **changes nothing and does not break
-the page**, the same as a missing preset: the graph loads and stays fully usable,
-and the status bar reports how many settings were dropped, with the reason for
-each in its tooltip.
-
-The focus node is checked against the graph on screen — there is no lookup, so a
-focus link is only as good as the query or cache it travels with. If the node is
-not there, the layout has nothing to centre on and says so rather than sitting
-inert. A context that opens empty is not treated as a failure: there is nothing
-to check against until you run a query.
-
-### Preset, cache, or exploration?
-
-| | Style preset | Precomputed graph | Exploration |
-|---|---|---|---|
-| **Stores** | how it looks | which nodes and edges | both, plus positions |
-| **Scope** | the context | the context | one user, plus shares |
-| **Addressed by** | `?style=name`, overridden per field by `?layout…` | `?precomputed=name`, plus provider arguments | `?exploration=uuid` |
-| **Combines with** | any graph | any style | — |
-
-A preset and a cache are orthogonal on purpose: the same look applies to any
-data, and the same data can be viewed in any look.
+A saved, parameterized query can be executed straight from a URL —
+`?template=<name>&template.<param>=<value>`. See
+[Query Templates](./query-templates.md#running-a-template-from-a-link) for the
+grammar, its all-or-nothing validation rules, and the full comparison against
+style presets, precomputed graphs, and explorations.
 
 ## Datasources
 

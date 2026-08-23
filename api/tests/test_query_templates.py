@@ -8,6 +8,7 @@ Visibility model:
 """
 
 import sys
+from uuid import UUID
 
 import pytest
 
@@ -126,6 +127,58 @@ class TestSchemas:
 
     def test_update_visibility_defaults_to_none(self):
         assert QueryTemplateUpdate().visibility is None
+
+
+class TestAllowUrlExecution:
+    """The ?template= link opt-out lives in the options JSON — no migration.
+
+    The default is filled at rehydration (TemplateOptions(**raw_options)), so a
+    template stored before the field existed reads back as linkable. That
+    back-compat contract is what the last test pins.
+    """
+
+    def test_defaults_to_true_when_omitted(self, client, context):
+        resp = _create(client, context, OWNER)
+        assert resp.status_code == 201
+        assert resp.json()["options"]["allow_url_execution"] is True
+
+    def test_false_round_trips_through_create_and_list(self, client, context):
+        resp = client.post(
+            _templates_url(context),
+            json={
+                "name": "no-links",
+                "query_type": "cypher",
+                "query": "MATCH (n) RETURN n",
+                "options": {"allow_url_execution": False},
+            },
+            headers=_headers(OWNER),
+        )
+        assert resp.status_code == 201
+        assert resp.json()["options"]["allow_url_execution"] is False
+
+        listed = client.get(_templates_url(context), headers=_headers(OWNER)).json()
+        assert listed[0]["options"]["allow_url_execution"] is False
+
+    def test_update_persists_the_flag(self, client, context):
+        template_id = _create(client, context, OWNER).json()["id"]
+        resp = client.put(
+            _templates_url(context, template_id),
+            json={"options": {"allow_url_execution": False}},
+            headers=_headers(OWNER),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["options"]["allow_url_execution"] is False
+
+    def test_pre_existing_row_without_the_key_reads_back_linkable(
+        self, client, context, store
+    ):
+        template_id = _create(client, context, OWNER).json()["id"]
+        # Simulate a row saved before the field existed.
+        stored = store.get_query_template(UUID(template_id))
+        stored.options.pop("allow_url_execution", None)
+
+        listed = client.get(_templates_url(context), headers=_headers(OWNER)).json()
+        assert listed[0]["options"]["allow_url_execution"] is True
 
 
 class TestCreate:

@@ -7,7 +7,7 @@
  */
 import { test, superuserTest, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
-import { seedContexts, seedExplorations, mockSchemaDrift, seedPrecomputedGraphs } from '../helpers/api-mocks';
+import { seedContexts, seedExplorations, mockSchemaDrift, seedPrecomputedGraphs, seedQueryTemplates } from '../helpers/api-mocks';
 
 test.describe('User Journeys', () => {
   // ---------------------------------------------------------------------------
@@ -166,6 +166,55 @@ test.describe('User Journeys', () => {
     await page.getByRole('button', { name: 'Open' }).click();
     await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Journey: Templates panel → fill parameters → copy link → open it fresh
+  // ---------------------------------------------------------------------------
+  test('user copies a template link from the execute modal and it runs on open', async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedQueryTemplates(page, MOCK_CONTEXT.id, [
+      {
+        id: 'tpl-neighbors',
+        graph_context_id: MOCK_CONTEXT.id,
+        owner_email: 'e2e@test.com',
+        name: 'Neighbors',
+        query_type: 'cypher',
+        query: 'MATCH (n {node_id: "$node_id"})-[r]-() RETURN r',
+        parameters: [{ id: 'node_id', type: 'input', label: 'node_id', required: true }],
+        options: { procedural_bfs: true, large_results_mode: true },
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    await page.route('**/graphlagoon/api/graph-contexts/*/cypher/transpile', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ transpiled_sql: 'SELECT * FROM edges' }),
+      }),
+    );
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+
+    // Open the graph and reach the template's execute modal.
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    await page.getByTitle('Query Templates', { exact: true }).click();
+    await page.getByTitle('Use this template', { exact: true }).click();
+
+    // Fill the parameter and mint the link.
+    await page.locator('#param-node_id').fill('n1');
+    await page.getByTestId('template-copy-link').click();
+    const link = await page.evaluate(() => navigator.clipboard.readText());
+    expect(link).toContain('template=Neighbors');
+    expect(link).toContain('template.node_id=n1');
+
+    // Open the link fresh, as a colleague receiving it would.
+    await page.goto(link);
+    await expect(page.getByTestId('graph-status-template')).toContainText('Neighbors', {
+      timeout: 15_000,
+    });
+    await expect(page.getByTestId('graph-status-bar')).toContainText('5 nodes');
   });
 });
 

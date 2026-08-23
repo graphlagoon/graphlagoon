@@ -46,6 +46,20 @@ import {
   precomputedParams,
   precomputedQuerySignature,
 } from '@/utils/precomputedUrlParams';
+import {
+  parseTemplateUrl,
+  resolveTemplateExecution,
+  summarizeTemplateIssues,
+  templateQuerySignature,
+  type ParsedTemplateUrl,
+  type TemplateUrlIssue,
+} from '@/utils/templateUrlParams';
+import { useQueryTemplatesStore } from '@/stores/queryTemplates';
+import { useTemplateExecution } from '@/composables/useTemplateExecution';
+import {
+  capabilitiesFor,
+  resolveDatasourceType,
+} from '@/composables/useDatasourceCapabilities';
 
 const props = defineProps<{
   contextId: string;
@@ -67,6 +81,36 @@ const layoutOverrideIssuesTitle = computed(() =>
   summarizeLayoutIssues(layoutOverrideIssues.value),
 );
 
+/**
+ * Why a `?template=` link did not run, and which one is on screen when it did.
+ *
+ * View-local for the same reason layoutOverrideIssues is: driven entirely by
+ * the router, and it must not leak into buildStylePreset/getExplorationState.
+ */
+const templateIssues = ref<TemplateUrlIssue[]>([]);
+const templateIssuesTitle = computed(() =>
+  summarizeTemplateIssues(templateIssues.value),
+);
+const activeUrlTemplate = ref<{
+  name: string;
+  values: Record<string, string>;
+} | null>(null);
+const activeUrlTemplateTitle = computed(() => {
+  if (!activeUrlTemplate.value) return '';
+  const args = Object.entries(activeUrlTemplate.value.values)
+    .filter(([, value]) => value !== '')
+    .map(([key, value]) => `${key}=${value}`);
+  // Name the values, or two links differing only by ?template.depth= would
+  // produce two identical-looking chips — same reasoning as the precomputed
+  // chip's arguments.
+  const withArgs = args.length ? ` Parameters: ${args.join(', ')}.` : '';
+  return `Query template “${activeUrlTemplate.value.name}”, run from the URL.${withArgs}`;
+});
+// Guards STALE CHIP WRITES only — two rapid URL edits must not let the older
+// run's outcome land on top of the newer one's. Query ordering itself belongs
+// to the graph store's own job handling.
+let templateRunToken = 0;
+
 // Opened by the "Check context schema" CTA in QueryErrorModal (a stale-schema
 // query failure) and by the drift banner below (an enrichment failure, or a
 // clean automatic column check surfacing a warning/info-level finding).
@@ -82,6 +126,8 @@ const clusterStore = useClusterStore();
 const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
 const queryConsoleStore = useQueryConsoleStore();
+const queryTemplatesStore = useQueryTemplatesStore();
+const { executeTemplateAsGraph } = useTemplateExecution();
 
 const showFilters = ref(false);
 const showLayoutPanel = ref(false);
@@ -215,19 +261,22 @@ const precomputedChipTitle = computed(() => {
 });
 
 /**
- * Open whatever the URL asks for: a precomputed graph, an exploration, or neither.
+ * Open whatever the URL asks for: a precomputed graph, an exploration, a
+ * query template, or none of them.
  *
- * A precomputed graph failing here deliberately does NOT fall through to the
- * default load — a mistyped or deleted link must surface as an error, not
- * silently launch an expensive warehouse query the user never asked for.
+ * A precomputed graph or template failing here deliberately does NOT fall
+ * through to the default load — a mistyped or deleted link must surface as an
+ * error, not silently launch an expensive warehouse query the user never
+ * asked for.
  */
 async function loadFromRoute(contextId: string) {
   const query = route.query as QueryLike;
   const name = precomputedName(query);
   const params = precomputedParams(query);
   const explorationId = route.query.exploration as string | undefined;
+  const templateParsed = parseTemplateUrl(query);
 
-  await loadGraphFromRoute(contextId, name, params, explorationId);
+  await loadGraphFromRoute(contextId, name, params, explorationId, templateParsed);
   await applyStyleFromRoute(contextId);
   applyLayoutOverridesFromRoute();
   validateLayoutOverridesAgainstGraph();
@@ -330,7 +379,20 @@ async function loadGraphFromRoute(
   name: string | undefined,
   params: Record<string, string>,
   explorationId: string | undefined,
+  templateParsed: ParsedTemplateUrl,
 ) {
+  // Precedence: exploration > precomputed > template > default auto-load.
+  // A template shadowed by either of the first two is ignored ENTIRELY —
+  // running it as well would race two loads for one canvas.
+  if (templateParsed.present && (name || explorationId)) {
+    console.warn(
+      `[graph] URL carries ?template together with ?${
+        explorationId ? 'exploration' : 'precomputed'
+      }; the template is ignored.`,
+    );
+    templateIssues.value = [];
+    activeUrlTemplate.value = null;
+  }
 
   if (name) {
     if (explorationId) {
@@ -358,6 +420,17 @@ async function loadGraphFromRoute(
     return;
   }
 
+  if (templateParsed.present) {
+    // The template replaces the default auto-load, and deliberately does NOT
+    // fall through to it on failure — same doctrine as a precomputed graph.
+    // No `graphQuery = ''` either: a successful run sets it via setGraphQuery,
+    // which is what keeps "save exploration" working afterwards.
+    await runTemplateFromRoute(contextId, templateParsed);
+    clusterStore.clearAll();
+    communityStore.clearCommunities();
+    return;
+  }
+
   // Starting a new context. By default we fetch nothing — the implicit "all
   // nodes" subgraph is expensive on large graphs, so the user runs the query
   // they actually want. A context opts in via default_behaviors:
@@ -371,6 +444,69 @@ async function loadGraphFromRoute(
   communityStore.clearCommunities();
   // Clear graph query - user must execute a query to save exploration
   graphStore.graphQuery = '';
+}
+
+/**
+ * Resolve and run the template a `?template=` link asked for.
+ *
+ * Fail-closed at every stage: a grammar issue, an unfetchable template list, a
+ * name that resolves to nothing (or to two things), a value that breaks a
+ * declared rule — each stops here with an explaining chip and NOTHING
+ * executes. These values are spliced into a query a warehouse will run;
+ * a link that is only mostly right must not run a query that is only mostly
+ * the one its author meant.
+ */
+async function runTemplateFromRoute(contextId: string, parsed: ParsedTemplateUrl) {
+  const token = ++templateRunToken;
+  activeUrlTemplate.value = null;
+
+  if (parsed.issues.length > 0) {
+    templateIssues.value = parsed.issues;
+    return;
+  }
+
+  // Always refetch: the store is a lazily-filled cache with no context tag, so
+  // whatever the templates panel loaded last may belong to another context —
+  // and a link must see templates created since the panel was last opened.
+  await queryTemplatesStore.loadTemplates(contextId);
+  if (token !== templateRunToken) return;
+  if (queryTemplatesStore.error) {
+    // loadTemplates swallows its error into store state and leaves stale
+    // templates in place — resolving against those would be guessing.
+    templateIssues.value = [
+      {
+        code: 'templates-load-failed',
+        param: 'template',
+        message: `The template list could not be loaded: ${queryTemplatesStore.error}`,
+      },
+    ];
+    return;
+  }
+
+  const capabilities = capabilitiesFor(
+    resolveDatasourceType(graphStore.currentContext),
+  );
+  const resolution = resolveTemplateExecution(parsed, queryTemplatesStore.templates, {
+    supportsSql: capabilities.supportsSql,
+  });
+  if (!resolution.ok) {
+    templateIssues.value = resolution.issues;
+    return;
+  }
+
+  try {
+    await executeTemplateAsGraph(resolution.template, resolution.values);
+    if (token === templateRunToken) {
+      templateIssues.value = [];
+      activeUrlTemplate.value = {
+        name: resolution.template.name,
+        values: resolution.values,
+      };
+    }
+  } catch {
+    // graphStore.queryError already carries the message for the UI — the same
+    // QueryErrorModal surface every other execution path reports through.
+  }
 }
 
 onMounted(async () => {
@@ -429,6 +565,10 @@ watch(
     // context's programs on top.
     clusterStore.clearAll();
     communityStore.clearCommunities();
+    // Template chips describe the context being left; loadFromRoute below
+    // rebuilds them for the new one if its URL still asks for a template.
+    templateIssues.value = [];
+    activeUrlTemplate.value = null;
     await graphStore.loadContext(newId);
     // loadContext re-resolves behaviors from the new context, so this honours the context
     // being switched TO, not the one being left.
@@ -454,6 +594,31 @@ watch(
     // auto-load over whatever the user is currently looking at.
     if (next === '') return;
     if (!graphStore.currentContext) return;
+    await loadFromRoute(props.contextId);
+  }
+);
+
+// The template name AND its parameter values live in the query string, and the
+// parameter keys are open-ended (`template.<paramId>`) — the signature stands
+// in for the whole set, exactly as it does for `?precomputed=`. Editing
+// `?template.depth=` in the address bar re-resolves and re-executes, the same
+// contract as editing `?seed=` on a precomputed link.
+watch(
+  () => templateQuerySignature(route.query as QueryLike),
+  async (next, previous) => {
+    if (next === previous) return;
+    if (next === '') {
+      // Every template param dropped. That clears the chips but deliberately
+      // does NOT reload anything: dropping `?template=` should not re-run the
+      // default auto-load over whatever the user is currently looking at —
+      // same doctrine as dropping `?precomputed=`.
+      templateIssues.value = [];
+      activeUrlTemplate.value = null;
+      return;
+    }
+    if (!graphStore.currentContext) return;
+    // The full orchestrator, not just the template branch, so `?style=` and
+    // `?layout.*` keep their load-bearing apply-after ordering.
     await loadFromRoute(props.contextId);
   }
 );
@@ -695,6 +860,27 @@ watch(
             :title="precomputedChipTitle"
           >
             precomputed: {{ graphStore.currentPrecomputedGraph.name }}
+          </span>
+          <!-- The query on screen came from a template the URL named. -->
+          <span
+            v-if="activeUrlTemplate"
+            class="status-item status-template"
+            data-testid="graph-status-template"
+            :title="activeUrlTemplateTitle"
+          >
+            template: {{ activeUrlTemplate.name }}
+          </span>
+          <!-- A template the URL named but that could not be run. One chip for
+               all issues, full list in the tooltip — same shape as the layout
+               chip below. Nothing was executed: a link that is only mostly
+               right must not run a query that is only mostly right. -->
+          <span
+            v-else-if="templateIssues.length"
+            class="status-template-error"
+            data-testid="graph-status-template-error"
+            :title="templateIssuesTitle"
+          >
+            template not run
           </span>
           <!-- Which named look is on, when the URL asked for one. -->
           <span
@@ -948,6 +1134,18 @@ watch(
 
 .status-precomputed {
   color: var(--primary-color, #007bff);
+  font-weight: 600;
+}
+
+.status-template {
+  color: var(--primary-color, #007bff);
+  font-weight: 600;
+}
+
+/* Same register as the layout chip: the link asked for something that could
+   not be honoured, and — because template runs are fail-closed — nothing ran. */
+.status-template-error {
+  color: var(--warning-color, #b8860b);
   font-weight: 600;
 }
 

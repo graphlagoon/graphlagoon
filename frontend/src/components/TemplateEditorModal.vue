@@ -89,6 +89,8 @@ const proceduralBfs = ref(props.template?.options?.procedural_bfs ?? true);
 const ctePrefilterEnabled = ref(!!(props.template?.options?.cte_prefilter));
 const ctePrefilterText = ref(props.template?.options?.cte_prefilter ?? '');
 const largeResultsMode = ref(props.template?.options?.large_results_mode ?? true);
+// Absent ⇒ true: templates saved before the flag existed stay linkable.
+const allowUrlExecution = ref(props.template?.options?.allow_url_execution ?? true);
 
 const saving = ref(false);
 const errorMsg = ref<string | null>(null);
@@ -170,13 +172,25 @@ async function handleSave() {
         id: p.id.trim(),
         label: p.id.trim(),
       })),
+      // Always sent, because allow_url_execution applies to every datasource.
+      // When the warehouse-only knobs are hidden, the template's stored values
+      // are carried over unchanged — sending fresh defaults here would silently
+      // reset procedural_bfs/cte_prefilter on a template edited from a
+      // non-warehouse context.
       options: showExecutionOptions.value
         ? {
             procedural_bfs: proceduralBfs.value,
             cte_prefilter: ctePrefilterEnabled.value ? ctePrefilterText.value.trim() || undefined : undefined,
             large_results_mode: largeResultsMode.value,
+            allow_url_execution: allowUrlExecution.value,
           }
-        : undefined,
+        : {
+            ...(props.template?.options ?? {
+              procedural_bfs: true,
+              large_results_mode: true,
+            }),
+            allow_url_execution: allowUrlExecution.value,
+          },
       visibility: visibility.value,
     };
 
@@ -269,6 +283,20 @@ async function handleSave() {
               rows="8"
               @keydown.tab.prevent="handleTab"
             />
+          </div>
+
+          <!-- Applies on every datasource, so it lives OUTSIDE the
+               warehouse-only execution-options block below. -->
+          <div class="field-group">
+            <label class="checkbox-label">
+              <input
+                v-model="allowUrlExecution"
+                type="checkbox"
+                data-testid="template-allow-url-execution"
+              />
+              Can be run from a link
+              <span class="option-hint">(?template= URLs; unchecking makes such links fail with an explanation)</span>
+            </label>
           </div>
 
           <!-- Execution options (fixed after creation) -->

@@ -32,6 +32,24 @@ describe('isReservedKey', () => {
     expect(isReservedKey(key)).toBe(true);
   });
 
+  it.each([
+    'template',
+    'template.node_id',
+    'template.depth',
+    'templateFoo',
+  ])('reserves the template key %s', (key) => {
+    // A template parameter forwarded as a provider argument would either 400
+    // or, worse, be silently consumed by a provider that happens to declare
+    // the same name.
+    expect(isReservedKey(key)).toBe(true);
+  });
+
+  it('reserving template keys does not confuse the layout parser', () => {
+    expect(parseLayoutOverrides({ 'template.p': 'x', template: 'T' }).present).toBe(
+      false,
+    );
+  });
+
   it.each(['utm_source', 'utm_campaign', 'fbclid', 'gclid', 'mc_cid', '_hsenc'])(
     'ignores the tracking parameter %s',
     (key) => {
@@ -96,7 +114,7 @@ describe('precomputedParams', () => {
     expect(precomputedParams({ seed: '99872' })).toEqual({});
   });
 
-  it('drops style, exploration and layout keys', () => {
+  it('drops style, exploration, layout and template keys', () => {
     expect(
       precomputedParams({
         precomputed: 'g',
@@ -104,6 +122,8 @@ describe('precomputedParams', () => {
         exploration: 'exp-1',
         layout: 'ego',
         'layout.ego.maxHops': '2',
+        template: 'T',
+        'template.node_id': 'x',
         seed: '1',
       }),
     ).toEqual({ seed: '1' });
@@ -184,6 +204,16 @@ describe('precomputedQuerySignature', () => {
       precomputedQuerySignature({ precomputed: 'g', 'layout.ego.maxHops': '2' }),
     ).toBe(
       precomputedQuerySignature({ precomputed: 'g', 'layout.ego.maxHops': '5' }),
+    );
+  });
+
+  it('does not move when only a template param changes', () => {
+    // A template alongside ?precomputed= is ignored, so editing its params
+    // must not refire the precomputed watcher either.
+    expect(
+      precomputedQuerySignature({ precomputed: 'g', 'template.depth': '2' }),
+    ).toBe(
+      precomputedQuerySignature({ precomputed: 'g', 'template.depth': '5' }),
     );
   });
 

@@ -18,13 +18,13 @@ import type { QueryLike } from './layoutUrlOverrides';
  * Query keys the frontend owns. Forwarding one would send the server a
  * parameter no provider can have declared, which is an immediate 400.
  *
- * `layout` is matched by prefix rather than as `layout.`, deliberately wider
- * than layoutUrlOverrides' own `isLayoutKey`: a future `layoutMode=` must never
- * leak into a provider's arguments, and this denylist is the last line before
- * it would.
+ * `layout` and `template` are matched by prefix rather than as `layout.` /
+ * `template.`, deliberately wider than the owning modules' own key predicates:
+ * a future `layoutMode=` or `templateFoo=` must never leak into a provider's
+ * arguments, and this denylist is the last line before it would.
  */
 const RESERVED_KEYS = ['precomputed', 'style', 'exploration'] as const;
-const RESERVED_PREFIX = 'layout';
+const RESERVED_PREFIXES = ['layout', 'template'] as const;
 
 /**
  * Analytics parameters that ride along on shared links.
@@ -40,7 +40,7 @@ export const PRECOMPUTED_KEY = 'precomputed';
 
 export function isReservedKey(key: string): boolean {
   if ((RESERVED_KEYS as readonly string[]).includes(key)) return true;
-  if (key.startsWith(RESERVED_PREFIX)) return true;
+  if (RESERVED_PREFIXES.some((prefix) => key.startsWith(prefix))) return true;
   return IGNORED_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
@@ -100,9 +100,11 @@ export function precomputedParams(query: QueryLike): Record<string, string> {
  * - It is `''` when no graph is named. Otherwise a stray `?foo=1` on an
  *   ordinary context URL would move the signature, fire the watcher and re-run
  *   the default auto-load branch.
- * - It excludes `style` and `layout*`. Those have their own, cheaper watchers,
- *   and changing a style deliberately does *not* reload the graph; folding them
- *   in here would shadow that with a full refetch.
+ * - It excludes `style`, `layout*` and `template*`. Those have their own
+ *   watchers, and changing a style deliberately does *not* reload the graph;
+ *   folding them in here would shadow that with a full refetch. `template*` in
+ *   particular is moot while `?precomputed=` is present — the template is
+ *   ignored then, so its params must not refire this watcher either.
  */
 export function precomputedQuerySignature(query: QueryLike): string {
   const name = precomputedName(query);
