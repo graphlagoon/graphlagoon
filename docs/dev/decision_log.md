@@ -4383,3 +4383,55 @@ Labels panel shows them side by side.
 **Verified:** `uv run pytest tests/test_style_presets.py tests/test_graph_cache.py` — 103 passed (102 existing + 1 new regression test for the body-size guard, `test_oversized_body_is_rejected_before_parsing`, mirroring the graph-cache test of the same name). Full API suite: 758 passed / 5 pre-existing unrelated failures (confirmed pre-existing by re-running against the unmodified branch via `git stash`) / 1 skipped — none touch these two features.
 
 **Files:** `api/graphlagoon/routers/style_presets.py` (added `enforce_body_limit` dependency on PUT), `api/graphlagoon/config.py` (docstring fix), `api/tests/test_style_presets.py` (new regression test).
+
+## [2026-08-23 11:35] - Feature Implemented: Auto-execute query templates from URL parameters
+
+**Feature:** `/graph/{contextId}?template=<name>&template.<paramId>=<value>` resolves a saved query template by name and executes it automatically on open — the template counterpart of `?precomputed=`. Frontend-only; the backend never learns templates gained a URL grammar.
+
+**Requirements (locked with the user):**
+- Template addressed by **name** (legible, shareable URLs), not UUID. Ambiguity (2+ visible templates with one name) is a refusal, not a guess.
+- **No new parameter type system** — the user explicitly declined a `value_type` field ("the template executes a query which is a string"); validation uses only what the existing `TemplateParameter` shape expresses: `required` (satisfied by URL value or declared default), `select` membership, and unknown-key rejection.
+- **Strict charset** for URL values: `/^[A-Za-z0-9 _.,:@/-]*$/`, rejecting quotes, backslash, backtick, `$`, parens, `;`, newlines.
+- **Precedence** `exploration > precomputed > template > default auto-load`; a shadowed template is ignored entirely (console warn), extending the existing chain in `loadFromRoute()`.
+
+**Design decisions:**
+1. **Fail-closed, unlike layout overrides.** `?layout.*` drops a bad field and applies the rest; a template link with ANY issue executes nothing and one status chip (`graph-status-template-error`) explains every issue at once. Rationale: values are spliced into a query a warehouse executes — a link that is only mostly right must not run a query that is only mostly the author's. Same no-fallback doctrine as `loadPrecomputedGraph` (a broken link must not silently launch an expensive query).
+2. **Two-stage pure validation in `utils/templateUrlParams.ts`** — `parseTemplateUrl` (grammar + charset; never throws; prototype-pollution guarded; last-wins repeats except conflicting repeats which BLOCK, unlike layout's warning) and `resolveTemplateExecution` (name resolution, SQL-template-on-non-SQL-datasource refusal mirroring `runnableTemplates`, unknown/required/select rules — defaults validated too, so a stale default outside current options refuses to run). Validation lives in the util, not the view, per the repo doctrine that GraphVisualizationView has no unit test.
+3. **Charset applies to param values only, not the template name** — the name is compared by equality and never substituted; rejecting "João's report" would be a false positive.
+4. **Substitution rewritten as a single-pass longest-first regex** (`utils/templateSubstitution.ts`), replacing the modal's sequential split/join. This deliberately fixes two modal bugs as well: the `$node`/`$node_id` prefix collision (longer id corrupted into `<value>_id`) and chained substitution (a value containing `$other` was re-substituted). Function-form replacer keeps `$&` in values inert. Undeclared `$tokens` (incl. `$hash()`) pass through untouched.
+5. **One execution path** — the modal's graph-mode branch moved verbatim into `composables/useTemplateExecution.ts` (`executeTemplateAsGraph`), used by both the modal and the URL path, so a click and a link cannot drift. Capabilities snapshotted at call time via the plain `capabilitiesFor(resolveDatasourceType(...))` exports. Table mode stays modal-only.
+6. **Reserved-key registry widened**: `precomputedUrlParams.ts` now reserves prefixes `['layout', 'template']`, keeping `template.*` out of provider-arg forwarding AND out of `precomputedQuerySignature` (editing a template param while `?precomputed=` is present neither reaches the provider nor refires the precomputed watcher — correct, the template is ignored then).
+7. **View wiring follows the precomputed pattern**: view-local `templateIssues`/`activeUrlTemplate` refs (not store state — must not leak into presets/explorations), a `templateQuerySignature` watcher (empty → clear chips only, never reload; non-empty → full `loadFromRoute` so `?style=`/`?layout.*` keep their load-bearing apply-after ordering), a monotonic token guarding stale chip writes, and the template branch replacing the default auto-load without touching `graphQuery = ''` (execution sets it via `setGraphQuery`, keeping save-exploration working). Template list is always refetched in this path: the store is an untagged lazy cache, and `loadTemplates` failure is gated on `store.error` because it leaves stale `templates` in place.
+8. **Copy link in the execute modal** (graph mode): builds the URL via `router.resolve` (mirrors `PrecomputedGraphPanel.precomputedUrl`), disabled with an explaining tooltip when a value fails the charset, a required param is empty, or the name is duplicated — the modal stays permissive for direct execution but won't mint a link its own parser would reject.
+
+**Files created:** `frontend/src/utils/templateUrlParams.ts`, `frontend/src/utils/templateSubstitution.ts`, `frontend/src/composables/useTemplateExecution.ts`, `frontend/src/utils/__tests__/templateUrlParams.test.ts` (50 tests), `frontend/src/utils/__tests__/templateSubstitution.test.ts` (12 tests), `frontend/e2e/tests/template-url-autoexec.spec.ts` (11 tests).
+
+**Files modified:** `frontend/src/views/GraphVisualizationView.vue` (orchestrator branch, `runTemplateFromRoute`, watcher, chips), `frontend/src/components/TemplateExecuteModal.vue` (shared substitution/execution, Copy link), `frontend/src/utils/precomputedUrlParams.ts` (reserved prefixes), `frontend/src/utils/__tests__/precomputedUrlParams.test.ts`, `frontend/e2e/tests/user-journeys.spec.ts` (copy-link → fresh-open journey), `docs/guide/configuration.md` (new section + precedence table).
+
+**Testing:** `npx vue-tsc --noEmit` clean; full unit suite 1716 passed (91 files) including hostile-value matrix (`'; DROP TABLE--`, `$hash('k')`, quotes, newline, backslash, `${x}`), prototype-pollution, ambiguity/staleness resolution matrix, and substitution-bug pins; new E2E spec 11/11 (fail-closed cases assert **zero** outbound query/transpile/subgraph requests; the precomputed-wins test doubles as the reserved-key regression — leaked `template.*` args would 404 the provider lookup); user-journeys 7/7 including the clipboard round-trip.
+
+**Known limitations:** ambiguity is viewer-relative (own private + shared set), so one link can run for one viewer and refuse for another — documented, unfixable without id addressing. Values needing `(`, `'`, `%` cannot travel by URL (deliberate; error message points to the Templates panel). URL path is graph-mode only.
+
+## [2026-08-23 11:55] - Docs: dedicated "Query Templates" guide page
+
+**Trigger:** user noted the guide sidebar had pages for every named-artifact feature (Precomputed Graphs, REST Connections, …) but none for query templates, including the new URL grammar.
+
+**Change:** new `docs/guide/query-templates.md` covering the whole feature — creating templates (`$param` placeholders, parameter declaration, execution options, visibility), running them (graph vs table mode, substitution semantics), the `?template=` URL grammar with its fail-closed validation and charset rationale, link composition with `?style=`/`?layout.*`, precedence, and the permissions matrix (shared/private, 404-not-403 for others' private templates). Registered in the VitePress sidebar between Precomputed Graphs and Configuration; the URL-grammar section in `configuration.md` now cross-links to it as the authoritative feature page.
+
+**Verified:** `make docs-build` clean (VitePress dead-link check passes for both cross-links).
+
+**Files:** `docs/guide/query-templates.md` (new), `docs/.vitepress/config.ts`, `docs/guide/configuration.md`.
+
+## [2026-08-23 11:52] - Feature: per-template "Can be run from a link" flag (`allow_url_execution`)
+
+**Trigger:** user asked whether templates should carry a field saying they may be executed via URL — conditional on it requiring no database change.
+
+**Design decisions:**
+1. **No migration needed, by construction.** The flag lives inside the existing `query_templates.options` JSON column as a new `TemplateOptions` field (`allow_url_execution: bool = True`). `template_to_response` already rehydrates via `TemplateOptions(**raw_options)`, so rows saved before the field existed get the default at read time — pinned by an API test that pops the key from a stored row and reads it back as `true`.
+2. **Default ON (opt-out), decided with the user.** Every existing template stays linkable; unchecking the editor box is the author's explicit choice. The frontend resolver therefore gates on strict `=== false` — absent/undefined must never block.
+3. **Enforcement at the URL boundary only**: a new `template-not-linkable` issue code in `resolveTemplateExecution` (fail-closed like every other rule; message points to the Templates panel). The modal remains fully usable; its Copy link button disables with "The author disabled running this template from a link".
+4. **Editor checkbox lives OUTSIDE the `supportsTranspile`-gated execution-options block** — it applies to every datasource. Consequence handled: `handleSave` now always sends `options` (it used to send `undefined` on non-warehouse datasources), spreading the template's stored options underneath the flag so editing from a non-warehouse context cannot silently reset `procedural_bfs`/`cte_prefilter`/`large_results_mode` to defaults.
+
+**Files:** `api/graphlagoon/models/schemas.py` (field), `api/tests/test_query_templates.py` (4 round-trip/back-compat tests, incl. the pre-existing-row pin), `frontend/src/types/graph.ts`, `frontend/src/utils/templateUrlParams.ts` (issue code + gate), `frontend/src/components/TemplateEditorModal.vue` (checkbox `template-allow-url-execution` + always-send options), `frontend/src/components/TemplateExecuteModal.vue` (Copy link guard), `frontend/src/utils/__tests__/templateUrlParams.test.ts` (3 tests: false blocks, absent linkable, explicit true linkable), `frontend/e2e/tests/template-url-autoexec.spec.ts` (fail-closed case, zero outbound requests), `docs/guide/query-templates.md`, `docs/guide/configuration.md`.
+
+**Verified:** API `pytest tests/test_query_templates.py` 32 passed; `vue-tsc --noEmit` clean; full frontend unit suite 1719 passed; template + user-journeys E2E 19 passed; `make docs-build` clean.

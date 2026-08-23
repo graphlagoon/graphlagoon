@@ -646,6 +646,10 @@ class TemplateOptions(BaseModel):
     procedural_bfs: bool = True
     cte_prefilter: Optional[str] = None
     large_results_mode: bool = True
+    # Whether a ?template= link may auto-execute this template. Default True so
+    # templates saved before the field existed stay linkable; the default is
+    # filled at rehydration (TemplateOptions(**raw_options)), never migrated.
+    allow_url_execution: bool = True
 
 
 class QueryTemplateCreate(BaseModel):

@@ -493,6 +493,8 @@ export interface TemplateOptions {
   procedural_bfs: boolean;
   cte_prefilter?: string;
   large_results_mode: boolean;
+  /** Whether a ?template= link may auto-execute this template. Absent ⇒ true. */
+  allow_url_execution?: boolean;
 }
 
 // 'shared': visible to everyone with context access, mutable by context writers.

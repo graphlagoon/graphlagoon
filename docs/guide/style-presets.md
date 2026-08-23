@@ -1,0 +1,138 @@
+# Style Presets
+
+A **style preset** is how a context's graph looks, saved under a name and
+applied from the URL:
+
+```
+/graph/{context_id}?style=investigacao
+```
+
+It carries three things — **style** (colors, icons, aesthetics), **labels**
+(text formatting) and **layout** (algorithm, its parameters, 3D forces) — and
+nothing about which data is shown. Applying one therefore never changes what
+is on screen, only how it is drawn, which is why it is safe on any graph in
+the context, before or after that graph loads. A graph loaded afterwards
+inherits the look.
+
+Deliberately excluded: nodes, edges, filters, the viewport, the query and its
+transpile options, clusters, communities, similarity and behaviors. A preset
+says how a graph *looks*, never which data it shows — the same split
+[precomputed graphs](./precomputed-graphs.md) draw from the other side.
+
+## Saving, applying, deleting
+
+Everything lives in one modal, opened by the **Presets** button inside the
+Aesthetics panel — not a second toolbar button, and not inline in the
+sidebar. A preset is not a setting you nudge; it is an occasional, deliberate
+act, and a list plus a naming form would crowd a panel of sliders.
+
+**Save current look as** — type a name and hit **Save**. Names follow the
+same alphabet every named artifact in Graph Lagoon uses:
+`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` — "Letters, digits, `_` `-` `.` only, up
+to 64, starting with a letter or digit." An optional description (up to 280
+characters) helps whoever opens the list later. Saving a name that already
+exists **overwrites** it — the modal warns first, and it keeps its original
+author, so write access cannot be used to take over someone else's preset and
+then delete it.
+
+**Applying** one is a click in the saved-presets list and a `router.replace`
+under the hood: the URL gains `?style=<name>`, so whatever look is on screen
+is always a link someone else can open too.
+
+**Stop using «name»** clears `?style=` from the URL without touching the
+graph — the look reverts to whatever the canvas defaults to, and nothing is
+deleted.
+
+**Deleting** asks for confirmation (`Delete style preset "name"?`) and then
+calls the API. A permission error is the *only* place a preset's author ever
+surfaces in the UI — the listing itself deliberately carries no `created_by`,
+since reading every file to build one would cost a request per preset.
+
+**Copy link** builds the absolute URL for a preset and copies it, for sharing
+a look without also sharing a specific graph.
+
+A preset the URL names but that does not exist **changes nothing and does not
+break the page** — the graph loads and stays fully usable, and the status bar
+reports that the styling was not applied. This differs from a missing
+`?precomputed=`, which leaves nothing to look at at all.
+
+## Who can do what
+
+Three permission levels — one more than anywhere else in Graph Lagoon:
+
+| Action | Who |
+|---|---|
+| Read | anyone with access to the context |
+| Write (create or overwrite) | anyone with *write* access to the context |
+| Delete | only the person who created that particular preset, or a superuser |
+
+Unlike a [precomputed graph](./precomputed-graphs.md), which is superuser-only
+to author, a preset is a few kilobytes of preference, not a published,
+administered artifact — so ordinary write access is enough to save one.
+Deleting is narrower on purpose: ownership lives inside the preset file
+itself, per preset rather than per context, so one person's saved look cannot
+be thrown away by another — not even by whoever owns the context.
+
+## Composing with other features
+
+The URL parameters compose, so one link can pin the data and its look
+together:
+
+```
+/graph/{context_id}?precomputed=fraude-2024&style=investigacao
+```
+
+A preset also composes with **layout URL overrides** — field-by-field
+adjustments to the layout a preset restored, so "the investigation look, but
+centred on *this* account" costs no new preset. See
+[Layout URL Overrides](./layout-url-overrides.md) for the grammar; the short
+version is that the URL wins field by field over whatever the preset set, and
+applying the override *after* the preset (not before) is what makes that true
+— a preset replaces the whole layout block, so an override applied earlier
+would be silently erased.
+
+## Configuration
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_STYLE_PRESETS_ENABLED` | `true` | `false` makes every preset endpoint answer 404. |
+| `GRAPH_LAGOON_STYLE_PRESETS_DIR` | `./tmp/style-presets` | Local directory, used when no volume path applies. |
+| `GRAPH_LAGOON_STYLE_PRESETS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to a `style-presets` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set. |
+| `GRAPH_LAGOON_STYLE_PRESETS_MAX_PER_CONTEXT` | `100` | Presets are listed in full for the picker, so the count is bounded here rather than paginated at read time. |
+
+Entries live at `{root}/style/{context_id}/{name}.jsonz`, gzip'd JSON, with
+the same name rules as a precomputed graph.
+
+::: warning Multi-replica deployments
+Without a volume path, each replica keeps its own copy of presets, so a
+`?style=` link works intermittently. Set
+`GRAPH_LAGOON_STYLE_PRESETS_VOLUME_PATH` (or
+`GRAPH_LAGOON_DATABRICKS_VOLUME_PATH`) for any deployment that is not a
+single process — the API logs a warning at startup when it detects this.
+:::
+
+## Unlike a precomputed graph, this is listable
+
+A style preset has a normal `GET /api/graph-contexts/{id}/style-presets`
+listing endpoint. [Precomputed graphs](./precomputed-graphs.md) deliberately
+do not: their entries can be machine-written and unbounded, so enumerating
+them is the one operation that does not survive scale. A preset is hand
+-authored, there are only ever a handful per context
+(`GRAPH_LAGOON_STYLE_PRESETS_MAX_PER_CONTEXT` bounds it at write time), and
+choosing one means seeing what exists — so the listing stays complete and
+honest rather than paginated.
+
+## Preset, precomputed, template, or exploration?
+
+| | Style preset | Precomputed graph | Query template | Exploration |
+|---|---|---|---|---|
+| **Stores** | how it looks | which nodes and edges | a parameterized query | graph, look and positions |
+| **Scope** | the context | the context | the context | one user, plus shares |
+| **Addressed by** | `?style=name`, overridden per field by `?layout…` | `?precomputed=name`, plus provider arguments | `?template=name`, plus `template.<param>=` values | `?exploration=uuid` |
+| **Combines with** | any graph | any style | any style | — |
+
+A preset and a precomputed graph are orthogonal on purpose: the same look
+applies to any data, and the same data can be viewed in any look. See
+[Query Templates](./query-templates.md#preset-precomputed-template-or-exploration)
+for the full four-way comparison and the precedence rule when a URL carries
+more than one data-choosing parameter.

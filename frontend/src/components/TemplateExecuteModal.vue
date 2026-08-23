@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { useRouter } from 'vue-router';
+import type { LocationQueryRaw } from 'vue-router';
 import { useGraphStore } from '@/stores/graph';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
+import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
+import { useTemplateExecution } from '@/composables/useTemplateExecution';
+import { useToast } from '@/composables/useToast';
+import { substituteTemplateParams } from '@/utils/templateSubstitution';
+import { SAFE_VALUE_RE, TEMPLATE_PARAM_PREFIX } from '@/utils/templateUrlParams';
 import type { QueryTemplate } from '@/types/graph';
 import { X } from 'lucide-vue-next';
 
@@ -13,15 +20,13 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
 const consoleStore = useQueryConsoleStore();
+const templatesStore = useQueryTemplatesStore();
+const router = useRouter();
+const toast = useToast();
+const { executeTemplateAsGraph } = useTemplateExecution();
 const capabilities = useDatasourceCapabilities(
   computed(() => graphStore.currentContext),
 );
-
-// A datasource that speaks Cypher natively has no SQL to review, so the
-// transpile-then-execute two-step below cannot run there at all — it would
-// stop at the transpile guard and load nothing. Send the Cypher itself, the
-// same thing GraphQueryPanel does for these contexts.
-const runsDirectly = computed(() => !capabilities.value.supportsTranspile);
 
 // How to run this query THIS time — a per-execution choice, not stored on the
 // template. Default: Graph (loads the visualization, the historical behavior).
@@ -42,28 +47,30 @@ const missingRequired = computed(() =>
 
 const canExecute = computed(() => missingRequired.value.length === 0);
 
-function substituteParameters(queryTemplate: string, vals: Record<string, string>): string {
-  let result = queryTemplate;
-  for (const [paramId, value] of Object.entries(vals)) {
-    result = result.split(`$${paramId}`).join(value);
-  }
-  return result;
-}
+const paramIds = computed(() => props.template.parameters.map((p) => p.id));
+
+const queryPreview = computed(() =>
+  substituteTemplateParams(props.template.query, paramIds.value, values.value),
+);
 
 async function executeNow() {
   if (!canExecute.value) return;
-  const substituted = substituteParameters(props.template.query, values.value);
-  const opts = props.template.options;
-  // A stored CTE pre-filter is SQL over the edge table. On a native-graph
-  // context it cannot be honoured, and sending it would earn a 400 — drop it.
-  const cte =
-    opts?.cte_prefilter && capabilities.value.supportsCtePrefilter
-      ? substituteParameters(opts.cte_prefilter, values.value)
-      : '';
 
   // Table mode runs in the Query Console (arbitrary projection allowed),
   // NOT through the graph path (which assumes the query returns edges).
   if (resultMode.value === 'table') {
+    const substituted = substituteTemplateParams(
+      props.template.query,
+      paramIds.value,
+      values.value,
+    );
+    const opts = props.template.options;
+    // A stored CTE pre-filter is SQL over the edge table. On a native-graph
+    // context it cannot be honoured, and sending it would earn a 400 — drop it.
+    const cte =
+      opts?.cte_prefilter && capabilities.value.supportsCtePrefilter
+        ? substituteTemplateParams(opts.cte_prefilter, paramIds.value, values.value)
+        : '';
     graphStore.ctePrefilter = cte; // the console reads ctePrefilter from graphStore
     consoleStore.mode = props.template.query_type;
     if (props.template.query_type === 'cypher') consoleStore.cypherQuery = substituted;
@@ -74,29 +81,62 @@ async function executeNow() {
     return;
   }
 
-  // Graph-intent (default): load the visualization.
-  graphStore.setGraphQuery(substituted);
+  // Graph-intent (default): the shared execution path, same one a
+  // `?template=` link runs through.
   emit('close');
-  graphStore.ctePrefilter = cte;
-  // Transpiler and result-transport settings only reach a warehouse backend;
-  // leaving them untouched elsewhere keeps stored options from silently
-  // rewriting store state a native-graph query will never consult.
-  if (capabilities.value.supportsTranspile) {
-    graphStore.vlpRenderingMode = opts?.procedural_bfs ? 'procedural' : 'cte';
-    graphStore.useExternalLinks = opts?.large_results_mode ?? true;
-  }
+  await executeTemplateAsGraph(props.template, values.value);
+}
 
-  if (props.template.query_type === 'cypher') {
-    if (runsDirectly.value) {
-      await graphStore.executeCypherQuery(substituted);
-    } else {
-      const sql = await graphStore.transpileCypher(substituted);
-      if (sql) {
-        await graphStore.executeGraphQuery(sql, { preserveGraphQuery: true });
-      }
-    }
-  } else {
-    await graphStore.executeGraphQuery(substituted, { preserveGraphQuery: true });
+/**
+ * Why this template, with these values, cannot be turned into a link.
+ *
+ * The modal itself stays permissive — anything can be typed and executed here.
+ * But a link goes through the fail-closed URL parser at the other end, so
+ * minting one that parser would reject helps nobody.
+ */
+const linkBlockedReason = computed<string | null>(() => {
+  if (!graphStore.currentContext?.id) return 'No context loaded';
+  if (props.template.options?.allow_url_execution === false) {
+    return 'The author disabled running this template from a link';
+  }
+  if (missingRequired.value.length > 0) return 'Fill the required parameters first';
+  const unsafe = props.template.parameters.filter((p) => {
+    const value = values.value[p.id] ?? '';
+    return value !== '' && !SAFE_VALUE_RE.test(value);
+  });
+  if (unsafe.length > 0) {
+    return `These values can't travel in a link: ${unsafe.map((p) => p.label).join(', ')}`;
+  }
+  const sameName = templatesStore.templates.filter(
+    (t) => t.name === props.template.name,
+  );
+  if (sameName.length > 1) {
+    return `Another template is also named “${props.template.name}” — a link can't tell them apart`;
+  }
+  return null;
+});
+
+function templateUrl(): string {
+  const query: LocationQueryRaw = { template: props.template.name };
+  for (const p of props.template.parameters) {
+    const value = values.value[p.id] ?? '';
+    if (value.trim() !== '') query[`${TEMPLATE_PARAM_PREFIX}${p.id}`] = value;
+  }
+  const href = router.resolve({
+    name: 'graph',
+    params: { contextId: graphStore.currentContext?.id ?? '' },
+    query,
+  }).href;
+  return new URL(href, window.location.origin).toString();
+}
+
+async function copyLink() {
+  if (linkBlockedReason.value) return;
+  try {
+    await navigator.clipboard.writeText(templateUrl());
+    toast.success('Link copied');
+  } catch {
+    toast.error('Could not copy the link');
   }
 }
 </script>
@@ -177,7 +217,7 @@ async function executeNow() {
           <!-- Query preview -->
           <div class="query-preview">
             <div class="preview-label">Query Preview</div>
-            <pre class="query-preview-text">{{ substituteParameters(template.query, values) }}</pre>
+            <pre class="query-preview-text">{{ queryPreview }}</pre>
           </div>
 
           <div v-if="missingRequired.length > 0" class="validation-hint">
@@ -187,6 +227,16 @@ async function executeNow() {
 
         <div class="modal-footer">
           <button class="btn btn-outline" @click="emit('close')">Cancel</button>
+          <button
+            v-if="resultMode === 'graph'"
+            class="btn btn-outline"
+            data-testid="template-copy-link"
+            :disabled="!!linkBlockedReason"
+            :title="linkBlockedReason ?? 'Copy a link that runs this template with these values'"
+            @click="copyLink"
+          >
+            Copy link
+          </button>
           <button
             class="btn btn-primary"
             @click="executeNow"
