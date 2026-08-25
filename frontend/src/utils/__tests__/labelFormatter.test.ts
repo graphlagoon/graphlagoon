@@ -328,17 +328,16 @@ describe('getAvailablePlaceholders', () => {
 })
 
 describe('getAvailableModifiers', () => {
-  it('returns all 7 modifiers', () => {
+  it('returns all 13 modifiers', () => {
     const result = getAvailableModifiers()
-    expect(result).toHaveLength(7)
+    expect(result).toHaveLength(13)
     const mods = result.map(r => r.modifier)
-    expect(mods).toContain('upper')
-    expect(mods).toContain('lower')
-    expect(mods).toContain('capitalize')
-    expect(mods).toContain('truncate')
-    expect(mods).toContain('number')
-    expect(mods).toContain('currency')
-    expect(mods).toContain('percent')
+    for (const name of [
+      'upper', 'lower', 'capitalize', 'truncate', 'number', 'currency', 'percent',
+      'split', 'slice', 'trim', 'default', 'match', 'replace',
+    ]) {
+      expect(mods).toContain(name)
+    }
   })
 })
 
@@ -868,5 +867,336 @@ describe('{br} line-break token', () => {
     const edgePlaceholders = getAvailablePlaceholders('edge', []).map(r => r.placeholder)
     expect(nodePlaceholders).toContain('{br}')
     expect(edgePlaceholders).toContain('{br}')
+  })
+})
+
+// ============================================================================
+// Modifier chaining (syntax v2)
+// ============================================================================
+
+describe('modifier chaining', () => {
+  it('applies modifiers left-to-right', () => {
+    const node = makeNode({ properties: { name: 'alice wonders' } })
+    expect(formatLabel('{prop:name|upper|truncate:8:..}', 'node', node)).toBe('ALICE ..')
+    expect(formatLabel('{prop:name|truncate:8:..|upper}', 'node', node)).toBe('ALICE ..')
+  })
+
+  it('order matters for non-commutative chains', () => {
+    const node = makeNode({ properties: { name: 'Alice' } })
+    expect(formatLabel('{prop:name|upper|lower}', 'node', node)).toBe('alice')
+    expect(formatLabel('{prop:name|lower|upper}', 'node', node)).toBe('ALICE')
+  })
+
+  it('chains on built-in placeholders too', () => {
+    const node = makeNode({ node_id: '12321_CNPJ_RAIZ' })
+    expect(formatLabel('{node_id|split:_:0|upper}', 'node', node)).toBe('12321')
+  })
+
+  it('unknown modifier in a chain is a no-op, rest still applies', () => {
+    const node = makeNode({ properties: { name: 'alice' } })
+    expect(formatLabel('{prop:name|nonsense|upper}', 'node', node)).toBe('ALICE')
+  })
+
+  it('single-modifier templates behave exactly as before', () => {
+    const node = makeNode({ properties: { name: 'a very long name here' } })
+    expect(formatLabel('{prop:name|truncate:10:...}', 'node', node)).toBe('a very ...')
+    expect(formatLabel('{node_id|upper}', 'node', makeNode())).toBe('ALICE')
+  })
+
+  it('chains inside conditional branches', () => {
+    const node = makeNode({ properties: { score: '95', name: 'alice wonders' } })
+    expect(
+      formatLabel('{if:prop:score>90|{prop:name|split: :0|upper}|low}', 'node', node)
+    ).toBe('ALICE')
+  })
+})
+
+// ============================================================================
+// Extraction modifiers: split / slice / trim / default
+// ============================================================================
+
+describe('split modifier', () => {
+  it('extracts by delimiter and index (motivating case: _CNPJ_RAIZ suffix)', () => {
+    expect(formatLabel('{node_id|split:_:0}', 'node', makeNode({ node_id: '12321_CNPJ_RAIZ' }))).toBe('12321')
+    expect(formatLabel('{node_id|split:_:0}', 'node', makeNode({ node_id: '0_CNPJ_RAIZ' }))).toBe('0')
+  })
+
+  it('supports static text composition (Empresa prefix)', () => {
+    const node = makeNode({ node_id: '12321_CNPJ_RAIZ' })
+    expect(formatLabel('Empresa {node_id|split:_:0}', 'node', node)).toBe('Empresa 12321')
+  })
+
+  it('supports negative index (from the end)', () => {
+    const node = makeNode({ properties: { path: 'a/b/c/file.txt' } })
+    expect(formatLabel('{prop:path|split:/:-1}', 'node', node)).toBe('file.txt')
+  })
+
+  it('literal / as delimiter works (not confused with regex spans)', () => {
+    const node = makeNode({ properties: { url: 'http://example.com/page' } })
+    expect(formatLabel('{prop:url|split:/:2}', 'node', node)).toBe('example.com')
+  })
+
+  it('escaped colon as delimiter', () => {
+    const node = makeNode({ properties: { pair: 'key:value' } })
+    expect(formatLabel('{prop:pair|split:\\::1}', 'node', node)).toBe('value')
+  })
+
+  it('out-of-range index yields empty string', () => {
+    expect(formatLabel('{node_id|split:_:9}', 'node', makeNode({ node_id: 'a_b' }))).toBe('')
+    expect(formatLabel('{node_id|split:_:-9}', 'node', makeNode({ node_id: 'a_b' }))).toBe('')
+  })
+})
+
+describe('slice modifier', () => {
+  it('extracts substring by position', () => {
+    const node = makeNode({ properties: { code: 'BR-SP-00123' } })
+    expect(formatLabel('{prop:code|slice:0:5}', 'node', node)).toBe('BR-SP')
+  })
+
+  it('supports negative start', () => {
+    const node = makeNode({ properties: { code: 'BR-SP-00123' } })
+    expect(formatLabel('{prop:code|slice:-5}', 'node', node)).toBe('00123')
+  })
+})
+
+describe('trim modifier', () => {
+  it('removes surrounding whitespace', () => {
+    const node = makeNode({ properties: { name: '  alice  ' } })
+    expect(formatLabel('{prop:name|trim}', 'node', node)).toBe('alice')
+  })
+})
+
+describe('default modifier', () => {
+  it('replaces the [prop] fallback for missing properties', () => {
+    expect(formatLabel('{prop:nickname|default:anon}', 'node', makeNode())).toBe('anon')
+  })
+
+  it('replaces empty-string property values', () => {
+    const node = makeNode({ properties: { nickname: '' } })
+    expect(formatLabel('{prop:nickname|default:anon}', 'node', node)).toBe('anon')
+  })
+
+  it('passes through non-empty values', () => {
+    const node = makeNode({ properties: { nickname: 'ali' } })
+    expect(formatLabel('{prop:nickname|default:anon}', 'node', node)).toBe('ali')
+  })
+
+  it('without default, missing prop still renders [prop]', () => {
+    expect(formatLabel('{prop:nickname}', 'node', makeNode())).toBe('[nickname]')
+  })
+
+  it('catches empty results mid-chain (match miss → default)', () => {
+    const node = makeNode({ properties: { email: 'no-at-sign' } })
+    expect(formatLabel('{prop:email|match:/@(.+)$/:1|default:sem dominio}', 'node', node)).toBe('sem dominio')
+  })
+})
+
+// ============================================================================
+// Regex modifiers: match / replace
+// ============================================================================
+
+describe('match modifier', () => {
+  it('extracts a capture group', () => {
+    const node = makeNode({ properties: { email: 'alice@empresa.com' } })
+    expect(formatLabel('{prop:email|match:/@(.+)$/:1}', 'node', node)).toBe('empresa.com')
+  })
+
+  it('group defaults to 0 (whole match)', () => {
+    const node = makeNode({ properties: { code: 'BR-SP-00123' } })
+    expect(formatLabel('{prop:code|match:/\\d+/}', 'node', node)).toBe('00123')
+  })
+
+  it('protects | alternation inside the pattern', () => {
+    const node = makeNode({ properties: { code: 'US-NY' } })
+    expect(formatLabel('{prop:code|match:/^(BR|US)/:1}', 'node', node)).toBe('US')
+  })
+
+  it('protects : and escaped slashes inside the pattern', () => {
+    const node = makeNode({ properties: { url: 'https://example.com/x' } })
+    expect(formatLabel('{prop:url|match:/https?:\\/\\/([^\\/]+)/:1}', 'node', node)).toBe('example.com')
+  })
+
+  it('supports the i flag', () => {
+    const node = makeNode({ properties: { code: 'br-123' } })
+    expect(formatLabel('{prop:code|match:/^BR/i}', 'node', node)).toBe('br')
+  })
+
+  it('quantifier braces (balanced) work unescaped', () => {
+    const node = makeNode({ properties: { code: 'abc12345' } })
+    expect(formatLabel('{prop:code|match:/\\d{3}/}', 'node', node)).toBe('123')
+  })
+
+  it('no match yields empty string', () => {
+    const node = makeNode({ properties: { email: 'no-at-sign' } })
+    expect(formatLabel('{prop:email|match:/@(.+)$/:1}', 'node', node)).toBe('')
+  })
+
+  it('invalid regex is a render no-op', () => {
+    const node = makeNode({ properties: { name: 'alice' } })
+    expect(formatLabel('{prop:name|match:/(unclosed/}', 'node', node)).toBe('alice')
+  })
+
+  it('chains with other modifiers', () => {
+    const node = makeNode({ properties: { email: 'alice@empresa.com' } })
+    expect(formatLabel('{prop:email|match:/@(.+)$/:1|upper}', 'node', node)).toBe('EMPRESA.COM')
+  })
+})
+
+describe('replace modifier', () => {
+  it('removes the matched text with empty replacement (motivating case)', () => {
+    const node = makeNode({ node_id: '12321_CNPJ_RAIZ' })
+    expect(formatLabel('{node_id|replace:/_CNPJ_RAIZ/:}', 'node', node)).toBe('12321')
+  })
+
+  it('replaces with the given text (motivating case: Empresa)', () => {
+    const node = makeNode({ node_id: '12321_CNPJ_RAIZ' })
+    expect(formatLabel('{node_id|replace:/_CNPJ_RAIZ/: Empresa}', 'node', node)).toBe('12321 Empresa')
+  })
+
+  it('replaces ALL occurrences (implicit global)', () => {
+    const node = makeNode({ properties: { name: 'a_b_c' } })
+    expect(formatLabel('{prop:name|replace:/_/:-}', 'node', node)).toBe('a-b-c')
+  })
+
+  it('supports capture group references in the replacement', () => {
+    const node = makeNode({ properties: { name: 'alice' } })
+    expect(formatLabel('{prop:name|replace:/(a)/:[$1]}', 'node', node)).toBe('[a]lice')
+  })
+})
+
+// ============================================================================
+// matches condition operator + pipe-form conditions
+// ============================================================================
+
+describe('matches condition operator', () => {
+  it('evaluates a regex test', () => {
+    const br = makeNode({ properties: { code: 'BR-123' } })
+    const us = makeNode({ properties: { code: 'US-456' } })
+    expect(formatLabel('{if:prop:code|matches:/^BR/|Brasil|Outro}', 'node', br)).toBe('Brasil')
+    expect(formatLabel('{if:prop:code|matches:/^BR/|Brasil|Outro}', 'node', us)).toBe('Outro')
+  })
+
+  it('protects alternation and supports the i flag', () => {
+    const node = makeNode({ properties: { code: 'br-1' } })
+    expect(formatLabel('{if:prop:code|matches:/^(BR|US)/i|Yes|No}', 'node', node)).toBe('Yes')
+  })
+
+  it('invalid regex evaluates to the false branch', () => {
+    const node = makeNode({ properties: { code: 'BR' } })
+    expect(formatLabel('{if:prop:code|matches:/(bad/|Yes|No}', 'node', node)).toBe('No')
+  })
+
+  it('branches may contain nested placeholders with chains', () => {
+    const node = makeNode({ properties: { code: 'BR-123', name: 'alice' } })
+    expect(
+      formatLabel('{if:prop:code|matches:/^BR/|{prop:name|upper}|-}', 'node', node)
+    ).toBe('ALICE')
+  })
+})
+
+describe('pipe-form string/date conditions (previously broken forms)', () => {
+  it('pipe-form contains now evaluates (was documented but broken)', () => {
+    const node = makeNode({ properties: { name: 'john smith' } })
+    expect(formatLabel('{if:prop:name|contains:john|Match|No}', 'node', node)).toBe('Match')
+  })
+
+  it('pipe-form daysAgo now evaluates (was documented but broken)', () => {
+    const recent = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+    const node = makeNode({ properties: { created: recent } })
+    expect(formatLabel('{if:prop:created|daysAgo:<7|Recent|Old}', 'node', node)).toBe('Recent')
+  })
+
+  it('inline form still works unchanged', () => {
+    const node = makeNode({ properties: { region: 'northeast' } })
+    expect(formatLabel('{if:prop:regioncontainseast|E|W}', 'node', node)).toBe('E')
+  })
+})
+
+// ============================================================================
+// validateTemplate: v2 errors and warnings
+// ============================================================================
+
+describe('validateTemplate v2', () => {
+  it('warns on unknown modifier but stays valid', () => {
+    const result = validateTemplate('{prop:name|nonsense}')
+    expect(result.valid).toBe(true)
+    expect(result.warnings.some(w => w.includes('nonsense'))).toBe(true)
+  })
+
+  it('errors on missing required args', () => {
+    const result = validateTemplate('{prop:name|split:_}')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.includes('index'))).toBe(true)
+  })
+
+  it('errors on non-integer int arg', () => {
+    const result = validateTemplate('{prop:name|split:_:abc}')
+    expect(result.valid).toBe(false)
+  })
+
+  it('errors on unterminated regex', () => {
+    const result = validateTemplate('{prop:name|match:/unclosed}')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.toLowerCase().includes('unterminated'))).toBe(true)
+  })
+
+  it('errors on invalid regex', () => {
+    const result = validateTemplate('{prop:name|match:/(bad/}')
+    expect(result.valid).toBe(false)
+  })
+
+  it('errors on disallowed regex flags', () => {
+    const result = validateTemplate('{prop:name|match:/a/g}')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.includes('flag'))).toBe(true)
+  })
+
+  it('errors on overlong regex', () => {
+    const result = validateTemplate(`{prop:name|match:/${'a'.repeat(300)}/}`)
+    expect(result.valid).toBe(false)
+  })
+
+  it('accepts valid regex templates', () => {
+    expect(validateTemplate('{prop:email|match:/@(.+)$/:1|upper}').valid).toBe(true)
+    expect(validateTemplate('{if:prop:code|matches:/^BR/|A|B}').valid).toBe(true)
+  })
+
+  it('errors on invalid matches regex in conditionals', () => {
+    const result = validateTemplate('{if:prop:code|matches:/(bad/|A|B}')
+    expect(result.valid).toBe(false)
+  })
+
+  it('validates modifiers nested in conditional branches', () => {
+    const result = validateTemplate('{if:prop:x>1|{prop:y|split:_}|no}')
+    expect(result.valid).toBe(false)
+  })
+
+  it('legacy shapes keep validating', () => {
+    expect(validateTemplate('{node_id} - {node_type}').valid).toBe(true)
+    // {if:badformat} stays a (useless but valid) placeholder, as before
+    expect(validateTemplate('{if:badformat}').valid).toBe(true)
+    // A conditional with an unparseable condition is still invalid
+    expect(validateTemplate('{if:prop:x==|yes|no}').valid).toBe(false)
+  })
+})
+
+// ============================================================================
+// extractTemplateProperties with v2 syntax
+// ============================================================================
+
+describe('extractTemplateProperties v2', () => {
+  it('extracts properties through modifier chains', () => {
+    expect(extractTemplateProperties('{prop:url|split:/:2|upper}')).toEqual(['url'])
+  })
+
+  it('does not leak regex fragments as properties', () => {
+    const props = extractTemplateProperties('{prop:email|match:/prop:fake@(.+)$/:1}')
+    expect(props).toEqual(['email'])
+  })
+
+  it('extracts the property from matches conditionals', () => {
+    const props = extractTemplateProperties('{if:prop:code|matches:/^BR/|{prop:name}|-}')
+    expect(props).toContain('code')
+    expect(props).toContain('name')
   })
 })

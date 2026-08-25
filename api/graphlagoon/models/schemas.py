@@ -512,8 +512,15 @@ class TextFormatDefaults(BaseModel):
 
 
 class TextFormatState(BaseModel):
+    # extra="allow" so future frontend-only fields survive the model_dump()
+    # round-trip in the explorations router instead of being silently dropped
+    model_config = ConfigDict(extra="allow")
+
     rules: list[TextFormatRule] = Field(default_factory=list)
     defaults: TextFormatDefaults = Field(default_factory=TextFormatDefaults)
+    # Template mini-language version the templates were written for
+    # (None = v1, pre-chaining)
+    syntaxVersion: Optional[int] = None
 
 
 VlpRenderingMode: TypeAlias = Literal["cte", "procedural"]

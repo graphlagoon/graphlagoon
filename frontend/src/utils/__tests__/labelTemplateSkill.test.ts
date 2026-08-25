@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildLabelTemplateSkill } from '@/utils/labelTemplateSkill'
+import { MODIFIER_REGISTRY, MAX_REGEX_LENGTH } from '@/utils/labelModifiers'
 
 describe('buildLabelTemplateSkill', () => {
   const fullInput = {
@@ -40,12 +41,21 @@ describe('buildLabelTemplateSkill', () => {
     expect(text).toContain('{prop:<column>}')
   })
 
-  it('documents every modifier supported by the formatter', () => {
+  it('documents every modifier supported by the formatter (registry-driven)', () => {
     const text = buildLabelTemplateSkill(fullInput)
-    for (const modifier of ['upper', 'lower', 'capitalize', 'truncate', 'number', 'currency', 'percent']) {
-      expect(text).toContain(`|${modifier}`)
+    for (const def of Object.values(MODIFIER_REGISTRY)) {
+      expect(text).toContain(`|${def.name}`)
+      expect(text).toContain(def.example)
     }
-    expect(text).toContain('Only ONE modifier per placeholder')
+    // Chaining is supported since syntax v2
+    expect(text).toContain('chain left-to-right')
+    expect(text).not.toContain('Only ONE modifier per placeholder')
+  })
+
+  it('documents the regex rules and the matches operator', () => {
+    const text = buildLabelTemplateSkill(fullInput)
+    expect(text).toContain('matches:/^BR/')
+    expect(text).toContain(`capped at ${MAX_REGEX_LENGTH} characters`)
   })
 
   it('documents date formatting and date conditionals', () => {

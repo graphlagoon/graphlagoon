@@ -36,6 +36,38 @@ describe('collectPropertyReferences', () => {
     expect(props).toContain('weight')
   })
 
+  it('chained-modifier templates yield the property, not modifier args', () => {
+    const state = createExplorationState({
+      textFormat: {
+        rules: [
+          {
+            id: 'r1', name: 'r', target: 'node', types: [], priority: 0, enabled: true, scope: 'exploration',
+            template: '{prop:url|split:/:2|upper}',
+          },
+        ],
+        defaults: { nodeTemplate: '', edgeTemplate: '' },
+      },
+    })
+    const props = collectPropertyReferences(state).map((r) => r.property)
+    expect(props).toEqual(['url'])
+  })
+
+  it('regex-arg templates never leak pattern fragments as properties', () => {
+    const state = createExplorationState({
+      textFormat: {
+        rules: [
+          {
+            id: 'r1', name: 'r', target: 'node', types: [], priority: 0, enabled: true, scope: 'exploration',
+            template: '{prop:email|match:/prop:fake@(.+)$/:1}',
+          },
+        ],
+        defaults: { nodeTemplate: '{if:prop:code|matches:/^BR/|{prop:name}|-}', edgeTemplate: '' },
+      },
+    })
+    const props = collectPropertyReferences(state).map((r) => r.property).sort()
+    expect(props).toEqual(['code', 'email', 'name'])
+  })
+
   it('nested conditional templates yield every referenced property', () => {
     const state = createExplorationState({
       textFormat: {

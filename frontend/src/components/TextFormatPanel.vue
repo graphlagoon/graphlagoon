@@ -47,6 +47,7 @@
             </div>
           </div>
         </div>
+        <TemplatePreviewInline :template="nodeDefaultTemplate" target="node" />
       </div>
 
       <div class="default-template">
@@ -75,6 +76,7 @@
             </div>
           </div>
         </div>
+        <TemplatePreviewInline :template="edgeDefaultTemplate" target="edge" />
       </div>
     </div>
 
@@ -190,12 +192,19 @@
             </div>
           </div>
         </div>
+        <TemplatePreviewInline
+          :template="formData.template"
+          :target="formData.target"
+          :types="formData.types"
+        />
       </div>
 
       <div class="form-field">
         <label>Priority</label>
         <input v-model.number="formData.priority" type="number" min="0" max="100" />
       </div>
+
+      <div v-if="formError" class="form-error" data-testid="form-error">{{ formError }}</div>
 
       <div class="form-actions">
         <button class="btn secondary" @click="cancelEdit">Cancel</button>
@@ -218,6 +227,7 @@ import type { TextFormatRule, TextFormatScope } from '@/types/graph';
 import { getAvailablePlaceholders, getAvailableModifiers, validateTemplate } from '@/utils/labelFormatter';
 import TextFormatHelpModal from './TextFormatHelpModal.vue';
 import LabelTemplateSkillModal from './LabelTemplateSkillModal.vue';
+import TemplatePreviewInline from './TemplatePreviewInline.vue';
 import { X, HelpCircle, Bot } from 'lucide-vue-next';
 
 const emit = defineEmits<{
@@ -266,6 +276,7 @@ const sortedRules = computed(() => {
 // Editing state
 const isEditing = ref(false);
 const editingRule = ref<TextFormatRule | null>(null);
+const formError = ref<string | null>(null);
 
 interface FormData {
   name: string;
@@ -327,6 +338,17 @@ function getTargetForInput(inputId: string): 'node' | 'edge' {
   return 'node';
 }
 
+/**
+ * Last index of an unescaped `ch` in `s` — backslash-escaped braces (e.g.
+ * inside a regex arg like match:/a\{2\}/) don't toggle the autocomplete.
+ */
+function lastUnescapedIndex(s: string, ch: string): number {
+  for (let i = s.length - 1; i >= 0; i--) {
+    if (s[i] === ch && (i === 0 || s[i - 1] !== '\\')) return i;
+  }
+  return -1;
+}
+
 function handleTemplateInput(event: Event, inputId: string) {
   const input = event.target as HTMLInputElement;
   const value = input.value;
@@ -334,8 +356,8 @@ function handleTemplateInput(event: Event, inputId: string) {
 
   // Find if we're inside a placeholder
   const beforeCursor = value.slice(0, cursorPos);
-  const lastOpenBrace = beforeCursor.lastIndexOf('{');
-  const lastCloseBrace = beforeCursor.lastIndexOf('}');
+  const lastOpenBrace = lastUnescapedIndex(beforeCursor, '{');
+  const lastCloseBrace = lastUnescapedIndex(beforeCursor, '}');
 
   if (lastOpenBrace > lastCloseBrace) {
     // We're inside a placeholder, show suggestions
@@ -398,7 +420,7 @@ function insertSuggestion(suggestion: { placeholder: string; description: string
 
   // Find the start of current placeholder
   const beforeCursor = value.slice(0, cursorPos);
-  const lastOpenBrace = beforeCursor.lastIndexOf('{');
+  const lastOpenBrace = lastUnescapedIndex(beforeCursor, '{');
 
   let newValue: string;
   let newCursorPos: number;
@@ -447,6 +469,7 @@ function handleBlur() {
 function startAddRule() {
   isEditing.value = true;
   editingRule.value = null;
+  formError.value = null;
   formData.value = {
     name: '',
     target: 'node',
@@ -460,6 +483,7 @@ function startAddRule() {
 function editRule(rule: TextFormatRule) {
   isEditing.value = true;
   editingRule.value = rule;
+  formError.value = null;
   formData.value = {
     name: rule.name,
     target: rule.target,
@@ -473,16 +497,20 @@ function editRule(rule: TextFormatRule) {
 function cancelEdit() {
   isEditing.value = false;
   editingRule.value = null;
+  formError.value = null;
 }
 
 function saveRule() {
   if (!isFormValid.value) return;
 
+  // Errors block saving; warnings (e.g. unknown modifier) are shown by the
+  // inline preview but don't prevent it
   const validation = validateTemplate(formData.value.template);
   if (!validation.valid) {
-    alert('Template error: ' + validation.errors.join(', '));
+    formError.value = 'Template error: ' + validation.errors.join(', ');
     return;
   }
+  formError.value = null;
 
   if (editingRule.value) {
     // Update existing
@@ -842,6 +870,13 @@ function deleteRule(ruleId: string) {
 
 .form-field select[multiple] {
   min-height: 80px;
+}
+
+.form-error {
+  font-size: 11px;
+  color: #e05252;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
 }
 
 .form-actions {

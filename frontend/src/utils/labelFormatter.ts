@@ -6,18 +6,47 @@
  *
  * Template Syntax:
  * - Basic placeholders: {prop:name}, {node_type}, {relationship_type}, {src}, {dst}, {node_id}, {edge_id}
- * - With modifiers: {prop:name|upper}, {prop:name|truncate:20:...}
+ * - With modifiers, chainable left-to-right: {prop:name|upper}, {prop:url|split:/:2|upper}
+ * - Extraction: {node_id|split:_:0}, {prop:code|slice:0:5}, {prop:email|match:/@(.+)$/:1}
  * - Conditionals: {if:prop:x>10|High|Low}, {if:prop:status==active|Active|Inactive}
+ * - Regex conditionals: {if:prop:code|matches:/^BR/|Brasil|Outro}
  * - Date formatting: {date:prop:created_at|DD/MM/YYYY}
  * - Date conditionals: {if:prop:date|daysAgo:<7|Recent|Old}
  * - Line break: {br} — renders the label on multiple lines
+ *
+ * Escaping inside {...}: a backslash escapes the next character, so `\:` `\|`
+ * `\{` `\}` are literals in modifier args. Regex args are slash-delimited
+ * (`match:/re/i`); inside them `\/` is a literal slash and only balanced
+ * braces (quantifiers like {2}) may appear unescaped.
+ *
+ * Modifier behavior/metadata lives in the MODIFIER_REGISTRY (labelModifiers.ts)
+ * so runtime, autocomplete, validation, and the generated AI prompt can't drift.
  */
 
-import type { Node, Edge, TextFormatRule, TextFormatModifier, TextFormatConditionOperator } from '@/types/graph';
+import type { Node, Edge, TextFormatRule, TextFormatConditionOperator } from '@/types/graph';
+import {
+  MODIFIER_REGISTRY,
+  REGEX_ARG_MODIFIERS,
+  REGEX_SEGMENT_WORDS,
+  MAX_REGEX_LENGTH,
+  ALLOWED_REGEX_FLAGS,
+  type ModifierDef,
+} from './labelModifiers';
 
 // ============================================================================
 // Types
 // ============================================================================
+
+interface ParsedModifier {
+  /** Registry name; unknown names are kept (render no-ops, validate warns) */
+  name: string;
+  /** Raw args; a regex arg is stored at its position as the bare pattern (no slashes/flags) */
+  args: string[];
+  /** Regex modifiers only: compiled at parse time, null = failed to compile */
+  regex?: RegExp | null;
+  /** Regex modifiers only: why compilation was rejected (drives validateTemplate) */
+  regexError?: string;
+}
 
 interface ParsedToken {
   type: 'text' | 'placeholder' | 'conditional' | 'date';
@@ -29,8 +58,8 @@ interface ParsedToken {
    * `node_id` is reachable even though a built-in of the same name exists.
    */
   fromProps?: boolean;
-  modifier?: TextFormatModifier;
-  modifierArgs?: string[];
+  /** Ordered modifier chain, applied left-to-right */
+  modifiers?: ParsedModifier[];
   condition?: ParsedCondition;
   trueValue?: string;
   falseValue?: string;
@@ -42,44 +71,14 @@ interface ParsedCondition {
   operator: TextFormatConditionOperator;
   value: string | number;
   value2?: string; // For dateBetween
+  /** `matches` operator only: compiled at parse time, null = failed to compile */
+  regex?: RegExp | null;
+  regexError?: string;
 }
 
 type FormatContext = {
   target: 'node' | 'edge';
   item: Node | Edge;
-};
-
-// ============================================================================
-// Modifier Functions
-// ============================================================================
-
-const modifiers: Record<TextFormatModifier, (value: string, args?: string[]) => string> = {
-  upper: (v) => v.toUpperCase(),
-  lower: (v) => v.toLowerCase(),
-  capitalize: (v) => v.charAt(0).toUpperCase() + v.slice(1).toLowerCase(),
-  truncate: (v, args) => {
-    const maxLen = parseInt(args?.[0] || '20', 10);
-    const suffix = args?.[1] || '...';
-    return v.length > maxLen ? v.slice(0, maxLen - suffix.length) + suffix : v;
-  },
-  number: (v) => {
-    const num = parseFloat(v);
-    return isNaN(num) ? v : num.toLocaleString();
-  },
-  currency: (v, args) => {
-    const num = parseFloat(v);
-    if (isNaN(num)) return v;
-    const currency = args?.[0] || 'USD';
-    try {
-      return num.toLocaleString(undefined, { style: 'currency', currency });
-    } catch {
-      return `${currency} ${num.toFixed(2)}`;
-    }
-  },
-  percent: (v) => {
-    const num = parseFloat(v);
-    return isNaN(num) ? v : `${(num * 100).toFixed(1)}%`;
-  },
 };
 
 // ============================================================================
@@ -205,6 +204,8 @@ function evaluateCondition(condition: ParsedCondition, value: string): boolean {
       return value.toLowerCase().startsWith(String(compareValue).toLowerCase());
     case 'endsWith':
       return value.toLowerCase().endsWith(String(compareValue).toLowerCase());
+    case 'matches':
+      return condition.regex ? condition.regex.test(value) : false;
     default:
       return false;
   }
@@ -217,13 +218,30 @@ function evaluateCondition(condition: ParsedCondition, value: string): boolean {
 function parseConditionExpression(expr: string): ParsedCondition | null {
   // Match patterns like: prop:field>10, prop:field==value, prop:date|daysAgo:<7
 
-  // Date operators: prop:field|daysAgo:<7, prop:field|dateAfter:2024-01-01
-  const dateMatch = expr.match(/^prop:([^|]+)\|(daysAgo|dateAfter|dateBefore|dateBetween):(.+)$/);
-  if (dateMatch) {
-    const [, property, operator, value] = dateMatch;
+  // Pipe-form operators: prop:field|daysAgo:<7, prop:field|matches:/^BR/i,
+  // prop:field|contains:text (string ops accept both pipe and inline forms)
+  const pipeMatch = expr.match(
+    /^prop:([^|]+)\|(daysAgo|dateAfter|dateBefore|dateBetween|matches|contains|startsWith|endsWith):(.+)$/,
+  );
+  if (pipeMatch) {
+    const [, property, operator, value] = pipeMatch;
     if (operator === 'dateBetween') {
       const [v1, v2] = value.split(':');
       return { property, operator: operator as TextFormatConditionOperator, value: v1, value2: v2 };
+    }
+    if (operator === 'matches') {
+      const condition: ParsedCondition = { property, operator, value };
+      if (!value.startsWith('/')) {
+        condition.regex = null;
+        condition.regexError = 'matches: pattern must be slash-delimited, e.g. matches:/pattern/';
+      } else {
+        const span = consumeRegexSpan(value, 0);
+        if (span.end < value.length) {
+          condition.regexError = 'matches: unexpected characters after regex';
+        }
+        compileModifierRegex(condition, span, false);
+      }
+      return condition;
     }
     return { property, operator: operator as TextFormatConditionOperator, value };
   }
@@ -239,41 +257,203 @@ function parseConditionExpression(expr: string): ParsedCondition | null {
 }
 
 /**
- * Split a string by `|` but respecting nested `{...}` pairs.
+ * Consume a slash-delimited regex span starting at `s[start]` (which must be
+ * `/`). Handles `\`-escapes (so `\/` stays inside the pattern) and collects
+ * trailing flag letters. The pattern is returned raw — regex escapes are
+ * meaningful to `new RegExp` and must not be unescaped.
+ */
+function consumeRegexSpan(s: string, start: number): {
+  pattern: string;
+  flags: string;
+  end: number;
+  terminated: boolean;
+} {
+  let i = start + 1;
+  let pattern = '';
+  let terminated = false;
+  while (i < s.length) {
+    if (s[i] === '\\' && i + 1 < s.length) {
+      pattern += s[i] + s[i + 1];
+      i += 2;
+      continue;
+    }
+    if (s[i] === '/') {
+      terminated = true;
+      i++;
+      break;
+    }
+    pattern += s[i];
+    i++;
+  }
+  let flags = '';
+  while (i < s.length && /[a-zA-Z]/.test(s[i])) {
+    flags += s[i];
+    i++;
+  }
+  return { pattern, flags, end: i, terminated };
+}
+
+/**
+ * Split a string by top-level `|`, respecting nested `{...}` pairs,
+ * `\`-escapes, and slash-delimited regex spans (`match:/a|b/` never splits at
+ * the alternation). A span is only recognized right after `<word>:` where
+ * word is a regex-carrying name (match/replace/matches), so `split:/:2` — a
+ * literal `/` delimiter — is untouched.
  * e.g. "prop:x==1|{prop:y|upper}|default" → ["prop:x==1", "{prop:y|upper}", "default"]
  */
 function splitByPipeRespectingBraces(s: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let current = '';
+  let segHasSpan = false;
+  let i = 0;
 
-  for (const ch of s) {
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === '\\' && i + 1 < s.length) {
+      current += ch + s[i + 1];
+      i += 2;
+      continue;
+    }
     if (ch === '{') depth++;
     if (ch === '}') depth--;
+    if (ch === '/' && depth === 0 && !segHasSpan && i > 0 && s[i - 1] === ':') {
+      const colonIdx = current.indexOf(':');
+      const word = colonIdx === -1 ? current : current.slice(0, colonIdx);
+      if (REGEX_SEGMENT_WORDS.has(word)) {
+        const span = consumeRegexSpan(s, i);
+        current += s.slice(i, span.end);
+        segHasSpan = true;
+        i = span.end;
+        continue;
+      }
+    }
     if (ch === '|' && depth === 0) {
       parts.push(current);
       current = '';
+      segHasSpan = false;
     } else {
       current += ch;
     }
+    i++;
   }
   parts.push(current);
   return parts;
 }
 
 /**
- * Find the matching closing `}` for a `{` at position `start`,
- * respecting nested brace pairs. Returns the index of the matching `}`,
- * or -1 if not found.
+ * Find the matching closing `}` for a `{` at position `start`, respecting
+ * nested brace pairs and `\`-escapes (`\}` inside a regex arg is a literal).
+ * Returns the index of the matching `}`, or -1 if not found.
  */
 function findMatchingBrace(template: string, start: number): number {
   let depth = 1;
   for (let j = start + 1; j < template.length; j++) {
+    if (template[j] === '\\') {
+      j++;
+      continue;
+    }
     if (template[j] === '{') depth++;
     if (template[j] === '}') depth--;
     if (depth === 0) return j;
   }
   return -1;
+}
+
+/**
+ * Split modifier args on `:` with backslash unescaping (`\:` → literal `:`,
+ * `\|` → `|`, `\\` → `\`). Used for non-regex args only — regex patterns keep
+ * their escapes.
+ */
+function splitArgsUnescaping(s: string): string[] {
+  const args: string[] = [];
+  let current = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '\\' && i + 1 < s.length) {
+      current += s[i + 1];
+      i++;
+      continue;
+    }
+    if (ch === ':') {
+      args.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  args.push(current);
+  return args;
+}
+
+/**
+ * Parse one pipe segment of a modifier chain (`truncate:20:...`,
+ * `match:/@(.+)$/:1`) into a ParsedModifier. Regex-arg modifiers get their
+ * pattern compiled here, once — the compiled RegExp rides the template cache.
+ */
+function parseModifierSegment(seg: string): ParsedModifier {
+  const colonIdx = seg.indexOf(':');
+  const name = colonIdx === -1 ? seg : seg.slice(0, colonIdx);
+  const rest = colonIdx === -1 ? '' : seg.slice(colonIdx + 1);
+  const mod: ParsedModifier = { name, args: [] };
+
+  if (REGEX_ARG_MODIFIERS.has(name)) {
+    if (!rest.startsWith('/')) {
+      mod.regex = null;
+      mod.regexError = `${name}: pattern must be slash-delimited, e.g. ${name}:/pattern/`;
+      return mod;
+    }
+    const span = consumeRegexSpan(rest, 0);
+    mod.args.push(span.pattern);
+    if (span.end < rest.length) {
+      if (rest[span.end] === ':') {
+        mod.args.push(...splitArgsUnescaping(rest.slice(span.end + 1)));
+      } else {
+        mod.regexError = `${name}: unexpected characters after regex`;
+      }
+    }
+    compileModifierRegex(mod, span, MODIFIER_REGISTRY[name as keyof typeof MODIFIER_REGISTRY]?.regexGlobal === true);
+    return mod;
+  }
+
+  if (rest !== '') {
+    mod.args = splitArgsUnescaping(rest);
+  }
+  return mod;
+}
+
+/** Shared regex compile policy: termination, length cap, flag allowlist, try/catch. */
+function compileModifierRegex(
+  target: { regex?: RegExp | null; regexError?: string },
+  span: { pattern: string; flags: string; terminated: boolean },
+  global: boolean,
+): void {
+  if (target.regexError) {
+    target.regex = null;
+    return;
+  }
+  if (!span.terminated) {
+    target.regex = null;
+    target.regexError = 'Unterminated regex (missing closing /)';
+    return;
+  }
+  if (span.pattern.length > MAX_REGEX_LENGTH) {
+    target.regex = null;
+    target.regexError = `Regex pattern too long (max ${MAX_REGEX_LENGTH} chars)`;
+    return;
+  }
+  const badFlags = span.flags.split('').filter((f) => !ALLOWED_REGEX_FLAGS.includes(f));
+  if (badFlags.length > 0) {
+    target.regex = null;
+    target.regexError = `Unsupported regex flag(s): ${badFlags.join('')} (allowed: ${ALLOWED_REGEX_FLAGS})`;
+    return;
+  }
+  try {
+    target.regex = new RegExp(span.pattern, span.flags + (global ? 'g' : ''));
+  } catch (e) {
+    target.regex = null;
+    target.regexError = `Invalid regex: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 function parseTokenContent(content: string): ParsedToken {
@@ -296,62 +476,51 @@ function parseTokenContent(content: string): ParsedToken {
     }
   }
 
-  // Conditional: if:condition|trueVal|falseVal (brace-aware split)
+  // Conditional: if:condition|trueVal|falseVal (brace/regex-aware split).
+  // Pipe-form operators arrive split across the first two parts
+  // (['prop:date', 'daysAgo:<7', 'Recent', 'Old']) — re-join and retry.
   if (content.startsWith('if:')) {
     const parts = splitByPipeRespectingBraces(content.slice(3));
     if (parts.length >= 2) {
-      const condition = parseConditionExpression(parts[0]);
+      let condition = parseConditionExpression(parts[0]);
+      let branchStart = 1;
+      if (
+        !condition &&
+        parts.length >= 3 &&
+        /^(daysAgo|dateAfter|dateBefore|dateBetween|matches|contains|startsWith|endsWith):/.test(parts[1])
+      ) {
+        condition = parseConditionExpression(parts[0] + '|' + parts[1]);
+        if (condition) branchStart = 2;
+      }
       return {
         type: 'conditional',
         value: content,
         condition: condition || undefined,
-        trueValue: parts[1],
-        falseValue: parts[2] || '',
+        trueValue: parts[branchStart],
+        falseValue: parts[branchStart + 1] || '',
       };
     }
   }
 
-  // Property placeholder: prop:name or prop:name|modifier
+  // Property placeholder: prop:name, prop:name|modifier, chains allowed
   if (content.startsWith('prop:')) {
-    const parts = content.slice(5).split('|');
-    const property = parts[0];
-    let modifier: TextFormatModifier | undefined;
-    let modifierArgs: string[] | undefined;
-
-    if (parts[1]) {
-      const modParts = parts[1].split(':');
-      modifier = modParts[0] as TextFormatModifier;
-      modifierArgs = modParts.slice(1);
-    }
-
+    const parts = splitByPipeRespectingBraces(content.slice(5));
     return {
       type: 'placeholder',
       value: content,
-      property,
+      property: parts[0],
       fromProps: true,
-      modifier,
-      modifierArgs,
+      modifiers: parts.length > 1 ? parts.slice(1).map(parseModifierSegment) : undefined,
     };
   }
 
   // Built-in placeholders: node_type, relationship_type, src, dst, node_id, edge_id
-  const parts = content.split('|');
-  const property = parts[0];
-  let modifier: TextFormatModifier | undefined;
-  let modifierArgs: string[] | undefined;
-
-  if (parts[1]) {
-    const modParts = parts[1].split(':');
-    modifier = modParts[0] as TextFormatModifier;
-    modifierArgs = modParts.slice(1);
-  }
-
+  const parts = splitByPipeRespectingBraces(content);
   return {
     type: 'placeholder',
     value: content,
-    property,
-    modifier,
-    modifierArgs,
+    property: parts[0],
+    modifiers: parts.length > 1 ? parts.slice(1).map(parseModifierSegment) : undefined,
   };
 }
 
@@ -428,9 +597,15 @@ function getPropertyValue(ctx: FormatContext, property: string, fromProps = fals
   return '';
 }
 
-function applyModifier(value: string, modifier?: TextFormatModifier, args?: string[]): string {
-  if (!modifier || !modifiers[modifier]) return value;
-  return modifiers[modifier](value, args);
+function applyModifierChain(value: string, chain?: ParsedModifier[]): string {
+  if (!chain) return value;
+  let result = value;
+  for (const mod of chain) {
+    const def: ModifierDef | undefined = MODIFIER_REGISTRY[mod.name as keyof typeof MODIFIER_REGISTRY];
+    if (!def) continue; // unknown modifier — lenient at render, warned by validateTemplate
+    result = def.apply(result, mod.args, mod.regex);
+  }
+  return result;
 }
 
 // ============================================================================
@@ -445,10 +620,11 @@ function formatWithTokens(tokens: ParsedToken[], ctx: FormatContext): string {
 
       case 'placeholder': {
         const value = getPropertyValue(ctx, token.property || '', token.fromProps);
-        if (value === '' && token.value?.startsWith('prop:')) {
+        const hasDefault = token.modifiers?.some((m) => m.name === 'default');
+        if (value === '' && token.value?.startsWith('prop:') && !hasDefault) {
           return `[${token.property}]`; // Fallback for missing props
         }
-        return applyModifier(value, token.modifier, token.modifierArgs);
+        return applyModifierChain(value, token.modifiers);
       }
 
       case 'conditional': {
@@ -556,15 +732,56 @@ export function formatEdgeLabel(
   return formatLabel(template, 'edge', edge);
 }
 
-/**
- * Validate a template string and return errors if any
- */
-export function validateTemplate(template: string): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
+/** Check one parsed modifier against its registry spec. */
+function validateModifier(
+  mod: ParsedModifier,
+  errors: string[],
+  warnings: string[],
+): void {
+  const def: ModifierDef | undefined = MODIFIER_REGISTRY[mod.name as keyof typeof MODIFIER_REGISTRY];
+  if (!def) {
+    warnings.push(`Unknown modifier "${mod.name}" (ignored at render)`);
+    return;
+  }
+  if (mod.regexError) {
+    errors.push(
+      mod.regexError.startsWith(`${mod.name}:`) ? mod.regexError : `${mod.name}: ${mod.regexError}`,
+    );
+    return;
+  }
+  def.args.forEach((spec, i) => {
+    const present = mod.args.length > i && (spec.kind !== 'int' || mod.args[i] !== '');
+    if (spec.required && !present) {
+      errors.push(`${mod.name}: missing required argument "${spec.name}"`);
+      return;
+    }
+    if (present && spec.kind === 'int' && !/^-?\d+$/.test(mod.args[i])) {
+      errors.push(`${mod.name}: argument "${spec.name}" must be an integer, got "${mod.args[i]}"`);
+    }
+  });
+}
 
-  // Check for balanced braces
+/**
+ * Validate a template string. `errors` block rendering correctness (invalid
+ * regex, bad args, unbalanced braces); `warnings` are survivable (unknown
+ * modifier no-ops at render). `valid` reflects errors only.
+ */
+export function validateTemplate(template: string): {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+} {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Check for balanced braces (backslash-escaped braces are literals)
   let braceCount = 0;
-  for (const char of template) {
+  for (let i = 0; i < template.length; i++) {
+    const char = template[i];
+    if (char === '\\') {
+      i++;
+      continue;
+    }
     if (char === '{') braceCount++;
     if (char === '}') braceCount--;
     if (braceCount < 0) {
@@ -576,19 +793,33 @@ export function validateTemplate(template: string): { valid: boolean; errors: st
     errors.push('Unbalanced braces: found { without matching }');
   }
 
-  // Parse and check tokens
-  try {
-    const tokens = parseTemplate(template);
-    for (const token of tokens) {
-      if (token.type === 'conditional' && !token.condition) {
-        errors.push(`Invalid condition syntax in: ${token.value}`);
+  // Parse and check tokens (recursing into conditional branches)
+  function walk(tmpl: string) {
+    for (const token of parseTemplate(tmpl)) {
+      if (token.type === 'conditional') {
+        if (!token.condition) {
+          errors.push(`Invalid condition syntax in: ${token.value}`);
+        } else if (token.condition.regexError) {
+          errors.push(token.condition.regexError);
+        }
+        if (token.trueValue) walk(token.trueValue);
+        if (token.falseValue) walk(token.falseValue);
+      }
+      if (token.type === 'placeholder' && token.modifiers) {
+        for (const mod of token.modifiers) {
+          validateModifier(mod, errors, warnings);
+        }
       }
     }
+  }
+
+  try {
+    walk(template);
   } catch (e) {
     errors.push(`Parse error: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, warnings };
 }
 
 /**
@@ -660,18 +891,14 @@ export function getAvailablePlaceholders(
 }
 
 /**
- * Get available modifiers for autocomplete
+ * Get available modifiers for autocomplete (driven by the registry)
  */
 export function getAvailableModifiers(): { modifier: string; description: string; example: string }[] {
-  return [
-    { modifier: 'upper', description: 'Convert to uppercase', example: '{prop:name|upper}' },
-    { modifier: 'lower', description: 'Convert to lowercase', example: '{prop:name|lower}' },
-    { modifier: 'capitalize', description: 'Capitalize first letter', example: '{prop:name|capitalize}' },
-    { modifier: 'truncate', description: 'Truncate with ellipsis', example: '{prop:name|truncate:20:...}' },
-    { modifier: 'number', description: 'Format as number', example: '{prop:count|number}' },
-    { modifier: 'currency', description: 'Format as currency', example: '{prop:amount|currency:BRL}' },
-    { modifier: 'percent', description: 'Format as percentage', example: '{prop:rate|percent}' },
-  ];
+  return Object.values(MODIFIER_REGISTRY).map((def) => ({
+    modifier: def.name,
+    description: def.description,
+    example: def.example,
+  }));
 }
 
 /**

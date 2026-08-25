@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useGraphStore } from '@/stores/graph'
 import { useClusterStore } from '@/stores/cluster'
@@ -263,7 +263,7 @@ describe('exploration state serialization', () => {
       // Reset and reload
       store.loadTextFormatState(undefined)
       expect(store.textFormatRules).toHaveLength(0)
-      expect(store.textFormatDefaults.nodeTemplate).toBe('{node_id|truncate:10}')
+      expect(store.textFormatDefaults.nodeTemplate).toBe('{node_id|truncate:10:...}')
 
       store.loadTextFormatState(state)
       expect(store.textFormatRules).toHaveLength(1)
@@ -285,8 +285,34 @@ describe('exploration state serialization', () => {
 
       store.loadTextFormatState(undefined)
       expect(store.textFormatRules).toHaveLength(0)
-      expect(store.textFormatDefaults.nodeTemplate).toBe('{node_id|truncate:10}')
+      expect(store.textFormatDefaults.nodeTemplate).toBe('{node_id|truncate:10:...}')
       expect(store.textFormatDefaults.edgeTemplate).toBe('{relationship_type}')
+    })
+
+    it('getTextFormatState stamps the current syntax version', () => {
+      const store = useGraphStore()
+      expect(store.getTextFormatState().syntaxVersion).toBe(2)
+    })
+
+    it('loads v1 state (no syntaxVersion) without complaint', () => {
+      const store = useGraphStore()
+      store.loadTextFormatState({
+        rules: [],
+        defaults: { nodeTemplate: '{node_id}', edgeTemplate: '{relationship_type}' },
+      })
+      expect(store.textFormatDefaults.nodeTemplate).toBe('{node_id}')
+    })
+
+    it('warns when loading state from a newer syntax version', () => {
+      const store = useGraphStore()
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      store.loadTextFormatState({
+        rules: [],
+        defaults: { nodeTemplate: '{node_id}', edgeTemplate: '{relationship_type}' },
+        syntaxVersion: 99,
+      })
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('newer syntax version'))
+      warnSpy.mockRestore()
     })
   })
 

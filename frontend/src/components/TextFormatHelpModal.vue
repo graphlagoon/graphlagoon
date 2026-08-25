@@ -101,17 +101,43 @@ const slides = [
       { template: '{relationship_type}', result: 'FOLLOWS', note: 'Edge type' },
       { template: '{src}', result: 'user_1', note: 'Source node ID' },
       { template: '{dst}', result: 'user_2', note: 'Destination node ID' },
-      { template: '{src} → {dst}', result: 'user_1 → user_2', note: 'Combined format' },
+      { template: '{src} -> {dst}', result: 'user_1 -> user_2', note: 'Combined format (canvas font is ASCII-only)' },
     ],
   },
   {
     title: 'Text Modifiers',
-    description: 'Apply transformations to property values using pipe syntax.',
+    description: 'Apply transformations to property values using pipe syntax. '
+      + 'Modifiers chain left-to-right: {prop:name|trim|upper} trims, then uppercases.',
     examples: [
       { template: '{prop:name|upper}', result: 'JOHN DOE', note: 'Uppercase' },
       { template: '{prop:name|lower}', result: 'john doe', note: 'Lowercase' },
       { template: '{prop:name|capitalize}', result: 'John doe', note: 'Capitalize first' },
       { template: '{prop:bio|truncate:15:...}', result: 'Software engin...', note: 'Truncate with ellipsis' },
+      { template: '{prop:name|trim|upper}', result: 'JOHN DOE', note: 'Chained: trim, then uppercase' },
+    ],
+  },
+  {
+    title: 'Extract & Split',
+    description: 'Pull one part out of a composite value: ids with suffixes, emails, '
+      + 'paths, codes. Negative indexes count from the end. |default: replaces empty results.',
+    examples: [
+      { template: '{node_id|split:_:0}', result: '12321', note: 'From 12321_CNPJ_RAIZ — part before the first _' },
+      { template: 'Empresa {node_id|split:_:0}', result: 'Empresa 12321', note: 'Combine with literal text' },
+      { template: '{prop:path|split:/:-1}', result: 'file.txt', note: 'Last path segment (negative index)' },
+      { template: '{prop:code|slice:0:5}', result: 'BR-SP', note: 'From BR-SP-00123 — substring by position' },
+      { template: '{prop:nickname|default:anonymous}', result: 'anonymous', note: 'Fallback when the value is empty/missing' },
+    ],
+  },
+  {
+    title: 'Regex Extraction',
+    description: 'match extracts via a capture group; replace rewrites all occurrences. '
+      + 'Patterns are slash-delimited (/re/), the only flag is i, \\/ is a literal slash, '
+      + 'and a lone brace must be escaped as \\{ or \\} (balanced quantifiers like {2} are fine).',
+    examples: [
+      { template: '{prop:email|match:/@(.+)$/:1}', result: 'empresa.com', note: 'Capture group 1 — the domain' },
+      { template: '{node_id|replace:/_CNPJ_RAIZ/: Empresa}', result: '12321 Empresa', note: 'Rewrite the suffix' },
+      { template: '{prop:code|match:/^(BR|US)/:1|upper}', result: 'BR', note: 'Alternation is safe inside /.../ — and chains' },
+      { template: '{if:prop:code|matches:/^BR/i|Brasil|Outro}', result: 'Brasil', note: 'Regex conditional, case-insensitive' },
     ],
   },
   {
@@ -160,7 +186,7 @@ const slides = [
     examples: [
       { template: '{prop:name|upper} ({node_type})', result: 'JOHN DOE (Person)', note: 'Name with type' },
       { template: '{prop:name|truncate:10} - {prop:role|capitalize}', result: 'John Doe... - Admin', note: 'Multiple fields' },
-      { template: '{if:prop:verified==true|✓|✗} {prop:email}', result: '✓ john@example.com', note: 'Status indicator' },
+      { template: '{if:prop:verified==true|OK|--} {prop:email}', result: 'OK john@example.com', note: 'Status indicator (canvas font is ASCII-only)' },
       { template: '[{prop:status|upper}] {prop:title|truncate:20}', result: '[ACTIVE] Meeting tomorrow...', note: 'Formatted status' },
     ],
   },
