@@ -38,3 +38,52 @@ describe('TextFormatPanel — AI skill helper', () => {
     )
   })
 })
+
+describe('TextFormatPanel — inline validation and preview', () => {
+  it('renders inline previews under the default template inputs', async () => {
+    const { container } = render(TextFormatPanel)
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(400)
+    vi.useRealTimers()
+    // node + edge default previews (defaults are non-empty)
+    expect(container.querySelectorAll('[data-testid="template-preview"]').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('blocks saving an invalid rule template with an inline error (no alert)', async () => {
+    const { container, getByText } = render(TextFormatPanel)
+    const graphStore = useGraphStore()
+
+    // Open the rule form
+    const addBtn = container.querySelector('.add-rule-btn') as HTMLButtonElement
+    await fireEvent.click(addBtn)
+
+    const nameInput = container.querySelector('.rule-form input[type="text"]') as HTMLInputElement
+    await fireEvent.update(nameInput, 'Bad rule')
+    const templateInput = container.querySelector('.rule-form .template-input') as HTMLInputElement
+    await fireEvent.update(templateInput, '{prop:name|match:/(bad/}')
+
+    await fireEvent.click(getByText('Save'))
+
+    expect(container.querySelector('[data-testid="form-error"]')?.textContent).toContain('Template error')
+    expect(graphStore.textFormatRules).toHaveLength(0)
+  })
+
+  it('saves a valid v2 rule template', async () => {
+    const { container, getByText } = render(TextFormatPanel)
+    const graphStore = useGraphStore()
+
+    const addBtn = container.querySelector('.add-rule-btn') as HTMLButtonElement
+    await fireEvent.click(addBtn)
+
+    const nameInput = container.querySelector('.rule-form input[type="text"]') as HTMLInputElement
+    await fireEvent.update(nameInput, 'Empresa rule')
+    const templateInput = container.querySelector('.rule-form .template-input') as HTMLInputElement
+    await fireEvent.update(templateInput, 'Empresa {node_id|split:_:0}')
+
+    await fireEvent.click(getByText('Save'))
+
+    expect(container.querySelector('[data-testid="form-error"]')).toBeNull()
+    expect(graphStore.textFormatRules).toHaveLength(1)
+    expect(graphStore.textFormatRules[0].template).toBe('Empresa {node_id|split:_:0}')
+  })
+})

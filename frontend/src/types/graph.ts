@@ -946,7 +946,13 @@ export type TextFormatModifier =
   | 'truncate'        // Truncate with ellipsis: truncate:20:...
   | 'number'          // Format as number with locale
   | 'currency'        // Format as currency: currency:BRL or currency:USD
-  | 'percent';        // Format as percentage
+  | 'percent'         // Format as percentage
+  | 'split'           // Split by delimiter, take part: split:_:0 (negative = from end)
+  | 'slice'           // Substring: slice:0:5 (String.prototype.slice semantics)
+  | 'trim'            // Trim surrounding whitespace
+  | 'default'         // Fallback when value is empty: default:N/A
+  | 'match'           // Regex capture: match:/@(.+)$/:1
+  | 'replace';        // Regex replace (all occurrences): replace:/_CNPJ_RAIZ/:
 
 /** Operators for conditional expressions */
 export type TextFormatConditionOperator =
@@ -959,6 +965,7 @@ export type TextFormatConditionOperator =
   | 'contains'        // String contains
   | 'startsWith'      // String starts with
   | 'endsWith'        // String ends with
+  | 'matches'         // Regex test: matches:/^BR/
   | 'daysAgo'         // Date is within N days: daysAgo:<7
   | 'dateAfter'       // Date is after: dateAfter:2024-01-01
   | 'dateBefore'      // Date is before: dateBefore:2024-12-31
@@ -989,4 +996,6 @@ export interface TextFormatDefaults {
 export interface TextFormatState {
   rules: TextFormatRule[];
   defaults: TextFormatDefaults;
+  /** Template mini-language version the templates were written for (absent = v1, pre-chaining) */
+  syntaxVersion?: number;
 }

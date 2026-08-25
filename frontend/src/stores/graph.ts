@@ -31,6 +31,7 @@ import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
+import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
 import { useToast } from '@/composables/useToast';
 import {
   capabilitiesFor,
@@ -2327,21 +2328,27 @@ export const useGraphStore = defineStore('graph', () => {
     return {
       rules: [...textFormatRules.value],
       defaults: { ...textFormatDefaults.value },
+      syntaxVersion: LABEL_TEMPLATE_SYNTAX_VERSION,
     };
   }
 
   function loadTextFormatState(state: TextFormatState | undefined) {
     if (state) {
+      if (state.syntaxVersion && state.syntaxVersion > LABEL_TEMPLATE_SYNTAX_VERSION) {
+        console.warn(
+          `Label templates were saved with a newer syntax version (${state.syntaxVersion} > ${LABEL_TEMPLATE_SYNTAX_VERSION}); some may not render as intended.`,
+        );
+      }
       textFormatRules.value = state.rules || [];
       textFormatDefaults.value = state.defaults || {
-        nodeTemplate: '{node_id|truncate:10}',
+        nodeTemplate: '{node_id|truncate:10:...}',
         edgeTemplate: '{relationship_type}',
       };
     } else {
       // Reset to defaults if no state provided
       textFormatRules.value = [];
       textFormatDefaults.value = {
-        nodeTemplate: '{node_id|truncate:10}',
+        nodeTemplate: '{node_id|truncate:10:...}',
         edgeTemplate: '{relationship_type}',
       };
     }

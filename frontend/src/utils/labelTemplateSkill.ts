@@ -13,8 +13,31 @@
  */
 
 import { bulletList, propertyList, type SkillProperty } from './clusterProgramSkill'
+import { MODIFIER_REGISTRY, MAX_REGEX_LENGTH, ALLOWED_REGEX_FLAGS, type ModifierDef } from './labelModifiers'
 
 export type { SkillProperty }
+
+const MODIFIER_CATEGORY_LABELS: Record<ModifierDef['docCategory'], string> = {
+  text: 'Text',
+  number: 'Numbers',
+  extract: 'Extraction',
+  regex: 'Regex (advanced)',
+}
+
+/**
+ * Modifier documentation generated straight from the registry, so this prompt
+ * can never drift from what the formatter actually supports.
+ */
+function modifierSections(): string {
+  const order: ModifierDef['docCategory'][] = ['text', 'number', 'extract', 'regex']
+  return order
+    .map((cat) => {
+      const defs = Object.values(MODIFIER_REGISTRY).filter((d) => d.docCategory === cat)
+      const lines = defs.map((d) => `- \`${d.example}\` — ${d.description}`).join('\n')
+      return `**${MODIFIER_CATEGORY_LABELS[cat]}:**\n${lines}`
+    })
+    .join('\n\n')
+}
 
 export interface LabelTemplateSkillInput {
   /** Node types present in the current graph (e.g. ['Person', 'Company']) */
@@ -105,16 +128,31 @@ Line break:
 ### Modifiers (pipe syntax)
 
 Append \`|modifier\` inside the braces. Arguments are colon-separated.
+Modifiers **chain left-to-right**: \`{prop:url|split:/:2|upper}\` first splits,
+then uppercases the kept part.
 
-- \`{prop:name|upper}\` → JOHN DOE
-- \`{prop:name|lower}\` → john doe
-- \`{prop:name|capitalize}\` → John doe
-- \`{prop:bio|truncate:15:...}\` → Software engin...  (truncate:<length>:<suffix>)
-- \`{prop:count|number}\` → 1,234,567 (locale number)
-- \`{prop:price|currency:USD}\` → $1,234.56   (also \`currency:BRL\` → R$ 1.234,56)
-- \`{prop:rate|percent}\` → 85.5%  (0.855 → 85.5%)
+${modifierSections()}
 
-Only ONE modifier per placeholder — they do not chain.
+Notes on arguments:
+- A backslash escapes the next character in an argument: \`split:\\::1\` splits
+  on a literal colon, \`\\|\` is a literal pipe.
+- \`split\` and \`slice\` accept **negative indexes** (count from the end):
+  \`{prop:path|split:/:-1}\` keeps the last path segment.
+- \`default\` replaces empty results, including a \`match\` that found nothing
+  and a \`prop:\` column that is missing (it suppresses the \`[column]\`
+  placeholder): \`{prop:nickname|default:anonymous}\`.
+
+Regex rules (for \`match\`, \`replace\` and the \`matches\` condition):
+- Patterns are slash-delimited: \`match:/@(.+)$/:1\` (the \`:1\` is the capture
+  group; omit for the whole match). Write \`\\/\` for a literal slash.
+- The only allowed flag is \`${ALLOWED_REGEX_FLAGS}\` (case-insensitive):
+  \`matches:/^br/i\`.
+- Patterns are capped at ${MAX_REGEX_LENGTH} characters.
+- Quantifier braces like \`{2}\` work as long as they are balanced; escape a
+  lone literal brace as \`\\{\` or \`\\}\`.
+- \`replace\` replaces **all** occurrences; an empty replacement deletes the
+  match: \`{node_id|replace:/_SUFFIX$/:}\`.
+- An invalid pattern renders the value unchanged (and the panel flags it).
 
 ### Dates
 
@@ -140,14 +178,16 @@ after the property name: \`==\`, \`!=\`, \`>\`, \`<\`, \`>=\`, \`<=\`, \`contain
 - \`{if:prop:score>80|High|Low}\`
 - \`{if:prop:role==admin|Admin|User}\`
 - \`{if:prop:namecontainsjohn|Match|No match}\` — parsed as property \`name\`,
-  operator \`contains\`, value \`john\`. Note there is NO space and NO pipe between
-  the property, the operator and the value.
+  operator \`contains\`, value \`john\`. The string operators also accept a pipe
+  form: \`{if:prop:name|contains:john|Match|No match}\` is equivalent.
 
-Date operators use the pipe form:
+Date and regex operators use the pipe form:
 - \`{if:prop:created|daysAgo:<7|Recent|Old}\` (also \`>\`, \`<=\`, \`>=\`)
 - \`{if:prop:created|dateAfter:2024-01-01|New|Legacy}\`
 - \`{if:prop:created|dateBefore:2023-12-31|Archive|Current}\`
 - \`{if:prop:created|dateBetween:2024-01-01:2024-12-31|In range|Out}\`
+- \`{if:prop:code|matches:/^BR/|Brasil|Outro}\` — regex test (same regex rules
+  as above; add \`i\` after the closing slash for case-insensitive)
 
 Branch values may themselves contain placeholders:
 \`{if:prop:verified==true|{prop:name}|anonymous}\`.
@@ -201,6 +241,13 @@ Rule "Recent transactions" — target \`edge\`, types \`[PAID]\`, priority \`30\
 {prop:amount|currency:USD} {if:prop:created|daysAgo:<7|NEW|}
 \`\`\`
 
+Rule "Clean company ids" — target \`node\`, types \`[Company]\`, when ids carry a
+fixed suffix like \`12321_CNPJ_RAIZ\` (extraction + chaining):
+
+\`\`\`
+Empresa {node_id|split:_:0}
+\`\`\`
+
 ## How to help me
 
 I don't know exactly what I want my labels to say yet.
@@ -219,6 +266,9 @@ Good questions to ask me include:
   \`{br}\`), like a name with a metric under it?
 - Should numbers be formatted (thousands separator, currency + which currency,
   percentage)? Which properties are numeric?
+- Do any ids or codes have a composite format (prefixes/suffixes with \`_\` or
+  \`-\`, emails, URLs) where only one part should be shown? (That's what
+  \`split\`, \`slice\`, \`match\` and \`replace\` are for.)
 - Are there date properties worth showing, and in what format?
 - Any status/flag property that should become a short badge or emoji via a
   conditional?
