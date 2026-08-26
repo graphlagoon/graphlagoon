@@ -759,6 +759,48 @@ app.include_router(graphql_router, prefix="/graphql")
 
 ---
 
+### 24. 🟢 E2E MOCK_GRAPH_RESPONSE nodes carry properties at the top level
+
+**Location:** [frontend/e2e/fixtures/mock-data.ts](frontend/e2e/fixtures/mock-data.ts) (`MOCK_GRAPH_RESPONSE`)
+
+**Issue:**
+Nodes are shaped `{ node_id, node_type, name, age }` — but the app expects
+`properties: { name, ... }` (see `types/graph.ts`). E2E therefore renders
+nodes with no usable properties: labels fall back to node ids and the detail
+panel is empty. Tests pass because none assert on rendered labels, so the
+suite silently exercises a degraded rendering path. The docs screenshot
+fixture (`frontend/e2e/fixtures/screenshot-graph.ts`) uses the correct shape.
+
+**Recommendation:**
+Move the extra fields under `properties` and adjust any spec that reads them
+from the top level. Verify no test relied on the fallback-to-id labels.
+
+**Effort:** Small (half a day)
+
+---
+
+### 25. ⚪ Docs "living docs" hardening not yet applied beyond skill_feature_creation
+
+**Location:** `.claude/skills/`, `.github/`
+
+**Issue:**
+The mandatory public-docs step (guide + sidebar + `make docs-build` +
+`make docs-screenshots`) exists only in `skill_feature_creation` (Step 4.2).
+Deliberately deferred (owner decision, 2026-08-26):
+- No equivalent step in `skill_context_menu_action` or other skills
+- No PR template checkbox
+- No non-blocking CI warning when `frontend/src/**` changes without `docs/**`
+- No visual-regression (`toHaveScreenshot`) — WebGL nondeterminism makes ROI low
+- `PricingCards.vue` still shows three identical "Free" plans and a hardcoded
+  mailto — product/content decision pending
+
+**Recommendation:**
+Revisit if features keep shipping without docs despite the skill gate.
+
+**Effort:** Small (1-2 hours for skills/CI pieces)
+
+---
+
 ## Performance Debts
 
 ### 22. 🔴 No Pagination on Large Result Sets
