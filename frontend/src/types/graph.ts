@@ -324,35 +324,10 @@ export interface StylePresetEntry {
   modified_at?: string | null;
 }
 
-// Property filter types
-export type PropertyFilterOperator =
-  | 'equals'           // Exact match (string or number)
-  | 'not_equals'       // Not equal
-  | 'one_of'           // Value is one of array
-  | 'contains'         // String contains (case-insensitive)
-  | 'less_than'        // Numeric comparison
-  | 'less_than_or_equal'
-  | 'greater_than'
-  | 'greater_than_or_equal'
-  | 'between';         // Range (inclusive)
-
-export interface PropertyFilter {
-  id: string;                         // Unique identifier for this filter
-  property: string;                   // Property name (from metadata) or 'metric:metricId'
-  operator: PropertyFilterOperator;
-  value: string | number | null;      // For single value operators
-  values?: (string | number)[];       // For 'one_of' operator
-  minValue?: number;                  // For 'between' operator
-  maxValue?: number;                  // For 'between' operator
-  enabled: boolean;                   // Allow toggling without removing
-}
-
 export interface FilterState {
   node_types: string[];
   edge_types: string[];
   search_query?: string;
-  nodePropertyFilters: PropertyFilter[];
-  edgePropertyFilters: PropertyFilter[];
 }
 
 export interface ViewportState {

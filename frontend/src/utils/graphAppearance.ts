@@ -139,20 +139,16 @@ export interface AppearanceContext {
   searchHiddenIds: Set<string> | null;
   isHighlightMode: boolean;
 
-  // Property filters
-  propFilterHiddenNodeIds: Set<string> | null;
-  propFilterHiddenEdgeIds: Set<string> | null;
-
   // Layout-mode hiding (e.g. ego layout's maxHops cutoff). Additive with all
   // other hide sources — a node hidden by a filter stays hidden here too.
   layoutHiddenNodeIds: Set<string> | null;
 
   // Table filter (DataTablePanel sync). KEEP-sets: null = no table filter;
   // non-null = only ids in the set stay visible. Applied visually (like
-  // type/search/property filters) so table filtering never rebuilds the graph
+  // type/search filters) so table filtering never rebuilds the graph
   // or reheats the layout. Cluster nodes are exempt (the sets hold real node
-  // ids only). Cluster-remapped edges (synthetic `cluster_*` ids) follow the
-  // same known limitation as propFilterHiddenEdgeIds: matched by id only.
+  // ids only). Cluster-remapped edges (synthetic `cluster_*` ids) are
+  // matched by id only.
   tableVisibleNodeIds: Set<string> | null;
   tableVisibleEdgeIds: Set<string> | null;
 
@@ -222,7 +218,6 @@ export function computeNodeAppearance(
   // Visibility checks
   const isTypeHidden = ctx.hasNodeTypeFilter && !ctx.nodeTypeFilterSet.has(nodeType);
   const isSearchHidden = ctx.searchHiddenIds?.has(nodeId) ?? false;
-  const isPropFilterHidden = ctx.propFilterHiddenNodeIds?.has(nodeId) ?? false;
   const isLayoutHidden = ctx.layoutHiddenNodeIds?.has(nodeId) ?? false;
   const isFocusHidden =
     ctx.edgeLensMode === 'hide' &&
@@ -231,7 +226,7 @@ export function computeNodeAppearance(
   // Table filter is a KEEP-set; clusters are exempt (set holds real node ids)
   const isTableHidden =
     !isCluster && ctx.tableVisibleNodeIds !== null && !ctx.tableVisibleNodeIds.has(nodeId);
-  const hidden = isTypeHidden || isSearchHidden || isPropFilterHidden || isLayoutHidden || isFocusHidden || isTableHidden;
+  const hidden = isTypeHidden || isSearchHidden || isLayoutHidden || isFocusHidden || isTableHidden;
 
   // Metric-based size mapping (skip for clusters)
   if (!isCluster && ctx.nodeSizeMetric) {
@@ -322,7 +317,6 @@ export function computeLinkAppearance(
 ): LinkAppearanceResult {
   const isEdgeTypeHidden =
     ctx.hasEdgeTypeFilter && !ctx.edgeTypeFilterSet.has(relationshipType);
-  const edgePropHidden = ctx.propFilterHiddenEdgeIds?.has(edgeId) ?? false;
   // Table filter KEEP-set (see AppearanceContext.tableVisibleEdgeIds).
   // Cluster-aggregate edges (synthetic `cluster_*` ids representing many
   // underlying edges) are exempt: their ids can never be in the set, and
@@ -336,7 +330,6 @@ export function computeLinkAppearance(
     isEdgeTypeHidden ||
     hiddenNodeIds.has(sourceId) ||
     hiddenNodeIds.has(targetId) ||
-    edgePropHidden ||
     isTableHidden;
 
   // Similarity edges: orange with score-based opacity

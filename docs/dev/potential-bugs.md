@@ -239,37 +239,13 @@ rules.sort((a, b) => {
 
 ---
 
-### 6. 🟡 Property Filter on Undefined Metric Causes Crash
+### 6. ✅ Property Filter on Undefined Metric Causes Crash (RESOLVED — feature removed)
 
-**Location:** [graphlagoon-frontend/src/stores/graph.ts](graphlagoon-frontend/src/stores/graph.ts)
-
-**Issue:**
-If a property filter references a metric that hasn't been computed yet (e.g., user adds filter before metrics finish calculating), accessing the metric value will be undefined, potentially causing errors.
-
-**Impact:**
-- Application crash
-- Filters don't work
-
-**Reproduction:**
-1. Load large graph (slow metric calculation)
-2. Immediately add property filter on "degree"
-3. Metric not ready → undefined access
-
-**Fix:**
-```typescript
-const metricsForNode = metricsStore.nodeMetrics.get(nodeId)
-if (!metricsForNode) {
-  // Metric not ready, consider node as passing filter
-  return true
-}
-
-const value = metricsForNode[filter.property]
-if (value === undefined) {
-  return true  // or false, depending on desired behavior
-}
-```
-
-**Priority:** Medium
+**Resolution (2026-08-26):** The Metric Filters panel (`PropertyFilterPanel`)
+and the whole property-filter mechanism (`nodePropertyFilters` /
+`edgePropertyFilters` in the graph store, `PropertyFilter` schema in the
+backend) were removed — the Data Table panel's filters cover the use case
+with stricter semantics. This bug is moot.
 
 ---
 
@@ -718,7 +694,7 @@ if (edge.source === edge.target) {
 | 3  | 🟡 High | Frontend | Special characters break selection | Cannot interact with nodes |
 | 4  | 🟡 High | Frontend | Exploration state not fully restored | Poor UX |
 | 5  | 🟢 Medium | Frontend | Text format rule priority ties | Unpredictable formatting |
-| 6  | 🟡 High | Frontend | Undefined metric in property filter | Application crash |
+| 6  | ✅ Resolved | Frontend | Undefined metric in property filter | Feature removed (2026-08-26) |
 | 7  | 🔴 Critical | Frontend | Concurrent query execution | Wrong data displayed |
 | 8  | 🔴 Critical | Backend | Empty node IDs causes SQL error | Query fails |
 | 9  | 🟡 High | Backend | Context owner can be removed | Authorization issues |

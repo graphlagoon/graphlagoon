@@ -428,35 +428,6 @@ describe('exploration state serialization', () => {
     })
   })
 
-  describe('property filter preservation', () => {
-    it('nodePropertyFilters captured in exploration state', () => {
-      const store = useGraphStore()
-      store.addNodePropertyFilter({
-        property: 'metric:degree',
-        operator: 'greater_than',
-        value: 5,
-        enabled: true,
-      })
-
-      const state = store.getExplorationState()
-      expect(state.filters.nodePropertyFilters).toHaveLength(1)
-      expect(state.filters.nodePropertyFilters[0].property).toBe('metric:degree')
-    })
-
-    it('edgePropertyFilters captured in exploration state', () => {
-      const store = useGraphStore()
-      store.addEdgePropertyFilter({
-        property: 'metric:edge-betweenness',
-        operator: 'less_than',
-        value: 0.5,
-        enabled: true,
-      })
-
-      const state = store.getExplorationState()
-      expect(state.filters.edgePropertyFilters).toHaveLength(1)
-    })
-  })
-
   describe('transpile options reset on clear', () => {
     it('procedural BFS is the default rendering mode for a fresh store', () => {
       const store = useGraphStore()

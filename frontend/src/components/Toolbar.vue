@@ -13,7 +13,6 @@ import type { ExportPNGOptions } from '@/stores/toolbar';
 import ExportModal from '@/components/ExportModal.vue';
 import {
   Filter,
-  ListFilter,
   Sliders,
   Search,
   BarChart2,
@@ -231,17 +230,6 @@ function handleExportPng(options: ExportPNGOptions) {
             @click="toolbarHandlers?.onToggleMetrics()"
           >
             <BarChart2 :size="15" /><span class="btn-text">Metrics</span>
-          </button>
-
-          <button
-            class="toolbar-btn"
-            :class="{ active: toolbarStore.activePanels.has('metric-filters') }"
-            :aria-pressed="toolbarStore.activePanels.has('metric-filters')"
-            title="Metric Filters"
-            data-testid="toolbar-metric-filters"
-            @click="toolbarHandlers?.onToggleMetricFilters()"
-          >
-            <ListFilter :size="15" /><span class="btn-text">Metric Filters</span>
           </button>
 
           <button

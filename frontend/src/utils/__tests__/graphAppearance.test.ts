@@ -30,8 +30,6 @@ function makeCtx(overrides: Partial<AppearanceContext> = {}): AppearanceContext 
     searchHiddenIds: null,
     isHighlightMode: false,
 
-    propFilterHiddenNodeIds: null,
-    propFilterHiddenEdgeIds: null,
 
     layoutHiddenNodeIds: null,
 
@@ -242,14 +240,6 @@ describe('computeNodeAppearance — visibility', () => {
   it('hides node by search hidden set', () => {
     const ctx = makeCtx({
       searchHiddenIds: new Set(['n1']),
-    });
-    const r = computeNodeAppearance('n1', 'Person', false, 0, null, ctx);
-    expect(r.hidden).toBe(true);
-  });
-
-  it('hides node by property filter', () => {
-    const ctx = makeCtx({
-      propFilterHiddenNodeIds: new Set(['n1']),
     });
     const r = computeNodeAppearance('n1', 'Person', false, 0, null, ctx);
     expect(r.hidden).toBe(true);
@@ -562,14 +552,6 @@ describe('computeLinkAppearance', () => {
   it('hides link when target node is hidden', () => {
     const ctx = makeCtx();
     const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(['b']), ctx);
-    expect(r.hidden).toBe(true);
-  });
-
-  it('hides link when edge is property-filter hidden', () => {
-    const ctx = makeCtx({
-      propFilterHiddenEdgeIds: new Set(['e1']),
-    });
-    const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(), ctx);
     expect(r.hidden).toBe(true);
   });
 

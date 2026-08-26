@@ -55,7 +55,7 @@ does not bring it back. Re-save when you want to keep new changes.
 | The query | OpenCypher/SQL text plus its transpile and rendering options |
 | The data | A snapshot of the visible nodes and edges **with their positions** — expanded nodes included |
 | The look | Colors, icons, sizes, label templates, layout mode and settings (the same block a [style preset](./style-presets.md) carries) |
-| Filters & viewport | Type and property filters, search, camera |
+| Filters & viewport | Type filters, search, camera |
 | Analysis | Cluster results and exploration-scoped cluster programs, communities, similarity state |
 | Behaviors | Data-fetching preferences |
 

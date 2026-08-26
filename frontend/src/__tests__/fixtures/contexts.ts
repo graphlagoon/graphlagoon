@@ -100,8 +100,6 @@ export function createExplorationState(overrides: Partial<ExplorationState> = {}
     filters: {
       node_types: [],
       edge_types: [],
-      nodePropertyFilters: [],
-      edgePropertyFilters: [],
     },
     viewport: { zoom: 1, center_x: 0, center_y: 0 },
     layout_algorithm: 'force',

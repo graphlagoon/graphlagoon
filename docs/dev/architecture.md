@@ -68,7 +68,7 @@ graphlagoon-studio is a comprehensive graph visualization system designed for ex
 
 **Graph Store** (`stores/graph.ts` - 1127 lines):
 - **Data:** nodes, edges, graph metadata
-- **Filters:** node_types, edge_types, search_query, property filters
+- **Filters:** node_types, edge_types, search_query (row-level filtering lives in the Data Table panel)
 - **Layout:** Force Atlas 2 settings, Helios 3D settings
 - **Aesthetics:** colors, opacity, sizes, labels
 - **Behaviors:** focusOnSelection, searchMode, centerOnSearch, viewMode (`'3d'` | `'2d-proj'` | `'2d'`)

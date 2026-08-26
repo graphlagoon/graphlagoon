@@ -392,15 +392,6 @@ const SCENES: Scene[] = [
     },
   },
   {
-    guide: 'communities-metrics',
-    scene: 'metric-filters',
-    path: GRAPH_URL,
-    prepare: async (page) => {
-      await waitForGraphSettled(page);
-      await openPanel(page, 'Metric Filters');
-    },
-  },
-  {
     guide: 'context-menu-actions',
     scene: 'menu',
     path: GRAPH_URL,

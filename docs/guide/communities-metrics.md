@@ -113,22 +113,6 @@ The mapping is part of the graph's look, so
 A restored mapping that names a metric not yet computed on the current
 graph falls back to base sizing until that metric is computed.
 
-### Filtering by metric values
-
-![Metric Filters panel](/screenshots/communities-metrics-metric-filters.png)
-
-Toolbar → **Metric Filters**. Where Visual Mapping changes how nodes
-*look*, this panel changes which ones are *shown*: add rules like
-`PageRank greater than 0.05` or `Degree between 3 and 20` and everything
-outside them is hidden. Rules exist for nodes and for edges (by edge
-metrics), can be stacked, and toggled on/off individually without losing
-their configuration.
-
-The dropdown offers only **computed metrics** — compute something in the
-Metrics panel first, or the list is empty. Filters combine with every
-other hiding mechanism (type filters, search, table filter): a node must
-pass all of them to stay visible.
-
 ### Two honest caveats
 
 - Metrics are **session-only**: they are not saved into explorations, and

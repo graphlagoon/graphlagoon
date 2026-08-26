@@ -141,8 +141,6 @@ test.describe('Exploration CRUD (database mode)', () => {
             filters: {
               node_types: ['Person'],
               edge_types: [],
-              nodePropertyFilters: [],
-              edgePropertyFilters: [],
             },
             viewport: { zoom: 1.0, center_x: 0, center_y: 0 },
             layout_algorithm: 'force-atlas-2',
@@ -192,8 +190,6 @@ test.describe('Exploration CRUD (database mode)', () => {
             filters: {
               node_types: [],
               edge_types: [],
-              nodePropertyFilters: [],
-              edgePropertyFilters: [],
             },
             viewport: { zoom: 2.0, center_x: 100, center_y: 50 },
             layout_algorithm: 'circular',
