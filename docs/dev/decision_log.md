@@ -7200,3 +7200,53 @@ Phase 2 (living docs):
 - [x] Screenshots regenerated
 
 **Related:** technical debts #24, #25.
+
+## [2026-08-26 10:10] - Docs Overhaul (Phase 3): seven new public guide pages + grouped sidebar
+
+**Feature:** Content waves of the docs overhaul plan — public guides for
+every previously undocumented user-facing surface, plus the Python API
+reference and a landing-page refresh.
+
+**Pages created (docs/guide/):**
+- `labels.md` — template language (placeholders, 13 modifiers, chaining,
+  regex, dates, conditionals), rules/priority, Ask-AI, error contract,
+  ASCII/culling canvas constraints, preset composition
+- `explorations.md` — save/overwrite-vs-copy, snapshots, sharing (person /
+  *@domain / public read-only), permissions matrix, URL precedence,
+  schema-drift interaction; canonical target for `?exploration=` mentions
+- `exploring-the-graph.md` — filters, query console, data table,
+  selection/camera shortcuts, expand, export, status-bar chips
+- `clusters.md` — cluster program contract, parameters + node bindings,
+  scopes, validator errors, Ask-AI
+- `communities-metrics.md` — Louvain + cluster-program-as-algorithm,
+  radial/hive, metrics algorithms, visual mapping, session-only caveat
+- `python-api.md` — public `__all__` reference: entry-point comparison,
+  mounting checklist (lifespan/AuthMiddleware), configure_auth/UserProvider
+  (first-ever docs), HeaderProvider/OAuth, registries, Settings, models
+
+**Pages updated:** `getting-started.md` (first-context walkthrough +
+screenshots + panel map), `index.md` (6 feature cards, new screenshot
+names), sidebar regrouped into Guide / Visualization / Data Sources /
+Deployment (`docs/.vitepress/config.ts`).
+
+**Screenshots:** 13 automated scenes now (added clusters-programs,
+communities-metrics-metrics); embedded in labels, explorations,
+exploring-the-graph, clusters, communities-metrics, getting-started, index.
+
+**Design decisions:**
+1. Deliberately did NOT document: PropertyFilterPanel (unmounted — no UI
+   entry point), metrics Scale/Edge-Weight/real-time controls (inert),
+   collapse-communities toggle (no UI binding). Recorded as debt #26 —
+   docs describe what ships, not what half-ships.
+2. Wave C surfaces (behaviors, schema drift, transpile settings, resource
+   monitor, login) were folded into the pages above instead of a filler
+   "interface reference" page.
+3. nested-sbm.md (dev doc) describes nothing shipped — not cited.
+4. Skill Step 4.2 guide→feature table refreshed with all 17 pages.
+
+**Public Docs:**
+- [x] `make docs-build` passes after every page (dead-link check)
+- [x] Screenshots regenerated (13/13 scenes green)
+
+**Related:** technical debts #24, #25, #26. Commits: 9777c10 (wave A),
+0f13a2c (python-api), 008d9b4 (wave B), plus this hygiene commit.
