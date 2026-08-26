@@ -7120,3 +7120,83 @@ The context-menu-action skill prompt (`contextMenuActionSkill.ts`) now documents
 ### [2026-08-25 20:07] - Amendment: ego deep-link example must load a graph first
 
 User-caught flaw: layout URL params only style what the link loads — a bare `/graph/<ctx>?layout=ego&...` opens an empty view. The ego example now anchors on `?exploration=<id>` (`{graphViewUrl}?exploration=<id>&layout=ego&layout.ego.focusNodeId={node_id}`): the skill modal passes the currently open exploration's id (read from `location.search`) so the example is real, with a `YOUR_EXPLORATION_ID` placeholder otherwise. The prompt also documents the alternatives that load a graph (`?precomputed=<name>&<args>` — a seed arg can itself be `{node_id}` — and `?template=<name>&template.<param>=`). +1 test (8 in the file), vue-tsc clean.
+
+## [2026-08-26 09:30] - Docs Overhaul (Phases 0-2): living docs mechanism + screenshot pipeline hardening
+
+**Feature:** Public docs audit follow-up — quick fixes, automated-screenshot
+pipeline hardening, and a mandatory public-docs gate in the feature skill.
+Plan approved by the owner; content waves (new guides) follow in later commits.
+
+**Design Decisions:**
+1. **Screenshots stay 100% automated** — the owner does not want manual
+   captures. The generator runs against the dev server + E2E API mocks.
+2. **Living-docs enforcement lives ONLY in `skill_feature_creation`** (owner
+   decision): no shared checklist doc, no CI guard, no edits to other skills.
+   Deferred pieces recorded as technical debt #25.
+3. **Screenshot-only fixture** (`screenshot-graph.ts`), not a change to
+   `MOCK_GRAPH_RESPONSE` — E2E specs assert on the small fixture. Its
+   wrong-level properties shape recorded as technical debt #24.
+4. **`?style=docs` preset instead of hacking labels** — node names come from a
+   seeded style preset with `nodeTemplate: '{prop:name}'`, exercising a real
+   product feature in every graph capture.
+5. **Dev-server capture + dev hooks, not a preview build** — a preview build
+   would strip `__THREE_RENDERER_INFO__`/`__GRAPH_LAYOUT_DONE__`, the
+   deterministic wait signals.
+
+**Implementation:**
+
+Phase 0 (quick fixes):
+- `PricingCards.vue`: CTA hrefs wrapped in `withBase()` (were 404 under the
+  `/graphlagoon/` Pages base). Placeholder pricing content left as-is —
+  product decision pending (debt #25).
+- Untracked committed `docs/.vitepress/cache/` artifacts; `.gitignore` now
+  covers it, drops the `docs/dew` typo and the `frontend/e2e/screenshots/`
+  line that had orphaned the screenshot generator from git.
+- Merged legacy `docs/dev/decision-log.md` (Feb–Jul history + templates
+  preamble) into this file; removed the duplicate.
+
+Phase 1 (screenshot pipeline):
+- Rescued `frontend/e2e/screenshots/{generate.ts,playwright.screenshots.config.ts}`
+  into git (were gitignored — `make docs-screenshots` broke on clean clones).
+- New `frontend/e2e/fixtures/screenshot-graph.ts`: deterministic 46-node /
+  77-edge Person/Company/Product graph with `properties: { name, ... }`.
+- New `seedGraphResponse()` helper in `e2e/helpers/api-mocks.ts` overriding
+  every graph-returning route.
+- `useDevPerf.ts`: stats-gl overlay disabled when `window.__SCREENSHOT_MODE__`
+  is set; generator also hides the DEV nav link and Unsaved badge via CSS.
+- `GraphCanvas3D.vue`: new dev-only `__GRAPH_LAYOUT_DONE__` hook; generator
+  waits on it + `__THREE_RENDERER_INFO__` (frame > 30, triangles > 0) instead
+  of blind `waitForTimeout(3000)`.
+- `generate.ts` rewritten around a declarative `SCENES` registry — adding a
+  guide screenshot is a one-entry diff. Naming: `<guide-slug>-<scene>.png`.
+  11 scenes: index (contexts, graph), getting-started (login), explorations,
+  style-presets (modal), query-templates, labels, exploring-the-graph
+  (filters), context-menu-actions (menu open via `__GRAPH_NODE_SCREEN_COORDS__`
+  right-click), layout-url-overrides (ego), precomputed-graphs (status chip).
+- Old 5 PNGs removed; `docs/index.md` + `getting-started.md` references
+  updated. Similarity/REST-connections scenes deferred to their content waves.
+
+Phase 2 (living docs):
+- `skill_feature_creation/SKILL.md`: new **Step 4.2 "Public Documentation
+  (MANDATORY)"** — user-visible? → update/create `docs/guide/<slug>.md` +
+  sidebar + scene + `make docs-screenshots` + `make docs-build`, else state
+  "No public docs impact" explicitly. Decision-log template and PR template
+  gained matching checkboxes. All broken underscore links fixed to the real
+  hyphenated `docs/dev/` files.
+
+**Testing:**
+- [x] `npm run screenshots` — 11/11 scenes pass (~27s), PNGs visually verified
+      (real names as labels, no FPS overlay, no DEV chrome, menu/modal open)
+- [x] `npx vue-tsc --noEmit` clean
+- [x] `npm run test:run` — 1876 passed
+- [x] `make docs-build` + `VITEPRESS_BASE=/graphlagoon/` build — clean, CTA
+      hrefs carry the base
+- [x] E2E suite (in progress at entry time; result in the commit message)
+
+**Public Docs:**
+- [x] Public pages touched: `docs/index.md`, `docs/guide/getting-started.md`
+      (screenshot references)
+- [x] `make docs-build` passes
+- [x] Screenshots regenerated
+
+**Related:** technical debts #24, #25.

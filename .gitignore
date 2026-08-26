@@ -28,8 +28,10 @@ alembic/versions/
 .idea
 *.swp
 
-# Claude Code
-.claude
+# Claude Code — skills are project workflow docs and stay tracked;
+# everything else (local settings, plans) is machine-local.
+.claude/*
+!.claude/skills/
 
 # =============================================================================
 # Python
