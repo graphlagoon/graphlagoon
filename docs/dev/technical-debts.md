@@ -198,6 +198,14 @@ Use worker pool with lifecycle management.
 
 **Effort:** Low (1 day)
 
+**Resolved (2026-08-26):** `GraphVisualizationView` now calls
+`resetMetricsCalculator()` (which terminates the metrics worker pool) plus
+`communityStore.clearCommunities()` (which terminates a mid-run community
+worker) both in `onUnmounted` and in the context-change watcher. The pool
+re-initializes lazily on the next computation, so re-entering the view costs
+nothing. Contract pinned by
+`frontend/src/services/__tests__/metricsCalculator.test.ts`.
+
 ### 7. 🟡 Error Handling Inconsistency
 
 **Location:** Frontend stores and components
@@ -232,6 +240,20 @@ export function handleApiError(error: unknown, context: string) {
 ```
 
 **Effort:** Medium (2-3 days)
+
+**Resolved (2026-08-26):** Shared extractor created at
+`frontend/src/utils/errorMessage.ts` (`extractErrorDetails` /
+`getErrorMessage`, tested), replacing 4 near-identical copies (graph store,
+query console store, StylePresetModal, PrecomputedGraphPanel) plus the
+hand-rolled unwraps in `saveExploration` and GraphContextFormModal. All
+`alert()` calls removed (cluster program run paths now use toasts).
+Silent user-initiated failures now toast: load-exploration (Toolbar),
+metric compute (MetricsPanel), delete/share/unshare in ContextsView and
+ExplorationsView, template delete, and the never-rendered persistence
+error refs in `cluster.ts`/`contextMenuActions.ts`. Deliberately NOT done
+(follow-ups, not blockers): axios response interceptor, unifying the
+modal-vs-toast double report on query failures, `window.confirm` sites,
+worker error-channel field naming.
 
 ### 8. 🟢 3D Force Graph Type Safety
 
@@ -295,6 +317,13 @@ engine = create_async_engine(
 ```
 
 **Effort:** Low (1 day)
+
+**Resolved (2026-08-26):** The standard PostgreSQL engine now receives
+`pool_size` / `max_overflow` / `pool_timeout` / `pool_recycle` from `Settings`
+(new `GRAPH_LAGOON_DATABASE_POOL_*` env vars, defaults 10/20/30s/3600s —
+documented in `docs/guide/configuration.md`). The Lakebase engine already had
+its own tuned pool (recycle tied to token lifetime) and is unchanged. Pinned by
+`api/tests/test_database_pool.py`.
 
 ### 10. 🟡 Lazy Database Initialization Without Health Checks
 
@@ -612,6 +641,13 @@ crashed write cannot surface as a phantom entry.
 
 **Effort:** Trivial (few lines) — bundle with #24.
 
+**Resolved (2026-08-26):** `LocalSnapshotService.save` now writes to a unique
+`.tmp-{uuid4().hex}` in the base dir and cleans it up on failure, mirroring
+`LocalBlobStore._save_sync`. Pinned by `api/tests/test_snapshot_local.py`
+(concurrent-save integrity, no leftover temp files, cleanup on failed write).
+#24 (Databricks client dedup) remains open — its characterization tests were
+not written here.
+
 ---
 
 ### 26. 🟢 Exploration Snapshots Leak on Context Deletion
@@ -835,6 +871,24 @@ these become real.
 **Effort:** Small-Medium (placeholder/docstring minutes; the rest half a
 day each)
 
+**Resolved (2026-08-26):** all six items:
+1. `PropertyFilterPanel` wired up — new toolbar button **Metric Filters**
+   (`PanelId 'metric-filters'`), documented in `communities-metrics.md`
+   with a screenshot scene (`communities-metrics-metric-filters`), E2E in
+   `graph.spec.ts`.
+2. Search placeholder now says "Search by node ID or type..." (matches the
+   actual index and the public guide).
+3. Scale (log/sqrt) is applied: `computeNodeAppearance` uses `scaleValue`;
+   `AppearanceContext.nodeSizeMapping` carries `scale`.
+4. Edge Weight mapping consumed: `computeLinkAppearance` returns a
+   metric-mapped `width` (null = aesthetic base width, kept live), rendered
+   via `linkWidth` in GraphCanvas3D.
+5. Both inert real-time checkboxes removed from MetricsPanel;
+   `enableRealTimeUpdates` now defaults to false in the calculator (the
+   partial-result callback is a no-op, streaming was pure overhead). The
+   store field/action remain for state compat.
+6. `create_mountable_app` docstring example fixed (token string, not dict).
+
 ---
 
 ## Performance Debts
@@ -896,10 +950,10 @@ const checkStabilization = () => {
 | 3  | 🟢 Medium | Frontend | Missing TypeScript strict mode | High |
 | 4  | 🟡 High | Frontend | No unit tests | High |
 | 5  | 🟢 Medium | Frontend | Hardcoded values | Low |
-| 6  | 🔴 Critical | Frontend | Memory leaks risk with workers | Low |
-| 7  | 🟡 High | Frontend | Error handling inconsistency | Medium |
+| 6  | ✅ Resolved (2026-08-26) | Frontend | Memory leaks risk with workers | Low |
+| 7  | ✅ Resolved (2026-08-26) | Frontend | Error handling inconsistency | Medium |
 | 8  | 🟢 Medium | Frontend | 3D Force Graph type safety | Low |
-| 9  | 🔴 Critical | Backend | Missing DB pool config | Low |
+| 9  | ✅ Resolved (2026-08-26) | Backend | Missing DB pool config | Low |
 | 10 | 🟡 High | Backend | Lazy init without health checks | Low |
 | 11 | 🟡 High | Backend | SQL injection risk | Medium |
 | 12 | 🟡 High | Backend | Missing request validation | Medium |
@@ -918,8 +972,8 @@ const checkStabilization = () => {
 ## Prioritization Recommendations
 
 ### Phase 1: Critical Fixes (1-2 weeks)
-1. Memory leaks risk (#6)
-2. Database connection pooling (#9)
+1. ~~Memory leaks risk (#6)~~ — resolved 2026-08-26
+2. ~~Database connection pooling (#9)~~ — resolved 2026-08-26
 3. Pagination for large datasets (#22)
 
 ### Phase 2: High-Priority Improvements (3-4 weeks)

@@ -15,6 +15,7 @@ import BehaviorPanel from '@/components/BehaviorPanel.vue';
 import GraphQueryPanel from '@/components/GraphQueryPanel.vue';
 import ContextInfoPanel from '@/components/ContextInfoPanel.vue';
 import MetricsPanel from '@/components/MetricsPanel.vue';
+import PropertyFilterPanel from '@/components/PropertyFilterPanel.vue';
 import ResourceMonitorModal from '@/components/ResourceMonitorModal.vue';
 import AestheticsPanel from '@/components/AestheticsPanel.vue';
 import TextFormatPanel from '@/components/TextFormatPanel.vue';
@@ -24,6 +25,7 @@ import ClusterProgramPanel from '@/components/ClusterProgramPanel.vue';
 import ClusterListPanel from '@/components/ClusterListPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
 import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
+import { resetMetricsCalculator } from '@/services/metricsCalculator';
 import { useCommunityTableAction } from '@/composables/useCommunityTableAction';
 import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
 import { useConfigurableMenuActions } from '@/composables/useConfigurableMenuActions';
@@ -139,6 +141,7 @@ const showBehaviorPanel = ref(false);
 const showQueryPanel = ref(false);
 const showContextInfo = ref(false);
 const showMetricsPanel = ref(false);
+const showMetricFilterPanel = ref(false);
 const showResourceMonitor = ref(false);
 const showAestheticsPanel = ref(false);
 const showTextFormatPanel = ref(false);
@@ -525,6 +528,7 @@ onMounted(async () => {
     onToggleBehaviors: () => { showBehaviorPanel.value = !showBehaviorPanel.value; toolbarStore.setPanelActive('behaviors', showBehaviorPanel.value); },
     onToggleQuery: () => { showQueryPanel.value = !showQueryPanel.value; toolbarStore.setPanelActive('query', showQueryPanel.value); },
     onToggleMetrics: () => { showMetricsPanel.value = !showMetricsPanel.value; toolbarStore.setPanelActive('metrics', showMetricsPanel.value); },
+    onToggleMetricFilters: () => { showMetricFilterPanel.value = !showMetricFilterPanel.value; toolbarStore.setPanelActive('metric-filters', showMetricFilterPanel.value); },
     onToggleAesthetics: () => { showAestheticsPanel.value = !showAestheticsPanel.value; toolbarStore.setPanelActive('aesthetics', showAestheticsPanel.value); },
     onToggleLabels: () => { showTextFormatPanel.value = !showTextFormatPanel.value; toolbarStore.setPanelActive('labels', showTextFormatPanel.value); },
     onToggleClusterPrograms: () => { showClusterPrograms.value = !showClusterPrograms.value; toolbarStore.setPanelActive('clusters', showClusterPrograms.value); },
@@ -567,6 +571,11 @@ onUnmounted(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange);
   canvasResizeObserver?.disconnect();
   canvasResizeObserver = null;
+  // Terminate background workers: the metrics pool outlives the view as a
+  // module singleton, and the community worker keeps running when it has no
+  // results yet (the nodes-watcher only clears when hasResults is true).
+  resetMetricsCalculator();
+  communityStore.clearCommunities();
   graphStore.clear();
 });
 
@@ -579,6 +588,9 @@ watch(
     // context's programs on top.
     clusterStore.clearAll();
     communityStore.clearCommunities();
+    // In-flight metric computations belong to the graph being left — terminate
+    // their workers; the pool re-initializes lazily on the next computation.
+    resetMetricsCalculator();
     // Template chips describe the context being left; loadFromRoute below
     // rebuilds them for the new one if its URL still asks for a template.
     templateIssues.value = [];
@@ -698,6 +710,10 @@ watch(
         v-if="showMetricsPanel"
         @close="showMetricsPanel = false; toolbarStore.setPanelActive('metrics', false)"
         @show-resource-monitor="showResourceMonitor = true"
+      />
+      <PropertyFilterPanel
+        v-if="showMetricFilterPanel"
+        @close="showMetricFilterPanel = false; toolbarStore.setPanelActive('metric-filters', false)"
       />
       <AestheticsPanel v-if="showAestheticsPanel" @close="showAestheticsPanel = false; toolbarStore.setPanelActive('aesthetics', false)" />
       <TextFormatPanel v-if="showTextFormatPanel" @close="showTextFormatPanel = false; toolbarStore.setPanelActive('labels', false)" />

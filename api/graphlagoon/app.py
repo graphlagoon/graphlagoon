@@ -435,13 +435,14 @@ def create_mountable_app(
         # Access at: http://localhost:8000/graphlagoon/
 
     Example with dynamic header provider (token refresh):
-        async def get_fresh_headers():
-            token = await my_token_service.get_token()
-            return {"Authorization": f"Bearer {token}"}
+        async def get_fresh_token() -> str:
+            # Return the raw token string; it is sent as
+            # "Authorization: Bearer <token>". Do NOT return a dict.
+            return await my_token_service.get_token()
 
         sgraph_app = create_mountable_app(
             settings=my_settings,
-            header_provider=get_fresh_headers,
+            header_provider=get_fresh_token,
             databricks_catalog="my_catalog",
             databricks_schema="my_schema",
         )

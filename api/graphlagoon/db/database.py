@@ -59,6 +59,10 @@ def _ensure_initialized() -> None:
             _settings.database_url,
             echo=_settings.dev_mode,
             pool_pre_ping=True,
+            pool_size=_settings.database_pool_size,
+            max_overflow=_settings.database_max_overflow,
+            pool_timeout=_settings.database_pool_timeout,
+            pool_recycle=_settings.database_pool_recycle,
         )
         _async_session_maker = async_sessionmaker(
             _engine,

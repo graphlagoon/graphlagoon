@@ -4,6 +4,8 @@ import { useMetricsStore } from '@/stores/metrics';
 import { useGraphStore } from '@/stores/graph';
 import { ALGORITHMS, getAlgorithmsByTarget } from '@/services/algorithmRegistry';
 import { getMetricsCalculator } from '@/services/metricsCalculator';
+import { useToast } from '@/composables/useToast';
+import { getErrorMessage } from '@/utils/errorMessage';
 import type { AlgorithmDefinition, ScaleType, Priority } from '@/types/metrics';
 import { Activity, ChevronDown, ChevronRight, Play, Pause, X } from 'lucide-vue-next';
 
@@ -15,6 +17,7 @@ const emit = defineEmits<{
 const metricsStore = useMetricsStore();
 const graphStore = useGraphStore();
 const calculator = getMetricsCalculator();
+const toast = useToast();
 
 // UI State
 const activeTab = ref<'compute' | 'mapping'>('compute');
@@ -40,7 +43,6 @@ const selectedAlgorithmDef = computed<AlgorithmDefinition | null>(() => {
 const algorithmParams = ref<Record<string, unknown>>({});
 const edgeTypeFilter = ref<string[]>([]);
 const computePriority = ref<Priority>('medium');
-const enableRealTime = ref(true);
 
 // Watch for algorithm changes to reset params
 watch(selectedAlgorithm, (algoId) => {
@@ -93,10 +95,10 @@ async function computeMetric() {
       params: algorithmParams.value,
       edgeTypeFilter: edgeTypeFilter.value,
       priority: computePriority.value,
-      enableRealTimeUpdates: enableRealTime.value,
     });
   } catch (error) {
     console.error('Computation failed:', error);
+    toast.error(getErrorMessage(error, 'Metric computation failed'));
   } finally {
     isComputing.value = false;
   }
@@ -373,11 +375,6 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                 <option value="high">High (Fastest)</option>
               </select>
             </div>
-
-            <label class="toggle-label">
-              <input type="checkbox" v-model="enableRealTime" />
-              <span>Real-time visual updates</span>
-            </label>
           </div>
 
           <!-- Compute Button -->
@@ -553,18 +550,6 @@ function toggleSection(section: keyof typeof expandedSections.value) {
             </div>
           </template>
         </div>
-      </div>
-
-      <!-- Real-time toggle -->
-      <div class="section">
-        <label class="toggle-label">
-          <input
-            type="checkbox"
-            :checked="metricsStore.visualMapping.enableRealTimeUpdates"
-            @change="metricsStore.toggleRealTimeUpdates(($event.target as HTMLInputElement).checked)"
-          />
-          <span>Update visuals during computation</span>
-        </label>
       </div>
 
       <!-- Reset button -->

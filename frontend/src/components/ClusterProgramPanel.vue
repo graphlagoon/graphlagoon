@@ -12,10 +12,13 @@ import ClusterProgramEditorModal from './ClusterProgramEditorModal.vue'
 import ClusterProgramRunModal from './ClusterProgramRunModal.vue'
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
 import { X, Play, Loader2, Bot } from 'lucide-vue-next'
+import { useToast } from '@/composables/useToast'
 
 const emit = defineEmits<{
   close: []
 }>()
+
+const toast = useToast()
 
 const clusterStore = useClusterStore()
 const communityStore = useCommunityStore()
@@ -86,9 +89,9 @@ async function handleExecute(program: ClusterProgram) {
 
   if (result.success) {
     const count = result.clusters?.length || 0
-    alert(`Program executed successfully!\nGenerated ${count} cluster${count !== 1 ? 's' : ''} in ${result.duration_ms}ms`)
+    toast.success(`Generated ${count} cluster${count !== 1 ? 's' : ''} in ${result.duration_ms}ms`)
   } else {
-    alert(`Execution failed:\n${result.error}`)
+    toast.error(`Cluster program failed: ${result.error}`)
   }
 }
 

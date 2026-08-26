@@ -4,13 +4,16 @@ import { useRouter } from 'vue-router';
 import { useContextsStore } from '@/stores/contexts';
 import { useAuthStore } from '@/stores/auth';
 import { usePersistence } from '@/composables/usePersistence';
+import { useToast } from '@/composables/useToast';
 import { api } from '@/services/api';
+import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration } from '@/types/graph';
 
 const router = useRouter();
 const contextsStore = useContextsStore();
 const authStore = useAuthStore();
 const { sharingEnabled, isSuperuser } = usePersistence();
+const toast = useToast();
 
 const explorations = ref<Exploration[]>([]);
 const loading = ref(false);
@@ -116,6 +119,7 @@ async function deleteExploration(exploration: Exploration) {
     explorations.value = explorations.value.filter((e) => e.id !== exploration.id);
   } catch (e) {
     console.error(e);
+    toast.error(getErrorMessage(e, 'Failed to delete exploration'));
   }
 }
 
@@ -151,6 +155,7 @@ async function share() {
     }
   } catch (e) {
     console.error('Failed to share exploration:', e);
+    toast.error(getErrorMessage(e, 'Failed to share exploration'));
   }
 }
 
@@ -165,6 +170,7 @@ async function unshare(explorationId: string, email: string) {
     }
   } catch (e) {
     console.error('Failed to unshare exploration:', e);
+    toast.error(getErrorMessage(e, 'Failed to unshare exploration'));
   }
 }
 
@@ -201,6 +207,7 @@ async function quickShare(email: string) {
     if (updated) shareExploration.value = updated;
   } catch (e) {
     console.error('Failed to share exploration:', e);
+    toast.error(getErrorMessage(e, 'Failed to share exploration'));
   }
 }
 </script>

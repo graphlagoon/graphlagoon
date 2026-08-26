@@ -43,6 +43,7 @@ export interface GraphLink {
   __curve?: { getPoint(t: number): { x: number; y: number; z: number } } | null; // Set by forcegraph lib for curved edges
   isSimilarity?: boolean; // True if this is a similarity edge
   score?: number; // Similarity score (0-1)
+  width?: number; // Rendered width (metric-mapped edge weight or aesthetic base)
 }
 
 export interface GraphData {

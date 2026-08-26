@@ -4,8 +4,10 @@ import { useRouter, useRoute } from 'vue-router';
 import { useContextsStore } from '@/stores/contexts';
 import { useAuthStore } from '@/stores/auth';
 import { usePersistence } from '@/composables/usePersistence';
+import { useToast } from '@/composables/useToast';
 import { api } from '@/services/api';
 import { fuzzyMatch, parseTag } from '@/utils/contextForm';
+import { getErrorMessage } from '@/utils/errorMessage';
 import { useSchemaDrift } from '@/composables/useSchemaDrift';
 import {
   capabilitiesFor,
@@ -22,6 +24,7 @@ const route = useRoute();
 const contextsStore = useContextsStore();
 const authStore = useAuthStore();
 const { sharingEnabled, isSuperuser } = usePersistence();
+const toast = useToast();
 
 // Check if current user is the owner of a context
 function isOwner(context: GraphContext): boolean {
@@ -144,6 +147,7 @@ async function deleteContext(context: GraphContext) {
     await contextsStore.deleteContext(context.id);
   } catch (e) {
     console.error(e);
+    toast.error(getErrorMessage(e, 'Failed to delete context'));
   }
 }
 
@@ -173,6 +177,7 @@ async function share() {
     shareForm.value = { email: '', permission: 'read' };
   } catch (e) {
     console.error('Failed to share context:', e);
+    toast.error(getErrorMessage(e, 'Failed to share context'));
   }
 }
 
@@ -187,6 +192,7 @@ async function unshare(contextId: string, email: string) {
     }
   } catch (e) {
     console.error('Failed to unshare context:', e);
+    toast.error(getErrorMessage(e, 'Failed to unshare context'));
   }
 }
 
@@ -222,6 +228,7 @@ async function quickShare(email: string) {
     if (updated) shareContextRef.value = updated;
   } catch (e) {
     console.error('Failed to share context:', e);
+    toast.error(getErrorMessage(e, 'Failed to share context'));
   }
 }
 

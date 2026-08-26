@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api } from '@/services/api';
+import { extractErrorDetails as extractApiErrorDetails } from '@/utils/errorMessage';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import {
@@ -49,38 +50,17 @@ export interface QueryErrorInfo {
   query?: string;
 }
 
-/** Pull the structured error out of the backend envelope
- * ({ detail: { error: { message, code, details: {...} } } }) or a plain Error. */
+/** Shape the shared extractor's output to feed the QueryErrorModal. */
 function extractErrorDetails(e: unknown, fallback: string): QueryErrorInfo {
-  if (e && typeof e === 'object' && 'response' in e) {
-    const detail = (e as { response?: { data?: { detail?: unknown } } })
-      .response?.data?.detail;
-    if (typeof detail === 'string') return { message: detail };
-    if (detail && typeof detail === 'object' && 'error' in detail) {
-      const err = (detail as {
-        error?: {
-          message?: string;
-          code?: string;
-          details?: {
-            query?: string;
-            transpiled_sql?: string;
-            exception_type?: string;
-            traceback?: string[];
-          };
-        };
-      }).error;
-      return {
-        message: err?.message || fallback,
-        code: err?.code,
-        exceptionType: err?.details?.exception_type,
-        traceback: err?.details?.traceback,
-        // Prefer the failing transpiled SQL when present (cypher mode).
-        query: err?.details?.query || err?.details?.transpiled_sql,
-      };
-    }
-  }
-  if (e instanceof Error) return { message: e.message };
-  return { message: fallback };
+  const d = extractApiErrorDetails(e, fallback);
+  return {
+    message: d.message,
+    code: d.code,
+    exceptionType: d.exceptionType,
+    traceback: d.traceback,
+    // Prefer the failing transpiled SQL when present (cypher mode).
+    query: d.query || d.transpiledSql,
+  };
 }
 
 /**

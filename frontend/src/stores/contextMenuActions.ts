@@ -12,6 +12,7 @@ import { ref } from 'vue';
 import type { ContextMenuActionConfig } from '@/types/contextMenuActions';
 import { useGraphStore } from '@/stores/graph';
 import { api } from '@/services/api';
+import { useToast } from '@/composables/useToast';
 
 const PERSIST_DEBOUNCE_MS = 800;
 
@@ -84,6 +85,9 @@ export const useContextMenuActionsStore = defineStore('contextMenuActions', () =
     } catch (e) {
       console.warn('Failed to persist context menu actions:', e);
       error.value = 'Failed to save context menu actions to the context';
+      // The error ref is not rendered anywhere — surface the silent
+      // persistence failure directly (technical debt #7).
+      useToast().error('Failed to save context menu actions to the context');
     }
   }
 

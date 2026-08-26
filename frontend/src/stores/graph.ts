@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed, nextTick, toRaw, watch } from 'vue';
 import { buildSearchText } from '@/utils/searchText';
+import { extractErrorDetails, getErrorMessage } from '@/utils/errorMessage';
 import type {
   Node,
   Edge,
@@ -370,61 +371,8 @@ export const useGraphStore = defineStore('graph', () => {
     contextId?: string;
   } | null>(null);
 
-  // Helper: extract error details from API errors
-  interface ApiErrorDetail {
-    error?: {
-      code?: string;
-      message?: string;
-      details?: {
-        query?: string;
-        exception_type?: string;
-        traceback?: string[];
-        hint?: string;
-        unresolved_name?: string;
-        context_id?: string;
-      };
-    };
-  }
-
-  function extractErrorDetails(e: unknown, fallbackMessage: string): {
-    message: string;
-    query?: string;
-    code?: string;
-    exceptionType?: string;
-    traceback?: string[];
-    hint?: string;
-    unresolvedName?: string;
-    contextId?: string;
-  } {
-    if (e && typeof e === 'object' && 'response' in e) {
-      const axiosError = e as { response?: { data?: { detail?: ApiErrorDetail | string } } };
-      const detail = axiosError.response?.data?.detail;
-
-      if (typeof detail === 'string') {
-        return { message: detail };
-      }
-
-      if (detail && typeof detail === 'object' && 'error' in detail) {
-        const error = detail.error;
-        return {
-          message: error?.message || fallbackMessage,
-          code: error?.code,
-          query: error?.details?.query,
-          exceptionType: error?.details?.exception_type,
-          traceback: error?.details?.traceback,
-          hint: error?.details?.hint,
-          unresolvedName: error?.details?.unresolved_name,
-          contextId: error?.details?.context_id,
-        };
-      }
-    }
-
-    if (e instanceof Error) {
-      return { message: e.message };
-    }
-
-    return { message: fallbackMessage };
-  }
+  // Error extraction lives in @/utils/errorMessage (shared with the query
+  // console, modals, and views — technical debt #7).
 
   function clearQueryError() {
     queryError.value = null;
@@ -2596,16 +2544,7 @@ export const useGraphStore = defineStore('graph', () => {
       }
       return { success: true };
     } catch (e: unknown) {
-      // Extract error message from Axios error or generic error
-      let errorMessage = 'Failed to save exploration';
-      if (e && typeof e === 'object' && 'response' in e) {
-        const axiosError = e as { response?: { data?: { detail?: string }; status?: number } };
-        if (axiosError.response?.data?.detail) {
-          errorMessage = axiosError.response.data.detail;
-        }
-      } else if (e instanceof Error) {
-        errorMessage = e.message;
-      }
+      const errorMessage = getErrorMessage(e, 'Failed to save exploration');
       error.value = errorMessage;
       return { success: false, error: errorMessage };
     } finally {

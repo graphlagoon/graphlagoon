@@ -24,6 +24,11 @@ SQL_WAREHOUSE_URL=http://localhost:8001
 # Database (optional — for persisting explorations/contexts)
 GRAPH_LAGOON_DATABASE_ENABLED=true
 GRAPH_LAGOON_DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/sgraph
+# Connection pool (defaults shown — see "Database connection pool" below)
+GRAPH_LAGOON_DATABASE_POOL_SIZE=10
+GRAPH_LAGOON_DATABASE_MAX_OVERFLOW=20
+GRAPH_LAGOON_DATABASE_POOL_TIMEOUT=30
+GRAPH_LAGOON_DATABASE_POOL_RECYCLE=3600
 
 # Databricks mode (replaces local warehouse)
 GRAPH_LAGOON_DATABRICKS_MODE=false
@@ -58,6 +63,25 @@ GRAPH_LAGOON_SHOW_ERROR_DETAILS=true
 GRAPH_LAGOON_SUPERUSER_EMAILS=admin@company.com,ops@company.com
 GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=company.com
 ```
+
+## Database connection pool
+
+When PostgreSQL persistence is enabled, the API keeps a pool of connections
+instead of opening one per request. The defaults suit a single-instance
+deployment; tune them when many workers share one database or when the
+database sits behind a connection limit.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_DATABASE_POOL_SIZE` | `10` | Persistent connections kept open per API process. |
+| `GRAPH_LAGOON_DATABASE_MAX_OVERFLOW` | `20` | Extra connections allowed under load, closed when idle again. Worst case per process is `pool_size + max_overflow`. |
+| `GRAPH_LAGOON_DATABASE_POOL_TIMEOUT` | `30` | Seconds a request waits for a free connection before failing — a bound, so exhaustion surfaces as an error instead of a hang. |
+| `GRAPH_LAGOON_DATABASE_POOL_RECYCLE` | `3600` | Connections older than this many seconds are recycled, so idle ones don't outlive server-side or firewall timeouts. |
+
+These apply to the standard PostgreSQL backend. The
+[Databricks Lakebase](./integration.md) backend manages its own pool with a
+shorter recycle interval, tied to its OAuth token lifetime — these variables
+do not affect it.
 
 ## Precomputed graphs
 

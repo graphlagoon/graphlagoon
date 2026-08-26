@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import type { GraphContext, DatasetsResponse, CreateGraphContextRequest } from '@/types/graph';
 import { api } from '@/services/api';
+import { getErrorMessage } from '@/utils/errorMessage';
 
 export const useContextsStore = defineStore('contexts', () => {
   const contexts = ref<GraphContext[]>([]);
@@ -16,7 +17,7 @@ export const useContextsStore = defineStore('contexts', () => {
     try {
       contexts.value = await api.getGraphContexts();
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : 'Failed to fetch contexts';
+      const errorMessage = getErrorMessage(e, 'Failed to fetch contexts');
       error.value = errorMessage;
     } finally {
       loading.value = false;
@@ -31,9 +32,8 @@ export const useContextsStore = defineStore('contexts', () => {
       const result = await api.getDatasets();
       datasets.value = result;
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : 'Failed to fetch datasets';
-      error.value = errorMessage;
-      console.error('=== fetchDatasets ERROR ===', e);
+      error.value = getErrorMessage(e, 'Failed to fetch datasets');
+      console.error('Failed to fetch datasets:', e);
     } finally {
       loading.value = false;
     }
@@ -48,7 +48,7 @@ export const useContextsStore = defineStore('contexts', () => {
       contexts.value.unshift(newContext);
       return newContext;
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : 'Failed to create context';
+      const errorMessage = getErrorMessage(e, 'Failed to create context');
       error.value = errorMessage;
       throw e;
     } finally {
@@ -68,7 +68,7 @@ export const useContextsStore = defineStore('contexts', () => {
       }
       return updatedContext;
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : 'Failed to update context';
+      const errorMessage = getErrorMessage(e, 'Failed to update context');
       error.value = errorMessage;
       throw e;
     } finally {
@@ -84,7 +84,7 @@ export const useContextsStore = defineStore('contexts', () => {
       await api.deleteGraphContext(id);
       contexts.value = contexts.value.filter((c) => c.id !== id);
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : 'Failed to delete context';
+      const errorMessage = getErrorMessage(e, 'Failed to delete context');
       error.value = errorMessage;
       throw e;
     } finally {
@@ -101,7 +101,7 @@ export const useContextsStore = defineStore('contexts', () => {
       // Refresh contexts to get updated shared_with list
       await fetchContexts();
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : 'Failed to share context';
+      const errorMessage = getErrorMessage(e, 'Failed to share context');
       error.value = errorMessage;
       throw e;
     } finally {
@@ -136,7 +136,7 @@ export const useContextsStore = defineStore('contexts', () => {
       await fetchDatasets();
       return result;
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : 'Failed to generate random graph';
+      const errorMessage = getErrorMessage(e, 'Failed to generate random graph');
       error.value = errorMessage;
       throw e;
     } finally {

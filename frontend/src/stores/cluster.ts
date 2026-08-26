@@ -16,6 +16,7 @@ import type {
 import { resolveParamValues } from '@/utils/clusterProgramParams'
 import { useGraphStore } from '@/stores/graph'
 import { api } from '@/services/api'
+import { useToast } from '@/composables/useToast'
 
 const STORAGE_KEY = 'graphlagoon-studio-clusters'
 
@@ -624,6 +625,9 @@ export const useClusterStore = defineStore('cluster', () => {
     } catch (e) {
       console.warn('Failed to persist cluster programs to context:', e)
       error.value = 'Failed to save cluster programs to the context'
+      // The error ref is not rendered anywhere — surface the silent
+      // persistence failure directly (technical debt #7).
+      useToast().error('Failed to save cluster programs to the context')
     }
   }
 

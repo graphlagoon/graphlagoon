@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { useContextsStore } from '@/stores/contexts';
 import { api } from '@/services/api';
+import { getErrorMessage } from '@/utils/errorMessage';
 import { parseTableName } from '@/utils/contextForm';
 import {
   resolveDatasourceDescriptor,
@@ -278,10 +279,9 @@ async function discoverTypes() {
         ? 'No types found. Tables may be empty or columns may not match.'
         : 'No labels found. The graph may be empty.';
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('Failed to discover schema types:', e);
-    const detail = e?.response?.data?.detail?.error?.message;
-    schemaDiscoveryError.value = detail || 'Failed to discover types from tables';
+    schemaDiscoveryError.value = getErrorMessage(e, 'Failed to discover types from tables');
   } finally {
     loadingSchemaDiscovery.value = false;
   }

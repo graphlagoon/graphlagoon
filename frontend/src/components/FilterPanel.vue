@@ -122,7 +122,7 @@ function resetFilters() {
       <input
         v-model="searchQuery"
         class="form-control"
-        placeholder="Search in metadata..."
+        placeholder="Search by node ID or type..."
         @input="applySearchDebounced"
       />
     </div>

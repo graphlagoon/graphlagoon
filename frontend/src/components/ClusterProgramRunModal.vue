@@ -8,6 +8,7 @@ import {
 } from '@/utils/clusterProgramParams'
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
 import { X, Play, Loader2 } from 'lucide-vue-next'
+import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
   program: ClusterProgram
@@ -15,6 +16,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const clusterStore = useClusterStore()
+const toast = useToast()
 
 const values = ref<ClusterProgramParamValues>(defaultParamValues(props.program.parameters))
 const running = ref(false)
@@ -37,7 +39,7 @@ async function runNow() {
     if (result.success) {
       const count = result.clusters?.length || 0
       emit('close')
-      alert(`Program executed successfully!\nGenerated ${count} cluster${count !== 1 ? 's' : ''} in ${result.duration_ms}ms`)
+      toast.success(`Generated ${count} cluster${count !== 1 ? 's' : ''} in ${result.duration_ms}ms`)
     } else {
       errorMsg.value = result.error ?? 'Execution failed'
     }

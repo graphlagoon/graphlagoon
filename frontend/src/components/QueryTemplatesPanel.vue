@@ -4,7 +4,9 @@ import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { usePersistence } from '@/composables/usePersistence';
+import { useToast } from '@/composables/useToast';
 import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
+import { getErrorMessage } from '@/utils/errorMessage';
 import { X } from 'lucide-vue-next';
 import type { QueryTemplate } from '@/types/graph';
 import TemplateEditorModal from './TemplateEditorModal.vue';
@@ -17,6 +19,7 @@ const capabilities = useDatasourceCapabilities(computed(() => graphStore.current
 const authStore = useAuthStore();
 const templatesStore = useQueryTemplatesStore();
 const { isSuperuser } = usePersistence();
+const toast = useToast();
 
 const canWrite = computed(
   () => graphStore.currentContext?.has_write_access ?? false,
@@ -94,6 +97,7 @@ async function handleDelete(template: QueryTemplate) {
     await templatesStore.deleteTemplate(graphStore.currentContext.id, template.id);
   } catch (e) {
     console.error('Failed to delete template:', e);
+    toast.error(getErrorMessage(e, 'Failed to delete template'));
   }
 }
 
