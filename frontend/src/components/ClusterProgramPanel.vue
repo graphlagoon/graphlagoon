@@ -338,6 +338,14 @@ function toggleEdgeTypeFilter(edgeType: string) {
               <input v-model="communityStore.colorEnabled" type="checkbox" />
               <span>Color by community</span>
             </label>
+            <label class="toggle-row">
+              <input
+                v-model="communityStore.tableColumnEnabled"
+                type="checkbox"
+                data-testid="community-table-toggle"
+              />
+              <span>Community column in Data Table</span>
+            </label>
             <label class="toggle-row layout-select-row">
               <span>Layout</span>
               <select

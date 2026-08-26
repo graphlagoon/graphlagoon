@@ -54,6 +54,10 @@ node in several clusters takes the first, and uncovered nodes form an
 - The results list shows every community with its color, label and size;
   right-click any member node → **View community members** for a
   searchable, CSV-exportable table.
+- **Community column in Data Table** adds each node's community as a
+  filterable column in the [Data Table](./exploring-the-graph.md)'s Nodes
+  tab (and its CSV export). The setting is saved with explorations; the
+  column disappears whenever the detection results do.
 
 Community assignments and colors are saved with an
 [exploration](./explorations.md) and restored when it reopens. Loading new
@@ -90,6 +94,26 @@ Each run produces a *named* metric — `PageRank (14:32:07)` — so you can
 compute the same algorithm with different parameters and compare. Results
 show min/max/mean; a selected node's individual values appear in the side
 panel and detail modal.
+
+### Metrics in the Data Table
+
+![Metric columns in the Data Table](/screenshots/communities-metrics-table-columns.png)
+
+Every computed metric in the list carries a **Show as Data Table column**
+checkbox. Check it and the metric's per-node (or per-edge) values appear
+as a numeric column in the [Data Table](./exploring-the-graph.md) — node
+metrics on the **Nodes** tab, Edge Betweenness on the **Edges** tab. The
+column sorts and filters like any other, feeds the table→graph filter
+sync, and is included in the table's CSV export. Uncheck the box (or
+delete the metric) and the column is gone.
+
+Two things to know:
+
+- The columns are as **session-only** as the metrics themselves — they
+  are not saved with explorations or style presets.
+- The table's **global search box does not scan metric values** (it
+  searches the id, type, and property text). Use the metric column's own
+  numeric filter instead.
 
 ### Mapping metrics to visuals
 

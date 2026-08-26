@@ -410,6 +410,15 @@ function toggleSection(section: keyof typeof expandedSections.value) {
               <span>Max: {{ metric.max.toFixed(4) }}</span>
               <span>Mean: {{ metric.mean.toFixed(4) }}</span>
             </div>
+            <label class="table-toggle">
+              <input
+                type="checkbox"
+                :checked="metricsStore.tableMetricIds.has(metric.id)"
+                :data-testid="`metric-table-toggle-${metric.id}`"
+                @change="metricsStore.toggleMetricInTable(metric.id)"
+              />
+              <span>Show as Data Table column</span>
+            </label>
             <div v-if="!metric.id.startsWith('__builtin_')" class="metric-actions">
               <button class="mini-btn danger" @click="deleteMetric(metric.id)">
                 Delete
@@ -909,6 +918,20 @@ function toggleSection(section: keyof typeof expandedSections.value) {
   font-size: 10px;
   color: var(--text-muted, #666);
   margin-bottom: 6px;
+}
+
+.table-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.table-toggle input {
+  cursor: pointer;
 }
 
 .metric-actions {

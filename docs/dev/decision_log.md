@@ -7709,3 +7709,52 @@ labels que identificam o nível do ego, desativada por default."
 - Ego only. The hierarchical layout's level lines (`L1`, `L2`, `unlinked`)
   keep their captions unconditionally — the request was scoped to ego, and
   the two guides have separate spec paths.
+
+## [2026-08-26 20:45] - Feature Implemented: Metric & Community Virtual Columns in the Data Table
+
+**Feature:** Computed metrics (degree, PageRank, betweenness, edge-betweenness, …) and community membership can now be shown as columns in the Data Table. Each computed metric in the Metrics panel carries a "Show as Data Table column" checkbox; the Clusters → Communities tab gains a "Community column in Data Table" toggle. Columns sort, filter, drive the table→graph filter sync, and land in the table's CSV export.
+
+**Requirements:** Users could compute metrics but the values did nothing outside visual mapping and the selected-item detail panels — they were invisible to the Data Table. Requested: a checkbox to expose them as properties of visualized nodes/edges, visible in the nodes/edges table.
+
+**Design Decisions:**
+1. **Virtual columns, not property mutation:** metric values are merged reactively in DataTablePanel; `node.properties`/`edge.properties` are never written. Avoids conflicts with backend property enrichment (which replaces the whole dict), needs no cleanup logic, and recompute/delete updates the table automatically. Rejected alternative: writing `metric_*` keys into `properties` via `patchNodeProperties` — would also reach labels/filters/JSON export, but is fragile against enrichment and requires a nonexistent `patchEdgeProperties`.
+2. **Per-metric flags are a session-only `Set<metricId>`** in the metrics store (`tableMetricIds`). Metric objects are replaced wholesale on recompute, so a flag on the object would be lost; the Set survives. NOT persisted in presets/explorations — metric values themselves are session-only, so a persisted flag would reference a metric that no longer exists.
+3. **Community flag (`tableColumnEnabled`) IS persisted** via the community store's `getState`/`loadState` (`?? false` legacy fallback) — the community map itself is exploration-persisted, unlike metrics.
+4. **Two-stage row building** (perf, 200k-node datasets): property rows stay a cached computed (`baseNodeRows`/`baseEdgeRows` from `nodePropCols`/`edgePropCols`); virtual values are added by `decorateRows` (O(n) shallow copies). Toggling a checkbox never re-runs the expensive flatten/type-detection pass.
+5. **`__search` excluded:** global search does not scan virtual columns (would defeat the cached base rows). Column filters/sort/CSV cover them; documented caveat.
+6. **Allowlist bypass:** metric/community columns are not properties — they skip `visiblePropKeys` and don't count in the PropertyVisibilityHint "N of M".
+7. **`mergeFilters` bonus fix:** column-set changes (metric toggles AND Property Visibility changes) no longer wipe the user's active column filters — old filter values are carried into the rebuilt filter model for fields present in both.
+
+**Implementation:**
+
+Frontend only (no backend changes).
+
+**Files Modified:**
+- [frontend/src/stores/metrics.ts](../../frontend/src/stores/metrics.ts) — `tableMetricIds` Set, `tableNodeMetrics`/`tableEdgeMetrics` computeds, `toggleMetricInTable`; `deleteMetric`/`clearAllMetrics` clean flags (built-ins kept)
+- [frontend/src/stores/community.ts](../../frontend/src/stores/community.ts) — `tableColumnEnabled` toggle, persisted in `getState`/`loadState`
+- [frontend/src/composables/useTableColumns.ts](../../frontend/src/composables/useTableColumns.ts) — `ExtraColumn` type, `decorateRows`, `mergeFilters` (pure helpers)
+- [frontend/src/components/DataTablePanel.vue](../../frontend/src/components/DataTablePanel.vue) — `nodeExtraCols`/`edgeExtraCols`, split `nodePropCols`/`edgePropCols` from merged `nodeCols`/`edgeCols`, base rows + decoration, filter merge on column change
+- [frontend/src/components/MetricsPanel.vue](../../frontend/src/components/MetricsPanel.vue) — per-metric checkbox (`metric-table-toggle-<id>` testids)
+- [frontend/src/components/ClusterProgramPanel.vue](../../frontend/src/components/ClusterProgramPanel.vue) — community-column toggle (`community-table-toggle` testid)
+- [frontend/e2e/screenshots/generate.ts](../../frontend/e2e/screenshots/generate.ts) — new `communities-metrics-table-columns` scene
+
+**Testing:**
+- [x] Unit: metrics store flag lifecycle (toggle, recompute survival, delete/clear cleanup), community flag persistence round-trip incl. legacy states, `decorateRows` (reference-equality fast path, null for missing ids, no input mutation, `__search` untouched), `mergeFilters`
+- [x] E2E (graph.spec.ts): built-in Degree checkbox adds/removes the drawer column
+- [x] Full suites green: 1920 unit tests (104 files), 174 e2e tests
+- [x] `npx vue-tsc --noEmit` clean
+
+**Public Docs:**
+- [x] `docs/guide/communities-metrics.md` — new "Metrics in the Data Table" subsection + community-column bullet under "What you see"
+- [x] `docs/guide/exploring-the-graph.md` — cross-link from the Data Table section
+- [x] Screenshot regenerated (`make docs-screenshots`): `communities-metrics-table-columns.png`
+- [x] `make docs-build` passes
+
+**Known Limitations:**
+- Global search box does not scan metric/community values (by design; column filters do).
+- Metric columns vanish with their metrics on graph reload; community column vanishes when detection results clear (existing nodes watcher).
+- Duplicate community labels filter together (mirrors the Communities list).
+
+**Future Enhancements:**
+- Metric values available to label templates / value filters (would require the property write-back approach).
+- Pre-existing issue noticed (out of scope): resetting table filters does not re-call `setTableFilteredIds`, so a stale graph filter can linger until the next filter event.
