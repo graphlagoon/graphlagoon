@@ -186,6 +186,27 @@ test.describe('Graph Visualization', () => {
       await page.getByTitle('Metrics').click();
     });
 
+    test('metric checkbox adds and removes a Data Table column', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTitle('Metrics')).toBeVisible({ timeout: 15_000 });
+
+      // The built-in Degree metric always exists once the graph has edges, and
+      // its id is stable — flag it as a Data Table column.
+      await page.getByTitle('Metrics').click();
+      const toggle = page.getByTestId('metric-table-toggle-__builtin_degree');
+      await expect(toggle).toBeVisible();
+      await toggle.check();
+
+      // The Nodes tab of the drawer now carries a numeric Degree column.
+      await page.getByTitle('Data Table').click();
+      const drawer = page.locator('.data-table-drawer');
+      await expect(drawer.locator('th', { hasText: 'Degree' })).toBeVisible();
+
+      // Unchecking removes the column again.
+      await toggle.uncheck();
+      await expect(drawer.locator('th', { hasText: 'Degree' })).toHaveCount(0);
+    });
+
     test('Query Templates panel shows template controls', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTitle('Query Templates')).toBeVisible({ timeout: 15_000 });

@@ -392,6 +392,21 @@ const SCENES: Scene[] = [
     },
   },
   {
+    // Built-in Degree flagged as a Data Table column: Metrics panel checkbox
+    // checked + the drawer showing the numeric Degree column.
+    guide: 'communities-metrics',
+    scene: 'table-columns',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Metrics');
+      await page.getByTestId('metric-table-toggle-__builtin_degree').check();
+      await page.getByTitle('Data Table').click();
+      await page.waitForSelector('.data-table-drawer', { timeout: 10_000 });
+      await page.waitForTimeout(400);
+    },
+  },
+  {
     guide: 'context-menu-actions',
     scene: 'menu',
     path: GRAPH_URL,

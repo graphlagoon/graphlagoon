@@ -43,6 +43,9 @@ export const useMetricsStore = defineStore('metrics', () => {
   /** History of completed/cancelled/errored computations */
   const computationHistory = ref<ComputationHistoryEntry[]>([]);
 
+  /** Metric ids exposed as virtual columns in the Data Table (session-only) */
+  const tableMetricIds = ref<Set<string>>(new Set());
+
   // ============================================================================
   // Visual Mapping Configuration
   // ============================================================================
@@ -166,6 +169,16 @@ export const useMetricsStore = defineStore('metrics', () => {
     );
     return [...builtIn, ...userComputed];
   });
+
+  /** Node metrics flagged to appear as Data Table columns */
+  const tableNodeMetrics = computed(() =>
+    nodeMetrics.value.filter((m) => tableMetricIds.value.has(m.id))
+  );
+
+  /** Edge metrics flagged to appear as Data Table columns */
+  const tableEdgeMetrics = computed(() =>
+    edgeMetrics.value.filter((m) => tableMetricIds.value.has(m.id))
+  );
 
   /** Currently selected node size metric (checks built-in + user-computed) */
   const nodeSizeMetric = computed(() => {
@@ -486,6 +499,7 @@ export const useMetricsStore = defineStore('metrics', () => {
     }
 
     computedMetrics.value.delete(metricId);
+    tableMetricIds.value.delete(metricId);
   }
 
   /**
@@ -495,6 +509,20 @@ export const useMetricsStore = defineStore('metrics', () => {
     computedMetrics.value.clear();
     visualMapping.value.nodeSize.metricId = null;
     visualMapping.value.edgeWeight.metricId = null;
+    for (const id of Array.from(tableMetricIds.value)) {
+      if (!id.startsWith('__builtin_')) tableMetricIds.value.delete(id);
+    }
+  }
+
+  /**
+   * Toggle whether a metric appears as a virtual column in the Data Table
+   */
+  function toggleMetricInTable(metricId: string): void {
+    if (tableMetricIds.value.has(metricId)) {
+      tableMetricIds.value.delete(metricId);
+    } else {
+      tableMetricIds.value.add(metricId);
+    }
   }
 
   /**
@@ -602,6 +630,7 @@ export const useMetricsStore = defineStore('metrics', () => {
     computedMetrics,
     activeComputations,
     computationHistory,
+    tableMetricIds,
     visualMapping,
     workerPoolConfig,
     resourceMetrics,
@@ -611,6 +640,8 @@ export const useMetricsStore = defineStore('metrics', () => {
     builtInMetrics,
     nodeMetrics,
     edgeMetrics,
+    tableNodeMetrics,
+    tableEdgeMetrics,
     nodeSizeMetric,
     edgeWeightMetric,
     hasActiveComputations,
@@ -644,5 +675,6 @@ export const useMetricsStore = defineStore('metrics', () => {
     deleteMetric,
     clearAllMetrics,
     clearHistory,
+    toggleMetricInTable,
   };
 });

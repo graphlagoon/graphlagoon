@@ -44,6 +44,7 @@ export const useCommunityStore = defineStore('community', () => {
   const colorEnabled = ref(true)
   const radialLayoutEnabled = ref(false)
   const collapseEnabled = ref(false)
+  const tableColumnEnabled = ref(false)
 
   // Algorithm selection: 'louvain' (worker) or 'cluster-program:<programId>'
   const algorithm = ref<CommunityAlgorithm>('louvain')
@@ -455,6 +456,7 @@ export const useCommunityStore = defineStore('community', () => {
       colorEnabled: colorEnabled.value,
       radialLayoutEnabled: radialLayoutEnabled.value,
       collapseEnabled: collapseEnabled.value,
+      tableColumnEnabled: tableColumnEnabled.value,
       resolution: resolution.value,
       edgeTypeFilter: edgeTypeFilter.value,
       programParams: programParams.value,
@@ -479,6 +481,7 @@ export const useCommunityStore = defineStore('community', () => {
     colorEnabled.value = (state.colorEnabled as boolean) ?? true
     radialLayoutEnabled.value = (state.radialLayoutEnabled as boolean) ?? false
     collapseEnabled.value = (state.collapseEnabled as boolean) ?? false
+    tableColumnEnabled.value = (state.tableColumnEnabled as boolean) ?? false
     resolution.value = (state.resolution as number) ?? 1.0
     edgeTypeFilter.value = (state.edgeTypeFilter as string[]) ?? []
     programParams.value =
@@ -555,6 +558,7 @@ export const useCommunityStore = defineStore('community', () => {
     colorEnabled,
     radialLayoutEnabled,
     collapseEnabled,
+    tableColumnEnabled,
     resolution,
     edgeTypeFilter,
     programParams,

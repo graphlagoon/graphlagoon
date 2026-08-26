@@ -89,6 +89,9 @@ same nodes and edges, as rows. The two drawers are mutually exclusive.
   (Ctrl/⌘/Shift-click multi-selects). **Double-click a cell** to see the
   full untruncated value with a copy button.
 - **CSV** exports the current tab, respecting active filters.
+- Computed **metrics and communities can join the table** as extra
+  columns — see
+  [Metrics in the Data Table](./communities-metrics.md#metrics-in-the-data-table).
 
 ### Focusing on a subset of properties
 

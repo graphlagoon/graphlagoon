@@ -136,6 +136,21 @@ export function initRowFilters(cols: ColMeta[]) {
   return f;
 }
 
+/** Carry over active filter values from a previous filter model into a freshly
+ * built one, for every field present in both (plus the global filter). Keeps
+ * user-entered filters alive when the column set changes (e.g. toggling a
+ * metric column or the property allowlist). */
+export function mergeFilters(
+  fresh: Record<string, any>,
+  old: Record<string, any> | undefined,
+): Record<string, any> {
+  if (!old) return fresh;
+  for (const field of Object.keys(fresh)) {
+    if (field in old) fresh[field] = old[field];
+  }
+  return fresh;
+}
+
 /** Build column metadata for a set of nodes, detecting property types automatically.
  *
  * `idColName` is the context's configured node id column (e.g. `id_hash`). When
@@ -188,6 +203,32 @@ export function flattenNodeRows<T extends { node_id: string; node_type: string; 
     }
     r[SEARCH_FIELD] = buildSearchText(searchVals);
     return r;
+  });
+}
+
+/** A virtual column whose values come from outside `properties` (computed
+ * metrics, community membership), resolved per row by id. */
+export interface ExtraColumn {
+  meta: ColMeta;
+  get: (id: string) => unknown;
+}
+
+/** Append virtual-column values to pre-flattened rows, looked up by the row's
+ * id field. Shallow-copies each row so cached base rows are never mutated;
+ * returns the input array untouched when there are no extras. Does NOT extend
+ * the `__search` field — global search skips virtual columns by design (base
+ * rows are cached; use the column filters instead). */
+export function decorateRows(
+  rows: Record<string, unknown>[],
+  idField: string,
+  extras: ExtraColumn[],
+): Record<string, unknown>[] {
+  if (extras.length === 0) return rows;
+  return rows.map(r => {
+    const out = { ...r };
+    const id = r[idField] as string;
+    for (const ex of extras) out[ex.meta.field] = ex.get(id);
+    return out;
   });
 }
 

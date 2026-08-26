@@ -368,3 +368,76 @@ describe('built-in degree metric', () => {
     expect(store.nodeMetrics.some(m => m.id === '__builtin_degree')).toBe(true)
   })
 })
+
+// ============================================================================
+// Data Table virtual columns (tableMetricIds)
+// ============================================================================
+
+describe('table metric flags', () => {
+  it('toggleMetricInTable adds and removes the flag', () => {
+    const store = useMetricsStore()
+    store.toggleMetricInTable('m1')
+    expect(store.tableMetricIds.has('m1')).toBe(true)
+    store.toggleMetricInTable('m1')
+    expect(store.tableMetricIds.has('m1')).toBe(false)
+  })
+
+  it('tableNodeMetrics / tableEdgeMetrics filter by target and flag', () => {
+    const store = useMetricsStore()
+    store.computedMetrics.set('n1', makeComputedMetric({ id: 'n1', target: 'node' }))
+    store.computedMetrics.set('n2', makeComputedMetric({ id: 'n2', target: 'node' }))
+    store.computedMetrics.set('e1', makeComputedMetric({ id: 'e1', target: 'edge' }))
+
+    store.toggleMetricInTable('n1')
+    store.toggleMetricInTable('e1')
+
+    expect(store.tableNodeMetrics.map(m => m.id)).toEqual(['n1'])
+    expect(store.tableEdgeMetrics.map(m => m.id)).toEqual(['e1'])
+  })
+
+  it('built-in degree can be flagged for the table', () => {
+    setupGraph()
+    const store = useMetricsStore()
+    store.toggleMetricInTable('__builtin_degree')
+    expect(store.tableNodeMetrics.some(m => m.id === '__builtin_degree')).toBe(true)
+  })
+
+  it('flag survives completeComputation re-storing the same id', () => {
+    const store = useMetricsStore()
+    store.registerComputation(makeComputation('m1'))
+    store.completeComputation(makeComputedMetric({ id: 'm1' }))
+    store.toggleMetricInTable('m1')
+
+    // Recompute: a new metric object replaces the old one under the same id
+    store.registerComputation(makeComputation('m1'))
+    store.completeComputation(makeComputedMetric({ id: 'm1', mean: 9 }))
+
+    expect(store.tableMetricIds.has('m1')).toBe(true)
+    expect(store.tableNodeMetrics.map(m => m.id)).toEqual(['m1'])
+  })
+
+  it('deleteMetric removes the flag', () => {
+    const store = useMetricsStore()
+    store.computedMetrics.set('m1', makeComputedMetric({ id: 'm1' }))
+    store.toggleMetricInTable('m1')
+
+    store.deleteMetric('m1')
+
+    expect(store.tableMetricIds.has('m1')).toBe(false)
+    expect(store.tableNodeMetrics).toHaveLength(0)
+  })
+
+  it('clearAllMetrics removes non-builtin flags but keeps built-in ones', () => {
+    setupGraph()
+    const store = useMetricsStore()
+    store.computedMetrics.set('m1', makeComputedMetric({ id: 'm1' }))
+    store.toggleMetricInTable('m1')
+    store.toggleMetricInTable('__builtin_degree')
+
+    store.clearAllMetrics()
+
+    expect(store.tableMetricIds.has('m1')).toBe(false)
+    expect(store.tableMetricIds.has('__builtin_degree')).toBe(true)
+    expect(store.tableNodeMetrics.map(m => m.id)).toEqual(['__builtin_degree'])
+  })
+})

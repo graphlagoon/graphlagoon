@@ -9,13 +9,15 @@ import MultiSelect from 'primevue/multiselect';
 import Popover from 'primevue/popover';
 
 import { useGraphStore } from '@/stores/graph';
+import { useMetricsStore } from '@/stores/metrics';
+import { useCommunityStore } from '@/stores/community';
 import { useDrawerResize } from '@/composables/useDrawerResize';
 import { useDebouncedModel } from '@/composables/useDebouncedModel';
 import DatePicker from 'primevue/datepicker';
 import {
-  type ColMeta,
+  type ColMeta, type CatOption, type ExtraColumn,
   detectType, collectOptions, buildColMeta, buildNodeColumns,
-  flattenNodeRows, initFilters, coerceValue,
+  flattenNodeRows, initFilters, mergeFilters, coerceValue, decorateRows,
 } from '@/composables/useTableColumns';
 import { buildSearchText, SEARCH_FIELD } from '@/utils/searchText';
 import PropertyVisibilityHint from '@/components/PropertyVisibilityHint.vue';
@@ -34,6 +36,8 @@ const emit = defineEmits<{
 }>();
 
 const graphStore = useGraphStore();
+const metricsStore = useMetricsStore();
+const communityStore = useCommunityStore();
 const { height, isResizing, onMouseDown } = useDrawerResize({
   initialHeight: 280,
   minHeight: 120,
@@ -75,13 +79,55 @@ const allEdgePropKeys = computed(() => {
 const nodePropKeys = computed(() => graphStore.visiblePropKeys('node', allNodePropKeys.value));
 const edgePropKeys = computed(() => graphStore.visiblePropKeys('edge', allEdgePropKeys.value));
 
+// ─── Virtual columns (computed metrics + community membership) ───
+// Values live in the metrics/community stores, not in `properties`; they bypass
+// the property allowlist and are appended after the prop_* columns. Rows are
+// decorated in a second pass so toggling a metric checkbox (or a recompute)
+// never re-runs the expensive flatten below — only an O(n) shallow-copy.
+
+const metricField = (id: string) => `metric_${id}`;
+
+const communityColOptions = computed<CatOption[]>(() => {
+  const opts: CatOption[] = communityStore.communitiesSorted
+    .map(c => ({ label: c.label, value: c.label }));
+  if (rawNodes.value.some(n => !communityStore.communityMap.has(n.node_id)))
+    opts.push({ label: '(empty)', value: null });
+  return opts;
+});
+
+const nodeExtraCols = computed<ExtraColumn[]>(() => {
+  const extras: ExtraColumn[] = metricsStore.tableNodeMetrics.map(m => ({
+    meta: buildColMeta(metricField(m.id), m.name, 'numeric'),
+    get: (id: string) => m.values.get(id) ?? null,
+  }));
+  if (communityStore.tableColumnEnabled && communityStore.hasResults) {
+    extras.push({
+      meta: buildColMeta('community', 'Community', 'categorical', communityColOptions.value),
+      get: (id: string) => {
+        const cid = communityStore.communityMap.get(id);
+        return cid === undefined ? null
+          : (communityStore.communityLabels[cid] ?? `Community ${cid}`);
+      },
+    });
+  }
+  return extras;
+});
+
+const edgeExtraCols = computed<ExtraColumn[]>(() =>
+  metricsStore.tableEdgeMetrics.map(m => ({
+    meta: buildColMeta(metricField(m.id), m.name, 'numeric'),
+    get: (id: string) => m.values.get(id) ?? null,
+  })),
+);
+
 // ─── Flattened data (properties as top-level fields for PrimeVue) ───
 
-const nodeRows = computed(() => flattenNodeRows(rawNodes.value, nodePropKeys.value, nodeCols.value));
+const baseNodeRows = computed(() => flattenNodeRows(rawNodes.value, nodePropKeys.value, nodePropCols.value));
+const nodeRows = computed(() => decorateRows(baseNodeRows.value, 'node_id', nodeExtraCols.value));
 
-const edgeRows = computed(() => {
+const baseEdgeRows = computed(() => {
   const keys = edgePropKeys.value;
-  const colMap = new Map(edgeCols.value.map(c => [c.field, c]));
+  const colMap = new Map(edgePropCols.value.map(c => [c.field, c]));
   return rawEdges.value.map(e => {
     const r: Record<string, unknown> = {
       edge_id: e.edge_id, relationship_type: e.relationship_type, src: e.src, dst: e.dst,
@@ -98,6 +144,7 @@ const edgeRows = computed(() => {
     return r;
   });
 });
+const edgeRows = computed(() => decorateRows(baseEdgeRows.value, 'edge_id', edgeExtraCols.value));
 
 const currentRows = computed(() => activeTab.value === 'nodes' ? nodeRows.value : edgeRows.value);
 
@@ -108,11 +155,13 @@ const currentRows = computed(() => activeTab.value === 'nodes' ? nodeRows.value 
 const nodeIdCol = computed(() => graphStore.currentContext?.node_structure?.node_id_col || undefined);
 const edgeIdCol = computed(() => graphStore.currentContext?.edge_structure?.edge_id_col || undefined);
 
-const nodeCols = computed<ColMeta[]>(() =>
+// Property-only columns feed the (cached) base rows; the merged nodeCols/
+// edgeCols below add the virtual columns and drive the template + filters.
+const nodePropCols = computed<ColMeta[]>(() =>
   buildNodeColumns(rawNodes.value, nodePropKeys.value, nodeIdCol.value),
 );
 
-const edgeCols = computed<ColMeta[]>(() => {
+const edgePropCols = computed<ColMeta[]>(() => {
   const cols: ColMeta[] = [
     buildColMeta('edge_id', edgeIdCol.value && edgeIdCol.value !== 'edge_id' ? `ID (${edgeIdCol.value})` : 'ID', 'text'),
     buildColMeta('relationship_type', 'Type', 'categorical', collectOptions(rawEdges.value, e => e.relationship_type)),
@@ -127,14 +176,21 @@ const edgeCols = computed<ColMeta[]>(() => {
   return cols;
 });
 
+const nodeCols = computed<ColMeta[]>(() =>
+  [...nodePropCols.value, ...nodeExtraCols.value.map(e => e.meta)],
+);
+const edgeCols = computed<ColMeta[]>(() =>
+  [...edgePropCols.value, ...edgeExtraCols.value.map(e => e.meta)],
+);
+
 const currentCols = computed(() => activeTab.value === 'nodes' ? nodeCols.value : edgeCols.value);
 
 // ─── Filters (matching PrimeVue menu format) ───
 
 const nodeFilters = ref(initFilters(nodeCols.value));
 const edgeFilters = ref(initFilters(edgeCols.value));
-watch(nodeCols, c => { nodeFilters.value = initFilters(c); });
-watch(edgeCols, c => { edgeFilters.value = initFilters(c); });
+watch(nodeCols, c => { nodeFilters.value = mergeFilters(initFilters(c), nodeFilters.value); });
+watch(edgeCols, c => { edgeFilters.value = mergeFilters(initFilters(c), edgeFilters.value); });
 
 const currentFilters = computed({
   get: () => activeTab.value === 'nodes' ? nodeFilters.value : edgeFilters.value,
