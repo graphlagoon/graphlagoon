@@ -1682,7 +1682,11 @@ function applyLayoutModeForces() {
     }
 
     guides.showEgoRings(
-      computeRingGuideSpec({ levelStats: result.levelStats, maxHops: cfg.ego.maxHops }),
+      computeRingGuideSpec({
+        levelStats: result.levelStats,
+        maxHops: cfg.ego.maxHops,
+        hideLabels: cfg.ego.hideRingLabels,
+      }),
       { focusHalo: true, ringSpacing: cfg.ego.ringSpacing },
     );
   } else if (mode === 'hierarchical') {

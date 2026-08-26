@@ -248,11 +248,13 @@ describe('LayoutPanel — ego ring ordering and edge arcs', () => {
     expect(getByTestId('ego-max-hops')).toBeTruthy()
     expect(queryByTestId('ego-ring-spacing')).toBeNull()
     expect(queryByTestId('ego-arc-intra-ring')).toBeNull()
+    expect(queryByTestId('ego-hide-ring-labels')).toBeNull()
 
     await openAdvanced()
 
     expect(queryByTestId('ego-ring-spacing')).not.toBeNull()
     expect(queryByTestId('ego-arc-intra-ring')).not.toBeNull()
+    expect(queryByTestId('ego-hide-ring-labels')).not.toBeNull()
   })
 
   it('changing the ordering strategy updates the store', async () => {
@@ -270,6 +272,19 @@ describe('LayoutPanel — ego ring ordering and edge arcs', () => {
     await fireEvent.click(getByTestId('ego-arc-intra-ring'))
 
     expect(store.layoutModeConfig.ego.arcIntraRingEdges).toBe(false)
+  })
+
+  it('ring labels show by default and the toggle hides them', async () => {
+    const { store, getByTestId, openAdvanced } = await renderEgoPanel()
+    await openAdvanced()
+
+    const checkbox = getByTestId('ego-hide-ring-labels') as HTMLInputElement
+    expect(checkbox.checked).toBe(false)
+    expect(store.layoutModeConfig.ego.hideRingLabels).toBe(false)
+
+    await fireEvent.click(checkbox)
+
+    expect(store.layoutModeConfig.ego.hideRingLabels).toBe(true)
   })
 
   it('shows the property picker only for the property strategy', async () => {

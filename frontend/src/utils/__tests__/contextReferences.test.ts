@@ -110,7 +110,7 @@ describe('collectPropertyReferences', () => {
         hive: { axisKey: 'prop:department', maxAxes: 6, positionKey: 'salary', scale: 'linear', innerRadius: 10, outerRadius: 100 },
         ego: {
           focusNodeId: null, direction: 'both', edgeTypes: null, maxHops: null, ringSpacing: 10,
-          ringOrdering: 'id', ringOrderingKey: null, crossingHeuristic: 'barycenter', crossingSweeps: 4, arcIntraRingEdges: false,
+          ringOrdering: 'id', ringOrderingKey: null, crossingHeuristic: 'barycenter', crossingSweeps: 4, arcIntraRingEdges: false, hideRingLabels: false,
         },
         hierarchical: { direction: 'td', traversal: 'out', edgeTypes: null, levelSpacing: 100, nodeSpacing: 50 },
       },
@@ -125,7 +125,7 @@ describe('collectPropertyReferences', () => {
         hive: { axisKey: 'node_type', maxAxes: 6, positionKey: 'degree', scale: 'linear', innerRadius: 10, outerRadius: 100 },
         ego: {
           focusNodeId: null, direction: 'both', edgeTypes: null, maxHops: null, ringSpacing: 10,
-          ringOrdering: 'id', ringOrderingKey: null, crossingHeuristic: 'barycenter', crossingSweeps: 4, arcIntraRingEdges: false,
+          ringOrdering: 'id', ringOrderingKey: null, crossingHeuristic: 'barycenter', crossingSweeps: 4, arcIntraRingEdges: false, hideRingLabels: false,
         },
         hierarchical: { direction: 'td', traversal: 'out', edgeTypes: null, levelSpacing: 100, nodeSpacing: 50 },
       },
@@ -139,7 +139,7 @@ describe('collectPropertyReferences', () => {
         hive: { axisKey: 'node_type', maxAxes: 6, positionKey: 'degree', scale: 'linear', innerRadius: 10, outerRadius: 100 },
         ego: {
           focusNodeId: null, direction: 'both', edgeTypes: null, maxHops: null, ringSpacing: 10,
-          ringOrdering: 'id', ringOrderingKey: 'prop:score', crossingHeuristic: 'barycenter', crossingSweeps: 4, arcIntraRingEdges: false,
+          ringOrdering: 'id', ringOrderingKey: 'prop:score', crossingHeuristic: 'barycenter', crossingSweeps: 4, arcIntraRingEdges: false, hideRingLabels: false,
         },
         hierarchical: { direction: 'td', traversal: 'out', edgeTypes: null, levelSpacing: 100, nodeSpacing: 50 },
       },
@@ -151,7 +151,7 @@ describe('collectPropertyReferences', () => {
         hive: { axisKey: 'node_type', maxAxes: 6, positionKey: 'degree', scale: 'linear', innerRadius: 10, outerRadius: 100 },
         ego: {
           focusNodeId: null, direction: 'both', edgeTypes: null, maxHops: null, ringSpacing: 10,
-          ringOrdering: 'property', ringOrderingKey: 'prop:score', crossingHeuristic: 'barycenter', crossingSweeps: 4, arcIntraRingEdges: false,
+          ringOrdering: 'property', ringOrderingKey: 'prop:score', crossingHeuristic: 'barycenter', crossingSweeps: 4, arcIntraRingEdges: false, hideRingLabels: false,
         },
         hierarchical: { direction: 'td', traversal: 'out', edgeTypes: null, levelSpacing: 100, nodeSpacing: 50 },
       },

@@ -315,6 +315,33 @@ describe('computeRingGuideSpec', () => {
     const spec = computeRingGuideSpec({ levelStats: stats([[0, 0, false]]), maxHops: null });
     expect(spec.rings).toHaveLength(0);
   });
+
+  it('labels every ring by default (hideLabels is opt-in)', () => {
+    const spec = computeRingGuideSpec({ levelStats: stats([[1, 60, false]]), maxHops: null });
+    expect(spec.rings[0].label).toBe('1 · 1');
+  });
+
+  it('drops the captions but keeps the rings when hideLabels is on', () => {
+    const levelStats = stats([[1, 60, false], [2, 145, false], [3, 210, true]]);
+    const labelled = computeRingGuideSpec({ levelStats, maxHops: null });
+    const bare = computeRingGuideSpec({ levelStats, maxHops: null, hideLabels: true });
+
+    expect(bare.rings.map((r) => r.label)).toEqual([null, null, null]);
+    // Geometry is untouched — toggling captions must never move a ring
+    expect(bare.rings.map((r) => r.radius)).toEqual(labelled.rings.map((r) => r.radius));
+    expect(bare.rings.map((r) => r.dashed)).toEqual(labelled.rings.map((r) => r.dashed));
+    expect(bare.rings.map((r) => r.hop)).toEqual(labelled.rings.map((r) => r.hop));
+  });
+
+  it('still respects the maxHops cutoff with labels hidden', () => {
+    const spec = computeRingGuideSpec({
+      levelStats: stats([[1, 60, false], [2, 120, false], [3, 180, false]]),
+      maxHops: 2,
+      hideLabels: true,
+    });
+
+    expect(spec.rings).toHaveLength(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
