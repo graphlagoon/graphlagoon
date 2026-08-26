@@ -300,6 +300,51 @@ export async function seedContexts(page: Page, contexts: any[]) {
 }
 
 /**
+ * Override every graph-returning endpoint with a custom response. Call AFTER
+ * setupAPIMocks (later routes take precedence). Used by the docs screenshot
+ * generator to serve a denser, curated graph than MOCK_GRAPH_RESPONSE.
+ */
+export async function seedGraphResponse(page: Page, graph: any) {
+  const body = JSON.stringify(graph);
+  for (const endpoint of ['subgraph', 'expand', 'query']) {
+    await page.route(`**/graphlagoon/api/graph-contexts/*/${endpoint}`, (route) => {
+      route.fulfill({ status: 200, contentType: 'application/json', body });
+    });
+  }
+  await page.route('**/graphlagoon/api/graph-contexts/*/cypher', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ...graph, transpiled_sql: 'SELECT * FROM edges' }),
+    });
+  });
+  await page.route('**/graphlagoon/api/graph-contexts/*/query/job/*', (route) => {
+    if (route.request().url().endsWith('/cancel')) return route.continue();
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'succeeded',
+        job_id: 'e2e-graph-job',
+        result: { ...graph, transpiled_sql: 'SELECT * FROM edges' },
+        transpiled_sql: 'SELECT * FROM edges',
+      }),
+    });
+  });
+  await page.route('**/graphlagoon/api/graph-contexts/*/nodes/batch', (route) => {
+    const requested: string[] = route.request().postDataJSON()?.node_ids ?? [];
+    const wanted = new Set(requested);
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        nodes: graph.nodes.filter((n: any) => wanted.has(n.node_id)),
+      }),
+    });
+  });
+}
+
+/**
  * Advertise extra datasource types to the app.
  *
  * The config is injected as a window global before any script runs (see

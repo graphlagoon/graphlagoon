@@ -27,7 +27,11 @@ const NOOP_HANDLE: DevPerfHandle = {
 }
 
 export function useDevPerf(): DevPerfHandle {
-  if (import.meta.env.PROD) return NOOP_HANDLE
+  // __SCREENSHOT_MODE__ is set by the docs screenshot generator
+  // (e2e/screenshots/generate.ts), which runs against the dev server but must
+  // not capture the stats overlay.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (import.meta.env.PROD || (window as any).__SCREENSHOT_MODE__) return NOOP_HANDLE
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let stats: any = null

@@ -1222,6 +1222,9 @@ async function initGraph() {
   // Dev-only: expose renderer info + attach stats-gl overlay
   if (import.meta.env.DEV) {
     // Lets e2e tests locate a node on the canvas (WebGL is opaque to DOM selectors)
+    // Lets the docs screenshot generator wait for the moment labels appear
+    (window as any).__GRAPH_LAYOUT_DONE__ = () => initialLayoutDone.value;
+
     (window as any).__GRAPH_NODE_SCREEN_COORDS__ = (nodeId: string) => {
       if (!graph3d) return null;
       const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
