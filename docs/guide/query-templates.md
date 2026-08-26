@@ -73,6 +73,8 @@ panel — and a link to one reports the mismatch instead of running.
 
 ## Running a template
 
+![The Query Templates panel listing the context's saved templates](/screenshots/query-templates-panel.png)
+
 The **Use** button opens the execute modal: fill the parameters, watch the live
 query preview, and choose how to run it —
 

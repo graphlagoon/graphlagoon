@@ -133,6 +133,8 @@ Add `choices: ["a", "b", "c"]` to any param to render a dropdown instead.
 
 The similarity UI lives in the **Clusters panel > Similarity tab**:
 
+![The Similarity tab with an endpoint selected and its parameter form rendered](/screenshots/similarity-panel.png)
+
 1. **Select endpoint** from the dropdown (populated from the registry)
 2. **Select node type** to filter which nodes provide keys
 3. **Select key property** — the node property whose values become keys sent to the endpoint. Defaults to `node_id`. If the property contains a JSON string, check "Value is JSON string" and specify a dot-separated path (e.g. `embedding.id`)

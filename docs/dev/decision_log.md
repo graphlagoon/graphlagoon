@@ -7250,3 +7250,49 @@ exploring-the-graph, clusters, communities-metrics, getting-started, index.
 
 **Related:** technical debts #24, #25, #26. Commits: 9777c10 (wave A),
 0f13a2c (python-api), 008d9b4 (wave B), plus this hygiene commit.
+
+## [2026-08-26 12:20] - Docs Overhaul (Phase 4): deferred screenshot scenes + orphan PNG embeds
+
+**Feature:** The two screenshot scenes deferred at the Phase 1 entry
+("deferred to their content waves") now exist, and the five PNGs the
+generator was already producing but no page referenced are embedded.
+
+**Retroactive note:** commits `d9ca267` and `729576f` (TL;DR use-it-when /
+not-the-tool-for blocks on all 17 guide pages) shipped without a log entry;
+recorded here for completeness — pure docs prose, no code impact.
+
+**New scenes** (`frontend/e2e/screenshots/generate.ts`, now 15 total):
+- `similarity-panel` — Clusters → Similarity tab with `embedding-cosine`
+  selected, node type Person, and the dynamic param form (threshold, top_k)
+  rendered. Backed by a new `seedSimilarityEndpoints()` helper in
+  `frontend/e2e/helpers/api-mocks.ts` (routes
+  `**/graphlagoon/api/similarity/endpoints`) — first similarity mock in the
+  E2E infrastructure. Compute endpoints stay unmocked; the scene captures
+  the configured form, not a run.
+- `rest-connections-picker` — create-context modal with the datasource
+  picker offering the Fraud Graph Service REST card next to Databricks.
+  Reuses `enableDatasources()` + `MOCK_REST_CONNECTION` (already existed
+  for `rest-context.spec.ts`); `setupPage` now calls both seeds
+  unconditionally — the picker only exists inside the modal, so the other
+  scenes are unaffected (verified: 13 pre-existing scenes byte-identical
+  in intent, all pass).
+
+**Embeds added (7 pages):**
+- `docs/guide/similarity.md` → similarity-panel.png (Frontend Usage)
+- `docs/guide/rest-connections.md` → rest-connections-picker.png (intro)
+- Orphan PNGs now referenced: `style-presets.md` (modal),
+  `query-templates.md` (panel), `context-menu-actions.md` (menu),
+  `layout-url-overrides.md` (ego), `precomputed-graphs.md` (status)
+
+**Testing:**
+- [x] `npm run screenshots` — 15/15 scenes pass (~39s); both new PNGs
+      visually verified (params visible, REST card copy correct)
+- [x] `npx vue-tsc --noEmit` clean
+- [x] `make docs-build` passes (dead-link + image reference check)
+
+**Public Docs:**
+- [x] Seven guide pages updated with screenshots
+- [x] Screenshots regenerated
+
+**Related:** closes the two deferred-scene items from the Phase 1 entry;
+debts #24/#25/#26 remain open (unchanged by this wave).

@@ -25,6 +25,8 @@ Use it when a team already serves a graph over HTTP — a fraud-scoring service,
 a precomputed neighborhood cache, an internal knowledge graph — and you want it
 explorable without ETL into tables.
 
+![The datasource picker offering a named REST connection next to the built-in datasources](/screenshots/rest-connections-picker.png)
+
 ## Registering connections
 
 Connections are declared **in code** by the app that embeds Graph Lagoon, the

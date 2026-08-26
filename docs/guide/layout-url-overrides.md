@@ -27,6 +27,8 @@ be set in the URL, field by field, on top of whatever the preset restored:
 The URL wins field by field; everything it does not name keeps the preset's
 value.
 
+![An ego layout centred on the node named by the URL](/screenshots/layout-url-overrides-ego.png)
+
 ## Grammar
 
 Two forms:

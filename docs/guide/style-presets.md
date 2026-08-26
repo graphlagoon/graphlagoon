@@ -39,7 +39,9 @@ says how a graph *looks*, never which data it shows — the same split
 
 Everything lives in one modal, opened by the **Presets** button inside the
 Aesthetics panel — not a second toolbar button, and not inline in the
-sidebar. A preset is not a setting you nudge; it is an occasional, deliberate
+sidebar.
+
+![The style preset modal: save the current look, apply or delete a saved one](/screenshots/style-presets-modal.png) A preset is not a setting you nudge; it is an occasional, deliberate
 act, and a list plus a naming form would crowd a panel of sliders.
 
 **Save current look as** — type a name and hit **Save**. Names follow the
