@@ -26,6 +26,10 @@ import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
 import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
 import { useCommunityTableAction } from '@/composables/useCommunityTableAction';
 import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
+import { useConfigurableMenuActions } from '@/composables/useConfigurableMenuActions';
+import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
+import ContextMenuActionsModal from '@/components/ContextMenuActionsModal.vue';
+import TemplateExecuteModal from '@/components/TemplateExecuteModal.vue';
 import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
 import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
@@ -141,10 +145,15 @@ const showTextFormatPanel = ref(false);
 const showClusterPrograms = ref(false);
 const showClusterList = ref(false);
 const showTemplatesPanel = ref(false);
+const showMenuActionsModal = ref(false);
 const showPrecomputedPanel = ref(false);
 const selectedClusterId = ref<string | null>(null);
 const communityTable = useCommunityTableAction();
 const clusterProgramActions = useClusterProgramMenuActions();
+const configurableMenuActions = useConfigurableMenuActions();
+// Ref driving the pre-filled TemplateExecuteModal opened by run-query-template
+// actions whose required parameters could not all be bound from the click.
+const { pendingTemplateExecution } = configurableMenuActions;
 const showDetailModal = ref(false);
 const showDataTable = ref(false);
 
@@ -532,6 +541,9 @@ onMounted(async () => {
   // Right-click a node → run flagged cluster programs as community algorithms
   clusterProgramActions.register();
 
+  // Right-click a node/edge → user-configured actions (open URL, copy, run template)
+  configurableMenuActions.register();
+
   // Track canvas dimensions for the export modal
   const graphContainer = graphContainerRef.value?.querySelector('.graph-container');
   if (graphContainer) {
@@ -547,8 +559,10 @@ onMounted(async () => {
 onUnmounted(() => {
   // Push any pending debounced cluster-program save before leaving the context
   void clusterStore.flushPersist();
+  void useContextMenuActionsStore().flushPersist();
   communityTable.unregister();
   clusterProgramActions.unregister();
+  configurableMenuActions.unregister();
   toolbarStore.unregisterHandlers();
   document.removeEventListener('fullscreenchange', onFullscreenChange);
   canvasResizeObserver?.disconnect();
@@ -674,7 +688,11 @@ watch(
   <div ref="graphContainerRef" class="graph-visualization" :class="{ fullscreen: isFullscreen }">
     <div class="main-content">
       <FilterPanel v-if="showFilters" @close="showFilters = false; toolbarStore.setPanelActive('filters', false)" />
-      <BehaviorPanel v-if="showBehaviorPanel" @close="showBehaviorPanel = false; toolbarStore.setPanelActive('behaviors', false)" />
+      <BehaviorPanel
+        v-if="showBehaviorPanel"
+        @close="showBehaviorPanel = false; toolbarStore.setPanelActive('behaviors', false)"
+        @open-menu-actions="showMenuActionsModal = true"
+      />
       <GraphQueryPanel v-if="showQueryPanel" @close="showQueryPanel = false; toolbarStore.setPanelActive('query', false)" />
       <MetricsPanel
         v-if="showMetricsPanel"
@@ -686,6 +704,13 @@ watch(
       <ClusterProgramPanel v-if="showClusterPrograms" @close="showClusterPrograms = false; toolbarStore.setPanelActive('clusters', false)" />
       <QueryTemplatesPanel v-if="showTemplatesPanel" @close="showTemplatesPanel = false; toolbarStore.setPanelActive('templates', false)" />
       <PrecomputedGraphPanel v-if="showPrecomputedPanel" @close="showPrecomputedPanel = false; toolbarStore.setPanelActive('precomputed', false)" />
+      <ContextMenuActionsModal v-model="showMenuActionsModal" />
+      <TemplateExecuteModal
+        v-if="pendingTemplateExecution"
+        :template="pendingTemplateExecution.template"
+        :initial-values="pendingTemplateExecution.initialValues"
+        @close="pendingTemplateExecution = null"
+      />
 
       <div class="graph-container" data-testid="graph-container">
         <div v-if="graphStore.loading" class="loading-overlay" data-testid="graph-loading">

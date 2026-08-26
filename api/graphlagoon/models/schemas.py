@@ -365,6 +365,12 @@ class GraphContextCreate(BaseModel):
         description="Context-level cluster programs shared by all explorations of "
         "this context. Passed through opaquely; the frontend owns the shape.",
     )
+    context_menu_actions: list[dict] = Field(
+        default_factory=list,
+        description="Context-level configurable context-menu actions (open-url, "
+        "copy-text, run-query-template). Passed through opaquely; the frontend "
+        "owns the shape.",
+    )
 
     @model_validator(mode="after")
     def _validate_datasource_fields(self) -> "GraphContextCreate":
@@ -416,6 +422,7 @@ class GraphContextUpdate(BaseModel):
     relationship_types: Optional[list[str]] = None
     default_behaviors: Optional[dict] = None
     cluster_programs: Optional[list[dict]] = None
+    context_menu_actions: Optional[list[dict]] = None
 
 
 class GraphContextResponse(BaseModel):
@@ -437,6 +444,7 @@ class GraphContextResponse(BaseModel):
     relationship_types: list[str] = Field(default_factory=list)
     default_behaviors: dict = Field(default_factory=dict)
     cluster_programs: list[dict] = Field(default_factory=list)
+    context_menu_actions: list[dict] = Field(default_factory=list)
     owner_email: str
     shared_with: list[str] = Field(default_factory=list)
     has_write_access: bool = False

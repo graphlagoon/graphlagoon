@@ -27,6 +27,7 @@ import type {
 import { DEFAULT_PROCEDURAL_BFS_OPTIONS } from '@/types/graph';
 import { api } from '@/services/api';
 import { useClusterStore } from '@/stores/cluster';
+import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
@@ -1221,6 +1222,10 @@ export const useGraphStore = defineStore('graph', () => {
       // Programs are context-level: rebuild built-in defaults + this context's
       // programs. A subsequent loadExploration() only adds exploration-scoped ones.
       useClusterStore().hydrateProgramsFromContext(currentContext.value.cluster_programs);
+      // Configurable right-click menu actions are context-level too.
+      useContextMenuActionsStore().hydrateFromContext(
+        currentContext.value.context_menu_actions,
+      );
       // Deliberately NOT an automatic schema-drift check here: two DESCRIBEs on
       // every single graph open is real cost for an event (drift) that is rare.
       // Detection stays user-initiated — the "Check schema" action in

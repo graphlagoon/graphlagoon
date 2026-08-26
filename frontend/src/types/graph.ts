@@ -1,4 +1,5 @@
 import type { ClusterProgram } from './cluster';
+import type { ContextMenuActionConfig } from './contextMenuActions';
 
 export interface Node {
   node_id: string;
@@ -130,6 +131,8 @@ export interface GraphContext {
   default_behaviors?: Record<string, unknown>;
   /** Context-level cluster programs, shared by all explorations. Built-in defaults are never stored here. */
   cluster_programs?: ClusterProgram[];
+  /** User-configurable right-click menu actions, shared by all explorations. */
+  context_menu_actions?: ContextMenuActionConfig[];
   owner_email: string;
   shared_with: string[];
   has_write_access: boolean;
@@ -672,6 +675,7 @@ export interface CreateGraphContextRequest {
   relationship_types?: string[];
   default_behaviors?: Record<string, unknown>;
   cluster_programs?: ClusterProgram[];
+  context_menu_actions?: ContextMenuActionConfig[];
 }
 
 export interface ShareRequest {

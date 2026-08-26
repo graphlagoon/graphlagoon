@@ -62,6 +62,9 @@ class GraphContext(Base):
     default_behaviors = Column(JSON, default={})
     # Context-level cluster programs (list of ClusterProgram dicts, opaque to the backend)
     cluster_programs = Column(JSON, default=[])
+    # Context-level configurable context-menu actions (list of ContextMenuActionConfig
+    # dicts, opaque to the backend — the frontend owns the shape)
+    context_menu_actions = Column(JSON, default=[])
     # Owner email from request header (no FK - users identified by headers in Databricks mode)
     owner_email = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())

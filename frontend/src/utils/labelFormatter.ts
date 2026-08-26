@@ -597,6 +597,22 @@ function getPropertyValue(ctx: FormatContext, property: string, fromProps = fals
   return '';
 }
 
+/**
+ * Resolve a single property/built-in value for an item — the exact lookup the
+ * label renderer uses (raw table column first when `fromProps`, then the
+ * built-ins). Exported so features that condition on item values (e.g. the
+ * configurable context-menu actions) can never drift from label semantics.
+ * Missing/unloaded values resolve to '' (no `[name]` sentinel here).
+ */
+export function resolveItemValue(
+  target: 'node' | 'edge',
+  item: Node | Edge,
+  property: string,
+  fromProps = true,
+): string {
+  return getPropertyValue({ target, item }, property, fromProps);
+}
+
 function applyModifierChain(value: string, chain?: ParsedModifier[]): string {
   if (!chain) return value;
   let result = value;

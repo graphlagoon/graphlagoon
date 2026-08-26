@@ -2272,6 +2272,10 @@ onMounted(() => {
     // raycast only caught the node after the button went down
     const target = downTarget ?? resolveContextMenuTarget(hoveredNodeSync, hoveredLinkSync);
     if (!target) return;
+    // Configurable menu actions condition on node properties, which load
+    // progressively — bump this node so property-gated entries appear fast
+    // (the menu's visible-actions computed re-evaluates when they arrive).
+    if (target.type === 'node') void graphStore.prioritizeNodeProperties(target.id);
     contextMenu.show(event, target);
     tooltipVisible.value = false;
   }

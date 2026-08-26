@@ -510,6 +510,13 @@ run-frontend:
 db-up:
 	@echo "$(CYAN)Starting PostgreSQL...$(RESET)"
 	docker-compose up -d postgres
+	@echo "$(DIM)Waiting for PostgreSQL to accept connections...$(RESET)"
+	@for i in $$(seq 1 30); do \
+		if docker-compose exec -T postgres pg_isready -U sgraph >/dev/null 2>&1; then \
+			break; \
+		fi; \
+		sleep 2; \
+	done
 	@echo "$(GREEN)PostgreSQL running on :5432$(RESET)"
 
 # Local stand-in for Neptune: Neo4j + the openCypher emulator that fronts it.
