@@ -801,6 +801,42 @@ Revisit if features keep shipping without docs despite the skill gate.
 
 ---
 
+### 26. 🟡 Dead or inert UI surfaces found during the docs audit (2026-08-26)
+
+**Location:** frontend/src
+
+**Issue:**
+Writing user guides forced a behavior-level review; these shipped states
+don't match their UI promises (none are documented in the public guides):
+
+1. `PropertyFilterPanel.vue` is **not mounted anywhere** — no toolbar
+   entry, no route; only its unit test references it. The store-level
+   property/metric filters it edits ARE live (explorations can carry
+   them), so the panel is finished but unreachable.
+2. The Filters panel search placeholder says "Search in metadata..." but
+   the search index only covers `node_id` + `node_type`.
+3. Metrics → Visual Mapping "Scale" (log/sqrt) is never applied —
+   `computeNodeAppearance` always normalizes linearly; `scaleValue()` has
+   no non-test call sites.
+4. Metrics → Edge Weight mapping has no renderer consumer — edge widths
+   never respond to it.
+5. Metrics "Real-time visual updates" checkbox is a no-op (partial-result
+   callback is empty in `metricsCalculator.ts:64-68`).
+6. `create_mountable_app`'s docstring example (`app.py:435-438`) still
+   shows the old dict-returning `header_provider`; the real contract is a
+   token string (the `__init__.py` docstring is correct).
+
+**Recommendation:**
+Wire up or delete the panel (1); fix the placeholder text (2); implement
+or hide the inert controls (3-5); fix the docstring (6). Update
+`docs/guide/exploring-the-graph.md` / `communities-metrics.md` when any of
+these become real.
+
+**Effort:** Small-Medium (placeholder/docstring minutes; the rest half a
+day each)
+
+---
+
 ## Performance Debts
 
 ### 22. 🔴 No Pagination on Large Result Sets

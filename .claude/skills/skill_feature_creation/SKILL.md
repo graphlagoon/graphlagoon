@@ -933,17 +933,23 @@ something is wrong" section. Existing pages by feature:
 
 | Guide page | Covers |
 |---|---|
-| `getting-started.md` | install, quick start, first graph |
-| `integration.md` | Databricks / FastAPI embedding, auth |
-| `databricks-apps.md` | deploy as a Databricks App |
-| `configuration.md` | env var reference |
-| `similarity.md` | similarity endpoints, Clusters → Similarity tab |
-| `rest-connections.md` | REST datasources |
-| `precomputed-graphs.md` | precomputed providers, `?precomputed=` |
+| `getting-started.md` | install, quick start, first context/graph walkthrough |
+| `exploring-the-graph.md` | filters, query console, data table, selection/camera, expand, export, status bar |
+| `explorations.md` | save/load/share explorations, `?exploration=`, permissions |
+| `labels.md` | label template language, rules, Ask-AI |
+| `clusters.md` | cluster programs (JS), scopes, right-click runs |
+| `communities-metrics.md` | Louvain/communities, metrics panel, visual mapping |
 | `style-presets.md` | `?style=` presets |
 | `layout-url-overrides.md` | `?layout=` grammar |
 | `query-templates.md` | saved queries, `?template=` |
-| `context-menu-actions.md` | right-click actions |
+| `context-menu-actions.md` | right-click actions config |
+| `similarity.md` | similarity endpoints, Clusters → Similarity tab |
+| `rest-connections.md` | REST datasources |
+| `precomputed-graphs.md` | precomputed providers, `?precomputed=` |
+| `integration.md` | Databricks / FastAPI embedding, auth |
+| `databricks-apps.md` | deploy as a Databricks App |
+| `configuration.md` | env var reference |
+| `python-api.md` | public Python API reference (embedding) |
 
 **3. New page?** Register it in the sidebar: `docs/.vitepress/config.ts`
 (the `sidebar` items array).
