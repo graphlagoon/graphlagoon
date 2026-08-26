@@ -6,7 +6,7 @@
  * Warn-only, by design: this NEVER edits a saved exploration. It exists so a
  * schema resync can tell the user "N dangling references across M
  * explorations" before they apply, not to fix them — see
- * docs/dev/decision-log.md for why.
+ * docs/dev/decision_log.md for why.
  */
 import type { ExplorationState } from '@/types/graph';
 import type { ClusterProgram } from '@/types/cluster';

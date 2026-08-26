@@ -17,13 +17,15 @@
         <ul class="features-list">
           <li v-for="feature in plan.features" :key="feature">{{ feature }}</li>
         </ul>
-        <a v-if="plan.link" :href="plan.link" class="card-action">{{ plan.action }}</a>
+        <a v-if="plan.link" :href="withBase(plan.link)" class="card-action">{{ plan.action }}</a>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
+import { withBase } from 'vitepress'
+
 const sharedFeatures = [
   'Open-source (MIT)',
   'All features included',
