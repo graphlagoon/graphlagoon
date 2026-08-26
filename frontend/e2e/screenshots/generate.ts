@@ -300,6 +300,26 @@ const SCENES: Scene[] = [
     },
   },
   {
+    guide: 'clusters',
+    scene: 'programs',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Clusters');
+      await page.getByRole('button', { name: 'Programs' }).click();
+      await page.waitForTimeout(400);
+    },
+  },
+  {
+    guide: 'communities-metrics',
+    scene: 'metrics',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Metrics');
+    },
+  },
+  {
     guide: 'context-menu-actions',
     scene: 'menu',
     path: GRAPH_URL,
