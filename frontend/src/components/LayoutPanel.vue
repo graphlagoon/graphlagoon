@@ -449,6 +449,22 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         </div>
 
         <div class="setting-item">
+          <label class="checkbox-item">
+            <input
+              type="checkbox"
+              data-testid="ego-hide-ring-labels"
+              :checked="egoConfig.hideRingLabels"
+              @change="graphStore.updateLayoutModeConfig({ ego: { hideRingLabels: ($event.target as HTMLInputElement).checked } })"
+            />
+            <span class="setting-label">Hide ring labels</span>
+          </label>
+          <span class="setting-hint">
+            Drops the hop number and node count printed next to each ring. The rings stay — use
+            this for a slide or a screenshot where you explain the hop distance yourself.
+          </span>
+        </div>
+
+        <div class="setting-item">
           <span class="setting-hint" data-testid="ego-pinned-hint">
             Nodes are placed analytically and pinned, so the simulation controls do not apply in
             this mode. The same graph always produces the same picture — that is what makes two

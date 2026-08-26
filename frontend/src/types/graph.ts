@@ -388,6 +388,13 @@ export interface EgoLayoutConfig {
    * traceable — this is arc routing, not bundling.
    */
   arcIntraRingEdges: boolean;
+  /**
+   * Hide the "<hop> · <count>" text next to each ring. The rings themselves
+   * stay drawn — this only drops the level captions, for a clean picture in a
+   * screenshot or a slide where the hop distance is being explained aloud.
+   * Off by default: the caption is how a reader tells ring 2 from ring 3.
+   */
+  hideRingLabels: boolean;
 }
 
 export interface HiveLayoutConfig {

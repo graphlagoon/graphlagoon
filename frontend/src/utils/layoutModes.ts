@@ -905,19 +905,24 @@ export function computeTreeLayout(
 // ---------------------------------------------------------------------------
 
 export interface RingGuideSpec {
-  rings: { hop: number; radius: number; dashed: boolean; label: string }[];
+  /** `label: null` means "draw this ring without a caption". */
+  rings: { hop: number; radius: number; dashed: boolean; label: string | null }[];
 }
 
 /**
  * Guide circles for the ego layout, derived from the tree layout's actual ring
  * radii (which adapt to ring population). Rings hidden by the maxHops cutoff
  * are omitted; the unreachable ring renders dashed.
+ *
+ * `hideLabels` suppresses the captions only — the geometry is unchanged, so
+ * toggling it never moves a node or a ring.
  */
 export function computeRingGuideSpec(opts: {
   levelStats: TreeLevelStat[];
   maxHops: number | null;
+  hideLabels?: boolean;
 }): RingGuideSpec {
-  const { levelStats, maxHops } = opts;
+  const { levelStats, maxHops, hideLabels = false } = opts;
   const rings: RingGuideSpec['rings'] = [];
 
   for (const stat of levelStats) {
@@ -931,7 +936,7 @@ export function computeRingGuideSpec(opts: {
       hop: stat.level,
       radius: stat.offset,
       dashed: stat.unreachable,
-      label: stat.count > 0 ? `${name} · ${stat.count}` : name,
+      label: hideLabels ? null : stat.count > 0 ? `${name} · ${stat.count}` : name,
     });
   }
 

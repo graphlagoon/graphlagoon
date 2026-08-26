@@ -177,6 +177,7 @@ export function defaultLayoutModeConfig(): LayoutModeConfig {
       crossingHeuristic: 'barycenter',
       crossingSweeps: 3,
       arcIntraRingEdges: true,
+      hideRingLabels: false,
     },
     hive: {
       axisKey: 'node_type',

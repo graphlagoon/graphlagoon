@@ -7635,3 +7635,77 @@ removed.
 - Explorations saved with active property filters lose them on load
   (accepted: the feature is gone; data-table filters are not persisted
   either).
+
+## [2026-08-26 20:15] - Feature: Ego Layout — Hide Ring Labels Toggle
+
+**Feature:** The ego layout's concentric hop rings carry a caption each
+(`"<hop> · <count>"`, e.g. `2 · 15`, and `unreachable · 3` on the dashed
+ring). A new **Hide ring labels** checkbox in the Layout panel's ego
+**Advanced** block drops those captions while keeping every ring drawn.
+Off by default — the caption is how a reader tells ring 2 from ring 3.
+
+**User request:** "o layout de ego deveria ter uma opção para ocultar os
+labels que identificam o nível do ego, desativada por default."
+
+**Design Decisions:**
+1. **Negative field name (`hideRingLabels: false`), not `showRingLabels: true`.**
+   Matches the request literally (a hide option, off by default) and makes
+   backward compatibility trivial: presets/explorations saved before this
+   field merge the default `false` and therefore render exactly what their
+   author saw. Precedent for negative naming exists (`behaviors.hideLabelsOnCameraMove`).
+2. **The decision lives in the pure spec function, not the THREE renderer.**
+   `computeRingGuideSpec` gained `hideLabels?: boolean` and its
+   `rings[].label` widened to `string | null` (null = draw this ring without
+   a caption); `useLayoutGuides.showEgoRings` just skips null labels. Rationale:
+   `useLayoutGuides.ts` has no test (it is THREE-heavy), while
+   `layoutModes.ts` is covered by `layoutModes.test.ts` — putting the branch
+   in the pure function buys real coverage instead of an untested `if`. It
+   also matches the file's stated contract ("geometry math lives in
+   utils/layoutModes.ts — this composable only turns specs into THREE objects").
+3. **Geometry is provably untouched.** A test asserts radius/dashed/hop are
+   identical with and without the flag — toggling captions must never move a
+   ring or a node, or two ego views stop being comparable.
+4. **Deliberately NOT added to `LAYOUT_OVERRIDE_SCHEMA` (`?layout.ego.…`).**
+   That allowlist's own comment excludes appearance ("spacings, radii, ring
+   ordering and arc routing are appearance. That is what a style preset is
+   for"). This toggle is appearance, so it follows its siblings.
+5. **Persistence comes for free.** `buildStylePreset()`/`getExplorationState()`
+   spread `layoutModeConfig.ego` wholesale and apply it over
+   `defaultLayoutModeConfig()`, so the flag round-trips through presets and
+   explorations with no schema change on either side (backend is
+   `extra="allow"`); `preset_version` stays 1.
+6. **Placed in the ego Advanced disclosure**, next to "Arc same-ring edges" —
+   it is a presentation refinement (slides, screenshots), not one of the
+   analytical essentials (focus node, direction, max hops, ring ordering).
+
+**Files Modified:**
+- [frontend/src/types/graph.ts](frontend/src/types/graph.ts) — `EgoLayoutConfig.hideRingLabels`
+- [frontend/src/stores/graph.ts](frontend/src/stores/graph.ts) — default `false`
+- [frontend/src/utils/layoutModes.ts](frontend/src/utils/layoutModes.ts) — `computeRingGuideSpec` `hideLabels` option; `label: string | null`
+- [frontend/src/composables/useLayoutGuides.ts](frontend/src/composables/useLayoutGuides.ts) — skip null labels
+- [frontend/src/components/GraphCanvas3D.vue](frontend/src/components/GraphCanvas3D.vue) — pass `hideLabels: cfg.ego.hideRingLabels`
+- [frontend/src/components/LayoutPanel.vue](frontend/src/components/LayoutPanel.vue) — `ego-hide-ring-labels` checkbox + hint
+- [frontend/src/utils/__tests__/layoutModes.test.ts](frontend/src/utils/__tests__/layoutModes.test.ts) — 3 new cases
+- [frontend/src/components/__tests__/LayoutPanel.test.ts](frontend/src/components/__tests__/LayoutPanel.test.ts) — toggle test + advanced-disclosure assertion
+- [frontend/src/utils/__tests__/contextReferences.test.ts](frontend/src/utils/__tests__/contextReferences.test.ts) — 4 `EgoLayoutConfig` literals grew the required field
+
+**Testing:**
+- [x] `vue-tsc --noEmit` clean
+- [x] Unit: 1901/1901 passed (103 files)
+- [x] E2E: layout-url-overrides + style-presets + graph specs, 46/46 passed
+- [x] No E2E added — single-panel toggle, no cross-page flow (skill Step 3.4)
+
+**Public Docs:**
+- No public docs impact. The ego layout's Advanced panel controls (ring
+  spacing, arc same-ring edges) are not covered by `docs/guide/`; the only
+  ego page, `layout-url-overrides.md`, documents the URL grammar, and this
+  toggle is deliberately not URL-settable (decision 4). The existing
+  `layout-url-overrides-ego` screenshot is unaffected — the default keeps
+  labels visible — so no `make docs-screenshots` run was needed.
+- Documented gap: the ego Layout panel as a whole has no public guide page.
+  Worth one when someone writes the "Layouts" guide.
+
+**Known Limitations:**
+- Ego only. The hierarchical layout's level lines (`L1`, `L2`, `unlinked`)
+  keep their captions unconditionally — the request was scoped to ego, and
+  the two guides have separate spec paths.

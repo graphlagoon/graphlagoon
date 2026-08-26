@@ -121,7 +121,10 @@ export function useLayoutGuides(
 
     for (const ring of spec.rings) {
       addLine(scene, circlePoints(ring.radius), { dashed: ring.dashed, loop: true });
-      addLabel(scene, `ego-ring-${ring.hop}`, ring.label, ring.radius + 6, 6);
+      // null label = captions suppressed by the layout config; ring still drawn
+      if (ring.label !== null) {
+        addLabel(scene, `ego-ring-${ring.hop}`, ring.label, ring.radius + 6, 6);
+      }
     }
 
     if (opts.focusHalo) {
