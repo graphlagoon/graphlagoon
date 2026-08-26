@@ -4,12 +4,11 @@ _SUCCESS*
 ._SUCCESS*
 scripts/ieee_cis_fraud/data/
 frontend/playwright-report-integration/trace/
-.vitepres
+docs/.vitepress/cache/
 frontend/ext-3d-force_raw
 frontend/playwright-report-integration/data
 frontend/test-results-integration/.last-run.json
 frontend/test-results-integration
-docs/dew
 scripts
 # =============================================================================
 # Project-specific
@@ -89,7 +88,6 @@ node_modules/
 # =============================================================================
 playwright-report/
 test-results/
-frontend/e2e/screenshots/
 
 # =============================================================================
 # Performance reports
