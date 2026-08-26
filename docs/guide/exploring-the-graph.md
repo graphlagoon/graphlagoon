@@ -1,9 +1,16 @@
 # Exploring the Graph
 
-The daily workflow: filter what you see, query for more, inspect the data
-behind the picture, and get results out. This page covers the Filters
-panel, the Query Console, the Data Table, selection and camera controls,
-neighbor expansion, and export.
+::: tip TL;DR
+The daily loop: **filter** what you see → **query** for more → **inspect**
+the rows behind the picture → **export** what you found. Filtering hides
+without re-running the layout; the Query Console is for tabular results
+while the graph query panel draws; cancel genuinely frees warehouse
+compute; and the status bar tells you when the view is partial
+(`⚠ truncated`) — trust it before drawing conclusions.
+:::
+
+This page covers the Filters panel, the Query Console, the Data Table,
+selection and camera controls, neighbor expansion, and export.
 
 ![Filters](/screenshots/exploring-the-graph-filters.png)
 

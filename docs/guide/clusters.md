@@ -1,5 +1,21 @@
 # Cluster Programs
 
+::: tip TL;DR
+Write (or ask an AI to write) a small JavaScript function that groups the
+loaded graph into named clusters — collapsed shapes or colored groups —
+using your domain rules.
+
+- **Use it when** the grouping is *knowledge you have* ("collapse leaves
+  per hub", "group accounts by email domain", "everything 2 hops from
+  here") rather than something an algorithm should discover.
+- **Not the tool for** statistical community detection (use
+  [Louvain](./communities-metrics.md)); anything needing data beyond the
+  loaded graph (programs run in your browser and see only what's on
+  screen); or heavy computation — code runs synchronously on the UI
+  thread, so an expensive program on a large graph will freeze the page
+  while it runs.
+:::
+
 Sometimes the grouping you need doesn't exist in any algorithm menu:
 "collapse every leaf node hanging off a hub", "group accounts by the
 domain of their email", "everything within 2 hops of this node". A

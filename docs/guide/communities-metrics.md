@@ -1,5 +1,19 @@
 # Communities & Metrics
 
+::: tip TL;DR
+Community detection colors the loaded graph by who-clusters-with-whom;
+metrics (degree, PageRank, betweenness, …) size nodes by importance.
+
+- **Use them when** you want structure to jump out of a hairball: factions
+  in a network, brokers between groups, the hubs that matter.
+- **Not the tool for** warehouse-scale analytics — everything computes in
+  your browser over the *loaded subgraph*, so results describe what's on
+  screen, not the full dataset. For graph algorithms over billions of
+  edges, compute in a Spark job and publish the result as a
+  [precomputed graph](./precomputed-graphs.md). Metrics are session-only:
+  they aren't saved with explorations and go stale when the graph changes.
+:::
+
 Two complementary ways to see structure the raw picture hides: **community
 detection** colors the graph by who-clusters-with-whom, and **metrics**
 size nodes by importance. Communities live in the **Clusters** panel

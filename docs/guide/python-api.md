@@ -1,5 +1,18 @@
 # Python API Reference
 
+::: tip TL;DR
+The reference for **embedding** Graph Lagoon in your own FastAPI or
+Databricks app: entry points, auth hooks, and the three extension
+registries.
+
+- **Use it when** you're mounting the studio inside an existing app,
+  plugging in your auth, or registering similarity / REST / precomputed
+  providers.
+- **You don't need it** to just run the studio — `graphlagoon serve` and
+  environment variables ([Configuration](./configuration.md)) cover the
+  standalone case entirely.
+:::
+
 Everything the `graphlagoon` package exports for embedding the studio in
 your own FastAPI application. This page is the map: signatures, the
 contracts that aren't obvious from them, and links into the deep guides

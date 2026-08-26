@@ -926,10 +926,16 @@ If NONE apply → write "No public docs impact" in the decision-log entry and
 skip to Step 4.3. Otherwise:
 
 **2. Update or create the relevant guide page** in `docs/guide/<slug>.md`.
-Follow the house style (reference: [docs/guide/context-menu-actions.md](../../../docs/guide/context-menu-actions.md)):
-open with the problem it solves, explain *why* rules exist, use short tables
-for permissions/fields, real code/URL examples, and a "what happens when
-something is wrong" section. Existing pages by feature:
+Follow the house style (reference: [docs/guide/labels.md](../../../docs/guide/labels.md)):
+- **Start with a `::: tip TL;DR` block**: one sentence on what the feature
+  is, then "**Use it when** …" and "**Not the tool for** …" bullets. The
+  not-for bullet must be honest (real limits, and a link to the feature
+  that IS the right tool).
+- Then open with the problem it solves, explain *why* rules exist, use
+  short tables for permissions/fields, real code/URL examples, and a
+  "what happens when something is wrong" section.
+
+Existing pages by feature:
 
 | Guide page | Covers |
 |---|---|
