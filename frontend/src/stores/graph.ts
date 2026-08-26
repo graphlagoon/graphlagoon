@@ -24,6 +24,7 @@ import type {
   PrecomputedGraphSource,
   StylePreset,
   StylePresetSettings,
+  PropertyVisibility,
 } from '@/types/graph';
 import { DEFAULT_PROCEDURAL_BFS_OPTIONS } from '@/types/graph';
 import { api } from '@/services/api';
@@ -211,10 +212,11 @@ const BEHAVIOR_ENUMS: Partial<Record<keyof GraphBehaviors, readonly string[]>> =
 };
 
 /**
- * Merge an untrusted `default_behaviors` dict into `target`, in place.
+ * Merge an untrusted behaviors dict into `target`, in place.
  *
- * Both the server config and the graph context carry this dict opaquely — neither knows
- * the frontend's schema — so validation has to happen here: unknown keys are dropped and
+ * The server config and the graph context carry `default_behaviors` opaquely, and saved
+ * style presets and explorations carry a `behaviors` snapshot — none of them knows the
+ * frontend's schema — so validation has to happen here: unknown keys are dropped and
  * type mismatches are rejected per-key rather than trusted. A typo (`constantZoom`) or an
  * env-var footgun (the *string* `"false"`, which is truthy) must not reach the store, or
  * it would ride along into every saved exploration.
@@ -230,20 +232,20 @@ function applyBehaviorOverrides(
 
   for (const [key, value] of Object.entries(overrides)) {
     if (!(key in target)) {
-      console.warn(`[graph] Ignoring unknown ${source} default_behaviors key: "${key}"`);
+      console.warn(`[graph] Ignoring unknown ${source} behaviors key: "${key}"`);
       continue;
     }
     const k = key as keyof GraphBehaviors;
     if (typeof value !== typeof target[k]) {
       console.warn(
-        `[graph] Ignoring ${source} default_behaviors."${key}": expected ${typeof target[k]}, got ${typeof value}`
+        `[graph] Ignoring ${source} behaviors."${key}": expected ${typeof target[k]}, got ${typeof value}`
       );
       continue;
     }
     const allowed = BEHAVIOR_ENUMS[k];
     if (allowed && !allowed.includes(value as string)) {
       console.warn(
-        `[graph] Ignoring ${source} default_behaviors."${key}": expected one of ${allowed.join(' | ')}, got ${JSON.stringify(value)}`
+        `[graph] Ignoring ${source} behaviors."${key}": expected one of ${allowed.join(' | ')}, got ${JSON.stringify(value)}`
       );
       continue;
     }
@@ -272,6 +274,24 @@ export function resolveInitialBehaviors(
   applyBehaviorOverrides(resolved, window.__GRAPH_LAGOON_CONFIG__?.default_behaviors, 'server');
   applyBehaviorOverrides(resolved, contextBehaviors, 'context');
   return resolved;
+}
+
+/**
+ * Validate an untrusted `property_visibility` payload (preset or exploration).
+ *
+ * A list survives only as its string elements; anything else — missing field,
+ * wrong type, pre-feature preset — collapses to null, which means "show all".
+ * `[]` is preserved, not coerced to null: an empty allowlist deliberately
+ * hides every property, leaving only the ID/type columns.
+ */
+function normalizePropertyVisibility(raw: unknown): PropertyVisibility {
+  const normalizeList = (value: unknown): string[] | null =>
+    Array.isArray(value) ? value.filter((k): k is string => typeof k === 'string') : null;
+  const source = (raw ?? {}) as Record<string, unknown>;
+  return {
+    nodeProperties: normalizeList(source.nodeProperties),
+    edgeProperties: normalizeList(source.edgeProperties),
+  };
 }
 
 /**
@@ -421,6 +441,41 @@ export const useGraphStore = defineStore('graph', () => {
 
   // Behavior settings — seeded from the server's default_behaviors, if any.
   const behaviors = ref(resolveInitialBehaviors());
+
+  // Property display allowlist: which property keys the display surfaces
+  // (data table, community/cluster node tables, detail modal, side panel)
+  // show. null = all. Never touches config pickers, value filters, label
+  // templates or queries — those must keep seeing every property.
+  const propertyVisibility = ref<PropertyVisibility>({
+    nodeProperties: null,
+    edgeProperties: null,
+  });
+
+  function setPropertyVisibility(kind: 'node' | 'edge', keys: string[] | null) {
+    const copy = keys ? [...keys] : null;
+    if (kind === 'node') {
+      propertyVisibility.value = { ...propertyVisibility.value, nodeProperties: copy };
+    } else {
+      propertyVisibility.value = { ...propertyVisibility.value, edgeProperties: copy };
+    }
+  }
+
+  /** Filter observed property keys through the allowlist, preserving their order. */
+  function visiblePropKeys(kind: 'node' | 'edge', keys: string[]): string[] {
+    const allowed = kind === 'node'
+      ? propertyVisibility.value.nodeProperties
+      : propertyVisibility.value.edgeProperties;
+    if (!allowed) return keys;
+    const allowedSet = new Set(allowed);
+    return keys.filter((k) => allowedSet.has(k));
+  }
+
+  function isPropertyVisible(kind: 'node' | 'edge', key: string): boolean {
+    const allowed = kind === 'node'
+      ? propertyVisibility.value.nodeProperties
+      : propertyVisibility.value.edgeProperties;
+    return !allowed || allowed.includes(key);
+  }
 
   // Aesthetic settings (visual appearance)
   const aesthetics = ref({
@@ -742,6 +797,9 @@ export const useGraphStore = defineStore('graph', () => {
     const activeNodeFilters = filters.value.nodePropertyFilters.filter(f => f.enabled);
     if (activeNodeFilters.length === 0) return null;
 
+    // nodeMetrics/edgeMetrics are ?.guarded: this computed can re-enter the
+    // metrics store while its setup() is still running (its watchers read
+    // filtered nodes), and a half-built store has no computeds yet.
     const metricsStore = useMetricsStore();
     const hidden = new Set<string>();
 
@@ -751,7 +809,7 @@ export const useGraphStore = defineStore('graph', () => {
       if (filter.property.startsWith('metric:')) {
         const metricId = filter.property.slice(7);
         if (!metricCache.has(metricId)) {
-          metricCache.set(metricId, metricsStore.nodeMetrics.find(m => m.id === metricId));
+          metricCache.set(metricId, metricsStore.nodeMetrics?.find(m => m.id === metricId));
         }
       }
     }
@@ -778,6 +836,9 @@ export const useGraphStore = defineStore('graph', () => {
     const activeEdgeFilters = filters.value.edgePropertyFilters.filter(f => f.enabled);
     if (activeEdgeFilters.length === 0) return null;
 
+    // nodeMetrics/edgeMetrics are ?.guarded: this computed can re-enter the
+    // metrics store while its setup() is still running (its watchers read
+    // filtered nodes), and a half-built store has no computeds yet.
     const metricsStore = useMetricsStore();
     const hidden = new Set<string>();
 
@@ -787,7 +848,7 @@ export const useGraphStore = defineStore('graph', () => {
       if (filter.property.startsWith('metric:')) {
         const metricId = filter.property.slice(7);
         if (!metricCache.has(metricId)) {
-          metricCache.set(metricId, metricsStore.edgeMetrics.find(m => m.id === metricId));
+          metricCache.set(metricId, metricsStore.edgeMetrics?.find(m => m.id === metricId));
         }
       }
     }
@@ -835,6 +896,9 @@ export const useGraphStore = defineStore('graph', () => {
     // Apply property filters (metrics only, no metadata)
     const activeNodeFilters = filters.value.nodePropertyFilters.filter(f => f.enabled);
     if (activeNodeFilters.length > 0) {
+      // nodeMetrics/edgeMetrics are ?.guarded: this computed can re-enter the
+      // metrics store while its setup() is still running (its watchers read
+      // filtered nodes), and a half-built store has no computeds yet.
       const metricsStore = useMetricsStore();
       // Cache metric lookup for O(1) access inside loop
       const metricCache = new Map<string, { values: Map<string, number> } | undefined>();
@@ -842,7 +906,7 @@ export const useGraphStore = defineStore('graph', () => {
         if (filter.property.startsWith('metric:')) {
           const metricId = filter.property.slice(7);
           if (!metricCache.has(metricId)) {
-            metricCache.set(metricId, metricsStore.nodeMetrics.find(m => m.id === metricId));
+            metricCache.set(metricId, metricsStore.nodeMetrics?.find(m => m.id === metricId));
           }
         }
       }
@@ -882,6 +946,9 @@ export const useGraphStore = defineStore('graph', () => {
     // Apply property filters to edges (metrics only, no metadata)
     const activeEdgeFilters = filters.value.edgePropertyFilters.filter(f => f.enabled);
     if (activeEdgeFilters.length > 0) {
+      // nodeMetrics/edgeMetrics are ?.guarded: this computed can re-enter the
+      // metrics store while its setup() is still running (its watchers read
+      // filtered nodes), and a half-built store has no computeds yet.
       const metricsStore = useMetricsStore();
       // Cache metric lookup for O(1) access inside loop
       const metricCache = new Map<string, { values: Map<string, number> } | undefined>();
@@ -889,7 +956,7 @@ export const useGraphStore = defineStore('graph', () => {
         if (filter.property.startsWith('metric:')) {
           const metricId = filter.property.slice(7);
           if (!metricCache.has(metricId)) {
-            metricCache.set(metricId, metricsStore.edgeMetrics.find(m => m.id === metricId));
+            metricCache.set(metricId, metricsStore.edgeMetrics?.find(m => m.id === metricId));
           }
         }
       }
@@ -1167,6 +1234,10 @@ export const useGraphStore = defineStore('graph', () => {
       // reset them). A subsequent loadExploration() still wins — it runs after this and
       // merges the saved behaviors on top.
       behaviors.value = resolveInitialBehaviors(currentContext.value.default_behaviors);
+      // Same reasoning for the property allowlist: context A's column names
+      // mean nothing on context B. An exploration or ?style= preset applied
+      // later still wins — both run after this.
+      propertyVisibility.value = { nodeProperties: null, edgeProperties: null };
       // Programs are context-level: rebuild built-in defaults + this context's
       // programs. A subsequent loadExploration() only adds exploration-scoped ones.
       useClusterStore().hydrateProgramsFromContext(currentContext.value.cluster_programs);
@@ -2335,8 +2406,12 @@ export const useGraphStore = defineStore('graph', () => {
    * field is added.
    *
    * Deliberately excluded: nodes, edges, filters, viewport, the query and its
-   * transpile options, clusters, communities, similarity and behaviors. This
-   * says how a graph *looks*, never which data it shows.
+   * transpile options, clusters, communities and similarity — this never
+   * carries which data is loaded. Context-menu actions are excluded too: they
+   * persist per-context on graph_contexts.context_menu_actions. Behaviors,
+   * the metric visual mapping and the property-visibility allowlist ARE
+   * included (an additive change; preset_version stays 1 — old clients simply
+   * ignore the extra fields).
    */
   function buildStylePreset(): StylePresetSettings &
     { layout_algorithm: LayoutAlgorithm } {
@@ -2368,6 +2443,18 @@ export const useGraphStore = defineStore('graph', () => {
         hierarchical: { ...layoutModeConfig.value.hierarchical },
       },
       force3d_settings: { ...force3DSettings.value },
+      // Metric-driven visual mapping (node size / edge width by metric)
+      visual_mapping: useMetricsStore().getVisualMappingState() as unknown as Record<string, unknown>,
+      // Display
+      property_visibility: {
+        nodeProperties: propertyVisibility.value.nodeProperties
+          ? [...propertyVisibility.value.nodeProperties]
+          : null,
+        edgeProperties: propertyVisibility.value.edgeProperties
+          ? [...propertyVisibility.value.edgeProperties]
+          : null,
+      },
+      behaviors: { ...behaviors.value },
     };
   }
 
@@ -2428,6 +2515,29 @@ export const useGraphStore = defineStore('graph', () => {
       },
     };
     force3DSettings.value = mergeForce3DSettings(settings.force3d_settings);
+
+    // Metric visual mapping. Full replace; absent (a pre-feature preset)
+    // resets to the defaults its author was looking at. A metricId not
+    // computed on this graph degrades to base sizing until it is.
+    useMetricsStore().loadVisualMappingState(settings.visual_mapping);
+
+    // Display. Full replace like the map fields: absent means the preset
+    // predates the allowlist, and its author saw every property — so show-all
+    // is the faithful restore.
+    propertyVisibility.value = normalizePropertyVisibility(settings.property_visibility);
+
+    // Behaviors, when the preset has them — always through the validated
+    // merge, never a cast. Absent means a pre-feature preset: leave the
+    // current behaviors alone, since "reset" would need a baseline from the
+    // precedence chain (defaults < server < context < panel) and would stomp
+    // panel edits the user never associated with styling.
+    if (settings.behaviors) {
+      behaviors.value = applyBehaviorOverrides(
+        { ...behaviors.value },
+        settings.behaviors,
+        'preset',
+      );
+    }
 
     // A new layout only takes effect when the simulation restarts.
     freshLayoutRequested.value = true;
@@ -2499,9 +2609,9 @@ export const useGraphStore = defineStore('graph', () => {
       // Cluster state: clusters/executions + exploration-scoped programs only.
       // Context-scoped programs live on graph_contexts.cluster_programs.
       clusters: clusterStore.getState() as any,
-      behaviors: { ...behaviors.value },
-      // Style, labels and layout — the same block a style preset stores, so the
-      // two can never describe the same thing differently.
+      // Style, labels, layout, property visibility and behaviors — the same
+      // block a style preset stores, so the two can never describe the same
+      // thing differently.
       ...buildStylePreset(),
       community: communityStore.getState(),
       similarity: similarityStore.getState(),
@@ -2646,11 +2756,10 @@ export const useGraphStore = defineStore('graph', () => {
       const clusterStore = useClusterStore();
       clusterStore.loadState(exploration.state.clusters);
 
-      // Behaviors are not part of a style preset — they govern how the app
-      // fetches, not how the graph looks — so they stay here.
-      if (exploration.state.behaviors) {
-        behaviors.value = { ...behaviors.value, ...exploration.state.behaviors } as typeof behaviors.value;
-      }
+      // Behaviors were applied by applyStylePreset above — old explorations
+      // stored them at the top level of state, which is exactly the settings
+      // object it received, and new ones get them from buildStylePreset. Either
+      // way they now pass through the validated merge instead of a raw cast.
 
       // Load graph data: snapshot first (fast, includes expanded nodes),
       // fall back to query re-execution if snapshot is unavailable.
@@ -2740,6 +2849,7 @@ export const useGraphStore = defineStore('graph', () => {
     layoutModeConfig.value = defaultLayoutModeConfig();
     egoLayoutStats.value = null;
     force3DSettings.value = defaultForce3DSettings();
+    propertyVisibility.value = { nodeProperties: null, edgeProperties: null };
     resetFilters();
     resetTranspileOptions();
   }
@@ -2879,6 +2989,10 @@ export const useGraphStore = defineStore('graph', () => {
     updateLayoutExecution,
     updateBehaviors,
     updateAesthetics,
+    propertyVisibility,
+    setPropertyVisibility,
+    visiblePropKeys,
+    isPropertyVisible,
     nodeTypeColors,
     edgeTypeColors,
     defaultColorPalette,

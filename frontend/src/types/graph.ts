@@ -270,7 +270,17 @@ export const ARTIFACT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 // describe the same setting two different ways.
 //
 // Deliberately absent: nodes, edges, filters, viewport, query, clusters,
-// communities and behaviors. A preset says how a graph looks, not what it shows.
+// communities and similarity — a preset never carries which data is loaded.
+// Also absent: context-menu actions, which are persisted per-context on
+// graph_contexts.context_menu_actions (stores/contextMenuActions.ts), never
+// per-preset.
+
+/** Allowlist of property keys shown on display surfaces (tables, detail
+ *  modal, side panel). null = show all. [] = hide all — distinct on purpose. */
+export interface PropertyVisibility {
+  nodeProperties: string[] | null;
+  edgeProperties: string[] | null;
+}
 
 export interface StylePresetSettings {
   // Style
@@ -286,6 +296,13 @@ export interface StylePresetSettings {
   layout_algorithm?: LayoutAlgorithm;
   layout_mode_config?: LayoutModeConfig;
   force3d_settings?: Record<string, unknown>;
+  // Metric-driven visual mapping (shape owned by types/metrics VisualMapping)
+  visual_mapping?: Record<string, unknown>;
+  // Display
+  property_visibility?: PropertyVisibility;
+  // Behaviors ride along since presets grew property visibility: absent =
+  // pre-feature preset = leave the current behaviors alone on apply.
+  behaviors?: Record<string, unknown>;
 }
 
 export interface StylePreset {
@@ -458,6 +475,8 @@ export interface ExplorationState {
   behaviors?: Record<string, unknown>;     // Behavior settings (optional for backwards compat)
   aesthetics?: Record<string, unknown>;    // Aesthetic settings (optional for backwards compat)
   force3d_settings?: Record<string, unknown>; // 3D force simulation params (optional for backwards compat)
+  visual_mapping?: Record<string, unknown>;   // Metric visual mapping (optional for backwards compat)
+  property_visibility?: PropertyVisibility;   // Property display allowlist (optional for backwards compat)
   community?: Record<string, unknown>;     // Community detection state (optional for backwards compat)
   similarity?: Record<string, unknown>;    // Similarity system state (optional for backwards compat)
   has_snapshot?: boolean;                  // Whether a file-based graph snapshot exists

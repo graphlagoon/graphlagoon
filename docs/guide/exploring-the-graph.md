@@ -90,7 +90,31 @@ same nodes and edges, as rows. The two drawers are mutually exclusive.
   full untruncated value with a copy button.
 - **CSV** exports the current tab, respecting active filters.
 
-## Selection and camera
+### Focusing on a subset of properties
+
+When a context carries dozens of properties and an analysis needs three,
+limit what the property surfaces show: **Style panel → Property Visibility**,
+one allowlist for node properties and one for edge properties. It prunes
+every place properties are *displayed* — the Data Table, the community and
+cluster node tables, **Open details**, and the side panel — and the CSV
+export follows the visible columns.
+
+![The Property Visibility picker in the Style panel, and the pruned Data Table with its "Showing N of M properties" hint](/screenshots/exploring-the-graph-property-visibility.png)
+
+Wherever something is hidden, the surface says so: a
+**"Showing N of M properties · Show all"** hint, where **Show all** clears
+the allowlist in one click. So a pruned table can never be mistaken for
+missing data. Two things to know:
+
+- The allowlist never touches configuration pickers, label templates,
+  query autocomplete, or [filters](#filters) — those always see every
+  property. It changes what is displayed, not what exists.
+- Changing the allowlist rebuilds the table's columns, which resets any
+  active per-column filters on that tab.
+
+The subset is part of the *look*: saving a [style preset](./style-presets.md)
+captures it, so `?style=<name>` can hand a whole team the same focused view,
+and explorations restore it like everything else.
 
 - **Click** a node or edge to select it — the side panel shows its
   details, metric values, and actions. Clicking a selected node again

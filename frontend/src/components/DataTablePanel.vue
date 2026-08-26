@@ -18,6 +18,7 @@ import {
   flattenNodeRows, initFilters, coerceValue,
 } from '@/composables/useTableColumns';
 import { buildSearchText, SEARCH_FIELD } from '@/utils/searchText';
+import PropertyVisibilityHint from '@/components/PropertyVisibilityHint.vue';
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -54,19 +55,25 @@ const rawEdges = computed(() => graphStore.filteredEdges.map(e => toRaw(e)));
 
 // ─── Property keys ───
 
-const nodePropKeys = computed(() => {
+const allNodePropKeys = computed(() => {
   const s = new Set<string>();
   for (const n of rawNodes.value)
     if (n.properties) for (const k of Object.keys(n.properties)) s.add(k);
   return Array.from(s).sort();
 });
 
-const edgePropKeys = computed(() => {
+const allEdgePropKeys = computed(() => {
   const s = new Set<string>();
   for (const e of rawEdges.value)
     if (e.properties) for (const k of Object.keys(e.properties)) s.add(k);
   return Array.from(s).sort();
 });
+
+// The allowlist (Aesthetics → Property Visibility) prunes columns here; the
+// unfiltered counts above feed the "Showing N of M" hint. Rows, the __search
+// field, and CSV export all derive from the pruned keys — WYSIWYG throughout.
+const nodePropKeys = computed(() => graphStore.visiblePropKeys('node', allNodePropKeys.value));
+const edgePropKeys = computed(() => graphStore.visiblePropKeys('edge', allEdgePropKeys.value));
 
 // ─── Flattened data (properties as top-level fields for PrimeVue) ───
 
@@ -278,6 +285,11 @@ function exportCSV() {
         <InputText v-model="globalSearch" placeholder="Search table..." class="table-search" />
       </div>
       <div class="header-right">
+        <PropertyVisibilityHint
+          :kind="activeTab === 'nodes' ? 'node' : 'edge'"
+          :visible="activeTab === 'nodes' ? nodePropKeys.length : edgePropKeys.length"
+          :total="activeTab === 'nodes' ? allNodePropKeys.length : allEdgePropKeys.length"
+        />
         <button class="action-btn" @click="clearFilters" title="Clear all filters">Clear</button>
         <button class="action-btn" @click="exportCSV" title="Export CSV">CSV</button>
         <button class="action-btn close-btn btn-icon-only" aria-label="Close" @click="emit('close')"><X :size="16" /></button>

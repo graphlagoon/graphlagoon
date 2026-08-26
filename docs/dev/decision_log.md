@@ -7441,3 +7441,121 @@ dead/inert UI surfaces from the docs audit (#26).
 - Query failures can still double-report (QueryErrorModal + toast) — kept
   deliberately, see #7 resolution note for the follow-up list.
 - `window.confirm` sites left as-is (blocking-native, but honest UX).
+
+## [2026-08-26 19:50] - Feature: Property Visibility Allowlist + Presets Grow Behaviors & Visual Mapping
+
+**Feature:** Analysts can limit which node/edge properties the display
+surfaces show (data table, community/cluster node tables, Open Details,
+side panel), and style presets now carry behaviors and the metric visual
+mapping alongside the new allowlist — so `?style=<name>` can hand a team a
+complete focused view.
+
+**Requirements (confirmed with user via Q&A):**
+- Allowlist semantics: null = show all; a list = show only those; `[]` =
+  hide all (reachable only deliberately).
+- Granularity: one global list for node properties, one for edge properties.
+- UI: "Property Visibility" section in the Aesthetics (Style) panel.
+- Persisted in style presets (and therefore explorations, which reuse
+  `buildStylePreset()`); NO context-level DB default (no migration).
+- Behaviors saved in presets as a whole — a "presentation-only subset"
+  (excluding autoLoadOnOpen/progressiveLoad/enableNodeDrag/
+  useInstancedRendering/…) was offered and explicitly rejected by the user
+  in favor of the full snapshot. Docs note that applying a shared preset
+  also changes fetch/interaction behaviors.
+- Context-menu actions stay OUT of presets (context-level integration
+  config on `graph_contexts.context_menu_actions`).
+- Visual mapping (metrics store: node size / edge width by metric) added to
+  presets mid-implementation at user request — it was previously persisted
+  NOWHERE, not even explorations.
+
+**Design Decisions:**
+1. **Filter at the propKeys level, not inside useTableColumns** —
+   `buildNodeColumns`/`flattenNodeRows` stay pure; each surface passes its
+   key union through `graphStore.visiblePropKeys()`. Rows, `__search`, and
+   CSV export follow automatically (WYSIWYG).
+2. **Apply asymmetry, documented at both apply sites:** absent
+   `property_visibility`/`visual_mapping` on apply → reset (show-all /
+   defaults — what a pre-feature preset's author actually saw); absent
+   `behaviors` → leave alone (a reset would need a baseline from the
+   precedence chain defaults < server < context < panel and would stomp
+   panel edits). New saves always emit all fields.
+3. **Validation everywhere:** preset/exploration behaviors go through the
+   existing `applyBehaviorOverrides` (fixes the previously unvalidated
+   `as` cast in `loadExploration`); `normalizePropertyVisibility` and
+   `loadVisualMappingState` do per-key validated merges.
+4. **`getExplorationState` deduplication:** the explicit `behaviors:` line
+   was removed — the `buildStylePreset()` spread now provides it (before,
+   the spread silently shadowed the explicit field).
+5. **`preset_version` stays 1** — additive optional fields; old clients
+   ignore them; backend is `extra="allow"`.
+6. **Empty-state UX (user-reported):** with zero property options (edges
+   with no properties and none declared in the context schema) the limit
+   checkbox is disabled with a "No edge properties in this graph or context
+   schema" hint instead of an empty MultiSelect.
+
+**Bugs found and fixed along the way:**
+- **Pydantic `ExplorationState` silently dropped undeclared state fields**
+  (`extra='ignore'` default + `model_dump()` in the explorations router):
+  `cte_fallback_enabled`/`cte_fallback_silent` were being lost on every
+  save with the database enabled. Fixed with `extra="allow"` (same
+  rationale as TextFormatState) + explicit declarations; pinned by
+  `api/tests/test_exploration_state_roundtrip.py`.
+- **Circular store init:** instantiating the metrics store from
+  `buildStylePreset()` exposed a re-entrancy in the graph store's filtered
+  computeds (`metricsStore.nodeMetrics` undefined while the metrics store's
+  setup is still running). Guarded with `?.` at the four lookup sites,
+  with a comment explaining the constraint.
+
+**Files Created:**
+- frontend/src/components/PropertyVisibilityHint.vue — shared
+  "Showing N of M properties · Show all" hint
+- frontend/src/components/__tests__/PropertyVisibilityHint.test.ts
+- frontend/src/components/__tests__/AestheticsPanel.propertyVisibility.test.ts
+- api/tests/test_exploration_state_roundtrip.py
+
+**Files Modified:**
+- frontend/src/types/graph.ts — PropertyVisibility; StylePresetSettings/
+  ExplorationState grow visual_mapping, property_visibility, behaviors
+- frontend/src/stores/graph.ts — propertyVisibility state + helpers,
+  build/apply preset changes, exploration dedup, context-switch + clear()
+  resets, generalized behavior-warning wording, `?.` guards
+- frontend/src/stores/metrics.ts — getVisualMappingState /
+  loadVisualMappingState (validated)
+- frontend/src/stores/contextMenuActions.ts — doc note (not preset material)
+- frontend/src/components/AestheticsPanel.vue — Property Visibility section
+- frontend/src/components/{DataTablePanel,CommunityNodeModal,
+  ClusterNodeModal,DetailModal,SidePanel}.vue — allowlist filtering + hint
+- api/graphlagoon/models/schemas.py — preset/exploration schema fields,
+  extra="allow" on ExplorationState
+- frontend/src/stores/__tests__/{graph.stylePreset,graph.exploration}.test.ts
+- frontend/src/components/__tests__/CommunityNodeModal.test.ts
+- frontend/e2e/tests/style-presets.spec.ts — 2 new tests (?style= applies
+  allowlist+behaviors; pick → save → reload round-trip; old fixtures kept
+  field-less as backward-compat guards)
+- frontend/e2e/screenshots/generate.ts — scene
+  `exploring-the-graph-property-visibility`
+
+**Testing:**
+- [x] frontend: 1927/1927 unit tests (105 files); `vue-tsc --noEmit` clean
+- [x] E2E: full suite green; style-presets spec 13/13
+- [x] api: 178 tests — 177 passed + 1 pre-existing failure
+  (test_cypher_comments, verified present without these changes; the known
+  gsql2rsql stub-isolation issue); test_style_presets 40/40; new roundtrip
+  tests 3/3
+
+**Public Docs:**
+- [x] docs/guide/style-presets.md — preset now carries six things; old-preset
+  semantics; behaviors-travel-whole warning; actions exclusion
+- [x] docs/guide/exploring-the-graph.md — "Focusing on a subset of
+  properties" section with screenshot
+- [x] docs/guide/communities-metrics.md — visual mapping saved in presets
+- [x] `make docs-screenshots` — 17/17 scenes
+- [x] `make docs-build` passes
+
+**Known Limitations:**
+- A preset's visual mapping referencing a not-yet-computed metric degrades
+  to base sizing until that metric is computed (documented).
+- Changing the allowlist rebuilds table columns, resetting active
+  per-column filters on that tab (documented).
+- DetailModal's "Copy all" still copies every property (explicit copy of
+  the data, not a display).

@@ -349,6 +349,29 @@ const SCENES: Scene[] = [
     },
   },
   {
+    // Property allowlist active: Style panel picker + pruned Data Table with
+    // its "Showing N of M properties · Show all" hint.
+    guide: 'exploring-the-graph',
+    scene: 'property-visibility',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Style');
+      await page.getByTestId('property-visibility-node-toggle').check();
+      await page.getByTestId('property-visibility-node').click();
+      await page.getByRole('option', { name: 'role' }).click();
+      await page.getByRole('option', { name: 'city' }).click();
+      await page.keyboard.press('Escape');
+      // The section sits at the bottom of the Style panel — scroll it into frame.
+      await page
+        .locator('.aesthetics-panel')
+        .evaluate((el) => el.scrollTo(0, el.scrollHeight));
+      await page.getByTitle('Data Table').click();
+      await page.waitForSelector('.data-table-drawer', { timeout: 10_000 });
+      await page.waitForTimeout(400);
+    },
+  },
+  {
     guide: 'clusters',
     scene: 'programs',
     path: GRAPH_URL,
