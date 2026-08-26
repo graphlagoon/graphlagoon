@@ -20,15 +20,32 @@ export default defineConfig({
         text: 'Guide',
         items: [
           { text: 'Getting Started', link: '/guide/getting-started' },
-          { text: 'Databricks Integration', link: '/guide/integration' },
-          { text: 'Deploy as a Databricks App', link: '/guide/databricks-apps' },
-          { text: 'Similarity System', link: '/guide/similarity' },
-          { text: 'REST Connections', link: '/guide/rest-connections' },
-          { text: 'Precomputed Graphs', link: '/guide/precomputed-graphs' },
+          { text: 'Explorations & Sharing', link: '/guide/explorations' },
+        ],
+      },
+      {
+        text: 'Visualization',
+        items: [
+          { text: 'Labels & Text Formatting', link: '/guide/labels' },
           { text: 'Style Presets', link: '/guide/style-presets' },
           { text: 'Layout URL Overrides', link: '/guide/layout-url-overrides' },
           { text: 'Query Templates', link: '/guide/query-templates' },
           { text: 'Context Menu Actions', link: '/guide/context-menu-actions' },
+        ],
+      },
+      {
+        text: 'Data Sources',
+        items: [
+          { text: 'REST Connections', link: '/guide/rest-connections' },
+          { text: 'Precomputed Graphs', link: '/guide/precomputed-graphs' },
+          { text: 'Similarity System', link: '/guide/similarity' },
+        ],
+      },
+      {
+        text: 'Deployment',
+        items: [
+          { text: 'Databricks Integration', link: '/guide/integration' },
+          { text: 'Deploy as a Databricks App', link: '/guide/databricks-apps' },
           { text: 'Configuration', link: '/guide/configuration' },
         ],
       },
