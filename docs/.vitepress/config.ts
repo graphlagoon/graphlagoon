@@ -28,6 +28,7 @@ export default defineConfig({
           { text: 'Style Presets', link: '/guide/style-presets' },
           { text: 'Layout URL Overrides', link: '/guide/layout-url-overrides' },
           { text: 'Query Templates', link: '/guide/query-templates' },
+          { text: 'Context Menu Actions', link: '/guide/context-menu-actions' },
           { text: 'Configuration', link: '/guide/configuration' },
         ],
       },
