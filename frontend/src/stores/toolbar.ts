@@ -11,7 +11,6 @@ export interface ToolbarHandlers {
   onToggleBehaviors: () => void;
   onToggleQuery: () => void;
   onToggleMetrics: () => void;
-  onToggleMetricFilters: () => void;
   onToggleAesthetics: () => void;
   onToggleLabels: () => void;
   onToggleClusterPrograms: () => void;
@@ -25,7 +24,6 @@ export type PanelId =
   | 'behaviors'
   | 'query'
   | 'metrics'
-  | 'metric-filters'
   | 'aesthetics'
   | 'labels'
   | 'clusters'

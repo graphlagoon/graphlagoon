@@ -571,20 +571,12 @@ describe('filter actions', () => {
       edge_types: ['KNOWS'],
       search_query: 'test',
     })
-    store.addNodePropertyFilter({
-      property: 'metric:deg',
-      operator: 'greater_than',
-      value: 1,
-      enabled: true,
-    })
 
     store.resetFilters()
 
     expect(store.filters.node_types).toEqual([])
     expect(store.filters.edge_types).toEqual([])
     expect(store.filters.search_query).toBeUndefined()
-    expect(store.filters.nodePropertyFilters).toEqual([])
-    expect(store.filters.edgePropertyFilters).toEqual([])
   })
 })
 
@@ -604,7 +596,7 @@ describe('loadExploration layout migration', () => {
       state: {
         nodes: [],
         edges: [],
-        filters: { node_types: [], edge_types: [], nodePropertyFilters: [], edgePropertyFilters: [] },
+        filters: { node_types: [], edge_types: [] },
         viewport: { zoom: 1, center_x: 0, center_y: 0 },
         ...state,
       },

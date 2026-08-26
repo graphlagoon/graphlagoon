@@ -186,18 +186,6 @@ test.describe('Graph Visualization', () => {
       await page.getByTitle('Metrics').click();
     });
 
-    test('Metric Filters panel opens with filter controls', async ({ authenticatedPage: page }) => {
-      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
-      await expect(page.getByTestId('toolbar-metric-filters')).toBeVisible({ timeout: 15_000 });
-
-      await page.getByTestId('toolbar-metric-filters').click();
-      await expect(page.locator('h3', { hasText: 'Property Filters' })).toBeVisible();
-      await expect(page.locator('h4', { hasText: 'Add Filter' })).toBeVisible();
-
-      await page.getByTestId('toolbar-metric-filters').click();
-      await expect(page.locator('h3', { hasText: 'Property Filters' })).not.toBeVisible();
-    });
-
     test('Query Templates panel shows template controls', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTitle('Query Templates')).toBeVisible({ timeout: 15_000 });

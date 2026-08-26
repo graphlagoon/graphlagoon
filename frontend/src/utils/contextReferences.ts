@@ -17,8 +17,6 @@ export type ReferenceKind =
   | 'icon-config'
   | 'layout-hive'
   | 'layout-ego'
-  | 'node-filter'
-  | 'edge-filter'
   | 'similarity'
   | 'cluster-binding'
   | 'raw-query';
@@ -118,27 +116,6 @@ export function collectPropertyReferences(
       kind: 'layout-ego',
       certain: true,
     });
-  }
-
-  for (const f of state.filters?.nodePropertyFilters ?? []) {
-    if (f.property && !f.property.startsWith('metric:')) {
-      refs.push({
-        location: `filters.nodePropertyFilters["${f.id}"].property`,
-        property: f.property,
-        kind: 'node-filter',
-        certain: true,
-      });
-    }
-  }
-  for (const f of state.filters?.edgePropertyFilters ?? []) {
-    if (f.property && !f.property.startsWith('metric:')) {
-      refs.push({
-        location: `filters.edgePropertyFilters["${f.id}"].property`,
-        property: f.property,
-        kind: 'edge-filter',
-        certain: true,
-      });
-    }
   }
 
   const keyProperty = state.similarity?.keyProperty;

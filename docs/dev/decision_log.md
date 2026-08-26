@@ -7559,3 +7559,79 @@ complete focused view.
   per-column filters on that tab (documented).
 - DetailModal's "Copy all" still copies every property (explicit copy of
   the data, not a display).
+
+## [2026-08-26 20:05] - Feature Removed: Metric Filters panel & property filters
+
+**Feature:** Removal of the "Metric Filters" toolbar panel
+(`PropertyFilterPanel`) and the entire property-filter mechanism
+(`nodePropertyFilters` / `edgePropertyFilters`), frontend and backend.
+
+**Rationale:** The Data Table panel's per-column filters cover the same
+use case with stricter semantics (and drive the canvas via the
+table-filter KEEP-sets). Keeping two parallel row-filtering systems was
+redundant UI and duplicated hiding logic in the appearance pipeline.
+
+**Design Decisions:**
+1. **Full removal, not deprecation:** the panel only ever filtered by
+   computed metrics (its dropdown was empty until a metric was computed),
+   so usage surface was tiny; the table filter is the sanctioned path.
+2. **Old explorations keep loading:** `FilterState` (frontend and
+   Pydantic) simply drops the two fields; Pydantic ignores unknown keys
+   by default and the frontend load path no longer reads them, so
+   explorations saved with property filters load cleanly — the stale
+   filter arrays are silently discarded on next save.
+3. **Schema-drift dead code removed too:** `contextReferences.ts` no
+   longer collects `node-filter`/`edge-filter` references (kinds dropped
+   from `ReferenceKind`) since nothing can create such references now.
+
+**Frontend Changes (removed):**
+- `components/PropertyFilterPanel.vue` + `__tests__/PropertyFilterPanel.test.ts` (deleted)
+- `stores/__tests__/graph.propertyFilter.test.ts` (deleted)
+- `stores/graph.ts`: `evaluatePropertyFilter`, `propertyFilterHiddenNodeIds/EdgeIds`
+  computeds, property-filter blocks in `filteredNodes`/`filteredEdges`,
+  6 add/update/remove actions, state/reset/load fields
+- `types/graph.ts`: `PropertyFilter`, `PropertyFilterOperator`, the two
+  `FilterState` fields
+- `utils/graphAppearance.ts`: `propFilterHiddenNodeIds/EdgeIds` dropped
+  from `AppearanceContext` and both hidden computations
+- `components/GraphCanvas3D.vue`: prop-filter computeds, ctx fields,
+  watcher deps
+- `components/Toolbar.vue`: "Metric Filters" button (+ unused `ListFilter`
+  icon import); `stores/toolbar.ts`: `onToggleMetricFilters` handler and
+  `'metric-filters'` `PanelId`
+- `views/GraphVisualizationView.vue`: panel wiring
+- `utils/contextReferences.ts`: filter-reference collection
+
+**Backend Changes (removed):**
+- `api/graphlagoon/models/schemas.py`: `PropertyFilter`,
+  `PropertyFilterOperator`, the two `FilterState` fields
+
+**Tests updated:** graph.actions, graph.exploration, graphAppearance,
+contextReferences, SchemaDriftModal, toolbar tests; fixtures/contexts.ts;
+E2E: graph.spec.ts (panel test removed),
+integration/exploration-state.spec.ts (property-filter round-trips →
+plain filter round-trip), integration/database-crud.spec.ts fixtures;
+screenshots/generate.ts scene `communities-metrics-metric-filters`
+removed.
+
+**Testing:**
+- [x] `npm run test:run` — 1897 tests / 103 files green
+- [x] `npx vue-tsc --noEmit` clean
+- [x] `npm run e2e` (see below)
+- [x] API: `pytest` — only pre-existing failure
+  `test_cypher_comments.py::test_leading_line_comment_accepted`
+  ("Query must start with MATCH"), unrelated (no validator code touched)
+
+**Public Docs:**
+- [x] `docs/guide/communities-metrics.md`: "Filtering by metric values"
+  section removed; `docs/guide/explorations.md` filters row updated
+- [x] Screenshot `communities-metrics-metric-filters.png` deleted;
+  toolbar-bearing screenshots regenerated via `make docs-screenshots`
+- [x] `make docs-build` passes
+- Dev docs: `architecture.md` filter line updated; `potential-bugs.md`
+  #6 marked resolved (feature removed)
+
+**Known Limitations:**
+- Explorations saved with active property filters lose them on load
+  (accepted: the feature is gone; data-table filters are not persisted
+  either).

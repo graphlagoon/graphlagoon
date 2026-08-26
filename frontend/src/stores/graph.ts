@@ -15,7 +15,6 @@ import type {
   SubgraphRequest,
   ExpandRequest,
   ExplorationState,
-  PropertyFilter,
   TextFormatRule,
   TextFormatState,
   TextFormatDefaults,
@@ -403,8 +402,6 @@ export const useGraphStore = defineStore('graph', () => {
     node_types: [],
     edge_types: [],
     search_query: undefined,
-    nodePropertyFilters: [],
-    edgePropertyFilters: [],
   });
   const viewport = ref<ViewportState>({
     zoom: 1.0,
@@ -686,74 +683,6 @@ export const useGraphStore = defineStore('graph', () => {
     return focused;
   });
 
-  // Helper: evaluate a property filter against a value
-  function evaluatePropertyFilter(
-    filter: PropertyFilter,
-    metadata: Record<string, string>,
-    getMetricValue?: (metricId: string) => number | undefined
-  ): boolean {
-    if (!filter.enabled) return true;
-
-    // Get the value to compare
-    let rawValue: string | number | undefined;
-
-    if (filter.property.startsWith('metric:')) {
-      const metricId = filter.property.slice(7);
-      rawValue = getMetricValue?.(metricId);
-    } else {
-      rawValue = metadata[filter.property];
-    }
-
-    if (rawValue === undefined || rawValue === null) return false;
-
-    // Parse numeric value if needed
-    const numericValue = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue);
-    const isNumeric = !isNaN(numericValue);
-    const stringValue = String(rawValue).toLowerCase();
-
-    switch (filter.operator) {
-      case 'equals':
-        if (isNumeric && typeof filter.value === 'number') {
-          return numericValue === filter.value;
-        }
-        return stringValue === String(filter.value).toLowerCase();
-
-      case 'not_equals':
-        if (isNumeric && typeof filter.value === 'number') {
-          return numericValue !== filter.value;
-        }
-        return stringValue !== String(filter.value).toLowerCase();
-
-      case 'one_of':
-        if (!filter.values || filter.values.length === 0) return true;
-        return filter.values.some(v =>
-          stringValue === String(v).toLowerCase()
-        );
-
-      case 'contains':
-        return stringValue.includes(String(filter.value).toLowerCase());
-
-      case 'less_than':
-        return isNumeric && typeof filter.value === 'number' && numericValue < filter.value;
-
-      case 'less_than_or_equal':
-        return isNumeric && typeof filter.value === 'number' && numericValue <= filter.value;
-
-      case 'greater_than':
-        return isNumeric && typeof filter.value === 'number' && numericValue > filter.value;
-
-      case 'greater_than_or_equal':
-        return isNumeric && typeof filter.value === 'number' && numericValue >= filter.value;
-
-      case 'between':
-        if (!isNumeric || filter.minValue === undefined || filter.maxValue === undefined) return false;
-        return numericValue >= filter.minValue && numericValue <= filter.maxValue;
-
-      default:
-        return true;
-    }
-  }
-
   // Pre-computed lowercased search text per node (id + type), rebuilt only when
   // `nodes` changes — not on every keystroke. This moves the per-node
   // `toLowerCase()` and the reactive-Proxy property reads off the search hot
@@ -792,84 +721,6 @@ export const useGraphStore = defineStore('graph', () => {
     return hidden;
   });
 
-  // Node IDs hidden by property filters (for 3D visual hiding to preserve positions)
-  const propertyFilterHiddenNodeIds = computed(() => {
-    const activeNodeFilters = filters.value.nodePropertyFilters.filter(f => f.enabled);
-    if (activeNodeFilters.length === 0) return null;
-
-    // nodeMetrics/edgeMetrics are ?.guarded: this computed can re-enter the
-    // metrics store while its setup() is still running (its watchers read
-    // filtered nodes), and a half-built store has no computeds yet.
-    const metricsStore = useMetricsStore();
-    const hidden = new Set<string>();
-
-    // Cache metric lookup: Map<metricId, MetricResult> for O(1) access inside loop
-    const metricCache = new Map<string, { values: Map<string, number> } | undefined>();
-    for (const filter of activeNodeFilters) {
-      if (filter.property.startsWith('metric:')) {
-        const metricId = filter.property.slice(7);
-        if (!metricCache.has(metricId)) {
-          metricCache.set(metricId, metricsStore.nodeMetrics?.find(m => m.id === metricId));
-        }
-      }
-    }
-
-    nodes.value.forEach((n) => {
-      const getMetricValue = (metricId: string) => {
-        return metricCache.get(metricId)?.values.get(n.node_id);
-      };
-
-      const passes = activeNodeFilters.every(filter =>
-        evaluatePropertyFilter(filter, {}, getMetricValue)
-      );
-
-      if (!passes) {
-        hidden.add(n.node_id);
-      }
-    });
-
-    return hidden.size > 0 ? hidden : null;
-  });
-
-  // Edge IDs hidden by property filters (for 3D visual hiding to preserve positions)
-  const propertyFilterHiddenEdgeIds = computed(() => {
-    const activeEdgeFilters = filters.value.edgePropertyFilters.filter(f => f.enabled);
-    if (activeEdgeFilters.length === 0) return null;
-
-    // nodeMetrics/edgeMetrics are ?.guarded: this computed can re-enter the
-    // metrics store while its setup() is still running (its watchers read
-    // filtered nodes), and a half-built store has no computeds yet.
-    const metricsStore = useMetricsStore();
-    const hidden = new Set<string>();
-
-    // Cache metric lookup for O(1) access inside loop
-    const metricCache = new Map<string, { values: Map<string, number> } | undefined>();
-    for (const filter of activeEdgeFilters) {
-      if (filter.property.startsWith('metric:')) {
-        const metricId = filter.property.slice(7);
-        if (!metricCache.has(metricId)) {
-          metricCache.set(metricId, metricsStore.edgeMetrics?.find(m => m.id === metricId));
-        }
-      }
-    }
-
-    edges.value.forEach((e) => {
-      const getMetricValue = (metricId: string) => {
-        return metricCache.get(metricId)?.values.get(e.edge_id);
-      };
-
-      const passes = activeEdgeFilters.every(filter =>
-        evaluatePropertyFilter(filter, {}, getMetricValue)
-      );
-
-      if (!passes) {
-        hidden.add(e.edge_id);
-      }
-    });
-
-    return hidden.size > 0 ? hidden : null;
-  });
-
   const filteredNodes = computed(() => {
     let result = nodes.value;
 
@@ -893,34 +744,6 @@ export const useGraphStore = defineStore('graph', () => {
       }
     }
 
-    // Apply property filters (metrics only, no metadata)
-    const activeNodeFilters = filters.value.nodePropertyFilters.filter(f => f.enabled);
-    if (activeNodeFilters.length > 0) {
-      // nodeMetrics/edgeMetrics are ?.guarded: this computed can re-enter the
-      // metrics store while its setup() is still running (its watchers read
-      // filtered nodes), and a half-built store has no computeds yet.
-      const metricsStore = useMetricsStore();
-      // Cache metric lookup for O(1) access inside loop
-      const metricCache = new Map<string, { values: Map<string, number> } | undefined>();
-      for (const filter of activeNodeFilters) {
-        if (filter.property.startsWith('metric:')) {
-          const metricId = filter.property.slice(7);
-          if (!metricCache.has(metricId)) {
-            metricCache.set(metricId, metricsStore.nodeMetrics?.find(m => m.id === metricId));
-          }
-        }
-      }
-      result = result.filter((n) => {
-        const getMetricValue = (metricId: string) => {
-          return metricCache.get(metricId)?.values.get(n.node_id);
-        };
-
-        return activeNodeFilters.every(filter =>
-          evaluatePropertyFilter(filter, {}, getMetricValue)
-        );
-      });
-    }
-
     // Note: graph lens focus (both 'hide' and 'dim') is handled visually in GraphCanvas3D
     // via hidden flag / alpha encoding. Not filtered here to preserve 3D positions.
 
@@ -941,34 +764,6 @@ export const useGraphStore = defineStore('graph', () => {
     if (filters.value.edge_types.length > 0) {
       const typeSet = new Set(filters.value.edge_types);
       result = result.filter((e) => typeSet.has(e.relationship_type));
-    }
-
-    // Apply property filters to edges (metrics only, no metadata)
-    const activeEdgeFilters = filters.value.edgePropertyFilters.filter(f => f.enabled);
-    if (activeEdgeFilters.length > 0) {
-      // nodeMetrics/edgeMetrics are ?.guarded: this computed can re-enter the
-      // metrics store while its setup() is still running (its watchers read
-      // filtered nodes), and a half-built store has no computeds yet.
-      const metricsStore = useMetricsStore();
-      // Cache metric lookup for O(1) access inside loop
-      const metricCache = new Map<string, { values: Map<string, number> } | undefined>();
-      for (const filter of activeEdgeFilters) {
-        if (filter.property.startsWith('metric:')) {
-          const metricId = filter.property.slice(7);
-          if (!metricCache.has(metricId)) {
-            metricCache.set(metricId, metricsStore.edgeMetrics?.find(m => m.id === metricId));
-          }
-        }
-      }
-      result = result.filter((e) => {
-        const getMetricValue = (metricId: string) => {
-          return metricCache.get(metricId)?.values.get(e.edge_id);
-        };
-
-        return activeEdgeFilters.every(filter =>
-          evaluatePropertyFilter(filter, {}, getMetricValue)
-        );
-      });
     }
 
     // Similarity display mode filtering
@@ -2072,8 +1867,6 @@ export const useGraphStore = defineStore('graph', () => {
       node_types: [],
       edge_types: [],
       search_query: undefined,
-      nodePropertyFilters: [],
-      edgePropertyFilters: [],
     };
   }
 
@@ -2091,42 +1884,6 @@ export const useGraphStore = defineStore('graph', () => {
     proceduralOptimizations.value = { ...DEFAULT_PROCEDURAL_BFS_OPTIONS };
     cteFallbackEnabled.value = true;
     cteFallbackSilent.value = true;
-  }
-
-  function addNodePropertyFilter(filter: Omit<PropertyFilter, 'id'>) {
-    const newFilter: PropertyFilter = {
-      ...filter,
-      id: `node-filter-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-    };
-    filters.value.nodePropertyFilters = [...filters.value.nodePropertyFilters, newFilter];
-  }
-
-  function updateNodePropertyFilter(filterId: string, updates: Partial<PropertyFilter>) {
-    filters.value.nodePropertyFilters = filters.value.nodePropertyFilters.map(f =>
-      f.id === filterId ? { ...f, ...updates } : f
-    );
-  }
-
-  function removeNodePropertyFilter(filterId: string) {
-    filters.value.nodePropertyFilters = filters.value.nodePropertyFilters.filter(f => f.id !== filterId);
-  }
-
-  function addEdgePropertyFilter(filter: Omit<PropertyFilter, 'id'>) {
-    const newFilter: PropertyFilter = {
-      ...filter,
-      id: `edge-filter-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-    };
-    filters.value.edgePropertyFilters = [...filters.value.edgePropertyFilters, newFilter];
-  }
-
-  function updateEdgePropertyFilter(filterId: string, updates: Partial<PropertyFilter>) {
-    filters.value.edgePropertyFilters = filters.value.edgePropertyFilters.map(f =>
-      f.id === filterId ? { ...f, ...updates } : f
-    );
-  }
-
-  function removeEdgePropertyFilter(filterId: string) {
-    filters.value.edgePropertyFilters = filters.value.edgePropertyFilters.filter(f => f.id !== filterId);
   }
 
   function setLayoutAlgorithm(algorithm: LayoutAlgorithm) {
@@ -2726,8 +2483,6 @@ export const useGraphStore = defineStore('graph', () => {
         node_types: loadedFilters.node_types ?? [],
         edge_types: loadedFilters.edge_types ?? [],
         search_query: loadedFilters.search_query,
-        nodePropertyFilters: loadedFilters.nodePropertyFilters ?? [],
-        edgePropertyFilters: loadedFilters.edgePropertyFilters ?? [],
       };
       viewport.value = exploration.state.viewport;
       // Backwards compat: old explorations saved legacy values ('force-atlas-2',
@@ -2942,8 +2697,6 @@ export const useGraphStore = defineStore('graph', () => {
     enhancedEdges,
     searchMatchedNodeIds,
     searchHiddenNodeIds,
-    propertyFilterHiddenNodeIds,
-    propertyFilterHiddenEdgeIds,
     focusedNodeIds,
 
     // Actions
@@ -2977,12 +2730,6 @@ export const useGraphStore = defineStore('graph', () => {
     applyFilters,
     resetFilters,
     resetTranspileOptions,
-    addNodePropertyFilter,
-    updateNodePropertyFilter,
-    removeNodePropertyFilter,
-    addEdgePropertyFilter,
-    updateEdgePropertyFilter,
-    removeEdgePropertyFilter,
     setLayoutAlgorithm,
     updateLayoutModeConfig,
     updateForce3DSettings,

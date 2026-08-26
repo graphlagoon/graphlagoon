@@ -206,8 +206,6 @@ const layoutHiddenNodeIds = ref<Set<string> | null>(null);
 
 // Hidden sets for visual hiding (preserves positions unlike filtering)
 const searchHiddenNodeIds = computed(() => graphStore.searchHiddenNodeIds);
-const propertyFilterHiddenNodeIds = computed(() => graphStore.propertyFilterHiddenNodeIds);
-const propertyFilterHiddenEdgeIds = computed(() => graphStore.propertyFilterHiddenEdgeIds);
 const focusedNodeIds = computed(() => graphStore.focusedNodeIds);
 
 // Use enhanced nodes/edges to include clusters
@@ -294,8 +292,6 @@ function collectAppearanceContext(): AppearanceContext {
     searchHiddenIds: searchHiddenNodeIds.value,
     isHighlightMode: graphStore.behaviors.searchMode === 'highlight' && searchMatched !== null,
 
-    propFilterHiddenNodeIds: propertyFilterHiddenNodeIds.value,
-    propFilterHiddenEdgeIds: propertyFilterHiddenEdgeIds.value,
 
     layoutHiddenNodeIds: layoutHiddenNodeIds.value,
 
@@ -1428,7 +1424,7 @@ watch(
   }
 );
 
-// Filter changes (type filters, property filters) — visuals only.
+// Filter changes (type filters) — visuals only.
 // This is the ONLY canvas reaction to these filters: the data chain
 // (displayNodes/displayEdges in the store) deliberately ignores them, so the
 // data watcher above never fires and no Three.js rebuild / layout reheat runs.
@@ -1439,8 +1435,6 @@ watch(
   () => JSON.stringify([
     graphStore.filters.node_types,
     graphStore.filters.edge_types,
-    graphStore.filters.nodePropertyFilters,
-    graphStore.filters.edgePropertyFilters,
   ]),
   () => {
     updateVisuals();

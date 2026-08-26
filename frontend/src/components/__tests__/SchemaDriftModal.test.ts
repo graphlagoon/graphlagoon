@@ -252,7 +252,7 @@ describe('SchemaDriftModal', () => {
         state: {
           nodes: [],
           edges: [],
-          filters: { node_types: [], edge_types: [], nodePropertyFilters: [], edgePropertyFilters: [] },
+          filters: { node_types: [], edge_types: [] },
           viewport: { zoom: 1, center_x: 0, center_y: 0 },
           layout_algorithm: 'force' as const,
           textFormat: {

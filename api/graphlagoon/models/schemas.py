@@ -474,36 +474,10 @@ class EdgeState(BaseModel):
     edge_id: str
 
 
-PropertyFilterOperator = Literal[
-    "equals",
-    "not_equals",
-    "one_of",
-    "contains",
-    "less_than",
-    "less_than_or_equal",
-    "greater_than",
-    "greater_than_or_equal",
-    "between",
-]
-
-
-class PropertyFilter(BaseModel):
-    id: str
-    property: str
-    operator: PropertyFilterOperator
-    value: Optional[Any] = None  # str | number | null
-    values: Optional[list[Any]] = None  # for 'one_of'
-    minValue: Optional[float] = None  # for 'between'
-    maxValue: Optional[float] = None  # for 'between'
-    enabled: bool = True
-
-
 class FilterState(BaseModel):
     node_types: list[str] = Field(default_factory=list)
     edge_types: list[str] = Field(default_factory=list)
     search_query: Optional[str] = None
-    nodePropertyFilters: list[PropertyFilter] = Field(default_factory=list)
-    edgePropertyFilters: list[PropertyFilter] = Field(default_factory=list)
 
 
 class ViewportState(BaseModel):

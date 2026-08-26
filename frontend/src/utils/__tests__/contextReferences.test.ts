@@ -161,27 +161,6 @@ describe('collectPropertyReferences', () => {
     )
   })
 
-  it('detects node and edge property filters, ignoring metric: filters', () => {
-    const state = createExplorationState({
-      filters: {
-        node_types: [],
-        edge_types: [],
-        nodePropertyFilters: [
-          { id: 'f1', property: 'age', operator: 'greater_than', value: 18, enabled: true },
-          { id: 'f2', property: 'metric:degree', operator: 'greater_than', value: 5, enabled: true },
-        ],
-        edgePropertyFilters: [
-          { id: 'f3', property: 'weight', operator: 'greater_than', value: 1, enabled: true },
-        ],
-      },
-    })
-    const refs = collectPropertyReferences(state)
-    const props = refs.map((r) => r.property)
-    expect(props).toContain('age')
-    expect(props).toContain('weight')
-    expect(props).not.toContain('metric:degree')
-  })
-
   it('detects a similarity keyProperty, ignoring the node_id sentinel', () => {
     const stateWithKey = createExplorationState({ similarity: { keyProperty: 'embedding' } })
     expect(collectPropertyReferences(stateWithKey)).toContainEqual(

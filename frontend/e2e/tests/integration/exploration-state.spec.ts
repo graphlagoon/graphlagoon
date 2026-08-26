@@ -2,7 +2,6 @@
  * Integration tests: ExplorationState round-trip through the database.
  *
  * Validates that all state fields survive the Pydantic serialization:
- * - nodePropertyFilters / edgePropertyFilters (BUG FIX)
  * - TextFormatRule with scope="global" (BUG FIX)
  * - clusters, graph_query, textFormat
  */
@@ -30,55 +29,21 @@ async function createContext(api: any, title: string): Promise<string> {
 }
 
 test.describe('ExplorationState round-trip', () => {
-  test('nodePropertyFilters survive save and load', async ({ api }) => {
-    const contextId = await createContext(api, 'PropertyFilter RT');
+  test('filter state survives save and load', async ({ api }) => {
+    const contextId = await createContext(api, 'FilterState RT');
 
     const filters = {
       node_types: ['Person'],
       edge_types: [],
       search_query: 'alice',
-      nodePropertyFilters: [
-        {
-          id: 'pf-1',
-          property: 'prop:age',
-          operator: 'greater_than',
-          value: 25,
-          values: null,
-          minValue: null,
-          maxValue: null,
-          enabled: true,
-        },
-        {
-          id: 'pf-2',
-          property: 'prop:name',
-          operator: 'contains',
-          value: 'ali',
-          values: null,
-          minValue: null,
-          maxValue: null,
-          enabled: true,
-        },
-      ],
-      edgePropertyFilters: [
-        {
-          id: 'pf-3',
-          property: 'prop:weight',
-          operator: 'between',
-          value: null,
-          values: null,
-          minValue: 0.5,
-          maxValue: 1.0,
-          enabled: false,
-        },
-      ],
     };
 
-    // CREATE exploration with property filters
+    // CREATE exploration with filters
     const createRes = await api.post(
       `api/graph-contexts/${contextId}/explorations`,
       {
         data: {
-          title: 'With Property Filters',
+          title: 'With Filters',
           state: {
             nodes: [],
             edges: [],
@@ -99,69 +64,8 @@ test.describe('ExplorationState round-trip', () => {
     const loaded = await getRes.json();
     const loadedFilters = loaded.state.filters;
 
-    // nodePropertyFilters preserved
-    expect(loadedFilters.nodePropertyFilters).toHaveLength(2);
-    expect(loadedFilters.nodePropertyFilters[0].property).toBe('prop:age');
-    expect(loadedFilters.nodePropertyFilters[0].operator).toBe('greater_than');
-    expect(loadedFilters.nodePropertyFilters[0].value).toBe(25);
-    expect(loadedFilters.nodePropertyFilters[1].property).toBe('prop:name');
-    expect(loadedFilters.nodePropertyFilters[1].operator).toBe('contains');
-
-    // edgePropertyFilters preserved
-    expect(loadedFilters.edgePropertyFilters).toHaveLength(1);
-    expect(loadedFilters.edgePropertyFilters[0].operator).toBe('between');
-    expect(loadedFilters.edgePropertyFilters[0].minValue).toBe(0.5);
-    expect(loadedFilters.edgePropertyFilters[0].maxValue).toBe(1.0);
-    expect(loadedFilters.edgePropertyFilters[0].enabled).toBe(false);
-
-    // Other filter fields
     expect(loadedFilters.search_query).toBe('alice');
     expect(loadedFilters.node_types).toEqual(['Person']);
-  });
-
-  test('one_of property filter with values array round-trips', async ({
-    api,
-  }) => {
-    const contextId = await createContext(api, 'OneOf RT');
-
-    const createRes = await api.post(
-      `api/graph-contexts/${contextId}/explorations`,
-      {
-        data: {
-          title: 'OneOf Filter',
-          state: {
-            nodes: [],
-            edges: [],
-            filters: {
-              node_types: [],
-              edge_types: [],
-              nodePropertyFilters: [
-                {
-                  id: 'pf-oneof',
-                  property: 'prop:name',
-                  operator: 'one_of',
-                  value: null,
-                  values: ['Alice', 'Bob', 'Carol'],
-                  enabled: true,
-                },
-              ],
-              edgePropertyFilters: [],
-            },
-            viewport: { zoom: 1, center_x: 0, center_y: 0 },
-            layout_algorithm: 'force-atlas-2',
-          },
-        },
-      }
-    );
-    expect(createRes.ok()).toBeTruthy();
-    const explorationId = (await createRes.json()).id;
-
-    const loaded = await (
-      await api.get(`api/explorations/${explorationId}`)
-    ).json();
-    const pf = loaded.state.filters.nodePropertyFilters[0];
-    expect(pf.operator).toBe('one_of');
-    expect(pf.values).toEqual(['Alice', 'Bob', 'Carol']);
   });
 
   test('TextFormatState with scope="global" survives round-trip', async ({
