@@ -7,6 +7,7 @@ import {
   buildNodeColumns, flattenNodeRows,
 } from '@/composables/useTableColumns'
 import { X } from 'lucide-vue-next'
+import PropertyVisibilityHint from '@/components/PropertyVisibilityHint.vue'
 
 interface Props {
   communityId: number | null
@@ -39,12 +40,15 @@ const algorithmLabel = computed(() =>
 
 // ─── Property keys ───
 
-const propKeys = computed(() => {
+const allPropKeys = computed(() => {
   const keys = new Set<string>()
   for (const node of nodes.value)
     if (node.properties) for (const k of Object.keys(node.properties)) keys.add(k)
   return Array.from(keys).sort()
 })
+
+// Pruned by the property allowlist (Aesthetics → Property Visibility)
+const propKeys = computed(() => graphStore.visiblePropKeys('node', allPropKeys.value))
 
 // ─── Column metadata + flat rows ───
 
@@ -153,6 +157,7 @@ function exportCSV() {
             class="table-search"
           />
           <div class="toolbar-right">
+            <PropertyVisibilityHint kind="node" :visible="propKeys.length" :total="allPropKeys.length" />
             <span class="row-count">
               <template v-if="filteredRows.length !== rows.length">{{ filteredRows.length }} of </template>{{ rows.length }} nodes
             </span>

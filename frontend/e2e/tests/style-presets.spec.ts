@@ -3,8 +3,15 @@
  */
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT } from '../fixtures/mock-data';
-import { seedContexts, seedStylePresets, seedPrecomputedGraphs } from '../helpers/api-mocks';
+import {
+  seedContexts,
+  seedStylePresets,
+  seedPrecomputedGraphs,
+  seedGraphResponse,
+} from '../helpers/api-mocks';
 
+// Kept WITHOUT property_visibility/behaviors on purpose: presets saved before
+// those fields existed must still apply cleanly (backward-compat guard).
 const INVESTIGACAO = {
   aesthetics: { nodeSize: 9 },
   nodeTypeColors: { Person: '#ff0000' },
@@ -13,6 +20,25 @@ const INVESTIGACAO = {
   layout_algorithm: 'hive',
   layout_mode_config: { ego: {}, hive: {}, hierarchical: {} },
   force3d_settings: {},
+};
+
+// A preset carrying the newer fields: a node-property allowlist and behaviors.
+const FOCO = {
+  ...INVESTIGACAO,
+  property_visibility: { nodeProperties: ['name'], edgeProperties: null },
+  behaviors: { degreeDimEnabled: false },
+};
+
+// The default subgraph mock carries no `properties` objects, so property
+// surfaces have nothing to prune. This graph does.
+const GRAPH_WITH_PROPS = {
+  nodes: [
+    { node_id: 'n1', node_type: 'Person', properties: { name: 'Alice', age: 30 } },
+    { node_id: 'n2', node_type: 'Person', properties: { name: 'Bob', age: 25 } },
+  ],
+  edges: [
+    { edge_id: 'e1', src: 'n1', dst: 'n2', relationship_type: 'KNOWS', properties: { weight: 0.5 } },
+  ],
 };
 
 /**
@@ -202,6 +228,75 @@ test.describe('Style presets', () => {
     await page.getByTestId('style-preset-open').click();
     await expect(page.getByTestId('style-preset-modal')).toBeVisible();
     await expect(page.getByTestId('style-preset-item-investigacao')).toBeVisible();
+  });
+
+  test('?style= with a property allowlist prunes the data table and behaviors land', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { foco: FOCO });
+    await seedGraphResponse(page, GRAPH_WITH_PROPS);
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?style=foco`);
+    await expect(page.getByTestId('graph-status-style')).toContainText('foco', {
+      timeout: 15_000,
+    });
+
+    // The data table shows only the allowlisted property column, with the way
+    // out advertised right next to it.
+    await page.getByTitle('Data Table').click();
+    const drawer = page.locator('.data-table-drawer');
+    await expect(drawer.locator('th', { hasText: 'name' })).toBeVisible();
+    await expect(drawer.locator('th', { hasText: 'age' })).toHaveCount(0);
+    await expect(page.getByTestId('property-visibility-hint')).toContainText(
+      'Showing 1 of 2',
+    );
+
+    // The preset's behaviors landed too: Dim Hub defaults to on, preset turned it off.
+    await page.getByTitle('Behaviors').click();
+    await expect(
+      page.locator('label', { hasText: 'Dim Hub' }).locator('input'),
+    ).not.toBeChecked();
+  });
+
+  test('picking a property subset survives save + reload through ?style=', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, {});
+    await seedGraphResponse(page, GRAPH_WITH_PROPS);
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    // Limit node properties: checking the box seeds the full list, then
+    // deselect "age" in the MultiSelect.
+    await page.getByTitle('Style', { exact: true }).click();
+    await page.getByTestId('property-visibility-node-toggle').check();
+    await page.getByTestId('property-visibility-node').click();
+    await page.getByRole('option', { name: 'age' }).click();
+    await page.keyboard.press('Escape');
+
+    await page.getByTitle('Data Table').click();
+    const drawer = page.locator('.data-table-drawer');
+    await expect(drawer.locator('th', { hasText: 'name' })).toBeVisible();
+    await expect(drawer.locator('th', { hasText: 'age' })).toHaveCount(0);
+
+    // Save the look as a preset, then reload through the URL it produced.
+    await openPresets(page);
+    await page.getByTestId('style-preset-name-input').fill('so-nomes');
+    await page.getByTestId('style-preset-save-button').click();
+    await expect(page).toHaveURL(/style=so-nomes/);
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?style=so-nomes`);
+    await expect(page.getByTestId('graph-status-style')).toContainText('so-nomes', {
+      timeout: 15_000,
+    });
+    await page.getByTitle('Data Table').click();
+    await expect(drawer.locator('th', { hasText: 'name' })).toBeVisible();
+    await expect(drawer.locator('th', { hasText: 'age' })).toHaveCount(0);
+
+    // "Show all" is the escape hatch — one click back to everything.
+    await page.getByTestId('property-visibility-hint').locator('button').click();
+    await expect(drawer.locator('th', { hasText: 'age' })).toBeVisible();
   });
 
   test('closing the modal leaves the applied style in place', async ({

@@ -1,0 +1,39 @@
+"""ExplorationState must round-trip frontend fields through model_dump().
+
+The explorations router validates incoming state with ExplorationState and
+stores `model_dump()`. Before extra="allow" was added, any field the model
+did not declare was silently dropped on save — cte_fallback_enabled and
+cte_fallback_silent were being lost exactly that way. These tests pin both
+the declared new fields and the survival of unknown future ones.
+"""
+
+from graphlagoon.models.schemas import ExplorationState
+
+
+def test_declared_display_fields_round_trip():
+    state = ExplorationState(
+        visual_mapping={"nodeSize": {"metricId": "pagerank"}},
+        property_visibility={"nodeProperties": ["name"], "edgeProperties": None},
+        cte_fallback_enabled=False,
+        cte_fallback_silent=False,
+    )
+
+    dumped = state.model_dump()
+
+    assert dumped["visual_mapping"] == {"nodeSize": {"metricId": "pagerank"}}
+    assert dumped["property_visibility"] == {
+        "nodeProperties": ["name"],
+        "edgeProperties": None,
+    }
+    assert dumped["cte_fallback_enabled"] is False
+    assert dumped["cte_fallback_silent"] is False
+
+
+def test_unknown_future_fields_survive_the_round_trip():
+    state = ExplorationState(**{"some_future_field": {"x": 1}})
+    assert state.model_dump()["some_future_field"] == {"x": 1}
+
+
+def test_behaviors_still_round_trip():
+    state = ExplorationState(behaviors={"focusDepth": 3})
+    assert state.model_dump()["behaviors"] == {"focusDepth": 3}

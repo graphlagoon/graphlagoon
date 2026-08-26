@@ -5,6 +5,7 @@ import { useMetricsStore } from '@/stores/metrics';
 import { tryParseJson } from '@/utils/jsonDetection';
 import { X } from 'lucide-vue-next';
 import JsonValueViewer from './JsonValueViewer.vue';
+import PropertyVisibilityHint from './PropertyVisibilityHint.vue';
 
 // Props for different display modes
 const props = withDefaults(defineProps<{
@@ -64,20 +65,30 @@ const selectedItem = computed(() => {
   return null;
 });
 
-// Get properties from selected item
+// Get properties from selected item, pruned by the property allowlist
+// (Aesthetics → Property Visibility). The unfiltered count feeds the hint.
+const totalPropertyCount = computed(() =>
+  selectedItem.value?.data.properties
+    ? Object.keys(selectedItem.value.data.properties).length
+    : 0,
+);
+
 const selectedItemProperties = computed(() => {
   if (!selectedItem.value?.data.properties) return [];
+  const kind = selectedItem.value.type;
   const itemProps = selectedItem.value.data.properties;
-  return Object.entries(itemProps).map(([key, value]) => {
-    const jsonResult = tryParseJson(value);
-    return {
-      key,
-      value: formatPropertyValue(value),
-      rawValue: value,
-      isJson: jsonResult.isJson,
-      parsedJson: jsonResult.isJson ? jsonResult.parsed : null,
-    };
-  });
+  return Object.entries(itemProps)
+    .filter(([key]) => graphStore.isPropertyVisible(kind, key))
+    .map(([key, value]) => {
+      const jsonResult = tryParseJson(value);
+      return {
+        key,
+        value: formatPropertyValue(value),
+        rawValue: value,
+        isJson: jsonResult.isJson,
+        parsedJson: jsonResult.isJson ? jsonResult.parsed : null,
+      };
+    });
 });
 
 // Format property value for display
@@ -215,9 +226,15 @@ async function expandFromNode() {
         </template>
       </div>
 
-      <!-- Properties section -->
-      <div v-if="selectedItemProperties.length > 0" class="detail-section">
+      <!-- Properties section: keyed on the unfiltered count so the hint (and
+           the way back to "show all") survives even a fully pruned list -->
+      <div v-if="totalPropertyCount > 0" class="detail-section">
         <h4>Properties</h4>
+        <PropertyVisibilityHint
+          :kind="selectedItem.type"
+          :visible="selectedItemProperties.length"
+          :total="totalPropertyCount"
+        />
         <template v-for="prop in selectedItemProperties" :key="prop.key">
           <!-- JSON value: full-width viewer below key -->
           <div v-if="prop.isJson" class="prop-json-block">

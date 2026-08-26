@@ -133,4 +133,41 @@ describe('CommunityNodeModal', () => {
     await fireEvent.click(container.querySelector('.modal-overlay')!)
     expect(emitted().close).toBeTruthy()
   })
+
+  describe('property visibility allowlist', () => {
+    it('shows only allowlisted property columns, with a "N of M" hint', async () => {
+      await seedStores()
+      const graphStore = useGraphStore()
+      graphStore.setPropertyVisibility('node', ['name'])
+
+      const { container } = render(CommunityNodeModal, { props: { communityId: 0 } })
+
+      const headers = Array.from(container.querySelectorAll('th')).map(th => th.textContent!.trim())
+      expect(headers.some(h => h.includes('name'))).toBe(true)
+      expect(headers.some(h => h.includes('age'))).toBe(false)
+
+      const hint = container.querySelector('[data-testid="property-visibility-hint"]')!
+      expect(hint.textContent).toContain('1 of 2')
+    })
+
+    it('Show all clears the allowlist and brings every column back', async () => {
+      await seedStores()
+      const graphStore = useGraphStore()
+      graphStore.setPropertyVisibility('node', ['name'])
+
+      const { container } = render(CommunityNodeModal, { props: { communityId: 0 } })
+      await fireEvent.click(container.querySelector('.show-all-btn')!)
+
+      expect(graphStore.propertyVisibility.nodeProperties).toBeNull()
+      const headers = Array.from(container.querySelectorAll('th')).map(th => th.textContent!.trim())
+      expect(headers.some(h => h.includes('age'))).toBe(true)
+      expect(container.querySelector('[data-testid="property-visibility-hint"]')).toBeNull()
+    })
+
+    it('renders no hint when nothing is hidden', async () => {
+      await seedStores()
+      const { container } = render(CommunityNodeModal, { props: { communityId: 0 } })
+      expect(container.querySelector('[data-testid="property-visibility-hint"]')).toBeNull()
+    })
+  })
 })

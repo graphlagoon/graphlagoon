@@ -238,9 +238,11 @@ class StylePresetSettings(BaseModel):
     describe the same thing two different ways.
 
     Deliberately excluded: nodes, edges, filters, viewport, the query and its
-    transpile options, clusters, communities and behaviors. A preset says how a
-    graph *looks*, never which data it shows — otherwise applying one would
-    silently hide nodes and the graph would look like it came back incomplete.
+    transpile options, clusters, communities and similarity — a preset never
+    carries which data is loaded, otherwise applying one would silently hide
+    nodes and the graph would look like it came back incomplete. Also excluded:
+    context-menu actions, which persist per-context on
+    graph_contexts.context_menu_actions, never per-preset.
 
     The server does not interpret any of it. Shapes are owned by the frontend
     (`buildStylePreset`/`applyStylePreset` in stores/graph.ts) and validated
@@ -262,6 +264,14 @@ class StylePresetSettings(BaseModel):
     layout_algorithm: Optional[str] = None
     layout_mode_config: Optional[dict[str, Any]] = None
     force3d_settings: Optional[dict[str, Any]] = None
+    # Metric-driven visual mapping (node size / edge width by metric)
+    visual_mapping: Optional[dict[str, Any]] = None
+    # Display — {nodeProperties: [...] | null, edgeProperties: [...] | null};
+    # null = show all properties
+    property_visibility: Optional[dict[str, Any]] = None
+    # Behaviors — full snapshot; absent = pre-feature preset (frontend leaves
+    # current behaviors untouched on apply)
+    behaviors: Optional[dict[str, Any]] = None
 
 
 class StylePresetWriteRequest(BaseModel):
@@ -584,6 +594,12 @@ class GraphSnapshot(BaseModel):
 
 
 class ExplorationState(BaseModel):
+    # extra="allow" so frontend-only fields survive the model_dump()
+    # round-trip in the explorations router instead of being silently
+    # dropped — cte_fallback_enabled/cte_fallback_silent were being lost
+    # exactly that way before this was added.
+    model_config = ConfigDict(extra="allow")
+
     nodes: list[NodeState] = Field(default_factory=list)
     edges: list[EdgeState] = Field(default_factory=list)
     has_snapshot: bool = False
@@ -610,6 +626,10 @@ class ExplorationState(BaseModel):
     behaviors: Optional[dict] = None
     aesthetics: Optional[dict] = None
     force3d_settings: Optional[dict] = None  # d3-force-3d simulation params
+    visual_mapping: Optional[dict] = None  # metric-driven size/width mapping
+    property_visibility: Optional[dict] = None  # property display allowlist
+    cte_fallback_enabled: Optional[bool] = None
+    cte_fallback_silent: Optional[bool] = None
     community: Optional[dict] = None
     similarity: Optional[dict] = None
 

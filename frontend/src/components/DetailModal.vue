@@ -6,6 +6,7 @@ import { useMetricsStore } from '@/stores/metrics';
 import { X } from 'lucide-vue-next';
 import { tryParseJson } from '@/utils/jsonDetection';
 import JsonValueViewer from './JsonValueViewer.vue';
+import PropertyVisibilityHint from './PropertyVisibilityHint.vue';
 
 const props = defineProps<{
   item: { type: 'node'; data: Node } | { type: 'edge'; data: Edge } | null;
@@ -61,19 +62,27 @@ const basicFields = computed(() => {
   }
 });
 
-// Properties as structured entries
+// Properties as structured entries, pruned by the property allowlist
+// (Aesthetics → Property Visibility). totalPropertyCount feeds the hint.
+const totalPropertyCount = computed(() =>
+  props.item?.data.properties ? Object.keys(props.item.data.properties).length : 0,
+);
+
 const properties = computed(() => {
   if (!props.item?.data.properties) return [];
-  return Object.entries(props.item.data.properties).map(([key, value]) => {
-    const jsonResult = tryParseJson(value);
-    return {
-      key,
-      value,
-      displayValue: formatValue(value),
-      isJsonValue: jsonResult.isJson,
-      parsedJson: jsonResult.isJson ? jsonResult.parsed : null,
-    };
-  });
+  const kind = props.item.type;
+  return Object.entries(props.item.data.properties)
+    .filter(([key]) => graphStore.isPropertyVisible(kind, key))
+    .map(([key, value]) => {
+      const jsonResult = tryParseJson(value);
+      return {
+        key,
+        value,
+        displayValue: formatValue(value),
+        isJsonValue: jsonResult.isJson,
+        parsedJson: jsonResult.isJson ? jsonResult.parsed : null,
+      };
+    });
 });
 
 // Computed metrics
@@ -194,10 +203,17 @@ function copyAll() {
             </table>
           </div>
 
-          <!-- Properties -->
-          <div v-if="properties.length > 0" class="section">
+          <!-- Properties: keyed on the unfiltered count so the hint (and the
+               way back to "show all") survives even a fully pruned list -->
+          <div v-if="totalPropertyCount > 0" class="section">
             <div class="section-header">
               <h4>Properties ({{ properties.length }})</h4>
+              <PropertyVisibilityHint
+                v-if="item"
+                :kind="item.type"
+                :visible="properties.length"
+                :total="totalPropertyCount"
+              />
             </div>
             <table class="props-table">
               <tbody>

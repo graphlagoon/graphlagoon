@@ -108,6 +108,11 @@ Edge Betweenness) and a width range, and edge thickness follows the
 metric. Edges the metric has no value for keep the base width from the
 Style panel.
 
+The mapping is part of the graph's look, so
+[style presets](./style-presets.md) and explorations save and restore it.
+A restored mapping that names a metric not yet computed on the current
+graph falls back to base sizing until that metric is computed.
+
 ### Filtering by metric values
 
 ![Metric Filters panel](/screenshots/communities-metrics-metric-filters.png)

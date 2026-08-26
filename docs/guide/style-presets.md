@@ -1,9 +1,9 @@
 # Style Presets
 
 ::: tip TL;DR
-A named look — colors, icons, labels, layout — applied from the URL with
-`?style=<name>`. It changes how the graph is drawn, never which data is
-shown.
+A named look — colors, icons, labels, layout, property visibility, behaviors
+— applied from the URL with `?style=<name>`. It changes how the graph is
+drawn and read, never which data is loaded.
 
 - **Use it when** a team wants a consistent, shareable look ("the
   investigation view") reusable across every graph of a context.
@@ -23,17 +23,39 @@ applied from the URL:
 /graph/{context_id}?style=investigacao
 ```
 
-It carries three things — **style** (colors, icons, aesthetics), **labels**
-(text formatting) and **layout** (algorithm, its parameters, 3D forces) — and
-nothing about which data is shown. Applying one therefore never changes what
-is on screen, only how it is drawn, which is why it is safe on any graph in
-the context, before or after that graph loads. A graph loaded afterwards
-inherits the look.
+It carries six things — **style** (colors, icons, aesthetics), **labels**
+(text formatting), **layout** (algorithm, its parameters, 3D forces),
+**visual mapping** (the
+[metric-driven node size / edge width](./communities-metrics.md) mapping),
+**property visibility** (which node/edge properties the
+[tables and detail views](./exploring-the-graph.md#focusing-on-a-subset-of-properties)
+show) and **behaviors** (the whole Behaviors panel: graph lens, degree
+dimming, view mode, loading and interaction preferences) — and nothing about
+which data is loaded. Applying one never changes which nodes and edges are on
+screen, which is why it is safe on any graph in the context, before or after
+that graph loads. A graph loaded afterwards inherits the look.
 
 Deliberately excluded: nodes, edges, filters, the viewport, the query and its
-transpile options, clusters, communities, similarity and behaviors. A preset
-says how a graph *looks*, never which data it shows — the same split
+transpile options, clusters, communities and similarity. A preset says how a
+graph *looks and reads*, never which data it loads — the same split
 [precomputed graphs](./precomputed-graphs.md) draw from the other side.
+[Context-menu actions](./context-menu-actions.md) are also excluded: they are
+context-level integration config shared by everyone on the context, not a
+saved look.
+
+Two consequences worth knowing:
+
+- **Presets saved before visual mapping, property visibility and behaviors
+  existed** still apply cleanly: they reset the visual mapping to its
+  defaults and property visibility to "show all" (that is what their author
+  saw), and leave your current behaviors untouched. A visual mapping that
+  names a metric not computed on the current graph falls back to base sizing
+  until that metric is computed.
+- **Behaviors travel whole.** Applying a shared preset also applies its
+  loading and interaction preferences (auto-load, progressive loading, node
+  drag, …), replacing the context's defaults and your panel edits — exactly
+  like the color maps. The Behaviors panel's Reset button takes you back to
+  the context defaults.
 
 ## Saving, applying, deleting
 

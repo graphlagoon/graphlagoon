@@ -55,6 +55,57 @@ describe('exploration state serialization', () => {
       expect(store.behaviors.mapStylePan).toBe(true)
       expect(store.behaviors.edgeLensMode).toBe('hide')
     })
+
+    it('serializes behaviors exactly once, via the style-preset block', () => {
+      // The explicit `behaviors:` field was removed from getExplorationState when
+      // buildStylePreset grew one — two spellings of the same field is a trap.
+      const store = useGraphStore()
+      store.updateBehaviors({ focusDepth: 3 })
+
+      const state = store.getExplorationState()
+      const preset = store.buildStylePreset()
+
+      expect(state.behaviors).toEqual(preset.behaviors)
+    })
+
+    it('restores an old exploration through the validated merge', () => {
+      // Old explorations stored behaviors at the top level of state — exactly
+      // the object applyStylePreset receives — so a stale or corrupt key must
+      // be dropped instead of landing in the store unchecked.
+      const store = useGraphStore()
+
+      store.applyStylePreset({
+        behaviors: { mapStylePan: false, removedSetting: true, viewMode: 'banana' },
+      } as never)
+
+      expect(store.behaviors.mapStylePan).toBe(false)
+      expect(store.behaviors).not.toHaveProperty('removedSetting')
+      expect(store.behaviors.viewMode).not.toBe('banana')
+    })
+  })
+
+  describe('property visibility persistence', () => {
+    it('serializes the allowlist into the exploration state', () => {
+      const store = useGraphStore()
+      store.setPropertyVisibility('node', ['name', 'age'])
+
+      const state = store.getExplorationState()
+
+      expect(state.property_visibility).toEqual({
+        nodeProperties: ['name', 'age'],
+        edgeProperties: null,
+      })
+    })
+
+    it('explorations saved before the allowlist existed show all properties', () => {
+      const store = useGraphStore()
+      store.setPropertyVisibility('node', ['name'])
+
+      // An old exploration's state has no property_visibility key.
+      store.applyStylePreset({ aesthetics: {} } as never)
+
+      expect(store.propertyVisibility).toEqual({ nodeProperties: null, edgeProperties: null })
+    })
   })
 
   describe('force3DSettings persistence', () => {

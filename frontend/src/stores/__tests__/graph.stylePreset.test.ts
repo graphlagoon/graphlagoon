@@ -11,6 +11,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { defaultLayoutModeConfig, useGraphStore } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
+import { useMetricsStore } from '@/stores/metrics';
+import { DEFAULT_VISUAL_MAPPING } from '@/types/metrics';
 import {
   parseLayoutOverrides,
   settableFieldNames,
@@ -83,7 +85,7 @@ describe('buildStylePreset', () => {
     expect(preset.layout_mode_config).toBeDefined();
   });
 
-  it('carries nothing about which data is shown', () => {
+  it('carries nothing about which data is loaded', () => {
     // A preset that could hide nodes would make a styled graph look like it came
     // back incomplete from the server.
     const preset = useGraphStore().buildStylePreset() as unknown as Record<string, unknown>;
@@ -97,10 +99,23 @@ describe('buildStylePreset', () => {
       'clusters',
       'community',
       'similarity',
-      'behaviors',
     ]) {
       expect(preset).not.toHaveProperty(forbidden);
     }
+  });
+
+  it('captures behaviors and the property allowlist', () => {
+    const store = useGraphStore();
+    store.updateBehaviors({ focusDepth: 3 });
+    store.setPropertyVisibility('node', ['name', 'age']);
+
+    const preset = store.buildStylePreset();
+
+    expect(preset.behaviors).toMatchObject({ focusDepth: 3 });
+    expect(preset.property_visibility).toEqual({
+      nodeProperties: ['name', 'age'],
+      edgeProperties: null,
+    });
   });
 
   it('feeds the exploration state, rather than being rebuilt for it', () => {
@@ -179,6 +194,171 @@ describe('applyStylePreset', () => {
     store.layoutAlgorithm = 'hive';
     store.applyStylePreset(undefined);
     expect(store.layoutAlgorithm).toBe('hive');
+  });
+
+  it('round-trips behaviors and the property allowlist', () => {
+    const store = useGraphStore();
+    store.updateBehaviors({ focusDepth: 4, edgeLensMode: 'hide' });
+    store.setPropertyVisibility('edge', ['amount']);
+    const saved = store.buildStylePreset();
+
+    store.updateBehaviors({ focusDepth: 1, edgeLensMode: 'dim' });
+    store.setPropertyVisibility('edge', null);
+
+    store.applyStylePreset(saved);
+
+    expect(store.behaviors.focusDepth).toBe(4);
+    expect(store.behaviors.edgeLensMode).toBe('hide');
+    expect(store.propertyVisibility.edgeProperties).toEqual(['amount']);
+  });
+
+  it('a pre-feature preset leaves behaviors alone but resets the allowlist', () => {
+    // Absent behaviors = the preset predates them; "reset" would need a baseline
+    // from the precedence chain and would stomp panel edits. Absent
+    // property_visibility = its author saw every property, so show-all IS the
+    // faithful restore. Both directions pinned on purpose.
+    const store = useGraphStore();
+    store.updateBehaviors({ focusDepth: 5 });
+    store.setPropertyVisibility('node', ['name']);
+
+    store.applyStylePreset(makeSettings()); // no behaviors, no property_visibility
+
+    expect(store.behaviors.focusDepth).toBe(5);
+    expect(store.propertyVisibility).toEqual({ nodeProperties: null, edgeProperties: null });
+  });
+
+  it('validates preset behaviors instead of trusting them', () => {
+    const store = useGraphStore();
+    const before = store.behaviors.focusDepth;
+
+    store.applyStylePreset(
+      makeSettings({
+        behaviors: {
+          notAThing: true,           // unknown key
+          focusDepth: 'deep',        // wrong type
+          viewMode: 'banana',        // enum violation
+          edgeLensMode: 'hide',      // valid
+        },
+      }),
+    );
+
+    expect(store.behaviors).not.toHaveProperty('notAThing');
+    expect(store.behaviors.focusDepth).toBe(before);
+    expect(store.behaviors.viewMode).not.toBe('banana');
+    expect(store.behaviors.edgeLensMode).toBe('hide');
+  });
+
+  it('normalizes a corrupt property_visibility to show-all, key by key', () => {
+    const store = useGraphStore();
+
+    store.applyStylePreset(
+      makeSettings({
+        property_visibility: {
+          nodeProperties: ['name', 42, null, 'age'], // non-strings dropped
+          edgeProperties: 'everything',              // not an array → null
+        },
+      }),
+    );
+
+    expect(store.propertyVisibility.nodeProperties).toEqual(['name', 'age']);
+    expect(store.propertyVisibility.edgeProperties).toBeNull();
+  });
+
+  it('preserves an empty allowlist — [] hides all, null shows all', () => {
+    const store = useGraphStore();
+    store.applyStylePreset(
+      makeSettings({ property_visibility: { nodeProperties: [], edgeProperties: null } }),
+    );
+    expect(store.propertyVisibility.nodeProperties).toEqual([]);
+    expect(store.propertyVisibility.edgeProperties).toBeNull();
+  });
+
+  it('round-trips the metric visual mapping', () => {
+    const store = useGraphStore();
+    const metricsStore = useMetricsStore();
+    metricsStore.updateNodeSizeMapping({ metricId: 'pagerank', maxSize: 30, scale: 'log' });
+    const saved = store.buildStylePreset();
+    expect(saved.visual_mapping).toMatchObject({ nodeSize: { metricId: 'pagerank' } });
+
+    metricsStore.resetVisualMapping();
+    store.applyStylePreset(saved);
+
+    expect(metricsStore.visualMapping.nodeSize.metricId).toBe('pagerank');
+    expect(metricsStore.visualMapping.nodeSize.maxSize).toBe(30);
+    expect(metricsStore.visualMapping.nodeSize.scale).toBe('log');
+  });
+
+  it('a pre-feature preset resets the visual mapping to defaults', () => {
+    const store = useGraphStore();
+    const metricsStore = useMetricsStore();
+    metricsStore.updateNodeSizeMapping({ metricId: 'pagerank', maxSize: 30 });
+
+    store.applyStylePreset(makeSettings()); // no visual_mapping
+
+    expect(metricsStore.visualMapping.nodeSize).toEqual(DEFAULT_VISUAL_MAPPING.nodeSize);
+  });
+
+  it('validates a saved visual mapping key by key instead of trusting it', () => {
+    const store = useGraphStore();
+    const metricsStore = useMetricsStore();
+
+    store.applyStylePreset(
+      makeSettings({
+        visual_mapping: {
+          nodeSize: { metricId: 'pagerank', minSize: 'big', scale: 'banana' },
+          edgeWeight: 'not-an-object',
+          enableRealTimeUpdates: 'yes',
+        },
+      }),
+    );
+
+    const vm = metricsStore.visualMapping;
+    expect(vm.nodeSize.metricId).toBe('pagerank');                      // valid: kept
+    expect(vm.nodeSize.minSize).toBe(DEFAULT_VISUAL_MAPPING.nodeSize.minSize); // wrong type
+    expect(vm.nodeSize.scale).toBe('linear');                           // enum violation
+    expect(vm.edgeWeight).toEqual(DEFAULT_VISUAL_MAPPING.edgeWeight);   // not an object
+    expect(vm.enableRealTimeUpdates).toBe(DEFAULT_VISUAL_MAPPING.enableRealTimeUpdates);
+  });
+});
+
+describe('property visibility helpers', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('passes every key through when no allowlist is set', () => {
+    const store = useGraphStore();
+    expect(store.visiblePropKeys('node', ['a', 'b'])).toEqual(['a', 'b']);
+    expect(store.isPropertyVisible('edge', 'anything')).toBe(true);
+  });
+
+  it('filters to the allowlist, preserving the incoming order', () => {
+    const store = useGraphStore();
+    store.setPropertyVisibility('node', ['c', 'a']);
+    expect(store.visiblePropKeys('node', ['a', 'b', 'c'])).toEqual(['a', 'c']);
+    expect(store.isPropertyVisible('node', 'b')).toBe(false);
+    // Edge list untouched by the node list
+    expect(store.visiblePropKeys('edge', ['b'])).toEqual(['b']);
+  });
+
+  it('an empty allowlist hides every property', () => {
+    const store = useGraphStore();
+    store.setPropertyVisibility('edge', []);
+    expect(store.visiblePropKeys('edge', ['a', 'b'])).toEqual([]);
+    expect(store.isPropertyVisible('edge', 'a')).toBe(false);
+  });
+
+  it('tolerates allowlisted keys the graph does not have', () => {
+    const store = useGraphStore();
+    store.setPropertyVisibility('node', ['ghost', 'name']);
+    expect(store.visiblePropKeys('node', ['name'])).toEqual(['name']);
+  });
+
+  it('resets on clear()', () => {
+    const store = useGraphStore();
+    store.setPropertyVisibility('node', ['name']);
+    store.clear();
+    expect(store.propertyVisibility).toEqual({ nodeProperties: null, edgeProperties: null });
   });
 });
 

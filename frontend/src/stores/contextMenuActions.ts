@@ -6,6 +6,10 @@
  * cluster store's persistence contract: hydration from the context never
  * triggers a PUT, edits persist debounced + fire-and-forget, and nothing is
  * sent without write access.
+ *
+ * Deliberately NOT part of style presets or exploration state — even though
+ * presets carry behaviors, actions are context-level integration config
+ * (write-gated, shared by everyone on the context), not a saved look.
  */
 import { defineStore } from 'pinia';
 import { ref } from 'vue';

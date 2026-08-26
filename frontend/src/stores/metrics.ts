@@ -12,6 +12,9 @@ import type {
   ComputationMetrics,
   ComputationHistoryEntry,
   VisualMapping,
+  SizeMapping,
+  WeightMapping,
+  ScaleType,
   GraphInfo,
   ResourceMetrics,
   WorkerPoolConfig,
@@ -384,6 +387,61 @@ export const useMetricsStore = defineStore('metrics', () => {
     };
   }
 
+  /** Snapshot the visual mapping for a style preset / exploration. */
+  function getVisualMappingState(): VisualMapping {
+    return {
+      nodeSize: { ...visualMapping.value.nodeSize },
+      edgeWeight: { ...visualMapping.value.edgeWeight },
+      enableRealTimeUpdates: visualMapping.value.enableRealTimeUpdates,
+    };
+  }
+
+  /**
+   * Restore a saved visual mapping — untrusted, so per-key validated merge
+   * over the defaults. Anything absent or mistyped falls back to its default;
+   * undefined resets outright (a preset saved before the field existed).
+   * A metricId naming a metric not computed on this graph is fine: the
+   * nodeSizeMetric/edgeWeightMetric lookups return null and sizing falls back
+   * to the base size until that metric is (re)computed.
+   */
+  function loadVisualMappingState(raw: unknown): void {
+    const source = (raw ?? {}) as Record<string, unknown>;
+    const SCALES: ScaleType[] = ['linear', 'log', 'sqrt'];
+
+    function mergeMapping<T extends SizeMapping | WeightMapping>(
+      defaults: T,
+      value: unknown,
+    ): T {
+      const merged = { ...defaults };
+      if (!value || typeof value !== 'object') return merged;
+      const v = value as Record<string, unknown>;
+      for (const key of Object.keys(defaults) as (keyof T)[]) {
+        const candidate = v[key as string];
+        if (key === 'metricId') {
+          if (candidate === null || typeof candidate === 'string') {
+            (merged[key] as unknown) = candidate;
+          }
+        } else if (key === 'scale') {
+          if (SCALES.includes(candidate as ScaleType)) {
+            (merged[key] as unknown) = candidate;
+          }
+        } else if (typeof candidate === typeof defaults[key]) {
+          (merged[key] as unknown) = candidate;
+        }
+      }
+      return merged;
+    }
+
+    visualMapping.value = {
+      nodeSize: mergeMapping({ ...DEFAULT_VISUAL_MAPPING.nodeSize }, source.nodeSize),
+      edgeWeight: mergeMapping({ ...DEFAULT_VISUAL_MAPPING.edgeWeight }, source.edgeWeight),
+      enableRealTimeUpdates:
+        typeof source.enableRealTimeUpdates === 'boolean'
+          ? source.enableRealTimeUpdates
+          : DEFAULT_VISUAL_MAPPING.enableRealTimeUpdates,
+    };
+  }
+
   // ============================================================================
   // Actions - Worker Pool Configuration
   // ============================================================================
@@ -575,6 +633,8 @@ export const useMetricsStore = defineStore('metrics', () => {
     updateEdgeWeightMapping,
     toggleRealTimeUpdates,
     resetVisualMapping,
+    getVisualMappingState,
+    loadVisualMappingState,
 
     // Worker pool
     updateWorkerPoolConfig,

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { X } from 'lucide-vue-next';
+import MultiSelect from 'primevue/multiselect';
 import StylePresetModal from './StylePresetModal.vue';
 import IconPicker from '@/components/IconPicker.vue';
 import type { PropertyIconConfig } from '@/types/graph';
@@ -139,6 +140,62 @@ function getFallbackIcon(nodeType: string): string | null {
   const config = getPropertyIconConfig(nodeType);
   return config?.fallbackIcon ?? null;
 }
+
+// Property visibility — the options a user can allowlist: the union of the
+// context's declared schema and whatever keys the loaded graph actually has
+// (progressive load can leave properties null until enrichment lands).
+function propertyUnion(kind: 'node' | 'edge'): { label: string; value: string }[] {
+  const ctx = graphStore.currentContext;
+  const schema = kind === 'node' ? ctx?.node_properties : ctx?.edge_properties;
+  const labels = new Map<string, string>();
+  for (const p of schema ?? []) labels.set(p.name, p.display_name || p.name);
+  const items = kind === 'node' ? graphStore.nodes : graphStore.edges;
+  for (const item of items) {
+    if (!item.properties) continue;
+    for (const key of Object.keys(item.properties)) {
+      if (!labels.has(key)) labels.set(key, key);
+    }
+  }
+  return [...labels.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([value, label]) => ({ value, label }));
+}
+
+const nodePropertyOptions = computed(() => propertyUnion('node'));
+const edgePropertyOptions = computed(() => propertyUnion('edge'));
+
+// Checking the box seeds the allowlist with everything currently known, so
+// nothing disappears until the user prunes — and clearing the MultiSelect is
+// never silently confused with "show all".
+function limitToggle(kind: 'node' | 'edge', options: typeof nodePropertyOptions) {
+  return computed({
+    get: () =>
+      (kind === 'node'
+        ? graphStore.propertyVisibility.nodeProperties
+        : graphStore.propertyVisibility.edgeProperties) !== null,
+    set: (enabled: boolean) => {
+      graphStore.setPropertyVisibility(
+        kind,
+        enabled ? options.value.map((o) => o.value) : null,
+      );
+    },
+  });
+}
+
+function visibleSelection(kind: 'node' | 'edge') {
+  return computed({
+    get: () =>
+      (kind === 'node'
+        ? graphStore.propertyVisibility.nodeProperties
+        : graphStore.propertyVisibility.edgeProperties) ?? [],
+    set: (keys: string[]) => graphStore.setPropertyVisibility(kind, keys),
+  });
+}
+
+const nodeLimitEnabled = limitToggle('node', nodePropertyOptions);
+const edgeLimitEnabled = limitToggle('edge', edgePropertyOptions);
+const nodeVisibleSelection = visibleSelection('node');
+const edgeVisibleSelection = visibleSelection('edge');
 
 function resetAesthetics() {
   graphStore.updateAesthetics({
@@ -482,6 +539,73 @@ function resetAesthetics() {
         </div>
     </div>
 
+    <!-- Property Visibility -->
+    <div class="settings-section">
+      <h5>Property Visibility</h5>
+      <span class="setting-hint">
+        Limits which properties the data table, community and cluster tables,
+        details and side panel show. Filters, labels and queries still see everything.
+      </span>
+
+      <!-- The toggle stays enabled while ON even with no options, so a stale
+           allowlist can always be switched off. -->
+      <div class="setting-item">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            v-model="nodeLimitEnabled"
+            :disabled="nodePropertyOptions.length === 0 && !nodeLimitEnabled"
+            data-testid="property-visibility-node-toggle"
+          />
+          Limit visible node properties
+        </label>
+        <span v-if="nodePropertyOptions.length === 0" class="setting-hint">
+          No node properties in this graph or context schema
+        </span>
+        <MultiSelect
+          v-if="nodeLimitEnabled"
+          v-model="nodeVisibleSelection"
+          :options="nodePropertyOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="No properties shown"
+          filter
+          :maxSelectedLabels="1"
+          selectedItemsLabel="{0} shown"
+          class="property-visibility-select"
+          data-testid="property-visibility-node"
+        />
+      </div>
+
+      <div class="setting-item">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            v-model="edgeLimitEnabled"
+            :disabled="edgePropertyOptions.length === 0 && !edgeLimitEnabled"
+            data-testid="property-visibility-edge-toggle"
+          />
+          Limit visible edge properties
+        </label>
+        <span v-if="edgePropertyOptions.length === 0" class="setting-hint">
+          No edge properties in this graph or context schema
+        </span>
+        <MultiSelect
+          v-if="edgeLimitEnabled"
+          v-model="edgeVisibleSelection"
+          :options="edgePropertyOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="No properties shown"
+          filter
+          :maxSelectedLabels="1"
+          selectedItemsLabel="{0} shown"
+          class="property-visibility-select"
+          data-testid="property-visibility-edge"
+        />
+      </div>
+    </div>
+
     <StylePresetModal v-if="showPresets" @close="showPresets = false" />
   </div>
 </template>
@@ -661,6 +785,17 @@ function resetAesthetics() {
   color: var(--text-muted, #888);
   margin-top: 2px;
   margin-left: 22px;
+}
+
+/* Section-level hint (not attached to a checkbox) */
+.settings-section > .setting-hint {
+  margin-left: 0;
+  margin-bottom: 8px;
+}
+
+.property-visibility-select {
+  width: 100%;
+  margin-top: 4px;
 }
 
 .node-type-block {
