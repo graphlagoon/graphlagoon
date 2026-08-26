@@ -19,9 +19,15 @@ features:
   - title: OpenCypher to SQL
     details: Write Cypher queries that gsql2rsql (open-source, MIT) transpiles to Databricks SQL — no new query language to deploy
   - title: Interactive Exploration
-    details: 3D force-directed visualization with real-time layout, node/edge filtering, and visual mapping for fraud detection, supply chains, and org hierarchies
+    details: 3D/2D force-directed visualization with filtering, label templates, community detection, metrics, and a right-click menu you can extend with your own actions
   - title: Databricks Apps Ready
     details: Deploy as a Databricks App or embed in any existing FastAPI application — single pip install, no extra infrastructure
+  - title: Bring Your Own Graph Source
+    details: SQL Warehouse tables, Amazon Neptune, custom REST connections, or precomputed graphs published by your pipelines — all behind the same UI
+    link: /guide/rest-connections
+  - title: Everything Is a Link
+    details: Style presets (?style=), saved query templates (?template=), layout overrides (?layout=), and precomputed graphs (?precomputed=) compose into shareable URLs
+    link: /guide/style-presets
 ---
 
 <PricingCards />
