@@ -15,6 +15,13 @@ import { X } from 'lucide-vue-next';
 
 const props = defineProps<{
   template: QueryTemplate;
+  /**
+   * Pre-filled parameter values merged over the template defaults (used by
+   * configurable context-menu actions, which bind node/edge properties to
+   * parameters). The component remounts per open (parents gate it with
+   * v-if), so seeding at setup is enough.
+   */
+  initialValues?: Record<string, string>;
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -32,10 +39,14 @@ const capabilities = useDatasourceCapabilities(
 // template. Default: Graph (loads the visualization, the historical behavior).
 const resultMode = ref<'graph' | 'table'>('graph');
 
-// Build initial values: use default if provided, otherwise empty string
+// Build initial values: caller-provided value first, then the template's
+// default, otherwise empty string
 const values = ref<Record<string, string>>(
   Object.fromEntries(
-    props.template.parameters.map((p) => [p.id, p.default ?? '']),
+    props.template.parameters.map((p) => [
+      p.id,
+      props.initialValues?.[p.id] || p.default || '',
+    ]),
   ),
 );
 

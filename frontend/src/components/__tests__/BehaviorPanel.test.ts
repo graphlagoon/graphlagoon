@@ -13,6 +13,20 @@ beforeEach(() => {
 })
 
 describe('BehaviorPanel', () => {
+  it('hides the context-menu actions entry without a writable context', () => {
+    const { queryByTestId } = renderPanel()
+    expect(queryByTestId('behavior-open-menu-actions')).toBeNull()
+  })
+
+  it('shows the context-menu actions entry with write access and emits open-menu-actions', async () => {
+    const store = useGraphStore()
+    store.currentContext = { has_write_access: true } as never
+    const { getByTestId, emitted } = renderPanel()
+
+    await fireEvent.click(getByTestId('behavior-open-menu-actions'))
+    expect(emitted()['open-menu-actions']).toHaveLength(1)
+  })
+
   it('renders visible sections and advanced toggle', () => {
     const { getByText, queryByText } = renderPanel()
 

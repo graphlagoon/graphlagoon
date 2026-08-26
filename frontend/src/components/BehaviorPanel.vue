@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useGraphStore, resolveInitialBehaviors, type ProgressiveLoadMode } from '@/stores/graph';
-import { ChevronDown, ChevronRight, X } from 'lucide-vue-next';
+import { ChevronDown, ChevronRight, X, MousePointerClick } from 'lucide-vue-next';
 
 const showAdvanced = ref(false);
 
 const emit = defineEmits<{
   (e: 'close'): void;
+  (e: 'open-menu-actions'): void;
 }>();
 
 const graphStore = useGraphStore();
+// Configuring context-menu actions writes to the context — hide the entry
+// point entirely from read-only users.
+const canEditMenuActions = computed(() => graphStore.currentContext?.has_write_access === true);
 
 const behaviors = computed(() => graphStore.behaviors);
 const force3D = computed(() => graphStore.force3DSettings);
@@ -121,6 +125,20 @@ function resetBehaviors() {
         <button class="btn btn-outline btn-sm" @click="resetBehaviors">Reset</button>
         <button class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
+    </div>
+
+    <div v-if="canEditMenuActions" class="behavior-section">
+      <h4>Context Menu</h4>
+      <button
+        class="btn btn-outline btn-sm"
+        data-testid="behavior-open-menu-actions"
+        @click="emit('open-menu-actions')"
+      >
+        <MousePointerClick :size="14" /> Configure actions…
+      </button>
+      <p class="behavior-desc">
+        Custom right-click actions on nodes and edges (open URLs, copy text, run query templates)
+      </p>
     </div>
 
     <div v-if="hasSelfEdges" class="behavior-section">

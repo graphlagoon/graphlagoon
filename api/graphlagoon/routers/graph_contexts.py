@@ -170,6 +170,7 @@ def context_to_response(
         # `or {}` / `or []` cover rows created before the columns existed (NULL).
         default_behaviors=context.default_behaviors or {},
         cluster_programs=context.cluster_programs or [],
+        context_menu_actions=context.context_menu_actions or [],
         owner_email=context.owner_email,
         shared_with=shared_with,
         has_write_access=has_write,
@@ -298,6 +299,7 @@ async def create_graph_context(
                 relationship_types=data.relationship_types,
                 default_behaviors=data.default_behaviors,
                 cluster_programs=data.cluster_programs,
+                context_menu_actions=data.context_menu_actions,
                 owner_email=user_email,
             )
             session.add(context)
@@ -323,6 +325,7 @@ async def create_graph_context(
             relationship_types=data.relationship_types,
             default_behaviors=data.default_behaviors,
             cluster_programs=data.cluster_programs,
+            context_menu_actions=data.context_menu_actions,
             owner_email=user_email,
         )
         return context_to_response(context, user_email)
@@ -447,6 +450,8 @@ async def update_graph_context(
                 context.default_behaviors = data.default_behaviors
             if data.cluster_programs is not None:
                 context.cluster_programs = data.cluster_programs
+            if data.context_menu_actions is not None:
+                context.context_menu_actions = data.context_menu_actions
 
             await session.commit()
             await session.refresh(context)
@@ -510,6 +515,8 @@ async def update_graph_context(
             updates["default_behaviors"] = data.default_behaviors
         if data.cluster_programs is not None:
             updates["cluster_programs"] = data.cluster_programs
+        if data.context_menu_actions is not None:
+            updates["context_menu_actions"] = data.context_menu_actions
 
         context = store.update_graph_context(context_id, **updates)
         return context_to_response(context, user_email)
