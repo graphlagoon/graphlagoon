@@ -1,5 +1,18 @@
 # Deploy as a Databricks App
 
+::: tip TL;DR
+The simplest production setup: deploy as a Databricks App and never
+manage a token — the runtime injects OAuth credentials for the app's
+service principal and `get_oauth_service()` turns them into a
+self-refreshing provider.
+
+- **Use it when** your users live in Databricks and you want the
+  lowest-ops production deployment.
+- **Not the tool for** running outside Databricks (see
+  [Databricks Integration](./integration.md) for embedding anywhere) or
+  local development (`make dev`).
+:::
+
 This guide shows how to deploy Graph Lagoon Studio as a [Databricks App](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/) — the simplest production setup, because **you never manage a token**. The app runs as its own service principal and Databricks injects OAuth credentials into the runtime; Graph Lagoon's built-in [`get_oauth_service()`](#authentication-zero-token) turns those into a self-refreshing `header_provider`.
 
 ## Why Databricks Apps

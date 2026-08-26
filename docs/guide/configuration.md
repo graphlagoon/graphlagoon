@@ -1,5 +1,18 @@
 # Configuration
 
+::: tip TL;DR
+The reference for every `GRAPH_LAGOON_*` environment variable and the
+programmatic `Settings` equivalent: warehouse, database, Databricks,
+Neptune, precomputed graphs, presets, superusers and share domains.
+
+- **Use it when** you're deploying and need the exact knob — or setting
+  up access control.
+- **Not a tutorial** — start at [Getting Started](./getting-started.md)
+  or [Databricks Integration](./integration.md); each feature's
+  *behavior* is explained in its own guide, this page only lists what you
+  can set.
+:::
+
 Graph Lagoon Studio is configured via environment variables or programmatically through `Settings`.
 
 ## Environment Variables

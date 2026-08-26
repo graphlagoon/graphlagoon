@@ -1,5 +1,20 @@
 # Query Templates
 
+::: tip TL;DR
+A saved query with `$placeholders`, run from the Templates panel or from a
+link: `?template=Neighbors&template.node_id=acct-9931`. A **live** query,
+shaped by whoever follows the link.
+
+- **Use it when** the same question gets asked about different subjects,
+  when non-experts should run curated queries safely, or when a dashboard
+  or ticket should deep-link a fresh answer.
+- **Not the tool for** serving a result the server already has
+  ([precomputed graphs](./precomputed-graphs.md) skip the query cost);
+  replaying one person's saved session with positions
+  ([explorations](./explorations.md)); or true one-offs — just type those
+  in the query panel.
+:::
+
 A **query template** is a saved, parameterized query that lives with a graph
 context. Instead of pasting the same Cypher into the query panel and hand-editing
 an id each time, you save it once with placeholders:

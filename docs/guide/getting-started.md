@@ -1,5 +1,21 @@
 # Getting Started
 
+::: tip TL;DR
+Graph Lagoon explores the graph already living in your warehouse —
+Cypher transpiled to SQL over Delta tables (or Neptune / REST sources),
+rendered as an interactive 2D/3D graph. Zero ETL, no dedicated graph
+database.
+
+- **Use it when** you're investigating entity relationships — fraud
+  rings, supply chains, org structures — with bounded-depth neighborhoods
+  (1–4 hops) over data you already have in tables.
+- **Not the tool for** deep or unbounded traversals and
+  millisecond-latency graph serving (that's a dedicated graph database —
+  though it can front Neptune); visualizing an entire warehouse at once
+  (you explore query-sized subgraphs, and partial views are flagged
+  `⚠ truncated`); or writing data — exploration is strictly read-only.
+:::
+
 ## Installation
 
 ### As a pip package

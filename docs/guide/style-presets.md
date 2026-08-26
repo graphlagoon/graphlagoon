@@ -1,5 +1,21 @@
 # Style Presets
 
+::: tip TL;DR
+A named look — colors, icons, labels, layout — applied from the URL with
+`?style=<name>`. It changes how the graph is drawn, never which data is
+shown.
+
+- **Use it when** a team wants a consistent, shareable look ("the
+  investigation view") reusable across every graph of a context.
+- **Not the tool for** choosing data (that's
+  [precomputed graphs](./precomputed-graphs.md),
+  [templates](./query-templates.md) or
+  [explorations](./explorations.md)); tweaking one layout field per link
+  ([layout URL overrides](./layout-url-overrides.md) do that without
+  minting a preset per target); or one-off adjustments — just use the
+  panels.
+:::
+
 A **style preset** is how a context's graph looks, saved under a name and
 applied from the URL:
 

@@ -1,5 +1,21 @@
 # Precomputed Graphs
 
+::: tip TL;DR
+A named graph resolved server-side and opened from a link —
+`?precomputed=fraude-bfs&seed=99872` — by a Python **provider** you
+register: a published file, a Lakebase query, a Delta table, a service.
+No query runs; a link *is* the interface.
+
+- **Use it when** a pipeline already computes the graph (nightly jobs,
+  expensive traversals done once), or when links in dashboards/tickets
+  should serve a known result instantly to everyone with access.
+- **Not the tool for** live queries shaped by the link's follower
+  ([query templates](./query-templates.md)); one person's saved session
+  with hand-arranged positions ([explorations](./explorations.md) —
+  precomputed graphs carry no positions, layout runs fresh); or anything
+  ad-hoc — providers are code, registered at deploy time.
+:::
+
 A **precomputed graph** is a named graph resource resolved on the server:
 
 ```

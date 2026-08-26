@@ -1,5 +1,20 @@
 # Databricks Integration
 
+::: tip TL;DR
+Mount Graph Lagoon inside your FastAPI app against a Databricks SQL
+Warehouse: settings, lifespan delegation (migrations), token strategies
+(static, OAuth refresh, custom provider), and persistence.
+
+- **Use it when** you're embedding the studio in an existing app or
+  platform, with your own auth and infrastructure.
+- **Not the place to start** for a local trial — `graphlagoon serve` or
+  `make dev` in [Getting Started](./getting-started.md) need none of
+  this. Deploying *on* Databricks itself is simpler still — the
+  [Databricks Apps guide](./databricks-apps.md) needs zero token
+  management. Full signatures live in the
+  [Python API Reference](./python-api.md).
+:::
+
 This guide covers how to integrate Graph Lagoon Studio with Databricks SQL Warehouse, including database setup, automatic migrations, and authentication.
 
 ## Prerequisites

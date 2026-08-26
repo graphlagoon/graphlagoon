@@ -1,5 +1,18 @@
 # Similarity System
 
+::: tip TL;DR
+Your app registers similarity endpoints; users pick a node type, a key
+property and an endpoint, and the scored pairwise edges are injected into
+the visualization. Graph Lagoon handles discovery and drawing — **your
+app owns the computation**.
+
+- **Use it when** you have embeddings, co-occurrence, or feature-distance
+  scores to explore visually next to the real edges.
+- **Not the tool for** standalone deployments (there must be a parent app
+  to serve the endpoint); relationships that already exist in your tables
+  — model those as ordinary edges and query them.
+:::
+
 Graph Lagoon Studio includes a similarity system that lets parent applications expose custom similarity endpoints. Users select a node type, a key property, and an endpoint — the system extracts keys from the graph, calls the endpoint, and injects the resulting scored edges into the visualization.
 
 This is useful for embedding-based similarity, co-occurrence analysis, feature distance, or any computation that produces pairwise node relationships.
