@@ -1,5 +1,20 @@
 # Explorations & Sharing
 
+::: tip TL;DR
+An exploration saves your whole investigation — query, visible nodes
+**with positions**, filters, look, analysis — under a shareable
+`?exploration=<id>` URL.
+
+- **Use it when** you want to resume an investigation later, hand a
+  colleague exactly what you're seeing, or deep-link a finding from a
+  dashboard or ticket.
+- **Not the tool for** exporting data (use [Export](./exploring-the-graph.md#export));
+  a *live* view of the tables (it snapshots the query result at save
+  time); or reusable styling across graphs (that's a
+  [style preset](./style-presets.md)). Sharing requires database
+  persistence — with the in-memory store, explorations reset on restart.
+:::
+
 An investigation is more than a query: it's the nodes you expanded, the
 layout you untangled, the filters, colors and labels that made the picture
 readable, the communities you detected. An **exploration** captures all of

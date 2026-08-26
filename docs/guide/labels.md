@@ -1,5 +1,19 @@
 # Labels & Text Formatting
 
+::: tip TL;DR
+A small template language that decides **what text** each node and edge
+shows — extract the readable part out of messy columns, per type, with
+live preview.
+
+- **Use it when** ids are unreadable (`12321_CNPJ_RAIZ`), the useful text
+  is buried inside a property, or different node types need different
+  labels.
+- **Not the tool for** colors, sizes or icons (that's the
+  [Style panel](./style-presets.md)); rich text or emoji (the canvas font
+  is ASCII-only); or long descriptions — labels over ~30 characters get
+  culled when the graph is crowded.
+:::
+
 Raw node ids make terrible labels. A graph of `12321_CNPJ_RAIZ`-style
 identifiers is unreadable, and a graph that shows a 60-character description
 on every node is worse. The **Labels** panel solves both with a small
