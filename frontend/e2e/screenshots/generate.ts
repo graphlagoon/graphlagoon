@@ -9,8 +9,10 @@ import {
   seedStylePresets,
   seedQueryTemplates,
   seedPrecomputedGraphs,
+  seedSimilarityEndpoints,
+  enableDatasources,
 } from '../helpers/api-mocks';
-import { MOCK_EXPLORATION } from '../fixtures/mock-data';
+import { MOCK_EXPLORATION, MOCK_REST_CONNECTION } from '../fixtures/mock-data';
 import {
   SCREENSHOT_CONTEXT,
   SCREENSHOT_GRAPH_RESPONSE,
@@ -127,6 +129,46 @@ const DEMO_TEMPLATES = [
   },
 ];
 
+// A believable catalog for the Clusters → Similarity tab. The compute
+// endpoints are never called — the scene captures the configured form.
+const DEMO_SIMILARITY_ENDPOINTS = [
+  {
+    name: 'embedding-cosine',
+    description: 'Cosine similarity over node embeddings',
+    endpoint: '/demo-api/similarity/cosine',
+    params: [
+      {
+        name: 'threshold',
+        type: 'float',
+        default: 0.75,
+        required: false,
+        description: 'Minimum score to keep a pair',
+      },
+      {
+        name: 'top_k',
+        type: 'int',
+        default: 10,
+        required: false,
+        description: 'Keep at most this many neighbours per node',
+      },
+    ],
+  },
+  {
+    name: 'shared-neighbors',
+    description: 'Jaccard overlap of direct neighbourhoods',
+    endpoint: '/demo-api/similarity/jaccard',
+    params: [
+      {
+        name: 'min_overlap',
+        type: 'float',
+        default: 0.2,
+        required: false,
+        description: 'Minimum Jaccard index',
+      },
+    ],
+  },
+];
+
 const DEMO_PRESETS = {
   docs: {
     aesthetics: {},
@@ -222,6 +264,13 @@ async function setupPage(page: Page) {
       edges: SCREENSHOT_GRAPH_RESPONSE.edges,
     },
   });
+  await seedSimilarityEndpoints(page, DEMO_SIMILARITY_ENDPOINTS);
+  // Advertise a named REST connection so the datasource picker shows the full
+  // roster (rest-connections scene). Invisible everywhere else — the picker
+  // only exists inside the create-context modal.
+  await enableDatasources(page, { sql_warehouse: true, neptune: false }, [
+    MOCK_REST_CONNECTION,
+  ]);
 }
 
 interface Scene {
@@ -353,6 +402,31 @@ const SCENES: Scene[] = [
     scene: 'status',
     path: `${GRAPH_URL}&precomputed=demo-subgraph`,
     prepare: waitForGraphSettled,
+  },
+  {
+    guide: 'similarity',
+    scene: 'panel',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Clusters');
+      await page.getByRole('button', { name: 'Similarity' }).click();
+      await page.waitForTimeout(400);
+      // Configure the form so the dynamic param inputs are on screen.
+      await page.selectOption('#sim-endpoint', 'embedding-cosine');
+      await page.selectOption('#sim-node-type', { label: 'Person' });
+      await page.waitForTimeout(300);
+    },
+  },
+  {
+    guide: 'rest-connections',
+    scene: 'picker',
+    path: '/contexts',
+    prepare: async (page) => {
+      await page.getByTestId('create-context-btn').click();
+      await expect(page.getByTestId('datasource-picker')).toBeVisible();
+      await page.waitForTimeout(400);
+    },
   },
 ];
 

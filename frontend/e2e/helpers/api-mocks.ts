@@ -383,6 +383,22 @@ export async function enableDatasources(
 }
 
 /**
+ * Advertise similarity endpoints to the app (the catalog the Clusters →
+ * Similarity tab fetches on mount). Call AFTER setupAPIMocks — later routes
+ * take precedence. The compute endpoints themselves live on the parent app;
+ * mock those separately per test if a computation should actually run.
+ */
+export async function seedSimilarityEndpoints(page: Page, endpoints: any[]) {
+  await page.route('**/graphlagoon/api/similarity/endpoints', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(endpoints),
+    });
+  });
+}
+
+/**
  * Mock the query endpoints for a native-graph context: openCypher runs as-is,
  * so `transpiled_sql` comes back null and the console returns rows inline with
  * no statement id.

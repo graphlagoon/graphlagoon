@@ -33,6 +33,8 @@ function registered when you build the app.
 Everyone with read access to the context can open such a link. Nobody needs to
 run a query, and nothing needs to be listed — a link *is* the interface.
 
+![A graph opened from a ?precomputed= link, served without running a query](/screenshots/precomputed-graphs-status.png)
+
 ## The chain
 
 Providers are registered in order, and each may decline:

@@ -28,6 +28,8 @@ do something with *that* item's data:
 Actions are configured once per context and stored with it, so everyone who
 opens the context gets the same right-click menu.
 
+![The right-click context menu open on a node](/screenshots/context-menu-actions-menu.png)
+
 ## Configuring
 
 Open the **Behaviors** panel and hit **Configure actions…** under *Context
