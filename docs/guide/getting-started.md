@@ -52,7 +52,7 @@ Use `make dev-stop` to stop all services.
 
 Once running, you'll see the graph visualization:
 
-![Graph Visualization](/screenshots/graph-visualization.png)
+![Graph Visualization](/screenshots/index-graph.png)
 
 ## Prerequisites (for development)
 

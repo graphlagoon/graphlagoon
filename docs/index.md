@@ -30,9 +30,9 @@ features:
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px;">
 
-![Graph Visualization](/screenshots/graph-visualization.png)
+![Graph Visualization](/screenshots/index-graph.png)
 
-![Contexts](/screenshots/contexts.png)
+![Contexts](/screenshots/index-contexts.png)
 
 </div>
 
