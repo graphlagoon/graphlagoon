@@ -82,7 +82,9 @@ class MetricsCalculatorService {
       params = {},
       edgeTypeFilter = [],
       priority = 'medium',
-      enableRealTimeUpdates = true,
+      // Default off: the pool's partial-result callback is a no-op, so asking
+      // workers to stream partial results only wastes postMessage traffic.
+      enableRealTimeUpdates = false,
     } = options;
 
     // Get algorithm definition

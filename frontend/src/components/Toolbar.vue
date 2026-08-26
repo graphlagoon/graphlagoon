@@ -5,12 +5,15 @@ import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
 import { useToolbarStore } from '@/stores/toolbar';
 import { usePersistence } from '@/composables/usePersistence';
+import { useToast } from '@/composables/useToast';
 import { api } from '@/services/api';
+import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration } from '@/types/graph';
 import type { ExportPNGOptions } from '@/stores/toolbar';
 import ExportModal from '@/components/ExportModal.vue';
 import {
   Filter,
+  ListFilter,
   Sliders,
   Search,
   BarChart2,
@@ -34,6 +37,7 @@ const router = useRouter();
 const graphStore = useGraphStore();
 const authStore = useAuthStore();
 const toolbarStore = useToolbarStore();
+const toast = useToast();
 const { devMode, isSuperuser } = usePersistence();
 
 const isGraphPage = computed(() => route.name === 'graph');
@@ -60,6 +64,7 @@ async function loadExplorations() {
     showExplorationSelector.value = true;
   } catch (e) {
     console.error(e);
+    toast.error(getErrorMessage(e, 'Failed to load explorations'));
   }
 }
 
@@ -226,6 +231,17 @@ function handleExportPng(options: ExportPNGOptions) {
             @click="toolbarHandlers?.onToggleMetrics()"
           >
             <BarChart2 :size="15" /><span class="btn-text">Metrics</span>
+          </button>
+
+          <button
+            class="toolbar-btn"
+            :class="{ active: toolbarStore.activePanels.has('metric-filters') }"
+            :aria-pressed="toolbarStore.activePanels.has('metric-filters')"
+            title="Metric Filters"
+            data-testid="toolbar-metric-filters"
+            @click="toolbarHandlers?.onToggleMetricFilters()"
+          >
+            <ListFilter :size="15" /><span class="btn-text">Metric Filters</span>
           </button>
 
           <button

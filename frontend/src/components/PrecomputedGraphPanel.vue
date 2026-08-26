@@ -27,6 +27,7 @@ import { useToast } from '@/composables/useToast';
 import { ARTIFACT_NAME_PATTERN } from '@/types/graph';
 import type { PrecomputedGraphCapabilities } from '@/types/graph';
 import { api } from '@/services/api';
+import { getErrorMessage } from '@/utils/errorMessage';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -119,17 +120,6 @@ function precomputedUrl(name: string): string {
   return new URL(href, window.location.origin).toString();
 }
 
-function describeError(e: unknown, fallback: string): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data
-    ?.detail;
-  if (detail && typeof detail === 'object' && 'error' in detail) {
-    const inner = (detail as { error?: { message?: string } }).error;
-    if (inner?.message) return inner.message;
-  }
-  if (typeof detail === 'string') return detail;
-  return e instanceof Error ? e.message : fallback;
-}
-
 async function save() {
   if (saveBlockedReason.value) return;
   saving.value = true;
@@ -141,7 +131,7 @@ async function save() {
     saveName.value = '';
     toast.success(`Precomputed graph “${name}” published`);
   } catch (e) {
-    saveError.value = describeError(e, 'Failed to publish the graph');
+    saveError.value = getErrorMessage(e, 'Failed to publish the graph');
   } finally {
     saving.value = false;
   }
@@ -167,7 +157,7 @@ async function remove() {
     // this deliberately does not claim the entry existed.
     toast.success(`No precomputed graph named “${name}” remains`);
   } catch (e) {
-    deleteError.value = describeError(e, 'Failed to delete the precomputed graph');
+    deleteError.value = getErrorMessage(e, 'Failed to delete the precomputed graph');
   } finally {
     deleting.value = false;
   }

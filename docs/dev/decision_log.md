@@ -7296,3 +7296,148 @@ recorded here for completeness — pure docs prose, no code impact.
 
 **Related:** closes the two deferred-scene items from the Phase 1 entry;
 debts #24/#25/#26 remain open (unchanged by this wave).
+
+## [2026-08-26 13:00] - Technical Debts #6 and #9 Resolved: worker cleanup + DB pool config
+
+**Feature:** Resolve two 🔴-critical technical debts — Web Worker memory-leak
+risk on the frontend (#6) and missing database connection-pool configuration
+on the backend (#9).
+
+**Design Decisions:**
+1. **#6 — cleanup lives in `GraphVisualizationView`, not in the stores:** the
+   metrics worker pool and the community worker are module/store singletons
+   that outlive any component; the view is the only place that knows when the
+   graph screen is being left (unmount) or repointed (contextId watcher). The
+   existing `resetMetricsCalculator()` / `clearCommunities()` teardown APIs
+   already terminated workers — nothing called them.
+2. **#6 — terminate, don't preserve, in-flight computations:** pool
+   termination rejects pending submits, which flows through `computeMetric`'s
+   catch into `metricsStore.failComputation`. In-flight results belong to the
+   graph being left, so failing them is correct; completed metrics in the
+   store are untouched.
+3. **#6 — lazy re-entry:** `WorkerPool` only spawns workers when tasks are
+   queued, and `MetricsCalculatorService.initialize()` re-runs on the next
+   `computeMetric`, so navigating back costs nothing.
+4. **#9 — pool knobs come from `Settings`, not hardcoded:** four new fields
+   (`database_pool_size=10`, `database_max_overflow=20`,
+   `database_pool_timeout=30`, `database_pool_recycle=3600`), overridable via
+   `GRAPH_LAGOON_DATABASE_POOL_*` env vars.
+5. **#9 — Lakebase engine untouched:** `lakebase.py` already carried a tuned
+   pool whose `pool_recycle=2700` is deliberately tied to the 60-minute OAuth
+   token lifetime; wiring the generic settings into it could silently break
+   that constraint.
+
+**Files Modified:**
+- api/graphlagoon/config.py — 4 new pool settings
+- api/graphlagoon/db/database.py — pool kwargs on `create_async_engine`
+- frontend/src/views/GraphVisualizationView.vue — worker teardown in
+  `onUnmounted` and in the contextId watcher
+- docs/guide/configuration.md — env block + "Database connection pool" section
+- docs/dev/technical-debts.md — #6 and #9 marked resolved
+
+**Files Created:**
+- api/tests/test_database_pool.py — pins engine kwargs (defaults + custom
+  Settings) and env-var override
+- frontend/src/services/__tests__/metricsCalculator.test.ts — pins the
+  initialize-once / reset-terminates / lazy-re-init lifecycle contract
+
+**Testing:**
+- [x] `api`: new tests 3/3; full suite 915 passed — the 6 failures
+  (test_cypher_comments, test_superuser, test_transpile_options) are
+  pre-existing and environmental (local `GRAPH_LAGOON_SUPERUSER_EMAILS`,
+  local gsql2rsql version drift), verified identical without these changes
+- [x] `frontend`: full Vitest suite 1880/1880 passed; `vue-tsc --noEmit` clean
+- [ ] E2E not run — no user-facing workflow changed (teardown only)
+
+**Public Docs:**
+- [x] #9: `docs/guide/configuration.md` updated (new env vars are
+  user-configurable deployment surface)
+- [x] #6: No public docs impact (internal lifecycle fix, no UI/config change)
+- [x] `make docs-build` passes
+
+**Known Limitations:**
+- Community worker's `runWorker` promise dangles (never settles) when its
+  worker is terminated mid-run — pre-existing behavior on the watcher path,
+  harmless (no worker leak), left as-is.
+
+## [2026-08-26 13:40] - Technical Debts #7, #25, #26 Resolved: error handling, snapshot temp-file, inert UI
+
+**Feature:** Three debts in one pass — frontend error-handling
+standardization (#7), snapshot temp-file collision (#25), and the six
+dead/inert UI surfaces from the docs audit (#26).
+
+**Design Decisions:**
+1. **#25 — mirror `LocalBlobStore._save_sync`:** unique `.tmp-{hex}` per
+   write + cleanup on failure. The Databricks path was untouched (its saves
+   are single PUTs, no temp file). #24's refactor deliberately not started.
+2. **#26.1 — wire PropertyFilterPanel, don't delete it:** the store-level
+   property/metric filters are live and explorations can carry them, so a
+   shared exploration could arrive with filters the recipient couldn't even
+   inspect. New toolbar entry **Metric Filters** (its own `PanelId`, not a
+   tab of MetricsPanel) following the exact pattern of every other panel.
+3. **#26.3/4 — implement Scale and Edge Weight rather than hide them:**
+   both had complete store/UI halves; only the renderer consumer was
+   missing. `computeLinkAppearance` returns `width: number | null` where
+   null means "use the live aesthetic base width" — baking the base width
+   in would have frozen unmapped edges against later Style changes.
+4. **#26.5 — hide the real-time toggles, don't implement:** streaming
+   partial metric results into visuals is a feature with real perf risk,
+   not debt cleanup. Removed both checkboxes; `enableRealTimeUpdates`
+   defaults to false so workers stop posting partial results nobody reads.
+5. **#7 — one shared extractor, no interceptor:** created
+   `utils/errorMessage.ts` (superset of the 4 duplicated extractors,
+   including `transpiled_sql`, `hint`, `unresolved_name`). An axios
+   response interceptor was considered and deferred — it changes every
+   catch site's input type at once; the helper gets the same win
+   incrementally. Toast policy: silent user-initiated failures
+   (delete/share/unshare/compute/load) now `toast.error(getErrorMessage())`;
+   structured query failures keep the QueryErrorModal.
+6. **#7 — `alert()` eliminated:** cluster program runs now toast on both
+   panel and modal paths (they previously disagreed).
+
+**Files Created:**
+- frontend/src/utils/errorMessage.ts (+ tests in
+  utils/__tests__/errorMessage.test.ts, 8 tests)
+- api/tests/test_snapshot_local.py (4 tests)
+
+**Files Modified (highlights):**
+- api/graphlagoon/services/snapshot.py — unique temp file (#25)
+- api/graphlagoon/app.py — header_provider docstring (#26.6)
+- frontend/src/utils/graphAppearance.ts — scale applied to node size; new
+  edgeWeightMetric/edgeWeightMapping ctx + width in LinkAppearanceResult
+- frontend/src/components/GraphCanvas3D.vue — ctx collection + linkWidth
+  wiring (init, aesthetics watcher, updateVisuals)
+- frontend/src/types/graph3d.ts — GraphLink.width
+- frontend/src/components/MetricsPanel.vue — checkboxes removed, compute
+  failure toasts
+- frontend/src/components/{Toolbar,QueryTemplatesPanel,ClusterProgramPanel,
+  ClusterProgramRunModal,StylePresetModal,PrecomputedGraphPanel,
+  GraphContextFormModal,GraphQueryPanel,FilterPanel}.vue — shared error
+  helper / toasts / alert removal / placeholder (#26.2)
+- frontend/src/views/{ContextsView,ExplorationsView,GraphVisualizationView}.vue
+- frontend/src/stores/{graph,queryConsole,contexts,cluster,contextMenuActions,
+  toolbar}.ts
+- frontend/e2e/tests/graph.spec.ts — Metric Filters panel E2E
+- frontend/e2e/screenshots/generate.ts — new scene
+  `communities-metrics-metric-filters`
+
+**Testing:**
+- [x] frontend: 1895/1895 unit tests; `vue-tsc --noEmit` clean
+- [x] E2E suite run after the toolbar change (verified `getByTitle('Filters')`
+  sites all use `{ exact: true }`; 'Metrics' is not a substring of
+  'Metric Filters')
+- [x] api: 919 passed; same 6 pre-existing environmental failures as before
+  (local superuser env var + gsql2rsql version drift), verified unrelated
+
+**Public Docs:**
+- [x] `docs/guide/communities-metrics.md` — Scale, Edge Weight, and the new
+  "Filtering by metric values" section with screenshot
+- [x] #25/#7: No public docs impact (internal fix / error-feedback
+  conventions are not documented surface)
+- [x] `make docs-screenshots` — 16/16 scenes, PNGs regenerated
+- [x] `make docs-build` passes
+
+**Known Limitations:**
+- Query failures can still double-report (QueryErrorModal + toast) — kept
+  deliberately, see #7 resolution note for the follow-up list.
+- `window.confirm` sites left as-is (blocking-native, but honest UX).

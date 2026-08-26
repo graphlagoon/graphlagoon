@@ -9,6 +9,7 @@ import {
   useDatasourceDescriptor,
 } from '@/composables/useDatasourceCapabilities';
 import { generateBfsExampleQuery } from '@/utils/exampleQuery';
+import { getErrorMessage } from '@/utils/errorMessage';
 import { X, SlidersHorizontal } from 'lucide-vue-next';
 
 const emit = defineEmits<{
@@ -286,8 +287,7 @@ async function handleAction() {
       }
     }
   } catch (e) {
-    const errorMsg = e instanceof Error ? e.message : 'Unknown error';
-    toast.error(`Error: ${errorMsg}`);
+    toast.error(getErrorMessage(e, 'Query failed'));
   } finally {
     isProcessing.value = false;
   }

@@ -261,6 +261,7 @@ const axisRotation = useAxisConstrainedRotation(
 function collectAppearanceContext(): AppearanceContext {
   const searchMatched = graphStore.searchMatchedNodeIds;
   const nodeSizeMetric = metricsStore.nodeSizeMetric;
+  const edgeWeightMetric = metricsStore.edgeWeightMetric;
 
   // Pre-compute color maps: avoids O(n) store lookups per node/link inside hot loop
   const nodeColorMap = new Map<string, string>();
@@ -316,6 +317,10 @@ function collectAppearanceContext(): AppearanceContext {
       ? { values: nodeSizeMetric.values, min: nodeSizeMetric.min, max: nodeSizeMetric.max }
       : null,
     nodeSizeMapping: metricsStore.visualMapping.nodeSize,
+    edgeWeightMetric: edgeWeightMetric
+      ? { values: edgeWeightMetric.values, min: edgeWeightMetric.min, max: edgeWeightMetric.max }
+      : null,
+    edgeWeightMapping: metricsStore.visualMapping.edgeWeight,
 
     getNodeTypeColor: (type: string) => nodeColorMap.get(type) || '#888888',
     getEdgeTypeColor: (type: string) => edgeColorMap.get(type) || '#888888',
@@ -494,6 +499,7 @@ async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | 
       curvature,
       isSimilarity,
       score: edgeScore,
+      width: appearance.width ?? undefined,
     });
   }
 
@@ -574,6 +580,7 @@ function updateVisuals() {
 
     link.color = appearance.color;
     link.hidden = appearance.hidden;
+    link.width = appearance.width ?? undefined;
   });
 
   const t2 = performance.now();
@@ -583,6 +590,9 @@ function updateVisuals() {
   graph3d.nodeVisibility((node: GraphNode) => !node.hidden);
   graph3d.linkColor((link: GraphLink) => link.color);
   graph3d.linkVisibility((link: GraphLink) => !link.hidden);
+  graph3d.linkWidth((link: GraphLink) =>
+    link.hidden ? 0 : (link.width ?? graphStore.aesthetics.edgeWidth)
+  );
 
   // Update icon billboards (must be after node appearance is computed)
   icons.updateIcons();
@@ -1040,7 +1050,7 @@ async function initGraph() {
     .linkSource('source')
     .linkTarget('target')
     .linkColor((link: GraphLink) => link.color)
-    .linkWidth((link: GraphLink) => link.hidden ? 0 : aesthetics.edgeWidth)
+    .linkWidth((link: GraphLink) => link.hidden ? 0 : (link.width ?? aesthetics.edgeWidth))
     .linkOpacity(aesthetics.edgeOpacity)
     .linkVisibility((link: GraphLink) => !link.hidden)
     .linkCurvature((link: GraphLink) => link.curvature ?? 0)
@@ -1469,7 +1479,7 @@ watch(
         .linkDirectionalArrowLength((link: GraphLink) =>
       link.isSimilarity ? 0 : (aesthetics.showArrows ? 4 * aesthetics.arrowSize : 0)
     )
-        .linkWidth(aesthetics.edgeWidth)
+        .linkWidth((link: GraphLink) => link.hidden ? 0 : (link.width ?? aesthetics.edgeWidth))
         .linkOpacity(aesthetics.edgeOpacity)
         .nodeRelSize(aesthetics.nodeSize / 2)
         .nodeOpacity(aesthetics.nodeOpacity);

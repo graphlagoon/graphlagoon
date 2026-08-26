@@ -50,7 +50,9 @@ function makeCtx(overrides: Partial<AppearanceContext> = {}): AppearanceContext 
     selectedNodeIds: new Set<string>(),
 
     nodeSizeMetric: null,
-    nodeSizeMapping: { minSize: 3, maxSize: 30 },
+    nodeSizeMapping: { minSize: 3, maxSize: 30, scale: 'linear' },
+    edgeWeightMetric: null,
+    edgeWeightMapping: { minWeight: 0.5, maxWeight: 5, scale: 'linear' },
 
     getNodeTypeColor: () => '#4488cc',
     getEdgeTypeColor: () => '#888888',
@@ -347,7 +349,7 @@ describe('computeNodeAppearance — sizing', () => {
         min: 0,
         max: 100,
       },
-      nodeSizeMapping: { minSize: 3, maxSize: 30 },
+      nodeSizeMapping: { minSize: 3, maxSize: 30, scale: 'linear' },
     });
     const r = computeNodeAppearance('n1', 'Person', false, 0, null, ctx);
     // normalized = (50-0)/(100-0) = 0.5
@@ -355,6 +357,36 @@ describe('computeNodeAppearance — sizing', () => {
     // relSize = 8 / 2 = 4
     // size = (16.5 / 4) ^ 3 = 4.125^3 = 70.19...
     expect(r.size).toBeCloseTo(70.19, 0);
+  });
+
+  it('applies sqrt scale to metric-based sizing', () => {
+    const ctx = makeCtx({
+      nodeSizeMetric: {
+        values: new Map([['n1', 25]]),
+        min: 0,
+        max: 100,
+      },
+      nodeSizeMapping: { minSize: 3, maxSize: 30, scale: 'sqrt' },
+    });
+    const r = computeNodeAppearance('n1', 'Person', false, 0, null, ctx);
+    // normalized = 0.25 → sqrt = 0.5
+    // desiredRadius = 3 + 0.5 * 27 = 16.5 → size = (16.5/4)^3
+    expect(r.size).toBeCloseTo(70.19, 0);
+  });
+
+  it('applies log scale to metric-based sizing', () => {
+    const ctx = makeCtx({
+      nodeSizeMetric: {
+        values: new Map([['n1', 100]]),
+        min: 0,
+        max: 100,
+      },
+      nodeSizeMapping: { minSize: 3, maxSize: 30, scale: 'log' },
+    });
+    const r = computeNodeAppearance('n1', 'Person', false, 0, null, ctx);
+    // normalized = 1 → log10(1 + 9) = 1 (log maps the top of the range to 1)
+    // desiredRadius = 3 + 1 * 27 = 30 → size = (30/4)^3 = 421.87
+    expect(r.size).toBeCloseTo(421.87, 0);
   });
 
   it('skips metric sizing for cluster nodes', () => {
@@ -619,5 +651,53 @@ describe('table filter visibility', () => {
     // caller aggregates node-hidden ids; 'b' was hidden by the table filter
     const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(['b']), ctx);
     expect(r.hidden).toBe(true);
+  });
+});
+
+describe('metric-based edge width', () => {
+  it('returns null width when no edge-weight metric is mapped', () => {
+    const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(), makeCtx());
+    expect(r.width).toBeNull();
+  });
+
+  it('returns null width when the metric has no value for this edge', () => {
+    const ctx = makeCtx({
+      edgeWeightMetric: { values: new Map([['other', 1]]), min: 0, max: 1 },
+    });
+    const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(), ctx);
+    expect(r.width).toBeNull();
+  });
+
+  it('maps the metric value linearly into the weight range', () => {
+    const ctx = makeCtx({
+      edgeWeightMetric: { values: new Map([['e1', 50]]), min: 0, max: 100 },
+      edgeWeightMapping: { minWeight: 1, maxWeight: 9, scale: 'linear' },
+    });
+    const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(), ctx);
+    // normalized 0.5 → 1 + 0.5 * 8 = 5
+    expect(r.width).toBeCloseTo(5);
+  });
+
+  it('applies sqrt scale to edge width', () => {
+    const ctx = makeCtx({
+      edgeWeightMetric: { values: new Map([['e1', 25]]), min: 0, max: 100 },
+      edgeWeightMapping: { minWeight: 1, maxWeight: 9, scale: 'sqrt' },
+    });
+    const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(), ctx);
+    // normalized 0.25 → sqrt 0.5 → 1 + 0.5 * 8 = 5
+    expect(r.width).toBeCloseTo(5);
+  });
+
+  it('still maps width for hidden edges (renderer decides 0-width)', () => {
+    const ctx = makeCtx({
+      edgeWeightMetric: { values: new Map([['e1', 100]]), min: 0, max: 100 },
+      edgeWeightMapping: { minWeight: 1, maxWeight: 9, scale: 'linear' },
+      edgeTypeFilter: ['OTHER'],
+      hasEdgeTypeFilter: true,
+      edgeTypeFilterSet: new Set(['OTHER']),
+    });
+    const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(), ctx);
+    expect(r.hidden).toBe(true);
+    expect(r.width).toBeCloseTo(9);
   });
 });

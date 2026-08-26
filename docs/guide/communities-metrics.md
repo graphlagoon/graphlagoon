@@ -98,6 +98,32 @@ out of the box, nodes are already sized by degree (min 4, max 20). Pick a
 metric and the size range; *None* returns to fixed size, and **Reset to
 Defaults** restores the stock mapping.
 
+Each mapping has a **Scale**: *Linear*, *Logarithmic*, or *Square Root*.
+Log and square-root scales compress the top of the range, which is what
+you want for skewed metrics like PageRank — with a linear scale one hub
+node dwarfs everything and the rest of the graph reads as uniform dots.
+
+**Edge Weight** works the same way for edges: pick an edge metric (e.g.
+Edge Betweenness) and a width range, and edge thickness follows the
+metric. Edges the metric has no value for keep the base width from the
+Style panel.
+
+### Filtering by metric values
+
+![Metric Filters panel](/screenshots/communities-metrics-metric-filters.png)
+
+Toolbar → **Metric Filters**. Where Visual Mapping changes how nodes
+*look*, this panel changes which ones are *shown*: add rules like
+`PageRank greater than 0.05` or `Degree between 3 and 20` and everything
+outside them is hidden. Rules exist for nodes and for edges (by edge
+metrics), can be stacked, and toggled on/off individually without losing
+their configuration.
+
+The dropdown offers only **computed metrics** — compute something in the
+Metrics panel first, or the list is empty. Filters combine with every
+other hiding mechanism (type filters, search, table filter): a node must
+pass all of them to stay visible.
+
 ### Two honest caveats
 
 - Metrics are **session-only**: they are not saved into explorations, and

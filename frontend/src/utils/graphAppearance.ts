@@ -6,6 +6,9 @@
  * for how nodes/links should look given the current store state.
  */
 
+import { scaleValue } from '@/types/metrics';
+import type { ScaleType } from '@/types/metrics';
+
 // ---------------------------------------------------------------------------
 // Low-level helpers
 // ---------------------------------------------------------------------------
@@ -170,7 +173,9 @@ export interface AppearanceContext {
 
   // Metric mapping
   nodeSizeMetric: { values: Map<string, number>; min: number; max: number } | null;
-  nodeSizeMapping: { minSize: number; maxSize: number };
+  nodeSizeMapping: { minSize: number; maxSize: number; scale: ScaleType };
+  edgeWeightMetric: { values: Map<string, number>; min: number; max: number } | null;
+  edgeWeightMapping: { minWeight: number; maxWeight: number; scale: ScaleType };
 
   // Color lookup
   getNodeTypeColor: (type: string) => string;
@@ -232,10 +237,15 @@ export function computeNodeAppearance(
   if (!isCluster && ctx.nodeSizeMetric) {
     const metricValue = ctx.nodeSizeMetric.values.get(nodeId);
     if (metricValue !== undefined) {
-      const range = ctx.nodeSizeMetric.max - ctx.nodeSizeMetric.min || 1;
-      const normalized = (metricValue - ctx.nodeSizeMetric.min) / range;
-      const { minSize, maxSize } = ctx.nodeSizeMapping;
-      const desiredRadius = minSize + normalized * (maxSize - minSize);
+      const { minSize, maxSize, scale } = ctx.nodeSizeMapping;
+      const desiredRadius = scaleValue(
+        metricValue,
+        ctx.nodeSizeMetric.min,
+        ctx.nodeSizeMetric.max,
+        minSize,
+        maxSize,
+        scale,
+      );
       // Compensate for lib's cbrt: radius = cbrt(val) * relSize
       const relSize = ctx.baseNodeSize / 2;
       size = (desiredRadius / relSize) ** 3;
@@ -285,6 +295,10 @@ export function computeNodeAppearance(
 export interface LinkAppearanceResult {
   color: string;
   hidden: boolean;
+  /** Metric-mapped link width, or null to use the live aesthetic base width.
+   *  Null (rather than a baked-in base) keeps unmapped links responsive to
+   *  later aesthetic width changes without a visuals pass. */
+  width: number | null;
 }
 
 /**
@@ -350,5 +364,22 @@ export function computeLinkAppearance(
       );
   }
 
-  return { color, hidden };
+  // Metric-based width mapping
+  let width: number | null = null;
+  if (ctx.edgeWeightMetric) {
+    const metricValue = ctx.edgeWeightMetric.values.get(edgeId);
+    if (metricValue !== undefined) {
+      const { minWeight, maxWeight, scale } = ctx.edgeWeightMapping;
+      width = scaleValue(
+        metricValue,
+        ctx.edgeWeightMetric.min,
+        ctx.edgeWeightMetric.max,
+        minWeight,
+        maxWeight,
+        scale,
+      );
+    }
+  }
+
+  return { color, hidden, width };
 }

@@ -35,6 +35,22 @@ class Settings(BaseSettings):
     database_enabled: bool = Field(
         default=False, description="Enable database persistence"
     )
+    database_pool_size: int = Field(
+        default=10,
+        description="Max persistent connections kept in the database pool",
+    )
+    database_max_overflow: int = Field(
+        default=20,
+        description="Extra connections allowed beyond pool_size under load",
+    )
+    database_pool_timeout: int = Field(
+        default=30,
+        description="Seconds to wait for a free connection before failing",
+    )
+    database_pool_recycle: int = Field(
+        default=3600,
+        description="Recycle pooled connections older than this many seconds",
+    )
 
     # Lakebase (Databricks-managed PostgreSQL)
     lakebase_enabled: bool = Field(

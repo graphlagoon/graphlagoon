@@ -17,6 +17,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import { ARTIFACT_NAME_PATTERN, type StylePresetEntry } from '@/types/graph';
 import { api } from '@/services/api';
+import { getErrorMessage } from '@/utils/errorMessage';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -70,17 +71,6 @@ function formatDate(value?: string | null): string {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString();
 }
 
-function describeError(e: unknown, fallback: string): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data
-    ?.detail;
-  if (detail && typeof detail === 'object' && 'error' in detail) {
-    const inner = (detail as { error?: { message?: string } }).error;
-    if (inner?.message) return inner.message;
-  }
-  if (typeof detail === 'string') return detail;
-  return e instanceof Error ? e.message : fallback;
-}
-
 async function refresh() {
   if (!contextId.value) return;
   loading.value = true;
@@ -88,7 +78,7 @@ async function refresh() {
   try {
     presets.value = await api.listStylePresets(contextId.value);
   } catch (e) {
-    error.value = describeError(e, 'Failed to list style presets');
+    error.value = getErrorMessage(e, 'Failed to list style presets');
   } finally {
     loading.value = false;
   }
@@ -107,7 +97,7 @@ async function save() {
     toast.success(`Style preset “${value}” saved`);
     apply(value);
   } catch (e) {
-    error.value = describeError(e, 'Failed to save style preset');
+    error.value = getErrorMessage(e, 'Failed to save style preset');
   } finally {
     saving.value = false;
   }
@@ -141,7 +131,7 @@ async function remove(value: string) {
   } catch (e) {
     // A 403 here names the author — the only place ownership ever surfaces,
     // since the listing deliberately does not carry it.
-    error.value = describeError(e, 'Failed to delete style preset');
+    error.value = getErrorMessage(e, 'Failed to delete style preset');
   }
 }
 

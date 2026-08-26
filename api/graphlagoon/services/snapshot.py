@@ -18,7 +18,7 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable, Optional, Union, Awaitable, TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -88,9 +88,17 @@ class LocalSnapshotService(SnapshotService):
         return self._base / f"{eid}.json.gz"
 
     async def save(self, eid: UUID, data: bytes) -> None:
-        tmp = self._path(eid).with_suffix(".tmp")
-        tmp.write_bytes(data)
-        tmp.replace(self._path(eid))  # atomic on same filesystem
+        # A unique temp name per write (mirrors LocalBlobStore._save_sync).
+        # Deriving it from the target via with_suffix(".tmp") gave concurrent
+        # writers of the same exploration one shared temp file: their writes
+        # interleaved and the rename published a corrupt blob.
+        tmp = self._base / f".tmp-{uuid4().hex}"
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(self._path(eid))  # atomic on same filesystem
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     async def load(self, eid: UUID) -> Optional[bytes]:
         p = self._path(eid)
