@@ -20,6 +20,7 @@ export default defineConfig({
         text: 'Guide',
         items: [
           { text: 'Getting Started', link: '/guide/getting-started' },
+          { text: 'Exploring the Graph', link: '/guide/exploring-the-graph' },
           { text: 'Explorations & Sharing', link: '/guide/explorations' },
         ],
       },
@@ -27,6 +28,8 @@ export default defineConfig({
         text: 'Visualization',
         items: [
           { text: 'Labels & Text Formatting', link: '/guide/labels' },
+          { text: 'Cluster Programs', link: '/guide/clusters' },
+          { text: 'Communities & Metrics', link: '/guide/communities-metrics' },
           { text: 'Style Presets', link: '/guide/style-presets' },
           { text: 'Layout URL Overrides', link: '/guide/layout-url-overrides' },
           { text: 'Query Templates', link: '/guide/query-templates' },
