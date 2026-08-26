@@ -1,5 +1,19 @@
 # REST Connections
 
+::: tip TL;DR
+Turn any graph-serving HTTP API into a datasource by declaring a
+connection spec in code: the user's query goes to your API, the JSON
+answer renders as a graph.
+
+- **Use it when** a team already serves a graph over HTTP — a
+  fraud-scoring service, a neighborhood cache, an internal knowledge
+  graph — and you want it explorable without ETL into tables.
+- **Not the tool for** data already in Delta tables (a plain SQL
+  warehouse context is simpler and gets Cypher for free); write
+  operations; or enforcing read-only safety — there's no query grammar to
+  inspect, so that's your API's job.
+:::
+
 A REST connection turns any graph-serving HTTP API into a datasource: the user
 types a query, Graph Lagoon sends it to your API exactly as your connection
 spec describes, and the JSON answer renders as a graph. Unlike the SQL

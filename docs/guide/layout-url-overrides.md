@@ -1,5 +1,20 @@
 # Layout URL Overrides
 
+::: tip TL;DR
+Set layout parameters field by field in the URL —
+`?layout=ego&layout.ego.focusNodeId=acct-9931` — on top of whatever a
+style preset restored.
+
+- **Use it when** a link should open centred on a *specific* node or with
+  one layout knob changed, without creating a preset per target — the
+  pattern [context-menu actions](./context-menu-actions.md) use for
+  "re-open from here" deep links.
+- **Not the tool for** appearance (colors/labels stay a
+  [preset](./style-presets.md)'s job — only semantic fields are
+  settable); choosing which data loads; or layouts beyond `force`, `ego`,
+  `hive`, `hierarchical`.
+:::
+
 A [style preset](./style-presets.md) is all-or-nothing: applying one replaces
 the whole layout block. That makes "the investigation look, but centred on
 *this* account" cost a new preset per account. Layout parameters can instead

@@ -1,5 +1,20 @@
 # Context Menu Actions
 
+::: tip TL;DR
+Custom entries in the right-click menu, configured once per context: open
+a URL built from the clicked item's data, copy formatted text, or run a
+query template with the item bound as a parameter.
+
+- **Use it when** the clicked node should bridge to another system —
+  PubMed for a gene, your CRM for an account — or when a curated query
+  from *this* node should be one click away.
+- **Not the tool for** bulk operations (an action sees exactly one
+  clicked item); logic beyond the three kinds — for arbitrary JavaScript
+  over the graph, use a [cluster program](./clusters.md) with a node
+  binding. Configuring needs write access to the context; readers still
+  get and use the menu.
+:::
+
 Right-clicking a node or an edge opens a context menu. Besides the built-in
 entries (copy id, expand neighbors, …), a graph context can carry its own
 **custom actions** — entries that appear only for the right kind of item and
