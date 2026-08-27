@@ -406,6 +406,15 @@ class GraphContextCreate(BaseModel):
                 self.node_table_name = None
                 self.node_properties = []
                 self.node_types = ["Node"]
+            # Typeless columns: an empty type column name means "this table
+            # has no such column" — every node/edge then carries the constant
+            # type, and the stored type lists must say exactly that. The
+            # column name itself stays "" (semantic; never defaulted away).
+            # Overlaps idempotently with the nodeless rule above.
+            if not self.node_structure.node_type_col:
+                self.node_types = ["Node"]
+            if not self.edge_structure.relationship_type_col:
+                self.relationship_types = ["RELATED_TO"]
         else:
             self.edge_table_name = None
             self.node_table_name = None

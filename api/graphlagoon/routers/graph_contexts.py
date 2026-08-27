@@ -29,6 +29,10 @@ from graphlagoon.utils.sharing import (
 )
 from graphlagoon.utils.authz import can_manage, can_write, is_superuser
 from graphlagoon.config import get_settings
+from graphlagoon.services.graph_operations import (
+    DEFAULT_NODE_TYPE,
+    DEFAULT_RELATIONSHIP_TYPE,
+)
 from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
 from graphlagoon.services.schema_drift import (
     validate_context_tables,
@@ -116,6 +120,37 @@ async def _validate_or_400(
                 }
             },
         )
+
+
+def _normalize_typeless_types(data, context) -> None:
+    """Force constant type lists when the EFFECTIVE structure has no type column.
+
+    Mirrors the create-time normalization in ``GraphContextCreate``: an empty
+    ``node_type_col``/``relationship_type_col`` means "this table has no such
+    column", so the stored type lists must be the constants every node/edge
+    will carry. Runs on every warehouse update (idempotent), which also
+    self-heals contexts saved before this rule existed. The effective
+    structure is the request's, falling back to the stored one — so a
+    cluster-programs-only PATCH re-forces from what is already stored.
+    """
+    if (
+        getattr(context, "datasource_type", None) or DEFAULT_DATASOURCE_TYPE
+    ) != "sql_warehouse":
+        return
+    node_struct = (
+        data.node_structure.model_dump()
+        if data.node_structure is not None
+        else (context.node_structure or {})
+    )
+    edge_struct = (
+        data.edge_structure.model_dump()
+        if data.edge_structure is not None
+        else (context.edge_structure or {})
+    )
+    if not node_struct.get("node_type_col", "node_type"):
+        data.node_types = [DEFAULT_NODE_TYPE]
+    if not edge_struct.get("relationship_type_col", "relationship_type"):
+        data.relationship_types = [DEFAULT_RELATIONSHIP_TYPE]
 
 
 def context_to_response(
@@ -399,6 +434,8 @@ async def update_graph_context(
             if not can_write(context.owner_email, context.shares, user_email):
                 raise HTTPException(status_code=403, detail="No write access")
 
+            _normalize_typeless_types(data, context)
+
             # Table names are immutable — validate the EFFECTIVE structure (new
             # if provided, else the stored one) against the existing tables, and
             # only when structure is actually part of this request; skip the
@@ -467,6 +504,8 @@ async def update_graph_context(
         # Check write access
         if not can_write(context.owner_email, context.shares, user_email):
             raise HTTPException(status_code=403, detail="No write access")
+
+        _normalize_typeless_types(data, context)
 
         # Warehouse-only: a schemaless graph database has no tables whose
         # columns could disagree with the structure.

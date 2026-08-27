@@ -7816,3 +7816,36 @@ Frontend only (no backend changes).
 **Future Enhancements:**
 - Optional per-relationship node typing (derive type from participating edge types).
 - A "materialize nodes view" helper action in the warehouse dev tooling.
+
+## [2026-08-27 08:30] - Feature Implemented: Typeless Type-Columns (node/edge tables without type columns)
+
+**Feature:** `sql_warehouse` contexts now fully support a node table with NO type column (`node_type_col=""`) and/or an edge table with NO relationship type column (`relationship_type_col=""`), independently or combined — including combined with the nodeless (no node table) mode. The form's existing `None` options for these selects were UI-reachable but half-broken: every Cypher query 400'd with a misleading `INVALID_TRANSPILE_OPTIONS: Property name cannot be empty`, type filters emitted `` WHERE `` IN ('') ``, discovery half-silently failed, and the UI showed empty-string types (blank edge labels, unlabeled filter checkboxes).
+
+**Strategy:** constant-type normalization, mirroring the nodeless work. `""` stays stored verbatim (semantic: "column absent") in structures and `ColumnConfig`; constants are injected at the boundaries: every node gets `node_type='Node'` (`DEFAULT_NODE_TYPE`), every edge `relationship_type='RELATED_TO'` (`DEFAULT_RELATIONSHIP_TYPE`, the transpiler's existing fallback — user choice).
+
+**Design Decisions:**
+1. **Derived fragment omits the type column** (nodeless + typeless): an alias-fallback `'Node' AS node_type` would be misfiled as a node *property* by `process_nodes_result` (the empty name is not in its structural set). The constant comes from the read path instead.
+2. **`_get_edge_id` composite stays `src@@dst`**: both query paths omit the column from their structs, so ids stay consistent; edge ids are opaque to the frontend.
+3. **Discovery returns the constants**, not `[]` — the form's Discover fills in exactly what the backend will store. Nodeless (no node table) still returns `node_types=[]`.
+4. **Update normalization forces constants over user-sent types**, computed from the EFFECTIVE structure (payload ∪ stored) in `_normalize_typeless_types` (router-level — `GraphContextUpdate` cannot see the stored context). Runs on every warehouse update, idempotent — self-heals pre-existing contexts saved with `""` cols and stale type lists. No migration.
+5. **Cypher**: `or None` at the read boundary (the `edge_id_col` pattern); typeless node table collapses to a single `Node` schema over the physical table with `filter=None` (keeping real property columns); typeless edge table registers a single `RELATED_TO` edge type with `filter=None`, ignoring stored `relationship_types`. The nodeless `TranspilerBindingException→ValueError` wrapper was generalized: unknown labels/types on constrained contexts get "no node type column — only :Node" / "no relationship type column — only :RELATED_TO" messages.
+6. **SQL filter gates**: subgraph/expand build type filters only when the column exists (filtering by the single constant type would match everything anyway).
+
+**Backend Changes:** `api/graphlagoon/services/graph_operations.py` (constants, read-path injection in `process_nodes_result`/`harvest_nodes_from_result`/`process_graph_query_result`, single-column derived fragment), `api/graphlagoon/models/schemas.py` (create validator forces constant type lists), `api/graphlagoon/routers/graph_contexts.py` (`_normalize_typeless_types` in both update branches), `api/graphlagoon/services/cypher.py` (typeless branches + generalized error wrapper), `api/graphlagoon/services/datasource/sql_warehouse.py` (filter gates), `api/graphlagoon/services/warehouse.py` (discovery skips DISTINCT, returns constants).
+
+**Frontend Changes:** `GraphContextFormModal.vue` (types inputs disabled + annotated `Node (constant — no type column)` when a type column is None or the context is nodeless), `DetailModal.vue` (type row labeled `type` instead of a nonexistent column name), `ContextInfoPanel.vue` (`None (constant: Node/RELATED_TO)` display). No new frontend predicate — the constants flow transparently through stores, legend, filters and labels.
+
+**Dev generator:** `warehouse/src/models/schemas.py` + `warehouse/src/services/graph.py` — type columns now optional (same skip pattern as `edge_id_col`), so typeless tables can be generated locally for end-to-end testing.
+
+**Testing:**
+- [x] `api/tests/test_typeless_columns.py` (23 tests: merge verbatim, read-path constants, fragment, create/update normalization, filter gates, discovery, drift)
+- [x] `api/tests/test_cypher_schema_provider.py` +8 typeless tests (real gsql2rsql: single schemas, filter=None, clear errors, combined, nodeless+typeless)
+- [x] Frontend: form None-selection payload + disabled inputs test
+- [x] Suites green: 986 backend (6 pre-existing failures unrelated), 1926 frontend unit, 175 E2E; `vue-tsc` clean
+
+**Public Docs:**
+- [x] `docs/guide/getting-started.md` — "Tables without type columns" subsection (TL;DR, constants contract, Cypher limits, combinable with nodeless)
+- [x] `make docs-build` passes
+- [x] No screenshot change (visual delta is a disabled input placeholder — not worth a scene)
+
+**Known Limitations:** with constant types, legend/filters/per-type styling collapse to a single entry (inherent to the data, not the implementation); Cypher accepts only `:Node`/`:RELATED_TO` on the constrained side.

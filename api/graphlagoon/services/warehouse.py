@@ -7,6 +7,10 @@ from typing import Optional, Any, Callable, Awaitable, Union
 import httpx
 
 from graphlagoon.config import Settings
+from graphlagoon.services.graph_operations import (
+    DEFAULT_NODE_TYPE,
+    DEFAULT_RELATIONSHIP_TYPE,
+)
 from graphlagoon.models.schemas import (
     DatasetsResponse,
     RandomGraphRequest,
@@ -488,9 +492,14 @@ class WarehouseClient:
         logger = logging.getLogger(__name__)
         errors: list[str] = []
 
-        # Query distinct node types
+        # Query distinct node types. An empty node_type_col means the table
+        # has no type column — every node carries the constant type, which is
+        # returned so the form's Discover fills in exactly what the backend
+        # will store.
         node_types: list[str] = []
-        if node_table:
+        if node_table and not columns.node_type_col:
+            node_types = [DEFAULT_NODE_TYPE]
+        elif node_table:
             node_query = (
                 f"SELECT DISTINCT `{columns.node_type_col}` FROM {node_table}"
             )
@@ -518,30 +527,42 @@ class WarehouseClient:
                 errors.append(f"Node types query error: {e}")
                 logger.warning(f"discover_schema node_types exception: {e}")
 
-        # Query distinct relationship types
+        # Query distinct relationship types (same constant contract as above
+        # when the edge table has no type column).
         relationship_types: list[str] = []
-        edge_query = (
-            f"SELECT DISTINCT `{columns.relationship_type_col}` FROM {edge_table}"
-        )
-        try:
-            result = await self.execute_statement(statement=edge_query)
-            if result.status.state == "SUCCEEDED" and result.result:
-                relationship_types = sorted(
-                    [row[0] for row in result.result.data_array if row[0] is not None]
-                )
-            elif result.status.state != "SUCCEEDED":
-                error_msg = (
-                    result.status.error.message
-                    if result.status.error
-                    else "Unknown error"
-                )
-                errors.append(f"Relationship types query failed: {error_msg}")
+        if not columns.relationship_type_col:
+            relationship_types = [DEFAULT_RELATIONSHIP_TYPE]
+        else:
+            edge_query = (
+                f"SELECT DISTINCT `{columns.relationship_type_col}` "
+                f"FROM {edge_table}"
+            )
+            try:
+                result = await self.execute_statement(statement=edge_query)
+                if result.status.state == "SUCCEEDED" and result.result:
+                    relationship_types = sorted(
+                        [
+                            row[0]
+                            for row in result.result.data_array
+                            if row[0] is not None
+                        ]
+                    )
+                elif result.status.state != "SUCCEEDED":
+                    error_msg = (
+                        result.status.error.message
+                        if result.status.error
+                        else "Unknown error"
+                    )
+                    errors.append(f"Relationship types query failed: {error_msg}")
+                    logger.warning(
+                        f"discover_schema relationship_types query failed: "
+                        f"{error_msg}"
+                    )
+            except Exception as e:
+                errors.append(f"Relationship types query error: {e}")
                 logger.warning(
-                    f"discover_schema relationship_types query failed: {error_msg}"
+                    f"discover_schema relationship_types exception: {e}"
                 )
-        except Exception as e:
-            errors.append(f"Relationship types query error: {e}")
-            logger.warning(f"discover_schema relationship_types exception: {e}")
 
         # If both queries failed, raise so the user sees the error
         if errors and not node_types and not relationship_types:

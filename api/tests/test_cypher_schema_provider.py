@@ -191,3 +191,126 @@ class TestNodelessSchemaProvider:
             transpile_cypher_to_sql(
                 "MATCH (a:Ghost)-[r:OWNS]->(b) RETURN r", make_context()
             )
+
+
+class TestTypelessColumns:
+    """Empty type columns: node_type_col="" and/or relationship_type_col=""
+    collapse the schema to constant labels/relationship types."""
+
+    def _typeless_node(self, **overrides):
+        return make_context(
+            node_structure={"node_id_col": "vertex_id", "node_type_col": ""},
+            node_types=["Node"],
+            **overrides,
+        )
+
+    def _typeless_edge(self, **overrides):
+        base = dict(
+            edge_structure={
+                "edge_id_col": "rel_id",
+                "src_col": "from_id",
+                "dst_col": "to_id",
+                "relationship_type_col": "",
+            },
+            relationship_types=["RELATED_TO"],
+        )
+        base.update(overrides)
+        return make_context(**base)
+
+    def test_typeless_node_single_label_no_filter(self):
+        schema = build_schema_provider(self._typeless_node())
+        node = schema.get_node_definition("Node")
+        assert node is not None
+        assert schema.get_node_definition("Person") is None
+        descriptor = schema.get_sql_table_descriptors("Node")
+        assert descriptor.filter is None
+        assert descriptor.full_table_name == "cat.sch.nodes"
+        # Real property columns of the physical table survive.
+        prop_names = {p.property_name for p in node.properties}
+        assert "name" in prop_names
+        assert "" not in prop_names
+
+    def test_typeless_node_transpiles(self):
+        from graphlagoon.services.cypher import transpile_cypher_to_sql
+
+        sql = transpile_cypher_to_sql(
+            "MATCH (a)-[r:OWNS]->(b) RETURN r", self._typeless_node()
+        )
+        assert " = ''" not in sql
+        assert "= 'Node'" not in sql
+
+    def test_typeless_edge_single_type_no_filter(self):
+        schema = build_schema_provider(self._typeless_edge())
+        descriptor = schema.get_sql_table_descriptors(
+            "Person@RELATED_TO@Person"
+        )
+        assert descriptor is not None
+        assert descriptor.filter is None
+        # No empty-named property registered on the edge.
+        edge = schema.get_edge_definition("RELATED_TO", "Person", "Person")
+        assert edge is not None
+        assert "" not in {p.property_name for p in edge.properties}
+
+    def test_typeless_edge_transpiles_and_ignores_stored_types(self):
+        from graphlagoon.services.cypher import transpile_cypher_to_sql
+
+        # Stored relationship_types from before the column was cleared must
+        # not leak broken per-type filters into the SQL.
+        context = self._typeless_edge(relationship_types=["KNOWS", "OWNS"])
+        sql = transpile_cypher_to_sql(
+            "MATCH (a:Person)-[r:RELATED_TO]->(b:Person) RETURN r", context
+        )
+        assert " = ''" not in sql
+        assert "= 'KNOWS'" not in sql
+
+    def test_unknown_label_on_typeless_node_raises_clear_error(self):
+        from graphlagoon.services.cypher import transpile_cypher_to_sql
+
+        with pytest.raises(ValueError, match="no node type column"):
+            transpile_cypher_to_sql(
+                "MATCH (a:Person)-[r:OWNS]->(b) RETURN r",
+                self._typeless_node(),
+            )
+
+    def test_unknown_rel_type_on_typeless_edge_raises_clear_error(self):
+        from graphlagoon.services.cypher import transpile_cypher_to_sql
+
+        with pytest.raises(
+            ValueError, match="no relationship type column"
+        ):
+            transpile_cypher_to_sql(
+                "MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN r",
+                self._typeless_edge(),
+            )
+
+    def test_both_typeless(self):
+        from graphlagoon.services.cypher import transpile_cypher_to_sql
+
+        context = make_context(
+            node_structure={"node_id_col": "vertex_id", "node_type_col": ""},
+            edge_structure={
+                "edge_id_col": "",
+                "src_col": "from_id",
+                "dst_col": "to_id",
+                "relationship_type_col": "",
+            },
+        )
+        sql = transpile_cypher_to_sql("MATCH (a)-[r]->(b) RETURN r", context)
+        assert " = ''" not in sql
+
+    def test_nodeless_plus_typeless_node_col(self):
+        from graphlagoon.services.cypher import transpile_cypher_to_sql
+
+        context = make_context(
+            node_table_name=None,
+            node_structure={"node_id_col": "node_id", "node_type_col": ""},
+            node_properties=[],
+            node_types=["Node"],
+        )
+        descriptor = build_schema_provider(context).get_sql_table_descriptors(
+            "Node"
+        )
+        # Single-column derived fragment: no empty backticks, no type alias.
+        assert "``" not in descriptor.full_table_name
+        sql = transpile_cypher_to_sql("MATCH (a) RETURN a", context)
+        assert "UNION" in sql

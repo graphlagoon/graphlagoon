@@ -116,7 +116,10 @@ const datasourceTagline = computed(() => datasourceDescriptor.value.copy.tagline
         </div>
         <div class="info-row">
           <span class="label">Node Type</span>
-          <span class="value mono">{{ graphStore.currentContext.node_structure.node_type_col }}</span>
+          <span class="value mono">{{
+            graphStore.currentContext.node_structure.node_type_col ||
+            'None (constant: Node)'
+          }}</span>
         </div>
       </div>
 
@@ -139,7 +142,10 @@ const datasourceTagline = computed(() => datasourceDescriptor.value.copy.tagline
         </div>
         <div class="info-row">
           <span class="label">Relationship</span>
-          <span class="value mono">{{ graphStore.currentContext.edge_structure.relationship_type_col }}</span>
+          <span class="value mono">{{
+            graphStore.currentContext.edge_structure.relationship_type_col ||
+            'None (constant: RELATED_TO)'
+          }}</span>
         </div>
       </div>
 

@@ -321,6 +321,18 @@ watch(() => form.value.noNodeTable, (noNodeTable) => {
   if (noNodeTable) form.value.node_table_name = '';
 });
 
+// Typeless columns ("None" picked for a type column, or no node table at
+// all): the backend stores the constant types regardless of what these
+// fields contain, so they are disabled and annotated instead of editable.
+const noNodeTypeCol = computed(
+  () =>
+    showTableConfig.value &&
+    (form.value.noNodeTable || !form.value.node_type_col),
+);
+const noRelTypeCol = computed(
+  () => showTableConfig.value && !form.value.relationship_type_col,
+);
+
 // --- Open/close lifecycle ----------------------------------------------------
 
 watch(
@@ -791,9 +803,18 @@ async function submit() {
                 v-model="form.node_types"
                 type="text"
                 class="form-control"
-                placeholder="Person, Company, Product"
+                :disabled="noNodeTypeCol"
+                :placeholder="
+                  noNodeTypeCol
+                    ? 'Node (constant — no type column)'
+                    : 'Person, Company, Product'
+                "
               />
-              <span class="hint">Comma-separated (or click Discover)</span>
+              <span class="hint">{{
+                noNodeTypeCol
+                  ? 'No node type column: every node gets the constant type "Node".'
+                  : 'Comma-separated (or click Discover)'
+              }}</span>
             </div>
             <div class="form-group">
               <label>Relationship Types</label>
@@ -801,9 +822,18 @@ async function submit() {
                 v-model="form.relationship_types"
                 type="text"
                 class="form-control"
-                placeholder="KNOWS, WORKS_AT, OWNS"
+                :disabled="noRelTypeCol"
+                :placeholder="
+                  noRelTypeCol
+                    ? 'RELATED_TO (constant — no type column)'
+                    : 'KNOWS, WORKS_AT, OWNS'
+                "
               />
-              <span class="hint">Comma-separated (or click Discover)</span>
+              <span class="hint">{{
+                noRelTypeCol
+                  ? 'No relationship type column: every edge gets the constant type "RELATED_TO".'
+                  : 'Comma-separated (or click Discover)'
+              }}</span>
             </div>
           </div>
         </div>
