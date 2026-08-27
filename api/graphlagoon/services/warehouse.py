@@ -471,13 +471,17 @@ class WarehouseClient:
     async def discover_schema(
         self,
         edge_table: str,
-        node_table: str,
+        node_table: Optional[str],
         columns: ColumnConfig,
     ) -> SchemaDiscoveryResponse:
         """Discover distinct node_types and relationship_types from tables.
 
         Uses the Databricks-compatible statements API to query distinct values.
         sql-warehouse handles catalog.schema.table -> schema.table conversion.
+
+        ``node_table=None`` is the triple-store-only case: there is no node
+        table to read types from, so node_types is [] — absence is
+        configuration, not a failure, and adds nothing to ``errors``.
         """
         import logging
 
@@ -486,24 +490,33 @@ class WarehouseClient:
 
         # Query distinct node types
         node_types: list[str] = []
-        node_query = f"SELECT DISTINCT `{columns.node_type_col}` FROM {node_table}"
-        try:
-            result = await self.execute_statement(statement=node_query)
-            if result.status.state == "SUCCEEDED" and result.result:
-                node_types = sorted(
-                    [row[0] for row in result.result.data_array if row[0] is not None]
-                )
-            elif result.status.state != "SUCCEEDED":
-                error_msg = (
-                    result.status.error.message
-                    if result.status.error
-                    else "Unknown error"
-                )
-                errors.append(f"Node types query failed: {error_msg}")
-                logger.warning(f"discover_schema node_types query failed: {error_msg}")
-        except Exception as e:
-            errors.append(f"Node types query error: {e}")
-            logger.warning(f"discover_schema node_types exception: {e}")
+        if node_table:
+            node_query = (
+                f"SELECT DISTINCT `{columns.node_type_col}` FROM {node_table}"
+            )
+            try:
+                result = await self.execute_statement(statement=node_query)
+                if result.status.state == "SUCCEEDED" and result.result:
+                    node_types = sorted(
+                        [
+                            row[0]
+                            for row in result.result.data_array
+                            if row[0] is not None
+                        ]
+                    )
+                elif result.status.state != "SUCCEEDED":
+                    error_msg = (
+                        result.status.error.message
+                        if result.status.error
+                        else "Unknown error"
+                    )
+                    errors.append(f"Node types query failed: {error_msg}")
+                    logger.warning(
+                        f"discover_schema node_types query failed: {error_msg}"
+                    )
+            except Exception as e:
+                errors.append(f"Node types query error: {e}")
+                logger.warning(f"discover_schema node_types exception: {e}")
 
         # Query distinct relationship types
         relationship_types: list[str] = []

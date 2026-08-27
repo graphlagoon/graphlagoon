@@ -114,7 +114,10 @@ describe('loadSubgraph', () => {
 
   it('loads subgraph and replaces nodes/edges', async () => {
     const store = setupGraph()
-    store.currentContext = { id: 'ctx-1' } as any
+    // node_table_name present: a nodeless context would coerce nodes_mode
+    // to 'full' (see graph.progressiveLoad.test.ts) and change the shape
+    // asserted below.
+    store.currentContext = { id: 'ctx-1', node_table_name: 'cat.db.nodes' } as any
     store.selectNode('A')
 
     vi.mocked(api.getSubgraph).mockResolvedValue({

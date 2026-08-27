@@ -140,6 +140,30 @@ export interface GraphContext {
   updated_at: string;
 }
 
+/**
+ * A nodeless (triple-store-only) warehouse context: it has only an edge table,
+ * and the backend derives a virtual node table (node_id + constant 'Node'
+ * type) from the edge endpoints. Derived nodes never have properties, so
+ * property enrichment is pointless for these contexts.
+ *
+ * REST/Neptune contexts also have `node_table_name: null` but are a different
+ * regime entirely (gated by datasource capabilities) — hence the type check.
+ * `datasource_type` absent means a pre-pluggable-datasource context, which is
+ * always `sql_warehouse`.
+ */
+export function isNodelessContext(
+  ctx:
+    | Pick<GraphContext, 'datasource_type' | 'node_table_name'>
+    | null
+    | undefined,
+): boolean {
+  if (!ctx) return false;
+  return (
+    (ctx.datasource_type ?? 'sql_warehouse') === 'sql_warehouse' &&
+    !ctx.node_table_name
+  );
+}
+
 export interface NodeState {
   node_id: string;
 }
@@ -915,7 +939,8 @@ export interface SchemaDriftFinding {
 }
 
 export interface SchemaDriftTable {
-  table_name: string;
+  /** Null on the node side of a nodeless context — the virtual node table is derived from edges and cannot drift. */
+  table_name: string | null;
   reachable: boolean;
   columns: ColumnInfo[];
 }

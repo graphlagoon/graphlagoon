@@ -386,18 +386,26 @@ class GraphContextCreate(BaseModel):
     def _validate_datasource_fields(self) -> "GraphContextCreate":
         """Enforce the shape each datasource type actually needs.
 
-        A warehouse context is meaningless without its two tables. A Neptune
-        context is the opposite: tables and column properties describe nothing,
-        so they are normalized away rather than rejected — a client that sends
-        leftovers from the warehouse form still gets a valid context instead of
-        a validation error it cannot act on.
+        A warehouse context is meaningless without its edge table. The node
+        table is optional: a triple-store-only warehouse has no node table, and
+        the backend derives a virtual one (node_id + constant 'Node' type) from
+        the edge endpoints. A Neptune context is the opposite: tables and column
+        properties describe nothing, so they are normalized away rather than
+        rejected — a client that sends leftovers from the warehouse form still
+        gets a valid context instead of a validation error it cannot act on.
         """
         if self.datasource_type == "sql_warehouse":
-            if not self.edge_table_name or not self.node_table_name:
+            if not self.edge_table_name:
                 raise ValueError(
-                    "edge_table_name and node_table_name are required for "
-                    "sql_warehouse contexts"
+                    "edge_table_name is required for sql_warehouse contexts"
                 )
+            if not self.node_table_name:
+                # Nodeless (triple-store-only) context: one canonical shape.
+                # Derived nodes have no properties and a single constant type,
+                # so stored node metadata must say exactly that.
+                self.node_table_name = None
+                self.node_properties = []
+                self.node_types = ["Node"]
         else:
             self.edge_table_name = None
             self.node_table_name = None
@@ -942,12 +950,11 @@ class SchemaDiscoveryRequest(BaseModel):
 
     @model_validator(mode="after")
     def _require_tables_for_sql(self) -> "SchemaDiscoveryRequest":
-        if self.datasource_type == "sql_warehouse" and not (
-            self.edge_table and self.node_table
-        ):
-            raise ValueError(
-                "edge_table and node_table are required for sql_warehouse discovery"
-            )
+        # node_table is optional: a triple-store-only context has none, and
+        # discovery then returns node_types=[] while still reading
+        # relationship types from the edge table.
+        if self.datasource_type == "sql_warehouse" and not self.edge_table:
+            raise ValueError("edge_table is required for sql_warehouse discovery")
         if self.datasource_type == "rest" and not self.datasource_name:
             raise ValueError("datasource_name is required for rest discovery")
         return self
@@ -977,9 +984,13 @@ class SchemaDriftFinding(BaseModel):
 
 
 class SchemaDriftTable(BaseModel):
-    """Live state of one side's table, as seen by the drift check."""
+    """Live state of one side's table, as seen by the drift check.
 
-    table_name: str
+    ``table_name`` is ``None`` on the node side of a nodeless (triple-store-only)
+    context — the virtual node table is derived from edges and cannot drift.
+    """
+
+    table_name: Optional[str] = None
     reachable: bool
     columns: list[ColumnInfo] = Field(default_factory=list)
 

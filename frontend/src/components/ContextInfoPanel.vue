@@ -99,7 +99,9 @@ const datasourceTagline = computed(() => datasourceDescriptor.value.copy.tagline
         </div>
         <div class="info-row">
           <span class="label">Node Table</span>
-          <span class="value mono">{{ graphStore.currentContext.node_table_name }}</span>
+          <span class="value mono">{{
+            graphStore.currentContext.node_table_name || 'derived from edges'
+          }}</span>
         </div>
       </div>
 

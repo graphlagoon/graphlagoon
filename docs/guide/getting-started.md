@@ -98,6 +98,40 @@ filtering, labels, and the detail panel later.
 
 ![Contexts](/screenshots/index-contexts.png)
 
+### Triple-store-only tables (no node table)
+
+::: tip TL;DR
+Check **"No node table — derive nodes from edge endpoints"** when your
+warehouse only has a triple/edge table (`src`, `dst`, `relationship_type`)
+and no node table at all. Graph Lagoon derives the nodes from the edge
+endpoints on the fly.
+
+- **Use it when** the data is a pure triple store — relationships exist as
+  rows, but entities were never materialized into their own table.
+- **Not the tool for** graphs where node attributes matter: derived nodes
+  have **no properties** and a single constant type (`Node`), so labels,
+  property-driven styling and the data table stay id-only. For a very large
+  triple store, materialize a nodes view in the warehouse (one
+  `SELECT src ... UNION SELECT dst` away) and point the context at it —
+  each fetch of derived nodes re-scans the edge table.
+:::
+
+![Create context without a node table](/screenshots/getting-started-nodeless-context.png)
+
+With the checkbox on, the Node Table select and the node column mapping
+disappear; the backend stores the context with no node table and builds a
+virtual one whenever node rows are needed. Everything keeps working —
+exploring, expanding, metrics, communities, saving explorations — with two
+honest limits:
+
+- **Cypher labels**: the only node label is `Node`. `MATCH (a)-[r]->(b)`
+  and `MATCH (a:Node)` work; `MATCH (a:Person)` returns a clear error.
+- **Schema drift**: only the edge table is checked — a derived node table
+  cannot drift.
+
+Type discovery still works with just the edge table selected (it reads
+relationship types; node types come back empty).
+
 ### 3. Open it and explore
 
 Click **Open** on the context card. Load data by running a query

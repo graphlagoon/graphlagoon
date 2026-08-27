@@ -70,6 +70,52 @@ test.describe('Contexts', () => {
     await expect(edgeSelect.locator('option', { hasText: 'test_db.edges' })).toBeAttached();
   });
 
+  test('creates a nodeless (triple-store-only) context via the checkbox', async ({
+    authenticatedPage: page,
+  }) => {
+    // A warehouse that only has triple/edge tables — no node tables at all.
+    await page.route('**/graphlagoon/api/datasets', (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ edge_tables: ['test_db.triples'], node_tables: [] }),
+      });
+    });
+
+    let createdPayload: Record<string, unknown> | null = null;
+    await page.route('**/graphlagoon/api/graph-contexts', (route) => {
+      if (route.request().method() === 'POST') {
+        createdPayload = JSON.parse(route.request().postData() || '{}');
+        route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify({ id: 'ctx-nodeless', ...createdPayload }),
+        });
+      } else {
+        route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      }
+    });
+
+    await page.goto('/contexts');
+    await page.getByTestId('create-context-btn').click();
+    await expect(page.getByTestId('create-context-modal')).toBeVisible();
+
+    // With no node tables in the warehouse, the checkbox comes pre-checked.
+    await expect(page.getByTestId('no-node-table-checkbox')).toBeChecked();
+
+    await page.getByPlaceholder('My Graph Context').fill('Triple Store');
+    const edgeSelect = page.getByTestId('create-context-modal').locator('select').first();
+    await edgeSelect.selectOption('test_db.triples');
+
+    await page.getByTestId('create-context-submit').click();
+    await expect(page.getByTestId('create-context-modal')).not.toBeVisible();
+
+    expect(createdPayload).not.toBeNull();
+    expect(createdPayload!.edge_table_name).toBe('test_db.triples');
+    expect(createdPayload!.node_table_name).toBeUndefined();
+    expect(createdPayload!.node_properties).toBeUndefined();
+  });
+
   // ---------------------------------------------------------------------------
   // Navigation
   // ---------------------------------------------------------------------------

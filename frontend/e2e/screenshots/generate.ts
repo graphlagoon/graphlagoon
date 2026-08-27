@@ -302,6 +302,36 @@ const SCENES: Scene[] = [
     prepare: waitForGraphSettled,
   },
   {
+    // Create-context modal for a triple-store-only warehouse: no node tables
+    // in the datasets listing, so the "No node table" checkbox is pre-checked
+    // and the node column mapping is hidden.
+    guide: 'getting-started',
+    scene: 'nodeless-context',
+    path: '/contexts',
+    prepare: async (page) => {
+      await page.route('**/graphlagoon/api/datasets', (route) => {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            edge_tables: ['warehouse.graph.triples'],
+            node_tables: [],
+          }),
+        });
+      });
+      await page.getByTestId('create-context-btn').click();
+      await expect(page.getByTestId('create-context-modal')).toBeVisible();
+      await expect(page.getByTestId('no-node-table-checkbox')).toBeChecked();
+      await page
+        .getByTestId('create-context-modal')
+        .locator('select')
+        .first()
+        .selectOption('warehouse.graph.triples');
+      await page.getByPlaceholder('My Graph Context').fill('Supply-chain triples');
+      await page.waitForTimeout(300);
+    },
+  },
+  {
     guide: 'explorations',
     scene: 'list',
     path: '/explorations',

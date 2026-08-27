@@ -8,6 +8,7 @@ from gsql2rsql.planner.logical_plan import LogicalPlan
 from gsql2rsql.planner.pass_manager import optimize_plan
 from gsql2rsql import ProceduralBFSOptimizations
 from gsql2rsql.renderer.sql_renderer import SQLRenderer
+from gsql2rsql.common.exceptions import TranspilerBindingException
 from gsql2rsql.common.schema import NodeSchema, EdgeSchema, EntityProperty
 from gsql2rsql.renderer.schema_provider import (
     SimpleSQLSchemaProvider,
@@ -15,6 +16,7 @@ from gsql2rsql.renderer.schema_provider import (
 )
 
 from graphlagoon.db.models import GraphContext as GraphContextModel
+from graphlagoon.services.graph_operations import resolve_node_table
 
 
 def spark_type_to_python_type(spark_type: str) -> type:
@@ -96,18 +98,18 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
             )
 
     # Get types
-    node_types = context.node_types or ["Node"]
     edge_types = context.relationship_types or ["RELATED_TO"]
 
-    # Create NodeSchema for each node_type
-    for node_type in node_types:
+    if not context.node_table_name:
+        # Nodeless (triple-store-only) context: exactly one label, "Node",
+        # mapped onto the derived virtual node table. table_or_view_name is
+        # set directly — the table_name convenience path rsplits on "." and
+        # would mangle a subquery. filter=None: the per-type filter is
+        # pointless against a table whose type column is a constant.
+        node_types = ["Node"]
         node_schema = NodeSchema(
-            name=node_type,
+            name="Node",
             properties=[
-                EntityProperty(property_name=prop_name, data_type=data_type)
-                for prop_name, data_type in extra_node_attrs.items()
-            ]
-            + [
                 EntityProperty(property_name=node_type_col, data_type=str),
                 EntityProperty(property_name=node_id_col, data_type=str),
             ],
@@ -116,11 +118,39 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
         schema.add_node(
             node_schema,
             SQLTableDescriptor(
-                table_name=context.node_table_name,
+                table_or_view_name=resolve_node_table(context),
+                schema_name="",
                 node_id_columns=[node_id_col],
-                filter=f"{node_type_col} = '{node_type}'",
+                filter=None,
             ),
         )
+    else:
+        node_types = context.node_types or ["Node"]
+
+        # Create NodeSchema for each node_type
+        for node_type in node_types:
+            node_schema = NodeSchema(
+                name=node_type,
+                properties=[
+                    EntityProperty(property_name=prop_name, data_type=data_type)
+                    for prop_name, data_type in extra_node_attrs.items()
+                ]
+                + [
+                    EntityProperty(property_name=node_type_col, data_type=str),
+                    EntityProperty(property_name=node_id_col, data_type=str),
+                ],
+                node_id_property=EntityProperty(
+                    property_name=node_id_col, data_type=str
+                ),
+            )
+            schema.add_node(
+                node_schema,
+                SQLTableDescriptor(
+                    table_name=context.node_table_name,
+                    node_id_columns=[node_id_col],
+                    filter=f"{node_type_col} = '{node_type}'",
+                ),
+            )
 
     # Edge properties are invariant across type combinations. The edge id
     # property uses the context's own column name; omitted when the context
@@ -201,7 +231,21 @@ def transpile_cypher_to_sql(
     parser = OpenCypherParser()
     ast = parser.parse(cypher_query)
 
-    plan = LogicalPlan.process_query_tree(ast, schema)
+    try:
+        plan = LogicalPlan.process_query_tree(ast, schema)
+    except TranspilerBindingException as e:
+        if not context.node_table_name:
+            # Nodeless context: the only registered label is "Node", so a
+            # binding failure is almost always a label the derived virtual
+            # node table cannot have. Say that, instead of the generic
+            # binding error. ValueError is the transpile-input error type the
+            # datasource already turns into a clean 400.
+            raise ValueError(
+                "This context has no node table — node labels other than "
+                ":Node are not available. Use unlabeled patterns like "
+                f"MATCH (a)-[r]->(b), or :Node. ({e})"
+            )
+        raise
 
     optimize_plan(plan, enabled=True, pushdown_enabled=True)
 

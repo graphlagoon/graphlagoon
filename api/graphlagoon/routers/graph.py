@@ -224,9 +224,13 @@ async def get_schema_drift(
             or discovered_relationship_types is not None
         ),
         counts=result["counts"],
+        # Nodeless context: the virtual node table is always "reachable" —
+        # there is nothing to describe and nothing that can drift.
         node_table=SchemaDriftTable(
             table_name=context.node_table_name,
-            reachable=node_reachable,
+            reachable=(
+                True if context.node_table_name is None else node_reachable
+            ),
             columns=node_columns,
         ),
         edge_table=SchemaDriftTable(
