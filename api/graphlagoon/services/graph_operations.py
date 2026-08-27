@@ -63,6 +63,39 @@ def merge_column_config(context) -> dict:
     }
 
 
+def derived_node_table_sql(edge_table: str, column_config: ColumnConfig) -> str:
+    """Virtual node table for contexts that have no physical node table.
+
+    A triple-store-only context knows its nodes only as edge endpoints, so the
+    node "table" is derived on the fly: the deduplicated union of src and dst,
+    with a constant ``'Node'`` type (a triple store carries no node typing).
+    Returned WITHOUT a trailing alias — every call site appends its own
+    (``FROM {node_table} n``), the same contract as a physical table name.
+
+    Each use scans the edge table twice (one UNION arm per endpoint column);
+    acceptable for the target datasets — users with very large triple stores
+    should materialize a nodes view and point the context at it instead.
+    """
+    node_id = _quote_identifier(column_config.node_id_col)
+    node_type = _quote_identifier(column_config.node_type_col)
+    src = _quote_identifier(column_config.src_col)
+    dst = _quote_identifier(column_config.dst_col)
+    return (
+        f"(SELECT node_id AS {node_id}, 'Node' AS {node_type} FROM ("
+        f"SELECT {src} AS node_id FROM {edge_table} "
+        f"UNION "
+        f"SELECT {dst} AS node_id FROM {edge_table}))"
+    )
+
+
+def resolve_node_table(context) -> str:
+    """The context's physical node table name, or the derived fragment when absent."""
+    if getattr(context, "node_table_name", None):
+        return context.node_table_name
+    config = ColumnConfig(**merge_column_config(context))
+    return derived_node_table_sql(context.edge_table_name, config)
+
+
 def _get_edge_id(
     row_dict: dict,
     edge_id_col: Optional[str],

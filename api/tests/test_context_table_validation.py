@@ -220,6 +220,42 @@ class TestCreateEndpointValidation:
         )
         assert resp.status_code == 200
 
+    def test_create_nodeless_context_succeeds(self):
+        """Triple-store-only: no node table at all. The context is accepted
+        and normalized to node_types=['Node'] with no node properties."""
+        warehouse = FakeWarehouse({"edges": CLEAN_EDGE_COLS})
+        client = make_client(warehouse)
+        resp = client.post(
+            "/api/graph-contexts",
+            json={
+                "title": "triples",
+                "edge_table_name": "cat.db.edges",
+            },
+            headers=_headers(),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["node_table_name"] is None
+        assert body["node_types"] == ["Node"]
+        assert body["node_properties"] == []
+
+    def test_create_nodeless_still_validates_edge_structure(self):
+        edge_cols = [("src", "string")]  # dst + relationship_type missing
+        warehouse = FakeWarehouse({"edges": edge_cols})
+        client = make_client(warehouse)
+        resp = client.post(
+            "/api/graph-contexts",
+            json={
+                "title": "triples",
+                "edge_table_name": "cat.db.edges",
+            },
+            headers=_headers(),
+        )
+        assert resp.status_code == 400
+        assert (
+            resp.json()["detail"]["error"]["code"] == "CONTEXT_STRUCTURE_INVALID"
+        )
+
 
 class TestUpdateEndpointValidation:
     @pytest.fixture

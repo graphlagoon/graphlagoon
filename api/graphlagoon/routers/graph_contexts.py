@@ -90,7 +90,7 @@ async def _validate_datasource_or_400(
 
 async def _validate_or_400(
     warehouse: WarehouseClient,
-    node_table_name: str,
+    node_table_name: Optional[str],
     edge_table_name: str,
     node_structure: Optional[dict],
     edge_structure: Optional[dict],

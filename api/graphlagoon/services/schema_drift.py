@@ -466,7 +466,19 @@ def compute_drift(
     node_table_name = _get(context, "node_table_name")
     edge_table_name = _get(context, "edge_table_name")
 
-    if not node_table_reachable:
+    # Nodeless (triple-store-only) context: the node table is derived from the
+    # edge endpoints on the fly — a virtual table cannot drift. The node side
+    # contributes no findings, no structural checks (reachable=False silences
+    # diff_structure's node roles) and no type comparison.
+    nodeless = node_table_name is None
+    if nodeless:
+        node_table_reachable = False
+        node_live_columns = None
+        discovered_node_types = None
+
+    if nodeless:
+        pass
+    elif not node_table_reachable:
         findings.append(
             Finding(
                 code="TABLE_NOT_FOUND",
@@ -576,7 +588,7 @@ class ContextValidationError(Exception):
 
 async def validate_context_tables(
     warehouse,
-    node_table_name: str,
+    node_table_name: Optional[str],
     edge_table_name: str,
     node_structure: Optional[dict] = None,
     edge_structure: Optional[dict] = None,
@@ -584,13 +596,17 @@ async def validate_context_tables(
     """Validate a context's table names and structural columns before create/update
     accepts them.
 
-    Table-name shape is always checked (cheap, no I/O). Structural columns are
-    checked against the live table ONLY when that table can be described — an
-    unreachable warehouse (down, dev mode without it running) means validation
-    is skipped, not failed: a context edit must never be blocked by warehouse
-    unavailability. Raises ``ContextValidationError``; callers map it to a 400.
+    Table-name shape is always checked (cheap, no I/O). A ``None`` node table is
+    the triple-store-only case (nodes derived from edges), not a malformed name —
+    the node side is simply skipped. Structural columns are checked against the
+    live table ONLY when that table can be described — an unreachable warehouse
+    (down, dev mode without it running) means validation is skipped, not failed:
+    a context edit must never be blocked by warehouse unavailability. Raises
+    ``ContextValidationError``; callers map it to a 400.
     """
     for table_name in (node_table_name, edge_table_name):
+        if table_name is None:
+            continue
         if parse_qualified_table(table_name) is None:
             raise ContextValidationError(
                 "CONTEXT_TABLE_INVALID",
@@ -604,7 +620,7 @@ async def validate_context_tables(
     missing: list[dict[str, str]] = []
 
     for side, structure in structures.items():
-        if not structure:
+        if not structure or table_names[side] is None:
             continue
         catalog, database, table = parse_qualified_table(table_names[side])
         try:

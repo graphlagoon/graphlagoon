@@ -58,7 +58,9 @@ function typesResponse() {
 
 function storeWithContext() {
   const store = useGraphStore()
-  store.currentContext = { id: 'ctx-1' } as any
+  // node_table_name present: a nodeless (triple-store-only) context never
+  // loads progressively — that regime has its own describe block below.
+  store.currentContext = { id: 'ctx-1', node_table_name: 'cat.db.nodes' } as any
   return store
 }
 
@@ -132,6 +134,7 @@ describe('progressive load', () => {
     function contextWith(propertyCount: number | null) {
       return {
         id: 'ctx-1',
+        node_table_name: 'cat.db.nodes',
         node_properties:
           propertyCount === null
             ? undefined
@@ -198,6 +201,48 @@ describe('progressive load', () => {
       store.behaviors.progressiveLoad = 'never'
 
       expect(store.shouldLoadProgressively()).toBe(false)
+    })
+
+    describe('nodeless (triple-store-only) context', () => {
+      // Derived nodes are only ever (node_id, 'Node') — enrichment would
+      // poll /nodes/batch forever for payloads that stay empty.
+      function nodelessContext() {
+        return {
+          id: 'ctx-1',
+          datasource_type: 'sql_warehouse',
+          node_table_name: null,
+          node_properties: [],
+        } as any
+      }
+
+      it('never loads progressively', () => {
+        const store = useGraphStore()
+        store.currentContext = nodelessContext()
+
+        expect(store.shouldLoadProgressively()).toBe(false)
+      })
+
+      it("overrides even progressiveLoad 'always'", () => {
+        const store = useGraphStore()
+        store.currentContext = nodelessContext()
+        store.behaviors.progressiveLoad = 'always'
+
+        expect(store.shouldLoadProgressively()).toBe(false)
+      })
+
+      it('a REST context with null tables is NOT treated as nodeless', () => {
+        const store = useGraphStore()
+        store.currentContext = {
+          id: 'ctx-1',
+          datasource_type: 'rest',
+          node_table_name: null,
+          node_properties: [],
+        } as any
+
+        // REST contexts fall through to the normal heuristic (empty
+        // properties ⇒ assume wide).
+        expect(store.shouldLoadProgressively()).toBe(true)
+      })
     })
 
     it('drives the nodes_mode actually requested', async () => {

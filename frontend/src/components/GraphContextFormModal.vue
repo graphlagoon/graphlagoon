@@ -64,6 +64,8 @@ function emptyForm() {
     datasource_name: '',
     edge_table_name: '',
     node_table_name: '',
+    // Triple-store-only: no node table; the backend derives nodes from edges.
+    noNodeTable: false,
     edge_id_col: 'edge_id',
     src_col: 'src',
     dst_col: 'dst',
@@ -85,6 +87,7 @@ function formFromContext(context: GraphContext) {
     datasource_name: context.datasource_name || '',
     edge_table_name: context.edge_table_name || '',
     node_table_name: context.node_table_name || '',
+    noNodeTable: Boolean(context.edge_table_name && !context.node_table_name),
     edge_id_col: context.edge_structure.edge_id_col,
     src_col: context.edge_structure.src_col,
     dst_col: context.edge_structure.dst_col,
@@ -216,11 +219,18 @@ async function fetchNodeTableSchema() {
   }
 }
 
-/** Both tables chosen (warehouse), or a datasource that needs none. */
+/**
+ * Both tables chosen (warehouse), a nodeless context with its edge table
+ * chosen (discovery then reads relationship types only), or a datasource
+ * that needs no tables at all.
+ */
 const canDiscoverTypes = computed(
   () =>
     !showTableConfig.value ||
-    Boolean(form.value.edge_table_name && form.value.node_table_name),
+    Boolean(
+      form.value.edge_table_name &&
+        (form.value.noNodeTable || form.value.node_table_name),
+    ),
 );
 
 /**
@@ -236,10 +246,14 @@ const showDiscoverButton = computed(
 
 async function discoverTypes() {
   const edgeTable = form.value.edge_table_name;
-  const nodeTable = form.value.node_table_name;
+  const nodeTable = form.value.noNodeTable ? '' : form.value.node_table_name;
   const needsTables = showTableConfig.value;
 
-  if (needsTables && (!edgeTable || !nodeTable)) {
+  if (needsTables && !edgeTable) {
+    schemaDiscoveryError.value = 'Please select the edge table first';
+    return;
+  }
+  if (needsTables && !form.value.noNodeTable && !nodeTable) {
     schemaDiscoveryError.value = 'Please select both edge and node tables first';
     return;
   }
@@ -255,7 +269,7 @@ async function discoverTypes() {
         ? {
             datasource_type: form.value.datasource_type,
             edge_table: edgeTable,
-            node_table: nodeTable,
+            ...(nodeTable ? { node_table: nodeTable } : {}),
             columns: {
               node_id_col: form.value.node_id_col,
               node_type_col: form.value.node_type_col,
@@ -300,6 +314,13 @@ watch(() => form.value.node_table_name, () => {
   if (showTableConfig.value) fetchNodeTableSchema();
 });
 
+// Checking "no node table" clears the selection (and with it the fetched
+// node schema, via the watcher above) so a previously picked table cannot
+// leak into the payload.
+watch(() => form.value.noNodeTable, (noNodeTable) => {
+  if (noNodeTable) form.value.node_table_name = '';
+});
+
 // --- Open/close lifecycle ----------------------------------------------------
 
 watch(
@@ -319,6 +340,15 @@ watch(
       if (props.prefillEdgeTable) form.value.edge_table_name = props.prefillEdgeTable;
       if (props.prefillNodeTable) form.value.node_table_name = props.prefillNodeTable;
       await contextsStore.fetchDatasets();
+      // A warehouse with no `%node%` tables is a triple store — pre-check the
+      // nodeless option so the (empty, required) node select doesn't dead-end
+      // the form.
+      if (
+        !props.prefillNodeTable &&
+        contextsStore.datasets.node_tables.length === 0
+      ) {
+        form.value.noNodeTable = true;
+      }
     }
   },
   { immediate: true },
@@ -385,18 +415,24 @@ async function submit() {
         .filter((col) => !nodeStructuralCols.has(col.name))
         .map((col) => ({ name: col.name, data_type: col.data_type }));
 
+      // Nodeless (triple-store-only): no node table, properties or types are
+      // sent — the backend derives the virtual node table and normalizes the
+      // node metadata itself. node_structure still names the derived columns.
+      const nodeless = form.value.noNodeTable;
+
       saved = await contextsStore.createContext({
         title: form.value.title,
         description: form.value.description || undefined,
         tags,
         datasource_type: form.value.datasource_type,
         edge_table_name: form.value.edge_table_name,
-        node_table_name: form.value.node_table_name,
+        ...(nodeless ? {} : { node_table_name: form.value.node_table_name }),
         edge_structure,
         node_structure,
         edge_properties: edgeProperties.length > 0 ? edgeProperties : undefined,
-        node_properties: nodeProperties.length > 0 ? nodeProperties : undefined,
-        node_types: nodeTypes.length > 0 ? nodeTypes : undefined,
+        node_properties:
+          !nodeless && nodeProperties.length > 0 ? nodeProperties : undefined,
+        node_types: !nodeless && nodeTypes.length > 0 ? nodeTypes : undefined,
         relationship_types: relationshipTypes.length > 0 ? relationshipTypes : undefined,
         default_behaviors: defaultBehaviors,
       });
@@ -507,14 +543,32 @@ async function submit() {
           </div>
 
           <div class="form-group">
-            <label>Node Table *</label>
-            <select v-model="form.node_table_name" class="form-control" required>
+            <label>{{ form.noNodeTable ? 'Node Table' : 'Node Table *' }}</label>
+            <select
+              v-model="form.node_table_name"
+              class="form-control"
+              :required="!form.noNodeTable"
+              :disabled="form.noNodeTable"
+            >
               <option value="" disabled>Select node table...</option>
               <option v-for="table in availableNodeTables" :key="'node-' + table" :value="table">
                 {{ table }}
               </option>
             </select>
-            <span v-if="availableNodeTables.length === 0" class="hint">No node tables available. Generate a graph first.</span>
+            <label class="checkbox-label">
+              <input
+                v-model="form.noNodeTable"
+                type="checkbox"
+                data-testid="no-node-table-checkbox"
+              />
+              No node table — derive nodes from edge endpoints (triple store)
+            </label>
+            <span
+              v-if="availableNodeTables.length === 0 && !form.noNodeTable"
+              class="hint"
+              >No node tables available. Generate a graph first, or check the
+              option above for a triple-store-only table.</span
+            >
           </div>
         </template>
         <template v-else>
@@ -533,7 +587,7 @@ async function submit() {
             <input
               type="text"
               class="form-control"
-              :value="form.node_table_name"
+              :value="form.noNodeTable ? '— (derived from edges)' : form.node_table_name"
               disabled
               title="Table names cannot be changed after creation. Delete and recreate the context to point at a different table."
             />
@@ -645,8 +699,9 @@ async function submit() {
           </div>
         </div>
 
-        <!-- Node Column Mapping -->
-        <div class="column-config-section">
+        <!-- Node Column Mapping — meaningless without a node table: the
+             derived virtual table always exposes node_id/node_type. -->
+        <div v-if="!form.noNodeTable" class="column-config-section">
           <div class="section-header-row">
             <h4>Node Table Columns</h4>
             <span v-if="loadingNodeSchema" class="loading-indicator">Loading...</span>
@@ -888,6 +943,20 @@ async function submit() {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 4px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.checkbox-label input {
+  margin: 0;
 }
 
 .hint-error {

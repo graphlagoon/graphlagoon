@@ -291,9 +291,9 @@ async function quickShare(email: string) {
             <span class="datasource-badge" :data-datasource="resolveDatasourceType(context)">
               {{ resolveDatasourceDescriptor(context).copy.label }}
             </span>
-            <template v-if="context.edge_table_name && context.node_table_name">
+            <template v-if="context.edge_table_name">
               <code>{{ context.edge_table_name }}</code> /
-              <code>{{ context.node_table_name }}</code>
+              <code>{{ context.node_table_name || 'derived from edges' }}</code>
             </template>
             <span v-else class="subtitle-note">
               {{ resolveDatasourceDescriptor(context).copy.tagline }}

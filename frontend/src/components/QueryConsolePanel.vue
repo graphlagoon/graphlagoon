@@ -173,7 +173,12 @@ onMounted(() => {
     }
   }
   if (!consoleStore.sqlQuery && capabilities.value.supportsSql) {
-    const table = graphStore.currentContext?.node_table_name || 'nodes';
+    // Nodeless (triple-store-only) context: the edge table is the only real
+    // table, so it is the only useful seed.
+    const table =
+      graphStore.currentContext?.node_table_name ||
+      graphStore.currentContext?.edge_table_name ||
+      'nodes';
     consoleStore.sqlQuery = `SELECT * FROM ${table} LIMIT 100`;
   }
   // Never leave the console in a mode this datasource cannot run.

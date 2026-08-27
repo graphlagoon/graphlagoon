@@ -25,7 +25,7 @@ import type {
   StylePresetSettings,
   PropertyVisibility,
 } from '@/types/graph';
-import { DEFAULT_PROCEDURAL_BFS_OPTIONS } from '@/types/graph';
+import { DEFAULT_PROCEDURAL_BFS_OPTIONS, isNodelessContext } from '@/types/graph';
 import { api } from '@/services/api';
 import { useClusterStore } from '@/stores/cluster';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
@@ -1069,6 +1069,12 @@ export const useGraphStore = defineStore('graph', () => {
    * exactly the case progressive load exists for.
    */
   function shouldLoadProgressively(): boolean {
+    // Nodeless (triple-store-only) context: derived nodes are only ever
+    // (node_id, 'Node') — there are no properties to defer, and entering the
+    // enrichment loop would poll /nodes/batch forever for payloads that stay
+    // empty. Overrides even 'always': there is nothing to gain, only the loop.
+    if (isNodelessContext(currentContext.value)) return false;
+
     const mode = behaviors.value.progressiveLoad;
     if (mode === 'always') return true;
     if (mode === 'never') return false;

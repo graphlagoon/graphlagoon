@@ -7758,3 +7758,61 @@ Frontend only (no backend changes).
 **Future Enhancements:**
 - Metric values available to label templates / value filters (would require the property write-back approach).
 - Pre-existing issue noticed (out of scope): resetting table filters does not re-call `setTableFilteredIds`, so a stale graph filter can linger until the next filter event.
+
+## [2026-08-27 07:15] - Feature Implemented: Nodeless (Triple-Store-Only) Contexts
+
+**Feature:** `sql_warehouse` contexts can now be created with ONLY an edge/triple table (`src`, `dst`, `relationship_type`) and no node table. The backend derives a virtual node table — `(SELECT node_id AS <node_id_col>, 'Node' AS <node_type_col> FROM (SELECT src ... UNION SELECT dst ...))` — and substitutes it everywhere the physical node table name used to be interpolated, so every existing query path and frontend feature keeps working.
+
+**Requirements:** Support triple stores without a node table; be safe (no `FROM None` SQL, no validation dead-ends) and functional with existing frontend features even where degraded.
+
+**Design Decisions:**
+1. **Derived virtual table, not a physical view:** a SQL fragment returned by `resolve_node_table(context)` slots into every `FROM {node_table} n` call site unchanged — zero changes to `build_node_query`/`fetch_nodes_by_ids`/`execute_graph_query_with_nodes`, only their callers.
+2. **`node_type = 'Node'` constant (user choice):** clean legend/filters, no empty-string types in the UI. Creation normalizes `node_types=['Node']`, `node_properties=[]`.
+3. **Cypher unknown labels → clear error (user choice):** the transpiler registers exactly one label `Node` over the derived fragment (`SQLTableDescriptor(table_or_view_name=<fragment>, schema_name="", filter=None)` — constructed directly because the `table_name` convenience path rsplits on `.` and would mangle a subquery; `filter=None` because the per-type filter is pointless against a constant). A `TranspilerBindingException` on a nodeless context is re-raised as a `ValueError` with a "use unlabeled patterns or :Node" message (existing clean-400 path). Relationship-only queries avoid the derived scan entirely via dead-table elimination (verified empirically).
+4. **Enrichment-loop fix on both sides:** a nodeless context has empty `node_properties`, which used to force progressive load → `nodes_mode:'types'` → `properties_deferred` → endless no-op `/nodes/batch` polling (+ stuck "enriching" indicator, false schema-drift toast, blocked precomputed-graph publish). Fixed independently in the frontend (`shouldLoadProgressively()` returns false for nodeless, overriding even `'always'`) and the backend (`_execute` coerces `nodes_mode` to `"full"` when nodeless).
+5. **Drift skipped on the node side:** a virtual table cannot drift. `compute_drift` emits no node-side findings; the endpoint reports `SchemaDriftTable(table_name=None, reachable=True)`. Edge-side drift stays useful.
+6. **`expand` depth>1 literal seed:** the recursive-CTE seed anchors BFS at the clicked node; nodeless contexts seed with the id literal instead of scanning the (nonexistent) node table — same observable result, no extra scans.
+7. **Frontend nodeless signal is the existing shape:** `datasource_type === 'sql_warehouse' && !node_table_name` (`isNodelessContext()` in types/graph.ts) — no new API field.
+
+**Implementation:**
+
+**Backend Changes:**
+- `api/graphlagoon/services/graph_operations.py` — `derived_node_table_sql()`, `resolve_node_table()`
+- `api/graphlagoon/models/schemas.py` — `GraphContextCreate` requires only the edge table for warehouse and normalizes nodeless metadata; `SchemaDiscoveryRequest` edge-only; `SchemaDriftTable.table_name` Optional
+- `api/graphlagoon/services/schema_drift.py` — `validate_context_tables` accepts `None` node table; `compute_drift` nodeless branch
+- `api/graphlagoon/services/datasource/sql_warehouse.py` — `_execute`/`fetch_nodes`/`_apply_prefilter` thread `resolve_node_table`; `nodes_mode` coercion; `expand` literal seed
+- `api/graphlagoon/services/warehouse.py` — `discover_schema` with `node_table=None` skips node types (not an error)
+- `api/graphlagoon/services/cypher.py` — nodeless schema-provider branch + clear unknown-label error
+- `api/graphlagoon/routers/graph.py` — drift endpoint virtual node side; `api/graphlagoon/routers/graph_contexts.py` — Optional type hint
+
+**Frontend Changes:**
+- `frontend/src/types/graph.ts` — `isNodelessContext()`; `SchemaDriftTable.table_name: string | null`
+- `frontend/src/stores/graph.ts` — `shouldLoadProgressively()` nodeless guard
+- `frontend/src/components/GraphContextFormModal.vue` — "No node table — derive nodes from edge endpoints (triple store)" checkbox (pre-checked when the warehouse lists no node tables), node column mapping hidden, discovery edge-only, nodeless submit payload
+- `frontend/src/components/QueryConsolePanel.vue` — SQL seed falls back to the edge table
+- `frontend/src/views/ContextsView.vue`, `frontend/src/components/ContextInfoPanel.vue` — "derived from edges" display
+
+**Testing:**
+- [x] `api/tests/test_nodeless_context.py` (24 tests: fragment shape, resolve, validators, datasource threading, drift)
+- [x] `api/tests/test_cypher_schema_provider.py` — nodeless transpiler branch (7 tests, real gsql2rsql)
+- [x] `api/tests/test_context_table_validation.py` — endpoint-level nodeless create (2 tests)
+- [x] Frontend: nodeless progressive-load tests, form-modal payload tests, E2E nodeless create flow
+- [x] Full suites green: 953 backend (6 pre-existing failures unrelated, present on clean tree), 1926 frontend unit, 176 E2E
+- [x] `npx vue-tsc --noEmit` clean
+
+**Public Docs:**
+- [x] `docs/guide/getting-started.md` — "Triple-store-only tables (no node table)" subsection (TL;DR block, honest limits, materialized-view advice for large stores)
+- [x] Screenshot scene `getting-started-nodeless-context` in `frontend/e2e/screenshots/generate.ts`; `make docs-screenshots` regenerated
+- [x] `make docs-build` passes
+
+**Performance Considerations:**
+- Each derived-node fetch scans the edge table twice (UNION arms). Acceptable for the target use case; docs advise materializing a nodes view for very large triple stores.
+- Relationship-only Cypher pays nothing (dead-table elimination); `expand` depth 1 and the depth>1 seed touch only the edge table.
+
+**Known Limitations:**
+- Derived nodes have no properties: data table shows ID/Type only, property-driven icons/hive axes/similarity-by-property are inert (all degrade gracefully, verified).
+- Only the `Node` label exists in Cypher for nodeless contexts.
+
+**Future Enhancements:**
+- Optional per-relationship node typing (derive type from participating edge types).
+- A "materialize nodes view" helper action in the warehouse dev tooling.

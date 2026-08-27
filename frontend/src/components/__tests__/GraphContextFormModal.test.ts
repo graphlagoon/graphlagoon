@@ -110,6 +110,54 @@ describe('GraphContextFormModal', () => {
       expect(payload.node_properties).toEqual([{ name: 'name', data_type: 'string' }])
     })
 
+    it('nodeless checkbox omits node table, properties and types from the payload', async () => {
+      vi.mocked(api.createGraphContext).mockResolvedValue(createGraphContext())
+
+      const { getByTestId, container } = renderModal({ open: true, mode: 'create' })
+      await flush()
+
+      await fireEvent.update(titleInput(container), 'Triples')
+      const edgeSelect = container.querySelectorAll('select')[0] as HTMLSelectElement
+      await fireEvent.update(edgeSelect, 'db.edges')
+      await flush()
+
+      // First pick a node table, then check the box — the stale selection
+      // must not leak into the payload.
+      const nodeSelect = container.querySelectorAll('select')[1] as HTMLSelectElement
+      await fireEvent.update(nodeSelect, 'db.nodes')
+      await flush()
+      await fireEvent.click(getByTestId('no-node-table-checkbox'))
+      await flush()
+
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      expect(api.createGraphContext).toHaveBeenCalledTimes(1)
+      const payload = vi.mocked(api.createGraphContext).mock.calls[0][0]
+      expect(payload.node_table_name).toBeUndefined()
+      expect(payload.node_properties).toBeUndefined()
+      expect(payload.node_types).toBeUndefined()
+      expect(payload.edge_table_name).toBe('db.edges')
+      // node_structure still names the derived virtual table's columns.
+      expect(payload.node_structure).toEqual({
+        node_id_col: 'node_id',
+        node_type_col: 'node_type',
+      })
+    })
+
+    it('pre-checks the nodeless option when the warehouse has no node tables', async () => {
+      vi.mocked(api.getDatasets).mockResolvedValue({
+        edge_tables: ['db.triples'],
+        node_tables: [],
+      } as any)
+
+      const { getByTestId } = renderModal({ open: true, mode: 'create' })
+      await flush()
+
+      const checkbox = getByTestId('no-node-table-checkbox') as HTMLInputElement
+      expect(checkbox.checked).toBe(true)
+    })
+
     it('emits saved with the created context', async () => {
       const created = createGraphContext({ id: 'new-ctx' })
       vi.mocked(api.createGraphContext).mockResolvedValue(created)

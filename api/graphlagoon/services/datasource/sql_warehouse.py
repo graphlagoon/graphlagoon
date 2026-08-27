@@ -48,6 +48,7 @@ from graphlagoon.services.graph_operations import (
     fetch_nodes_by_ids,
     merge_column_config,
     parse_tabular_result,
+    resolve_node_table,
 )
 from graphlagoon.services.sql_validation import (
     sanitize_string_literal,
@@ -258,11 +259,13 @@ class SqlWarehouseDatasource(GraphDatasource):
         if not is_valid:
             raise _invalid("INVALID_CTE_PREFILTER", error_msg)
 
+        # resolve_node_table so a user CTE referencing __NODES__ keeps working
+        # on nodeless contexts (expands to the derived virtual node table).
         return apply_cte_prefilter(
             sql,
             cte_prefilter,
             context.edge_table_name,
-            context.node_table_name,
+            resolve_node_table(context),
         )
 
     # ── Execution ────────────────────────────────────────────────────────
@@ -306,10 +309,17 @@ class SqlWarehouseDatasource(GraphDatasource):
         progress_callback=None,
         on_partial=None,
     ) -> GraphResponse:
+        # Nodeless contexts: the derived virtual node table is 2 columns wide,
+        # so "types" and "full" projections are identical — but "full" keeps
+        # properties_deferred=False in the response, so no client (even a stale
+        # one) ever enters the property-enrichment loop for nodes that will
+        # never have properties.
+        if not context.node_table_name:
+            nodes_mode = "full"
         try:
             return await execute_graph_query_with_nodes(
                 warehouse_client=self.warehouse,
-                node_table=context.node_table_name,
+                node_table=resolve_node_table(context),
                 query=query,
                 limit=limit,
                 column_config=self._column_config(context),
@@ -460,14 +470,30 @@ class SqlWarehouseDatasource(GraphDatasource):
                     {edge_type_filter}
             """
 
-            query = f"""
-            WITH RECURSIVE neighbors AS (
+            # The seed's only job is anchoring the BFS at the clicked node. A
+            # nodeless context has no table to anchor against, so seed with the
+            # id literally — an id absent from the edge table just yields zero
+            # edges, the same observable result, without scanning anything.
+            if node_table:
+                seed = f"""
                 SELECT
                     `{node_id_col}` AS node_id,
                     0 AS depth,
                     ARRAY(`{node_id_col}`) AS path
                 FROM {node_table}
                 WHERE `{node_id_col}` = '{safe_node_id}'
+            """
+            else:
+                seed = f"""
+                SELECT
+                    '{safe_node_id}' AS node_id,
+                    0 AS depth,
+                    ARRAY('{safe_node_id}') AS path
+            """
+
+            query = f"""
+            WITH RECURSIVE neighbors AS (
+                {seed}
 
                 UNION ALL
 
@@ -507,7 +533,7 @@ class SqlWarehouseDatasource(GraphDatasource):
 
         nodes, query_ms, _ = await fetch_nodes_by_ids(
             warehouse_client=self.warehouse,
-            node_table=context.node_table_name,
+            node_table=resolve_node_table(context),
             node_ids=node_ids,
             column_config=self._column_config(context),
             node_columns=node_columns,
