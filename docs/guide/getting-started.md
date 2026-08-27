@@ -98,62 +98,15 @@ filtering, labels, and the detail panel later.
 
 ![Contexts](/screenshots/index-contexts.png)
 
-### Triple-store-only tables (no node table)
+### Other table shapes and datasources
 
-::: tip TL;DR
-Check **"No node table — derive nodes from edge endpoints"** when your
-warehouse only has a triple/edge table (`src`, `dst`, `relationship_type`)
-and no node table at all. Graph Lagoon derives the nodes from the edge
-endpoints on the fly.
-
-- **Use it when** the data is a pure triple store — relationships exist as
-  rows, but entities were never materialized into their own table.
-- **Not the tool for** graphs where node attributes matter: derived nodes
-  have **no properties** and a single constant type (`Node`), so labels,
-  property-driven styling and the data table stay id-only. For a very large
-  triple store, materialize a nodes view in the warehouse (one
-  `SELECT src ... UNION SELECT dst` away) and point the context at it —
-  each fetch of derived nodes re-scans the edge table.
-:::
-
-![Create context without a node table](/screenshots/getting-started-nodeless-context.png)
-
-With the checkbox on, the Node Table select and the node column mapping
-disappear; the backend stores the context with no node table and builds a
-virtual one whenever node rows are needed. Everything keeps working —
-exploring, expanding, metrics, communities, saving explorations — with two
-honest limits:
-
-- **Cypher labels**: the only node label is `Node`. `MATCH (a)-[r]->(b)`
-  and `MATCH (a:Node)` work; `MATCH (a:Person)` returns a clear error.
-- **Schema drift**: only the edge table is checked — a derived node table
-  cannot drift.
-
-Type discovery still works with just the edge table selected (it reads
-relationship types; node types come back empty).
-
-### Tables without type columns
-
-::: tip TL;DR
-Pick **None** for "Node Type Column" and/or "Relationship Type Column" when
-a table simply has no type column. Every node then gets the constant type
-`Node`, and every edge the constant type `RELATED_TO`.
-
-- **Use it when** your node table is just ids + attributes, or your edge
-  table is just `src`/`dst` pairs — typing was never part of the schema.
-- **Not the tool for** hiding a type column you do have: with constant
-  types, the legend, type filters and per-type styling all collapse to a
-  single entry, and Cypher accepts only `:Node` / `:RELATED_TO`.
-:::
-
-The constants flow through everywhere a type appears — legend, filters,
-labels (`{relationship_type}` renders `RELATED_TO`), the data table — so
-nothing shows empty strings or blank checkboxes. In Cypher,
-`MATCH (a)-[r]->(b)`, `(a:Node)` and `-[r:RELATED_TO]->` all work; any
-other label or relationship type returns a clear error naming the
-constraint. This combines freely with the
-[no-node-table mode](#triple-store-only-tables-no-node-table) above: a bare
-`src`/`dst` triple table with no types at all is fully supported.
+A messy warehouse is still a graph: an edge-only **triple store** (no node
+table) and tables **without type columns** are both first-class — see
+[Triple Stores & Typeless Tables](./triple-stores.md). And tables are not
+the only backend: a context can also query [Amazon Neptune](./neptune.md)
+(native openCypher) or any [REST connection](./rest-connections.md) your
+deployment registers — the datasource picker at the top of the form shows
+whatever is enabled.
 
 ### 3. Open it and explore
 
@@ -189,8 +142,11 @@ can come back to it or share it as a link (`?exploration=<id>`). Use
   [Databricks Integration](/guide/integration)
 - Deploying for your team: [Deploy as a Databricks App](/guide/databricks-apps)
 - Graph sources beyond SQL tables:
+  [Amazon Neptune](/guide/neptune),
   [REST Connections](/guide/rest-connections),
   [Precomputed Graphs](/guide/precomputed-graphs)
+- Edge-only or typeless tables:
+  [Triple Stores & Typeless Tables](/guide/triple-stores)
 - Every environment variable: [Configuration](/guide/configuration)
 
 ## Prerequisites (for development)

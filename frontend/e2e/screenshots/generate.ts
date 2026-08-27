@@ -305,7 +305,7 @@ const SCENES: Scene[] = [
     // Create-context modal for a triple-store-only warehouse: no node tables
     // in the datasets listing, so the "No node table" checkbox is pre-checked
     // and the node column mapping is hidden.
-    guide: 'getting-started',
+    guide: 'triple-stores',
     scene: 'nodeless-context',
     path: '/contexts',
     prepare: async (page) => {

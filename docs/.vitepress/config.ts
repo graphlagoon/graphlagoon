@@ -39,7 +39,9 @@ export default defineConfig({
       {
         text: 'Data Sources',
         items: [
+          { text: 'Amazon Neptune', link: '/guide/neptune' },
           { text: 'REST Connections', link: '/guide/rest-connections' },
+          { text: 'Triple Stores & Typeless Tables', link: '/guide/triple-stores' },
           { text: 'Precomputed Graphs', link: '/guide/precomputed-graphs' },
           { text: 'Similarity System', link: '/guide/similarity' },
         ],
