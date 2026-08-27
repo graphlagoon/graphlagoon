@@ -145,6 +145,44 @@ describe('GraphContextFormModal', () => {
       })
     })
 
+    it('typeless columns: None selections post "" and disable the types inputs', async () => {
+      vi.mocked(api.createGraphContext).mockResolvedValue(createGraphContext())
+
+      const { getByTestId, container } = renderModal({ open: true, mode: 'create' })
+      await flush()
+
+      await fireEvent.update(titleInput(container), 'Typeless')
+      const selects = () => container.querySelectorAll('select')
+      await fireEvent.update(selects()[0] as HTMLSelectElement, 'db.edges')
+      await flush()
+      await fireEvent.update(selects()[1] as HTMLSelectElement, 'db.nodes')
+      await flush()
+
+      // Column-mapping selects render once live schema is loaded. Pick None
+      // for both type columns. Order: edge src, dst, rel type, edge id, then
+      // node id, node type.
+      const relTypeSelect = selects()[4] as HTMLSelectElement
+      await fireEvent.update(relTypeSelect, '')
+      const nodeTypeSelect = selects()[7] as HTMLSelectElement
+      await fireEvent.update(nodeTypeSelect, '')
+      await flush()
+
+      // Types inputs are disabled and annotated (backend stores constants).
+      const typeInputs = container.querySelectorAll(
+        'input[placeholder*="constant"]',
+      ) as NodeListOf<HTMLInputElement>
+      expect(typeInputs).toHaveLength(2)
+      expect(typeInputs[0].disabled).toBe(true)
+      expect(typeInputs[1].disabled).toBe(true)
+
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const payload = vi.mocked(api.createGraphContext).mock.calls[0][0]
+      expect(payload.node_structure?.node_type_col).toBe('')
+      expect(payload.edge_structure?.relationship_type_col).toBe('')
+    })
+
     it('pre-checks the nodeless option when the warehouse has no node tables', async () => {
       vi.mocked(api.getDatasets).mockResolvedValue({
         edge_tables: ['db.triples'],

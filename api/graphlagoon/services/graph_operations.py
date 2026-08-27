@@ -47,8 +47,20 @@ class QueryExecutionError(Exception):
         super().__init__(message)
 
 
+# Constant types for tables that have no type column (node_type_col="" /
+# relationship_type_col="") and for the derived virtual node table of a
+# nodeless (triple-store-only) context. Injected at the read boundary — the
+# empty column name itself stays stored verbatim, meaning "absent".
+DEFAULT_NODE_TYPE = "Node"
+DEFAULT_RELATIONSHIP_TYPE = "RELATED_TO"
+
+
 def merge_column_config(context) -> dict:
-    """Merge edge_structure and node_structure from context into a single ColumnConfig."""
+    """Merge edge_structure and node_structure from context into a single ColumnConfig.
+
+    An empty string for a type column is semantic ("this table has no such
+    column") and is returned verbatim — never defaulted away.
+    """
     edge_struct = context.edge_structure or {}
     node_struct = context.node_structure or {}
     return {
@@ -75,13 +87,23 @@ def derived_node_table_sql(edge_table: str, column_config: ColumnConfig) -> str:
     Each use scans the edge table twice (one UNION arm per endpoint column);
     acceptable for the target datasets — users with very large triple stores
     should materialize a nodes view and point the context at it instead.
+
+    When the context also has no node type column (``node_type_col=""``) the
+    fragment is a single id column — a ``'Node' AS <alias>`` column would be
+    misfiled as a node *property* by process_nodes_result (the empty name is
+    not in its structural set). The constant type is injected at the read
+    boundary instead (DEFAULT_NODE_TYPE).
     """
     node_id = _quote_identifier(column_config.node_id_col)
-    node_type = _quote_identifier(column_config.node_type_col)
     src = _quote_identifier(column_config.src_col)
     dst = _quote_identifier(column_config.dst_col)
+    if column_config.node_type_col:
+        node_type = _quote_identifier(column_config.node_type_col)
+        projection = f"node_id AS {node_id}, '{DEFAULT_NODE_TYPE}' AS {node_type}"
+    else:
+        projection = f"node_id AS {node_id}"
     return (
-        f"(SELECT node_id AS {node_id}, 'Node' AS {node_type} FROM ("
+        f"(SELECT {projection} FROM ("
         f"SELECT {src} AS node_id FROM {edge_table} "
         f"UNION "
         f"SELECT {dst} AS node_id FROM {edge_table}))"
@@ -103,7 +125,14 @@ def _get_edge_id(
     dst_col: str,
     rel_type_col: str,
 ) -> str:
-    """Get edge_id from row, or generate composite key if edge_id_col is None."""
+    """Get edge_id from row, or generate composite key if edge_id_col is None.
+
+    With an absent relationship type column (``rel_type_col=""``) the
+    composite is ``src@@dst`` — deliberately NOT the constant type: both the
+    subgraph/expand path and the transpiled-Cypher path omit the column from
+    their structs, so the two produce identical ids and dedup stays
+    consistent. Edge ids are opaque to the frontend.
+    """
     if edge_id_col and edge_id_col in row_dict:
         return row_dict[edge_id_col]
     # Generate composite key: {src}@{relationship_type}@{dst}. `.get()`, not direct
@@ -312,12 +341,18 @@ def process_graph_query_result(
                         value = _parse_row_value(value)
                     properties[col] = value
 
-            # Build edge
+            # Build edge. An absent relationship type column (rel_type_col="")
+            # means every edge carries the constant type; a configured column
+            # with NULLs still yields "".
             edge = Edge(
                 edge_id=edge_id,
                 src=src_id or "",
                 dst=dst_id or "",
-                relationship_type=item.get(rel_type_col, ""),
+                relationship_type=(
+                    item.get(rel_type_col, "")
+                    if rel_type_col
+                    else DEFAULT_RELATIONSHIP_TYPE
+                ),
                 properties=properties if properties else None,
             )
             edges.append(edge)
@@ -436,7 +471,12 @@ def harvest_nodes_from_result(
 
                 harvested[node_id] = Node(
                     node_id=node_id,
-                    node_type=item.get(node_type_col, "") or "",
+                    # Absent type column ⇒ constant type (typeless table).
+                    node_type=(
+                        item.get(node_type_col, "") or ""
+                        if node_type_col
+                        else DEFAULT_NODE_TYPE
+                    ),
                     properties=properties if properties else None,
                 )
 
@@ -590,7 +630,12 @@ def process_nodes_result(
 
         node = Node(
             node_id=row_dict.get(node_id_col, "") or "",
-            node_type=row_dict.get(node_type_col, "") or "",
+            # Absent type column ⇒ constant type (typeless table).
+            node_type=(
+                row_dict.get(node_type_col, "") or ""
+                if node_type_col
+                else DEFAULT_NODE_TYPE
+            ),
             properties=properties if properties else None,
         )
         nodes.append(node)

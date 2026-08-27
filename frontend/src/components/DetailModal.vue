@@ -23,12 +23,14 @@ const copiedKey = ref<string | null>(null);
 
 const isVisible = computed(() => props.item !== null);
 
-// Column names from context
+// Column names from context. An empty type column means the table has no
+// such column (types are the backend's constant) — label the row 'type'
+// rather than pretending a column name exists.
 const nodeColumns = computed(() => {
   const struct = graphStore.currentContext?.node_structure;
   return {
     id: struct?.node_id_col || 'node_id',
-    type: struct?.node_type_col || 'node_type',
+    type: struct?.node_type_col || 'type',
   };
 });
 

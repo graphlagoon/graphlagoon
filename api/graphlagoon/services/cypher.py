@@ -16,7 +16,11 @@ from gsql2rsql.renderer.schema_provider import (
 )
 
 from graphlagoon.db.models import GraphContext as GraphContextModel
-from graphlagoon.services.graph_operations import resolve_node_table
+from graphlagoon.services.graph_operations import (
+    DEFAULT_NODE_TYPE,
+    DEFAULT_RELATIONSHIP_TYPE,
+    resolve_node_table,
+)
 
 
 def spark_type_to_python_type(spark_type: str) -> type:
@@ -56,14 +60,16 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
     edge_struct = context.edge_structure or {}
 
     node_id_col = node_struct.get("node_id_col", "node_id")
-    node_type_col = node_struct.get("node_type_col", "node_type")
+    # "" (frontend "None" option) means the table has no such column — for
+    # the type columns this collapses the schema to a single constant
+    # label/relationship type, matching the read-path constants.
+    node_type_col = node_struct.get("node_type_col", "node_type") or None
 
     src_col = edge_struct.get("src_col", "src")
     dst_col = edge_struct.get("dst_col", "dst")
-    relationship_type_col = edge_struct.get(
-        "relationship_type_col", "relationship_type"
+    relationship_type_col = (
+        edge_struct.get("relationship_type_col", "relationship_type") or None
     )
-    # "" (frontend "None" option) means the context has no edge id column.
     edge_id_col = edge_struct.get("edge_id_col", "edge_id") or None
 
     # Convert property columns to dict {name: type}
@@ -97,8 +103,12 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
                 prop_type or "string"
             )
 
-    # Get types
-    edge_types = context.relationship_types or ["RELATED_TO"]
+    # Get types. With no relationship type column, every edge carries the
+    # constant type regardless of what an older context stored.
+    if relationship_type_col is None:
+        edge_types = [DEFAULT_RELATIONSHIP_TYPE]
+    else:
+        edge_types = context.relationship_types or [DEFAULT_RELATIONSHIP_TYPE]
 
     if not context.node_table_name:
         # Nodeless (triple-store-only) context: exactly one label, "Node",
@@ -106,13 +116,15 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
         # set directly — the table_name convenience path rsplits on "." and
         # would mangle a subquery. filter=None: the per-type filter is
         # pointless against a table whose type column is a constant.
-        node_types = ["Node"]
+        node_types = [DEFAULT_NODE_TYPE]
+        node_properties = [EntityProperty(property_name=node_id_col, data_type=str)]
+        if node_type_col:
+            node_properties.insert(
+                0, EntityProperty(property_name=node_type_col, data_type=str)
+            )
         node_schema = NodeSchema(
-            name="Node",
-            properties=[
-                EntityProperty(property_name=node_type_col, data_type=str),
-                EntityProperty(property_name=node_id_col, data_type=str),
-            ],
+            name=DEFAULT_NODE_TYPE,
+            properties=node_properties,
             node_id_property=EntityProperty(property_name=node_id_col, data_type=str),
         )
         schema.add_node(
@@ -124,8 +136,30 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
                 filter=None,
             ),
         )
+    elif node_type_col is None:
+        # Physical node table with no type column: single constant label over
+        # the real table — same shape as the nodeless branch, but the table
+        # is real (and may carry real property columns).
+        node_types = [DEFAULT_NODE_TYPE]
+        node_schema = NodeSchema(
+            name=DEFAULT_NODE_TYPE,
+            properties=[
+                EntityProperty(property_name=prop_name, data_type=data_type)
+                for prop_name, data_type in extra_node_attrs.items()
+            ]
+            + [EntityProperty(property_name=node_id_col, data_type=str)],
+            node_id_property=EntityProperty(property_name=node_id_col, data_type=str),
+        )
+        schema.add_node(
+            node_schema,
+            SQLTableDescriptor(
+                table_name=context.node_table_name,
+                node_id_columns=[node_id_col],
+                filter=None,
+            ),
+        )
     else:
-        node_types = context.node_types or ["Node"]
+        node_types = context.node_types or [DEFAULT_NODE_TYPE]
 
         # Create NodeSchema for each node_type
         for node_type in node_types:
@@ -152,17 +186,20 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
                 ),
             )
 
-    # Edge properties are invariant across type combinations. The edge id
-    # property uses the context's own column name; omitted when the context
-    # has no edge id column.
+    # Edge properties are invariant across type combinations. The edge id and
+    # relationship type properties use the context's own column names; each is
+    # omitted when the context has no such column.
     edge_properties = [
         EntityProperty(property_name=prop_name, data_type=data_type)
         for prop_name, data_type in extra_edge_attrs.items()
     ] + [
-        EntityProperty(property_name=relationship_type_col, data_type=str),
         EntityProperty(property_name=src_col, data_type=str),
         EntityProperty(property_name=dst_col, data_type=str),
     ]
+    if relationship_type_col:
+        edge_properties.append(
+            EntityProperty(property_name=relationship_type_col, data_type=str)
+        )
     if edge_id_col:
         edge_properties.append(EntityProperty(property_name=edge_id_col, data_type=str))
 
@@ -190,7 +227,13 @@ def build_schema_provider(context: GraphContextModel) -> SimpleSQLSchemaProvider
                     SQLTableDescriptor(
                         entity_id=edge_id,
                         table_name=context.edge_table_name,
-                        filter=f"{relationship_type_col} = '{edge_type}'",
+                        # No type column ⇒ no per-type filter (the single
+                        # constant type matches every row).
+                        filter=(
+                            f"{relationship_type_col} = '{edge_type}'"
+                            if relationship_type_col
+                            else None
+                        ),
                         node_id_columns=[src_col, dst_col],
                     ),
                 )
@@ -234,17 +277,40 @@ def transpile_cypher_to_sql(
     try:
         plan = LogicalPlan.process_query_tree(ast, schema)
     except TranspilerBindingException as e:
-        if not context.node_table_name:
-            # Nodeless context: the only registered label is "Node", so a
-            # binding failure is almost always a label the derived virtual
-            # node table cannot have. Say that, instead of the generic
-            # binding error. ValueError is the transpile-input error type the
-            # datasource already turns into a clean 400.
-            raise ValueError(
-                "This context has no node table — node labels other than "
-                ":Node are not available. Use unlabeled patterns like "
-                f"MATCH (a)-[r]->(b), or :Node. ({e})"
+        # When the context can only ever expose constant labels/relationship
+        # types, a binding failure is almost always a label or type the
+        # schema cannot have. Say that, instead of the generic binding error.
+        # ValueError is the transpile-input error type the datasource already
+        # turns into a clean 400.
+        node_struct = context.node_structure or {}
+        edge_struct = context.edge_structure or {}
+        only_node_label = not context.node_table_name or not node_struct.get(
+            "node_type_col", "node_type"
+        )
+        only_rel_type = not edge_struct.get(
+            "relationship_type_col", "relationship_type"
+        )
+        constraints = []
+        if only_node_label:
+            reason = (
+                "no node table"
+                if not context.node_table_name
+                else "no node type column"
             )
+            constraints.append(
+                f"This context has {reason} — node labels other than "
+                f":{DEFAULT_NODE_TYPE} are not available. Use unlabeled "
+                f"patterns like MATCH (a)-[r]->(b), or :{DEFAULT_NODE_TYPE}."
+            )
+        if only_rel_type:
+            constraints.append(
+                "This context's edge table has no relationship type column — "
+                f"relationship types other than :{DEFAULT_RELATIONSHIP_TYPE} "
+                f"are not available. Use -[r]-> or -[r:"
+                f"{DEFAULT_RELATIONSHIP_TYPE}]->."
+            )
+        if constraints:
+            raise ValueError(f"{' '.join(constraints)} ({e})")
         raise
 
     optimize_plan(plan, enabled=True, pushdown_enabled=True)

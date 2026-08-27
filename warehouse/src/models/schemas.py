@@ -61,12 +61,13 @@ class ColumnConfig(BaseModel):
     """Configuration for column names in generated tables."""
     # Node table columns
     node_id_col: str = "node_id"
-    node_type_col: str = "node_type"
+    node_type_col: Optional[str] = "node_type"  # If None/"", table has no type column
     # Edge table columns
     edge_id_col: Optional[str] = "edge_id"  # If None, generates {src}@{rel_type}@{dst}
     src_col: str = "src"
     dst_col: str = "dst"
-    relationship_type_col: str = "relationship_type"
+    # If None/"", table has no relationship type column (typeless triple store)
+    relationship_type_col: Optional[str] = "relationship_type"
 
 
 class DatasetsResponse(BaseModel):

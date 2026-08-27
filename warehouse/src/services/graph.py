@@ -368,11 +368,15 @@ def generate_random_graph(
     # Get column names from config
     cols = request.columns
 
-    # Build node schema
+    # Build node schema. A falsy node_type_col means a typeless node table
+    # (no type column at all) — same skip pattern as edge_id_col below.
     node_schema_fields = [
         StructField(cols.node_id_col, StringType(), False),
-        StructField(cols.node_type_col, StringType(), False),
     ]
+    if cols.node_type_col:
+        node_schema_fields.append(
+            StructField(cols.node_type_col, StringType(), False)
+        )
     if request.include_metadata:
         node_schema_fields.append(StructField("metadata", MapType(StringType(), StringType()), True))
     # Add extra node columns
@@ -388,8 +392,11 @@ def generate_random_graph(
         node_id_map[nx_node] = node_id
         node_type = request.node_types[i % len(request.node_types)]
 
-        # Build row tuple
-        row = [node_id, node_type]
+        # Build row tuple (node_type still feeds metadata naming below even
+        # when the column itself is omitted)
+        row = [node_id]
+        if cols.node_type_col:
+            row.append(node_type)
         if request.include_metadata:
             metadata = {"name": f"{node_type}_{i}", "index": str(i)}
             row.append(metadata)
@@ -409,8 +416,11 @@ def generate_random_graph(
     edge_schema_fields.extend([
         StructField(cols.src_col, StringType(), False),
         StructField(cols.dst_col, StringType(), False),
-        StructField(cols.relationship_type_col, StringType(), False),
     ])
+    if cols.relationship_type_col:
+        edge_schema_fields.append(
+            StructField(cols.relationship_type_col, StringType(), False)
+        )
     if request.include_metadata:
         edge_schema_fields.append(
             StructField("metadata", MapType(StringType(), StringType()), True)
@@ -433,7 +443,9 @@ def generate_random_graph(
         row = []
         if cols.edge_id_col:
             row.append(str(uuid.uuid4()))
-        row.extend([src, dst, relationship_type])
+        row.extend([src, dst])
+        if cols.relationship_type_col:
+            row.append(relationship_type)
         if request.include_metadata:
             metadata = {"weight": str(random.random()), "index": str(i)}
             row.append(metadata)
@@ -454,7 +466,9 @@ def generate_random_graph(
             row = []
             if cols.edge_id_col:
                 row.append(str(uuid.uuid4()))
-            row.extend([node_id, node_id, relationship_type])
+            row.extend([node_id, node_id])
+            if cols.relationship_type_col:
+                row.append(relationship_type)
             if request.include_metadata:
                 metadata = {"weight": str(random.random()), "index": str(edge_idx), "self_edge": "true"}
                 row.append(metadata)
@@ -478,7 +492,9 @@ def generate_random_graph(
                 row = []
                 if cols.edge_id_col:
                     row.append(str(uuid.uuid4()))
-                row.extend([src, dst, relationship_type])
+                row.extend([src, dst])
+                if cols.relationship_type_col:
+                    row.append(relationship_type)
                 if request.include_metadata:
                     metadata = {"weight": str(random.random()), "index": str(edge_idx), "multi_edge": "true"}
                     row.append(metadata)
@@ -501,7 +517,9 @@ def generate_random_graph(
             row = []
             if cols.edge_id_col:
                 row.append(str(uuid.uuid4()))
-            row.extend([src, dst, relationship_type])
+            row.extend([src, dst])
+            if cols.relationship_type_col:
+                row.append(relationship_type)
             if request.include_metadata:
                 metadata = {"weight": str(random.random()), "index": str(edge_idx), "bidirectional": "true"}
                 row.append(metadata)

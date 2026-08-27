@@ -344,7 +344,9 @@ class SqlWarehouseDatasource(GraphDatasource):
         column_config = self._column_config(context)
 
         edge_conditions = []
-        if data.edge_types:
+        # No relationship type column ⇒ no filter to build: every edge carries
+        # the constant type, so any requested type filter matches all rows.
+        if data.edge_types and column_config.relationship_type_col:
             types_str = ", ".join(
                 [f"'{sanitize_string_literal(t)}'" for t in data.edge_types]
             )
@@ -384,7 +386,9 @@ class SqlWarehouseDatasource(GraphDatasource):
 
         edge_type_filter = ""
         final_edge_filter = ""
-        if data.edge_types:
+        # rel_type_col="" means the table has no type column — skip the
+        # filter (the single constant type matches every edge anyway).
+        if data.edge_types and rel_type_col:
             types_str = ", ".join(
                 [f"'{sanitize_string_literal(t)}'" for t in data.edge_types]
             )

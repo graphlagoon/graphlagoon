@@ -132,6 +132,29 @@ honest limits:
 Type discovery still works with just the edge table selected (it reads
 relationship types; node types come back empty).
 
+### Tables without type columns
+
+::: tip TL;DR
+Pick **None** for "Node Type Column" and/or "Relationship Type Column" when
+a table simply has no type column. Every node then gets the constant type
+`Node`, and every edge the constant type `RELATED_TO`.
+
+- **Use it when** your node table is just ids + attributes, or your edge
+  table is just `src`/`dst` pairs — typing was never part of the schema.
+- **Not the tool for** hiding a type column you do have: with constant
+  types, the legend, type filters and per-type styling all collapse to a
+  single entry, and Cypher accepts only `:Node` / `:RELATED_TO`.
+:::
+
+The constants flow through everywhere a type appears — legend, filters,
+labels (`{relationship_type}` renders `RELATED_TO`), the data table — so
+nothing shows empty strings or blank checkboxes. In Cypher,
+`MATCH (a)-[r]->(b)`, `(a:Node)` and `-[r:RELATED_TO]->` all work; any
+other label or relationship type returns a clear error naming the
+constraint. This combines freely with the
+[no-node-table mode](#triple-store-only-tables-no-node-table) above: a bare
+`src`/`dst` triple table with no types at all is fully supported.
+
 ### 3. Open it and explore
 
 Click **Open** on the context card. Load data by running a query
