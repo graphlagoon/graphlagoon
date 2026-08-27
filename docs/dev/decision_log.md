@@ -7849,3 +7849,21 @@ Frontend only (no backend changes).
 - [x] No screenshot change (visual delta is a disabled input placeholder — not worth a scene)
 
 **Known Limitations:** with constant types, legend/filters/per-type styling collapse to a single entry (inherent to the data, not the implementation); Cypher accepts only `:Node`/`:RELATED_TO` on the constrained side.
+
+## [2026-08-27 09:00] - Docs: dedicated guide pages for Amazon Neptune and Triple Stores
+
+**Action:** Two new public guide pages filling gaps the guide had: no page for the Neptune datasource (only env vars buried in the configuration reference) and no dedicated page for triple-store / typeless-table support (the content lived as two subsections inside getting-started).
+
+**Files Created:**
+- [docs/guide/neptune.md](../guide/neptune.md) — TL;DR (analytical vs operational trade-off), enabling env vars, what a Neptune context does/doesn't have (openCypher passthrough; SQL-only features hidden), local emulator (`make dev-neptune`), IAM, cancellation caveat, troubleshooting.
+- [docs/guide/triple-stores.md](../guide/triple-stores.md) — the three degraded table shapes (no node table / no node type column / no relationship type column), the derived virtual node table, constant types `Node`/`RELATED_TO`, Cypher limits, materialized-view performance advice, troubleshooting. Content moved out of getting-started and expanded (scenario table, upgrade path, CREATE VIEW example).
+
+**Files Modified:**
+- `docs/guide/getting-started.md` — the two long subsections replaced by a short "Other table shapes and datasources" pointer; "Where next" links to both new pages.
+- `docs/.vitepress/config.ts` — both pages registered under Data Sources.
+- `docs/guide/configuration.md` — Neptune section links to the new guide page; the SQL-warehouse section no longer claims both tables are required (outdated since the nodeless feature).
+- `frontend/e2e/screenshots/generate.ts` — nodeless-context scene moved to the `triple-stores` slug (naming convention `<guide-slug>-<scene>.png`); old PNG removed, regenerated as `triple-stores-nodeless-context.png`.
+
+**Public Docs:** this IS the public-docs change; `make docs-build` passes (dead-link check covers the new sidebar entries, cross-links and image).
+
+**Testing:** N/A beyond `make docs-build` and `make docs-screenshots` — no runtime code changed.

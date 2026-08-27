@@ -256,15 +256,18 @@ before you trust an answer.
 The graph lives in two tables — an edge table and a node table — and Cypher is
 transpiled to Spark SQL. This is what Databricks mode and the local PySpark
 warehouse serve, and what every context created before datasources were
-pluggable uses. Creating one of these contexts requires naming both tables and
-mapping their structural columns.
+pluggable uses. Creating one of these contexts requires naming the edge table
+and mapping the structural columns; the node table and the type columns are
+optional — an edge-only triple store derives its nodes from the edge
+endpoints (see [Triple Stores & Typeless Tables](/guide/triple-stores)).
 
 ### Amazon Neptune (openCypher)
 
 A native property graph. Set `GRAPH_LAGOON_NEPTUNE_ENDPOINT` to enable it; the
 "Amazon Neptune" option then appears when creating a context. Such a context
 defines **no tables and no column mapping** — openCypher is sent to the cluster
-as-is and its nodes and relationships map straight onto the graph.
+as-is and its nodes and relationships map straight onto the graph. See the
+[Amazon Neptune guide](/guide/neptune) for the full picture.
 
 | Variable | Default | Notes |
 |---|---|---|
