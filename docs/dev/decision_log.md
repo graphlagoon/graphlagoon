@@ -8362,3 +8362,36 @@ admin-area impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-28 23:55] - Fix: two defects found by auditing interaction states
+
+Continued the visual audit into the states a user actually works in —
+selection, right-click menu, Data Table with its filter popover, Node Details.
+
+- **Query panel copy** (#22): the transpiler option rendered as
+  `Trust transpiled SQL(trust the experimental gsql2rsql )` — the two spans sat
+  in a flex label, which drops the whitespace between them, and the hint text
+  only repeated the label. It is now a checkbox with the explanation beneath:
+  what running it does, and when to turn it off.
+- **Node Details metrics** (#23): `border-bottom: 1px dotted` on a value with
+  `flex: 1` drew the dotted line across the entire row, so "Degree 5.00" read
+  as an empty form field. `text-decoration: underline dotted` hugs the text.
+
+**Checked and left alone:** the right-click menu, the Data Table and its filter
+popover, and node selection. A screenshot appeared to show that clicking a node
+did not open Node Details; measuring the panel's rect after the click proved it
+does (`x: 980, width: 300`) — the earlier click had simply missed the node.
+Worth recording: the screenshot was the misleading evidence and the measurement
+was the correct one, the reverse of the usual order.
+
+**Files modified:** `frontend/src/components/GraphQueryPanel.vue`,
+`frontend/src/components/SidePanel.vue`.
+
+**Testing:** 2167 unit, 196 e2e; both fixes re-screenshotted. Docs screenshots
+regenerated.
+
+**Public Docs:** screenshots only. **Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---

@@ -54,6 +54,18 @@ Every panel was opened and looked at, not just tested:
 | 20 | Context Info broke ordinary words mid-token (`word-break: break-all` rendered "the produc / ts that connect them"). | **fixed**: `word-break: normal; overflow-wrap: anywhere` — long ids still break, prose does not |
 | 21 | The Metrics panel's "Visual Mapping" tab wrapped to two lines, making that tab taller than its two neighbours. | **fixed**: `white-space: nowrap` with tighter padding; the row fits |
 
+## 2d. Interaction states (selection, context menu, table, node details)
+
+| # | Finding | Status |
+|---|---------|--------|
+| 22 | The Query panel's transpiler option rendered as `Trust transpiled SQL(trust the experimental gsql2rsql )` — two spans glued together inside a flex label, and the hint only repeated the label instead of saying what the box does. | **fixed**: the explanation is a paragraph under the checkbox and says what happens when it is on and when to turn it off |
+| 23 | In Node Details, `border-bottom: 1px dotted` on a `flex: 1` value stretched the dotted line across the whole row, so every metric read like an empty form field. | **fixed**: `text-decoration: underline dotted`, which hugs the text |
+
+Checked and found correct (no change): the right-click menu, the Data Table
+and its filter popover, and node selection — clicking a node *does* open Node
+Details; an earlier screenshot that seemed to show otherwise was a mis-aimed
+click, confirmed by measuring the panel's rect.
+
 ## 3. Remaining backlog, in order
 
 1. **A real dirty state** (#6, remainder) — the breadcrumb still cannot say
@@ -67,7 +79,7 @@ Every panel was opened and looked at, not just tested:
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
 #15–#17 (phone-width responsiveness of the list pages, modals and toolbar),
 #6 (save state as a control, rename in the list), #18–#21 (panel chrome found
-by looking at every panel).
+by looking at every panel), #22–#23 (interaction states).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 
