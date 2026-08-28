@@ -675,6 +675,152 @@ snapshots after the commit, in the same never-raises style as
 
 ---
 
+### 27. 🟢 Derived Node Table Scans the Edge Table Twice
+
+**Location:** [api/graphlagoon/services/graph_operations.py](api/graphlagoon/services/graph_operations.py)
+(`derived_node_table_sql`)
+
+**Issue:**
+```sql
+(SELECT node_id, 'Node' AS node_type FROM (
+    SELECT src AS node_id FROM {edge_table}
+    UNION
+    SELECT dst AS node_id FROM {edge_table}
+))
+```
+Every fetch against a nodeless (triple-store-only) context's virtual node
+table reads the edge table twice, once per `UNION` arm. A single-scan
+equivalent is available on Spark/Databricks —
+`SELECT explode(array(src, dst)) AS node_id FROM {edge_table}` (dedup via
+`SELECT DISTINCT` over that, or leave dedup to the caller, which already
+joins against a `VALUES` id list) — but it was not used, to keep the
+fragment portable dialect-agnostic SQL rather than a Spark builtin.
+
+Disclosed to users in the [Triple Stores guide](/guide/triple-stores.md#performance)
+(materialize a view for large triple stores) and in the docstring, but not
+actually fixed, and not covered by a performance test — the ~40% cost
+difference claimed for the `VALUES`-join pattern elsewhere in this file
+(`build_node_query`) was never measured for this path.
+
+**Recommendation:**
+Benchmark the `explode(array(...))` rewrite against a large synthetic
+triple table (the dev generator's typeless mode from #30 makes this easy
+to set up) before switching — the current form's SQL-portability is a real
+property to weigh against a single-scan gain.
+
+**Effort:** Small (half a day, mostly benchmarking)
+
+---
+
+### 28. 🟢 `_get_edge_id` Composite Collides for Parallel Edges Without Full Structural Columns
+
+**Location:** [api/graphlagoon/services/graph_operations.py](api/graphlagoon/services/graph_operations.py)
+(`_get_edge_id`)
+
+**Issue:**
+With no `edge_id_col`, the edge id is synthesized as
+`{src}@{relationship_type}@{dst}`. A typeless edge table
+(`relationship_type_col=""`) drops the middle term, so the composite
+becomes `src@@dst` for every edge — **any two parallel edges between the
+same node pair collide onto one id.** The frontend then treats them as one
+edge (last-write-wins in whatever downstream map keys on `edge_id`).
+
+This is not a new failure mode — `edge_id_col=""` with a single
+relationship type already collided the same way — but the typeless-columns
+feature (`docs/dev/decision_log.md`, 2026-08-27 08:30 entry) is the first
+place that makes "no edge id AND no relationship type" a first-class,
+UI-reachable, documented configuration, so the collision now has a real
+audience: any triple-store-only context whose warehouse also lacks an edge
+id column, generating true multi-edges (the dev generator's
+`multi_edges_max_count`/`multi_edges_ratio` produce exactly this shape).
+
+**Recommendation:**
+Either (a) document the limitation explicitly in the
+[Triple Stores guide](/guide/triple-stores.md) ("parallel edges without an
+edge id column are indistinguishable"), or (b) fold a row-sequence/hash
+component into the composite when both columns are absent, at the cost of
+the id no longer being derivable from `src`/`dst` alone (breaks the
+implicit assumption in a few places that recomputing `_get_edge_id` from
+just src/dst/type reproduces the same id). (a) is cheaper and honest; (b)
+is the real fix if this proves to matter in practice.
+
+**Effort:** Trivial for (a); Small for (b)
+
+---
+
+### 29. 🟢 Cypher Binding-Error Wrapper Can Mask Unrelated Errors on Constrained Contexts
+
+**Location:** [api/graphlagoon/services/cypher.py](api/graphlagoon/services/cypher.py)
+(`transpile_cypher_to_sql`)
+
+**Issue:**
+On a nodeless or typeless context, *any* `TranspilerBindingException` —
+not just an unknown label/relationship-type — is rewritten into "no node
+table / no type column, use :Node / :RELATED_TO". A query that fails to
+bind for an unrelated reason (e.g. `a.nonexistent_property`, a malformed
+pattern gsql2rsql reports as a binding error) gets the same misleading
+message on these contexts, pointing the user at the wrong fix.
+
+Accepted trade-off when the nodeless work introduced the wrapper (same
+note applies here): the common case (an unavailable label/type) is common
+enough that the better message for *that* case was judged worth the risk
+of a wrong message in the uncommon case. Not revisited when the wrapper
+was generalized to cover typeless columns too, which widens how often the
+wrapper fires (four independent conditions can now trigger it instead of
+one).
+
+**Recommendation:**
+Narrow the rewrite to binding exceptions whose message actually names an
+unknown node/edge label (gsql2rsql's `TranspilerBindingException` message
+format is stable enough to pattern-match — see the "Available node types:"
+suffix observed in `test_cypher_schema_provider.py`), and re-raise
+unchanged otherwise.
+
+**Effort:** Small (half a day, needs a few negative-case tests)
+
+---
+
+### 30. 🟢 Dev-Generator Typeless-Column Support Has No Automated Test Coverage
+
+**Location:** [warehouse/src/services/graph.py](warehouse/src/services/graph.py),
+[warehouse/src/models/schemas.py](warehouse/src/models/schemas.py)
+
+**Issue:**
+The `warehouse/` package (the local PySpark random-graph generator used by
+`make dev`'s "DEV Generator" and `/api/dev/random-graph`) had **zero test
+coverage before this change** (`warehouse/tests/` contains only
+`test_statements_async.py`, unrelated to graph generation) and still has
+none after it. The row-building logic touches five separate code paths
+(base edges, self-edges, multi-edges, bidirectional edges, and the node
+schema/rows), each independently gated on
+`if cols.relationship_type_col:` / `if cols.node_type_col:` — a plausible
+place for one path to be missed or misindented (a `replace_all` edit here
+initially broke indentation in three of the five and was caught only by
+re-reading the diff, not by a test).
+
+**Verified manually (2026-08-28):** ran `generate_random_graph` directly
+against a real local `SparkSession` (`barabasi_albert`, 30 nodes,
+multi-edges + self-edges + bidirectional-edges all enabled,
+`ColumnConfig(node_type_col="", relationship_type_col="")`) and read the
+written Parquet back. Node schema is exactly `{node_id, metadata}`, edge
+schema exactly `{edge_id, src, dst, metadata}` — `node_type` and
+`relationship_type` correctly absent from every one of the five row-build
+paths, 127 edges and 30 nodes written without error. Confirms the earlier
+`ast.parse` syntax check was matched by correct runtime behavior; the gap
+that remains is the missing *automated* regression test, not unverified
+code.
+
+**Recommendation:**
+Add a unit test for `generate_graph` covering
+`ColumnConfig(node_type_col=None, relationship_type_col=None)` (asserting
+the resulting DataFrames' schemas), using a local `SparkSession` fixture —
+none exists in `warehouse/tests/` yet, so this is also the first step
+toward testing the generator at all.
+
+**Effort:** Small (mostly the missing Spark test fixture)
+
+---
+
 ## Shared Technical Debts
 
 ### 17. 🟡 Inconsistent Naming Between Frontend and Backend
@@ -968,6 +1114,10 @@ const checkStabilization = () => {
 | 21 | 🟢 Medium | Architecture | No GraphQL support | High |
 | 22 | 🔴 Critical | Performance | No pagination | High |
 | 23 | 🟡 High | Performance | Force layout runs continuously | Medium |
+| 27 | 🟢 Medium | Backend | Derived node table scans edge table twice | Small |
+| 28 | 🟢 Medium | Backend | `_get_edge_id` composite collides for parallel edges | Trivial–Small |
+| 29 | 🟢 Medium | Backend | Cypher binding-error wrapper can mask unrelated errors | Small |
+| 30 | 🟢 Medium | Backend | Dev-generator typeless columns lack automated tests (manually verified) | Small |
 
 ## Prioritization Recommendations
 
