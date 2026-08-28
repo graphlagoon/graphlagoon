@@ -14,8 +14,9 @@ import { useCommunityStore } from '@/stores/community';
 import { useDrawerResize } from '@/composables/useDrawerResize';
 import { useDebouncedModel } from '@/composables/useDebouncedModel';
 import DatePicker from 'primevue/datepicker';
+import type { ComputedMetric } from '@/types/metrics';
 import {
-  type ColMeta, type CatOption, type ExtraColumn,
+  type ColMeta, type CatOption, type ExtraColumn, type ColType,
   detectType, collectOptions, buildColMeta, buildNodeColumns,
   flattenNodeRows, initFilters, mergeFilters, coerceValue, decorateRows,
 } from '@/composables/useTableColumns';
@@ -95,11 +96,31 @@ const communityColOptions = computed<CatOption[]>(() => {
   return opts;
 });
 
+// Column type follows the metric's value type. Boolean metrics become a
+// categorical column: categorical filters compare strings, so the getter
+// stringifies them ('true' / 'false'); null stays null → '(empty)'.
+const BOOL_OPTIONS: CatOption[] = [
+  { label: 'true', value: 'true' },
+  { label: 'false', value: 'false' },
+  { label: '(empty)', value: null },
+];
+function metricColumn(m: ComputedMetric): ExtraColumn {
+  const type: ColType = m.valueType === 'number' ? 'numeric'
+    : m.valueType === 'boolean' ? 'categorical' : 'text';
+  return {
+    meta: buildColMeta(metricField(m.id), m.name, type, type === 'categorical' ? BOOL_OPTIONS : undefined),
+    get: (id: string) => {
+      const v = m.values.get(id);
+      if (v === undefined || v === null) return null;
+      return m.valueType === 'boolean' ? String(v) : v;
+    },
+  };
+}
+
 const nodeExtraCols = computed<ExtraColumn[]>(() => {
-  const extras: ExtraColumn[] = metricsStore.tableNodeMetrics.map(m => ({
-    meta: buildColMeta(metricField(m.id), m.name, 'numeric'),
-    get: (id: string) => m.values.get(id) ?? null,
-  }));
+  // Touch the version so a same-size recompute refreshes the column getters.
+  void metricsStore.metricsVersion;
+  const extras: ExtraColumn[] = metricsStore.tableNodeMetrics.map(metricColumn);
   if (communityStore.tableColumnEnabled && communityStore.hasResults) {
     extras.push({
       meta: buildColMeta('community', 'Community', 'categorical', communityColOptions.value),
@@ -113,12 +134,10 @@ const nodeExtraCols = computed<ExtraColumn[]>(() => {
   return extras;
 });
 
-const edgeExtraCols = computed<ExtraColumn[]>(() =>
-  metricsStore.tableEdgeMetrics.map(m => ({
-    meta: buildColMeta(metricField(m.id), m.name, 'numeric'),
-    get: (id: string) => m.values.get(id) ?? null,
-  })),
-);
+const edgeExtraCols = computed<ExtraColumn[]>(() => {
+  void metricsStore.metricsVersion;
+  return metricsStore.tableEdgeMetrics.map(metricColumn);
+});
 
 // ─── Flattened data (properties as top-level fields for PrimeVue) ───
 

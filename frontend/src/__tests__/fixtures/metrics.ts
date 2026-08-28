@@ -6,6 +6,7 @@ export function createComputedMetric(overrides: Partial<ComputedMetric> = {}): C
     name: 'Test Degree',
     algorithmId: 'degree',
     target: 'node',
+    valueType: 'number',
     values: new Map([['node-1', 5], ['node-2', 3], ['node-3', 1]]),
     min: 1,
     max: 5,

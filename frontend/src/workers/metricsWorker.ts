@@ -170,6 +170,7 @@ async function runComputation(
         name: outputName,
         algorithmId,
         target,
+        valueType: 'number',
         values: Array.from(values.entries()),
         min: stats.min,
         max: stats.max,

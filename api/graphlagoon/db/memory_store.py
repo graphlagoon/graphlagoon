@@ -61,6 +61,7 @@ class MemoryGraphContext:
     default_behaviors: Dict[str, Any] = field(default_factory=dict)
     cluster_programs: List[Dict[str, Any]] = field(default_factory=list)
     context_menu_actions: List[Dict[str, Any]] = field(default_factory=list)
+    metric_definitions: List[Dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     shares: List[MemoryGraphContextShare] = field(default_factory=list)
@@ -155,6 +156,7 @@ class InMemoryStore:
         default_behaviors: Optional[Dict[str, Any]] = None,
         cluster_programs: Optional[List[Dict[str, Any]]] = None,
         context_menu_actions: Optional[List[Dict[str, Any]]] = None,
+        metric_definitions: Optional[List[Dict[str, Any]]] = None,
     ) -> MemoryGraphContext:
         """Create a new graph context."""
         context_id = uuid4()
@@ -184,6 +186,7 @@ class InMemoryStore:
             default_behaviors=default_behaviors or {},
             cluster_programs=cluster_programs or [],
             context_menu_actions=context_menu_actions or [],
+            metric_definitions=metric_definitions or [],
         )
         self.graph_contexts[context_id] = context
         return context

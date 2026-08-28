@@ -70,6 +70,10 @@ declare global {
       precomputed_graphs_enabled?: boolean;
       /** Whether this server serves named style presets. */
       style_presets_enabled?: boolean;
+      /** Custom (writer-authored) metrics feature — GRAPH_LAGOON_CUSTOM_METRICS_ENABLED. */
+      custom_metrics_enabled?: boolean;
+      /** Whether `auto_run` custom metrics may evaluate on graph load. */
+      custom_metrics_auto_run_enabled?: boolean;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.

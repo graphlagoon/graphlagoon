@@ -13,6 +13,7 @@
  */
 import type { StylePresetSettings } from './graph';
 import type { ContextMenuActionConfig } from './contextMenuActions';
+import type { CustomMetricDefinition } from './customMetrics';
 
 export const PORTABLE_EXPORT_VERSION = 1;
 
@@ -46,4 +47,11 @@ export interface PortableContextMenuActions {
   export_version: number;
   source: PortableSourceSchema;
   actions: ContextMenuActionConfig[];
+}
+
+export interface PortableCustomMetrics {
+  graphlagoon_export: 'custom-metrics';
+  export_version: number;
+  source: PortableSourceSchema;
+  metrics: CustomMetricDefinition[];
 }

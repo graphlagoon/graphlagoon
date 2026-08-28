@@ -134,9 +134,9 @@ def add_exception_handlers(app: FastAPI, show_error_details: bool = True) -> Non
                 "detail": {
                     "error": {
                         "code": f"HTTP_{exc.status_code}",
-                        "message": str(exc.detail)
-                        if exc.detail
-                        else "An error occurred",
+                        "message": (
+                            str(exc.detail) if exc.detail else "An error occurred"
+                        ),
                         "details": {},
                     }
                 }
@@ -262,6 +262,10 @@ def create_frontend_router(
             "databricks_mode": settings.databricks_mode,
             "precomputed_graphs_enabled": settings.precomputed_graphs_enabled,
             "style_presets_enabled": settings.style_presets_enabled,
+            # Custom metrics: feature on/off, and whether auto_run definitions may
+            # evaluate on graph load (false ⇒ Recompute only).
+            "custom_metrics_enabled": settings.custom_metrics_enabled,
+            "custom_metrics_auto_run_enabled": settings.custom_metrics_auto_run_enabled,
             "datasources": available_datasource_types(),
             "datasource_connections": available_datasource_connections(),
             "router_base": router_base,
@@ -383,9 +387,7 @@ def _prepare_precomputed_graph_storage(settings, *, verbose: bool) -> None:
 
     Path(settings.precomputed_graphs_dir).mkdir(parents=True, exist_ok=True)
     if verbose:
-        logger.info(
-            "Precomputed graph directory: %s", settings.precomputed_graphs_dir
-        )
+        logger.info("Precomputed graph directory: %s", settings.precomputed_graphs_dir)
 
     if settings.databricks_mode:
         logger.warning(

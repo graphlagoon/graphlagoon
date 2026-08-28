@@ -38,6 +38,10 @@ async def get_config(request: Request):
         # additionally needs dev mode, which the frontend gates on separately.
         "precomputed_graphs_enabled": settings.precomputed_graphs_enabled,
         "style_presets_enabled": settings.style_presets_enabled,
+        # Custom metrics: feature on/off, and whether auto_run definitions may
+        # evaluate on graph load (false ⇒ Recompute only).
+        "custom_metrics_enabled": settings.custom_metrics_enabled,
+        "custom_metrics_auto_run_enabled": settings.custom_metrics_auto_run_enabled,
         # Which backends this server can serve. Drives whether the context
         # creation form offers a datasource beyond the SQL warehouse; what each
         # backend can *do* is the frontend's own matrix.

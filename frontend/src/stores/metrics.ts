@@ -24,7 +24,10 @@ import {
   DEFAULT_VISUAL_MAPPING,
   getDefaultWorkerPoolConfig,
   calculateStats,
+  isNumericMetric,
 } from '@/types/metrics';
+import type { MetricValue } from '@/types/metrics';
+import type { MetricResolver } from '@/utils/labelFormatter';
 import { useGraphStore } from './graph';
 
 export const useMetricsStore = defineStore('metrics', () => {
@@ -45,6 +48,13 @@ export const useMetricsStore = defineStore('metrics', () => {
 
   /** Metric ids exposed as virtual columns in the Data Table (session-only) */
   const tableMetricIds = ref<Set<string>>(new Set());
+
+  /**
+   * Bumped whenever a metric's VALUES change (complete / upsert / delete /
+   * clear). Consumers that key their watchers on `computedMetrics.size` miss a
+   * recompute that replaces a same-size Map — watch this instead.
+   */
+  const metricsVersion = ref(0);
 
   // ============================================================================
   // Visual Mapping Configuration
@@ -124,6 +134,7 @@ export const useMetricsStore = defineStore('metrics', () => {
       name: 'Degree',
       algorithmId: '__builtin',
       target: 'node',
+      valueType: 'number',
       values: new Map(degrees),
       min: stats.min,
       max: stats.max,
@@ -170,6 +181,12 @@ export const useMetricsStore = defineStore('metrics', () => {
     return [...builtIn, ...userComputed];
   });
 
+  /** Node metrics whose values are numbers — the only ones that can drive size */
+  const numericNodeMetrics = computed(() => nodeMetrics.value.filter(isNumericMetric));
+
+  /** Edge metrics whose values are numbers — the only ones that can drive width */
+  const numericEdgeMetrics = computed(() => edgeMetrics.value.filter(isNumericMetric));
+
   /** Node metrics flagged to appear as Data Table columns */
   const tableNodeMetrics = computed(() =>
     nodeMetrics.value.filter((m) => tableMetricIds.value.has(m.id))
@@ -180,19 +197,49 @@ export const useMetricsStore = defineStore('metrics', () => {
     edgeMetrics.value.filter((m) => tableMetricIds.value.has(m.id))
   );
 
-  /** Currently selected node size metric (checks built-in + user-computed) */
+  /** Currently selected node size metric (checks built-in + user-computed).
+   * Null when the selected metric is not numeric — the renderer's contract is
+   * Map<string, number>, and a string metric cannot size anything. */
   const nodeSizeMetric = computed(() => {
     const id = visualMapping.value.nodeSize.metricId;
     if (!id) return null;
-    return builtInMetrics.value.get(id) || computedMetrics.value.get(id) || null;
+    const m = builtInMetrics.value.get(id) || computedMetrics.value.get(id) || null;
+    return m && isNumericMetric(m) ? m : null;
   });
 
   /** Currently selected edge weight metric (checks built-in + user-computed) */
   const edgeWeightMetric = computed(() => {
     const id = visualMapping.value.edgeWeight.metricId;
     if (!id) return null;
-    return builtInMetrics.value.get(id) || computedMetrics.value.get(id) || null;
+    const m = builtInMetrics.value.get(id) || computedMetrics.value.get(id) || null;
+    return m && isNumericMetric(m) ? m : null;
   });
+
+  /** Look a metric up by id (built-in first, then computed). */
+  function getMetric(metricId: string): ComputedMetric | null {
+    return builtInMetrics.value.get(metricId) || computedMetrics.value.get(metricId) || null;
+  }
+
+  /**
+   * Look a metric up by display name within a target. First match wins in
+   * list order (built-ins, then computed in insertion order): custom metric
+   * names are unique per context, and algorithm runs carry a timestamp.
+   */
+  function findMetricByName(target: 'node' | 'edge', name: string): ComputedMetric | null {
+    const list = target === 'node' ? nodeMetrics.value : edgeMetrics.value;
+    return list.find((m) => m.name === name) ?? null;
+  }
+
+  /**
+   * Resolver handed to the label formatter for `{metric:<ref>}` placeholders.
+   * `ref` may be a metric id or a metric name. Reads `.value` at call time, so
+   * a render pass triggered by `metricsVersion` sees fresh values.
+   */
+  const metricResolver: MetricResolver = (target, itemId, ref) => {
+    const metric = getMetric(ref) ?? findMetricByName(target, ref);
+    if (!metric || metric.target !== target) return undefined;
+    return metric.values.get(itemId) as MetricValue | undefined;
+  };
 
   /** Whether any computation is currently running */
   const hasActiveComputations = computed(() => {
@@ -243,6 +290,7 @@ export const useMetricsStore = defineStore('metrics', () => {
 
     // Store the computed metric
     computedMetrics.value.set(metric.id, metric);
+    metricsVersion.value++;
 
     // Move to history
     if (computation) {
@@ -485,6 +533,15 @@ export const useMetricsStore = defineStore('metrics', () => {
   // ============================================================================
 
   /**
+   * Insert or replace a metric that did not go through the computation queue
+   * (custom metrics evaluated by their own runner). No history entry.
+   */
+  function upsertMetric(metric: ComputedMetric): void {
+    computedMetrics.value.set(metric.id, metric);
+    metricsVersion.value++;
+  }
+
+  /**
    * Delete a computed metric (built-in metrics cannot be deleted)
    */
   function deleteMetric(metricId: string): void {
@@ -498,7 +555,7 @@ export const useMetricsStore = defineStore('metrics', () => {
       visualMapping.value.edgeWeight.metricId = null;
     }
 
-    computedMetrics.value.delete(metricId);
+    if (computedMetrics.value.delete(metricId)) metricsVersion.value++;
     tableMetricIds.value.delete(metricId);
   }
 
@@ -507,6 +564,7 @@ export const useMetricsStore = defineStore('metrics', () => {
    */
   function clearAllMetrics(): void {
     computedMetrics.value.clear();
+    metricsVersion.value++;
     visualMapping.value.nodeSize.metricId = null;
     visualMapping.value.edgeWeight.metricId = null;
     for (const id of Array.from(tableMetricIds.value)) {
@@ -631,6 +689,7 @@ export const useMetricsStore = defineStore('metrics', () => {
     activeComputations,
     computationHistory,
     tableMetricIds,
+    metricsVersion,
     visualMapping,
     workerPoolConfig,
     resourceMetrics,
@@ -640,6 +699,11 @@ export const useMetricsStore = defineStore('metrics', () => {
     builtInMetrics,
     nodeMetrics,
     edgeMetrics,
+    numericNodeMetrics,
+    numericEdgeMetrics,
+    getMetric,
+    findMetricByName,
+    metricResolver,
     tableNodeMetrics,
     tableEdgeMetrics,
     nodeSizeMetric,
@@ -672,6 +736,7 @@ export const useMetricsStore = defineStore('metrics', () => {
     setResourceMetrics,
 
     // Metric management
+    upsertMetric,
     deleteMetric,
     clearAllMetrics,
     clearHistory,

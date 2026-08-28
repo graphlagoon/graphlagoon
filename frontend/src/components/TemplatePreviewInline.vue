@@ -35,6 +35,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue';
 import { useGraphStore } from '@/stores/graph';
+import { useMetricsStore } from '@/stores/metrics';
 import { formatLabel, validateTemplate } from '@/utils/labelFormatter';
 import type { Node, Edge } from '@/types/graph';
 
@@ -46,6 +47,7 @@ const props = defineProps<{
 }>();
 
 const graphStore = useGraphStore();
+const metricsStore = useMetricsStore();
 
 // Debounced copy of the template — validation/formatting run at most every
 // 400ms while typing (same cadence the panel uses for store updates)
@@ -82,7 +84,11 @@ const samples = computed<(Node | Edge)[]>(() => {
 
 const previews = computed(() => {
   if (debouncedTemplate.value.trim() === '' || !validation.value.valid) return [];
-  return samples.value.map((item) => formatLabel(debouncedTemplate.value, props.target, item));
+  // Touch the version so a metric recompute refreshes the preview.
+  void metricsStore.metricsVersion;
+  return samples.value.map((item) =>
+    formatLabel(debouncedTemplate.value, props.target, item, { metrics: metricsStore.metricResolver }),
+  );
 });
 </script>
 

@@ -29,6 +29,7 @@ import { DEFAULT_PROCEDURAL_BFS_OPTIONS, isNodelessContext, LAYOUT_ALGORITHMS } 
 import { api } from '@/services/api';
 import { useClusterStore } from '@/stores/cluster';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
+import { useCustomMetricsStore } from './customMetrics';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
@@ -1038,6 +1039,10 @@ export const useGraphStore = defineStore('graph', () => {
       // Configurable right-click menu actions are context-level too.
       useContextMenuActionsStore().hydrateFromContext(
         currentContext.value.context_menu_actions,
+      );
+      // Writer-authored custom metrics are context-level too (readers get []).
+      useCustomMetricsStore().hydrateFromContext(
+        currentContext.value.metric_definitions,
       );
       // Deliberately NOT an automatic schema-drift check here: two DESCRIBEs on
       // every single graph open is real cost for an event (drift) that is rare.

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 from typing import Optional, Any, Literal, TypeAlias
 from uuid import UUID
 from datetime import datetime
@@ -347,6 +347,68 @@ EdgeColumnConfig = EdgeStructure
 NodeColumnConfig = NodeStructure
 
 
+# Custom (writer-authored) metrics
+MetricTarget = Literal["node", "edge"]
+MetricValueType = Literal["number", "string", "boolean"]
+
+METRIC_DEFINITION_MAX_CODE = 20_000
+METRIC_DEFINITION_MAX_NAME = 80
+METRIC_DEFINITION_MAX_DESCRIPTION = 500
+
+
+class MetricDefinition(BaseModel):
+    """A writer-authored JavaScript metric evaluated per node/edge.
+
+    The code runs only in the frontend, inside a sandboxed Web Worker with a
+    hard timeout. The server never executes it — it stores the definition and
+    validates its shape. Definitions are returned only to users with write
+    access on the context (see routers.graph_contexts.context_to_response), so
+    read-only users never receive, let alone run, another user's code.
+    """
+
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-]+$")
+    name: str = Field(min_length=1, max_length=METRIC_DEFINITION_MAX_NAME)
+    target: MetricTarget
+    value_type: MetricValueType = "number"
+    # Body of `function(item, ctx) { ... }`.
+    code: str = Field(min_length=1, max_length=METRIC_DEFINITION_MAX_CODE)
+    description: Optional[str] = Field(
+        default=None, max_length=METRIC_DEFINITION_MAX_DESCRIPTION
+    )
+    # Evaluate automatically whenever the graph loads (in every writer's
+    # browser). Off by default: nothing runs without someone asking. Subject
+    # to the server-wide custom_metrics_auto_run_enabled flag.
+    auto_run: StrictBool = False
+    # Show the metric as a Data Table column (context-level, like the
+    # definition itself). Algorithm metrics keep their session-only toggle.
+    show_in_table: StrictBool = False
+
+    @model_validator(mode="after")
+    def _strip_name(self) -> "MetricDefinition":
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("name must not be blank")
+        return self
+
+
+def _validate_unique_metric_definitions(
+    definitions: list[MetricDefinition],
+) -> list[MetricDefinition]:
+    """Ids must be unique (they key the metric); names must be unique
+    case-insensitively (label templates resolve metrics by name)."""
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
+    for d in definitions:
+        if d.id in seen_ids:
+            raise ValueError(f"duplicate metric definition id: {d.id}")
+        key = d.name.casefold()
+        if key in seen_names:
+            raise ValueError(f"duplicate metric definition name: {d.name}")
+        seen_ids.add(d.id)
+        seen_names.add(key)
+    return definitions
+
+
 # Graph Context models
 class GraphContextCreate(BaseModel):
     title: str
@@ -381,6 +443,17 @@ class GraphContextCreate(BaseModel):
         "copy-text, run-query-template). Passed through opaquely; the frontend "
         "owns the shape.",
     )
+    metric_definitions: list[MetricDefinition] = Field(
+        default_factory=list,
+        description="Writer-authored custom metrics (per-node/edge JavaScript "
+        "evaluated in the frontend's sandboxed worker). Only returned to users "
+        "with write access.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_metric_definitions(self) -> "GraphContextCreate":
+        _validate_unique_metric_definitions(self.metric_definitions)
+        return self
 
     @model_validator(mode="after")
     def _validate_datasource_fields(self) -> "GraphContextCreate":
@@ -450,6 +523,13 @@ class GraphContextUpdate(BaseModel):
     default_behaviors: Optional[dict] = None
     cluster_programs: Optional[list[dict]] = None
     context_menu_actions: Optional[list[dict]] = None
+    metric_definitions: Optional[list[MetricDefinition]] = None
+
+    @model_validator(mode="after")
+    def _validate_metric_definitions(self) -> "GraphContextUpdate":
+        if self.metric_definitions is not None:
+            _validate_unique_metric_definitions(self.metric_definitions)
+        return self
 
 
 class GraphContextResponse(BaseModel):
@@ -472,6 +552,8 @@ class GraphContextResponse(BaseModel):
     default_behaviors: dict = Field(default_factory=dict)
     cluster_programs: list[dict] = Field(default_factory=list)
     context_menu_actions: list[dict] = Field(default_factory=list)
+    # Empty for read-only users — see routers.graph_contexts.context_to_response.
+    metric_definitions: list[MetricDefinition] = Field(default_factory=list)
     owner_email: str
     shared_with: list[str] = Field(default_factory=list)
     has_write_access: bool = False

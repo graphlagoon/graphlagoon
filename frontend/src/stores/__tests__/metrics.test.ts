@@ -39,6 +39,7 @@ function makeComputedMetric(overrides: Partial<ComputedMetric> = {}): ComputedMe
     name: 'Degree',
     algorithmId: 'degree',
     target: 'node',
+    valueType: 'number',
     values: new Map([['n1', 1], ['n2', 2], ['n3', 1]]),
     min: 1,
     max: 2,
@@ -439,5 +440,84 @@ describe('table metric flags', () => {
     expect(store.tableMetricIds.has('m1')).toBe(false)
     expect(store.tableMetricIds.has('__builtin_degree')).toBe(true)
     expect(store.tableNodeMetrics.map(m => m.id)).toEqual(['__builtin_degree'])
+  })
+})
+
+describe('value types, metricsVersion and resolver', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('numericNodeMetrics / numericEdgeMetrics filter out string and boolean metrics', () => {
+    setupGraph()
+    const store = useMetricsStore()
+    store.upsertMetric(makeComputedMetric({ id: 'custom:s', name: 'S', valueType: 'string', values: new Map([['n1', 'x']]) }))
+    store.upsertMetric(makeComputedMetric({ id: 'custom:b', name: 'B', valueType: 'boolean', values: new Map([['n1', true]]) }))
+    store.upsertMetric(makeComputedMetric({ id: 'custom:n', name: 'N', valueType: 'number' }))
+    store.upsertMetric(makeComputedMetric({ id: 'custom:e', name: 'E', target: 'edge', valueType: 'string', values: new Map([['e1', 'y']]) }))
+    expect(store.nodeMetrics.map((m) => m.id)).toEqual(['__builtin_degree', 'custom:s', 'custom:b', 'custom:n'])
+    expect(store.numericNodeMetrics.map((m) => m.id)).toEqual(['__builtin_degree', 'custom:n'])
+    expect(store.edgeMetrics.map((m) => m.id)).toEqual(['custom:e'])
+    expect(store.numericEdgeMetrics).toEqual([])
+  })
+
+  it('nodeSizeMetric / edgeWeightMetric are null when the selected metric is not numeric', () => {
+    setupGraph()
+    const store = useMetricsStore()
+    store.upsertMetric(makeComputedMetric({ id: 'custom:s', name: 'S', valueType: 'string', values: new Map([['n1', 'x']]) }))
+    store.setNodeSizeMetric('custom:s')
+    expect(store.nodeSizeMetric).toBeNull()
+    store.setNodeSizeMetric('__builtin_degree')
+    expect(store.nodeSizeMetric?.id).toBe('__builtin_degree')
+    store.upsertMetric(makeComputedMetric({ id: 'custom:w', name: 'W', target: 'edge', valueType: 'boolean', values: new Map([['e1', true]]) }))
+    store.setEdgeWeightMetric('custom:w')
+    expect(store.edgeWeightMetric).toBeNull()
+  })
+
+  it('metricsVersion bumps on complete / upsert / delete / clear (not on a no-op delete)', () => {
+    const store = useMetricsStore()
+    const v0 = store.metricsVersion
+    store.registerComputation(makeComputation('m1'))
+    store.completeComputation(makeComputedMetric({ id: 'm1' }))
+    expect(store.metricsVersion).toBe(v0 + 1)
+    store.upsertMetric(makeComputedMetric({ id: 'custom:a' }))
+    expect(store.metricsVersion).toBe(v0 + 2)
+    store.deleteMetric('nope')
+    expect(store.metricsVersion).toBe(v0 + 2)
+    store.deleteMetric('custom:a')
+    expect(store.metricsVersion).toBe(v0 + 3)
+    store.clearAllMetrics()
+    expect(store.metricsVersion).toBe(v0 + 4)
+  })
+
+  it('upsertMetric replaces in place without history or active computations', () => {
+    const store = useMetricsStore()
+    store.upsertMetric(makeComputedMetric({ id: 'custom:a', values: new Map([['n1', 1]]) }))
+    store.upsertMetric(makeComputedMetric({ id: 'custom:a', values: new Map([['n1', 2]]) }))
+    expect(store.computedMetrics.size).toBe(1)
+    expect(store.computedMetrics.get('custom:a')?.values.get('n1')).toBe(2)
+    expect(store.computationHistory).toEqual([])
+    expect(store.activeComputations.size).toBe(0)
+  })
+
+  it('getMetric / findMetricByName / metricResolver resolve by id then by name within the target', () => {
+    setupGraph()
+    const store = useMetricsStore()
+    store.upsertMetric(makeComputedMetric({ id: 'custom:s', name: 'Email domain', valueType: 'string', values: new Map([['n1', 'foo.com']]) }))
+    store.upsertMetric(makeComputedMetric({ id: 'custom:e', name: 'Weight', target: 'edge', values: new Map([['e1', 2.5]]) }))
+    expect(store.getMetric('__builtin_degree')?.name).toBe('Degree')
+    expect(store.getMetric('nope')).toBeNull()
+    expect(store.findMetricByName('node', 'Email domain')?.id).toBe('custom:s')
+    expect(store.findMetricByName('edge', 'Email domain')).toBeNull()
+
+    const r = store.metricResolver
+    expect(r('node', 'n1', 'Email domain')).toBe('foo.com')
+    expect(r('node', 'n1', 'custom:s')).toBe('foo.com')
+    expect(r('node', 'n1', 'Degree')).toBe(1)
+    expect(r('node', 'n1', '__builtin_degree')).toBe(1)
+    expect(r('node', 'n9', 'Degree')).toBeUndefined()
+    expect(r('edge', 'e1', 'Weight')).toBe(2.5)
+    expect(r('edge', 'e1', 'Email domain')).toBeUndefined() // wrong target
+    expect(r('node', 'n1', 'missing')).toBeUndefined()
   })
 })

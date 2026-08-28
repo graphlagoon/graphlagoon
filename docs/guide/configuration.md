@@ -55,6 +55,10 @@ GRAPH_LAGOON_STYLE_PRESETS_DIR=./tmp/style-presets
 # GRAPH_LAGOON_STYLE_PRESETS_VOLUME_PATH=/Volumes/catalog/schema/volume/style-presets
 GRAPH_LAGOON_STYLE_PRESETS_MAX_PER_CONTEXT=100
 
+# Custom metrics (see "Custom metrics" below)
+GRAPH_LAGOON_CUSTOM_METRICS_ENABLED=true
+GRAPH_LAGOON_CUSTOM_METRICS_AUTO_RUN_ENABLED=true
+
 # Development
 GRAPH_LAGOON_DEV_MODE=true
 GRAPH_LAGOON_SHOW_ERROR_DETAILS=true
@@ -216,6 +220,21 @@ and with layout URL overrides.
 | `GRAPH_LAGOON_STYLE_PRESETS_DIR` | `./tmp/style-presets` | Local directory, used when no volume path applies. |
 | `GRAPH_LAGOON_STYLE_PRESETS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to a `style-presets` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set. |
 | `GRAPH_LAGOON_STYLE_PRESETS_MAX_PER_CONTEXT` | `100` | Presets are listed in full for the picker, so the count is bounded here rather than paginated at read time. |
+
+## Custom metrics
+
+[Custom metrics](./communities-metrics.md#custom-metrics) are JavaScript
+snippets, written by users with write access to a context, evaluated per
+node/edge in a sandboxed worker of every writer's browser. Two flags let a
+deployment turn the feature — or just its automatic execution — off:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_CUSTOM_METRICS_ENABLED` | `true` | `false` hides every definition from API responses (writers included), rejects writes of `metric_definitions` with `400 CUSTOM_METRICS_DISABLED`, and removes the **Custom** tab. Stored definitions are kept and reappear when re-enabled. |
+| `GRAPH_LAGOON_CUSTOM_METRICS_AUTO_RUN_ENABLED` | `true` | `false` ignores the per-metric **Run automatically when the graph loads** flag: every custom metric then evaluates only on **Recompute** (or when its author saves it). The checkbox is shown disabled with the reason. |
+
+Both are reported to the frontend as `custom_metrics_enabled` /
+`custom_metrics_auto_run_enabled` in `GET /api/config`.
 
 ## Layout URL overrides
 

@@ -9,6 +9,7 @@ import {
   getAvailableModifiers,
   clearTemplateCache,
   extractTemplateProperties,
+  extractTemplateMetrics,
 } from '@/utils/labelFormatter'
 import type { Node, Edge, TextFormatRule } from '@/types/graph'
 
@@ -1198,5 +1199,70 @@ describe('extractTemplateProperties v2', () => {
     const props = extractTemplateProperties('{if:prop:code|matches:/^BR/|{prop:name}|-}')
     expect(props).toContain('code')
     expect(props).toContain('name')
+  })
+})
+
+// ============================================================================
+// Metric placeholders — {metric:<id or name>} resolved through a resolver
+// ============================================================================
+
+describe('metric placeholders', () => {
+  const values: Record<string, Record<string, number | string | boolean | null>> = {
+    'Email domain': { alice: 'foo.com', bob: 'bar.org' },
+    'Super-hub': { alice: true, bob: false },
+    'custom:score': { alice: 0.12345, bob: null },
+    Degree: { alice: 4 },
+  }
+  const resolver = (target: 'node' | 'edge', itemId: string, ref: string) =>
+    target === 'node' ? values[ref]?.[itemId] : undefined
+
+  it('renders a string metric and chains modifiers', () => {
+    expect(formatLabel('{metric:Email domain|upper}', 'node', makeNode(), { metrics: resolver })).toBe('FOO.COM')
+  })
+
+  it('stringifies booleans and numbers (number modifier still applies)', () => {
+    expect(formatLabel('{metric:Super-hub}', 'node', makeNode(), { metrics: resolver })).toBe('true')
+    expect(formatLabel('{metric:custom:score|number}', 'node', makeNode(), { metrics: resolver })).toBe((0.12345).toLocaleString())
+    expect(formatLabel('{metric:Degree}', 'node', makeNode(), { metrics: resolver })).toBe('4')
+  })
+
+  it('missing metric → [metric:name] sentinel, unless a default is given', () => {
+    expect(formatLabel('{metric:nope}', 'node', makeNode(), { metrics: resolver })).toBe('[metric:nope]')
+    expect(formatLabel('{metric:custom:score}', 'node', makeNode({ node_id: 'bob' }), { metrics: resolver })).toBe('[metric:custom:score]')
+    expect(formatLabel('{metric:nope|default:-}', 'node', makeNode(), { metrics: resolver })).toBe('-')
+  })
+
+  it('without a resolver the placeholder renders as missing (existing callers unaffected)', () => {
+    expect(formatLabel('{metric:Degree}', 'node', makeNode())).toBe('[metric:Degree]')
+    expect(formatLabel('{metric:Degree|default:?}', 'node', makeNode())).toBe('?')
+  })
+
+  it('never reads item.properties for a metric ref', () => {
+    const node = makeNode({ properties: { Degree: 'from-props' } })
+    expect(formatLabel('{metric:Degree}', 'node', node, { metrics: resolver })).toBe('4')
+  })
+
+  it('works inside conditionals and through formatNodeLabel/formatEdgeLabel', () => {
+    expect(
+      formatLabel('{if:prop:kind==vip|{metric:Email domain}|-}', 'node', makeNode({ properties: { kind: 'vip' } }), { metrics: resolver }),
+    ).toBe('foo.com')
+    expect(formatNodeLabel(makeNode(), [], '{node_id} ({metric:Degree})', { metrics: resolver })).toBe('alice (4)')
+    // Edge resolver gets target 'edge' and the edge id
+    const edgeResolver = (target: 'node' | 'edge', itemId: string, ref: string) =>
+      target === 'edge' && itemId === 'e1' && ref === 'Weight' ? 2.5 : undefined
+    expect(formatEdgeLabel(makeEdge(), [], '{relationship_type} {metric:Weight}', { metrics: edgeResolver })).toBe('KNOWS 2.5')
+  })
+
+  it('extractTemplateMetrics lists refs (incl. nested) and extractTemplateProperties ignores them', () => {
+    const tpl = '{metric:A} {prop:x} {if:prop:y>1|{metric:B|upper}|{metric:A}}'
+    expect(extractTemplateMetrics(tpl).sort()).toEqual(['A', 'B'])
+    expect(extractTemplateProperties(tpl).sort()).toEqual(['x', 'y'])
+  })
+
+  it('getAvailablePlaceholders lists metric names', () => {
+    const list = getAvailablePlaceholders('node', ['a'], ['Degree', 'Email domain'])
+    expect(list.map((p) => p.placeholder)).toContain('{metric:Degree}')
+    expect(list.map((p) => p.placeholder)).toContain('{metric:Email domain}')
+    expect(getAvailablePlaceholders('node', ['a']).map((p) => p.placeholder)).not.toContain('{metric:Degree}')
   })
 })

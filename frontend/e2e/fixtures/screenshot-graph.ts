@@ -128,4 +128,26 @@ export const SCREENSHOT_CONTEXT = {
     { name: 'industry', data_type: 'string' },
     { name: 'category', data_type: 'string' },
   ],
+  // Custom metrics for the communities-metrics guide: one auto-run derived
+  // text column, one manual structural score.
+  metric_definitions: [
+    {
+      id: 'cm-city-tag',
+      name: 'City tag',
+      target: 'node',
+      value_type: 'string',
+      description: 'Upper-cased city, or the node type when unknown',
+      code: "const c = String(item.properties.city ?? '').trim();\nreturn c ? c.toUpperCase() : item.type;",
+      auto_run: true,
+    },
+    {
+      id: 'cm-neighbour-degree',
+      name: 'Neighbour mean degree',
+      target: 'node',
+      value_type: 'number',
+      description: 'Average degree of the neighbours',
+      code: 'const ns = ctx.neighbors(item.id);\nreturn ns.length ? ns.reduce((s, n) => s + ctx.degreeOf(n), 0) / ns.length : 0;',
+      auto_run: false,
+    },
+  ],
 };

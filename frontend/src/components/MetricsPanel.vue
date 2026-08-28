@@ -7,7 +7,17 @@ import { getMetricsCalculator } from '@/services/metricsCalculator';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { AlgorithmDefinition, ScaleType, Priority } from '@/types/metrics';
-import { Activity, ChevronDown, ChevronRight, Play, Pause, X } from 'lucide-vue-next';
+import { isCustomMetricId, customMetricId } from '@/types/customMetrics';
+import { formatMetricValue } from '@/utils/metricFormat';
+import { useFeatureFlags } from '@/composables/useFeatureFlags';
+import type { CustomMetricDefinition } from '@/types/customMetrics';
+import { useCustomMetricsStore } from '@/stores/customMetrics';
+import CustomMetricEditorModal from './CustomMetricEditorModal.vue';
+import CustomMetricSkillModal from './CustomMetricSkillModal.vue';
+import { parseImportedCustomMetrics } from '@/utils/customMetricImport';
+import { buildSourceSchema, downloadJson, readFileAsText, safeFilename } from '@/utils/portableExport';
+import { PORTABLE_EXPORT_VERSION, type PortableCustomMetrics } from '@/types/portable';
+import { Activity, ChevronDown, ChevronRight, Play, Pause, X, Bot, Download } from 'lucide-vue-next';
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -16,11 +26,99 @@ const emit = defineEmits<{
 
 const metricsStore = useMetricsStore();
 const graphStore = useGraphStore();
+const customMetricsStore = useCustomMetricsStore();
+const { customMetricsEnabled } = useFeatureFlags();
 const calculator = getMetricsCalculator();
 const toast = useToast();
 
 // UI State
-const activeTab = ref<'compute' | 'mapping'>('compute');
+const activeTab = ref<'compute' | 'mapping' | 'custom'>('compute');
+
+// ─── Custom metrics (writer-authored, sandboxed) ───
+const customEditorOpen = ref(false);
+const customEditing = ref<CustomMetricDefinition | null>(null);
+const customSkillOpen = ref(false);
+
+function openCustomEditor(def: CustomMetricDefinition | null) {
+  customEditing.value = def;
+  customEditorOpen.value = true;
+}
+
+function customStatus(id: string) {
+  return customMetricsStore.runStates.get(id);
+}
+
+function customStatusLabel(id: string): string {
+  const s = customStatus(id);
+  if (!s || s.status === 'idle') return 'not computed — use Recompute';
+  if (s.status === 'stale') return 'stale — the graph changed, use Recompute';
+  if (s.status === 'queued') return 'queued';
+  if (s.status === 'running') return `running ${s.progress}%`;
+  if (s.status === 'error') return `error: ${s.error ?? 'unknown'}`;
+  const errs = s.errorCount > 0 ? ` · ${s.errorCount} item error${s.errorCount === 1 ? '' : 's'}` : '';
+  return `done in ${Math.round(s.elapsedMs)} ms${errs}`;
+}
+
+// Import JSON (several metrics at once) / Export JSON (all)
+const customImportOpen = ref(false);
+const customImportText = ref('');
+const customImportError = ref<string | null>(null);
+const customFileInput = ref<HTMLInputElement | null>(null);
+
+const customParsedImport = computed(() => {
+  const text = customImportText.value.trim();
+  return text ? parseImportedCustomMetrics(text) : null;
+});
+
+async function pickCustomFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  customImportError.value = null;
+  try {
+    customImportText.value = await readFileAsText(file);
+  } catch {
+    customImportError.value = 'Could not read the file';
+  } finally {
+    input.value = '';
+  }
+}
+
+/** Add or update every pasted metric (match by id, then by name). */
+function applyCustomImport() {
+  customImportError.value = null;
+  const result = parseImportedCustomMetrics(customImportText.value);
+  if (!result.ok) {
+    customImportError.value = result.error;
+    return;
+  }
+  const { updated, added } = customMetricsStore.upsertDefinitions(result.definitions);
+  customImportText.value = '';
+  customImportOpen.value = false;
+  const parts = [];
+  if (added) parts.push(`${added} added`);
+  if (updated) parts.push(`${updated} updated`);
+  toast.success(`Custom metrics imported: ${parts.join(', ')}`);
+}
+
+function exportCustomMetrics() {
+  const payload: PortableCustomMetrics = {
+    graphlagoon_export: 'custom-metrics',
+    export_version: PORTABLE_EXPORT_VERSION,
+    source: buildSourceSchema({
+      context: graphStore.currentContext,
+      loadedNodeTypes: graphStore.nodeTypes,
+      loadedEdgeTypes: graphStore.edgeTypes,
+    }),
+    metrics: customMetricsStore.definitions.map((d) => ({ ...d })),
+  };
+  downloadJson(safeFilename(`metrics-${graphStore.currentContext?.title || 'context'}`), payload);
+}
+
+function deleteCustomMetric(def: CustomMetricDefinition) {
+  if (!confirm(`Delete custom metric "${def.name}"?`)) return;
+  customMetricsStore.removeDefinition(def.id);
+}
 const selectedAlgorithm = ref<string | null>(null);
 const isComputing = ref(false);
 const expandedSections = ref({
@@ -60,6 +158,13 @@ const graphInfo = computed(() => metricsStore.graphInfo);
 // Computed metrics
 const nodeMetrics = computed(() => metricsStore.nodeMetrics);
 const edgeMetrics = computed(() => metricsStore.edgeMetrics);
+const numericNodeMetrics = computed(() => metricsStore.numericNodeMetrics);
+const numericEdgeMetrics = computed(() => metricsStore.numericEdgeMetrics);
+// Built-in + algorithm runs only: custom metrics have their own tab (with the
+// same table toggle) — listing them twice was noise.
+const computedMetricsList = computed(() =>
+  [...nodeMetrics.value, ...edgeMetrics.value].filter((m) => !isCustomMetricId(m.id)),
+);
 
 // Active computations
 const activeComputations = computed(() =>
@@ -187,7 +292,158 @@ function toggleSection(section: keyof typeof expandedSections.value) {
       >
         Visual Mapping
       </button>
+      <button
+        v-if="customMetricsEnabled"
+        class="tab"
+        :class="{ active: activeTab === 'custom' }"
+        data-testid="metrics-tab-custom"
+        @click="activeTab = 'custom'"
+      >
+        Custom
+      </button>
     </div>
+
+    <!-- Custom Tab -->
+    <div v-if="activeTab === 'custom' && customMetricsEnabled" class="tab-content" data-testid="custom-metrics-tab">
+      <div v-if="!customMetricsStore.canEdit" class="custom-readonly-note" data-testid="custom-metrics-readonly">
+        Custom metrics are defined by users with write access to this context. You have read-only access, so none are shown here.
+      </div>
+      <template v-else>
+        <p class="custom-intro">
+          Per-node / per-edge JavaScript evaluated in a sandboxed worker. Values can be numbers, text or booleans and
+          appear in the Data Table, the inspector, size mapping (numbers) and label templates as <code>{metric:name}</code>.
+        </p>
+        <div class="custom-actions">
+          <button class="compute-btn" data-testid="custom-metric-new" @click="openCustomEditor(null)">
+            + New custom metric
+          </button>
+          <button
+            class="icon-btn"
+            data-testid="custom-metrics-skill-help"
+            title="Not sure how? Get an AI prompt to write a custom metric"
+            aria-label="Get help writing a custom metric"
+            @click="customSkillOpen = true"
+          >
+            <Bot :size="16" />
+          </button>
+        </div>
+        <div class="custom-actions custom-actions--secondary">
+          <button
+            class="mini-btn"
+            :class="{ active: customImportOpen }"
+            data-testid="custom-metrics-import-toggle"
+            @click="customImportOpen = !customImportOpen"
+          >
+            Import JSON
+          </button>
+          <button
+            class="mini-btn"
+            data-testid="custom-metric-export-all"
+            :disabled="customMetricsStore.definitions.length === 0"
+            title="Download all custom metrics as a JSON file you can import into another context"
+            @click="exportCustomMetrics"
+          >
+            <Download :size="12" /> Export JSON
+          </button>
+        </div>
+
+        <div v-if="customImportOpen" class="custom-import" data-testid="custom-metrics-import">
+          <span class="custom-intro">
+            Paste the JSON from the AI prompt or a file exported from another context. Several
+            metrics at once are fine; a metric with the same id or name as an existing one
+            <strong>updates it</strong>, the others are added.
+          </span>
+          <textarea
+            v-model="customImportText"
+            class="custom-import-textarea"
+            data-testid="custom-metrics-import-text"
+            rows="4"
+            placeholder='[{"name": "...", "target": "node", "value_type": "number", "code": "return ..."}]'
+          />
+          <div class="custom-actions">
+            <input
+              ref="customFileInput"
+              type="file"
+              accept=".json,application/json"
+              class="file-input"
+              data-testid="custom-metrics-import-file"
+              @change="pickCustomFile"
+            />
+            <button class="mini-btn" @click="customFileInput?.click()">Choose file…</button>
+            <button
+              class="mini-btn"
+              data-testid="custom-metrics-import-apply"
+              :disabled="!customParsedImport?.ok"
+              @click="applyCustomImport"
+            >
+              Add metrics
+            </button>
+          </div>
+          <span
+            v-if="customParsedImport && !customParsedImport.ok"
+            class="custom-status is-error"
+            data-testid="custom-metrics-import-parse-error"
+          >
+            {{ customParsedImport.error }}
+          </span>
+          <span v-if="customImportError" class="custom-status is-error">{{ customImportError }}</span>
+        </div>
+
+        <div v-if="customMetricsStore.definitions.length === 0" class="empty-hint">
+          No custom metrics on this context yet.
+        </div>
+
+        <div
+          v-for="def in customMetricsStore.definitions"
+          :key="def.id"
+          class="metric-item"
+          :data-testid="`custom-metric-item-${def.id}`"
+        >
+          <div class="metric-name" :title="def.description || def.name">{{ def.name }}</div>
+          <div class="metric-meta">
+            {{ def.target }} · {{ def.value_type }}<template v-if="def.auto_run"> · <span :title="customMetricsStore.autoRunAllowed ? 'Runs automatically when the graph loads' : 'Auto-run is disabled on this server'">auto{{ customMetricsStore.autoRunAllowed ? '' : ' (off)' }}</span></template>
+          </div>
+          <div
+            class="metric-meta custom-status"
+            :class="{ 'is-error': customStatus(def.id)?.status === 'error', 'is-stale': customStatus(def.id)?.status === 'stale' }"
+            :data-testid="`custom-metric-status-${def.id}`"
+          >
+            {{ customStatusLabel(def.id) }}
+          </div>
+          <div class="metric-footer">
+            <label class="table-toggle" title="Add as a column in the table drawer">
+              <input
+                type="checkbox"
+                :checked="def.show_in_table === true"
+                :data-testid="`metric-table-toggle-${customMetricId(def.id)}`"
+                @change="customMetricsStore.setShowInTable(def.id, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>Table column</span>
+            </label>
+            <div class="metric-actions">
+            <button class="mini-btn" :data-testid="`custom-metric-edit-${def.id}`" @click="openCustomEditor(def)">Edit</button>
+            <button
+              class="mini-btn"
+              :data-testid="`custom-metric-recompute-${def.id}`"
+              @click="customMetricsStore.recomputeNow([def.id])"
+            >
+              Recompute
+            </button>
+            <button class="mini-btn danger" :data-testid="`custom-metric-delete-${def.id}`" @click="deleteCustomMetric(def)">
+              Delete
+            </button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <CustomMetricEditorModal
+      v-if="customEditorOpen"
+      :definition="customEditing"
+      @close="customEditorOpen = false"
+    />
+    <CustomMetricSkillModal v-model="customSkillOpen" />
 
     <!-- Compute Tab -->
     <div v-if="activeTab === 'compute'" class="tab-content">
@@ -396,35 +652,35 @@ function toggleSection(section: keyof typeof expandedSections.value) {
         </div>
         <div class="section-content">
           <div
-            v-for="metric in [...nodeMetrics, ...edgeMetrics]"
+            v-for="metric in computedMetricsList"
             :key="metric.id"
             class="metric-item"
           >
-            <div class="metric-header">
-              <span class="metric-name">{{ metric.name }}</span>
-              <span v-if="metric.id.startsWith('__builtin_')" class="builtin-badge">Built-in</span>
-              <span class="metric-target">{{ metric.target }}</span>
+            <div class="metric-row">
+              <span class="metric-name" :title="metric.name">{{ metric.name }}</span>
+              <span v-if="metric.id.startsWith('__builtin_')" class="metric-kind">built-in</span>
             </div>
-            <div class="metric-stats">
-              <span>Min: {{ metric.min.toFixed(4) }}</span>
-              <span>Max: {{ metric.max.toFixed(4) }}</span>
-              <span>Mean: {{ metric.mean.toFixed(4) }}</span>
+            <div class="metric-meta">
+              {{ metric.target }} · min {{ formatMetricValue(metric.min) }} · max {{ formatMetricValue(metric.max) }} · mean {{ formatMetricValue(metric.mean) }}
             </div>
-            <label class="table-toggle">
-              <input
-                type="checkbox"
-                :checked="metricsStore.tableMetricIds.has(metric.id)"
-                :data-testid="`metric-table-toggle-${metric.id}`"
-                @change="metricsStore.toggleMetricInTable(metric.id)"
-              />
-              <span>Show as Data Table column</span>
-            </label>
-            <div v-if="!metric.id.startsWith('__builtin_')" class="metric-actions">
-              <button class="mini-btn danger" @click="deleteMetric(metric.id)">
+            <div class="metric-footer">
+              <label class="table-toggle" title="Add as a column in the table drawer">
+                <input
+                  type="checkbox"
+                  :checked="metricsStore.tableMetricIds.has(metric.id)"
+                  :data-testid="`metric-table-toggle-${metric.id}`"
+                  @change="metricsStore.toggleMetricInTable(metric.id)"
+                />
+                <span>Table column</span>
+              </label>
+              <button v-if="!metric.id.startsWith('__builtin_')" class="mini-btn danger" @click="deleteMetric(metric.id)">
                 Delete
               </button>
             </div>
           </div>
+          <p v-if="customMetricsStore.definitions.length > 0" class="custom-intro">
+            Custom metrics are listed in the <a href="#" @click.prevent="activeTab = 'custom'">Custom</a> tab.
+          </p>
         </div>
       </div>
     </div>
@@ -446,7 +702,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
               class="form-select"
             >
               <option :value="null">None (Fixed Size)</option>
-              <option v-for="metric in nodeMetrics" :key="metric.id" :value="metric.id">
+              <option v-for="metric in numericNodeMetrics" :key="metric.id" :value="metric.id">
                 {{ metric.name }}
               </option>
             </select>
@@ -511,7 +767,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
               class="form-select"
             >
               <option :value="null">None (Fixed Weight)</option>
-              <option v-for="metric in edgeMetrics" :key="metric.id" :value="metric.id">
+              <option v-for="metric in numericEdgeMetrics" :key="metric.id" :value="metric.id">
                 {{ metric.name }}
               </option>
             </select>
@@ -617,6 +873,92 @@ function toggleSection(section: keyof typeof expandedSections.value) {
 
 .icon-btn:hover {
   background: var(--bg-secondary, #f5f5f5);
+}
+
+/* Custom metrics tab */
+.custom-actions {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  margin-bottom: 6px;
+}
+
+.custom-actions .mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.custom-actions--secondary .mini-btn {
+  flex: 1;
+  padding: 5px 8px;
+}
+
+.custom-actions .mini-btn.active {
+  border-color: var(--primary-color, #42b883);
+  color: var(--primary-color, #42b883);
+}
+
+.custom-import {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed var(--border-color, #ccc);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.custom-import-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+  resize: vertical;
+}
+
+.file-input {
+  display: none;
+}
+
+.custom-actions .compute-btn {
+  flex: 1;
+}
+
+.custom-readonly-note,
+.empty-hint {
+  font-size: 12px;
+  color: var(--text-muted, #666);
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-secondary, #f5f5f5);
+  margin-top: 8px;
+}
+
+.custom-intro {
+  font-size: 11px;
+  color: var(--text-muted, #666);
+  margin: 0 0 8px;
+}
+
+.custom-intro code {
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.custom-status {
+  font-size: 10px;
+}
+
+.custom-status.is-error {
+  color: var(--error-color, #e74c3c);
+}
+
+.custom-status.is-stale {
+  color: var(--warning-color, #b7791f);
 }
 
 /* Tabs */
@@ -885,58 +1227,64 @@ function toggleSection(section: keyof typeof expandedSections.value) {
   margin-bottom: 8px;
 }
 
-.metric-header {
+.metric-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 .metric-name {
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--text-color, #333);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
-.metric-target {
+.metric-kind {
+  margin-left: auto;
   font-size: 10px;
-  padding: 2px 6px;
-  background: var(--border-color, #ddd);
-  border-radius: 3px;
+  color: var(--text-muted, #999);
+  flex-shrink: 0;
 }
 
-.builtin-badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  background: var(--primary-color, #42b883);
-  color: white;
-  border-radius: 3px;
-}
-
-.metric-stats {
-  display: flex;
-  gap: 12px;
+.metric-meta {
   font-size: 10px;
   color: var(--text-muted, #666);
-  margin-bottom: 6px;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 .table-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-size: 11px;
   color: var(--text-secondary, #999);
-  margin-bottom: 6px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .table-toggle input {
   cursor: pointer;
+  margin: 0;
 }
 
 .metric-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 2px;
 }
 
 /* Range Inputs */

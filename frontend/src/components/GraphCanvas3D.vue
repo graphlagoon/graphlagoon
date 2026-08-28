@@ -9,6 +9,7 @@ import { useSimilarityStore } from '@/stores/similarity';
 import type { Node, Edge } from '@/types/graph';
 import type { GraphNode, GraphLink, GraphData } from '@/types/graph3d';
 import { formatNodeLabel, formatEdgeLabel } from '@/utils/labelFormatter';
+import { numericValueMap } from '@/types/metrics';
 import {
   getMultiEdgeCurvature3D,
   computeNodeAppearance,
@@ -41,6 +42,8 @@ const emit = defineEmits<{
 
 const graphStore = useGraphStore();
 const metricsStore = useMetricsStore();
+// `{metric:<name>}` placeholders in label templates resolve through the store.
+const labelOptions = { metrics: metricsStore.metricResolver };
 const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
 
@@ -309,12 +312,14 @@ function collectAppearanceContext(): AppearanceContext {
 
     selectedNodeIds: graphStore.selectedNodeIds,
 
+    // The store guarantees these are numeric metrics; numericValueMap narrows
+    // the Map<string, MetricValue> to the renderer's Map<string, number>.
     nodeSizeMetric: nodeSizeMetric
-      ? { values: nodeSizeMetric.values, min: nodeSizeMetric.min, max: nodeSizeMetric.max }
+      ? { values: numericValueMap(nodeSizeMetric), min: nodeSizeMetric.min, max: nodeSizeMetric.max }
       : null,
     nodeSizeMapping: metricsStore.visualMapping.nodeSize,
     edgeWeightMetric: edgeWeightMetric
-      ? { values: edgeWeightMetric.values, min: edgeWeightMetric.min, max: edgeWeightMetric.max }
+      ? { values: numericValueMap(edgeWeightMetric), min: edgeWeightMetric.min, max: edgeWeightMetric.max }
       : null,
     edgeWeightMapping: metricsStore.visualMapping.edgeWeight,
 
@@ -391,7 +396,7 @@ async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | 
 
     const nodeLabel = isCluster
       ? (node.properties?.cluster_name as string || 'Cluster')
-      : formatNodeLabel(node, graphStore.textFormatRules, graphStore.textFormatDefaults.nodeTemplate);
+      : formatNodeLabel(node, graphStore.textFormatRules, graphStore.textFormatDefaults.nodeTemplate, labelOptions);
 
     // Compute property-based icon override (if configured for this node type)
     let iconOverride: string | undefined;
@@ -462,7 +467,7 @@ async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | 
     if (!nodeIds.has(edge.src) || !nodeIds.has(edge.dst)) continue;
 
     const edgeLabel = formatEdgeLabel(
-      edge, graphStore.textFormatRules, graphStore.textFormatDefaults.edgeTemplate,
+      edge, graphStore.textFormatRules, graphStore.textFormatDefaults.edgeTemplate, labelOptions,
     );
 
     const isSimilarity = edge.relationship_type === '__similarity__';
@@ -626,6 +631,7 @@ function refreshNodeContent() {
       original,
       graphStore.textFormatRules,
       graphStore.textFormatDefaults.nodeTemplate,
+      labelOptions,
     );
   }
 
@@ -1889,7 +1895,10 @@ watch(
     const metricsCount = metricsStore.computedMetrics.size;
     const nodeSizeMetric = metricsStore.nodeSizeMetric;
     const nodeSizeValuesSize = nodeSizeMetric?.values?.size || 0;
-    return { nodeSize, edgeWeight, metricsCount, nodeSizeValuesSize };
+    // A recompute that replaces a same-size Map (custom metrics, {metric:x}
+    // labels) is only visible through the version counter.
+    const metricsVersion = metricsStore.metricsVersion;
+    return { nodeSize, edgeWeight, metricsCount, nodeSizeValuesSize, metricsVersion };
   },
   () => { updateGraph(); },
   { deep: true }

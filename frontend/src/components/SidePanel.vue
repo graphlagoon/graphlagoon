@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
-import { useMetricsStore } from '@/stores/metrics';
+import { useItemMetrics } from '@/composables/useItemMetrics';
+import { formatMetricValue } from '@/utils/metricFormat';
 import { tryParseJson } from '@/utils/jsonDetection';
 import { X } from 'lucide-vue-next';
 import JsonValueViewer from './JsonValueViewer.vue';
@@ -19,7 +20,6 @@ const emit = defineEmits<{
 }>();
 
 const graphStore = useGraphStore();
-const metricsStore = useMetricsStore();
 
 const expandDepth = ref(2);
 const expandEdgeLimit = ref(100);
@@ -112,36 +112,8 @@ function formatPropertyValue(value: unknown): string {
   return String(value);
 }
 
-// Get computed metrics for the selected item
-const selectedItemMetrics = computed(() => {
-  if (!selectedItem.value) return [];
-
-  const metrics: { name: string; value: number }[] = [];
-  const id = selectedItem.value.type === 'node'
-    ? selectedItem.value.data.node_id
-    : selectedItem.value.data.edge_id;
-
-  const targetMetrics = selectedItem.value.type === 'node'
-    ? metricsStore.nodeMetrics
-    : metricsStore.edgeMetrics;
-
-  for (const metric of targetMetrics) {
-    const value = metric.values.get(id);
-    if (value !== undefined) {
-      metrics.push({ name: metric.name, value });
-    }
-  }
-
-  return metrics;
-});
-
-// Format metric value for display (rounded)
-function formatMetricValue(value: number): string {
-  if (Math.abs(value) < 0.0001) return value.toExponential(2);
-  if (Math.abs(value) >= 1000) return value.toFixed(0);
-  if (Math.abs(value) >= 1) return value.toFixed(2);
-  return value.toFixed(4);
-}
+// Computed + custom metrics for the selected item (shared lookup)
+const selectedItemMetrics = useItemMetrics(selectedItem);
 
 async function expandFromNode() {
   if (!graphStore.selectedNode) return;
@@ -257,7 +229,7 @@ async function expandFromNode() {
           class="detail-row"
         >
           <span class="label" :title="metric.name">{{ metric.name }}</span>
-          <span class="value metric-value" :title="metric.value.toString()">
+          <span class="value metric-value" :title="String(metric.value)">
             {{ formatMetricValue(metric.value) }}
           </span>
         </div>

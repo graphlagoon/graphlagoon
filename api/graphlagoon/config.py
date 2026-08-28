@@ -193,6 +193,20 @@ class Settings(BaseSettings):
         "paginated at read time.",
     )
 
+    # Custom (writer-authored) metrics — per-node/edge JavaScript evaluated in
+    # the frontend's sandboxed worker. Two feature flags:
+    custom_metrics_enabled: bool = Field(
+        default=True,
+        description="Enable custom metrics. False hides every definition from "
+        "API responses and rejects writes of metric_definitions.",
+    )
+    custom_metrics_auto_run_enabled: bool = Field(
+        default=True,
+        description="Allow custom metrics flagged auto_run to evaluate "
+        "automatically whenever a graph loads in a writer's browser. False "
+        "makes every custom metric run only on demand (Recompute).",
+    )
+
     # Warehouse timeout settings
     warehouse_http_timeout: float = Field(
         default=300.0,
@@ -442,4 +456,3 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
-
