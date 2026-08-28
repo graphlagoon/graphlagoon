@@ -18,6 +18,7 @@ const showAdvanced = ref(false);
 const showEgoAdvanced = ref(false);
 
 const emit = defineEmits<{
+  (e: 'close'): void;
   (e: 'start-layout'): void;
   (e: 'stop-layout'): void;
   (e: 'reheat-layout'): void;
@@ -187,11 +188,20 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
   <div class="layout-panel">
     <div class="panel-header">
       <h3>Layout</h3>
-      <button
-        class="help-btn"
-        title="Help - Parameter explanations"
-        @click="showHelpModal = true"
-      ><HelpCircle :size="14" /></button>
+      <div class="panel-header-actions">
+        <button
+          class="help-btn"
+          title="Help - Parameter explanations"
+          @click="showHelpModal = true"
+        ><HelpCircle :size="14" /></button>
+        <button
+          class="help-btn"
+          title="Close"
+          aria-label="Close"
+          data-testid="layout-panel-close"
+          @click="emit('close')"
+        ><X :size="14" /></button>
+      </div>
     </div>
 
     <!-- Layout mode selector -->
@@ -1206,6 +1216,12 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .panel-header h3 {

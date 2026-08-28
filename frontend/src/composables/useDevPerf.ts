@@ -59,8 +59,15 @@ export function useDevPerf(): DevPerfHandle {
 
       // Append to the container — it must be a positioned element (relative/absolute)
       // Do NOT override container's position, just set the overlay to absolute
+      //
+      // `pointer-events:none` and a z-index BELOW the floating panels (20/30):
+      // the overlay sits at the top-left, which is exactly where Context Info
+      // and Layout open, and with `auto` at z-index 9999 it silently swallowed
+      // every click in that corner — the Layout panel's close button could not
+      // be pressed in dev. Nothing is lost: `horizontal: true` already shows
+      // every panel at once, so the click-to-cycle behaviour is not needed.
       stats.dom.style.cssText =
-        'position:absolute;top:4px;left:4px;z-index:9999;opacity:0.85;pointer-events:auto;'
+        'position:absolute;top:4px;left:4px;z-index:15;opacity:0.85;pointer-events:none;'
       container.appendChild(stats.dom)
 
       // Patch renderer for GPU timing

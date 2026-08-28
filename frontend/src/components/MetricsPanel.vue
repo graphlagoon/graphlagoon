@@ -979,7 +979,10 @@ function toggleSection(section: keyof typeof expandedSections.value) {
 
 .tab {
   flex: 1;
-  padding: 6px 12px;
+  /* "Visual Mapping" wrapped to two lines and made its tab taller than the
+     other two; the row fits on one line at this size. */
+  white-space: nowrap;
+  padding: 6px 8px;
   background: transparent;
   border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;

@@ -8320,3 +8320,45 @@ entry points). **Admin-Area Impact:** No admin-area impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-28 23:20] - Fix: panel chrome found by a visual audit
+
+Every graph panel was opened and screenshotted at 1280×800 and reviewed by
+eye — the previous passes had test coverage but nobody had *looked*. Four
+findings (#18–#21 in [ux-review.md](ux-review.md)):
+
+- **The dev FPS overlay ate clicks.** `useDevPerf` positioned stats-gl at
+  `top:4px; left:4px` with `z-index: 9999; pointer-events: auto`, directly over
+  the corner where Context Info and Layout open. In `make dev` the Layout
+  panel's close button was unclickable — Playwright named the culprit
+  ("`<canvas width=90 height=48>` from `.graph-wrapper-3d` intercepts pointer
+  events"), which is how a UI dead zone nobody had reported got found. Now
+  `pointer-events: none` and `z-index: 15` (above the canvas, below the panels
+  at 20/30). `horizontal: true` already renders every stats panel, so the
+  click-to-cycle behaviour that `auto` existed for was never needed.
+- **LayoutPanel had no close button** — the only panel in the app without one.
+  Added next to the help icon, emitting `close` like every other panel.
+- **Context Info broke words mid-token**: `word-break: break-all` rendered
+  "the produc / ts that connect them". Now `word-break: normal` +
+  `overflow-wrap: anywhere`, so long ids still break and prose does not.
+- **The Metrics "Visual Mapping" tab wrapped** to two lines and was taller than
+  its neighbours; `white-space: nowrap` with tighter padding fits the row.
+
+**Files modified:** `frontend/src/composables/useDevPerf.ts`,
+`frontend/src/components/LayoutPanel.vue`,
+`frontend/src/components/ContextInfoPanel.vue`,
+`frontend/src/components/MetricsPanel.vue`,
+`frontend/src/views/GraphVisualizationView.vue` (wires `@close`),
+`frontend/e2e/tests/graph.spec.ts` (the Layout panel closes from its own
+header — the test that exposed #18).
+
+**Testing:** 2167 unit, 196 e2e. Each fix re-screenshotted and compared against
+the before image.
+
+**Public Docs:** No public docs impact (the panels look the same in the guide
+screenshots apart from the Layout close button). **Admin-Area Impact:** No
+admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---

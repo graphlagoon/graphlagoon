@@ -297,6 +297,23 @@ test.describe('Graph Visualization', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Panels
+  // ---------------------------------------------------------------------------
+  test.describe('Panel chrome', () => {
+    test('the Layout panel closes from its own header', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTestId('graph-toolbar-layout').click();
+      const closeBtn = page.getByTestId('layout-panel-close');
+      // It was the only panel in the app without a close button.
+      await expect(closeBtn).toBeVisible();
+      await closeBtn.click();
+      await expect(closeBtn).toHaveCount(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Save state
   // ---------------------------------------------------------------------------
   test.describe('Save state', () => {

@@ -813,6 +813,7 @@ watch(
             @reheat-layout="graphCanvas3DRef?.reheatLayout()"
             @scramble-layout="graphCanvas3DRef?.scrambleLayout()"
             @start-edge-type-layout="(et: string | null, s: string) => graphCanvas3DRef?.startEdgeTypeLayout(et, s as any, similarityStore.useScoreAsWeight)"
+            @close="showLayoutPanel = false"
           />
         </div>
 
