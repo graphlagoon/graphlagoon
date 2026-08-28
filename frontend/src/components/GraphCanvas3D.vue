@@ -29,6 +29,7 @@ import { useGraphCamera } from '@/composables/useGraphCamera';
 import { useAxisConstrainedRotation } from '@/composables/useAxisConstrainedRotation';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
 import GraphContextMenu from '@/components/GraphContextMenu.vue';
+import { CANVAS_SHORTCUTS, formatShortcuts } from '@/utils/shortcuts';
 import { Network } from 'lucide-vue-next';
 import { recordPerf } from '@/utils/perfMetrics';
 import { isStationaryRightClick, resolveContextMenuTarget } from '@/utils/contextMenuTrigger';
@@ -105,6 +106,7 @@ const devPerf = useDevPerf();
 
 // Context menu
 const contextMenu = useContextMenu();
+const shortcutsTooltip = formatShortcuts();
 let rightClickMouseDownPos: { x: number; y: number } | null = null;
 // Menu target captured at right-button PRESS time. Resolving it at mouseup is unreliable:
 // any pointer jitter while the button is held makes the library flag a drag, and its next
@@ -2520,12 +2522,14 @@ onUnmounted(() => {
     </div>
 
     <!-- 3D Controls hint -->
-    <div class="controls-hint">
-      <span><kbd>Alt</kbd>+<kbd>Click</kbd> Expand node</span>
-      <span><kbd>X</kbd>/<kbd>Y</kbd>/<kbd>Z</kbd> + <kbd>Drag</kbd> Axis Rotation</span>
-      <span><kbd>Shift</kbd> Blower</span>
-      <span><kbd>Space</kbd>+<kbd>L</kbd> Relayout</span>
-      <span><kbd>Space</kbd>+<kbd>C</kbd> Reset View</span>
+    <div class="controls-hint" :title="shortcutsTooltip" data-testid="controls-hint">
+      <span v-for="s in CANVAS_SHORTCUTS" :key="s.label" class="controls-hint-item">
+        <template v-for="(k, i) in s.keys" :key="k"><kbd>{{ k }}</kbd><template v-if="i < s.keys.length - 1">+</template></template>
+        {{ s.short ?? s.label }}
+      </span>
+      <!-- Narrow viewports show only this; the full list is in the tooltip
+           and in About → Graph shortcuts. -->
+      <span class="controls-hint-compact"><kbd>?</kbd> Shortcuts</span>
     </div>
   </div>
 </template>
@@ -2627,6 +2631,16 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--text-muted, #666);
   pointer-events: none;
+}
+
+/* The hint sits bottom-right (~760px) and the view's graph toolbar
+   bottom-left (ends ~550px); below ~1400px the two overlap, and the toolbar
+   is the one that must stay usable — so collapse to a single "? Shortcuts"
+   chip (full list in its tooltip). */
+.controls-hint-compact { display: none; }
+@media (max-width: 1400px) {
+  .controls-hint-item { display: none; }
+  .controls-hint-compact { display: inline; }
 }
 
 .controls-hint kbd {

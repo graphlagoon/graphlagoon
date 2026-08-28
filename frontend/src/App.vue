@@ -3,6 +3,7 @@ import { RouterView } from 'vue-router';
 import { useRoute } from 'vue-router';
 import { computed } from 'vue';
 import ToastContainer from '@/components/ToastContainer.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import Toolbar from '@/components/Toolbar.vue';
 
 const route = useRoute();
@@ -18,17 +19,28 @@ const showToolbar = computed(() => route.name !== 'login');
       <RouterView />
     </main>
     <ToastContainer />
+    <ConfirmDialog />
   </div>
 </template>
 
 <style scoped>
+/*
+ * A definite 100vh column so full-height views (the graph page) can use
+ * `height: 100%` of <main> instead of guessing the toolbar height — the
+ * toolbar wraps to two rows under 768px, so any `calc(100vh - Npx)` is wrong
+ * somewhere. <main> stays a block (NOT a flex container: auto horizontal
+ * margins on a flex item cancel `stretch`, which collapsed the centred list
+ * views to their content width). Content taller than the viewport still
+ * overflows <main> and scrolls the document exactly as before.
+ */
 .app {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
 main {
   flex: 1;
+  min-height: 0;
 }
 </style>

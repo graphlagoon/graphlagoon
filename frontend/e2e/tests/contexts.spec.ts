@@ -138,9 +138,9 @@ test.describe('Contexts', () => {
     await page.goto('/contexts');
     await expect(page.getByText('Test Context')).toBeVisible();
 
-    page.on('dialog', (dialog) => dialog.accept());
-
     await page.getByRole('button', { name: 'Delete' }).click();
+    await expect(page.getByTestId('confirm-dialog')).toContainText('Test Context');
+    await page.getByTestId('confirm-dialog-accept').click();
     await expect(page.getByText('No Graph Contexts')).toBeVisible();
   });
 });

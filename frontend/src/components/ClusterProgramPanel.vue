@@ -13,6 +13,7 @@ import ClusterProgramRunModal from './ClusterProgramRunModal.vue'
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
 import { X, Play, Loader2, Bot } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
+import { confirmAction } from '@/composables/useConfirm';
 
 const emit = defineEmits<{
   close: []
@@ -72,10 +73,14 @@ function handleEdit(program: ClusterProgram) {
   showEditor.value = true
 }
 
-function handleDelete(programId: string) {
-  if (confirm('Are you sure you want to delete this program?')) {
-    clusterStore.deleteProgram(programId)
-  }
+async function handleDelete(programId: string) {
+  const ok = await confirmAction({
+    title: 'Delete this cluster program?',
+    message: 'Clusters it already produced stay on the graph; the program itself is gone.',
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (ok) clusterStore.deleteProgram(programId)
 }
 
 async function handleExecute(program: ClusterProgram) {

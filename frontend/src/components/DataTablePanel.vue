@@ -508,8 +508,9 @@ function exportCSV() {
 /* ─── Header ─── */
 .drawer-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border-color, #ddd);
   flex-shrink: 0;
@@ -518,10 +519,12 @@ function exportCSV() {
 .header-left {
   display: flex;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .header-center {
   flex: 1;
+  min-width: 160px;
   display: flex;
   justify-content: center;
 }
@@ -530,6 +533,8 @@ function exportCSV() {
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .tab-btn {
@@ -556,6 +561,7 @@ function exportCSV() {
 
 .table-search {
   width: 220px;
+  max-width: 100%;
 }
 
 .action-btn {

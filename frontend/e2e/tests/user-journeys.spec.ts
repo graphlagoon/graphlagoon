@@ -109,12 +109,12 @@ test.describe('User Journeys', () => {
 
     // Open Query — verify editor is available
     await page.getByTitle('Query', { exact: true }).click();
-    await expect(page.getByText('Graph Query')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Query', exact: true })).toBeVisible();
     await page.getByTitle('Query', { exact: true }).click();
 
     // Open Metrics — verify compute controls
     await page.getByTitle('Metrics').click();
-    await expect(page.getByText('Graph Metrics')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Metrics', exact: true })).toBeVisible();
     await page.getByTitle('Metrics').click();
   });
 

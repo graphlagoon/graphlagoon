@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import { api } from '@/services/api';
 import type { GraphModel, RandomGraphRequest, RandomGraphResponse, ExtraColumnDefinition, ColumnDataType, GeneratorType } from '@/types/graph';
+import { confirmAction } from '@/composables/useConfirm';
 
 const router = useRouter();
 
@@ -281,9 +282,13 @@ function createContextFromResult() {
 }
 
 async function clearAllData() {
-  if (!confirm('Are you sure you want to delete ALL data? This will remove all graph contexts, explorations, and generated tables.')) {
-    return;
-  }
+  const ok = await confirmAction({
+    title: 'Delete ALL data?',
+    message: 'Every graph context, exploration and generated table is removed. This cannot be undone.',
+    confirmLabel: 'Delete everything',
+    danger: true,
+  });
+  if (!ok) return;
 
   clearing.value = true;
   clearMessage.value = null;

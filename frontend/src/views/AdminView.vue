@@ -20,6 +20,7 @@ import {
 } from '@/utils/adminView';
 import type { AdminTab } from '@/types/admin';
 import type { Exploration, GraphContext } from '@/types/graph';
+import { confirmAction } from '@/composables/useConfirm';
 
 /**
  * Admin area — superuser only. The router guard hides it from everyone else;
@@ -130,13 +131,25 @@ const filteredExplorations = computed(() =>
 );
 
 async function removeContext(ctx: GraphContext) {
-  if (!confirm(`Delete context "${ctx.title}" owned by ${ctx.owner_email}? This also deletes its explorations.`)) return;
+  const ok = await confirmAction({
+    title: `Delete context “${ctx.title}”?`,
+    message: `Owned by ${ctx.owner_email}. This also deletes its explorations.`,
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
   if (await admin.deleteContext(ctx.id)) toast.success(`Deleted "${ctx.title}"`);
   else toast.error(admin.error || 'Delete failed');
 }
 
 async function removeExploration(exp: Exploration) {
-  if (!confirm(`Delete exploration "${exp.title}" owned by ${exp.owner_email}?`)) return;
+  const ok = await confirmAction({
+    title: `Delete exploration “${exp.title}”?`,
+    message: `Owned by ${exp.owner_email}.`,
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
   if (await admin.deleteExploration(exp.id)) toast.success(`Deleted "${exp.title}"`);
   else toast.error(admin.error || 'Delete failed');
 }

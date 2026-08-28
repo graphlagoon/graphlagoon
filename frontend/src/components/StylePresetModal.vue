@@ -26,6 +26,7 @@ import {
   styleCompatibilityWarnings,
 } from '@/utils/stylePresetImport';
 import StylePresetSkillModal from './StylePresetSkillModal.vue';
+import { confirmAction } from '@/composables/useConfirm';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -129,7 +130,13 @@ function clearStyle() {
 
 async function remove(value: string) {
   if (!contextId.value) return;
-  if (!window.confirm(`Delete style preset “${value}”?`)) return;
+  const ok = await confirmAction({
+    title: `Delete style preset “${value}”?`,
+    message: 'Links that name this preset will open with the default look.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
   error.value = null;
   try {
     await api.deleteStylePreset(contextId.value, value);

@@ -303,7 +303,7 @@ function setMode(mode: QueryMode) {
 <template>
   <div class="query-panel">
     <div class="panel-header">
-      <h3>Graph Query</h3>
+      <h3>Query</h3>
       <div class="header-actions">
         <button
           v-if="capabilities.supportsTranspile"

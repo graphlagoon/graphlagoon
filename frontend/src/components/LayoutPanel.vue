@@ -186,7 +186,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 <template>
   <div class="layout-panel">
     <div class="panel-header">
-      <h4>Layout</h4>
+      <h3>Layout</h3>
       <button
         class="help-btn"
         title="Help - Parameter explanations"
@@ -1208,7 +1208,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
   align-items: center;
 }
 
-.panel-header h4 {
+.panel-header h3 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;

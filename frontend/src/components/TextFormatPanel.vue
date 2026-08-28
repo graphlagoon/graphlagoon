@@ -230,6 +230,7 @@ import TextFormatHelpModal from './TextFormatHelpModal.vue';
 import LabelTemplateSkillModal from './LabelTemplateSkillModal.vue';
 import TemplatePreviewInline from './TemplatePreviewInline.vue';
 import { X, HelpCircle, Bot } from 'lucide-vue-next';
+import { confirmAction } from '@/composables/useConfirm';
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -541,10 +542,14 @@ function saveRule() {
   cancelEdit();
 }
 
-function deleteRule(ruleId: string) {
-  if (confirm('Delete this rule?')) {
-    graphStore.removeTextFormatRule(ruleId);
-  }
+async function deleteRule(ruleId: string) {
+  const ok = await confirmAction({
+    title: 'Delete this label rule?',
+    message: 'Nodes it matched fall back to the default template.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (ok) graphStore.removeTextFormatRule(ruleId);
 }
 </script>
 
