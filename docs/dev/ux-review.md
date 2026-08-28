@@ -43,6 +43,17 @@ the phone width was not:
 | 16 | `.modal { min-width: 400px; max-width: 90vw }` — `min-width` beats `max-width` in CSS, so every modal was wider than any viewport below ~445 px. | **fixed**: `min-width: min(400px, 100%)` and the overlay gained padding so dialogs never touch the edges |
 | 17 | Under 768 px the toolbar's left group kept its content width and slid *under* the right group (About / user menu unreachable, "Admin" printed under the ⓘ button). | **fixed**: the left group gets `min-width: 0` and scrolls; below 520 px the decorative separators go and the nav padding tightens |
 
+## 2c. Visual audit of the panels (screenshots at 1280×800)
+
+Every panel was opened and looked at, not just tested:
+
+| # | Finding | Status |
+|---|---------|--------|
+| 18 | The dev FPS overlay (`useDevPerf`) sat at `top:4px; left:4px` with `z-index: 9999; pointer-events: auto` — on top of the floating panels that open in that very corner. It silently ate clicks: the Layout panel's close button could not be pressed in `make dev`. | **fixed**: `pointer-events: none` and `z-index: 15` (above the canvas, below the panels). `horizontal: true` already shows every stats panel, so click-to-cycle was not needed |
+| 19 | `LayoutPanel` was the only panel in the app with no close button — you had to find the toolbar button that opened it. | **fixed**: an X next to the help icon, wired to the same state |
+| 20 | Context Info broke ordinary words mid-token (`word-break: break-all` rendered "the produc / ts that connect them"). | **fixed**: `word-break: normal; overflow-wrap: anywhere` — long ids still break, prose does not |
+| 21 | The Metrics panel's "Visual Mapping" tab wrapped to two lines, making that tab taller than its two neighbours. | **fixed**: `white-space: nowrap` with tighter padding; the row fits |
+
 ## 3. Remaining backlog, in order
 
 1. **A real dirty state** (#6, remainder) — the breadcrumb still cannot say
@@ -55,7 +66,8 @@ the phone width was not:
 
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
 #15–#17 (phone-width responsiveness of the list pages, modals and toolbar),
-#6 (save state as a control, rename in the list).
+#6 (save state as a control, rename in the list), #18–#21 (panel chrome found
+by looking at every panel).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 

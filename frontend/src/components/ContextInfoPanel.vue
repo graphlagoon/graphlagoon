@@ -317,9 +317,12 @@ const datasourceTagline = computed(() => datasourceDescriptor.value.copy.tagline
   flex-shrink: 0;
 }
 
+/* `break-all` split ordinary words mid-token ("produc / ts"). Break only what
+   cannot fit on its own — long ids, table names — and leave prose alone. */
 .info-row .value {
   text-align: right;
-  word-break: break-all;
+  word-break: normal;
+  overflow-wrap: anywhere;
   color: var(--text-color, #333);
 }
 
