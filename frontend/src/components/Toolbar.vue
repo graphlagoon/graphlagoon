@@ -152,10 +152,27 @@ function handleExportPng(options: ExportPNGOptions) {
           Multi
         </span>
         <span class="title-sep" aria-hidden="true"></span>
-        <span v-if="graphStore.currentExploration" class="exploration-name">
+        <!-- The save state is the control, not a label: "Unsaved" used to be
+             inert text while the only way to act on it was a button in a
+             different group at the other end of the bar. -->
+        <button
+          v-if="graphStore.currentExploration"
+          class="exploration-state exploration-name"
+          data-testid="toolbar-exploration-name"
+          :title="`Saved as “${graphStore.currentExploration.title}” — click to update it`"
+          @click="openSaveModal"
+        >
           {{ graphStore.currentExploration.title }}
-        </span>
-        <span v-else class="exploration-unsaved">Unsaved</span>
+        </button>
+        <button
+          v-else
+          class="exploration-state exploration-unsaved"
+          data-testid="toolbar-exploration-unsaved"
+          title="This view is not saved. Click to save it as an exploration."
+          @click="openSaveModal"
+        >
+          Unsaved
+        </button>
       </template>
     </div>
 
@@ -549,6 +566,17 @@ function handleExportPng(options: ExportPNGOptions) {
   color: var(--color-warning);
   font-style: italic;
 }
+
+.exploration-state {
+  background: none;
+  border: none;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+}
+.exploration-state:hover { background: var(--color-toolbar-hover-bg); }
+.exploration-state:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .multi-edge-badge {
   display: inline-flex;

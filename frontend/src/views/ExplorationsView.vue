@@ -21,6 +21,39 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const filterContextId = ref<string>('');
 
+// Rename modal state. Renaming lives here rather than on the graph page: the
+// list is where you go looking for an exploration whose name no longer says
+// what it holds.
+const renameTarget = ref<Exploration | null>(null);
+const renameTitle = ref('');
+const renaming = ref(false);
+
+function openRename(exploration: Exploration) {
+  renameTarget.value = exploration;
+  renameTitle.value = exploration.title;
+}
+
+async function submitRename() {
+  const target = renameTarget.value;
+  const title = renameTitle.value.trim();
+  if (!target || !title || renaming.value) return;
+  if (title === target.title) {
+    renameTarget.value = null;
+    return;
+  }
+  renaming.value = true;
+  try {
+    const updated = await api.updateExploration(target.id, { title });
+    explorations.value = explorations.value.map((e) => (e.id === target.id ? updated : e));
+    renameTarget.value = null;
+    toast.success(`Renamed to “${updated.title}”`);
+  } catch (e) {
+    toast.error(getErrorMessage(e, 'Failed to rename exploration'));
+  } finally {
+    renaming.value = false;
+  }
+}
+
 // Share modal state
 const showShareModal = ref(false);
 const shareExploration = ref<Exploration | null>(null);
@@ -307,6 +340,14 @@ async function quickShare(email: string) {
               Open
             </button>
             <button
+              v-if="canManage(exploration)"
+              class="btn btn-outline btn-sm"
+              :data-testid="`exploration-rename-${exploration.id}`"
+              @click="openRename(exploration)"
+            >
+              Rename
+            </button>
+            <button
               v-if="sharingEnabled && canManage(exploration)"
               class="btn btn-outline btn-sm"
               @click="openShare(exploration)"
@@ -325,12 +366,46 @@ async function quickShare(email: string) {
       </div>
     </div>
 
+    <!-- Rename Modal -->
+    <div v-if="renameTarget" class="modal-overlay" @click.self="renameTarget = null">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>Rename exploration</h2>
+          <button class="modal-close" aria-label="Close" @click="renameTarget = null">&times;</button>
+        </div>
+        <form @submit.prevent="submitRename">
+          <div class="form-group">
+            <label for="rename-title">Title</label>
+            <input
+              id="rename-title"
+              v-model="renameTitle"
+              class="form-control"
+              data-testid="exploration-rename-input"
+              required
+              autofocus
+            />
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline" @click="renameTarget = null">Cancel</button>
+            <button
+              type="submit"
+              class="btn btn-primary"
+              data-testid="exploration-rename-save"
+              :disabled="renaming || !renameTitle.trim()"
+            >
+              {{ renaming ? 'Saving…' : 'Save' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Share Modal (only available when database is enabled) -->
     <div v-if="sharingEnabled && showShareModal" class="modal-overlay" @click.self="showShareModal = false">
       <div class="modal">
         <div class="modal-header">
           <h2>Share "{{ shareExploration?.title }}"</h2>
-          <button class="modal-close" @click="showShareModal = false">&times;</button>
+          <button class="modal-close" aria-label="Close" @click="showShareModal = false">&times;</button>
         </div>
 
         <div v-if="shareExploration?.shared_with?.length" class="shared-list">

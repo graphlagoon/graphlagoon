@@ -8279,3 +8279,44 @@ text changes. **Admin-Area Impact:** No admin-area impact (CSS only).
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-28 22:45] - UX: the save state is the control, and explorations can be renamed
+
+**Finding #6** in [ux-review.md](ux-review.md): saving lived only in the
+top-bar File group, the italic `Unsaved` next to the context title was inert
+text, and the Explorations list could open / share / delete but never rename.
+
+**Changes:**
+- `Unsaved` and the exploration name are now buttons that open the Save
+  dialog (`toolbar-exploration-unsaved` / `toolbar-exploration-name`), with
+  titles that say what will happen. The state a user reads is the control they
+  press — it used to point at a button in a different group at the other end
+  of the bar.
+- Explorations list: **Rename** (owner / write access only) via a small modal
+  that PUTs `{ title }` through the existing `api.updateExploration`. No API
+  change was needed. Creating deliberately stays on the graph page: an
+  exploration captures a view, so there is nothing to create from a list.
+- `aria-label` on the share modal's close button (spotted by looking at the
+  rendered page, not by a test).
+
+**Not solved:** a true *dirty* state ("modified since save") needs the graph
+store to diff the live view against the saved exploration; "Unsaved" still
+only means "never saved". Recorded as the first backlog item.
+
+**Files modified:** `frontend/src/components/Toolbar.vue`,
+`frontend/src/views/ExplorationsView.vue`, `frontend/e2e/helpers/api-mocks.ts`
+(the seeded exploration route now answers PUT by echoing the patch),
+`frontend/e2e/tests/explorations.spec.ts` (rename round-trip),
+`frontend/e2e/tests/graph.spec.ts` (clicking `Unsaved` opens Save).
+
+**Testing:** 2167 unit, 195 e2e. Rendered pages reviewed by eye at 1440 and
+390px (confirm dialog, rename modal, hovered save state) — the earlier UX
+items had test coverage but had never been *looked* at; doing so is what
+turned up the missing `aria-label`.
+
+**Public Docs:** no guide text change (the Save flow is unchanged, only its
+entry points). **Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---

@@ -16,7 +16,7 @@ document; the rest is a backlog with a recommended order.
 | 3 | **"Clusters" has two entry points**: top → `ClusterProgramPanel` (tabs Communities / Programs / Similarity), bottom → `ClusterListPanel` (the generated clusters). The Similarity tab has no header of its own. | backlog: fold the list into a *Results* tab of the Clusters panel |
 | 4 | **Panels were not exclusive.** The nine top-bar panels were independent booleans; all could be open at once, docked side by side on the left, squeezing the canvas (Filters + Style + Labels = 780 px). | **fixed**: the nine share one dock — opening one closes the other (`setDocked`/`toggleDocked` in the view). Floating panels (Info, Layout, cluster list) and the bottom drawers are unaffected |
 | 5 | **Names drift between button, heading and component**: Style / "Style" / `AestheticsPanel`; Labels / "Labels" / `TextFormatPanel`; Query / "Graph Query"; Metrics / "Graph Metrics"; `LayoutPanel` used `<h4>` where every other panel uses `<h3>`. | **fixed** for headings (Query, Metrics, Layout `<h3>`); component file names left alone (rename is churn without user value) |
-| 6 | **Saving an exploration** lives only in the top-bar File group; the italic `Unsaved` in the breadcrumb is the only save-state signal. The Explorations page can open / share / delete but not create or rename. | backlog |
+| 6 | **Saving an exploration** lived only in the top-bar File group; the italic `Unsaved` in the breadcrumb was inert text, and the Explorations page could open / share / delete but not rename. | **fixed**: the save state *is* the control — `Unsaved` and the exploration name are buttons that open the Save dialog; the list gained **Rename**. Creating stays on the graph page by design (an exploration captures a view) |
 | 7 | Below 1600 px the top bar drops every label: 11 icon-only buttons whose meaning is tooltip-only. | mitigated by the responsive pass; disappears with a left rail (see §4) |
 | 8 | While a query ran, the whole centre of the top bar was replaced by a spinner — every panel toggle vanished mid-query. | **fixed**: toggles stay; the spinner sits in the right group next to Export |
 
@@ -45,13 +45,17 @@ the phone width was not:
 
 ## 3. Remaining backlog, in order
 
-1. **Save affordance on the canvas** (#6) — a `Save` / `Saved · 2 min ago` control in the canvas toolbar; create + rename on the Explorations page.
+1. **A real dirty state** (#6, remainder) — the breadcrumb still cannot say
+   *modified since save*: that needs the graph store to diff the live view
+   against the saved exploration state. Until then "Unsaved" only means "never
+   saved".
 2. **Clusters results tab** (#3) — fold `ClusterListPanel` into a *Results* tab of the Clusters panel so "Clusters" is one place.
 3. **Colour lint** (#14) — stylelint `color-no-hex` over `src/**/*.vue`, then remove the `var(--x, #ddd)` fallbacks file by file.
 4. **Undo for deletes** — now that confirmations are in-app, a toast with *Undo* is a better trade than a dialog for the cheap ones (a label rule, a cluster).
 
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
-#15–#17 (phone-width responsiveness of the list pages, modals and toolbar).
+#15–#17 (phone-width responsiveness of the list pages, modals and toolbar),
+#6 (save state as a control, rename in the list).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 

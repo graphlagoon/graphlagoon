@@ -87,6 +87,24 @@ test.describe('Explorations', () => {
     await expect(page.getByText('No Explorations')).toBeVisible();
   });
 
+  test('renames an exploration from the list', async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedExplorations(page, [MOCK_EXPLORATION]);
+
+    await page.goto('/explorations');
+    await expect(page.getByText('Test Exploration')).toBeVisible();
+
+    await page.getByTestId(`exploration-rename-${MOCK_EXPLORATION.id}`).click();
+    const input = page.getByTestId('exploration-rename-input');
+    await expect(input).toHaveValue('Test Exploration');
+    await input.fill('Fraude — anel principal');
+    await page.getByTestId('exploration-rename-save').click();
+
+    // Scoped to the row: the success toast carries the new name too.
+    await expect(page.locator('.list-item-title', { hasText: 'Fraude — anel principal' })).toBeVisible();
+    await expect(page.locator('.list-item-title', { hasText: 'Test Exploration' })).toHaveCount(0);
+  });
+
   // ---------------------------------------------------------------------------
   // Navigation from exploration to graph
   // ---------------------------------------------------------------------------
