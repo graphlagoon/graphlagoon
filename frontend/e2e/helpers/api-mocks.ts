@@ -4,6 +4,12 @@ import {
   MOCK_GRAPH_RESPONSE,
   MOCK_DATASETS,
   MOCK_DEV_RANDOM_GRAPH,
+  MOCK_ADMIN_AUDIT,
+  MOCK_ADMIN_CONFIG,
+  MOCK_ADMIN_CONTEXTS,
+  MOCK_ADMIN_EXPLORATIONS,
+  MOCK_ADMIN_OVERVIEW,
+  MOCK_ADMIN_USERS,
 } from '../fixtures/mock-data';
 
 /**
@@ -955,4 +961,82 @@ export async function seedStylePresets(
       route.continue();
     },
   );
+}
+
+/**
+ * Admin area (superuser only). Mocks every /api/admin/* route plus the
+ * contexts/explorations listings the Contexts and Explorations tabs reuse.
+ * Call AFTER setupAPIMocks. Transfer requests are recorded on the returned
+ * object so a test can assert what the UI sent; `forbidden: true` makes every
+ * admin route answer 403 (what a non-superuser gets from the backend).
+ */
+export async function seedAdmin(
+  page: Page,
+  overrides: {
+    overview?: any;
+    config?: any[];
+    users?: any;
+    contexts?: any[];
+    explorations?: any[];
+    audit?: any;
+    forbidden?: boolean;
+  } = {},
+) {
+  const calls: { transfers: Array<{ url: string; body: any }>; clears: any[] } = {
+    transfers: [],
+    clears: [],
+  };
+  const json = (body: unknown, status = 200) => ({
+    status,
+    contentType: 'application/json',
+    body: JSON.stringify(body),
+  });
+  const forbidden = json(
+    { detail: { error: { code: 'FORBIDDEN', message: 'This action is restricted to superusers.', details: {} } } },
+    403,
+  );
+  const overview = overrides.overview ?? MOCK_ADMIN_OVERVIEW;
+  const users = overrides.users ?? MOCK_ADMIN_USERS;
+  const audit = overrides.audit ?? MOCK_ADMIN_AUDIT;
+  const contexts = overrides.contexts ?? MOCK_ADMIN_CONTEXTS;
+  const explorations = overrides.explorations ?? MOCK_ADMIN_EXPLORATIONS;
+
+  await page.route('**/graphlagoon/api/admin/**', (route) => {
+    if (overrides.forbidden) return route.fulfill(forbidden);
+    const url = route.request().url();
+    const method = route.request().method();
+    if (url.includes('/admin/overview')) return route.fulfill(json(overview));
+    if (url.includes('/admin/health/warehouse'))
+      return route.fulfill(json({ status: 'ok', latency_ms: 12.5, detail: null }));
+    if (url.includes('/admin/config')) return route.fulfill(json(overrides.config ?? MOCK_ADMIN_CONFIG));
+    if (url.includes('/admin/users')) return route.fulfill(json(users));
+    if (url.includes('/admin/audit')) return route.fulfill(json(audit));
+    if (url.includes('/transfer') && method === 'POST') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      calls.transfers.push({ url, body });
+      const id = url.split('/').slice(-2)[0];
+      return route.fulfill(json({ id, previous_owner_email: 'previous@example.com', owner_email: body.new_owner_email }));
+    }
+    if (url.includes('/environment/clear') && method === 'POST') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      calls.clears.push(body);
+      if (body.confirm !== 'CLEAR ALL')
+        return route.fulfill(json({ detail: { error: { code: 'CONFIRMATION_REQUIRED', message: 'Type "CLEAR ALL" to confirm.', details: {} } } }, 400));
+      return route.fulfill(json({ status: 'cleared', cleared: ['memory'], warehouse: null }));
+    }
+    return route.fulfill(json({ detail: 'unmocked admin route' }, 404));
+  });
+
+  await seedContexts(page, contexts);
+  await page.route('**/graphlagoon/api/explorations', (route) => {
+    if (route.request().method() === 'GET') route.fulfill(json(explorations));
+    else route.continue();
+  });
+  for (const exp of explorations) {
+    await page.route(`**/graphlagoon/api/explorations/${exp.id}`, (route) => {
+      if (route.request().method() === 'DELETE') route.fulfill(json({ status: 'deleted' }));
+      else route.fulfill(json(exp));
+    });
+  }
+  return calls;
 }

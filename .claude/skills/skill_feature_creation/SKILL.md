@@ -968,6 +968,26 @@ generator runs against API mocks — no backend, no manual screenshots.
 **5. Verify:** `make docs-build` MUST pass (it runs VitePress's dead-link
 check over sidebar entries, cross-links, and image references).
 
+#### Step 4.2b: Admin-Area Impact (MANDATORY)
+
+The superuser admin area (`/admin`, `api/graphlagoon/routers/admin.py`) shows
+the environment and audits destructive actions. Most of its coverage is
+**enforced by `api/tests/test_admin_registry.py`** — a red test there is the
+admin area telling you it needs an update. Full table:
+[docs/dev/admin-area.md](../../../docs/dev/admin-area.md). Ask:
+
+| Did you… | Then… |
+|---|---|
+| add a `Settings` field / env var | classify it in `routers/admin_registry.CONFIG_FIELD_KINDS` (`public` / `secret` / `hidden`) |
+| add a table or in-memory collection | `CLEARABLE_TABLES` or `PRESERVED_TABLES`, `InMemoryStore.clear_all`, a count in `AdminCounts` if user-owned, and extend `graphlagoon.dev.seed` |
+| add a `POST`/`PUT`/`DELETE` route | `AUDITED_ROUTES` + `services.audit.record(...)` + `AuditAction`, or `AUDIT_EXEMPT_ROUTES` with a reason |
+| add a router module | `tests/test_admin_registry.ROUTER_MODULES` |
+| add a new audit action | `describeAudit` in `frontend/src/utils/adminView.ts` |
+| add a new user-owned entity | a tab or column in `AdminView.vue` so a superuser can see who owns it |
+
+The decision-log entry MUST state either what was updated or the sentence
+**"No admin-area impact"**. Silence is not an option.
+
 #### Step 4.3: Document in Decision Log
 
 ```markdown
@@ -1023,6 +1043,9 @@ check over sidebar entries, cross-links, and image references).
 - [x] Public guide updated (list pages) / "No public docs impact" stated
 - [x] `make docs-build` passes
 - [x] Screenshots regenerated (`make docs-screenshots`) if UI changed
+
+**Admin-Area Impact:**
+- [x] Registries updated (`CONFIG_FIELD_KINDS` / tables / audited routes) or "No admin-area impact" stated
 
 **Performance Considerations:**
 - Database index added on `owner_email`
@@ -1097,6 +1120,7 @@ git push origin feature/feature-name
 - [x] Decision log updated
 - [x] Public guide (`docs/guide/`) updated or "No public docs impact" stated
 - [x] `make docs-build` passes
+- [x] Admin-area impact stated (registries updated or "No admin-area impact")
 
 ### Screenshots
 [Run `make docs-screenshots` and commit the regenerated PNGs if UI changed]

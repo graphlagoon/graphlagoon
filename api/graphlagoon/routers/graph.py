@@ -4,8 +4,6 @@ from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from uuid import UUID
 from typing import Optional
 
-from graphlagoon.db.database import is_database_available, get_session_maker
-from graphlagoon.db.memory_store import get_memory_store
 from graphlagoon.models.schemas import (
     DatasetsResponse,
     GraphResponse,
@@ -35,6 +33,10 @@ from graphlagoon.models.schemas import (
     SchemaDriftProposal,
 )
 from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
+from graphlagoon.services import audit
+from graphlagoon.services.audit import AuditAction
+from graphlagoon.services.environment import clear_environment
+from graphlagoon.utils.authz import require_superuser
 from graphlagoon.services.graph_operations import (
     merge_column_config,
     QueryExecutionError,
@@ -228,9 +230,7 @@ async def get_schema_drift(
         # there is nothing to describe and nothing that can drift.
         node_table=SchemaDriftTable(
             table_name=context.node_table_name,
-            reachable=(
-                True if context.node_table_name is None else node_reachable
-            ),
+            reachable=(True if context.node_table_name is None else node_reachable),
             columns=node_columns,
         ),
         edge_table=SchemaDriftTable(
@@ -822,9 +822,17 @@ async def create_random_graph(
 
 @router.delete("/dev/clear-all")
 async def clear_all_data(
-    request: Request, warehouse: WarehouseClient = Depends(get_warehouse)
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+    user_email: str = Depends(require_superuser),
 ):
-    """Clear all data (dev mode only). Clears storage and parquet files."""
+    """Clear all data (dev mode only, superuser only).
+
+    Alias of ``POST /api/admin/environment/clear`` kept for the dev generator
+    page. Same double gate: dev mode *and* superuser (the dev default identity
+    is a superuser in the shipped ``.env.example``), and the audit trail is
+    preserved so the ``admin.clear_all`` entry outlives the wipe.
+    """
     if not get_settings().dev_mode:
         raise HTTPException(
             status_code=403,
@@ -837,32 +845,12 @@ async def clear_all_data(
             },
         )
 
-    get_current_user(request)  # Ensure authenticated
-
-    if is_database_available():
-        from sqlalchemy import text
-
-        session_maker = get_session_maker()
-        async with session_maker() as session:
-            # Use TRUNCATE CASCADE to efficiently clear all tables
-            tables_to_truncate = [
-                "usage_logs",
-                "exploration_shares",
-                "explorations",
-                "graph_context_shares",
-                "graph_contexts",
-                "users",
-            ]
-
-            for table in tables_to_truncate:
-                await session.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
-            await session.commit()
-    else:
-        # Clear in-memory store
-        store = get_memory_store()
-        store.clear_all()
-
-    # Clear parquet files in warehouse
-    await warehouse.clear_all_tables()
+    result = await clear_environment(warehouse=warehouse)
+    await audit.record(
+        user_email,
+        AuditAction.ADMIN_CLEAR_ALL,
+        resource_type="environment",
+        metadata={"cleared": result["cleared"], "via": "dev/clear-all"},
+    )
 
     return {"status": "cleared", "message": "All data cleared"}

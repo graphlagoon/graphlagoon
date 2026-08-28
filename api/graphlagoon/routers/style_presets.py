@@ -42,6 +42,8 @@ from graphlagoon.services.style_presets import (
     style_presets_enabled,
     validate_preset_name,
 )
+from graphlagoon.services import audit
+from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import can_manage, can_write, is_superuser
 from graphlagoon.utils.context_access import get_context_with_access
 
@@ -274,3 +276,14 @@ async def delete_style_preset(context_id: UUID, name: str, request: Request):
         raise
     except Exception as exc:
         raise _storage_error("delete", validated, exc) from exc
+
+    await audit.record(
+        user_email,
+        AuditAction.PRESET_DELETE,
+        resource_type="graph_context",
+        resource_id=context_id,
+        metadata={
+            "name": validated,
+            "created_by": preset.created_by if preset is not None else None,
+        },
+    )

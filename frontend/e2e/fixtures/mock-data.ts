@@ -161,3 +161,95 @@ export const MOCK_EXPLORATION = {
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };
+
+// --- Admin area (superuser only) -------------------------------------------
+// Shapes mirror api/graphlagoon/models/schemas.py "Admin area"; values echo a
+// small `graphlagoon.dev.seed --seed 42` run so screenshots look like `make dev`.
+
+export const MOCK_ADMIN_OVERVIEW = {
+  version: '0.29.0',
+  dev_mode: true,
+  databricks_mode: false,
+  persistence_backend: 'memory',
+  alembic_version: null,
+  counts: { users: 31, contexts: 60, explorations: 197, query_templates: 24, audit_entries: 43 },
+  superusers: ['dev@graphlagoon.local'],
+  storage: {
+    exploration_snapshots: './tmp/explorations',
+    precomputed_graphs: './tmp/precomputed-graphs',
+    style_presets: './tmp/style-presets',
+  },
+  public_config: {
+    dev_mode: true,
+    database_enabled: false,
+    databricks_mode: false,
+    precomputed_graphs_enabled: true,
+    style_presets_enabled: true,
+    custom_metrics_enabled: true,
+    custom_metrics_auto_run_enabled: true,
+    datasources: { sql_warehouse: true, neptune: false },
+    datasource_connections: [],
+    allowed_share_domains: ['example.com'],
+    default_behaviors: {},
+    version: '0.29.0',
+    is_superuser: true,
+  },
+  health: { database: { status: 'memory', latency_ms: null, detail: 'in-memory store' } },
+};
+
+export const MOCK_ADMIN_CONFIG = [
+  { key: 'dev_mode', env_var: 'GRAPH_LAGOON_DEV_MODE', value: true, kind: 'public' },
+  { key: 'database_enabled', env_var: 'GRAPH_LAGOON_DATABASE_ENABLED', value: false, kind: 'public' },
+  { key: 'database_url', env_var: 'GRAPH_LAGOON_DATABASE_URL', value: 'set', kind: 'secret' },
+  { key: 'databricks_token', env_var: 'GRAPH_LAGOON_DATABRICKS_TOKEN', value: 'not set', kind: 'secret' },
+  { key: 'allowed_share_domains', env_var: 'GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS', value: 'example.com', kind: 'public' },
+  { key: 'port', env_var: 'GRAPH_LAGOON_PORT', value: 8000, kind: 'public' },
+];
+
+export const MOCK_ADMIN_USERS = {
+  items: [
+    { email: 'dev@graphlagoon.local', display_name: 'dev', created_at: '2026-08-01T09:00:00Z', last_seen_at: '2026-08-28T11:58:00Z', is_superuser: true, contexts_owned: 0, explorations_owned: 0 },
+    { email: 'zoe.garcia@example.com', display_name: 'zoe.garcia', created_at: '2026-08-02T09:00:00Z', last_seen_at: '2026-08-28T10:00:00Z', is_superuser: false, contexts_owned: 14, explorations_owned: 52 },
+    { email: 'bob.silva@example.com', display_name: 'bob.silva', created_at: '2026-08-03T09:00:00Z', last_seen_at: '2026-08-20T10:00:00Z', is_superuser: false, contexts_owned: 3, explorations_owned: 9 },
+    { email: 'dave.moore@example.com', display_name: 'dave.moore', created_at: '2026-08-04T09:00:00Z', last_seen_at: '2026-08-04T09:00:00Z', is_superuser: false, contexts_owned: 0, explorations_owned: 0 },
+  ],
+  total: 4,
+  page: 1,
+  page_size: 200,
+};
+
+export const MOCK_ADMIN_CONTEXTS = [
+  {
+    ...MOCK_CONTEXT,
+    id: 'ctx-admin-1',
+    title: 'Fraud ring #1',
+    owner_email: 'zoe.garcia@example.com',
+    shared_with: ['*@example.com'],
+    tags: ['fraud', 'seed:1a2b3c4d'],
+  },
+  {
+    ...MOCK_CONTEXT,
+    id: 'ctx-admin-2',
+    title: 'Supplier network #2',
+    owner_email: 'bob.silva@example.com',
+    shared_with: [],
+    tags: ['supply'],
+  },
+];
+
+export const MOCK_ADMIN_EXPLORATIONS = [
+  { ...MOCK_EXPLORATION, id: 'exp-admin-1', title: 'Hub n-17 (1)', graph_context_id: 'ctx-admin-1', owner_email: 'zoe.garcia@example.com', shared_with: ['*'] },
+  { ...MOCK_EXPLORATION, id: 'exp-admin-2', title: 'Ego of n-3 (2)', graph_context_id: 'ctx-admin-2', owner_email: 'bob.silva@example.com' },
+];
+
+export const MOCK_ADMIN_AUDIT = {
+  items: [
+    { id: 'a1', user_email: 'dev@graphlagoon.local', action: 'context.transfer', resource_type: 'graph_context', resource_id: 'ctx-admin-2', metadata: { from: 'carol.lee@example.com', to: 'bob.silva@example.com', title: 'Supplier network #2' }, created_at: '2026-08-28T11:50:00Z' },
+    { id: 'a2', user_email: 'zoe.garcia@example.com', action: 'exploration.delete', resource_type: 'exploration', resource_id: 'exp-old', metadata: { title: 'Weekly review: n-9', owner: 'zoe.garcia@example.com' }, created_at: '2026-08-28T11:40:00Z' },
+    { id: 'a3', user_email: 'zoe.garcia@example.com', action: 'context.share', resource_type: 'graph_context', resource_id: 'ctx-admin-1', metadata: { with: '*@example.com', permission: 'read' }, created_at: '2026-08-28T11:30:00Z' },
+  ],
+  total: 3,
+  page: 1,
+  page_size: 50,
+  actions: ['admin.clear_all', 'context.delete', 'context.share', 'context.transfer', 'context.unshare', 'exploration.delete', 'exploration.share', 'exploration.transfer', 'exploration.unshare', 'precomputed.delete', 'precomputed.publish', 'preset.delete'],
+};

@@ -7973,3 +7973,76 @@ Frontend only (no backend changes).
 **Public Docs:** `docs/guide/communities-metrics.md` — new "Custom metrics" section with two automated screenshot scenes (`communities-metrics-custom`, `communities-metrics-custom-editor`; the screenshot fixture context now carries one auto-run and one manual definition), "Importing and exporting" and the robot prompt; `docs/guide/configuration.md` — "Custom metrics" flags section + env example; `api/.env.example` (who can see them, `item`/`ctx` contract, examples, where values go, security notes with residual risks) and the caveats updated; `docs/guide/labels.md` — `{metric:<name>}` placeholder.
 
 **Technical debt:** see technical-debts.md #31–#34 (no CSP; cluster programs still run unsandboxed on the main thread; snapshot clone cost on very large graphs; first-match metric-name resolution in labels).
+
+## [2026-08-28 19:30] - Feature Implemented: Admin area (superuser) + audit trail + dev seed
+
+**Feature:** A superuser-only area at `/admin` (backend `/api/admin/*`) that shows the environment (mode, persistence backend + Alembic revision, database latency, on-demand warehouse probe, counts, superusers, share domains, storage paths, feature flags, datasources), the effective configuration with secrets redacted, every known user with ownership counts and last-seen, all contexts/explorations with **ownership transfer** and delete, a paginated **audit log**, and a dev-only **clear environment**. Plus a parametrised dev seed (`make dev-seed`) that populates a running stack with dozens of users and hundreds of contexts/explorations so the system is explorable, run by default at the end of `make dev` / `make dev-db` / `make dev-gsql2rsql*`.
+
+**Purpose (user request):** "criar um plano para uma área de super usuário … todas rotas usadas devem estar seguras … contemplando quando deve atualizar a área"; then "um comando para criar automático vários usuários, contextos e explorations para conseguirmos visualizar e explorar melhor o sistema". Plan approved and kept at [plans/admin-area.md](plans/admin-area.md).
+
+**Design Decisions:**
+1. **Gate at the router level.** `APIRouter(prefix="/api/admin", dependencies=[Depends(require_superuser)])` — a handler cannot forget the check. `require_superuser` (new, in `utils/authz.py`) resolves identity through `get_current_user`, so it works with or without `AuthMiddleware` (mounted deployments, bare test apps). `tests/test_admin.py` walks `admin.router.routes` and asserts 403 for a non-superuser on every one (with valid bodies — FastAPI validates JSON before dependencies) and snapshots the expected route list.
+2. **Pre-existing privilege-escalation path closed.** `get_current_user` ignored the `configure_auth(user_provider)` and read the forgeable header directly; in a host that mounted graphlagoon without `AuthMiddleware` a client could claim any identity. It now consults the provider first; an *async* provider without the middleware fails closed (`500 AUTH_MISCONFIGURED`) rather than falling back to the header (debt #37). Also `AuthMiddleware` now returns the 403 as a `JSONResponse` instead of raising (an exception from `BaseHTTPMiddleware` surfaced as a 500 with traceback — part of M2).
+3. **Config by classified allowlist, not blocklist.** `routers/admin_registry.CONFIG_FIELD_KINDS` classifies every `Settings` field as `public` / `secret` (`set`/`not set` only; includes every URL that can embed credentials) / `hidden`. `test_admin_registry` fails when a new field is unclassified — this is the "when to update the admin area" forcing function for env vars.
+4. **Audit through the existing `usage_logs` table** (created in migration 001, never written before) plus a bounded deque on `InMemoryStore`. `services/audit.record` never raises, caps metadata at 4 KB, and takes the handler's session so a rolled-back delete leaves no orphan line. Every mutating route is either in `AUDITED_ROUTES` (context/exploration delete/share/unshare/transfer, precomputed publish/delete, preset delete, clear-all) or in `AUDIT_EXEMPT_ROUTES` with a reason — enforced by walking every router module's routes (the registry test reads `module.router.routes` because FastAPI ≥ 0.139 wraps included routers lazily in `_IncludedRouter` and `app.routes` no longer exposes `APIRoute`s).
+5. **One public-config builder.** `services/public_config.build_public_config` now feeds `GET /api/config`, the SPA template and the admin overview (they were duplicated and even disagreed on `version`). A new flag appears in the admin "feature flags" card automatically. `tests/test_default_behaviors.py::TestConfigInjection` was updated to assert on the builder.
+6. **Users registered in both persistence modes and outside the middleware.** `services/users.touch_user` (create + `last_seen_at`, throttled to one write per 15 min) is called by `AuthMiddleware` (previously DB-only; `InMemoryStore.ensure_user` was dead code) and on ownership transfer for the new owner. Migration `014` adds `users.last_seen_at` and indexes on `usage_logs(created_at DESC, user_email, action)`.
+7. **Clear-all moved to `services/environment.clear_environment`**, consuming `admin_registry.CLEARABLE_TABLES` (so the registry-vs-metadata test is not tautological); `usage_logs` is preserved and the `admin.clear_all` entry is written *after* the wipe. `POST /api/admin/environment/clear` (POST, not DELETE-with-body: proxies drop those) needs dev mode + superuser + literal `CLEAR ALL`; `DELETE /api/dev/clear-all` is the same service with the same gates (A1 partially closed; the dev-generator page keeps working because `.env.example` now makes `dev@graphlagoon.local` a superuser, which also removes the personal e-mail — B8).
+8. **Warehouse probe on demand only.** No `ping` exists on `WarehouseClient` and its HTTP timeout is minutes; hitting a stopped Databricks SQL warehouse wakes it (slow, billable). `POST /api/admin/health/warehouse` uses its own 3 s `httpx` call against the cheapest endpoint (warehouse metadata on Databricks, `/health` locally) and is a button, never part of the overview.
+9. **Transfer validates with a new `validate_owner_email`** (`validate_share_email` accepts `*` and `*@domain`, which must never become an owner). Redundant share held by the new owner is removed; the previous owner keeps no implicit access.
+10. **Frontend guard is UX only**, reads `is_superuser` from the injected config (the auth store has no role). While there, `meta.devOnly` — declared on `/dev/generator` but never enforced — is now enforced. `resolveGuard` is a pure exported function with its own tests. Dev login/logout now re-fetches `/api/config` (`services/config.ts`) so the flag matches the identity actually in use (closes the "reload needed" limitation of 2026-07-13).
+11. **Superuser list is shown** — only inside `/api/admin/*`. The 2026-07-13 decision (never expose to the client) still holds for regular users; admins need to know who else is admin.
+12. **Reuse instead of new listing endpoints:** the Contexts/Explorations tabs call the existing `GET /api/graph-contexts` and `GET /api/explorations` (superuser branches already return everything) and the existing DELETEs; only transfer and clear are new mutations.
+13. **Dev seed over HTTP, not direct store writes.** `graphlagoon/dev/seed.py` acts as N generated users (`X-Forwarded-Email` per request) so it goes through auth, sharing, ownership and audit exactly like real traffic, and works identically in memory and Postgres modes. Deterministic per `--seed`, three user profiles (power / normal / inactive → transfer candidates), 5 NetworkX graphs of 50–5000 nodes via the existing `/api/dev/random-graph`, contexts with tags/shares (public, domain, user; read/write)/query templates, explorations with real node ids from `/subgraph`, then ~5 % deletes and 2–3 admin transfers so the audit tab is populated. Idempotent via a `seed:<hash(params)>` tag; `--reset` clears through the admin API; refuses non-dev servers. `make dev-seed` / `make dev-seed-big` (the CLI auto-detects the `/graphlagoon` mount prefix), hooked into the dev workflows with `SEED_DATA=0` to skip. Tests run it in-process through `httpx.ASGITransport` (`--no-graphs`).
+14. **Governance for "when to update the admin area"** lives in [admin-area.md](admin-area.md) (table "If you… → then…", each row naming the test that enforces it) and in the feature skill as mandatory **Step 4.2b — Admin-area impact** with the forced sentence "No admin-area impact".
+
+**Backend Changes:**
+- NEW `utils/authz.require_superuser`; `utils/sharing.validate_owner_email`
+- NEW `services/users.py` (`touch_user`), `services/public_config.py`, `services/audit.py`, `services/environment.py`, `routers/admin.py`, `routers/admin_registry.py`, `dev/seed.py`
+- `middleware/auth.py` (provider in `get_current_user`, 403 as response, `touch_user` in both modes), `routers/config.py` + `app.py` (shared builder, admin router registered), `routers/graph.py` (clear-all via service + superuser), `routers/graph_contexts.py` / `explorations.py` / `precomputed_graphs.py` / `style_presets.py` (audit calls), `db/models.py` (`User.last_seen_at`), `db/memory_store.py` (`last_seen_at`, `MemoryUsageLog`, `record_usage`, `clear_all(keep_usage_logs)`), `models/schemas.py` (admin schemas), `alembic/versions/014_admin_area.py`, `.env.example`, root `Makefile`.
+
+**Frontend Changes:**
+- NEW `types/admin.ts`, `services/config.ts`, `stores/admin.ts`, `utils/adminView.ts`, `views/AdminView.vue`, `components/admin/TransferOwnershipModal.vue`
+- `router/index.ts` (`/admin`, `resolveGuard`), `components/Toolbar.vue` (Admin link), `services/api.ts` (admin methods), `stores/auth.ts` (async login/logout with config refresh).
+
+**Testing:**
+- Backend: NEW `tests/test_admin.py` (gate walk incl. anonymous outside dev, provider-vs-forged-header, overview/config/users shape, secret sentinel never in output, transfer + audit + 404/422, danger zone gates, dev alias, last_seen), `tests/test_admin_registry.py` (settings classified, tables clearable/preserved, memory `clear_all` empties every collection, every mutating route audited or exempt, router module list in sync, audited modules call `audit.record`), `tests/test_audit.py` (service + handler behaviour incl. denied actions leave no trace), `tests/test_dev_seed.py` (counts, determinism, no-op rerun, reset, refuses non-dev). Updated `test_default_behaviors.py`. Suite: **1110 passed**; the 5 failures in `test_cypher_comments.py` / `test_transpile_options.py` and `test_superuser::test_default_is_empty` are pre-existing on the unmodified tree (verified with `git stash`; gsql2rsql version and the developer's `.env`).
+- Frontend unit: NEW `router/__tests__/guards.test.ts`, `stores/__tests__/admin.test.ts`, `views/__tests__/AdminView.logic.test.ts`, `components/__tests__/TransferOwnershipModal.test.ts` — **2163 passed / 126 files**; `vue-tsc --noEmit` clean.
+- E2E: NEW `e2e/tests/admin.spec.ts` (regular user redirected; overview + on-demand probe; config redaction + filter; users → drill into contexts; transfer flow asserting the request body; audit table + action filter; danger zone confirmation), `navigation.spec.ts` (+2), `helpers/api-mocks.seedAdmin`, `fixtures/mock-data.MOCK_ADMIN_*`. admin/navigation/auth/user-journeys/sharing-ui/dev-generator specs green.
+- Manual: not run against a live stack in this session (the seed's `/subgraph` fallback and the Postgres branches are covered by tests only — see debt #35).
+
+**Public Docs:**
+- [x] NEW `docs/guide/admin.md` (TL;DR, who can open it, tabs, transfer, audit actions, clearing, sample data, troubleshooting); sidebar (Deployment → Admin Area); `configuration.md` (Admin area + transfer/audit under Access Control); `getting-started.md` (Sample data).
+- [x] Screenshots `admin-overview`, `admin-users`, `admin-audit` (generator gained a per-scene `setup` hook; admin scenes promote the screenshot identity and mock `/api/admin/*`).
+- [x] `make docs-build` passes.
+
+**Admin-Area Impact:** this feature *is* the admin area; registries created (`CONFIG_FIELD_KINDS`, `CLEARABLE_TABLES`/`PRESERVED_TABLES`, `AUDITED_ROUTES`/`AUDIT_EXEMPT_ROUTES`).
+
+**Dev docs:** NEW [admin-area.md](admin-area.md); `README.md` index; `security-assessment.md` A1 note; technical debts #35–#37; skill Step 4.2b.
+
+**Security Considerations:**
+- Every `/api/admin/*` route inherits the superuser gate; `AuthMiddleware.PUBLIC_PATHS/PREFIXES` are asserted never to cover it.
+- No secret leaves `/api/admin/config` (allowlist; test sets a sentinel token and asserts it never appears).
+- All admin mutations audited; clear-all triple-gated and audited after the fact so the entry survives.
+- Frontend never decides permission; the flag only hides the page.
+- Dev mode remains "trust everyone" (client-chosen identity) — the page says so in a banner.
+
+**Known Limitations:**
+- No PostgreSQL-backed automated coverage of the admin DB branches (#35); precomputed/preset audit lines checked statically only (#36); async `user_provider` without `AuthMiddleware` is a 500 by design (#37).
+- Presets and precomputed graphs are not inventoried across contexts (name-keyed stores, no listing by design).
+- Superusers, settings and datasources are process-start configuration; the area shows, never edits.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+**Public docs:** the area deliberately ships **without** a public guide page.
+It is an operator surface (superuser-only), so it is documented for developers
+in [admin-area.md](admin-area.md) only: no `docs/guide/admin.md`, no sidebar
+entry, no screenshots, and no admin scenes in
+`frontend/e2e/screenshots/generate.ts`. `docs/guide/configuration.md` keeps the
+*Superusers* section and `GRAPH_LAGOON_SUPERUSER_EMAILS` (they gate style
+presets and precomputed graphs) but links nowhere into the admin area.
+
+---
+

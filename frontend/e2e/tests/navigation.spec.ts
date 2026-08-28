@@ -1,4 +1,5 @@
-import { test, expect } from '../fixtures/test-fixtures';
+import { test, expect, superuserTest } from '../fixtures/test-fixtures';
+import { seedAdmin } from '../helpers/api-mocks';
 
 test.describe('Navigation', () => {
   test('toolbar links navigate between pages', async ({ authenticatedPage: page }) => {
@@ -51,5 +52,24 @@ test.describe('Navigation', () => {
   test('DEV link is visible in dev mode', async ({ authenticatedPage: page }) => {
     await page.goto('/contexts');
     await expect(page.getByTestId('nav-dev')).toBeVisible();
+  });
+
+  test('Admin link is hidden for regular users and /admin redirects', async ({ authenticatedPage: page }) => {
+    await page.goto('/contexts');
+    await expect(page.getByTestId('nav-contexts')).toBeVisible();
+    await expect(page.getByTestId('nav-admin')).toHaveCount(0);
+    await page.goto('/admin');
+    await page.waitForURL('**/contexts');
+    await expect(page.getByTestId('admin-view')).toHaveCount(0);
+  });
+});
+
+superuserTest.describe('Navigation (superuser)', () => {
+  superuserTest('Admin link is visible and opens the admin area', async ({ superuserPage: page }) => {
+    await seedAdmin(page);
+    await page.goto('/contexts');
+    await page.getByTestId('nav-admin').click();
+    await page.waitForURL('**/admin');
+    await expect(page.getByRole('heading', { level: 1, name: 'Admin' })).toBeVisible();
   });
 });

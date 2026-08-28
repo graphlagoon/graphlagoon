@@ -66,6 +66,14 @@ make dev
 
 Use `make dev-stop` to stop all services.
 
+### Sample data
+
+`make dev` and `make dev-db` finish by seeding the running stack with
+generated users, graphs, contexts, explorations and shares (30 / 5 / 60 / 200
+by default), so there is something to click on immediately. The seed prints
+which e-mails to log in as; `dev@graphlagoon.local` is a local superuser.
+`SEED_DATA=0 make dev` starts empty; `make dev-seed` reseeds a running stack.
+
 ## Your First Graph
 
 ### 1. Sign in
