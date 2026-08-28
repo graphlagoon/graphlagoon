@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { parseImportedActionConfigs } from '../contextMenuActionImport';
+import {
+  parseImportedActionConfigs,
+  actionCompatibilityWarnings,
+  hasActionCompatibilityWarnings,
+} from '../contextMenuActionImport';
 
 const VALID_OPEN_URL = {
   kind: 'open-url',
@@ -110,5 +114,97 @@ describe('parseImportedActionConfigs', () => {
         JSON.stringify([{ kind: 'copy-text', label: 'X', match: { target: 'node' } }]),
       ).ok,
     ).toBe(false);
+  });
+});
+
+describe('parseImportedActionConfigs — portable envelope', () => {
+  it('unwraps the envelope and returns its source schema', () => {
+    const result = parseImportedActionConfigs(
+      JSON.stringify({
+        graphlagoon_export: 'context-menu-actions',
+        export_version: 1,
+        source: {
+          context_title: 'Old',
+          node_types: ['Person'],
+          relationship_types: [],
+          node_properties: ['name'],
+          edge_properties: [],
+          query_templates: [{ id: 'old-t', name: 'Old tpl', parameters: ['p'] }],
+        },
+        actions: [
+          { kind: 'copy-text', label: 'Copy', match: { target: 'node' }, textTemplate: '{prop:name}' },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.configs).toHaveLength(1);
+    expect(result.source?.context_title).toBe('Old');
+    expect(result.source?.query_templates).toEqual([{ id: 'old-t', name: 'Old tpl', parameters: ['p'] }]);
+  });
+
+  it('refuses an envelope of another kind', () => {
+    const result = parseImportedActionConfigs(
+      JSON.stringify({ graphlagoon_export: 'style-preset', settings: {} }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('style-preset');
+  });
+
+  it('requires "actions" to be an array inside an envelope', () => {
+    const result = parseImportedActionConfigs(
+      JSON.stringify({ graphlagoon_export: 'context-menu-actions', actions: {} }),
+    );
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('actionCompatibilityWarnings', () => {
+  const CURRENT = {
+    nodeTypes: ['Customer'],
+    edgeTypes: ['PAID'],
+    nodeProperties: ['full_name'],
+    edgeProperties: ['amount'],
+    templateIds: ['t-new'],
+  };
+
+  it('reports types, properties and template ids this graph lacks', () => {
+    const configs = [
+      {
+        id: '1', label: 'Search', enabled: true, kind: 'open-url' as const, openIn: 'new-tab' as const,
+        match: { target: 'node' as const, nodeTypes: ['Person'], propertyConditions: [{ property: 'email', operator: 'not-empty' as const }, { property: 'node_id', operator: 'exists' as const }] },
+        urlTemplate: 'https://x.com/?q={prop:email}&n={node_id}',
+      },
+      {
+        id: '2', label: 'Run', enabled: true, kind: 'run-query-template' as const,
+        match: { target: 'edge' as const, relationshipTypes: ['KNOWS'] },
+        templateId: 't-old', paramBindings: { p: '{prop:amount}', q: '{prop:since}' },
+      },
+      {
+        id: '3', label: 'Copy', enabled: true, kind: 'copy-text' as const,
+        match: { target: 'node' as const, nodeTypes: ['Customer'] },
+        textTemplate: '{prop:full_name}',
+      },
+    ];
+    const w = actionCompatibilityWarnings(configs, CURRENT);
+    expect(w.missingNodeTypes).toEqual(['Person']);
+    expect(w.missingEdgeTypes).toEqual(['KNOWS']);
+    expect(w.missingProperties.sort()).toEqual(['email', 'since']);
+    expect(w.missingTemplateIds).toEqual(['t-old']);
+    expect(hasActionCompatibilityWarnings(w)).toBe(true);
+  });
+
+  it('is empty when every reference resolves', () => {
+    const w = actionCompatibilityWarnings(
+      [
+        {
+          id: '3', label: 'Copy', enabled: true, kind: 'copy-text',
+          match: { target: 'node', nodeTypes: ['Customer'] },
+          textTemplate: '{prop:full_name}',
+        },
+      ],
+      CURRENT,
+    );
+    expect(hasActionCompatibilityWarnings(w)).toBe(false);
   });
 });

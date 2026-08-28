@@ -8,8 +8,8 @@
             <button
               class="btn-icon-only"
               data-testid="menu-action-skill-help"
-              title="Ask an AI to write context-menu actions"
-              aria-label="Ask an AI to write context-menu actions"
+              :title="importText.trim() ? 'Ask an AI to adapt the pasted actions to this graph' : 'Ask an AI to write context-menu actions'"
+              :aria-label="importText.trim() ? 'Ask an AI to adapt the pasted actions to this graph' : 'Ask an AI to write context-menu actions'"
               @click="showSkill = true"
             >
               <Bot :size="16" />
@@ -57,12 +57,26 @@
                 <button class="btn-small danger" @click="remove(config)">Delete</button>
               </div>
             </div>
-            <div class="list-actions" v-if="canEdit">
-              <button class="btn-primary" data-testid="menu-action-add" @click="startCreate">
+            <div class="list-actions">
+              <button v-if="canEdit" class="btn-primary" data-testid="menu-action-add" @click="startCreate">
                 + New action
               </button>
-              <button class="btn-secondary" @click="showImport = !showImport">
+              <button
+                v-if="canEdit"
+                class="btn-secondary"
+                data-testid="menu-action-import-toggle"
+                @click="showImport = !showImport"
+              >
                 Import JSON
+              </button>
+              <button
+                class="btn-secondary"
+                data-testid="menu-action-export"
+                :disabled="store.actionConfigs.length === 0"
+                title="Download all actions as a JSON file you can import into another context"
+                @click="exportActions"
+              >
+                <Download :size="14" /> Export JSON
               </button>
             </div>
           </div>
@@ -71,7 +85,10 @@
           <div v-if="showImport && canEdit" class="section import-section">
             <div class="section-title">Import JSON</div>
             <p class="hint">
-              Paste the JSON array produced by the AI prompt (robot button above).
+              Paste the JSON array produced by the AI prompt (robot button above),
+              or a file exported from another context. Actions from another
+              graph name other types, properties and templates — the robot
+              button then rewrites them for this graph.
             </p>
             <textarea
               v-model="importText"
@@ -80,8 +97,55 @@
               rows="6"
               placeholder='[{"kind": "open-url", "label": "...", ...}]'
             />
+            <div class="list-actions">
+              <input
+                ref="fileInput"
+                type="file"
+                accept=".json,application/json"
+                class="file-input"
+                data-testid="menu-action-import-file"
+                @change="pickFile"
+              />
+              <button class="btn-secondary" @click="fileInput?.click()">Choose file…</button>
+            </div>
+            <p
+              v-if="parsedImport && !parsedImport.ok"
+              class="field-error"
+              data-testid="menu-action-import-parse-error"
+            >
+              {{ parsedImport.error }}
+            </p>
+            <div v-if="importWarnings" class="hint warning warning-block" data-testid="menu-action-import-warnings">
+              <p>These actions name things this graph does not have:</p>
+              <ul>
+                <li v-if="importWarnings.missingNodeTypes.length">
+                  node types: {{ importWarnings.missingNodeTypes.join(', ') }}
+                </li>
+                <li v-if="importWarnings.missingEdgeTypes.length">
+                  relationship types: {{ importWarnings.missingEdgeTypes.join(', ') }}
+                </li>
+                <li v-if="importWarnings.missingProperties.length">
+                  properties: {{ importWarnings.missingProperties.join(', ') }}
+                </li>
+                <li v-if="importWarnings.missingTemplateIds.length">
+                  query template ids: {{ importWarnings.missingTemplateIds.join(', ') }}
+                </li>
+              </ul>
+              <button
+                class="btn-secondary"
+                data-testid="menu-action-import-adapt"
+                @click="showSkill = true"
+              >
+                <Bot :size="14" /> Ask an AI to adapt them
+              </button>
+            </div>
             <p v-if="importError" class="field-error">{{ importError }}</p>
-            <button class="btn-primary" data-testid="menu-action-import-apply" @click="applyImport">
+            <button
+              class="btn-primary"
+              data-testid="menu-action-import-apply"
+              :disabled="!parsedImport?.ok"
+              @click="applyImport"
+            >
               Add imported actions
             </button>
           </div>
@@ -248,20 +312,30 @@
         </div>
       </div>
     </div>
-    <ContextMenuActionSkillModal v-model="showSkill" />
+    <ContextMenuActionSkillModal
+      v-model="showSkill"
+      :imported-json="importText"
+      :imported-source="importedSource"
+    />
   </Teleport>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { X, Bot } from 'lucide-vue-next';
+import { X, Bot, Download } from 'lucide-vue-next';
 import { useGraphStore } from '@/stores/graph';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
 import { useToast } from '@/composables/useToast';
 import { validateTemplate } from '@/utils/labelFormatter';
 import { validateUrlTemplate } from '@/utils/safeUrl';
-import { parseImportedActionConfigs } from '@/utils/contextMenuActionImport';
+import {
+  actionCompatibilityWarnings,
+  hasActionCompatibilityWarnings,
+  parseImportedActionConfigs,
+} from '@/utils/contextMenuActionImport';
+import { buildSourceSchema, downloadJson, readFileAsText, safeFilename } from '@/utils/portableExport';
+import { PORTABLE_EXPORT_VERSION, type PortableContextMenuActions } from '@/types/portable';
 import ContextMenuActionSkillModal from './ContextMenuActionSkillModal.vue';
 import type {
   ContextMenuActionConfig,
@@ -484,6 +558,65 @@ function remove(config: ContextMenuActionConfig) {
 const showImport = ref(false);
 const importText = ref('');
 const importError = ref<string | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+
+function sourceSchema() {
+  return buildSourceSchema({
+    context: graphStore.currentContext,
+    loadedNodeTypes: graphStore.nodeTypes,
+    loadedEdgeTypes: graphStore.edgeTypes,
+    templates: templatesStore.templates,
+  });
+}
+
+/** Download every configured action as a portable JSON file. */
+function exportActions() {
+  const payload: PortableContextMenuActions = {
+    graphlagoon_export: 'context-menu-actions',
+    export_version: PORTABLE_EXPORT_VERSION,
+    source: sourceSchema(),
+    actions: store.actionConfigs,
+  };
+  downloadJson(safeFilename(`actions-${graphStore.currentContext?.title || 'context'}`), payload);
+}
+
+/** Parsed view of the Import box; null while it holds nothing. */
+const parsedImport = computed(() => {
+  const text = importText.value.trim();
+  return text ? parseImportedActionConfigs(text) : null;
+});
+
+const importedSource = computed(() =>
+  parsedImport.value?.ok ? parsedImport.value.source : undefined,
+);
+
+/** Types, properties and template ids the pasted actions use that this graph lacks. */
+const importWarnings = computed(() => {
+  if (!parsedImport.value?.ok) return null;
+  const schema = sourceSchema();
+  const w = actionCompatibilityWarnings(parsedImport.value.configs, {
+    nodeTypes: schema.node_types,
+    edgeTypes: schema.relationship_types,
+    nodeProperties: schema.node_properties,
+    edgeProperties: schema.edge_properties,
+    templateIds: templatesStore.templates.map((t) => t.id),
+  });
+  return hasActionCompatibilityWarnings(w) ? w : null;
+});
+
+async function pickFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  importError.value = null;
+  try {
+    importText.value = await readFileAsText(file);
+  } catch {
+    importError.value = 'Could not read the file';
+  } finally {
+    input.value = '';
+  }
+}
 
 function applyImport() {
   importError.value = null;
@@ -613,6 +746,35 @@ function close() {
 
 .hint.warning {
   color: #b45309;
+}
+
+.warning-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #b45309;
+  border-radius: 6px;
+}
+
+.warning-block p,
+.warning-block ul {
+  margin: 0;
+}
+
+.warning-block ul {
+  padding-left: 18px;
+}
+
+.warning-block .btn-secondary,
+.list-actions .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.file-input {
+  display: none;
 }
 
 .action-row {

@@ -13,6 +13,8 @@
  */
 
 import { bulletList, propertyList, type SkillProperty } from './clusterProgramSkill'
+import { sourceSchemaSection } from './stylePresetSkill'
+import type { PortableSourceSchema } from '@/types/portable'
 
 export type { SkillProperty }
 
@@ -53,6 +55,14 @@ export interface ContextMenuActionSkillInput {
    * available, a placeholder otherwise.
    */
   explorationId?: string
+  /**
+   * Actions (JSON text) exported from ANOTHER graph, to adapt to this one.
+   * Switches the prompt from "interview me and write actions" to "rewrite
+   * these for the types, properties and templates listed below".
+   */
+  importedJson?: string
+  /** Schema of the graph the imported actions came from, when the export recorded it. */
+  importedSource?: PortableSourceSchema
 }
 
 function templateList(templates: SkillQueryTemplate[]): string {
@@ -80,17 +90,91 @@ export function buildContextMenuActionSkill(input: ContextMenuActionSkillInput):
   const { nodeTypes, edgeTypes, nodeProperties, edgeProperties, queryTemplates } = input
   const graphViewUrl = input.graphViewUrl || 'https://YOUR_APP_HOST/graph/YOUR_CONTEXT_ID'
   const explorationParam = `exploration=${input.explorationId || 'YOUR_EXPLORATION_ID'}`
+  const adapting = !!input.importedJson?.trim()
 
-  return `# Task: write "context-menu actions" for a graph visualization tool
+  const task = adapting
+    ? `# Task: adapt "context-menu actions" from another graph to this one`
+    : `# Task: write "context-menu actions" for a graph visualization tool`
 
-You are helping me configure **right-click menu actions** for Graph Lagoon
+  const intro = adapting
+    ? `You are helping me reuse **right-click menu actions** of Graph Lagoon Studio
+that were exported from a **different graph**. Its type names, property names
+and query-template ids do not match this graph. Your job is to produce the
+same actions, **rewritten for the types, properties and templates listed
+under "This graph's metadata"**. Your final answer will be a **JSON array**
+that I paste into the tool's Actions editor ("Import JSON" box).`
+    : `You are helping me configure **right-click menu actions** for Graph Lagoon
 Studio. When I right-click a node or an edge of a 3D graph, a context menu
 opens; each action you write becomes an entry in that menu. Your final answer
 will be a **JSON array** that I paste into the tool's Actions editor
 ("Import JSON" box).
 
 I don't know exactly what I want yet, so **start by asking me questions** (see
-the "How to help me" section at the end) before writing any JSON.
+the "How to help me" section at the end) before writing any JSON.`
+
+  const adaptSection = adapting
+    ? `
+## The actions to adapt
+
+${sourceSchemaSection(input.importedSource)}
+
+Here are the exported actions:
+
+\`\`\`json
+${input.importedJson!.trim()}
+\`\`\`
+
+Rules for adapting them:
+- Rewrite \`match.nodeTypes\` / \`match.relationshipTypes\` to the **equivalent
+  types in this graph**. Drop an action whose types have no equivalent here
+  and tell me which ones you dropped.
+- Rewrite every \`{prop:<name>}\` in \`urlTemplate\`, \`textTemplate\` and
+  \`paramBindings\`, and every \`propertyConditions[].property\`, to the
+  **equivalent property in this graph**. Built-ins (\`{node_id}\`, \`{src}\`...)
+  stay as they are.
+- \`run-query-template\` actions: the old \`templateId\`s are **not valid
+  here**. Pick a template from this graph's list with the same purpose and
+  re-bind its parameters; if none fits, turn the action into an \`open-url\`
+  or \`copy-text\` when that makes sense, otherwise drop it and tell me.
+- Keep labels, icons, \`openIn\` and URL hosts as they are unless a rename
+  makes the label wrong. Never change the \`http(s)://\` prefix rule.
+- Do not wrap the answer in an export envelope — output the JSON array only.
+`
+    : ''
+
+  const howToHelp = adapting
+    ? `## How to help me
+
+First, **show me the mapping you intend to use** (old type → new type, old
+property → new property, old template → new template) as a short table and
+ask me to confirm or correct anything ambiguous — one question at a time when
+the choice is not obvious from the names. Only **then** output the final JSON
+array (no prose around it) so I can paste it into the Import JSON box.`
+    : `## How to help me
+
+I don't know exactly which actions I want yet.
+**Do NOT write JSON immediately.** First, **ask me questions, one topic at a
+time**, referencing the actual types, properties and templates above:
+
+- Which node types do I interact with most, and what would I want one click
+  away for them? (an external system? a search? an internal template?)
+- Do any properties hold ids/codes of external systems (ticket ids, DOIs,
+  CNPJs, SKUs) that map to a URL pattern? What is the exact URL pattern?
+- Should links open in a new tab (keep the graph) or the current tab?
+- Is there text I repeatedly copy out of the graph (ids, emails, composite
+  strings)?
+- Which saved query templates would be useful to trigger from a node or edge,
+  and which property fills each parameter?
+- Should an action apply to all types or only when a property is present /
+  has a specific value?
+
+Ask follow-ups until you're confident, **then** output ONLY the final JSON
+array (no prose around it) so I can paste it into the Import JSON box.`
+
+  return `${task}
+
+${intro}
+${adaptSection}
 
 ## What an action can do (the three kinds)
 
@@ -219,25 +303,6 @@ ${propertyList(edgeProperties, 'none declared')}
 **Query templates in this context (for \`run-query-template\`):**
 ${templateList(queryTemplates)}
 
-## How to help me
-
-I don't know exactly which actions I want yet.
-**Do NOT write JSON immediately.** First, **ask me questions, one topic at a
-time**, referencing the actual types, properties and templates above:
-
-- Which node types do I interact with most, and what would I want one click
-  away for them? (an external system? a search? an internal template?)
-- Do any properties hold ids/codes of external systems (ticket ids, DOIs,
-  CNPJs, SKUs) that map to a URL pattern? What is the exact URL pattern?
-- Should links open in a new tab (keep the graph) or the current tab?
-- Is there text I repeatedly copy out of the graph (ids, emails, composite
-  strings)?
-- Which saved query templates would be useful to trigger from a node or edge,
-  and which property fills each parameter?
-- Should an action apply to all types or only when a property is present /
-  has a specific value?
-
-Ask follow-ups until you're confident, **then** output ONLY the final JSON
-array (no prose around it) so I can paste it into the Import JSON box.
+${howToHelp}
 `
 }

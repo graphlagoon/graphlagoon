@@ -96,6 +96,67 @@ break the page** — the graph loads and stays fully usable, and the status bar
 reports that the styling was not applied. This differs from a missing
 `?precomputed=`, which leaves nothing to look at at all.
 
+## Exporting and importing
+
+A preset lives under one context. To carry a look to another context — or to
+another Graph Lagoon instance — the modal exports it as a JSON file and
+imports one back.
+
+**Export** — the download icon next to a saved preset fetches it and downloads
+`style-<name>.json`. **Export current look** (under the save form) does the
+same for whatever the Style panel shows right now, saved or not. The file is
+a small envelope around the settings:
+
+```json
+{
+  "graphlagoon_export": "style-preset",
+  "export_version": 1,
+  "name": "investigacao",
+  "description": "Fraud review look",
+  "source": {
+    "context_title": "Fraud ring",
+    "node_types": ["Person", "Company"],
+    "relationship_types": ["OWNS"],
+    "node_properties": ["name", "cnpj"],
+    "edge_properties": ["share"]
+  },
+  "settings": { "nodeTypeColors": { "Person": "#4f8cff" }, "...": "..." }
+}
+```
+
+`source` records the schema of the graph the preset came from. The settings
+themselves are exactly what the server stores; nothing about which nodes are
+shown is included.
+
+**Import** — the **Import JSON** toggle opens a box that takes the envelope, a
+bare settings object (what an AI answers with), or a full preset as the API
+returns it — pasted or picked with **Choose file…**. Then:
+
+- **Apply only** puts the look on screen without writing anything. It works
+  for read-only viewers too, and clears `?style=` from the URL, since the look
+  no longer comes from a saved preset.
+- **Save & apply** (write access) stores it under a name — prefilled from the
+  envelope, editable — and applies it through `?style=<name>` like any other
+  preset.
+
+### When the preset came from a different graph
+
+A preset keys colors and icons by type name and label templates by property
+name. Imported from a graph with other names, it applies cleanly but does
+nothing visible — no `Person` here to color. The Import box checks the pasted
+preset against this graph's types and properties and lists what does not
+match:
+
+> This preset names things this graph does not have: node types: Person,
+> Company · properties: cnpj
+
+The **robot button** — the same Ask-AI helper the Labels and Actions editors
+have — then switches to *adapt* mode. The prompt it generates carries the
+exported preset, the `source` schema it came from, and this graph's real
+types and properties, and asks the AI to show its old → new mapping before
+rewriting the JSON. Paste the answer back into the Import box; the warnings
+disappear when every name resolves.
+
 ## Who can do what
 
 Three permission levels — one more than anywhere else in Graph Lagoon:

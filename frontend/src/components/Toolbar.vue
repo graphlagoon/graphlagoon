@@ -11,6 +11,7 @@ import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration } from '@/types/graph';
 import type { ExportPNGOptions } from '@/stores/toolbar';
 import ExportModal from '@/components/ExportModal.vue';
+import { downloadJson } from '@/utils/portableExport';
 import {
   Filter,
   Sliders,
@@ -105,11 +106,7 @@ async function saveExploration() {
 
 function exportJSON() {
   const data = { nodes: graphStore.nodes, edges: graphStore.edges };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const link = document.createElement('a');
-  link.download = `${graphStore.currentContext?.title || 'graph'}.json`;
-  link.href = URL.createObjectURL(blob);
-  link.click();
+  downloadJson(`${graphStore.currentContext?.title || 'graph'}.json`, data);
 }
 
 function handleExportPng(options: ExportPNGOptions) {
