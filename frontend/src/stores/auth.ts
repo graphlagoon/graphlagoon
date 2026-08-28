@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { refreshRuntimeConfig } from '@/services/config';
 
 function _resolveInitialEmail(): string | null {
   // Databricks email takes priority (injected by backend or Vite env)
@@ -13,19 +14,30 @@ function _resolveInitialEmail(): string | null {
   return localStorage.getItem('userEmail');
 }
 
+function isDevMode(): boolean {
+  return window.__GRAPH_LAGOON_CONFIG__?.dev_mode ?? import.meta.env.DEV;
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const email = ref<string | null>(_resolveInitialEmail());
 
   const isAuthenticated = computed(() => !!email.value);
 
-  function login(userEmail: string) {
+  /**
+   * Resolves once the per-user runtime config (is_superuser, …) has been
+   * refreshed for the new identity — callers that navigate to a gated route
+   * right after logging in should await it.
+   */
+  async function login(userEmail: string): Promise<void> {
     email.value = userEmail;
     localStorage.setItem('userEmail', userEmail);
+    if (isDevMode()) await refreshRuntimeConfig(userEmail);
   }
 
-  function logout() {
+  async function logout(): Promise<void> {
     email.value = null;
     localStorage.removeItem('userEmail');
+    if (isDevMode()) await refreshRuntimeConfig(null);
   }
 
   return {

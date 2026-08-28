@@ -2,7 +2,7 @@
         dev dev-db dev-gsql2rsql dev-gsql2rsql-db \
         dev-databricks dev-databricks-db dev-databricks-lakebase \
         dev-neptune dev-neptune-db \
-        dev-stop dev-logs dev-logs-follow \
+        dev-stop dev-logs dev-logs-follow dev-seed dev-seed-big \
         lint lint-frontend lint-api format \
         test test-unit test-coverage test-e2e test-e2e-headed test-e2e-ui test-e2e-report \
         test-integration test-integration-headed test-all \
@@ -41,6 +41,8 @@ help:
 	@echo "  make dev-databricks-db     Databricks SQL + local PostgreSQL"
 	@echo "  make dev-stop              Stop all background services"
 	@echo "  make dev-logs              Show logs"
+	@echo "  make dev-seed              Seed users/contexts/explorations (auto after dev*; SEED_DATA=0 skips)"
+	@echo "  make dev-seed-big          Large seed (200 users / 500 contexts / 2000 explorations)"
 	@echo ""
 	@echo "$(GREEN)Quality$(RESET)"
 	@echo "  make lint                  Run all linters (frontend + API)"
@@ -94,6 +96,7 @@ dev:
 	@echo ""
 	@echo "$(GREEN)Ready!$(RESET)  warehouse :8001 | API :8000 | frontend :3000"
 	@echo "$(DIM)make dev-logs · make dev-stop$(RESET)"
+	@$(MAKE) --no-print-directory _seed-after-dev
 
 # Local: warehouse + API + frontend + PostgreSQL persistence
 dev-db: db-up
@@ -113,6 +116,7 @@ dev-db: db-up
 	@echo ""
 	@echo "$(GREEN)Ready!$(RESET)  PostgreSQL :5432 | warehouse :8001 | API :8000 (db) | frontend :3000"
 	@echo "$(DIM)make dev-logs · make dev-stop$(RESET)"
+	@$(MAKE) --no-print-directory _seed-after-dev
 
 # Local: warehouse + API (local gsql2rsql) + frontend — no persistence
 dev-gsql2rsql: _ensure-gsql2rsql
@@ -131,6 +135,7 @@ dev-gsql2rsql: _ensure-gsql2rsql
 	@echo ""
 	@echo "$(GREEN)Ready!$(RESET)  warehouse :8001 | API :8000 (gsql2rsql) | frontend :3000"
 	@echo "$(DIM)make dev-logs · make dev-stop$(RESET)"
+	@$(MAKE) --no-print-directory _seed-after-dev
 
 # Local: warehouse + API (local gsql2rsql) + frontend + PostgreSQL
 dev-gsql2rsql-db: _ensure-gsql2rsql db-up
@@ -150,6 +155,7 @@ dev-gsql2rsql-db: _ensure-gsql2rsql db-up
 	@echo ""
 	@echo "$(GREEN)Ready!$(RESET)  PostgreSQL :5432 | warehouse :8001 | API :8000 (gsql2rsql + db) | frontend :3000"
 	@echo "$(DIM)make dev-logs · make dev-stop$(RESET)"
+	@$(MAKE) --no-print-directory _seed-after-dev
 
 # Amazon Neptune (openCypher) against the local emulator — no AWS needed.
 # Neo4j speaks openCypher; neptune-emulator/ fronts it with Neptune's HTTP
@@ -236,6 +242,29 @@ dev-databricks-lakebase: _ensure-databricks-env
 	@echo ""
 	@echo "$(GREEN)Ready!$(RESET)  API :8000 (Databricks + Lakebase) | frontend :3000"
 	@echo "$(DIM)make dev-logs · make dev-stop$(RESET)"
+
+# Seed data — generated users, contexts, explorations, shares and audit
+# activity, via the API of the running stack (works for memory and DB modes).
+# Runs automatically at the end of dev / dev-db / dev-gsql2rsql*; SEED_DATA=0 skips.
+SEED_DATA ?= 1
+SEED_USERS ?= 30
+SEED_CONTEXTS ?= 60
+SEED_EXPLORATIONS ?= 200
+SEED_GRAPHS ?= 5
+SEED ?= 42
+SEED_API ?= http://localhost:8000
+
+dev-seed:
+	@echo "$(CYAN)Seeding $(SEED_USERS) users / $(SEED_CONTEXTS) contexts / $(SEED_EXPLORATIONS) explorations (seed $(SEED))...$(RESET)"
+	@cd api && uv run python -m graphlagoon.dev.seed --api $(SEED_API) \
+		--users $(SEED_USERS) --contexts $(SEED_CONTEXTS) --explorations $(SEED_EXPLORATIONS) \
+		--graphs $(SEED_GRAPHS) --seed $(SEED) $(SEED_ARGS)
+
+dev-seed-big:
+	@$(MAKE) --no-print-directory dev-seed SEED_USERS=200 SEED_CONTEXTS=500 SEED_EXPLORATIONS=2000 SEED_GRAPHS=8
+
+_seed-after-dev:
+	@if [ "$(SEED_DATA)" != "0" ]; then $(MAKE) --no-print-directory dev-seed; else echo "$(DIM)seed skipped (SEED_DATA=0)$(RESET)"; fi
 
 dev-stop:
 	@echo "$(CYAN)Stopping all services...$(RESET)"

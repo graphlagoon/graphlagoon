@@ -102,3 +102,21 @@ def share_match_emails(user_email: str) -> list[str]:
     if domain:
         values.append(f"*@{domain}")
     return values
+
+
+def validate_owner_email(email: str) -> tuple[bool, str]:
+    """Validate an e-mail that will become a resource *owner*.
+
+    Stricter than ``validate_share_email``: the public sentinel and domain
+    wildcards are share targets, never owners. Ownership transfer (admin area)
+    uses this so a context can never end up owned by ``*``.
+    """
+    if not email or not email.strip():
+        return False, "Owner e-mail is required"
+    candidate = email.strip()
+    if is_public_share(candidate) or is_domain_wildcard(candidate):
+        return False, "Owner must be a single user e-mail, not a wildcard"
+    local, sep, domain = candidate.partition("@")
+    if not sep or not local or not domain or "." not in domain or " " in candidate:
+        return False, f"Invalid email format: {email}"
+    return True, ""

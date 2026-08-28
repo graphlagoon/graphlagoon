@@ -15,6 +15,8 @@ This directory contains comprehensive technical documentation for the graphlagoo
 | [technical_debts.md](technical_debts.md) | Known technical debts and areas for improvement | Planning refactoring or avoiding known issues |
 | [potential_bugs.md](potential_bugs.md) | Cataloged potential bugs and edge cases | Understanding known issues or reproducing bugs |
 | [decision_log.md](decision_log.md) | Historical record of all significant decisions | Understanding why decisions were made |
+| [plans/](plans/) | Pre-implementation proposals and analyses (e.g. [ego-crowded-rings-qsa.md](plans/ego-crowded-rings-qsa.md)) | Picking up planned-but-unbuilt work |
+| [admin-area.md](admin-area.md) | Admin area security model + "when to update it" table (test-enforced) | Adding settings, tables, mutating routes, or touching `/api/admin` |
 
 ### 🛠️ Skills and Workflows
 

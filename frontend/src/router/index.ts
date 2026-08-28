@@ -34,6 +34,12 @@ const router = createRouter({
       meta: { devOnly: true },
     },
     {
+      path: '/admin',
+      name: 'admin',
+      component: () => import('@/views/AdminView.vue'),
+      meta: { superuserOnly: true },
+    },
+    {
       path: '/graph/:contextId',
       name: 'graph',
       component: () => import('@/views/GraphVisualizationView.vue'),
@@ -42,18 +48,40 @@ const router = createRouter({
   ],
 });
 
-// Navigation guard for authentication
-router.beforeEach((to, _from, next) => {
-  const authStore = useAuthStore();
-  const devMode = window.__GRAPH_LAGOON_CONFIG__?.dev_mode ?? import.meta.env.DEV;
-
+/**
+ * Pure guard decision, exported for tests. The frontend flags are UX only —
+ * the backend rejects non-superusers on /api/admin/* and dev-only endpoints
+ * regardless of what the router allows.
+ */
+export function resolveGuard(
+  to: { meta: Record<string, unknown> },
+  state: { devMode: boolean; isAuthenticated: boolean; isSuperuser: boolean },
+): { name: string } | null {
   // In dev mode, require login via authStore
   // In production mode (dev_mode=false), email comes from proxy headers
-  if (devMode && !to.meta.public && !authStore.isAuthenticated) {
-    next({ name: 'login' });
-  } else {
-    next();
+  if (state.devMode && !to.meta.public && !state.isAuthenticated) {
+    return { name: 'login' };
   }
+  if (to.meta.superuserOnly && !state.isSuperuser) {
+    return { name: 'contexts' };
+  }
+  if (to.meta.devOnly && !state.devMode) {
+    return { name: 'contexts' };
+  }
+  return null;
+}
+
+// Navigation guard for authentication and role-gated pages
+router.beforeEach((to, _from, next) => {
+  const authStore = useAuthStore();
+  const config = window.__GRAPH_LAGOON_CONFIG__;
+  const redirect = resolveGuard(to, {
+    devMode: config?.dev_mode ?? import.meta.env.DEV,
+    isAuthenticated: authStore.isAuthenticated,
+    isSuperuser: config?.is_superuser === true,
+  });
+  if (redirect) next(redirect);
+  else next();
 });
 
 export default router;

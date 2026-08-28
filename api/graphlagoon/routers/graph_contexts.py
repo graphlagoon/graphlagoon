@@ -28,6 +28,8 @@ from graphlagoon.utils.sharing import (
     user_has_share_access,
     validate_share_email,
 )
+from graphlagoon.services import audit
+from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import can_manage, can_write, is_superuser
 from graphlagoon.config import get_settings
 from graphlagoon.services.graph_operations import (
@@ -687,7 +689,16 @@ async def delete_graph_context(context_id: UUID, request: Request):
             if not can_manage(context.owner_email, user_email):
                 raise HTTPException(status_code=403, detail="Only owner can delete")
 
+            audit_meta = {"title": context.title, "owner": context.owner_email}
             await session.delete(context)
+            await audit.record(
+                user_email,
+                AuditAction.CONTEXT_DELETE,
+                resource_type="graph_context",
+                resource_id=context_id,
+                metadata=audit_meta,
+                session=session,
+            )
             await session.commit()
     else:
         store = get_memory_store()
@@ -699,7 +710,15 @@ async def delete_graph_context(context_id: UUID, request: Request):
         if not can_manage(context.owner_email, user_email):
             raise HTTPException(status_code=403, detail="Only owner can delete")
 
+        audit_meta = {"title": context.title, "owner": context.owner_email}
         store.delete_graph_context(context_id)
+        await audit.record(
+            user_email,
+            AuditAction.CONTEXT_DELETE,
+            resource_type="graph_context",
+            resource_id=context_id,
+            metadata=audit_meta,
+        )
 
     await _purge_precomputed_graphs(context_id)
     await _purge_style_presets(context_id)
@@ -741,10 +760,19 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error_msg)
 
+            audit_meta = {"with": data.email, "permission": data.permission}
             # Check if already shared
             for share in context.shares:
                 if share.shared_with_email == data.email:
                     share.permission = data.permission
+                    await audit.record(
+                        user_email,
+                        AuditAction.CONTEXT_SHARE,
+                        resource_type="graph_context",
+                        resource_id=context_id,
+                        metadata={**audit_meta, "updated": True},
+                        session=session,
+                    )
                     await session.commit()
                     return {"status": "updated"}
 
@@ -755,6 +783,14 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
                 permission=data.permission,
             )
             session.add(share)
+            await audit.record(
+                user_email,
+                AuditAction.CONTEXT_SHARE,
+                resource_type="graph_context",
+                resource_id=context_id,
+                metadata=audit_meta,
+                session=session,
+            )
             await session.commit()
     else:
         store = get_memory_store()
@@ -776,6 +812,13 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
             raise HTTPException(status_code=400, detail=error_msg)
 
         store.share_graph_context(context_id, data.email, data.permission)
+        await audit.record(
+            user_email,
+            AuditAction.CONTEXT_SHARE,
+            resource_type="graph_context",
+            resource_id=context_id,
+            metadata={"with": data.email, "permission": data.permission},
+        )
 
     return {"status": "shared"}
 
@@ -814,6 +857,14 @@ async def unshare_graph_context(context_id: UUID, email: str, request: Request):
 
             if share:
                 await session.delete(share)
+                await audit.record(
+                    user_email,
+                    AuditAction.CONTEXT_UNSHARE,
+                    resource_type="graph_context",
+                    resource_id=context_id,
+                    metadata={"with": email},
+                    session=session,
+                )
                 await session.commit()
     else:
         store = get_memory_store()
@@ -826,5 +877,12 @@ async def unshare_graph_context(context_id: UUID, email: str, request: Request):
             raise HTTPException(status_code=403, detail="Only owner can manage sharing")
 
         store.unshare_graph_context(context_id, email)
+        await audit.record(
+            user_email,
+            AuditAction.CONTEXT_UNSHARE,
+            resource_type="graph_context",
+            resource_id=context_id,
+            metadata={"with": email},
+        )
 
     return {"status": "removed"}

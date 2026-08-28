@@ -42,13 +42,11 @@ from graphlagoon.services.precomputed import (
 )
 from graphlagoon.services.style_presets import configure_style_preset_service
 from graphlagoon.services.datasource import (
-    available_datasource_connections,
-    available_datasource_types,
     close_datasources,
     configure_datasources,
 )
 from graphlagoon.middleware.auth import AuthMiddleware, configure_auth, UserProvider
-from graphlagoon.utils.authz import is_superuser
+from graphlagoon.services.public_config import build_public_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -195,6 +193,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         settings = get_settings()
 
     from graphlagoon.routers import (
+        admin,
         graph_contexts,
         explorations,
         graph,
@@ -208,6 +207,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
 
     router = APIRouter()
     router.include_router(config.router)
+    router.include_router(admin.router)
     router.include_router(graph_contexts.router)
     router.include_router(explorations.router)
     router.include_router(query_templates.router)
@@ -254,30 +254,13 @@ def create_frontend_router(
         manifest = load_vite_manifest()
         assets = get_assets_from_manifest(manifest)
 
-        from graphlagoon import __version__
-
-        config = {
-            "dev_mode": settings.dev_mode,
-            "database_enabled": is_database_available(),
-            "databricks_mode": settings.databricks_mode,
-            "precomputed_graphs_enabled": settings.precomputed_graphs_enabled,
-            "style_presets_enabled": settings.style_presets_enabled,
-            # Custom metrics: feature on/off, and whether auto_run definitions may
-            # evaluate on graph load (false ⇒ Recompute only).
-            "custom_metrics_enabled": settings.custom_metrics_enabled,
-            "custom_metrics_auto_run_enabled": settings.custom_metrics_auto_run_enabled,
-            "datasources": available_datasource_types(),
-            "datasource_connections": available_datasource_connections(),
-            "router_base": router_base,
-            "allowed_share_domains": settings.allowed_share_domain_list,
-            "default_behaviors": settings.default_behaviors_dict,
-            "version": __version__,
-        }
-        # Inject user email so frontend auto-logins
+        # Same payload as GET /api/config (one builder, never out of sync),
+        # plus the SPA-only router base and the auto-login identity.
         user_email = getattr(request.state, "user_email", None)
+        config = build_public_config(user_email, settings)
+        config["router_base"] = router_base
         if user_email:
             config["databricks_user_email"] = user_email
-        config["is_superuser"] = is_superuser(user_email) if user_email else False
 
         return templates.TemplateResponse(
             "index.html",

@@ -13,7 +13,7 @@ See docs/dev/decision-log.md for why resync reuses PUT instead of a dedicated wr
 endpoint, and why renames are never inferred.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Any, Literal, Optional
 
 from graphlagoon.services.graph_operations import merge_column_config

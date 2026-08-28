@@ -19,6 +19,9 @@ class User(Base):
     email = Column(String(255), primary_key=True)
     display_name = Column(String(255))
     created_at = Column(DateTime, server_default=func.now())
+    # Bumped at most every 15 minutes by services.users.touch_user; feeds the
+    # admin area's "who is active" view. NULL for rows created before 014.
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class GraphContext(Base):

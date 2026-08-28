@@ -83,22 +83,31 @@ class TestDefaultBehaviorsDict:
 
 
 class TestConfigInjection:
-    """The two config producers must agree, or the feature works in prod but not dev."""
+    """The config producers must agree, or the feature works in prod but not dev.
 
-    def test_api_config_route_includes_default_behaviors(self):
-        """GET /api/config is what `npm run dev` reads (no Jinja template there)."""
+    Both GET /api/config (what `npm run dev` reads) and the SPA template
+    (window.__GRAPH_LAGOON_CONFIG__ for the built app) are built by the single
+    services.public_config.build_public_config, so the check is on that
+    builder plus on both consumers actually calling it.
+    """
+
+    def test_public_config_builder_includes_default_behaviors(self):
+        from graphlagoon.services.public_config import build_public_config
+
+        assert "default_behaviors" in build_public_config(None)
+
+    def test_api_config_route_uses_the_shared_builder(self):
         import inspect
 
         from graphlagoon.routers import config as config_router
 
-        source = inspect.getsource(config_router.get_config)
-        assert "default_behaviors" in source
+        assert "build_public_config(" in inspect.getsource(config_router.get_config)
 
-    def test_spa_template_config_includes_default_behaviors(self):
-        """render_spa builds the window.__GRAPH_LAGOON_CONFIG__ dict for the built app."""
+    def test_spa_template_config_uses_the_shared_builder(self):
         import inspect
 
         from graphlagoon import app as app_module
 
-        source = inspect.getsource(app_module.create_frontend_router)
-        assert "default_behaviors" in source
+        assert "build_public_config(" in inspect.getsource(
+            app_module.create_frontend_router
+        )

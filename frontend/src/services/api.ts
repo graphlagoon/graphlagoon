@@ -1,5 +1,14 @@
 import axios, { type AxiosInstance } from 'axios';
 import type {
+  AdminConfigEntry,
+  AdminHealth,
+  AdminOverview,
+  AdminUserPage,
+  AuditPage,
+  ClearEnvironmentResponse,
+  TransferOwnershipResponse,
+} from '@/types/admin';
+import type {
   DatasetsResponse,
   GraphContext,
   GraphResponse,
@@ -597,6 +606,56 @@ class ApiService {
     // Uses parentClient: same origin in prod, VITE_BACKEND_ORIGIN in dev.
     // Shares auth interceptors with the main client.
     const response = await this.parentClient.post(endpoint, body);
+    return response.data;
+  }
+
+  // Admin area (superuser only; every route 403s for anyone else)
+  async getAdminOverview(): Promise<AdminOverview> {
+    const response = await this.client.get('/api/admin/overview');
+    return response.data;
+  }
+
+  async probeWarehouse(): Promise<AdminHealth> {
+    const response = await this.client.post('/api/admin/health/warehouse');
+    return response.data;
+  }
+
+  async getAdminConfig(): Promise<AdminConfigEntry[]> {
+    const response = await this.client.get('/api/admin/config');
+    return response.data;
+  }
+
+  async getAdminUsers(params: { q?: string; page?: number; page_size?: number } = {}): Promise<AdminUserPage> {
+    const response = await this.client.get('/api/admin/users', { params });
+    return response.data;
+  }
+
+  async transferContextOwnership(contextId: string, newOwnerEmail: string): Promise<TransferOwnershipResponse> {
+    const response = await this.client.post(`/api/admin/contexts/${contextId}/transfer`, {
+      new_owner_email: newOwnerEmail,
+    });
+    return response.data;
+  }
+
+  async transferExplorationOwnership(
+    explorationId: string,
+    newOwnerEmail: string,
+  ): Promise<TransferOwnershipResponse> {
+    const response = await this.client.post(`/api/admin/explorations/${explorationId}/transfer`, {
+      new_owner_email: newOwnerEmail,
+    });
+    return response.data;
+  }
+
+  async getAuditLog(
+    params: { page?: number; page_size?: number; user?: string; action?: string } = {},
+  ): Promise<AuditPage> {
+    const response = await this.client.get('/api/admin/audit', { params });
+    return response.data;
+  }
+
+  async clearEnvironment(confirm: string): Promise<ClearEnvironmentResponse> {
+    const response = await this.client.post('/api/admin/environment/clear', { confirm });
     return response.data;
   }
 }

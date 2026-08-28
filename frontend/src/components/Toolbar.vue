@@ -132,6 +132,13 @@ function handleExportPng(options: ExportPNGOptions) {
       <span class="title-sep" aria-hidden="true"></span>
       <RouterLink to="/explorations" class="nav-link" data-testid="nav-explorations">Explorations</RouterLink>
       <RouterLink v-if="devMode" to="/dev/generator" class="nav-link dev-link" data-testid="nav-dev">DEV</RouterLink>
+      <RouterLink
+        v-if="isSuperuser"
+        to="/admin"
+        class="nav-link admin-link"
+        data-testid="nav-admin"
+        title="Admin area (superuser)"
+      >Admin</RouterLink>
 
       <template v-if="isGraphPage">
         <span class="title-sep" aria-hidden="true"></span>
@@ -485,6 +492,7 @@ function handleExportPng(options: ExportPNGOptions) {
 .nav-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .dev-link { color: #f59e0b !important; }
+.admin-link { color: var(--color-warning, #b45309); font-weight: var(--font-semibold); }
 
 .title-sep {
   width: 1px;

@@ -4,9 +4,10 @@ Provides the same interface as database models but stores data in memory.
 Data is lost when the application restarts.
 """
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Any, Deque, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from graphlagoon.utils.sharing import email_matches_share
@@ -16,6 +17,20 @@ from graphlagoon.utils.sharing import email_matches_share
 class MemoryUser:
     email: str
     display_name: str
+    created_at: datetime = field(default_factory=datetime.now)
+    last_seen_at: Optional[datetime] = None
+
+
+@dataclass
+class MemoryUsageLog:
+    """In-memory twin of db.models.UsageLog (the audit trail)."""
+
+    id: UUID
+    user_email: str
+    action: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[UUID] = None
+    log_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
@@ -104,6 +119,9 @@ class MemoryQueryTemplate:
     updated_at: datetime = field(default_factory=datetime.now)
 
 
+USAGE_LOG_MAX_ENTRIES = 10_000
+
+
 class InMemoryStore:
     """In-memory storage for GraphContexts and Explorations."""
 
@@ -114,6 +132,9 @@ class InMemoryStore:
         self.graph_contexts: Dict[UUID, MemoryGraphContext] = {}
         self.explorations: Dict[UUID, MemoryExploration] = {}
         self.query_templates: Dict[UUID, MemoryQueryTemplate] = {}
+        # Audit trail, newest last. Bounded so a long-running dev server
+        # cannot grow without limit; the admin area reads it newest first.
+        self.usage_logs: Deque[MemoryUsageLog] = deque(maxlen=USAGE_LOG_MAX_ENTRIES)
 
     @classmethod
     def get_instance(cls) -> "InMemoryStore":
@@ -461,12 +482,39 @@ class InMemoryStore:
         del self.query_templates[template_id]
         return True
 
-    def clear_all(self):
-        """Clear all data (for dev mode)."""
+    # Audit operations
+    def record_usage(
+        self,
+        user_email: str,
+        action: str,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[UUID] = None,
+        log_metadata: Optional[Dict[str, Any]] = None,
+    ) -> MemoryUsageLog:
+        entry = MemoryUsageLog(
+            id=uuid4(),
+            user_email=user_email,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            log_metadata=log_metadata,
+        )
+        self.usage_logs.append(entry)
+        return entry
+
+    def clear_all(self, *, keep_usage_logs: bool = True):
+        """Clear all data (for dev mode).
+
+        The audit trail is preserved by default so the "environment cleared"
+        entry — and everything that led up to it — survives the clear itself,
+        mirroring the DB path where usage_logs is never truncated.
+        """
         self.users.clear()
         self.graph_contexts.clear()
         self.explorations.clear()
         self.query_templates.clear()
+        if not keep_usage_logs:
+            self.usage_logs.clear()
 
 
 def get_memory_store() -> InMemoryStore:

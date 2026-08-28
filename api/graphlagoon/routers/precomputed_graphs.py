@@ -57,6 +57,8 @@ from graphlagoon.services.precomputed.resolver import (
     missing_requirement,
     plan_resolution,
 )
+from graphlagoon.services import audit
+from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import is_superuser
 from graphlagoon.utils.context_access import get_context_with_access
 
@@ -96,6 +98,8 @@ def _require_superuser(user_email: str) -> None:
             "FORBIDDEN",
             "Creating and deleting precomputed graphs is restricted to superusers.",
         )
+    # ``utils.authz.require_superuser`` is the generic FastAPI dependency for
+    # the same rule; this wrapper only keeps the feature-specific message.
 
 
 def _validated_name(name: str) -> str:
@@ -407,11 +411,20 @@ async def put_precomputed_graph(
     )
 
     try:
-        return await provider.save(write_request, data.graph, data.source)
+        entry = await provider.save(write_request, data.graph, data.source)
     except HTTPException:
         raise
     except Exception as exc:
         raise _storage_error("save", validated, exc) from exc
+
+    await audit.record(
+        user_email,
+        AuditAction.PRECOMPUTED_PUBLISH,
+        resource_type="graph_context",
+        resource_id=context_id,
+        metadata={"name": validated, "provider": provider.name},
+    )
+    return entry
 
 
 @router.delete("/{context_id}/precomputed-graphs/{name}", status_code=204)
@@ -449,4 +462,11 @@ async def delete_precomputed_graph(context_id: UUID, name: str, request: Request
     except Exception as exc:
         raise _storage_error("delete", validated, exc) from exc
 
+    await audit.record(
+        user_email,
+        AuditAction.PRECOMPUTED_DELETE,
+        resource_type="graph_context",
+        resource_id=context_id,
+        metadata={"name": validated, "provider": provider.name},
+    )
     return Response(status_code=204)

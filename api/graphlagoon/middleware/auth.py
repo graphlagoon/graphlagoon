@@ -1,10 +1,10 @@
 from fastapi import Request, HTTPException
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable, Optional, Union
 from collections.abc import Awaitable
 import inspect
 
-from graphlagoon.db.database import get_session_maker, is_database_available
 from graphlagoon.config import get_settings
 
 DEV_DEFAULT_EMAIL = "dev@graphlagoon.local"
@@ -64,6 +64,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
     - X-User-Email: Legacy/custom header for backwards compatibility
 
     In dev mode, uses a default email if no user is found.
+
+    ``/api/admin`` must never be added to PUBLIC_PATHS/PUBLIC_PREFIXES — the
+    admin router relies on the identity resolved here (guarded by a test).
     """
 
     # Paths that don't require authentication
@@ -108,16 +111,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if settings.dev_mode:
                 user_email = DEV_DEFAULT_EMAIL
             else:
-                raise HTTPException(
+                # Return the response directly: an HTTPException raised from a
+                # BaseHTTPMiddleware sits above the exception handlers and
+                # would surface as a 500 with a traceback instead of a 403.
+                return JSONResponse(
                     status_code=403,
-                    detail={
-                        "error": {
-                            "code": "FORBIDDEN",
-                            "message": (
-                                "Access denied. Authentication header required. "
-                                f"Expected header: {', '.join(EMAIL_HEADERS)}"
-                            ),
-                            "details": {},
+                    content={
+                        "detail": {
+                            "error": {
+                                "code": "FORBIDDEN",
+                                "message": (
+                                    "Access denied. Authentication header required. "
+                                    f"Expected header: {', '.join(EMAIL_HEADERS)}"
+                                ),
+                                "details": {},
+                            }
                         }
                     },
                 )
@@ -125,12 +133,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Store email in request state
         request.state.user_email = user_email
 
-        # Ensure user exists in database (only if database is available)
-        if is_database_available():
-            session_maker = get_session_maker()
-            async with session_maker() as session:
-                await ensure_user_exists(session, user_email)
-                await session.commit()
+        # Register the user (DB *and* memory mode) and bump last_seen_at.
+        from graphlagoon.services.users import touch_user
+
+        await touch_user(user_email)
 
         return await call_next(request)
 
@@ -156,12 +162,45 @@ def get_current_user(request: Request) -> str:
 
     Resolution order:
     1. request.state.user_email (set by AuthMiddleware)
-    2. X-Forwarded-Email header (direct read — guards against
+    2. The custom user_provider registered via configure_auth(), when the
+       host app relies on it instead of installing AuthMiddleware. A sync
+       provider is called here; an async one cannot be awaited from a sync
+       dependency and is a configuration error — the host must install
+       AuthMiddleware so the identity is resolved before the handler runs.
+       Without this step a mounted deployment would trust a client-supplied
+       X-Forwarded-Email header over the host's own authentication.
+    3. X-Forwarded-Email header (direct read — guards against
        BaseHTTPMiddleware state propagation issues)
-    3. DEV_DEFAULT_EMAIL (dev mode only)
+    4. DEV_DEFAULT_EMAIL (dev mode only)
     """
     if hasattr(request.state, "user_email"):
         return request.state.user_email
+
+    if _user_provider is not None:
+        try:
+            result = _user_provider(request)
+        except Exception:
+            result = None
+        if inspect.isawaitable(result):
+            if hasattr(result, "close"):
+                result.close()  # avoid "coroutine was never awaited" warnings
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "code": "AUTH_MISCONFIGURED",
+                        "message": (
+                            "An async user_provider is configured but AuthMiddleware "
+                            "is not installed; install AuthMiddleware so the identity "
+                            "is resolved before handlers run."
+                        ),
+                        "details": {},
+                    }
+                },
+            )
+        if result:
+            request.state.user_email = result
+            return result
 
     # Direct header read as fallback
     for header in EMAIL_HEADERS:

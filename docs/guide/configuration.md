@@ -376,9 +376,9 @@ What superusers do **not** bypass:
 - Identity: the user's email still comes from the platform
   (`X-Forwarded-Email` header in Databricks Apps).
 
-The list is read at startup — restart the app after changing it. The list
-itself is never exposed to the frontend; each user only receives a boolean
-`is_superuser` flag for themselves.
+The list is read at startup — restart the app after changing it. Regular users
+never receive the list; each user only gets a boolean `is_superuser` flag for
+themselves.
 
 ```python
 # Programmatic equivalent

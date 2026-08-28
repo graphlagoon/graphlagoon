@@ -1139,6 +1139,45 @@ Label templates reference metrics by id or name. Custom-metric names are unique 
 
 ---
 
+### 35. 🟢 Admin area DB-mode paths lack PostgreSQL coverage
+
+**Location:** [api/graphlagoon/routers/admin.py](api/graphlagoon/routers/admin.py), [api/graphlagoon/services/environment.py](api/graphlagoon/services/environment.py), [api/graphlagoon/services/audit.py](api/graphlagoon/services/audit.py)
+
+**Issue:**
+The suite runs in memory mode. Every admin endpoint has a DB branch (counts via `func.count`, user list with grouped ownership counts, transfer with share cleanup in the same transaction, `alembic_version` read, `usage_logs` writes) that mirrors the memory branch and shares the same helpers, but is only exercised manually with `make dev-db`.
+
+**Recommendation:** A PostgreSQL-backed integration job (docker compose already exists) running `test_admin.py` with `GRAPH_LAGOON_DATABASE_ENABLED=true`.
+
+**Effort:** Small
+
+---
+
+### 36. 🟢 Precomputed / preset audit entries are declared, not behaviourally tested
+
+**Location:** [api/tests/test_admin_registry.py](api/tests/test_admin_registry.py), [api/tests/test_audit.py](api/tests/test_audit.py)
+
+**Issue:**
+`AUDITED_ROUTES` lists the precomputed publish/delete and preset delete routes, and the registry test checks their modules call `audit.record`, but only the context/exploration handlers are exercised end-to-end for the audit line (they need no storage provider). A regression that moves the `audit.record` call above a raising storage call would not be caught.
+
+**Recommendation:** Extend `test_precomputed_graphs.py` / `test_style_presets.py` (which already have provider fixtures) with one assertion on `InMemoryStore.usage_logs` after a successful PUT/DELETE.
+
+**Effort:** Small
+
+---
+
+### 37. 🟢 `get_current_user` cannot await an async `user_provider`
+
+**Location:** [api/graphlagoon/middleware/auth.py](api/graphlagoon/middleware/auth.py) (`get_current_user`)
+
+**Issue:**
+The admin work made `get_current_user` consult the `configure_auth` provider (so a mounted deployment without `AuthMiddleware` cannot be bypassed by a forged `X-Forwarded-Email`). It is a sync function used as a plain call inside handlers, so an *async* provider cannot be awaited there; it now fails closed with `500 AUTH_MISCONFIGURED` and tells the host to install `AuthMiddleware`. Correct, but a host with an async provider and no middleware gets a 500 instead of working.
+
+**Recommendation:** Turn `get_current_user` into an async FastAPI dependency (`Depends`) across routers, or resolve the provider once in a lightweight ASGI middleware that is always installed by `create_mountable_app`.
+
+**Effort:** Small–Medium
+
+---
+
 ## Summary Table
 
 | ID | Severity | Component | Description | Effort |
@@ -1174,6 +1213,9 @@ Label templates reference metrics by id or name. Custom-metric names are unique 
 | 32 | 🟡 High | Frontend | Cluster programs still run unsandboxed on the main thread | Medium |
 | 33 | 🟢 Medium | Performance | Custom-metric snapshot cloned per recompute cycle | Medium |
 | 34 | 🟢 Medium | Frontend | `{metric:name}` first-match resolution on name collisions | Small |
+| 35 | 🟢 Medium | Backend | Admin DB-mode paths (counts, users, transfer, alembic_version) have no PostgreSQL test coverage | Small |
+| 36 | 🟢 Medium | Backend | Precomputed/preset audit calls are declared, not behaviourally tested | Small |
+| 37 | 🟢 Medium | Backend | `get_current_user` cannot await an async `user_provider` (500 without `AuthMiddleware`) | Small |
 
 ## Prioritization Recommendations
 

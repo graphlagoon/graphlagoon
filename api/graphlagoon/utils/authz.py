@@ -5,6 +5,8 @@ case-insensitive) and bypass ownership/share checks everywhere. They do NOT
 bypass share-target validation (allowed_share_domains).
 """
 
+from fastapi import HTTPException, Request
+
 from graphlagoon.config import get_settings
 from graphlagoon.utils.sharing import user_has_share_access, user_has_write_access
 
@@ -37,3 +39,30 @@ def can_read(owner_email: str, shares: list, user_email: str) -> bool:
         or user_has_share_access(user_email, shares)
         or is_superuser(user_email)
     )
+
+
+def require_superuser(request: Request) -> str:
+    """FastAPI dependency: the current user's email, or 403 if not a superuser.
+
+    Resolves identity through ``get_current_user`` (not ``request.state``)
+    because a mounted deployment may run without ``AuthMiddleware`` and tests
+    mount routers bare. Use it as a router-level dependency so no handler can
+    forget the gate::
+
+        router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_superuser)])
+    """
+    from graphlagoon.middleware.auth import get_current_user
+
+    user_email = get_current_user(request)
+    if not is_superuser(user_email):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This action is restricted to superusers.",
+                    "details": {},
+                }
+            },
+        )
+    return user_email

@@ -28,6 +28,8 @@ from graphlagoon.utils.sharing import (
     user_has_share_access,
     validate_share_email,
 )
+from graphlagoon.services import audit
+from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import can_manage, can_read, can_write, is_superuser
 from graphlagoon.config import get_settings
 
@@ -604,7 +606,16 @@ async def delete_exploration(exploration_id: UUID, request: Request):
                 raise HTTPException(status_code=403, detail="Only owner can delete")
 
             state = exploration.state or {}
+            audit_meta = {"title": exploration.title, "owner": exploration.owner_email}
             await session.delete(exploration)
+            await audit.record(
+                user_email,
+                AuditAction.EXPLORATION_DELETE,
+                resource_type="exploration",
+                resource_id=exploration_id,
+                metadata=audit_meta,
+                session=session,
+            )
             await session.commit()
 
         await _delete_snapshot_if_exists(state, exploration_id)
@@ -619,7 +630,15 @@ async def delete_exploration(exploration_id: UUID, request: Request):
             raise HTTPException(status_code=403, detail="Only owner can delete")
 
         state = exploration.state or {}
+        audit_meta = {"title": exploration.title, "owner": exploration.owner_email}
         store.delete_exploration(exploration_id)
+        await audit.record(
+            user_email,
+            AuditAction.EXPLORATION_DELETE,
+            resource_type="exploration",
+            resource_id=exploration_id,
+            metadata=audit_meta,
+        )
         await _delete_snapshot_if_exists(state, exploration_id)
 
     return {"status": "deleted"}
@@ -722,10 +741,19 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error_msg)
 
+            audit_meta = {"with": data.email, "permission": data.permission}
             # Check if already shared
             for share in exploration.shares:
                 if share.shared_with_email == data.email:
                     share.permission = data.permission
+                    await audit.record(
+                        user_email,
+                        AuditAction.EXPLORATION_SHARE,
+                        resource_type="exploration",
+                        resource_id=exploration_id,
+                        metadata={**audit_meta, "updated": True},
+                        session=session,
+                    )
                     await session.commit()
                     return {"status": "updated"}
 
@@ -736,6 +764,14 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
                 permission=data.permission,
             )
             session.add(share)
+            await audit.record(
+                user_email,
+                AuditAction.EXPLORATION_SHARE,
+                resource_type="exploration",
+                resource_id=exploration_id,
+                metadata=audit_meta,
+                session=session,
+            )
             await session.commit()
     else:
         store = get_memory_store()
@@ -757,6 +793,13 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
             raise HTTPException(status_code=400, detail=error_msg)
 
         store.share_exploration(exploration_id, data.email, data.permission)
+        await audit.record(
+            user_email,
+            AuditAction.EXPLORATION_SHARE,
+            resource_type="exploration",
+            resource_id=exploration_id,
+            metadata={"with": data.email, "permission": data.permission},
+        )
 
     return {"status": "shared"}
 
@@ -799,6 +842,14 @@ async def unshare_exploration(exploration_id: UUID, email: str, request: Request
 
             if share:
                 await session.delete(share)
+                await audit.record(
+                    user_email,
+                    AuditAction.EXPLORATION_UNSHARE,
+                    resource_type="exploration",
+                    resource_id=exploration_id,
+                    metadata={"with": email},
+                    session=session,
+                )
                 await session.commit()
     else:
         store = get_memory_store()
@@ -817,5 +868,12 @@ async def unshare_exploration(exploration_id: UUID, email: str, request: Request
             )
 
         store.unshare_exploration(exploration_id, email)
+        await audit.record(
+            user_email,
+            AuditAction.EXPLORATION_UNSHARE,
+            resource_type="exploration",
+            resource_id=exploration_id,
+            metadata={"with": email},
+        )
 
     return {"status": "removed"}

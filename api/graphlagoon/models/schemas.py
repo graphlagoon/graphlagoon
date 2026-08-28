@@ -1399,3 +1399,105 @@ class StatementResponse(BaseModel):
     # how many chunks were fetched, so callers can attribute query time.
     client_download_ms: Optional[float] = None
     client_chunk_count: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Admin area (superuser only — see routers/admin.py)
+# ---------------------------------------------------------------------------
+
+
+class AdminHealth(BaseModel):
+    status: str
+    latency_ms: Optional[float] = None
+    detail: Optional[str] = None
+
+
+class AdminCounts(BaseModel):
+    users: int
+    contexts: int
+    explorations: int
+    query_templates: int
+    audit_entries: int
+
+
+class AdminStorage(BaseModel):
+    """Where each blob-style artefact lives (the most common misconfiguration)."""
+
+    exploration_snapshots: str
+    precomputed_graphs: str
+    style_presets: str
+
+
+class AdminOverview(BaseModel):
+    version: str
+    dev_mode: bool
+    databricks_mode: bool
+    persistence_backend: str
+    alembic_version: Optional[str] = None
+    counts: AdminCounts
+    superusers: list[str]
+    storage: AdminStorage
+    public_config: dict[str, Any]
+    health: dict[str, AdminHealth]
+
+
+class AdminConfigEntry(BaseModel):
+    key: str
+    env_var: str
+    value: Any
+    kind: Literal["public", "secret"]
+
+
+class AdminUser(BaseModel):
+    email: str
+    display_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+    is_superuser: bool
+    contexts_owned: int
+    explorations_owned: int
+
+
+class AdminUserPage(BaseModel):
+    items: list[AdminUser]
+    total: int
+    page: int
+    page_size: int
+
+
+class TransferOwnershipRequest(BaseModel):
+    new_owner_email: str = Field(..., min_length=3, max_length=255)
+
+
+class TransferOwnershipResponse(BaseModel):
+    id: UUID
+    previous_owner_email: str
+    owner_email: str
+
+
+class AuditEntry(BaseModel):
+    id: str
+    user_email: str
+    action: str
+    resource_type: Optional[str] = None
+    resource_id: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+
+
+class AuditPage(BaseModel):
+    items: list[AuditEntry]
+    total: int
+    page: int
+    page_size: int
+    actions: list[str]
+
+
+class ClearEnvironmentRequest(BaseModel):
+    confirm: str = Field(..., description='Must be exactly "CLEAR ALL"')
+
+
+class ClearEnvironmentResponse(BaseModel):
+    status: str
+    cleared: list[str]
+    warehouse: Optional[Any] = None
