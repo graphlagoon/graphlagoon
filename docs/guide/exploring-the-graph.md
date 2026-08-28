@@ -39,7 +39,7 @@ Behavior**:
 
 ## Query Console
 
-Canvas footer → **Query** opens a resizable bottom drawer for *tabular*
+Canvas footer → **Console** opens a resizable bottom drawer for *tabular*
 results — any projection is allowed, unlike the graph query path which
 must return edges. Run with the **▶** button or **Ctrl/⌘ + Enter**.
 

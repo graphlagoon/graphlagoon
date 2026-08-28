@@ -34,9 +34,14 @@ async function bootstrap() {
       preset: Aura,
       options: {
         darkModeSelector: '.dark-mode',
+        // PrimeVue emits `@layer primevue;` before any app stylesheet, which
+        // would otherwise fix the layer order with the theme FIRST (weakest).
+        // Declare the app's `reset` layer ahead of it here so the theme's
+        // paddings beat `* { padding: 0 }` — mirrors the `@layer` statement at
+        // the top of assets/main.css.
         cssLayer: {
           name: 'primevue',
-          order: 'primevue',
+          order: 'reset, primevue',
         },
       },
     },

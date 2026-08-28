@@ -80,9 +80,10 @@ test.describe('Explorations', () => {
     await page.goto('/explorations');
     await expect(page.getByText('Test Exploration')).toBeVisible();
 
-    page.on('dialog', (dialog) => dialog.accept());
-
     await page.getByRole('button', { name: 'Delete' }).click();
+    // In-app confirm dialog (not the browser's): the question names the item.
+    await expect(page.getByTestId('confirm-dialog')).toContainText('Test Exploration');
+    await page.getByTestId('confirm-dialog-accept').click();
     await expect(page.getByText('No Explorations')).toBeVisible();
   });
 

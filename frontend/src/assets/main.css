@@ -1,7 +1,20 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/*
+ * The reset lives in a cascade layer declared BEFORE PrimeVue's. Unlayered
+ * rules beat every layered rule regardless of specificity, so an unlayered
+ * `* { padding: 0 }` silently stripped the padding from every PrimeVue
+ * component (DataTable cells, InputText, MultiSelect…) — table text sat flush
+ * against the cell borders. With `reset` ordered first, PrimeVue's theme wins
+ * over the reset while the app's own (unlayered) styles still win over both.
+ * The layer name must match `cssLayer.name` in main.ts.
+ */
+@layer reset, primevue;
+
+@layer reset {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 }
 
 /* ─── Design Tokens ───────────────────────────────────────────────────────── */

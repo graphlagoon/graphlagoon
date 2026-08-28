@@ -18,6 +18,7 @@ import GraphContextFormModal from '@/components/GraphContextFormModal.vue';
 import SchemaDriftBanner from '@/components/SchemaDriftBanner.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
 import type { GraphContext } from '@/types/graph';
+import { confirmAction } from '@/composables/useConfirm';
 
 const router = useRouter();
 const route = useRoute();
@@ -141,7 +142,13 @@ function openGraph(context: GraphContext) {
 }
 
 async function deleteContext(context: GraphContext) {
-  if (!confirm(`Delete "${context.title}"?`)) return;
+  const ok = await confirmAction({
+    title: `Delete context “${context.title}”?`,
+    message: 'Its explorations, templates and presets go with it. This cannot be undone.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
 
   try {
     await contextsStore.deleteContext(context.id);

@@ -12,6 +12,7 @@ import type { Exploration } from '@/types/graph';
 import type { ExportPNGOptions } from '@/stores/toolbar';
 import ExportModal from '@/components/ExportModal.vue';
 import { downloadJson } from '@/utils/portableExport';
+import { GRAPH_SHORTCUTS } from '@/utils/shortcuts';
 import {
   Filter,
   Sliders,
@@ -159,15 +160,10 @@ function handleExportPng(options: ExportPNGOptions) {
     </div>
 
     <!-- Center: action buttons (graph page only) -->
+    <!-- The panel toggles stay put while a query runs: a toolbar that
+         disappears mid-query reads as a broken page, and the panels
+         (filters, style, labels…) are all usable while data loads. -->
     <div v-if="isGraphPage && toolbarHandlers" class="toolbar-center">
-      <template v-if="graphStore.loading">
-        <span class="loading-indicator">
-          <Loader2 :size="14" class="spin" />
-          Loading…
-        </span>
-      </template>
-
-      <template v-else>
         <!-- Group 1: Explore -->
         <div class="btn-group" role="group" aria-label="Explore">
           <button
@@ -295,11 +291,14 @@ function handleExportPng(options: ExportPNGOptions) {
           </button>
 
         </div>
-      </template>
     </div>
 
     <!-- Right: export + about + user -->
     <div class="toolbar-right">
+      <span v-if="isGraphPage && graphStore.loading" class="loading-indicator" data-testid="toolbar-loading">
+        <Loader2 :size="14" class="spin" />
+        <span class="btn-text">Loading…</span>
+      </span>
       <button
         v-if="isGraphPage && toolbarHandlers && !graphStore.loading"
         class="toolbar-btn"
@@ -424,6 +423,20 @@ function handleExportPng(options: ExportPNGOptions) {
 
           </div>
 
+          <div class="about-shortcuts" data-testid="about-shortcuts">
+            <div class="about-shortcuts-title">Graph shortcuts</div>
+            <dl class="shortcut-list">
+              <template v-for="s in GRAPH_SHORTCUTS" :key="s.label">
+                <dt>
+                  <template v-for="(k, i) in s.keys" :key="k">
+                    <kbd>{{ k }}</kbd><span v-if="i < s.keys.length - 1" class="shortcut-plus">+</span>
+                  </template>
+                </dt>
+                <dd>{{ s.label }}</dd>
+              </template>
+            </dl>
+          </div>
+
           <div class="about-footer">
             <span>MIT License</span>
             <span class="about-sep">·</span>
@@ -473,9 +486,22 @@ function handleExportPng(options: ExportPNGOptions) {
   gap: var(--space-2);
 }
 
-.toolbar-left { flex-shrink: 0; }
+/* Left shrinks (the context title ellipsises), right never does (Save /
+   Export / user menu must stay reachable); the centre takes what is left and
+   scrolls rather than pushing the right group off-screen. */
+.toolbar-left { flex-shrink: 1; min-width: 0; }
 .toolbar-right { flex-shrink: 0; }
-.toolbar-center { flex: 1; justify-content: center; flex-wrap: nowrap; }
+.toolbar-center {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* room for the focus ring, which overflow-x:auto would otherwise clip */
+  padding-block: 3px;
+}
+.toolbar-center::-webkit-scrollbar { display: none; }
 
 /* ── Navigation ───────────────────────────────────────────── */
 .nav-link {
@@ -491,7 +517,7 @@ function handleExportPng(options: ExportPNGOptions) {
 .nav-link.router-link-active { color: var(--color-primary); font-weight: var(--font-semibold); }
 .nav-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-.dev-link { color: #f59e0b !important; }
+.nav-link.dev-link { color: var(--color-warning); }
 .admin-link { color: var(--color-warning, #b45309); font-weight: var(--font-semibold); }
 
 .title-sep {
@@ -793,6 +819,37 @@ function handleExportPng(options: ExportPNGOptions) {
   background: var(--color-bg-muted);
 }
 
+.about-shortcuts {
+  margin-bottom: var(--space-4);
+}
+.about-shortcuts-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+}
+.shortcut-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+.shortcut-list dt { white-space: nowrap; }
+.shortcut-list dd { margin: 0; }
+.shortcut-list kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: var(--text-xs);
+  font-family: inherit;
+  color: var(--color-text);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.shortcut-plus { margin: 0 3px; }
+
 .about-footer {
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-border);
@@ -808,7 +865,9 @@ function handleExportPng(options: ExportPNGOptions) {
 }
 
 /* ── Responsive ───────────────────────────────────────────── */
-@media (max-width: 1400px) {
+/* Measured: with every label visible the centre group alone is ~800px, so a
+   1440px viewport already overflowed by ~190px. Labels go first. */
+@media (max-width: 1600px) {
   .toolbar-center .btn-text { display: none; }
   .toolbar-btn { padding: 6px 7px; }
 }
@@ -816,13 +875,22 @@ function handleExportPng(options: ExportPNGOptions) {
 @media (max-width: 1100px) {
   .toolbar-center { gap: 2px; }
   .btn-group-sep { margin: 0; }
+  .brand-name { display: none; }
+  .context-title { max-width: 140px; }
+}
+
+@media (max-width: 900px) {
+  .exploration-name, .exploration-unsaved, .multi-edge-badge { display: none; }
+  .context-title { max-width: 110px; }
 }
 
 @media (max-width: 768px) {
   .toolbar { height: auto; flex-wrap: wrap; padding: var(--space-2) var(--space-3); }
   .toolbar-left { order: 1; flex: 1; }
   .toolbar-right { order: 2; }
-  .toolbar-center { order: 3; width: 100%; justify-content: flex-start; padding-top: var(--space-2); border-top: 1px solid var(--color-toolbar-sep); }
+  /* flex-basis 100% (not width) — `flex: 1` above sets basis 0, which would
+     let the centre squeeze onto the first row next to the nav links. */
+  .toolbar-center { order: 3; flex: 1 1 100%; min-width: 100%; justify-content: flex-start; padding-top: var(--space-2); border-top: 1px solid var(--color-toolbar-sep); }
   .context-title, .exploration-name, .exploration-unsaved, .multi-edge-badge { display: none; }
   .brand-name { display: none; }
 }

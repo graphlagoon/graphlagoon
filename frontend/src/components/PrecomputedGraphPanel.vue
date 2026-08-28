@@ -28,6 +28,7 @@ import { ARTIFACT_NAME_PATTERN } from '@/types/graph';
 import type { PrecomputedGraphCapabilities } from '@/types/graph';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { confirmAction } from '@/composables/useConfirm';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -140,13 +141,13 @@ async function save() {
 async function remove() {
   if (deleteBlockedReason.value || !contextId.value) return;
   const name = deleteName.value.trim();
-  if (
-    !window.confirm(
-      `Delete precomputed graph “${name}”? Anyone using its link loses it.`,
-    )
-  ) {
-    return;
-  }
+  const ok = await confirmAction({
+    title: `Delete precomputed graph “${name}”?`,
+    message: 'Anyone using its link loses it.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
   deleting.value = true;
   deleteError.value = null;
   try {

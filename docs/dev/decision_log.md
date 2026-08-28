@@ -7974,6 +7974,7 @@ Frontend only (no backend changes).
 
 **Technical debt:** see technical-debts.md #31–#34 (no CSP; cluster programs still run unsandboxed on the main thread; snapshot clone cost on very large graphs; first-match metric-name resolution in labels).
 
+
 ## [2026-08-28 19:30] - Feature Implemented: Admin area (superuser) + audit trail + dev seed
 
 **Feature:** A superuser-only area at `/admin` (backend `/api/admin/*`) that shows the environment (mode, persistence backend + Alembic revision, database latency, on-demand warehouse probe, counts, superusers, share domains, storage paths, feature flags, datasources), the effective configuration with secrets redacted, every known user with ownership counts and last-seen, all contexts/explorations with **ownership transfer** and delete, a paginated **audit log**, and a dev-only **clear environment**. Plus a parametrised dev seed (`make dev-seed`) that populates a running stack with dozens of users and hundreds of contexts/explorations so the system is explorable, run by default at the end of `make dev` / `make dev-db` / `make dev-gsql2rsql*`.
@@ -8046,3 +8047,197 @@ presets and precomputed graphs) but links nowhere into the admin area.
 
 ---
 
+## [2026-08-28 20:15] - Fix: responsive layout of the graph page and Data Table
+
+**Problem (reported):** the Data Table drawer and the graph page as a whole
+responded badly to the viewport: table text sat flush against (visually
+"eaten by") the cell borders, the top toolbar ran off the right edge of a
+1440px window, the keyboard-hint overlay overlapped the bottom graph toolbar
+on narrower windows, and under 768px the page overflowed the screen
+vertically.
+
+**Root causes (measured with a throwaway Playwright probe at 1440/1280/1024/
+800/600px, not guessed):**
+1. `assets/main.css` opened with an *unlayered* `* { padding: 0 }` reset.
+   PrimeVue puts its whole theme in `@layer primevue`; unlayered rules beat
+   layered ones regardless of specificity, so every PrimeVue component lost
+   its default padding — DataTable cells, InputText, MultiSelect, DatePicker.
+   The table "eaten by the borders" was the visible symptom.
+2. The top toolbar's centre group (~800px with labels) only dropped its labels
+   at ≤1400px, so 1440px overflowed by ~190px (`document.scrollWidth = 1628`);
+   `.toolbar-right` (Save / Export / user menu) was pushed off-screen.
+3. `.graph-visualization { height: calc(100vh - 60px) }` assumed a 52px
+   toolbar (8px always wasted) and broke completely when the toolbar wraps to
+   two rows at ≤768px.
+4. `.controls-hint` (bottom-right, ~670px) overlapped `.graph-toolbar`
+   (bottom-left, ~520px) below ~1280px.
+
+**Design decisions:**
+- **Layer the reset instead of patching each component.** `main.css` now
+  declares `@layer reset, primevue;` and wraps the reset in `@layer reset`;
+  `main.ts` sets PrimeVue `cssLayer.order: 'reset, primevue'` because PrimeVue
+  injects its own `@layer primevue;` statement *before* any app stylesheet —
+  without matching the order there, the first declaration wins and `reset`
+  would land *after* `primevue` (verified: the fix silently did nothing until
+  `order` was changed). App styles stay unlayered and keep beating both.
+  Visual consequence: every PrimeVue component regains its theme padding
+  app-wide (search inputs, pickers, modals); docs screenshots regenerated to
+  match.
+- **Toolbar:** labels hide at ≤1600px (measured need), `.toolbar-left`
+  shrinks with an ellipsised title, `.toolbar-center` gets `min-width: 0` +
+  `overflow-x: auto` (scrollbar hidden) as a hard guarantee that it can never
+  push the right group off-screen; ≤1100px hides the brand name, ≤900px hides
+  the exploration name/badge. The ≤768px wrap rule uses `flex: 1 1 100%`, not
+  `width: 100%`, because `flex: 1` sets basis 0 and the centre squeezed onto
+  the first row once it had `min-width: 0`.
+- **Page height by layout, not arithmetic:** `.app { height: 100vh }`, `main
+  { flex: 1; min-height: 0 }`, `.graph-visualization { height: 100% }`. `main`
+  deliberately stays a block: a first attempt made it a flex column and the
+  centred list views (`margin: 0 auto`) collapsed to content width — auto
+  cross-axis margins cancel `stretch`. Long pages still scroll the document.
+- **Hint overlay hidden at ≤1280px** — the toolbar is the thing that must stay
+  usable; the hints are discoverable in the About/help text.
+- Drawer header wraps (`flex-wrap`, search `max-width: 100%`), graph toolbar
+  wraps within `calc(100% - 32px)`, status bar wraps.
+
+**Files modified:**
+- [frontend/src/assets/main.css](../../frontend/src/assets/main.css) — layered reset
+- [frontend/src/main.ts](../../frontend/src/main.ts) — PrimeVue `cssLayer.order`
+- [frontend/src/App.vue](../../frontend/src/App.vue) — definite-height shell
+- [frontend/src/views/GraphVisualizationView.vue](../../frontend/src/views/GraphVisualizationView.vue) — `height: 100%`, wrapping toolbar/status bar
+- [frontend/src/components/Toolbar.vue](../../frontend/src/components/Toolbar.vue) — breakpoints, shrink/scroll rules
+- [frontend/src/components/DataTablePanel.vue](../../frontend/src/components/DataTablePanel.vue) — wrapping header
+- [frontend/src/components/GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue) — hint hidden ≤1280px
+- `docs/public/screenshots/*.png` — regenerated (`make docs-screenshots`)
+
+**Files created:**
+- [frontend/e2e/tests/responsive-layout.spec.ts](../../frontend/e2e/tests/responsive-layout.spec.ts) — at 1440×900, 1024×700 and 600×800: no document overflow in either axis, `.toolbar-right` inside the viewport, drawer bottom inside the viewport, DataTable cell `padding-left > 0`.
+
+**Testing:**
+- [x] `npx vue-tsc --noEmit` clean
+- [x] Unit suite: 2163 tests / 126 files pass
+- [x] New E2E `responsive-layout.spec.ts` (3 viewports) passes; full E2E suite run
+- [x] Before/after probe screenshots at five viewports inspected manually
+
+**Public Docs:** No guide text changes — the feature set is unchanged; the
+guide screenshots were regenerated because PrimeVue components now render
+with their theme padding. `make docs-build` run.
+
+**Admin-Area Impact:** No admin-area impact (CSS only; no settings, tables or
+routes).
+
+**Known Limitations:**
+- Under ~560px the bottom graph toolbar wraps to two rows over the canvas;
+  the app is not designed for phone widths and this is the graceful floor,
+  not a supported layout.
+- The DataTable still relies on horizontal scrolling for many columns (by
+  design — columns keep their min-widths so values stay readable).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-08-28 20:40] - Fix: context menu (and every overlay) invisible in fullscreen
+
+**Problem (reported):** right-click context menu does not work in fullscreen.
+
+**Root cause:** `toggleFullscreen()` called `requestFullscreen()` on the
+`.graph-visualization` container. A native fullscreen element is rendered
+alone in the browser's top layer — nothing outside its subtree is painted.
+`GraphContextMenu`, all 22 modals, `ToastContainer` and PrimeVue's overlays
+(Data Table filter popovers, MultiSelect/DatePicker panels) `<Teleport
+to="body">`, so in fullscreen they existed in the DOM, received the click,
+and were never drawn. The menu "did not work" because it was invisible.
+
+**Design decision:** request fullscreen on `document.documentElement` and let
+the existing `.graph-visualization.fullscreen` class (position: fixed, inset
+0, z-index 1000) cover the viewport. One-line fix; every body-teleported
+overlay keeps its higher z-index (`--z-toast` 9000, `--z-menu` 9001, context
+menu 10001) and renders. Rejected: a dynamic teleport target following
+`document.fullscreenElement` — 23 components to touch, and PrimeVue overlays
+would still need `appendTo` wiring.
+
+**Files modified:**
+- [frontend/src/views/GraphVisualizationView.vue](../../frontend/src/views/GraphVisualizationView.vue) — `toggleFullscreen`
+- [frontend/e2e/tests/context-menu.spec.ts](../../frontend/e2e/tests/context-menu.spec.ts) — new test: after entering fullscreen, the opened menu must be a descendant of `document.fullscreenElement` (verified red on the old code, green on the fix)
+
+**Testing:** `context-menu.spec.ts` 3/3 pass; the new test fails with the
+previous implementation (`Expected: true, Received: false`).
+
+**Public Docs:** No public docs impact (behaviour now matches what the guide
+already describes). **Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-08-28 21:30] - UX review + quick wins
+
+**Feature:** a written UX / information-architecture review
+([docs/dev/ux-review.md](ux-review.md), 14 numbered findings, prioritized
+backlog, structural "left rail" proposal) and the low-risk items from it
+implemented in the same change.
+
+**Implemented (finding numbers refer to ux-review.md):**
+- #2 — canvas-footer `Query` button renamed **Console** (title "Query Console"
+  and `data-testid` unchanged); empty-state text now names the top-bar *Query*
+  / *Template* buttons and right-click.
+- #5 — panel headings match their buttons: "Graph Query" → "Query", "Graph
+  Metrics" → "Metrics"; `LayoutPanel` heading `<h4>` → `<h3>`.
+- #8 — the top-bar panel toggles no longer disappear while a query runs; the
+  spinner moved to the right group (`data-testid="toolbar-loading"`).
+  Gotcha hit on the way: a bare `<template>` with no directive is rendered as
+  an inert native `<template>` by Vue — the whole centre vanished until the
+  wrapper was removed (58 E2E tests went red, then green).
+- #10/#11 — `src/utils/shortcuts.ts` is the single source of truth for the
+  canvas shortcuts (rendered by the canvas hint strip and by About → *Graph
+  shortcuts*); right-click is the first entry. Under 1280 px the strip
+  collapses to a `? Shortcuts` chip whose tooltip lists everything, instead of
+  hiding.
+- #12 — status-bar chips `truncated` / `style not applied` / `template not run`
+  / `layout setting(s) not applied` are buttons that open Behaviors / Style /
+  Templates / Layout (`openPanel()` in the view; test ids unchanged).
+- #13 — `aria-pressed` on every canvas-toolbar toggle; 3D/2D segmented control
+  is a labelled `role="group"`.
+- #14 (partial) — `.dev-link` uses `var(--color-warning)` without `!important`.
+
+**Files created:** `docs/dev/ux-review.md`, `frontend/src/utils/shortcuts.ts`.
+**Files modified:** `Toolbar.vue`, `GraphVisualizationView.vue`,
+`GraphCanvas3D.vue`, `GraphQueryPanel.vue`, `MetricsPanel.vue`,
+`LayoutPanel.vue`, `e2e/tests/graph.spec.ts`, `e2e/tests/user-journeys.spec.ts`
+(heading assertions now `getByRole('heading', { name, exact: true })`),
+`docs/guide/exploring-the-graph.md` (footer button is *Console*).
+
+**Testing:** `vue-tsc` clean; unit suite 2163/2163; E2E `graph`,
+`context-menu`, `query-console`, `navigation`, `responsive-layout`,
+`user-journeys` 58/58; docs screenshots regenerated.
+
+**Public Docs:** `exploring-the-graph.md` updated (Console); screenshots
+regenerated. **Admin-Area Impact:** No admin-area impact.
+
+**Also in this pass (finding #9 and #4):**
+- **In-app confirmations.** `src/composables/useConfirm.ts` (`confirmAction()`
+  → `Promise<boolean>`) + `src/components/ConfirmDialog.vue`, mounted once in
+  `App.vue`. All 11 `window.confirm()` sites migrated (style presets, custom
+  metrics, precomputed graphs, label rules, cluster programs, cluster list,
+  explorations, contexts, dev clear-all, admin context/exploration). Each
+  question now says what is lost rather than "Are you sure?"; destructive ones
+  focus *Cancel* so Enter cannot delete by reflex; Escape and backdrop cancel.
+  Native `confirm()` also dropped the user out of native fullscreen — the same
+  top-layer problem as the context menu above.
+  The composable falls back to `window.confirm()` when no dialog is mounted, so
+  component tests that render a panel in isolation keep working with
+  `vi.spyOn(window, 'confirm')`; E2E now clicks `confirm-dialog-accept` instead
+  of accepting a browser dialog.
+- **One dock for the nine top-bar panels** (`setDocked`/`toggleDocked` in
+  GraphVisualizationView): opening a panel closes the one that was open.
+  Filters + Style + Labels used to stack to ~780px and squeeze the canvas into
+  a strip. Floating panels (Info, Layout, cluster list) and the bottom drawers
+  are unaffected.
+
+**Not done (backlog in ux-review.md §3–4):** canvas save affordance, Clusters
+results tab, colour lint, left-rail toolbar, undo-on-delete.
+
+**Author:** Claude (AI Assistant)
+
+---

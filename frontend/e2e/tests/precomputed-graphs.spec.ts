@@ -230,8 +230,6 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
     await seedPrecomputedGraphs(page, MOCK_CONTEXT.id, {
       descartavel: { nodes: NODES, edges: EDGES },
     });
-    page.on('dialog', (dialog) => dialog.accept());
-
     await page.goto(`/graph/${MOCK_CONTEXT.id}?precomputed=descartavel`);
     await expect(page.getByTestId('graph-status-precomputed')).toContainText('descartavel', {
       timeout: 15_000,
@@ -240,6 +238,7 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
     await page.getByTestId('toolbar-precomputed').click();
     await page.getByTestId('precomputed-graph-delete-input').fill('descartavel');
     await page.getByTestId('precomputed-graph-delete-button').click();
+    await page.getByTestId('confirm-dialog-accept').click();
 
     // Reopening the same URL now finds nothing.
     await page.goto(`/graph/${MOCK_CONTEXT.id}?precomputed=descartavel`);

@@ -106,6 +106,34 @@ test.describe('Graph context menu', () => {
     await expect(page.getByTestId('context-menu-action-copy-id')).toBeVisible();
   });
 
+  test('the menu is rendered inside the fullscreen element, so it stays visible in fullscreen', async ({ authenticatedPage: page }) => {
+    // A native fullscreen element is rendered alone in the top layer: anything
+    // outside its subtree is invisible. The menu teleports to <body>, so
+    // fullscreen must be requested on the document (not the graph container)
+    // for the menu to be a descendant of `document.fullscreenElement`.
+    await page.getByTitle('Fullscreen', { exact: true }).click();
+    await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+
+    const menu = page.getByTestId('graph-context-menu');
+    let opened = false;
+    for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      const pos = await hoverNode(page, 'n1');
+      await page.mouse.down({ button: 'right' });
+      await page.mouse.up({ button: 'right' });
+      opened = await menu
+        .waitFor({ state: 'visible', timeout: 2_000 })
+        .then(() => true)
+        .catch(() => false);
+    }
+    expect(opened).toBe(true);
+
+    const insideFullscreen = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="graph-context-menu"]');
+      return !!el && !!document.fullscreenElement?.contains(el);
+    });
+    expect(insideFullscreen).toBe(true);
+  });
+
   test('right-drag (camera pan/orbit) does not open the context menu', async ({ authenticatedPage: page }) => {
     const pos = await hoverNode(page, 'n1');
 

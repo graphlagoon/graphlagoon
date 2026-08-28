@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useClusterStore } from '@/stores/cluster'
 import type { Cluster } from '@/types/cluster'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { confirmAction } from '@/composables/useConfirm';
 
 const clusterStore = useClusterStore()
 
@@ -35,10 +36,14 @@ function toggleCluster(clusterId: string) {
   clusterStore.toggleClusterState(clusterId)
 }
 
-function deleteCluster(clusterId: string) {
-  if (confirm('Delete this cluster? This action cannot be undone.')) {
-    clusterStore.deleteCluster(clusterId)
-  }
+async function deleteCluster(clusterId: string) {
+  const ok = await confirmAction({
+    title: 'Delete this cluster?',
+    message: 'Its nodes are released back to the graph. This cannot be undone.',
+    confirmLabel: 'Delete',
+    danger: true,
+  })
+  if (ok) clusterStore.deleteCluster(clusterId)
 }
 
 function openAll() {

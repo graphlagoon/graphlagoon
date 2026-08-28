@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, type Ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useGraphStore } from '@/stores/graph';
-import { useToolbarStore } from '@/stores/toolbar';
+import { useToolbarStore, type PanelId } from '@/stores/toolbar';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
 import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
@@ -201,7 +201,14 @@ function toggleFullscreen() {
   if (!graphContainerRef.value) return;
 
   if (!document.fullscreenElement) {
-    graphContainerRef.value.requestFullscreen().then(() => {
+    // Fullscreen the DOCUMENT, not the graph container. A native fullscreen
+    // element is rendered alone in the top layer, so anything teleported to
+    // <body> — the right-click context menu, every modal, toasts, PrimeVue
+    // overlays in the Data Table — was invisible while the container itself
+    // was fullscreen. The `.fullscreen` class below already pins the graph
+    // over the whole viewport (position: fixed, z-index 1000); overlays keep
+    // their higher z-indices and stay usable.
+    document.documentElement.requestFullscreen().then(() => {
       isFullscreen.value = true;
     }).catch(() => {
       // Fullscreen not supported or denied
@@ -216,6 +223,48 @@ function toggleFullscreen() {
 // Listen for fullscreen changes (e.g., user presses Esc)
 function onFullscreenChange() {
   isFullscreen.value = !!document.fullscreenElement;
+}
+
+/**
+ * The nine top-bar panels share ONE dock on the left of the canvas: opening
+ * a panel closes whichever was open. They used to be independent booleans,
+ * so Filters + Style + Labels could stack to ~780px and squeeze the canvas
+ * into a strip; nobody edits three panels at once, and the floating panels
+ * (Info, Layout, cluster list) and the bottom drawers are unaffected.
+ */
+const dockedPanels: Record<PanelId, Ref<boolean>> = {
+  filters: showFilters,
+  behaviors: showBehaviorPanel,
+  query: showQueryPanel,
+  metrics: showMetricsPanel,
+  aesthetics: showAestheticsPanel,
+  labels: showTextFormatPanel,
+  clusters: showClusterPrograms,
+  templates: showTemplatesPanel,
+  precomputed: showPrecomputedPanel,
+};
+
+function setDocked(id: PanelId, open: boolean) {
+  for (const [key, r] of Object.entries(dockedPanels) as [PanelId, Ref<boolean>][]) {
+    const next = key === id ? open : false;
+    if (r.value !== next) {
+      r.value = next;
+      toolbarStore.setPanelActive(key, next);
+    }
+  }
+}
+
+function toggleDocked(id: PanelId) {
+  setDocked(id, !dockedPanels[id].value);
+}
+
+/**
+ * Open (never toggle) a panel from somewhere else on the page — the
+ * status-bar chips use it so a "not applied" notice leads straight to the
+ * panel that can fix it.
+ */
+function openPanel(id: PanelId) {
+  setDocked(id, true);
 }
 
 function handleFocusNode(nodeId: string) {
@@ -522,15 +571,15 @@ async function runTemplateFromRoute(contextId: string, parsed: ParsedTemplateUrl
 onMounted(async () => {
   // Register toolbar handlers for the global Toolbar component
   toolbarStore.registerHandlers({
-    onToggleFilters: () => { showFilters.value = !showFilters.value; toolbarStore.setPanelActive('filters', showFilters.value); },
-    onToggleBehaviors: () => { showBehaviorPanel.value = !showBehaviorPanel.value; toolbarStore.setPanelActive('behaviors', showBehaviorPanel.value); },
-    onToggleQuery: () => { showQueryPanel.value = !showQueryPanel.value; toolbarStore.setPanelActive('query', showQueryPanel.value); },
-    onToggleMetrics: () => { showMetricsPanel.value = !showMetricsPanel.value; toolbarStore.setPanelActive('metrics', showMetricsPanel.value); },
-    onToggleAesthetics: () => { showAestheticsPanel.value = !showAestheticsPanel.value; toolbarStore.setPanelActive('aesthetics', showAestheticsPanel.value); },
-    onToggleLabels: () => { showTextFormatPanel.value = !showTextFormatPanel.value; toolbarStore.setPanelActive('labels', showTextFormatPanel.value); },
-    onToggleClusterPrograms: () => { showClusterPrograms.value = !showClusterPrograms.value; toolbarStore.setPanelActive('clusters', showClusterPrograms.value); },
-    onToggleTemplates: () => { showTemplatesPanel.value = !showTemplatesPanel.value; toolbarStore.setPanelActive('templates', showTemplatesPanel.value); },
-    onTogglePrecomputed: () => { showPrecomputedPanel.value = !showPrecomputedPanel.value; toolbarStore.setPanelActive('precomputed', showPrecomputedPanel.value); },
+    onToggleFilters: () => toggleDocked('filters'),
+    onToggleBehaviors: () => toggleDocked('behaviors'),
+    onToggleQuery: () => toggleDocked('query'),
+    onToggleMetrics: () => toggleDocked('metrics'),
+    onToggleAesthetics: () => toggleDocked('aesthetics'),
+    onToggleLabels: () => toggleDocked('labels'),
+    onToggleClusterPrograms: () => toggleDocked('clusters'),
+    onToggleTemplates: () => toggleDocked('templates'),
+    onTogglePrecomputed: () => toggleDocked('precomputed'),
     onExportPNG: handleExportPNG,
   });
 
@@ -743,7 +792,10 @@ watch(
           <div class="empty-state">
             <Network :size="48" class="empty-state-icon" />
             <p class="empty-state-title">No nodes to display</p>
-            <p class="empty-state-message">Run a query to start visualizing your graph</p>
+            <p class="empty-state-message">
+              Open <strong>Query</strong> in the top bar (Cypher or SQL) or pick a
+              <strong>Template</strong> to load nodes. Right-click a node for actions.
+            </p>
           </div>
         </div>
 
@@ -784,6 +836,7 @@ watch(
           <button
             class="toolbar-btn"
             :class="{ active: showContextInfo }"
+            :aria-pressed="showContextInfo"
             @click="showContextInfo = !showContextInfo"
             title="Context Info"
           >
@@ -794,6 +847,7 @@ watch(
           <button
             class="toolbar-btn"
             :class="{ active: showLayoutPanel }"
+            :aria-pressed="showLayoutPanel"
             @click="showLayoutPanel = !showLayoutPanel"
             title="Layout Settings"
             data-testid="graph-toolbar-layout"
@@ -806,6 +860,7 @@ watch(
             v-if="clusterStore.clusters.length > 0"
             class="toolbar-btn"
             :class="{ active: showClusterList }"
+            :aria-pressed="showClusterList"
             @click="showClusterList = !showClusterList"
             title="Cluster List"
           >
@@ -813,16 +868,18 @@ watch(
             <span class="btn-label">Clusters ({{ clusterStore.clusters.length }})</span>
           </button>
 
-          <div class="toolbar-segmented">
+          <div class="toolbar-segmented" role="group" aria-label="View mode">
             <button
               class="seg-btn"
               :class="{ active: graphStore.behaviors.viewMode === '3d' }"
+              :aria-pressed="graphStore.behaviors.viewMode === '3d'"
               @click="setViewMode('3d')"
               title="3D"
             >3D</button>
             <button
               class="seg-btn"
               :class="{ active: graphStore.behaviors.viewMode === '2d-proj' }"
+              :aria-pressed="graphStore.behaviors.viewMode === '2d-proj'"
               @click="setViewMode('2d-proj')"
               title="2D Projection (flat layout)"
             >2D</button>
@@ -831,6 +888,7 @@ watch(
           <button
             class="toolbar-btn"
             @click="toggleFullscreen"
+            :aria-pressed="isFullscreen"
             :title="isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'"
           >
             <Minimize2 v-if="isFullscreen" :size="14" />
@@ -841,6 +899,7 @@ watch(
           <button
             class="toolbar-btn"
             :class="{ active: showDataTable }"
+            :aria-pressed="showDataTable"
             @click="toggleDataTable"
             title="Data Table"
           >
@@ -851,12 +910,16 @@ watch(
           <button
             class="toolbar-btn"
             :class="{ active: queryConsoleStore.isOpen }"
+            :aria-pressed="queryConsoleStore.isOpen"
             @click="toggleQueryConsole"
             title="Query Console"
             data-testid="query-console-toggle"
           >
             <TerminalSquare :size="14" />
-            <span class="btn-label">Query</span>
+            <!-- "Console", not "Query": the top bar already has a Query button
+                 (graph query) and two identical labels on screen was the most
+                 common point of confusion. -->
+            <span class="btn-label">Console</span>
           </button>
         </div>
 
@@ -876,14 +939,16 @@ watch(
           <!-- The edge result hit its cap, so this graph is a slice of a larger
                one. Worth stating plainly: a truncated graph looks exactly like
                a complete one, and conclusions drawn from it may not hold. -->
-          <span
+          <button
             v-if="graphStore.truncated"
-            class="status-truncated"
+            type="button"
+            class="status-chip status-truncated"
             data-testid="graph-status-truncated"
-            title="The edge limit was reached — this graph is a partial view. Raise the limit or narrow the query to see more."
+            title="The edge limit was reached — this graph is a partial view. Raise the limit or narrow the query to see more. Click to open Behaviors."
+            @click="openPanel('behaviors')"
           >
             ⚠ truncated
-          </span>
+          </button>
           <!-- Resolved from a name rather than queried just now. It may not
                reflect the current state of the source, so say so where the
                other qualifiers about this graph already live. -->
@@ -908,14 +973,16 @@ watch(
                all issues, full list in the tooltip — same shape as the layout
                chip below. Nothing was executed: a link that is only mostly
                right must not run a query that is only mostly right. -->
-          <span
+          <button
             v-else-if="templateIssues.length"
-            class="status-template-error"
+            type="button"
+            class="status-chip status-template-error"
             data-testid="graph-status-template-error"
-            :title="templateIssuesTitle"
+            :title="templateIssuesTitle + '\nClick to open Templates.'"
+            @click="openPanel('templates')"
           >
             template not run
-          </span>
+          </button>
           <!-- Which named look is on, when the URL asked for one. -->
           <span
             v-if="graphStore.currentStylePreset"
@@ -927,28 +994,32 @@ watch(
           </span>
           <!-- A preset the URL named but could not be applied. The graph is
                unaffected, so this is a notice rather than an error state. -->
-          <span
+          <button
             v-else-if="graphStore.stylePresetError"
-            class="status-style-error"
+            type="button"
+            class="status-chip status-style-error"
             data-testid="graph-status-style-error"
-            :title="graphStore.stylePresetError"
+            :title="graphStore.stylePresetError + '\nClick to open Style.'"
+            @click="openPanel('aesthetics')"
           >
             style not applied
-          </span>
+          </button>
           <!-- Layout parameters the URL named but could not be applied. One chip
                for all of them: the status bar is a row of terse qualifiers, and
                N chips for N typos would push the node count off the row and
                imply N different kinds of problem. Full list in the tooltip. -->
-          <span
+          <button
             v-if="layoutOverrideIssues.length"
-            class="status-layout-error"
+            type="button"
+            class="status-chip status-layout-error"
             data-testid="graph-status-layout-error"
-            :title="layoutOverrideIssuesTitle"
+            :title="layoutOverrideIssuesTitle + '\nClick to open Layout.'"
+            @click="showLayoutPanel = true"
           >
             {{ layoutOverrideIssues.length === 1
               ? 'layout setting not applied'
               : `${layoutOverrideIssues.length} layout settings not applied` }}
-          </span>
+          </button>
         </div>
       </div>
 
@@ -1016,7 +1087,10 @@ watch(
 .graph-visualization {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 60px);
+  /* Fills whatever App.vue's <main> leaves under the toolbar (see App.vue). */
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
 }
 
 .main-content {
@@ -1130,9 +1204,22 @@ watch(
   margin: 0;
 }
 
+/* Status chips that point at a fix are buttons; keep them looking like the
+   inert chips next to them, with the cursor as the only extra tell. */
+.status-chip {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.status-chip:hover { text-decoration: underline; }
+.status-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 2px; }
+
 .status-bar {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   padding: 8px 16px;
   background: var(--card-background);
   border-top: 1px solid var(--border-color);
@@ -1206,7 +1293,11 @@ watch(
   position: absolute;
   bottom: 48px;
   left: 16px;
+  /* Never wider than the canvas: on narrow viewports the buttons wrap
+     instead of running off the right edge. */
+  max-width: calc(100% - 32px);
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   z-index: 20;
 }

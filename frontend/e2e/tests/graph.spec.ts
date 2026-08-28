@@ -167,7 +167,7 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByTitle('Query', { exact: true })).toBeVisible({ timeout: 15_000 });
 
       await page.getByTitle('Query', { exact: true }).click();
-      await expect(page.locator('h3', { hasText: 'Graph Query' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Query', exact: true })).toBeVisible();
       // Mode toggle buttons
       await expect(page.getByRole('button', { name: 'OpenCypher' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'SQL' })).toBeVisible();
@@ -180,7 +180,7 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByTitle('Metrics')).toBeVisible({ timeout: 15_000 });
 
       await page.getByTitle('Metrics').click();
-      await expect(page.locator('h3', { hasText: 'Graph Metrics' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Metrics', exact: true })).toBeVisible();
       await expect(page.getByText('Visual Mapping')).toBeVisible();
 
       await page.getByTitle('Metrics').click();
@@ -329,7 +329,7 @@ test.describe('Graph Visualization', () => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
       await page.getByTestId('toolbar-query').click();
-      await expect(page.locator('h3', { hasText: 'Graph Query' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Query', exact: true })).toBeVisible();
     }
 
     test('options live in a modal, not inline in the side panel', async ({ authenticatedPage: page }) => {

@@ -180,13 +180,12 @@ test.describe('Style presets', () => {
       { alheio: INVESTIGACAO },
       { alheio: 'alice@example.com' },
     );
-    page.on('dialog', (dialog) => dialog.accept());
-
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
     await openPresets(page);
     await page.getByTestId('style-preset-delete-alheio').click();
+    await page.getByTestId('confirm-dialog-accept').click();
 
     // The listing carries no owner, so this message is the only place it appears.
     await expect(page.getByTestId('style-preset-error')).toContainText(
@@ -197,13 +196,12 @@ test.describe('Style presets', () => {
 
   test('deleting your own preset removes it', async ({ authenticatedPage: page }) => {
     await seedStylePresets(page, MOCK_CONTEXT.id, { meu: INVESTIGACAO });
-    page.on('dialog', (dialog) => dialog.accept());
-
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
     await openPresets(page);
     await page.getByTestId('style-preset-delete-meu').click();
+    await page.getByTestId('confirm-dialog-accept').click();
 
     await expect(page.getByTestId('style-preset-item-meu')).toHaveCount(0);
     await expect(page.getByTestId('style-preset-empty')).toBeVisible();

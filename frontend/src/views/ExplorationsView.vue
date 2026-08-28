@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration } from '@/types/graph';
+import { confirmAction } from '@/composables/useConfirm';
 
 const router = useRouter();
 const contextsStore = useContextsStore();
@@ -112,7 +113,13 @@ function openExploration(exploration: Exploration) {
 }
 
 async function deleteExploration(exploration: Exploration) {
-  if (!confirm(`Delete "${exploration.title}"?`)) return;
+  const ok = await confirmAction({
+    title: `Delete exploration “${exploration.title}”?`,
+    message: 'Anyone it was shared with loses access. This cannot be undone.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
 
   try {
     await api.deleteExploration(exploration.id);
