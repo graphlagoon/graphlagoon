@@ -393,10 +393,14 @@ async function expandFromNode() {
   font-size: 12px;
 }
 
+/* `border-bottom` on a `flex: 1` value stretched the dotted line across the
+   whole row, so a metric read like an empty form field. `text-decoration`
+   hugs the text instead. */
 .metric-value {
   font-family: monospace;
   cursor: help;
-  border-bottom: 1px dotted var(--text-muted, #888);
+  text-decoration: underline dotted var(--text-muted, #888);
+  text-underline-offset: 3px;
 }
 
 .prop-label {

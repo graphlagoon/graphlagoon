@@ -370,18 +370,26 @@ function setMode(mode: QueryMode) {
       <p v-else class="help-text">{{ helpText }}</p>
 
       <!-- In Messi We Trust option - only visible in cypher mode -->
-      <label
+      <div
         v-if="queryMode === 'cypher' && capabilities.supportsTranspile"
-        class="checkbox-label messi-option"
+        class="messi-option"
       >
-        <input
-          type="checkbox"
-          v-model="inMessiWeTrust"
-          :disabled="isProcessing"
-        />
-        <span>Trust transpiled SQL</span>
-        <span class="messi-hint">(trust the experimental gsql2rsql )</span>
-      </label>
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            v-model="inMessiWeTrust"
+            :disabled="isProcessing"
+          />
+          <span>Trust transpiled SQL</span>
+        </label>
+        <!-- Its own line: inside the flex label the two spans rendered glued
+             together ("SQL(trust the experimental gsql2rsql )"), and the copy
+             only repeated the label instead of saying what the box does. -->
+        <p class="messi-hint">
+          Runs the SQL that the experimental gsql2rsql transpiler produces without
+          checking it first. Turn it off if a query returns something unexpected.
+        </p>
+      </div>
     </div>
 
     <!-- CTE Pre-filter Section - only in cypher mode -->
@@ -589,8 +597,10 @@ function setMode(mode: QueryMode) {
 }
 
 .messi-hint {
+  margin: 4px 0 0 20px;
   color: var(--text-muted, #666);
   font-size: 10px;
+  line-height: 1.4;
 }
 
 .query-section textarea.has-error {
