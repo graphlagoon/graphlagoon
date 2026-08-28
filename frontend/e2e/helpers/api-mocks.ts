@@ -521,6 +521,15 @@ export async function seedExplorations(page: Page, explorations: any[]) {
         });
       } else if (method === 'DELETE') {
         route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else if (method === 'PUT') {
+        // Rename / state update: echo the patch back over the seeded entity,
+        // the way the API does.
+        const patch = route.request().postDataJSON?.() ?? {};
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ ...exp, ...patch, updated_at: new Date().toISOString() }),
+        });
       } else {
         route.continue();
       }

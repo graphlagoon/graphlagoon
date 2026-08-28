@@ -297,6 +297,21 @@ test.describe('Graph Visualization', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Save state
+  // ---------------------------------------------------------------------------
+  test.describe('Save state', () => {
+    test('the Unsaved marker is the control that saves the view', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+      // It used to be inert text, with the only Save button in another group
+      // at the far end of the toolbar.
+      await page.getByTestId('toolbar-exploration-unsaved').click();
+      await expect(page.getByRole('heading', { name: 'Save Exploration' })).toBeVisible();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Load exploration from graph page
   // ---------------------------------------------------------------------------
   test.describe('Load exploration', () => {
