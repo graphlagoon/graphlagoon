@@ -8241,3 +8241,41 @@ results tab, colour lint, left-rail toolbar, undo-on-delete.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-28 22:10] - Fix: phone-width responsiveness of the list pages, modals and toolbar
+
+**Problem:** the first responsive pass measured only the graph page. A probe
+over `/contexts`, `/explorations`, `/admin` and the create-context modal at
+1440 / 1024 / 768 / 390px found the desktop widths clean and 390px broken.
+
+**Root causes and fixes** (findings #15–#17 in [ux-review.md](ux-review.md)):
+- `.list-item` / `.list-item-actions` were non-wrapping flex rows, so the five
+  row buttons ran to 626px inside a 390px viewport and scrolled the document
+  sideways. Both wrap now; `.list-item-content` is `flex: 1 1 240px` with
+  `min-width: 0` so long titles ellipsise instead of pushing.
+- `.modal { min-width: 400px; max-width: 90vw }` — **`min-width` beats
+  `max-width` in CSS**, so every modal in the app was wider than the viewport
+  below ~445px. Now `min-width: min(400px, 100%)`, and `.modal-overlay` has
+  padding so a dialog never touches the screen edge.
+- Under 768px `.toolbar-left` had `flex: 1` with the default `min-width: auto`,
+  so it kept its content width and slid *under* `.toolbar-right` — About and
+  the user menu were unreachable and "Admin" printed under the ⓘ button. It
+  now has `min-width: 0` and scrolls horizontally; below 520px the decorative
+  separators are dropped and the nav padding tightens.
+
+**Files modified:** `frontend/src/assets/main.css`,
+`frontend/src/components/Toolbar.vue`, `frontend/src/views/ExplorationsView.vue`,
+`frontend/e2e/tests/responsive-layout.spec.ts` (new cases: the list pages and a
+modal must not overflow at 768 and 390px — a shared
+`assertNoHorizontalOverflow` helper that names the offending elements),
+regenerated docs screenshots.
+
+**Testing:** 2167 unit, 193 e2e (5 responsive-layout cases). Probe screenshots
+at 390px reviewed by eye for both list pages and the admin area.
+
+**Public Docs:** screenshots regenerated (modal padding, list rows); no guide
+text changes. **Admin-Area Impact:** No admin-area impact (CSS only).
+
+**Author:** Claude (AI Assistant)
+
+---

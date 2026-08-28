@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/test-fixtures';
-import { MOCK_CONTEXT } from '../fixtures/mock-data';
-import { seedContexts } from '../helpers/api-mocks';
+import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
+import { seedContexts, seedExplorations } from '../helpers/api-mocks';
 
 /**
  * Layout regressions the graph page used to have (2026-08-28):
@@ -11,6 +11,24 @@ import { seedContexts } from '../helpers/api-mocks';
  *   - the page height was `calc(100vh - 60px)` while the toolbar wraps to two
  *     rows under 768px, so the drawer ran off the bottom of the screen.
  */
+/** No element may stick out of the viewport horizontally. */
+async function assertNoHorizontalOverflow(page: import('@playwright/test').Page, width: number) {
+  const result = await page.evaluate((w) => {
+    const out: string[] = [];
+    document.querySelectorAll('body *').forEach((el) => {
+      const b = el.getBoundingClientRect();
+      if (b.width > 0 && (b.right > w + 1 || b.left < -1)) {
+        const e = el as HTMLElement;
+        const cls = typeof e.className === 'string' ? e.className.split(' ')[0] : '';
+        out.push(`${e.tagName}.${cls}`);
+      }
+    });
+    return { scrollWidth: document.documentElement.scrollWidth, offenders: out.slice(0, 6) };
+  }, width);
+  expect(result.offenders, `elements past ${width}px`).toEqual([]);
+  expect(result.scrollWidth).toBeLessThanOrEqual(width);
+}
+
 test.describe('Responsive layout', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
     await seedContexts(page, [MOCK_CONTEXT]);
@@ -52,6 +70,33 @@ test.describe('Responsive layout', () => {
       expect(layout.drawerBottom).toBeLessThanOrEqual(height);
       // Cell text is inset from the border (PrimeVue theme padding applies).
       expect(layout.cellPaddingLeft).toBeGreaterThan(0);
+    });
+  }
+
+  // The list pages used to push their row actions (Open / Check schema / Edit
+  // / Share / Delete) off-screen at phone widths — measured to 626px in a
+  // 390px viewport — and `.modal { min-width: 400px }` beat `max-width: 90vw`,
+  // so every modal was wider than the screen below ~445px.
+  for (const [width, height] of [
+    [768, 900],
+    [390, 844],
+  ] as const) {
+    test(`list pages and modals fit ${width}x${height}`, async ({ authenticatedPage: page }) => {
+      await page.setViewportSize({ width, height });
+      await seedExplorations(page, [MOCK_EXPLORATION]);
+
+      await page.goto('/contexts');
+      await expect(page.getByText(MOCK_CONTEXT.title)).toBeVisible({ timeout: 15_000 });
+      await assertNoHorizontalOverflow(page, width);
+
+      await page.goto('/explorations');
+      await expect(page.getByText(MOCK_EXPLORATION.title)).toBeVisible({ timeout: 15_000 });
+      await assertNoHorizontalOverflow(page, width);
+
+      await page.goto('/contexts');
+      await page.getByTestId('create-context-btn').click();
+      await expect(page.getByRole('heading', { name: 'Create Graph Context' })).toBeVisible();
+      await assertNoHorizontalOverflow(page, width);
     });
   }
 });

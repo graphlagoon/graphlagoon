@@ -506,6 +506,7 @@ async function quickShare(email: string) {
 
 .list-item-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 

@@ -404,8 +404,13 @@ select.field-input:focus {
 }
 
 /* ─── List items ──────────────────────────────────────────────────────────── */
+/* Rows wrap instead of pushing their action buttons off-screen: at phone
+   widths the actions drop under the content rather than overflowing the
+   document (measured at 390px: they ran to 626px). */
 .list-item {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   justify-content: space-between;
   align-items: center;
   padding: var(--space-4);
@@ -417,7 +422,8 @@ select.field-input:focus {
 }
 
 .list-item-content {
-  flex: 1;
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
 .list-item-title {
@@ -432,6 +438,7 @@ select.field-input:focus {
 
 .list-item-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -443,14 +450,17 @@ select.field-input:focus {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: var(--space-3);
   z-index: var(--z-modal-backdrop);
 }
 
+/* `min-width: 400px` beat `max-width: 90vw` (min wins over max in CSS), so
+   every modal overflowed a viewport narrower than ~445px. */
 .modal {
   background: var(--color-surface);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
-  min-width: 400px;
+  min-width: min(400px, 100%);
   max-width: 90vw;
   max-height: 90vh;
   overflow-y: auto;
