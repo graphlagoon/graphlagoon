@@ -65,6 +65,10 @@ class GraphContext(Base):
     # Context-level configurable context-menu actions (list of ContextMenuActionConfig
     # dicts, opaque to the backend — the frontend owns the shape)
     context_menu_actions = Column(JSON, default=[])
+    # Writer-authored custom metric definitions (list of MetricDefinition dicts:
+    # per-node/edge JavaScript evaluated in the frontend's sandboxed worker).
+    # Never returned to read-only users — see routers.graph_contexts.context_to_response.
+    metric_definitions = Column(JSON, default=[])
     # Owner email from request header (no FK - users identified by headers in Databricks mode)
     owner_email = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())

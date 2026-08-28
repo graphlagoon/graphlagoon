@@ -89,12 +89,20 @@ export interface ComputationMetrics {
 // Computed Metric Result
 // ============================================================================
 
+/** A metric value. Algorithm metrics are always numbers; custom metrics may
+ * also produce strings or booleans (null = no value / evaluation failed). */
+export type MetricValue = number | string | boolean | null;
+export type MetricValueType = 'number' | 'string' | 'boolean';
+
 export interface ComputedMetric {
   id: string;
   name: string;
   algorithmId: string;
   target: AlgorithmTarget;
-  values: Map<string, number>;  // nodeId/edgeId -> computed value
+  /** Every producer must set it; only 'number' metrics can drive size/width. */
+  valueType: MetricValueType;
+  values: Map<string, MetricValue>;  // nodeId/edgeId -> computed value
+  /** Statistics over the numeric values (all 0 for non-numeric metrics) */
   min: number;
   max: number;
   mean: number;
@@ -103,6 +111,34 @@ export interface ComputedMetric {
   params: Record<string, unknown>;
   edgeTypeFilter: string[];
   elapsedMs: number;
+  /** Custom metrics only: the persisted definition id */
+  definitionId?: string;
+  /** Custom metrics only: items whose evaluation threw (value = null) */
+  errorCount?: number;
+}
+
+/** True when the metric's values are numbers (usable for size/width mapping). */
+export function isNumericMetric(metric: ComputedMetric): boolean {
+  return metric.valueType === 'number';
+}
+
+/** The finite numeric values of a metric (empty for non-numeric metrics). */
+export function numericValues(metric: ComputedMetric): number[] {
+  const out: number[] = [];
+  for (const v of metric.values.values()) {
+    if (typeof v === 'number' && Number.isFinite(v)) out.push(v);
+  }
+  return out;
+}
+
+/** Narrow a numeric metric's values to Map<string, number> for the renderer.
+ * Non-numeric entries (null from a failed evaluation) are skipped. */
+export function numericValueMap(metric: ComputedMetric): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [k, v] of metric.values) {
+    if (typeof v === 'number' && Number.isFinite(v)) out.set(k, v);
+  }
+  return out;
 }
 
 // ============================================================================
@@ -196,7 +232,7 @@ export type WorkerCommand =
 export type WorkerMessage =
   | { type: 'PROGRESS'; payload: ComputationProgress }
   | { type: 'PARTIAL_RESULT'; payload: { id: string; results: [string, number][] } }
-  | { type: 'COMPLETE'; payload: Omit<ComputedMetric, 'values'> & { values: [string, number][] } }
+  | { type: 'COMPLETE'; payload: Omit<ComputedMetric, 'values' | 'valueType'> & { valueType: 'number'; values: [string, number][] } }
   | { type: 'ERROR'; payload: { id: string; error: string } }
   | { type: 'READY' };
 

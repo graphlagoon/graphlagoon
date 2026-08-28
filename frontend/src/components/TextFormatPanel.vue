@@ -223,6 +223,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue';
 import { useGraphStore } from '@/stores/graph';
+import { useMetricsStore } from '@/stores/metrics';
 import type { TextFormatRule, TextFormatScope } from '@/types/graph';
 import { getAvailablePlaceholders, getAvailableModifiers, validateTemplate } from '@/utils/labelFormatter';
 import TextFormatHelpModal from './TextFormatHelpModal.vue';
@@ -235,6 +236,7 @@ const emit = defineEmits<{
 }>();
 
 const graphStore = useGraphStore();
+const metricsStore = useMetricsStore();
 
 // Help modal
 const showHelp = ref(false);
@@ -364,8 +366,9 @@ function handleTemplateInput(event: Event, inputId: string) {
     const partial = beforeCursor.slice(lastOpenBrace + 1);
     const target = getTargetForInput(inputId);
     const props = target === 'node' ? nodeProperties.value : edgeProperties.value;
+    const metricNames = (target === 'node' ? metricsStore.nodeMetrics : metricsStore.edgeMetrics).map((m) => m.name);
     const allSuggestions = [
-      ...getAvailablePlaceholders(target, props),
+      ...getAvailablePlaceholders(target, props, metricNames),
       ...getAvailableModifiers().map(m => ({
         placeholder: `|${m.modifier}`,
         description: m.description,

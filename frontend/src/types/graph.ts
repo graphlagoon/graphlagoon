@@ -1,5 +1,6 @@
 import type { ClusterProgram } from './cluster';
 import type { ContextMenuActionConfig } from './contextMenuActions';
+import type { CustomMetricDefinition } from './customMetrics';
 
 export interface Node {
   node_id: string;
@@ -133,6 +134,8 @@ export interface GraphContext {
   cluster_programs?: ClusterProgram[];
   /** User-configurable right-click menu actions, shared by all explorations. */
   context_menu_actions?: ContextMenuActionConfig[];
+  /** Writer-authored custom metrics; the backend returns [] to read-only users. */
+  metric_definitions?: CustomMetricDefinition[];
   owner_email: string;
   shared_with: string[];
   has_write_access: boolean;
@@ -703,6 +706,7 @@ export interface CreateGraphContextRequest {
   default_behaviors?: Record<string, unknown>;
   cluster_programs?: ClusterProgram[];
   context_menu_actions?: ContextMenuActionConfig[];
+  metric_definitions?: CustomMetricDefinition[];
 }
 
 export interface ShareRequest {

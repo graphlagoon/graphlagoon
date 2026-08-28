@@ -24,6 +24,7 @@
  */
 
 import type { Node, Edge, TextFormatRule, TextFormatConditionOperator } from '@/types/graph';
+import type { MetricValue } from '@/types/metrics';
 import {
   MODIFIER_REGISTRY,
   REGEX_ARG_MODIFIERS,
@@ -36,6 +37,22 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * Resolves a metric value for `{metric:<ref>}` placeholders. `ref` is a
+ * metric id or a metric name; `undefined` means "no such metric / no value".
+ * Provided by the metrics store (see stores/metrics.ts `metricResolver`).
+ */
+export type MetricResolver = (
+  target: 'node' | 'edge',
+  itemId: string,
+  ref: string,
+) => MetricValue | undefined;
+
+/** Optional per-call context for the formatters. */
+export interface FormatOptions {
+  metrics?: MetricResolver;
+}
 
 interface ParsedModifier {
   /** Registry name; unknown names are kept (render no-ops, validate warns) */
@@ -52,6 +69,8 @@ interface ParsedToken {
   type: 'text' | 'placeholder' | 'conditional' | 'date';
   value: string;
   property?: string;
+  /** True for `{metric:<ref>}` — resolved through FormatContext.metrics */
+  fromMetric?: boolean;
   /**
    * True when the token was written with the `prop:` prefix. These resolve
    * from `item.properties` first, so a literal table column named e.g.
@@ -79,6 +98,12 @@ interface ParsedCondition {
 type FormatContext = {
   target: 'node' | 'edge';
   item: Node | Edge;
+  /**
+   * Optional resolver for `{metric:<ref>}` placeholders (metric id or name).
+   * Absent → metric placeholders render as missing. Callers outside the graph
+   * canvas (URL templates, previews) may leave it out.
+   */
+  metrics?: MetricResolver;
 };
 
 // ============================================================================
@@ -502,6 +527,19 @@ function parseTokenContent(content: string): ParsedToken {
     }
   }
 
+  // Metric placeholder: metric:<id or name>, modifiers allowed. Resolved via
+  // FormatContext.metrics; never touches item.properties.
+  if (content.startsWith('metric:')) {
+    const parts = splitByPipeRespectingBraces(content.slice(7));
+    return {
+      type: 'placeholder',
+      value: content,
+      property: parts[0],
+      fromMetric: true,
+      modifiers: parts.length > 1 ? parts.slice(1).map(parseModifierSegment) : undefined,
+    };
+  }
+
   // Property placeholder: prop:name, prop:name|modifier, chains allowed
   if (content.startsWith('prop:')) {
     const parts = splitByPipeRespectingBraces(content.slice(5));
@@ -613,6 +651,14 @@ export function resolveItemValue(
   return getPropertyValue({ target, item }, property, fromProps);
 }
 
+/** Resolve a `{metric:<ref>}` token to its display string ('' when missing). */
+function getMetricValue(ctx: FormatContext, ref: string): string {
+  if (!ctx.metrics) return '';
+  const id = ctx.target === 'node' ? (ctx.item as Node).node_id : (ctx.item as Edge).edge_id;
+  const v = ctx.metrics(ctx.target, id, ref);
+  return v == null ? '' : String(v);
+}
+
 function applyModifierChain(value: string, chain?: ParsedModifier[]): string {
   if (!chain) return value;
   let result = value;
@@ -635,10 +681,14 @@ function formatWithTokens(tokens: ParsedToken[], ctx: FormatContext): string {
         return token.value;
 
       case 'placeholder': {
-        const value = getPropertyValue(ctx, token.property || '', token.fromProps);
+        const value = token.fromMetric
+          ? getMetricValue(ctx, token.property || '')
+          : getPropertyValue(ctx, token.property || '', token.fromProps);
         const hasDefault = token.modifiers?.some((m) => m.name === 'default');
-        if (value === '' && token.value?.startsWith('prop:') && !hasDefault) {
-          return `[${token.property}]`; // Fallback for missing props
+        if (value === '' && !hasDefault) {
+          // Fallback sentinels for missing props / metrics
+          if (token.fromMetric) return `[metric:${token.property}]`;
+          if (token.value?.startsWith('prop:')) return `[${token.property}]`;
         }
         return applyModifierChain(value, token.modifiers);
       }
@@ -672,7 +722,12 @@ const templateCache = new Map<string, ParsedToken[]>();
 /**
  * Format a label using a template string
  */
-export function formatLabel(template: string, target: 'node' | 'edge', item: Node | Edge): string {
+export function formatLabel(
+  template: string,
+  target: 'node' | 'edge',
+  item: Node | Edge,
+  options?: FormatOptions,
+): string {
   if (!template) {
     // Default fallback
     if (target === 'node') {
@@ -693,7 +748,7 @@ export function formatLabel(template: string, target: 'node' | 'edge', item: Nod
     }
   }
 
-  return formatWithTokens(tokens, { target, item });
+  return formatWithTokens(tokens, { target, item, metrics: options?.metrics });
 }
 
 /**
@@ -728,11 +783,12 @@ export function findMatchingRule(
 export function formatNodeLabel(
   node: Node,
   rules: TextFormatRule[],
-  defaultTemplate: string
+  defaultTemplate: string,
+  options?: FormatOptions,
 ): string {
   const rule = findMatchingRule(rules, 'node', node.node_type);
   const template = rule?.template || defaultTemplate;
-  return formatLabel(template, 'node', node);
+  return formatLabel(template, 'node', node, options);
 }
 
 /**
@@ -741,11 +797,12 @@ export function formatNodeLabel(
 export function formatEdgeLabel(
   edge: Edge,
   rules: TextFormatRule[],
-  defaultTemplate: string
+  defaultTemplate: string,
+  options?: FormatOptions,
 ): string {
   const rule = findMatchingRule(rules, 'edge', edge.relationship_type);
   const template = rule?.template || defaultTemplate;
-  return formatLabel(template, 'edge', edge);
+  return formatLabel(template, 'edge', edge, options);
 }
 
 /** Check one parsed modifier against its registry spec. */
@@ -872,11 +929,35 @@ export function extractTemplateProperties(template: string): string[] {
 }
 
 /**
+ * Extract every metric reference (`{metric:x}`) a template uses, including
+ * inside conditional branches. Companion of extractTemplateProperties.
+ */
+export function extractTemplateMetrics(template: string): string[] {
+  const refs = new Set<string>();
+
+  function walk(tmpl: string) {
+    for (const token of parseTemplate(tmpl)) {
+      if (token.type === 'placeholder' && token.fromMetric && token.property) {
+        refs.add(token.property);
+      }
+      if (token.type === 'conditional') {
+        if (token.trueValue) walk(token.trueValue);
+        if (token.falseValue) walk(token.falseValue);
+      }
+    }
+  }
+
+  walk(template);
+  return [...refs];
+}
+
+/**
  * Get available placeholders for autocomplete
  */
 export function getAvailablePlaceholders(
   target: 'node' | 'edge',
-  properties: string[]
+  properties: string[],
+  metricNames: string[] = [],
 ): { placeholder: string; description: string }[] {
   const result: { placeholder: string; description: string }[] = [];
 
@@ -901,6 +982,11 @@ export function getAvailablePlaceholders(
   // same-named built-ins when written with the `prop:` prefix)
   for (const prop of properties) {
     result.push({ placeholder: `{prop:${prop}}`, description: `Property: ${prop}` });
+  }
+
+  // Metric placeholders (computed + custom metrics, resolved by name)
+  for (const name of metricNames) {
+    result.push({ placeholder: `{metric:${name}}`, description: `Metric: ${name}` });
   }
 
   return result;

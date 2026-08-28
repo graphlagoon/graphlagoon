@@ -43,6 +43,7 @@ per node or edge.
 | `{edge_id}` / `{relationship_type}` | The configured id / type columns (edges) |
 | `{src}` / `{dst}` | Source / destination node id (edges) |
 | `{prop:<column>}` | Any property column, e.g. `{prop:name}` |
+| `{metric:<name>}` | A metric value — computed (`{metric:Degree}`) or [custom](./communities-metrics.md#custom-metrics) (`{metric:Email domain}`), by name or id |
 | `{br}` | Line break — makes the label multi-line |
 
 `{prop:...}` reads the item's properties first and only then falls back to
@@ -54,6 +55,14 @@ A missing property renders as a visible sentinel — `{prop:nickname}` on a
 node without that column shows `[nickname]` — so a typo is caught on the
 canvas instead of silently disappearing. Chain `|default:` to replace the
 sentinel with a fallback of your choice.
+
+`{metric:...}` works the same way: it renders the metric's value for the
+node or edge (numbers, text or booleans — `{metric:Ratio|number}`,
+`{metric:Email domain|upper}`), shows `[metric:name]` when no such metric
+has a value for that item, and never reads a property of the same name.
+Labels re-render when a metric is (re)computed. Custom metrics are only
+visible to users with write access to the context, so a shared label
+template that uses one renders the sentinel for read-only viewers.
 
 ## Modifiers
 

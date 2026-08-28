@@ -16,6 +16,7 @@ from graphlagoon.models.schemas import (
     GraphContextCreate,
     GraphContextUpdate,
     GraphContextResponse,
+    MetricDefinition,
     ShareRequest,
     EdgeStructure,
     NodeStructure,
@@ -153,13 +154,53 @@ def _normalize_typeless_types(data, context) -> None:
         data.relationship_types = [DEFAULT_RELATIONSHIP_TYPE]
 
 
+def _reject_metric_definitions_if_disabled(
+    definitions: Optional[list[MetricDefinition]],
+) -> None:
+    """Writes of custom metrics are refused while the feature is off.
+
+    An empty list is allowed (it is what a full-object PUT carries), so a
+    client that never learned about the feature keeps working.
+    """
+    if definitions and not get_settings().custom_metrics_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "CUSTOM_METRICS_DISABLED",
+                    "message": "Custom metrics are disabled on this server "
+                    "(GRAPH_LAGOON_CUSTOM_METRICS_ENABLED=false)",
+                    "details": {},
+                }
+            },
+        )
+
+
 def context_to_response(
     context: Union["GraphContext", MemoryGraphContext],
     user_email: str = "",
 ) -> GraphContextResponse:
-    """Convert GraphContext model to response schema."""
+    """Convert GraphContext model to response schema.
+
+    Every endpoint (list, get, create, update) builds its response here, so
+    this is the single place the visibility rule for custom metrics lives:
+    `metric_definitions` is returned only to users with write access. A
+    read-only user gets an empty list — they never receive another user's
+    JavaScript, so the frontend never evaluates it for them.
+    """
     shared_with = [share.shared_with_email for share in context.shares]
     has_write = can_write(context.owner_email, context.shares, user_email)
+
+    # getattr: rows/dataclasses predating the column report an empty list.
+    # The feature flag hides definitions for everyone, writers included.
+    raw_metric_defs = (
+        (getattr(context, "metric_definitions", None) or [])
+        if has_write and get_settings().custom_metrics_enabled
+        else []
+    )
+    metric_defs = [
+        MetricDefinition(**d) if isinstance(d, dict) else d for d in raw_metric_defs
+    ]
 
     # Parse structure configs from JSON/dict
     edge_struct = context.edge_structure or {}
@@ -206,6 +247,7 @@ def context_to_response(
         default_behaviors=context.default_behaviors or {},
         cluster_programs=context.cluster_programs or [],
         context_menu_actions=context.context_menu_actions or [],
+        metric_definitions=metric_defs,
         owner_email=context.owner_email,
         shared_with=shared_with,
         has_write_access=has_write,
@@ -299,6 +341,7 @@ async def create_graph_context(
 ):
     """Create a new graph context."""
     user_email = get_current_user(request)
+    _reject_metric_definitions_if_disabled(data.metric_definitions)
 
     await _validate_datasource_or_400(data.datasource_type, data.datasource_name)
 
@@ -335,6 +378,7 @@ async def create_graph_context(
                 default_behaviors=data.default_behaviors,
                 cluster_programs=data.cluster_programs,
                 context_menu_actions=data.context_menu_actions,
+                metric_definitions=[m.model_dump() for m in data.metric_definitions],
                 owner_email=user_email,
             )
             session.add(context)
@@ -361,6 +405,7 @@ async def create_graph_context(
             default_behaviors=data.default_behaviors,
             cluster_programs=data.cluster_programs,
             context_menu_actions=data.context_menu_actions,
+            metric_definitions=[m.model_dump() for m in data.metric_definitions],
             owner_email=user_email,
         )
         return context_to_response(context, user_email)
@@ -412,6 +457,7 @@ async def update_graph_context(
 ):
     """Update a graph context."""
     user_email = get_current_user(request)
+    _reject_metric_definitions_if_disabled(data.metric_definitions)
 
     if is_database_available():
         from sqlalchemy import select
@@ -489,6 +535,10 @@ async def update_graph_context(
                 context.cluster_programs = data.cluster_programs
             if data.context_menu_actions is not None:
                 context.context_menu_actions = data.context_menu_actions
+            if data.metric_definitions is not None:
+                context.metric_definitions = [
+                    m.model_dump() for m in data.metric_definitions
+                ]
 
             await session.commit()
             await session.refresh(context)
@@ -556,6 +606,10 @@ async def update_graph_context(
             updates["cluster_programs"] = data.cluster_programs
         if data.context_menu_actions is not None:
             updates["context_menu_actions"] = data.context_menu_actions
+        if data.metric_definitions is not None:
+            updates["metric_definitions"] = [
+                m.model_dump() for m in data.metric_definitions
+            ]
 
         context = store.update_graph_context(context_id, **updates)
         return context_to_response(context, user_email)

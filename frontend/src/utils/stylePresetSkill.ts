@@ -36,6 +36,27 @@ export interface StylePresetSkillInput {
   importedJson?: string
   /** Schema of the graph the imported preset came from, when known. */
   importedSource?: PortableSourceSchema
+  /**
+   * Custom metrics defined on this context (writer view). Only the numeric
+   * ones can drive `visual_mapping`; the others are listed so the LLM does
+   * not invent them.
+   */
+  customMetrics?: { id: string; name: string; target: 'node' | 'edge'; valueType: 'number' | 'string' | 'boolean' }[]
+}
+
+/** Render the metric ids a preset may reference in `visual_mapping`. */
+export function metricIdsSection(customMetrics: StylePresetSkillInput['customMetrics']): string {
+  const numeric = (customMetrics ?? []).filter((m) => m.valueType === 'number')
+  const lines = numeric.map(
+    (m) => `- \`custom:${m.id}\` — "${m.name}" (${m.target === 'node' ? 'node size' : 'edge weight'})`,
+  )
+  const custom = lines.length > 0 ? `\n${lines.join('\n')}` : ' (none on this context)'
+  return `- \`__builtin_degree\` — the built-in node degree (always available)
+- custom numeric metrics of this context:${custom}
+- \`null\` — no metric.
+Algorithm runs (PageRank, betweenness…) get a new session-only id on every
+run, so a preset cannot reference them reliably. Text/boolean custom metrics
+cannot size anything.`
 }
 
 /** Render the origin schema block of an adapt prompt. */
@@ -196,7 +217,7 @@ A preset is a single JSON object. Every key is optional — a missing key means
   },
   "layout_algorithm": "force",
   "visual_mapping": {
-    "nodeSize": { "metricId": "degree", "minSize": 4, "maxSize": 20, "scale": "linear" },
+    "nodeSize": { "metricId": "__builtin_degree", "minSize": 4, "maxSize": 20, "scale": "linear" },
     "edgeWeight": { "metricId": null, "minWeight": 1, "maxWeight": 4, "scale": "linear" },
     "enableRealTimeUpdates": true
   },
@@ -216,9 +237,8 @@ Field rules:
   look like \`{if:prop:x>10|High|Low}\`. A rule's \`types\` empty means "all
   types". \`scope\` is always \`"context"\`.
 - \`layout_algorithm\` must be one of: ${layoutAlgorithms.map((l) => `\`${l}\``).join(', ')}.
-- \`visual_mapping.nodeSize.metricId\` / \`edgeWeight.metricId\` name a
-  computed metric (\`degree\`, \`in_degree\`, \`out_degree\`, \`pagerank\`,
-  \`betweenness\`, \`closeness\`, \`clustering\`...) or \`null\` for none.
+- \`visual_mapping.nodeSize.metricId\` / \`edgeWeight.metricId\` must be one of:
+${metricIdsSection(input.customMetrics)}
   \`scale\` is \`"linear"\`, \`"log"\` or \`"sqrt"\`.
 - \`property_visibility\`: \`null\` shows every property, \`[]\` hides all,
   otherwise an allowlist of column names.

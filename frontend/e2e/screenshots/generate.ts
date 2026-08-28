@@ -437,6 +437,38 @@ const SCENES: Scene[] = [
     },
   },
   {
+    // Custom tab: the auto-run metric already computed, the manual one waiting
+    // for Recompute, plus the Import/Export and robot buttons.
+    guide: 'communities-metrics',
+    scene: 'custom',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Metrics');
+      await page.getByTestId('metrics-tab-custom').click();
+      await page
+        .getByTestId('custom-metric-status-cm-city-tag')
+        .filter({ hasText: 'done' })
+        .waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(300);
+    },
+  },
+  {
+    // The editor with a definition tested against the current graph.
+    guide: 'communities-metrics',
+    scene: 'custom-editor',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Metrics');
+      await page.getByTestId('metrics-tab-custom').click();
+      await page.getByTestId('custom-metric-edit-cm-neighbour-degree').click();
+      await page.getByTestId('custom-metric-test').click();
+      await page.getByTestId('custom-metric-test-results').waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(500);
+    },
+  },
+  {
     guide: 'context-menu-actions',
     scene: 'menu',
     path: GRAPH_URL,

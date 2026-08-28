@@ -82,6 +82,12 @@ const skillText = computed(() =>
     nodeProperties: graphStore.currentContext?.node_properties ?? [],
     edgeProperties: graphStore.currentContext?.edge_properties ?? [],
     layoutAlgorithms: [...LAYOUT_ALGORITHMS],
+    customMetrics: (graphStore.currentContext?.metric_definitions ?? []).map((d) => ({
+      id: d.id,
+      name: d.name,
+      target: d.target,
+      valueType: d.value_type,
+    })),
     importedJson: props.importedJson,
     importedSource: props.importedSource,
   })

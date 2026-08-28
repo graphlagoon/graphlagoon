@@ -2,7 +2,9 @@
 import { computed, ref } from 'vue';
 import type { Node, Edge } from '@/types/graph';
 import { useGraphStore } from '@/stores/graph';
-import { useMetricsStore } from '@/stores/metrics';
+import { useItemMetrics } from '@/composables/useItemMetrics';
+import { formatMetricValue as formatMetric } from '@/utils/metricFormat';
+import type { MetricValue } from '@/types/metrics';
 import { X } from 'lucide-vue-next';
 import { tryParseJson } from '@/utils/jsonDetection';
 import JsonValueViewer from './JsonValueViewer.vue';
@@ -17,7 +19,6 @@ const emit = defineEmits<{
 }>();
 
 const graphStore = useGraphStore();
-const metricsStore = useMetricsStore();
 
 const copiedKey = ref<string | null>(null);
 
@@ -87,22 +88,8 @@ const properties = computed(() => {
     });
 });
 
-// Computed metrics
-const metrics = computed(() => {
-  if (!props.item) return [];
-  const id = props.item.type === 'node'
-    ? props.item.data.node_id
-    : props.item.data.edge_id;
-  const targetMetrics = props.item.type === 'node'
-    ? metricsStore.nodeMetrics
-    : metricsStore.edgeMetrics;
-  const result: { name: string; value: number }[] = [];
-  for (const metric of targetMetrics) {
-    const v = metric.values.get(id);
-    if (v !== undefined) result.push({ name: metric.name, value: v });
-  }
-  return result;
-});
+// Computed + custom metrics for the item (shared lookup)
+const metrics = useItemMetrics(computed(() => props.item));
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return 'null';
@@ -117,11 +104,8 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
-function formatMetricValue(value: number): string {
-  if (Math.abs(value) < 0.0001) return value.toExponential(4);
-  if (Math.abs(value) >= 1000) return value.toFixed(2);
-  if (Math.abs(value) >= 1) return value.toFixed(4);
-  return value.toFixed(6);
+function formatMetricValue(value: MetricValue): string {
+  return formatMetric(value, 'long');
 }
 
 function copyValue(key: string, value: unknown) {
@@ -151,7 +135,7 @@ function copyAll() {
 
   // Metrics
   if (metrics.value.length > 0) {
-    const m: Record<string, number> = {};
+    const m: Record<string, MetricValue> = {};
     for (const metric of metrics.value) {
       m[metric.name] = metric.value;
     }

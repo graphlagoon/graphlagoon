@@ -5,11 +5,20 @@ import { javascript } from '@codemirror/lang-javascript';
 import { autocompletion, CompletionContext } from '@codemirror/autocomplete';
 import { EditorView } from '@codemirror/view';
 
+export interface EditorCompletion {
+  label: string;
+  type: string;
+  detail?: string;
+  apply?: string;
+}
+
 const props = defineProps<{
   modelValue: string;
   placeholder?: string;
   disabled?: boolean;
   hasError?: boolean;
+  /** Completion set; defaults to the cluster-program API. */
+  completions?: EditorCompletion[];
 }>();
 
 const emit = defineEmits<{
@@ -136,7 +145,7 @@ function clusterCompletions(context: CompletionContext) {
   if (!word || (word.from === word.to && !context.explicit)) return null;
 
   const text = word.text;
-  const options = [
+  const options: EditorCompletion[] = props.completions ?? [
     ...CONTEXT_API,
     ...CLUSTER_PROPERTIES,
     ...SNIPPETS,

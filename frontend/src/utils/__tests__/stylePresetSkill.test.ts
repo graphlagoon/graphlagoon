@@ -90,3 +90,28 @@ describe('sourceSchemaSection', () => {
     expect(text).toContain('NOT valid here');
   });
 });
+
+describe('metric ids in visual_mapping', () => {
+  it('lists only ids that really exist: the built-in degree and numeric custom metrics', () => {
+    const skill = buildStylePresetSkill({
+      ...INPUT,
+      customMetrics: [
+        { id: 'abc', name: 'Neighbour mean degree', target: 'node', valueType: 'number' },
+        { id: 'def', name: 'Email domain', target: 'node', valueType: 'string' },
+        { id: 'ghi', name: 'Jaccard', target: 'edge', valueType: 'number' },
+      ],
+    });
+    expect(skill).toContain('"metricId": "__builtin_degree"');
+    expect(skill).toContain('`custom:abc` — "Neighbour mean degree" (node size)');
+    expect(skill).toContain('`custom:ghi` — "Jaccard" (edge weight)');
+    expect(skill).not.toContain('custom:def');
+    // The old, non-existent ids are gone for good.
+    for (const bogus of ['`in_degree`', '`out_degree`', '`clustering`', '"metricId": "degree"']) {
+      expect(skill).not.toContain(bogus);
+    }
+  });
+
+  it('says so when the context has no custom metrics', () => {
+    expect(buildStylePresetSkill(INPUT)).toContain('custom numeric metrics of this context: (none on this context)');
+  });
+});

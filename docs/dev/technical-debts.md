@@ -1087,6 +1087,58 @@ const checkStabilization = () => {
 
 ---
 
+### 31. 🟡 No Content-Security-Policy — the custom-metric sandbox has a single fence
+
+**Location:** [api/graphlagoon/app.py](api/graphlagoon/app.py), [frontend/index.html](frontend/index.html)
+
+**Issue:**
+The app sets no CSP. The custom-metric worker ([frontend/src/workers/customMetricWorker.ts](frontend/src/workers/customMetricWorker.ts)) strips network/storage/messaging globals from its scope before running user code, and the main thread enforces a timeout, but nothing at the browser-policy level backs that up. A CSP with `worker-src 'self'; connect-src 'self'` (plus whatever the Databricks Apps proxy and PrimeVue inline styles need) would make an escape that somehow re-obtained `fetch` still unable to reach a foreign host.
+
+**Recommendation:** Add a CSP as a dedicated change (it touches the proxy setup, `/graphlagoon/static`, inline styles and the Neptune/REST datasources' allowed hosts), test it against `make dev-databricks`, then tighten `worker-src`/`connect-src`.
+
+**Effort:** Medium
+
+---
+
+### 32. 🟡 Cluster programs still run unsandboxed on the main thread
+
+**Location:** [frontend/src/stores/cluster.ts](frontend/src/stores/cluster.ts) (`computeClustersFromProgram`, `new Function` on the main thread)
+
+**Issue:**
+Custom metrics introduced a sandbox (dedicated worker, stripped scope, hard timeout, re-validated output). Cluster programs — the older user-JS feature — still compile with `new Function` on the main thread with full access to `window`, no timeout, and output validation only. The two features now have inconsistent security postures for the same kind of input (writer-authored JavaScript stored on the context).
+
+**Recommendation:** Move cluster-program evaluation onto the custom-metric runner pattern (`services/customMetricRunner.ts` + `workers/customMetricSandbox.ts`), keeping the current output validation. Note cluster programs are also persisted per exploration, so the "only writers run writer code" argument does not fully apply to them — the sandbox matters more there, not less.
+
+**Effort:** Medium
+
+---
+
+### 33. 🟢 Custom-metric snapshot is structured-cloned on every recompute cycle
+
+**Location:** [frontend/src/services/customMetricRunner.ts](frontend/src/services/customMetricRunner.ts) (`serializeGraphForCustomMetrics`)
+
+**Issue:**
+Each recompute cycle clones the full filtered population (ids, types, properties) plus degrees, non-custom metric values and communities into the worker. On 200k+ node graphs with wide properties that is tens of MB per cycle. Cycles are debounced (750 ms) and coalesced, and adjacency is built inside the worker rather than cloned, so this is a latency cost rather than a correctness one.
+
+**Recommendation:** If it shows up in `make perf-report`, transfer a JSON `ArrayBuffer` (transferable) or keep a long-lived worker and send property patches (`nodePatchVersion`) instead of the whole snapshot.
+
+**Effort:** Medium
+
+---
+
+### 34. 🟢 `{metric:<name>}` resolves by first match when names collide
+
+**Location:** [frontend/src/stores/metrics.ts](frontend/src/stores/metrics.ts) (`findMetricByName`, `metricResolver`)
+
+**Issue:**
+Label templates reference metrics by id or name. Custom-metric names are unique per context (validated server-side) and algorithm runs carry a timestamp, so collisions are rare — but two algorithm runs can have identical names if started in the same second, and a custom metric could be named like an algorithm run. Resolution is by id first, then the first name match in list order (built-ins, then insertion order).
+
+**Recommendation:** Prefer ids in templates written by the Labels panel autocomplete (it currently inserts names for readability), or warn in `validateTemplate` when a name matches more than one metric.
+
+**Effort:** Small
+
+---
+
 ## Summary Table
 
 | ID | Severity | Component | Description | Effort |
@@ -1118,6 +1170,10 @@ const checkStabilization = () => {
 | 28 | 🟢 Medium | Backend | `_get_edge_id` composite collides for parallel edges | Trivial–Small |
 | 29 | 🟢 Medium | Backend | Cypher binding-error wrapper can mask unrelated errors | Small |
 | 30 | 🟢 Medium | Backend | Dev-generator typeless columns lack automated tests (manually verified) | Small |
+| 31 | 🟡 High | Frontend/Backend | No CSP behind the custom-metric sandbox | Medium |
+| 32 | 🟡 High | Frontend | Cluster programs still run unsandboxed on the main thread | Medium |
+| 33 | 🟢 Medium | Performance | Custom-metric snapshot cloned per recompute cycle | Medium |
+| 34 | 🟢 Medium | Frontend | `{metric:name}` first-match resolution on name collisions | Small |
 
 ## Prioritization Recommendations
 
