@@ -886,12 +886,21 @@ function handleExportPng(options: ExportPNGOptions) {
 
 @media (max-width: 768px) {
   .toolbar { height: auto; flex-wrap: wrap; padding: var(--space-2) var(--space-3); }
-  .toolbar-left { order: 1; flex: 1; }
+  /* min-width:0 so the nav can shrink; without it the left group kept its
+     content width and slid under the right group (About / user menu). */
+  .toolbar-left { order: 1; flex: 1 1 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .toolbar-left::-webkit-scrollbar { display: none; }
   .toolbar-right { order: 2; }
   /* flex-basis 100% (not width) — `flex: 1` above sets basis 0, which would
      let the centre squeeze onto the first row next to the nav links. */
   .toolbar-center { order: 3; flex: 1 1 100%; min-width: 100%; justify-content: flex-start; padding-top: var(--space-2); border-top: 1px solid var(--color-toolbar-sep); }
   .context-title, .exploration-name, .exploration-unsaved, .multi-edge-badge { display: none; }
   .brand-name { display: none; }
+}
+
+/* Phone widths: the separators are decoration the nav cannot afford. */
+@media (max-width: 520px) {
+  .toolbar-left .title-sep { display: none; }
+  .nav-link { padding: 4px var(--space-1); }
 }
 </style>

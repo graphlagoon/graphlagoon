@@ -31,6 +31,18 @@ document; the rest is a backlog with a recommended order.
 | 13 | `aria-pressed` on the top-bar toggles but not on the canvas toolbar; the 3D/2D segmented control had no group label. | **fixed** |
 | 14 | ~1200 hard-coded hex literals despite a token system (`--color-*`), `var(--x, #ddd)` fallbacks everywhere, `.dev-link { color: #f59e0b !important }`. | `.dev-link` tokenised; rest backlog (stylelint `color-no-hex` + gradual removal of fallbacks) |
 
+## 2b. Responsiveness of the rest of the app
+
+Measured with a probe over `/contexts`, `/explorations`, `/admin` and the
+create-context modal at 1440 / 1024 / 768 / 390 px. Desktop widths were clean;
+the phone width was not:
+
+| # | Finding | Status |
+|---|---------|--------|
+| 15 | `.list-item` rows put their actions (Open / Check schema / Edit / Share / Delete) in a non-wrapping flex row: at 390 px they ran to 626 px, so the whole document scrolled sideways. | **fixed**: `.list-item` and `.list-item-actions` wrap; the content column has `flex: 1 1 240px; min-width: 0` |
+| 16 | `.modal { min-width: 400px; max-width: 90vw }` — `min-width` beats `max-width` in CSS, so every modal was wider than any viewport below ~445 px. | **fixed**: `min-width: min(400px, 100%)` and the overlay gained padding so dialogs never touch the edges |
+| 17 | Under 768 px the toolbar's left group kept its content width and slid *under* the right group (About / user menu unreachable, "Admin" printed under the ⓘ button). | **fixed**: the left group gets `min-width: 0` and scrolls; below 520 px the decorative separators go and the nav padding tightens |
+
 ## 3. Remaining backlog, in order
 
 1. **Save affordance on the canvas** (#6) — a `Save` / `Saved · 2 min ago` control in the canvas toolbar; create + rename on the Explorations page.
@@ -38,7 +50,8 @@ document; the rest is a backlog with a recommended order.
 3. **Colour lint** (#14) — stylelint `color-no-hex` over `src/**/*.vue`, then remove the `var(--x, #ddd)` fallbacks file by file.
 4. **Undo for deletes** — now that confirmations are in-app, a toast with *Undo* is a better trade than a dialog for the cheap ones (a label rule, a cluster).
 
-Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity).
+Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
+#15–#17 (phone-width responsiveness of the list pages, modals and toolbar).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 
