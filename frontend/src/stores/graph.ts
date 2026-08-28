@@ -25,7 +25,7 @@ import type {
   StylePresetSettings,
   PropertyVisibility,
 } from '@/types/graph';
-import { DEFAULT_PROCEDURAL_BFS_OPTIONS, isNodelessContext } from '@/types/graph';
+import { DEFAULT_PROCEDURAL_BFS_OPTIONS, isNodelessContext, LAYOUT_ALGORITHMS } from '@/types/graph';
 import { api } from '@/services/api';
 import { useClusterStore } from '@/stores/cluster';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
@@ -156,9 +156,7 @@ export type GraphBehaviors = typeof DEFAULT_BEHAVIORS;
 
 /** Fresh defaults per call — nested objects must never be shared by reference. */
 /** Layout algorithms a saved state may name. Anything else falls back to 'force'. */
-const KNOWN_LAYOUTS: LayoutAlgorithm[] = [
-  'force', 'ego', 'hive', 'hierarchical', 'circular', 'grid',
-];
+const KNOWN_LAYOUTS: LayoutAlgorithm[] = [...LAYOUT_ALGORITHMS];
 
 export function defaultLayoutModeConfig(): LayoutModeConfig {
   return {

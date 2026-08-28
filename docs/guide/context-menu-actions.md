@@ -144,6 +144,43 @@ The AI's final answer is a JSON array — paste it into the editor's **Import
 JSON** box and the actions are added after validation (unknown kinds, bad
 operators and non-`http(s)` URL templates are rejected with a pointed error).
 
+## Exporting and importing
+
+**Export JSON** in the actions list downloads every configured action as
+`actions-<context>.json` — available to read-only viewers as well, since
+reading the actions is not editing them. The file wraps the array in the same
+envelope style presets use, with a `source` block describing this graph
+(types, properties, and the query templates the actions may reference):
+
+```json
+{
+  "graphlagoon_export": "context-menu-actions",
+  "export_version": 1,
+  "source": {
+    "context_title": "Fraud ring",
+    "node_types": ["Person", "Company"],
+    "relationship_types": ["OWNS"],
+    "node_properties": ["name", "cnpj"],
+    "edge_properties": [],
+    "query_templates": [{ "id": "…", "name": "Neighbors", "parameters": ["person"] }]
+  },
+  "actions": [ { "kind": "open-url", "label": "…" } ]
+}
+```
+
+**Import JSON** accepts that file (pasted or via **Choose file…**) as well as
+the bare array an AI produces. Before anything is added, the box compares the
+actions with this graph and lists every node type, relationship type,
+property and `templateId` it does not have — the sign that they were written
+for another graph. Template ids are per context, so a `run-query-template`
+action never survives an export unchanged.
+
+The robot button then switches to *adapt* mode: its prompt includes the
+pasted actions, the `source` schema they came from, and this graph's real
+types, properties and templates, and asks the AI to propose the old → new
+mapping (including which of this context's templates replaces each old one,
+or which actions to drop) before answering with the rewritten array.
+
 ## Storage and permissions
 
 Actions live in the graph context itself (an opaque JSON document, like

@@ -1,9 +1,9 @@
 <template>
   <Teleport to="body">
     <div v-if="modelValue" class="modal-overlay" @click.self="close">
-      <div class="modal-container" data-testid="menu-action-skill-modal">
+      <div class="modal-container" data-testid="style-preset-skill-modal">
         <div class="modal-header">
-          <h2>{{ adapting ? 'Ask an AI to adapt these actions to this graph' : 'Ask an AI to write context-menu actions' }}</h2>
+          <h2>{{ adapting ? 'Ask an AI to adapt this style preset' : 'Ask an AI to write a style preset' }}</h2>
           <button class="close-btn" @click="close" title="Close">
             <X :size="20" />
           </button>
@@ -11,31 +11,29 @@
 
         <div class="modal-content">
           <p class="intro" v-if="adapting">
-            The JSON in the Import box came from another graph, so its types,
-            properties and query-template ids don't match this one. Copy the text
-            below and paste it into any AI assistant (ChatGPT, Claude, etc.). It
-            includes the exported actions, the schema they came from (when the
-            export recorded it) and this graph's real types, properties and
-            templates — the AI rewrites the actions for this graph. Paste its
-            JSON answer back into the Import box.
+            The JSON in the Import box came from another graph, so its type and
+            property names don't match this one. Copy the text below and paste it
+            into any AI assistant (ChatGPT, Claude, etc.). It includes the exported
+            preset, the schema it came from (when the export recorded it) and this
+            graph's real types and properties — the AI rewrites the preset for
+            this graph. Paste its JSON answer back into the Import box.
           </p>
           <p class="intro" v-else>
-            Not sure how to configure right-click actions? Copy the text below and
-            paste it into any AI assistant (ChatGPT, Claude, etc.), then describe
-            what you want one click away. It already includes this graph's
-            node/edge types, properties and query templates plus the exact JSON
-            the Import box accepts — paste the AI's JSON answer back into the
-            editor's "Import JSON" field.
+            Not sure how to style this graph? Copy the text below and paste it
+            into any AI assistant (ChatGPT, Claude, etc.), then describe the look
+            you want. It already includes this graph's node/edge types and
+            properties plus the exact JSON the Import box accepts — paste the AI's
+            JSON answer back into the Presets modal's "Import JSON" field.
           </p>
 
           <div class="skill-toolbar">
-            <button class="copy-btn" data-testid="menu-action-skill-copy" @click="copy">
+            <button class="copy-btn" data-testid="style-preset-skill-copy" @click="copy">
               <component :is="copied ? Check : Copy" :size="14" />
               {{ copied ? 'Copied!' : 'Copy to clipboard' }}
             </button>
           </div>
 
-          <pre class="skill-text" data-testid="menu-action-skill-text">{{ skillText }}</pre>
+          <pre class="skill-text" data-testid="style-preset-skill-text">{{ skillText }}</pre>
         </div>
       </div>
     </div>
@@ -46,8 +44,8 @@
 import { ref, computed, watch } from 'vue'
 import { X, Copy, Check } from 'lucide-vue-next'
 import { useGraphStore } from '@/stores/graph'
-import { useQueryTemplatesStore } from '@/stores/queryTemplates'
-import { buildContextMenuActionSkill } from '@/utils/contextMenuActionSkill'
+import { buildStylePresetSkill } from '@/utils/stylePresetSkill'
+import { LAYOUT_ALGORITHMS } from '@/types/graph'
 import type { PortableSourceSchema } from '@/types/portable'
 import { buildSourceSchema } from '@/utils/portableExport'
 
@@ -64,7 +62,6 @@ const emit = defineEmits<{
 }>()
 
 const graphStore = useGraphStore()
-const templatesStore = useQueryTemplatesStore()
 
 const adapting = computed(() => !!props.importedJson?.trim())
 
@@ -77,30 +74,14 @@ const currentSchema = computed(() =>
 )
 
 const skillText = computed(() =>
-  buildContextMenuActionSkill({
+  buildStylePresetSkill({
     // Declared types (context config) unioned with whatever is on the canvas:
     // an adapt prompt on an empty canvas still needs to know this graph's types.
     nodeTypes: currentSchema.value.node_types,
     edgeTypes: currentSchema.value.relationship_types,
     nodeProperties: graphStore.currentContext?.node_properties ?? [],
     edgeProperties: graphStore.currentContext?.edge_properties ?? [],
-    queryTemplates: templatesStore.templates.map((t) => ({
-      id: t.id,
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters.map((p) => ({
-        id: p.id,
-        label: p.label,
-        required: p.required,
-      })),
-    })),
-    // The modal only opens from the graph view, so the current location IS
-    // this context's graph URL — used by the ego-layout deep-link example.
-    graphViewUrl: `${window.location.origin}${window.location.pathname}`,
-    // A deep link must load a graph before layout params mean anything; when
-    // an exploration is open, hand its id over so the example is real.
-    explorationId:
-      new URLSearchParams(window.location.search).get('exploration') ?? undefined,
+    layoutAlgorithms: [...LAYOUT_ALGORITHMS],
     importedJson: props.importedJson,
     importedSource: props.importedSource,
   })
@@ -122,7 +103,6 @@ async function copy() {
   }
 }
 
-// Reset the "Copied!" state whenever the modal is reopened
 watch(
   () => props.modelValue,
   (open) => {

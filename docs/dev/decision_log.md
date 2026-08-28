@@ -7759,6 +7759,31 @@ Frontend only (no backend changes).
 - Metric values available to label templates / value filters (would require the property write-back approach).
 - Pre-existing issue noticed (out of scope): resetting table filters does not re-call `setTableFilteredIds`, so a stale graph filter can linger until the next filter event.
 
+## [2026-08-26 22:30] - Security Assessment: threat-model-calibrated review + remediation plan
+
+**Action:** Full static security review of backend (`api/`), frontend (`frontend/`) and deploy/config (Databricks Apps, CI/CD, submodules), consolidated into a new document with criticality calibrated to the real threat model, plus a phased remediation plan.
+
+**Threat model (per request):** the system is never internet-exposed — it runs inside Databricks infra on a private network, behind a proxy that authenticates the user and injects `X-Forwarded-Email`. Executing generic **read-only** graph queries against the warehouse is intended functionality, not a defect. This recalibration lowers the severity of the external-attacker class (header spoofing, CORS `*`, SSRF, "generic SQL") and keeps/raises the severity of cross-user attacks via shared artifacts and of insecure defaults that could weaken the perimeter.
+
+**Method:** three parallel read-only exploration agents (backend auth/authz/query-path/SSRF/secrets; frontend cluster-program execution/XSS/URL-injection/CSV; deployment/config/CI/supply-chain). Findings cross-checked against actual code with file:line references.
+
+**Design decisions:**
+1. **Calibrated, not raw, severity.** Each finding scored as impact × reachability *within* the private-network model. External-anonymous attacker treated as effectively absent; the dominant risk is insider / compromised-account attacking colleagues via shared explorations/contexts, which the perimeter does not cover.
+2. **Distinguished "by design" from "crosses the line".** Generic read-only query = intended. But the `BEGIN...END` validator bypass (A3) and the catalog-router SQL interpolation (A4) turn that into writes/DDL and reads outside the authz model — classified High, not "by design".
+3. **Single Critical (C1):** unsandboxed `new Function` cluster-program execution + silent propagation into the victim's shared context. One-click, socially-trivial in-browser RCE against colleagues; survives the perimeter. Highest-leverage fix flagged: move execution to a Web Worker (no DOM, `connect-src 'none'`, timeout), which also unblocks a real CSP.
+4. **Documented what the codebase already gets right** (safeUrl 4-layer defense, zero HTML sinks, canvas labels, ORM-only app SQL, no SSRF, secrets never in responses/logs/git) as an explicit "do not regress" section.
+
+**Findings:** 1 Critical, 5 High, 7 Medium, 9 Low. Phase-1 blockers before next deploy: C1 (remove silent context propagation + add explicit-run confirmation), A1 (`dev_mode=False` default + gate `/api/dev/*`), A2 (remove `verify=False` on OAuth exchange), A3 (`BEGIN...END` bypass), A4 (catalog SQL interpolation).
+
+**Files Created:**
+- [docs/dev/security-assessment.md](security-assessment.md) — full assessment, consolidated criticality table, per-finding remediation, phased plan, dependency appendix.
+
+**Public Docs:** No public docs impact (internal dev/security doc; no user-facing UI, config key, URL param, or endpoint changed by this action — it is analysis only).
+
+**Testing:** N/A — no code changed; this is a review artifact.
+
+**Note:** No remediation code was written; this entry records the assessment only. The remediation plan in the document is the proposed follow-up work, not yet implemented.
+
 ## [2026-08-27 07:15] - Feature Implemented: Nodeless (Triple-Store-Only) Contexts
 
 **Feature:** `sql_warehouse` contexts can now be created with ONLY an edge/triple table (`src`, `dst`, `relationship_type`) and no node table. The backend derives a virtual node table — `(SELECT node_id AS <node_id_col>, 'Node' AS <node_type_col> FROM (SELECT src ... UNION SELECT dst ...))` — and substitutes it everywhere the physical node table name used to be interpolated, so every existing query path and frontend feature keeps working.
@@ -7867,3 +7892,51 @@ Frontend only (no backend changes).
 **Public Docs:** this IS the public-docs change; `make docs-build` passes (dead-link check covers the new sidebar entries, cross-links and image).
 
 **Testing:** N/A beyond `make docs-build` and `make docs-screenshots` — no runtime code changed.
+
+## [2026-08-28 14:30] - Feature Planning: Crowded ego rings (QSA — company with hundreds of partners)
+
+**Purpose:** In QSA data one company can have hundreds of sócios; all land on ego ring 1. The only anti-crowding device today is radius growth against the hard-coded `EGO_MIN_NODE_ARC = 26` (`GraphCanvas3D.vue:89`, `layoutModes.ts:741-781`), so 300 partners → ring radius ≈ 1240: unreadable, and the few multi-connected partners (the investigation targets) are indistinguishable from leaf noise.
+
+**Action:** Options evaluated on usability / UX / investigation value, with external references (Linkurious supernode + filtered expand, yFiles radial layout & fraud grouping, AML node-grouping literature). Full analysis and step-by-step plan saved at [plans/ego-crowded-rings-qsa.md](plans/ego-crowded-rings-qsa.md) — new `docs/dev/plans/` folder for pre-implementation proposals (dev-only, excluded from the public site via `srcExclude: dev/**`).
+
+**Design Decisions (proposed, not implemented):**
+1. **Two independent, complementary fixes:** (B) make the ego/hierarchical layouts cluster-aware by feeding `filteredNodes/filteredEdges` (enhanced data) instead of raw `graphStore.nodes/edges` — closed cluster nodes become ring citizens, the existing ORPHAN_CLUSTERS program turns "300 sócios" into one expandable "287 sócios sem outros vínculos" node + the ~13 multi-connected ones; also fixes closed clusters floating off-ring today. (A) concentric sub-ring wrapping in the radial branch of `computeTreeLayout`, mirroring the layered branch's sub-row precedent — round-robin by angular order so angles/sectors/ordering/determinism stay identical, only radius varies within the hop band.
+2. **Rejected:** fisheye/magnification lens (breaks determinism & comparability); degree filter / density fade / bundling (already vetoed 2026-07-20 — nothing hidden from the investigator).
+3. **Config:** `minNodeArc` and `ringWrap: 'auto'|'off'` join `EgoLayoutConfig` (Advanced panel), deliberately NOT in the URL override schema (appearance). `ringWrap:'auto'` default is a deliberate compat change (old explorations with crowded rings render wrapped).
+4. Recommended order B1 → A → B2 (Group-leaves button) → C (crowded-ring panel warning, docs section in exploring-the-graph.md, screenshot scene).
+
+**Files Created:** `docs/dev/plans/ego-crowded-rings-qsa.md`
+**Files Modified:** `docs/dev/README.md` (plans folder pointer)
+**Testing:** N/A (planning only). Test plan inside the proposal — notably the ring-radius contract test at `layoutModes.test.ts:387` must be split (`'off'` keeps current assertions) rather than loosened.
+**Public Docs:** No public docs impact (planning only; docs work is scoped inside Phase C of the proposal).
+
+## [2026-08-28 08:30] - Feature Implemented: Export / import of style presets and context-menu actions, with an Ask-AI "adapt to this graph" prompt
+
+**Feature:** Style presets and context-menu actions can be downloaded as JSON files and imported into any other context (or instance). Because an export names the types, properties and query-template ids of the graph it came from, the existing robot button (copy-pasteable LLM prompt) gains an *adapt* mode that rewrites the payload for the current graph.
+
+**Requirements:** export + import for both styles and actions; the same robot icon/prompt pattern the app already uses, now able to adapt a payload from a totally different graph to the current node types, edge types and property names.
+
+**Design Decisions:**
+1. **A portable envelope with the origin schema (`types/portable.ts`).** `{ graphlagoon_export, export_version, source, settings | actions }`. `source` (declared ∪ loaded types, property names, template ids) exists purely so the adapt prompt can tell the LLM what the old names were; without it the LLM would have to guess from the JSON alone (the prompt says so explicitly when `source` is absent).
+2. **Parsers accept the bare payload too.** An LLM answers with a settings object or an action array, not an envelope; `parseImportedStylePreset` also takes a full server `StylePreset`. Envelopes of the wrong kind are refused with the kind named, so a style file in the actions box fails clearly.
+3. **No backend change.** Style import saves through the existing `PUT …/style-presets/{name}` (settings are opaque server-side, `extra="allow"`); actions import goes through the store's debounced context PATCH. The 1 MiB / max-per-context caps already apply.
+4. **Style import has two exits.** *Apply only* calls `graphStore.applyStylePreset` in memory — read-only viewers can use a colleague's look — and drops `?style=` from the URL so the chip does not lie. *Save & apply* is the normal named-preset path (write access), name/description prefilled from the envelope.
+5. **Compatibility warnings drive the robot, not a blocker.** `styleCompatibilityWarnings` / `actionCompatibilityWarnings` list types, properties (via `extractTemplateProperties`, the renderer's own parser) and template ids the current graph lacks. Importing is still allowed — a preset can legitimately style types not loaded yet — but the warning offers "Ask an AI to adapt it" inline.
+6. **One builder, two modes.** `buildStylePresetSkill` (new) and `buildContextMenuActionSkill` (extended) take optional `importedJson`/`importedSource`; when present the task, the "How to help me" section and a "to adapt" section change, and the LLM is asked to show its old → new mapping first instead of interviewing from scratch. `sourceSchemaSection` is shared.
+7. **Skill modals now union declared and loaded types.** Previously `graphStore.nodeTypes` only (empty canvas ⇒ "no nodes loaded yet"); an adapt prompt on an empty canvas needs the context's declared types, so both modals use `buildSourceSchema`.
+8. **`LAYOUT_ALGORITHMS` const** added to `types/graph.ts` (the store's `KNOWN_LAYOUTS` derives from it) so the prompt lists exactly the accepted layouts.
+9. **First file picker in the app** (`readFileAsText`), hidden `<input type=file>` behind a button; paste remains the primary path. `downloadJson` extracted from `Toolbar.exportJSON` and now revokes the object URL.
+
+**Implementation:**
+
+**Backend Changes:** none.
+
+**Frontend Changes:**
+- Created: `types/portable.ts`, `utils/portableExport.ts` (`buildSourceSchema`, `downloadJson`, `readFileAsText`, `safeFilename`), `utils/stylePresetImport.ts`, `utils/stylePresetSkill.ts`, `components/StylePresetSkillModal.vue`.
+- Modified: `utils/contextMenuActionImport.ts` (envelope + `actionCompatibilityWarnings`), `utils/contextMenuActionSkill.ts` (adapt mode), `components/StylePresetModal.vue` (robot, export per preset / current look, import section), `components/ContextMenuActionsModal.vue` (Export JSON, file picker, warnings, adapt robot), `components/ContextMenuActionSkillModal.vue` (props), `components/Toolbar.vue` (uses `downloadJson`), `types/graph.ts` + `stores/graph.ts` (`LAYOUT_ALGORITHMS`).
+
+**Testing:** new `utils/__tests__/{stylePresetImport,portableExport,stylePresetSkill}.test.ts`, `components/__tests__/ContextMenuActionsModal.portable.test.ts`; extended `contextMenuActionImport`, `contextMenuActionSkill`, `StylePresetModal` tests. Full suite: 1966 tests green; `vue-tsc --noEmit` clean.
+
+**Public Docs:** `docs/guide/style-presets.md` and `docs/guide/context-menu-actions.md` gained "Exporting and importing" sections (envelope, Apply only vs Save & apply, adapt-mode robot). The `style-presets-modal` screenshot scene picks up the new buttons on regeneration.
+
+**Technical debt:** the `source` block of a style export has no `query_templates` (irrelevant to styles); if presets ever reference templates, extend `buildSourceSchema` callers. Warnings treat every property as global across node/edge for actions (the matcher resolves by target at runtime).

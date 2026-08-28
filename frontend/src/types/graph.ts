@@ -360,7 +360,9 @@ export interface ViewportState {
   center_y: number;
 }
 
-export type LayoutAlgorithm = "force" | "ego" | "hive" | "hierarchical" | "circular" | "grid";
+/** Layout algorithms a saved state may name. Anything else falls back to 'force'. */
+export const LAYOUT_ALGORITHMS = ["force", "ego", "hive", "hierarchical", "circular", "grid"] as const;
+export type LayoutAlgorithm = (typeof LAYOUT_ALGORITHMS)[number];
 
 /** BFS direction for the ego layout: follow outgoing edges, incoming edges, or both */
 export type EgoDirection = "both" | "out" | "in";

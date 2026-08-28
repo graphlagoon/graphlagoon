@@ -93,3 +93,37 @@ describe('buildContextMenuActionSkill', () => {
     expect(skill).toContain('template=');
   });
 });
+
+describe('buildContextMenuActionSkill — adapt mode', () => {
+  it('switches to adapting when exported actions are given', () => {
+    const imported = JSON.stringify([{ kind: 'copy-text', label: 'x', match: { target: 'node', nodeTypes: ['Old'] }, textTemplate: '{prop:old}' }]);
+    const skill = buildContextMenuActionSkill({
+      ...INPUT,
+      importedJson: imported,
+      importedSource: {
+        context_title: 'Old graph',
+        node_types: ['Old'],
+        relationship_types: [],
+        node_properties: ['old'],
+        edge_properties: [],
+        query_templates: [{ id: 'old-t', name: 'Old tpl', parameters: ['p'] }],
+      },
+    });
+    expect(skill).toContain('# Task: adapt "context-menu actions"');
+    expect(skill).toContain('## The actions to adapt');
+    expect(skill).toContain('"Old graph"');
+    expect(skill).toContain(imported);
+    expect(skill).toContain('`old-t`');
+    expect(skill).toContain('show me the mapping');
+    expect(skill).not.toContain('Do NOT write JSON immediately');
+    // The current graph's metadata is still there for the rewrite.
+    expect(skill).toContain('- Person');
+    expect(skill).toContain('tpl-uuid-1');
+  });
+
+  it('keeps the interview flow without an import', () => {
+    const skill = buildContextMenuActionSkill(INPUT);
+    expect(skill).toContain('Do NOT write JSON immediately');
+    expect(skill).not.toContain('## The actions to adapt');
+  });
+});
