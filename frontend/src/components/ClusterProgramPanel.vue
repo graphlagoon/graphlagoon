@@ -11,11 +11,13 @@ import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
 import ClusterProgramEditorModal from './ClusterProgramEditorModal.vue'
 import ClusterProgramRunModal from './ClusterProgramRunModal.vue'
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
+import ClusterListPanel from './ClusterListPanel.vue'
 import { X, Play, Loader2, Bot } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { confirmAction } from '@/composables/useConfirm';
 
 const emit = defineEmits<{
+  'update:tab': [tab: ClustersTab]
   close: []
 }>()
 
@@ -27,7 +29,21 @@ const similarityStore = useSimilarityStore()
 const graphStore = useGraphStore()
 
 // UI state
-const activeTab = ref<'communities' | 'programs' | 'similarity'>('communities')
+export type ClustersTab = 'communities' | 'programs' | 'similarity' | 'results'
+
+/**
+ * `tab` lets the page open the panel straight on a tab — the status bar's
+ * cluster chip opens Results. Two-way so clicking a tab keeps the page in
+ * sync.
+ */
+const props = withDefaults(defineProps<{ tab?: ClustersTab }>(), { tab: undefined })
+
+const activeTab = ref<ClustersTab>(props.tab ?? 'communities')
+watch(() => props.tab, (t) => { if (t) activeTab.value = t })
+function selectTab(tab: ClustersTab) {
+  activeTab.value = tab
+  emit('update:tab', tab)
+}
 
 // Community layout: one control for the mutually-exclusive spatial arrangements
 // (radial force vs. hive plot with one axis per community).
@@ -171,7 +187,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
       <button
         class="tab-btn"
         :class="{ active: activeTab === 'communities' }"
-        @click="activeTab = 'communities'"
+        @click="selectTab('communities')"
       >
         Communities
         <span v-if="communityStore.hasResults" class="tab-badge">{{ communityStore.communityStats.count }}</span>
@@ -179,15 +195,26 @@ function toggleEdgeTypeFilter(edgeType: string) {
       <button
         class="tab-btn"
         :class="{ active: activeTab === 'programs' }"
-        @click="activeTab = 'programs'"
+        @click="selectTab('programs')"
       >
         Programs
+      </button>
+      <!-- The clusters a program produced used to live in a separate floating
+           panel with its own toolbar button, so "Clusters" meant two different
+           surfaces. -->
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'results' }"
+        data-testid="clusters-tab-results"
+        @click="selectTab('results')"
+      >
+        Results
         <span v-if="clusterStore.clusters.length > 0" class="tab-badge">{{ clusterStore.clusterStats.total }}</span>
       </button>
       <button
         class="tab-btn"
         :class="{ active: activeTab === 'similarity' }"
-        @click="activeTab = 'similarity'"
+        @click="selectTab('similarity')"
       >
         Similarity
         <span v-if="similarityStore.hasResults" class="tab-badge">{{ similarityStore.resultStats?.edgeCount }}</span>
@@ -459,6 +486,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
               <div class="program-actions" @click.stop>
                 <button
                   class="btn-execute"
+                  :data-testid="`cluster-program-run-${program.program_id}`"
                   @click="handleExecute(program)"
                   title="Execute program"
                   :disabled="clusterStore.loading"
@@ -525,6 +553,10 @@ function toggleEdgeTypeFilter(edgeType: string) {
       <!-- ================================================================ -->
       <!-- Similarity Tab -->
       <!-- ================================================================ -->
+      <div v-if="activeTab === 'results'" class="tab-pane" data-testid="clusters-results-pane">
+        <ClusterListPanel embedded />
+      </div>
+
       <div v-if="activeTab === 'similarity'" class="tab-pane">
         <SimilarityPanel />
       </div>

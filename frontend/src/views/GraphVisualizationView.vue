@@ -20,8 +20,7 @@ import AestheticsPanel from '@/components/AestheticsPanel.vue';
 import TextFormatPanel from '@/components/TextFormatPanel.vue';
 import QueryErrorModal from '@/components/QueryErrorModal.vue';
 import QueryRunningState from '@/components/QueryRunningState.vue';
-import ClusterProgramPanel from '@/components/ClusterProgramPanel.vue';
-import ClusterListPanel from '@/components/ClusterListPanel.vue';
+import ClusterProgramPanel, { type ClustersTab } from '@/components/ClusterProgramPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
 import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
@@ -37,7 +36,7 @@ import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
 import QueryTemplatesPanel from '@/components/QueryTemplatesPanel.vue';
 import PrecomputedGraphPanel from '@/components/PrecomputedGraphPanel.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
-import { Info, Settings2, Hexagon, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
+import { Info, Settings2, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
 import { useToast } from '@/composables/useToast';
 import {
   layoutQuerySignature,
@@ -144,7 +143,6 @@ const showResourceMonitor = ref(false);
 const showAestheticsPanel = ref(false);
 const showTextFormatPanel = ref(false);
 const showClusterPrograms = ref(false);
-const showClusterList = ref(false);
 const showTemplatesPanel = ref(false);
 const showMenuActionsModal = ref(false);
 const showPrecomputedPanel = ref(false);
@@ -265,6 +263,19 @@ function toggleDocked(id: PanelId) {
  */
 function openPanel(id: PanelId) {
   setDocked(id, true);
+}
+
+/**
+ * Which tab the Clusters panel shows. The clusters a program produced used to
+ * live in a second floating panel with its own toolbar button, so "Clusters"
+ * named two different surfaces; they are now the panel's Results tab, reached
+ * from the status bar's cluster count.
+ */
+const clustersTab = ref<ClustersTab>('communities');
+
+function showClusterResults() {
+  clustersTab.value = 'results';
+  openPanel('clusters');
 }
 
 function handleFocusNode(nodeId: string) {
@@ -759,7 +770,11 @@ watch(
       />
       <AestheticsPanel v-if="showAestheticsPanel" @close="showAestheticsPanel = false; toolbarStore.setPanelActive('aesthetics', false)" />
       <TextFormatPanel v-if="showTextFormatPanel" @close="showTextFormatPanel = false; toolbarStore.setPanelActive('labels', false)" />
-      <ClusterProgramPanel v-if="showClusterPrograms" @close="showClusterPrograms = false; toolbarStore.setPanelActive('clusters', false)" />
+      <ClusterProgramPanel
+        v-if="showClusterPrograms"
+        v-model:tab="clustersTab"
+        @close="showClusterPrograms = false; toolbarStore.setPanelActive('clusters', false)"
+      />
       <QueryTemplatesPanel v-if="showTemplatesPanel" @close="showTemplatesPanel = false; toolbarStore.setPanelActive('templates', false)" />
       <PrecomputedGraphPanel v-if="showPrecomputedPanel" @close="showPrecomputedPanel = false; toolbarStore.setPanelActive('precomputed', false)" />
       <ContextMenuActionsModal v-model="showMenuActionsModal" />
@@ -827,11 +842,6 @@ watch(
           @review-schema="reviewContextSchema"
         />
 
-        <!-- Cluster List Panel (right side) -->
-        <div v-if="showClusterList" class="panel-wrapper panel-right">
-          <ClusterListPanel />
-        </div>
-
         <!-- Bottom toolbar -->
         <div class="graph-toolbar">
           <button
@@ -857,17 +867,6 @@ watch(
             <span class="btn-label">Layout</span>
           </button>
 
-          <button
-            v-if="clusterStore.clusters.length > 0"
-            class="toolbar-btn"
-            :class="{ active: showClusterList }"
-            :aria-pressed="showClusterList"
-            @click="showClusterList = !showClusterList"
-            title="Cluster List"
-          >
-            <Hexagon :size="14" />
-            <span class="btn-label">Clusters ({{ clusterStore.clusters.length }})</span>
-          </button>
 
           <div class="toolbar-segmented" role="group" aria-label="View mode">
             <button
@@ -949,6 +948,16 @@ watch(
             @click="openPanel('behaviors')"
           >
             ⚠ truncated
+          </button>
+          <button
+            v-if="clusterStore.clusters.length > 0"
+            type="button"
+            class="status-chip status-item"
+            data-testid="graph-status-clusters"
+            :title="`${clusterStore.clusters.length} clusters on this graph — click to list them`"
+            @click="showClusterResults"
+          >
+            {{ clusterStore.clusters.length }} clusters
           </button>
           <!-- Resolved from a name rather than queried just now. It may not
                reflect the current state of the source, so say so where the
