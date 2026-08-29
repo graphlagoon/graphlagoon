@@ -317,6 +317,26 @@ test.describe('Graph Visualization', () => {
   // Save state
   // ---------------------------------------------------------------------------
   test.describe('Save state', () => {
+    test('an opened exploration flags unsaved changes once the view moves', async ({ authenticatedPage: page }) => {
+      await seedExplorations(page, [MOCK_EXPLORATION]);
+      await page.goto(`/graph/${MOCK_CONTEXT.id}?exploration=${MOCK_EXPLORATION.id}`);
+      await expect(page.getByTestId('toolbar-exploration-name')).toContainText('Test Exploration', {
+        timeout: 15_000,
+      });
+      // Freshly loaded: the view still matches what was saved.
+      await expect(page.getByTestId('toolbar-exploration-dirty')).toHaveCount(0);
+
+      // Change something the exploration stores, via the UI.
+      await page.getByTitle('Filters', { exact: true }).click();
+      await page.locator('.filter-panel input[type="checkbox"]').first().uncheck();
+
+      await expect(page.getByTestId('toolbar-exploration-dirty')).toBeVisible();
+      await expect(page.getByTestId('toolbar-exploration-name')).toHaveAttribute(
+        'title',
+        /unsaved changes/,
+      );
+    });
+
     test('the Unsaved marker is the control that saves the view', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });

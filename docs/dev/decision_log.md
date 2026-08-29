@@ -8395,3 +8395,45 @@ regenerated.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 00:20] - UX: "modified since save" for the open exploration
+
+The last piece of finding #6. Opening a saved exploration and then re-styling,
+re-filtering or re-querying left the toolbar showing the exploration's name
+unchanged — the user was never told the view no longer matched what was saved,
+and closing the tab lost the work silently.
+
+**How the dirty check is cheap:** `getExplorationState()` deliberately stores
+no nodes or edges (they are rebuilt from the query or the snapshot), so the
+state object is small. `isExplorationDirty` stringifies it and compares against
+a fingerprint taken at the last save or load. Being a computed, it only re-runs
+when one of the settings it reads actually changes — never per frame.
+`viewport` is in the fingerprint but is only ever written on load, so panning
+and zooming do not flag the exploration as modified.
+
+**Where the baseline is taken:** `markExplorationSaved()` after a successful
+`saveExploration`, and at the end of `loadExploration` once every restored
+piece has been applied. `clear()` drops it, so a fresh context never inherits
+a stale baseline.
+
+**UI:** the exploration name turns amber with a `●` and its tooltip changes to
+"… has unsaved changes — click to save them" (the sentence lives in the
+tooltip; the bar is too dense for the word "modified"). A visually-hidden span
+carries the same for screen readers.
+
+**Files modified:** `frontend/src/stores/graph.ts`,
+`frontend/src/components/Toolbar.vue`.
+**Files created:** `frontend/src/stores/__tests__/graph.dirty.test.ts` (no
+exploration open → never dirty; fresh baseline → clean; a changed filter or
+query → dirty; saving re-baselines; reverting the change clears it).
+
+**Testing:** 2172 unit, 197 e2e (an opened exploration flags unsaved changes
+once a filter is unchecked). Toolbar screenshotted before and after the change.
+
+**Public Docs:** `docs/guide/explorations.md` is unaffected — the save flow is
+unchanged, this only reports its state. **Admin-Area Impact:** No admin-area
+impact.
+
+**Author:** Claude (AI Assistant)
+
+---
