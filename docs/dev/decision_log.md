@@ -8616,3 +8616,48 @@ impact (its deletes still confirm).
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 03:10] - UX: a searchable, grouped table picker for context creation
+
+Creating a context on a real Databricks workspace meant choosing from two
+native `<select>`s holding every `catalog.schema.table` as one flat string.
+Reproduced with 90 tables across 3 catalogs × 5 schemas: every row repeats the
+qualified prefix, the only distinguishing part (the table name) sits at the
+end, and the browser's type-ahead matches the catalog every option shares.
+
+`TableSelect.vue`: a trigger showing the table name with its path as secondary
+text, and a menu with a filter box over rows grouped by `catalog.schema`
+(sticky headers). The grouping *is* the tree the user asked about, without
+making them drill three levels to reach a name they can already type. Arrow
+keys walk the flattened list, Enter picks, Escape closes only the menu.
+
+Two things worth recording:
+- **Closing on outside `pointerdown`, not `focusout`.** The first version
+  closed on `focusout` and the "Table not listed?" button became unclickable:
+  `focusout` fires from the search field on mousedown, *before* the new element
+  takes focus, so the menu closed and the click landed on nothing.
+- **A regression the tests caught:** `required` on the old `<select>`s was the
+  only thing stopping a submit with no table. The picker is a button, so the
+  rule is now explicit — `requiredTablesChosen` disables the submit button and
+  its title says what is missing.
+
+**Escape hatch:** the warehouse only lists tables whose name contains "edge" or
+"node" (`_list_datasets_databricks`), so a table called `transacoes` cannot be
+picked at all. The menu's footer accepts a typed qualified name. Relaxing that
+backend filter is the next step.
+
+**Files created:** `frontend/src/components/TableSelect.vue`,
+`frontend/src/components/__tests__/TableSelect.test.ts`.
+**Files modified:** `frontend/src/components/GraphContextFormModal.vue`,
+its two unit tests (a `pickTable` helper replaces `selectOption`),
+`frontend/e2e/tests/contexts.spec.ts`.
+
+**Testing:** 2184 unit, 203 e2e (filtering, and creating a context from a typed
+name the listing does not carry). Screenshotted with 90 tables.
+
+**Public Docs:** none yet — the create flow is being reworked further.
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---

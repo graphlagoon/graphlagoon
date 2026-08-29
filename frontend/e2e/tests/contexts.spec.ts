@@ -63,11 +63,15 @@ test.describe('Contexts', () => {
     await expect(page.getByTestId('create-context-modal')).toBeVisible();
 
     // MOCK_DATASETS returns edge_tables: ['test_db.edges', 'test_db.relationships']
-    // Wait for the datasets API to respond and populate the dropdown options
-    const edgeSelect = page.getByTestId('create-context-modal').locator('select').first();
-    await expect(edgeSelect).toBeVisible();
-    // The select options should contain our mock tables
-    await expect(edgeSelect.locator('option', { hasText: 'test_db.edges' })).toBeAttached();
+    await page.getByTestId('edge-table-select').click();
+    await expect(page.getByTestId('table-option-test_db.edges')).toBeVisible();
+    // Grouped by catalog.schema, so the row itself carries only the table name.
+    await expect(page.getByTestId('table-option-test_db.edges')).toHaveText('edges');
+
+    // The filter is what makes a 90-table workspace usable.
+    await page.getByTestId('edge-table-select-search').fill('relation');
+    await expect(page.getByTestId('table-option-test_db.edges')).toHaveCount(0);
+    await expect(page.getByTestId('table-option-test_db.relationships')).toBeVisible();
   });
 
   test('creates a nodeless (triple-store-only) context via the checkbox', async ({
@@ -104,8 +108,8 @@ test.describe('Contexts', () => {
     await expect(page.getByTestId('no-node-table-checkbox')).toBeChecked();
 
     await page.getByPlaceholder('My Graph Context').fill('Triple Store');
-    const edgeSelect = page.getByTestId('create-context-modal').locator('select').first();
-    await edgeSelect.selectOption('test_db.triples');
+    await page.getByTestId('edge-table-select').click();
+    await page.getByTestId('table-option-test_db.triples').click();
 
     await page.getByTestId('create-context-submit').click();
     await expect(page.getByTestId('create-context-modal')).not.toBeVisible();
@@ -114,6 +118,43 @@ test.describe('Contexts', () => {
     expect(createdPayload!.edge_table_name).toBe('test_db.triples');
     expect(createdPayload!.node_table_name).toBeUndefined();
     expect(createdPayload!.node_properties).toBeUndefined();
+  });
+
+  test('a table the listing does not carry can still be typed in', async ({
+    authenticatedPage: page,
+  }) => {
+    // The warehouse only surfaces tables whose name contains "edge"/"node", so
+    // a table called `transacoes` is invisible to the picker. Typing its
+    // qualified name is the way through until that filter changes.
+    let createdPayload: Record<string, unknown> | null = null;
+    await page.route('**/graphlagoon/api/graph-contexts', (route) => {
+      if (route.request().method() === 'POST') {
+        createdPayload = JSON.parse(route.request().postData() || '{}');
+        route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify({ id: 'ctx-manual', ...createdPayload }),
+        });
+      } else {
+        route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      }
+    });
+
+    await page.goto('/contexts');
+    await page.getByTestId('create-context-btn').click();
+    await page.getByPlaceholder('My Graph Context').fill('Manual table');
+
+    await page.getByTestId('edge-table-select').click();
+    await page.getByTestId('edge-table-select-manual').click();
+    await page.getByTestId('edge-table-select-manual-input').fill('prod.fraude.transacoes');
+    await page.getByTestId('edge-table-select-manual-use').click();
+    await expect(page.getByTestId('edge-table-select')).toContainText('transacoes');
+
+    await page.getByTestId('no-node-table-checkbox').check();
+    await page.getByTestId('create-context-submit').click();
+
+    await expect(page.getByTestId('create-context-modal')).not.toBeVisible();
+    expect(createdPayload!.edge_table_name).toBe('prod.fraude.transacoes');
   });
 
   // ---------------------------------------------------------------------------

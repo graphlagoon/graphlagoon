@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import TableSelect from '@/components/TableSelect.vue';
 import { useContextsStore } from '@/stores/contexts';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -224,7 +225,15 @@ async function fetchNodeTableSchema() {
  * chosen (discovery then reads relationship types only), or a datasource
  * that needs no tables at all.
  */
-const canDiscoverTypes = computed(
+/**
+ * The tables the chosen datasource requires are set.
+ *
+ * This used to ride on `required` on the two native `<select>`s: HTML5
+ * constraint validation blocked submission for free. `TableSelect` is a button
+ * with a menu, so the rule has to be stated here — otherwise the form would
+ * happily POST an empty `edge_table_name`.
+ */
+const requiredTablesChosen = computed(
   () =>
     !showTableConfig.value ||
     Boolean(
@@ -232,6 +241,8 @@ const canDiscoverTypes = computed(
         (form.value.noNodeTable || form.value.node_table_name),
     ),
 );
+
+const canDiscoverTypes = requiredTablesChosen;
 
 /**
  * Whether discovery exists at all for the selection. A REST connection only
@@ -545,28 +556,26 @@ async function submit() {
         <template v-if="mode === 'create'">
           <div class="form-group">
             <label>Edge Table *</label>
-            <select v-model="form.edge_table_name" class="form-control" required>
-              <option value="" disabled>Select edge table...</option>
-              <option v-for="table in availableEdgeTables" :key="'edge-' + table" :value="table">
-                {{ table }}
-              </option>
-            </select>
+            <TableSelect
+              v-model="form.edge_table_name"
+              :tables="availableEdgeTables"
+              placeholder="Select edge table..."
+              testid="edge-table-select"
+              empty-hint="No edge tables available. Generate a graph first."
+            />
             <span v-if="availableEdgeTables.length === 0" class="hint">No edge tables available. Generate a graph first.</span>
           </div>
 
           <div class="form-group">
             <label>{{ form.noNodeTable ? 'Node Table' : 'Node Table *' }}</label>
-            <select
+            <TableSelect
               v-model="form.node_table_name"
-              class="form-control"
-              :required="!form.noNodeTable"
+              :tables="availableNodeTables"
               :disabled="form.noNodeTable"
-            >
-              <option value="" disabled>Select node table...</option>
-              <option v-for="table in availableNodeTables" :key="'node-' + table" :value="table">
-                {{ table }}
-              </option>
-            </select>
+              placeholder="Select node table..."
+              testid="node-table-select"
+              empty-hint="No node tables available. Generate a graph first, or use the triple-store option below."
+            />
             <label class="checkbox-label">
               <input
                 v-model="form.noNodeTable"
@@ -882,7 +891,8 @@ async function submit() {
             type="submit"
             class="btn btn-primary"
             data-testid="create-context-submit"
-            :disabled="contextsStore.loading || !!defaultBehaviorsError"
+            :disabled="contextsStore.loading || !!defaultBehaviorsError || !requiredTablesChosen"
+            :title="requiredTablesChosen ? undefined : 'Choose an edge table (and a node table, or the triple-store option)'"
           >
             {{ mode === 'edit' ? 'Save' : 'Create' }}
           </button>
