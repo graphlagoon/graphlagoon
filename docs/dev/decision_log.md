@@ -8537,3 +8537,37 @@ screenshots regenerated. **Admin-Area Impact:** No admin-area impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 02:00] - Fix: keyboard focus moves into a modal, and back out
+
+Follow-on from the Escape work, and measured the same way: `grep -c autofocus`
+over `src/**/*.vue` returns **1**. Opening any of the other 29 modals left
+focus on the button behind the dialog — Tab walked the page underneath, and a
+screen reader never entered the dialog at all. Closing never gave focus back.
+
+`useModalFocus` (mounted once in `App.vue`) observes the body for a
+`.modal-overlay` being added, then focuses the first meaningful control inside
+it. "Meaningful" skips `.modal-close`: landing on × means Enter closes the
+dialog you just opened. When the last overlay is removed, focus returns to
+whatever held it before the first one opened (nested modals restore to the
+outer one, not to the inner).
+
+**Deliberately not a focus trap.** A trap has to fight every nested surface —
+a confirmation opened from inside a modal, a PrimeVue overlay teleported to the
+body — and when it gets that wrong it locks the keyboard out of the page
+entirely. Escape closes, focus starts inside, focus comes back: the parts that
+matter, without the part that breaks.
+
+**Files created:** `frontend/src/composables/useModalFocus.ts`.
+**Files modified:** `frontend/src/App.vue`,
+`frontend/e2e/tests/navigation.spec.ts` (focus is inside `.modal-overlay` after
+opening, and back on the trigger after Escape).
+
+**Testing:** 2172 unit, 201 e2e.
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area
+impact.
+
+**Author:** Claude (AI Assistant)
+
+---
