@@ -18,7 +18,6 @@ import { parseImportedCustomMetrics } from '@/utils/customMetricImport';
 import { buildSourceSchema, downloadJson, readFileAsText, safeFilename } from '@/utils/portableExport';
 import { PORTABLE_EXPORT_VERSION, type PortableCustomMetrics } from '@/types/portable';
 import { Activity, ChevronDown, ChevronRight, Play, Pause, X, Bot, Download } from 'lucide-vue-next';
-import { confirmAction } from '@/composables/useConfirm';
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -116,15 +115,12 @@ function exportCustomMetrics() {
   downloadJson(safeFilename(`metrics-${graphStore.currentContext?.title || 'context'}`), payload);
 }
 
-async function deleteCustomMetric(def: CustomMetricDefinition) {
-  const ok = await confirmAction({
-    title: `Delete custom metric “${def.name}”?`,
-    message: 'Its values leave the Data Table, the inspector and any label using it.',
-    confirmLabel: 'Delete',
-    danger: true,
-  });
-  if (!ok) return;
+function deleteCustomMetric(def: CustomMetricDefinition) {
+  // `addDefinition` re-persists and recomputes, which is exactly what undoing
+  // a delete should do; the definition lands at the end of the list, and
+  // nothing about a metric depends on its position.
   customMetricsStore.removeDefinition(def.id);
+  toast.undoable(`Metric “${def.name}” deleted`, () => customMetricsStore.addDefinition(def));
 }
 const selectedAlgorithm = ref<string | null>(null);
 const isComputing = ref(false);

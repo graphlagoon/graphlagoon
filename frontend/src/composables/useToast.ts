@@ -1,19 +1,31 @@
 import { ref } from 'vue';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface Toast {
   id: number;
   message: string;
   type: 'info' | 'success' | 'warning' | 'error';
   duration: number;
+  /** Optional button inside the toast, e.g. Undo. */
+  action?: ToastAction;
 }
 
 const toasts = ref<Toast[]>([]);
 let nextId = 0;
 
 export function useToast() {
-  function show(message: string, type: Toast['type'] = 'info', duration = 3000) {
+  function show(
+    message: string,
+    type: Toast['type'] = 'info',
+    duration = 3000,
+    action?: ToastAction,
+  ) {
     const id = nextId++;
-    toasts.value.push({ id, message, type, duration });
+    toasts.value.push({ id, message, type, duration, action });
 
     if (duration > 0) {
       setTimeout(() => {
@@ -47,10 +59,29 @@ export function useToast() {
     return show(message, 'error', duration);
   }
 
+  /**
+   * "Done — Undo" instead of "Are you sure?". For a change the app can put
+   * back itself, asking first costs every user a click to prevent a mistake
+   * few of them make; this costs nothing and still repairs the mistake.
+   * Longer-lived than a normal toast because it has to be read and acted on.
+   */
+  function undoable(message: string, onUndo: () => void, duration = 8000) {
+    let id = -1;
+    id = show(message, 'info', duration, {
+      label: 'Undo',
+      onClick: () => {
+        onUndo();
+        remove(id);
+      },
+    });
+    return id;
+  }
+
   return {
     toasts,
     show,
     remove,
+    undoable,
     info,
     success,
     warning,

@@ -8571,3 +8571,48 @@ impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 02:30] - UX: undo instead of "are you sure?" for client-side deletes
+
+The confirm dialog added earlier was the right call for deletes that hit the
+server. It was the wrong one for state the app holds itself: a label rule, a
+cluster, a custom metric. A confirmation charges every user a click on every
+deletion to prevent a mistake few of them make; an undo costs nothing and
+repairs the mistake that does happen.
+
+- `useToast` gained an optional `action` on a toast and an `undoable(message,
+  onUndo)` helper (8s, longer than a normal toast because it has to be read and
+  acted on). `ToastContainer` renders the action button; clicking it runs the
+  callback and dismisses, and `@click.stop` keeps the toast's own
+  dismiss-on-click from swallowing it.
+- Three deletes converted: label rule, cluster, custom metric.
+- **Restores keep position.** `restoreTextFormatRule(rule, index)` and
+  `restoreCluster(cluster, index)` splice the item back where it was rather
+  than appending — label rules are matched in order, so an undo that appended
+  would silently change which rule wins. Custom metrics go through
+  `addDefinition`, which re-persists and recomputes (both wanted) and whose
+  position carries no meaning.
+- The server-backed deletes (context, exploration, style preset, precomputed
+  graph, admin) keep their confirmation: undoing them means re-creating server
+  state.
+
+**Files modified:** `frontend/src/composables/useToast.ts`,
+`frontend/src/components/ToastContainer.vue`, `frontend/src/stores/graph.ts`,
+`frontend/src/stores/cluster.ts`, `frontend/src/components/TextFormatPanel.vue`,
+`frontend/src/components/ClusterListPanel.vue`,
+`frontend/src/components/MetricsPanel.vue`,
+`frontend/src/components/__tests__/MetricsPanel.custom.test.ts`,
+`frontend/e2e/tests/graph.spec.ts`.
+**Files created:** `frontend/src/composables/__tests__/useToast.undo.test.ts`.
+
+**Testing:** 2176 unit, 202 e2e (deleting a cluster shows no confirm dialog,
+drops the status-bar count, and Undo puts it back). Screenshotted the toast —
+which is how the message got fixed from the cluster's internal `cluster_class`
+("by-type") to the name the list actually shows ("Person Cluster").
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area
+impact (its deletes still confirm).
+
+**Author:** Claude (AI Assistant)
+
+---

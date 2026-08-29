@@ -326,6 +326,28 @@ test.describe('Graph Visualization', () => {
       await chip.click();
       await expect(page.getByTestId('clusters-results-pane')).toBeVisible();
     });
+
+    test('deleting a cluster is undoable instead of asking first', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTitle('Clusters', { exact: true }).click();
+      await page.getByRole('button', { name: 'Programs' }).click();
+      await page.getByTestId('cluster-program-run-default-group-by-node-type').click();
+      await page.getByTestId('clusters-tab-results').click();
+
+      const chip = page.getByTestId('graph-status-clusters');
+      await expect(chip).toBeVisible({ timeout: 15_000 });
+      const before = (await chip.textContent())!.trim();
+
+      // No confirmation for client-side state the app can put back.
+      await page.getByRole('button', { name: /^Delete cluster/ }).first().click();
+      await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
+      await expect(chip).not.toHaveText(before);
+
+      await page.getByTestId('toast-action-undo').click();
+      await expect(chip).toHaveText(before);
+    });
   });
 
   // ---------------------------------------------------------------------------

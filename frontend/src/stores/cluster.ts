@@ -523,6 +523,13 @@ export const useClusterStore = defineStore('cluster', () => {
     return false
   }
 
+  /** Put a deleted cluster back where it was (undo). */
+  function restoreCluster(cluster: Cluster, index: number): void {
+    const next = [...clusters.value]
+    next.splice(Math.max(0, Math.min(index, next.length)), 0, cluster)
+    clusters.value = next
+  }
+
   /**
    * Toggle a cluster's state (open <-> closed)
    */
@@ -1106,6 +1113,7 @@ return clusters;`,
     createCluster,
     updateCluster,
     deleteCluster,
+    restoreCluster,
     toggleClusterState,
     openCluster,
     closeCluster,
