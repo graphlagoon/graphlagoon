@@ -106,6 +106,44 @@ describe('WarehouseTablePicker', () => {
     expect((q(container, 'assign-node-prod.fraud.ring_nodes') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('refuses to make one table both roles', async () => {
+    // A row of the edge table is a relationship; a row of the node table is an
+    // entity. A single table of triples is the `nodeDisabled` case instead.
+    const { container, emitted } = mount({ edgeValue: 'prod.fraud.ring_edges' });
+
+    const nodeBtn = q(container, 'assign-node-prod.fraud.ring_edges') as HTMLButtonElement;
+    expect(nodeBtn.disabled).toBe(true);
+    expect(nodeBtn.title).toContain('cannot be both');
+
+    await fireEvent.click(nodeBtn);
+    expect(emitted()['update:nodeValue']).toBeUndefined();
+  });
+
+  it('refuses the same table typed in for the other role', async () => {
+    const { container, emitted } = mount({ edgeValue: 'prod.fraude.transacoes' });
+    await fireEvent.click(q(container, 'table-manual')!);
+    await fireEvent.update(
+      q(container, 'table-manual-role') as HTMLSelectElement,
+      'node',
+    );
+    await fireEvent.update(
+      q(container, 'table-manual-input') as HTMLInputElement,
+      'prod.fraude.transacoes',
+    );
+    await fireEvent.click(q(container, 'table-manual-use')!);
+
+    expect(emitted()['update:nodeValue']).toBeUndefined();
+    expect(q(container, 'table-manual-error')!.textContent).toContain('cannot be both');
+  });
+
+  it('says so when a saved context already names one table for both', () => {
+    const { container } = mount({
+      edgeValue: 'prod.fraud.ring_edges',
+      nodeValue: 'prod.fraud.ring_edges',
+    });
+    expect(q(container, 'table-same-table')!.textContent).toContain('cannot be both');
+  });
+
   it('still works against a backend that only returns the two guessed lists', () => {
     // Older API versions have no `tables` field; the union of the guesses is
     // the best available answer and must not leave the panel blank.

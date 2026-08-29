@@ -8796,3 +8796,41 @@ impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 05:45] - Fix: one table cannot be both the edge and the node table
+
+Removing the name-based restriction left a state the data model does not
+allow: the same table assigned to both roles. A row of the edge table is a
+relationship and a row of the node table is an entity; a single table of
+triples is the *nodeless* case (`No node table`), not one name written twice.
+
+Unlike the `%edge%`/`%node%` guess, this restriction is real, so the UI states
+it rather than hiding it:
+- the conflicting role button is disabled on that row, and its tooltip says
+  why ("Already the edge table — one table cannot be both");
+- `assign()` refuses the same pairing even if reached another way, and the
+  typed-name form rejects it with a message instead of silently accepting;
+- a context that already carries the same name for both — from an older save,
+  or set outside the picker — gets a warning naming the way out (`No node
+  table`), because rendering a form that cannot work is worse than saying so;
+- the submit button stays disabled, with a title that distinguishes "nothing
+  chosen" from "one table cannot be both".
+
+**Server side:** `GraphContextCreate` gained a validator whose message names
+the escape (`omit node_table_name`). `GraphContextUpdate` deliberately has
+none — it carries no table names at all, since they are fixed at creation. A
+first attempt added one there anyway; because those fields do not exist, the
+validator would have raised `AttributeError` on *every* context update. The
+test that now stands asserts the fields' absence instead.
+
+**Testing:** api `test_catalog_schemas.py` 20 passed (create rejects the
+duplicate and names the way out, a nodeless context and two distinct tables
+are fine, update carries no table names); 2190 unit (three new picker cases);
+205 e2e. Backend suite: 6 failures, all pre-existing.
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area
+impact (no new setting, table or mutating route).
+
+**Author:** Claude (AI Assistant)
+
+---
