@@ -1,0 +1,104 @@
+import { describe, it, expect } from 'vitest';
+import { render, fireEvent } from '@testing-library/vue';
+import WarehouseTablePicker from '@/components/WarehouseTablePicker.vue';
+
+const EDGE = [
+  'prod.fraud.ring_edges',
+  'prod.graph.people_edges',
+  'staging.graph.people_edges',
+];
+const NODE = [
+  'prod.fraud.ring_nodes',
+  'prod.graph.people_nodes',
+  'staging.graph.people_nodes',
+];
+
+function mount(props: Record<string, unknown> = {}) {
+  return render(WarehouseTablePicker, {
+    props: {
+      edgeTables: EDGE,
+      nodeTables: NODE,
+      edgeValue: '',
+      nodeValue: '',
+      ...props,
+    },
+  });
+}
+
+const q = (c: Element, id: string) => c.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+const rows = (c: Element) =>
+  Array.from(c.querySelectorAll('.wtp-table-name')).map((el) => el.textContent!.trim());
+
+describe('WarehouseTablePicker', () => {
+  it('browses one schema at a time and lists only its tables', async () => {
+    const { container } = mount();
+
+    // The first location is opened for you, so the panel is never blank.
+    expect(rows(container)).toEqual(['ring_edges', 'ring_nodes']);
+
+    await fireEvent.click(q(container, 'catalog-staging')!);
+    await fireEvent.click(q(container, 'schema-staging.graph')!);
+    expect(rows(container)).toEqual(['people_edges', 'people_nodes']);
+  });
+
+  it('searching spans every catalog and schema', async () => {
+    const { container } = mount();
+    await fireEvent.update(q(container, 'table-search') as HTMLInputElement, 'people_edges');
+
+    // Two catalogs hold a table of this name — the flat dropdown showed them
+    // as two near-identical long strings.
+    expect(rows(container).length).toBe(2);
+    expect(container.textContent).toContain('prod.graph');
+    expect(container.textContent).toContain('staging.graph');
+  });
+
+  it('assigns each role from the row, and clicking again clears it', async () => {
+    const { container, emitted } = mount();
+    await fireEvent.click(q(container, 'assign-edge-prod.fraud.ring_edges')!);
+    expect(emitted()['update:edgeValue']).toEqual([['prod.fraud.ring_edges']]);
+
+    const { container: c2, emitted: e2 } = mount({ edgeValue: 'prod.fraud.ring_edges' });
+    await fireEvent.click(q(c2, 'assign-edge-prod.fraud.ring_edges')!);
+    expect(e2()['update:edgeValue']).toEqual([['']]);
+  });
+
+  it('offers each table only for the roles the warehouse listed it under', () => {
+    const { container } = mount();
+    expect((q(container, 'assign-node-prod.fraud.ring_edges') as HTMLButtonElement).disabled).toBe(true);
+    expect((q(container, 'assign-edge-prod.fraud.ring_edges') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('shows the shared location once when both tables agree', () => {
+    const { container } = mount({
+      edgeValue: 'prod.fraud.ring_edges',
+      nodeValue: 'prod.fraud.ring_nodes',
+    });
+    expect(container.querySelector('.wtp-location')!.textContent).toBe('prod.fraud');
+    expect(q(container, 'table-schema-mismatch')).toBeNull();
+  });
+
+  it('warns when the pair straddles two schemas — invisible with two dropdowns', () => {
+    const { container } = mount({
+      edgeValue: 'prod.fraud.ring_edges',
+      nodeValue: 'staging.graph.people_nodes',
+    });
+    expect(q(container, 'table-schema-mismatch')).not.toBeNull();
+    expect(container.querySelector('.wtp-location')).toBeNull();
+  });
+
+  it('says nodes are derived, and refuses the role, for a triple store', () => {
+    const { container } = mount({ edgeValue: 'prod.fraud.ring_edges', nodeDisabled: true });
+    expect(container.textContent).toContain('derived from the edge endpoints');
+    expect((q(container, 'assign-node-prod.fraud.ring_nodes') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('accepts a table the warehouse never listed', async () => {
+    // Only names containing "edge"/"node" are listed, so `transacoes` is
+    // unreachable any other way.
+    const { container, emitted } = mount();
+    await fireEvent.click(q(container, 'table-manual')!);
+    await fireEvent.update(q(container, 'table-manual-input') as HTMLInputElement, ' prod.fraude.transacoes ');
+    await fireEvent.click(q(container, 'table-manual-use')!);
+    expect(emitted()['update:edgeValue']).toEqual([['prod.fraude.transacoes']]);
+  });
+});

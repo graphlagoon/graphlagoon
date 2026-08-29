@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import TableSelect from '@/components/TableSelect.vue';
+import WarehouseTablePicker from '@/components/WarehouseTablePicker.vue';
 import { useContextsStore } from '@/stores/contexts';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -229,7 +229,7 @@ async function fetchNodeTableSchema() {
  * The tables the chosen datasource requires are set.
  *
  * This used to ride on `required` on the two native `<select>`s: HTML5
- * constraint validation blocked submission for free. `TableSelect` is a button
+ * constraint validation blocked submission for free. The picker is a panel
  * with a menu, so the rule has to be stated here — otherwise the form would
  * happily POST an empty `edge_table_name`.
  */
@@ -555,26 +555,15 @@ async function submit() {
         <!-- Table selection: live selects in create mode, immutable text in edit mode -->
         <template v-if="mode === 'create'">
           <div class="form-group">
-            <label>Edge Table *</label>
-            <TableSelect
-              v-model="form.edge_table_name"
-              :tables="availableEdgeTables"
-              placeholder="Select edge table..."
-              testid="edge-table-select"
-              empty-hint="No edge tables available. Generate a graph first."
-            />
-            <span v-if="availableEdgeTables.length === 0" class="hint">No edge tables available. Generate a graph first.</span>
-          </div>
-
-          <div class="form-group">
-            <label>{{ form.noNodeTable ? 'Node Table' : 'Node Table *' }}</label>
-            <TableSelect
-              v-model="form.node_table_name"
-              :tables="availableNodeTables"
-              :disabled="form.noNodeTable"
-              placeholder="Select node table..."
-              testid="node-table-select"
-              empty-hint="No node tables available. Generate a graph first, or use the triple-store option below."
+            <label>Tables *</label>
+            <WarehouseTablePicker
+              :edge-tables="availableEdgeTables"
+              :node-tables="availableNodeTables"
+              :edge-value="form.edge_table_name"
+              :node-value="form.node_table_name"
+              :node-disabled="form.noNodeTable"
+              @update:edge-value="form.edge_table_name = $event"
+              @update:node-value="form.node_table_name = $event"
             />
             <label class="checkbox-label">
               <input
@@ -584,12 +573,6 @@ async function submit() {
               />
               No node table — derive nodes from edge endpoints (triple store)
             </label>
-            <span
-              v-if="availableNodeTables.length === 0 && !form.noNodeTable"
-              class="hint"
-              >No node tables available. Generate a graph first, or check the
-              option above for a triple-store-only table.</span
-            >
           </div>
         </template>
         <template v-else>

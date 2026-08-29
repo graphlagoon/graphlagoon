@@ -75,9 +75,9 @@ afterEach(() => {
  * used to render native `<select>`s; the picker is a button + menu so a 90-table
  * workspace can be filtered.
  */
-async function pickTable(container: Element, testid: string, table: string) {
-  await fireEvent.click(container.querySelector(`[data-testid="${testid}"]`)!)
-  await fireEvent.click(container.querySelector(`[data-testid="table-option-${table}"]`)!)
+async function pickTable(container: Element, role: 'edge' | 'node', table: string) {
+  // Roles are assigned on the table's own row in WarehouseTablePicker.
+  await fireEvent.click(container.querySelector(`[data-testid="assign-${role}-${table}"]`)!)
 }
 
 describe('datasource picker visibility', () => {
@@ -136,8 +136,7 @@ describe('form shape per datasource', () => {
     })
     await flush()
 
-    expect(container.querySelector('[data-testid="edge-table-select"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="node-table-select"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="warehouse-table-picker"]')).not.toBeNull()
   })
 
   it('collapses the table configuration for a native graph database', async () => {
@@ -242,8 +241,8 @@ describe('submitted payload', () => {
     ) as HTMLInputElement
     await fireEvent.update(title, 'Warehouse graph')
 
-    await pickTable(container, 'edge-table-select', 'db.edges')
-    await pickTable(container, 'node-table-select', 'db.nodes')
+    await pickTable(container, 'edge', 'db.edges')
+    await pickTable(container, 'node', 'db.nodes')
     await flush()
 
     await fireEvent.submit(container.querySelector('form')!)

@@ -100,9 +100,16 @@ On the **Contexts** page, click **Create Context**. The form asks for:
 - **Node Table** — the table with one row per entity, and which columns are
   the node id and node type
 
-The table dropdowns are populated from your warehouse, so you pick rather
-than type. Optional property columns you select here become available for
-filtering, labels, and the detail panel later.
+Both tables are picked in one panel, fed from your warehouse: browse
+catalog → schema on the left and mark a row **Edges** or **Nodes**, or search
+across every catalog when you already know the name. The panel shows the pair
+you have chosen, with their shared `catalog.schema` written once, and warns if
+the two end up in different schemas. A table your warehouse does not list
+(only names containing `edge` or `node` are listed) can be named directly
+with **Table not listed?**.
+
+Optional property columns you select here become available for filtering,
+labels, and the detail panel later.
 
 ![Contexts](/screenshots/index-contexts.png)
 

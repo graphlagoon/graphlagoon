@@ -322,11 +322,7 @@ const SCENES: Scene[] = [
       await page.getByTestId('create-context-btn').click();
       await expect(page.getByTestId('create-context-modal')).toBeVisible();
       await expect(page.getByTestId('no-node-table-checkbox')).toBeChecked();
-      await page
-        .getByTestId('create-context-modal')
-        .locator('select')
-        .first()
-        .selectOption('warehouse.graph.triples');
+      await page.getByTestId('assign-edge-warehouse.graph.triples').click();
       await page.getByPlaceholder('My Graph Context').fill('Supply-chain triples');
       await page.waitForTimeout(300);
     },

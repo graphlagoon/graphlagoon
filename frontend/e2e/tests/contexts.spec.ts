@@ -51,10 +51,12 @@ test.describe('Contexts', () => {
     await expect(page.getByTestId('create-context-modal')).toBeVisible();
     await expect(page.getByText('Create Graph Context')).toBeVisible();
 
-    // Core form labels are present (labels use "Title *", "Edge Table *", etc.)
     await expect(page.getByText('Title *')).toBeVisible();
-    await expect(page.getByText('Edge Table *')).toBeVisible();
-    await expect(page.getByText('Node Table *')).toBeVisible();
+    // The two tables are one control: the pair is picked together, and each
+    // role states whether it has been chosen.
+    await expect(page.getByText('Tables *')).toBeVisible();
+    await expect(page.getByTestId('picked-edge-table')).toContainText('not chosen');
+    await expect(page.getByTestId('picked-node-table')).toContainText('not chosen');
   });
 
   test('create context modal populates table dropdowns from API', async ({ authenticatedPage: page }) => {
@@ -63,15 +65,15 @@ test.describe('Contexts', () => {
     await expect(page.getByTestId('create-context-modal')).toBeVisible();
 
     // MOCK_DATASETS returns edge_tables: ['test_db.edges', 'test_db.relationships']
-    await page.getByTestId('edge-table-select').click();
-    await expect(page.getByTestId('table-option-test_db.edges')).toBeVisible();
-    // Grouped by catalog.schema, so the row itself carries only the table name.
-    await expect(page.getByTestId('table-option-test_db.edges')).toHaveText('edges');
+    // Tables are browsed in place, one schema at a time, and each row carries
+    // the role buttons — the pair is chosen together.
+    await expect(page.getByTestId('table-row-test_db.edges')).toBeVisible();
+    await expect(page.getByTestId('assign-edge-test_db.edges')).toBeEnabled();
 
-    // The filter is what makes a 90-table workspace usable.
-    await page.getByTestId('edge-table-select-search').fill('relation');
-    await expect(page.getByTestId('table-option-test_db.edges')).toHaveCount(0);
-    await expect(page.getByTestId('table-option-test_db.relationships')).toBeVisible();
+    // Search spans every catalog and schema.
+    await page.getByTestId('table-search').fill('relation');
+    await expect(page.getByTestId('table-row-test_db.edges')).toHaveCount(0);
+    await expect(page.getByTestId('table-row-test_db.relationships')).toBeVisible();
   });
 
   test('creates a nodeless (triple-store-only) context via the checkbox', async ({
@@ -108,8 +110,7 @@ test.describe('Contexts', () => {
     await expect(page.getByTestId('no-node-table-checkbox')).toBeChecked();
 
     await page.getByPlaceholder('My Graph Context').fill('Triple Store');
-    await page.getByTestId('edge-table-select').click();
-    await page.getByTestId('table-option-test_db.triples').click();
+    await page.getByTestId('assign-edge-test_db.triples').click();
 
     await page.getByTestId('create-context-submit').click();
     await expect(page.getByTestId('create-context-modal')).not.toBeVisible();
@@ -118,6 +119,26 @@ test.describe('Contexts', () => {
     expect(createdPayload!.edge_table_name).toBe('test_db.triples');
     expect(createdPayload!.node_table_name).toBeUndefined();
     expect(createdPayload!.node_properties).toBeUndefined();
+  });
+
+  test('an assigned role stays readable while the pointer rests on it', async ({
+    authenticatedPage: page,
+  }) => {
+    // `:hover:not(:disabled)` outranks `.on` on specificity, so the label of a
+    // just-clicked button was painted teal on teal and disappeared.
+    await page.goto('/contexts');
+    await page.getByTestId('create-context-btn').click();
+
+    const button = page.getByTestId('assign-edge-test_db.edges');
+    await button.click();
+    await button.hover();
+
+    const { color, background } = await button.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { color: style.color, background: style.backgroundColor };
+    });
+    expect(color).not.toBe(background);
+    await expect(button).toHaveText('Edges');
   });
 
   test('a table the listing does not carry can still be typed in', async ({
@@ -144,11 +165,10 @@ test.describe('Contexts', () => {
     await page.getByTestId('create-context-btn').click();
     await page.getByPlaceholder('My Graph Context').fill('Manual table');
 
-    await page.getByTestId('edge-table-select').click();
-    await page.getByTestId('edge-table-select-manual').click();
-    await page.getByTestId('edge-table-select-manual-input').fill('prod.fraude.transacoes');
-    await page.getByTestId('edge-table-select-manual-use').click();
-    await expect(page.getByTestId('edge-table-select')).toContainText('transacoes');
+    await page.getByTestId('table-manual').click();
+    await page.getByTestId('table-manual-input').fill('prod.fraude.transacoes');
+    await page.getByTestId('table-manual-use').click();
+    await expect(page.getByTestId('picked-edge-table')).toContainText('transacoes');
 
     await page.getByTestId('no-node-table-checkbox').check();
     await page.getByTestId('create-context-submit').click();

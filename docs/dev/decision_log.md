@@ -8661,3 +8661,58 @@ name the listing does not carry). Screenshotted with 90 tables.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 04:10] - UX: the edge/node tables are picked as a pair, in a panel
+
+Follow-up to the grouped dropdown from the previous entry — the dropdown was
+the wrong *control*, not just the wrong rendering.
+
+**Why a dropdown is wrong here.** It answers "which of these names do I want",
+which assumes you know the name. Someone meeting a workspace for the first time
+is browsing, and a popover that closes when you look away is the worst place to
+browse. And the two tables are a *pair*: choosing them in two separate controls
+means naming the catalog and schema twice, and nothing in the form notices when
+`prod.fraud.edges` gets married to `staging.graph.nodes`.
+
+**`WarehouseTablePicker`** replaces both dropdowns with one inline panel:
+- a **search** over every catalog and schema, for people who know the name;
+- a **catalog → schema tree** on the left (sticky catalog headers, table counts)
+  with the tables of the selected schema on the right, for people who do not;
+- **role buttons on the row** (`Edges` / `Nodes`), enabled only for the roles
+  the warehouse listed that table under, so the pair is assigned in one place
+  and clicking an assigned role clears it;
+- a **summary** naming the pair with their shared `catalog.schema` written once,
+  and an explicit warning when the two are in different schemas;
+- **"Table not listed?"** for a typed qualified name — the warehouse only lists
+  names containing `edge`/`node`, so this is the only route to a table called
+  `transacoes`. Relaxing that filter is now the top backlog item.
+
+**Rejected on the way**, both after building them and looking:
+- a **3-step wizard** — it forces a sequence on a task that is not sequential
+  (you may want to fix the mapping before naming the context) and hides the
+  shape of the whole form;
+- **collapsible sections** — they reorganise a form whose real problem was the
+  control, not the grouping.
+
+**A bug the screenshots caught:** an assigned role button rendered with no
+label. `:hover:not(:disabled)` (0,3,1) outranks `.wtp-role-btn.on` (0,2,0), so
+resting the pointer on the button you just clicked painted teal text on the
+teal background. `:not(.on)` on the hover rule fixes it; the e2e test asserts
+colour ≠ background while hovered.
+
+**Files created:** `frontend/src/components/WarehouseTablePicker.vue`,
+`frontend/src/components/__tests__/WarehouseTablePicker.test.ts`.
+**Files removed:** `TableSelect.vue` and its test (superseded after one commit).
+**Files modified:** `GraphContextFormModal.vue`, its two unit tests,
+`e2e/tests/contexts.spec.ts`, `e2e/screenshots/generate.ts`,
+`docs/guide/getting-started.md`.
+
+**Testing:** 2184 unit, 204 e2e; docs screenshots regenerated. Exercised with a
+90-table fixture across 3 catalogs × 5 schemas.
+
+**Public Docs:** `getting-started.md` describes the panel.
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
