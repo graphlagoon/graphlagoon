@@ -8472,3 +8472,32 @@ impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 01:05] - Fix: the status bar was dimmed by the graph overlays
+
+Screenshotted the states nobody looks at until they happen: a failed graph
+load, an empty result and the login page (down to 390px).
+
+The loading / error / empty overlays are `position: absolute; inset: 0` over
+the whole graph container at `z-index: 10`, and the status bar is unpositioned
+— so it painted *underneath* the translucent white backdrop. With an error on
+screen the node and edge counts and the whole bottom strip looked disabled,
+which is exactly the wrong message: the counts are still facts and the toolbar
+still works (the overlays are `pointer-events: none`). The status bar now sits
+at `z-index: 20`, the same level the graph toolbar was already given.
+
+**Checked and left alone:** the query-error modal (names the failure, shows the
+error code, offers "Copy Full Error"), the error and empty overlays themselves,
+and the login page at 390px.
+
+**Files modified:** `frontend/src/views/GraphVisualizationView.vue`.
+
+**Testing:** 2172 unit, 199 e2e; empty state re-screenshotted (counts now
+render at full contrast).
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area
+impact.
+
+**Author:** Claude (AI Assistant)
+
+---

@@ -72,6 +72,16 @@ click, confirmed by measuring the panel's rect.
 |---|---------|--------|
 | 24 | **No modal in the app closed on Escape** — all 30 `.modal-overlay` instances, across 28 components. The only ways out were the × and the backdrop. | **fixed**: one document-level listener (`useEscapeToCloseModals`, mounted in `App.vue`) dispatches a self-targeted click on the top-most overlay, which is exactly what every modal's `@click.self` close handler already listens for. Registered in the capture phase and stopping propagation, so a modal over the graph takes Escape instead of the canvas clearing the selection beneath it. `ConfirmDialog` keeps its own handler (it has a promise to resolve) |
 
+## 2f. Error, empty and login states
+
+| # | Finding | Status |
+|---|---------|--------|
+| 25 | The loading / error / empty overlays cover the whole graph container at `z-index: 10`, including the status bar (which is unpositioned, so it painted underneath). With an error on screen, "0 nodes 0 edges" and the bottom strip read as disabled. | **fixed**: the status bar is `position: relative; z-index: 20`, the same reason the graph toolbar already sat at 20 |
+
+Checked and found correct: the query-error modal (names the failure, carries
+the error code and a copy button), the graph-error and empty overlays, and the
+login page down to 390 px.
+
 ## 3. Remaining backlog, in order
 
 1. **Clusters results tab** (#3) — fold `ClusterListPanel` into a *Results* tab of the Clusters panel so "Clusters" is one place.
@@ -81,7 +91,7 @@ click, confirmed by measuring the panel's rect.
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
 #15–#17 (phone-width responsiveness of the list pages, modals and toolbar),
 #6 (save state as a control, rename in the list), #18–#21 (panel chrome found
-by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals).
+by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals), #25 (status bar dimmed by overlays).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 
