@@ -69,9 +69,9 @@ beforeEach(() => {
  * used to render native `<select>`s; the picker is a button + menu so a 90-table
  * workspace can be filtered.
  */
-async function pickTable(container: Element, testid: string, table: string) {
-  await fireEvent.click(container.querySelector(`[data-testid="${testid}"]`)!)
-  await fireEvent.click(container.querySelector(`[data-testid="table-option-${table}"]`)!)
+async function pickTable(container: Element, role: 'edge' | 'node', table: string) {
+  // Roles are assigned on the table's own row in WarehouseTablePicker.
+  await fireEvent.click(container.querySelector(`[data-testid="assign-${role}-${table}"]`)!)
 }
 
 describe('GraphContextFormModal', () => {
@@ -90,10 +90,10 @@ describe('GraphContextFormModal', () => {
 
       await fireEvent.update(titleInput(container), 'My Context')
 
-      await pickTable(container, 'edge-table-select', 'db.edges')
+      await pickTable(container, 'edge', 'db.edges')
       await flush()
 
-      await pickTable(container, 'node-table-select', 'db.nodes')
+      await pickTable(container, 'node', 'db.nodes')
       await flush()
 
       await fireEvent.click(getByTestId('create-context-submit'))
@@ -125,12 +125,12 @@ describe('GraphContextFormModal', () => {
       await flush()
 
       await fireEvent.update(titleInput(container), 'Triples')
-      await pickTable(container, 'edge-table-select', 'db.edges')
+      await pickTable(container, 'edge', 'db.edges')
       await flush()
 
       // First pick a node table, then check the box — the stale selection
       // must not leak into the payload.
-      await pickTable(container, 'node-table-select', 'db.nodes')
+      await pickTable(container, 'node', 'db.nodes')
       await flush()
       await fireEvent.click(getByTestId('no-node-table-checkbox'))
       await flush()
@@ -159,9 +159,9 @@ describe('GraphContextFormModal', () => {
 
       await fireEvent.update(titleInput(container), 'Typeless')
       const selects = () => container.querySelectorAll('select')
-      await pickTable(container, 'edge-table-select', 'db.edges')
+      await pickTable(container, 'edge', 'db.edges')
       await flush()
-      await pickTable(container, 'node-table-select', 'db.nodes')
+      await pickTable(container, 'node', 'db.nodes')
       await flush()
 
       // Column-mapping selects render once live schema is loaded. Pick None
@@ -214,8 +214,8 @@ describe('GraphContextFormModal', () => {
       // both are set (the native selects used to enforce this via HTML5
       // constraint validation; the picker is a button, so the form states it).
       expect((getByTestId('create-context-submit') as HTMLButtonElement).disabled).toBe(true)
-      await pickTable(container, 'edge-table-select', 'db.edges')
-      await pickTable(container, 'node-table-select', 'db.nodes')
+      await pickTable(container, 'edge', 'db.edges')
+      await pickTable(container, 'node', 'db.nodes')
       await flush()
       expect((getByTestId('create-context-submit') as HTMLButtonElement).disabled).toBe(false)
       await fireEvent.click(getByTestId('create-context-submit'))
