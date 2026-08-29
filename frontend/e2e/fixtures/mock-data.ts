@@ -42,6 +42,15 @@ export const MOCK_GRAPH_RESPONSE = {
 export const MOCK_DATASETS = {
   edge_tables: ['test_db.edges', 'test_db.relationships'],
   node_tables: ['test_db.nodes', 'test_db.entities'],
+  // Everything in scope, including a table whose name says nothing about the
+  // role it plays — the picker lets the user decide.
+  tables: [
+    'test_db.edges',
+    'test_db.entities',
+    'test_db.nodes',
+    'test_db.relationships',
+    'test_db.transacoes',
+  ],
 };
 
 export const MOCK_DEV_RANDOM_GRAPH = {

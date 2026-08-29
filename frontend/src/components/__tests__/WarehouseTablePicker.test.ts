@@ -16,6 +16,7 @@ const NODE = [
 function mount(props: Record<string, unknown> = {}) {
   return render(WarehouseTablePicker, {
     props: {
+      tables: [...EDGE, ...NODE],
       edgeTables: EDGE,
       nodeTables: NODE,
       edgeValue: '',
@@ -62,10 +63,23 @@ describe('WarehouseTablePicker', () => {
     expect(e2()['update:edgeValue']).toEqual([['']]);
   });
 
-  it('offers each table only for the roles the warehouse listed it under', () => {
+  it('lets any listed table take either role', () => {
+    // The warehouse's `%edge%`/`%node%` guess is a hint. Greying out a
+    // legitimate choice because of a naming convention is worse than asking.
     const { container } = mount();
-    expect((q(container, 'assign-node-prod.fraud.ring_edges') as HTMLButtonElement).disabled).toBe(true);
-    expect((q(container, 'assign-edge-prod.fraud.ring_edges') as HTMLButtonElement).disabled).toBe(false);
+    expect((q(container, 'assign-node-prod.fraud.ring_edges') as HTMLButtonElement).disabled).toBe(false);
+    expect((q(container, 'assign-edge-prod.fraud.ring_nodes') as HTMLButtonElement).disabled).toBe(false);
+    // The guess still shows, as a nudge on the matching role.
+    expect(q(container, 'assign-edge-prod.fraud.ring_edges')!.className).toContain('suggested');
+    expect(q(container, 'assign-node-prod.fraud.ring_edges')!.className).not.toContain('suggested');
+  });
+
+  it('lists a table the name-based guess says nothing about', () => {
+    const { container } = mount({
+      tables: [...EDGE, ...NODE, 'prod.fraude.transacoes'],
+    });
+    // It sits in its own schema, so switch to it first.
+    expect(container.querySelector('[data-testid="schema-prod.fraude"]')).not.toBeNull();
   });
 
   it('shows the shared location once when both tables agree', () => {

@@ -343,14 +343,20 @@ class WarehouseClient:
             raise RuntimeError(f"Invalid JSON response from warehouse: {e}") from e
 
     async def list_datasets(self) -> DatasetsResponse:
-        """List available edge and node tables.
+        """List the tables available for building a graph context.
 
-        In Databricks mode: searches configured catalog_schema_pairs.
-        In local mode: discovers all schemas dynamically via SHOW DATABASES.
+        In Databricks mode: the configured catalog_schema_pairs.
+        In local mode: every schema, discovered via SHOW DATABASES.
         Returns 3-part names: catalog.schema.table.
+
+        Every table in scope is returned in `tables`. `edge_tables` /
+        `node_tables` keep the historical name-based guess (`*edge*` /
+        `*node*`) for callers that rely on it, but a table named `transacoes`
+        is a perfectly good edge table and the caller decides.
         """
         edge_tables: list[str] = []
         node_tables: list[str] = []
+        tables: list[str] = []
 
         if self.databricks_mode:
             for catalog, schema in self.catalog_schema_pairs:
@@ -359,6 +365,7 @@ class WarehouseClient:
                     schema,
                     edge_tables,
                     node_tables,
+                    tables,
                 )
         else:
             # Discover all schemas dynamically in local Spark mode
@@ -369,11 +376,13 @@ class WarehouseClient:
                     schema,
                     edge_tables,
                     node_tables,
+                    tables,
                 )
 
         return DatasetsResponse(
             edge_tables=sorted(set(edge_tables)),
             node_tables=sorted(set(node_tables)),
+            tables=sorted(set(tables)),
         )
 
     async def _list_spark_schemas(self) -> list[str]:
@@ -396,14 +405,22 @@ class WarehouseClient:
         schema: str,
         edge_tables: list[str],
         node_tables: list[str],
+        tables: list[str],
     ) -> None:
-        """Search for edge/node tables in a Databricks catalog.schema."""
+        """List the tables of a Databricks catalog.schema.
+
+        The query used to end with
+        `AND (table_name LIKE '%edge%' OR table_name LIKE '%node%')`, which
+        meant a table called `transacoes` or `relationships` never reached the
+        UI at all — it could not be chosen, and nothing said why. Naming is not
+        a schema: every table in the configured scope is returned, and the
+        `%edge%`/`%node%` guess only pre-sorts them.
+        """
         query = f"""
             SELECT table_schema, table_name
             FROM {catalog}.information_schema.tables
             WHERE table_catalog = '{catalog.replace("`", "")}'
               AND table_schema = '{schema}'
-              AND (table_name LIKE '%edge%' OR table_name LIKE '%node%')
             ORDER BY table_schema, table_name
         """
         result = await self.execute_statement(statement=query)
@@ -417,6 +434,7 @@ class WarehouseClient:
                 table_name = row[1]
                 if s and table_name:
                     full_name = f"{catalog}.{s}.{table_name}"
+                    tables.append(full_name)
                     if "edge" in table_name:
                         edge_tables.append(full_name)
                     elif "node" in table_name:
@@ -430,8 +448,9 @@ class WarehouseClient:
         schema: str,
         edge_tables: list[str],
         node_tables: list[str],
+        tables: list[str],
     ) -> None:
-        """Search for edge/node tables in a local Spark schema."""
+        """List the tables of a local Spark schema (see the Databricks note)."""
         result = await self.execute_statement(
             statement=f"SHOW TABLES IN {schema}",
         )
@@ -446,6 +465,7 @@ class WarehouseClient:
                 table_name = row[1] if len(row) > 1 else row[0]
                 if table_name:
                     full_name = f"{catalog}.{s}.{table_name}"
+                    tables.append(full_name)
                     if "edge" in table_name:
                         edge_tables.append(full_name)
                     if "node" in table_name:

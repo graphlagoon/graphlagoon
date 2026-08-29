@@ -312,8 +312,18 @@ class StylePresetListResponse(BaseModel):
 
 
 class DatasetsResponse(BaseModel):
+    """Tables the warehouse offers for building a graph context.
+
+    `tables` is every table in the configured catalog/schema pairs. Which of
+    them is the edge table and which is the node table is the user's call, made
+    in the picker — the two lists below only carry the name-based guess
+    (`*edge*` / `*node*`) so existing callers keep working; nothing should
+    *restrict* a choice to them.
+    """
+
     edge_tables: list[str]
     node_tables: list[str]
+    tables: list[str] = []
 
 
 # Structural column configuration for edge and node tables

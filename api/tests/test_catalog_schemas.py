@@ -165,6 +165,14 @@ class TestListDatasetsSpark:
 
         result = await client.list_datasets()
 
+        # Every table in scope is offered — `other_table` used to be dropped
+        # by a `%edge%`/`%node%` filter and was unreachable from the UI.
+        assert result.tables == [
+            "spark_catalog.default.edges_test",
+            "spark_catalog.default.nodes_test",
+            "spark_catalog.default.other_table",
+        ]
+        # The name-based guess is kept, as a hint only.
         assert result.edge_tables == ["spark_catalog.default.edges_test"]
         assert result.node_tables == ["spark_catalog.default.nodes_test"]
 
@@ -231,6 +239,7 @@ class TestListDatasetsSpark:
         result = await client.list_datasets()
 
         assert result.edge_tables == ["spark_catalog.default.edges_x"]
+        assert result.tables == ["spark_catalog.default.edges_x"]
 
     @pytest.mark.asyncio
     async def test_empty_schema(self):
@@ -284,6 +293,49 @@ class TestListDatasetsDatabricks:
 
         assert result.edge_tables == ["prod.graphs.edges_main"]
         assert result.node_tables == ["prod.graphs.nodes_main"]
+        assert result.tables == ["prod.graphs.edges_main", "prod.graphs.nodes_main"]
+
+    @pytest.mark.asyncio
+    async def test_lists_tables_whose_names_say_nothing(self):
+        """A table called `transacoes` is a valid edge table.
+
+        The listing query used to filter on `table_name LIKE '%edge%' OR
+        '%node%'`, so anything named in another language, or after the business
+        entity rather than the graph role, never reached the UI — it could not
+        be chosen and nothing said why. The role is now the user's call.
+        """
+        from graphlagoon.services.warehouse import WarehouseClient
+
+        settings = Settings(
+            databricks_mode=True,
+            databricks_host="test.databricks.net",
+            databricks_token="tok",
+            databricks_warehouse_id="wh1",
+            databricks_catalog="prod",
+            databricks_schema="fraude",
+        )
+        client = WarehouseClient(settings=settings)
+
+        captured: dict[str, str] = {}
+
+        async def mock_execute(statement, **kwargs):
+            captured["statement"] = statement
+            return _make_statement_response(
+                [
+                    ["fraude", "transacoes"],
+                    ["fraude", "pessoas"],
+                ]
+            )
+
+        client.execute_statement = AsyncMock(side_effect=mock_execute)
+
+        result = await client.list_datasets()
+
+        assert result.tables == ["prod.fraude.pessoas", "prod.fraude.transacoes"]
+        # Nothing matched the old guess, and that is fine: it is only a hint.
+        assert result.edge_tables == []
+        assert result.node_tables == []
+        assert "LIKE" not in captured["statement"]
 
     @pytest.mark.asyncio
     async def test_multiple_catalog_schemas(self):
