@@ -8760,3 +8760,39 @@ route; `DatasetsResponse` gains a field on an existing GET).
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 05:20] - Fix: an empty warehouse must say what to do about it
+
+Reported as "now no table appears". Investigated before touching anything:
+
+- `SHOW TABLES` in every schema the local warehouse has (`default`, `fraud`,
+  `graphs`) returns **0 rows**, and `warehouse/spark-warehouse/{fraud,graphs}.db`
+  are empty directories dated hours before this work started.
+- The API process answering `/api/datasets` is the one started earlier in the
+  day — its response carries no `tables` field, so it is running the code from
+  *before* the listing change, and it also returns `{"edge_tables": [],
+  "node_tables": []}`.
+
+So the emptiness is the environment, not the change. What *was* mine: the
+picker rewrite dropped the old selects' actionable hint ("No edge tables
+available. Generate a graph first.") and left only a flat "the warehouse
+listed no tables" — a dead end where there used to be a next step.
+
+- `WarehouseTablePicker` takes an `emptyHint` and always follows it with the
+  escape hatch ("You can still name one directly below").
+- The modal supplies the hint that fits: in dev, generate a sample graph from
+  the DEV page; otherwise, the app is pointed at catalogs and schemas that hold
+  nothing (`GRAPH_LAGOON_CATALOG_SCHEMAS`).
+- The browse tree is hidden entirely when there is nothing to browse, instead
+  of rendering as an empty grey column.
+
+**Tests:** two new picker cases — an older backend that returns only the two
+guessed lists still fills the panel (no `tables` field), and the empty state
+names both the next step and the escape hatch. 2187 unit, 205 e2e.
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area
+impact.
+
+**Author:** Claude (AI Assistant)
+
+---

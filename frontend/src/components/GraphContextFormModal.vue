@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import WarehouseTablePicker from '@/components/WarehouseTablePicker.vue';
+import { usePersistence } from '@/composables/usePersistence';
 import { useContextsStore } from '@/stores/contexts';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -55,6 +56,7 @@ const emit = defineEmits<{
 }>();
 
 const contextsStore = useContextsStore();
+const { devMode } = usePersistence();
 
 function emptyForm() {
   return {
@@ -324,6 +326,17 @@ const availableTables = computed(() => {
   ].sort();
 });
 
+/**
+ * An empty warehouse is the most common first-run state, and "no tables"
+ * without a next step is a dead end. In dev the answer is the generator; in a
+ * real deployment it is almost always the configured scope.
+ */
+const emptyTablesHint = computed(() =>
+  devMode.value
+    ? 'The warehouse has no tables yet — generate a sample graph from the DEV page.'
+    : 'No tables in the catalogs and schemas this app is pointed at (GRAPH_LAGOON_CATALOG_SCHEMAS).',
+);
+
 const availableEdgeTables = computed(() => [...contextsStore.datasets.edge_tables].sort());
 const availableNodeTables = computed(() => [...contextsStore.datasets.node_tables].sort());
 
@@ -570,6 +583,7 @@ async function submit() {
             <label>Tables *</label>
             <WarehouseTablePicker
               :tables="availableTables"
+              :empty-hint="emptyTablesHint"
               :edge-tables="availableEdgeTables"
               :node-tables="availableNodeTables"
               :edge-value="form.edge_table_name"

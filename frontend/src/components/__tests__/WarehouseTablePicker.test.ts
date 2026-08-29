@@ -106,6 +106,27 @@ describe('WarehouseTablePicker', () => {
     expect((q(container, 'assign-node-prod.fraud.ring_nodes') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('still works against a backend that only returns the two guessed lists', () => {
+    // Older API versions have no `tables` field; the union of the guesses is
+    // the best available answer and must not leave the panel blank.
+    const { container } = mount({ tables: [] });
+    expect(rows(container).length).toBeGreaterThan(0);
+    expect(q(container, 'table-picker-empty')).toBeNull();
+  });
+
+  it('says what to do when the warehouse listed nothing at all', () => {
+    const { container } = mount({
+      tables: [],
+      edgeTables: [],
+      nodeTables: [],
+      emptyHint: 'The warehouse has no tables yet — generate a sample graph from the DEV page.',
+    });
+    const empty = q(container, 'table-picker-empty')!;
+    expect(empty.textContent).toContain('generate a sample graph');
+    // …and the way out is still offered.
+    expect(empty.textContent).toContain('name one directly');
+  });
+
   it('accepts a table the warehouse never listed', async () => {
     // Only names containing "edge"/"node" are listed, so `transacoes` is
     // unreachable any other way.

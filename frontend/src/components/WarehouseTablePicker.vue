@@ -30,8 +30,10 @@ const props = withDefaults(
     nodeValue: string;
     /** Triple store: nodes come from the edge endpoints, so no node table. */
     nodeDisabled?: boolean;
+    /** What to say — and what to do — when the warehouse listed nothing. */
+    emptyHint?: string;
   }>(),
-  { nodeDisabled: false },
+  { nodeDisabled: false, emptyHint: undefined },
 );
 
 const emit = defineEmits<{
@@ -240,7 +242,7 @@ const mismatched = computed(
 
     <div class="wtp-body">
       <!-- Browse: catalog › schema. Hidden while searching, which spans them all. -->
-      <nav v-if="!searching" class="wtp-tree" aria-label="Catalogs and schemas">
+      <nav v-if="!searching && entries.length > 0" class="wtp-tree" aria-label="Catalogs and schemas">
         <template v-for="catalog in catalogs" :key="catalog.name || '—'">
           <button
             v-if="catalog.name"
@@ -272,8 +274,9 @@ const mismatched = computed(
       <!-- Tables of the chosen schema (or the search hits), with the role
            buttons on the row so the pair is picked in one place. -->
       <div class="wtp-tables">
-        <p v-if="entries.length === 0" class="wtp-empty">
-          The warehouse listed no tables. Use “not listed” below to name one directly.
+        <p v-if="entries.length === 0" class="wtp-empty" data-testid="table-picker-empty">
+          {{ props.emptyHint ?? 'The warehouse returned no tables.' }}
+          You can still name one directly below.
         </p>
         <p v-else-if="results.length === 0" class="wtp-empty">
           Nothing matches “{{ search }}”.
