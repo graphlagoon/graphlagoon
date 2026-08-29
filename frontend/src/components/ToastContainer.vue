@@ -24,6 +24,14 @@ const { toasts, remove } = useToast();
             <XCircle v-else-if="toast.type === 'error'" :size="14" />
           </span>
           <span class="toast-message">{{ toast.message }}</span>
+          <button
+            v-if="toast.action"
+            class="toast-action"
+            :data-testid="`toast-action-${toast.action.label.toLowerCase()}`"
+            @click.stop="toast.action.onClick()"
+          >
+            {{ toast.action.label }}
+          </button>
         </div>
       </TransitionGroup>
     </div>
@@ -41,6 +49,20 @@ const { toasts, remove } = useToast();
   gap: var(--space-2);
   pointer-events: none;
 }
+
+.toast-action {
+  margin-left: var(--space-2);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+}
+.toast-action:hover { background: var(--color-bg-muted); }
+.toast-action:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .toast {
   display: flex;

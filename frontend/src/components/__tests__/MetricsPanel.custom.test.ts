@@ -126,11 +126,8 @@ describe('MetricsPanel — Custom tab', () => {
     await fireEvent.click(getByTestId('custom-metric-edit-a'));
     expect(getByTestId('editor-stub')).toBeTruthy();
 
-    // Delete asks for confirmation, then removes
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
-    await fireEvent.click(getByTestId('custom-metric-delete-a'));
-    expect(store.definitions).toHaveLength(2);
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    // Delete removes immediately and offers Undo (no confirmation): the
+    // definition is client state the panel can put straight back.
     await fireEvent.click(getByTestId('custom-metric-delete-a'));
     expect(store.definitions.map((d) => d.id)).toEqual(['b']);
     await nextTick();

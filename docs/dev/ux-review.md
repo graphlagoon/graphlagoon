@@ -66,6 +66,12 @@ and its filter popover, and node selection — clicking a node *does* open Node
 Details; an earlier screenshot that seemed to show otherwise was a mis-aimed
 click, confirmed by measuring the panel's rect.
 
+## 2g. Confirmation vs undo
+
+| # | Finding | Status |
+|---|---------|--------|
+| 27 | Every delete asked first, including client-side ones the app can put straight back — a label rule, a cluster, a custom metric. A confirmation taxes every deletion to prevent the rare mistake. | **fixed**: those three delete immediately and offer **Undo** in the toast (`useToast().undoable`, 8s). Restores keep position — label rules are matched in order, so appending on undo would silently change which rule wins. The server-backed deletes keep their confirmation |
+
 ## 2e. Keyboard
 
 | # | Finding | Status |
@@ -86,12 +92,12 @@ login page down to 390 px.
 ## 3. Remaining backlog, in order
 
 1. **Colour lint** (#14) — stylelint `color-no-hex` over `src/**/*.vue`, then remove the `var(--x, #ddd)` fallbacks file by file.
-2. **Undo for deletes** — now that confirmations are in-app, a toast with *Undo* is a better trade than a dialog for the cheap ones (a label rule, a cluster).
+2. **Undo for the rest** — the server-backed deletes (context, exploration, style preset, precomputed graph) still ask first, because undoing them means re-creating server state. Worth doing if the API grows a soft delete.
 
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
 #15–#17 (phone-width responsiveness of the list pages, modals and toolbar),
 #6 (save state as a control, rename in the list), #18–#21 (panel chrome found
-by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals), #25 (status bar dimmed by overlays), #3 (one Clusters surface), #26 (focus into modals).
+by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals), #25 (status bar dimmed by overlays), #3 (one Clusters surface), #26 (focus into modals), #27 (undo instead of confirm for client-side deletes).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 

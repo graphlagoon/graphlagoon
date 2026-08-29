@@ -2093,6 +2093,17 @@ export const useGraphStore = defineStore('graph', () => {
     textFormatRules.value = textFormatRules.value.filter(r => r.id !== ruleId);
   }
 
+  /**
+   * Put a removed rule back where it was, keeping its id — rules are matched
+   * in order, so an undo that appended it would silently change which rule
+   * wins.
+   */
+  function restoreTextFormatRule(rule: TextFormatRule, index: number) {
+    const next = [...textFormatRules.value];
+    next.splice(Math.max(0, Math.min(index, next.length)), 0, rule);
+    textFormatRules.value = next;
+  }
+
   function setTextFormatRuleEnabled(ruleId: string, enabled: boolean) {
     updateTextFormatRule(ruleId, { enabled });
   }
@@ -2826,6 +2837,7 @@ export const useGraphStore = defineStore('graph', () => {
     addTextFormatRule,
     updateTextFormatRule,
     removeTextFormatRule,
+    restoreTextFormatRule,
     setTextFormatRuleEnabled,
     updateTextFormatDefaults,
     reorderTextFormatRules,

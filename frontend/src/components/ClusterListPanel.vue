@@ -6,7 +6,7 @@ import type { Cluster } from '@/types/cluster'
 // the app (and read as "eye, eye-in-speech-bubble, wastebasket" to a screen
 // reader); lucide keeps the panel consistent with the rest.
 import { ChevronLeft, ChevronRight, Eye, EyeOff, Trash2 } from 'lucide-vue-next'
-import { confirmAction } from '@/composables/useConfirm';
+import { useToast } from '@/composables/useToast'
 
 /**
  * `embedded` renders the list without its own panel chrome, for use as the
@@ -16,6 +16,7 @@ import { confirmAction } from '@/composables/useConfirm';
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 
 const clusterStore = useClusterStore()
+const toast = useToast()
 
 const isCollapsed = ref(false)
 const filterClass = ref<string>('')
@@ -46,14 +47,14 @@ function toggleCluster(clusterId: string) {
   clusterStore.toggleClusterState(clusterId)
 }
 
-async function deleteCluster(clusterId: string) {
-  const ok = await confirmAction({
-    title: 'Delete this cluster?',
-    message: 'Its nodes are released back to the graph. This cannot be undone.',
-    confirmLabel: 'Delete',
-    danger: true,
-  })
-  if (ok) clusterStore.deleteCluster(clusterId)
+function deleteCluster(clusterId: string) {
+  const index = clusterStore.clusters.findIndex(c => c.cluster_id === clusterId)
+  const cluster = clusterStore.clusters[index]
+  if (!cluster) return
+  clusterStore.deleteCluster(clusterId)
+  toast.undoable(`“${cluster.cluster_name}” deleted`, () =>
+    clusterStore.restoreCluster(cluster, index),
+  )
 }
 
 function openAll() {
@@ -167,7 +168,7 @@ function getClusterColor(cluster: Cluster): string {
               </button>
               <button
                 class="btn-delete"
-                :aria-label="`Delete cluster ${cluster.cluster_class}`"
+                :aria-label="`Delete cluster ${cluster.cluster_name}`"
                 @click="deleteCluster(cluster.cluster_id)"
                 title="Delete cluster"
               >

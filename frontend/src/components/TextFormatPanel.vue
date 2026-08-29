@@ -230,13 +230,14 @@ import TextFormatHelpModal from './TextFormatHelpModal.vue';
 import LabelTemplateSkillModal from './LabelTemplateSkillModal.vue';
 import TemplatePreviewInline from './TemplatePreviewInline.vue';
 import { X, HelpCircle, Bot } from 'lucide-vue-next';
-import { confirmAction } from '@/composables/useConfirm';
+import { useToast } from '@/composables/useToast';
 
 const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
 const graphStore = useGraphStore();
+const toast = useToast();
 const metricsStore = useMetricsStore();
 
 // Help modal
@@ -542,14 +543,15 @@ function saveRule() {
   cancelEdit();
 }
 
-async function deleteRule(ruleId: string) {
-  const ok = await confirmAction({
-    title: 'Delete this label rule?',
-    message: 'Nodes it matched fall back to the default template.',
-    confirmLabel: 'Delete',
-    danger: true,
-  });
-  if (ok) graphStore.removeTextFormatRule(ruleId);
+function deleteRule(ruleId: string) {
+  // Undo beats a confirmation for something the app can put back itself: the
+  // rule is client-side state, and asking first taxes every deletion to
+  // prevent the rare mistake this repairs for free.
+  const index = graphStore.textFormatRules.findIndex((r) => r.id === ruleId);
+  const rule = graphStore.textFormatRules[index];
+  if (!rule) return;
+  graphStore.removeTextFormatRule(ruleId);
+  toast.undoable('Label rule deleted', () => graphStore.restoreTextFormatRule(rule, index));
 }
 </script>
 
