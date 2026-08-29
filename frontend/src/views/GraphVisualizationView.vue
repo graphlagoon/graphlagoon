@@ -1217,7 +1217,13 @@ watch(
 .status-chip:hover { text-decoration: underline; }
 .status-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 2px; }
 
+/* Above the loading / error / empty overlays (z-index 10): those cover the
+   whole graph container, and washing out the node and edge counts made the
+   whole bottom strip read as disabled. The graph toolbar already sits at 20
+   for the same reason. */
 .status-bar {
+  position: relative;
+  z-index: 20;
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
