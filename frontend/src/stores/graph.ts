@@ -2385,6 +2385,43 @@ export const useGraphStore = defineStore('graph', () => {
     };
   }
 
+  /**
+   * Fingerprint of the exploration state as it was last saved or loaded.
+   *
+   * `getExplorationState()` deliberately leaves nodes/edges empty (they are
+   * rebuilt from the query or the snapshot), so the object is small and
+   * stringifying it to compare is cheap — cheap enough to do inside a computed
+   * that only re-runs when one of the settings it reads actually changes.
+   */
+  const savedStateFingerprint = ref<string | null>(null);
+
+  function fingerprintExplorationState(): string {
+    try {
+      return JSON.stringify(getExplorationState());
+    } catch {
+      // Never let a serialisation problem break the toolbar: an empty
+      // fingerprint just means "cannot tell", handled as not-dirty below.
+      return '';
+    }
+  }
+
+  function markExplorationSaved() {
+    savedStateFingerprint.value = fingerprintExplorationState();
+  }
+
+  /**
+   * True when the open exploration has been changed since it was saved or
+   * loaded. Without this the toolbar showed the exploration's name whether or
+   * not the view still matched it, so a user could re-style, re-filter and
+   * re-query for an hour and be told nothing.
+   */
+  const isExplorationDirty = computed(() => {
+    if (!currentExploration.value) return false;
+    const saved = savedStateFingerprint.value;
+    if (!saved) return false;
+    return fingerprintExplorationState() !== saved;
+  });
+
   async function saveExploration(title: string): Promise<{ success: boolean; error?: string }> {
     if (!currentContext.value) return { success: false, error: 'No context selected' };
 
@@ -2419,6 +2456,7 @@ export const useGraphStore = defineStore('graph', () => {
           { title, state, snapshot }
         );
       }
+      markExplorationSaved();
       return { success: true };
     } catch (e: unknown) {
       const errorMessage = getErrorMessage(e, 'Failed to save exploration');
@@ -2580,6 +2618,9 @@ export const useGraphStore = defineStore('graph', () => {
       // Clear selections after loading
       selectedNodeIds.value.clear();
       selectedEdgeIds.value.clear();
+      // Baseline for the dirty marker: everything the exploration carries has
+      // been applied by now, so what we read here is "as saved".
+      markExplorationSaved();
     } catch (e: unknown) {
       const errorMessage = e instanceof Error ? e.message : 'Failed to load exploration';
       error.value = errorMessage;
@@ -2593,6 +2634,7 @@ export const useGraphStore = defineStore('graph', () => {
     edges.value = [];
     currentContext.value = null;
     currentExploration.value = null;
+    savedStateFingerprint.value = null;
     currentPrecomputedGraph.value = null;
     currentStylePreset.value = null;
     stylePresetError.value = null;
@@ -2638,6 +2680,7 @@ export const useGraphStore = defineStore('graph', () => {
     edges,
     currentContext,
     currentExploration,
+    isExplorationDirty,
     currentPrecomputedGraph,
     currentStylePreset,
     stylePresetError,
@@ -2775,6 +2818,7 @@ export const useGraphStore = defineStore('graph', () => {
     toggleNodePinned,
     getExplorationState,
     saveExploration,
+    markExplorationSaved,
     loadExploration,
     clear,
 

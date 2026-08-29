@@ -158,11 +158,23 @@ function handleExportPng(options: ExportPNGOptions) {
         <button
           v-if="graphStore.currentExploration"
           class="exploration-state exploration-name"
+          :class="{ dirty: graphStore.isExplorationDirty }"
           data-testid="toolbar-exploration-name"
-          :title="`Saved as “${graphStore.currentExploration.title}” — click to update it`"
+          :title="graphStore.isExplorationDirty
+            ? `“${graphStore.currentExploration.title}” has unsaved changes — click to save them`
+            : `Saved as “${graphStore.currentExploration.title}” — click to update it`"
           @click="openSaveModal"
         >
           {{ graphStore.currentExploration.title }}
+          <!-- A dot, not the word "modified": it sits in a dense bar and the
+               tooltip carries the sentence. -->
+          <span
+            v-if="graphStore.isExplorationDirty"
+            class="dirty-dot"
+            data-testid="toolbar-exploration-dirty"
+            aria-hidden="true"
+          >●</span>
+          <span v-if="graphStore.isExplorationDirty" class="sr-only">has unsaved changes</span>
         </button>
         <button
           v-else
@@ -565,6 +577,27 @@ function handleExportPng(options: ExportPNGOptions) {
   font-size: var(--text-base);
   color: var(--color-warning);
   font-style: italic;
+}
+
+.exploration-state.dirty { color: var(--color-warning); }
+
+.dirty-dot {
+  margin-left: 4px;
+  font-size: 9px;
+  vertical-align: middle;
+  color: var(--color-warning);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .exploration-state {
