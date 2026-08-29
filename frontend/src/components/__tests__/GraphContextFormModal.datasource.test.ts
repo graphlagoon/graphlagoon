@@ -70,6 +70,16 @@ afterEach(() => {
   delete (window as any).__GRAPH_LAGOON_CONFIG__
 })
 
+/**
+ * Pick a table through `TableSelect` (open the menu, click the row). The form
+ * used to render native `<select>`s; the picker is a button + menu so a 90-table
+ * workspace can be filtered.
+ */
+async function pickTable(container: Element, testid: string, table: string) {
+  await fireEvent.click(container.querySelector(`[data-testid="${testid}"]`)!)
+  await fireEvent.click(container.querySelector(`[data-testid="table-option-${table}"]`)!)
+}
+
 describe('datasource picker visibility', () => {
   it('is hidden when the server serves only one datasource', async () => {
     ;(window as any).__GRAPH_LAGOON_CONFIG__ = {
@@ -126,7 +136,8 @@ describe('form shape per datasource', () => {
     })
     await flush()
 
-    expect(container.querySelectorAll('select').length).toBeGreaterThan(0)
+    expect(container.querySelector('[data-testid="edge-table-select"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="node-table-select"]')).not.toBeNull()
   })
 
   it('collapses the table configuration for a native graph database', async () => {
@@ -231,9 +242,8 @@ describe('submitted payload', () => {
     ) as HTMLInputElement
     await fireEvent.update(title, 'Warehouse graph')
 
-    const selects = container.querySelectorAll('select')
-    await fireEvent.update(selects[0] as HTMLSelectElement, 'db.edges')
-    await fireEvent.update(selects[1] as HTMLSelectElement, 'db.nodes')
+    await pickTable(container, 'edge-table-select', 'db.edges')
+    await pickTable(container, 'node-table-select', 'db.nodes')
     await flush()
 
     await fireEvent.submit(container.querySelector('form')!)

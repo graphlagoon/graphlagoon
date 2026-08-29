@@ -64,6 +64,16 @@ beforeEach(() => {
   })
 })
 
+/**
+ * Pick a table through `TableSelect` (open the menu, click the row). The form
+ * used to render native `<select>`s; the picker is a button + menu so a 90-table
+ * workspace can be filtered.
+ */
+async function pickTable(container: Element, testid: string, table: string) {
+  await fireEvent.click(container.querySelector(`[data-testid="${testid}"]`)!)
+  await fireEvent.click(container.querySelector(`[data-testid="table-option-${table}"]`)!)
+}
+
 describe('GraphContextFormModal', () => {
   describe('create mode', () => {
     it('fetches datasets when opened', async () => {
@@ -80,12 +90,10 @@ describe('GraphContextFormModal', () => {
 
       await fireEvent.update(titleInput(container), 'My Context')
 
-      const edgeSelect = container.querySelectorAll('select')[0] as HTMLSelectElement
-      await fireEvent.update(edgeSelect, 'db.edges')
+      await pickTable(container, 'edge-table-select', 'db.edges')
       await flush()
 
-      const nodeSelect = container.querySelectorAll('select')[1] as HTMLSelectElement
-      await fireEvent.update(nodeSelect, 'db.nodes')
+      await pickTable(container, 'node-table-select', 'db.nodes')
       await flush()
 
       await fireEvent.click(getByTestId('create-context-submit'))
@@ -117,14 +125,12 @@ describe('GraphContextFormModal', () => {
       await flush()
 
       await fireEvent.update(titleInput(container), 'Triples')
-      const edgeSelect = container.querySelectorAll('select')[0] as HTMLSelectElement
-      await fireEvent.update(edgeSelect, 'db.edges')
+      await pickTable(container, 'edge-table-select', 'db.edges')
       await flush()
 
       // First pick a node table, then check the box — the stale selection
       // must not leak into the payload.
-      const nodeSelect = container.querySelectorAll('select')[1] as HTMLSelectElement
-      await fireEvent.update(nodeSelect, 'db.nodes')
+      await pickTable(container, 'node-table-select', 'db.nodes')
       await flush()
       await fireEvent.click(getByTestId('no-node-table-checkbox'))
       await flush()
@@ -153,17 +159,18 @@ describe('GraphContextFormModal', () => {
 
       await fireEvent.update(titleInput(container), 'Typeless')
       const selects = () => container.querySelectorAll('select')
-      await fireEvent.update(selects()[0] as HTMLSelectElement, 'db.edges')
+      await pickTable(container, 'edge-table-select', 'db.edges')
       await flush()
-      await fireEvent.update(selects()[1] as HTMLSelectElement, 'db.nodes')
+      await pickTable(container, 'node-table-select', 'db.nodes')
       await flush()
 
       // Column-mapping selects render once live schema is loaded. Pick None
       // for both type columns. Order: edge src, dst, rel type, edge id, then
-      // node id, node type.
-      const relTypeSelect = selects()[4] as HTMLSelectElement
+      // node id, node type. (The table pickers are no longer <select>s, so
+      // these indices count only the column-mapping ones.)
+      const relTypeSelect = selects()[2] as HTMLSelectElement
       await fireEvent.update(relTypeSelect, '')
-      const nodeTypeSelect = selects()[7] as HTMLSelectElement
+      const nodeTypeSelect = selects()[5] as HTMLSelectElement
       await fireEvent.update(nodeTypeSelect, '')
       await flush()
 
@@ -203,11 +210,14 @@ describe('GraphContextFormModal', () => {
       const { getByTestId, container, emitted } = renderModal({ open: true, mode: 'create' })
       await flush()
       await fireEvent.update(titleInput(container), 'X')
-      // Edge/Node Table are required selects — HTML5 constraint validation
-      // silently blocks form submission (no submit event at all) without them.
-      await fireEvent.update(container.querySelectorAll('select')[0] as HTMLSelectElement, 'db.edges')
-      await fireEvent.update(container.querySelectorAll('select')[1] as HTMLSelectElement, 'db.nodes')
+      // Edge/Node Table are required: the submit button stays disabled until
+      // both are set (the native selects used to enforce this via HTML5
+      // constraint validation; the picker is a button, so the form states it).
+      expect((getByTestId('create-context-submit') as HTMLButtonElement).disabled).toBe(true)
+      await pickTable(container, 'edge-table-select', 'db.edges')
+      await pickTable(container, 'node-table-select', 'db.nodes')
       await flush()
+      expect((getByTestId('create-context-submit') as HTMLButtonElement).disabled).toBe(false)
       await fireEvent.click(getByTestId('create-context-submit'))
       await flush()
 
