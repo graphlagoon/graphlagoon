@@ -4,12 +4,16 @@ import { useRoute } from 'vue-router';
 import { computed } from 'vue';
 import ToastContainer from '@/components/ToastContainer.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import { useEscapeToCloseModals } from '@/composables/useEscapeToCloseModals';
 import Toolbar from '@/components/Toolbar.vue';
 
 const route = useRoute();
 
 // Don't show toolbar on login page
 const showToolbar = computed(() => route.name !== 'login');
+
+// One listener for every modal in the app — see the composable for why.
+useEscapeToCloseModals();
 </script>
 
 <template>

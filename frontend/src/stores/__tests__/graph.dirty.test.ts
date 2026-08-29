@@ -9,7 +9,9 @@ import type { Exploration } from '@/types/graph';
  * nothing. `isExplorationDirty` is what makes the marker possible.
  */
 describe('graph store — exploration dirty state', () => {
-  beforeEach(() => setActivePinia(createPinia()));
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
 
   function openSavedExploration() {
     const store = useGraphStore();
