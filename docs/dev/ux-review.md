@@ -94,7 +94,7 @@ login page down to 390 px.
 | # | Finding | Status |
 |---|---------|--------|
 | 28 | The edge and node tables were two independent `<select>`s over flat `catalog.schema.table` strings. Reproduced with 90 tables across 3 catalogs × 5 schemas: every option repeats the qualified prefix, the distinguishing part is last, and the browser's type-ahead matches the catalog every option shares. Worse than the reading problem: the two tables are **a pair**, so you name the catalog and schema twice and nothing notices when they end up in different ones. | **fixed**: `WarehouseTablePicker` — one inline panel with a global search, a catalog → schema tree, and the role buttons (**Edges** / **Nodes**) on the table row itself, so the pair is chosen in one place. The chosen pair is summarised with the shared `catalog.schema` shown once, and a mismatch is called out |
-| 29 | The warehouse only lists tables whose name contains `edge` or `node` (`_list_datasets_databricks`), so a table called `transacoes` is unreachable from the form. | **worked around**: the panel accepts a typed qualified name. The listing filter itself is still to fix — see the backlog |
+| 29 | The warehouse only listed tables whose name contained `edge` or `node`, and the picker then *disabled* the role buttons for anything outside those lists. A naming convention was deciding what a user is allowed to choose, silently. | **fixed at the root**: the listing query dropped its `LIKE '%edge%' OR '%node%'` clause and returns every table in the configured scope as `tables`; the two old lists remain as hints and now only *highlight* the matching role. Any listed table can take either role |
 | 30 | An assigned role button lost its label under the pointer: `:hover:not(:disabled)` outranks `.wtp-role-btn.on` on specificity, so it painted teal text on the teal background. | **fixed** (`:not(.on)` on the hover rule), with a test asserting colour ≠ background while hovered |
 
 Two designs were tried and rejected on the way: a **wizard** (it forces a
@@ -104,12 +104,8 @@ the control, not the grouping).
 
 ## 3. Remaining backlog, in order
 
-1. **Relax the dataset listing** (#29) — `%edge%`/`%node%` in
-   `_list_datasets_databricks` decides what the picker can show at all. Listing
-   every table in the configured `catalog_schema_pairs` and letting the user
-   assign the role (which the picker now does anyway) removes the guesswork.
-2. **Colour lint** (#14) — stylelint `color-no-hex` over `src/**/*.vue`, then remove the `var(--x, #ddd)` fallbacks file by file.
-3. **Undo for the rest** — the server-backed deletes (context, exploration, style preset, precomputed graph) still ask first, because undoing them means re-creating server state. Worth doing if the API grows a soft delete.
+1. **Colour lint** (#14) — stylelint `color-no-hex` over `src/**/*.vue`, then remove the `var(--x, #ddd)` fallbacks file by file.
+2. **Undo for the rest** — the server-backed deletes (context, exploration, style preset, precomputed graph) still ask first, because undoing them means re-creating server state. Worth doing if the API grows a soft delete.
 
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
 #15–#17 (phone-width responsiveness of the list pages, modals and toolbar),

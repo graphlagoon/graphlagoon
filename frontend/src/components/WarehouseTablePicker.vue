@@ -21,6 +21,9 @@ import { ChevronRight, Search, X, AlertTriangle } from 'lucide-vue-next';
  */
 const props = withDefaults(
   defineProps<{
+    /** Every table in scope. The warehouse does not decide the roles. */
+    tables: string[];
+    /** Name-based guesses (`*edge*` / `*node*`), used only to order rows. */
     edgeTables: string[];
     nodeTables: string[];
     edgeValue: string;
@@ -43,8 +46,8 @@ interface TableEntry {
   catalog: string;
   schema: string;
   name: string;
-  canBeEdge: boolean;
-  canBeNode: boolean;
+  /** The warehouse's name-based guess. A hint in the UI, never a rule. */
+  suggests?: Role;
 }
 
 function parse(full: string) {
@@ -56,26 +59,26 @@ function parse(full: string) {
   return { catalog: '', schema: '', name: full };
 }
 
-/** One row per table, carrying which roles the warehouse offers it for. */
+/**
+ * One row per table in scope.
+ *
+ * Roles are NOT restricted by the name: the warehouse's `%edge%`/`%node%`
+ * guess said nothing about a table called `transacoes`, and a UI that greys
+ * out a legitimate choice because of a naming convention is worse than one
+ * that simply asks.
+ */
 const entries = computed<TableEntry[]>(() => {
-  const byFull = new Map<string, TableEntry>();
-  const add = (full: string, role: Role) => {
-    const existing = byFull.get(full);
-    if (existing) {
-      if (role === 'edge') existing.canBeEdge = true;
-      else existing.canBeNode = true;
-      return;
-    }
-    byFull.set(full, {
-      full,
-      ...parse(full),
-      canBeEdge: role === 'edge',
-      canBeNode: role === 'node',
-    });
-  };
-  props.edgeTables.forEach((t) => add(t, 'edge'));
-  props.nodeTables.forEach((t) => add(t, 'node'));
-  return Array.from(byFull.values()).sort((a, b) => a.full.localeCompare(b.full));
+  const suggestion = new Map<string, Role>();
+  props.edgeTables.forEach((t) => suggestion.set(t, 'edge'));
+  props.nodeTables.forEach((t) => suggestion.set(t, suggestion.get(t) ?? 'node'));
+
+  const all = props.tables.length
+    ? props.tables
+    : [...new Set([...props.edgeTables, ...props.nodeTables])];
+
+  return all
+    .map((full) => ({ full, ...parse(full), suggests: suggestion.get(full) }))
+    .sort((a, b) => a.full.localeCompare(b.full));
 });
 
 /** `catalog.schema` → its tables, for the browse tree. */
@@ -289,9 +292,8 @@ const mismatched = computed(
             <button
               type="button"
               class="wtp-role-btn"
-              :class="{ on: edgeValue === entry.full }"
-              :disabled="!entry.canBeEdge"
-              :title="entry.canBeEdge ? 'Use as the edge table' : 'The warehouse does not list this as an edge table'"
+              :class="{ on: edgeValue === entry.full, suggested: entry.suggests === 'edge' }"
+              title="Use as the edge table"
               :data-testid="`assign-edge-${entry.full}`"
               @click="assign(entry, 'edge')"
             >
@@ -300,11 +302,11 @@ const mismatched = computed(
             <button
               type="button"
               class="wtp-role-btn"
-              :class="{ on: nodeValue === entry.full }"
-              :disabled="!entry.canBeNode || nodeDisabled"
+              :class="{ on: nodeValue === entry.full, suggested: entry.suggests === 'node' }"
+              :disabled="nodeDisabled"
               :title="nodeDisabled
                 ? 'This context derives nodes from the edge endpoints'
-                : entry.canBeNode ? 'Use as the node table' : 'The warehouse does not list this as a node table'"
+                : 'Use as the node table'"
               :data-testid="`assign-node-${entry.full}`"
               @click="assign(entry, 'node')"
             >
@@ -535,6 +537,11 @@ const mismatched = computed(
    painted teal text on the teal background and the label vanished. */
 .wtp-role-btn:hover:not(:disabled):not(.on) {
   border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+/* The name-based guess shows as a nudge, never as a restriction. */
+.wtp-role-btn.suggested:not(.on) {
+  border-color: var(--color-primary-subtle);
   color: var(--color-primary);
 }
 .wtp-role-btn.on {

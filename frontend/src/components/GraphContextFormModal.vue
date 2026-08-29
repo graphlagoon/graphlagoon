@@ -312,6 +312,18 @@ async function discoverTypes() {
   }
 }
 
+/**
+ * Every table the warehouse offers. Older backends only returned the
+ * name-matched lists, so fall back to their union.
+ */
+const availableTables = computed(() => {
+  const all = contextsStore.datasets.tables ?? [];
+  if (all.length) return [...all].sort();
+  return [
+    ...new Set([...contextsStore.datasets.edge_tables, ...contextsStore.datasets.node_tables]),
+  ].sort();
+});
+
 const availableEdgeTables = computed(() => [...contextsStore.datasets.edge_tables].sort());
 const availableNodeTables = computed(() => [...contextsStore.datasets.node_tables].sort());
 
@@ -557,6 +569,7 @@ async function submit() {
           <div class="form-group">
             <label>Tables *</label>
             <WarehouseTablePicker
+              :tables="availableTables"
               :edge-tables="availableEdgeTables"
               :node-tables="availableNodeTables"
               :edge-value="form.edge_table_name"

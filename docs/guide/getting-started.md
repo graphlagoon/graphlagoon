@@ -104,9 +104,10 @@ Both tables are picked in one panel, fed from your warehouse: browse
 catalog → schema on the left and mark a row **Edges** or **Nodes**, or search
 across every catalog when you already know the name. The panel shows the pair
 you have chosen, with their shared `catalog.schema` written once, and warns if
-the two end up in different schemas. A table your warehouse does not list
-(only names containing `edge` or `node` are listed) can be named directly
-with **Table not listed?**.
+the two end up in different schemas. Any table in the configured catalogs and schemas can take either role — a
+table called `transacoes` is a perfectly good edge table, and names matching
+`edge`/`node` are only highlighted as a suggestion. A table outside the
+configured scope can be named directly with **Table not listed?**.
 
 Optional property columns you select here become available for filtering,
 labels, and the detail panel later.

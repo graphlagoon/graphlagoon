@@ -6,7 +6,7 @@ import { getErrorMessage } from '@/utils/errorMessage';
 
 export const useContextsStore = defineStore('contexts', () => {
   const contexts = ref<GraphContext[]>([]);
-  const datasets = ref<DatasetsResponse>({ edge_tables: [], node_tables: [] });
+  const datasets = ref<DatasetsResponse>({ edge_tables: [], node_tables: [], tables: [] });
   const loading = ref(false);
   const error = ref<string | null>(null);
 

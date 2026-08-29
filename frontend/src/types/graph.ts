@@ -506,8 +506,11 @@ export interface Exploration {
 }
 
 export interface DatasetsResponse {
+  /** Name-based guesses (`*edge*` / `*node*`) — hints, never restrictions. */
   edge_tables: string[];
   node_tables: string[];
+  /** Every table in the configured scope; the role is the user's choice. */
+  tables?: string[];
 }
 
 // Query Template types

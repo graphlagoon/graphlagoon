@@ -141,6 +141,41 @@ test.describe('Contexts', () => {
     await expect(button).toHaveText('Edges');
   });
 
+  test('a table whose name says nothing can still be the edge table', async ({
+    authenticatedPage: page,
+  }) => {
+    // The listing used to filter on `%edge%`/`%node%`, so `transacoes` never
+    // appeared; then the UI greyed out its role buttons. Both are gone.
+    let createdPayload: Record<string, unknown> | null = null;
+    await page.route('**/graphlagoon/api/graph-contexts', (route) => {
+      if (route.request().method() === 'POST') {
+        createdPayload = JSON.parse(route.request().postData() || '{}');
+        route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify({ id: 'ctx-transacoes', ...createdPayload }),
+        });
+      } else {
+        route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      }
+    });
+
+    await page.goto('/contexts');
+    await page.getByTestId('create-context-btn').click();
+    await page.getByPlaceholder('My Graph Context').fill('Transações');
+
+    const edgeButton = page.getByTestId('assign-edge-test_db.transacoes');
+    await expect(edgeButton).toBeEnabled();
+    await edgeButton.click();
+    await expect(page.getByTestId('picked-edge-table')).toContainText('transacoes');
+
+    await page.getByTestId('no-node-table-checkbox').check();
+    await page.getByTestId('create-context-submit').click();
+
+    await expect(page.getByTestId('create-context-modal')).not.toBeVisible();
+    expect(createdPayload!.edge_table_name).toBe('test_db.transacoes');
+  });
+
   test('a table the listing does not carry can still be typed in', async ({
     authenticatedPage: page,
   }) => {

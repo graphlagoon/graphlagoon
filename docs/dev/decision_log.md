@@ -8716,3 +8716,47 @@ colour ≠ background while hovered.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 04:50] - Fix: a naming convention was deciding which tables you may pick
+
+Two layers of the same mistake, both removed.
+
+**Backend.** `_list_datasets_databricks` ended its query with
+`AND (table_name LIKE '%edge%' OR table_name LIKE '%node%')`. A table called
+`transacoes`, `pessoas` or `relationships` therefore never reached the UI at
+all — it could not be chosen, and nothing said why. `DatasetsResponse` now
+carries `tables`: every table in the configured `catalog_schema_pairs`. The
+`edge_tables` / `node_tables` lists stay, unchanged in meaning, for callers
+that use them — but they are a **guess**, not a permission.
+
+**Frontend.** The picker then greyed out the role buttons for any table missing
+from the matching list, so the heuristic became a rule the user could see but
+not argue with. Every listed table can now take either role; the guess only
+tints the suggested one. `availableTables` falls back to the union of the two
+old lists, so an older backend still works.
+
+The pre-check that offers the triple-store option when a warehouse has no
+`%node%` tables deliberately still reads the name-based list: "no table looks
+like a node table" is exactly the signal it wants.
+
+**Files modified:** `api/graphlagoon/models/schemas.py`,
+`api/graphlagoon/services/warehouse.py`, `api/tests/test_catalog_schemas.py`,
+`frontend/src/types/graph.ts`, `frontend/src/stores/contexts.ts`,
+`frontend/src/components/WarehouseTablePicker.vue`,
+`frontend/src/components/GraphContextFormModal.vue`, its picker test,
+`frontend/e2e/fixtures/mock-data.ts`, `frontend/e2e/tests/contexts.spec.ts`,
+`docs/guide/getting-started.md`.
+
+**Testing:** api `test_catalog_schemas.py` 16 passed (new: a schema of
+`transacoes` / `pessoas` is listed in full and the query carries no `LIKE`);
+2185 unit; 205 e2e (new: `transacoes` can be assigned as the edge table and
+POSTs as `edge_table_name`). The 6 failures in the wider api suite are
+pre-existing — verified identical with these changes stashed.
+
+**Public Docs:** `getting-started.md` now says any table can take either role.
+**Admin-Area Impact:** No admin-area impact (no new setting, table or mutating
+route; `DatasetsResponse` gains a field on an existing GET).
+
+**Author:** Claude (AI Assistant)
+
+---
