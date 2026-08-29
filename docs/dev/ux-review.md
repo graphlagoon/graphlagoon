@@ -13,7 +13,7 @@ document; the rest is a backlog with a recommended order.
 |---|---------|--------|
 | 1 | **Two toolbars with mixed roles.** Top bar: 11 panel toggles in four groups (Explore / Visualize / Config / File) + Export / About / user. A second toolbar floats over the canvas: Info, Layout, Clusters (n), 3D/2D, Fullscreen, Table, Console. *Info* and *Layout* are panels like the top-bar ones; *Table* and *Console* are bottom drawers. Nothing tells the user why a feature lives where it does. | backlog (structural) |
 | 2 | **"Query" meant three things at once**: top `Query` (graph query, Cypher/SQL), bottom `Query` (tabular Query Console), and `Templates`. The empty canvas said "Run a query" without saying which. | **fixed**: bottom button is now `Console`; empty state names the top-bar *Query* and *Template* buttons and mentions right-click |
-| 3 | **"Clusters" has two entry points**: top → `ClusterProgramPanel` (tabs Communities / Programs / Similarity), bottom → `ClusterListPanel` (the generated clusters). The Similarity tab has no header of its own. | backlog: fold the list into a *Results* tab of the Clusters panel |
+| 3 | **"Clusters" had two entry points**: the top bar opened `ClusterProgramPanel` (Communities / Programs / Similarity) and the canvas footer opened a separate floating `ClusterListPanel`. | **fixed**: the list is the panel's **Results** tab (with a count badge); the canvas button is gone and the status bar gained an **N clusters** chip that opens that tab |
 | 4 | **Panels were not exclusive.** The nine top-bar panels were independent booleans; all could be open at once, docked side by side on the left, squeezing the canvas (Filters + Style + Labels = 780 px). | **fixed**: the nine share one dock — opening one closes the other (`setDocked`/`toggleDocked` in the view). Floating panels (Info, Layout, cluster list) and the bottom drawers are unaffected |
 | 5 | **Names drift between button, heading and component**: Style / "Style" / `AestheticsPanel`; Labels / "Labels" / `TextFormatPanel`; Query / "Graph Query"; Metrics / "Graph Metrics"; `LayoutPanel` used `<h4>` where every other panel uses `<h3>`. | **fixed** for headings (Query, Metrics, Layout `<h3>`); component file names left alone (rename is churn without user value) |
 | 6 | **Saving an exploration** lived only in the top-bar File group; the italic `Unsaved` in the breadcrumb was inert text; there was no *modified since save* state at all; and the Explorations page could open / share / delete but not rename. | **fixed**: the save state *is* the control — `Unsaved` and the exploration name are buttons that open the Save dialog, and an open exploration turns amber with a dot once the view no longer matches what was saved (`graphStore.isExplorationDirty`). The list gained **Rename**. Creating stays on the graph page by design (an exploration captures a view) |
@@ -84,14 +84,13 @@ login page down to 390 px.
 
 ## 3. Remaining backlog, in order
 
-1. **Clusters results tab** (#3) — fold `ClusterListPanel` into a *Results* tab of the Clusters panel so "Clusters" is one place.
-3. **Colour lint** (#14) — stylelint `color-no-hex` over `src/**/*.vue`, then remove the `var(--x, #ddd)` fallbacks file by file.
-4. **Undo for deletes** — now that confirmations are in-app, a toast with *Undo* is a better trade than a dialog for the cheap ones (a label rule, a cluster).
+1. **Colour lint** (#14) — stylelint `color-no-hex` over `src/**/*.vue`, then remove the `var(--x, #ddd)` fallbacks file by file.
+2. **Undo for deletes** — now that confirmations are in-app, a toast with *Undo* is a better trade than a dialog for the cheap ones (a label rule, a cluster).
 
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
 #15–#17 (phone-width responsiveness of the list pages, modals and toolbar),
 #6 (save state as a control, rename in the list), #18–#21 (panel chrome found
-by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals), #25 (status bar dimmed by overlays).
+by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals), #25 (status bar dimmed by overlays), #3 (one Clusters surface).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 

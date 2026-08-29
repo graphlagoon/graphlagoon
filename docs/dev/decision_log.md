@@ -8501,3 +8501,39 @@ impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 01:40] - UX: one Clusters surface (finding #3)
+
+"Clusters" named two different things: the top bar opened `ClusterProgramPanel`
+(Communities / Programs / Similarity) while the canvas footer opened a separate
+floating `ClusterListPanel` holding the clusters a program had produced.
+
+- `ClusterListPanel` gained an `embedded` prop that drops its own chrome
+  (header, collapse arrow, fixed width) — the same shape `SimilarityPanel`
+  already had — and is rendered as the panel's new **Results** tab, which
+  carries the cluster count as a badge.
+- The canvas-footer button is gone. Its useful part was the count, which now
+  lives in the status bar as an **N clusters** chip that opens the Results tab
+  — consistent with the other chips there, which report a fact about the graph
+  and lead to the panel that acts on it.
+- The panel takes `v-model:tab`, so the page can open it on a chosen tab.
+- While in the list: the emoji buttons (👁️ / 🗑️) became lucide icons, which
+  match every other icon in the app and do not read as "eye, wastebasket" to a
+  screen reader; the delete button gained an `aria-label` naming the cluster.
+
+**Files modified:** `frontend/src/components/ClusterListPanel.vue`,
+`frontend/src/components/ClusterProgramPanel.vue`,
+`frontend/src/views/GraphVisualizationView.vue`,
+`frontend/e2e/tests/graph.spec.ts`, `docs/guide/clusters.md`.
+
+**Testing:** 2172 unit, 200 e2e — the new case runs the *Group by Node Type*
+built-in (deterministic on the fixture graph, unlike *Orphan Clusters*, which
+is what the first attempt caught), then checks the status chip appears and both
+it and the tab open the Results pane. Screenshotted the result.
+
+**Public Docs:** `docs/guide/clusters.md` "Managing the results" rewritten;
+screenshots regenerated. **Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---

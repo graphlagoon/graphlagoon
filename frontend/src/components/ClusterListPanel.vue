@@ -2,8 +2,18 @@
 import { ref, computed } from 'vue'
 import { useClusterStore } from '@/stores/cluster'
 import type { Cluster } from '@/types/cluster'
-import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
+// Emoji rendered at a different weight and colour from every other icon in
+// the app (and read as "eye, eye-in-speech-bubble, wastebasket" to a screen
+// reader); lucide keeps the panel consistent with the rest.
+import { ChevronLeft, ChevronRight, Eye, EyeOff, Trash2 } from 'lucide-vue-next'
 import { confirmAction } from '@/composables/useConfirm';
+
+/**
+ * `embedded` renders the list without its own panel chrome, for use as the
+ * Results tab of the Clusters panel. The standalone chrome (header, collapse
+ * arrow, fixed width) exists only for the floating variant this replaced.
+ */
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 
 const clusterStore = useClusterStore()
 
@@ -75,8 +85,8 @@ function getClusterColor(cluster: Cluster): string {
 </script>
 
 <template>
-  <div class="cluster-list-panel" :class="{ collapsed: isCollapsed }">
-    <div class="panel-header">
+  <div class="cluster-list-panel" :class="{ collapsed: isCollapsed, embedded: props.embedded }">
+    <div v-if="!props.embedded" class="panel-header">
       <h3>Clusters ({{ clusterStore.clusters.length }})</h3>
       <button
         class="btn-collapse"
@@ -87,7 +97,7 @@ function getClusterColor(cluster: Cluster): string {
       </button>
     </div>
 
-    <div v-if="!isCollapsed" class="panel-content">
+    <div v-if="props.embedded || !isCollapsed" class="panel-content">
       <!-- Empty State -->
       <div v-if="clusterStore.clusters.length === 0" class="empty-state">
         <p>No clusters yet.</p>
@@ -151,14 +161,17 @@ function getClusterColor(cluster: Cluster): string {
                 @click="toggleCluster(cluster.cluster_id)"
                 :title="cluster.state === 'open' ? 'Close cluster' : 'Open cluster'"
               >
-                {{ cluster.state === 'open' ? '👁️ Open' : '👁️‍🗨️ Closed' }}
+                <Eye v-if="cluster.state === 'open'" :size="12" />
+                <EyeOff v-else :size="12" />
+                {{ cluster.state === 'open' ? 'Open' : 'Closed' }}
               </button>
               <button
                 class="btn-delete"
+                :aria-label="`Delete cluster ${cluster.cluster_class}`"
                 @click="deleteCluster(cluster.cluster_id)"
                 title="Delete cluster"
               >
-                🗑️
+                <Trash2 :size="12" />
               </button>
             </div>
           </div>
@@ -195,6 +208,18 @@ function getClusterColor(cluster: Cluster): string {
   max-height: 600px;
   width: 320px;
   transition: width 0.3s;
+}
+
+/* Embedded in the Clusters panel: the tab supplies the frame. */
+.cluster-list-panel.embedded {
+  width: auto;
+  max-width: none;
+  max-height: none;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
 }
 
 .cluster-list-panel.collapsed {
@@ -386,6 +411,9 @@ function getClusterColor(cluster: Cluster): string {
 }
 
 .btn-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 6px 10px;
   background: white;
   border: 1px solid #ddd;
@@ -412,6 +440,9 @@ function getClusterColor(cluster: Cluster): string {
 }
 
 .btn-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px 8px;
   background: white;
   border: 1px solid #ddd;

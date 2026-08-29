@@ -297,6 +297,38 @@ test.describe('Graph Visualization', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Clusters
+  // ---------------------------------------------------------------------------
+  test.describe('Clusters', () => {
+    test('a program run lands in the Results tab, reachable from the status bar', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+      // No clusters yet: nothing claims there are.
+      await expect(page.getByTestId('graph-status-clusters')).toHaveCount(0);
+
+      await page.getByTitle('Clusters', { exact: true }).click();
+      await page.getByRole('button', { name: 'Programs' }).click();
+      // Group by Node Type always produces clusters; Orphan Clusters would not
+      // on this fixture graph.
+      await page.getByTestId('cluster-program-run-default-group-by-node-type').click();
+
+      // The clusters produced live in this panel's Results tab — they used to
+      // be a separate floating panel with its own toolbar button.
+      const chip = page.getByTestId('graph-status-clusters');
+      await expect(chip).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTestId('clusters-tab-results').click();
+      await expect(page.getByTestId('clusters-results-pane')).toBeVisible();
+
+      // The status-bar count opens that same tab.
+      await page.getByRole('button', { name: 'Communities' }).click();
+      await chip.click();
+      await expect(page.getByTestId('clusters-results-pane')).toBeVisible();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Panels
   // ---------------------------------------------------------------------------
   test.describe('Panel chrome', () => {

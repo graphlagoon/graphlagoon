@@ -139,8 +139,9 @@ and describe the grouping you want. The same workflow exists for
 
 ## Managing the results
 
-Once clusters exist, a **Clusters (N)** button appears in the canvas
-footer. The list it opens filters by state and class, toggles each cluster
-open/closed (or all at once), and shows per-cluster stats. **Clear
-Clusters** in the Programs tab wipes the current groups without touching
-the programs.
+Once clusters exist, the Clusters panel's **Results** tab lists them — the
+tab shows how many, and the status bar under the graph gains an **N
+clusters** chip that opens it. The list filters by state and class, toggles
+each cluster open/closed (or all at once), and shows per-cluster stats.
+**Clear Clusters** in the Programs tab wipes the current groups without
+touching the programs.
