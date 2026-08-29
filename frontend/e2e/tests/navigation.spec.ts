@@ -86,6 +86,25 @@ test.describe('Escape closes modals', () => {
     await expect(page.getByRole('heading', { name: 'Create Graph Context' })).toHaveCount(0);
   });
 
+  test('opening a modal moves focus into it and closing gives it back', async ({ authenticatedPage: page }) => {
+    await page.goto('/contexts');
+    const trigger = page.getByTestId('create-context-btn');
+    await trigger.focus();
+
+    await trigger.click();
+    await expect(page.getByRole('heading', { name: 'Create Graph Context' })).toBeVisible();
+    // Focus lands inside the dialog — it used to stay on the button behind it,
+    // so Tab walked the page underneath.
+    const insideModal = await page.evaluate(
+      () => !!document.activeElement?.closest('.modal-overlay'),
+    );
+    expect(insideModal).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: 'Create Graph Context' })).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+
   test('the About modal closes on Escape', async ({ authenticatedPage: page }) => {
     await page.goto('/contexts');
     await page.getByTitle('About Graph Lagoon Studio').click();

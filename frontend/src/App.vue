@@ -5,6 +5,7 @@ import { computed } from 'vue';
 import ToastContainer from '@/components/ToastContainer.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { useEscapeToCloseModals } from '@/composables/useEscapeToCloseModals';
+import { useModalFocus } from '@/composables/useModalFocus';
 import Toolbar from '@/components/Toolbar.vue';
 
 const route = useRoute();
@@ -14,6 +15,7 @@ const showToolbar = computed(() => route.name !== 'login');
 
 // One listener for every modal in the app — see the composable for why.
 useEscapeToCloseModals();
+useModalFocus();
 </script>
 
 <template>
