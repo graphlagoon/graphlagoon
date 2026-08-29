@@ -150,7 +150,16 @@ function toggleCatalog(name: string) {
   expanded.value = new Set(expanded.value);
 }
 
+/** The table already assigned to the *other* role, if any. */
+function heldByOtherRole(full: string, role: Role): boolean {
+  return role === 'edge' ? props.nodeValue === full : props.edgeValue === full;
+}
+
 function assign(entry: TableEntry, role: Role) {
+  // One table cannot be both: a row of the edge table is a relationship, a row
+  // of the node table is an entity. (The name-based guess was never a reason
+  // to forbid a choice; this is — it comes from the data model.)
+  if (heldByOtherRole(entry.full, role)) return;
   const current = role === 'edge' ? props.edgeValue : props.nodeValue;
   // Clicking the role a table already holds clears it — the same button both
   // assigns and unassigns, so there is no separate "clear" affordance.
@@ -159,9 +168,16 @@ function assign(entry: TableEntry, role: Role) {
   else emit('update:nodeValue', next);
 }
 
+const manualError = ref('');
+
 function commitManual() {
   const value = manualValue.value.trim();
   if (!value) return;
+  if (heldByOtherRole(value, manualRole.value)) {
+    manualError.value = 'That table is already the other one — a table cannot be both.';
+    return;
+  }
+  manualError.value = '';
   if (manualRole.value === 'edge') emit('update:edgeValue', value);
   else emit('update:nodeValue', value);
   manualValue.value = '';
@@ -186,6 +202,15 @@ const sharedLocation = computed(() => {
  * Two tables from different schemas are legal but almost always a slip — the
  * old pair of dropdowns could not even see it happen.
  */
+/**
+ * Defensive: a context saved before this rule, or a value set outside the
+ * picker, can still name one table for both roles. Saying so beats rendering
+ * a form that cannot work.
+ */
+const sameTable = computed(
+  () => !props.nodeDisabled && !!props.edgeValue && props.edgeValue === props.nodeValue,
+);
+
 const mismatched = computed(
   () => !props.nodeDisabled && !!edgeParts.value && !!nodeParts.value && sharedLocation.value === null,
 );
@@ -217,7 +242,14 @@ const mismatched = computed(
         </span>
         <code v-if="sharedLocation" class="wtp-location">{{ sharedLocation }}</code>
       </div>
-      <p v-if="mismatched" class="wtp-warning" data-testid="table-schema-mismatch">
+      <p v-if="sameTable" class="wtp-warning" data-testid="table-same-table">
+        <AlertTriangle :size="13" />
+        The same table is set for both roles. A row of the edge table is a
+        relationship and a row of the node table is an entity, so one table
+        cannot be both — for a single table of triples, use
+        <strong>No node table</strong> below.
+      </p>
+      <p v-else-if="mismatched" class="wtp-warning" data-testid="table-schema-mismatch">
         <AlertTriangle :size="13" />
         The two tables are in different schemas
         (<code>{{ edgeParts!.catalog }}.{{ edgeParts!.schema }}</code> and
@@ -296,7 +328,10 @@ const mismatched = computed(
               type="button"
               class="wtp-role-btn"
               :class="{ on: edgeValue === entry.full, suggested: entry.suggests === 'edge' }"
-              title="Use as the edge table"
+              :disabled="nodeValue === entry.full"
+              :title="nodeValue === entry.full
+                ? 'Already the node table — one table cannot be both'
+                : 'Use as the edge table'"
               :data-testid="`assign-edge-${entry.full}`"
               @click="assign(entry, 'edge')"
             >
@@ -306,10 +341,12 @@ const mismatched = computed(
               type="button"
               class="wtp-role-btn"
               :class="{ on: nodeValue === entry.full, suggested: entry.suggests === 'node' }"
-              :disabled="nodeDisabled"
+              :disabled="nodeDisabled || edgeValue === entry.full"
               :title="nodeDisabled
                 ? 'This context derives nodes from the edge endpoints'
-                : 'Use as the node table'"
+                : edgeValue === entry.full
+                  ? 'Already the edge table — one table cannot be both'
+                  : 'Use as the node table'"
               :data-testid="`assign-node-${entry.full}`"
               @click="assign(entry, 'node')"
             >
@@ -350,6 +387,9 @@ const mismatched = computed(
           Use
         </button>
       </form>
+      <p v-if="manualError" class="wtp-manual-error" data-testid="table-manual-error">
+        {{ manualError }}
+      </p>
     </div>
   </div>
 </template>
@@ -408,6 +448,12 @@ const mismatched = computed(
   color: var(--color-warning);
 }
 .wtp-warning code { font-size: var(--text-xs); }
+
+.wtp-manual-error {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-error);
+}
 
 /* ── Search ──────────────────────────────────────────────── */
 .wtp-search {

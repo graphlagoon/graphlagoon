@@ -420,6 +420,27 @@ def _validate_unique_metric_definitions(
 
 
 # Graph Context models
+def _validate_distinct_tables(
+    edge_table_name: Optional[str], node_table_name: Optional[str]
+) -> None:
+    """One table cannot play both roles.
+
+    A row of the edge table is a relationship; a row of the node table is an
+    entity. A single table holding triples is the *nodeless* case
+    (`node_table_name` omitted, nodes derived from the edge endpoints), not the
+    same table named twice.
+
+    Only `GraphContextCreate` needs this: `GraphContextUpdate` carries no table
+    names at all — they are fixed once a context exists.
+    """
+    if edge_table_name and node_table_name and edge_table_name == node_table_name:
+        raise ValueError(
+            f"edge_table_name and node_table_name are both '{edge_table_name}'. "
+            "One table cannot be both; omit node_table_name to derive nodes from "
+            "the edge endpoints."
+        )
+
+
 class GraphContextCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -463,6 +484,11 @@ class GraphContextCreate(BaseModel):
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextCreate":
         _validate_unique_metric_definitions(self.metric_definitions)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_tables(self) -> "GraphContextCreate":
+        _validate_distinct_tables(self.edge_table_name, self.node_table_name)
         return self
 
     @model_validator(mode="after")
@@ -540,6 +566,7 @@ class GraphContextUpdate(BaseModel):
         if self.metric_definitions is not None:
             _validate_unique_metric_definitions(self.metric_definitions)
         return self
+
 
 
 class GraphContextResponse(BaseModel):

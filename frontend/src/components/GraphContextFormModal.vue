@@ -240,7 +240,11 @@ const requiredTablesChosen = computed(
     !showTableConfig.value ||
     Boolean(
       form.value.edge_table_name &&
-        (form.value.noNodeTable || form.value.node_table_name),
+        (form.value.noNodeTable ||
+          (form.value.node_table_name &&
+            // One table cannot be both: its rows are either relationships or
+            // entities. A single table of triples is the `noNodeTable` case.
+            form.value.node_table_name !== form.value.edge_table_name)),
     ),
 );
 
@@ -902,7 +906,11 @@ async function submit() {
             class="btn btn-primary"
             data-testid="create-context-submit"
             :disabled="contextsStore.loading || !!defaultBehaviorsError || !requiredTablesChosen"
-            :title="requiredTablesChosen ? undefined : 'Choose an edge table (and a node table, or the triple-store option)'"
+            :title="requiredTablesChosen
+              ? undefined
+              : form.edge_table_name && form.edge_table_name === form.node_table_name
+                ? 'One table cannot be both the edge and the node table'
+                : 'Choose an edge table (and a node table, or the triple-store option)'"
           >
             {{ mode === 'edit' ? 'Save' : 'Create' }}
           </button>

@@ -450,3 +450,49 @@ class TestListDatasetsDatabricks:
             "cat_a.s1.edges_zzz",
             "cat_b.s2.edges_aaa",
         ]
+
+
+class TestDistinctTables:
+    """One table cannot be both the edge and the node table."""
+
+    def test_create_rejects_the_same_table_twice(self):
+        from pydantic import ValidationError
+
+        from graphlagoon.models.schemas import GraphContextCreate
+
+        with pytest.raises(ValidationError) as exc:
+            GraphContextCreate(
+                title="Broken",
+                edge_table_name="prod.fraude.transacoes",
+                node_table_name="prod.fraude.transacoes",
+            )
+
+        # The message has to name the way out, not just the rule.
+        assert "One table cannot be both" in str(exc.value)
+        assert "omit node_table_name" in str(exc.value)
+
+    def test_create_allows_a_nodeless_context(self):
+        from graphlagoon.models.schemas import GraphContextCreate
+
+        context = GraphContextCreate(
+            title="Triples",
+            edge_table_name="prod.fraude.transacoes",
+        )
+        assert context.node_table_name is None
+
+    def test_create_allows_two_different_tables(self):
+        from graphlagoon.models.schemas import GraphContextCreate
+
+        context = GraphContextCreate(
+            title="Fine",
+            edge_table_name="prod.fraude.transacoes",
+            node_table_name="prod.fraude.pessoas",
+        )
+        assert context.node_table_name == "prod.fraude.pessoas"
+
+    def test_update_carries_no_table_names_at_all(self):
+        """Nothing to validate on update: the names are fixed at creation."""
+        from graphlagoon.models.schemas import GraphContextUpdate
+
+        assert "edge_table_name" not in GraphContextUpdate.model_fields
+        assert "node_table_name" not in GraphContextUpdate.model_fields
