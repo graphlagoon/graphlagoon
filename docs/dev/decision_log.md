@@ -8437,3 +8437,38 @@ impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-08-29 00:45] - Fix: Escape closes modals (all of them)
+
+**Measured first:** of the 28 components that render a `.modal-overlay` (30
+overlays), **none** handled Escape. The only ways out of any dialog in the app
+were the × and a backdrop click.
+
+**Why one listener instead of 28 edits:** wiring `keydown` into every modal
+works until the next modal is written and forgets. All 30 overlays already
+close on a backdrop click, and Vue compiles `@click.self` to "run only when
+`event.target === currentTarget`" — so dispatching a click *on the overlay
+element itself* is precisely the event each modal's own close handler is
+waiting for, whatever it does to close. `useEscapeToCloseModals` (mounted once
+in `App.vue`) finds the last `.modal-overlay` in the DOM and dispatches that.
+
+Two details that matter:
+- **Capture phase + `stopPropagation`**, so a modal opened over the graph takes
+  Escape rather than the canvas also clearing the node selection underneath.
+- **`ConfirmDialog` is skipped** (different class, and it must resolve its
+  promise), as is any event already `defaultPrevented` by a field inside the
+  modal.
+
+**Files created:** `frontend/src/composables/useEscapeToCloseModals.ts`.
+**Files modified:** `frontend/src/App.vue`,
+`frontend/e2e/tests/navigation.spec.ts` (the create-context and About modals
+close on Escape).
+
+**Testing:** 2172 unit, 199 e2e.
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area
+impact.
+
+**Author:** Claude (AI Assistant)
+
+---

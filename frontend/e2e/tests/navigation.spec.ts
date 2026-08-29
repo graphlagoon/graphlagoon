@@ -73,3 +73,25 @@ superuserTest.describe('Navigation (superuser)', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Admin' })).toBeVisible();
   });
 });
+
+test.describe('Escape closes modals', () => {
+  // Not one of the app's 30 modal overlays handled Escape; a single
+  // document-level listener now closes the top-most one.
+  test('the create-context modal closes on Escape', async ({ authenticatedPage: page }) => {
+    await page.goto('/contexts');
+    await page.getByTestId('create-context-btn').click();
+    await expect(page.getByRole('heading', { name: 'Create Graph Context' })).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: 'Create Graph Context' })).toHaveCount(0);
+  });
+
+  test('the About modal closes on Escape', async ({ authenticatedPage: page }) => {
+    await page.goto('/contexts');
+    await page.getByTitle('About Graph Lagoon Studio').click();
+    await expect(page.getByRole('heading', { name: 'About Graph Lagoon Studio' })).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: 'About Graph Lagoon Studio' })).toHaveCount(0);
+  });
+});

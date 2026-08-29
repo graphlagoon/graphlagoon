@@ -66,6 +66,12 @@ and its filter popover, and node selection — clicking a node *does* open Node
 Details; an earlier screenshot that seemed to show otherwise was a mis-aimed
 click, confirmed by measuring the panel's rect.
 
+## 2e. Keyboard
+
+| # | Finding | Status |
+|---|---------|--------|
+| 24 | **No modal in the app closed on Escape** — all 30 `.modal-overlay` instances, across 28 components. The only ways out were the × and the backdrop. | **fixed**: one document-level listener (`useEscapeToCloseModals`, mounted in `App.vue`) dispatches a self-targeted click on the top-most overlay, which is exactly what every modal's `@click.self` close handler already listens for. Registered in the capture phase and stopping propagation, so a modal over the graph takes Escape instead of the canvas clearing the selection beneath it. `ConfirmDialog` keeps its own handler (it has a promise to resolve) |
+
 ## 3. Remaining backlog, in order
 
 1. **Clusters results tab** (#3) — fold `ClusterListPanel` into a *Results* tab of the Clusters panel so "Clusters" is one place.
@@ -75,7 +81,7 @@ click, confirmed by measuring the panel's rect.
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
 #15–#17 (phone-width responsiveness of the list pages, modals and toolbar),
 #6 (save state as a control, rename in the list), #18–#21 (panel chrome found
-by looking at every panel), #22–#23 (interaction states).
+by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 
