@@ -199,6 +199,8 @@ export function styleCompatibilityWarnings(
     };
     check(textFormat.defaults?.nodeTemplate, 'node');
     check(textFormat.defaults?.edgeTemplate, 'edge');
+    check(textFormat.defaults?.nodeTooltipTemplate, 'node');
+    check(textFormat.defaults?.edgeTooltipTemplate, 'edge');
     for (const rule of textFormat.rules ?? []) {
       check(rule.template, rule.target);
       const known = rule.target === 'node' ? nodeTypes : edgeTypes;

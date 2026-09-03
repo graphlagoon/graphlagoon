@@ -36,6 +36,34 @@ describe('collectPropertyReferences', () => {
     expect(props).toContain('weight')
   })
 
+  it('detects tooltip templates', () => {
+    const state = createExplorationState({
+      textFormat: {
+        rules: [],
+        defaults: {
+          nodeTemplate: '',
+          edgeTemplate: '',
+          nodeTooltipTemplate: '{prop:email}',
+          edgeTooltipTemplate: '{prop:amount}',
+        },
+      },
+    })
+    const refs = collectPropertyReferences(state)
+    expect(refs).toContainEqual(
+      expect.objectContaining({
+        location: 'textFormat.defaults.nodeTooltipTemplate',
+        property: 'email',
+        kind: 'label-template',
+      }),
+    )
+    expect(refs).toContainEqual(
+      expect.objectContaining({
+        location: 'textFormat.defaults.edgeTooltipTemplate',
+        property: 'amount',
+      }),
+    )
+  })
+
   it('chained-modifier templates yield the property, not modifier args', () => {
     const state = createExplorationState({
       textFormat: {

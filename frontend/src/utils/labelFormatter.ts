@@ -787,16 +787,30 @@ export function formatLabel(
 }
 
 /**
- * Find the matching rule for an item
+ * A rule's surface, degraded to 'label' for anything unrecognised — rules
+ * predate surfaces, and hand-edited preset JSON can hold garbage.
+ */
+function ruleSurface(rule: TextFormatRule): 'label' | 'tooltip' | 'both' {
+  return rule.surface === 'tooltip' || rule.surface === 'both' ? rule.surface : 'label';
+}
+
+/**
+ * Find the matching rule for an item.
+ *
+ * `surface` selects which text is being resolved: a rule participates when its
+ * own surface is the requested one or 'both'. Defaults to 'label', which keeps
+ * every pre-surface caller — and every pre-surface rule — meaning what it did.
  */
 export function findMatchingRule(
   rules: TextFormatRule[],
   target: 'node' | 'edge',
-  itemType: string
+  itemType: string,
+  surface: 'label' | 'tooltip' = 'label',
 ): TextFormatRule | null {
-  // Filter rules by target and enabled status
+  // Filter rules by target, surface and enabled status
   const applicableRules = rules
     .filter(r => r.enabled && r.target === target)
+    .filter(r => ruleSurface(r) === surface || ruleSurface(r) === 'both')
     .filter(r => r.types.length === 0 || r.types.includes(itemType))
     .sort((a, b) => {
       // Primary sort: by priority (higher first)
@@ -806,7 +820,11 @@ export function findMatchingRule(
       // Tie-breaker: more specific rules (with types) win over generic rules (empty types)
       const aHasTypes = a.types.length > 0 ? 1 : 0;
       const bHasTypes = b.types.length > 0 ? 1 : 0;
-      return bHasTypes - aHasTypes;
+      if (aHasTypes !== bHasTypes) return bHasTypes - aHasTypes;
+      // Final tie-breaker: a rule written for exactly this surface beats 'both'
+      const aExact = ruleSurface(a) === surface ? 1 : 0;
+      const bExact = ruleSurface(b) === surface ? 1 : 0;
+      return bExact - aExact;
     });
 
   return applicableRules[0] || null;

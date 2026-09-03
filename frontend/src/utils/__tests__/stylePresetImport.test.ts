@@ -122,6 +122,23 @@ describe('styleCompatibilityWarnings', () => {
     expect(hasCompatibilityWarnings(w)).toBe(true);
   });
 
+  it('reports a column referenced only by a tooltip template', () => {
+    const w = styleCompatibilityWarnings(
+      {
+        textFormat: {
+          defaults: {
+            nodeTemplate: '{prop:name}',
+            edgeTemplate: '{relationship_type}',
+            nodeTooltipTemplate: '{prop:no_such_column}',
+          },
+          rules: [],
+        },
+      } as never,
+      CURRENT,
+    );
+    expect(w.missingProperties).toEqual(['no_such_column']);
+  });
+
   it('is empty when everything matches', () => {
     const w = styleCompatibilityWarnings(
       { nodeTypeColors: { Customer: '#fff' }, textFormat: { defaults: { nodeTemplate: '{prop:name}', edgeTemplate: '{relationship_type}' }, rules: [] } } as any,

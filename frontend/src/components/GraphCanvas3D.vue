@@ -9,6 +9,7 @@ import { useSimilarityStore } from '@/stores/similarity';
 import type { Node, Edge } from '@/types/graph';
 import type { GraphNode, GraphLink, GraphData } from '@/types/graph3d';
 import { formatNodeLabel, formatEdgeLabel } from '@/utils/labelFormatter';
+import { buildNodeTooltip, buildEdgeTooltip, EDGE_TYPE_CHIP, type TooltipContent } from '@/utils/tooltipContent';
 import { numericValueMap } from '@/types/metrics';
 import {
   getMultiEdgeCurvature3D,
@@ -128,7 +129,18 @@ let lastPanPos: { x: number; y: number } | null = null;
 const tooltipVisible = ref(false);
 const tooltipX = ref(0);
 const tooltipY = ref(0);
-const tooltipContent = ref<{ title: string; type: string } | null>(null);
+const tooltipContent = ref<TooltipContent | null>(null);
+// What the tooltip is describing, so its body can be rebuilt in place when the
+// template changes or the item's properties finish loading.
+let tooltipTarget: { kind: 'node' | 'edge'; id: string } | null = null;
+// Anchor from the opposite edge near the viewport border. The tooltip is
+// pointer-events:none, so a box that overflows cannot be scrolled back in.
+const tooltipFlipX = ref(false);
+const tooltipFlipY = ref(false);
+// Hovering a node whose properties are still in flight jumps it up the
+// enrichment queue, so {prop:} sentinels resolve while the pointer rests.
+let hoverPrioritizeTimer: ReturnType<typeof setTimeout> | null = null;
+const HOVER_PRIORITIZE_DELAY_MS = 150;
 
 // Soprador/Aspirador (pointer repulsion/attraction) state — d3-force with node pinning
 let pointerRepulsionForce: PointerRepulsionForce | null = null;
@@ -615,6 +627,93 @@ function updateVisuals() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Tooltip
+// ---------------------------------------------------------------------------
+
+/**
+ * Pin the tooltip beside the cursor, flipping it inward near a viewport edge.
+ *
+ * Flips are decided from the cursor alone rather than from the rendered box:
+ * the box does not exist yet on the frame the hover starts, and measuring it
+ * afterwards would cost a layout read plus a visible jump.
+ */
+function placeTooltip() {
+  tooltipX.value = mouseX.value + 12;
+  tooltipY.value = mouseY.value - 12;
+  tooltipFlipX.value = mouseX.value > window.innerWidth * 0.7;
+  tooltipFlipY.value = mouseY.value > window.innerHeight * 0.7;
+}
+
+/**
+ * Anchor from the opposite side when flipped, so the box grows inward from the
+ * cursor instead of off-screen.
+ */
+const tooltipStyle = computed(() => ({
+  left: tooltipFlipX.value ? 'auto' : `${tooltipX.value}px`,
+  right: tooltipFlipX.value ? `${window.innerWidth - tooltipX.value + 24}px` : 'auto',
+  top: tooltipFlipY.value ? 'auto' : `${tooltipY.value}px`,
+  bottom: tooltipFlipY.value ? `${window.innerHeight - tooltipY.value - 24}px` : 'auto',
+}));
+
+function hideTooltip() {
+  tooltipVisible.value = false;
+  tooltipContent.value = null;
+  tooltipTarget = null;
+  if (hoverPrioritizeTimer) {
+    clearTimeout(hoverPrioritizeTimer);
+    hoverPrioritizeTimer = null;
+  }
+}
+
+/**
+ * Cluster pseudo-nodes are not real `Node`s — no properties table, no metrics —
+ * so they keep the pre-template tooltip. Same for a node the data map has not
+ * caught up with.
+ */
+function nodeTooltipFor(node: GraphNode): TooltipContent {
+  const original = node.isCluster ? undefined : nodeDataMap.value.get(node.id);
+  if (!original) return { body: node.label, typeChip: node.nodeType };
+
+  return buildNodeTooltip(
+    original,
+    graphStore.textFormatRules,
+    graphStore.textFormatDefaults,
+    labelOptions,
+  );
+}
+
+function linkTooltipFor(link: GraphLink): TooltipContent {
+  const original = edgeDataMap.value.get(link.id);
+  if (!original) return { body: link.relationshipType, typeChip: EDGE_TYPE_CHIP };
+
+  return buildEdgeTooltip(
+    original,
+    graphStore.textFormatRules,
+    graphStore.textFormatDefaults,
+    labelOptions,
+  );
+}
+
+/**
+ * Rebuild the open tooltip's body in place — after properties stream in (so
+ * `[prop:x]` sentinels resolve under the resting pointer) or after the
+ * template changes.
+ */
+function recomputeTooltip() {
+  if (!tooltipTarget || !graph3d) return;
+
+  const target = tooltipTarget;
+  const data = graph3d.graphData();
+  if (target.kind === 'node') {
+    const node = (data.nodes as GraphNode[]).find((n) => n.id === target.id);
+    if (node) tooltipContent.value = nodeTooltipFor(node);
+  } else {
+    const link = (data.links as GraphLink[]).find((l) => l.id === target.id);
+    if (link) tooltipContent.value = linkTooltipFor(link);
+  }
+}
+
 /**
  * Refresh what node properties feed into, after a progressive-load patch.
  *
@@ -644,6 +743,7 @@ function refreshNodeContent() {
 
   updateVisuals();
   updateOverlays();
+  recomputeTooltip();
   recordPerf('refreshNodeContent', performance.now() - t0, {
     nodeCount: currentData.nodes.length,
   });
@@ -1120,25 +1220,27 @@ async function initGraph() {
       });
 
       if (node) {
-        tooltipX.value = mouseX.value + 12;
-        tooltipY.value = mouseY.value - 12;
-        tooltipContent.value = { title: node.label, type: node.nodeType };
+        placeTooltip();
+        tooltipTarget = { kind: 'node', id: node.id };
+        tooltipContent.value = nodeTooltipFor(node);
         tooltipVisible.value = true;
+        if (hoverPrioritizeTimer) clearTimeout(hoverPrioritizeTimer);
+        hoverPrioritizeTimer = setTimeout(() => {
+          void graphStore.prioritizeNodeProperties(node.id);
+        }, HOVER_PRIORITIZE_DELAY_MS);
       } else {
-        tooltipVisible.value = false;
-        tooltipContent.value = null;
+        hideTooltip();
       }
     })
     .onLinkHover((link: GraphLink | null, _prevLink: GraphLink | null) => {
       hoveredLinkSync = link;
       if (link) {
-        tooltipX.value = mouseX.value + 12;
-        tooltipY.value = mouseY.value - 12;
-        tooltipContent.value = { title: link.relationshipType, type: 'Edge' };
+        placeTooltip();
+        tooltipTarget = { kind: 'edge', id: link.id };
+        tooltipContent.value = linkTooltipFor(link);
         tooltipVisible.value = true;
       } else {
-        tooltipVisible.value = false;
-        tooltipContent.value = null;
+        hideTooltip();
       }
     });
   // Context menu is NOT wired through onNodeRightClick/onLinkRightClick: the library
@@ -2055,11 +2157,29 @@ watch(
   () => { updateGraph(); },
 );
 
-// Text format changes — update graph to refresh labels
+// Label template changes rebake every label, so they need a full update. Rules
+// can also drive tooltips (surface), so the open tooltip refreshes here too.
 watch(
-  () => [graphStore.textFormatRules, graphStore.textFormatDefaults],
-  () => { updateGraph(); },
+  () => [
+    graphStore.textFormatRules,
+    graphStore.textFormatDefaults.nodeTemplate,
+    graphStore.textFormatDefaults.edgeTemplate,
+  ],
+  () => {
+    updateGraph();
+    recomputeTooltip();
+  },
   { deep: true }
+);
+
+// Tooltip templates touch only the hovered item, so they must NOT drag a
+// Three.js rebuild along — typing in the panel fires this every 400 ms.
+watch(
+  () => [
+    graphStore.textFormatDefaults.nodeTooltipTemplate,
+    graphStore.textFormatDefaults.edgeTooltipTemplate,
+  ],
+  () => { recomputeTooltip(); },
 );
 
 // ---------------------------------------------------------------------------
@@ -2307,7 +2427,7 @@ onMounted(() => {
     // (the menu's visible-actions computed re-evaluates when they arrive).
     if (target.type === 'node') void graphStore.prioritizeNodeProperties(target.id);
     contextMenu.show(event, target);
-    tooltipVisible.value = false;
+    hideTooltip();
   }
 
   _onMouseMove = function onMouseMove(event: MouseEvent) {
@@ -2470,6 +2590,10 @@ onUnmounted(() => {
     clearTimeout(lensHoverTimeout);
     lensHoverTimeout = null;
   }
+  if (hoverPrioritizeTimer) {
+    clearTimeout(hoverPrioritizeTimer);
+    hoverPrioritizeTimer = null;
+  }
   if (layoutConfigDebounce) {
     clearTimeout(layoutConfigDebounce);
     layoutConfigDebounce = null;
@@ -2521,11 +2645,12 @@ onUnmounted(() => {
     <div
       v-if="tooltipVisible && tooltipContent"
       class="tooltip"
-      :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
+      data-testid="graph-tooltip"
+      :style="tooltipStyle"
     >
       <div class="tooltip-header">
-        <strong>{{ tooltipContent.title }}</strong>
-        <span class="tooltip-type">{{ tooltipContent.type }}</span>
+        <strong class="tooltip-body" data-testid="graph-tooltip-body">{{ tooltipContent.body }}</strong>
+        <span class="tooltip-type">{{ tooltipContent.typeChip }}</span>
       </div>
     </div>
 
@@ -2577,16 +2702,27 @@ onUnmounted(() => {
   padding: 8px 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1000;
-  max-width: 300px;
+  max-width: 360px;
+  /* A template over a long text column must not paint an unbounded box; the
+     tooltip is pointer-events:none, so nothing here can be scrolled. */
+  max-height: 40vh;
+  overflow: hidden;
   pointer-events: none;
 }
 
 .tooltip-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  /* Multi-line bodies read better with the chip pinned to the first line. */
+  align-items: flex-start;
   gap: 12px;
   margin-bottom: 4px;
+}
+
+.tooltip-body {
+  /* `{br}` renders as '\n' — pre-line is what turns it into a line break. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .tooltip-type {

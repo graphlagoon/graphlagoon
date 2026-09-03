@@ -543,11 +543,20 @@ export const useGraphStore = defineStore('graph', () => {
   const useExternalLinks = ref(true);
 
   // Text format rules (label formatting)
+  // Stock templates. The two tooltip ones are empty on purpose: empty means
+  // "the tooltip shows the label", i.e. the tooltip the app had before tooltip
+  // templates existed.
+  function defaultTextFormatDefaults(): TextFormatDefaults {
+    return {
+      nodeTemplate: '{node_id|truncate:10:...}',
+      edgeTemplate: '{relationship_type}',
+      nodeTooltipTemplate: '',
+      edgeTooltipTemplate: '',
+    };
+  }
+
   const textFormatRules = ref<TextFormatRule[]>([]);
-  const textFormatDefaults = ref<TextFormatDefaults>({
-    nodeTemplate: '{node_id|truncate:10:...}',
-    edgeTemplate: '{relationship_type}',
-  });
+  const textFormatDefaults = ref<TextFormatDefaults>(defaultTextFormatDefaults());
 
   // Node positions (pinned nodes)
   const nodePositions = ref<Map<string, { x: number; y: number; pinned: boolean }>>(new Map());
@@ -1126,7 +1135,8 @@ export const useGraphStore = defineStore('graph', () => {
 
   /**
    * Property columns that change what is drawn on screen: the ones referenced
-   * by label templates/rules and by property-driven node icons.
+   * by label/tooltip templates and rules (of either surface), and by
+   * property-driven node icons.
    *
    * On a wide table these are a handful out of ~100, so fetching them first
    * makes the visible graph correct long before the bulk arrives. Returns null
@@ -1136,9 +1146,10 @@ export const useGraphStore = defineStore('graph', () => {
   function visualPropertyColumns(): string[] | null {
     const cols = new Set<string>();
 
-    // `prop:`-prefixed tokens in label templates read raw table columns.
+    // `prop:`-prefixed tokens in label/tooltip templates read raw table columns.
     const templates = [
       textFormatDefaults.value.nodeTemplate,
+      textFormatDefaults.value.nodeTooltipTemplate,
       ...textFormatRules.value
         .filter((r) => r.target === 'node')
         .map((r) => r.template),
@@ -2144,17 +2155,15 @@ export const useGraphStore = defineStore('graph', () => {
         );
       }
       textFormatRules.value = state.rules || [];
-      textFormatDefaults.value = state.defaults || {
-        nodeTemplate: '{node_id|truncate:10:...}',
-        edgeTemplate: '{relationship_type}',
-      };
+      // Merge over the stock defaults so a state saved before a template field
+      // existed gets that field's stock value, not `undefined`. Still
+      // replace-not-merge semantics against the *current* state: a preset
+      // without tooltip templates resets them, exactly as it resets labels.
+      textFormatDefaults.value = { ...defaultTextFormatDefaults(), ...(state.defaults ?? {}) };
     } else {
       // Reset to defaults if no state provided
       textFormatRules.value = [];
-      textFormatDefaults.value = {
-        nodeTemplate: '{node_id|truncate:10:...}',
-        edgeTemplate: '{relationship_type}',
-      };
+      textFormatDefaults.value = defaultTextFormatDefaults();
     }
   }
 

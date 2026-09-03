@@ -695,6 +695,20 @@ describe('progressive load', () => {
       expect(store.pendingPropertyNodeIds.size).toBe(0)
     })
 
+    it('counts the tooltip template as a visual column', async () => {
+      // A property used only by the hover tooltip must still arrive in the
+      // first wave, or the first hover shows a [prop:x] sentinel.
+      const store = storeWithContext()
+      store.textFormatDefaults.nodeTooltipTemplate = '{prop:email}'
+      vi.mocked(api.getSubgraph).mockResolvedValue(typesResponse() as any)
+      vi.mocked(api.getNodesBatch).mockResolvedValue({ nodes: [] } as any)
+
+      await store.loadSubgraph({})
+      await settle()
+
+      expect(vi.mocked(api.getNodesBatch).mock.calls[0][2]).toEqual(['email'])
+    })
+
     it('skips the first wave when no property drives the visuals', async () => {
       const store = storeWithContext() // default template uses node_id only
       vi.mocked(api.getSubgraph).mockResolvedValue(typesResponse() as any)
