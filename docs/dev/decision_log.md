@@ -9589,3 +9589,21 @@ admin-area impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-09-03 10:40] - Docs: permission-gating recipe added to skill_feature_creation
+
+The "when and how to gate a new action" recipe lived only in
+docs/dev/admin-area.md (one table row) and the guide. Now
+`.claude/skills/skill_feature_creation/SKILL.md` carries it where it gets
+read: **Step 2.4b** (ask per new user-facing action; 4-step recipe —
+catalog entry, `require_permission` gate, hidden affordance, tests — plus
+the two never-rules) and a matching row in the Step 4.2b admin-impact
+table. Decided against a dedicated skill: the question belongs inside
+feature creation, not beside it.
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No
+admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
