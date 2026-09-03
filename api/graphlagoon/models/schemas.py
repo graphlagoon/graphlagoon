@@ -1468,6 +1468,7 @@ class AdminCounts(BaseModel):
     explorations: int
     query_templates: int
     audit_entries: int
+    groups: int
 
 
 class AdminStorage(BaseModel):
@@ -1551,3 +1552,89 @@ class ClearEnvironmentResponse(BaseModel):
     status: str
     cleared: list[str]
     warehouse: Optional[Any] = None
+
+
+# --- Groups & permissions (superuser-managed authorization) ---
+
+
+class GroupMemberIn(BaseModel):
+    kind: Literal["email", "databricks_group"]
+    value: str
+
+
+class GroupMemberOut(GroupMemberIn):
+    id: str
+
+
+class AdminGroupIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    members: list[GroupMemberIn] = Field(default_factory=list)
+
+
+class AdminGroupOut(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    members: list[GroupMemberOut] = Field(default_factory=list)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ResolverStatus(BaseModel):
+    """Provenance of Databricks group membership lookups (admin banner)."""
+
+    mode: Literal["databricks", "stub"]
+    ttl_seconds: int
+    cached_users: int
+    errors: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AdminGroupsResponse(BaseModel):
+    items: list[AdminGroupOut]
+    resolver: ResolverStatus
+
+
+class PermissionRuleIn(BaseModel):
+    group_id: str
+    effect: Literal["allow", "deny"]
+
+
+class PermissionRuleOut(PermissionRuleIn):
+    group_name: str
+
+
+class AdminPermissionOut(BaseModel):
+    id: str
+    label: str
+    description: str
+    mode: Literal["everyone", "restricted"]
+    rules: list[PermissionRuleOut] = Field(default_factory=list)
+
+
+class AdminPermissionsResponse(BaseModel):
+    items: list[AdminPermissionOut]
+    resolver: ResolverStatus
+
+
+class AdminPermissionUpdate(BaseModel):
+    """Full replacement of one permission's mode and rules."""
+
+    mode: Literal["everyone", "restricted"]
+    rules: list[PermissionRuleIn] = Field(default_factory=list)
+
+
+class GroupCacheRefreshRequest(BaseModel):
+    email: Optional[str] = None  # None ⇒ drop every cached entry
+
+
+class PermissionInspection(BaseModel):
+    """Why a user can or cannot do each catalog action — the admin
+    inspector's payload, produced by services.permissions.inspect_user."""
+
+    email: str
+    is_superuser: bool
+    resolved_databricks_groups: list[str]
+    resolution: dict[str, Any]
+    group_memberships: list[dict[str, Any]]
+    permissions: list[dict[str, Any]]

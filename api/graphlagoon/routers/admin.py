@@ -83,6 +83,7 @@ async def _counts() -> AdminCounts:
         from graphlagoon.db.models import (
             Exploration,
             GraphContext,
+            Group,
             QueryTemplate,
             UsageLog,
             User,
@@ -102,6 +103,7 @@ async def _counts() -> AdminCounts:
                 explorations=await count(Exploration),
                 query_templates=await count(QueryTemplate),
                 audit_entries=await count(UsageLog),
+                groups=await count(Group),
             )
     store = get_memory_store()
     return AdminCounts(
@@ -110,6 +112,7 @@ async def _counts() -> AdminCounts:
         explorations=len(store.explorations),
         query_templates=len(store.query_templates),
         audit_entries=len(store.usage_logs),
+        groups=len(store.groups),
     )
 
 
@@ -495,3 +498,4 @@ async def clear_environment_endpoint(
     return ClearEnvironmentResponse(
         status="cleared", cleared=result["cleared"], warehouse=result["warehouse"]
     )
+

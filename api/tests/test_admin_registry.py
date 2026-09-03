@@ -112,6 +112,7 @@ def test_clear_all_keeps_audit_by_default():
 
 ROUTER_MODULES = (
     "admin",
+    "admin_groups",
     "catalog",
     "config",
     "explorations",

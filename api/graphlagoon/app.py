@@ -195,6 +195,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
 
     from graphlagoon.routers import (
         admin,
+        admin_groups,
         graph_contexts,
         explorations,
         graph,
@@ -209,6 +210,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router = APIRouter()
     router.include_router(config.router)
     router.include_router(admin.router)
+    router.include_router(admin_groups.router)
     router.include_router(graph_contexts.router)
     router.include_router(explorations.router)
     router.include_router(query_templates.router)

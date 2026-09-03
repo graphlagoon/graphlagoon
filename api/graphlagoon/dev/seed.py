@@ -660,6 +660,64 @@ async def run_seed(
                 break
         log(f"audit activity: {stats.deletes} deletes, {stats.transfers} transfers")
 
+        # Groups & permissions ------------------------------------------------
+        # Deliberately gentle: the demo deny targets an email the seed never
+        # creates with, so restricting it can never break a rerun. Never
+        # restrict context.create/exploration.save for seed users here.
+        try:
+            existing = {
+                g["name"]: g
+                for g in (
+                    await client.request("GET", "/api/admin/groups", ADMIN_EMAIL)
+                ).json()["items"]
+            }
+            groups_payload = {
+                "analysts": {
+                    "name": "analysts",
+                    "description": "Seeded demo group: emails + a Databricks group",
+                    "members": (
+                        [
+                            {"kind": "email", "value": u.email}
+                            for u in roster[:8]
+                        ]
+                        + [{"kind": "databricks_group", "value": "data-analysts"}]
+                    ),
+                },
+                "restricted-demo": {
+                    "name": "restricted-demo",
+                    "description": "Seeded demo group: denied context.create",
+                    "members": [
+                        {"kind": "email", "value": f"restricted-demo@{SEED_DOMAIN}"}
+                    ],
+                },
+            }
+            for name, payload in groups_payload.items():
+                if name not in existing:
+                    created = await client.request(
+                        "POST", "/api/admin/groups", ADMIN_EMAIL, json=payload
+                    )
+                    existing[name] = created.json()
+            await client.request(
+                "PUT",
+                "/api/admin/permissions/context.create",
+                ADMIN_EMAIL,
+                json={
+                    "mode": "everyone",
+                    "rules": [
+                        {
+                            "group_id": existing["restricted-demo"]["id"],
+                            "effect": "deny",
+                        }
+                    ],
+                },
+            )
+            log(
+                "groups: analysts + restricted-demo "
+                f"(restricted-demo@{SEED_DOMAIN} cannot create contexts)"
+            )
+        except SeedError as exc:
+            log(f"  groups seeding skipped ({exc})")
+
         power = next((u.email for u in roster if u.profile == "power"), None)
         idle = next((u.email for u in roster if u.profile == "inactive"), None)
         log("")
