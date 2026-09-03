@@ -62,9 +62,14 @@ export type ClusterProgramParameterType = 'text' | 'number' | 'boolean' | 'selec
 /**
  * Source of a parameter value pulled from the right-clicked node when a
  * program runs from the node context menu. 'prop:<name>' reads
- * node.properties[name].
+ * node.properties[name]; 'metric:<ref>' reads a session-computed metric by
+ * id or name (the run aborts when the metric has no value for the node).
  */
-export type ClusterProgramNodeBinding = 'node_id' | 'node_type' | `prop:${string}`;
+export type ClusterProgramNodeBinding =
+  | 'node_id'
+  | 'node_type'
+  | `prop:${string}`
+  | `metric:${string}`;
 
 /**
  * A parameter declared on a cluster program.
@@ -222,6 +227,22 @@ export interface ClusterProgramContext {
 
   /** Resolved values of the program's declared parameters, keyed by id */
   params: ClusterProgramParamValues;
+
+  /**
+   * Look up a session-computed metric value (Metrics panel). `ref` is a
+   * metric id or name; `id` is a node or edge id. A name shared by a node
+   * metric and an edge metric resolves node-first. Returns undefined when the
+   * metric is not computed or has no value for the item.
+   */
+  metric: (ref: string, id: string) => number | string | boolean | null | undefined;
+
+  /** The session's computed metrics, for discoverability inside programs. */
+  metrics: Array<{
+    id: string;
+    name: string;
+    target: 'node' | 'edge';
+    valueType: string;
+  }>;
 }
 
 /**

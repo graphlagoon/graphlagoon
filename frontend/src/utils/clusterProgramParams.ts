@@ -81,12 +81,17 @@ export function missingRequiredParams(
  * resolved. A binding is missing when the source value is undefined, null,
  * an empty string, or not a primitive — a missing binding should abort the
  * run (falling back to a declared default would silently use a value from
- * the wrong context). Coercion to the declared param type happens later in
- * `resolveParamValues`. Params without a binding are ignored.
+ * the wrong context; likewise a `metric:` binding whose metric was not
+ * recomputed this session). Coercion to the declared param type happens
+ * later in `resolveParamValues`. Params without a binding are ignored.
+ *
+ * `metricValue` resolves `metric:<ref>` bindings (injected so this file
+ * stays store-free); when absent, every metric binding reports missing.
  */
 export function resolveNodeBoundValues(
   parameters: ClusterProgramParameter[] | undefined,
-  node: NodeBindingSource
+  node: NodeBindingSource,
+  metricValue?: (ref: string, nodeId: string) => number | string | boolean | null | undefined
 ): ResolveNodeBoundResult {
   const values: ClusterProgramParamValues = {}
   const missing: Array<{ paramId: string; binding: string }> = []
@@ -102,6 +107,8 @@ export function resolveNodeBoundValues(
       raw = node.node_type
     } else if (binding.startsWith('prop:')) {
       raw = node.properties?.[binding.slice('prop:'.length)]
+    } else if (binding.startsWith('metric:')) {
+      raw = metricValue?.(binding.slice('metric:'.length), node.node_id)
     } else {
       raw = undefined
     }

@@ -21,6 +21,10 @@ export interface SkillProperty {
 }
 
 export interface ClusterProgramSkillInput {
+  /** Session-computed node metrics (readable via `metric(<name>, node_id)`) */
+  nodeMetrics?: SkillMetric[]
+  /** Session-computed edge metrics */
+  edgeMetrics?: SkillMetric[]
   /** Node types present in the current graph (e.g. ['Person', 'Company']) */
   nodeTypes: string[]
   /** Edge/relationship types present in the current graph */
@@ -68,6 +72,8 @@ export function metricList(metrics: SkillMetric[], emptyText: string): string {
  */
 export function buildClusterProgramSkill(input: ClusterProgramSkillInput): string {
   const { nodeTypes, edgeTypes, nodeProperties, edgeProperties } = input
+  const nodeMetrics = input.nodeMetrics ?? []
+  const edgeMetrics = input.edgeMetrics ?? []
 
   return `# Task: write a "cluster program" for a graph visualization tool
 
@@ -82,7 +88,9 @@ I don't know exactly what I want yet, so **start by asking me questions** (see t
 
 - Your code runs as the **body of a function** that receives a single \`context\`
   object. These variables are already destructured and in scope:
-  \`nodes\`, \`edges\`, \`selectedNodeIds\`, \`selectedEdgeIds\`, \`params\`.
+  \`nodes\`, \`edges\`, \`selectedNodeIds\`, \`selectedEdgeIds\`, \`params\`,
+  \`metric\`, \`metrics\`. (Do not declare your own top-level \`const\` with any
+  of these names.)
 - Programs can declare **parameters** in the editor UI (text, number, boolean, or
   dropdown). Their values arrive already typed in \`params\` and are read as
   \`params.<id>\` (e.g. \`params.threshold\`). Prefer a parameter over a hardcoded
@@ -110,7 +118,20 @@ edges: Array<{
 selectedNodeIds: string[]
 selectedEdgeIds: string[]
 params: Record<string, string | number | boolean>  // values of parameters declared in the editor UI
+// Session-computed metrics (Metrics panel). ref = metric name or id; returns
+// undefined when not computed / no value for the item. A name shared by a
+// node and an edge metric resolves node-first.
+metric: (ref: string, id: string) => number | string | boolean | null | undefined
+metrics: Array<{ id: string, name: string, target: 'node' | 'edge', valueType: string }>
 \`\`\`
+
+Example: \`const pr = metric('PageRank', node.node_id) ?? 0\`. Metrics only
+exist while computed in the session — guard for \`undefined\`, and prefer
+\`node.properties\` when an equivalent column exists.
+
+A parameter can also be bound to the right-clicked node's metric with the
+editor's node binding \`metric:<name>\` (like \`prop:<name>\`); the run aborts
+with a message when the metric has no value for that node.
 
 ## Output shape (return value) — array of clusters
 
@@ -148,6 +169,12 @@ ${propertyList(nodeProperties, 'none declared')}
 
 **Edge properties (available under \`edge.properties\`):**
 ${propertyList(edgeProperties, 'none declared')}
+
+**Node metrics (session-computed, via \`metric('<name>', node.node_id)\`):**
+${metricList(nodeMetrics, 'none computed in this session')}
+
+**Edge metrics (session-computed, via \`metric('<name>', edge.edge_id)\`):**
+${metricList(edgeMetrics, 'none computed in this session')}
 
 ## Worked example (group nodes by their type)
 

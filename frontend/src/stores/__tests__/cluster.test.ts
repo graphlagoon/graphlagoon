@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useClusterStore, isDefaultProgramId } from '@/stores/cluster'
 import { useGraphStore } from '@/stores/graph'
+import { useMetricsStore } from '@/stores/metrics'
+import { createComputedMetric } from '@/__tests__/fixtures/metrics'
 import { api } from '@/services/api'
 import type { GraphContext } from '@/types/graph'
 import type { ClusterProgram } from '@/types/cluster'
@@ -1100,6 +1102,88 @@ describe('cluster store', () => {
       store.createCluster({ cluster_id: 'c1', cluster_name: 'C1', cluster_class: 'x', figure: 'circle', state: 'open', node_ids: ['n1'] })
       store.createCluster({ cluster_id: 'c2', cluster_name: 'C2', cluster_class: 'x', figure: 'circle', state: 'closed', node_ids: ['n1'] })
       expect(store.getClustersForNode('n1')).toHaveLength(2)
+    })
+  })
+
+  // ==========================================================================
+  // Metrics in the program context — metric(ref, id) + metrics list
+  // ==========================================================================
+
+  describe('program context metrics', () => {
+    function seedMetrics() {
+      const metricsStore = useMetricsStore()
+      metricsStore.upsertMetric(
+        createComputedMetric({
+          id: 'm-pr',
+          name: 'PageRank',
+          values: new Map([
+            ['n1', 0.8],
+            ['n2', 0.1],
+          ]),
+        }),
+      )
+      metricsStore.upsertMetric(
+        createComputedMetric({
+          id: 'm-w',
+          name: 'Weight',
+          target: 'edge',
+          values: new Map([['e1', 2.5]]),
+        }),
+      )
+      return metricsStore
+    }
+
+    it('programs read metrics via metric(ref, id), by name or id, node-first', () => {
+      setupGraphForCluster()
+      seedMetrics()
+      const store = useClusterStore()
+      const prog = store.createProgram({
+        program_name: 'Metric clusters',
+        code: `
+          const hubs = nodes.filter(n => (metric('PageRank', n.node_id) ?? 0) > 0.5)
+          const heavy = edges.filter(e => (metric('m-w', e.edge_id) ?? 0) > 1)
+          return [
+            { cluster_name: 'hubs', node_ids: hubs.map(n => n.node_id) },
+            { cluster_name: 'heavy-src', node_ids: heavy.map(e => e.src) },
+          ]
+        `,
+      })
+      const result = store.computeClustersFromProgram(prog.program_id)
+      expect(result.success).toBe(true)
+      expect(result.clusters?.[0].node_ids).toEqual(['n1'])
+      expect(result.clusters?.[1].node_ids).toEqual(['n1'])
+    })
+
+    it('exposes the metrics list for discoverability', () => {
+      setupGraphForCluster()
+      seedMetrics()
+      const store = useClusterStore()
+      const prog = store.createProgram({
+        program_name: 'List metrics',
+        code: `
+          const names = metrics.map(m => m.name + ':' + m.target).sort()
+          return [{ cluster_name: names.join(','), node_ids: [] }]
+        `,
+      })
+      const result = store.computeClustersFromProgram(prog.program_id)
+      expect(result.success).toBe(true)
+      // Includes the built-in degree metric alongside the seeded ones
+      expect(result.clusters?.[0].cluster_name).toBe('Degree:node,PageRank:node,Weight:edge')
+    })
+
+    it('uncomputed metrics return undefined; old programs run unchanged', () => {
+      setupGraphForCluster()
+      const store = useClusterStore()
+      const prog = store.createProgram({
+        program_name: 'No metrics',
+        code: `
+          if (metric('nope', 'n1') !== undefined) throw new Error('should be undefined')
+          return [{ cluster_name: 'byType', node_ids: nodes.filter(n => n.node_type === 'Person').map(n => n.node_id) }]
+        `,
+      })
+      const result = store.computeClustersFromProgram(prog.program_id)
+      expect(result.success).toBe(true)
+      expect(result.clusters?.[0].node_ids).toEqual(['n1', 'n2'])
     })
   })
 })

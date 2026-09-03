@@ -15,6 +15,7 @@ import type {
 } from '@/types/cluster'
 import { resolveParamValues } from '@/utils/clusterProgramParams'
 import { useGraphStore } from '@/stores/graph'
+import { useMetricsStore } from '@/stores/metrics'
 import { api } from '@/services/api'
 import { useToast } from '@/composables/useToast'
 
@@ -284,6 +285,7 @@ export const useClusterStore = defineStore('cluster', () => {
     try {
       // Prepare execution context
       const graphStore = useGraphStore()
+      const metricsStore = useMetricsStore()
       const context: ClusterProgramContext = {
         nodes: graphStore.nodes.map(n => ({
           node_id: n.node_id,
@@ -300,14 +302,28 @@ export const useClusterStore = defineStore('cluster', () => {
         selectedNodeIds: Array.from(graphStore.selectedNodeIds),
         selectedEdgeIds: Array.from(graphStore.selectedEdgeIds),
         params: resolved.params,
+        // A name shared by a node and an edge metric resolves node-first;
+        // programs iterate both, so the lookup cannot be target-scoped.
+        metric: (ref, id) => {
+          const nodeValue = metricsStore.metricResolver('node', id, ref)
+          return nodeValue !== undefined ? nodeValue : metricsStore.metricResolver('edge', id, ref)
+        },
+        metrics: [...metricsStore.nodeMetrics, ...metricsStore.edgeMetrics].map(m => ({
+          id: m.id,
+          name: m.name,
+          target: m.target as 'node' | 'edge',
+          valueType: m.valueType,
+        })),
       }
 
       // Execute user code in a function context
       // Note: Using Function constructor to eval the code
       // The code should return an array of cluster objects
+      // (`metric`/`metrics` are in scope — a program declaring its own
+      // top-level const with either name would now throw a redeclaration)
       const fn = new Function('context', `
         'use strict';
-        const { nodes, edges, selectedNodeIds, selectedEdgeIds, params } = context;
+        const { nodes, edges, selectedNodeIds, selectedEdgeIds, params, metric, metrics } = context;
 
         // User code:
         ${program.code}

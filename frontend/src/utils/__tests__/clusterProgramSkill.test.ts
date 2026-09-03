@@ -70,4 +70,21 @@ describe('buildClusterProgramSkill', () => {
   it('is stable/deterministic for the same input', () => {
     expect(buildClusterProgramSkill(fullInput)).toBe(buildClusterProgramSkill(fullInput))
   })
+
+  it('embeds session-computed metrics and documents metric()/metrics and metric: bindings', () => {
+    const text = buildClusterProgramSkill({
+      ...fullInput,
+      nodeMetrics: [{ name: 'PageRank', valueType: 'number' as const }],
+      edgeMetrics: [{ name: 'Weight', valueType: 'number' as const }],
+    })
+    expect(text).toContain('- PageRank (number)')
+    expect(text).toContain('- Weight (number)')
+    expect(text).toContain("metric('PageRank', node.node_id)")
+    expect(text).toContain('metric:<name>')
+  })
+
+  it('falls back gracefully when no metrics were computed', () => {
+    const text = buildClusterProgramSkill(fullInput)
+    expect(text).toContain('(none computed in this session)')
+  })
 })

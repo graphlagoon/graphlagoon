@@ -5,6 +5,7 @@ import { useToast } from './useToast';
 import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
 import { useGraphStore } from '@/stores/graph';
+import { useMetricsStore } from '@/stores/metrics';
 import {
   defaultParamValues,
   resolveNodeBoundValues,
@@ -19,7 +20,7 @@ export const CLUSTER_PROGRAM_ACTION_PREFIX = 'cluster-program-action:';
  * Each flagged program becomes a menu item (labeled with the program name)
  * that runs the program as a COMMUNITY algorithm on the right-clicked node:
  * parameter defaults, overridden by node-bound parameters (`node_binding` =
- * node_id / node_type / prop:<name>) resolved from the clicked node. Feedback
+ * node_id / node_type / prop:<name> / metric:<ref>) resolved from the clicked node. Feedback
  * is toast-only; the graph recolors through existing community reactivity.
  *
  * The owning component (GraphVisualizationView) calls register()/unregister()
@@ -32,6 +33,7 @@ export function useClusterProgramMenuActions() {
   const clusterStore = useClusterStore();
   const communityStore = useCommunityStore();
   const graphStore = useGraphStore();
+  const metricsStore = useMetricsStore();
   const { success, error } = useToast();
 
   const registered = ref(false);
@@ -81,14 +83,22 @@ export function useClusterProgramMenuActions() {
       return;
     }
 
-    const { values, missing } = resolveNodeBoundValues(program.parameters, node);
+    const { values, missing } = resolveNodeBoundValues(
+      program.parameters,
+      node,
+      (ref, id) => metricsStore.metricResolver('node', id, ref),
+    );
     if (missing.length > 0) {
       const what = missing
-        .map(m =>
-          m.binding.startsWith('prop:')
-            ? `property "${m.binding.slice('prop:'.length)}" (for ${m.paramId})`
-            : `${m.binding} (for ${m.paramId})`
-        )
+        .map(m => {
+          if (m.binding.startsWith('prop:')) {
+            return `property "${m.binding.slice('prop:'.length)}" (for ${m.paramId})`;
+          }
+          if (m.binding.startsWith('metric:')) {
+            return `metric "${m.binding.slice('metric:'.length)}" (for ${m.paramId}; compute it in the Metrics panel)`;
+          }
+          return `${m.binding} (for ${m.paramId})`;
+        })
         .join(', ');
       error(`Cannot run "${program.program_name}": node is missing ${what}`);
       return;
