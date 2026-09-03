@@ -25,10 +25,12 @@ def app_version() -> str:
     return __version__
 
 
-def build_public_config(
+async def build_public_config(
     user_email: Optional[str], settings: Optional[Settings] = None
 ) -> dict:
     """Public, per-user configuration. Contains no secrets and no user lists."""
+    from graphlagoon.services.permissions import effective_permissions
+
     if settings is None:
         settings = get_settings()
     return {
@@ -53,4 +55,7 @@ def build_public_config(
         "version": app_version(),
         # Per-user boolean only; the superuser list itself is admin-only.
         "is_superuser": is_superuser(user_email) if user_email else False,
+        # Effective permission ids for THIS user (UX mirror only — routes
+        # enforce via require_permission). Superusers get the full catalog.
+        "permissions": await effective_permissions(user_email) if user_email else [],
     }

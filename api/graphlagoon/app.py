@@ -250,7 +250,7 @@ def create_frontend_router(
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-    def render_spa(request: Request):
+    async def render_spa(request: Request):
         """Render the SPA template."""
         manifest = load_vite_manifest()
         assets = get_assets_from_manifest(manifest)
@@ -258,7 +258,7 @@ def create_frontend_router(
         # Same payload as GET /api/config (one builder, never out of sync),
         # plus the SPA-only router base and the auto-login identity.
         user_email = getattr(request.state, "user_email", None)
-        config = build_public_config(user_email, settings)
+        config = await build_public_config(user_email, settings)
         config["router_base"] = router_base
         if user_email:
             config["databricks_user_email"] = user_email
@@ -277,7 +277,7 @@ def create_frontend_router(
     @router.get("/", response_class=HTMLResponse)
     async def serve_frontend_root(request: Request):
         """Serve the SPA for root route."""
-        return render_spa(request)
+        return await render_spa(request)
 
     @router.get("/{path:path}", response_class=HTMLResponse)
     async def serve_frontend(request: Request, path: str = ""):
@@ -287,7 +287,7 @@ def create_frontend_router(
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404, detail="Not found")
-        return render_spa(request)
+        return await render_spa(request)
 
     return router
 
