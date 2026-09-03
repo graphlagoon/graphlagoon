@@ -22,14 +22,12 @@ template language: you decide what text each node and edge shows, extract
 the readable part out of messy values, and preview the result on your real
 data before it hits the canvas.
 
-Open it from the toolbar **Labels** button. It has three tabs:
-
-- **Labels** — the default templates, one for all nodes, one for all edges.
-- **Tooltips** — one template per target for the box that appears on
-  hover; empty means "same as the label".
-- **Rules** — templates that apply only to some target (node/edge)
-  and, optionally, only to some types, with a priority to break ties. Each
-  rule applies to labels, tooltips, or both; the tab badge counts them.
+Open it from the toolbar **Labels** button. It has two tabs, one per
+surface — **Labels** (the canvas text) and **Tooltips** (the hover box) —
+and each tab shows its default templates **and the custom rules that
+override them**, so everything affecting what you see is in one place. A
+rule that applies to both surfaces shows on both tabs; the tab badges count
+the rules affecting each surface.
 
 ![Labels panel](/screenshots/labels-panel.png)
 
@@ -189,9 +187,10 @@ Two gotchas worth knowing:
 
 A rule has a name, a target (node or edge), a **surface** (labels, tooltips,
 or both — which text its template drives), an optional list of types, a
-template, and a priority (0–100). A new rule starts just above the
-highest-priority existing rule for its target — newest wins by default, so a
-rule you just created actually applies. Adding or editing one opens a
+template, and a priority (0–100). A new rule starts at the **maximum
+priority (100)** — the rule you just created applies; lower the number to
+slot it underneath existing rules. Adding a rule from a surface tab presets
+the rule to that surface. Adding or editing one opens a
 dedicated editor with the same autocomplete and live preview as the default
 templates.
 

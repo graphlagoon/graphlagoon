@@ -17,31 +17,22 @@ import { X } from 'lucide-vue-next';
 const props = defineProps<{
   /** Rule to edit, or null to create a new one */
   rule: TextFormatRule | null;
+  /** Surface a NEW rule starts on — the panel passes the open tab's surface. */
+  initialSurface?: TextFormatSurface;
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const graphStore = useGraphStore();
 const isEditMode = computed(() => props.rule !== null);
 
-/**
- * A new rule defaults to winning over the existing ones for its target —
- * "I created a rule and nothing changed" is the classic priority-system
- * trap. Existing rules keep their relative order; 100 stays the ceiling.
- */
-function newestWinsPriority(forTarget: 'node' | 'edge'): number {
-  const priorities = graphStore.textFormatRules
-    .filter((r) => r.target === forTarget)
-    .map((r) => r.priority);
-  if (priorities.length === 0) return 10;
-  return Math.min(100, Math.max(...priorities) + 10);
-}
-
 const name = ref(props.rule?.name ?? '');
 const target = ref<'node' | 'edge'>(props.rule?.target ?? 'node');
-const surface = ref<TextFormatSurface>(props.rule?.surface ?? 'label');
+const surface = ref<TextFormatSurface>(props.rule?.surface ?? props.initialSurface ?? 'label');
 const types = ref<string[]>([...(props.rule?.types ?? [])]);
 const template = ref(props.rule?.template ?? '');
-const priority = ref(props.rule?.priority ?? newestWinsPriority('node'));
+// A new rule starts at maximum priority: the rule you just created applies.
+// Lower it to slot the rule underneath existing ones.
+const priority = ref(props.rule?.priority ?? 100);
 const scope = ref<TextFormatScope>(props.rule?.scope ?? 'exploration');
 
 const formError = ref<string | null>(null);
@@ -50,11 +41,9 @@ const availableTypes = computed(() =>
   target.value === 'node' ? graphStore.nodeTypes : graphStore.edgeTypes,
 );
 
-// Node types make no sense on an edge rule and vice versa; a new rule's
-// suggested priority follows the target's own rule pool.
-watch(target, (t) => {
+// Node types make no sense on an edge rule and vice versa.
+watch(target, () => {
   types.value = [];
-  if (!isEditMode.value) priority.value = newestWinsPriority(t);
 });
 
 function toggleType(t: string) {
@@ -143,7 +132,7 @@ function save() {
                 min="0"
                 max="100"
                 data-testid="rule-priority"
-                title="Higher wins; new rules start above the existing ones"
+                title="Higher wins; new rules start at the maximum"
               />
             </div>
           </div>

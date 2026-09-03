@@ -9365,3 +9365,21 @@ ties resolve toward the OLDER rule, the opposite of the intent.
 Tests updated for tab navigation (unit + e2e + screenshot scenes);
 labels.md panel description now says tabs. 2377 unit green, 6 e2e green.
 No admin-area impact.
+
+## [2026-09-03 08:10] - Refinement: two surface tabs (rules inline) + priority 100 (supersedes newest-wins)
+
+User review of the tabbed panel: a separate Rules tab hid what drives each
+surface — you looked at the Tooltips tab and could not see the rules
+overriding it. The panel now has **two tabs (Labels | Tooltips)** and each
+shows its defaults AND the custom rules affecting that surface (a `both`
+rule lists on both tabs — that is what it does). The tab's + button opens
+the rule editor preset to that surface (`initialSurface` prop); tab badges
+count the rules per surface.
+
+**Priority default is now a fixed 100** (user decision, superseding the
+newest-wins default from the earlier entry): a new rule is created at
+maximum priority so it applies immediately; the user lowers it to slot a
+rule underneath. Editing keeps the stored priority.
+
+Tests/e2e/screenshot scenes updated (2378 unit green, 6 e2e green,
+`make docs-build` passes). No admin-area impact.

@@ -377,13 +377,13 @@ const SCENES: Scene[] = [
     prepare: async (page) => {
       await waitForGraphSettled(page);
       await openPanel(page, 'Labels');
-      await page.getByTestId('labels-tab-rules').click();
+      // The Tooltips tab's + button opens the editor preset to that surface.
+      await page.getByTestId('labels-tab-tooltips').click();
       await page.locator('.add-rule-btn').click();
       const modal = page.getByTestId('rule-editor-modal');
       await expect(modal).toBeVisible();
       // Show the tooltip-surface flow: per-type tooltip with a live preview.
       await modal.getByTestId('rule-name').fill('Person tooltips');
-      await modal.getByTestId('rule-surface').selectOption('tooltip');
       await modal.getByTestId('rule-types').getByText('Person', { exact: true }).click();
       await modal.getByTestId('rule-template').fill('{prop:name}{br}{prop:role}');
       // Let the preview debounce render.
