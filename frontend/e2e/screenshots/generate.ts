@@ -377,6 +377,7 @@ const SCENES: Scene[] = [
     prepare: async (page) => {
       await waitForGraphSettled(page);
       await openPanel(page, 'Labels');
+      await page.getByTestId('labels-tab-rules').click();
       await page.locator('.add-rule-btn').click();
       const modal = page.getByTestId('rule-editor-modal');
       await expect(modal).toBeVisible();

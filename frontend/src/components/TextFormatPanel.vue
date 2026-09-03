@@ -17,13 +17,46 @@
       </div>
     </div>
 
+    <!-- Tabs (house pattern: MetricsPanel, ClusterProgramPanel) -->
+    <div class="tabs">
+      <button
+        class="tab"
+        :class="{ active: activeTab === 'labels' }"
+        data-testid="labels-tab-labels"
+        @click="activeTab = 'labels'"
+      >
+        Labels
+      </button>
+      <button
+        class="tab"
+        :class="{ active: activeTab === 'tooltips' }"
+        data-testid="labels-tab-tooltips"
+        @click="activeTab = 'tooltips'"
+      >
+        Tooltips
+      </button>
+      <button
+        class="tab"
+        :class="{ active: activeTab === 'rules' }"
+        data-testid="labels-tab-rules"
+        @click="activeTab = 'rules'"
+      >
+        Rules
+        <span v-if="graphStore.textFormatRules.length > 0" class="tab-badge">{{ graphStore.textFormatRules.length }}</span>
+      </button>
+    </div>
+
     <!-- Default Templates -->
-    <div class="section">
+    <div v-if="activeTab === 'labels'" class="section">
       <div class="section-title">Default Templates</div>
+      <p class="section-hint">
+        Type <code>{</code> for placeholders and <code>|</code> for modifiers —
+        every template field autocompletes.
+      </p>
 
       <div class="default-template">
         <label>Node Label</label>
-        <TemplateInput v-model="nodeDefaultTemplate" target="node" placeholder="{node_id}" />
+        <TemplateInput v-model="nodeDefaultTemplate" target="node" placeholder="{node_id|truncate:10:...}" />
         <TemplatePreviewInline :template="nodeDefaultTemplate" target="node" />
       </div>
 
@@ -35,7 +68,7 @@
     </div>
 
     <!-- Hover Tooltips -->
-    <div class="section">
+    <div v-if="activeTab === 'tooltips'" class="section">
       <div class="section-title">Hover Tooltips</div>
       <p class="section-hint">
         Leave empty to show the label. A custom rule whose surface includes
@@ -48,6 +81,7 @@
         <TemplateInput
           v-model="nodeTooltipTemplate"
           target="node"
+          multiline
           placeholder="empty = same as the label"
           data-testid="tooltip-template-node"
         />
@@ -64,6 +98,7 @@
         <TemplateInput
           v-model="edgeTooltipTemplate"
           target="edge"
+          multiline
           placeholder="empty = same as the label"
           data-testid="tooltip-template-edge"
         />
@@ -77,7 +112,7 @@
     </div>
 
     <!-- Custom Rules -->
-    <div class="section">
+    <div v-if="activeTab === 'rules'" class="section">
       <div class="section-title">
         Custom Rules
         <button class="add-rule-btn" @click="startAddRule" title="Add Rule">
@@ -174,6 +209,9 @@ const emit = defineEmits<{
 
 const graphStore = useGraphStore();
 const toast = useToast();
+
+// Which tab is open. 'labels' first: defaults are the most-edited thing.
+const activeTab = ref<'labels' | 'tooltips' | 'rules'>('labels');
 
 // Help modal
 const showHelp = ref(false);
@@ -306,6 +344,53 @@ function deleteRule(ruleId: string) {
 
 .close-btn:hover {
   color: var(--vt-c-text-1, #fff);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-color, #ddd);
+  padding-bottom: 8px;
+}
+
+.tab {
+  flex: 1;
+  white-space: nowrap;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+  color: var(--text-color, #333);
+}
+
+.tab:hover {
+  background: var(--bg-secondary, #f5f5f5);
+}
+
+.tab.active {
+  background: var(--primary-color, #42b883);
+  color: white;
+  border-color: var(--primary-color, #42b883);
+}
+
+.tab-badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.tab:not(.active) .tab-badge {
+  background: var(--bg-secondary, #eee);
+  color: var(--text-secondary, #888);
 }
 
 .section {
