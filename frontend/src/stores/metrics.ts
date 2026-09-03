@@ -14,6 +14,7 @@ import type {
   VisualMapping,
   SizeMapping,
   WeightMapping,
+  ColorMapping,
   ScaleType,
   GraphInfo,
   ResourceMetrics,
@@ -62,6 +63,7 @@ export const useMetricsStore = defineStore('metrics', () => {
 
   const visualMapping = ref<VisualMapping>({
     nodeSize: { ...DEFAULT_VISUAL_MAPPING.nodeSize },
+    nodeColor: { ...DEFAULT_VISUAL_MAPPING.nodeColor },
     edgeWeight: { ...DEFAULT_VISUAL_MAPPING.edgeWeight },
     enableRealTimeUpdates: DEFAULT_VISUAL_MAPPING.enableRealTimeUpdates,
   });
@@ -202,6 +204,15 @@ export const useMetricsStore = defineStore('metrics', () => {
    * Map<string, number>, and a string metric cannot size anything. */
   const nodeSizeMetric = computed(() => {
     const id = visualMapping.value.nodeSize.metricId;
+    if (!id) return null;
+    const m = builtInMetrics.value.get(id) || computedMetrics.value.get(id) || null;
+    return m && isNumericMetric(m) ? m : null;
+  });
+
+  /** Currently selected node color metric — same numeric-only contract as
+   * nodeSizeMetric: a string/boolean metric cannot drive the gradient. */
+  const nodeColorMetric = computed(() => {
+    const id = visualMapping.value.nodeColor.metricId;
     if (!id) return null;
     const m = builtInMetrics.value.get(id) || computedMetrics.value.get(id) || null;
     return m && isNumericMetric(m) ? m : null;
@@ -412,6 +423,25 @@ export const useMetricsStore = defineStore('metrics', () => {
   }
 
   /**
+   * Set the metric to use for node coloring (null turns metric color off)
+   */
+  function setNodeColorMetric(metricId: string | null): void {
+    visualMapping.value.nodeColor.metricId = metricId;
+  }
+
+  /**
+   * Update node color mapping parameters
+   */
+  function updateNodeColorMapping(
+    update: Partial<typeof visualMapping.value.nodeColor>
+  ): void {
+    visualMapping.value.nodeColor = {
+      ...visualMapping.value.nodeColor,
+      ...update,
+    };
+  }
+
+  /**
    * Set the metric to use for edge weight
    */
   function setEdgeWeightMetric(metricId: string | null): void {
@@ -443,6 +473,7 @@ export const useMetricsStore = defineStore('metrics', () => {
   function resetVisualMapping(): void {
     visualMapping.value = {
       nodeSize: { ...DEFAULT_VISUAL_MAPPING.nodeSize },
+      nodeColor: { ...DEFAULT_VISUAL_MAPPING.nodeColor },
       edgeWeight: { ...DEFAULT_VISUAL_MAPPING.edgeWeight },
       enableRealTimeUpdates: DEFAULT_VISUAL_MAPPING.enableRealTimeUpdates,
     };
@@ -452,6 +483,7 @@ export const useMetricsStore = defineStore('metrics', () => {
   function getVisualMappingState(): VisualMapping {
     return {
       nodeSize: { ...visualMapping.value.nodeSize },
+      nodeColor: { ...visualMapping.value.nodeColor },
       edgeWeight: { ...visualMapping.value.edgeWeight },
       enableRealTimeUpdates: visualMapping.value.enableRealTimeUpdates,
     };
@@ -469,7 +501,7 @@ export const useMetricsStore = defineStore('metrics', () => {
     const source = (raw ?? {}) as Record<string, unknown>;
     const SCALES: ScaleType[] = ['linear', 'log', 'sqrt'];
 
-    function mergeMapping<T extends SizeMapping | WeightMapping>(
+    function mergeMapping<T extends SizeMapping | WeightMapping | ColorMapping>(
       defaults: T,
       value: unknown,
     ): T {
@@ -486,6 +518,12 @@ export const useMetricsStore = defineStore('metrics', () => {
           if (SCALES.includes(candidate as ScaleType)) {
             (merged[key] as unknown) = candidate;
           }
+        } else if (key === 'minColor' || key === 'maxColor') {
+          // Untrusted preset input that ends up in the renderer — only a
+          // full 6-digit hex color is accepted.
+          if (typeof candidate === 'string' && /^#[0-9a-fA-F]{6}$/.test(candidate)) {
+            (merged[key] as unknown) = candidate;
+          }
         } else if (typeof candidate === typeof defaults[key]) {
           (merged[key] as unknown) = candidate;
         }
@@ -495,6 +533,7 @@ export const useMetricsStore = defineStore('metrics', () => {
 
     visualMapping.value = {
       nodeSize: mergeMapping({ ...DEFAULT_VISUAL_MAPPING.nodeSize }, source.nodeSize),
+      nodeColor: mergeMapping({ ...DEFAULT_VISUAL_MAPPING.nodeColor }, source.nodeColor),
       edgeWeight: mergeMapping({ ...DEFAULT_VISUAL_MAPPING.edgeWeight }, source.edgeWeight),
       enableRealTimeUpdates:
         typeof source.enableRealTimeUpdates === 'boolean'
@@ -551,6 +590,9 @@ export const useMetricsStore = defineStore('metrics', () => {
     if (visualMapping.value.nodeSize.metricId === metricId) {
       visualMapping.value.nodeSize.metricId = null;
     }
+    if (visualMapping.value.nodeColor.metricId === metricId) {
+      visualMapping.value.nodeColor.metricId = null;
+    }
     if (visualMapping.value.edgeWeight.metricId === metricId) {
       visualMapping.value.edgeWeight.metricId = null;
     }
@@ -566,6 +608,7 @@ export const useMetricsStore = defineStore('metrics', () => {
     computedMetrics.value.clear();
     metricsVersion.value++;
     visualMapping.value.nodeSize.metricId = null;
+    visualMapping.value.nodeColor.metricId = null;
     visualMapping.value.edgeWeight.metricId = null;
     for (const id of Array.from(tableMetricIds.value)) {
       if (!id.startsWith('__builtin_')) tableMetricIds.value.delete(id);
@@ -707,6 +750,7 @@ export const useMetricsStore = defineStore('metrics', () => {
     tableNodeMetrics,
     tableEdgeMetrics,
     nodeSizeMetric,
+    nodeColorMetric,
     edgeWeightMetric,
     hasActiveComputations,
     queuedCount,
@@ -724,6 +768,8 @@ export const useMetricsStore = defineStore('metrics', () => {
     // Visual mapping
     setNodeSizeMetric,
     updateNodeSizeMapping,
+    setNodeColorMetric,
+    updateNodeColorMapping,
     setEdgeWeightMetric,
     updateEdgeWeightMapping,
     toggleRealTimeUpdates,

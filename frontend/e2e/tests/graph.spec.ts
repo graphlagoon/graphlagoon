@@ -207,6 +207,23 @@ test.describe('Graph Visualization', () => {
       await expect(drawer.locator('th', { hasText: 'Degree' })).toHaveCount(0);
     });
 
+    test('mapping tab offers color-by-metric with the built-in Degree metric', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTitle('Metrics')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTitle('Metrics').click();
+      await page.getByText('Visual Mapping').click();
+
+      const colorSelect = page.getByTestId('node-color-metric-select');
+      await expect(colorSelect).toBeVisible();
+      // Off by default; picking the built-in degree metric turns it on and
+      // reveals the gradient controls.
+      await colorSelect.selectOption('__builtin_degree');
+      await expect(colorSelect).toHaveValue('__builtin_degree');
+      await expect(page.getByTestId('node-color-min')).toBeVisible();
+      await expect(page.getByTestId('node-color-max')).toBeVisible();
+    });
+
     test('Query Templates panel shows template controls', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTitle('Query Templates')).toBeVisible({ timeout: 15_000 });

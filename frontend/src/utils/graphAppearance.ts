@@ -24,6 +24,22 @@ export function hexToRgba(hex: string, alpha: number): string {
 }
 
 /**
+ * Per-channel linear interpolation between two #rrggbb colors; t clamped to
+ * [0,1]. Drives the color-by-metric gradient.
+ */
+export function interpolateHexColor(a: string, b: string, t: number): string {
+  const clamped = Math.max(0, Math.min(1, t));
+  const channel = (offset: number): string => {
+    const from = parseInt(a.slice(offset, offset + 2), 16);
+    const to = parseInt(b.slice(offset, offset + 2), 16);
+    return Math.round(from + (to - from) * clamped)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${channel(1)}${channel(3)}${channel(5)}`;
+}
+
+/**
  * Calculate curvature for an edge in a multi-edge group that may contain
  * both forward (A→B) and reverse (B→A) edges.
  *
@@ -170,6 +186,11 @@ export interface AppearanceContext {
   // Metric mapping
   nodeSizeMetric: { values: Map<string, number>; min: number; max: number } | null;
   nodeSizeMapping: { minSize: number; maxSize: number; scale: ScaleType };
+  // Color-by-metric gradient. Precedence when a node HAS a value: metric
+  // color > community color > type color (clusters exempt). Nodes without a
+  // value fall back per-node — visually flagging coverage gaps.
+  nodeColorMetric: { values: Map<string, number>; min: number; max: number } | null;
+  nodeColorMapping: { minColor: string; maxColor: string; scale: ScaleType };
   edgeWeightMetric: { values: Map<string, number>; min: number; max: number } | null;
   edgeWeightMapping: { minWeight: number; maxWeight: number; scale: ScaleType };
 
@@ -214,6 +235,25 @@ export function computeNodeAppearance(
     : (ctx.communityColorMap?.get(nodeId) ?? ctx.getNodeTypeColor(nodeType));
   let color = baseColor;
   let size = isCluster ? clusterBaseSize : ctx.baseNodeSize;
+
+  // Color-by-metric gradient (skip for clusters). Wins over community/type
+  // color when the node has a value: the user turned it on explicitly in the
+  // mapping tab, while community coloring is ambient — the select silently
+  // no-oping whenever communities exist would be worse.
+  if (!isCluster && ctx.nodeColorMetric) {
+    const metricValue = ctx.nodeColorMetric.values.get(nodeId);
+    if (metricValue !== undefined) {
+      const t = scaleValue(
+        metricValue,
+        ctx.nodeColorMetric.min,
+        ctx.nodeColorMetric.max,
+        0,
+        1,
+        ctx.nodeColorMapping.scale,
+      );
+      color = interpolateHexColor(ctx.nodeColorMapping.minColor, ctx.nodeColorMapping.maxColor, t);
+    }
+  }
 
   // Visibility checks
   const isTypeHidden = ctx.hasNodeTypeFilter && !ctx.nodeTypeFilterSet.has(nodeType);
