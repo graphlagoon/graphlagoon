@@ -116,6 +116,13 @@ export function describeAudit(entry: AuditEntry): string {
       return `${m.name ?? '?'}${m.provider ? ` via ${m.provider}` : ''}`;
     case 'admin.clear_all':
       return `cleared: ${Array.isArray(m.cleared) ? m.cleared.join(', ') : '?'}`;
+    case 'group.create':
+    case 'group.update':
+      return `"${m.name ?? entry.resource_id}" (${m.members ?? 0} member${m.members === 1 ? '' : 's'})`;
+    case 'group.delete':
+      return `"${m.name ?? entry.resource_id}"${m.rules_removed ? ` — ${m.rules_removed} rule(s) removed` : ''}`;
+    case 'permission.update':
+      return `${m.permission ?? '?'}: ${m.mode ?? '?'}, ${m.rules ?? 0} rule(s)`;
     default: {
       const keys = Object.keys(m);
       return keys.length ? keys.map((k) => `${k}=${String(m[k])}`).join(', ') : '';

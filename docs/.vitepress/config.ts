@@ -51,6 +51,7 @@ export default defineConfig({
         items: [
           { text: 'Databricks Integration', link: '/guide/integration' },
           { text: 'Deploy as a Databricks App', link: '/guide/databricks-apps' },
+          { text: 'Groups & Permissions', link: '/guide/permissions' },
           { text: 'Configuration', link: '/guide/configuration' },
           { text: 'Python API Reference', link: '/guide/python-api' },
         ],

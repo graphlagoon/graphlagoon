@@ -391,6 +391,16 @@ settings = Settings(superuser_emails="admin@company.com,ops@company.com")
 which wildcard sharing (`*@domain`) is allowed. When unset, wildcard shares
 are rejected; sharing with individual emails is always allowed.
 
+### Groups & permissions
+
+Runtime-managed authorization (who may create contexts, save explorations)
+lives in the admin area, not in env vars — see
+[Groups & Permissions](./permissions.md). One setting tunes it:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_GROUP_CACHE_TTL_SECONDS` | `600` | Per-user TTL of the Databricks group-membership (SCIM) cache. Stale entries are served when SCIM is unreachable. |
+
 ## Programmatic Configuration
 
 ```python

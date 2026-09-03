@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   setupAPIMocks,
+  seedAdmin,
   seedContexts,
   seedExplorations,
   seedGraphResponse,
@@ -631,6 +632,43 @@ test.describe('Documentation Screenshots', () => {
 
     await page.screenshot({
       path: screenshotPath('getting-started-login'),
+      fullPage: false,
+    });
+
+    await context.close();
+  });
+
+  test('permissions-admin-groups', async ({ browser }) => {
+    // Fresh context: needs is_superuser, which setupPage does not inject.
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await context.newPage();
+
+    await page.addInitScript(() => {
+      (window as any).__GRAPH_LAGOON_CONFIG__ = {
+        dev_mode: true,
+        database_enabled: false,
+        is_superuser: true,
+      };
+      (window as any).__SCREENSHOT_MODE__ = true;
+      localStorage.setItem('userEmail', 'admin@graphlagoon.dev');
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = '[data-testid="nav-dev"] { display: none !important; }';
+        document.head.appendChild(style);
+      });
+    });
+
+    await setupAPIMocks(page);
+    await seedAdmin(page);
+    await page.goto('/admin');
+    await page.getByTestId('admin-tab-groups').click();
+    await expect(page.getByTestId('admin-groups-list')).toBeVisible();
+    await page.waitForTimeout(300);
+
+    await page.screenshot({
+      path: screenshotPath('permissions-admin-groups'),
       fullPage: false,
     });
 

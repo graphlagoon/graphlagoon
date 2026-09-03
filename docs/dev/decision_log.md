@@ -9478,3 +9478,92 @@ had no other entry point.
 `frontend/e2e/tests/rest-context.spec.ts` (its `Expand from Node` hidden-check
 had nothing left to assert; the surrounding query-only-connection test stays),
 `docs/guide/exploring-the-graph.md` ("Three ways" → "Two ways").
+
+## [2026-09-03 09:50] - Feature: Groups & Permissions (authorization)
+
+**Feature:** Superuser-managed groups (members: emails and/or Databricks
+workspace groups) with allow/deny rules over a fixed permission catalog.
+v1 catalog: `context.create`, `exploration.save`. User decisions (asked):
+capabilities-only scope (resource sharing stays email-based), both gates in
+v1, SCIM on-demand + TTL cache for Databricks membership, and **hide** (not
+disable) blocked UI affordances.
+
+**Design decisions:**
+1. **GBAC / flat RBAC with deny precedence** — permission → groups
+   (allow/deny), not role → permissions. Deny > restricted-needs-allow >
+   everyone; superusers bypass everything (env-var list = anti-lockout).
+   Policy engines (OPA/Casbin) rejected as unadministrable overkill.
+2. **Default-allow**: no rows ⇒ today's behavior; upgrade is a no-op (route
+   tests pin this). Explicit per-permission mode instead of "first allow
+   rule flips to restricted" (no silent surprises).
+3. **Rules/modes read per check, never process-cached** — admin edits apply
+   immediately, replicas can't disagree. Only SCIM membership is cached
+   (per-user TTL `GRAPH_LAGOON_GROUP_CACHE_TTL_SECONDS`=600, stale-on-error,
+   admin banner + manual refresh). Documented trade-off: a deny backed only
+   by a Databricks group can lapse when SCIM is down AND the cache is cold —
+   the guide tells admins to use email members for critical denies.
+4. **SCIM via raw httpx** (databricks-sdk is not in the default venv);
+   direct membership only; service principals have no email ⇒ out of the
+   identity model. Deployment prerequisite (SP needs SCIM read) documented.
+5. **admin_groups is a SIBLING router of admin**, not nested: FastAPI
+   0.139's lazy `_IncludedRouter` hides nested routes from
+   `router.routes`, which the registry introspection walks (known gotcha).
+   It carries its own `require_superuser` router dependency + its own
+   parametrized gate walk.
+6. **Catalog registry forces honesty**: `test_permission_gates_reference_catalog`
+   fails on any `require_permission("...")` literal outside the catalog.
+   Adding a permission = 1 catalog line + 1 `Depends` + 1 `can()` hide.
+7. **Hide model in the UI** (user's call): create-context buttons and the
+   save-exploration affordances render only with the permission; the
+   Contexts page never hides (viewing is not gated); the empty state
+   explains ("ask an administrator") instead of dead-ending; the
+   exploration-name chip stays visible (it is information) and its click
+   explains via toast. Backend 403 `PERMISSION_DENIED` names the permission.
+8. **Effective permissions ride `build_public_config`** (now async; ripple:
+   render_spa + 3 call sites + one sync test) — no new /api/me endpoint,
+   and dev identity switching re-fetches it for free.
+
+**Server:** 4 tables (migration 015, idempotent) + memory-store twins;
+`services/permission_catalog.py`, `services/groups.py`,
+`services/permissions.py` (pure `evaluate()` + zero-IO fast path for the
+default posture), `services/group_resolution.py` (SCIM + TTL + stub);
+`require_permission` dependency factory in `utils/authz.py`; gates on
+POST /api/graph-contexts and exploration create/update;
+`routers/admin_groups.py` (groups CRUD, permissions GET/PUT, inspector,
+cache refresh) — all mutations audited (`group.create/update/delete`,
+`permission.update`); AdminCounts.groups; seed adds `analysts` +
+`restricted-demo` and a demo deny that can never break seed reruns.
+
+**Frontend:** `usePermissions` (`can()`; absent array ⇒ allow for older
+backends, present ⇒ strict; deliberately NOT useFeatureFlags whose
+absent→true is a different contract); hidden affordances in ContextsView +
+Toolbar; Admin tab "Groups & permissions" (GroupsPanel + GroupEditorModal +
+PermissionsMatrix with lockout warning + PermissionInspector);
+admin store/API methods; describeAudit cases.
+
+**Testing:** api 1191 passed (6 pre-existing failures unchanged) —
+test_permissions (evaluate matrix, membership, SCIM resolver via
+MockTransport incl. stale-on-error), test_permission_routes (default
+posture no-op, 403 envelope, deny-beats-everyone, databricks stub, config
+payload), test_admin_groups (CRUD, normalization, cascade, audit trail,
+inspector, gate walk); frontend 2396 unit / 139 files; e2e 221 passed
+(new: admin-groups.spec, permissions.spec).
+
+**Public Docs:** new `docs/guide/permissions.md` (+ sidebar), configuration
+and databricks-apps updated, screenshot `permissions-admin-groups.png`
+(`make docs-screenshots`), `make docs-build` passes.
+
+**Admin-Area Impact:** registries updated — CLEARABLE_TABLES (4 tables),
+CONFIG_FIELD_KINDS (`group_cache_ttl_seconds`), AUDITED_ROUTES (4) +
+AUDIT_EXEMPT (refresh), ROUTER_MODULES (`admin_groups`), AuditAction (4),
+AdminCounts.groups, seed, docs/dev/admin-area.md rows for the catalog and
+the sibling-router rule.
+
+**Known limitations / future:** nested Databricks groups don't expand
+(SCIM direct members); share-with-group is a designed v2 hook
+(`group:<uuid>` sentinel in `shared_with_email` via `share_match_emails`)
+with zero schema change; superusers remain env-var by design.
+
+**Author:** Claude (AI Assistant)
+
+---

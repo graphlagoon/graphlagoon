@@ -5,6 +5,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
 import { useToolbarStore } from '@/stores/toolbar';
 import { usePersistence } from '@/composables/usePersistence';
+import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -43,6 +44,7 @@ const authStore = useAuthStore();
 const toolbarStore = useToolbarStore();
 const toast = useToast();
 const { devMode, isSuperuser } = usePersistence();
+const { canSaveExplorations } = usePermissions();
 
 const isGraphPage = computed(() => route.name === 'graph');
 const toolbarHandlers = computed(() => toolbarStore.handlers);
@@ -85,6 +87,13 @@ async function selectExploration(exploration: Exploration) {
 }
 
 function openSaveModal() {
+  // Save affordances are hidden without the permission; the exploration-name
+  // chip stays visible (it identifies what is loaded), so its click lands
+  // here and gets an explanation instead of a hidden modal.
+  if (!canSaveExplorations.value) {
+    toast.info("You don't have the Save explorations permission — ask an administrator.");
+    return;
+  }
   saveTitle.value = graphStore.currentExploration?.title || '';
   saveError.value = null;
   showSaveModal.value = true;
@@ -184,7 +193,7 @@ function handleExportPng(options: ExportPNGOptions) {
           <span v-if="graphStore.isExplorationDirty" class="sr-only">has unsaved changes</span>
         </button>
         <button
-          v-else
+          v-else-if="canSaveExplorations"
           class="exploration-state exploration-unsaved"
           data-testid="toolbar-exploration-unsaved"
           title="This view is not saved. Click to save it as an exploration."
@@ -303,7 +312,7 @@ function handleExportPng(options: ExportPNGOptions) {
           </button>
 
           <button
-            v-if="graphStore.graphQuery || graphStore.currentExploration"
+            v-if="canSaveExplorations && (graphStore.graphQuery || graphStore.currentExploration)"
             class="toolbar-btn toolbar-btn--primary"
             title="Save Exploration"
             @click="openSaveModal"
