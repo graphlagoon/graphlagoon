@@ -31,6 +31,9 @@ import {
   X,
   Info,
   ExternalLink,
+  Shield,
+  FlaskConical,
+  LogOut,
 } from 'lucide-vue-next';
 
 const route = useRoute();
@@ -124,7 +127,6 @@ function handleExportPng(options: ExportPNGOptions) {
           <path d="M2 17c2-4 4-6 6-6s4 4 6 4 4-3 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/>
           <circle cx="12" cy="12" r="2.5" fill="currentColor" opacity="0.7"/>
         </svg>
-        <span class="brand-name">Graph Lagoon</span>
       </RouterLink>
 
       <span class="title-sep" aria-hidden="true"></span>
@@ -132,18 +134,16 @@ function handleExportPng(options: ExportPNGOptions) {
       <RouterLink to="/contexts" class="nav-link" data-testid="nav-contexts">Contexts</RouterLink>
       <span class="title-sep" aria-hidden="true"></span>
       <RouterLink to="/explorations" class="nav-link" data-testid="nav-explorations">Explorations</RouterLink>
-      <RouterLink v-if="devMode" to="/dev/generator" class="nav-link dev-link" data-testid="nav-dev">DEV</RouterLink>
-      <RouterLink
-        v-if="isSuperuser"
-        to="/admin"
-        class="nav-link admin-link"
-        data-testid="nav-admin"
-        title="Admin area (superuser)"
-      >Admin</RouterLink>
 
       <template v-if="isGraphPage">
         <span class="title-sep" aria-hidden="true"></span>
-        <span class="context-title" data-testid="toolbar-context-title">{{ graphStore.currentContext?.title }}</span>
+        <!-- The name is truncated by CSS, so the full one has to live somewhere:
+             without the title a long context name is unrecoverable. -->
+        <span
+          class="context-title"
+          data-testid="toolbar-context-title"
+          :title="graphStore.currentContext?.title"
+        >{{ graphStore.currentContext?.title }}</span>
         <span
           v-if="graphStore.enhancedHasMultiEdges"
           class="multi-edge-badge"
@@ -165,7 +165,14 @@ function handleExportPng(options: ExportPNGOptions) {
             : `Saved as “${graphStore.currentExploration.title}” — click to update it`"
           @click="openSaveModal"
         >
-          {{ graphStore.currentExploration.title }}
+          <!-- Stands in for the name once the bar is too narrow to show a
+               legible part of it: the save affordance and the dirty dot must
+               survive widths where the text cannot. -->
+          <Save :size="14" class="exploration-icon" aria-hidden="true" />
+          <!-- The title is in its own span so the ellipsis eats only the name:
+               applied to the button it would clip the dirty dot too, hiding the
+               unsaved indicator on exactly the long names that need it. -->
+          <span class="exploration-label">{{ graphStore.currentExploration.title }}</span>
           <!-- A dot, not the word "modified": it sits in a dense bar and the
                tooltip carries the sentence. -->
           <span
@@ -304,21 +311,6 @@ function handleExportPng(options: ExportPNGOptions) {
             <Save :size="15" /><span class="btn-text">Save</span>
           </button>
 
-          <!-- Reading a precomputed graph never needs this panel — it is a URL.
-               Only superusers can publish one, so the button is gated on that;
-               whether any provider is actually writable is a second question the
-               panel answers from the server. -->
-          <button
-            v-if="isSuperuser && toolbarHandlers"
-            class="toolbar-btn"
-            :class="{ active: toolbarStore.activePanels.has('precomputed') }"
-            title="Precomputed graphs (superuser)"
-            data-testid="toolbar-precomputed"
-            @click="toolbarHandlers.onTogglePrecomputed()"
-          >
-            <DatabaseZap :size="15" /><span class="btn-text">Precomputed</span>
-          </button>
-
         </div>
     </div>
 
@@ -345,13 +337,62 @@ function handleExportPng(options: ExportPNGOptions) {
         <Info :size="15" />
       </button>
 
-      <div v-if="devMode" class="user-menu-container">
-        <button class="btn-user-icon" :aria-expanded="showUserMenu" title="User menu" @click="showUserMenu = !showUserMenu">
+      <!-- The account menu also holds everything role-gated: DEV, Admin and
+           Precomputed are used by a minority, rarely, and each one cost the
+           toolbar permanent width — measured at 874px for the left group with
+           DEV and Admin showing, which is what pushed the panel toggles off
+           the screen. The menu renders for everyone now, not only in dev mode:
+           it is the only way to reach Admin. -->
+      <div class="user-menu-container">
+        <button
+          class="btn-user-icon"
+          :aria-expanded="showUserMenu"
+          title="User menu"
+          data-testid="user-menu-btn"
+          @click="showUserMenu = !showUserMenu"
+        >
           <User :size="18" />
         </button>
         <div v-if="showUserMenu" class="user-menu-dropdown" @click.stop>
-          <div class="user-menu-email">{{ authStore.email }}</div>
-          <button class="user-menu-item" @click="logout(); showUserMenu = false">Logout</button>
+          <div v-if="authStore.email" class="user-menu-email">{{ authStore.email }}</div>
+
+          <RouterLink
+            v-if="isSuperuser"
+            to="/admin"
+            class="user-menu-item"
+            data-testid="nav-admin"
+            @click="showUserMenu = false"
+          >
+            <Shield :size="14" /> Admin area
+          </RouterLink>
+
+          <!-- Reading a precomputed graph never needs this panel — it is a URL.
+               Only superusers can publish one, so it is gated on that; whether
+               any provider is actually writable is a second question the panel
+               answers from the server. -->
+          <button
+            v-if="isSuperuser && isGraphPage && toolbarHandlers"
+            class="user-menu-item"
+            :class="{ active: toolbarStore.activePanels.has('precomputed') }"
+            data-testid="toolbar-precomputed"
+            @click="toolbarHandlers.onTogglePrecomputed(); showUserMenu = false"
+          >
+            <DatabaseZap :size="14" /> Precomputed graphs
+          </button>
+
+          <RouterLink
+            v-if="devMode"
+            to="/dev/generator"
+            class="user-menu-item dev-item"
+            data-testid="nav-dev"
+            @click="showUserMenu = false"
+          >
+            <FlaskConical :size="14" /> DEV generator
+          </RouterLink>
+
+          <button v-if="devMode" class="user-menu-item" @click="logout(); showUserMenu = false">
+            <LogOut :size="14" /> Logout
+          </button>
         </div>
         <div v-if="showUserMenu" class="user-menu-backdrop" @click="showUserMenu = false"></div>
       </div>
@@ -483,7 +524,10 @@ function handleExportPng(options: ExportPNGOptions) {
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--space-4);
-  height: 52px;
+  /* min-height rather than height: the bar wraps to two rows under 768px.
+     Deliberately NOT flex-wrap here — wrapping makes flex move a group to the
+     next line instead of shrinking the left group, which is what has to give. */
+  min-height: 52px;
   background: var(--color-toolbar-bg);
   border-bottom: 1px solid var(--color-toolbar-border);
   gap: var(--space-3);
@@ -504,7 +548,6 @@ function handleExportPng(options: ExportPNGOptions) {
 }
 .brand:hover { opacity: 0.85; }
 .brand-icon { flex-shrink: 0; }
-.brand-name { white-space: nowrap; }
 
 /* ── Sections ─────────────────────────────────────────────── */
 .toolbar-left,
@@ -515,14 +558,19 @@ function handleExportPng(options: ExportPNGOptions) {
   gap: var(--space-2);
 }
 
-/* Left shrinks (the context title ellipsises), right never does (Save /
-   Export / user menu must stay reachable); the centre takes what is left and
-   scrolls rather than pushing the right group off-screen. */
+/* Left shrinks (both names ellipsise), right never does (Save / Export / user
+   menu must stay reachable), and the centre asks for its buttons.
+   `min-width: min-content` on the centre is what makes the left group yield:
+   with `min-width: 0` the centre accepted any width and hid the overflow
+   behind a scrollbar it also hides, so the flex algorithm never saw a shortage
+   and never asked the left group — 874px wide with DEV and Admin showing — for
+   anything. The measured result was Filters and Query clipped away even at
+   1920px. */
 .toolbar-left { flex-shrink: 1; min-width: 0; }
 .toolbar-right { flex-shrink: 0; }
 .toolbar-center {
   flex: 1;
-  min-width: 0;
+  min-width: min-content;
   justify-content: center;
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -538,6 +586,10 @@ function handleExportPng(options: ExportPNGOptions) {
   font-size: var(--text-base);
   color: var(--color-toolbar-text-muted);
   text-decoration: none;
+  /* Under pressure the names truncate; the nav must not wrap to two lines
+     inside a 52px bar. */
+  flex-shrink: 0;
+  white-space: nowrap;
   padding: 4px var(--space-2);
   border-radius: var(--radius-sm);
   transition: color var(--transition-fast), background-color var(--transition-fast);
@@ -546,8 +598,6 @@ function handleExportPng(options: ExportPNGOptions) {
 .nav-link.router-link-active { color: var(--color-primary); font-weight: var(--font-semibold); }
 .nav-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-.nav-link.dev-link { color: var(--color-warning); }
-.admin-link { color: var(--color-warning, #b45309); font-weight: var(--font-semibold); }
 
 .title-sep {
   width: 1px;
@@ -560,6 +610,7 @@ function handleExportPng(options: ExportPNGOptions) {
   font-weight: var(--font-semibold);
   font-size: var(--text-md);
   color: var(--color-toolbar-text);
+  min-width: 4rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -573,6 +624,17 @@ function handleExportPng(options: ExportPNGOptions) {
   white-space: nowrap;
 }
 
+.exploration-label {
+  /* A name shrunk past this shows "…" and nothing else — floor it, and drop
+     the text entirely (for the icon below) when even the floor will not fit. */
+  min-width: 4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exploration-icon { display: none; flex-shrink: 0; }
+
 .exploration-unsaved {
   font-size: var(--text-base);
   color: var(--color-warning);
@@ -582,6 +644,7 @@ function handleExportPng(options: ExportPNGOptions) {
 .exploration-state.dirty { color: var(--color-warning); }
 
 .dirty-dot {
+  flex-shrink: 0;
   margin-left: 4px;
   font-size: 9px;
   vertical-align: middle;
@@ -600,7 +663,15 @@ function handleExportPng(options: ExportPNGOptions) {
   border: 0;
 }
 
+/* Capped like .context-title: a nowrap child with no max-width sets the whole
+   left group's min-content, so a long exploration name could not be shrunk
+   away and the space came out of .toolbar-center — whose overflow is scrolled
+   with a hidden scrollbar, so the panel toggles just left the screen. */
 .exploration-state {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 200px;
   background: none;
   border: none;
   padding: 2px var(--space-1);
@@ -760,18 +831,26 @@ function handleExportPng(options: ExportPNGOptions) {
 }
 
 .user-menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   width: 100%;
   padding: 10px 14px;
   border: none;
   background: none;
   text-align: left;
   font-size: var(--text-base);
+  font-family: inherit;
   cursor: pointer;
   color: var(--color-text);
+  text-decoration: none;
   transition: background-color var(--transition-fast);
 }
 .user-menu-item:hover { background: var(--color-bg-muted); }
+.user-menu-item:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* Same open/closed feedback the panel toggles give in the centre group. */
+.user-menu-item.active { color: var(--color-primary); background: var(--color-toolbar-hover-bg); }
+.user-menu-item.dev-item { color: var(--color-warning); }
 
 .user-menu-backdrop {
   position: fixed;
@@ -936,8 +1015,13 @@ function handleExportPng(options: ExportPNGOptions) {
 @media (max-width: 1100px) {
   .toolbar-center { gap: 2px; }
   .btn-group-sep { margin: 0; }
-  .brand-name { display: none; }
   .context-title { max-width: 140px; }
+  /* Below this the exploration name cannot show enough of itself to be worth
+     the width — the chip keeps the dirty dot and the click-to-save, and the
+     title attribute keeps the name. */
+  .exploration-label { display: none; }
+  .exploration-icon { display: inline-flex; }
+  .exploration-state { max-width: none; }
 }
 
 @media (max-width: 900px) {
@@ -956,7 +1040,6 @@ function handleExportPng(options: ExportPNGOptions) {
      let the centre squeeze onto the first row next to the nav links. */
   .toolbar-center { order: 3; flex: 1 1 100%; min-width: 100%; justify-content: flex-start; padding-top: var(--space-2); border-top: 1px solid var(--color-toolbar-sep); }
   .context-title, .exploration-name, .exploration-unsaved, .multi-edge-badge { display: none; }
-  .brand-name { display: none; }
 }
 
 /* Phone widths: the separators are decoration the nav cannot afford. */

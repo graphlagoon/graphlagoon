@@ -23,10 +23,6 @@ const emit = defineEmits<{
 
 const graphStore = useGraphStore();
 
-const expandDepth = ref(2);
-const expandEdgeLimit = ref(100);
-const expandDirected = ref(false);
-const expandEdgeTypes = ref<string[]>([]);
 
 const hasSelection = computed(() => {
   return graphStore.selectedNode || graphStore.selectedEdge;
@@ -136,18 +132,6 @@ const selectedItemProperties = computed(() => propertySplit.value.kept);
 const metricSplit = computed(() =>
   hideEmpty(selectedItemMetrics.value, (m) => isEmptyValue(m.value), hideEmptyEnabled.value),
 );
-
-async function expandFromNode() {
-  if (!graphStore.selectedNode) return;
-
-  await graphStore.expandFromNode(
-    graphStore.selectedNode.node_id,
-    expandDepth.value,
-    expandEdgeTypes.value,
-    expandEdgeLimit.value,
-    expandDirected.value
-  );
-}
 
 </script>
 
@@ -267,59 +251,6 @@ async function expandFromNode() {
         </div>
       </div>
 
-      <!-- Expansion needs backend support: hidden (not disabled) when the
-           context's connection declared no expand handler. -->
-      <template v-if="selectedItem.type === 'node' && graphStore.supportsExpand">
-        <div class="detail-section">
-          <h4>Actions</h4>
-
-          <div class="expand-options">
-            <div class="form-row">
-              <div class="form-group half">
-                <label>Depth (1-2)</label>
-                <select v-model.number="expandDepth" class="form-control">
-                  <option :value="1">1</option>
-                  <option :value="2">2</option>
-                </select>
-              </div>
-              <div class="form-group half">
-                <label>Edge Limit</label>
-                <input
-                  v-model.number="expandEdgeLimit"
-                  type="number"
-                  min="4"
-                  max="1000"
-                  class="form-control"
-                />
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input v-model="expandDirected" type="checkbox" />
-                Directed (follow edge direction only)
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label>Edge Types (all if empty)</label>
-              <select v-model="expandEdgeTypes" class="form-control" multiple>
-                <option v-for="type in graphStore.edgeTypes" :key="type" :value="type">
-                  {{ type }}
-                </option>
-              </select>
-            </div>
-
-            <button
-              class="btn btn-primary btn-block"
-              :disabled="graphStore.loading"
-              @click="expandFromNode"
-            >
-              Expand from Node
-            </button>
-          </div>
-        </div>
-      </template>
     </template>
   </div>
 </template>
@@ -473,40 +404,4 @@ async function expandFromNode() {
   font-style: italic;
 }
 
-.expand-options {
-  margin-top: 12px;
-}
-
-.expand-options .form-group {
-  margin-bottom: 12px;
-}
-
-.expand-options .form-group label {
-  font-size: 12px;
-}
-
-.btn-block {
-  width: 100%;
-}
-
-.form-row {
-  display: flex;
-  gap: 10px;
-}
-
-.form-group.half {
-  flex: 1;
-}
-
-.checkbox-label {
-  display: flex !important;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.checkbox-label input[type="checkbox"] {
-  width: auto;
-  margin: 0;
-}
 </style>

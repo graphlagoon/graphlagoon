@@ -8,6 +8,7 @@
 import { test, superuserTest, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
 import { seedContexts, seedExplorations, mockSchemaDrift, seedPrecomputedGraphs, seedQueryTemplates } from '../helpers/api-mocks';
+import { openUserMenu } from '../helpers/user-menu';
 
 test.describe('User Journeys', () => {
   // ---------------------------------------------------------------------------
@@ -73,7 +74,8 @@ test.describe('User Journeys', () => {
     await page.waitForURL('**/explorations');
     await expect(page.getByRole('heading', { level: 1, name: 'Explorations' })).toBeVisible();
 
-    // Go to DEV
+    // Go to DEV (in the account menu)
+    await openUserMenu(page);
     await page.getByTestId('nav-dev').click();
     await page.waitForURL('**/dev/generator');
 
@@ -238,6 +240,7 @@ superuserTest.describe('User Journeys (superuser)', () => {
     await expect(page.getByTestId('graph-status-precomputed')).toHaveCount(0);
 
     // Publish it under a name.
+    await openUserMenu(page);
     await page.getByTestId('toolbar-precomputed').click();
     await page.getByTestId('precomputed-graph-name-input').fill('investigacao-agosto');
     await page.getByTestId('precomputed-graph-save-button').click();

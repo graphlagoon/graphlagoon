@@ -129,7 +129,7 @@ test.describe('Querying a REST context', () => {
     await expect(page.getByTestId('graph-container')).toBeVisible();
   });
 
-  test('a query-only connection hides expansion affordances', async ({
+  test('a query-only connection loads and queries without expansion', async ({
     authenticatedPage: page,
   }) => {
     await enableDatasources(page, { sql_warehouse: true, neptune: false }, [
@@ -141,12 +141,12 @@ test.describe('Querying a REST context', () => {
     await page.goto(`/graph/${MOCK_REST_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
-    // Load a graph, select a node, open the side panel: the expand section
-    // must not be offered.
+    // A query-only connection still loads and queries; expansion is simply
+    // never offered (the canvas guards Alt+click and the context-menu entry on
+    // `graphStore.supportsExpand` — the side-panel form was removed in
+    // 2026-09-03, see the decision log).
     await page.getByTestId('toolbar-query').click();
     await page.getByTestId('graph-query-run').click();
     await expect(page.getByTestId('graph-container')).toBeVisible();
-
-    await expect(page.getByText('Expand from Node')).toBeHidden();
   });
 });

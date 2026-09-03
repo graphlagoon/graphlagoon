@@ -15,6 +15,7 @@
 import { test, superuserTest, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT } from '../fixtures/mock-data';
 import { seedContexts, seedPrecomputedGraphs } from '../helpers/api-mocks';
+import { openUserMenu } from '../helpers/user-menu';
 
 const NODES = [
   { node_id: 'n1', node_type: 'Account', properties: { name: 'Ana' } },
@@ -179,6 +180,7 @@ test.describe('Precomputed graphs — reading', () => {
     await expect(page.getByTestId('graph-status-precomputed')).toBeVisible({
       timeout: 15_000,
     });
+    await openUserMenu(page);
     await expect(page.getByTestId('toolbar-precomputed')).toHaveCount(0);
   });
 });
@@ -193,6 +195,7 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
+      await openUserMenu(page);
       await page.getByTestId('toolbar-precomputed').click();
       await expect(page.getByTestId('precomputed-graph-panel')).toBeVisible();
 
@@ -214,7 +217,8 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
-    await page.getByTestId('toolbar-precomputed').click();
+    await openUserMenu(page);
+      await page.getByTestId('toolbar-precomputed').click();
     await page.getByTestId('precomputed-graph-name-input').fill('recem-salvo');
     await page.getByTestId('precomputed-graph-save-button').click();
     await expect(page.getByTestId('precomputed-graph-last-saved')).toBeVisible();
@@ -235,7 +239,8 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
       timeout: 15_000,
     });
 
-    await page.getByTestId('toolbar-precomputed').click();
+    await openUserMenu(page);
+      await page.getByTestId('toolbar-precomputed').click();
     await page.getByTestId('precomputed-graph-delete-input').fill('descartavel');
     await page.getByTestId('precomputed-graph-delete-button').click();
     await page.getByTestId('confirm-dialog-accept').click();
@@ -259,6 +264,7 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
         timeout: 15_000,
       });
 
+      await openUserMenu(page);
       await page.getByTestId('toolbar-precomputed').click();
       await expect(page.getByTestId('precomputed-graph-viewing')).toContainText('em-tela');
     },
@@ -274,6 +280,7 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
+      await openUserMenu(page);
       await page.getByTestId('toolbar-precomputed').click();
       const panel = page.getByTestId('precomputed-graph-panel');
       await expect(panel).toBeVisible();
@@ -302,7 +309,8 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
-    await page.getByTestId('toolbar-precomputed').click();
+    await openUserMenu(page);
+      await page.getByTestId('toolbar-precomputed').click();
     const box = (await page.getByTestId('precomputed-graph-panel').boundingBox())!;
     // 22vw of 900 is under the 230px floor, so the clamp holds it there.
     expect(box.width).toBeGreaterThanOrEqual(200);
@@ -322,6 +330,7 @@ superuserTest.describe('Precomputed graphs — superuser publishing', () => {
         timeout: 15_000,
       });
 
+      await openUserMenu(page);
       await page.getByTestId('toolbar-precomputed').click();
       await page.getByTestId('precomputed-graph-name-input').fill('nome invalido');
 

@@ -1,5 +1,6 @@
 import { test as base, expect } from '../fixtures/test-fixtures';
 import { setupAPIMocks } from '../helpers/api-mocks';
+import { openUserMenu } from '../helpers/user-menu';
 
 // Custom fixture for prod mode (dev_mode=false)
 const prodTest = base.extend({
@@ -19,8 +20,9 @@ const prodTest = base.extend({
 base.describe('DEV Generator', () => {
   base('DEV link is visible in dev mode', async ({ authenticatedPage: page }) => {
     await page.goto('/contexts');
+    await openUserMenu(page);
     await expect(page.getByTestId('nav-dev')).toBeVisible();
-    await expect(page.getByTestId('nav-dev')).toHaveText('DEV');
+    await expect(page.getByTestId('nav-dev')).toContainText('DEV generator');
   });
 
   base('navigates to DEV generator page', async ({ authenticatedPage: page }) => {
@@ -65,6 +67,7 @@ base.describe('DEV Generator', () => {
 prodTest.describe('DEV Generator - Production Mode', () => {
   prodTest('DEV link is NOT visible in production mode', async ({ prodPage: page }) => {
     await page.goto('/contexts');
+    await openUserMenu(page);
     await expect(page.getByTestId('nav-dev')).not.toBeVisible();
   });
 });

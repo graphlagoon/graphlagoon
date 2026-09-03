@@ -1,5 +1,6 @@
 import { test, expect, superuserTest } from '../fixtures/test-fixtures';
 import { seedAdmin } from '../helpers/api-mocks';
+import { openUserMenu } from '../helpers/user-menu';
 
 test.describe('Navigation', () => {
   test('toolbar links navigate between pages', async ({ authenticatedPage: page }) => {
@@ -12,7 +13,8 @@ test.describe('Navigation', () => {
     await page.waitForURL('**/explorations');
     await expect(page.getByRole('heading', { level: 1, name: 'Explorations' })).toBeVisible();
 
-    // Navigate to DEV
+    // Navigate to DEV (in the account menu)
+    await openUserMenu(page);
     await page.getByTestId('nav-dev').click();
     await page.waitForURL('**/dev/generator');
 
@@ -51,12 +53,14 @@ test.describe('Navigation', () => {
 
   test('DEV link is visible in dev mode', async ({ authenticatedPage: page }) => {
     await page.goto('/contexts');
+    await openUserMenu(page);
     await expect(page.getByTestId('nav-dev')).toBeVisible();
   });
 
   test('Admin link is hidden for regular users and /admin redirects', async ({ authenticatedPage: page }) => {
     await page.goto('/contexts');
     await expect(page.getByTestId('nav-contexts')).toBeVisible();
+    await openUserMenu(page);
     await expect(page.getByTestId('nav-admin')).toHaveCount(0);
     await page.goto('/admin');
     await page.waitForURL('**/contexts');
@@ -68,6 +72,7 @@ superuserTest.describe('Navigation (superuser)', () => {
   superuserTest('Admin link is visible and opens the admin area', async ({ superuserPage: page }) => {
     await seedAdmin(page);
     await page.goto('/contexts');
+    await openUserMenu(page);
     await page.getByTestId('nav-admin').click();
     await page.waitForURL('**/admin');
     await expect(page.getByRole('heading', { level: 1, name: 'Admin' })).toBeVisible();
