@@ -2,16 +2,17 @@
 
 ::: tip TL;DR
 A small template language that decides **what text** each node and edge
-shows — extract the readable part out of messy columns, per type, with
-live preview.
+shows — on the canvas and in the hover tooltip — extract the readable
+part out of messy columns, per type, with live preview.
 
 - **Use it when** ids are unreadable (`12321_CNPJ_RAIZ`), the useful text
   is buried inside a property, or different node types need different
   labels.
 - **Not the tool for** colors, sizes or icons (that's the
-  [Style panel](./style-presets.md)); rich text or emoji (the canvas font
-  is ASCII-only); or long descriptions — labels over ~30 characters get
-  culled when the graph is crowded.
+  [Style panel](./style-presets.md)); rich text or emoji **in labels** (the
+  canvas font is ASCII-only — [tooltips](#hover-tooltips) take both); or long
+  descriptions — labels over ~30 characters get culled when the graph is
+  crowded, though a [tooltip](#hover-tooltips) can carry them.
 :::
 
 Raw node ids make terrible labels. A graph of `12321_CNPJ_RAIZ`-style
@@ -24,8 +25,11 @@ data before it hits the canvas.
 Open it from the toolbar **Labels** button. It has two layers:
 
 - **Default templates** — one for all nodes, one for all edges.
+- **Hover tooltips** — one template per target for the box that appears on
+  hover; empty means "same as the label".
 - **Custom rules** — templates that apply only to some target (node/edge)
-  and, optionally, only to some types, with a priority to break ties.
+  and, optionally, only to some types, with a priority to break ties. Each
+  rule applies to labels, tooltips, or both.
 
 ![Labels panel](/screenshots/labels-panel.png)
 
@@ -183,13 +187,54 @@ Two gotchas worth knowing:
 
 ## Custom rules and priority
 
-A rule has a name, a target (node or edge), an optional list of types, a
-template, and a priority (0–100, default 10). At render time the
-highest-priority enabled rule whose target and types match wins; on a tie,
-a rule with explicit types beats a catch-all. No match → the default
-template. Type-restricted rules are how you give `Person` nodes a
-`{prop:name}` label while `Transaction` nodes show
-`{prop:amount|currency}`.
+A rule has a name, a target (node or edge), a **surface** (labels, tooltips,
+or both — which text its template drives), an optional list of types, a
+template, and a priority (0–100, default 10). Adding or editing one opens a
+dedicated editor with the same autocomplete and live preview as the default
+templates.
+
+![Rule editor](/screenshots/labels-rule-modal.png)
+
+At render time the highest-priority enabled rule whose target, surface and
+types match wins; on a tie, a rule with explicit types beats a catch-all,
+and a rule written for exactly that surface beats a `both` rule. No match →
+the default template. Type-restricted rules are how you give `Person` nodes
+a `{prop:name}` label while `Transaction` nodes show
+`{prop:amount|currency}` — and a `tooltip`-surface rule is how `Person`
+nodes get a richer hover box without touching their label.
+
+## Hover tooltips
+
+The box that appears when you point at a node or edge takes templates too —
+the **Hover Tooltips** section of the panel has one field per target.
+Resolution order for the body:
+
+1. A matching custom rule whose surface includes tooltips.
+2. The tooltip template, when it is not empty.
+3. **The label** — an empty tooltip template means "show what the label
+   shows", which is also what every graph configured before this feature
+   renders. The panel previews this inheritance with a small *= label* badge.
+
+![Tooltip on hover](/screenshots/labels-tooltip.png)
+
+Two things are different from labels, and both are because the tooltip is a
+DOM element rather than the canvas font:
+
+- **Accents, emoji and arrows render** — `José 🚀 → fim` draws exactly like
+  that in a tooltip, while a label would strip and `?` it. Long text is safe
+  too: the body wraps, is capped at a scroll-safe height, and hard-truncates
+  around 2,000 characters instead of being culled.
+- **`{br}` makes real line breaks**, so `{prop:name}{br}{prop:role}` is a
+  two-line tooltip. Keep labels short and put the detail here.
+
+The small **type chip** on the right of the tooltip is structural: it always
+shows the raw node type (or `Edge`), no matter what the template says — a
+broken template can never leave you without the item's type.
+
+One progressive-loading note: on a wide table, columns referenced by the
+node tooltip template are fetched in the first enrichment wave, and hovering
+a node bumps it up the queue — so a `[prop:x]` sentinel in a tooltip right
+after load resolves while you point at it.
 
 Every template input has autocomplete (type `{` to see placeholders for
 your context's real columns, and `|` modifiers) and a **live preview** that
@@ -247,8 +292,9 @@ it is drawn:
 
 ## Saved with presets and explorations
 
-The whole Labels state — defaults, rules, and syntax version — travels
-inside [style presets](./style-presets.md) and saved explorations. Applying
+The whole Labels state — defaults, tooltip templates, rules (surface
+included), and syntax version — travels inside
+[style presets](./style-presets.md) and saved explorations. Applying
 `?style=<name>` **replaces** your current label setup with the preset's
 (including resetting to the stock defaults if the preset carried no label
 config); it never touches which nodes are shown. Rules referencing

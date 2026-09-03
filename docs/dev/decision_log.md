@@ -9196,3 +9196,128 @@ action, no new user-owned entity. `api/tests/test_admin_registry.py` untouched.
   appears. `NaN` is unambiguously a failed computation.
 - Flipping the toggle marks the exploration dirty. Intended, and consistent with
   Property Visibility.
+
+## [2026-09-03 07:30] - Feature Implemented: Templated hover tooltips + rule surfaces
+
+**Feature:** The hover tooltip (nodes and edges) is now driven by the label
+template language instead of being hardcoded, and custom rules gained a
+`surface` field (`label` / `tooltip` / `both`) so a rule can drive either
+text. The rule editor moved from an inline sidebar form to a centered modal,
+matching the house pattern (custom metrics, cluster programs, context-menu
+actions).
+
+**Requirements (from the user's question "tooltip é um valor fixo ou
+conseguimos setar um template assim como fazemos com labels?"):**
+- Tooltip content configurable with the same `{prop:}` / `{metric:}` / `{if:}`
+  / modifier grammar as labels, edited in the Labels panel with the same
+  autocomplete + live preview + validation.
+- Backward compatible: an unconfigured graph renders exactly the pre-feature
+  tooltip (formatted label + type chip; raw `relationship_type` + `Edge` chip).
+- Multi-line via `{br}`; state persists in style presets and explorations.
+
+**Design Decisions:**
+1. **Two default tooltip templates in `TextFormatDefaults`**
+   (`nodeTooltipTemplate` / `edgeTooltipTemplate`), not a parallel rules
+   list — they ride inside `textFormat.defaults`, so presets/explorations
+   carry them with zero new plumbing and replace-not-merge semantics
+   identical to labels.
+2. **Empty template = mirror the label** (raw `relationship_type` for
+   edges) — the shipped default, so every pre-feature preset/exploration
+   renders unchanged. The panel shows the inheritance with a "= label" badge.
+3. **Type chip is structural** — always the raw `node_type` / `Edge`; the
+   template owns the body only, so a broken template cannot hide the type.
+4. **Rules gained `surface`** (absent = `label`, back-compat) instead of a
+   separate tooltip-rules list. `findMatchingRule` takes an optional 4th
+   `surface` param defaulting to `'label'` — zero caller churn, labels
+   byte-identical. Tie-break: priority desc → explicit types → exact surface
+   beats `both`. Tooltip body resolution: tooltip-surface rule → tooltip
+   default template → label result.
+5. **Rule editing moved to `LabelRuleEditorModal`** (Teleport + global
+   `.modal-overlay` Escape/focus handlers) after a UX review against
+   `CustomMetricEditorModal` / `ContextMenuActionsModal` — the inline
+   sidebar form was the app's only inline editor and had no room for the
+   surface field. The ~100-line autocomplete was extracted to
+   `TemplateInput.vue`, shared by the panel's four fields and the modal.
+6. **Panel section order unchanged** (Defaults → Hover Tooltips → Custom
+   Rules): with surfaces, rules override both defaults sections, so
+   "defaults first, overrides last" is the correct reading. Copy + a surface
+   chip on rule list items carry the semantics instead.
+7. **Tooltip is DOM, not the MSDF canvas font** — accents/emoji/multi-line
+   allowed (documented as a feature); body clamped at 2,000 chars +
+   `max-height: 40vh` since the tooltip is `pointer-events: none`.
+8. **Perf:** the deep `textFormatDefaults` watcher in GraphCanvas3D was
+   split — label-template changes still `updateGraph()`, tooltip-template
+   changes only recompute the open tooltip (typing in the panel no longer
+   triggers a Three.js rebuild every 400 ms). Hovering a node schedules a
+   debounced (150 ms) `prioritizeNodeProperties` so `[prop:x]` sentinels
+   resolve under the pointer; tooltip recomputes on `nodePatchVersion`.
+   `visualPropertyColumns()` now includes the node tooltip template, so
+   tooltip-only columns arrive in enrichment wave 1.
+
+**Files Created:**
+- frontend/src/utils/tooltipContent.ts (+ tests, 24)
+- frontend/src/components/TemplateInput.vue
+- frontend/src/components/LabelRuleEditorModal.vue (+ tests, 4)
+- frontend/e2e/tests/tooltip-templates.spec.ts (6 e2e)
+
+**Files Modified:**
+- frontend/src/types/graph.ts (`TextFormatDefaults`, `TextFormatSurface`,
+  `TextFormatRule.surface`)
+- frontend/src/utils/labelFormatter.ts (`findMatchingRule` surface param)
+- frontend/src/stores/graph.ts (`defaultTextFormatDefaults()` extracted,
+  `loadTextFormatState` merge, `visualPropertyColumns`)
+- frontend/src/components/GraphCanvas3D.vue (tooltip render/recompute/flip,
+  watcher split, hover prioritize)
+- frontend/src/components/TextFormatPanel.vue (Hover Tooltips section,
+  TemplateInput extraction, modal wiring, inline form deleted)
+- frontend/src/components/TemplatePreviewInline.vue (`chrome`,
+  `emptyFallback` props)
+- frontend/src/utils/{stylePresetImport,contextReferences,
+  labelTemplateSkill,stylePresetSkill}.ts, TextFormatHelpModal.vue (tooltip
+  + surface semantics)
+- api/graphlagoon/models/schemas.py — `TextFormatDefaults` gained the two
+  template fields + `extra="allow"` (load-bearing: the explorations router
+  round-trips state through the typed model, which silently dropped unknown
+  fields), `TextFormatRule.surface` with default `"label"`.
+- e2e: screenshots/generate.ts (docs preset + `labels-tooltip`,
+  `labels-rule-modal` scenes), TextFormatPanel/TemplatePreviewInline/
+  labelFormatter/tooltipContent/store test files.
+
+**No DB migration:** exploration state is a JSON blob column; style presets
+are volume/disk JSON files. Old state loads with `''` tooltip templates and
+`label`-surface rules — pinned by tests.
+
+**Testing:**
+- [x] 2372 unit tests green (136 files); new coverage: tooltipContent (24),
+  findMatchingRule surfaces (7), preview chrome/badge (5), panel modal flow
+  (9), modal (4), store round-trips, backend round-trip (3 new).
+- [x] `npx vue-tsc --noEmit` clean (`make lint-frontend` remains broken
+  repo-wide, pre-existing).
+- [x] 6 e2e in tooltip-templates.spec.ts green.
+
+**Public Docs:**
+- [docs/guide/labels.md](../guide/labels.md): TL;DR covers hover; new
+  "Hover tooltips" section (resolution order, `= label` badge, DOM-not-canvas
+  differences, type chip, progressive-load note); "Custom rules and priority"
+  covers surface + the modal; presets section updated. Screenshots
+  `labels-panel/tooltip/rule-modal.png` regenerated/added.
+- [docs/guide/exploring-the-graph.md](../guide/exploring-the-graph.md):
+  status-bar note now says hovering also prioritizes, links the new section.
+- `make docs-screenshots` and `make docs-build` pass.
+
+**No admin-area impact** — no `Settings` field or env var, no table or
+collection, no new/mutating route, no audit action, no new user-owned
+entity. The backend delta is defaulted fields on nested Pydantic models
+already persisted inside exploration state JSON.
+
+**Known Limitations:**
+- Cluster pseudo-node tooltips are not templated (they are not real `Node`s).
+- The tooltip does not follow the cursor after it opens, and hover-out only
+  fires while the pointer stays on the canvas (pre-existing).
+- Editing a tooltip-only rule still triggers a full `updateGraph()` via the
+  shared rules watcher — acceptable (rule edits are rare), future
+  optimization.
+
+**Future Enhancements:**
+- Metric placeholders in tooltips could show a spinner while a metric
+  computes; today they render the `[metric:...]` sentinel.
