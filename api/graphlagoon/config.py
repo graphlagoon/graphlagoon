@@ -133,6 +133,14 @@ class Settings(BaseSettings):
         "When set, list_datasets searches all specified pairs instead of just default_catalog/default_schema.",
     )
 
+    # Permission groups (services.permissions / services.group_resolution)
+    group_cache_ttl_seconds: int = Field(
+        default=600,
+        description="TTL in seconds for the Databricks group-membership (SCIM) "
+        "cache used by permission groups. Stale entries are served when SCIM "
+        "is unreachable.",
+    )
+
     # Exploration snapshots (file-based graph state persistence)
     exploration_snapshots_dir: str = Field(
         default="./tmp/explorations",

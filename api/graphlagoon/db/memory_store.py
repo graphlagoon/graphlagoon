@@ -119,6 +119,40 @@ class MemoryQueryTemplate:
     updated_at: datetime = field(default_factory=datetime.now)
 
 
+@dataclass
+class MemoryGroupMember:
+    """In-memory twin of db.models.GroupMember."""
+
+    id: UUID
+    group_id: UUID
+    kind: str  # "email" | "databricks_group"
+    value: str  # lowercased
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryGroup:
+    """In-memory twin of db.models.Group (members inline, like shares)."""
+
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    members: List[MemoryGroupMember] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryPermissionRule:
+    """In-memory twin of db.models.PermissionRule."""
+
+    id: UUID
+    permission_id: str
+    group_id: UUID
+    effect: str  # "allow" | "deny"
+    created_at: datetime = field(default_factory=datetime.now)
+
+
 USAGE_LOG_MAX_ENTRIES = 10_000
 
 
@@ -132,6 +166,10 @@ class InMemoryStore:
         self.graph_contexts: Dict[UUID, MemoryGraphContext] = {}
         self.explorations: Dict[UUID, MemoryExploration] = {}
         self.query_templates: Dict[UUID, MemoryQueryTemplate] = {}
+        self.groups: Dict[UUID, MemoryGroup] = {}
+        # permission_id -> "everyone" | "restricted"; absent ⇒ "everyone"
+        self.permission_modes: Dict[str, str] = {}
+        self.permission_rules: Dict[UUID, MemoryPermissionRule] = {}
         # Audit trail, newest last. Bounded so a long-running dev server
         # cannot grow without limit; the admin area reads it newest first.
         self.usage_logs: Deque[MemoryUsageLog] = deque(maxlen=USAGE_LOG_MAX_ENTRIES)
@@ -482,6 +520,94 @@ class InMemoryStore:
         del self.query_templates[template_id]
         return True
 
+    # Group / permission operations (semantics live in services.groups —
+    # these are thin storage methods mirroring the DB tables)
+    def create_group(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        members: Optional[List[Dict[str, str]]] = None,
+    ) -> MemoryGroup:
+        group_id = uuid4()
+        group = MemoryGroup(id=group_id, name=name, description=description)
+        for m in members or []:
+            group.members.append(
+                MemoryGroupMember(
+                    id=uuid4(), group_id=group_id, kind=m["kind"], value=m["value"]
+                )
+            )
+        self.groups[group_id] = group
+        return group
+
+    def get_group(self, group_id: UUID) -> Optional[MemoryGroup]:
+        return self.groups.get(group_id)
+
+    def get_group_by_name(self, name: str) -> Optional[MemoryGroup]:
+        for group in self.groups.values():
+            if group.name == name:
+                return group
+        return None
+
+    def list_groups(self) -> List[MemoryGroup]:
+        return sorted(self.groups.values(), key=lambda g: g.name)
+
+    def update_group(
+        self,
+        group_id: UUID,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        members: Optional[List[Dict[str, str]]] = None,
+    ) -> Optional[MemoryGroup]:
+        group = self.groups.get(group_id)
+        if group is None:
+            return None
+        if name is not None:
+            group.name = name
+        group.description = description
+        if members is not None:  # full replacement, like the DB path
+            group.members = [
+                MemoryGroupMember(
+                    id=uuid4(), group_id=group_id, kind=m["kind"], value=m["value"]
+                )
+                for m in members
+            ]
+        group.updated_at = datetime.now()
+        return group
+
+    def delete_group(self, group_id: UUID) -> Optional[MemoryGroup]:
+        group = self.groups.pop(group_id, None)
+        if group is None:
+            return None
+        # Mirror the DB's ON DELETE CASCADE on permission_rules.group_id
+        self.permission_rules = {
+            rid: rule
+            for rid, rule in self.permission_rules.items()
+            if rule.group_id != group_id
+        }
+        return group
+
+    def set_permission(
+        self, permission_id: str, mode: str, rules: List[Dict[str, Any]]
+    ) -> None:
+        """Full replacement of one permission's mode and rules."""
+        self.permission_modes[permission_id] = mode
+        self.permission_rules = {
+            rid: rule
+            for rid, rule in self.permission_rules.items()
+            if rule.permission_id != permission_id
+        }
+        for r in rules:
+            rule = MemoryPermissionRule(
+                id=uuid4(),
+                permission_id=permission_id,
+                group_id=r["group_id"],
+                effect=r["effect"],
+            )
+            self.permission_rules[rule.id] = rule
+
+    def list_permission_rules(self) -> List[MemoryPermissionRule]:
+        return list(self.permission_rules.values())
+
     # Audit operations
     def record_usage(
         self,
@@ -513,6 +639,9 @@ class InMemoryStore:
         self.graph_contexts.clear()
         self.explorations.clear()
         self.query_templates.clear()
+        self.groups.clear()
+        self.permission_modes.clear()
+        self.permission_rules.clear()
         if not keep_usage_logs:
             self.usage_logs.clear()
 
