@@ -681,6 +681,44 @@ const layout = useGraphLayout(getGraph3d, { isLayoutRunning, ... }, { setLabelsV
 const camera = useGraphCamera(getGraph3d, containerRef, initialLayoutDone, { setLabelsVisible: labels.setLabelsVisible, updateVisuals });
 ```
 
+#### Step 2.4b: Permission Gating (Groups & Permissions)
+
+**Ask for every new user-facing ACTION (not read/view):** should an admin be
+able to restrict or deny it per group? If yes, wire it into the permission
+system (docs: [docs/guide/permissions.md](../../../docs/guide/permissions.md),
+[docs/dev/admin-area.md](../../../docs/dev/admin-area.md)). The whole recipe
+is ~15 lines; everything else (admin matrix row, inspector, rules storage,
+`/api/config` payload) renders the new entry automatically:
+
+1. **Catalog entry** — `api/graphlagoon/services/permission_catalog.py`:
+   ```python
+   Permission(id="<resource>.<verb>", label="...", description="..."),
+   ```
+   Id shape: exactly one dot, AuditAction style. Default posture is
+   `everyone`, so shipping the entry changes nothing until an admin writes
+   a rule.
+2. **Gate the route** — on the handler that IS the action:
+   ```python
+   user_email: str = Depends(require_permission("<resource>.<verb>")),
+   ```
+   (replaces the handler's `get_current_user(request)` line; existing
+   ownership/share checks stay as separate AND-gates).
+3. **Hide the affordance** — `v-if="can('<resource>.<verb>')"` via
+   `usePermissions()` (HIDE model, not disable; keep read paths visible;
+   empty states must still say what to do — "ask an administrator").
+4. **Tests** — one allow/deny route case in
+   `api/tests/test_permission_routes.py`; a hidden-affordance case in the
+   feature's spec.
+
+**Never** add a catalog entry without its `Depends` gate (a matrix row that
+does nothing is security theater), and never a gate with an uncataloged id —
+`test_admin_registry::test_permission_gates_reference_catalog` fails the
+build on the latter.
+
+Per-resource access ("this user on this context") is NOT this system — that
+is ownership + shares. Scoped/conditional rules (per catalog, time-based)
+are deliberately unsupported; raise a design discussion before attempting.
+
 #### Step 2.5: Consider Performance
 
 **Backend Performance:**
@@ -984,6 +1022,7 @@ admin area telling you it needs an update. Full table:
 | add a router module | `tests/test_admin_registry.ROUTER_MODULES` |
 | add a new audit action | `describeAudit` in `frontend/src/utils/adminView.ts` |
 | add a new user-owned entity | a tab or column in `AdminView.vue` so a superuser can see who owns it |
+| add a user-facing action that admins may want to restrict | a permission catalog entry + `require_permission` gate + hidden affordance (see Step 2.4b) |
 
 The decision-log entry MUST state either what was updated or the sentence
 **"No admin-area impact"**. Silence is not an option.
