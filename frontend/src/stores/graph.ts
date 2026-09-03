@@ -492,6 +492,8 @@ export const useGraphStore = defineStore('graph', () => {
     edgeIconSize3D: 8,        // Edge icon size in 3D (diameter in world units)
     nodeLabelOffsetY3D: 2,    // Offset for node labels (distance from node surface)
     nodeLabelPosition3D: 'right' as 'top' | 'right' | 'left', // Label placement relative to node
+    // Details display
+    hideEmptyValues: true,    // Omit empty properties/metrics in Open details & the side panel
   });
 
   // Color scheme for node/edge types (custom colors override default palette)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { Node, Edge } from '@/types/graph';
 import { useGraphStore } from '@/stores/graph';
 import { useItemMetrics } from '@/composables/useItemMetrics';
@@ -9,6 +9,8 @@ import { X } from 'lucide-vue-next';
 import { tryParseJson } from '@/utils/jsonDetection';
 import JsonValueViewer from './JsonValueViewer.vue';
 import PropertyVisibilityHint from './PropertyVisibilityHint.vue';
+import EmptyValuesHint from './EmptyValuesHint.vue';
+import { hideEmpty, isEmptyValue, isEmptyPropertyValue } from '@/utils/emptyValue';
 
 const props = defineProps<{
   item: { type: 'node'; data: Node } | { type: 'edge'; data: Edge } | null;
@@ -71,7 +73,7 @@ const totalPropertyCount = computed(() =>
   props.item?.data.properties ? Object.keys(props.item.data.properties).length : 0,
 );
 
-const properties = computed(() => {
+const allowedProperties = computed(() => {
   if (!props.item?.data.properties) return [];
   const kind = props.item.type;
   return Object.entries(props.item.data.properties)
@@ -88,8 +90,29 @@ const properties = computed(() => {
     });
 });
 
-// Computed + custom metrics for the item (shared lookup)
+// Computed + custom metrics for the item (shared lookup). Deliberately the raw
+// list: copyAll() reads it, and the hint needs the pre-filter count.
 const metrics = useItemMetrics(computed(() => props.item));
+
+// "Hide empty values" (Style → Details Display), with a per-surface peek. The
+// reveal is local on purpose — flipping the saved setting would dirty the
+// exploration just to look at one item. A new item is a new question, so it
+// resets; that also covers closing the modal, which nulls the prop.
+const revealEmpty = ref(false);
+watch(() => props.item, () => { revealEmpty.value = false; });
+
+const hideEmptyEnabled = computed(
+  () => graphStore.aesthetics.hideEmptyValues && !revealEmpty.value,
+);
+
+const propertySplit = computed(() =>
+  hideEmpty(allowedProperties.value, (p) => isEmptyPropertyValue(p.value), hideEmptyEnabled.value),
+);
+const properties = computed(() => propertySplit.value.kept);
+
+const metricSplit = computed(() =>
+  hideEmpty(metrics.value, (m) => isEmptyValue(m.value), hideEmptyEnabled.value),
+);
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return 'null';
@@ -119,6 +142,9 @@ function copyValue(key: string, value: unknown) {
   }, 1500);
 }
 
+// Copy is an export, not a view: it reads the raw property object and the raw
+// metric list, so neither the property allowlist nor "hide empty values" can
+// silently truncate it. Do not "simplify" this to reuse the pruned computeds.
 function copyAll() {
   if (!props.item) return;
   const data: Record<string, unknown> = {};
@@ -197,8 +223,13 @@ function copyAll() {
               <PropertyVisibilityHint
                 v-if="item"
                 :kind="item.type"
-                :visible="properties.length"
+                :visible="allowedProperties.length"
                 :total="totalPropertyCount"
+              />
+              <EmptyValuesHint
+                :hidden="propertySplit.hiddenCount"
+                :revealed="revealEmpty"
+                @toggle="revealEmpty = !revealEmpty"
               />
             </div>
             <table class="props-table">
@@ -227,10 +258,15 @@ function copyAll() {
           <div v-if="metrics.length > 0" class="section">
             <div class="section-header">
               <h4>Computed Metrics</h4>
+              <EmptyValuesHint
+                :hidden="metricSplit.hiddenCount"
+                :revealed="revealEmpty"
+                @toggle="revealEmpty = !revealEmpty"
+              />
             </div>
             <table class="props-table">
               <tbody>
-                <tr v-for="m in metrics" :key="m.name">
+                <tr v-for="m in metricSplit.kept" :key="m.name">
                   <td class="prop-key" :title="m.name">{{ m.name }}</td>
                   <td class="prop-val mono" :title="String(m.value)">{{ formatMetricValue(m.value) }}</td>
                   <td class="prop-action">

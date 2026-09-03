@@ -9048,3 +9048,151 @@ endpoints; frontend-only. **No backend change** — `visual_mapping` is already
   undocumented.
 - Edge color-by-metric not included (edge weight mapping itself still has no
   renderer consumer — pre-existing tech debt, untouched).
+
+---
+
+## [2026-09-02 22:55] - Feature Implemented: Hide empty properties and metrics in the details views
+
+**Feature:** A style toggle — **Hide empty properties and metrics**, ON by
+default — that omits properties and computed metrics with no value from the two
+details surfaces (**Open details** modal and the right-hand side panel). Saved
+automatically in style presets and explorations.
+
+**Problem:** Both surfaces rendered every property and every metric. Null
+properties printed the literal string `'null'`
+(`SidePanel.formatPropertyValue`, `DetailModal.formatValue`), and null metrics
+printed `—` (`metricFormat.formatMetricValue`). In a sparse context — or after a
+custom metric that fails for some nodes, since `customMetricEvaluate` writes a
+*dense* values map with `null` for failures — the panel became a wall of `null`
+and `—` that buried the two or three fields being read.
+
+**Requirements (settled with the user before implementation):**
+- What counts as empty: `null`/`undefined`, blank text, `[]`, `{}`, `NaN` and
+  `Infinity`. `0`, `false` and `"0"` always render.
+- Granularity: one toggle covering properties *and* metrics on *both* surfaces.
+- Scope: the two details surfaces only. Data table, hover tooltips and
+  copy/export untouched.
+
+**Design Decisions:**
+
+1. **The flag lives in the `aesthetics` ref, not as a new top-level preset
+   field.** `buildStylePreset()` serializes `aesthetics` wholesale,
+   `getExplorationState()` spreads `buildStylePreset()`, and
+   `fingerprintExplorationState()` stringifies that — so presets, explorations,
+   `?style=`, import/export and dirty-tracking all picked the field up with zero
+   plumbing. A first-class field would have meant edits to `StylePresetSettings`,
+   `ExplorationState`, `applyStylePreset`, `SETTINGS_KEYS`, the backend schema
+   and the AI prompt for no behavioral gain. *Rejected: a top-level
+   `display` key.*
+
+2. **One shared pure predicate (`utils/emptyValue.ts`), not per-component
+   logic.** SidePanel and DetailModal already duplicate their value formatters;
+   duplicating the emptiness rule too would guarantee drift. `isEmptyValue`,
+   `isEmptyPropertyValue` and `hideEmpty` are called at all four sites
+   (properties × metrics × two surfaces). `isEmptyPropertyValue` runs
+   `tryParseJson` first so the string `'[]'` — which `JsonValueViewer` draws as
+   an empty array — is judged as rendered; `tryParseJson` only reports `isJson`
+   for objects/arrays, so the literal string `'null'` is never collapsed.
+   Non-goals written into the doc comment: no recursion into containers, no
+   "looks like a null literal" heuristics.
+
+3. **Reveal is local to each surface; it does not flip the store.**
+   `PropertyVisibilityHint.showAll()` mutates the store because the allowlist is
+   a deliberate scoping the user is undoing. This toggle is a saved global
+   preference — flipping it from a hint would mark the exploration dirty just
+   because someone peeked at one node. Each surface owns a `revealEmpty` ref
+   that resets when the selected item changes. The permanent switch is in
+   Style → Details Display.
+
+4. **Metrics are filtered at the surfaces, not inside `useItemMetrics`.**
+   `DetailModal.copyAll()` reads `metrics.value` directly, so filtering in the
+   composable would have silently truncated Copy All. The hint also needs both
+   the raw and the kept count, and the composable is a data lookup that must not
+   carry a display preference for future consumers (export, tooltips, table
+   joins). *Rejected: filtering in `useItemMetrics`.* `useItemMetrics.ts` and its
+   test are deliberately unchanged.
+
+5. **Section gates read the raw counts.** The properties section already gated
+   on the unfiltered `totalPropertyCount`; the metrics `v-for` now iterates
+   `metricSplit.kept` while the section still gates on the raw
+   `metrics.length`. Without this, an item whose metrics are all empty would
+   lose the whole section — and with it the explanation and the way back.
+
+6. **`PropertyVisibilityHint` keeps allowlist arithmetic.** It receives
+   `allowedProperties.length`, not the post-empty count, so its "Show all" button
+   always matches the number it prints. The two causes of pruning get two hints.
+
+7. **A separate "Details Display" panel section**, not a checkbox inside
+   Property Visibility: the allowlist also prunes the data table and this toggle
+   does not, and the guide says so.
+
+**Implementation:**
+
+*Files created:*
+- [frontend/src/utils/emptyValue.ts](frontend/src/utils/emptyValue.ts)
+- [frontend/src/components/EmptyValuesHint.vue](frontend/src/components/EmptyValuesHint.vue)
+- `frontend/src/utils/__tests__/emptyValue.test.ts`
+- `frontend/src/components/__tests__/EmptyValuesHint.test.ts`
+- `frontend/src/components/__tests__/DetailModal.emptyValues.test.ts` (first test
+  file for DetailModal)
+- `frontend/src/components/__tests__/SidePanel.emptyValues.test.ts`
+
+*Files modified:*
+- [frontend/src/stores/graph.ts](frontend/src/stores/graph.ts) — `hideEmptyValues: true`
+  in the `aesthetics` defaults; nothing else
+- [frontend/src/components/SidePanel.vue](frontend/src/components/SidePanel.vue),
+  [frontend/src/components/DetailModal.vue](frontend/src/components/DetailModal.vue)
+  — `properties`/`selectedItemProperties` renamed to `allowedProperties`, new
+  `propertySplit`/`metricSplit`, `revealEmpty`, both hints; `copyAll` gained a
+  comment explaining why it must keep reading raw data
+- [frontend/src/components/AestheticsPanel.vue](frontend/src/components/AestheticsPanel.vue)
+  — "Details Display" section
+- [frontend/src/utils/stylePresetSkill.ts](frontend/src/utils/stylePresetSkill.ts)
+  — field in the JSON shape + a field rule, so Ask-AI can set it
+- `frontend/e2e/screenshots/generate.ts` — scene
+  `exploring-the-graph-hide-empty-values`
+
+**Testing:**
+- Unit: 45 cases pin the emptiness semantics table (including `0`, `false`,
+  `'null'`, `'N/A'`, `Date`, `'[]'` vs `'{'`); 4 for the hint component; 10 for
+  DetailModal and 8 for SidePanel covering default pruning, the reveal and its
+  reset, the setting off, allowlist + empties with separate arithmetic, the
+  metrics section surviving an all-empty list; 2 preset round-trip cases
+  (including that a saved `false` survives).
+- **Copy All regression guard**: a DetailModal test asserts the clipboard
+  payload still contains every property and the null metric while both the
+  allowlist and hide-empty are pruning the screen.
+- Suite: **2318 tests / 134 files green**; `npx vue-tsc --noEmit` clean.
+- No new E2E: single-page, self-contained UI (skill Step 3.4), not a
+  cross-page journey.
+
+**Public Docs:**
+- New "Hiding empty values" section in
+  [docs/guide/exploring-the-graph.md](docs/guide/exploring-the-graph.md) with the
+  hidden/kept table, the hint behavior and the copy/export carve-out; the
+  Property Visibility section now cross-links it so the two controls are not
+  confused. [docs/guide/style-presets.md](docs/guide/style-presets.md) notes the
+  toggle travels with the aesthetics (still "six things" — it rides inside
+  style, so no new preset field).
+- `make docs-screenshots` and `make docs-build` pass. Ten unrelated PNGs also
+  changed: the force layout is non-deterministic, so pixel-identical captures
+  are an explicit non-goal of the screenshot fixture.
+
+**No admin-area impact** — frontend-only: no `Settings` field or env var, no
+table or in-memory collection, no mutating route, no router module, no audit
+action, no new user-owned entity. `api/tests/test_admin_registry.py` untouched.
+
+**Known Limitations:**
+- `applyStylePreset` merges `aesthetics` over the *current* values, not over the
+  defaults, so a preset saved before this feature leaves `hideEmptyValues` as it
+  is rather than resetting it to `true`. Pre-existing for every aesthetics key
+  added after v1 (`edgeIconSize3D`, `nodeLabelPosition3D`); changing it would
+  alter behavior for all of them.
+- `SidePanel.formatPropertyValue` and `DetailModal.formatValue` remain
+  duplicated and still print the literal `'null'` on the revealed path. Left
+  alone to keep the diff reviewable — candidate for `technical-debts.md`.
+- `Infinity` counts as empty by product decision. It can be a legitimate value
+  (an unreachable distance in a shortest-path metric); revisit if such a metric
+  appears. `NaN` is unambiguously a failed computation.
+- Flipping the toggle marks the exploration dirty. Intended, and consistent with
+  Property Visibility.

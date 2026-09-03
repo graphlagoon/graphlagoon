@@ -29,7 +29,9 @@ It carries six things — **style** (colors, icons, aesthetics), **labels**
 [metric-driven node size / edge width](./communities-metrics.md) mapping),
 **property visibility** (which node/edge properties the
 [tables and detail views](./exploring-the-graph.md#focusing-on-a-subset-of-properties)
-show) and **behaviors** (the whole Behaviors panel: graph lens, degree
+show, alongside the
+[hide empty values](./exploring-the-graph.md#hiding-empty-values) toggle that
+travels with the aesthetics) and **behaviors** (the whole Behaviors panel: graph lens, degree
 dimming, view mode, loading and interaction preferences) — and nothing about
 which data is loaded. Applying one never changes which nodes and edges are on
 screen, which is why it is safe on any graph in the context, before or after

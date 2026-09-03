@@ -539,6 +539,32 @@ function resetAesthetics() {
         </div>
     </div>
 
+    <!-- Details Display -->
+    <!-- Kept separate from Property Visibility on purpose: the allowlist also
+         prunes the data table, this toggle only touches the two details
+         surfaces. Folding them together would make that promise wrong. -->
+    <div class="settings-section">
+      <h5>Details Display</h5>
+
+      <div class="setting-item">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            :checked="aesthetics.hideEmptyValues"
+            @change="updateSetting('hideEmptyValues', ($event.target as HTMLInputElement).checked)"
+            data-testid="hide-empty-values-toggle"
+          />
+          Hide empty properties and metrics
+        </label>
+        <span class="setting-hint">
+          Omits values with nothing in them (null, blank text, empty list or object)
+          from Open details and the side panel. Zero and false always show. Each
+          surface reports how many it hid and can reveal them; copy and export
+          always keep every value.
+        </span>
+      </div>
+    </div>
+
     <!-- Property Visibility -->
     <div class="settings-section">
       <h5>Property Visibility</h5>
