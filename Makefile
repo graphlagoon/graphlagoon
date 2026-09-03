@@ -2,7 +2,7 @@
         dev dev-db dev-gsql2rsql dev-gsql2rsql-db \
         dev-databricks dev-databricks-db dev-databricks-lakebase \
         dev-neptune dev-neptune-db \
-        dev-stop dev-logs dev-logs-follow dev-seed dev-seed-big \
+        dev-stop dev-logs dev-logs-follow dev-seed dev-seed-big dev-reset \
         lint lint-frontend lint-api format \
         test test-unit test-coverage test-e2e test-e2e-headed test-e2e-ui test-e2e-report \
         test-integration test-integration-headed test-all \
@@ -43,6 +43,7 @@ help:
 	@echo "  make dev-logs              Show logs"
 	@echo "  make dev-seed              Seed users/contexts/explorations (auto after dev*; SEED_DATA=0 skips)"
 	@echo "  make dev-seed-big          Large seed (200 users / 500 contexts / 2000 explorations)"
+	@echo "  make dev-reset             Wipe the dev environment and seed it from scratch"
 	@echo ""
 	@echo "$(GREEN)Quality$(RESET)"
 	@echo "  make lint                  Run all linters (frontend + API)"
@@ -262,6 +263,14 @@ dev-seed:
 
 dev-seed-big:
 	@$(MAKE) --no-print-directory dev-seed SEED_USERS=200 SEED_CONTEXTS=500 SEED_EXPLORATIONS=2000 SEED_GRAPHS=8
+
+# Throw the whole dev environment away and build it again. Use it when the
+# contexts and the warehouse have drifted apart badly enough that a plain
+# dev-seed (which rebuilds missing tables but keeps everything else) is not
+# enough. Destroys every context, exploration and warehouse table.
+dev-reset:
+	@echo "$(YELLOW)Clearing the dev environment (contexts, explorations, warehouse tables)...$(RESET)"
+	@$(MAKE) --no-print-directory dev-seed SEED_ARGS=--reset
 
 _seed-after-dev:
 	@if [ "$(SEED_DATA)" != "0" ]; then $(MAKE) --no-print-directory dev-seed; else echo "$(DIM)seed skipped (SEED_DATA=0)$(RESET)"; fi

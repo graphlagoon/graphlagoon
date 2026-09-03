@@ -11,7 +11,11 @@ against the in-memory store (``make dev``) and PostgreSQL (``make dev-db``).
 Deterministic for a given ``--seed`` (same e-mails, titles and sharing
 decisions every run), idempotent (a ``seed:<hash>`` tag marks what a given
 parameter set already created; rerunning is a no-op), and refuses to run
-unless the server reports ``dev_mode``. ``--reset`` clears the environment
+unless the server reports ``dev_mode``. A rerun also rebuilds any seeded
+warehouse table that went missing while its context survived — PostgreSQL and
+the Spark warehouse are wiped independently, so they drift apart.
+
+``--reset`` clears the environment
 first through the admin API, which needs the caller to be a superuser
 (``GRAPH_LAGOON_SUPERUSER_EMAILS`` — the shipped ``.env.example`` lists
 ``dev@graphlagoon.local``).
@@ -23,6 +27,7 @@ import argparse
 import asyncio
 import hashlib
 import random
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -34,6 +39,11 @@ ADMIN_EMAIL = "dev@graphlagoon.local"
 SEED_DOMAIN = "example.com"
 DEFAULT_CATALOG = "dev_catalog"
 DEFAULT_SCHEMA = "graphs"
+# A seeded edge table, e.g. ``dev_catalog.graphs.edges_seed_6``. The index is
+# the only thing that identifies the graph — see :func:`graph_payload`.
+SEED_TABLE_RE = re.compile(
+    r"^(?:(?P<catalog>[^.]+)\.)?(?P<schema>[^.]+)\.edges_seed_(?P<index>\d+)$"
+)
 
 FIRST_NAMES = [
     "alice",
@@ -196,6 +206,7 @@ class SeedStats:
     shares: int = 0
     deletes: int = 0
     transfers: int = 0
+    repaired: int = 0
     skipped: bool = False
 
 
@@ -242,6 +253,86 @@ def pick_owner(users: list[SeedUser], rng: random.Random) -> SeedUser:
     weights = {"power": 6.0, "normal": 1.0, "inactive": 0.0}
     candidates = [u for u in users if weights[u.profile] > 0]
     return rng.choices(candidates, weights=[weights[u.profile] for u in candidates])[0]
+
+
+def graph_payload(
+    index: int, catalog: str = DEFAULT_CATALOG, schema: str = DEFAULT_SCHEMA
+) -> dict[str, Any]:
+    """The ``/api/dev/random-graph`` body for graph ``seed_<index>``.
+
+    Everything here derives from ``index`` alone, so ``edges_seed_6`` always
+    means the same graph no matter which seed run created it. That is what lets
+    :func:`repair_missing_graphs` rebuild a table from its name.
+    """
+    node_types, edge_types = NODE_TYPE_SETS[index % len(NODE_TYPE_SETS)]
+    return {
+        "catalog": catalog,
+        "schema_name": schema,
+        "table_name": f"seed_{index}",
+        "model": GRAPH_MODELS[index % len(GRAPH_MODELS)],
+        "num_nodes": [50, 300, 1000, 2500, 5000][index % 5],
+        "avg_degree": 4.0 + (index % 3),
+        "ensure_connected": True,
+        "bidirectional_edges_ratio": 0.1 if index % 2 else 0.0,
+        "node_types": node_types,
+        "edge_types": edge_types,
+        "extra_node_columns": EXTRA_NODE_COLUMNS,
+    }
+
+
+def _unqualified(table: str) -> str:
+    """``catalog.schema.table`` → ``schema.table``.
+
+    Local Spark resolves seeded tables two-part, and the catalog a name carries
+    depends on who wrote it (the seed asks for ``dev_catalog``; ``/api/datasets``
+    reports ``spark_catalog``). Comparing without it is what Spark itself does.
+    """
+    parts = table.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else table
+
+
+async def repair_missing_graphs(
+    client: "SeedClient", contexts: list[dict[str, Any]], log=print
+) -> int:
+    """Recreate seeded warehouse tables that existing contexts still point at.
+
+    Contexts live in PostgreSQL (a Docker volume) while their tables live in the
+    Spark warehouse (a local directory). Either can be wiped without the other,
+    and the seed used to skip on its tag alone — so a rerun left every seeded
+    context pointing at a table that no longer existed, and every query on one
+    failed with ``TABLE_OR_VIEW_NOT_FOUND``. Returns how many were rebuilt.
+    """
+    referenced: dict[tuple[str, str], set[int]] = {}
+    for ctx in contexts:
+        match = SEED_TABLE_RE.match(ctx.get("edge_table_name") or "")
+        if match:
+            key = (match["catalog"] or DEFAULT_CATALOG, match["schema"])
+            referenced.setdefault(key, set()).add(int(match["index"]))
+    if not referenced:
+        return 0
+
+    datasets = (await client.request("GET", "/api/datasets", ADMIN_EMAIL)).json()
+    live = {
+        _unqualified(name)
+        for key in ("tables", "edge_tables", "node_tables")
+        for name in (datasets.get(key) or [])
+    }
+
+    rebuilt = 0
+    for (catalog, schema), indexes in sorted(referenced.items()):
+        for index in sorted(indexes):
+            needed = {f"{schema}.edges_seed_{index}", f"{schema}.nodes_seed_{index}"}
+            if needed <= live:
+                continue
+            log(f"repairing {schema}.*_seed_{index} (gone from the warehouse)")
+            await client.request(
+                "POST",
+                "/api/dev/random-graph",
+                ADMIN_EMAIL,
+                json=graph_payload(index, catalog, schema),
+            )
+            rebuilt += 1
+    return rebuilt
 
 
 class SeedClient:
@@ -333,6 +424,12 @@ async def run_seed(
         existing = (
             await client.request("GET", "/api/graph-contexts", ADMIN_EMAIL)
         ).json()
+        # Before anything else, heal an environment where the contexts outlived
+        # their tables — PostgreSQL and the Spark warehouse are wiped separately.
+        if not no_graphs:
+            stats.repaired = await repair_missing_graphs(client, existing, log)
+            if stats.repaired:
+                log(f"rebuilt {stats.repaired} missing warehouse graph(s)")
         if any(tag in (c.get("tags") or []) for c in existing):
             log(f"already seeded ({tag}); use --reset or different parameters")
             stats.skipped = True
@@ -350,22 +447,9 @@ async def run_seed(
         graph_tables: list[tuple[str, str, list[str], list[str]]] = []
         if not no_graphs:
             for i in range(graphs):
-                model = GRAPH_MODELS[i % len(GRAPH_MODELS)]
-                node_types, edge_types = NODE_TYPE_SETS[i % len(NODE_TYPE_SETS)]
-                num_nodes = [50, 300, 1000, 2500, 5000][i % 5]
-                payload = {
-                    "catalog": DEFAULT_CATALOG,
-                    "schema_name": DEFAULT_SCHEMA,
-                    "table_name": f"seed_{i}",
-                    "model": model,
-                    "num_nodes": num_nodes,
-                    "avg_degree": 4.0 + (i % 3),
-                    "ensure_connected": True,
-                    "bidirectional_edges_ratio": 0.1 if i % 2 else 0.0,
-                    "node_types": node_types,
-                    "edge_types": edge_types,
-                    "extra_node_columns": EXTRA_NODE_COLUMNS,
-                }
+                payload = graph_payload(i)
+                node_types = payload["node_types"]
+                edge_types = payload["edge_types"]
                 result = (
                     await client.request(
                         "POST", "/api/dev/random-graph", ADMIN_EMAIL, json=payload
@@ -375,7 +459,10 @@ async def run_seed(
                     (result["edge_table"], result["node_table"], node_types, edge_types)
                 )
                 stats.graphs += 1
-                log(f"graph {i}: {model} {num_nodes} nodes → {result['edge_table']}")
+                log(
+                    f"graph {i}: {payload['model']} {payload['num_nodes']} nodes "
+                    f"→ {result['edge_table']}"
+                )
         else:
             for i in range(max(1, graphs)):
                 node_types, edge_types = NODE_TYPE_SETS[i % len(NODE_TYPE_SETS)]
@@ -665,6 +752,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     except SeedError as exc:
         print(f"seed failed: {exc}", file=sys.stderr)
         return 1
+    if stats.repaired:
+        print(f"repaired: {stats.repaired} warehouse graph(s) rebuilt")
     if not stats.skipped:
         print(
             f"seeded: {stats.users} users, {stats.graphs} graphs, {stats.contexts} contexts, "

@@ -8834,3 +8834,97 @@ impact (no new setting, table or mutating route).
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-09-02 22:15] - Bug Fixed: the test suite wiped the running dev warehouse
+
+**Symptom:** `make dev-db` came up and every graph query failed with
+`[TABLE_OR_VIEW_NOT_FOUND] The table or view 'graphs'.'edges_seed_6' cannot be
+found`. `/api/datasets` reported zero tables while PostgreSQL still held 508
+contexts pointing at `dev_catalog.graphs.edges_seed_0..7`.
+
+**Root cause (two independent faults, both needed to produce the symptom):**
+
+1. **`pytest tests/` DROPs every table in a developer's live warehouse.**
+   `get_warehouse_client()` ([services/warehouse.py:1288](../../api/graphlagoon/services/warehouse.py#L1288))
+   is a module-level singleton. The first test to build one against the real
+   settings leaves `http://localhost:8001` cached for the rest of the pytest
+   process; `test_dev_seed.py::test_reset_clears_first` then calls
+   `POST /api/admin/environment/clear`, which reaches
+   [environment.py:147](../../api/graphlagoon/services/environment.py#L147) →
+   `DELETE /dev/clear-all` on the *real* warehouse. Reproduced with a canary
+   table: it survives `test_admin.py` alone and `test_dev_seed.py` alone, and
+   dies whenever both run in one process — which is why it never looked like a
+   test problem.
+
+2. **The seed refused to repair what step 1 destroyed.** `run_seed` skipped on
+   its `seed:<hash>` tag alone, and the tag lives in PostgreSQL. PostgreSQL is a
+   Docker volume; the warehouse is a local directory. Wipe one and the seed
+   reports "already seeded" forever while every context points at a table that
+   no longer exists.
+
+**Design decisions:**
+
+1. **Guard the whole suite, not the one guilty test.** A single autouse fixture
+   in a new [api/tests/conftest.py](../../api/tests/conftest.py) points
+   `sql_warehouse_url` at the RFC 863 discard port and drops the singleton
+   around every test. Nothing in the suite legitimately needs a live warehouse —
+   the tests that need one stub it — so the strongest guarantee is also the
+   cheapest one. Fixing only `test_reset_clears_first` would have left the next
+   test free to do the same thing. Side benefit: the suite went from 29 s to
+   6 s, all of it previously spent on real HTTP.
+2. **Make a rerun of the seed the repair.** `repair_missing_graphs` reads every
+   context's `edge_table_name`, matches `…​.<schema>.edges_seed_<i>`, asks
+   `/api/datasets` which of them still exist, and regenerates the missing ones —
+   *before* the tag check, so it heals a "skipped" environment. It works on
+   graphs left by any past run (a `dev-seed-big` env keeps contexts on
+   `seed_5..7` that a default reseed would otherwise never touch).
+3. **A graph is identified by its index alone.** `graph_payload(index)` moves
+   the model/size/type parameters out of the creation loop, so `edges_seed_6`
+   means the same graph whatever run made it. Without that, a missing table
+   could not be rebuilt from its name. The creation loop now uses the same
+   helper, so the two paths cannot drift.
+4. **Compare table names without the catalog.** The seed asks for `dev_catalog`
+   while `/api/datasets` reports `spark_catalog`; local Spark resolves these
+   tables two-part and ignores the catalog. Comparing `schema.table` is what
+   Spark itself does. (The `dev_catalog` / `spark_catalog` mismatch is cosmetic
+   but real — seeded contexts carry a catalog name the table picker never
+   offers. Left alone; it does not affect resolution.)
+5. **`make dev-reset` for the cases repair cannot fix.** Repair is
+   non-destructive by design, so there had to be an explicit way to ask for the
+   destructive one rather than making users discover `SEED_ARGS=--reset`.
+
+**Files created:**
+- [api/tests/conftest.py](../../api/tests/conftest.py)
+
+**Files modified:**
+- [api/graphlagoon/dev/seed.py](../../api/graphlagoon/dev/seed.py) — `SEED_TABLE_RE`,
+  `graph_payload`, `_unqualified`, `repair_missing_graphs`, `SeedStats.repaired`,
+  wiring in `run_seed`/`main`
+- [api/tests/test_dev_seed.py](../../api/tests/test_dev_seed.py) — warehouse stub
+  fixture + `TestWarehouseRepair`
+- [Makefile](../../Makefile) — `dev-reset`
+- [docs/guide/getting-started.md](../guide/getting-started.md)
+
+**Testing:**
+- [x] `TestWarehouseRepair`: rebuilds after a wipe, no-ops when tables are live,
+      repairs graphs left by a *different* seed run
+- [x] Canary table survives `pytest tests/` (it did not before)
+- [x] Full API suite: 1126 passed, 6 failed — the same 6 failures on a stashed
+      working tree (`test_cypher_comments` ×4, `test_superuser`,
+      `test_transpile_options`), pre-existing and unrelated
+- [x] Live environment repaired: `/api/datasets` back to 16 seeded tables,
+      `SELECT count(*) FROM graphs.edges_seed_6` → 595
+
+**Public Docs:** getting-started's "Sample data" now says a reseed is also the
+repair, and documents `make dev-reset`. `make docs-build` passes. No screenshots
+changed.
+
+**Admin-Area Impact:** No admin-area impact — no new setting, table, mutating
+route or router module.
+
+**Known Limitations:**
+- Repair only covers `*_seed_<i>` tables. A hand-made context (the local
+  `spark_catalog.fraud.edges_ieee_cis`) whose tables were destroyed by the same
+  bug has to be reloaded by hand; the seed has no recipe for it.
+- The 500 contexts left by an old `dev-seed-big` remain; they now work, but
+  `make dev-reset` is the way to get a tidy environment.
