@@ -228,4 +228,32 @@ describe('resolveNodeBoundValues', () => {
     expect(resolveNodeBoundValues(params, node)).toEqual({ values: {}, missing: [] })
     expect(resolveNodeBoundValues(undefined, node)).toEqual({ values: {}, missing: [] })
   })
+
+  it('metric: bindings resolve through the injected resolver', () => {
+    const params = [
+      createClusterProgramParameter({ id: 'pr', type: 'number', node_binding: 'metric:PageRank' }),
+    ]
+    const metricValue = (ref: string, nodeId: string) =>
+      ref === 'PageRank' && nodeId === node.node_id ? 0.8 : undefined
+    const result = resolveNodeBoundValues(params, node, metricValue)
+    expect(result.values).toEqual({ pr: 0.8 })
+    expect(result.missing).toEqual([])
+  })
+
+  it('metric: bindings without a resolver or without a value report missing (run aborts)', () => {
+    const params = [
+      createClusterProgramParameter({ id: 'pr', type: 'number', node_binding: 'metric:PageRank' }),
+    ]
+    // No resolver at all (stale persisted binding, metric never recomputed)
+    expect(resolveNodeBoundValues(params, node).missing).toEqual([
+      { paramId: 'pr', binding: 'metric:PageRank' },
+    ])
+    // Resolver, but no value for this node (null counts as no value)
+    expect(resolveNodeBoundValues(params, node, () => undefined).missing).toEqual([
+      { paramId: 'pr', binding: 'metric:PageRank' },
+    ])
+    expect(resolveNodeBoundValues(params, node, () => null).missing).toEqual([
+      { paramId: 'pr', binding: 'metric:PageRank' },
+    ])
+  })
 })

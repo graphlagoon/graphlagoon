@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useClusterStore } from '@/stores/cluster'
 import { useGraphStore } from '@/stores/graph'
+import { useMetricsStore } from '@/stores/metrics'
 import type {
   ClusterProgram,
   ClusterProgramParameter,
@@ -19,6 +20,8 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const clusterStore = useClusterStore()
 const graphStore = useGraphStore()
+const metricsStore = useMetricsStore()
+const nodeMetricNames = computed(() => metricsStore.nodeMetrics.map(m => m.name))
 
 const isEditMode = computed(() => props.program !== null)
 
@@ -81,11 +84,15 @@ const selectsValid = computed(() =>
   parameters.value.every(p => p.type !== 'select' || (p.options ?? []).length > 0)
 )
 
-// A 'prop:' binding needs a property name after the prefix
+// 'prop:'/'metric:' bindings need a name/ref after the prefix
 const bindingsValid = computed(() =>
-  parameters.value.every(
-    p => !p.node_binding?.startsWith('prop:') || p.node_binding.length > 'prop:'.length
-  )
+  parameters.value.every(p => {
+    const b = p.node_binding
+    if (!b) return true
+    if (b.startsWith('prop:')) return b.length > 'prop:'.length
+    if (b.startsWith('metric:')) return b.length > 'metric:'.length
+    return true
+  })
 )
 
 const isValid = computed(
@@ -97,13 +104,14 @@ const isValid = computed(
     bindingsValid.value
 )
 
-// ─── Node binding helpers (binding stored as 'node_id' | 'node_type' | 'prop:<name>') ───
+// ─── Node binding helpers (binding stored as 'node_id' | 'node_type' | 'prop:<name>' | 'metric:<ref>') ───
 
-type BindingKind = '' | 'node_id' | 'node_type' | 'prop'
+type BindingKind = '' | 'node_id' | 'node_type' | 'prop' | 'metric'
 
 function getBindingKind(param: ClusterProgramParameter): BindingKind {
   if (!param.node_binding) return ''
   if (param.node_binding.startsWith('prop:')) return 'prop'
+  if (param.node_binding.startsWith('metric:')) return 'metric'
   return param.node_binding as BindingKind
 }
 
@@ -113,11 +121,19 @@ function getBindingProp(param: ClusterProgramParameter): string {
     : ''
 }
 
+function getBindingMetric(param: ClusterProgramParameter): string {
+  return param.node_binding?.startsWith('metric:')
+    ? param.node_binding.slice('metric:'.length)
+    : ''
+}
+
 function setBindingKind(param: ClusterProgramParameter, kind: BindingKind) {
   if (kind === '') {
     delete param.node_binding
   } else if (kind === 'prop') {
     param.node_binding = 'prop:'
+  } else if (kind === 'metric') {
+    param.node_binding = 'metric:'
   } else {
     param.node_binding = kind
   }
@@ -125,6 +141,10 @@ function setBindingKind(param: ClusterProgramParameter, kind: BindingKind) {
 
 function setBindingProp(param: ClusterProgramParameter, propName: string) {
   param.node_binding = `prop:${propName.trim()}` as ClusterProgramNodeBinding
+}
+
+function setBindingMetric(param: ClusterProgramParameter, ref: string) {
+  param.node_binding = `metric:${ref.trim()}` as ClusterProgramNodeBinding
 }
 
 function addParameter() {
@@ -385,6 +405,7 @@ function handleSave() {
                       <option value="node_id">Node ID</option>
                       <option value="node_type">Node type</option>
                       <option value="prop">Property…</option>
+                      <option value="metric">Metric… (session-computed)</option>
                     </select>
                   </div>
                   <div v-if="getBindingKind(param) === 'prop'" class="param-field">
@@ -397,6 +418,21 @@ function handleSave() {
                       @input="setBindingProp(param, ($event.target as HTMLInputElement).value)"
                       placeholder="e.g. id_simples"
                     />
+                  </div>
+                  <div v-if="getBindingKind(param) === 'metric'" class="param-field">
+                    <label class="param-field-label">Metric name <span class="required-mark">*</span></label>
+                    <input
+                      type="text"
+                      class="field-input"
+                      :class="{ invalid: getBindingMetric(param) === '' }"
+                      :value="getBindingMetric(param)"
+                      list="cluster-binding-metrics"
+                      @input="setBindingMetric(param, ($event.target as HTMLInputElement).value)"
+                      placeholder="e.g. PageRank"
+                    />
+                    <datalist id="cluster-binding-metrics">
+                      <option v-for="m in nodeMetricNames" :key="m" :value="m" />
+                    </datalist>
                   </div>
                 </div>
 
