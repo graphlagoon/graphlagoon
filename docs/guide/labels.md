@@ -189,7 +189,9 @@ Two gotchas worth knowing:
 
 A rule has a name, a target (node or edge), a **surface** (labels, tooltips,
 or both — which text its template drives), an optional list of types, a
-template, and a priority (0–100, default 10). Adding or editing one opens a
+template, and a priority (0–100). A new rule starts just above the
+highest-priority existing rule for its target — newest wins by default, so a
+rule you just created actually applies. Adding or editing one opens a
 dedicated editor with the same autocomplete and live preview as the default
 templates.
 

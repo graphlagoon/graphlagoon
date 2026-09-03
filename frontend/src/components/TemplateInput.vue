@@ -1,6 +1,19 @@
 <template>
   <div class="template-input-wrapper">
+    <textarea
+      v-if="multiline"
+      ref="inputRef"
+      :value="modelValue"
+      rows="2"
+      :placeholder="placeholder"
+      class="template-input template-textarea"
+      :data-testid="dataTestid"
+      @input="handleInput"
+      @keydown="handleKeydown"
+      @blur="handleBlur"
+    />
     <input
+      v-else
       ref="inputRef"
       :value="modelValue"
       type="text"
@@ -44,6 +57,13 @@ const props = defineProps<{
   target: 'node' | 'edge';
   placeholder?: string;
   dataTestid?: string;
+  /**
+   * Render a wrapping textarea instead of a one-line input, for templates too
+   * long to read in a single line (conditionals, multi-part tooltips). Enter
+   * still accepts the autocomplete and never inserts a literal newline —
+   * line breaks in templates are written as {br}.
+   */
+  multiline?: boolean;
 }>();
 
 const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>();
@@ -51,7 +71,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>();
 const graphStore = useGraphStore();
 const metricsStore = useMetricsStore();
 
-const inputRef = ref<HTMLInputElement | null>(null);
+const inputRef = ref<HTMLInputElement | HTMLTextAreaElement | null>(null);
 const suggestions = ref<{ placeholder: string; description: string }[]>([]);
 const selectedSuggestionIndex = ref(0);
 
@@ -75,7 +95,7 @@ function lastUnescapedIndex(s: string, ch: string): number {
 }
 
 function handleInput(event: Event) {
-  const input = event.target as HTMLInputElement;
+  const input = event.target as HTMLInputElement | HTMLTextAreaElement;
   const value = input.value;
   emit('update:modelValue', value);
 
@@ -112,7 +132,12 @@ function handleInput(event: Event) {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if (suggestions.value.length === 0) return;
+  if (suggestions.value.length === 0) {
+    // A textarea would insert an invisible literal newline on Enter; the
+    // template language spells line breaks as {br}, so swallow it.
+    if (props.multiline && event.key === 'Enter') event.preventDefault();
+    return;
+  }
 
   switch (event.key) {
     case 'ArrowDown':
@@ -245,5 +270,12 @@ function handleBlur() {
   color: var(--vt-c-text-3, #666);
   font-size: 0.75rem;
   text-align: right;
+}
+
+.template-textarea {
+  resize: vertical;
+  min-height: 52px;
+  line-height: 1.45;
+  display: block;
 }
 </style>

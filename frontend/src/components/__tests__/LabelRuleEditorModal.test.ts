@@ -40,7 +40,7 @@ describe('LabelRuleEditorModal', () => {
     await fireEvent.update(el('[data-testid="rule-name"]') as HTMLInputElement, 'R')
     expect(save.disabled).toBe(true)
 
-    await fireEvent.update(el('input[data-testid="rule-template"]') as HTMLInputElement, '{node_id}')
+    await fireEvent.update(el('[data-testid="rule-template"]') as HTMLTextAreaElement, '{node_id}')
     expect(save.disabled).toBe(false)
   })
 
@@ -60,6 +60,33 @@ describe('LabelRuleEditorModal', () => {
     expect(checked.length).toBe(0)
   })
 
+  it('defaults a new rule to winning over the existing ones (newest wins)', () => {
+    const graphStore = useGraphStore()
+    graphStore.addTextFormatRule({
+      name: 'Old', target: 'node', types: [], template: '{node_id}',
+      priority: 30, enabled: true, scope: 'exploration',
+    })
+    render(LabelRuleEditorModal, { props: { rule: null } })
+
+    expect((el('[data-testid="rule-priority"]') as HTMLInputElement).value).toBe('40')
+  })
+
+  it('newest-wins priority is capped at 100 and scoped to the target', async () => {
+    const graphStore = useGraphStore()
+    graphStore.addTextFormatRule({
+      name: 'Loud', target: 'node', types: [], template: '{node_id}',
+      priority: 97, enabled: true, scope: 'exploration',
+    })
+    render(LabelRuleEditorModal, { props: { rule: null } })
+
+    const priority = el('[data-testid="rule-priority"]') as HTMLInputElement
+    expect(priority.value).toBe('100')
+
+    // Edge rules are a separate pool: no edge rules -> back to the base 10.
+    await fireEvent.update(el('[data-testid="rule-target"]') as HTMLSelectElement, 'edge')
+    expect(priority.value).toBe('10')
+  })
+
   it('pre-fills every field from an existing rule', () => {
     const rule: TextFormatRule = {
       id: 'r1',
@@ -77,6 +104,6 @@ describe('LabelRuleEditorModal', () => {
     expect((el('[data-testid="rule-name"]') as HTMLInputElement).value).toBe('Tips')
     expect((el('[data-testid="rule-surface"]') as HTMLSelectElement).value).toBe('both')
     expect((el('[data-testid="rule-priority"]') as HTMLInputElement).value).toBe('42')
-    expect((el('input[data-testid="rule-template"]') as HTMLInputElement).value).toBe('{prop:name}')
+    expect((el('[data-testid="rule-template"]') as HTMLTextAreaElement).value).toBe('{prop:name}')
   })
 })
