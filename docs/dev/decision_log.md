@@ -9567,3 +9567,25 @@ with zero schema change; superusers remain env-var by design.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-09-03 10:15] - Fix: SPA template render crashed on current Starlette
+
+Found by the permissions feature's end-to-end smoke (create_app → GET /):
+`templates.TemplateResponse("index.html", {...})` — the legacy
+(name, context) signature — crashes on the installed Starlette with
+"unhashable type: 'dict'" (the context dict reaches jinja's get_template).
+**Pre-existing on main**, verified in a clean worktree; unnoticed because
+`make dev` serves the frontend through Vite, so the template path went
+unexercised. Fix: modern signature (`TemplateResponse(request, name,
+context)`). This is the path that injects `window.__GRAPH_LAGOON_CONFIG__`
+(now including `permissions`) in production/embedded mode.
+
+**Testing:** smoke renders 200 with permissions injected; api suite 1191
+passed (6 pre-existing failures unchanged).
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No
+admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
