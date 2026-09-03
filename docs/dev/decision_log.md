@@ -9321,3 +9321,23 @@ already persisted inside exploration state JSON.
 **Future Enhancements:**
 - Metric placeholders in tooltips could show a spinner while a metric
   computes; today they render the `[metric:...]` sentinel.
+
+## [2026-09-03 07:50] - Refinement: rule modal layout, textarea template, newest-wins priority
+
+Follow-up UX pass on the rule editor modal after review:
+- **Template field is a wrapping textarea** (`TemplateInput` gained a
+  `multiline` prop): conditional-heavy templates no longer scroll
+  horizontally. Enter still accepts autocomplete and never inserts a literal
+  newline — `{br}` is the template's line break.
+- **Newest-wins priority default**: a new rule starts at
+  `min(100, max(existing same-target priorities) + 10)` (10 with no rules),
+  recomputed when the target flips. Fixed 10 left new rules losing to old
+  ones; a fixed 100 would make every new rule tie. Documented in labels.md.
+- The wrapping "Where this rule's template is used" hint became a `title`
+  (the select options are self-explanatory), fixing the Target/Applies
+  to/Priority row alignment; Priority got a `title` explaining higher wins.
+
+Tests: 2374 unit green (2 new for the priority default; selectors updated
+for the textarea), 6 e2e green, `labels-rule-modal.png` regenerated.
+No public-docs impact beyond the labels.md priority sentence; no admin-area
+impact.

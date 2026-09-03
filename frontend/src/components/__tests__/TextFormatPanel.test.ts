@@ -65,7 +65,7 @@ describe('TextFormatPanel — inline validation and preview', () => {
 
     await fireEvent.update(modalEl('[data-testid="rule-name"]') as HTMLInputElement, 'Bad rule')
     await fireEvent.update(
-      modalEl('[data-testid="rule-template"] input, input[data-testid="rule-template"]') as HTMLInputElement,
+      modalEl('[data-testid="rule-template"]') as HTMLInputElement,
       '{prop:name|match:/(bad/}'
     )
 
@@ -86,7 +86,7 @@ describe('TextFormatPanel — inline validation and preview', () => {
 
     await fireEvent.update(modalEl('[data-testid="rule-name"]') as HTMLInputElement, 'Empresa rule')
     await fireEvent.update(
-      modalEl('[data-testid="rule-template"] input, input[data-testid="rule-template"]') as HTMLInputElement,
+      modalEl('[data-testid="rule-template"]') as HTMLInputElement,
       'Empresa {node_id|split:_:0}'
     )
 
@@ -107,7 +107,7 @@ describe('TextFormatPanel — inline validation and preview', () => {
     await fireEvent.update(modalEl('[data-testid="rule-name"]') as HTMLInputElement, 'Tip rule')
     await fireEvent.update(modalEl('[data-testid="rule-surface"]') as HTMLSelectElement, 'tooltip')
     await fireEvent.update(
-      modalEl('[data-testid="rule-template"] input, input[data-testid="rule-template"]') as HTMLInputElement,
+      modalEl('[data-testid="rule-template"]') as HTMLInputElement,
       '{node_id|upper}'
     )
     await fireEvent.click(modalEl('[data-testid="rule-save"]') as HTMLButtonElement)
