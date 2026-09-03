@@ -6,6 +6,7 @@ import ToastContainer from '@/components/ToastContainer.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { useEscapeToCloseModals } from '@/composables/useEscapeToCloseModals';
 import { useModalFocus } from '@/composables/useModalFocus';
+import { useDocumentTitle } from '@/composables/useDocumentTitle';
 import Toolbar from '@/components/Toolbar.vue';
 
 const route = useRoute();
@@ -16,6 +17,8 @@ const showToolbar = computed(() => route.name !== 'login');
 // One listener for every modal in the app — see the composable for why.
 useEscapeToCloseModals();
 useModalFocus();
+// The tab names what is open, not just the app.
+useDocumentTitle();
 </script>
 
 <template>

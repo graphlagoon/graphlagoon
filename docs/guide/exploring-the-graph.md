@@ -190,13 +190,11 @@ Shortcuts apply while the pointer is over the canvas.
 
 ## Expanding neighbors
 
-Three ways, same engine:
+Two ways, same engine:
 
 1. **Alt + Click** a node — quick expand at depth 1.
 2. **Right-click → Expand neighbors** — same, from the
    [context menu](./context-menu-actions.md).
-3. **Side panel → Expand from Node** — the full form: depth (1–2), edge
-   limit (4–1000), directed-only, and an edge-type allow-list.
 
 Results are **merged**: existing nodes keep their positions and only new
 nodes and edges are added. On sources that can't expand (some REST

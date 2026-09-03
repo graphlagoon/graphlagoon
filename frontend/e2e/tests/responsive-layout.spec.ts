@@ -99,4 +99,56 @@ test.describe('Responsive layout', () => {
       await assertNoHorizontalOverflow(page, width);
     });
   }
+
+  // The exploration name had no max-width: a nowrap child that cannot shrink
+  // sets the whole left group's min-content, so a long title took its width out
+  // of `.toolbar-center` — which scrolls with a hidden scrollbar, so the panel
+  // toggles simply left the screen with nothing to say they had.
+  test('long context and exploration names do not push the panel toggles off-screen', async ({
+    authenticatedPage: page,
+  }) => {
+    const longContext = {
+      ...MOCK_CONTEXT,
+      title: 'Banking Production Context — customers, accounts and transfers, 2026',
+    };
+    const longExploration = {
+      ...MOCK_EXPLORATION,
+      title: 'Centrality analysis over the payments subgraph — final revision v4',
+    };
+    await seedContexts(page, [longContext]);
+    await seedExplorations(page, [longExploration]);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/graph/${longContext.id}?exploration=${longExploration.id}`);
+    await expect(page.getByTestId('toolbar-exploration-name')).toBeVisible({ timeout: 15_000 });
+
+    // Every panel toggle stays inside the viewport, not scrolled out of the
+    // centre group.
+    for (const title of ['Filters', 'Query', 'Query Templates', 'Style', 'Labels', 'Metrics', 'Clusters', 'Behaviors', 'Load Exploration']) {
+      const box = await page.getByTitle(title, { exact: true }).boundingBox();
+      expect(box, `${title} has no box`).not.toBeNull();
+      expect(box!.x, `${title} scrolled off the left`).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width, `${title} past the right edge`).toBeLessThanOrEqual(1440);
+    }
+
+    // Both names are visibly truncated, and both carry the full text on hover.
+    const measured = await page.evaluate(() => {
+      const ctx = document.querySelector('[data-testid="toolbar-context-title"]') as HTMLElement;
+      const label = document.querySelector('.exploration-label') as HTMLElement;
+      const dot = document.querySelector('[data-testid="toolbar-exploration-dirty"]');
+      return {
+        ctxTruncated: ctx.scrollWidth > ctx.clientWidth,
+        ctxTitle: ctx.getAttribute('title'),
+        labelTruncated: label.scrollWidth > label.clientWidth,
+        // The dot must not live inside the ellipsised label.
+        dotInsideLabel: dot ? !!dot.closest('.exploration-label') : false,
+      };
+    });
+    expect(measured.ctxTruncated).toBe(true);
+    expect(measured.ctxTitle).toBe(longContext.title);
+    expect(measured.labelTruncated).toBe(true);
+    expect(measured.dotInsideLabel).toBe(false);
+
+    await assertNoHorizontalOverflow(page, 1440);
+  });
 });

@@ -9383,3 +9383,98 @@ rule underneath. Editing keeps the stored priority.
 
 Tests/e2e/screenshot scenes updated (2378 unit green, 6 e2e green,
 `make docs-build` passes). No admin-area impact.
+
+## [2026-09-03 08:05] - Toolbar: long context/exploration names hid the panel toggles
+
+**Issue:** with a long context or exploration name the top bar "ficava com
+design muito ruim" — and, measured, the panel toggles silently left the
+screen. The user first asked for a hover + ellipsis, then pushed back twice:
+was the real cause the toolbar's own design, and were the three groups
+(`toolbar-left/center/right`) the problem? Measurement decided it.
+
+**Root cause (measured with a Playwright probe, superuser + dev mode, both
+names ~70 chars):**
+
+| viewport | `.toolbar-left` | centre has | centre needs | clipped |
+|---|---|---|---|---|
+| 1920 | 874px | 833 | 912 | Filters, Query, Precomputed |
+| 1440 | 874px | 357 | 394 | Filters, Query, Save, Precomputed |
+| 1280 | 874px | 197 | 314 | six buttons |
+
+Two independent faults:
+
+1. `.exploration-name` had `white-space: nowrap` and no `max-width` /
+   `overflow`, so it could not shrink at all.
+2. `.toolbar-center` had `min-width: 0` **plus** `overflow-x: auto` with
+   `scrollbar-width: none` — a bottomless sink. The flex container therefore
+   never overflowed, so the algorithm never asked `.toolbar-left` (874px with
+   DEV and Admin showing) to give anything up, and the centre hid its own
+   buttons behind a scrollbar it also hid. Nothing on screen said the buttons
+   existed.
+
+Unifying the three groups was considered and rejected: the width floor is per
+*item* (`min-content` of a nowrap text), not per group, so a single flex row
+fails identically — and it would lose the pinned right group (Save / Export /
+user menu always reachable) and the centred tool group. `flex-wrap: wrap` on
+the bar was tried and reverted by measurement: wrapping makes flex move a
+group to the next line *instead of* shrinking the left group, so the bar broke
+into two rows at 1920px.
+
+**Solution (all in `Toolbar.vue` unless noted):**
+- `.toolbar-center { min-width: min-content }` — the centre now states what it
+  needs, so the left group yields. Measured: left 874 → 717 → 614 → 494 as the
+  viewport narrows; zero clipped buttons from 1920 down to 768, one 52px row,
+  no document overflow.
+- `.exploration-state` is `inline-flex` with `max-width: 200px` (the context
+  title's cap) and the name moved into `.exploration-label` so the ellipsis
+  eats the name, not the dirty dot (`flex-shrink: 0`).
+- `min-width: 4rem` on both names: a name shrunk past that is just "…". Below
+  1100px the label is dropped for a `Save` icon, keeping the dirty dot, the
+  click-to-save and the tooltip.
+- `:title` on `.context-title` (the exploration chip already had one), and
+  `.nav-link { flex-shrink: 0; white-space: nowrap }` so the nav cannot wrap
+  to two lines inside a 52px bar.
+- **DEV, Admin and Precomputed moved into the account menu** (user request):
+  used by a minority, rarely, and they cost the toolbar permanent width. The
+  menu now renders for everyone (it is the only route to Admin); Logout stays
+  dev-mode only. Left group at 960px: 874 → 387.
+- **`document.title` now names what is open** (`useDocumentTitle`, wired in
+  `App.vue`): `● <exploration> · <context> — Graph Lagoon Studio`. Two graphs
+  open in two tabs used to be indistinguishable, and it is where the full
+  names survive at widths that hide them.
+
+**Files:** `src/components/Toolbar.vue`, `src/App.vue`,
+`src/composables/useDocumentTitle.ts` (new).
+
+**Testing:** new `src/components/__tests__/Toolbar.test.ts` (3) and
+`src/composables/__tests__/useDocumentTitle.test.ts` (5) — 2383 unit green.
+New e2e case in `responsive-layout.spec.ts` asserting no toggle leaves the
+1440px viewport with long names, both names truncated, both carrying their
+full text, dot outside the label. `e2e/helpers/user-menu.ts` (new) +
+16 call sites updated across navigation / dev-generator / precomputed-graphs /
+user-journeys. No admin-area impact.
+
+**Not done (backlog):** the structural fix in
+[ux-review.md](./ux-review.md) §4 (one vertical rail replacing both toolbars)
+— findings #1 and #7 stay open. The user explicitly scoped this change small.
+
+## [2026-09-03 08:20] - Side panel: the "Actions" expand form removed
+
+**Issue:** user request — clicking a node put an expansion form ("Actions":
+depth, edge limit, directed, edge-type allow-list, *Expand from Node*) in the
+details panel, competing with the details themselves.
+
+**Solution:** the section, its four refs and its submit handler are gone from
+`SidePanel.vue`, along with the CSS only it used (`.expand-options`,
+`.form-row`, `.form-group.half`, `.checkbox-label`, `.btn-block`). Expansion
+itself is untouched: **Alt + Click** (`GraphCanvas3D.vue:1189`) and
+**right-click → Expand neighbors** (`GraphCanvas3D.vue:2360`) still call
+`graphStore.expandFromNode`, both still gated on `graphStore.supportsExpand`,
+and the store/API are unchanged. What is lost is only the non-default
+parameters — depth 2, an edge limit, directed-only, an edge-type filter — which
+had no other entry point.
+
+**Files:** `frontend/src/components/SidePanel.vue`,
+`frontend/e2e/tests/rest-context.spec.ts` (its `Expand from Node` hidden-check
+had nothing left to assert; the surrounding query-only-connection test stays),
+`docs/guide/exploring-the-graph.md` ("Three ways" → "Two ways").
