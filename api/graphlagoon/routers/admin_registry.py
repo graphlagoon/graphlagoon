@@ -114,6 +114,10 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/admin/explorations/{exploration_id}/transfer"),
         ("POST", "/api/admin/environment/clear"),
         ("DELETE", "/api/dev/clear-all"),
+        ("POST", "/api/admin/groups"),
+        ("PUT", "/api/admin/groups/{group_id}"),
+        ("DELETE", "/api/admin/groups/{group_id}"),
+        ("PUT", "/api/admin/permissions/{permission_id}"),
     }
 )
 
@@ -162,4 +166,7 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/schema-discovery"): "read-only discovery",
     ("POST", "/api/catalog/refresh"): "cache refresh; no data change",
     ("POST", "/api/admin/health/warehouse"): "read-only probe",
+    ("POST", "/api/admin/groups/resolution/refresh"): (
+        "cache refresh; no data change"
+    ),
 }

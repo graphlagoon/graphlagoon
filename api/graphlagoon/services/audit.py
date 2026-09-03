@@ -40,6 +40,10 @@ class AuditAction:
     PRECOMPUTED_DELETE = "precomputed.delete"
     PRESET_DELETE = "preset.delete"
     ADMIN_CLEAR_ALL = "admin.clear_all"
+    GROUP_CREATE = "group.create"
+    GROUP_UPDATE = "group.update"
+    GROUP_DELETE = "group.delete"
+    PERMISSION_UPDATE = "permission.update"
 
     @classmethod
     def all(cls) -> list[str]:

@@ -35,6 +35,7 @@ from graphlagoon.dev.seed import ADMIN_EMAIL, SeedError, make_users, run_seed  #
 from graphlagoon.middleware.auth import AuthMiddleware  # noqa: E402
 from graphlagoon.routers import (  # noqa: E402
     admin,
+    admin_groups,
     config,
     explorations,
     graph_contexts,
@@ -71,7 +72,14 @@ def warehouse_stub():
 def app(env, store, warehouse_stub):
     app = FastAPI()
     app.add_middleware(AuthMiddleware)
-    for module in (config, admin, graph_contexts, explorations, query_templates):
+    for module in (
+        config,
+        admin,
+        admin_groups,
+        graph_contexts,
+        explorations,
+        query_templates,
+    ):
         app.include_router(module.router)
 
     # Minimal stand-ins for the two graph-router endpoints the seed calls when
@@ -155,6 +163,15 @@ class TestSeed:
         assert "context.share" in actions or "exploration.share" in actions
         assert stats.transfers >= 1 and "context.transfer" in actions
         assert stats.templates >= 1
+        group_names = {g.name for g in store.groups.values()}
+        assert {"analysts", "restricted-demo"} <= group_names
+        assert "permission.update" in actions
+        # The demo deny must never target a seed creator (rerun safety).
+        creators = {c.owner_email for c in store.graph_contexts.values()}
+        demo = next(
+            g for g in store.groups.values() if g.name == "restricted-demo"
+        )
+        assert not creators & {m.value for m in demo.members}
 
     async def test_deterministic(self, in_process, store):
         await _run()
