@@ -281,6 +281,97 @@ describe('visual mapping', () => {
 })
 
 // ============================================================================
+// Node color mapping (color-by-metric)
+// ============================================================================
+
+describe('node color mapping', () => {
+  it('is off by default and turns on/off via setNodeColorMetric', () => {
+    const store = useMetricsStore()
+    expect(store.visualMapping.nodeColor.metricId).toBeNull()
+    expect(store.nodeColorMetric).toBeNull()
+
+    store.computedMetrics.set('m1', makeComputedMetric({ id: 'm1' }))
+    store.setNodeColorMetric('m1')
+    expect(store.nodeColorMetric?.id).toBe('m1')
+
+    store.setNodeColorMetric(null)
+    expect(store.nodeColorMetric).toBeNull()
+  })
+
+  it('nodeColorMetric is null for non-numeric metrics (no categorical gradients)', () => {
+    const store = useMetricsStore()
+    store.computedMetrics.set(
+      'tier',
+      makeComputedMetric({ id: 'tier', valueType: 'string', values: new Map([['n1', 'gold']]) }),
+    )
+    store.setNodeColorMetric('tier')
+    expect(store.nodeColorMetric).toBeNull()
+  })
+
+  it('stale metricId is harmless: lookup returns null, mapping keeps the id', () => {
+    const store = useMetricsStore()
+    store.setNodeColorMetric('gone-after-reload')
+    expect(store.nodeColorMetric).toBeNull()
+    expect(store.visualMapping.nodeColor.metricId).toBe('gone-after-reload')
+  })
+
+  it('round-trips through get/loadVisualMappingState', () => {
+    const store = useMetricsStore()
+    store.setNodeColorMetric('m1')
+    store.updateNodeColorMapping({ minColor: '#112233', maxColor: '#aabbcc', scale: 'sqrt' })
+
+    const snapshot = store.getVisualMappingState()
+    store.resetVisualMapping()
+    expect(store.visualMapping.nodeColor.metricId).toBeNull()
+
+    store.loadVisualMappingState(snapshot)
+    expect(store.visualMapping.nodeColor).toEqual({
+      metricId: 'm1',
+      minColor: '#112233',
+      maxColor: '#aabbcc',
+      scale: 'sqrt',
+    })
+  })
+
+  it('rejects non-hex colors from untrusted payloads (falls back to defaults)', () => {
+    const store = useMetricsStore()
+    store.loadVisualMappingState({
+      nodeColor: {
+        metricId: 'm1',
+        minColor: 'javascript:alert(1)',
+        maxColor: 'url(evil)',
+        scale: 'linear',
+      },
+    })
+    expect(store.visualMapping.nodeColor.metricId).toBe('m1')
+    expect(store.visualMapping.nodeColor.minColor).toBe('#dbeafe')
+    expect(store.visualMapping.nodeColor.maxColor).toBe('#1d4ed8')
+  })
+
+  it('legacy payloads without nodeColor load with the feature off', () => {
+    const store = useMetricsStore()
+    store.setNodeColorMetric('m1')
+    store.loadVisualMappingState({
+      nodeSize: { metricId: null, minSize: 4, maxSize: 20, scale: 'linear' },
+    })
+    expect(store.visualMapping.nodeColor.metricId).toBeNull()
+  })
+
+  it('deleteMetric and clearAllMetrics clear a selected color metric', () => {
+    const store = useMetricsStore()
+    store.computedMetrics.set('m1', makeComputedMetric({ id: 'm1' }))
+    store.setNodeColorMetric('m1')
+    store.deleteMetric('m1')
+    expect(store.visualMapping.nodeColor.metricId).toBeNull()
+
+    store.computedMetrics.set('m2', makeComputedMetric({ id: 'm2' }))
+    store.setNodeColorMetric('m2')
+    store.clearAllMetrics()
+    expect(store.visualMapping.nodeColor.metricId).toBeNull()
+  })
+})
+
+// ============================================================================
 // nodeMetrics / edgeMetrics
 // ============================================================================
 

@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
+import { useMetricsStore } from '@/stores/metrics';
 import { useSimilarityStore } from '@/stores/similarity';
 import type { LayoutAlgorithm, RingOrdering, CrossingHeuristic } from '@/types/graph';
 import { Play, Square, Flame, Shuffle, ChevronDown, ChevronRight, HelpCircle, X } from 'lucide-vue-next';
@@ -52,6 +53,19 @@ const LAYOUT_OPTIONS: { id: LayoutAlgorithm; label: string; icon: string }[] = [
 const layoutMode = computed(() => graphStore.layoutAlgorithm);
 const egoConfig = computed(() => graphStore.layoutModeConfig.ego);
 const hiveConfig = computed(() => graphStore.layoutModeConfig.hive);
+
+// Hive metric keys use NAME refs ('metric:<name>'), not run ids: layout config
+// persists in explorations, and algorithm-run ids embed timestamps while a
+// name re-resolves after the metric is recomputed.
+const metricsStore = useMetricsStore();
+const categoricalNodeMetrics = computed(() =>
+  metricsStore.nodeMetrics.filter((m) => m.valueType !== 'number'),
+);
+const hiveMetricKeyStale = (key: string): boolean => {
+  if (!key.startsWith('metric:')) return false;
+  const ref = key.slice('metric:'.length);
+  return !metricsStore.nodeMetrics.some((m) => m.name === ref || m.id === ref);
+};
 
 function selectLayout(mode: LayoutAlgorithm) {
   graphStore.setLayoutAlgorithm(mode);
@@ -518,6 +532,9 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
           <option v-for="p in graphStore.categoricalNodeProperties" :key="p.name" :value="`prop:${p.name}`">
             {{ p.display_name || p.name }}
           </option>
+          <option v-for="m in categoricalNodeMetrics" :key="m.id" :value="`metric:${m.name}`">
+            {{ m.name }} (metric)
+          </option>
         </select>
         <span
           v-if="hiveConfig.axisKey === 'community' && communityStore.communityMap.size === 0"
@@ -525,6 +542,14 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
           data-testid="hive-no-communities-hint"
         >
           No communities detected yet — run community detection in the Communities panel first.
+        </span>
+        <span
+          v-if="hiveMetricKeyStale(hiveConfig.axisKey)"
+          class="setting-hint"
+          data-testid="hive-axis-metric-stale-hint"
+        >
+          Metric not computed in this session — all nodes land on a "(missing)" axis
+          until it is recomputed in the Metrics panel.
         </span>
         <span v-if="hiveOthersCount > 0" class="setting-hint" data-testid="hive-others-hint">
           {{ hiveOthersCount }} categories grouped into "Others" (max {{ hiveConfig.maxAxes }} axes)
@@ -548,7 +573,18 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
           <option v-for="p in graphStore.numericNodeProperties" :key="p.name" :value="`prop:${p.name}`">
             {{ p.display_name || p.name }}
           </option>
+          <option v-for="m in metricsStore.numericNodeMetrics" :key="m.id" :value="`metric:${m.name}`">
+            {{ m.name }} (metric)
+          </option>
         </select>
+        <span
+          v-if="hiveMetricKeyStale(hiveConfig.positionKey)"
+          class="setting-hint"
+          data-testid="hive-position-metric-stale-hint"
+        >
+          Metric not computed in this session — nodes sit at the inner end of their
+          axis until it is recomputed in the Metrics panel.
+        </span>
       </div>
 
       <div class="setting-item">

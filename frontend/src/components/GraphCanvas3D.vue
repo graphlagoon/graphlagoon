@@ -264,6 +264,7 @@ const axisRotation = useAxisConstrainedRotation(
 function collectAppearanceContext(): AppearanceContext {
   const searchMatched = graphStore.searchMatchedNodeIds;
   const nodeSizeMetric = metricsStore.nodeSizeMetric;
+  const nodeColorMetric = metricsStore.nodeColorMetric;
   const edgeWeightMetric = metricsStore.edgeWeightMetric;
 
   // Pre-compute color maps: avoids O(n) store lookups per node/link inside hot loop
@@ -320,6 +321,10 @@ function collectAppearanceContext(): AppearanceContext {
       ? { values: numericValueMap(nodeSizeMetric), min: nodeSizeMetric.min, max: nodeSizeMetric.max }
       : null,
     nodeSizeMapping: metricsStore.visualMapping.nodeSize,
+    nodeColorMetric: nodeColorMetric
+      ? { values: numericValueMap(nodeColorMetric), min: nodeColorMetric.min, max: nodeColorMetric.max }
+      : null,
+    nodeColorMapping: metricsStore.visualMapping.nodeColor,
     edgeWeightMetric: edgeWeightMetric
       ? { values: numericValueMap(edgeWeightMetric), min: edgeWeightMetric.min, max: edgeWeightMetric.max }
       : null,
@@ -1730,6 +1735,7 @@ function applyLayoutModeForces() {
     const { positions, axes } = computeHivePositions(graphStore.nodes, cfg.hive, {
       nodeDegrees: graphStore.nodeDegrees,
       communityMap: communityStore.communityMap,
+      nodeMetricValue: (ref, id) => metricsStore.metricResolver('node', id, ref),
     });
     pinPositions(positions);
     // Curve the links: intra-axis links are collinear with their axis and
@@ -1893,14 +1899,16 @@ watch(
 watch(
   () => {
     const nodeSize = metricsStore.visualMapping.nodeSize;
+    const nodeColor = metricsStore.visualMapping.nodeColor;
     const edgeWeight = metricsStore.visualMapping.edgeWeight;
     const metricsCount = metricsStore.computedMetrics.size;
     const nodeSizeMetric = metricsStore.nodeSizeMetric;
     const nodeSizeValuesSize = nodeSizeMetric?.values?.size || 0;
+    const nodeColorValuesSize = metricsStore.nodeColorMetric?.values?.size || 0;
     // A recompute that replaces a same-size Map (custom metrics, {metric:x}
     // labels) is only visible through the version counter.
     const metricsVersion = metricsStore.metricsVersion;
-    return { nodeSize, edgeWeight, metricsCount, nodeSizeValuesSize, metricsVersion };
+    return { nodeSize, nodeColor, edgeWeight, metricsCount, nodeSizeValuesSize, nodeColorValuesSize, metricsVersion };
   },
   () => { updateGraph(); },
   { deep: true }

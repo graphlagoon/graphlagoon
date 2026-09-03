@@ -1390,3 +1390,68 @@ describe('crossing heuristics', () => {
     expect(Math.abs(circularMedian([0.1, -0.1, 0.05, 2 * Math.PI - 0.05])!)).toBeLessThan(0.2);
   });
 });
+
+// ============================================================================
+// computeHivePositions — metric:<ref> axis/position keys
+// ============================================================================
+
+describe('computeHivePositions metric keys', () => {
+  const options = {
+    axisKey: 'node_type',
+    maxAxes: 6,
+    positionKey: 'degree',
+    scale: 'linear' as const,
+    innerRadius: 40,
+    outerRadius: 300,
+  };
+  const metricValues: Record<string, Record<string, number | string>> = {
+    PageRank: { a: 0, b: 10 },
+    tier: { a: 'gold', b: 'silver' },
+  };
+  const deps = {
+    nodeDegrees: new Map([
+      ['a', 1],
+      ['b', 1],
+    ]),
+    nodeMetricValue: (ref: string, nodeId: string) => metricValues[ref]?.[nodeId],
+  };
+
+  it('metric: position keys drive the radius via the injected resolver', () => {
+    const result = computeHivePositions(
+      [node('a'), node('b')],
+      { ...options, positionKey: 'metric:PageRank' },
+      deps,
+    );
+    const ra = Math.hypot(result.positions.get('a')!.x, result.positions.get('a')!.y);
+    const rb = Math.hypot(result.positions.get('b')!.x, result.positions.get('b')!.y);
+    expect(ra).toBeCloseTo(40);
+    expect(rb).toBeCloseTo(300);
+  });
+
+  it('nodes missing the metric sit at the inner end; no resolver behaves the same', () => {
+    const result = computeHivePositions(
+      [node('a'), node('c')],
+      { ...options, positionKey: 'metric:PageRank' },
+      deps,
+    );
+    const rc = Math.hypot(result.positions.get('c')!.x, result.positions.get('c')!.y);
+    expect(rc).toBeCloseTo(40);
+
+    const noResolver = computeHivePositions(
+      [node('a'), node('b')],
+      { ...options, positionKey: 'metric:PageRank' },
+      { nodeDegrees: deps.nodeDegrees },
+    );
+    const rb = Math.hypot(noResolver.positions.get('b')!.x, noResolver.positions.get('b')!.y);
+    expect(rb).toBeCloseTo(40);
+  });
+
+  it('metric: axis keys bucket by stringified metric value, (missing) when absent', () => {
+    const result = computeHivePositions(
+      [node('a'), node('b'), node('c')],
+      { ...options, axisKey: 'metric:tier' },
+      { ...deps, nodeDegrees: new Map([['a', 1], ['b', 1], ['c', 1]]) },
+    );
+    expect(result.axes.sort()).toEqual(['(missing)', 'gold', 'silver']);
+  });
+});

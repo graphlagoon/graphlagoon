@@ -128,6 +128,7 @@ const expandedSections = ref({
   graphInfo: true,
   compute: true,
   nodeMapping: true,
+  nodeColorMapping: true,
   edgeMapping: true,
 });
 
@@ -179,6 +180,18 @@ const nodeSizeMapping = computed({
   get: () => metricsStore.visualMapping.nodeSize,
   set: (value) => metricsStore.updateNodeSizeMapping(value)
 });
+
+const nodeColorMapping = computed({
+  get: () => metricsStore.visualMapping.nodeColor,
+  set: (value) => metricsStore.updateNodeColorMapping(value)
+});
+
+// A saved color metricId that no longer resolves (session metrics gone after
+// a reload, or the metric was deleted) — the canvas silently falls back, so
+// the panel says why the gradient is not showing.
+const nodeColorMetricStale = computed(
+  () => nodeColorMapping.value.metricId !== null && metricsStore.nodeColorMetric === null
+);
 
 const edgeWeightMapping = computed({
   get: () => metricsStore.visualMapping.edgeWeight,
@@ -755,6 +768,76 @@ function toggleSection(section: keyof typeof expandedSections.value) {
         </div>
       </div>
 
+      <!-- Node Color Mapping -->
+      <div class="section">
+        <div class="section-header" @click="toggleSection('nodeColorMapping')">
+          <span class="section-title">Node Color</span>
+          <ChevronDown v-if="expandedSections.nodeColorMapping" :size="12" class="toggle-icon" /><ChevronRight v-else :size="12" class="toggle-icon" />
+        </div>
+        <div v-if="expandedSections.nodeColorMapping" class="section-content">
+          <div class="form-group">
+            <label>Metric</label>
+            <select
+              :value="nodeColorMapping.metricId"
+              data-testid="node-color-metric-select"
+              @change="metricsStore.setNodeColorMetric(($event.target as HTMLSelectElement).value || null)"
+              class="form-select"
+            >
+              <option :value="null">None (Type/Community Color)</option>
+              <option v-for="metric in numericNodeMetrics" :key="metric.id" :value="metric.id">
+                {{ metric.name }}
+              </option>
+            </select>
+          </div>
+          <p v-if="nodeColorMetricStale" class="hint">
+            Metric not computed in this session — nodes keep their type/community
+            color until it is recomputed.
+          </p>
+
+          <template v-if="nodeColorMapping.metricId">
+            <div class="form-group">
+              <label>Scale</label>
+              <select
+                :value="nodeColorMapping.scale"
+                @change="metricsStore.updateNodeColorMapping({ scale: ($event.target as HTMLSelectElement).value as ScaleType })"
+                class="form-select"
+              >
+                <option v-for="opt in scaleOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="range-inputs">
+              <div class="form-group">
+                <label>Low Color</label>
+                <input
+                  type="color"
+                  :value="nodeColorMapping.minColor"
+                  data-testid="node-color-min"
+                  @input="metricsStore.updateNodeColorMapping({ minColor: ($event.target as HTMLInputElement).value })"
+                  class="form-input color-input"
+                />
+              </div>
+              <div class="form-group">
+                <label>High Color</label>
+                <input
+                  type="color"
+                  :value="nodeColorMapping.maxColor"
+                  data-testid="node-color-max"
+                  @input="metricsStore.updateNodeColorMapping({ maxColor: ($event.target as HTMLInputElement).value })"
+                  class="form-input color-input"
+                />
+              </div>
+            </div>
+            <p class="hint">
+              Overrides type and community colors for nodes that have a value;
+              nodes without one keep their normal color.
+            </p>
+          </template>
+        </div>
+      </div>
+
       <!-- Edge Weight Mapping -->
       <div class="section">
         <div class="section-header" @click="toggleSection('edgeMapping')">
@@ -1162,6 +1245,12 @@ function toggleSection(section: keyof typeof expandedSections.value) {
 .form-input:focus {
   outline: none;
   border-color: var(--primary-color, #42b883);
+}
+
+.color-input {
+  padding: 2px;
+  height: 28px;
+  cursor: pointer;
 }
 
 .form-hint {

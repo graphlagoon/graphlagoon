@@ -159,8 +159,21 @@ export interface WeightMapping {
   scale: ScaleType;
 }
 
+/**
+ * Node color driven by a numeric metric: a min→max hex gradient. Off when
+ * metricId is null. Only 'number' metrics can drive the gradient (categorical
+ * color-by is out of scope — string/boolean metrics are not offered).
+ */
+export interface ColorMapping {
+  metricId: string | null;
+  minColor: string;
+  maxColor: string;
+  scale: ScaleType;
+}
+
 export interface VisualMapping {
   nodeSize: SizeMapping;
+  nodeColor: ColorMapping;
   edgeWeight: WeightMapping;
   enableRealTimeUpdates: boolean;
 }
@@ -330,6 +343,12 @@ export const DEFAULT_VISUAL_MAPPING: VisualMapping = {
     metricId: '__builtin_degree',
     minSize: 4,
     maxSize: 20,
+    scale: 'linear',
+  },
+  nodeColor: {
+    metricId: null, // off by default — type/community coloring stays in charge
+    minColor: '#dbeafe',
+    maxColor: '#1d4ed8',
     scale: 'linear',
   },
   edgeWeight: {

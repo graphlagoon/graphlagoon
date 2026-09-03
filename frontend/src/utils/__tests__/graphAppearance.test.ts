@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   hexToRgba,
+  interpolateHexColor,
   getMultiEdgeCurvature3D,
   computeLinkColor,
   computeNodeAppearance,
@@ -49,6 +50,8 @@ function makeCtx(overrides: Partial<AppearanceContext> = {}): AppearanceContext 
 
     nodeSizeMetric: null,
     nodeSizeMapping: { minSize: 3, maxSize: 30, scale: 'linear' },
+    nodeColorMetric: null,
+    nodeColorMapping: { minColor: '#000000', maxColor: '#ffffff', scale: 'linear' },
     edgeWeightMetric: null,
     edgeWeightMapping: { minWeight: 0.5, maxWeight: 5, scale: 'linear' },
 
@@ -681,5 +684,88 @@ describe('metric-based edge width', () => {
     const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(), ctx);
     expect(r.hidden).toBe(true);
     expect(r.width).toBeCloseTo(9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// interpolateHexColor
+// ---------------------------------------------------------------------------
+
+describe('interpolateHexColor', () => {
+  it('returns the endpoints at t=0 and t=1 and the midpoint at t=0.5', () => {
+    expect(interpolateHexColor('#000000', '#ffffff', 0)).toBe('#000000');
+    expect(interpolateHexColor('#000000', '#ffffff', 1)).toBe('#ffffff');
+    expect(interpolateHexColor('#000000', '#ffffff', 0.5)).toBe('#808080');
+    expect(interpolateHexColor('#ff0000', '#0000ff', 0.5)).toBe('#800080');
+  });
+
+  it('clamps t outside [0,1]', () => {
+    expect(interpolateHexColor('#000000', '#ffffff', -3)).toBe('#000000');
+    expect(interpolateHexColor('#000000', '#ffffff', 42)).toBe('#ffffff');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Color-by-metric
+// ---------------------------------------------------------------------------
+
+describe('computeNodeAppearance color-by-metric', () => {
+  const colorCtx = (overrides: Partial<AppearanceContext> = {}) =>
+    makeCtx({
+      nodeColorMetric: {
+        values: new Map([
+          ['low', 0],
+          ['high', 10],
+        ]),
+        min: 0,
+        max: 10,
+      },
+      nodeColorMapping: { minColor: '#000000', maxColor: '#ffffff', scale: 'linear' },
+      ...overrides,
+    });
+
+  it('maps values onto the gradient with the configured scale', () => {
+    const ctx = colorCtx();
+    expect(computeNodeAppearance('low', 'Person', false, 0, null, ctx).color).toBe('#000000');
+    expect(computeNodeAppearance('high', 'Person', false, 0, null, ctx).color).toBe('#ffffff');
+
+    const sqrtCtx = colorCtx({
+      nodeColorMetric: { values: new Map([['mid', 2.5]]), min: 0, max: 10 },
+      nodeColorMapping: { minColor: '#000000', maxColor: '#ffffff', scale: 'sqrt' },
+    });
+    // sqrt(0.25) = 0.5 → midpoint
+    expect(computeNodeAppearance('mid', 'Person', false, 0, null, sqrtCtx).color).toBe('#808080');
+  });
+
+  it('beats community color when the node has a value', () => {
+    const ctx = colorCtx({
+      communityColorMap: new Map([
+        ['high', '#123456'],
+        ['no-value', '#123456'],
+      ]),
+    });
+    expect(computeNodeAppearance('high', 'Person', false, 0, null, ctx).color).toBe('#ffffff');
+    // No metric value → per-node fallback to community, then type color
+    expect(computeNodeAppearance('no-value', 'Person', false, 0, null, ctx).color).toBe('#123456');
+  });
+
+  it('falls back to type color for value-less nodes without a community', () => {
+    const ctx = colorCtx();
+    expect(computeNodeAppearance('no-value', 'Person', false, 0, null, ctx).color).toBe('#4488cc');
+  });
+
+  it('clusters are exempt', () => {
+    const ctx = colorCtx({
+      nodeColorMetric: { values: new Map([['cluster-1', 10]]), min: 0, max: 10 },
+    });
+    expect(computeNodeAppearance('cluster-1', 'Cluster', true, 12, '#9333ea', ctx).color).toBe('#9333ea');
+  });
+
+  it('later dim overrides still win over the gradient color', () => {
+    const ctx = colorCtx({
+      dimmedByDegreeIds: new Set(['high']),
+    });
+    const r = computeNodeAppearance('high', 'Person', false, 0, null, ctx);
+    expect(r.color.startsWith('rgba(')).toBe(true);
   });
 });

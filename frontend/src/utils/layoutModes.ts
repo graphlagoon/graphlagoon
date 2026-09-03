@@ -1192,11 +1192,13 @@ interface HiveNodeInput {
 }
 
 export interface HivePositionsOptions {
-  /** 'node_type', 'community' (Louvain), or 'prop:<name>' of a categorical node property */
+  /** 'node_type', 'community' (Louvain), 'prop:<name>' of a categorical node
+   * property, or 'metric:<ref>' of a session-computed metric */
   axisKey: string;
   /** Categories beyond this count are bucketed into an "Others" axis */
   maxAxes: number;
-  /** 'degree' or 'prop:<name>' of a numeric node property */
+  /** 'degree', 'prop:<name>' of a numeric node property, or 'metric:<ref>'
+   * of a numeric session-computed metric */
   positionKey: string;
   scale: HiveScale;
   innerRadius: number;
@@ -1207,6 +1209,12 @@ export interface HivePositionsDeps {
   nodeDegrees: Map<string, number>;
   /** nodeId → community id, required when axisKey === 'community' */
   communityMap?: Map<string, number> | null;
+  /**
+   * Resolves 'metric:<ref>' axis/position keys (session-computed metrics).
+   * Injected so layoutModes stays store-free; when absent, metric keys
+   * behave like a missing value (inner radius / '(missing)' axis).
+   */
+  nodeMetricValue?: (ref: string, nodeId: string) => number | string | boolean | null | undefined;
 }
 
 export interface HivePosition {
@@ -1229,12 +1237,16 @@ export const HIVE_OTHERS_AXIS = 'Others';
 function categoryOf(
   node: HiveNodeInput,
   axisKey: string,
-  communityMap?: Map<string, number> | null
+  deps: HivePositionsDeps
 ): string {
   if (axisKey === 'node_type') return node.node_type;
   if (axisKey === 'community') {
-    const communityId = communityMap?.get(node.node_id);
+    const communityId = deps.communityMap?.get(node.node_id);
     return communityId === undefined ? '(none)' : `Community ${communityId}`;
+  }
+  if (axisKey.startsWith('metric:')) {
+    const value = deps.nodeMetricValue?.(axisKey.slice('metric:'.length), node.node_id);
+    return value === null || value === undefined ? '(missing)' : String(value);
   }
   const propName = axisKey.startsWith('prop:') ? axisKey.slice(5) : axisKey;
   const value = node.properties?.[propName];
@@ -1244,11 +1256,16 @@ function categoryOf(
 function metricOf(
   node: HiveNodeInput,
   positionKey: string,
-  nodeDegrees: Map<string, number>
+  deps: HivePositionsDeps
 ): number | null {
-  if (positionKey === 'degree') return nodeDegrees.get(node.node_id) ?? 0;
-  const propName = positionKey.startsWith('prop:') ? positionKey.slice(5) : positionKey;
-  const raw = node.properties?.[propName];
+  if (positionKey === 'degree') return deps.nodeDegrees.get(node.node_id) ?? 0;
+  let raw: unknown;
+  if (positionKey.startsWith('metric:')) {
+    raw = deps.nodeMetricValue?.(positionKey.slice('metric:'.length), node.node_id);
+  } else {
+    const propName = positionKey.startsWith('prop:') ? positionKey.slice(5) : positionKey;
+    raw = node.properties?.[propName];
+  }
   const numeric = typeof raw === 'number' ? raw : parseFloat(String(raw));
   return isNaN(numeric) ? null : numeric;
 }
@@ -1274,7 +1291,7 @@ export function computeHivePositions(
   // --- Axis bucketing: top-N categories by node count, rest into Others ---
   const countByCategory = new Map<string, number>();
   for (const node of nodes) {
-    const cat = categoryOf(node, axisKey, deps.communityMap);
+    const cat = categoryOf(node, axisKey, deps);
     countByCategory.set(cat, (countByCategory.get(cat) ?? 0) + 1);
   }
   const sortedCategories = Array.from(countByCategory.keys()).sort((a, b) => {
@@ -1290,9 +1307,9 @@ export function computeHivePositions(
   // --- Group nodes per axis with their metric ---
   const nodesByAxis = new Map<number, { id: string; metric: number | null }[]>();
   for (const node of nodes) {
-    const cat = categoryOf(node, axisKey, deps.communityMap);
+    const cat = categoryOf(node, axisKey, deps);
     const axisIndex = axisIndexByCategory.get(cat) ?? axes.length - 1;
-    const entry = { id: node.node_id, metric: metricOf(node, positionKey, deps.nodeDegrees) };
+    const entry = { id: node.node_id, metric: metricOf(node, positionKey, deps) };
     const list = nodesByAxis.get(axisIndex);
     if (list) list.push(entry);
     else nodesByAxis.set(axisIndex, [entry]);
