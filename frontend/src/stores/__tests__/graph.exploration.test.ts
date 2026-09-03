@@ -365,6 +365,43 @@ describe('exploration state serialization', () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('newer syntax version'))
       warnSpy.mockRestore()
     })
+
+    it('carries the tooltip templates through the round-trip', () => {
+      const store = useGraphStore()
+      store.updateTextFormatDefaults({
+        nodeTooltipTemplate: '{prop:name}{br}{prop:email}',
+        edgeTooltipTemplate: '{src} -> {dst}',
+      })
+
+      const state = store.getTextFormatState()
+      expect(state.defaults.nodeTooltipTemplate).toBe('{prop:name}{br}{prop:email}')
+
+      store.loadTextFormatState(state)
+      expect(store.textFormatDefaults.nodeTooltipTemplate).toBe('{prop:name}{br}{prop:email}')
+      expect(store.textFormatDefaults.edgeTooltipTemplate).toBe('{src} -> {dst}')
+    })
+
+    it('resolves tooltip templates saved before the feature to empty, not undefined', () => {
+      const store = useGraphStore()
+      store.updateTextFormatDefaults({ nodeTooltipTemplate: 'configured' })
+
+      // A state written by a frontend that had no tooltip templates at all.
+      store.loadTextFormatState({
+        rules: [],
+        defaults: { nodeTemplate: '{node_id}', edgeTemplate: '{relationship_type}' },
+      })
+
+      expect(store.textFormatDefaults.nodeTooltipTemplate).toBe('')
+      expect(store.textFormatDefaults.edgeTooltipTemplate).toBe('')
+    })
+
+    it('loadTextFormatState(undefined) resets the tooltip templates', () => {
+      const store = useGraphStore()
+      store.updateTextFormatDefaults({ nodeTooltipTemplate: 'configured' })
+
+      store.loadTextFormatState(undefined)
+      expect(store.textFormatDefaults.nodeTooltipTemplate).toBe('')
+    })
   })
 
   describe('text format rule management', () => {

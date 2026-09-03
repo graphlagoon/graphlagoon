@@ -162,6 +162,32 @@ describe('applyStylePreset', () => {
     expect(store.layoutAlgorithm).toBe('ego');
   });
 
+  it('round-trips the tooltip templates', () => {
+    const store = useGraphStore();
+    store.updateTextFormatDefaults({
+      nodeTooltipTemplate: '{prop:name}{br}{prop:email}',
+      edgeTooltipTemplate: '{src} -> {dst}',
+    });
+    const saved = store.buildStylePreset();
+
+    store.updateTextFormatDefaults({ nodeTooltipTemplate: '', edgeTooltipTemplate: '' });
+    store.applyStylePreset(saved);
+
+    expect(store.textFormatDefaults.nodeTooltipTemplate).toBe('{prop:name}{br}{prop:email}');
+    expect(store.textFormatDefaults.edgeTooltipTemplate).toBe('{src} -> {dst}');
+  });
+
+  it('a preset saved before tooltip templates resets them to the stock look', () => {
+    // Same replace-not-merge contract the labels already have: applying a
+    // preset gives you exactly the look it was saved with.
+    const store = useGraphStore();
+    store.updateTextFormatDefaults({ nodeTooltipTemplate: '{prop:name}' });
+
+    store.applyStylePreset(makeSettings());
+
+    expect(store.textFormatDefaults.nodeTooltipTemplate).toBe('');
+  });
+
   it('replaces rather than merges, so the look is exactly what was saved', () => {
     const store = useGraphStore();
     const saved = store.buildStylePreset(); // no colors set

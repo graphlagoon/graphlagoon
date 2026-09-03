@@ -1013,6 +1013,9 @@ export type TextFormatConditionOperator =
 /** Scope where the rule applies */
 export type TextFormatScope = 'global' | 'context' | 'exploration';
 
+/** Which text the rule's template drives: the canvas label, the hover tooltip, or both */
+export type TextFormatSurface = 'label' | 'tooltip' | 'both';
+
 /** A text format rule defines how labels should be displayed */
 export interface TextFormatRule {
   id: string;                          // Unique identifier
@@ -1023,12 +1026,18 @@ export interface TextFormatRule {
   priority: number;                    // Higher priority rules take precedence
   enabled: boolean;                    // Allow toggling without removing
   scope: TextFormatScope;              // Where this rule is stored/applies
+  surface?: TextFormatSurface;         // Absent = 'label' (rules predate tooltips)
 }
 
 /** Default format rule (used when no matching rule is found) */
 export interface TextFormatDefaults {
   nodeTemplate: string;                // Default template for nodes
   edgeTemplate: string;                // Default template for edges
+  // Hover tooltip bodies. Empty (or absent, on states saved before the feature)
+  // means "show what the label shows" — the pre-feature tooltip, unchanged.
+  // Optional so every persisted TextFormatState still type-checks.
+  nodeTooltipTemplate?: string;
+  edgeTooltipTemplate?: string;
 }
 
 /** State for text format rules in exploration */

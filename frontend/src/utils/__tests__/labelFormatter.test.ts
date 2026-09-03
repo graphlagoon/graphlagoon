@@ -1362,3 +1362,44 @@ describe('metric conditionals', () => {
     expect(validateTemplate('{if:metric:PageRank>0.5|hub|leaf}').valid).toBe(true)
   })
 })
+
+describe('findMatchingRule — surfaces', () => {
+  const tooltipRule = makeRule({ id: 't', name: 'Tooltip', surface: 'tooltip', template: 'TIP' })
+  const labelRule = makeRule({ id: 'l', name: 'Label', surface: 'label', template: 'LBL' })
+  const bothRule = makeRule({ id: 'b', name: 'Both', surface: 'both', template: 'BOTH' })
+  const legacyRule = makeRule({ id: 'legacy', name: 'Legacy' }) // no surface at all
+
+  it('defaults to the label surface, preserving pre-surface behavior', () => {
+    expect(findMatchingRule([legacyRule], 'node', 'Person')?.id).toBe('legacy')
+  })
+
+  it('keeps tooltip-only rules invisible to labels', () => {
+    expect(findMatchingRule([tooltipRule], 'node', 'Person', 'label')).toBeNull()
+    expect(findMatchingRule([tooltipRule], 'node', 'Person')).toBeNull()
+  })
+
+  it('keeps label-only (and legacy) rules invisible to tooltips', () => {
+    expect(findMatchingRule([labelRule, legacyRule], 'node', 'Person', 'tooltip')).toBeNull()
+  })
+
+  it("matches 'both' rules on either surface", () => {
+    expect(findMatchingRule([bothRule], 'node', 'Person', 'label')?.id).toBe('b')
+    expect(findMatchingRule([bothRule], 'node', 'Person', 'tooltip')?.id).toBe('b')
+  })
+
+  it("breaks a full tie in favor of the exact surface over 'both'", () => {
+    expect(findMatchingRule([bothRule, tooltipRule], 'node', 'Person', 'tooltip')?.id).toBe('t')
+    expect(findMatchingRule([bothRule, labelRule], 'node', 'Person', 'label')?.id).toBe('l')
+  })
+
+  it('priority still beats surface exactness', () => {
+    const loudBoth = makeRule({ id: 'b2', surface: 'both', priority: 99 })
+    expect(findMatchingRule([loudBoth, tooltipRule], 'node', 'Person', 'tooltip')?.id).toBe('b2')
+  })
+
+  it('degrades a garbage surface value to label', () => {
+    const garbage = makeRule({ id: 'g', surface: 'banana' as never })
+    expect(findMatchingRule([garbage], 'node', 'Person', 'label')?.id).toBe('g')
+    expect(findMatchingRule([garbage], 'node', 'Person', 'tooltip')).toBeNull()
+  })
+})

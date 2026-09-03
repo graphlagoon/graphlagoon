@@ -81,6 +81,17 @@ export function collectPropertyReferences(
         refs.push({ location: 'textFormat.defaults.edgeTemplate', property: prop, kind: 'label-template', certain: true });
       }
     }
+    // Tooltip templates read the same columns; a dangling one is just as broken.
+    if (defaults?.nodeTooltipTemplate) {
+      for (const prop of extractTemplateProperties(defaults.nodeTooltipTemplate)) {
+        refs.push({ location: 'textFormat.defaults.nodeTooltipTemplate', property: prop, kind: 'label-template', certain: true });
+      }
+    }
+    if (defaults?.edgeTooltipTemplate) {
+      for (const prop of extractTemplateProperties(defaults.edgeTooltipTemplate)) {
+        refs.push({ location: 'textFormat.defaults.edgeTooltipTemplate', property: prop, kind: 'label-template', certain: true });
+      }
+    }
   }
 
   if (state.nodePropertyIconConfigs) {

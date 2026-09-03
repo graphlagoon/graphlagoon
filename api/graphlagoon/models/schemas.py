@@ -632,11 +632,24 @@ class TextFormatRule(BaseModel):
     priority: int = 0
     enabled: bool = True
     scope: Literal["exploration", "context", "global"] = "exploration"
+    # Which text the template drives. Rules predate tooltips, so the default
+    # keeps every previously saved rule meaning exactly what it meant.
+    surface: Literal["label", "tooltip", "both"] = "label"
 
 
 class TextFormatDefaults(BaseModel):
+    # extra="allow" for the same reason TextFormatState has it: the explorations
+    # router round-trips state through ExplorationState(**data).model_dump(), so
+    # a typed model without it silently drops any field the backend has not been
+    # taught about yet.
+    model_config = ConfigDict(extra="allow")
+
     nodeTemplate: str = "{node_id}"
     edgeTemplate: str = "{relationship_type}"
+    # Hover tooltip bodies. "" means the tooltip shows the label — the tooltip
+    # the app had before these templates existed.
+    nodeTooltipTemplate: str = ""
+    edgeTooltipTemplate: str = ""
 
 
 class TextFormatState(BaseModel):
