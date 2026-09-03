@@ -265,10 +265,16 @@ def create_frontend_router(
         if user_email:
             config["databricks_user_email"] = user_email
 
+        # Starlette's modern signature (request first). The legacy
+        # (name, context) form crashes on current Starlette with
+        # "unhashable type: 'dict'" — the context dict lands in
+        # jinja's get_template. Pre-existing bug, unmasked by the
+        # permissions smoke test (make dev serves the SPA via Vite,
+        # so this path went unexercised).
         return templates.TemplateResponse(
+            request,
             "index.html",
             {
-                "request": request,
                 "api_url": api_prefix,
                 "static_prefix": static_prefix,
                 "assets": assets,
