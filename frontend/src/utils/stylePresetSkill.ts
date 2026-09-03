@@ -192,7 +192,8 @@ A preset is a single JSON object. Every key is optional — a missing key means
     "enableMultiEdgeCurvature": true,
     "showNodeLabels3D": true, "showEdgeLabels3D": true,
     "nodeLabelSize3D": 10, "edgeLabelSize3D": 5,
-    "nodeLabelPosition3D": "right"
+    "nodeLabelPosition3D": "right",
+    "hideEmptyValues": true
   },
   "nodeTypeColors": { "Person": "#4f8cff", "Company": "#ff9f43" },
   "edgeTypeColors": { "WORKS_AT": "#9aa0a6" },
@@ -242,6 +243,9 @@ ${metricIdsSection(input.customMetrics)}
   \`scale\` is \`"linear"\`, \`"log"\` or \`"sqrt"\`.
 - \`property_visibility\`: \`null\` shows every property, \`[]\` hides all,
   otherwise an allowlist of column names.
+- \`aesthetics.hideEmptyValues\`: \`true\` (the default) omits properties and
+  metrics with no value from the details modal and the side panel. Set it to
+  \`false\` only when the user wants to see every field, empty ones included.
 - Keys you don't want to change may be omitted entirely.
 
 ## This graph's metadata (use these real values)

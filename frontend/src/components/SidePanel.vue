@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useItemMetrics } from '@/composables/useItemMetrics';
 import { formatMetricValue } from '@/utils/metricFormat';
@@ -7,6 +7,8 @@ import { tryParseJson } from '@/utils/jsonDetection';
 import { X } from 'lucide-vue-next';
 import JsonValueViewer from './JsonValueViewer.vue';
 import PropertyVisibilityHint from './PropertyVisibilityHint.vue';
+import EmptyValuesHint from './EmptyValuesHint.vue';
+import { hideEmpty, isEmptyValue, isEmptyPropertyValue } from '@/utils/emptyValue';
 
 // Props for different display modes
 const props = withDefaults(defineProps<{
@@ -73,7 +75,7 @@ const totalPropertyCount = computed(() =>
     : 0,
 );
 
-const selectedItemProperties = computed(() => {
+const allowedProperties = computed(() => {
   if (!selectedItem.value?.data.properties) return [];
   const kind = selectedItem.value.type;
   const itemProps = selectedItem.value.data.properties;
@@ -112,8 +114,28 @@ function formatPropertyValue(value: unknown): string {
   return String(value);
 }
 
-// Computed + custom metrics for the selected item (shared lookup)
+// Computed + custom metrics for the selected item (shared lookup). Deliberately
+// the raw list: the section gate and the hint both need the pre-filter count.
 const selectedItemMetrics = useItemMetrics(selectedItem);
+
+// "Hide empty values" (Style → Details Display), with a per-surface peek. The
+// reveal is local on purpose — flipping the saved setting would dirty the
+// exploration just to look at one node. A new selection is a new question.
+const revealEmpty = ref(false);
+watch(selectedItem, () => { revealEmpty.value = false; });
+
+const hideEmptyEnabled = computed(
+  () => graphStore.aesthetics.hideEmptyValues && !revealEmpty.value,
+);
+
+const propertySplit = computed(() =>
+  hideEmpty(allowedProperties.value, (p) => isEmptyPropertyValue(p.rawValue), hideEmptyEnabled.value),
+);
+const selectedItemProperties = computed(() => propertySplit.value.kept);
+
+const metricSplit = computed(() =>
+  hideEmpty(selectedItemMetrics.value, (m) => isEmptyValue(m.value), hideEmptyEnabled.value),
+);
 
 async function expandFromNode() {
   if (!graphStore.selectedNode) return;
@@ -204,8 +226,13 @@ async function expandFromNode() {
         <h4>Properties</h4>
         <PropertyVisibilityHint
           :kind="selectedItem.type"
-          :visible="selectedItemProperties.length"
+          :visible="allowedProperties.length"
           :total="totalPropertyCount"
+        />
+        <EmptyValuesHint
+          :hidden="propertySplit.hiddenCount"
+          :revealed="revealEmpty"
+          @toggle="revealEmpty = !revealEmpty"
         />
         <template v-for="prop in selectedItemProperties" :key="prop.key">
           <!-- JSON value: full-width viewer below key -->
@@ -223,8 +250,13 @@ async function expandFromNode() {
 
       <div v-if="selectedItemMetrics.length > 0" class="detail-section">
         <h4>Computed Metrics</h4>
+        <EmptyValuesHint
+          :hidden="metricSplit.hiddenCount"
+          :revealed="revealEmpty"
+          @toggle="revealEmpty = !revealEmpty"
+        />
         <div
-          v-for="metric in selectedItemMetrics"
+          v-for="metric in metricSplit.kept"
           :key="metric.name"
           class="detail-row"
         >

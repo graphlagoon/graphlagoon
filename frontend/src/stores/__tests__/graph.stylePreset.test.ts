@@ -118,6 +118,15 @@ describe('buildStylePreset', () => {
     });
   });
 
+  it('captures the hide-empty-values details toggle', () => {
+    const store = useGraphStore();
+    expect(store.buildStylePreset().aesthetics).toMatchObject({ hideEmptyValues: true });
+
+    store.updateAesthetics({ hideEmptyValues: false });
+
+    expect(store.buildStylePreset().aesthetics).toMatchObject({ hideEmptyValues: false });
+  });
+
   it('feeds the exploration state, rather than being rebuilt for it', () => {
     const store = useGraphStore();
     store.setNodeTypeColor('Device', '#abcdef');
@@ -194,6 +203,17 @@ describe('applyStylePreset', () => {
     store.layoutAlgorithm = 'hive';
     store.applyStylePreset(undefined);
     expect(store.layoutAlgorithm).toBe('hive');
+  });
+
+  it('round-trips the hide-empty-values toggle, including a saved false', () => {
+    const store = useGraphStore();
+    store.updateAesthetics({ hideEmptyValues: false });
+    const saved = store.buildStylePreset();
+
+    store.updateAesthetics({ hideEmptyValues: true });
+    store.applyStylePreset(saved);
+
+    expect(store.aesthetics.hideEmptyValues).toBe(false);
   });
 
   it('round-trips behaviors and the property allowlist', () => {

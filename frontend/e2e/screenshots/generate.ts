@@ -398,6 +398,22 @@ const SCENES: Scene[] = [
     },
   },
   {
+    // The "Hide empty properties and metrics" switch in Style → Details Display.
+    guide: 'exploring-the-graph',
+    scene: 'hide-empty-values',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Style');
+      // The section sits near the bottom of the Style panel — scroll it in.
+      await page
+        .locator('.aesthetics-panel')
+        .evaluate((el) => el.scrollTo(0, el.scrollHeight));
+      await page.getByTestId('hide-empty-values-toggle').waitFor();
+      await page.waitForTimeout(300);
+    },
+  },
+  {
     guide: 'clusters',
     scene: 'programs',
     path: GRAPH_URL,

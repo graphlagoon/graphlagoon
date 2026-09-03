@@ -97,7 +97,9 @@ same nodes and edges, as rows. The two drawers are mutually exclusive.
 
 When a context carries dozens of properties and an analysis needs three,
 limit what the property surfaces show: **Style panel → Property Visibility**,
-one allowlist for node properties and one for edge properties. It prunes
+one allowlist for node properties and one for edge properties. (This is about
+*which properties exist for you*; to drop the ones that merely have no value on
+the item you are looking at, see [hiding empty values](#hiding-empty-values).) It prunes
 every place properties are *displayed* — the Data Table, the community and
 cluster node tables, **Open details**, and the side panel — and the CSV
 export follows the visible columns.
@@ -118,6 +120,45 @@ missing data. Two things to know:
 The subset is part of the *look*: saving a [style preset](./style-presets.md)
 captures it, so `?style=<name>` can hand a whole team the same focused view,
 and explorations restore it like everything else.
+
+### Hiding empty values
+
+A sparse table is the normal case: most columns are filled for some rows and
+blank for others, and a metric that failed to compute for one node has no value
+there. Rendering those anyway turns the detail views into a wall of `null` and
+`—` that buries the three fields you were actually reading.
+
+So **Hide empty properties and metrics** (**Style panel → Details Display**) is
+**on by default**. It omits, in **Open details** and the side panel, any
+property or metric whose value is nothing:
+
+| Hidden | Kept |
+|---|---|
+| `null`, missing | `0` and `false` — a result, not an absence |
+| blank text (`""`, spaces) | the literal text `null`, `N/A`, `-` — somebody stored that |
+| an empty list or object | a list or object with anything in it |
+| a metric that failed (`NaN`) | every other number |
+
+![The "Hide empty properties and metrics" switch in the Style panel](/screenshots/exploring-the-graph-hide-empty-values.png)
+
+The same promise as the allowlist holds: wherever something is hidden, the
+surface says so, with an **"N empty hidden · Show"** hint above the pruned list
+— one on Properties, one on Computed Metrics. **Show** reveals them for that
+one item only; picking a different node or edge goes back to hiding, and the
+switch itself stays where you left it. A section never disappears because
+everything in it was empty — the hint stays, so you can always tell "no data
+here" from "no such field".
+
+Two things it deliberately does not touch:
+
+- **Copy and export.** **Copy All (JSON)**, the per-row **Copy** buttons and the
+  CSV export always write every value, empty ones included. The setting is a
+  view, never a data loss.
+- **Everything else.** The data table, filters, label templates and queries are
+  unaffected; use the allowlist above for those.
+
+Like the allowlist, it is part of the *look*: style presets and explorations
+carry it.
 
 - **Click** a node or edge to select it — the side panel shows its
   details, metric values, and actions. Clicking a selected node again

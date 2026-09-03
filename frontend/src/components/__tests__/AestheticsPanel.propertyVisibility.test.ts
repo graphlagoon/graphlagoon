@@ -119,3 +119,40 @@ describe('AestheticsPanel — property visibility', () => {
     expect(graphStore.propertyVisibility.edgeProperties).toBeNull()
   })
 })
+
+describe('AestheticsPanel — details display', () => {
+  it('reflects the saved hide-empty-values setting', () => {
+    const graphStore = seedGraph()
+    graphStore.updateAesthetics({ hideEmptyValues: false })
+
+    const { container } = render(AestheticsPanel, { global: { stubs } })
+
+    const box = container.querySelector<HTMLInputElement>(
+      '[data-testid="hide-empty-values-toggle"]',
+    )
+    expect(box).not.toBeNull()
+    expect(box!.checked).toBe(false)
+  })
+
+  it('defaults to on', () => {
+    seedGraph()
+    const { container } = render(AestheticsPanel, { global: { stubs } })
+
+    expect(
+      container.querySelector<HTMLInputElement>(
+        '[data-testid="hide-empty-values-toggle"]',
+      )!.checked,
+    ).toBe(true)
+  })
+
+  it('writes the toggle back to the store', async () => {
+    const graphStore = seedGraph()
+    const { container } = render(AestheticsPanel, { global: { stubs } })
+
+    await fireEvent.click(
+      container.querySelector('[data-testid="hide-empty-values-toggle"]')!,
+    )
+
+    expect(graphStore.aesthetics.hideEmptyValues).toBe(false)
+  })
+})
