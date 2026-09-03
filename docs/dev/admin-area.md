@@ -36,6 +36,8 @@ runtime (`get_settings()` is `lru_cache`d and connections are registered in
 | add a datasource type / REST connection kind | nothing for the listing (it comes from `build_public_config`); consider a probe in `services/environment.py` if it has a cheap health endpoint | review |
 | add an Alembic migration | nothing — the overview reads `alembic_version` | — |
 | add a new frontend-facing audit action | `describeAudit` in `utils/adminView.ts` for a readable line (falls back to `key=value`) | `AdminView.logic.test.ts` |
+| add a permission to the catalog (`services/permission_catalog.py`) | put `Depends(require_permission("<id>"))` on the route it protects and hide the matching frontend affordance behind `usePermissions().can('<id>')`; the admin matrix/inspector render it automatically | `test_admin_registry::test_permission_gates_reference_catalog` |
+| add a route under `/api/admin` for groups/permissions | it goes in `routers/admin_groups.py` — a SIBLING of `admin.router` (FastAPI 0.139's lazy nested includes hide routes from introspection) with its own `require_superuser` router dependency; update `test_admin_groups.py`'s gate walk body builder if it has one | `test_admin_groups::TestGate` |
 
 The skill [`skill_feature_creation`](../../.claude/skills/skill_feature_creation/SKILL.md)
 has a mandatory **Step 4.2b — Admin-area impact** that asks these questions

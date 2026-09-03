@@ -173,6 +173,7 @@ The app's service principal needs permission on the resources it reads:
 
 - **SQL Warehouse** — `CAN USE` on the warehouse referenced by `DATABRICKS_WAREHOUSE_ID`.
 - **Unity Catalog** — `SELECT` on the catalog/schema/tables you visualize (and `READ VOLUME` / `WRITE VOLUME` if you set `databricks_volume_path` for snapshots).
+- **Workspace SCIM (optional)** — only if you use [permission groups](./permissions.md) with `databricks_group` members: the principal must be able to read workspace SCIM Users (`GET /api/2.0/preview/scim/v2/Users`) to resolve a user's groups. Without the grant, lookups fail and only email members resolve (the admin area shows a banner).
 
 Grant these to the app's service principal from the app's **Authorization** settings or via `GRANT` statements.
 

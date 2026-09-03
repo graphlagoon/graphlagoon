@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { useContextsStore } from '@/stores/contexts';
 import { useAuthStore } from '@/stores/auth';
 import { usePersistence } from '@/composables/usePersistence';
+import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { api } from '@/services/api';
 import { fuzzyMatch, parseTag } from '@/utils/contextForm';
@@ -25,6 +26,7 @@ const route = useRoute();
 const contextsStore = useContextsStore();
 const authStore = useAuthStore();
 const { sharingEnabled, isSuperuser } = usePersistence();
+const { canCreateContexts } = usePermissions();
 const toast = useToast();
 
 // Check if current user is the owner of a context
@@ -70,6 +72,9 @@ const formModalPrefillEdge = ref('');
 const formModalPrefillNode = ref('');
 
 function openCreateModal() {
+  // The buttons are hidden without the permission; this guards deep links
+  // and stale pages (the backend 403s regardless).
+  if (!canCreateContexts.value) return;
   formModalMode.value = 'create';
   formModalContext.value = null;
   formModalPrefillEdge.value = '';
@@ -245,7 +250,12 @@ async function quickShare(email: string) {
   <div class="container">
     <div class="page-header">
       <h1>Graph Contexts</h1>
-      <button class="btn btn-primary" data-testid="create-context-btn" @click="openCreateModal">
+      <button
+        v-if="canCreateContexts"
+        class="btn btn-primary"
+        data-testid="create-context-btn"
+        @click="openCreateModal"
+      >
         Create New
       </button>
     </div>
@@ -272,10 +282,18 @@ async function quickShare(email: string) {
 
     <div v-else-if="contextsStore.contexts.length === 0" class="empty-state card">
       <h3>No Graph Contexts</h3>
-      <p>Create your first graph context or generate a graph in DEV mode</p>
-      <button class="btn btn-primary" @click="openCreateModal">
-        Create Context
-      </button>
+      <template v-if="canCreateContexts">
+        <p>Create your first graph context or generate a graph in DEV mode</p>
+        <button class="btn btn-primary" @click="openCreateModal">
+          Create Context
+        </button>
+      </template>
+      <!-- An empty state must always say what to do next — without the
+           permission the next step is asking, not a hidden button. -->
+      <p v-else data-testid="contexts-empty-no-permission">
+        Contexts are created by users with the create permission — ask an
+        administrator for access.
+      </p>
     </div>
 
     <div v-else-if="filteredContexts.length === 0" class="empty-state card">

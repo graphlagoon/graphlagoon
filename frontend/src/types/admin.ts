@@ -16,6 +16,7 @@ export interface AdminCounts {
   explorations: number;
   query_templates: number;
   audit_entries: number;
+  groups: number;
 }
 
 export interface AdminStorage {
@@ -93,4 +94,93 @@ export interface ClearEnvironmentResponse {
   warehouse: unknown;
 }
 
-export type AdminTab = 'overview' | 'config' | 'users' | 'contexts' | 'explorations' | 'audit' | 'danger';
+export type AdminTab =
+  | 'overview'
+  | 'config'
+  | 'users'
+  | 'contexts'
+  | 'explorations'
+  | 'groups'
+  | 'audit'
+  | 'danger';
+
+// --- Groups & permissions (mirrors the schemas.py block of the same name) ---
+
+export type GroupMemberKind = 'email' | 'databricks_group';
+
+export interface AdminGroupMember {
+  id?: string;
+  kind: GroupMemberKind;
+  value: string;
+}
+
+export interface AdminGroup {
+  id: string;
+  name: string;
+  description?: string | null;
+  members: AdminGroupMember[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface AdminGroupPayload {
+  name: string;
+  description?: string | null;
+  members: Array<{ kind: GroupMemberKind; value: string }>;
+}
+
+/** Health of the Databricks SCIM membership resolver (drives the banner). */
+export interface ResolverStatus {
+  mode: 'databricks' | 'stub';
+  ttl_seconds: number;
+  cached_users: number;
+  errors: Array<{ email?: string; error?: string; at?: number }>;
+}
+
+export interface AdminGroupsResponse {
+  items: AdminGroup[];
+  resolver: ResolverStatus;
+}
+
+export type PermissionEffect = 'allow' | 'deny';
+export type PermissionMode = 'everyone' | 'restricted';
+
+export interface AdminPermissionRule {
+  group_id: string;
+  group_name: string;
+  effect: PermissionEffect;
+}
+
+export interface AdminPermission {
+  id: string;
+  label: string;
+  description: string;
+  mode: PermissionMode;
+  rules: AdminPermissionRule[];
+}
+
+export interface AdminPermissionsResponse {
+  items: AdminPermission[];
+  resolver: ResolverStatus;
+}
+
+export interface AdminPermissionUpdate {
+  mode: PermissionMode;
+  rules: Array<{ group_id: string; effect: PermissionEffect }>;
+}
+
+export interface PermissionInspection {
+  email: string;
+  is_superuser: boolean;
+  resolved_databricks_groups: string[];
+  resolution: { source: string; error?: string | null };
+  group_memberships: Array<{ group_id: string; name: string; via: string }>;
+  permissions: Array<{
+    id: string;
+    label: string;
+    mode: PermissionMode;
+    allowed: boolean;
+    reason: string;
+    matched?: { effect: PermissionEffect; group_id: string; group_name: string } | null;
+  }>;
+}

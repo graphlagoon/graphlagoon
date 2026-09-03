@@ -8,7 +8,11 @@ import {
   MOCK_ADMIN_CONFIG,
   MOCK_ADMIN_CONTEXTS,
   MOCK_ADMIN_EXPLORATIONS,
+  MOCK_ADMIN_GROUPS,
   MOCK_ADMIN_OVERVIEW,
+  MOCK_ADMIN_PERMISSIONS,
+  MOCK_PERMISSION_INSPECTION,
+  MOCK_RESOLVER_STATUS,
   MOCK_ADMIN_USERS,
 } from '../fixtures/mock-data';
 
@@ -988,12 +992,22 @@ export async function seedAdmin(
     contexts?: any[];
     explorations?: any[];
     audit?: any;
+    groups?: any;
+    permissions?: any;
+    inspection?: any;
     forbidden?: boolean;
   } = {},
 ) {
-  const calls: { transfers: Array<{ url: string; body: any }>; clears: any[] } = {
+  const calls: {
+    transfers: Array<{ url: string; body: any }>;
+    clears: any[];
+    groupSaves: Array<{ method: string; url: string; body: any }>;
+    permissionPuts: Array<{ url: string; body: any }>;
+  } = {
     transfers: [],
     clears: [],
+    groupSaves: [],
+    permissionPuts: [],
   };
   const json = (body: unknown, status = 200) => ({
     status,
@@ -1014,6 +1028,50 @@ export async function seedAdmin(
     if (overrides.forbidden) return route.fulfill(forbidden);
     const url = route.request().url();
     const method = route.request().method();
+    // Most specific paths first — '/admin/groups' would swallow the refresh
+    // endpoint, '/admin/permissions' the inspector.
+    if (url.includes('/admin/groups/resolution/refresh') && method === 'POST')
+      return route.fulfill(json(MOCK_RESOLVER_STATUS));
+    if (url.includes('/admin/permissions/inspect'))
+      return route.fulfill(json(overrides.inspection ?? MOCK_PERMISSION_INSPECTION));
+    if (url.includes('/admin/groups')) {
+      const groups = overrides.groups ?? MOCK_ADMIN_GROUPS;
+      if (method === 'GET') return route.fulfill(json(groups));
+      const body = JSON.parse(route.request().postData() || '{}');
+      calls.groupSaves.push({ method, url, body });
+      if (method === 'DELETE') return route.fulfill(json({ status: 'deleted' }));
+      const id = method === 'PUT' ? url.split('/').pop() : 'grp-new';
+      return route.fulfill(
+        json(
+          {
+            id,
+            name: body.name,
+            description: body.description ?? null,
+            members: (body.members ?? []).map((m: any, i: number) => ({ id: `m${i}`, ...m })),
+          },
+          method === 'POST' ? 201 : 200,
+        ),
+      );
+    }
+    if (url.includes('/admin/permissions')) {
+      const permissions = overrides.permissions ?? MOCK_ADMIN_PERMISSIONS;
+      if (method === 'GET') return route.fulfill(json(permissions));
+      const body = JSON.parse(route.request().postData() || '{}');
+      calls.permissionPuts.push({ url, body });
+      const permissionId = url.split('/').pop();
+      const row = permissions.items.find((p: any) => p.id === permissionId) ?? permissions.items[0];
+      return route.fulfill(
+        json({
+          ...row,
+          mode: body.mode,
+          rules: (body.rules ?? []).map((r: any) => ({
+            ...r,
+            group_name:
+              (overrides.groups ?? MOCK_ADMIN_GROUPS).items.find((g: any) => g.id === r.group_id)?.name ?? '?',
+          })),
+        }),
+      );
+    }
     if (url.includes('/admin/overview')) return route.fulfill(json(overview));
     if (url.includes('/admin/health/warehouse'))
       return route.fulfill(json({ status: 'ok', latency_ms: 12.5, detail: null }));

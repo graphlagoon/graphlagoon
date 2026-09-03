@@ -2,10 +2,16 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import type {
   AdminConfigEntry,
+  AdminGroup,
+  AdminGroupPayload,
   AdminHealth,
   AdminOverview,
+  AdminPermission,
+  AdminPermissionUpdate,
   AdminUser,
   AuditEntry,
+  PermissionInspection,
+  ResolverStatus,
 } from '@/types/admin';
 import type { Exploration, GraphContext } from '@/types/graph';
 import { api } from '@/services/api';
@@ -29,6 +35,10 @@ export const useAdminStore = defineStore('admin', () => {
   const audit = ref<AuditEntry[]>([]);
   const auditTotal = ref(0);
   const auditActions = ref<string[]>([]);
+  const groups = ref<AdminGroup[]>([]);
+  const permissions = ref<AdminPermission[]>([]);
+  const resolverStatus = ref<ResolverStatus | null>(null);
+  const inspection = ref<PermissionInspection | null>(null);
 
   const loading = ref<Record<string, boolean>>({});
   const error = ref<string | null>(null);
@@ -87,6 +97,88 @@ export const useAdminStore = defineStore('admin', () => {
       auditTotal.value = result.total;
       auditActions.value = result.actions;
     }
+  }
+
+  async function fetchGroups() {
+    const result = await run('groups', () => api.getAdminGroups(), 'Failed to load groups');
+    if (result) {
+      groups.value = result.items;
+      resolverStatus.value = result.resolver;
+    }
+  }
+
+  async function saveGroup(payload: AdminGroupPayload, groupId?: string): Promise<boolean> {
+    const result = await run(
+      'groupSave',
+      () => (groupId ? api.updateAdminGroup(groupId, payload) : api.createAdminGroup(payload)),
+      'Failed to save group',
+    );
+    if (!result) return false;
+    if (groupId) {
+      groups.value = groups.value.map((g) => (g.id === groupId ? result : g));
+    } else {
+      groups.value = [...groups.value, result].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return true;
+  }
+
+  async function deleteGroup(groupId: string): Promise<boolean> {
+    const ok = await run(
+      'groupDelete',
+      async () => (await api.deleteAdminGroup(groupId), true),
+      'Failed to delete group',
+    );
+    if (ok) {
+      groups.value = groups.value.filter((g) => g.id !== groupId);
+      // Rules referencing the group cascaded away server-side.
+      permissions.value = permissions.value.map((p) => ({
+        ...p,
+        rules: p.rules.filter((r) => r.group_id !== groupId),
+      }));
+    }
+    return !!ok;
+  }
+
+  async function fetchPermissions() {
+    const result = await run(
+      'permissions',
+      () => api.getAdminPermissions(),
+      'Failed to load permissions',
+    );
+    if (result) {
+      permissions.value = result.items;
+      resolverStatus.value = result.resolver;
+    }
+  }
+
+  async function savePermission(permissionId: string, payload: AdminPermissionUpdate): Promise<boolean> {
+    const result = await run(
+      'permissionSave',
+      () => api.putAdminPermission(permissionId, payload),
+      'Failed to save permission',
+    );
+    if (!result) return false;
+    permissions.value = permissions.value.map((p) => (p.id === permissionId ? result : p));
+    return true;
+  }
+
+  async function inspectPermissions(email: string) {
+    const result = await run(
+      'inspect',
+      () => api.inspectAdminPermissions(email),
+      'Inspection failed',
+    );
+    if (result) inspection.value = result;
+  }
+
+  async function refreshGroupCache(email?: string): Promise<boolean> {
+    const result = await run(
+      'groupCacheRefresh',
+      () => api.refreshAdminGroupCache(email),
+      'Cache refresh failed',
+    );
+    if (result) resolverStatus.value = result;
+    return !!result;
   }
 
   async function transferContext(contextId: string, newOwner: string): Promise<boolean> {
@@ -150,6 +242,10 @@ export const useAdminStore = defineStore('admin', () => {
     audit,
     auditTotal,
     auditActions,
+    groups,
+    permissions,
+    resolverStatus,
+    inspection,
     loading,
     error,
     fetchOverview,
@@ -159,6 +255,13 @@ export const useAdminStore = defineStore('admin', () => {
     fetchContexts,
     fetchExplorations,
     fetchAudit,
+    fetchGroups,
+    saveGroup,
+    deleteGroup,
+    fetchPermissions,
+    savePermission,
+    inspectPermissions,
+    refreshGroupCache,
     transferContext,
     transferExploration,
     deleteContext,
