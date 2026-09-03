@@ -147,3 +147,20 @@ describe('buildLabelTemplateSkill', () => {
     expect(text).toContain('{metric:<name>}')
   })
 })
+
+describe('buildLabelTemplateSkill — tooltip templates', () => {
+  it('documents the tooltip templates and that rules do not apply to them', () => {
+    const text = buildLabelTemplateSkill({
+      nodeTypes: ['Person'],
+      edgeTypes: ['KNOWS'],
+      nodeProperties: [{ name: 'name', data_type: 'string' }],
+      edgeProperties: [],
+    })
+
+    expect(text).toContain('three places')
+    expect(text).toContain('Tooltip templates')
+    // Rules can drive tooltips via the surface field.
+    expect(text).toContain("surface?: 'label' | 'tooltip' | 'both'")
+    expect(text.toLowerCase()).toContain('emoji')
+  })
+})

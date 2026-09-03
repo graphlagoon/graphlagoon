@@ -207,12 +207,20 @@ A preset is a single JSON object. Every key is optional — a missing key means
     }
   },
   "textFormat": {
-    "defaults": { "nodeTemplate": "{prop:name}", "edgeTemplate": "{relationship_type}" },
+    "defaults": {
+      "nodeTemplate": "{prop:name}", "edgeTemplate": "{relationship_type}",
+      "nodeTooltipTemplate": "{prop:name}{br}{prop:email}", "edgeTooltipTemplate": ""
+    },
     "rules": [
       {
         "id": "rule-1", "name": "Company label", "target": "node",
         "types": ["Company"], "template": "{prop:name|upper} ({prop:country})",
         "priority": 10, "enabled": true, "scope": "context"
+      },
+      {
+        "id": "rule-2", "name": "Company tooltip", "target": "node",
+        "types": ["Company"], "template": "{prop:name}{br}{prop:country}",
+        "priority": 10, "enabled": true, "scope": "context", "surface": "tooltip"
       }
     ]
   },
@@ -236,7 +244,11 @@ Field rules:
   \`{relationship_type}\`, \`{src}\`, \`{dst}\`; modifiers chain with \`|\`
   (\`{prop:name|upper}\`, \`{prop:title|truncate:30:...}\`) and conditionals
   look like \`{if:prop:x>10|High|Low}\`. A rule's \`types\` empty means "all
-  types". \`scope\` is always \`"context"\`.
+  types". \`scope\` is always \`"context"\`. The two \`*TooltipTemplate\`
+  fields are the hover tooltips; \`""\` means the tooltip shows the label, and
+  \`{br}\` gives them extra lines. A rule's optional \`surface\`
+  (\`"label"\` | \`"tooltip"\` | \`"both"\`, default \`"label"\`) says which
+  text it overrides.
 - \`layout_algorithm\` must be one of: ${layoutAlgorithms.map((l) => `\`${l}\``).join(', ')}.
 - \`visual_mapping.nodeSize.metricId\` / \`edgeWeight.metricId\` must be one of:
 ${metricIdsSection(input.customMetrics)}
