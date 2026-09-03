@@ -46,6 +46,7 @@
 import { ref, computed, watch } from 'vue'
 import { X, Copy, Check } from 'lucide-vue-next'
 import { useGraphStore } from '@/stores/graph'
+import { useMetricsStore } from '@/stores/metrics'
 import { useQueryTemplatesStore } from '@/stores/queryTemplates'
 import { buildContextMenuActionSkill } from '@/utils/contextMenuActionSkill'
 import type { PortableSourceSchema } from '@/types/portable'
@@ -65,6 +66,7 @@ const emit = defineEmits<{
 
 const graphStore = useGraphStore()
 const templatesStore = useQueryTemplatesStore()
+const metricsStore = useMetricsStore()
 
 const adapting = computed(() => !!props.importedJson?.trim())
 
@@ -84,6 +86,8 @@ const skillText = computed(() =>
     edgeTypes: currentSchema.value.relationship_types,
     nodeProperties: graphStore.currentContext?.node_properties ?? [],
     edgeProperties: graphStore.currentContext?.edge_properties ?? [],
+    nodeMetrics: metricsStore.nodeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
+    edgeMetrics: metricsStore.edgeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
     queryTemplates: templatesStore.templates.map((t) => ({
       id: t.id,
       name: t.name,

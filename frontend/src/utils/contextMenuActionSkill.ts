@@ -12,11 +12,11 @@
  * tone. Pure function — no store access — so it is easy to test.
  */
 
-import { bulletList, propertyList, type SkillProperty } from './clusterProgramSkill'
+import { bulletList, propertyList, metricList, type SkillProperty, type SkillMetric } from './clusterProgramSkill'
 import { sourceSchemaSection } from './stylePresetSkill'
 import type { PortableSourceSchema } from '@/types/portable'
 
-export type { SkillProperty }
+export type { SkillProperty, SkillMetric }
 
 export interface SkillTemplateParameter {
   id: string
@@ -42,6 +42,10 @@ export interface ContextMenuActionSkillInput {
   edgeProperties: SkillProperty[]
   /** Query templates available in this context (for run-query-template actions) */
   queryTemplates: SkillQueryTemplate[]
+  /** Session-computed node metrics (available as `{metric:<name>}`) */
+  nodeMetrics?: SkillMetric[]
+  /** Session-computed edge metrics */
+  edgeMetrics?: SkillMetric[]
   /**
    * Absolute URL of the current graph view (e.g. https://host/graph/<ctx-id>),
    * used in the deep-link example (`?layout=ego&...`). Optional — falls back
@@ -88,6 +92,8 @@ function templateList(templates: SkillQueryTemplate[]): string {
  */
 export function buildContextMenuActionSkill(input: ContextMenuActionSkillInput): string {
   const { nodeTypes, edgeTypes, nodeProperties, edgeProperties, queryTemplates } = input
+  const nodeMetrics = input.nodeMetrics ?? []
+  const edgeMetrics = input.edgeMetrics ?? []
   const graphViewUrl = input.graphViewUrl || 'https://YOUR_APP_HOST/graph/YOUR_CONTEXT_ID'
   const explorationParam = `exploration=${input.explorationId || 'YOUR_EXPLORATION_ID'}`
   const adapting = !!input.importedJson?.trim()
@@ -262,7 +268,10 @@ Field rules:
   with operators \`exists\`, \`not-empty\`, \`equals\`, \`not-equals\`,
   \`contains\`. An action that interpolates \`{prop:x}\` into a URL should
   usually also require \`{ "property": "x", "operator": "not-empty" }\` so the
-  entry hides when the value is missing.
+  entry hides when the value is missing. \`property\` may also be a
+  session-computed metric written as \`"metric:<name>"\` (e.g.
+  \`{ "property": "metric:PageRank", "operator": "not-empty" }\`) — the action
+  then stays hidden until that metric is computed in the session.
 - \`urlTemplate\` MUST literally start with \`http://\` or \`https://\` — the
   tool rejects anything else. Interpolated values are URL-encoded
   automatically; just write \`{prop:x}\` where the value goes.
@@ -280,11 +289,19 @@ Field rules:
   \`not-empty\` condition, hide instead).
 - Node built-ins: \`{node_id}\`, \`{node_type}\`.
 - Edge built-ins: \`{edge_id}\`, \`{relationship_type}\`, \`{src}\`, \`{dst}\`.
+- \`{metric:<name>}\` — a session-computed metric of the clicked item (see
+  "metrics" in the metadata below). Metrics only exist after the user computes
+  them in the Metrics panel: a URL build aborts with a "missing" message when
+  the metric is absent (values are URL-encoded like properties), and
+  \`copy-text\` shows a \`[metric:<name>]\` placeholder. Pair a metric ref with
+  a \`{ "property": "metric:<name>", "operator": "not-empty" }\` condition.
+  Prefer a property when an equivalent column exists.
 - Modifiers chain with \`|\` inside the braces: \`{prop:name|upper}\`,
   \`{prop:title|truncate:30:...}\`, \`{prop:code|split:_:0}\`,
   \`{prop:email|match:/@(.+)$/:1}\`. Prefer plain \`{prop:x}\` inside URLs
   (values are encoded before modifiers run).
-- Conditionals: \`{if:prop:x>10|High|Low}\` — useful in \`copy-text\`.
+- Conditionals: \`{if:prop:x>10|High|Low}\` or \`{if:metric:PageRank>0.5|hub|leaf}\`
+  — useful in \`copy-text\`.
 
 ## This graph's metadata (use these real values)
 
@@ -299,6 +316,12 @@ ${propertyList(nodeProperties, 'none declared')}
 
 **Edge properties (available as \`{prop:<name>}\` on edges):**
 ${propertyList(edgeProperties, 'none declared')}
+
+**Node metrics (session-computed, available as \`{metric:<name>}\` on nodes):**
+${metricList(nodeMetrics, 'none computed in this session')}
+
+**Edge metrics (session-computed, available as \`{metric:<name>}\` on edges):**
+${metricList(edgeMetrics, 'none computed in this session')}
 
 **Query templates in this context (for \`run-query-template\`):**
 ${templateList(queryTemplates)}

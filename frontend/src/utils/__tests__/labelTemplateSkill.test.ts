@@ -123,4 +123,27 @@ describe('buildLabelTemplateSkill', () => {
     expect(text).toContain('(no edges loaded yet)')
     expect(text).toContain('(none declared)')
   })
+
+  it('embeds session-computed metrics with value types and documents {metric:}', () => {
+    const text = buildLabelTemplateSkill({
+      ...fullInput,
+      nodeMetrics: [
+        { name: 'PageRank', valueType: 'number' as const },
+        { name: 'Tier', valueType: 'string' as const },
+      ],
+      edgeMetrics: [{ name: 'Weight', valueType: 'number' as const }],
+    })
+    expect(text).toContain('- PageRank (number)')
+    expect(text).toContain('- Tier (string)')
+    expect(text).toContain('- Weight (number)')
+    expect(text).toContain('{metric:<name>}')
+    expect(text).toContain('{if:metric:PageRank>0.5|hub|leaf}')
+  })
+
+  it('falls back gracefully when no metrics were computed (input omitted)', () => {
+    const text = buildLabelTemplateSkill(fullInput)
+    expect(text).toContain('(none computed in this session)')
+    // The syntax docs still exist so the AI knows the namespace is legal
+    expect(text).toContain('{metric:<name>}')
+  })
 })

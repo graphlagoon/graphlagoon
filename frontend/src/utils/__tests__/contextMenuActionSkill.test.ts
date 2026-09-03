@@ -126,4 +126,22 @@ describe('buildContextMenuActionSkill — adapt mode', () => {
     expect(skill).toContain('Do NOT write JSON immediately');
     expect(skill).not.toContain('## The actions to adapt');
   });
+
+  it('embeds session-computed metrics and documents metric templates/conditions', () => {
+    const skill = buildContextMenuActionSkill({
+      ...INPUT,
+      nodeMetrics: [{ name: 'PageRank', valueType: 'number' as const }],
+      edgeMetrics: [{ name: 'Weight', valueType: 'number' as const }],
+    });
+    expect(skill).toContain('- PageRank (number)');
+    expect(skill).toContain('- Weight (number)');
+    expect(skill).toContain('{metric:<name>}');
+    expect(skill).toContain('"metric:PageRank"');
+    expect(skill).toContain('{if:metric:PageRank>0.5|hub|leaf}');
+  });
+
+  it('falls back gracefully when no metrics were computed', () => {
+    const skill = buildContextMenuActionSkill(INPUT);
+    expect(skill).toContain('(none computed in this session)');
+  });
 });

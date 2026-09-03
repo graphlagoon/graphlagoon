@@ -48,6 +48,20 @@ export function propertyList(props: SkillProperty[], emptyText: string): string 
     .join('\n')
 }
 
+/** A session-computed metric, as embedded into the Ask-AI prompts. */
+export interface SkillMetric {
+  /** Metric display name (the `{metric:<name>}` ref) */
+  name: string
+  /** Value type from ComputedMetric.valueType */
+  valueType: 'number' | 'string' | 'boolean'
+}
+
+/** Render computed metrics as `name (valueType)` bullets. */
+export function metricList(metrics: SkillMetric[], emptyText: string): string {
+  if (metrics.length === 0) return `  (${emptyText})`
+  return metrics.map((m) => `  - ${m.name} (${m.valueType})`).join('\n')
+}
+
 /**
  * Build the cluster-program skill prompt from the current graph's metadata.
  * The output is plain text (Markdown) meant to be copied into an LLM chat.
