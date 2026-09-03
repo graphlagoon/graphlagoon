@@ -60,31 +60,29 @@ describe('LabelRuleEditorModal', () => {
     expect(checked.length).toBe(0)
   })
 
-  it('defaults a new rule to winning over the existing ones (newest wins)', () => {
-    const graphStore = useGraphStore()
-    graphStore.addTextFormatRule({
-      name: 'Old', target: 'node', types: [], template: '{node_id}',
-      priority: 30, enabled: true, scope: 'exploration',
-    })
+  it('defaults a new rule to maximum priority, so it applies immediately', () => {
     render(LabelRuleEditorModal, { props: { rule: null } })
 
-    expect((el('[data-testid="rule-priority"]') as HTMLInputElement).value).toBe('40')
+    expect((el('[data-testid="rule-priority"]') as HTMLInputElement).value).toBe('100')
   })
 
-  it('newest-wins priority is capped at 100 and scoped to the target', async () => {
-    const graphStore = useGraphStore()
-    graphStore.addTextFormatRule({
-      name: 'Loud', target: 'node', types: [], template: '{node_id}',
-      priority: 97, enabled: true, scope: 'exploration',
+  it('a new rule starts on the surface of the tab it was created from', () => {
+    render(LabelRuleEditorModal, { props: { rule: null, initialSurface: 'tooltip' } })
+
+    expect((el('[data-testid="rule-surface"]') as HTMLSelectElement).value).toBe('tooltip')
+  })
+
+  it('editing keeps the stored priority', () => {
+    render(LabelRuleEditorModal, {
+      props: {
+        rule: {
+          id: 'r9', name: 'Old', target: 'node', types: [], template: '{node_id}',
+          priority: 30, enabled: true, scope: 'exploration',
+        },
+      },
     })
-    render(LabelRuleEditorModal, { props: { rule: null } })
 
-    const priority = el('[data-testid="rule-priority"]') as HTMLInputElement
-    expect(priority.value).toBe('100')
-
-    // Edge rules are a separate pool: no edge rules -> back to the base 10.
-    await fireEvent.update(el('[data-testid="rule-target"]') as HTMLSelectElement, 'edge')
-    expect(priority.value).toBe('10')
+    expect((el('[data-testid="rule-priority"]') as HTMLInputElement).value).toBe('30')
   })
 
   it('pre-fills every field from an existing rule', () => {

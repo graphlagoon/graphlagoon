@@ -17,7 +17,9 @@
       </div>
     </div>
 
-    <!-- Tabs (house pattern: MetricsPanel, ClusterProgramPanel) -->
+    <!-- Tabs (house pattern: MetricsPanel, ClusterProgramPanel). One per
+         surface — each shows its defaults AND the rules overriding them, so
+         everything affecting what you see is on one tab. -->
     <div class="tabs">
       <button
         class="tab"
@@ -26,6 +28,7 @@
         @click="activeTab = 'labels'"
       >
         Labels
+        <span v-if="labelRules.length > 0" class="tab-badge">{{ labelRules.length }}</span>
       </button>
       <button
         class="tab"
@@ -34,15 +37,7 @@
         @click="activeTab = 'tooltips'"
       >
         Tooltips
-      </button>
-      <button
-        class="tab"
-        :class="{ active: activeTab === 'rules' }"
-        data-testid="labels-tab-rules"
-        @click="activeTab = 'rules'"
-      >
-        Rules
-        <span v-if="graphStore.textFormatRules.length > 0" class="tab-badge">{{ graphStore.textFormatRules.length }}</span>
+        <span v-if="tooltipRules.length > 0" class="tab-badge">{{ tooltipRules.length }}</span>
       </button>
     </div>
 
@@ -111,8 +106,9 @@
       </div>
     </div>
 
-    <!-- Custom Rules -->
-    <div v-if="activeTab === 'rules'" class="section">
+    <!-- Custom Rules — filtered to the rules that affect the open tab's
+         surface; a 'both' rule shows on both tabs because it drives both. -->
+    <div class="section">
       <div class="section-title">
         Custom Rules
         <button class="add-rule-btn" @click="startAddRule" title="Add Rule">
@@ -124,14 +120,15 @@
       </div>
 
       <p class="section-hint">
-        Rules override the default templates for chosen types. Each rule
-        applies to labels, tooltips, or both.
+        Rules override the {{ activeTab === 'tooltips' ? 'tooltip' : 'label' }}
+        defaults above for chosen types. A rule can apply to both surfaces —
+        then it shows on both tabs.
       </p>
 
       <!-- Rule List -->
-      <div v-if="graphStore.textFormatRules.length > 0" class="rules-list">
+      <div v-if="visibleRules.length > 0" class="rules-list">
         <div
-          v-for="rule in sortedRules"
+          v-for="rule in visibleRules"
           :key="rule.id"
           :class="['rule-item', { disabled: !rule.enabled }]"
         >
@@ -172,7 +169,8 @@
       </div>
 
       <div v-else class="no-rules">
-        No custom rules defined. Click + to add one.
+        No {{ activeTab === 'tooltips' ? 'tooltip' : 'label' }} rules defined.
+        Click + to add one.
       </div>
     </div>
 
@@ -180,6 +178,7 @@
     <LabelRuleEditorModal
       v-if="ruleModalOpen"
       :rule="editingRule"
+      :initial-surface="newRuleSurface"
       @close="ruleModalOpen = false"
     />
 
@@ -210,8 +209,8 @@ const emit = defineEmits<{
 const graphStore = useGraphStore();
 const toast = useToast();
 
-// Which tab is open. 'labels' first: defaults are the most-edited thing.
-const activeTab = ref<'labels' | 'tooltips' | 'rules'>('labels');
+// Which surface is open. 'labels' first: defaults are the most-edited thing.
+const activeTab = ref<'labels' | 'tooltips'>('labels');
 
 // Help modal
 const showHelp = ref(false);
@@ -264,6 +263,18 @@ const sortedRules = computed(() => {
   return [...graphStore.textFormatRules].sort((a, b) => b.priority - a.priority);
 });
 
+/** Does this rule drive the given surface? Absent/garbage surface = label. */
+function affectsSurface(rule: TextFormatRule, surface: 'label' | 'tooltip'): boolean {
+  const s = rule.surface === 'tooltip' || rule.surface === 'both' ? rule.surface : 'label';
+  return s === surface || s === 'both';
+}
+
+const labelRules = computed(() => sortedRules.value.filter((r) => affectsSurface(r, 'label')));
+const tooltipRules = computed(() => sortedRules.value.filter((r) => affectsSurface(r, 'tooltip')));
+const visibleRules = computed(() =>
+  activeTab.value === 'tooltips' ? tooltipRules.value : labelRules.value,
+);
+
 // Rule editing happens in LabelRuleEditorModal (house pattern).
 const ruleModalOpen = ref(false);
 const editingRule = ref<TextFormatRule | null>(null);
@@ -272,6 +283,11 @@ function startAddRule() {
   editingRule.value = null;
   ruleModalOpen.value = true;
 }
+
+/** A rule created from a surface tab starts on that surface. */
+const newRuleSurface = computed(() =>
+  activeTab.value === 'tooltips' ? ('tooltip' as const) : ('label' as const),
+);
 
 function editRule(rule: TextFormatRule) {
   editingRule.value = rule;

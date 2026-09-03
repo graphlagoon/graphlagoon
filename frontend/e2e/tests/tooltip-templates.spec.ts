@@ -129,15 +129,17 @@ test.describe('Tooltip-surface rules (rule editor modal)', () => {
   test('a tooltip-surface rule drives the hover body and leaves the label alone', async ({
     authenticatedPage: page,
   }) => {
-    // Create the rule through the modal (house pattern: list in panel, edit in modal).
+    // Create the rule through the modal, from the Tooltips tab — its + button
+    // opens the editor already preset to the tooltip surface.
     await page.getByTitle('Labels', { exact: true }).click();
-    await page.getByTestId('labels-tab-rules').click();
+    await page.getByTestId('labels-tab-tooltips').click();
     await page.locator('.add-rule-btn').click();
 
     const modal = page.getByTestId('rule-editor-modal');
     await expect(modal).toBeVisible();
+    await expect(modal.getByTestId('rule-surface')).toHaveValue('tooltip');
+    await expect(modal.getByTestId('rule-priority')).toHaveValue('100');
     await modal.getByTestId('rule-name').fill('Person tips');
-    await modal.getByTestId('rule-surface').selectOption('tooltip');
     await modal.getByTestId('rule-types').getByText('Person', { exact: true }).click();
     await modal.getByTestId('rule-template').fill('RULE {node_id|upper}');
     await modal.getByTestId('rule-save').click();
@@ -157,7 +159,6 @@ test.describe('Tooltip-surface rules (rule editor modal)', () => {
 
   test('Escape closes the modal without saving', async ({ authenticatedPage: page }) => {
     await page.getByTitle('Labels', { exact: true }).click();
-    await page.getByTestId('labels-tab-rules').click();
     await page.locator('.add-rule-btn').click();
     await expect(page.getByTestId('rule-editor-modal')).toBeVisible();
 

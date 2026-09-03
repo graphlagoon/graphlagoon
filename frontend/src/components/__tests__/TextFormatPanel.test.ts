@@ -59,8 +59,7 @@ describe('TextFormatPanel — inline validation and preview', () => {
     const { container } = render(TextFormatPanel)
     const graphStore = useGraphStore()
 
-    // Open the rule editor modal (rules live in their own tab)
-    await fireEvent.click(container.querySelector('[data-testid="labels-tab-rules"]') as HTMLButtonElement)
+    // Open the rule editor modal (the rules list lives on each surface tab)
     const addBtn = container.querySelector('.add-rule-btn') as HTMLButtonElement
     await fireEvent.click(addBtn)
 
@@ -82,7 +81,6 @@ describe('TextFormatPanel — inline validation and preview', () => {
     const { container } = render(TextFormatPanel)
     const graphStore = useGraphStore()
 
-    await fireEvent.click(container.querySelector('[data-testid="labels-tab-rules"]') as HTMLButtonElement)
     const addBtn = container.querySelector('.add-rule-btn') as HTMLButtonElement
     await fireEvent.click(addBtn)
 
@@ -101,14 +99,16 @@ describe('TextFormatPanel — inline validation and preview', () => {
     expect(document.body.querySelector('[data-testid="rule-editor-modal"]')).toBeNull()
   })
 
-  it('saves a tooltip-surface rule and pre-fills it on edit', async () => {
+  it('creates a tooltip rule from the Tooltips tab, preset to that surface', async () => {
     const { container } = render(TextFormatPanel)
     const graphStore = useGraphStore()
 
-    await fireEvent.click(container.querySelector('[data-testid="labels-tab-rules"]') as HTMLButtonElement)
+    // The Tooltips tab's + button opens the modal already on the tooltip surface.
+    await fireEvent.click(container.querySelector('[data-testid="labels-tab-tooltips"]') as HTMLButtonElement)
     await fireEvent.click(container.querySelector('.add-rule-btn') as HTMLButtonElement)
+    expect((modalEl('[data-testid="rule-surface"]') as HTMLSelectElement).value).toBe('tooltip')
+
     await fireEvent.update(modalEl('[data-testid="rule-name"]') as HTMLInputElement, 'Tip rule')
-    await fireEvent.update(modalEl('[data-testid="rule-surface"]') as HTMLSelectElement, 'tooltip')
     await fireEvent.update(
       modalEl('[data-testid="rule-template"]') as HTMLInputElement,
       '{node_id|upper}'
@@ -116,10 +116,15 @@ describe('TextFormatPanel — inline validation and preview', () => {
     await fireEvent.click(modalEl('[data-testid="rule-save"]') as HTMLButtonElement)
 
     expect(graphStore.textFormatRules[0].surface).toBe('tooltip')
-    // The list shows a surface chip for non-label rules...
+    // The rule lists on the tab whose surface it affects, with the chip...
     expect(container.querySelector('.rule-surface')?.textContent).toBe('tooltip')
 
-    // ...and reopening the rule pre-fills the surface select.
+    // ...but not on the Labels tab, which it does not touch.
+    await fireEvent.click(container.querySelector('[data-testid="labels-tab-labels"]') as HTMLButtonElement)
+    expect(container.querySelector('.rule-surface')).toBeNull()
+
+    // Reopening the rule pre-fills the surface select.
+    await fireEvent.click(container.querySelector('[data-testid="labels-tab-tooltips"]') as HTMLButtonElement)
     await fireEvent.click(container.querySelector('.rule-action') as HTMLButtonElement)
     expect((modalEl('[data-testid="rule-surface"]') as HTMLSelectElement).value).toBe('tooltip')
   })
