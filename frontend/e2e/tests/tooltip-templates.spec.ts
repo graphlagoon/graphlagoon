@@ -72,6 +72,7 @@ test.describe('Hover tooltip templates', () => {
   /** Type the template into the panel and let the 400 ms debounce land. */
   async function setNodeTooltipTemplate(page: Page, template: string) {
     await page.getByTitle('Labels', { exact: true }).click();
+    await page.getByTestId('labels-tab-tooltips').click();
     await page.getByTestId('tooltip-template-node').fill(template);
     await page.waitForTimeout(600);
     await page.getByTitle('Labels', { exact: true }).click();
@@ -108,6 +109,7 @@ test.describe('Hover tooltip templates', () => {
     await setNodeTooltipTemplate(page, 'TIP {node_id}');
 
     await page.getByTitle('Labels', { exact: true }).click();
+    await page.getByTestId('labels-tab-tooltips').click();
     await expect(page.getByTestId('tooltip-template-node')).toHaveValue('TIP {node_id}');
     await page.getByTitle('Labels', { exact: true }).click();
 
@@ -129,6 +131,7 @@ test.describe('Tooltip-surface rules (rule editor modal)', () => {
   }) => {
     // Create the rule through the modal (house pattern: list in panel, edit in modal).
     await page.getByTitle('Labels', { exact: true }).click();
+    await page.getByTestId('labels-tab-rules').click();
     await page.locator('.add-rule-btn').click();
 
     const modal = page.getByTestId('rule-editor-modal');
@@ -154,6 +157,7 @@ test.describe('Tooltip-surface rules (rule editor modal)', () => {
 
   test('Escape closes the modal without saving', async ({ authenticatedPage: page }) => {
     await page.getByTitle('Labels', { exact: true }).click();
+    await page.getByTestId('labels-tab-rules').click();
     await page.locator('.add-rule-btn').click();
     await expect(page.getByTestId('rule-editor-modal')).toBeVisible();
 

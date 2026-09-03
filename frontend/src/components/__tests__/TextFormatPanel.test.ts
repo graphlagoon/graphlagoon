@@ -59,7 +59,8 @@ describe('TextFormatPanel — inline validation and preview', () => {
     const { container } = render(TextFormatPanel)
     const graphStore = useGraphStore()
 
-    // Open the rule editor modal
+    // Open the rule editor modal (rules live in their own tab)
+    await fireEvent.click(container.querySelector('[data-testid="labels-tab-rules"]') as HTMLButtonElement)
     const addBtn = container.querySelector('.add-rule-btn') as HTMLButtonElement
     await fireEvent.click(addBtn)
 
@@ -81,6 +82,7 @@ describe('TextFormatPanel — inline validation and preview', () => {
     const { container } = render(TextFormatPanel)
     const graphStore = useGraphStore()
 
+    await fireEvent.click(container.querySelector('[data-testid="labels-tab-rules"]') as HTMLButtonElement)
     const addBtn = container.querySelector('.add-rule-btn') as HTMLButtonElement
     await fireEvent.click(addBtn)
 
@@ -103,6 +105,7 @@ describe('TextFormatPanel — inline validation and preview', () => {
     const { container } = render(TextFormatPanel)
     const graphStore = useGraphStore()
 
+    await fireEvent.click(container.querySelector('[data-testid="labels-tab-rules"]') as HTMLButtonElement)
     await fireEvent.click(container.querySelector('.add-rule-btn') as HTMLButtonElement)
     await fireEvent.update(modalEl('[data-testid="rule-name"]') as HTMLInputElement, 'Tip rule')
     await fireEvent.update(modalEl('[data-testid="rule-surface"]') as HTMLSelectElement, 'tooltip')
@@ -131,6 +134,7 @@ describe('TextFormatPanel — hover tooltip templates', () => {
       const { container } = render(TextFormatPanel)
       const graphStore = useGraphStore()
 
+      await fireEvent.click(container.querySelector('[data-testid="labels-tab-tooltips"]') as HTMLButtonElement)
       const input = container.querySelector(
         '[data-testid="tooltip-template-node"]'
       ) as HTMLInputElement
@@ -151,6 +155,7 @@ describe('TextFormatPanel — hover tooltip templates', () => {
       const { container } = render(TextFormatPanel)
       const graphStore = useGraphStore()
 
+      await fireEvent.click(container.querySelector('[data-testid="labels-tab-tooltips"]') as HTMLButtonElement)
       const input = container.querySelector(
         '[data-testid="tooltip-template-edge"]'
       ) as HTMLInputElement
@@ -167,6 +172,7 @@ describe('TextFormatPanel — hover tooltip templates', () => {
     const { container } = render(TextFormatPanel)
     const graphStore = useGraphStore()
 
+    await fireEvent.click(container.querySelector('[data-testid="labels-tab-tooltips"]') as HTMLButtonElement)
     graphStore.updateTextFormatDefaults({ nodeTooltipTemplate: '{node_type}' })
     await new Promise((r) => setTimeout(r, 0))
 
@@ -176,9 +182,10 @@ describe('TextFormatPanel — hover tooltip templates', () => {
     expect(input.value).toBe('{node_type}')
   })
 
-  it('starts empty, so an unconfigured tooltip keeps showing the label', () => {
+  it('starts empty, so an unconfigured tooltip keeps showing the label', async () => {
     const { container } = render(TextFormatPanel)
 
+    await fireEvent.click(container.querySelector('[data-testid="labels-tab-tooltips"]') as HTMLButtonElement)
     const node = container.querySelector('[data-testid="tooltip-template-node"]') as HTMLInputElement
     const edge = container.querySelector('[data-testid="tooltip-template-edge"]') as HTMLInputElement
     expect(node.value).toBe('')

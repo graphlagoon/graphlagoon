@@ -9341,3 +9341,27 @@ Tests: 2374 unit green (2 new for the priority default; selectors updated
 for the textarea), 6 e2e green, `labels-rule-modal.png` regenerated.
 No public-docs impact beyond the labels.md priority sentence; no admin-area
 impact.
+
+## [2026-09-03 08:00] - Refinement: Labels panel tabs + form polish
+
+The Labels panel outgrew a single scroll (4 template fields with previews
+pushed Custom Rules below the fold on a 900px viewport). It now has three
+tabs — **Labels | Tooltips | Rules** — the house pattern (MetricsPanel,
+ClusterProgramPanel). Rules get their own tab rather than being split
+under Labels/Tooltips precisely because a rule can drive both surfaces;
+the surface chip says which, and a tab badge counts the rules.
+
+Form polish inside the panel: the two tooltip fields are multiline
+(same TemplateInput mode as the modal), the Node Label placeholder now
+shows the real stock default ({node_id|truncate:10:...}, not {node_id}),
+and a hint under Default Templates surfaces the autocomplete
+("Type { for placeholders and | for modifiers").
+
+Priority default question revisited and kept: a new rule already IS the
+maximum (max of existing same-target priorities + 10, ceiling 100) — a
+literal fixed 100 would make the second new rule tie with the first, and
+ties resolve toward the OLDER rule, the opposite of the intent.
+
+Tests updated for tab navigation (unit + e2e + screenshot scenes);
+labels.md panel description now says tabs. 2377 unit green, 6 e2e green.
+No admin-area impact.

@@ -22,14 +22,14 @@ template language: you decide what text each node and edge shows, extract
 the readable part out of messy values, and preview the result on your real
 data before it hits the canvas.
 
-Open it from the toolbar **Labels** button. It has two layers:
+Open it from the toolbar **Labels** button. It has three tabs:
 
-- **Default templates** — one for all nodes, one for all edges.
-- **Hover tooltips** — one template per target for the box that appears on
+- **Labels** — the default templates, one for all nodes, one for all edges.
+- **Tooltips** — one template per target for the box that appears on
   hover; empty means "same as the label".
-- **Custom rules** — templates that apply only to some target (node/edge)
+- **Rules** — templates that apply only to some target (node/edge)
   and, optionally, only to some types, with a priority to break ties. Each
-  rule applies to labels, tooltips, or both.
+  rule applies to labels, tooltips, or both; the tab badge counts them.
 
 ![Labels panel](/screenshots/labels-panel.png)
 
