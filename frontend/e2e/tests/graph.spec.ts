@@ -294,7 +294,8 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByTitle('Labels')).toBeVisible({ timeout: 15_000 });
 
       await page.getByTitle('Labels').click();
-      await expect(page.getByText('Default Templates')).toBeVisible();
+      // exact: the Custom Rules hint mentions "default templates" too
+      await expect(page.getByText('Default Templates', { exact: true })).toBeVisible();
       // "Custom Rules" exact to avoid matching "No custom rules defined..."
       await expect(page.getByText('Custom Rules', { exact: true })).toBeVisible();
 

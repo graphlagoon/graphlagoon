@@ -190,6 +190,21 @@ const slides = [
       { template: '[{prop:status|upper}] {prop:title|truncate:20}', result: '[ACTIVE] Meeting tomorrow...', note: 'Formatted status' },
     ],
   },
+  {
+    title: 'Hover Tooltips',
+    description: 'The Hover Tooltips section takes the same templates, for the box that '
+      + 'appears when you point at a node or edge. Leave it empty and the tooltip keeps '
+      + 'showing the label. A custom rule whose surface includes tooltips overrides this '
+      + 'template for its types. A tooltip is drawn as HTML instead of the canvas font, so '
+      + 'it may run several lines long and may use accented letters and emoji, which a '
+      + 'label cannot.',
+    examples: [
+      { template: '{prop:name}{br}{prop:email}', result: 'John Doe\njohn@example.com', note: 'Two lines; {br} is the line break' },
+      { template: '{node_type}{br}Degree {metric:Degree}', result: 'Person\nDegree 12', note: 'Metrics work here too' },
+      { template: '{if:prop:node_type==Person|{prop:name}|{prop:legal_name}}', result: 'John Doe', note: 'Per-type tooltip via a conditional' },
+      { template: '{src} -> {dst}', result: 'user_123 -> user_456', note: 'Edge tooltip showing both endpoints' },
+    ],
+  },
 ];
 
 function close() {

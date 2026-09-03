@@ -75,12 +75,20 @@ I don't know exactly what I want yet, so **start by asking me questions** (see t
 
 ## Where a template goes
 
-There are two places a template can live:
+There are three places a template can live:
 
 1. **Default templates** — one for nodes, one for edges. Used for anything not
    covered by a rule. Defaults are \`{node_id}\` for nodes and
    \`{relationship_type}\` for edges.
-2. **Rules** — a rule overrides the default for specific types. A rule has:
+2. **Tooltip templates** — one for nodes, one for edges, used for the text that
+   appears when hovering. A tooltip resolves in this order: a matching rule
+   whose \`surface\` includes tooltips, then this template, then (when both are
+   empty) whatever the label shows. Tooltips are drawn as HTML rather than with
+   the canvas font, so unlike labels they may use accents, emoji and arrows,
+   and they can be several lines long.
+3. **Rules** — a rule overrides the default template of its \`surface\` for
+   specific types. Give a rule \`surface: 'tooltip'\` for a per-type tooltip
+   (\`{if:...}\` is still there for per-VALUE conditions). A rule has:
 
 \`\`\`js
 {
@@ -90,6 +98,7 @@ There are two places a template can live:
   template: string,           // the template string
   priority: number,           // 0-100, higher wins
   enabled: boolean,
+  surface?: 'label' | 'tooltip' | 'both',  // optional; default 'label'
 }
 \`\`\`
 

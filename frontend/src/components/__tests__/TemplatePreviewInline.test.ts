@@ -119,3 +119,76 @@ describe('TemplatePreviewInline', () => {
     expect(container.querySelector('[data-testid="preview-sample"]')?.textContent?.trim()).toBe('P1')
   })
 })
+
+describe('TemplatePreviewInline — tooltip chrome and empty fallback', () => {
+  it('renders nothing for an empty template without a fallback (unchanged)', async () => {
+    seedStore()
+    const { container } = render(TemplatePreviewInline, {
+      props: { template: '', target: 'node' },
+    })
+    await flushDebounce()
+
+    expect(container.querySelector('[data-testid="template-preview"]')).toBeNull()
+  })
+
+  it('an empty template with a fallback previews the inherited template with a badge', async () => {
+    seedStore()
+    const { container } = render(TemplatePreviewInline, {
+      props: {
+        template: '',
+        target: 'node',
+        types: ['Person'],
+        emptyFallback: { template: '{prop:name|upper}', badge: '= label' },
+      },
+    })
+    await flushDebounce()
+
+    expect(container.querySelector('[data-testid="preview-fallback-badge"]')?.textContent?.trim()).toBe(
+      '= label'
+    )
+    const bodies = [...container.querySelectorAll('[data-testid="preview-sample"]')].map(
+      (el) => el.textContent
+    )
+    expect(bodies).toEqual(['ALICE', 'BOB'])
+  })
+
+  it('typing a template hides the badge and previews the template itself', async () => {
+    seedStore()
+    const { container, rerender } = render(TemplatePreviewInline, {
+      props: {
+        template: '',
+        target: 'node',
+        types: ['Person'],
+        emptyFallback: { template: '{prop:name}', badge: '= label' },
+      },
+    })
+    await flushDebounce()
+    await rerender({ template: '{node_id}' })
+    await flushDebounce()
+
+    expect(container.querySelector('[data-testid="preview-fallback-badge"]')).toBeNull()
+    expect(container.querySelector('[data-testid="preview-sample"]')?.textContent).toBe('p1')
+  })
+
+  it('tooltip chrome wraps each sample in a box with the type chip', async () => {
+    seedStore()
+    const { container } = render(TemplatePreviewInline, {
+      props: { template: '{prop:name}', target: 'node', types: ['Person'], chrome: 'tooltip' },
+    })
+    await flushDebounce()
+
+    const boxes = container.querySelectorAll('[data-testid="preview-tooltip-chrome"]')
+    expect(boxes.length).toBe(2)
+    expect(boxes[0].querySelector('.preview-tooltip-type')?.textContent).toBe('Person')
+  })
+
+  it("edge samples get the literal 'Edge' chip", async () => {
+    seedStore()
+    const { container } = render(TemplatePreviewInline, {
+      props: { template: '{src} -> {dst}', target: 'edge', chrome: 'tooltip' },
+    })
+    await flushDebounce()
+
+    expect(container.querySelector('.preview-tooltip-type')?.textContent).toBe('Edge')
+  })
+})
