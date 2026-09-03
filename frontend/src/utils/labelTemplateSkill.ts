@@ -12,10 +12,10 @@
  * behave the same way. Pure function — no store access — so it is easy to test.
  */
 
-import { bulletList, propertyList, type SkillProperty } from './clusterProgramSkill'
+import { bulletList, propertyList, metricList, type SkillProperty, type SkillMetric } from './clusterProgramSkill'
 import { MODIFIER_REGISTRY, MAX_REGEX_LENGTH, ALLOWED_REGEX_FLAGS, type ModifierDef } from './labelModifiers'
 
-export type { SkillProperty }
+export type { SkillProperty, SkillMetric }
 
 const MODIFIER_CATEGORY_LABELS: Record<ModifierDef['docCategory'], string> = {
   text: 'Text',
@@ -48,6 +48,10 @@ export interface LabelTemplateSkillInput {
   nodeProperties: SkillProperty[]
   /** Edge property columns from the current context */
   edgeProperties: SkillProperty[]
+  /** Session-computed node metrics (available as `{metric:<name>}`) */
+  nodeMetrics?: SkillMetric[]
+  /** Session-computed edge metrics */
+  edgeMetrics?: SkillMetric[]
 }
 
 /**
@@ -56,6 +60,8 @@ export interface LabelTemplateSkillInput {
  */
 export function buildLabelTemplateSkill(input: LabelTemplateSkillInput): string {
   const { nodeTypes, edgeTypes, nodeProperties, edgeProperties } = input
+  const nodeMetrics = input.nodeMetrics ?? []
+  const edgeMetrics = input.edgeMetrics ?? []
 
   return `# Task: write "label templates" for a graph visualization tool
 
@@ -117,6 +123,14 @@ it falls back to the built-in of the same name; if nothing resolves, the label
 shows \`[<column>]\` as a visible placeholder (so a typo in a column name is easy to
 spot). Missing values never raise an error.
 
+Session-computed metrics (from the tool's Metrics panel — see "This graph's
+metrics" below):
+- \`{metric:<name>}\` — e.g. \`{metric:PageRank}\`. Resolved from metrics computed
+  in the current session, never from a table column. An uncomputed metric
+  renders \`[metric:<name>]\` (suppress with \`|default:\`). Modifiers chain as
+  usual: \`{metric:PageRank|number}\`. Metrics only exist while computed in the
+  session — prefer a property when an equivalent column exists.
+
 Anything outside \`{...}\` is literal text: \`[{node_type}] {prop:name}\` works.
 
 Line break:
@@ -168,7 +182,10 @@ Values may be ISO strings or unix timestamps (seconds or milliseconds).
 ### Conditionals
 
 \`{if:<condition>|<trueValue>|<falseValue>}\` — the false branch may be omitted
-(renders empty). Conditions always read a property with the \`prop:\` prefix.
+(renders empty). Conditions read a property with the \`prop:\` prefix, or a
+session-computed metric with the \`metric:\` prefix
+(\`{if:metric:PageRank>0.5|hub|leaf}\` — an uncomputed metric always takes the
+false branch).
 
 Comparison operators are written **inline, with no spaces or separators**, right
 after the property name: \`==\`, \`!=\`, \`>\`, \`<\`, \`>=\`, \`<=\`, \`contains\`,
@@ -219,6 +236,12 @@ ${propertyList(nodeProperties, 'none declared')}
 
 **Edge properties (available as \`{prop:<name>}\` on edges):**
 ${propertyList(edgeProperties, 'none declared')}
+
+**Node metrics (session-computed, available as \`{metric:<name>}\` on nodes):**
+${metricList(nodeMetrics, 'none computed in this session')}
+
+**Edge metrics (session-computed, available as \`{metric:<name>}\` on edges):**
+${metricList(edgeMetrics, 'none computed in this session')}
 
 ## Worked example
 

@@ -35,6 +35,7 @@
 import { ref, computed, watch } from 'vue'
 import { X, Copy, Check } from 'lucide-vue-next'
 import { useGraphStore } from '@/stores/graph'
+import { useMetricsStore } from '@/stores/metrics'
 import { buildLabelTemplateSkill } from '@/utils/labelTemplateSkill'
 
 const props = defineProps<{
@@ -46,6 +47,7 @@ const emit = defineEmits<{
 }>()
 
 const graphStore = useGraphStore()
+const metricsStore = useMetricsStore()
 
 const skillText = computed(() =>
   buildLabelTemplateSkill({
@@ -53,6 +55,8 @@ const skillText = computed(() =>
     edgeTypes: graphStore.edgeTypes,
     nodeProperties: graphStore.currentContext?.node_properties ?? [],
     edgeProperties: graphStore.currentContext?.edge_properties ?? [],
+    nodeMetrics: metricsStore.nodeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
+    edgeMetrics: metricsStore.edgeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
   })
 )
 
