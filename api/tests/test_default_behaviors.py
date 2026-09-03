@@ -92,9 +92,11 @@ class TestConfigInjection:
     """
 
     def test_public_config_builder_includes_default_behaviors(self):
+        import asyncio
+
         from graphlagoon.services.public_config import build_public_config
 
-        assert "default_behaviors" in build_public_config(None)
+        assert "default_behaviors" in asyncio.run(build_public_config(None))
 
     def test_api_config_route_uses_the_shared_builder(self):
         import inspect

@@ -143,7 +143,7 @@ async def get_overview(user_email: str = Depends(require_superuser)):
         counts=await _counts(),
         superusers=settings.superuser_email_list,
         storage=_storage(settings),
-        public_config=build_public_config(user_email, settings),
+        public_config=await build_public_config(user_email, settings),
         health={"database": AdminHealth(**await database_health())},
     )
 

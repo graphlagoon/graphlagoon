@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from uuid import UUID
 from typing import TYPE_CHECKING, Union
 
@@ -30,7 +30,13 @@ from graphlagoon.utils.sharing import (
 )
 from graphlagoon.services import audit
 from graphlagoon.services.audit import AuditAction
-from graphlagoon.utils.authz import can_manage, can_read, can_write, is_superuser
+from graphlagoon.utils.authz import (
+    can_manage,
+    can_read,
+    can_write,
+    is_superuser,
+    require_permission,
+)
 from graphlagoon.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -346,10 +352,12 @@ async def list_explorations(context_id: UUID, request: Request):
     "/api/graph-contexts/{context_id}/explorations", response_model=ExplorationResponse
 )
 async def create_exploration(
-    context_id: UUID, data: ExplorationCreate, request: Request
+    context_id: UUID,
+    data: ExplorationCreate,
+    request: Request,
+    user_email: str = Depends(require_permission("exploration.save")),
 ):
     """Create a new exploration for a graph context."""
-    user_email = get_current_user(request)
 
     # Build state dict, marking has_snapshot if a snapshot is provided
     state_dict = data.state.model_dump()
@@ -473,10 +481,12 @@ async def get_exploration(exploration_id: UUID, request: Request):
 
 @router.put("/api/explorations/{exploration_id}", response_model=ExplorationResponse)
 async def update_exploration(
-    exploration_id: UUID, data: ExplorationUpdate, request: Request
+    exploration_id: UUID,
+    data: ExplorationUpdate,
+    request: Request,
+    user_email: str = Depends(require_permission("exploration.save")),
 ):
     """Update an exploration (only owner can update)."""
-    user_email = get_current_user(request)
 
     if is_database_available():
         from sqlalchemy import select
