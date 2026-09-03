@@ -62,11 +62,38 @@ def store():
 
 
 @pytest.fixture
-def app(env, store):
+def warehouse_stub():
+    """Stands in for the Spark warehouse: a set of live 3-part table names."""
+    return {"tables": set(), "created": []}
+
+
+@pytest.fixture
+def app(env, store, warehouse_stub):
     app = FastAPI()
     app.add_middleware(AuthMiddleware)
     for module in (config, admin, graph_contexts, explorations, query_templates):
         app.include_router(module.router)
+
+    # Minimal stand-ins for the two graph-router endpoints the seed calls when
+    # it manages warehouse tables; the real ones need a running Spark.
+    @app.get("/api/datasets")
+    async def _datasets():
+        names = sorted(warehouse_stub["tables"])
+        return {
+            "tables": names,
+            "edge_tables": [n for n in names if "edges_" in n],
+            "node_tables": [n for n in names if "nodes_" in n],
+        }
+
+    @app.post("/api/dev/random-graph")
+    async def _random_graph(payload: dict):
+        prefix = f"{payload['catalog']}.{payload['schema_name']}"
+        edge = f"{prefix}.edges_{payload['table_name']}"
+        node = f"{prefix}.nodes_{payload['table_name']}"
+        warehouse_stub["tables"].update({edge, node})
+        warehouse_stub["created"].append(payload["table_name"])
+        return {"edge_table": edge, "node_table": node}
+
     return app
 
 
@@ -168,3 +195,61 @@ def test_cli_parser_defaults():
         5,
         42,
     )
+
+
+@pytest.mark.asyncio
+class TestWarehouseRepair:
+    """PostgreSQL keeps contexts across restarts; the Spark warehouse does not."""
+
+    async def test_rerun_rebuilds_tables_wiped_under_the_contexts(
+        self, in_process, store, warehouse_stub
+    ):
+        await _run(no_graphs=False, graphs=2)
+        assert sorted(warehouse_stub["created"]) == ["seed_0", "seed_1"]
+
+        # The warehouse is wiped (make clean, a fresh container, a reset
+        # metastore) while the contexts survive in the database.
+        warehouse_stub["tables"].clear()
+        warehouse_stub["created"].clear()
+
+        stats = await _run(no_graphs=False, graphs=2)
+        assert stats.skipped is True  # same parameters: nothing new is seeded
+        assert stats.repaired == 2
+        assert sorted(warehouse_stub["created"]) == ["seed_0", "seed_1"]
+        for ctx in store.graph_contexts.values():
+            assert ctx.edge_table_name in warehouse_stub["tables"]
+
+    async def test_rerun_with_live_tables_touches_nothing(
+        self, in_process, store, warehouse_stub
+    ):
+        await _run(no_graphs=False, graphs=2)
+        warehouse_stub["created"].clear()
+
+        stats = await _run(no_graphs=False, graphs=2)
+        assert stats.skipped is True
+        assert stats.repaired == 0
+        assert warehouse_stub["created"] == []
+
+    async def test_repairs_graphs_left_by_a_different_seed_run(
+        self, in_process, store, warehouse_stub
+    ):
+        """A `dev-seed-big` env keeps contexts on seed_5..7; a default rerun
+        must rebuild those too, not just the ones its own parameters cover."""
+        await _run(no_graphs=False, graphs=6)
+        warehouse_stub["tables"].clear()
+        warehouse_stub["created"].clear()
+
+        # Different parameters → a different tag → not skipped, but the older
+        # contexts' tables are still missing and still get rebuilt.
+        stats = await _run(no_graphs=False, graphs=2, contexts=4)
+        assert not stats.skipped
+        assert "seed_5" in warehouse_stub["created"]
+
+
+def test_graph_payload_depends_only_on_the_index():
+    from graphlagoon.dev.seed import graph_payload
+
+    assert graph_payload(6) == graph_payload(6)
+    assert graph_payload(6)["table_name"] == "seed_6"
+    assert graph_payload(6, "spark_catalog", "graphs")["catalog"] == "spark_catalog"
+    assert graph_payload(6)["model"] != graph_payload(7)["model"]

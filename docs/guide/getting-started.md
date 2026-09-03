@@ -74,6 +74,14 @@ by default), so there is something to click on immediately. The seed prints
 which e-mails to log in as; `dev@graphlagoon.local` is a local superuser.
 `SEED_DATA=0 make dev` starts empty; `make dev-seed` reseeds a running stack.
 
+Reseeding is also the repair. Contexts live in PostgreSQL (a Docker volume)
+while their tables live in the Spark warehouse (a local directory), so the two
+can be wiped independently — and a context whose table is gone fails every
+query with `TABLE_OR_VIEW_NOT_FOUND`. `make dev-seed` rebuilds any seeded table
+that went missing and leaves everything else alone. When the two have drifted
+too far to reconcile, `make dev-reset` throws the environment away and seeds it
+again from scratch.
+
 ## Your First Graph
 
 ### 1. Sign in
