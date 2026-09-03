@@ -17,7 +17,7 @@
  */
 import type { StylePresetSettings } from '@/types/graph';
 import type { PortableSourceSchema } from '@/types/portable';
-import { extractTemplateProperties } from './labelFormatter';
+import { extractTemplateProperties, extractTemplateMetrics } from './labelFormatter';
 
 export type StyleImportResult =
   | {
@@ -146,6 +146,11 @@ export interface StyleCompatibilityWarnings {
   missingEdgeTypes: string[];
   /** Property columns referenced by label templates / icon configs that do not exist here. */
   missingProperties: string[];
+  /**
+   * Metric refs used by label templates. Session-computed — always a warning,
+   * never a blocker: labels show the `[metric:x]` sentinel until computed.
+   */
+  sessionMetricRefs: string[];
 }
 
 /**
@@ -170,6 +175,7 @@ export function styleCompatibilityWarnings(
   const missingNodeTypes = new Set<string>();
   const missingEdgeTypes = new Set<string>();
   const missingProperties = new Set<string>();
+  const sessionMetricRefs = new Set<string>();
 
   for (const map of [settings.nodeTypeColors, settings.nodeTypeIcons, settings.nodePropertyIconConfigs]) {
     for (const type of Object.keys(map ?? {})) if (!nodeTypes.has(type)) missingNodeTypes.add(type);
@@ -189,6 +195,7 @@ export function styleCompatibilityWarnings(
       for (const prop of extractTemplateProperties(template)) {
         if (!known.has(prop)) missingProperties.add(prop);
       }
+      for (const ref of extractTemplateMetrics(template)) sessionMetricRefs.add(ref);
     };
     check(textFormat.defaults?.nodeTemplate, 'node');
     check(textFormat.defaults?.edgeTemplate, 'edge');
@@ -204,6 +211,7 @@ export function styleCompatibilityWarnings(
     missingNodeTypes: [...missingNodeTypes],
     missingEdgeTypes: [...missingEdgeTypes],
     missingProperties: [...missingProperties],
+    sessionMetricRefs: [...sessionMetricRefs],
   };
 }
 
@@ -211,6 +219,7 @@ export function hasCompatibilityWarnings(w: StyleCompatibilityWarnings): boolean
   return (
     w.missingNodeTypes.length > 0 ||
     w.missingEdgeTypes.length > 0 ||
-    w.missingProperties.length > 0
+    w.missingProperties.length > 0 ||
+    w.sessionMetricRefs.length > 0
   );
 }

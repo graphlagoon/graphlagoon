@@ -5,6 +5,7 @@ import { useContextMenu, type ContextMenuTarget } from './useContextMenu';
 import { useToast } from './useToast';
 import { useGraphStore } from '@/stores/graph';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
+import { useMetricsStore } from '@/stores/metrics';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useTemplateExecution } from './useTemplateExecution';
 import { matchesAction } from '@/utils/menuActionMatcher';
@@ -12,7 +13,10 @@ import { buildUrlFromTemplate, openUrl } from '@/utils/safeUrl';
 import {
   formatLabel,
   extractTemplateProperties,
+  extractTemplateMetrics,
   resolveItemValue,
+  resolveItemMetricValue,
+  type FormatOptions,
 } from '@/utils/labelFormatter';
 import type { Node, Edge, QueryTemplate } from '@/types/graph';
 import type {
@@ -32,25 +36,31 @@ const KIND_ICONS: Record<string, Component> = {
 /**
  * Resolve a run-query-template action's parameter values for a clicked item.
  * Bound values win over template defaults; a binding whose referenced
- * properties are missing/unloaded resolves to '' rather than leaking the
- * `[name]` sentinel. `missingRequired` lists required params still empty —
- * the caller opens the execute modal pre-filled instead of running directly.
+ * properties or metrics are missing/unloaded resolves to '' rather than
+ * leaking the `[name]`/`[metric:x]` sentinel. `missingRequired` lists
+ * required params still empty — the caller opens the execute modal
+ * pre-filled instead of running directly.
  */
 export function resolveTemplateParamValues(
   config: RunQueryTemplateActionConfig,
   template: QueryTemplate,
   targetType: 'node' | 'edge',
   item: Node | Edge,
+  options?: FormatOptions,
 ): { values: Record<string, string>; missingRequired: string[] } {
   const values: Record<string, string> = {};
   for (const parameter of template.parameters) {
     const binding = config.paramBindings[parameter.id];
     let bound = '';
     if (binding) {
-      const unresolved = extractTemplateProperties(binding).some(
-        (property) => resolveItemValue(targetType, item, property) === '',
-      );
-      bound = unresolved ? '' : formatLabel(binding, targetType, item);
+      const unresolved =
+        extractTemplateProperties(binding).some(
+          (property) => resolveItemValue(targetType, item, property) === '',
+        ) ||
+        extractTemplateMetrics(binding).some(
+          (ref) => resolveItemMetricValue(targetType, item, ref, options?.metrics) === '',
+        );
+      bound = unresolved ? '' : formatLabel(binding, targetType, item, options);
     }
     values[parameter.id] = bound || parameter.default || '';
   }
@@ -76,7 +86,11 @@ export function useConfigurableMenuActions() {
   const contextMenu = useContextMenu();
   const graphStore = useGraphStore();
   const actionsStore = useContextMenuActionsStore();
+  const metricsStore = useMetricsStore();
   const templatesStore = useQueryTemplatesStore();
+  // Same pattern as GraphCanvas3D: lets {metric:<ref>} work in copy-text,
+  // URL templates, param bindings, and metric: visibility conditions.
+  const labelOptions: FormatOptions = { metrics: metricsStore.metricResolver };
   const { executeTemplateAsGraph } = useTemplateExecution();
   const { success, error } = useToast();
 
@@ -108,7 +122,7 @@ export function useConfigurableMenuActions() {
     // Real graph items only — cluster synthetic nodes are not in graphStore.nodes
     const item = lookupItem(target);
     if (!item) return false;
-    if (!matchesAction(config, target.type, item)) return false;
+    if (!matchesAction(config, target.type, item, metricsStore.metricResolver)) return false;
     // A dangling/invisible template (deleted, or private to another user and
     // therefore never sent to this client) hides the action entirely.
     if (config.kind === 'run-query-template' && !findTemplate(config.templateId)) {
@@ -123,7 +137,7 @@ export function useConfigurableMenuActions() {
 
     switch (config.kind) {
       case 'open-url': {
-        const result = buildUrlFromTemplate(config.urlTemplate, target.type, item);
+        const result = buildUrlFromTemplate(config.urlTemplate, target.type, item, labelOptions);
         if (!result.ok) {
           error(
             result.missing
@@ -138,7 +152,7 @@ export function useConfigurableMenuActions() {
       case 'copy-text': {
         try {
           await navigator.clipboard.writeText(
-            formatLabel(config.textTemplate, target.type, item),
+            formatLabel(config.textTemplate, target.type, item, labelOptions),
           );
           success('Copied');
         } catch {
@@ -157,6 +171,7 @@ export function useConfigurableMenuActions() {
           template,
           target.type,
           item,
+          labelOptions,
         );
         if (missingRequired.length > 0) {
           // Let the user fill the rest in the execute modal, pre-filled with

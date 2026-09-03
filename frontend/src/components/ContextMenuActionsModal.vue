@@ -130,6 +130,10 @@
                 <li v-if="importWarnings.missingTemplateIds.length">
                   query template ids: {{ importWarnings.missingTemplateIds.join(', ') }}
                 </li>
+                <li v-if="importWarnings.sessionMetricRefs.length">
+                  metrics (session-computed — these actions only work after the
+                  metric is computed here): {{ importWarnings.sessionMetricRefs.join(', ') }}
+                </li>
               </ul>
               <button
                 class="btn-secondary"
@@ -227,8 +231,13 @@
                 <button class="btn-small danger" @click="editingConditions.splice(i, 1)">✕</button>
               </div>
               <datalist id="menu-action-properties">
-                <option v-for="p in availableProperties" :key="p" :value="p" />
+                <option v-for="p in availableConditionRefs" :key="p" :value="p" />
               </datalist>
+              <p v-if="availableMetricNames.length" class="hint">
+                Conditions and templates may reference metrics (metric:&lt;name&gt;).
+                Metrics are session-computed: actions referencing one stay hidden
+                (conditions) or fail with a "missing" message (URLs) until it is computed.
+              </p>
             </div>
 
             <!-- Kind-specific fields -->
@@ -324,6 +333,7 @@
 import { ref, computed, watch } from 'vue';
 import { X, Bot, Download } from 'lucide-vue-next';
 import { useGraphStore } from '@/stores/graph';
+import { useMetricsStore } from '@/stores/metrics';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
 import { useToast } from '@/composables/useToast';
@@ -347,6 +357,7 @@ defineProps<{ modelValue: boolean }>();
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
 
 const graphStore = useGraphStore();
+const metricsStore = useMetricsStore();
 const templatesStore = useQueryTemplatesStore();
 const store = useContextMenuActionsStore();
 const { success } = useToast();
@@ -362,9 +373,24 @@ const availableProperties = computed(() => {
   return [...names];
 });
 
+const availableMetricNames = computed(() => {
+  const names = new Set<string>();
+  for (const m of metricsStore.nodeMetrics) names.add(m.name);
+  for (const m of metricsStore.edgeMetrics) names.add(m.name);
+  return [...names];
+});
+
+/** Condition property suggestions: real columns plus `metric:<name>` refs. */
+const availableConditionRefs = computed(() => [
+  ...availableProperties.value,
+  ...availableMetricNames.value.map((name) => `metric:${name}`),
+]);
+
 const placeholderHint = computed(() => {
   const props = availableProperties.value.slice(0, 6).map((p) => `{prop:${p}}`);
-  return ['{node_id}', ...props].join(' ') + (availableProperties.value.length > 6 ? ' …' : '');
+  const metrics = availableMetricNames.value.slice(0, 2).map((name) => `{metric:${name}}`);
+  const more = availableProperties.value.length > 6 || availableMetricNames.value.length > 2;
+  return ['{node_id}', ...props, ...metrics].join(' ') + (more ? ' …' : '');
 });
 
 // ---------------------------------------------------------------------------

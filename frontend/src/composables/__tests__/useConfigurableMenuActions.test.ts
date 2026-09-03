@@ -382,4 +382,43 @@ describe('resolveTemplateParamValues', () => {
     expect(values.gene).toBe('');
     expect(missingRequired).toEqual(['gene']);
   });
+
+  it('metric bindings resolve through options.metrics', () => {
+    const resolver = (target: 'node' | 'edge', itemId: string, ref: string) =>
+      target === 'node' && itemId === 'n1' && ref === 'PageRank' ? 0.8 : undefined;
+    const template = makeTemplate({
+      parameters: [{ id: 'score', type: 'input', label: 'Score', required: true }],
+    });
+    const config = {
+      id: 'c', label: 'Run', enabled: true, kind: 'run-query-template',
+      templateId: template.id, match: { target: 'node' },
+      paramBindings: { score: '{metric:PageRank}' },
+    } as ContextMenuActionConfig & { paramBindings: Record<string, string> };
+    const item = { node_id: 'n1', node_type: 'Gene' };
+    const { values, missingRequired } = resolveTemplateParamValues(
+      config as never, template, 'node', item as never, { metrics: resolver },
+    );
+    expect(values.score).toBe('0.8');
+    expect(missingRequired).toEqual([]);
+  });
+
+  it('unresolved metric bindings fall back to the default, never the sentinel', () => {
+    const template = makeTemplate({
+      parameters: [{ id: 'score', type: 'input', label: 'Score', required: false, default: '1' }],
+    });
+    const config = {
+      id: 'c', label: 'Run', enabled: true, kind: 'run-query-template',
+      templateId: template.id, match: { target: 'node' },
+      paramBindings: { score: '{metric:PageRank}' },
+    };
+    const item = { node_id: 'n1', node_type: 'Gene' };
+    // No resolver at all (back-compat callers) and resolver without the metric
+    for (const options of [undefined, { metrics: () => undefined }]) {
+      const { values, missingRequired } = resolveTemplateParamValues(
+        config as never, template, 'node', item as never, options as never,
+      );
+      expect(values.score).toBe('1');
+      expect(missingRequired).toEqual([]);
+    }
+  });
 });

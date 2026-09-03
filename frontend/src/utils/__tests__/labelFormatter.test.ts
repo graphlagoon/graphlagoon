@@ -10,6 +10,9 @@ import {
   clearTemplateCache,
   extractTemplateProperties,
   extractTemplateMetrics,
+  resolveItemMetricValue,
+  parseMetricRef,
+  METRIC_REF_PREFIX,
 } from '@/utils/labelFormatter'
 import type { Node, Edge, TextFormatRule } from '@/types/graph'
 
@@ -1264,5 +1267,98 @@ describe('metric placeholders', () => {
     expect(list.map((p) => p.placeholder)).toContain('{metric:Degree}')
     expect(list.map((p) => p.placeholder)).toContain('{metric:Email domain}')
     expect(getAvailablePlaceholders('node', ['a']).map((p) => p.placeholder)).not.toContain('{metric:Degree}')
+  })
+})
+
+// ============================================================================
+// resolveItemMetricValue / parseMetricRef — shared plumbing for non-label
+// consumers (context-menu actions, cluster bindings, layouts)
+// ============================================================================
+
+describe('resolveItemMetricValue and parseMetricRef', () => {
+  const resolver = (target: 'node' | 'edge', itemId: string, ref: string) => {
+    if (target !== 'node' || itemId !== 'alice') return undefined
+    return ({ pr: 0.75, hub: true, tier: 'gold', empty: null } as Record<string, number | string | boolean | null>)[ref]
+  }
+
+  it('resolves by ref and stringifies numbers/booleans', () => {
+    expect(resolveItemMetricValue('node', makeNode(), 'pr', resolver)).toBe('0.75')
+    expect(resolveItemMetricValue('node', makeNode(), 'hub', resolver)).toBe('true')
+    expect(resolveItemMetricValue('node', makeNode(), 'tier', resolver)).toBe('gold')
+  })
+
+  it("missing resolver / metric / value / wrong target all resolve to '' (no sentinel)", () => {
+    expect(resolveItemMetricValue('node', makeNode(), 'pr')).toBe('')
+    expect(resolveItemMetricValue('node', makeNode(), 'nope', resolver)).toBe('')
+    expect(resolveItemMetricValue('node', makeNode(), 'empty', resolver)).toBe('')
+    expect(resolveItemMetricValue('edge', makeEdge(), 'pr', resolver)).toBe('')
+  })
+
+  it('parseMetricRef strips the prefix and rejects everything else', () => {
+    expect(parseMetricRef(`${METRIC_REF_PREFIX}PageRank`)).toBe('PageRank')
+    expect(parseMetricRef('metric:custom:score')).toBe('custom:score')
+    expect(parseMetricRef('prop:metric')).toBeNull()
+    expect(parseMetricRef('PageRank')).toBeNull()
+  })
+})
+
+// ============================================================================
+// Metric conditionals — {if:metric:<ref>...}
+// ============================================================================
+
+describe('metric conditionals', () => {
+  const values: Record<string, Record<string, number | string | boolean | null>> = {
+    PageRank: { alice: 0.8, bob: 0.1 },
+    'custom:tier': { alice: 'gold' },
+  }
+  const resolver = (target: 'node' | 'edge', itemId: string, ref: string) =>
+    target === 'node' ? values[ref]?.[itemId] : undefined
+
+  it('evaluates numeric comparisons by metric name', () => {
+    expect(formatLabel('{if:metric:PageRank>0.5|hub|leaf}', 'node', makeNode(), { metrics: resolver })).toBe('hub')
+    expect(
+      formatLabel('{if:metric:PageRank>0.5|hub|leaf}', 'node', makeNode({ node_id: 'bob' }), { metrics: resolver }),
+    ).toBe('leaf')
+  })
+
+  it('evaluates string ops and id-style refs (colons in the ref)', () => {
+    expect(formatLabel('{if:metric:custom:tier==gold|VIP|-}', 'node', makeNode(), { metrics: resolver })).toBe('VIP')
+    expect(
+      formatLabel('{if:metric:custom:tier|startsWith:go|yes|no}', 'node', makeNode(), { metrics: resolver }),
+    ).toBe('yes')
+  })
+
+  it('unknown metric or missing resolver falls to the false branch', () => {
+    expect(formatLabel('{if:metric:nope>1|a|b}', 'node', makeNode(), { metrics: resolver })).toBe('b')
+    expect(formatLabel('{if:metric:PageRank>0.5|a|b}', 'node', makeNode())).toBe('b')
+  })
+
+  it('wrong-target metric falls to the false branch', () => {
+    expect(formatLabel('{if:metric:PageRank>0|a|b}', 'edge', makeEdge(), { metrics: resolver })).toBe('b')
+  })
+
+  it('branches nest placeholders, including other metrics', () => {
+    expect(
+      formatLabel('{if:metric:PageRank>0.5|{metric:custom:tier|upper}|{node_id}}', 'node', makeNode(), {
+        metrics: resolver,
+      }),
+    ).toBe('GOLD')
+  })
+
+  it('never reads item.properties for a metric condition', () => {
+    const node = makeNode({ properties: { PageRank: 999 } })
+    expect(
+      formatLabel('{if:metric:PageRank>1|big|small}', 'node', node, { metrics: resolver }),
+    ).toBe('small')
+  })
+
+  it('extractTemplateProperties ignores metric conditions; extractTemplateMetrics collects them', () => {
+    const tpl = '{if:metric:PageRank>0.5|{prop:name}|-} {if:prop:kind==vip|x|y}'
+    expect(extractTemplateProperties(tpl).sort()).toEqual(['kind', 'name'])
+    expect(extractTemplateMetrics(tpl)).toEqual(['PageRank'])
+  })
+
+  it('validateTemplate accepts metric conditionals', () => {
+    expect(validateTemplate('{if:metric:PageRank>0.5|hub|leaf}').valid).toBe(true)
   })
 })

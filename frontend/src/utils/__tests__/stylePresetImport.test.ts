@@ -134,4 +134,19 @@ describe('styleCompatibilityWarnings', () => {
     const w = styleCompatibilityWarnings({ aesthetics: { nodeSize: 10 } }, CURRENT);
     expect(hasCompatibilityWarnings(w)).toBe(false);
   });
+
+  it('collects label-template metric refs as session warnings, not missing columns', () => {
+    const w = styleCompatibilityWarnings(
+      {
+        textFormat: {
+          defaults: { nodeTemplate: '{prop:name} ({metric:PageRank})', edgeTemplate: '{if:metric:Weight>1|+|-}' },
+          rules: [],
+        },
+      } as never,
+      CURRENT,
+    );
+    expect(w.sessionMetricRefs.sort()).toEqual(['PageRank', 'Weight']);
+    expect(w.missingProperties).toEqual([]);
+    expect(hasCompatibilityWarnings(w)).toBe(true);
+  });
 });
