@@ -127,6 +127,15 @@ Log and square-root scales compress the top of the range, which is what
 you want for skewed metrics like PageRank — with a linear scale one hub
 node dwarfs everything and the rest of the graph reads as uniform dots.
 
+![Node Color mapping driven by the built-in Degree metric](/screenshots/communities-metrics-color-mapping.png)
+
+**Node Color** paints nodes along a two-color gradient driven by a numeric
+metric — pick the metric, the low/high colors and a scale, and *None*
+returns to normal coloring. When a node has a value, the gradient color
+**wins over community and type colors** (you turned it on explicitly;
+community coloring is ambient) — nodes *without* a value keep their normal
+color, which conveniently flags coverage gaps. Off by default.
+
 **Edge Weight** works the same way for edges: pick an edge metric (e.g.
 Edge Betweenness) and a width range, and edge thickness follows the
 metric. Edges the metric has no value for keep the base width from the
@@ -135,7 +144,15 @@ Style panel.
 The mapping is part of the graph's look, so
 [style presets](./style-presets.md) and explorations save and restore it.
 A restored mapping that names a metric not yet computed on the current
-graph falls back to base sizing until that metric is computed.
+graph falls back to base sizing (or normal coloring) until that metric is
+computed — the panel says so next to the select.
+
+Metrics reach beyond the mapping tab: label templates and context-menu
+actions accept `{metric:<name>}` and `{if:metric:...}` (see
+[Labels](./labels.md) and [Context-menu actions](./context-menu-actions.md)),
+cluster programs get a `metric()` lookup ([Clusters](./clusters.md)), and
+the hive layout's *Axes by* / *Position by* selects accept metrics
+alongside properties.
 
 ### Two honest caveats
 
