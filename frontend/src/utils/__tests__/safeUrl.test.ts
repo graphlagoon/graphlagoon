@@ -93,3 +93,68 @@ describe('openUrl', () => {
     expect(assignSpy).toHaveBeenCalledWith('https://x.com');
   });
 });
+
+describe('metric refs in URL templates', () => {
+  const RAW_ID = 'id with space';
+  const metricValues: Record<string, string | number> = {
+    score: 'a b&c=d/e?f#g',
+    PR: 0.5,
+  };
+  // Keyed by the RAW item id — proves the lookup never sees the encoded id.
+  const resolver = (target: 'node' | 'edge', itemId: string, ref: string) =>
+    target === 'node' && itemId === RAW_ID ? metricValues[ref] : undefined;
+
+  it('interpolates metric values URL-encoded', () => {
+    const node = createNode({ node_id: RAW_ID });
+    const result = buildUrlFromTemplate('https://x.com/?s={metric:score}', 'node', node, {
+      metrics: resolver,
+    });
+    expect(result).toEqual({
+      ok: true,
+      url: `https://x.com/?s=${encodeURIComponent('a b&c=d/e?f#g')}`,
+    });
+  });
+
+  it('uses the raw item id for the metric lookup even when the id needs encoding', () => {
+    const node = createNode({ node_id: RAW_ID });
+    const result = buildUrlFromTemplate('https://x.com/{node_id}?pr={metric:PR}', 'node', node, {
+      metrics: resolver,
+    });
+    expect(result).toEqual({ ok: true, url: 'https://x.com/id%20with%20space?pr=0.5' });
+  });
+
+  it('reports missing metrics as metric:<ref>, alongside missing properties', () => {
+    const node = createNode({ node_id: RAW_ID, properties: { present: 'x' } });
+    const result = buildUrlFromTemplate(
+      'https://x.com/{prop:present}/{prop:absent}/{metric:nope}',
+      'node',
+      node,
+      { metrics: resolver },
+    );
+    expect(result).toEqual({ ok: false, missing: ['absent', 'metric:nope'] });
+  });
+
+  it('without a resolver every metric ref is missing (never a sentinel URL)', () => {
+    const node = createNode({ node_id: RAW_ID });
+    const result = buildUrlFromTemplate('https://x.com/{metric:PR}', 'node', node);
+    expect(result).toEqual({ ok: false, missing: ['metric:PR'] });
+  });
+
+  it('guards metric conditional refs too', () => {
+    const node = createNode({ node_id: RAW_ID });
+    const ok = buildUrlFromTemplate(
+      'https://x.com/{if:metric:PR>0.1|hub|leaf}',
+      'node',
+      node,
+      { metrics: resolver },
+    );
+    expect(ok).toEqual({ ok: true, url: 'https://x.com/hub' });
+    const missing = buildUrlFromTemplate(
+      'https://x.com/{if:metric:nope>0.1|hub|leaf}',
+      'node',
+      node,
+      { metrics: resolver },
+    );
+    expect(missing).toEqual({ ok: false, missing: ['metric:nope'] });
+  });
+});

@@ -9,6 +9,7 @@
  * - With modifiers, chainable left-to-right: {prop:name|upper}, {prop:url|split:/:2|upper}
  * - Extraction: {node_id|split:_:0}, {prop:code|slice:0:5}, {prop:email|match:/@(.+)$/:1}
  * - Conditionals: {if:prop:x>10|High|Low}, {if:prop:status==active|Active|Inactive}
+ * - Metric conditionals: {if:metric:pagerank>0.5|Hub|Leaf} — resolved via FormatOptions.metrics
  * - Regex conditionals: {if:prop:code|matches:/^BR/|Brasil|Outro}
  * - Date formatting: {date:prop:created_at|DD/MM/YYYY}
  * - Date conditionals: {if:prop:date|daysAgo:<7|Recent|Old}
@@ -86,7 +87,14 @@ interface ParsedToken {
 }
 
 interface ParsedCondition {
+  /** Bare column name or, when `fromMetric`, bare metric ref (no prefix). */
   property: string;
+  /**
+   * True for `if:metric:<ref>...` conditions. The prefix is stripped from
+   * `property` so extractTemplateProperties (and every missing-property guard
+   * built on it) never mistakes a metric ref for a real table column.
+   */
+  fromMetric?: boolean;
   operator: TextFormatConditionOperator;
   value: string | number;
   value2?: string; // For dateBetween
@@ -241,21 +249,22 @@ function evaluateCondition(condition: ParsedCondition, value: string): boolean {
 // ============================================================================
 
 function parseConditionExpression(expr: string): ParsedCondition | null {
-  // Match patterns like: prop:field>10, prop:field==value, prop:date|daysAgo:<7
+  // Match patterns like: prop:field>10, metric:pagerank>0.5, prop:date|daysAgo:<7
 
   // Pipe-form operators: prop:field|daysAgo:<7, prop:field|matches:/^BR/i,
   // prop:field|contains:text (string ops accept both pipe and inline forms)
   const pipeMatch = expr.match(
-    /^prop:([^|]+)\|(daysAgo|dateAfter|dateBefore|dateBetween|matches|contains|startsWith|endsWith):(.+)$/,
+    /^(prop|metric):([^|]+)\|(daysAgo|dateAfter|dateBefore|dateBetween|matches|contains|startsWith|endsWith):(.+)$/,
   );
   if (pipeMatch) {
-    const [, property, operator, value] = pipeMatch;
+    const [, namespace, property, operator, value] = pipeMatch;
+    const fromMetric = namespace === 'metric' || undefined;
     if (operator === 'dateBetween') {
       const [v1, v2] = value.split(':');
-      return { property, operator: operator as TextFormatConditionOperator, value: v1, value2: v2 };
+      return { property, fromMetric, operator: operator as TextFormatConditionOperator, value: v1, value2: v2 };
     }
     if (operator === 'matches') {
-      const condition: ParsedCondition = { property, operator, value };
+      const condition: ParsedCondition = { property, fromMetric, operator, value };
       if (!value.startsWith('/')) {
         condition.regex = null;
         condition.regexError = 'matches: pattern must be slash-delimited, e.g. matches:/pattern/';
@@ -268,14 +277,15 @@ function parseConditionExpression(expr: string): ParsedCondition | null {
       }
       return condition;
     }
-    return { property, operator: operator as TextFormatConditionOperator, value };
+    return { property, fromMetric, operator: operator as TextFormatConditionOperator, value };
   }
 
   // Standard operators
-  const opMatch = expr.match(/^prop:([^=!<>]+)(==|!=|>=|<=|>|<|contains|startsWith|endsWith)(.+)$/);
+  const opMatch = expr.match(/^(prop|metric):([^=!<>]+)(==|!=|>=|<=|>|<|contains|startsWith|endsWith)(.+)$/);
   if (opMatch) {
-    const [, property, operator, value] = opMatch;
-    return { property, operator: operator as TextFormatConditionOperator, value };
+    const [, namespace, property, operator, value] = opMatch;
+    const fromMetric = namespace === 'metric' || undefined;
+    return { property, fromMetric, operator: operator as TextFormatConditionOperator, value };
   }
 
   return null;
@@ -651,6 +661,29 @@ export function resolveItemValue(
   return getPropertyValue({ target, item }, property, fromProps);
 }
 
+/** Prefix that marks a metric reference (vs a property/column name). */
+export const METRIC_REF_PREFIX = 'metric:';
+
+/** Return the bare metric ref when `s` is `metric:<ref>`, else null. */
+export function parseMetricRef(s: string): string | null {
+  return s.startsWith(METRIC_REF_PREFIX) ? s.slice(METRIC_REF_PREFIX.length) : null;
+}
+
+/**
+ * Resolve a metric ref for an item — the exact lookup `{metric:<ref>}` uses.
+ * Companion of resolveItemValue for the metric namespace: missing resolver,
+ * unknown metric, wrong target, or nullish value all resolve to '' (no
+ * `[metric:x]` sentinel here — that is label-render-only).
+ */
+export function resolveItemMetricValue(
+  target: 'node' | 'edge',
+  item: Node | Edge,
+  ref: string,
+  metrics?: MetricResolver,
+): string {
+  return getMetricValue({ target, item, metrics }, ref);
+}
+
 /** Resolve a `{metric:<ref>}` token to its display string ('' when missing). */
 function getMetricValue(ctx: FormatContext, ref: string): string {
   if (!ctx.metrics) return '';
@@ -695,8 +728,10 @@ function formatWithTokens(tokens: ParsedToken[], ctx: FormatContext): string {
 
       case 'conditional': {
         if (!token.condition) return '';
-        // Conditions are always written as `prop:field...`
-        const propValue = getPropertyValue(ctx, token.condition.property, true);
+        // Conditions read a `prop:` column or, with `fromMetric`, a metric ref.
+        const propValue = token.condition.fromMetric
+          ? getMetricValue(ctx, token.condition.property)
+          : getPropertyValue(ctx, token.condition.property, true);
         const result = evaluateCondition(token.condition, propValue);
         const valueToFormat = result ? (token.trueValue || '') : (token.falseValue || '');
         const innerTokens = parseTemplate(valueToFormat);
@@ -913,9 +948,11 @@ export function extractTemplateProperties(template: string): string[] {
         properties.add(token.property);
       }
       if (token.type === 'conditional') {
-        // parseConditionExpression only ever matches a `prop:`-prefixed
-        // expression, so a present condition.property is always a real column.
-        if (token.condition?.property) properties.add(token.condition.property);
+        // A condition.property is a real column only for `prop:` conditions;
+        // `metric:` conditions carry a metric ref (see extractTemplateMetrics).
+        if (token.condition?.property && !token.condition.fromMetric) {
+          properties.add(token.condition.property);
+        }
         // trueValue/falseValue are themselves template strings and may nest
         // further placeholders, e.g. {if:prop:x>10|{prop:y|upper}|-}.
         if (token.trueValue) walk(token.trueValue);
@@ -929,8 +966,9 @@ export function extractTemplateProperties(template: string): string[] {
 }
 
 /**
- * Extract every metric reference (`{metric:x}`) a template uses, including
- * inside conditional branches. Companion of extractTemplateProperties.
+ * Extract every metric reference a template uses — `{metric:x}` placeholders
+ * and `{if:metric:x...}` conditions, including inside conditional branches.
+ * Companion of extractTemplateProperties.
  */
 export function extractTemplateMetrics(template: string): string[] {
   const refs = new Set<string>();
@@ -941,6 +979,9 @@ export function extractTemplateMetrics(template: string): string[] {
         refs.add(token.property);
       }
       if (token.type === 'conditional') {
+        if (token.condition?.fromMetric && token.condition.property) {
+          refs.add(token.condition.property);
+        }
         if (token.trueValue) walk(token.trueValue);
         if (token.falseValue) walk(token.falseValue);
       }

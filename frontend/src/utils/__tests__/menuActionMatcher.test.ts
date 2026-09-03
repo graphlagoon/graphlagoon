@@ -140,3 +140,64 @@ describe('matchesAction', () => {
     expect(matchesAction(config, 'node', createNode({ node_type: 'Company' }))).toBe(false);
   });
 });
+
+describe('metric conditions (metric:<ref> in condition.property)', () => {
+  const values: Record<string, Record<string, number | string | null>> = {
+    PageRank: { n1: 0.8, n2: 0.1 },
+    tier: { n1: 'gold' },
+    nullish: { n1: null },
+  };
+  const resolver = (target: 'node' | 'edge', itemId: string, ref: string) =>
+    target === 'node' ? values[ref]?.[itemId] : undefined;
+
+  function metricConfig(property: string, operator: string, value?: string) {
+    return makeConfig({
+      match: {
+        target: 'node',
+        propertyConditions: [{ property, operator: operator as never, value }],
+      },
+    });
+  }
+
+  it('equals / not-equals / contains compare the stringified metric value', () => {
+    const n1 = createNode({ node_id: 'n1' });
+    expect(matchesAction(metricConfig('metric:PageRank', 'equals', '0.8'), 'node', n1, resolver)).toBe(true);
+    expect(matchesAction(metricConfig('metric:PageRank', 'not-equals', '0.8'), 'node', n1, resolver)).toBe(false);
+    expect(matchesAction(metricConfig('metric:tier', 'contains', 'gol'), 'node', n1, resolver)).toBe(true);
+  });
+
+  it('not-empty holds only when the item has a value', () => {
+    expect(
+      matchesAction(metricConfig('metric:PageRank', 'not-empty'), 'node', createNode({ node_id: 'n1' }), resolver),
+    ).toBe(true);
+    expect(
+      matchesAction(metricConfig('metric:PageRank', 'not-empty'), 'node', createNode({ node_id: 'n3' }), resolver),
+    ).toBe(false);
+  });
+
+  it('exists means computed AND has a value for this item (null counts as no value)', () => {
+    expect(
+      matchesAction(metricConfig('metric:PageRank', 'exists'), 'node', createNode({ node_id: 'n1' }), resolver),
+    ).toBe(true);
+    expect(
+      matchesAction(metricConfig('metric:uncomputed', 'exists'), 'node', createNode({ node_id: 'n1' }), resolver),
+    ).toBe(false);
+    expect(
+      matchesAction(metricConfig('metric:PageRank', 'exists'), 'node', createNode({ node_id: 'n3' }), resolver),
+    ).toBe(false);
+  });
+
+  it('never reads a same-named property for a metric: condition', () => {
+    const node = createNode({ node_id: 'n3', properties: { PageRank: '0.9' } });
+    expect(matchesAction(metricConfig('metric:PageRank', 'not-empty'), 'node', node, resolver)).toBe(false);
+  });
+
+  it('without a resolver metric conditions fail (action hidden, back-compat)', () => {
+    expect(
+      matchesAction(metricConfig('metric:PageRank', 'not-empty'), 'node', createNode({ node_id: 'n1' })),
+    ).toBe(false);
+    expect(
+      matchesAction(metricConfig('metric:PageRank', 'exists'), 'node', createNode({ node_id: 'n1' })),
+    ).toBe(false);
+  });
+});

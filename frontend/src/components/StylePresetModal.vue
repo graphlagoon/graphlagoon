@@ -482,6 +482,10 @@ onMounted(refresh);
                 <li v-if="importWarnings.missingProperties.length">
                   properties: {{ importWarnings.missingProperties.join(', ') }}
                 </li>
+                <li v-if="importWarnings.sessionMetricRefs.length">
+                  metrics (session-computed — labels show a placeholder until
+                  the metric is computed here): {{ importWarnings.sessionMetricRefs.join(', ') }}
+                </li>
               </ul>
               <button
                 class="btn btn-outline btn-sm"

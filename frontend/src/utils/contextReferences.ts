@@ -38,6 +38,12 @@ function stripPropPrefix(value: string): string {
   return value.startsWith('prop:') ? value.slice(5) : value;
 }
 
+// `metric:<name>` layout keys reference session-computed metrics, not
+// property columns — never report them as dangling column references.
+function isMetricKey(value: string): boolean {
+  return value.startsWith('metric:');
+}
+
 /**
  * Walk every structured field of an exploration's state (plus its active
  * cluster programs, passed separately since they live in the cluster store,
@@ -92,7 +98,7 @@ export function collectPropertyReferences(
 
   const lmc = state.layout_mode_config;
   if (lmc?.hive) {
-    if (lmc.hive.axisKey && !LAYOUT_SENTINELS.has(lmc.hive.axisKey)) {
+    if (lmc.hive.axisKey && !LAYOUT_SENTINELS.has(lmc.hive.axisKey) && !isMetricKey(lmc.hive.axisKey)) {
       refs.push({
         location: 'layout_mode_config.hive.axisKey',
         property: stripPropPrefix(lmc.hive.axisKey),
@@ -100,7 +106,7 @@ export function collectPropertyReferences(
         certain: true,
       });
     }
-    if (lmc.hive.positionKey && !LAYOUT_SENTINELS.has(lmc.hive.positionKey)) {
+    if (lmc.hive.positionKey && !LAYOUT_SENTINELS.has(lmc.hive.positionKey) && !isMetricKey(lmc.hive.positionKey)) {
       refs.push({
         location: 'layout_mode_config.hive.positionKey',
         property: stripPropPrefix(lmc.hive.positionKey),
@@ -109,7 +115,7 @@ export function collectPropertyReferences(
       });
     }
   }
-  if (lmc?.ego?.ringOrdering === 'property' && lmc.ego.ringOrderingKey) {
+  if (lmc?.ego?.ringOrdering === 'property' && lmc.ego.ringOrderingKey && !isMetricKey(lmc.ego.ringOrderingKey)) {
     refs.push({
       location: 'layout_mode_config.ego.ringOrderingKey',
       property: stripPropPrefix(lmc.ego.ringOrderingKey),

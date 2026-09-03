@@ -226,3 +226,39 @@ describe('findRawQueryReferences', () => {
     expect(refs).toEqual([])
   })
 })
+
+describe('metric refs are session refs, never dangling column references', () => {
+  it('label templates with metric placeholders/conditions yield no property refs', () => {
+    const state = createExplorationState({
+      textFormat: {
+        rules: [],
+        defaults: {
+          nodeTemplate: '{metric:PageRank} {if:metric:Weight>1|{prop:name}|-}',
+          edgeTemplate: '',
+        },
+      },
+    })
+    const props = collectPropertyReferences(state).map((r) => r.property)
+    expect(props).toEqual(['name'])
+  })
+
+  it('metric: hive keys and ego ordering keys are not property references', () => {
+    const state = createExplorationState({
+      layout_mode_config: {
+        hive: { axisKey: 'metric:tier', positionKey: 'metric:PageRank' },
+        ego: { ringOrdering: 'property', ringOrderingKey: 'metric:PageRank' },
+      },
+    } as never)
+    expect(collectPropertyReferences(state)).toEqual([])
+  })
+
+  it('metric: cluster param bindings are not property references', () => {
+    const refs = collectPropertyReferences(createExplorationState({}), [
+      {
+        program_name: 'p',
+        parameters: [{ id: 'x', node_binding: 'metric:PageRank' }],
+      } as never,
+    ])
+    expect(refs).toEqual([])
+  })
+})

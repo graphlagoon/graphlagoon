@@ -14,7 +14,7 @@ import type {
 import { isKnownActionKind } from '@/types/contextMenuActions';
 import type { PortableSourceSchema } from '@/types/portable';
 import { validateUrlTemplate } from './safeUrl';
-import { extractTemplateProperties } from './labelFormatter';
+import { extractTemplateProperties, extractTemplateMetrics, parseMetricRef } from './labelFormatter';
 
 const TARGETS = ['node', 'edge', 'both'];
 const OPERATORS = ['exists', 'not-empty', 'equals', 'not-equals', 'contains'];
@@ -185,6 +185,12 @@ export interface ActionCompatibilityWarnings {
   missingProperties: string[];
   /** `run-query-template` ids that no template of this context has. */
   missingTemplateIds: string[];
+  /**
+   * Metric refs used in templates or `metric:` conditions. Metrics are
+   * session-computed, so this is always a warning (never an import blocker):
+   * the action will not work until the metric is computed here.
+   */
+  sessionMetricRefs: string[];
 }
 
 /**
@@ -211,18 +217,27 @@ export function actionCompatibilityWarnings(
   const missingEdgeTypes = new Set<string>();
   const missingProperties = new Set<string>();
   const missingTemplateIds = new Set<string>();
+  const sessionMetricRefs = new Set<string>();
 
   const checkTemplate = (template: string | undefined) => {
     if (typeof template !== 'string') return;
     for (const prop of extractTemplateProperties(template)) {
       if (!properties.has(prop)) missingProperties.add(prop);
     }
+    for (const ref of extractTemplateMetrics(template)) sessionMetricRefs.add(ref);
   };
 
   for (const config of configs) {
     for (const t of config.match.nodeTypes ?? []) if (!nodeTypes.has(t)) missingNodeTypes.add(t);
     for (const t of config.match.relationshipTypes ?? []) if (!edgeTypes.has(t)) missingEdgeTypes.add(t);
     for (const c of config.match.propertyConditions ?? []) {
+      // metric: conditions are session refs, not columns — flagging them as a
+      // missing property would always false-flag; they get the metric warning.
+      const metricRef = parseMetricRef(c.property);
+      if (metricRef != null) {
+        sessionMetricRefs.add(metricRef);
+        continue;
+      }
       if (!properties.has(c.property) && !BUILTIN_PROPERTIES.has(c.property)) {
         missingProperties.add(c.property);
       }
@@ -240,6 +255,7 @@ export function actionCompatibilityWarnings(
     missingEdgeTypes: [...missingEdgeTypes],
     missingProperties: [...missingProperties],
     missingTemplateIds: [...missingTemplateIds],
+    sessionMetricRefs: [...sessionMetricRefs],
   };
 }
 
@@ -258,6 +274,7 @@ export function hasActionCompatibilityWarnings(w: ActionCompatibilityWarnings): 
     w.missingNodeTypes.length > 0 ||
     w.missingEdgeTypes.length > 0 ||
     w.missingProperties.length > 0 ||
-    w.missingTemplateIds.length > 0
+    w.missingTemplateIds.length > 0 ||
+    w.sessionMetricRefs.length > 0
   );
 }

@@ -207,4 +207,23 @@ describe('actionCompatibilityWarnings', () => {
     );
     expect(hasActionCompatibilityWarnings(w)).toBe(false);
   });
+
+  it('collects metric refs as session warnings, never as missing columns', () => {
+    const w = actionCompatibilityWarnings(
+      [
+        {
+          id: '1', label: 'Search', enabled: true, kind: 'open-url' as const, openIn: 'new-tab' as const,
+          match: {
+            target: 'node' as const,
+            propertyConditions: [{ property: 'metric:PageRank', operator: 'not-empty' as const }],
+          },
+          urlTemplate: 'https://x.com/?s={metric:custom:score}&n={prop:full_name}',
+        },
+      ],
+      CURRENT,
+    );
+    expect(w.sessionMetricRefs.sort()).toEqual(['PageRank', 'custom:score']);
+    expect(w.missingProperties).toEqual([]);
+    expect(hasActionCompatibilityWarnings(w)).toBe(true);
+  });
 });
