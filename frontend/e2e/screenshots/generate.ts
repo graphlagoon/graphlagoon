@@ -176,7 +176,12 @@ const DEMO_PRESETS = {
     edgeTypeColors: {},
     textFormat: {
       rules: [],
-      defaults: { nodeTemplate: '{prop:name}', edgeTemplate: '{relationship_type}' },
+      defaults: {
+        nodeTemplate: '{prop:name}',
+        edgeTemplate: '{relationship_type}',
+        nodeTooltipTemplate: '{prop:name}{br}{prop:role} - {prop:city}',
+        edgeTooltipTemplate: '',
+      },
     },
     layout_algorithm: 'forceAtlas2',
     layout_mode_config: { ego: {}, hive: {}, hierarchical: {} },
@@ -363,6 +368,37 @@ const SCENES: Scene[] = [
     prepare: async (page) => {
       await waitForGraphSettled(page);
       await openPanel(page, 'Labels');
+    },
+  },
+  {
+    guide: 'labels',
+    scene: 'rule-modal',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Labels');
+      await page.locator('.add-rule-btn').click();
+      const modal = page.getByTestId('rule-editor-modal');
+      await expect(modal).toBeVisible();
+      // Show the tooltip-surface flow: per-type tooltip with a live preview.
+      await modal.getByTestId('rule-name').fill('Person tooltips');
+      await modal.getByTestId('rule-surface').selectOption('tooltip');
+      await modal.getByTestId('rule-types').getByText('Person', { exact: true }).click();
+      await modal.getByTestId('rule-template').fill('{prop:name}{br}{prop:role}');
+      // Let the preview debounce render.
+      await page.waitForTimeout(600);
+    },
+  },
+  {
+    guide: 'labels',
+    scene: 'tooltip',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      // The docs style preset carries a multi-line node tooltip template.
+      await hoverNode(page, 'person-0');
+      await expect(page.getByTestId('graph-tooltip')).toBeVisible();
+      await page.waitForTimeout(200);
     },
   },
   {

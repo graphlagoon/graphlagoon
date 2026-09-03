@@ -221,7 +221,8 @@ The strip under the canvas is the graph's honesty panel:
 
 - `N nodes · M edges` — counts of what's visible (filters applied).
 - `loading properties…` — the graph drew before node properties finished
-  loading; tooltips may be briefly empty. Clicking a node prioritizes it.
+  loading; [tooltips](./labels.md#hover-tooltips) may briefly show `[prop:x]`
+  sentinels. Hovering or clicking a node prioritizes it.
   This progressive load is controlled in **Behaviors → property loading**
   (`auto`, the default, uses it only when the node table is wide enough to
   pay off).
