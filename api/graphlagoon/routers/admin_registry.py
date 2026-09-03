@@ -74,6 +74,7 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "neptune_tls_verify": "public",
     "neptune_http_timeout": "public",
     "neptune_discovery_sample_limit": "public",
+    "group_cache_ttl_seconds": "public",
 }
 
 # Tables wiped by "clear environment", in an order that respects foreign keys
@@ -84,6 +85,10 @@ CLEARABLE_TABLES: tuple[str, ...] = (
     "graph_context_shares",
     "query_templates",
     "graph_contexts",
+    "permission_rules",
+    "group_members",
+    "permission_modes",
+    "groups",
     "users",
 )
 

@@ -1,4 +1,12 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    DateTime,
+    ForeignKey,
+    JSON,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -178,3 +186,85 @@ class UsageLog(Base):
     resource_id = Column(UUID(as_uuid=True))
     log_metadata = Column("metadata", JSON)  # 'metadata' is reserved in SQLAlchemy
     created_at = Column(DateTime, server_default=func.now())
+
+
+class Group(Base):
+    """A named principal for permission rules (services.permissions).
+
+    Members are emails and/or Databricks workspace group names — a user
+    belongs to the group through either kind. Superuser-managed only.
+    """
+
+    __tablename__ = "groups"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    members = relationship(
+        "GroupMember", back_populates="group", cascade="all, delete-orphan"
+    )
+    rules = relationship(
+        "PermissionRule", back_populates="group", cascade="all, delete-orphan"
+    )
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    __table_args__ = (
+        UniqueConstraint(
+            "group_id", "kind", "value", name="uq_group_members_group_kind_value"
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id = Column(
+        UUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), nullable=False
+    )
+    # "email" (no FK — users identified by headers in Databricks mode) or
+    # "databricks_group" (a workspace group displayName, resolved via SCIM).
+    # Values are stored lowercased; matching is exact, no wildcards.
+    kind = Column(String(20), nullable=False)
+    value = Column(String(255), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    group = relationship("Group", back_populates="members")
+
+
+class PermissionMode(Base):
+    """Per-permission mode: "everyone" | "restricted". No row ⇒ "everyone",
+    so an empty table (and any pre-feature deployment) behaves exactly as
+    before the permission existed."""
+
+    __tablename__ = "permission_modes"
+
+    permission_id = Column(String(100), primary_key=True)
+    mode = Column(String(20), nullable=False, server_default="everyone")
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class PermissionRule(Base):
+    """allow/deny of one permission for one group. Deny always wins; allow
+    only matters when the permission's mode is "restricted"."""
+
+    __tablename__ = "permission_rules"
+    __table_args__ = (
+        UniqueConstraint(
+            "permission_id", "group_id", name="uq_permission_rules_permission_group"
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    permission_id = Column(String(100), nullable=False, index=True)
+    group_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    effect = Column(String(10), nullable=False)  # "allow" | "deny"
+    created_at = Column(DateTime, server_default=func.now())
+
+    group = relationship("Group", back_populates="rules")
