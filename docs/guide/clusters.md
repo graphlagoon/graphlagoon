@@ -42,7 +42,19 @@ edges            // [{ edge_id, src, dst, relationship_type, properties? }]
 selectedNodeIds  // ids currently selected in the canvas
 selectedEdgeIds
 params           // your declared parameters, already type-coerced
+metric           // (ref, id) => value — session-computed metrics by name or id
+metrics          // [{ id, name, target, valueType }] — what's computed right now
 ```
+
+`metric('PageRank', node.node_id)` reads a metric computed in the [Metrics
+panel](./communities-metrics.md) — built-in degree, algorithm runs, or custom
+metrics. It returns `undefined` when the metric is not computed or has no
+value for that item, so guard with `?? 0` (or skip the node). A name shared
+by a node metric and an edge metric resolves node-first; pass the metric's id
+to disambiguate. Metrics are session-only — a saved program that depends on
+one does nothing useful until the metric is recomputed. Don't declare your
+own top-level `const metric` or `const metrics`; both names are already in
+scope.
 
 It must **return an array of clusters**:
 
@@ -82,8 +94,9 @@ optional defaults, required flag) and read them as `params.<id>`. A
 program with parameters opens a **Run** dialog; one without runs
 immediately.
 
-A parameter can also be **bound to a node** — its id, its type, or a
-property. That's what powers the next section.
+A parameter can also be **bound to a node** — its id, its type, a
+property, or a session-computed metric (`metric:<name>`). That's what
+powers the next section.
 
 ## Running from the right-click menu
 
@@ -97,7 +110,10 @@ Menu runs execute the program as a **community algorithm**: nodes are
 recolored by group instead of collapsed, and a toast summarizes the result
 (see [Communities & Metrics](./communities-metrics.md)). A missing bound
 property aborts the run with a toast naming the property, rather than
-running with a hole in the inputs.
+running with a hole in the inputs. A `metric:` binding aborts the same way
+when the metric has no value for the clicked node — including after a
+reload, since metrics are session-computed; the toast says to recompute it
+in the Metrics panel.
 
 ## Where programs are saved
 

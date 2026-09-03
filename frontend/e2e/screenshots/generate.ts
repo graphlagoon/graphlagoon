@@ -418,6 +418,21 @@ const SCENES: Scene[] = [
     },
   },
   {
+    // Visual Mapping tab with the Node Color section active: built-in Degree
+    // driving the gradient, low/high color pickers visible, canvas recolored.
+    guide: 'communities-metrics',
+    scene: 'color-mapping',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Metrics');
+      await page.getByText('Visual Mapping').click();
+      await page.getByTestId('node-color-metric-select').selectOption('__builtin_degree');
+      await page.getByTestId('node-color-min').waitFor({ timeout: 5_000 });
+      await page.waitForTimeout(600);
+    },
+  },
+  {
     // Built-in Degree flagged as a Data Table column: Metrics panel checkbox
     // checked + the drawer showing the numeric Degree column.
     guide: 'communities-metrics',

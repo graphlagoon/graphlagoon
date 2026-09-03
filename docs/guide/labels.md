@@ -147,8 +147,19 @@ branches are themselves templates, so nesting works:
 {if:prop:verified==true|{prop:name|upper}|anonymous}
 ```
 
-Conditions always address a property with the `prop:` prefix. Two forms
-exist; the pipe form is required for date and regex operators:
+Conditions address a property with the `prop:` prefix, or a
+session-computed metric with the `metric:` prefix:
+
+```
+{if:metric:PageRank>0.5|hub|leaf}
+{if:metric:Email domain==gmail.com|consumer|corporate}
+```
+
+A metric condition resolves through the same lookup as `{metric:...}` (by
+name or id, never a property of the same name). A metric that is not
+computed, or has no value for the item, compares as an empty string — the
+false branch renders. Two forms exist; the pipe form is required for date
+and regex operators:
 
 ```
 {if:prop:name|contains:john|Match|No match}

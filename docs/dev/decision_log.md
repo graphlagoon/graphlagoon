@@ -8928,3 +8928,123 @@ route or router module.
   bug has to be reloaded by hand; the seed has no recipe for it.
 - The 500 contexts left by an old `dev-seed-big` remain; they now work, but
   `make dev-reset` is the way to get a tidy environment.
+
+## [2026-09-02 22:31] - Feature Implemented: Metrics everywhere — `metric:` namespace across actions, conditionals, cluster programs, and visuals
+
+**Feature:** Session-computed metrics (built-in degree, algorithm runs, custom
+metrics — all in `useMetricsStore`) become usable in four surfaces that were
+metric-blind: context-menu actions, label-formatter conditionals (+ the Ask-AI
+prompts), cluster programs, and visuals (color-by-metric + hive layout keys).
+Frontend-only; branch `feature/metrics-everywhere`.
+
+**Design Decisions:**
+
+1. **Own namespace, never merged into properties.** Metrics are addressed as
+   `metric:<id-or-name>` everywhere, parallel to `prop:<name>`. They have their
+   own identity (id vs name, node/edge target, valueType, session-only
+   lifetime); folding them into the property namespace would silently collide
+   with same-named columns. Confirmed with the user before implementation.
+2. **`ParsedCondition.fromMetric` flag, bare ref in `property`.** The
+   conditional grammar generalizes `^prop:` to `^(prop|metric):`, but the
+   prefix is stripped before storing. Rationale: `extractTemplateProperties`
+   adds `condition.property` verbatim as a real column — a prefixed string
+   there would poison every missing-property guard (safeUrl, param bindings,
+   import warnings, contextReferences). This was the main correctness trap.
+3. **safeUrl resolver wrapper + raw-id capture.** Metric values reach URL
+   templates through a resolver wrapper that `encodeURIComponent`s each value
+   (properties are pre-encoded by `encodeItemForUrl`; a raw resolver would
+   bypass that) and closes over the ORIGINAL item id, because
+   `encodeItemForUrl` encodes `node_id`/`edge_id` and would break the metric
+   Map lookup for ids with URI-special characters. Missing metrics abort the
+   URL build (reported as `metric:<ref>` in `missing`), same contract as
+   properties.
+4. **Session-metric semantics, per surface.** Labels → `[metric:x]` sentinel;
+   visibility conditions → action hidden until computed (menu-open-time
+   evaluation); URLs → missing toast; cluster param bindings → abort toast
+   (a silent default would use a wrong value); color/size/hive → per-item
+   fallback plus a panel hint; imports (actions + style presets) → a
+   `sessionMetricRefs` warning, never a blocker.
+5. **Color-by-metric precedence: metric > community > type; clusters exempt.**
+   The user enables metric color explicitly in the mapping tab, while
+   community coloring is ambient — the alternative (community wins) would make
+   the color select silently no-op whenever communities exist. Value-less
+   nodes fall back per-node, visually flagging coverage gaps. Numeric metrics
+   only (no categorical gradients). Persisted inside `visual_mapping`
+   (presets/explorations) with min/max colors accepted only as `#rrggbb`
+   (untrusted input reaching the renderer). Uses the existing `scaleValue`
+   with a 0..1 range, honoring the configured scale without touching the
+   known node-size "Scale never applied" tech debt.
+6. **Cluster programs get `metric(ref, id)` + `metrics`,** destructured into
+   scope like the other context vars. Resolution is node-first for shared
+   names (programs iterate both targets, so the lookup can't be
+   target-scoped; ids disambiguate). Caveat: a program declaring its own
+   top-level `const metric`/`const metrics` now throws a redeclaration error —
+   accepted and documented in the guide and the AI prompt.
+7. **Hive layout uses NAME refs (`metric:<name>`), injected resolver.** Layout
+   config persists in explorations; algorithm-run ids embed timestamps while
+   names re-resolve after a recompute. `HivePositionsDeps.nodeMetricValue`
+   keeps layoutModes store-free. Layout URL grammar unchanged —
+   `LAYOUT_OVERRIDE_SCHEMA` has `hive: {}` (axis/position keys deliberately
+   not URL-overridable), so `docs/guide/layout-url-overrides.md` has no docs
+   impact.
+8. **Ask-AI prompts generate metric docs from the live lists** (same
+   anti-drift approach as the MODIFIER_REGISTRY-driven modifier docs): both
+   skill inputs gain optional `nodeMetrics`/`edgeMetrics` (name + valueType)
+   and the modals pass the store's current metrics.
+
+**Files Modified (by step):**
+
+- Formatter: `frontend/src/utils/labelFormatter.ts` (exports
+  `resolveItemMetricValue`, `parseMetricRef`, `METRIC_REF_PREFIX`;
+  `{if:metric:...}`; extractor fixes)
+- Actions: `frontend/src/composables/useConfigurableMenuActions.ts`,
+  `frontend/src/utils/safeUrl.ts`, `frontend/src/utils/menuActionMatcher.ts`,
+  `frontend/src/utils/contextMenuActionImport.ts`,
+  `frontend/src/utils/stylePresetImport.ts`,
+  `frontend/src/utils/contextReferences.ts`,
+  `frontend/src/components/ContextMenuActionsModal.vue`,
+  `frontend/src/components/StylePresetModal.vue`
+- Ask-AI: `frontend/src/utils/clusterProgramSkill.ts` (shared `SkillMetric` +
+  `metricList`), `frontend/src/utils/labelTemplateSkill.ts`,
+  `frontend/src/utils/contextMenuActionSkill.ts`, the three skill modals
+- Cluster programs: `frontend/src/types/cluster.ts`,
+  `frontend/src/stores/cluster.ts`, `frontend/src/utils/clusterProgramParams.ts`,
+  `frontend/src/composables/useClusterProgramMenuActions.ts`,
+  `frontend/src/components/ClusterProgramEditorModal.vue`
+- Visuals: `frontend/src/types/metrics.ts` (`ColorMapping`),
+  `frontend/src/stores/metrics.ts` (`nodeColorMetric`, actions, validated
+  round-trip, cleanup in deleteMetric/clearAllMetrics),
+  `frontend/src/utils/graphAppearance.ts` (`interpolateHexColor`, gradient
+  branch), `frontend/src/utils/layoutModes.ts`,
+  `frontend/src/components/GraphCanvas3D.vue` (context + watch keys + hive
+  deps), `frontend/src/components/MetricsPanel.vue` (Node Color section),
+  `frontend/src/components/LayoutPanel.vue` (metric options + stale hints)
+
+**Testing:**
+- Unit: labelFormatter (metric conditionals, resolver plumbing), safeUrl
+  (encoding, raw-id lookup, missing guards), menuActionMatcher, param
+  bindings, import warnings, contextReferences, skill prompts, cluster store
+  (programs calling `metric()`), metrics store (nodeColor round-trip, hex
+  validation, cleanup), graphAppearance (lerp, precedence, fallbacks),
+  layoutModes (metric keys). Suite: 2246 tests green; `vue-tsc --noEmit` clean.
+- E2E: `graph.spec.ts` gains a mapping-tab color-by-metric test (passes).
+
+**Public Docs:**
+- Updated `docs/guide/labels.md`, `docs/guide/context-menu-actions.md`,
+  `docs/guide/clusters.md`, `docs/guide/communities-metrics.md` (new "Node
+  Color" coverage + cross-surface pointer). `docs/guide/layout-url-overrides.md`
+  deliberately untouched (see decision 7). New screenshot scene
+  `communities-metrics-color-mapping` in `frontend/e2e/screenshots/generate.ts`;
+  `make docs-screenshots` and `make docs-build` pass.
+
+**No admin-area impact** — no settings fields, tables, routes, or audited
+endpoints; frontend-only. **No backend change** — `visual_mapping` is already
+`Optional[dict]` on both style presets and exploration state.
+
+**Known Limitations:**
+- Metric values remain session-only; every surface degrades as per decision 4.
+- `{date:metric:...}` is out of scope (metrics are effectively never dates);
+  date/regex pipe operators are syntactically legal on `metric:` but
+  undocumented.
+- Edge color-by-metric not included (edge weight mapping itself still has no
+  renderer consumer — pre-existing tech debt, untouched).

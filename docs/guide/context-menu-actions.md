@@ -46,6 +46,10 @@ Every action has:
   `equals`, `not equals`, `contains`. An action that interpolates
   `{prop:symbol}` into a URL should usually also require `symbol` *not empty*,
   so the entry hides instead of failing when the value is missing.
+  The property may also be a session-computed metric, written as
+  `metric:<name>` (e.g. `metric:PageRank` *not empty*) — the action then stays
+  hidden until that metric is computed in the [Metrics
+  panel](./communities-metrics.md), and reappears the moment it is.
 - **A kind** — what clicking it does. Three kinds exist:
 
 ### Open URL
@@ -63,9 +67,12 @@ Safety rules, enforced rather than suggested:
   value can never choose the scheme, and `javascript:`/`data:` URLs are
   rejected outright.
 - Every interpolated value is URL-encoded before the template renders, so a
-  property containing `&`, `?` or `/` cannot restructure the URL.
+  property containing `&`, `?` or `/` cannot restructure the URL. Metric
+  values get the same encoding.
 - If a referenced property is missing (or not loaded yet), the action refuses
-  to open a partial URL and says which property was missing.
+  to open a partial URL and says which property was missing. A `{metric:...}`
+  ref whose metric is not computed aborts the same way, reported as
+  `metric:<name>`.
 - New tabs open with `noopener,noreferrer`.
 
 ### Copy text
@@ -104,10 +111,16 @@ mini-language as the Labels panel:
 - `{prop:<column>}` — any raw column of the clicked node or edge.
 - Node built-ins: `{node_id}`, `{node_type}`. Edge built-ins: `{edge_id}`,
   `{relationship_type}`, `{src}`, `{dst}`.
+- `{metric:<name>}` — a session-computed metric of the clicked item (built-in
+  degree, algorithm runs, custom metrics). Metrics only exist while computed
+  in the session: a URL build aborts when the metric is missing, and
+  copy-text renders the `[metric:<name>]` placeholder. Pair the ref with a
+  `metric:<name>` *not empty* condition so the entry hides instead.
 - Modifiers chain with pipes: `{prop:title|truncate:30:...}`,
   `{prop:code|split:_:0}`. Inside URLs prefer plain `{prop:x}` — values are
   encoded before modifiers run.
-- Conditionals: `{if:prop:score>80|High|Low}` (useful in copy-text).
+- Conditionals: `{if:prop:score>80|High|Low}` or
+  `{if:metric:PageRank>0.5|hub|leaf}` (useful in copy-text).
 
 ## Deep-linking back into the tool
 
@@ -173,7 +186,10 @@ the bare array an AI produces. Before anything is added, the box compares the
 actions with this graph and lists every node type, relationship type,
 property and `templateId` it does not have — the sign that they were written
 for another graph. Template ids are per context, so a `run-query-template`
-action never survives an export unchanged.
+action never survives an export unchanged. Metric refs (`{metric:...}` or
+`metric:<name>` conditions) are listed too, but only as a heads-up: metrics
+are session-computed, so the import is never blocked — the actions simply
+stay dormant until the metric is computed here.
 
 The robot button then switches to *adapt* mode: its prompt includes the
 pasted actions, the `source` schema they came from, and this graph's real
