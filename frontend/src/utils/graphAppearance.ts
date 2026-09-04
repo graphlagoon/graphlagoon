@@ -416,3 +416,27 @@ export function computeLinkAppearance(
 
   return { color, hidden, width };
 }
+
+export interface IconTreatmentResult {
+  /** Sphere color: transparent when an icon billboard replaces the sphere */
+  color: string;
+  /** Color handed to the icon billboard; undefined when the node has no icon */
+  iconColor: string | undefined;
+}
+
+/**
+ * Sphere↔icon slot: nodes with an icon hide the opaque sphere (transparent
+ * color) and preserve the appearance color for the icon billboard. Clusters
+ * never take an icon.
+ */
+export function computeIconTreatment(
+  appearanceColor: string,
+  isCluster: boolean,
+  hasTypeIcon: boolean,
+  iconOverride: string | undefined,
+): IconTreatmentResult {
+  const hasIcon = !isCluster && (hasTypeIcon || !!iconOverride);
+  return hasIcon
+    ? { color: 'rgba(0,0,0,0)', iconColor: appearanceColor }
+    : { color: appearanceColor, iconColor: undefined };
+}

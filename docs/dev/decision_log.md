@@ -9607,3 +9607,37 @@ admin-area impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-09-03 18:46] - Fix: styled node icons invisible until camera move on ?style= first load
+
+**Issue:** Loading the app for the first time with `?style=<name>` in the URL (e.g. a precomputed graph link) showed plain colored spheres instead of the preset's node icons. The icons only appeared after the user moved the camera or zoomed.
+
+**Root Cause:** A race in the first-load order of operations. The sphere↔icon treatment (`node.color = 'rgba(0,0,0,0)'` + `node.__iconColor`) lived only in `updateVisuals()` — `buildGraphData()` never applied it, and neither `updateGraph()` nor `initGraph()` re-ran visuals after the `graph3d.graphData()` swap. On first load, `updateGraph()` is async (chunked build + headless settle for >2000 edges), and the style preset's fetch resolves mid-flight: the `nodeTypeIcons` watcher fired `updateVisuals()` against the OLD/empty graphData, whose work was discarded by the swap. The fresh nodes kept opaque spheres, and the icon billboards (`depthWrite:false, depthTest:true`, same diameter) were depth-rejected inside them. Camera movement "fixed" it because the 300ms camera-idle callback in `useGraphCamera.ts` calls `updateVisuals()` when `edgeLensMode !== 'off'` (default `'dim'`). A secondary window existed when a preset carried `behaviors.viewMode`/`useOrthographicCamera`: those watchers re-run `initGraph()`, recreating an empty `FastIconRenderer` with the same lost-visuals problem.
+
+**Investigation:**
+- Traced URL style flow: `GraphVisualizationView.vue` `applyStyleFromRoute` → `graphStore.loadStylePreset` → `applyStylePreset` (replaces `nodeTypeIcons`) → watcher in `GraphCanvas3D.vue` → `updateVisuals()` against pre-swap data
+- Confirmed icons render via `FastIconRenderer` (instanced billboards), built synchronously — no async texture loading involved
+- Confirmed camera-idle `updateVisuals()` as the accidental repair path
+
+**Solution:** Call `updateVisuals()` once, synchronously, right after the graphData swap in both `updateGraph()` and `initGraph()` (after `applyLayoutModeForces()`, before the stop/reheat branch). This atomically re-syncs node/link visuals against the CURRENT store state and also repairs any other visuals-only watcher updates (selection, filters, lens) lost mid-build. The inline icon treatment in `updateVisuals()` was extracted into a pure function `computeIconTreatment()` in `graphAppearance.ts` for testability and to prevent logic drift. Rejected alternative: applying the treatment inside `buildGraphData()` — racy (style landing mid-chunk gives a mixed snapshot) and duplicates the treatment logic.
+
+**Files Modified:**
+- [frontend/src/utils/graphAppearance.ts](../../frontend/src/utils/graphAppearance.ts) — new `computeIconTreatment()` pure function
+- [frontend/src/components/GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue) — `updateVisuals()` uses the pure function; post-swap `updateVisuals()` calls in `updateGraph()` and `initGraph()`; DEV hook `__GRAPH_NODE_VISUAL_STATE__` for E2E
+- [frontend/src/utils/__tests__/graphAppearance.test.ts](../../frontend/src/utils/__tests__/graphAppearance.test.ts) — 4 unit tests for `computeIconTreatment`
+- [frontend/e2e/tests/style-presets.spec.ts](../../frontend/e2e/tests/style-presets.spec.ts) — 2 regression tests (>2000-edge precomputed graph makes the race deterministic; asserts sphere transparency + iconColor with zero camera interaction; second test covers the `initGraph()` re-init path via `behaviors.viewMode`)
+
+**Testing:**
+- [x] Unit: `npm run test:run` — 2400 passed (139 files)
+- [x] E2E: `npm run e2e` — 223 passed; the 2 new regression tests verified to FAIL with the fix reverted and pass with it
+- [x] `npx vue-tsc --noEmit` clean
+
+**Performance note:** `updateVisuals()` is O(nodes+links) synchronous and already runs on every camera idle with the default `edgeLensMode: 'dim'`; one extra call per data swap is within the existing budget (`recordPerf('updateVisuals')` monitors it).
+
+**Known limitation (pre-existing, not introduced here):** selected *cluster* nodes compound their ×1.5 selection size boost on every `updateVisuals()` pass (`clusterBaseSize` is seeded from the current `node.size` with no cluster guard in the selection branch of `computeNodeAppearance`). This already happened on every camera idle; the new call adds one more site. Follow-up: stash an immutable `__baseSize` at build time.
+
+No public docs impact. No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---

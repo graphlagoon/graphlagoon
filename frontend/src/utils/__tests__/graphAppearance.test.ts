@@ -6,6 +6,7 @@ import {
   computeLinkColor,
   computeNodeAppearance,
   computeLinkAppearance,
+  computeIconTreatment,
   type AppearanceContext,
 } from '../graphAppearance';
 
@@ -767,5 +768,31 @@ describe('computeNodeAppearance color-by-metric', () => {
     });
     const r = computeNodeAppearance('high', 'Person', false, 0, null, ctx);
     expect(r.color.startsWith('rgba(')).toBe(true);
+  });
+});
+
+describe('computeIconTreatment', () => {
+  it('node with a type icon hides the sphere and keeps the color for the billboard', () => {
+    const r = computeIconTreatment('#ff0000', false, true, undefined);
+    expect(r.color).toBe('rgba(0,0,0,0)');
+    expect(r.iconColor).toBe('#ff0000');
+  });
+
+  it('iconOverride alone (no type icon) still triggers the treatment', () => {
+    const r = computeIconTreatment('#00ff00', false, false, 'star');
+    expect(r.color).toBe('rgba(0,0,0,0)');
+    expect(r.iconColor).toBe('#00ff00');
+  });
+
+  it('node without any icon passes the color through untouched', () => {
+    const r = computeIconTreatment('#0000ff', false, false, undefined);
+    expect(r.color).toBe('#0000ff');
+    expect(r.iconColor).toBeUndefined();
+  });
+
+  it('clusters never take an icon, even with a type icon assigned', () => {
+    const r = computeIconTreatment('#9333ea', true, true, 'user');
+    expect(r.color).toBe('#9333ea');
+    expect(r.iconColor).toBeUndefined();
   });
 });
