@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import WarehouseTablePicker from '@/components/WarehouseTablePicker.vue';
 import { usePersistence } from '@/composables/usePersistence';
+import { usePermissions } from '@/composables/usePermissions';
 import { useContextsStore } from '@/stores/contexts';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -57,6 +58,7 @@ const emit = defineEmits<{
 
 const contextsStore = useContextsStore();
 const { devMode } = usePersistence();
+const { canCreateContexts } = usePermissions();
 
 function emptyForm() {
   return {
@@ -253,12 +255,15 @@ const canDiscoverTypes = requiredTablesChosen;
 /**
  * Whether discovery exists at all for the selection. A REST connection only
  * has it when its spec declared a handler; offering the button otherwise
- * would promise a 400.
+ * would promise a 400. Discovery (and the table/schema fetches) sit behind
+ * context.create — the catalog endpoints share that gate, so without it the
+ * button would only 403.
  */
 const showDiscoverButton = computed(
   () =>
-    selectedDatasource.value.type !== 'rest' ||
-    selectedDatasource.value.restOps?.schemaDiscovery === true,
+    canCreateContexts.value &&
+    (selectedDatasource.value.type !== 'rest' ||
+      selectedDatasource.value.restOps?.schemaDiscovery === true),
 );
 
 async function discoverTypes() {

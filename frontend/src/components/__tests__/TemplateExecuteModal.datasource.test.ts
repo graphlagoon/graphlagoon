@@ -87,12 +87,18 @@ afterEach(() => {
 })
 
 describe('warehouse context', () => {
-  it('transpiles first, then executes the SQL', async () => {
+  it('runs through the Cypher endpoint — the server transpiles', async () => {
+    // Client-side transpile-then-POST-the-SQL is gone: procedural BEGIN…END
+    // scripts are rejected by the raw-SQL endpoint (SCRIPT_NOT_ALLOWED), so
+    // the Cypher endpoint owns transpilation and execution on every backend.
     const { transpileCypher, executeCypherQuery } = await runTemplateOn(
       createGraphContext(),
     )
-    expect(transpileCypher).toHaveBeenCalledWith('MATCH (n)-[r]->(m) RETURN n, r, m')
-    expect(executeCypherQuery).not.toHaveBeenCalled()
+    expect(executeCypherQuery).toHaveBeenCalledWith(
+      'MATCH (n)-[r]->(m) RETURN n, r, m',
+      { preserveGraphQuery: true },
+    )
+    expect(transpileCypher).not.toHaveBeenCalled()
   })
 
   it('applies the stored execution options', async () => {
@@ -108,7 +114,10 @@ describe('native graph context', () => {
     const { executeCypherQuery, transpileCypher } = await runTemplateOn(
       createNeptuneGraphContext(),
     )
-    expect(executeCypherQuery).toHaveBeenCalledWith('MATCH (n)-[r]->(m) RETURN n, r, m')
+    expect(executeCypherQuery).toHaveBeenCalledWith(
+      'MATCH (n)-[r]->(m) RETURN n, r, m',
+      { preserveGraphQuery: true },
+    )
     expect(transpileCypher).not.toHaveBeenCalled()
   })
 
@@ -136,6 +145,7 @@ describe('native graph context', () => {
     )
     expect(executeCypherQuery).toHaveBeenCalledWith(
       'MATCH (n) WHERE id(n) = abc-123 RETURN n',
+      { preserveGraphQuery: true },
     )
   })
 })

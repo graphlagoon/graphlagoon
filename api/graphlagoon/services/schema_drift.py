@@ -17,6 +17,7 @@ from dataclasses import dataclass, asdict
 from typing import Any, Literal, Optional
 
 from graphlagoon.services.graph_operations import merge_column_config
+from graphlagoon.services.sql_identifiers import validate_identifier_part
 
 Severity = Literal["ok", "info", "warning", "error"]
 _SEVERITY_ORDER: dict[str, int] = {"ok": 0, "info": 1, "warning": 2, "error": 3}
@@ -56,11 +57,19 @@ def parse_qualified_table(name: str) -> Optional[tuple[str, str, str]]:
 
     Backend port of the frontend-only ``parseTableName`` in ContextsView.vue. A
     two-part name implies the ``spark_catalog`` default, matching the frontend rule.
-    Returns ``None`` for anything else (0, 1, or 4+ parts).
+    Returns ``None`` for anything else (0, 1, or 4+ parts) — and for any part
+    that is not a bare SQL identifier, since these names are later interpolated
+    into subgraph/expand SQL for every reader of the context (the stored
+    variant of finding A4).
     """
     if not name:
         return None
     parts = name.split(".")
+    try:
+        for part in parts:
+            validate_identifier_part(part)
+    except ValueError:
+        return None
     if len(parts) == 2:
         return ("spark_catalog", parts[0], parts[1])
     if len(parts) == 3:

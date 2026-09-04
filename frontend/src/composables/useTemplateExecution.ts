@@ -53,17 +53,11 @@ export function useTemplateExecution() {
     }
 
     if (template.query_type === 'cypher') {
-      if (!capabilities.supportsTranspile) {
-        // A datasource that speaks Cypher natively has no SQL to review, so
-        // the transpile-then-execute two-step cannot run there — send the
-        // Cypher itself, the same thing GraphQueryPanel does.
-        await graphStore.executeCypherQuery(substituted);
-      } else {
-        const sql = await graphStore.transpileCypher(substituted);
-        if (sql) {
-          await graphStore.executeGraphQuery(sql, { preserveGraphQuery: true });
-        }
-      }
+      // The Cypher endpoint transpiles and executes server-side on every
+      // datasource (procedural BEGIN…END scripts included — the raw-SQL
+      // endpoint rejects those); the transpiled SQL still surfaces through
+      // graphStore.lastTranspiledSql for review.
+      await graphStore.executeCypherQuery(substituted, { preserveGraphQuery: true });
     } else {
       await graphStore.executeGraphQuery(substituted, { preserveGraphQuery: true });
     }

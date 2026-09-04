@@ -17,6 +17,7 @@ from graphlagoon.models.schemas import (
     QueryMetadata,
     ColumnConfig,
 )
+from graphlagoon.services.sql_identifiers import quote_identifier
 from graphlagoon.services.sql_validation import extract_query_limit
 from graphlagoon.services.warehouse_errors import (
     classify_query_error,
@@ -483,15 +484,10 @@ def harvest_nodes_from_result(
     return harvested
 
 
-def _quote_identifier(name: str) -> str:
-    """Backtick-quote a SQL identifier, escaping embedded backticks.
-
-    Column names reach the query builder from stored context configuration, not
-    from request bodies, but quoting keeps names with spaces/reserved words
-    working and closes the injection path if a context is ever attacker-shaped.
-    """
-    escaped = name.replace("`", "``")
-    return f"`{escaped}`"
+# Column names reach the query builder from stored context configuration, not
+# from request bodies, but quoting keeps names with spaces/reserved words
+# working and closes the injection path if a context is ever attacker-shaped.
+_quote_identifier = quote_identifier
 
 
 def build_node_projection(

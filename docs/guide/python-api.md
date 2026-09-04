@@ -193,6 +193,14 @@ construct `DatabricksOAuthService(workspace_url, client_id, client_secret)`
 yourself. Tokens are cached with a five-minute expiry margin;
 `refresh_token()` forces a re-exchange.
 
+::: warning
+This provider is process-wide: every user's query runs as that one service
+principal, not as themselves. Grant it **`SELECT` only** on the schemas you
+visualize and bound its reach with `GRAPH_LAGOON_CATALOG_SCHEMAS` — see
+[Databricks Apps → Authentication](/guide/databricks-apps#authentication-zero-token)
+and [Query scope](/guide/permissions#query-scope).
+:::
+
 ## Extension registries
 
 Three registries let the parent app plug custom capabilities in. Each has

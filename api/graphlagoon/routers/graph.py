@@ -36,7 +36,7 @@ from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
 from graphlagoon.services import audit
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.services.environment import clear_environment
-from graphlagoon.utils.authz import require_superuser
+from graphlagoon.utils.authz import require_permission, require_superuser
 from graphlagoon.services.graph_operations import (
     merge_column_config,
     QueryExecutionError,
@@ -126,12 +126,81 @@ def execution_failure_http_error(
     )
 
 
+async def enforce_query_scope(
+    context,
+    user_email: str,
+    sql: Optional[str] = None,
+    cte_prefilter: Optional[str] = None,
+    datasource=None,
+) -> None:
+    """403 unless every table the request reads is in the caller's scope.
+
+    Only SQL-backed contexts are scoped: a native graph database has no
+    tables to name and its own system owns access control, so passing its
+    Cypher through a SQL parser would deny every query.
+
+    The tier comes from ``context.create``: holders read anything in the
+    configured catalog.schema allowlist, everyone else only the open
+    context's own tables (see services.sql_scope).
+
+    Two things are checked, and both matter:
+
+    * ``sql`` — the statement about to run. Skipped when it is a
+      ``BEGIN...END`` script, which no parser can scope; scripts are only
+      reachable via ``allow_raw_sql_scripts``, whose contract is read-only
+      grants, or as transpiler output on the Cypher path.
+    * ``cte_prefilter`` — raw client SQL spliced into EVERY mode, procedural
+      scripts included. It is checked at the source, where it is still
+      parseable, so a foreign table cannot ride into an opaque script.
+    """
+    from graphlagoon.services.datasource.sql_warehouse import _is_script
+    from graphlagoon.services.permissions import check_permission
+    from graphlagoon.services.sql_scope import check_scope, cte_prefilter_as_statement
+
+    if datasource is not None and not getattr(
+        datasource.capabilities, "supports_sql", False
+    ):
+        return
+
+    settings = get_settings()
+    to_check: list[str] = []
+    if cte_prefilter and cte_prefilter.strip():
+        to_check.append(cte_prefilter_as_statement(cte_prefilter, context))
+    if sql and not _is_script(sql):
+        to_check.append(sql)
+    if not to_check:
+        return
+
+    decision = await check_permission(user_email, "context.create")
+    for statement in to_check:
+        problem = check_scope(
+            statement,
+            context,
+            is_author=decision.allowed,
+            allowed_pairs=settings.catalog_schema_pairs,
+            default_catalog=settings.default_catalog,
+            default_schema=settings.default_schema,
+        )
+        if problem:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": {
+                        "code": "QUERY_SCOPE_DENIED",
+                        "message": problem,
+                        "details": {"context_id": str(context.id)},
+                    }
+                },
+            )
+
+
 @router.get("/datasets", response_model=DatasetsResponse)
 async def list_datasets(
-    request: Request, warehouse: WarehouseClient = Depends(get_warehouse)
+    request: Request,
+    user_email: str = Depends(require_permission("context.create")),
+    warehouse: WarehouseClient = Depends(get_warehouse),
 ):
     """List available datasets from sql-warehouse."""
-    get_current_user(request)  # Ensure authenticated
     return await warehouse.list_datasets()
 
 
@@ -378,6 +447,9 @@ async def execute_graph_query(
     require_capability(datasource, "supports_sql", "Raw SQL graph queries")
 
     prepared = datasource.prepare_sql(context, data)
+    await enforce_query_scope(
+        context, user_email, prepared.statement, data.cte_prefilter
+    )
 
     try:
         return await datasource.execute_prepared(
@@ -412,6 +484,11 @@ async def execute_cypher_query(
     datasource = resolve_datasource_or_400(context)
 
     prepared = datasource.prepare_cypher(context, data)
+    # The transpiler is context-bound, but a client-supplied CTE pre-filter is
+    # spliced into its output — so the prefilter still needs scoping.
+    await enforce_query_scope(
+        context, user_email, prepared.statement, data.cte_prefilter, datasource
+    )
     transpiled_sql = prepared.transpiled_sql
     extra_details = {"transpiled_sql": transpiled_sql} if transpiled_sql else None
 
@@ -484,6 +561,15 @@ async def execute_table_query(
 
     if data.mode == "sql":
         require_capability(datasource, "supports_sql", "SQL console queries")
+    # In cypher mode the transpiler is context-bound, so only the client's CTE
+    # pre-filter needs scoping; in sql mode the statement itself does too.
+    await enforce_query_scope(
+        context,
+        user_email,
+        data.query if data.mode == "sql" else None,
+        data.cte_prefilter,
+        datasource,
+    )
 
     if not data.query or not data.query.strip():
         raise HTTPException(
@@ -617,6 +703,9 @@ async def execute_graph_query_async(
     require_capability(datasource, "supports_sql", "Raw SQL graph queries")
 
     prepared = datasource.prepare_sql(context, data)
+    await enforce_query_scope(
+        context, user_email, prepared.statement, data.cte_prefilter
+    )
     job_id, _ = _start_graph_job(datasource, context, prepared, data.use_external_links)
     return GraphJobSubmitResponse(status="running", job_id=job_id)
 
@@ -636,6 +725,9 @@ async def execute_cypher_query_async(
     datasource = resolve_datasource_or_400(context)
 
     prepared = datasource.prepare_cypher(context, data)
+    await enforce_query_scope(
+        context, user_email, prepared.statement, data.cte_prefilter, datasource
+    )
     job_id, record = _start_graph_job(
         datasource, context, prepared, data.use_external_links
     )
@@ -760,6 +852,7 @@ async def transpile_cypher_query(
 async def schema_discovery(
     data: SchemaDiscoveryRequest,
     request: Request,
+    user_email: str = Depends(require_permission("context.create")),
 ):
     """
     Discover the node types and relationship types a datasource exposes.
@@ -768,7 +861,6 @@ async def schema_discovery(
     warehouse runs ``SELECT DISTINCT`` over the two tables; a native graph
     database reads its own label catalog.
     """
-    get_current_user(request)  # Ensure authenticated
     try:
         return await get_datasource(
             data.datasource_type, data.datasource_name

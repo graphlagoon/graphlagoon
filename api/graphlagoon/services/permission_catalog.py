@@ -34,7 +34,13 @@ PERMISSIONS: tuple[Permission, ...] = (
     Permission(
         id="context.create",
         label="Create graph contexts",
-        description="Create new graph contexts from warehouse tables.",
+        description=(
+            "Create new graph contexts from warehouse tables. Also gates "
+            "browsing the warehouse catalog (the authoring surface), and "
+            "widens query scope: holders may read any table in the "
+            "configured catalog.schema allowlist, while everyone else is "
+            "restricted to the tables of the context they have open."
+        ),
     ),
     Permission(
         id="exploration.save",

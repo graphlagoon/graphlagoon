@@ -27,6 +27,5 @@ export function usePermissions() {
 
   const canCreateContexts = computed(() => hasPermission('context.create'));
   const canSaveExplorations = computed(() => hasPermission('exploration.save'));
-
   return { can, canCreateContexts, canSaveExplorations };
 }

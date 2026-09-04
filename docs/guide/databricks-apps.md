@@ -44,6 +44,27 @@ create_mountable_app(
 
 No `databricks_token` is needed in this mode — the `header_provider` takes precedence.
 
+::: danger This token is your security boundary
+The `header_provider` is process-wide: **every** query from **every** user
+runs as this one service principal, whatever their own Unity Catalog grants
+are. Two consequences to decide before you ship:
+
+1. **Give the service principal `SELECT` only**, on the schemas you actually
+   visualize — see [Grant the app access](#grant-the-app-access). The app's
+   read-only validator is defense in depth; these grants are what make writes
+   *impossible* rather than merely rejected, and they are the only thing
+   guarding [`GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS`](./configuration.md) if you
+   ever turn it on.
+2. **Scope what it can reach** with `GRAPH_LAGOON_CATALOG_SCHEMAS`: whatever
+   the principal can read, an app user with the "Create graph contexts"
+   permission can reach through a query (see
+   [Query scope](./permissions.md#query-scope)).
+
+The M2M exchange itself requests the `all-apis` scope, so the credential is
+powerful: keep `GRAPH_LAGOON_DATABRICKS_TLS_VERIFY=true` (the default) and
+never log the token.
+:::
+
 ## Project structure
 
 A Databricks App is a directory deployed to your workspace. Minimal layout:
@@ -176,6 +197,27 @@ The app's service principal needs permission on the resources it reads:
 - **Workspace SCIM (optional)** — only if you use [permission groups](./permissions.md) with `databricks_group` members: the principal must be able to read workspace SCIM Users (`GET /api/2.0/preview/scim/v2/Users`) to resolve a user's groups. Without the grant, lookups fail and only email members resolve (the admin area shows a banner).
 
 Grant these to the app's service principal from the app's **Authorization** settings or via `GRANT` statements.
+
+::: warning Least privilege is the outer security boundary
+Every query runs as this **one** service principal — Unity Catalog's per-user
+grants do not apply to what users do through the app. Whatever the principal
+can read, any authenticated app user can read through free-form queries (see
+[permissions](./permissions.md) to gate *who* may write them). So:
+
+- Grant **`SELECT` only** — never `MODIFY`, and never on catalogs you do not
+  visualize. The app's own read-only validator is defense in depth; the
+  grants are what bound the blast radius of any bypass.
+- Avoid catalog- or metastore-wide grants; enumerate the schemas the app
+  actually needs.
+- Consider [`GRAPH_LAGOON_MAX_QUERY_ROWS`](./configuration.md) to cap result
+  sizes on top of the grants.
+
+A future evolution is Databricks Apps **on-behalf-of-user** authorization
+(scope `sql:restricted-query`), where each query would run read-only under
+the end user's own Unity Catalog permissions — row filters and column masks
+included. Graph Lagoon does not implement OBO yet; least-privilege grants on
+the service principal are the mechanism today.
+:::
 
 ## Persistence options
 

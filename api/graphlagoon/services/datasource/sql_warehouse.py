@@ -30,6 +30,7 @@ from graphlagoon.models.schemas import (
     TableQueryResponse,
     TableQueryStatusResponse,
 )
+from graphlagoon.config import get_settings
 from graphlagoon.services.cte_prefilter import (
     apply_cte_prefilter,
     validate_cte_prefilter,
@@ -49,6 +50,11 @@ from graphlagoon.services.graph_operations import (
     merge_column_config,
     parse_tabular_result,
     resolve_node_table,
+)
+from graphlagoon.services.sql_identifiers import (
+    escape_identifier,
+    qualified_from_dotted,
+    quote_identifier,
 )
 from graphlagoon.services.sql_validation import (
     sanitize_string_literal,
@@ -89,7 +95,13 @@ def build_edge_named_struct(column_config, table_alias: str = "") -> str:
         )
         if c
     ]
-    fields = ", ".join(f"'{col}', {prefix}`{col}`" for col in cols)
+    fields = ", ".join(
+        # Escape both positions: the string literal AND the backticked
+        # identifier — an embedded backtick/quote in a stored column name must
+        # not break out of either (stored variant of finding A4).
+        f"'{sanitize_string_literal(col)}', {prefix}{quote_identifier(col)}"
+        for col in cols
+    )
     return f"NAMED_STRUCT({fields})"
 
 
@@ -119,6 +131,19 @@ def resolve_node_columns(context) -> Optional[list[str]]:
             names.append(name)
 
     return names or None
+
+
+def _safe_table_name(name: str) -> str:
+    """Validate and backtick-quote a stored table name before interpolation.
+
+    Context table names are validated at create time nowadays, but contexts
+    stored before that validation (or written directly to the store) must not
+    reach the SQL builders unchecked.
+    """
+    try:
+        return qualified_from_dotted(name)
+    except ValueError as e:
+        raise _invalid("INVALID_CONTEXT_TABLES", str(e))
 
 
 def _is_script(sql: str) -> bool:
@@ -206,16 +231,40 @@ class SqlWarehouseDatasource(GraphDatasource):
         )
 
     def prepare_sql(self, context, data: GraphQueryRequest) -> PreparedGraphQuery:
-        """Validate a raw SQL graph query and apply any CTE pre-filter."""
-        is_script = _is_script(data.query)
-        if not is_script:
-            is_valid, error_msg = validate_sql_query(data.query)
-            if not is_valid:
-                raise _invalid("INVALID_SQL_QUERY", error_msg)
+        """Validate a raw SQL graph query and apply any CTE pre-filter.
+
+        A client-supplied ``BEGIN...END`` script is refused unless
+        ``allow_raw_sql_scripts`` is on: a Databricks compound statement body
+        may hold DML/DDL, and neither the SELECT-only validator nor the
+        table-scope check can see inside one (``EXECUTE IMMEDIATE`` runs SQL
+        built at runtime). Scripts still run on the Cypher path, where they
+        are the transpiler's own output rather than client text.
+        """
+        if _is_script(data.query):
+            if not get_settings().allow_raw_sql_scripts:
+                raise _invalid(
+                    "SCRIPT_NOT_ALLOWED",
+                    "BEGIN...END scripts cannot be executed as raw SQL. Run "
+                    "the original Cypher query instead (the Cypher endpoints "
+                    "transpile and execute scripts server-side), or ask an "
+                    "administrator to enable "
+                    "GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS.",
+                )
+            # Opt-in: neither validation nor scoping can inspect a script, so
+            # read-only Unity Catalog grants are the enforcing layer here.
+            return PreparedGraphQuery(
+                statement=self._apply_prefilter(
+                    context, data.query, data.cte_prefilter
+                )
+            )
+
+        is_valid, error_msg = validate_sql_query(data.query)
+        if not is_valid:
+            raise _invalid("INVALID_SQL_QUERY", error_msg)
 
         final_query = self._apply_prefilter(context, data.query, data.cte_prefilter)
 
-        if data.cte_prefilter and not is_script:
+        if data.cte_prefilter:
             # Re-validate after the CTE is spliced in.
             is_valid, error_msg = validate_sql_query(final_query)
             if not is_valid:
@@ -351,7 +400,8 @@ class SqlWarehouseDatasource(GraphDatasource):
                 [f"'{sanitize_string_literal(t)}'" for t in data.edge_types]
             )
             edge_conditions.append(
-                f"`{column_config.relationship_type_col}` IN ({types_str})"
+                f"{quote_identifier(column_config.relationship_type_col)} "
+                f"IN ({types_str})"
             )
 
         where_clause = (
@@ -363,10 +413,10 @@ class SqlWarehouseDatasource(GraphDatasource):
         # maps correctly for any schema (see build_edge_named_struct).
         query = f"""
         SELECT {build_edge_named_struct(column_config)} AS r
-        FROM {context.edge_table_name}
+        FROM {_safe_table_name(context.edge_table_name)}
         {where_clause}
         {order_clause}
-        LIMIT {data.edge_limit}
+        LIMIT {int(data.edge_limit)}
     """
 
         return await self._execute(
@@ -379,10 +429,11 @@ class SqlWarehouseDatasource(GraphDatasource):
     async def expand(self, context, data: ExpandRequest) -> GraphResponse:
         column_config = self._column_config(context)
 
-        node_id_col = column_config.node_id_col
-        src_col = column_config.src_col
-        dst_col = column_config.dst_col
-        rel_type_col = column_config.relationship_type_col
+        # Escaped once here: every use below sits inside its own backticks.
+        node_id_col = escape_identifier(column_config.node_id_col)
+        src_col = escape_identifier(column_config.src_col)
+        dst_col = escape_identifier(column_config.dst_col)
+        rel_type_col = escape_identifier(column_config.relationship_type_col)
 
         edge_type_filter = ""
         final_edge_filter = ""
@@ -395,8 +446,12 @@ class SqlWarehouseDatasource(GraphDatasource):
             edge_type_filter = f"AND `{rel_type_col}` IN ({types_str})"
             final_edge_filter = f"AND e.`{rel_type_col}` IN ({types_str})"
 
-        edge_table = context.edge_table_name
-        node_table = context.node_table_name
+        edge_table = _safe_table_name(context.edge_table_name)
+        node_table = (
+            _safe_table_name(context.node_table_name)
+            if context.node_table_name
+            else context.node_table_name
+        )
         safe_node_id = sanitize_string_literal(data.node_id)
 
         if data.depth == 1:

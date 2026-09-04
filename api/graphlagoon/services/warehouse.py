@@ -7,6 +7,12 @@ from typing import Optional, Any, Callable, Awaitable, Union
 import httpx
 
 from graphlagoon.config import Settings
+from graphlagoon.services.sql_identifiers import (
+    qualified_from_dotted,
+    qualified_name,
+    quote_identifier,
+    validate_identifier_part,
+)
 from graphlagoon.services.graph_operations import (
     DEFAULT_NODE_TYPE,
     DEFAULT_RELATIONSHIP_TYPE,
@@ -81,6 +87,10 @@ def _get_header_provider() -> Optional[HeaderProvider]:
 class WarehouseClient:
     """HTTP client for SQL warehouse (local sql-warehouse or Databricks)."""
 
+    # Class-level default: tests (and some callers) build instances via
+    # ``__new__`` without running ``__init__``.
+    max_query_rows: Optional[int] = None
+
     def __init__(
         self,
         settings: Optional[Settings] = None,
@@ -105,6 +115,7 @@ class WarehouseClient:
         self.max_poll_time = settings.warehouse_max_poll_time
         self.poll_interval = settings.warehouse_poll_interval
         self.chunk_concurrency = max(1, settings.warehouse_chunk_concurrency)
+        self.max_query_rows = settings.max_query_rows
 
         # Only get static headers if no dynamic provider is configured
         # This allows using header_provider without requiring databricks_token in settings
@@ -116,6 +127,16 @@ class WarehouseClient:
             self.client = httpx.AsyncClient(
                 timeout=self.http_timeout, headers=self._static_headers
             )
+
+    def _effective_row_limit(self, row_limit: Optional[int]) -> Optional[int]:
+        """Combine a caller's row limit with the server-wide ``max_query_rows``
+        cap — the single choke point for every statement submitted to the
+        warehouse. Returns the smaller of the two, or whichever is set."""
+        if self.max_query_rows is None:
+            return row_limit
+        if row_limit is None:
+            return self.max_query_rows
+        return min(row_limit, self.max_query_rows)
 
     async def _get_headers(self) -> dict:
         """Get headers for request. Calls provider if configured, else returns static headers."""
@@ -416,10 +437,12 @@ class WarehouseClient:
         a schema: every table in the configured scope is returned, and the
         `%edge%`/`%node%` guess only pre-sorts them.
         """
+        catalog = validate_identifier_part(catalog)
+        schema = validate_identifier_part(schema)
         query = f"""
             SELECT table_schema, table_name
-            FROM {catalog}.information_schema.tables
-            WHERE table_catalog = '{catalog.replace("`", "")}'
+            FROM {quote_identifier(catalog)}.information_schema.tables
+            WHERE table_catalog = '{catalog}'
               AND table_schema = '{schema}'
             ORDER BY table_schema, table_name
         """
@@ -452,7 +475,7 @@ class WarehouseClient:
     ) -> None:
         """List the tables of a local Spark schema (see the Databricks note)."""
         result = await self.execute_statement(
-            statement=f"SHOW TABLES IN {schema}",
+            statement=f"SHOW TABLES IN {qualified_name(schema)}",
         )
         if (
             result.status.state == "SUCCEEDED"
@@ -521,7 +544,8 @@ class WarehouseClient:
             node_types = [DEFAULT_NODE_TYPE]
         elif node_table:
             node_query = (
-                f"SELECT DISTINCT `{columns.node_type_col}` FROM {node_table}"
+                f"SELECT DISTINCT {quote_identifier(columns.node_type_col)} "
+                f"FROM {qualified_from_dotted(node_table)}"
             )
             try:
                 result = await self.execute_statement(statement=node_query)
@@ -554,8 +578,8 @@ class WarehouseClient:
             relationship_types = [DEFAULT_RELATIONSHIP_TYPE]
         else:
             edge_query = (
-                f"SELECT DISTINCT `{columns.relationship_type_col}` "
-                f"FROM {edge_table}"
+                f"SELECT DISTINCT {quote_identifier(columns.relationship_type_col)} "
+                f"FROM {qualified_from_dotted(edge_table)}"
             )
             try:
                 result = await self.execute_statement(statement=edge_query)
@@ -625,7 +649,7 @@ class WarehouseClient:
         try:
             # Try SHOW SCHEMAS IN catalog first (Databricks style)
             result = await self.execute_statement(
-                statement=f"SHOW SCHEMAS IN {catalog}"
+                statement=f"SHOW SCHEMAS IN {qualified_name(catalog)}"
             )
             if result.status.state != "SUCCEEDED" or not result.result:
                 # Fallback to SHOW SCHEMAS (local Spark)
@@ -664,12 +688,12 @@ class WarehouseClient:
         try:
             # Try catalog.database format first (Databricks style)
             result = await self.execute_statement(
-                statement=f"SHOW TABLES IN {catalog}.{database}"
+                statement=f"SHOW TABLES IN {qualified_name(catalog, database)}"
             )
             if result.status.state != "SUCCEEDED" or not result.result:
                 # Fallback to just database (local Spark)
                 result = await self.execute_statement(
-                    statement=f"SHOW TABLES IN {database}"
+                    statement=f"SHOW TABLES IN {qualified_name(database)}"
                 )
 
             if result.status.state == "SUCCEEDED" and result.result:
@@ -706,14 +730,14 @@ class WarehouseClient:
             database = self.default_schema
 
         # Try catalog.database.table format first
-        full_table_name = f"{catalog}.{database}.{table}"
+        full_table_name = qualified_name(catalog, database, table)
         result = await self.execute_statement(
             statement=f"DESCRIBE TABLE {full_table_name}"
         )
 
         if result.status.state != "SUCCEEDED" or not result.result:
             # Fallback to database.table
-            full_table_name = f"{database}.{table}"
+            full_table_name = qualified_name(database, table)
             result = await self.execute_statement(
                 statement=f"DESCRIBE TABLE {full_table_name}"
             )
@@ -757,14 +781,15 @@ class WarehouseClient:
             database = self.default_schema
 
         # Try catalog.database.table format first
-        full_table_name = f"{catalog}.{database}.{table}"
+        limit = int(limit)
+        full_table_name = qualified_name(catalog, database, table)
         result = await self.execute_statement(
             statement=f"SELECT * FROM {full_table_name} LIMIT {limit}"
         )
 
         if result.status.state != "SUCCEEDED" or not result.result:
             # Fallback to database.table
-            full_table_name = f"{database}.{table}"
+            full_table_name = qualified_name(database, table)
             result = await self.execute_statement(
                 statement=f"SELECT * FROM {full_table_name} LIMIT {limit}"
             )
@@ -854,6 +879,7 @@ class WarehouseClient:
             request_body["catalog"] = catalog
         if schema:
             request_body["schema"] = schema
+        row_limit = self._effective_row_limit(row_limit)
         if row_limit:
             request_body["row_limit"] = row_limit
         if parameters:
@@ -968,6 +994,7 @@ class WarehouseClient:
             request_body["catalog"] = catalog
         if schema:
             request_body["schema"] = schema
+        row_limit = self._effective_row_limit(row_limit)
         if row_limit:
             request_body["row_limit"] = row_limit
         if parameters:
@@ -1141,6 +1168,7 @@ class WarehouseClient:
             request_body["catalog"] = catalog
         if schema:
             request_body["schema"] = schema
+        row_limit = self._effective_row_limit(row_limit)
         if row_limit:
             request_body["row_limit"] = row_limit
         if parameters:
