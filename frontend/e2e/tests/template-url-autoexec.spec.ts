@@ -34,16 +34,21 @@ const NEIGHBORS_TEMPLATE = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
-/** Mock the Cypher→SQL transpile step and record the queries it was sent. */
+/**
+ * Record the substituted Cypher each template execution submits. Templates now
+ * run through the Cypher endpoints (the server transpiles — the raw-SQL
+ * endpoint rejects transpiled BEGIN…END scripts), so the substituted query is
+ * what lands on `/cypher` or `/cypher/async`; the responses themselves come
+ * from the setupAPIMocks defaults.
+ */
 async function mockTranspile(page: Page): Promise<string[]> {
   const transpiled: string[] = [];
-  await page.route('**/graphlagoon/api/graph-contexts/*/cypher/transpile', (route) => {
-    transpiled.push(route.request().postDataJSON()?.query ?? '');
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ transpiled_sql: 'SELECT * FROM edges' }),
-    });
+  page.on('request', (req) => {
+    if (req.method() !== 'POST') return;
+    const path = new URL(req.url()).pathname;
+    if (/\/cypher(\/async)?$/.test(path)) {
+      transpiled.push(req.postDataJSON()?.query ?? '');
+    }
   });
   return transpiled;
 }

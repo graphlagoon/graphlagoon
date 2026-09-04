@@ -48,6 +48,9 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "databricks_catalog": "public",
     "databricks_schema": "public",
     "catalog_schemas": "public",
+    "allow_raw_sql_scripts": "public",
+    "databricks_tls_verify": "public",
+    "max_query_rows": "public",
     "exploration_snapshots_dir": "public",
     "databricks_volume_path": "public",
     "precomputed_graphs_enabled": "public",
@@ -138,12 +141,20 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("PUT", "/api/graph-contexts/{context_id}/style-presets/{name}"): (
         "personal preference anyone with write access may save"
     ),
-    ("POST", "/api/graph-contexts/{context_id}/query"): "read-only query execution",
+    ("POST", "/api/graph-contexts/{context_id}/query"): (
+        "read-only query execution (SELECT-only validator, BEGIN…END scripts "
+        "rejected, gated by query.freeform)"
+    ),
     (
         "POST",
         "/api/graph-contexts/{context_id}/query/async",
-    ): "read-only query execution",
-    ("POST", "/api/graph-contexts/{context_id}/query/table"): "read-only query",
+    ): (
+        "read-only query execution (SELECT-only validator, BEGIN…END scripts "
+        "rejected, gated by query.freeform)"
+    ),
+    ("POST", "/api/graph-contexts/{context_id}/query/table"): (
+        "read-only query (gated by query.freeform)"
+    ),
     ("POST", "/api/graph-contexts/{context_id}/query/job/{job_id}/cancel"): (
         "cancels the caller's own query"
     ),

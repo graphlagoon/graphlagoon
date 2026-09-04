@@ -34,6 +34,7 @@ import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
+import { isSqlScript } from '@/utils/sqlScript';
 import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
 import { useToast } from '@/composables/useToast';
 import {
@@ -1686,7 +1687,10 @@ export const useGraphStore = defineStore('graph', () => {
   const contextTranspiles = () =>
     capabilitiesFor(resolveDatasourceType(currentContext.value)).supportsTranspile;
 
-  async function executeCypherQuery(query: string): Promise<string | null> {
+  async function executeCypherQuery(
+    query: string,
+    options?: { preserveGraphQuery?: boolean; preserveSelections?: boolean },
+  ): Promise<string | null> {
     if (!currentContext.value) return null;
 
     loading.value = true;
@@ -1695,8 +1699,10 @@ export const useGraphStore = defineStore('graph', () => {
     lastTranspiledSql.value = null;
     pendingQueryText = query;
 
-    // Save query to state
-    graphQuery.value = query;
+    // Save query to state (unless preserving existing)
+    if (!options?.preserveGraphQuery) {
+      graphQuery.value = query;
+    }
 
     const t0 = performance.now();
     const transpiles = contextTranspiles();
@@ -1729,8 +1735,11 @@ export const useGraphStore = defineStore('graph', () => {
       recordChainRecompute('cypher');
       adjustGravityForConnectivity();
       if (status.transpiled_sql) lastTranspiledSql.value = status.transpiled_sql;
-      selectedNodeIds.value.clear();
-      selectedEdgeIds.value.clear();
+      // Clear selections (unless preserving for exploration restore)
+      if (!options?.preserveSelections) {
+        selectedNodeIds.value.clear();
+        selectedEdgeIds.value.clear();
+      }
     };
 
     try {
@@ -2496,14 +2505,22 @@ export const useGraphStore = defineStore('graph', () => {
     if (exploration.state.graph_query) {
       const query = exploration.state.graph_query.trim();
       if (!contextTranspiles()) {
-        // Native-Cypher and REST backends run the saved query directly: the
-        // transpile step below would stop at its guard and replay nothing.
+        // Native-Cypher and REST backends run the saved query directly.
         await executeCypherQuery(query);
       } else if (query.toUpperCase().startsWith('MATCH')) {
-        const sql = await transpileCypher(query);
-        if (sql) {
-          await executeGraphQuery(sql, { preserveGraphQuery: true, preserveSelections: true });
-        }
+        // Cypher replays through the Cypher endpoint: the server transpiles
+        // and executes (scripts included) — the backend rejects transpiled
+        // scripts posted back as raw SQL.
+        await executeCypherQuery(query, { preserveGraphQuery: true, preserveSelections: true });
+      } else if (isSqlScript(query)) {
+        // A saved BEGIN…END script is transpiler output whose Cypher was
+        // lost; the raw-SQL endpoint refuses scripts, so surface that
+        // instead of replaying a doomed request.
+        queryError.value = {
+          message:
+            'This exploration saved a transpiled SQL script, which can no longer '
+            + 'be replayed directly. Re-run its original Cypher query and save again.',
+        };
       } else {
         await executeGraphQuery(query, { preserveGraphQuery: true, preserveSelections: true });
       }

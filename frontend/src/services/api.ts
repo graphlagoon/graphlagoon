@@ -91,6 +91,12 @@ declare global {
       custom_metrics_enabled?: boolean;
       /** Whether `auto_run` custom metrics may evaluate on graph load. */
       custom_metrics_auto_run_enabled?: boolean;
+      /**
+       * Whether a hand-written BEGIN…END script may run on the raw-SQL path
+       * (GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS). Off by default: a script body is
+       * opaque to both the SELECT-only validator and the table-scope check.
+       */
+      allow_raw_sql_scripts?: boolean;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.

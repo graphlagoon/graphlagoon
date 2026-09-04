@@ -47,6 +47,7 @@ class DatabricksOAuthService:
         client_id: str,
         client_secret: str,
         fallback_token: str | None = None,
+        verify_tls: bool = True,
     ):
         workspace_url = workspace_url.rstrip("/")
         if not workspace_url.startswith(("http://", "https://")):
@@ -55,6 +56,7 @@ class DatabricksOAuthService:
         self.client_id = client_id
         self.client_secret = client_secret
         self.fallback_token = fallback_token
+        self.verify_tls = verify_tls
         self._current_token: OAuthToken | None = None
         self._token_lock = asyncio.Lock()
 
@@ -91,7 +93,11 @@ class DatabricksOAuthService:
 
         auth = (self.client_id, self.client_secret)
 
-        async with httpx.AsyncClient(verify=False) as client:
+        # This request carries the client secret and receives the workspace
+        # bearer token — TLS verification stays on by default (finding A2);
+        # GRAPH_LAGOON_DATABRICKS_TLS_VERIFY=false is the explicit escape
+        # hatch for environments that cannot trust their own chain.
+        async with httpx.AsyncClient(verify=self.verify_tls) as client:
             response = await client.post(
                 token_url,
                 data=data,
@@ -119,11 +125,14 @@ class DatabricksOAuthService:
 
 @lru_cache()
 def get_databricks_oauth_service() -> DatabricksOAuthService:
+    from graphlagoon.config import get_settings
+
     return DatabricksOAuthService(
         workspace_url=os.getenv("DATABRICKS_HOST"),
         client_id=os.getenv("DATABRICKS_CLIENT_ID", ""),
         client_secret=os.getenv("DATABRICKS_CLIENT_SECRET", ""),
         fallback_token=None,
+        verify_tls=get_settings().databricks_tls_verify,
     )
 
 

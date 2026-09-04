@@ -132,6 +132,27 @@ class Settings(BaseSettings):
         description="Comma-separated catalog.schema pairs (e.g. 'cat1.schema1,cat2.schema2'). "
         "When set, list_datasets searches all specified pairs instead of just default_catalog/default_schema.",
     )
+    allow_raw_sql_scripts: bool = Field(
+        default=False,
+        description="Allow BEGIN...END compound statements on the raw-SQL "
+        "query path. Off by default: a Databricks script body may contain "
+        "DML/DDL that the SELECT-only validator cannot inspect (EXECUTE "
+        "IMMEDIATE runs SQL built at runtime), and table-scope checks cannot "
+        "read inside one either. Enable ONLY with read-only Unity Catalog "
+        "grants on the warehouse credential.",
+    )
+    databricks_tls_verify: bool = Field(
+        default=True,
+        description="Verify TLS certificates on the Databricks OAuth token "
+        "exchange. Leave True; environments with an internal CA should point "
+        "SSL_CERT_FILE at their bundle instead of disabling verification.",
+    )
+    max_query_rows: Optional[int] = Field(
+        default=None,
+        description="Server-side cap on rows returned by any warehouse "
+        "statement (Databricks row_limit). None (default) preserves the "
+        "query's own LIMIT behavior.",
+    )
 
     # Permission groups (services.permissions / services.group_resolution)
     group_cache_ttl_seconds: int = Field(

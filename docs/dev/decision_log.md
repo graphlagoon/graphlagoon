@@ -9641,3 +9641,67 @@ No public docs impact. No admin-area impact.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-09-04 10:30] - Security: escopo de query por tier + allowlist; scripts BEGIN…END atrás de flag
+
+**Feature:** Responder às duas perguntas do assessment sobre permissão de query — "posso ler tabela fora do contexto?" e "posso executar DML/DDL?" — com enforcement real de **escopo de tabela**, e devolver o SQL bruto `BEGIN…END` como feature opt-in. Sem migração de banco.
+
+**Histórico (duas iterações descartadas, registradas porque a terceira só faz sentido com elas):**
+1. *Bloquear `BEGIN…END` incondicionalmente.* Rejeitado pelo usuário: removia uma feature legítima (escrever e rodar SQL próprio, não-Cypher) e atacava a **forma** do statement, não a semântica.
+2. *Permissões `query.freeform` / `catalog.browse` como portão pode/não-pode.* Rejeitado: o problema real não é "quem pode query", é "quais tabelas cada um alcança".
+
+**Design Decisions (final):**
+1. **Escopo de tabela em 2 tiers, chaveado em `context.create`** — novo `services/sql_scope.py`: extrai as tabelas do statement com sqlglot (pega JOIN, subquery, UNION; nome de CTE não conta como tabela), normaliza contra `default_catalog`/`default_schema` e decide. Quem tem `context.create` lê qualquer tabela nos `catalog.schema` da allowlist (`catalog_schema_pairs`, que já existia) — não é escalada, pois já poderia apontar um contexto para lá. Quem não tem lê **apenas as tabelas do contexto aberto**. Os schemas do próprio contexto entram sempre no escopo, para não quebrar contexto que aponta fora da allowlist. Violação → 403 `QUERY_SCOPE_DENIED` nomeando as tabelas.
+2. **Check roda DEPOIS de `prepare_sql`**, sobre o statement final: a validação SELECT-only já garantiu parse limpo (nada de `exp.Command` opaco escapando como "sem tabelas") e o SQL final inclui o CTE prefilter.
+3. **Cypher dispensa o check** — o transpiler renderiza contra o schema provider do contexto, então só consegue nomear as tabelas daquele contexto. É também o que preserva BFS procedural para todos.
+4. **`BEGIN…END` no caminho raw: bloqueado por default, liberado por `allow_raw_sql_scripts`.** Fundamentado na doc do Databricks (verificada): o corpo de um compound statement aceita DML e, em blocos não-atômicos, DDL/DCL; e `EXECUTE IMMEDIATE` executa string montada em runtime. Logo nem o validador (sqlglot não decompõe o bloco) nem o escopo conseguem inspecionar um script — "prove que este programa só lê" é indecidível com SQL dinâmico. **Rejeitado:** parsear o corpo (falha exatamente no `EXECUTE IMMEDIATE`, o vetor real → falsa segurança) e assinar o transpile com HMAC (complexidade/rotação). **Contrato da flag, documentado:** ligada, scripts pulam validação E escopo; os grants read-only do Unity Catalog viram a única camada.
+5. **`context.create` absorveu `catalog.browse`** — navegar catálogo é atividade de autoria; o catálogo de permissões volta a 2 entradas.
+6. **Frontend segue o servidor:** `allow_raw_sql_scripts` vai no `/api/config`; o GraphQueryPanel só reroteia script para o endpoint Cypher quando o servidor recusa scripts. Botões Query/Templates/Console voltaram a ser visíveis para todos (query não é mais pode/não-pode); Discover segue `context.create`.
+
+**Files Created:**
+- [api/graphlagoon/services/sql_scope.py](../../api/graphlagoon/services/sql_scope.py) — extração + decisão de escopo
+- [api/graphlagoon/services/sql_identifiers.py](../../api/graphlagoon/services/sql_identifiers.py) — validação/quoting de identificadores (A4)
+- [api/tests/test_sql_scope.py](../../api/tests/test_sql_scope.py), [test_sql_identifiers.py](../../api/tests/test_sql_identifiers.py), [test_script_rejection.py](../../api/tests/test_script_rejection.py)
+- [frontend/src/utils/sqlScript.ts](../../frontend/src/utils/sqlScript.ts) + teste
+
+**Files Modified (principais):**
+- [routers/graph.py](../../api/graphlagoon/routers/graph.py) — `enforce_query_scope` + wiring nos 3 caminhos de SQL bruto; `context.create` em `/datasets` e `/schema-discovery`
+- [routers/catalog.py](../../api/graphlagoon/routers/catalog.py) — validação de identificadores (400) + gate `context.create`
+- [datasource/sql_warehouse.py](../../api/graphlagoon/services/datasource/sql_warehouse.py) — script condicional à flag; `_safe_table_name`; colunas escapadas
+- [warehouse.py](../../api/graphlagoon/services/warehouse.py) — identificadores quotados; `_effective_row_limit`
+- [config.py](../../api/graphlagoon/config.py) — `allow_raw_sql_scripts`, `databricks_tls_verify` (A2), `max_query_rows`
+- [permission_catalog.py](../../api/graphlagoon/services/permission_catalog.py), [schema_drift.py](../../api/graphlagoon/services/schema_drift.py), [public_config.py](../../api/graphlagoon/services/public_config.py), [admin_registry.py](../../api/graphlagoon/routers/admin_registry.py)
+- Frontend: [graph.ts](../../frontend/src/stores/graph.ts), [GraphQueryPanel.vue](../../frontend/src/components/GraphQueryPanel.vue), [useTemplateExecution.ts](../../frontend/src/composables/useTemplateExecution.ts), [GraphContextFormModal.vue](../../frontend/src/components/GraphContextFormModal.vue), [api.ts](../../frontend/src/services/api.ts)
+
+**Testing:**
+- [x] API: 1267 passed (6 falhas pré-existentes, confirmadas via stash)
+- [x] Frontend: 2406 passed (140 files); `npx vue-tsc --noEmit` limpo; E2E 223 passed
+- [x] Escopo verificado com casos reais: tabela vizinha no mesmo schema, outro catálogo, tabela escondida em JOIN, em subquery, e CTE que **não** deve ser confundida com tabela; tiers author/reader; allowlist configurável por env
+- [x] Flag verificada nos dois estados (bloqueia por default; libera e não enfraquece o validador de statement único)
+
+**Public Docs:**
+- [x] [permissions.md](../guide/permissions.md) — catálogo de 2 entradas, seção "Query scope" com os tiers, warning sobre `BEGIN…END`, novos sintomas na tabela de troubleshooting
+- [x] [configuration.md](../guide/configuration.md) — `GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS`, `GRAPH_LAGOON_CATALOG_SCHEMAS` (agora também escopo), `MAX_QUERY_ROWS`, `DATABRICKS_TLS_VERIFY`
+- [x] [databricks-apps.md](../guide/databricks-apps.md) — warning de least-privilege (só `SELECT`), OBO `sql:restricted-query` como futuro
+- [x] [security-assessment.md](security-assessment.md) — A2/A3/A4 atualizados com a análise do Databricks scripting; tabela de camadas revisada; §2 explicitamente revisado (query livre agora é *dentro de escopo declarado*)
+- [x] `make docs-build` passa. Sem screenshot novo: a UI só muda por ocultação condicional e por uma flag de servidor desligada por default
+
+**Admin-Area Impact:**
+- [x] `CONFIG_FIELD_KINDS`: `allow_raw_sql_scripts`, `databricks_tls_verify`, `max_query_rows` como `public`
+- [x] Razões de `AUDIT_EXEMPT_ROUTES` atualizadas nos endpoints de query
+- [x] Matriz de permissões volta a 2 linhas (test_admin_registry verde)
+
+**Security Considerations:**
+- O que o app garante por parsing é **onde** se pode ler (escopo). O que ele **não** garante por parsing é read-only dentro de um script — isso é propriedade da credencial (grants read-only) ou, no futuro, da identidade (OBO `sql:restricted-query`)
+- Sem OBO, a credencial única continua sendo o perímetro externo; por isso o guia de least-privilege virou parte da correção
+
+**Follow-up na mesma sessão — furo encontrado por revisão do usuário ("um reader ainda consegue ler tabela fora do contexto?"):** o `cte_prefilter` é SQL bruto do cliente aceito por `GraphQueryRequest`, `CypherQueryRequest` e `TableQueryRequest`, e é spliced no statement final em TODOS os modos. Como eu tinha isentado os caminhos Cypher do check ("o transpiler é context-bound"), um reader lia tabela alheia com `{"query": "MATCH (n)-[r]->(m) RETURN r", "cte_prefilter": "MY_FINAL_EDGES AS (SELECT * FROM hr.private.salaries)"}`. Corrigido: `cte_prefilter_as_statement()` embrulha o prefilter (substituindo `__EDGES__`/`__NODES__` pelas tabelas do contexto) e o escopo é checado **na origem**, onde ainda é parseável — o que importa porque em modo procedural o statement final vira script opaco. `enforce_query_scope` agora roda nos 4 caminhos Cypher também, e recebe o datasource para isentar backends não-SQL (Neptune/REST não têm tabelas a escopar — sem isso, quebrei os testes desses dois e o suite acusou). Verificado desabilitando a checagem: `/query/table` modo cypher passa a vazar, e o caso prefilter-dentro-de-script tem teste direto (`TestPrefilterInsideOpaqueScript`).
+
+**Known Limitations:**
+- Com `allow_raw_sql_scripts=true` o escopo de tabela não é verificável para scripts (documentado no guia e no warning)
+- Exploração antiga sem snapshot cujo `graph_query` salvo é script bruto mostra erro pedindo re-execução do Cypher
+- OBO exigiria `header_provider` por request — mudança arquitetural, fora deste escopo
+
+**Author:** Claude (AI Assistant)
+
+---
