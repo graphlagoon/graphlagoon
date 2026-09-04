@@ -162,6 +162,13 @@ O agravante é documental: o `app.yaml`/`app.py` de exemplo em `docs/guide/datab
 
 ### 🟠 A2 — TLS desligado na troca OAuth (segredo mais privilegiado)
 
+> **✅ Corrigido 2026-09-04:** a troca OAuth agora verifica TLS por default.
+> Novo setting `databricks_tls_verify` (default `True`, classificado
+> `public` no registro admin) como escape hatch explícito para CA interna —
+> seguindo o padrão existente `neptune_tls_verify`. Evidência de que o
+> `verify=False` era acidental: o cliente do warehouse fala com o mesmo
+> host com `verify=True` desde sempre.
+
 ```python
 # api/graphlagoon/services/databricks_oauth.py:94
 async with httpx.AsyncClient(verify=False) as client:
@@ -175,6 +182,30 @@ Essa é exatamente a requisição que carrega `client_id`/`client_secret` (HTTP 
 ---
 
 ### 🟠 A3 — Bypass do read-only via `BEGIN...END`
+
+> **✅ Corrigido 2026-09-04:** `prepare_sql` rejeita script `BEGIN...END`
+> com 400 `SCRIPT_NOT_ALLOWED` **por default**, atrás da feature flag
+> `allow_raw_sql_scripts` (opt-in do operador). Os 3 fluxos do frontend que
+> transpilavam no cliente e postavam o script no `/query` (review no
+> GraphQueryPanel, restore de exploração sem snapshot, templates) foram
+> reroteados para os endpoints Cypher, onde o script é gerado no servidor
+> e fica ligado ao contexto por construção — então Cypher procedural
+> continua funcionando para todos, flag ligada ou não.
+>
+> **Por que a forma do statement é o critério.** A referência do Databricks
+> confirma que o corpo de um compound statement aceita DML
+> (`INSERT`/`UPDATE`/`DELETE`/`MERGE`) e, em blocos não-atômicos, DDL e DCL;
+> e `EXECUTE IMMEDIATE` executa uma string montada em runtime. Logo nem o
+> validador SELECT-only (sqlglot não decompõe o bloco) nem o novo checador
+> de escopo de tabela conseguem inspecionar um script — provar "este
+> programa só lê" é indecidível com SQL dinâmico. Alternativas rejeitadas:
+> parsear o corpo (falha exatamente no `EXECUTE IMMEDIATE`, dando falsa
+> segurança) e HMAC no transpile (complexidade/rotação).
+>
+> **Contrato da flag:** com ela ligada, scripts pulam validação E escopo —
+> os grants read-only do Unity Catalog passam a ser a única camada que
+> impede escrita. Documentado em `configuration.md` e `permissions.md`.
+> Testes: `api/tests/test_script_rejection.py`.
 
 O validador `validate_sql_query` (sqlglot, dialeto Spark) rejeita `Insert/Update/Delete/Drop/Create/Alter/Truncate/Grant/...` e é aplicado a todos os caminhos de query. Mas:
 
@@ -197,6 +228,35 @@ Qualquer corpo enviado a `POST /api/graph-contexts/{id}/query` (ou `/query/async
 
 ### 🟠 A4 — Interpolação de SQL no router de catálogo
 
+> **✅ Corrigido 2026-09-04 (injeção + escopo):** novo módulo
+> `services/sql_identifiers.py` (regex `^[A-Za-z0-9_]+$` + backtick-quote
+> com escape) aplicado em todos os f-strings de identificador: router de
+> catálogo (400 `INVALID_IDENTIFIER` na borda), `warehouse.py` (SHOW/
+> DESCRIBE/SELECT/discover_schema), e a variante armazenada —
+> `parse_qualified_table` agora rejeita partes hostis (fecha injeção via
+> config de contexto) e os builders de subgraph/expand escapam colunas e
+> validam+quotam nomes de tabela. O router de catálogo inteiro também
+> ganhou o gate `context.create` (antes: qualquer autenticado enumerava e
+> pré-visualizava qualquer tabela).
+>
+> E o problema maior que A4 só tangenciava — ler tabela fora do contexto —
+> passou a ter **enforcement real**: `services/sql_scope.py` extrai as
+> tabelas do statement com sqlglot (JOIN, subquery, UNION; CTE não conta
+> como tabela) e aplica dois tiers. Quem tem `context.create` lê qualquer
+> tabela nos `catalog.schema` da allowlist; quem não tem lê **apenas as
+> tabelas do contexto aberto**. O `cte_prefilter` — SQL bruto do cliente que
+> é spliced em TODOS os modos, inclusive dentro de scripts procedurais
+> opacos — é checado **na origem**, enquanto ainda é parseável; sem isso um
+> reader lia tabela alheia via `{"query": "MATCH ...", "cte_prefilter":
+> "MY_FINAL_EDGES AS (SELECT * FROM hr.private.salaries)"}`. Cypher sem
+> prefilter dispensa o check (o transpiler só nomeia as tabelas do
+> contexto), e datasources não-SQL (Neptune/REST) são isentos por não terem
+> tabelas a escopar. Isto **revisa a premissa do §2**: query
+> read-only arbitrária continua intencional, mas agora dentro de um escopo
+> declarado, não sobre tudo que a credencial alcança. Testes:
+> `api/tests/test_sql_scope.py`, `test_sql_identifiers.py` + casos de rota
+> em `test_permission_routes.py` e `test_schema_drift.py`.
+
 ```python
 # warehouse.py:613,657,708 — parâmetros vindos direto da query string
 statement=f"SHOW TABLES IN {catalog}.{database}"
@@ -211,6 +271,18 @@ statement=f"SELECT * FROM {full_table_name} LIMIT {limit}"
 ---
 
 ### 🟠 A5 — Um único service principal com escopo `all-apis`
+
+> **Atualização 2026-09-04 (mitigações parciais):** (b) virou guia oficial —
+> `docs/guide/databricks-apps.md` agora manda conceder **só `SELECT`** nos
+> catálogos visualizados, com o aviso explícito de que os grants do SP são
+> o perímetro externo e a única camada que segura um script `BEGIN...END`.
+> No app, o escopo de leitura deixou de depender só da credencial: dois
+> tiers por `context.create` + allowlist de `catalog.schema` (ver A4).
+> Clamp opcional `max_query_rows` (Databricks `row_limit`) no choke point
+> do warehouse. (c) — OBO com `sql:restricted-query` — segue como evolução
+> futura: resolveria A5 e tornaria script seguro por construção (a query
+> roda com os grants do próprio usuário). O `scope=all-apis` do M2M
+> permanece (o fluxo M2M do Databricks não aceita escopo menor).
 
 Todas as queries de warehouse rodam como uma **identidade única da app**, nunca como o usuário final, com **`scope: "all-apis"`** (`databricks_oauth.py:90`) — o escopo OAuth mais amplo. Consequências: os grants per-user do Unity Catalog **não são aplicados** (todo mundo compartilha o acesso do SP), e o mesmo credential dirige qualquer REST API do Databricks. Isto é arquitetural e em parte inerente ao modelo de Databricks Apps, mas amplifica A3/A4: o que vazar por eles roda com o acesso máximo.
 
@@ -321,9 +393,30 @@ O engine Postgres puro (`db/database.py:57-66`) não passa `connect_args`/`ssl`;
 ### Fase 1 — Antes do próximo deploy (bloqueadores)
 1. **C1** — implementar confirmação explícita + registro de autor + remover a propagação silenciosa para o context (`persistProgramsToContext` no `loadState`). *(O Worker-sandbox pode vir na Fase 2, mas a propagação silenciosa e a auto-importação precisam sair já.)*
 2. **A1** — `dev_mode=False` default; `/api/dev/*` atrás de flag dedicado e fora do build de produção; setar `GRAPH_LAGOON_DEV_MODE=false` no `app.yaml`/`app.py` de exemplo.
-3. **A2** — remover `verify=False` da troca OAuth.
-4. **A3** — parar de reconhecer `BEGIN...END` por prefixo de texto do usuário; marcar/validar o SQL procedural interno.
-5. **A4** — validar/allowlist `catalog`/`database`/`table` no router de catálogo.
+3. ~~**A2** — remover `verify=False` da troca OAuth.~~ ✅ 2026-09-04
+4. ~~**A3** — parar de reconhecer `BEGIN...END` por prefixo de texto do usuário; marcar/validar o SQL procedural interno.~~ ✅ 2026-09-04
+5. ~~**A4** — validar/allowlist `catalog`/`database`/`table` no router de catálogo.~~ ✅ 2026-09-04
+
+### Abordagem em camadas — permissão de queries (referência, 2026-09-04)
+
+Como o problema "usuário consulta tabela fora do contexto / executa DML" é
+tratado, camada por camada:
+
+| Camada | Controle | Contra o quê | Status |
+|---|---|---|---|
+| App — validação | `validate_sql_query` (sqlglot, SELECT-only, single-statement) + `BEGIN...END` recusado no caminho raw por default (`SCRIPT_NOT_ALLOWED`, flag `allow_raw_sql_scripts` para reabrir) | DML/DDL | ✅ |
+| App — validação | `services/sql_identifiers.py` (regex + backtick-escape) em todo f-string de identificador | Injeção via URL params e via config de contexto armazenada | ✅ |
+| App — escopo | `services/sql_scope.py`: tabelas extraídas do statement e checadas contra 2 tiers (`context.create` ⇒ allowlist de catalog.schema; senão ⇒ só as tabelas do contexto aberto) | **Leitura de tabela fora do contexto/allowlist** | ✅ enforced |
+| App — autorização | `context.create` gateia criar contexto, navegar catálogo e o tier largo de query | Quem autora e quem só explora | ✅ |
+| App — contenção | `max_query_rows` (Databricks `row_limit`) no choke point do warehouse | Exfiltração em massa / custo | ✅ opcional, default off |
+| Databricks — credencial | Grants **read-only** (`SELECT` + `CAN USE`) só nos catálogos visualizados | Neutraliza qualquer bypass de escrita no nível do warehouse | 📖 guia em `databricks-apps.md`; responsabilidade do operador |
+| Databricks — identidade | OBO (`x-forwarded-access-token`, scope `sql:restricted-query`): queries read-only sob as permissões UC **do usuário final** (row filters/column masks) | Resolve A5 por arquitetura | ⏳ futuro — exigiria `header_provider` por request |
+
+Nota de escopo (revisa o §2): query read-only arbitrária continua sendo o
+produto, mas **dentro de um escopo declarado**. O que a app garante por
+parsing é *onde* se pode ler; o que ela não consegue garantir por parsing é
+*read-only dentro de um script* — isso é propriedade da credencial (grants)
+ou, no futuro, da identidade (OBO).
 
 ### Fase 2 — Hardening estrutural (próximo ciclo)
 6. **C1 (definitivo)** — mover `new Function` para Web Worker isolado (sem DOM, `connect-src 'none'`, timeout) e adotar CSP real (**B1**).

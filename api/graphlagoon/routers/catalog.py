@@ -10,8 +10,9 @@ from graphlagoon.models.schemas import (
     TableSchema,
     TablePreviewResponse,
 )
+from graphlagoon.services.sql_identifiers import validate_identifier_part
 from graphlagoon.services.warehouse import get_warehouse_client, WarehouseClient
-from graphlagoon.middleware.auth import get_current_user
+from graphlagoon.utils.authz import require_permission
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
@@ -21,12 +22,35 @@ def get_warehouse() -> WarehouseClient:
     return get_warehouse_client()
 
 
+def _validate_identifiers(**names: Optional[str]) -> None:
+    """400 INVALID_IDENTIFIER for any non-None parameter that is not a bare
+    SQL identifier — the security boundary for everything this router
+    interpolates into SQL (finding A4)."""
+    for label, value in names.items():
+        if value is None:
+            continue
+        try:
+            validate_identifier_part(value)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "INVALID_IDENTIFIER",
+                        "message": str(e),
+                        "details": {"parameter": label},
+                    }
+                },
+            ) from e
+
+
 @router.get("/catalogs", response_model=CatalogListResponse)
 async def list_catalogs(
-    request: Request, warehouse: WarehouseClient = Depends(get_warehouse)
+    request: Request,
+    user_email: str = Depends(require_permission("context.create")),
+    warehouse: WarehouseClient = Depends(get_warehouse),
 ):
     """List all available catalogs."""
-    get_current_user(request)  # Ensure authenticated
     return await warehouse.list_catalogs()
 
 
@@ -36,10 +60,11 @@ async def list_databases(
     catalog: Optional[str] = Query(
         default=None, description="Catalog name (uses configured default)"
     ),
+    user_email: str = Depends(require_permission("context.create")),
     warehouse: WarehouseClient = Depends(get_warehouse),
 ):
     """List all databases in a catalog."""
-    get_current_user(request)  # Ensure authenticated
+    _validate_identifiers(catalog=catalog)
     return await warehouse.list_databases(catalog)
 
 
@@ -52,10 +77,11 @@ async def list_tables(
     catalog: Optional[str] = Query(
         default=None, description="Catalog name (uses configured default)"
     ),
+    user_email: str = Depends(require_permission("context.create")),
     warehouse: WarehouseClient = Depends(get_warehouse),
 ):
     """List all tables in a database."""
-    get_current_user(request)  # Ensure authenticated
+    _validate_identifiers(database=database, catalog=catalog)
     return await warehouse.list_tables(database, catalog)
 
 
@@ -69,10 +95,11 @@ async def get_table_schema(
     catalog: Optional[str] = Query(
         default=None, description="Catalog name (uses configured default)"
     ),
+    user_email: str = Depends(require_permission("context.create")),
     warehouse: WarehouseClient = Depends(get_warehouse),
 ):
     """Get the schema of a table."""
-    get_current_user(request)  # Ensure authenticated
+    _validate_identifiers(table=table, database=database, catalog=catalog)
     try:
         return await warehouse.get_table_schema(table, database, catalog)
     except Exception as e:
@@ -106,10 +133,11 @@ async def preview_table(
         default=None, description="Catalog name (uses configured default)"
     ),
     limit: int = Query(default=100, le=1000, description="Max rows"),
+    user_email: str = Depends(require_permission("context.create")),
     warehouse: WarehouseClient = Depends(get_warehouse),
 ):
     """Preview table data."""
-    get_current_user(request)  # Ensure authenticated
+    _validate_identifiers(table=table, database=database, catalog=catalog)
     try:
         return await warehouse.preview_table(table, database, catalog, limit)
     except Exception as e:
@@ -133,12 +161,13 @@ async def preview_table(
 
 @router.post("/refresh")
 async def refresh_catalog(
-    request: Request, warehouse: WarehouseClient = Depends(get_warehouse)
+    request: Request,
+    user_email: str = Depends(require_permission("context.create")),
+    warehouse: WarehouseClient = Depends(get_warehouse),
 ):
     """Re-register all parquet tables in the Spark catalog.
 
     This is useful when tables are created after the service starts,
     or when you need to sync the catalog with the filesystem.
     """
-    get_current_user(request)  # Ensure authenticated
     return await warehouse.refresh_catalog()

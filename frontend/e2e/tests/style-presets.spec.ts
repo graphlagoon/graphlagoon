@@ -1,6 +1,7 @@
 /**
  * Named style presets — style, labels and layout applied from the URL.
  */
+import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT } from '../fixtures/mock-data';
 import {
@@ -311,5 +312,117 @@ test.describe('Style presets', () => {
 
     await expect(page.getByTestId('style-preset-modal')).toHaveCount(0);
     await expect(page.getByTestId('graph-status-style')).toContainText('investigacao');
+  });
+});
+
+/**
+ * The sphere/icon state of one node, read straight from graphData.
+ *
+ * Deliberately not rendering-dependent: `color` and `__iconColor` are plain JS
+ * state written by updateVisuals(), so these assertions hold identically on a
+ * GPU and on CI's software renderer. The hook itself is dev-only, so its
+ * absence means the suite is pointed at a production build — worth saying out
+ * loud rather than failing later on `undefined.color`.
+ */
+async function readVisualState(page: Page, nodeId: string) {
+  const state = await page.evaluate(
+    (id) => (window as any).__GRAPH_NODE_VISUAL_STATE__?.(id) ?? null,
+    nodeId,
+  );
+  expect(
+    state,
+    'no __GRAPH_NODE_VISUAL_STATE__ for the node: the graph never finished '
+      + 'building, or the app is a production build without the dev hook',
+  ).not.toBeNull();
+  return state as { color: string; iconColor?: string };
+}
+
+/**
+ * Regression: on a first load with ?style=, the preset's fetch used to land
+ * while the async graph build (chunked + headless settle for >2000 edges) was
+ * still in flight — the nodeTypeIcons watcher ran updateVisuals() against the
+ * about-to-be-discarded graphData, so styled nodes kept their opaque spheres
+ * and the icon billboards stayed depth-rejected inside them until the next
+ * camera idle. The >2000-edge graph makes the race deterministic: the mocked
+ * style fetch (ms) always resolves mid-settle.
+ */
+test.describe('Style presets — icons on first load', () => {
+  // These two deliberately load a graph big enough to force the async build
+  // path, and they run on a software-rendered WebGL context in CI. The default
+  // 30s budget cannot even contain their own waits, let alone a cold runner:
+  // mark them slow (x3) so a slow environment reports the real assertion
+  // instead of a timeout.
+  test.slow();
+
+  // Above HEADLESS_SETTLE_EDGE_THRESHOLD (2000) so updateGraph awaits a
+  // headless settle, guaranteeing the style lands mid-build.
+  const N = 420;
+  const BIG_NODES = Array.from({ length: N }, (_, i) => ({
+    node_id: `p${i}`,
+    node_type: 'Person',
+    properties: { name: `Person ${i}` },
+  }));
+  const BIG_EDGES = Array.from({ length: N * 5 }, (_, i) => ({
+    edge_id: `e${i}`,
+    src: `p${i % N}`,
+    dst: `p${(i * 7 + 1) % N}`,
+    relationship_type: 'KNOWS',
+    properties: {},
+  }));
+
+  const ICONES = {
+    ...INVESTIGACAO,
+    nodeTypeIcons: { Person: 'user' },
+  };
+
+  test.beforeEach(async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedPrecomputedGraphs(page, MOCK_CONTEXT.id, {
+      'big-icons': { nodes: BIG_NODES, edges: BIG_EDGES },
+    });
+  });
+
+  test('icons from ?style= show without any camera interaction', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedStylePresets(page, MOCK_CONTEXT.id, { icones: ICONES });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?precomputed=big-icons&style=icones`);
+
+    await expect(page.getByTestId('graph-status-style')).toContainText('icones', {
+      timeout: 20_000,
+    });
+    await page.waitForFunction(() => (window as any).__GRAPH_LAYOUT_DONE__?.(), null, {
+      timeout: 30_000,
+    });
+
+    // No camera move, no zoom: the sphere must already be transparent with the
+    // appearance color handed to the icon billboard.
+    const state = await readVisualState(page, 'p1');
+    expect(state.color).toBe('rgba(0,0,0,0)');
+    expect(state.iconColor).toBeTruthy();
+  });
+
+  test('preset behaviors that re-init the graph still keep the icons', async ({
+    authenticatedPage: page,
+  }) => {
+    // viewMode '3d' differs from the '2d-proj' default, so applying the preset
+    // re-runs initGraph() — the secondary window for the same lost-visuals bug.
+    await seedStylePresets(page, MOCK_CONTEXT.id, {
+      icones3d: { ...ICONES, behaviors: { viewMode: '3d' } },
+    });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?precomputed=big-icons&style=icones3d`);
+
+    await expect(page.getByTestId('graph-status-style')).toContainText('icones3d', {
+      timeout: 20_000,
+    });
+    await page.waitForFunction(() => (window as any).__GRAPH_LAYOUT_DONE__?.(), null, {
+      timeout: 30_000,
+    });
+
+    const state = await readVisualState(page, 'p1');
+    expect(state.color).toBe('rgba(0,0,0,0)');
+    expect(state.iconColor).toBeTruthy();
   });
 });

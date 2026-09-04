@@ -10,6 +10,10 @@ import {
 } from '@/composables/useDatasourceCapabilities';
 import { generateBfsExampleQuery } from '@/utils/exampleQuery';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { isSqlScript } from '@/utils/sqlScript';
+
+/** Server-side opt-in: when on, a hand-written BEGIN…END runs as raw SQL. */
+const rawScriptsAllowed = window.__GRAPH_LAGOON_CONFIG__?.allow_raw_sql_scripts === true;
 import { X, SlidersHorizontal } from 'lucide-vue-next';
 
 const emit = defineEmits<{
@@ -273,6 +277,26 @@ async function handleAction() {
         } else if (graphStore.queryError) {
           toast.error(`Transpile failed: ${graphStore.queryError.message}`);
         }
+      }
+    } else if (isSqlScript(sqlQuery.value) && !rawScriptsAllowed) {
+      // The server refuses BEGIN…END on the raw-SQL path unless an admin
+      // enabled allow_raw_sql_scripts. Unedited, the script is the transpiler's
+      // own output, so re-running its Cypher gives the same result (plus the
+      // CTE fallback); edited, there is nothing safe to send.
+      if (sqlQuery.value === graphStore.lastTranspiledSql && cypherQuery.value.trim()) {
+        const sql = await graphStore.executeCypherQuery(cypherQuery.value);
+        if (sql) sqlQuery.value = sql;
+        if (graphStore.queryError) {
+          toast.error(`Query failed: ${graphStore.queryError.message}`);
+        } else {
+          toast.success(`Loaded ${graphStore.nodes.length} nodes and ${graphStore.edges.length} edges`);
+        }
+      } else {
+        toast.error(
+          'Modified BEGIN…END scripts cannot be executed. Edit the Cypher query instead, '
+          + 'use CTE (WITH RECURSIVE) mode to get editable SQL, or ask an administrator '
+          + 'to enable raw SQL scripts.',
+        );
       }
     } else {
       // Execute SQL query

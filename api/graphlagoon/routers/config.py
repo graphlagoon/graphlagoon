@@ -17,4 +17,4 @@ async def get_config(request: Request):
     ``services.public_config.build_public_config`` — the same payload the SPA
     template injects and the admin overview shows.
     """
-    return build_public_config(get_current_user(request))
+    return await build_public_config(get_current_user(request))

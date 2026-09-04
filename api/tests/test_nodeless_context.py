@@ -318,7 +318,8 @@ class TestDatasourceThreading:
             make_context(node_table_name="cat.sch.nodes"),
             ExpandRequest(node_id="n1", depth=2),
         )
-        assert "FROM cat.sch.nodes" in captured["query"]
+        # Table names are validated and backtick-quoted since the A4 fix.
+        assert "FROM `cat`.`sch`.`nodes`" in captured["query"]
 
     def test_prefilter_nodes_placeholder_expands_to_fragment(self):
         ds = self._datasource()

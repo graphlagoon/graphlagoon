@@ -5,6 +5,9 @@ import { useAdminStore } from '@/stores/admin';
 import { usePersistence } from '@/composables/usePersistence';
 import { useToast } from '@/composables/useToast';
 import TransferOwnershipModal from '@/components/admin/TransferOwnershipModal.vue';
+import GroupsPanel from '@/components/admin/GroupsPanel.vue';
+import PermissionsMatrix from '@/components/admin/PermissionsMatrix.vue';
+import PermissionInspector from '@/components/admin/PermissionInspector.vue';
 import {
   CLEAR_CONFIRMATION,
   canClearEnvironment,
@@ -39,6 +42,7 @@ const TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'users', label: 'Users' },
   { id: 'contexts', label: 'Contexts' },
   { id: 'explorations', label: 'Explorations' },
+  { id: 'groups', label: 'Groups & permissions' },
   { id: 'audit', label: 'Audit' },
   { id: 'danger', label: 'Danger zone' },
 ];
@@ -65,6 +69,15 @@ async function loadTab(id: AdminTab, force = false) {
       break;
     case 'explorations':
       await Promise.all([admin.fetchExplorations(), admin.fetchContexts(), admin.fetchUsers({ page_size: 200 })]);
+      break;
+    case 'groups':
+      // Users feed the member/inspector datalists; permissions feed the
+      // matrix and the per-group rule counts.
+      await Promise.all([
+        admin.fetchGroups(),
+        admin.fetchPermissions(),
+        admin.fetchUsers({ page_size: 200 }),
+      ]);
       break;
     case 'audit':
       await admin.fetchAudit({ page: auditPage.value, page_size: AUDIT_PAGE_SIZE, ...auditFilters.value });
@@ -489,6 +502,13 @@ function openGraph(id: string) {
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Groups & permissions -->
+    <section v-else-if="tab === 'groups'" class="tab-panel" data-testid="admin-groups">
+      <GroupsPanel />
+      <PermissionsMatrix />
+      <PermissionInspector />
     </section>
 
     <!-- Audit -->

@@ -48,6 +48,9 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "databricks_catalog": "public",
     "databricks_schema": "public",
     "catalog_schemas": "public",
+    "allow_raw_sql_scripts": "public",
+    "databricks_tls_verify": "public",
+    "max_query_rows": "public",
     "exploration_snapshots_dir": "public",
     "databricks_volume_path": "public",
     "precomputed_graphs_enabled": "public",
@@ -74,6 +77,7 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "neptune_tls_verify": "public",
     "neptune_http_timeout": "public",
     "neptune_discovery_sample_limit": "public",
+    "group_cache_ttl_seconds": "public",
 }
 
 # Tables wiped by "clear environment", in an order that respects foreign keys
@@ -84,6 +88,10 @@ CLEARABLE_TABLES: tuple[str, ...] = (
     "graph_context_shares",
     "query_templates",
     "graph_contexts",
+    "permission_rules",
+    "group_members",
+    "permission_modes",
+    "groups",
     "users",
 )
 
@@ -109,6 +117,10 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/admin/explorations/{exploration_id}/transfer"),
         ("POST", "/api/admin/environment/clear"),
         ("DELETE", "/api/dev/clear-all"),
+        ("POST", "/api/admin/groups"),
+        ("PUT", "/api/admin/groups/{group_id}"),
+        ("DELETE", "/api/admin/groups/{group_id}"),
+        ("PUT", "/api/admin/permissions/{permission_id}"),
     }
 )
 
@@ -129,12 +141,20 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("PUT", "/api/graph-contexts/{context_id}/style-presets/{name}"): (
         "personal preference anyone with write access may save"
     ),
-    ("POST", "/api/graph-contexts/{context_id}/query"): "read-only query execution",
+    ("POST", "/api/graph-contexts/{context_id}/query"): (
+        "read-only query execution (SELECT-only validator, BEGIN…END scripts "
+        "rejected, gated by query.freeform)"
+    ),
     (
         "POST",
         "/api/graph-contexts/{context_id}/query/async",
-    ): "read-only query execution",
-    ("POST", "/api/graph-contexts/{context_id}/query/table"): "read-only query",
+    ): (
+        "read-only query execution (SELECT-only validator, BEGIN…END scripts "
+        "rejected, gated by query.freeform)"
+    ),
+    ("POST", "/api/graph-contexts/{context_id}/query/table"): (
+        "read-only query (gated by query.freeform)"
+    ),
     ("POST", "/api/graph-contexts/{context_id}/query/job/{job_id}/cancel"): (
         "cancels the caller's own query"
     ),
@@ -157,4 +177,7 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/schema-discovery"): "read-only discovery",
     ("POST", "/api/catalog/refresh"): "cache refresh; no data change",
     ("POST", "/api/admin/health/warehouse"): "read-only probe",
+    ("POST", "/api/admin/groups/resolution/refresh"): (
+        "cache refresh; no data change"
+    ),
 }

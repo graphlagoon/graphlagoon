@@ -36,6 +36,19 @@ GRAPH_LAGOON_DATABRICKS_HOST=adb-xxx.azuredatabricks.net
 GRAPH_LAGOON_DATABRICKS_TOKEN=dapi-xxx
 GRAPH_LAGOON_DATABRICKS_WAREHOUSE_ID=xxx
 GRAPH_LAGOON_DATABRICKS_CATALOG=main
+# TLS verification on the OAuth token exchange. Leave true; with an internal
+# CA, point SSL_CERT_FILE at your bundle instead of disabling this.
+GRAPH_LAGOON_DATABRICKS_TLS_VERIFY=true
+# Which catalog.schema pairs any query may read (see "Query scope" in the
+# permissions guide). Also the search scope for dataset listing.
+# GRAPH_LAGOON_CATALOG_SCHEMAS=main.graphs,main.staging
+# Allow hand-written BEGIN...END scripts on the raw-SQL path. Off by default:
+# a script body is opaque to both the read-only validator and the table-scope
+# check. Enable ONLY with read-only Unity Catalog grants.
+GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS=false
+# Optional server-side cap on rows any warehouse statement may return
+# (Databricks row_limit). Unset = the query's own LIMIT decides.
+# GRAPH_LAGOON_MAX_QUERY_ROWS=50000
 
 # Amazon Neptune (see "Datasources" below)
 GRAPH_LAGOON_NEPTUNE_ENDPOINT=my-cluster.cluster-abc.us-east-1.neptune.amazonaws.com
@@ -390,6 +403,16 @@ settings = Settings(superuser_emails="admin@company.com,ops@company.com")
 `GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS` is a comma-separated list of domains for
 which wildcard sharing (`*@domain`) is allowed. When unset, wildcard shares
 are rejected; sharing with individual emails is always allowed.
+
+### Groups & permissions
+
+Runtime-managed authorization (who may create contexts, save explorations)
+lives in the admin area, not in env vars — see
+[Groups & Permissions](./permissions.md). One setting tunes it:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_GROUP_CACHE_TTL_SECONDS` | `600` | Per-user TTL of the Databricks group-membership (SCIM) cache. Stale entries are served when SCIM is unreachable. |
 
 ## Programmatic Configuration
 

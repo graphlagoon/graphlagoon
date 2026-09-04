@@ -9478,3 +9478,230 @@ had no other entry point.
 `frontend/e2e/tests/rest-context.spec.ts` (its `Expand from Node` hidden-check
 had nothing left to assert; the surrounding query-only-connection test stays),
 `docs/guide/exploring-the-graph.md` ("Three ways" → "Two ways").
+
+## [2026-09-03 09:50] - Feature: Groups & Permissions (authorization)
+
+**Feature:** Superuser-managed groups (members: emails and/or Databricks
+workspace groups) with allow/deny rules over a fixed permission catalog.
+v1 catalog: `context.create`, `exploration.save`. User decisions (asked):
+capabilities-only scope (resource sharing stays email-based), both gates in
+v1, SCIM on-demand + TTL cache for Databricks membership, and **hide** (not
+disable) blocked UI affordances.
+
+**Design decisions:**
+1. **GBAC / flat RBAC with deny precedence** — permission → groups
+   (allow/deny), not role → permissions. Deny > restricted-needs-allow >
+   everyone; superusers bypass everything (env-var list = anti-lockout).
+   Policy engines (OPA/Casbin) rejected as unadministrable overkill.
+2. **Default-allow**: no rows ⇒ today's behavior; upgrade is a no-op (route
+   tests pin this). Explicit per-permission mode instead of "first allow
+   rule flips to restricted" (no silent surprises).
+3. **Rules/modes read per check, never process-cached** — admin edits apply
+   immediately, replicas can't disagree. Only SCIM membership is cached
+   (per-user TTL `GRAPH_LAGOON_GROUP_CACHE_TTL_SECONDS`=600, stale-on-error,
+   admin banner + manual refresh). Documented trade-off: a deny backed only
+   by a Databricks group can lapse when SCIM is down AND the cache is cold —
+   the guide tells admins to use email members for critical denies.
+4. **SCIM via raw httpx** (databricks-sdk is not in the default venv);
+   direct membership only; service principals have no email ⇒ out of the
+   identity model. Deployment prerequisite (SP needs SCIM read) documented.
+5. **admin_groups is a SIBLING router of admin**, not nested: FastAPI
+   0.139's lazy `_IncludedRouter` hides nested routes from
+   `router.routes`, which the registry introspection walks (known gotcha).
+   It carries its own `require_superuser` router dependency + its own
+   parametrized gate walk.
+6. **Catalog registry forces honesty**: `test_permission_gates_reference_catalog`
+   fails on any `require_permission("...")` literal outside the catalog.
+   Adding a permission = 1 catalog line + 1 `Depends` + 1 `can()` hide.
+7. **Hide model in the UI** (user's call): create-context buttons and the
+   save-exploration affordances render only with the permission; the
+   Contexts page never hides (viewing is not gated); the empty state
+   explains ("ask an administrator") instead of dead-ending; the
+   exploration-name chip stays visible (it is information) and its click
+   explains via toast. Backend 403 `PERMISSION_DENIED` names the permission.
+8. **Effective permissions ride `build_public_config`** (now async; ripple:
+   render_spa + 3 call sites + one sync test) — no new /api/me endpoint,
+   and dev identity switching re-fetches it for free.
+
+**Server:** 4 tables (migration 015, idempotent) + memory-store twins;
+`services/permission_catalog.py`, `services/groups.py`,
+`services/permissions.py` (pure `evaluate()` + zero-IO fast path for the
+default posture), `services/group_resolution.py` (SCIM + TTL + stub);
+`require_permission` dependency factory in `utils/authz.py`; gates on
+POST /api/graph-contexts and exploration create/update;
+`routers/admin_groups.py` (groups CRUD, permissions GET/PUT, inspector,
+cache refresh) — all mutations audited (`group.create/update/delete`,
+`permission.update`); AdminCounts.groups; seed adds `analysts` +
+`restricted-demo` and a demo deny that can never break seed reruns.
+
+**Frontend:** `usePermissions` (`can()`; absent array ⇒ allow for older
+backends, present ⇒ strict; deliberately NOT useFeatureFlags whose
+absent→true is a different contract); hidden affordances in ContextsView +
+Toolbar; Admin tab "Groups & permissions" (GroupsPanel + GroupEditorModal +
+PermissionsMatrix with lockout warning + PermissionInspector);
+admin store/API methods; describeAudit cases.
+
+**Testing:** api 1191 passed (6 pre-existing failures unchanged) —
+test_permissions (evaluate matrix, membership, SCIM resolver via
+MockTransport incl. stale-on-error), test_permission_routes (default
+posture no-op, 403 envelope, deny-beats-everyone, databricks stub, config
+payload), test_admin_groups (CRUD, normalization, cascade, audit trail,
+inspector, gate walk); frontend 2396 unit / 139 files; e2e 221 passed
+(new: admin-groups.spec, permissions.spec).
+
+**Public Docs:** new `docs/guide/permissions.md` (+ sidebar), configuration
+and databricks-apps updated, screenshot `permissions-admin-groups.png`
+(`make docs-screenshots`), `make docs-build` passes.
+
+**Admin-Area Impact:** registries updated — CLEARABLE_TABLES (4 tables),
+CONFIG_FIELD_KINDS (`group_cache_ttl_seconds`), AUDITED_ROUTES (4) +
+AUDIT_EXEMPT (refresh), ROUTER_MODULES (`admin_groups`), AuditAction (4),
+AdminCounts.groups, seed, docs/dev/admin-area.md rows for the catalog and
+the sibling-router rule.
+
+**Known limitations / future:** nested Databricks groups don't expand
+(SCIM direct members); share-with-group is a designed v2 hook
+(`group:<uuid>` sentinel in `shared_with_email` via `share_match_emails`)
+with zero schema change; superusers remain env-var by design.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-09-03 10:15] - Fix: SPA template render crashed on current Starlette
+
+Found by the permissions feature's end-to-end smoke (create_app → GET /):
+`templates.TemplateResponse("index.html", {...})` — the legacy
+(name, context) signature — crashes on the installed Starlette with
+"unhashable type: 'dict'" (the context dict reaches jinja's get_template).
+**Pre-existing on main**, verified in a clean worktree; unnoticed because
+`make dev` serves the frontend through Vite, so the template path went
+unexercised. Fix: modern signature (`TemplateResponse(request, name,
+context)`). This is the path that injects `window.__GRAPH_LAGOON_CONFIG__`
+(now including `permissions`) in production/embedded mode.
+
+**Testing:** smoke renders 200 with permissions injected; api suite 1191
+passed (6 pre-existing failures unchanged).
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No
+admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-09-03 10:40] - Docs: permission-gating recipe added to skill_feature_creation
+
+The "when and how to gate a new action" recipe lived only in
+docs/dev/admin-area.md (one table row) and the guide. Now
+`.claude/skills/skill_feature_creation/SKILL.md` carries it where it gets
+read: **Step 2.4b** (ask per new user-facing action; 4-step recipe —
+catalog entry, `require_permission` gate, hidden affordance, tests — plus
+the two never-rules) and a matching row in the Step 4.2b admin-impact
+table. Decided against a dedicated skill: the question belongs inside
+feature creation, not beside it.
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No
+admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-09-03 18:46] - Fix: styled node icons invisible until camera move on ?style= first load
+
+**Issue:** Loading the app for the first time with `?style=<name>` in the URL (e.g. a precomputed graph link) showed plain colored spheres instead of the preset's node icons. The icons only appeared after the user moved the camera or zoomed.
+
+**Root Cause:** A race in the first-load order of operations. The sphere↔icon treatment (`node.color = 'rgba(0,0,0,0)'` + `node.__iconColor`) lived only in `updateVisuals()` — `buildGraphData()` never applied it, and neither `updateGraph()` nor `initGraph()` re-ran visuals after the `graph3d.graphData()` swap. On first load, `updateGraph()` is async (chunked build + headless settle for >2000 edges), and the style preset's fetch resolves mid-flight: the `nodeTypeIcons` watcher fired `updateVisuals()` against the OLD/empty graphData, whose work was discarded by the swap. The fresh nodes kept opaque spheres, and the icon billboards (`depthWrite:false, depthTest:true`, same diameter) were depth-rejected inside them. Camera movement "fixed" it because the 300ms camera-idle callback in `useGraphCamera.ts` calls `updateVisuals()` when `edgeLensMode !== 'off'` (default `'dim'`). A secondary window existed when a preset carried `behaviors.viewMode`/`useOrthographicCamera`: those watchers re-run `initGraph()`, recreating an empty `FastIconRenderer` with the same lost-visuals problem.
+
+**Investigation:**
+- Traced URL style flow: `GraphVisualizationView.vue` `applyStyleFromRoute` → `graphStore.loadStylePreset` → `applyStylePreset` (replaces `nodeTypeIcons`) → watcher in `GraphCanvas3D.vue` → `updateVisuals()` against pre-swap data
+- Confirmed icons render via `FastIconRenderer` (instanced billboards), built synchronously — no async texture loading involved
+- Confirmed camera-idle `updateVisuals()` as the accidental repair path
+
+**Solution:** Call `updateVisuals()` once, synchronously, right after the graphData swap in both `updateGraph()` and `initGraph()` (after `applyLayoutModeForces()`, before the stop/reheat branch). This atomically re-syncs node/link visuals against the CURRENT store state and also repairs any other visuals-only watcher updates (selection, filters, lens) lost mid-build. The inline icon treatment in `updateVisuals()` was extracted into a pure function `computeIconTreatment()` in `graphAppearance.ts` for testability and to prevent logic drift. Rejected alternative: applying the treatment inside `buildGraphData()` — racy (style landing mid-chunk gives a mixed snapshot) and duplicates the treatment logic.
+
+**Files Modified:**
+- [frontend/src/utils/graphAppearance.ts](../../frontend/src/utils/graphAppearance.ts) — new `computeIconTreatment()` pure function
+- [frontend/src/components/GraphCanvas3D.vue](../../frontend/src/components/GraphCanvas3D.vue) — `updateVisuals()` uses the pure function; post-swap `updateVisuals()` calls in `updateGraph()` and `initGraph()`; DEV hook `__GRAPH_NODE_VISUAL_STATE__` for E2E
+- [frontend/src/utils/__tests__/graphAppearance.test.ts](../../frontend/src/utils/__tests__/graphAppearance.test.ts) — 4 unit tests for `computeIconTreatment`
+- [frontend/e2e/tests/style-presets.spec.ts](../../frontend/e2e/tests/style-presets.spec.ts) — 2 regression tests (>2000-edge precomputed graph makes the race deterministic; asserts sphere transparency + iconColor with zero camera interaction; second test covers the `initGraph()` re-init path via `behaviors.viewMode`)
+
+**Testing:**
+- [x] Unit: `npm run test:run` — 2400 passed (139 files)
+- [x] E2E: `npm run e2e` — 223 passed; the 2 new regression tests verified to FAIL with the fix reverted and pass with it
+- [x] `npx vue-tsc --noEmit` clean
+
+**Performance note:** `updateVisuals()` is O(nodes+links) synchronous and already runs on every camera idle with the default `edgeLensMode: 'dim'`; one extra call per data swap is within the existing budget (`recordPerf('updateVisuals')` monitors it).
+
+**Known limitation (pre-existing, not introduced here):** selected *cluster* nodes compound their ×1.5 selection size boost on every `updateVisuals()` pass (`clusterBaseSize` is seeded from the current `node.size` with no cluster guard in the selection branch of `computeNodeAppearance`). This already happened on every camera idle; the new call adds one more site. Follow-up: stash an immutable `__baseSize` at build time.
+
+No public docs impact. No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-09-04 10:30] - Security: escopo de query por tier + allowlist; scripts BEGIN…END atrás de flag
+
+**Feature:** Responder às duas perguntas do assessment sobre permissão de query — "posso ler tabela fora do contexto?" e "posso executar DML/DDL?" — com enforcement real de **escopo de tabela**, e devolver o SQL bruto `BEGIN…END` como feature opt-in. Sem migração de banco.
+
+**Histórico (duas iterações descartadas, registradas porque a terceira só faz sentido com elas):**
+1. *Bloquear `BEGIN…END` incondicionalmente.* Rejeitado pelo usuário: removia uma feature legítima (escrever e rodar SQL próprio, não-Cypher) e atacava a **forma** do statement, não a semântica.
+2. *Permissões `query.freeform` / `catalog.browse` como portão pode/não-pode.* Rejeitado: o problema real não é "quem pode query", é "quais tabelas cada um alcança".
+
+**Design Decisions (final):**
+1. **Escopo de tabela em 2 tiers, chaveado em `context.create`** — novo `services/sql_scope.py`: extrai as tabelas do statement com sqlglot (pega JOIN, subquery, UNION; nome de CTE não conta como tabela), normaliza contra `default_catalog`/`default_schema` e decide. Quem tem `context.create` lê qualquer tabela nos `catalog.schema` da allowlist (`catalog_schema_pairs`, que já existia) — não é escalada, pois já poderia apontar um contexto para lá. Quem não tem lê **apenas as tabelas do contexto aberto**. Os schemas do próprio contexto entram sempre no escopo, para não quebrar contexto que aponta fora da allowlist. Violação → 403 `QUERY_SCOPE_DENIED` nomeando as tabelas.
+2. **Check roda DEPOIS de `prepare_sql`**, sobre o statement final: a validação SELECT-only já garantiu parse limpo (nada de `exp.Command` opaco escapando como "sem tabelas") e o SQL final inclui o CTE prefilter.
+3. **Cypher dispensa o check** — o transpiler renderiza contra o schema provider do contexto, então só consegue nomear as tabelas daquele contexto. É também o que preserva BFS procedural para todos.
+4. **`BEGIN…END` no caminho raw: bloqueado por default, liberado por `allow_raw_sql_scripts`.** Fundamentado na doc do Databricks (verificada): o corpo de um compound statement aceita DML e, em blocos não-atômicos, DDL/DCL; e `EXECUTE IMMEDIATE` executa string montada em runtime. Logo nem o validador (sqlglot não decompõe o bloco) nem o escopo conseguem inspecionar um script — "prove que este programa só lê" é indecidível com SQL dinâmico. **Rejeitado:** parsear o corpo (falha exatamente no `EXECUTE IMMEDIATE`, o vetor real → falsa segurança) e assinar o transpile com HMAC (complexidade/rotação). **Contrato da flag, documentado:** ligada, scripts pulam validação E escopo; os grants read-only do Unity Catalog viram a única camada.
+5. **`context.create` absorveu `catalog.browse`** — navegar catálogo é atividade de autoria; o catálogo de permissões volta a 2 entradas.
+6. **Frontend segue o servidor:** `allow_raw_sql_scripts` vai no `/api/config`; o GraphQueryPanel só reroteia script para o endpoint Cypher quando o servidor recusa scripts. Botões Query/Templates/Console voltaram a ser visíveis para todos (query não é mais pode/não-pode); Discover segue `context.create`.
+
+**Files Created:**
+- [api/graphlagoon/services/sql_scope.py](../../api/graphlagoon/services/sql_scope.py) — extração + decisão de escopo
+- [api/graphlagoon/services/sql_identifiers.py](../../api/graphlagoon/services/sql_identifiers.py) — validação/quoting de identificadores (A4)
+- [api/tests/test_sql_scope.py](../../api/tests/test_sql_scope.py), [test_sql_identifiers.py](../../api/tests/test_sql_identifiers.py), [test_script_rejection.py](../../api/tests/test_script_rejection.py)
+- [frontend/src/utils/sqlScript.ts](../../frontend/src/utils/sqlScript.ts) + teste
+
+**Files Modified (principais):**
+- [routers/graph.py](../../api/graphlagoon/routers/graph.py) — `enforce_query_scope` + wiring nos 3 caminhos de SQL bruto; `context.create` em `/datasets` e `/schema-discovery`
+- [routers/catalog.py](../../api/graphlagoon/routers/catalog.py) — validação de identificadores (400) + gate `context.create`
+- [datasource/sql_warehouse.py](../../api/graphlagoon/services/datasource/sql_warehouse.py) — script condicional à flag; `_safe_table_name`; colunas escapadas
+- [warehouse.py](../../api/graphlagoon/services/warehouse.py) — identificadores quotados; `_effective_row_limit`
+- [config.py](../../api/graphlagoon/config.py) — `allow_raw_sql_scripts`, `databricks_tls_verify` (A2), `max_query_rows`
+- [permission_catalog.py](../../api/graphlagoon/services/permission_catalog.py), [schema_drift.py](../../api/graphlagoon/services/schema_drift.py), [public_config.py](../../api/graphlagoon/services/public_config.py), [admin_registry.py](../../api/graphlagoon/routers/admin_registry.py)
+- Frontend: [graph.ts](../../frontend/src/stores/graph.ts), [GraphQueryPanel.vue](../../frontend/src/components/GraphQueryPanel.vue), [useTemplateExecution.ts](../../frontend/src/composables/useTemplateExecution.ts), [GraphContextFormModal.vue](../../frontend/src/components/GraphContextFormModal.vue), [api.ts](../../frontend/src/services/api.ts)
+
+**Testing:**
+- [x] API: 1267 passed (6 falhas pré-existentes, confirmadas via stash)
+- [x] Frontend: 2406 passed (140 files); `npx vue-tsc --noEmit` limpo; E2E 223 passed
+- [x] Escopo verificado com casos reais: tabela vizinha no mesmo schema, outro catálogo, tabela escondida em JOIN, em subquery, e CTE que **não** deve ser confundida com tabela; tiers author/reader; allowlist configurável por env
+- [x] Flag verificada nos dois estados (bloqueia por default; libera e não enfraquece o validador de statement único)
+
+**Public Docs:**
+- [x] [permissions.md](../guide/permissions.md) — catálogo de 2 entradas, seção "Query scope" com os tiers, warning sobre `BEGIN…END`, novos sintomas na tabela de troubleshooting
+- [x] [configuration.md](../guide/configuration.md) — `GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS`, `GRAPH_LAGOON_CATALOG_SCHEMAS` (agora também escopo), `MAX_QUERY_ROWS`, `DATABRICKS_TLS_VERIFY`
+- [x] [databricks-apps.md](../guide/databricks-apps.md) — warning de least-privilege (só `SELECT`), OBO `sql:restricted-query` como futuro
+- [x] [security-assessment.md](security-assessment.md) — A2/A3/A4 atualizados com a análise do Databricks scripting; tabela de camadas revisada; §2 explicitamente revisado (query livre agora é *dentro de escopo declarado*)
+- [x] `make docs-build` passa. Sem screenshot novo: a UI só muda por ocultação condicional e por uma flag de servidor desligada por default
+
+**Admin-Area Impact:**
+- [x] `CONFIG_FIELD_KINDS`: `allow_raw_sql_scripts`, `databricks_tls_verify`, `max_query_rows` como `public`
+- [x] Razões de `AUDIT_EXEMPT_ROUTES` atualizadas nos endpoints de query
+- [x] Matriz de permissões volta a 2 linhas (test_admin_registry verde)
+
+**Security Considerations:**
+- O que o app garante por parsing é **onde** se pode ler (escopo). O que ele **não** garante por parsing é read-only dentro de um script — isso é propriedade da credencial (grants read-only) ou, no futuro, da identidade (OBO `sql:restricted-query`)
+- Sem OBO, a credencial única continua sendo o perímetro externo; por isso o guia de least-privilege virou parte da correção
+
+**Follow-up na mesma sessão — furo encontrado por revisão do usuário ("um reader ainda consegue ler tabela fora do contexto?"):** o `cte_prefilter` é SQL bruto do cliente aceito por `GraphQueryRequest`, `CypherQueryRequest` e `TableQueryRequest`, e é spliced no statement final em TODOS os modos. Como eu tinha isentado os caminhos Cypher do check ("o transpiler é context-bound"), um reader lia tabela alheia com `{"query": "MATCH (n)-[r]->(m) RETURN r", "cte_prefilter": "MY_FINAL_EDGES AS (SELECT * FROM hr.private.salaries)"}`. Corrigido: `cte_prefilter_as_statement()` embrulha o prefilter (substituindo `__EDGES__`/`__NODES__` pelas tabelas do contexto) e o escopo é checado **na origem**, onde ainda é parseável — o que importa porque em modo procedural o statement final vira script opaco. `enforce_query_scope` agora roda nos 4 caminhos Cypher também, e recebe o datasource para isentar backends não-SQL (Neptune/REST não têm tabelas a escopar — sem isso, quebrei os testes desses dois e o suite acusou). Verificado desabilitando a checagem: `/query/table` modo cypher passa a vazar, e o caso prefilter-dentro-de-script tem teste direto (`TestPrefilterInsideOpaqueScript`).
+
+**Known Limitations:**
+- Com `allow_raw_sql_scripts=true` o escopo de tabela não é verificável para scripts (documentado no guia e no warning)
+- Exploração antiga sem snapshot cujo `graph_query` salvo é script bruto mostra erro pedindo re-execução do Cypher
+- OBO exigiria `header_provider` por request — mudança arquitetural, fora deste escopo
+
+**Author:** Claude (AI Assistant)
+
+---

@@ -181,7 +181,7 @@ export const MOCK_ADMIN_OVERVIEW = {
   databricks_mode: false,
   persistence_backend: 'memory',
   alembic_version: null,
-  counts: { users: 31, contexts: 60, explorations: 197, query_templates: 24, audit_entries: 43 },
+  counts: { users: 31, contexts: 60, explorations: 197, query_templates: 24, audit_entries: 43, groups: 2 },
   superusers: ['dev@graphlagoon.local'],
   storage: {
     exploration_snapshots: './tmp/explorations',
@@ -261,4 +261,82 @@ export const MOCK_ADMIN_AUDIT = {
   page: 1,
   page_size: 50,
   actions: ['admin.clear_all', 'context.delete', 'context.share', 'context.transfer', 'context.unshare', 'exploration.delete', 'exploration.share', 'exploration.transfer', 'exploration.unshare', 'precomputed.delete', 'precomputed.publish', 'preset.delete'],
+};
+
+export const MOCK_RESOLVER_STATUS = {
+  mode: 'stub',
+  ttl_seconds: 600,
+  cached_users: 0,
+  errors: [],
+};
+
+export const MOCK_ADMIN_GROUPS = {
+  items: [
+    {
+      id: 'grp-1',
+      name: 'analysts',
+      description: 'Emails + a Databricks group',
+      members: [
+        { id: 'm1', kind: 'email', value: 'zoe.garcia@example.com' },
+        { id: 'm2', kind: 'databricks_group', value: 'data-analysts' },
+      ],
+      created_at: '2026-08-28T10:00:00Z',
+      updated_at: '2026-08-28T10:00:00Z',
+    },
+    {
+      id: 'grp-2',
+      name: 'restricted-demo',
+      description: 'Denied context.create',
+      members: [{ id: 'm3', kind: 'email', value: 'restricted-demo@example.com' }],
+      created_at: '2026-08-28T10:00:00Z',
+      updated_at: '2026-08-28T10:00:00Z',
+    },
+  ],
+  resolver: MOCK_RESOLVER_STATUS,
+};
+
+export const MOCK_ADMIN_PERMISSIONS = {
+  items: [
+    {
+      id: 'context.create',
+      label: 'Create graph contexts',
+      description: 'Create new graph contexts from warehouse tables.',
+      mode: 'everyone',
+      rules: [{ group_id: 'grp-2', group_name: 'restricted-demo', effect: 'deny' }],
+    },
+    {
+      id: 'exploration.save',
+      label: 'Save explorations',
+      description: 'Save or update explorations.',
+      mode: 'everyone',
+      rules: [],
+    },
+  ],
+  resolver: MOCK_RESOLVER_STATUS,
+};
+
+export const MOCK_PERMISSION_INSPECTION = {
+  email: 'restricted-demo@example.com',
+  is_superuser: false,
+  resolved_databricks_groups: [],
+  resolution: { source: 'none', error: null },
+  group_memberships: [{ group_id: 'grp-2', name: 'restricted-demo', via: 'email' }],
+  permissions: [
+    {
+      id: 'context.create',
+      label: 'Create graph contexts',
+      mode: 'everyone',
+      allowed: false,
+      reason: 'deny_rule',
+      matched: { effect: 'deny', group_id: 'grp-2', group_name: 'restricted-demo' },
+    },
+    {
+      id: 'exploration.save',
+      label: 'Save explorations',
+      mode: 'everyone',
+      allowed: true,
+      reason: 'mode_everyone',
+      matched: null,
+    },
+  ],
 };

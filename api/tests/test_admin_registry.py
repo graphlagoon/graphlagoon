@@ -85,6 +85,12 @@ def test_memory_store_clear_all_empties_every_collection():
     store.create_exploration(ctx.id, "x", "a@b.co", {})
     store.create_query_template(ctx.id, "a@b.co", "q", "cypher", "MATCH (n) RETURN n")
     store.record_usage("a@b.co", "context.delete")
+    group = store.create_group("g", members=[{"kind": "email", "value": "a@b.co"}])
+    store.set_permission(
+        "context.create",
+        "restricted",
+        [{"group_id": group.id, "effect": "allow"}],
+    )
     store.clear_all(keep_usage_logs=False)
     not_empty = [
         name
@@ -106,6 +112,7 @@ def test_clear_all_keeps_audit_by_default():
 
 ROUTER_MODULES = (
     "admin",
+    "admin_groups",
     "catalog",
     "config",
     "explorations",
@@ -174,6 +181,40 @@ def test_audit_actions_are_dotted_and_unique():
     actions = AuditAction.all()
     assert len(actions) == len(set(actions))
     assert all(a.count(".") == 1 for a in actions)
+
+
+def test_permission_ids_are_dotted_and_unique():
+    """Catalog entries follow the AuditAction shape and carry admin-UI copy."""
+    from graphlagoon.services.permission_catalog import PERMISSIONS
+
+    ids = [p.id for p in PERMISSIONS]
+    assert len(ids) == len(set(ids))
+    assert all(i.count(".") == 1 for i in ids)
+    assert all(p.label.strip() and p.description.strip() for p in PERMISSIONS)
+
+
+def test_permission_gates_reference_catalog():
+    """Every require_permission("...") literal in a router must name a catalog
+    entry — a gate on an uncataloged id is a typo, and a catalog entry is
+    only honest when some gate (or planned gate) can reference it."""
+    import importlib
+    import inspect
+    import re
+
+    from graphlagoon.services.permission_catalog import PERMISSION_IDS
+
+    referenced = set()
+    for name in ROUTER_MODULES:
+        module = importlib.import_module(f"graphlagoon.routers.{name}")
+        referenced |= set(
+            re.findall(r'require_permission\(\s*"([^"]+)"\s*\)', inspect.getsource(module))
+        )
+    unknown = sorted(referenced - PERMISSION_IDS)
+    assert not unknown, (
+        f"require_permission gate(s) reference id(s) {unknown} that are not in "
+        "services/permission_catalog.PERMISSIONS — add the catalog entry or "
+        "fix the typo."
+    )
 
 
 @pytest.mark.parametrize("route", sorted(AUDITED_ROUTES))

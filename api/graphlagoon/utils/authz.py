@@ -41,6 +41,53 @@ def can_read(owner_email: str, shares: list, user_email: str) -> bool:
     )
 
 
+def require_permission(permission_id: str):
+    """Dependency factory: 403 ``PERMISSION_DENIED`` unless the caller holds
+    the catalog permission. Use it where the route IS the capability::
+
+        @router.post("", ...)
+        async def create_graph_context(
+            user_email: str = Depends(require_permission("context.create")),
+        ): ...
+
+    Resolves the catalog entry at import time so a typo'd id fails app
+    startup, not the first request (tests/test_admin_registry.py also walks
+    router sources for unknown ids). Existing ownership/share checks remain
+    separate AND-gates — this one is about *who may do the action at all*.
+    """
+    from graphlagoon.services.permission_catalog import get_permission
+
+    perm = get_permission(permission_id)
+
+    async def dependency(request: Request) -> str:
+        from graphlagoon.middleware.auth import get_current_user
+        from graphlagoon.services.permissions import check_permission
+
+        user_email = get_current_user(request)
+        decision = await check_permission(user_email, perm.id)
+        if not decision.allowed:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": {
+                        "code": "PERMISSION_DENIED",
+                        "message": (
+                            f'You do not have the "{perm.label}" permission. '
+                            "Ask an administrator to add you to a group that "
+                            "allows it."
+                        ),
+                        "details": {
+                            "permission": perm.id,
+                            "reason": decision.reason,
+                        },
+                    }
+                },
+            )
+        return user_email
+
+    return dependency
+
+
 def require_superuser(request: Request) -> str:
     """FastAPI dependency: the current user's email, or 403 if not a superuser.
 

@@ -1,11 +1,19 @@
 import axios, { type AxiosInstance } from 'axios';
 import type {
   AdminConfigEntry,
+  AdminGroup,
+  AdminGroupPayload,
+  AdminGroupsResponse,
   AdminHealth,
   AdminOverview,
+  AdminPermission,
+  AdminPermissionsResponse,
+  AdminPermissionUpdate,
   AdminUserPage,
   AuditPage,
   ClearEnvironmentResponse,
+  PermissionInspection,
+  ResolverStatus,
   TransferOwnershipResponse,
 } from '@/types/admin';
 import type {
@@ -83,12 +91,25 @@ declare global {
       custom_metrics_enabled?: boolean;
       /** Whether `auto_run` custom metrics may evaluate on graph load. */
       custom_metrics_auto_run_enabled?: boolean;
+      /**
+       * Whether a hand-written BEGIN…END script may run on the raw-SQL path
+       * (GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS). Off by default: a script body is
+       * opaque to both the SELECT-only validator and the table-scope check.
+       */
+      allow_raw_sql_scripts?: boolean;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
        * Backend-computed per user; the superuser list itself is never exposed.
        */
       is_superuser?: boolean;
+      /**
+       * Effective permission ids for THIS user (e.g. "context.create"),
+       * computed by the backend from groups + rules. UX mirror only — every
+       * gated route enforces server-side. Absent ⇒ the backend predates the
+       * permission system ⇒ treat as allowed (see usePermissions).
+       */
+      permissions?: string[];
       /**
        * Which datasource types this server can serve, e.g.
        * `{ sql_warehouse: true, neptune: false }`. Drives whether the context
@@ -656,6 +677,46 @@ class ApiService {
 
   async clearEnvironment(confirm: string): Promise<ClearEnvironmentResponse> {
     const response = await this.client.post('/api/admin/environment/clear', { confirm });
+    return response.data;
+  }
+
+  // Groups & permissions (superuser only)
+  async getAdminGroups(): Promise<AdminGroupsResponse> {
+    const response = await this.client.get('/api/admin/groups');
+    return response.data;
+  }
+
+  async createAdminGroup(payload: AdminGroupPayload): Promise<AdminGroup> {
+    const response = await this.client.post('/api/admin/groups', payload);
+    return response.data;
+  }
+
+  async updateAdminGroup(groupId: string, payload: AdminGroupPayload): Promise<AdminGroup> {
+    const response = await this.client.put(`/api/admin/groups/${groupId}`, payload);
+    return response.data;
+  }
+
+  async deleteAdminGroup(groupId: string): Promise<void> {
+    await this.client.delete(`/api/admin/groups/${groupId}`);
+  }
+
+  async getAdminPermissions(): Promise<AdminPermissionsResponse> {
+    const response = await this.client.get('/api/admin/permissions');
+    return response.data;
+  }
+
+  async putAdminPermission(permissionId: string, payload: AdminPermissionUpdate): Promise<AdminPermission> {
+    const response = await this.client.put(`/api/admin/permissions/${permissionId}`, payload);
+    return response.data;
+  }
+
+  async inspectAdminPermissions(email: string): Promise<PermissionInspection> {
+    const response = await this.client.get('/api/admin/permissions/inspect', { params: { email } });
+    return response.data;
+  }
+
+  async refreshAdminGroupCache(email?: string): Promise<ResolverStatus> {
+    const response = await this.client.post('/api/admin/groups/resolution/refresh', { email: email ?? null });
     return response.data;
   }
 }

@@ -84,6 +84,14 @@ class TestParseQualifiedTable:
         assert parse_qualified_table("a.b.c.d") is None
         assert parse_qualified_table("") is None
 
+    def test_hostile_parts_return_none(self):
+        # Stored variant of finding A4: names later interpolated into
+        # subgraph/expand SQL must be bare identifiers.
+        assert parse_qualified_table("db.t WHERE 1=1 UNION SELECT 1 --") is None
+        assert parse_qualified_table("db.t; DROP TABLE x") is None
+        assert parse_qualified_table("cat.db.`quoted`") is None
+        assert parse_qualified_table("db.ta ble") is None
+
 
 # --- structural_roles ---------------------------------------------------------
 

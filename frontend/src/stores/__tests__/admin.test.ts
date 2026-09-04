@@ -15,6 +15,14 @@ vi.mock('@/services/api', () => ({
     deleteGraphContext: vi.fn(),
     deleteExploration: vi.fn(),
     clearEnvironment: vi.fn(),
+    getAdminGroups: vi.fn(),
+    createAdminGroup: vi.fn(),
+    updateAdminGroup: vi.fn(),
+    deleteAdminGroup: vi.fn(),
+    getAdminPermissions: vi.fn(),
+    putAdminPermission: vi.fn(),
+    inspectAdminPermissions: vi.fn(),
+    refreshAdminGroupCache: vi.fn(),
   },
 }));
 
@@ -96,5 +104,95 @@ describe('admin store', () => {
     expect(await store.clearEnvironment('CLEAR ALL')).toBe(true);
     expect(mocked.clearEnvironment).toHaveBeenCalledWith('CLEAR ALL');
     expect(store.contexts).toEqual([]);
+  });
+
+  const RESOLVER = { mode: 'stub', ttl_seconds: 0, cached_users: 0, errors: [] };
+
+  it('fetchGroups stores items and resolver status', async () => {
+    mocked.getAdminGroups.mockResolvedValue({
+      items: [{ id: 'g1', name: 'builders', members: [] }],
+      resolver: RESOLVER,
+    });
+    const store = useAdminStore();
+    await store.fetchGroups();
+    expect(store.groups).toHaveLength(1);
+    expect(store.resolverStatus?.mode).toBe('stub');
+  });
+
+  it('saveGroup creates (sorted insert) and updates in place', async () => {
+    mocked.createAdminGroup.mockResolvedValue({ id: 'g2', name: 'analysts', members: [] });
+    const store = useAdminStore();
+    store.groups = [{ id: 'g1', name: 'builders', members: [] } as any];
+    expect(await store.saveGroup({ name: 'analysts', members: [] })).toBe(true);
+    expect(store.groups.map((g) => g.name)).toEqual(['analysts', 'builders']);
+
+    mocked.updateAdminGroup.mockResolvedValue({ id: 'g1', name: 'renamed', members: [] });
+    expect(await store.saveGroup({ name: 'renamed', members: [] }, 'g1')).toBe(true);
+    expect(mocked.updateAdminGroup).toHaveBeenCalledWith('g1', { name: 'renamed', members: [] });
+    expect(store.groups.find((g) => g.id === 'g1')?.name).toBe('renamed');
+  });
+
+  it('saveGroup surfaces the backend error message', async () => {
+    mocked.createAdminGroup.mockRejectedValue({
+      response: { data: { detail: { error: { code: 'GROUP_NAME_TAKEN', message: 'A group named "x" already exists' } } } },
+      isAxiosError: true,
+    });
+    const store = useAdminStore();
+    expect(await store.saveGroup({ name: 'x', members: [] })).toBe(false);
+    expect(store.error).toContain('already exists');
+  });
+
+  it('deleteGroup drops the group and its rules from loaded permissions', async () => {
+    mocked.deleteAdminGroup.mockResolvedValue(undefined);
+    const store = useAdminStore();
+    store.groups = [{ id: 'g1', name: 'b', members: [] } as any];
+    store.permissions = [
+      {
+        id: 'context.create',
+        label: 'x',
+        description: '',
+        mode: 'restricted',
+        rules: [{ group_id: 'g1', group_name: 'b', effect: 'allow' }],
+      } as any,
+    ];
+    expect(await store.deleteGroup('g1')).toBe(true);
+    expect(store.groups).toEqual([]);
+    expect(store.permissions[0].rules).toEqual([]);
+  });
+
+  it('savePermission replaces the row with the server round-trip', async () => {
+    mocked.putAdminPermission.mockResolvedValue({
+      id: 'context.create', label: 'Create', description: '', mode: 'restricted',
+      rules: [{ group_id: 'g1', group_name: 'b', effect: 'allow' }],
+    });
+    const store = useAdminStore();
+    store.permissions = [
+      { id: 'context.create', label: 'Create', description: '', mode: 'everyone', rules: [] } as any,
+    ];
+    expect(
+      await store.savePermission('context.create', {
+        mode: 'restricted',
+        rules: [{ group_id: 'g1', effect: 'allow' }],
+      }),
+    ).toBe(true);
+    expect(store.permissions[0].mode).toBe('restricted');
+  });
+
+  it('inspectPermissions stores the report', async () => {
+    mocked.inspectAdminPermissions.mockResolvedValue({
+      email: 'a@b.co', is_superuser: false, resolved_databricks_groups: [],
+      resolution: { source: 'none' }, group_memberships: [],
+      permissions: [{ id: 'context.create', label: 'x', mode: 'restricted', allowed: false, reason: 'restricted_no_match' }],
+    });
+    const store = useAdminStore();
+    await store.inspectPermissions('a@b.co');
+    expect(store.inspection?.permissions[0].allowed).toBe(false);
+  });
+
+  it('refreshGroupCache updates the resolver status', async () => {
+    mocked.refreshAdminGroupCache.mockResolvedValue({ ...RESOLVER, cached_users: 0 });
+    const store = useAdminStore();
+    expect(await store.refreshGroupCache()).toBe(true);
+    expect(store.resolverStatus?.cached_users).toBe(0);
   });
 });

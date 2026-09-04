@@ -30,7 +30,12 @@ from graphlagoon.utils.sharing import (
 )
 from graphlagoon.services import audit
 from graphlagoon.services.audit import AuditAction
-from graphlagoon.utils.authz import can_manage, can_write, is_superuser
+from graphlagoon.utils.authz import (
+    can_manage,
+    can_write,
+    is_superuser,
+    require_permission,
+)
 from graphlagoon.config import get_settings
 from graphlagoon.services.graph_operations import (
     DEFAULT_NODE_TYPE,
@@ -340,9 +345,9 @@ async def create_graph_context(
     request: Request,
     data: GraphContextCreate,
     warehouse: WarehouseClient = Depends(get_warehouse),
+    user_email: str = Depends(require_permission("context.create")),
 ):
     """Create a new graph context."""
-    user_email = get_current_user(request)
     _reject_metric_definitions_if_disabled(data.metric_definitions)
 
     await _validate_datasource_or_400(data.datasource_type, data.datasource_name)

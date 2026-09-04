@@ -41,6 +41,7 @@ from graphlagoon.services.precomputed import (
     volume_provider,
 )
 from graphlagoon.services.style_presets import configure_style_preset_service
+from graphlagoon.services.group_resolution import configure_group_resolution
 from graphlagoon.services.datasource import (
     close_datasources,
     configure_datasources,
@@ -194,6 +195,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
 
     from graphlagoon.routers import (
         admin,
+        admin_groups,
         graph_contexts,
         explorations,
         graph,
@@ -208,6 +210,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router = APIRouter()
     router.include_router(config.router)
     router.include_router(admin.router)
+    router.include_router(admin_groups.router)
     router.include_router(graph_contexts.router)
     router.include_router(explorations.router)
     router.include_router(query_templates.router)
@@ -249,7 +252,7 @@ def create_frontend_router(
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-    def render_spa(request: Request):
+    async def render_spa(request: Request):
         """Render the SPA template."""
         manifest = load_vite_manifest()
         assets = get_assets_from_manifest(manifest)
@@ -257,15 +260,21 @@ def create_frontend_router(
         # Same payload as GET /api/config (one builder, never out of sync),
         # plus the SPA-only router base and the auto-login identity.
         user_email = getattr(request.state, "user_email", None)
-        config = build_public_config(user_email, settings)
+        config = await build_public_config(user_email, settings)
         config["router_base"] = router_base
         if user_email:
             config["databricks_user_email"] = user_email
 
+        # Starlette's modern signature (request first). The legacy
+        # (name, context) form crashes on current Starlette with
+        # "unhashable type: 'dict'" — the context dict lands in
+        # jinja's get_template. Pre-existing bug, unmasked by the
+        # permissions smoke test (make dev serves the SPA via Vite,
+        # so this path went unexercised).
         return templates.TemplateResponse(
+            request,
             "index.html",
             {
-                "request": request,
                 "api_url": api_prefix,
                 "static_prefix": static_prefix,
                 "assets": assets,
@@ -276,7 +285,7 @@ def create_frontend_router(
     @router.get("/", response_class=HTMLResponse)
     async def serve_frontend_root(request: Request):
         """Serve the SPA for root route."""
-        return render_spa(request)
+        return await render_spa(request)
 
     @router.get("/{path:path}", response_class=HTMLResponse)
     async def serve_frontend(request: Request, path: str = ""):
@@ -286,7 +295,7 @@ def create_frontend_router(
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404, detail="Not found")
-        return render_spa(request)
+        return await render_spa(request)
 
     return router
 
@@ -495,6 +504,7 @@ def create_mountable_app(
     configure_snapshot_service(settings, header_provider=header_provider)
     configure_precomputed_storage(settings, header_provider=header_provider)
     configure_style_preset_service(settings, header_provider=header_provider)
+    configure_group_resolution(settings, header_provider=header_provider)
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
 
@@ -647,6 +657,7 @@ def create_app(
     configure_snapshot_service(settings, header_provider=header_provider)
     configure_precomputed_storage(settings, header_provider=header_provider)
     configure_style_preset_service(settings, header_provider=header_provider)
+    configure_group_resolution(settings, header_provider=header_provider)
 
     # Register similarity endpoints
     if similarity_endpoints:

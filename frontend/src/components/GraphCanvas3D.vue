@@ -15,6 +15,7 @@ import {
   getMultiEdgeCurvature3D,
   computeNodeAppearance,
   computeLinkAppearance,
+  computeIconTreatment,
   type AppearanceContext,
 } from '@/utils/graphAppearance';
 import { applyForceConfig, applyCommunityRadialForce, applyEdgeTypeLayoutForce, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
@@ -576,14 +577,14 @@ function updateVisuals() {
     }
 
     // Icon replacement: hide sphere (transparent) but preserve color for icon composable
-    const hasIcon = !isCluster && (graphStore.nodeTypeIcons.has(node.nodeType) || !!node.iconOverride);
-    if (hasIcon) {
-      node.__iconColor = appearance.color;
-      node.color = 'rgba(0,0,0,0)';
-    } else {
-      node.__iconColor = undefined;
-      node.color = appearance.color;
-    }
+    const treatment = computeIconTreatment(
+      appearance.color,
+      isCluster,
+      graphStore.nodeTypeIcons.has(node.nodeType),
+      node.iconOverride,
+    );
+    node.__iconColor = treatment.iconColor;
+    node.color = treatment.color;
 
     if (appearance.hidden) hiddenNodeIds.add(node.id);
   });
@@ -960,6 +961,13 @@ async function updateGraph() {
   // are data-dependent and go stale on every data swap
   applyLayoutModeForces();
 
+  // Re-sync visuals against the CURRENT store state. Visuals-only watchers
+  // (nodeTypeIcons from ?style=, filters, selection) that fired while the
+  // chunked build/settle was in flight ran against the OLD graphData and were
+  // discarded by the swap above — without this, styled icons stay hidden
+  // inside opaque spheres until the next camera idle.
+  updateVisuals();
+
   if (preSettled || (incrementallyPlaced && !isLayoutRunning.value)) {
     // Positions are already final: either the headless settle produced (and
     // pinned) the layout, or the incremental additions were seeded next to
@@ -1273,6 +1281,11 @@ async function initGraph() {
   // including the auto-switch to 2D that re-inits the graph)
   applyLayoutModeForces();
 
+  // Re-sync visuals against the CURRENT store state — a style preset applied
+  // mid-init (?style= on first load, or one carrying behaviors that re-init the
+  // graph) had its watcher's updateVisuals() run against the discarded graphData.
+  updateVisuals();
+
   // Register blower force (stays disabled until Shift is held)
   pointerRepulsionForce = forcePointerRepulsion();
   pointerRepulsionForce.strength(graphStore.force3DSettings.pointerRepulsionStrength);
@@ -1351,6 +1364,13 @@ async function initGraph() {
       const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
       if (!node || typeof node.x !== 'number') return null;
       return graph3d.graph2ScreenCoords(node.x, node.y ?? 0, node.z ?? 0);
+    };
+
+    // Lets e2e tests assert the sphere↔icon treatment without camera interaction
+    (window as any).__GRAPH_NODE_VISUAL_STATE__ = (nodeId: string) => {
+      if (!graph3d) return null;
+      const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
+      return node ? { color: node.color, iconColor: node.__iconColor } : null;
     };
 
     const devRenderer = graph3d.renderer?.() as THREE.WebGLRenderer | null;

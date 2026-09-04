@@ -25,10 +25,12 @@ def app_version() -> str:
     return __version__
 
 
-def build_public_config(
+async def build_public_config(
     user_email: Optional[str], settings: Optional[Settings] = None
 ) -> dict:
     """Public, per-user configuration. Contains no secrets and no user lists."""
+    from graphlagoon.services.permissions import effective_permissions
+
     if settings is None:
         settings = get_settings()
     return {
@@ -43,6 +45,9 @@ def build_public_config(
         # evaluate on graph load (false ⇒ Recompute only).
         "custom_metrics_enabled": settings.custom_metrics_enabled,
         "custom_metrics_auto_run_enabled": settings.custom_metrics_auto_run_enabled,
+        # Whether a hand-written BEGIN...END script may run on the raw-SQL
+        # path — the editor offers to run one only when the server accepts it.
+        "allow_raw_sql_scripts": settings.allow_raw_sql_scripts,
         # Which backends this server can serve, and the named REST connections
         # (UI copy + operation flags only; transport and auth never leave the
         # process).
@@ -53,4 +58,7 @@ def build_public_config(
         "version": app_version(),
         # Per-user boolean only; the superuser list itself is admin-only.
         "is_superuser": is_superuser(user_email) if user_email else False,
+        # Effective permission ids for THIS user (UX mirror only — routes
+        # enforce via require_permission). Superusers get the full catalog.
+        "permissions": await effective_permissions(user_email) if user_email else [],
     }
