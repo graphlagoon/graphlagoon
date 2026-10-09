@@ -1,8 +1,8 @@
 # Investigações: pacote de execução
 
 > Status: **pronto para implementar**, design aprovado como proposta em 2026-10-09.
-> **Execução em andamento** no branch `feature/investigations`: G1 feita (#28,
-> commit `0b6177b`). O progresso tarefa a tarefa está nos checkboxes de
+> **Execução em andamento** no branch `feature/investigations`: portões G1–G4
+> concluídos (G4 por decisão, sem medição). O progresso tarefa a tarefa está nos checkboxes de
 > [04-plano-de-implementacao.md](04-plano-de-implementacao.md#progresso) e no decision log.
 >
 > Este pacote basta sozinho para um agente implementar a funcionalidade. Os
