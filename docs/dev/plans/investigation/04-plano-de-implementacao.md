@@ -21,7 +21,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] G1 · Corrigir o #28 (IDs de arestas paralelas colidem)
 - [x] G2 · Corrigir o M4 (injeção de fórmula em exportação CSV)
 - [x] G3 · Sandbox dos cluster programs (#32)
-- [ ] G4 · Medir o teto do grafo no browser
+- [x] G4 · Medir o teto do grafo no browser (pulada para o MVP: teto fixado em 50 mil arestas por decisão, sem medição)
 
 **F1 · Fundação**
 - [ ] F1.1 · Modelos, migração 016 e paridade em memória
@@ -133,7 +133,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   2. Medir carga, `updateVisuals` e memória.
   3. Registrar o resultado no decision log.
 - **Aceite:**
-  - [ ] Um número `INVESTIGATION_MAX_WORKING_EDGES` decidido e justificado.
+  - [x] Um número `INVESTIGATION_MAX_WORKING_EDGES` decidido e justificado.
   - [ ] Esse número vira setting na F2.3 e responde a Q5 do README.
 
 ---

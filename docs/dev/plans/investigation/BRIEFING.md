@@ -17,6 +17,9 @@ Instruções que cada agente recebe para implementar **uma** tarefa do
 
 ## Como escrever o código
 
+- **Objetivo é o MVP rápido:** sem preciosismo. Faça o que os critérios de aceite
+  pedem, do jeito mais simples; polimento fica para depois.
+
 - Precisa existir? Pule features, opções e flexibilidade que ninguém pediu (cite-as
   numa linha). Pedido vago → a menor versão que faz o trabalho principal.
 - Já existe no código (helper, componente, serviço, padrão)? Use do jeito que o código
