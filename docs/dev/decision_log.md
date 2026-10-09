@@ -10118,6 +10118,23 @@ FA.7.
 
 ---
 
+## [2026-10-09 20:20] - Docs: plano de investigações AI-first desde o início, repositório igual ao artefato
+
+O título, o resumo e o topo do plano passam a apresentar o produto como **sistema de
+investigação AI-first**: agentes de IA trabalham no caso via MCP e pessoas decidem. A
+seção "AI-first: agentes trabalham no caso, pessoas decidem" (o que o agente faz
+direto, propõe e nunca faz) fica logo no início, nos dois lugares:
+- no `plans/investigation-workspace.md` e no `plans/investigation/README.md`;
+- no documento do plano no claude.ai, renomeado para "Plano: Graph Lagoon como
+  sistema de investigação AI-first".
+
+No documento também foram corrigidas as legendas dos diagramas, o armazenamento no
+Volume e a lista de riscos.
+
+**Public Docs:** nenhuma alteração. **Admin-Area Impact:** nenhum.
+
+---
+
 ## [2026-10-09 20:30] - Feature Implemented: G1 · Corrigir o #28 (IDs de arestas paralelas colidem)
 
 **Feature:** sem coluna de id de aresta, o id composto `src@tipo@dst` agora recebe
