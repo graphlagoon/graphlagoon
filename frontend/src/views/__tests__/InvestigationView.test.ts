@@ -18,6 +18,8 @@ vi.mock('@/services/api', () => ({
     createInvestigationNote: vi.fn(),
     getInvestigationArtifacts: vi.fn(async () => []),
     getInvestigationProposals: vi.fn(async () => []),
+    lookupEnrichment: vi.fn(),
+    postInvestigationEvent: vi.fn(async () => ({})),
   },
 }))
 vi.mock('@/components/GraphCanvas3D.vue', () => ({ default: { render: () => null } }))
@@ -109,5 +111,35 @@ describe('InvestigationView', () => {
     expect(api.createInvestigationNote).toHaveBeenCalledWith('inv', { kind: 'node', id: 'a@c1' }, 'KYC mismatch')
     expect(await findByText('KYC mismatch')).toBeTruthy()
     expect(api.getInvestigationEvents).toHaveBeenCalled()
+  })
+
+  it('shows enrichment rows and promotes shared devices to a node', async () => {
+    const devices = {
+      name: 'devices', label: 'Login devices', table: 'main.risk.devices', key_column: 'account_id',
+      match_node_types: ['T'], match_source: 'node_id', cardinality: 'many', columns: ['device_id'],
+      promote: { node_type: 'Dispositivo', id_column: 'device_id', edge_type: 'USOU' },
+    }
+    vi.mocked(api.getGraphContext).mockImplementation(async (id) =>
+      ({ id, title: id, identity_keys: [], enrichment_tables: id === 'c1' ? [devices] : [] }) as any,
+    )
+    vi.mocked(api.lookupEnrichment).mockResolvedValue({
+      rows: { a: [{ device_id: 'd1' }], b: [{ device_id: 'd1' }] }, truncated: false,
+    } as any)
+    const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    const graph = useGraphStore()
+    graph.selectNode('a@c1')
+    await flushPromises()
+
+    await fireEvent.click(getByTestId('inspector-enrichment-tab'))
+    await flushPromises()
+    expect(api.lookupEnrichment).toHaveBeenCalledWith('c1', 'devices', ['a', 'b'])
+    expect(getByTestId('enrichment-rows').textContent).toContain('d1')
+
+    await fireEvent.click(getByTestId('enrichment-promote'))
+    await flushPromises()
+    expect(api.postInvestigationEvent).toHaveBeenCalledWith('inv', 'nodes.promoted', expect.objectContaining({ nodes: 1, edges: 2 }))
+    expect(graph.nodes.map((n) => n.node_id)).toContain('Dispositivo:d1@c1')
+    expect(graph.edges.filter((e) => e.dst === 'Dispositivo:d1@c1').map((e) => e.src).sort()).toEqual(['a@c1', 'b@c1'])
   })
 })
