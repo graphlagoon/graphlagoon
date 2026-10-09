@@ -10371,3 +10371,18 @@ duas mensagens de erro novas.
   silenciosa de programas para o context.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 21:30] - Decisão: G4 · teto do grafo no browser (pulada para o MVP)
+
+O mantenedor pediu para acelerar o MVP e considerou a medição da G4 desnecessária
+agora. **Decisão:** `INVESTIGATION_MAX_WORKING_EDGES = 50_000`, sem medição. Isso
+responde a Q5 provisoriamente.
+
+**Justificativa:** 50 mil é o menor dos três tamanhos que o plano mandava medir. Como
+o grafo de um caso de golpe Pix tem centenas a poucos milhares de arestas, sobra
+folga. O número vira o setting `investigation_max_working_edges` na F2.3. Medir
+(`make perf-report`) fica para quando algum caso real bater no teto.
+
+**Public Docs:** nenhuma. **Admin-Area Impact:** nenhum agora; o setting entra na F2.3.
