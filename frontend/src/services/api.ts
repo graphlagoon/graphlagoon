@@ -4,6 +4,8 @@ import type {
   Investigation,
   InvestigationArtifact,
   InvestigationFile,
+  FileContextResult,
+  FileEnrichmentSpec,
   FileRole,
   InvestigationProposal,
   InvestigationEvent,
@@ -13,6 +15,7 @@ import type {
   SourceSnapshotPayload,
   SourceMode,
 } from '@/types/investigation';
+import type { MappingSpec } from '@/utils/fileMapping';
 import type {
   AdminConfigEntry,
   AdminGroup,
@@ -774,6 +777,30 @@ class ApiService {
       params: { filename: file.name, role },
       headers: { 'Content-Type': 'application/octet-stream' },
     });
+    return response.data;
+  }
+
+  /** Raw bytes of a case file (audited read). */
+  async getInvestigationFileContent(id: string, fileId: string): Promise<ArrayBuffer> {
+    const response = await this.client.get(`/api/investigations/${id}/files/${fileId}/content`, {
+      responseType: 'arraybuffer',
+    });
+    return response.data;
+  }
+
+  /** Generates the file graph on the server (F2.5): a `file` context, an exploration and a source. */
+  async createFileContext(
+    id: string,
+    fileId: string,
+    body: { mapping: MappingSpec; file_ids?: string[]; title?: string },
+  ): Promise<FileContextResult> {
+    const response = await this.client.post(`/api/investigations/${id}/files/${fileId}/context`, body);
+    return response.data;
+  }
+
+  /** How an enrichment file joins the case's nodes (F2.6). */
+  async setInvestigationFileMapping(id: string, fileId: string, mapping: FileEnrichmentSpec): Promise<InvestigationFile> {
+    const response = await this.client.patch(`/api/investigations/${id}/files/${fileId}`, { mapping });
     return response.data;
   }
 
