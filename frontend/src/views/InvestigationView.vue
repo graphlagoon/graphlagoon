@@ -26,6 +26,8 @@ import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import LayoutPanel from '@/components/LayoutPanel.vue';
 import SourcesPanel from '@/components/investigation/SourcesPanel.vue';
 import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
+import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue';
+import { api } from '@/services/api';
 import type { GraphResponse } from '@/types/graph';
 import type { InvestigationEvent, InvestigationRole } from '@/types/investigation';
 
@@ -42,6 +44,9 @@ const auth = useAuthStore();
 const showAdd = ref(false);
 const showLayout = ref(false);
 const activeTab = ref(UNIFIED);
+/** The graph tabs or the case space (T10). */
+const view = ref<'graph' | 'space'>('graph');
+const artifactCount = ref<number | null>(null);
 const inspectorTab = ref<'data' | 'notes' | 'origin'>('data');
 const showJournal = ref(false);
 const noteDraft = ref('');
@@ -124,10 +129,13 @@ watch(
     communityByTab.clear();
     renderedTab = null;
     activeTab.value = UNIFIED;
+    view.value = 'graph';
+    artifactCount.value = null;
     await store.openInvestigation(id);
     // The journal and notes are secondary: a failure here must not block the graph.
     store.fetchNotes().catch(() => {});
     store.fetchEvents().catch(() => {});
+    api.getInvestigationArtifacts(id).then((a) => (artifactCount.value = a.length)).catch(() => {});
     await loadWorkspace();
   },
   { immediate: true },
@@ -173,6 +181,16 @@ async function run(action: () => Promise<unknown>, fallback: string) {
   }
 }
 
+function openTab(tab: string) {
+  activeTab.value = tab;
+  view.value = 'graph';
+}
+
+function onArtifactsChanged(count: number) {
+  artifactCount.value = count;
+  store.fetchEvents().catch(() => {});
+}
+
 function onRoleChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value as InvestigationRole | '';
   const id = selected.value?.node_id;
@@ -204,6 +222,9 @@ function describeEvent(e: InvestigationEvent): string {
     case 'note.created': return `noted on ${p.anchor?.id ?? 'the case'}: “${p.body}”`;
     case 'note.updated': return 'edited a note';
     case 'note.deleted': return 'deleted a note';
+    case 'artifact.created': return `uploaded “${p.name}” v1`;
+    case 'artifact.version_added': return `uploaded “${p.name}” v${p.version}`;
+    case 'artifact.approved': return `approved “${p.name}” v${p.version}`;
     default: return e.kind;
   }
 }
@@ -226,9 +247,9 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
       <nav class="tabs" data-testid="workspace-tabs">
         <button
           class="tab"
-          :class="{ active: activeTab === UNIFIED }"
+          :class="{ active: view === 'graph' && activeTab === UNIFIED }"
           data-testid="tab-unified"
-          @click="activeTab = UNIFIED"
+          @click="openTab(UNIFIED)"
         >
           <span class="dots">
             <span v-for="s in readableSources" :key="s.id" class="dot" :style="{ background: store.sourceColors[s.id] }"></span>
@@ -239,9 +260,9 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           <button
             v-if="s.accessible"
             class="tab"
-            :class="{ active: activeTab === s.id }"
+            :class="{ active: view === 'graph' && activeTab === s.id }"
             :data-testid="`tab-${s.id}`"
-            @click="activeTab = s.id"
+            @click="openTab(s.id)"
           >
             <span class="dot" :style="{ background: store.sourceColors[s.id] }"></span>
             {{ s.title_snapshot }}
@@ -258,9 +279,19 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
         >
           <Plus :size="14" /> Add
         </button>
+        <button class="tab" :class="{ active: view === 'space' }" data-testid="tab-space" @click="view = 'space'">
+          Case space<span v-if="artifactCount !== null" class="count">{{ artifactCount }}</span>
+        </button>
       </nav>
 
-      <div class="ws-body">
+      <ArtifactsSpace
+        v-if="view === 'space'"
+        :investigation-id="id"
+        :can-edit="canEdit"
+        @changed="onArtifactsChanged"
+      />
+
+      <div v-show="view === 'graph'" class="ws-body">
         <SourcesPanel
           :sources="store.sources"
           :graphs="store.sourceGraphs"
@@ -268,7 +299,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           :colors="store.sourceColors"
           :merged-counts="mergedCounts"
           :active-tab="activeTab"
-          @select="activeTab = $event"
+          @select="openTab($event)"
         />
 
         <section class="canvas-area" data-testid="graph-container">
@@ -512,6 +543,14 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
 .tab.active {
   font-weight: 600;
   border-bottom-color: var(--color-primary);
+}
+
+.tab .count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  background: var(--border-color);
 }
 
 .tab.restricted {

@@ -82,11 +82,15 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "agent_token_max_days": "public",
     "agents_allow_unmasked_data": "public",
     "agent_rate_limit_per_minute": "public",
+    "investigations_volume_path": "public",
+    "artifact_max_bytes": "public",
 }
 
 # Tables wiped by "clear environment", in an order that respects foreign keys
 # (children first). services.environment consumes this list directly.
 CLEARABLE_TABLES: tuple[str, ...] = (
+    "investigation_artifact_versions",
+    "investigation_artifacts",
     "entity_matches",
     "investigation_evidence",
     "investigation_notes",
@@ -212,6 +216,16 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
             ("POST", "/api/investigations/{investigation_id}/notes"),
             ("PATCH", "/api/investigations/{investigation_id}/notes/{note_id}"),
             ("DELETE", "/api/investigations/{investigation_id}/notes/{note_id}"),
+            ("POST", "/api/investigations/{investigation_id}/artifacts"),
+            (
+                "POST",
+                "/api/investigations/{investigation_id}/artifacts/{artifact_id}/versions",
+            ),
+            (
+                "POST",
+                "/api/investigations/{investigation_id}/artifacts/{artifact_id}"
+                "/versions/{version}/approve",
+            ),
         )
     },
 }

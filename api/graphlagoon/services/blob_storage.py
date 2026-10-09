@@ -93,6 +93,18 @@ class BlobStore(ABC):
     @abstractmethod
     async def save(self, key: str, data: bytes) -> None: ...
 
+    async def save_stream(self, key: str, path: str) -> None:
+        """Store the file at `path` under `key`, without holding it in memory.
+
+        The file is consumed: backends may move it. Raises FileExistsError when
+        the key already exists (blobs saved this way are never overwritten).
+        Fallback for backends without a streaming path: read it whole.
+        """
+        if await self.exists(key):
+            raise FileExistsError(key)
+        await self.save(key, Path(path).read_bytes())
+        Path(path).unlink(missing_ok=True)
+
     @abstractmethod
     async def load(self, key: str) -> Optional[bytes]:
         """Return the stored bytes, or None when the key does not exist."""
@@ -161,6 +173,29 @@ class LocalBlobStore(BlobStore):
 
     async def save(self, key: str, data: bytes) -> None:
         await asyncio.to_thread(self._save_sync, self._resolve(key), data)
+
+    async def save_stream(self, key: str, path: str) -> None:
+        target = self._resolve(key)
+
+        def _move() -> None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Move next to the target first (may copy across filesystems), then
+            # link: os.link fails if the key exists, so nothing is overwritten.
+            tmp = target.parent / f"{_TEMP_PREFIX}{uuid.uuid4().hex}"
+            try:
+                shutil.move(path, tmp)
+                try:
+                    os.link(tmp, target)
+                except FileExistsError:
+                    raise
+                except OSError:  # no hard links here: check, then rename
+                    if target.exists():
+                        raise FileExistsError(key)
+                    os.replace(tmp, target)
+            finally:
+                tmp.unlink(missing_ok=True)
+
+        await asyncio.to_thread(_move)
 
     async def load(self, key: str) -> Optional[bytes]:
         path = self._resolve(key)
@@ -410,6 +445,38 @@ class DatabricksBlobStore(BlobStore):
             params={"overwrite": "true"},
         )
         self._check_response(resp, "save", key, url)
+
+    _STREAM_CHUNK = 1024 * 1024
+
+    async def save_stream(self, key: str, path: str) -> None:
+        """PUT the file with a streamed body and ``overwrite=false``."""
+        await self._ensure_directory(key)
+
+        async def _chunks():
+            with open(path, "rb") as f:
+                while chunk := await asyncio.to_thread(f.read, self._STREAM_CHUNK):
+                    yield chunk
+
+        url = self._file_url(key)
+        headers = await self._auth_headers()
+        headers["Content-Type"] = "application/octet-stream"
+        # An explicit length keeps httpx from switching to chunked encoding.
+        headers["Content-Length"] = str(os.path.getsize(path))
+        try:
+            resp = await self._request(
+                "PUT",
+                url,
+                "save_stream",
+                key,
+                content=_chunks(),
+                headers=headers,
+                params={"overwrite": "false"},
+            )
+            if resp.status_code == 409:
+                raise FileExistsError(key)
+            self._check_response(resp, "save_stream", key, url)
+        finally:
+            Path(path).unlink(missing_ok=True)
 
     async def load(self, key: str) -> Optional[bytes]:
         url = self._file_url(key)

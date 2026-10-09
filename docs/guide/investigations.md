@@ -100,6 +100,26 @@ Nodes without a key never merge: they stay one per context.
   is chained to the previous by a hash, so a gap or a rewrite is detectable.
   Deleting a note keeps its text in the journal.
 
+## Case space
+
+The **Case space** tab keeps the case's artifacts: slides, documents,
+reports, images and data (`md`, `txt`, `pdf`, `png`, `jpg`, `pptx`, `docx`,
+`xlsx`, `csv`, `json`, `html`, `svg`).
+
+- **Upload artifact** adds a file; **New version** adds a version of the
+  selected one (same file type). A version never replaces the previous one:
+  each is stored separately with its sha256, author and note, and the list
+  on the right shows them all.
+- **Preview:** `md` and `txt` show as plain text, images and PDFs in place.
+  `html` and `svg` are **download only**: they are never opened in the
+  browser, since they can carry scripts. The other types are download only.
+- **Approve.** Every version starts as a *draft*. Only a person with edit
+  access approves it; an AI agent can upload drafts but never approve.
+- Uploads, new versions and approvals go to the journal. Files live in the
+  case storage (a Unity Catalog Volume on Databricks, see
+  [Configuration](./configuration.md#investigation-storage)) and are only
+  reached through the app, which checks access.
+
 ## Access and sharing
 
 - **Who sees a case:** its owner, its assignee, the people it was shared

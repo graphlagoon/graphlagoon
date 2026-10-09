@@ -1203,5 +1203,52 @@ export async function seedInvestigations(
     }
     return route.fulfill(json(events.get(id) ?? []));
   });
-  return { added };
+  // Case space (FA.2): raw-body upload, versions, content and approval, in memory.
+  const artifacts = new Map<string, any[]>();
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+\/artifacts(\/.*)?(\?.*)?$/, (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const [, id, rest = ''] = url.pathname.match(/investigations\/([^/]+)\/artifacts\/?(.*)$/)!;
+    const list = artifacts.get(id) ?? [];
+    artifacts.set(id, list);
+    const version = (n: number) => ({
+      version: n,
+      sha256: `sha${n}`.padEnd(64, '0'),
+      size_bytes: req.postDataBuffer()?.length ?? 0,
+      content_type: 'text/markdown',
+      status: 'draft',
+      actor: { kind: 'human', email: 'e2e@test.com' },
+      source_evidence_ids: [],
+      created_at: new Date().toISOString(),
+    });
+    const contents = (a: any, n: number) => (a.contents ??= {})[n];
+    const out = ({ contents: _c, ...a }: any) => a;
+    if (!rest) {
+      if (req.method() !== 'POST') return route.fulfill(json(list.map(out)));
+      const name = url.searchParams.get('name') ?? 'file';
+      const a: any = { id: `art-${list.length + 1}`, name, kind: 'doc', current_version: 1, download_only: false, versions: [version(1)] };
+      a.contents = { 1: req.postData() ?? '' };
+      list.unshift(a);
+      journal(id, 'artifact.created', { name, version: 1 });
+      return route.fulfill(json(out(a), 201));
+    }
+    const [aid, , n, action] = rest.split('/');
+    const a = list.find((x) => x.id === aid);
+    if (!a) return route.fulfill(json({ detail: { error: { code: 'ARTIFACT_NOT_FOUND' } } }, 404));
+    if (!n) {
+      a.current_version += 1;
+      a.versions.unshift(version(a.current_version));
+      a.contents[a.current_version] = req.postData() ?? '';
+      journal(id, 'artifact.version_added', { name: a.name, version: a.current_version });
+      return route.fulfill(json(out(a), 201));
+    }
+    if (action === 'approve') {
+      const v = a.versions.find((x: any) => x.version === Number(n));
+      Object.assign(v, { status: 'approved', approved_by: 'e2e@test.com', approved_at: new Date().toISOString() });
+      journal(id, 'artifact.approved', { name: a.name, version: v.version });
+      return route.fulfill(json(out(a)));
+    }
+    return route.fulfill({ status: 200, contentType: 'text/markdown', body: contents(a, Number(n)) ?? '' });
+  });
+  return { added, artifacts };
 }
