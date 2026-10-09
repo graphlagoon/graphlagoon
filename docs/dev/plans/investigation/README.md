@@ -22,6 +22,12 @@ fraude, PLD/FT e risco** para adquirentes e bancos. As capacidades são:
    proporcional, LIBR), caminhos, Sankey e linha do tempo em raias.
 6. **Documentação do caso:** diário automático, notas, hipóteses, evidências
    congeladas com hash, decisão e exportações.
+7. **AI-first:**
+   - API REST e **servidor MCP** para um agente de IA criar e evoluir a investigação,
+     rodar análises e subir artefatos (slides, documentos, relatórios, imagens) no
+     **espaço do caso**, guardado no Volume;
+   - o agente age em nome de uma pessoa e propõe;
+   - a pessoa aprova e decide.
 
 ## Ordem de leitura
 
@@ -45,7 +51,7 @@ docs/dev/plans/investigation/
 ├── 02-design.md
 ├── 03-arquitetura.md
 ├── 04-plano-de-implementacao.md
-├── screens/    PNG das telas propostas (T1–T9) e das 3 direções de layout
+├── screens/    PNG das telas propostas (T1–T11) e das 3 direções de layout
 ├── diagrams/   PNG do mapa do sistema, das jornadas e da comparação
 └── mockups/    HTML-fonte das telas e diagramas (abra no browser; ver abaixo)
 ```
@@ -95,6 +101,10 @@ Valem para **toda** tarefa do plano:
    `feature/investigations-f1`, `-f2`, ….
 10. **Não implemente o que está marcado como decisão em aberto** abaixo sem
     resposta humana; use o padrão recomendado e registre a suposição no decision log.
+11. **AI-first (a partir da FA.6):** rota nova de investigação entrega também a
+    ferramenta MCP, ou fica registrada como só humana. O teste
+    `api/tests/test_agent_registry.py` cobra. Análise que o agente usa precisa ter
+    versão no servidor com paridade por fixture.
 
 ## Decisões em aberto (precisam de humano)
 
@@ -102,14 +112,18 @@ Valem para **toda** tarefa do plano:
 |---|---|---|
 | Q1 | Direção de layout: A canvas-first, B cockpit, C dossiê-first ([imagens](02-design.md#direções-de-layout)) | **A**, com o T5 funcionando como cockpit durante o rastreio |
 | Q2 | Primeiro fluxo a entregar: golpe Pix (banco/IP) ou lojistas de fachada (adquirente) | **Golpe Pix** (fluxo A) |
-| Q3 | Onde ficam os arquivos sigilosos: storage do app, Volume do Databricks, só browser | O mesmo `BlobStore` dos snapshots (local ou Volume) |
+| Q3 | Onde ficam os arquivos sigilosos e qual o tamanho máximo por upload no Databricks Apps e na Files API | No Volume, em `investigations_volume_path`, em streaming; implementar upload em partes se o limite do request for menor que `investigation_file_max_bytes` |
 | Q4 | Profundidade padrão do rastreio (o MED 2.0 oficial fala em 2 camadas; fontes secundárias em 5) | 3 camadas, Δ = 24 h |
 | Q5 | Teto do grafo de trabalho no browser | Medir na tarefa G4 antes de fixar |
 | Q6 | Siscoaf tem API? | Não assumir: só exportar resumo estruturado |
+| Q7 | Como o agente alcança o app no Databricks Apps (proxy com login do Databricks)? | `/mcp` remoto onde for alcançável; senão a ponte local stdio da FA.5 com o OAuth do Databricks CLI |
+| Q8 | Agentes podem ver CPF, CNPJ e contas sem máscara? | Não (`agents_allow_unmasked_data = false`); o admin pode liberar |
+| Q9 | O que o agente faz direto e o que precisa de aceite humano? | Direto: notas, evidências, fontes, artefatos em rascunho. Proposta: papel, match, hipótese, tipologia, status. Nunca: decisão, comunicação, DICT, compartilhamento, apagar, aprovar artefato |
 
 ## Execução autônoma
 
-Prompt para uma sessão implementar o plano inteiro (G1 até F4) sem perguntar nada.
+Prompt para uma sessão implementar o plano inteiro (G1 até F4, incluindo a FA) sem
+perguntar nada.
 Funciona colado numa sessão interativa; o contexto é resumido sozinho quando
 cresce, e o estado fica neste repositório (checkboxes, decision log e commits).
 
@@ -118,7 +132,7 @@ Use a skill skill_feature_creation e execute o plano de investigações de ponta
 
 1. Leia docs/dev/plans/investigation/README.md (Definition of Done e decisões em aberto). Leia também 03-arquitetura.md e 02-design.md quando a tarefa pedir.
 2. Trabalhe no branch feature/investigations: se não existir, crie-o a partir do branch que contém este pacote. Faça push depois de cada tarefa. Na primeira tarefa, abra um PR draft para main com gh e mantenha a descrição com o progresso.
-3. Repita até não restar tarefa G1–G4 ou F1.1–F4.6 desmarcada em 04-plano-de-implementacao.md: pegue a próxima não marcada cujas dependências estejam feitas; implemente; rode os testes do Definition of Done e corrija até ficarem verdes; registre no decision log; marque [x]; faça commit e push.
+3. Repita até não restar tarefa G1–G4, F1.x, FA.x, F2.x, F3.x ou F4.x desmarcada em 04-plano-de-implementacao.md, na ordem do arquivo: pegue a próxima não marcada cujas dependências estejam feitas; implemente; rode os testes do Definition of Done e corrija até ficarem verdes; registre no decision log; marque [x]; faça commit e push.
 4. Decisões em aberto: use os padrões do README e registre cada suposição no decision log. Nunca pare para perguntar.
 5. Bloqueio real (teste que não passa depois de 3 tentativas diferentes, dependência externa indisponível): registre no decision log, troque o [ ] da tarefa por [~] com uma linha explicando, e siga para a próxima que não dependa dela.
 6. Proibido: force push, merge ou push em main, apagar dados ou arquivos fora do escopo da tarefa, mexer nas tarefas F5.
@@ -137,7 +151,7 @@ o texto em `prompt.txt` antes de rodar:
 
 ```bash
 PLAN=docs/dev/plans/investigation/04-plano-de-implementacao.md
-pendentes() { grep -cE '^- \[ \] (G[1-4]|F[1-4]\.)' "$PLAN"; }
+pendentes() { grep -cE '^- \[ \] (G[1-4]|F[1-4]\.|FA\.)' "$PLAN"; }
 antes=$(pendentes)
 while [ "$antes" -gt 0 ]; do
   claude -p "$(cat prompt.txt)" --permission-mode acceptEdits \

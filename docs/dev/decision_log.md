@@ -10062,3 +10062,58 @@ diante.
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-10-09 19:45] - Feature Planning: investigações AI-first e armazenamento no Volume
+
+**Pedido:** confirmar que os arquivos enviados vão para o Volume e incluir uma etapa
+AI-first: API e servidor MCP para um agente de IA criar e evoluir a investigação e
+subir artefatos (slides, docs, relatórios) no espaço do caso.
+
+**Achado sobre o armazenamento:** o plano já mandava arquivos ao `BlobStore` (local ou
+Volume via Files API). Mas o `BlobStore.save()` recebe o arquivo inteiro em memória e
+sobrescreve, e não havia setting próprio. Corrigido no plano:
+- `investigations_volume_path` (padrão: subpasta de `databricks_volume_path`);
+- `save_stream` com sha256 calculado durante o upload;
+- endereçamento por conteúdo, nunca sobrescrever;
+- layout `files/`, `sources/`, `evidence/`, `artifacts/`, `exports/` (03 §2.3);
+- limite de request do Databricks Apps e da Files API como Q3.
+
+**Etapa nova FA (7 tarefas, entre F1 e F2):**
+- FA.1: tokens de agente `glt_` (escopos `read`, `analyze`, `write`, `propose`; hash
+  guardado; validade; revogação) e ator no diário.
+- FA.2: armazenamento no Volume e espaço de artefatos versionados (T10).
+- FA.3: propostas com aceite humano (T11).
+- FA.4: servidor MCP em `/mcp` (SDK oficial, Streamable HTTP, ferramentas sobre a
+  camada de serviço).
+- FA.5: ponte stdio para apps atrás do proxy do Databricks.
+- FA.6: registry com teste que obriga cobertura MCP.
+- FA.7: guia público e E2E.
+- Também a **F3.8**: rastreio e caminhos portados para Python com paridade pela mesma
+  fixture, porque o agente não roda web workers. E a F4.3 ganhou tipologias espelhadas
+  em Python.
+
+**Design Decisions:**
+1. **O agente age em nome de uma pessoa,** nunca com mais acesso que ela.
+2. **O que o agente faz direto:** notas, evidências, fontes, artefatos em rascunho.
+3. **O que vira proposta:** papel, match, hipótese, tipologia, status.
+4. **Só humano:** decidir, comunicar, marcar no DICT, compartilhar, apagar, aprovar
+   artefato. Bloqueado por `forbid_agents` mesmo para superuser.
+5. **Dados pessoais vão mascarados** para agentes por padrão (LGPD: envio a provedor
+   de LLM); o admin libera com `agents_allow_unmasked_data`.
+6. **Conteúdo de dados vai marcado como `untrusted_data`** nas respostas MCP (prompt
+   injection). Nenhuma ferramenta executa código nem expõe caminho de Volume.
+7. **HTML e SVG de artefatos só para download,** nunca renderizados (XSS).
+8. **Regra AI-first no Definition of Done (#11):** a partir da FA.6, rota nova de
+   investigação entrega ferramenta MCP ou é registrada como só humana.
+
+**Files Modified:** `plans/investigation/` (README, 02, 03, 04), telas novas
+`screens/T10-Espaco.png`, `screens/T11-Agentes.png` e os mockups.
+
+**Public Docs:** nenhuma alteração ainda; o guia `docs/guide/agents-mcp.md` está na
+FA.7.
+
+**Admin-Area Impact:** nenhum agora. A FA traz settings, tabelas, rotas e a permissão
+`investigation.agent`, previstos na FA.1 e na FA.2.
+
+**Author:** Claude (AI Assistant)
+
+---

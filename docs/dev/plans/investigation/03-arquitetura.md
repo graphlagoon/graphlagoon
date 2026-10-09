@@ -33,7 +33,12 @@ Princípios:
 - **Algoritmos interativos rodam em web worker,** como os de métricas hoje. Versões
   em SQL ficam para a F5.
 - **Tudo que vira prova é imutável e tem hash:** arquivos, fontes congeladas,
-  evidências e o caso decidido.
+  evidências, versões de artefatos e o caso decidido. Tudo fica no Volume (§2.3).
+- **AI-first:** cada capacidade tem rota REST e ferramenta MCP. Agentes agem em nome de
+  uma pessoa; a decisão é sempre humana (§8).
+- **Análises que o agente usa rodam também no servidor:** rastreio, caminhos e
+  tipologias têm implementação Python com paridade garantida pelas mesmas fixtures do
+  worker.
 
 ## 2. Modelo de dados
 
@@ -97,6 +102,54 @@ A chave final de um nó é `"{entity}:{valor normalizado}"`.
 | `entity_matches` | `id`, `investigation_id`, `left` JSON `{source_id, node_id, entity_key?}`, `right` JSON, `score`, `reasons` JSON, `status` (`sugerido`, `aceito`, `recusado`, `adiado`), `reason_text?`, `decided_by?`, `decided_at?`, `created_at` | |
 
 `decision` = `{outcome: "comunicar" | "arquivar", actions: ["dict", "spa", "bloqueio_cautelar"], rationale, decided_by, decided_at}`.
+
+**Tabelas da etapa AI-first (FA):**
+
+| Tabela | Colunas principais | Notas |
+|---|---|---|
+| `agent_tokens` | `id`, `owner_email`, `name`, `token_hash` (sha256), `scopes` JSON (`read`, `analyze`, `write`, `propose`), `expires_at`, `last_used_at?`, `revoked_at?`, `created_at` | O token (`glt_` + 32 bytes base64url) aparece uma vez; só o hash fica guardado |
+| `investigation_artifacts` | `id`, `investigation_id`, `name`, `kind` (`slides`, `doc`, `report`, `image`, `data`, `other`), `current_version`, `created_at` | O espaço do caso (T10) |
+| `investigation_artifact_versions` | `id`, `artifact_id`, `version`, `blob_key`, `sha256`, `size_bytes`, `content_type`, `status` (`draft`, `approved`), `actor` JSON, `source_evidence_ids` JSON, `note`, `created_at`, `approved_by?`, `approved_at?` | Imutável; aprovar é ação humana |
+| `investigation_proposals` | `id`, `investigation_id`, `kind` (`role`, `match`, `hypothesis`, `hypothesis_status`, `typology`, `status`), `payload` JSON, `rationale`, `actor` JSON, `status` (`pending`, `accepted`, `rejected`), `decided_by?`, `decided_at?`, `decision_note?` | Aceitar aplica a mudança pelo **mesmo** serviço da ação na UI |
+
+`actor` = `{kind: "human" | "agent", email, agent_name?, token_id?}`. A tabela
+`investigation_events` ganha as colunas `actor_kind`, `agent_name` e `token_id`.
+
+### 2.3 Armazenamento no Volume
+
+Tudo o que o caso guarda em arquivo vai para o mesmo `BlobStore` dos outros recursos
+(`services/blob_storage.py`): diretório local em dev e Volume do Unity Catalog via
+Files API no Databricks. A raiz vem do setting novo `investigations_volume_path`.
+Seguindo o padrão dos settings `precomputed_graphs_volume_path` e
+`style_presets_volume_path`, o padrão é a subpasta `investigations` de
+`databricks_volume_path`, ou do diretório local de snapshots.
+
+```
+{investigations_volume_path}/{investigation_id}/
+├── files/{sha256}                         arquivos enviados (brutos)
+├── sources/{source_id}.json.gz            fontes congeladas
+├── evidence/{evidence_id}.json.gz         evidências
+├── artifacts/{artifact_id}/v{n}/{nome}    artefatos versionados (espaço do caso)
+└── exports/{export_id}.{ext}              exportações geradas
+```
+
+Regras:
+- **Upload em streaming.** O `BlobStore.save()` atual recebe o arquivo inteiro em
+  memória. Crie `save_stream(key, path)`:
+  - local: move o arquivo temporário;
+  - Databricks: `PUT` na Files API com o corpo em stream.
+
+  O servidor calcula o sha256 enquanto recebe e grava num temporário, e só então
+  envia ao Volume.
+- **Imutável e endereçado por conteúdo.** Nunca sobrescreve: arquivos usam a chave do
+  hash e versões ganham pasta nova. Se a chave já existe, reaproveita.
+- **Sem acesso direto.** O caminho do Volume nunca é exposto a usuário nem a agente;
+  todo acesso passa pela API, que checa permissão e audita.
+- **Apagar** só pela retenção (§7), nunca por rota comum.
+- **No Databricks,** o Volume deve dar escrita só ao service principal do app.
+- **Limites:** `investigation_file_max_bytes` e `artifact_max_bytes`. O limite de
+  tamanho por request do Databricks Apps e da Files API está **a confirmar** (Q3 do
+  README); se ficar abaixo do necessário, implemente upload em partes.
 
 ## 3. API
 
@@ -419,7 +472,8 @@ Os selos **sugerem**; aceitar um selo grava o evento `typology.accepted`.
 - **Catálogo de permissões** (`services/permission_catalog.py`):
   - `investigation.create` (`POST /api/investigations`);
   - `investigation.upload` (`POST .../files`);
-  - `investigation.export` (`GET .../export`).
+  - `investigation.export` (`GET .../export`);
+  - `investigation.agent` (`POST /api/agent-tokens`: quem pode autorizar agentes).
 
   Todas com gate `require_permission` e affordance escondida no frontend.
 - **Acesso ao caso:**
@@ -446,5 +500,147 @@ Os selos **sugerem**; aceitar um selo grava o evento `typology.accepted`.
   - `investigation_file_max_bytes`;
   - `investigation_max_working_edges` (vem da G4);
   - `investigation_retention_years`;
+  - `investigations_volume_path`;
   - `enrichment_max_keys`;
-  - `enrichment_max_rows`.
+  - `enrichment_max_rows`;
+  - da etapa AI-first: `agents_enabled`, `agent_token_max_days`,
+    `agents_allow_unmasked_data`, `artifact_max_bytes`, `agent_rate_limit_per_minute`.
+
+## 8. AI-first: agentes na investigação
+
+**Objetivo:** um agente de IA (Claude Code, Claude Desktop ou outro cliente MCP)
+consegue criar uma investigação, evoluí-la, rodar análises e subir artefatos (slides,
+documentos, relatórios, imagens, dados) no espaço do caso, **com o mesmo acesso do
+usuário que o autorizou**. Pessoas continuam decidindo.
+
+### 8.1 Princípios
+
+1. **Agente é cidadão de primeira classe.** Toda capacidade nova de investigação nasce
+   com rota REST documentada **e** ferramenta MCP, ou fica explicitamente marcada como
+   só humana (§8.7).
+2. **O agente age em nome de uma pessoa**, com o acesso dela e nunca mais que isso:
+   need-to-know, permissões e redação de fontes valem igual.
+3. **Tudo é atribuído.** Diário, auditoria e versões registram "agente X em nome de Y,
+   token Z".
+4. **Pessoas decidem.** Os escopos (§8.2) e a lista do que é só humano (§8.7) separam
+   o que o agente faz direto, o que ele propõe e o que nunca faz.
+5. **O dado é não confiável.** Valores vindos do grafo, de arquivos e de enriquecimento
+   podem conter instruções maliciosas (prompt injection). As respostas das ferramentas
+   marcam isso.
+
+### 8.2 Identidade e tokens
+
+- **Criação:** `POST /api/agent-tokens` (exige `investigation.agent`) com `{name,
+  scopes, expires_in_days}`. Devolve o token uma única vez. `GET` lista os tokens do
+  usuário; `DELETE /api/agent-tokens/{id}` revoga. O admin lista e revoga qualquer um.
+- **Escopos:**
+
+  | Escopo | O agente pode |
+  |---|---|
+  | `read` | ler caso, grafo e diário |
+  | `analyze` | rodar análises no servidor |
+  | `write` | notas, evidências, fontes, artefatos em rascunho |
+  | `propose` | criar propostas |
+
+- **Autenticação:** `Authorization: Bearer glt_…` em `middleware/auth.py`. O token vira
+  o `owner_email` mais `request.state.actor = {kind: "agent", …}`. Expirado ou revogado
+  leva 401.
+- **Bloqueio por rota:** uma dependência `forbid_agents` bloqueia com 403 as rotas só
+  humanas, **mesmo que o dono tenha a permissão**.
+- **Desligado por padrão:** sem `agents_enabled`, tokens e `/mcp` não existem (404).
+- **Databricks Apps:** o app fica atrás do proxy, que exige login do Databricks.
+  Quando o `/mcp` remoto não for alcançável pelo agente, use a ponte local da FA.5,
+  um processo stdio que fala com a API usando o OAuth do Databricks CLI. Ver Q7 do
+  README.
+
+### 8.3 Servidor MCP
+
+- **Implementação:** SDK oficial `mcp` para Python (FastMCP), como extra opcional
+  `mcp` no `api/pyproject.toml`. Código em `api/graphlagoon/mcp/server.py`.
+- **Transporte:** Streamable HTTP montado em `/mcp` no app FastAPI quando
+  `agents_enabled`.
+- **Sem auto-chamada HTTP:** as ferramentas chamam a **camada de serviço** (as mesmas
+  funções dos routers), com a identidade do token.
+- **Saída:** JSON. Conteúdo vindo de dados vai dentro de `{"untrusted_data": …}`.
+- **Mascaramento:** CPF, CNPJ e contas vão mascarados quando
+  `agents_allow_unmasked_data = false` (padrão).
+
+| Grupo | Ferramenta | Escopo | Base |
+|---|---|---|---|
+| Leitura | `list_investigations(status?, assignee?)` | read | F1.2 |
+| | `get_investigation(id)`: resumo, prazos, fontes (redigidas), contagens | read | F1.2 |
+| | `get_graph(id, view="unified" \| source_id, limit)` | read | F1.6 |
+| | `search_entities(id, query)` | read | F1.6 |
+| | `get_entity(id, uid)`: propriedades, origem, papel, notas | read | F1.6 |
+| | `lookup_enrichment(id, uid, table)` | read | F2.1 |
+| | `list_events(id, after?)`, `get_dossier(id)` | read | F1.7, F4.2 |
+| | `list_artifacts(id)`, `get_artifact(id, artifact_id, version?)` | read | FA.2 |
+| Análise (servidor) | `trace_money(id, seed, params)` | analyze | F3.8 |
+| | `find_paths(id, from, to, mode)` | analyze | F3.8 |
+| | `run_typologies(id, which?)` | analyze | F4.3 |
+| | `suggest_matches(id)` | analyze | F2.8 |
+| Escrita (atribuída) | `create_investigation(title, typology?, origin?)` | write + `investigation.create` | F1.2 |
+| | `add_source(id, exploration_id, mode)` | write | F1.3 |
+| | `upload_file(id, filename, role, content_base64)`, até `artifact_max_bytes`; maior, só pela UI | write + `investigation.upload` | F2.3 |
+| | `add_note(id, anchor, body)` | write | F1.7 |
+| | `pin_evidence(id, title, kind, params)` | write | F4.1 |
+| | `upload_artifact(id, name, kind, content_base64 \| text, source_evidence_ids?, note?)`: nova versão em **rascunho** | write | FA.2 |
+| Propostas | `propose(id, kind, payload, rationale)` | propose | FA.3 |
+
+- **Resources:** `investigation://{id}/summary`, `investigation://{id}/dossier.md`,
+  `investigation://{id}/events`, `investigation://{id}/artifacts/{aid}`.
+- **Prompts:** `investigar_golpe_pix`, `revisar_lojista`, `montar_dossie`. Cada um traz
+  o roteiro do fluxo correspondente (02-design) e lembra o agente das regras de §8.1.
+
+### 8.4 Propostas e aprovação humana
+
+O agente cria uma proposta em vez de alterar direto: papel de entidade, decisão de
+match, nova hipótese ou mudança de status de hipótese, aceitar selo de tipologia,
+status do caso.
+
+A pessoa aceita ou recusa na T11. Aceitar chama o **mesmo** serviço que a ação na UI
+chamaria e grava evento com os dois atores: quem propôs e quem aceitou.
+
+### 8.5 Espaço do caso (artefatos)
+
+- **API:**
+  - `POST .../artifacts` (multipart, ou JSON com texto) cria o artefato e a v1;
+  - `POST .../artifacts/{aid}/versions` cria nova versão;
+  - `GET .../artifacts`, `GET .../artifacts/{aid}/versions/{n}/content`;
+  - `POST .../artifacts/{aid}/versions/{n}/approve` aprova (só humano).
+- **Tipos aceitos:** `md`, `txt`, `pdf`, `png`, `jpg`, `pptx`, `docx`, `xlsx`, `csv`,
+  `json`, `html`, `svg`.
+- **Pré-visualização** (T10):
+  - `md` e `txt` renderizados com sanitização;
+  - `pdf` no visualizador do browser;
+  - `png` e `jpg` como imagem;
+  - `pptx`, `docx`, `xlsx`, `csv` e `json` só download, com metadados;
+  - **`html` e `svg` nunca renderizados inline (XSS): só download.**
+- **Integridade:** cada versão grava sha256, autor e `source_evidence_ids`, vira evento
+  no diário e pode ser levada ao dossiê. Depois da decisão (F4.5), o espaço fica
+  só-leitura.
+
+### 8.6 Dados pessoais e LLMs
+
+Enviar dado de cliente a um provedor de LLM é transferência de dado pessoal (LGPD).
+- **Mascaramento por padrão:** o admin decide com `agents_allow_unmasked_data`, e a
+  T11 mostra a política.
+- **Leituras auditadas:** toda leitura feita por agente é auditada com o token.
+- **Limite de taxa:** `agent_rate_limit_per_minute` por token.
+- **Sem execução de código:** nenhuma ferramenta executa código arbitrário (nem
+  cluster program, nem métrica customizada), e nenhuma devolve caminho de Volume.
+
+### 8.7 Registry de cobertura (teste)
+
+`api/graphlagoon/mcp/registry.py` declara:
+- `AGENT_TOOL_ROUTES`: rota → ferramenta;
+- `AGENT_EXEMPT_ROUTES`: rota → motivo.
+
+O teste `api/tests/test_agent_registry.py` falha quando:
+- uma rota de `routers/investigations.py` (ou a de enriquecimento) não está em
+  nenhuma das duas listas;
+- uma rota só humana aceita token de agente.
+
+Só humanas: `POST .../decision`, `.../share`, `DELETE` do caso, aprovar versão de
+artefato, aceitar ou recusar proposta, criar ou revogar token, exportações oficiais
+(`format=siscoaf|simba`). Elas vão em `AGENT_EXEMPT_ROUTES` com o motivo.
