@@ -10550,6 +10550,58 @@ normalizadores em `utils/identityKeys.ts`.
 verdes); vitest dos normalizadores e do modal (30 verdes); `vue-tsc` limpo.
 
 **Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** no admin-area
-impact (a rota de update do context já existe e já é auditada).
+impact (campo novo na rota de update do context, que já existe; ela não está em
+`AUDITED_ROUTES`, como antes).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 01:30] - Feature Implemented: F1.5 · Frontend: rotas, store, API, fila (T1), adicionar (T3)
+
+**Feature:** rotas `/investigations` e `/investigations/:id`, store `investigation`,
+métodos de API, fila de casos (T1), modal "Add to investigation" (T3) aberto da
+lista de explorações, da toolbar do grafo (com exploração carregada) e do caso, e o
+link "Investigations" no topo.
+
+**Design Decisions:**
+1. **Fila (T1):** tabela com caso, tipologia, fontes, status, responsável, prazo e
+   atualização; filtros de busca e status (padrão "abertas"); 4 contadores.
+   `GET /api/investigations` passa a devolver `source_count` (uma query agrupada),
+   para a fila não fazer N chamadas. Filtros de tipologia/responsável e os pontos
+   coloridos por context ficaram de fora.
+2. **Prazo:** `shortcut:` 45 dias da criação (seleção) ou de `selected_at` (análise),
+   calculado no cliente (`utils/investigationStatus.ts`); a F4.4 leva para o servidor.
+3. **Modal (T3):** um componente para os dois sentidos: com `investigationId` o caso
+   é fixo; com `explorationId` a exploração vem marcada e o caso é escolhido (só casos
+   com escrita e não decididos). Explorações por context, as que já estão no caso
+   marcadas e desabilitadas, fontes `accessible:false` como placeholder com o dono
+   para pedir acesso, modo viva/congelada. A prévia é aproximada: contagem de
+   explorações e contexts novos e as chaves de identidade (F1.4) compartilhadas entre
+   os contexts envolvidos; a prévia exata de nós fica para a F1.6.
+4. Adicionar várias = uma chamada por exploração (a API recebe uma); para na
+   primeira falha e o toast diz quantas entraram.
+5. `InvestigationView.vue` entra já, mínima (lista de fontes e "Add explorations"),
+   para a rota `/investigations/:id` ter destino; a F1.6 a transforma no workspace.
+6. "New investigation" escondido sem `can('investigation.create')`; UI em inglês como
+   o resto do app. Abas "Arquivo" e "Query Console" do T3 ficam para F2.5.
+
+**Files:** `frontend/src/router/index.ts`, `src/types/investigation.ts` (novo),
+`src/services/api.ts`, `src/stores/investigation.ts` (novo),
+`src/views/InvestigationsView.vue` (novo), `src/views/InvestigationView.vue` (novo),
+`src/components/investigation/AddToInvestigationModal.vue` (novo),
+`src/utils/investigationStatus.ts` (novo), `src/components/Toolbar.vue`,
+`src/views/ExplorationsView.vue`, `e2e/helpers/api-mocks.ts` (`seedInvestigations`),
+`e2e/tests/investigations.spec.ts` (novo); backend
+`api/graphlagoon/services/investigations.py`, `models/schemas.py`
+(`source_count`), `api/tests/test_investigation_sources.py`.
+
+**Testing:** vitest `stores/__tests__/investigation.test.ts` e
+`views/__tests__/InvestigationsView.test.ts`; E2E `investigations.spec.ts` (3) mais
+`explorations.spec.ts` e `navigation.spec.ts` verdes; pytest das investigações (18);
+`vue-tsc` limpo.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** no admin-area
+impact.
 
 **Author:** Claude (AI Assistant)

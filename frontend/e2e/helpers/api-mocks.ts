@@ -1107,3 +1107,65 @@ export async function seedAdmin(
   }
   return calls;
 }
+
+/**
+ * Seed investigations (cases) and their sources. Call AFTER setupAPIMocks.
+ * `POST .../sources` echoes an accessible source and is recorded in `added`.
+ */
+export async function seedInvestigations(
+  page: Page,
+  investigations: any[],
+  sources: Record<string, any[]> = {},
+) {
+  const added: any[] = [];
+  await page.route('**/graphlagoon/api/investigations', (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON();
+      route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'inv-new',
+          status: 'selecao',
+          owner_email: 'e2e@test.com',
+          state: {},
+          shared_with: [],
+          has_write_access: true,
+          can_manage: true,
+          created_at: new Date().toISOString(),
+          ...body,
+        }),
+      });
+    } else {
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(investigations) });
+    }
+  });
+  for (const inv of investigations) {
+    await page.route(`**/graphlagoon/api/investigations/${inv.id}`, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(inv) }),
+    );
+    await page.route(`**/graphlagoon/api/investigations/${inv.id}/sources`, (route) => {
+      if (route.request().method() === 'POST') {
+        const body = route.request().postDataJSON();
+        const source = {
+          id: `src-${added.length + 1}`,
+          kind: 'exploration',
+          position: added.length,
+          title_snapshot: body.exploration_id,
+          accessible: true,
+          exploration_id: body.exploration_id,
+          mode: body.mode,
+        };
+        added.push({ investigation_id: inv.id, ...body });
+        route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(source) });
+      } else {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(sources[inv.id] ?? []),
+        });
+      }
+    });
+  }
+  return { added };
+}
