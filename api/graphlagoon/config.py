@@ -179,6 +179,19 @@ class Settings(BaseSettings):
         default=120, description="Requests per minute allowed for each agent token"
     )
 
+    # Case storage (03-arquitetura §2.3): files, frozen sources, artifacts
+    investigations_volume_path: Optional[str] = Field(
+        default=None,
+        description="Databricks Volume path for investigation files and artifacts. "
+        "Defaults to an 'investigations' subdirectory of databricks_volume_path "
+        "when that is set; otherwise files go to "
+        "{exploration_snapshots_dir}/investigations.",
+    )
+    artifact_max_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        description="Maximum size of one artifact version in the case space, in bytes",
+    )
+
     # Exploration snapshots (file-based graph state persistence)
     exploration_snapshots_dir: str = Field(
         default="./tmp/explorations",
@@ -353,6 +366,15 @@ class Settings(BaseSettings):
             return self.style_presets_volume_path
         if self.databricks_volume_path:
             return f"{self.databricks_volume_path.rstrip('/')}/style-presets"
+        return None
+
+    @property
+    def investigations_volume_path_effective(self) -> Optional[str]:
+        """Volume path for case storage, if any (same fallback as presets)."""
+        if self.investigations_volume_path:
+            return self.investigations_volume_path
+        if self.databricks_volume_path:
+            return f"{self.databricks_volume_path.rstrip('/')}/investigations"
         return None
 
     @property

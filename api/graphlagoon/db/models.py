@@ -456,6 +456,50 @@ class EntityMatch(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class InvestigationArtifact(Base):
+    """An entry in the case space (T10): slides, docs, reports, images, data."""
+
+    __tablename__ = "investigation_artifacts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = _investigation_fk()
+    name = Column(String(255), nullable=False)
+    kind = Column(String(20), nullable=False)  # slides | doc | report | image | data | other
+    current_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class InvestigationArtifactVersion(Base):
+    """Immutable version of an artifact; approving is a human action."""
+
+    __tablename__ = "investigation_artifact_versions"
+    __table_args__ = (
+        UniqueConstraint("artifact_id", "version", name="uq_artifact_versions_version"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Denormalized so a case's versions are listed (and cascade) in one hop.
+    investigation_id = _investigation_fk()
+    artifact_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("investigation_artifacts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    blob_key = Column(String(512), nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    content_type = Column(String(255), nullable=False)
+    status = Column(String(10), nullable=False, default="draft")  # draft | approved
+    actor = Column(JSON, nullable=False, default={})  # {kind, email, agent_name?, token_id?}
+    source_evidence_ids = Column(JSON, nullable=False, default=[])
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    approved_by = Column(String(255), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+
+
 class AgentToken(Base):
     """Personal token an AI agent uses to act for its owner (03-arquitetura §8.2).
 

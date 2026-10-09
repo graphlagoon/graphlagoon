@@ -88,3 +88,40 @@ export interface InvestigationNote {
   created_at?: string | null;
   updated_at?: string | null;
 }
+
+/** Who wrote an artifact version or a proposal (03 §2.2 `actor`). */
+export interface InvestigationActor {
+  kind: 'human' | 'agent';
+  email: string;
+  agent_name?: string | null;
+  token_id?: string | null;
+}
+
+export type ArtifactKind = 'slides' | 'doc' | 'report' | 'image' | 'data' | 'other';
+
+/** Immutable version in the case space (T10); approving is human-only. */
+export interface ArtifactVersion {
+  version: number;
+  sha256: string;
+  size_bytes: number;
+  content_type: string;
+  status: 'draft' | 'approved';
+  actor: InvestigationActor;
+  source_evidence_ids: string[];
+  note?: string | null;
+  created_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+}
+
+export interface InvestigationArtifact {
+  id: string;
+  name: string;
+  kind: ArtifactKind;
+  current_version: number;
+  created_at?: string | null;
+  /** html and svg: never rendered inline (XSS). */
+  download_only: boolean;
+  /** Newest first. */
+  versions: ArtifactVersion[];
+}
