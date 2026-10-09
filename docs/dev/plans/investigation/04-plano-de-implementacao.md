@@ -37,7 +37,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 **FA · AI-first: agentes na investigação**
 - [x] FA.1 · Tokens de agente, escopos e ator no diário
 - [x] FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
-- [ ] FA.3 · Propostas e aprovação humana (T11)
+- [x] FA.3 · Propostas e aprovação humana (T11)
 - [ ] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
 - [ ] FA.5 · Ponte MCP local (stdio) para apps atrás do proxy do Databricks
 - [ ] FA.6 · Registry de cobertura AI-first (teste obrigatório)
@@ -417,9 +417,9 @@ trabalho de análise e documentação; a pessoa decide.
 - **Passos:** aceitar chama o **mesmo** serviço da ação na UI (papel, match, hipótese,
   tipologia, status) e grava evento com quem propôs e quem aceitou.
 - **Aceite:**
-  - [ ] Uma proposta de papel aceita muda o papel exatamente como a ação manual.
-  - [ ] Recusar exige motivo.
-  - [ ] A tela segue `screens/T11-Agentes.png`.
+  - [x] Uma proposta de papel aceita muda o papel exatamente como a ação manual.
+  - [x] Recusar exige motivo.
+  - [x] A tela segue `screens/T11-Agentes.png`.
 - **Testes:** novo `test_proposals.py` e vitest da view.
 
 ### FA.4 · Servidor MCP em `/mcp`

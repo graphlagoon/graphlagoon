@@ -39,6 +39,12 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/investigations/:id/agents',
+      name: 'investigation-agents',
+      component: () => import('@/views/InvestigationAgentsView.vue'),
+      props: true,
+    },
+    {
       path: '/dev/generator',
       name: 'dev-generator',
       component: () => import('@/views/DevGeneratorView.vue'),

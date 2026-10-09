@@ -748,6 +748,21 @@ async def append_event(
     return event
 
 
+def current_actor(user_email: str) -> dict:
+    """`actor` JSON (03 §2.2): the person, or "agent X on behalf of" them."""
+    from graphlagoon.middleware.auth import get_current_actor
+
+    agent = get_current_actor()
+    if agent:
+        return {
+            "kind": "agent",
+            "email": user_email,
+            "agent_name": agent["name"],
+            "token_id": str(agent["token_id"]),
+        }
+    return {"kind": "human", "email": user_email}
+
+
 def _serialize_event(e: Any) -> dict:
     return {
         "id": e.id,
