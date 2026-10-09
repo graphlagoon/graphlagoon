@@ -1,4 +1,5 @@
 /** Investigations (cases): see docs/dev/plans/investigation/03-arquitetura.md §3. */
+import type { ExplorationState, GraphSnapshot } from '@/types/graph';
 
 export type InvestigationStatus = 'selecao' | 'analise' | 'decidido' | 'arquivado';
 
@@ -48,4 +49,16 @@ export interface InvestigationSource {
   frozen_sha256?: string | null;
   added_by?: string | null;
   added_at?: string | null;
+}
+
+/** `GET …/sources/{sid}/snapshot`: the exploration state plus its saved graph snapshot. */
+export interface SourceSnapshotPayload {
+  exploration: {
+    id: string;
+    title: string;
+    graph_context_id: string;
+    owner_email: string;
+    state: ExplorationState;
+  };
+  snapshot: GraphSnapshot | null;
 }
