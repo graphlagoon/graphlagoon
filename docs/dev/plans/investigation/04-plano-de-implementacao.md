@@ -20,7 +20,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 **G · Portões (antes de F1)**
 - [x] G1 · Corrigir o #28 (IDs de arestas paralelas colidem)
 - [x] G2 · Corrigir o M4 (injeção de fórmula em exportação CSV)
-- [ ] G3 · Sandbox dos cluster programs (#32)
+- [x] G3 · Sandbox dos cluster programs (#32)
 - [ ] G4 · Medir o teto do grafo no browser
 
 **F1 · Fundação**
@@ -121,8 +121,8 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   (`computeClustersFromProgram`), reaproveitando `workers/customMetricSandbox.ts` e o
   padrão de `customMetricWorker.ts`.
 - **Aceite:**
-  - [ ] Os programas rodam em worker, com timeout.
-  - [ ] Os 3 programas padrão continuam funcionando.
+  - [x] Os programas rodam em worker, com timeout.
+  - [x] Os 3 programas padrão continuam funcionando.
 - **Testes:** vitest do store e um teste de timeout.
 
 ### G4 · Medir o teto do grafo no browser

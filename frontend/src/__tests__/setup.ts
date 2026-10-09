@@ -1,4 +1,6 @@
 import { vi, beforeEach, afterEach } from 'vitest'
+import { setClusterProgramWorkerFactory } from '@/services/clusterProgramRunner'
+import { InlineClusterProgramWorker } from './fixtures/inlineClusterProgramWorker'
 
 // Mock localStorage for consistent test behavior
 const localStorageMock = (() => {
@@ -23,4 +25,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+// Cluster programs run in a module worker in the app; happy-dom has none, so
+// every test gets an in-process stand-in (tests may swap it per case).
+beforeEach(() => {
+  setClusterProgramWorkerFactory(() => new InlineClusterProgramWorker() as unknown as Worker)
 })

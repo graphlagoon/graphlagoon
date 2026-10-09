@@ -155,6 +155,9 @@ Each cluster object supports these fields:
 - Every id in \`node_ids\` must reference a node that exists in \`nodes\`.
 - \`figure\` must be one of: circle, box, diamond, hexagon, star.
 - \`state\` must be 'open' or 'closed'.
+- The code runs synchronously in a sandboxed Web Worker (no DOM, \`window\`,
+  network or storage) and must finish within 10 seconds or it is stopped.
+- Return plain data only (strings, numbers, arrays, objects) — no functions.
 
 ## This graph's metadata (use these real values)
 

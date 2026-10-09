@@ -245,6 +245,52 @@ export interface ClusterProgramContext {
   }>;
 }
 
+// ============================================================================
+// Sandboxed execution (workers/clusterProgramWorker.ts)
+// ============================================================================
+
+/**
+ * Hard limit for one cluster program run. The main thread terminates the
+ * worker when it is exceeded (same budget as custom metrics).
+ */
+export const CLUSTER_PROGRAM_TIMEOUT_MS = 10_000;
+
+/** One session metric as shipped to the worker (values only when needed). */
+export interface ClusterProgramMetricSnapshot {
+  id: string;
+  name: string;
+  target: 'node' | 'edge';
+  valueType: string;
+  /** `[itemId, value]` pairs; omitted when the program never calls `metric`. */
+  values?: Array<[string, number | string | boolean | null]>;
+}
+
+/**
+ * Structured-clone-safe input of a cluster program: the context minus the
+ * `metric` function, which the worker rebuilds from `metrics[].values`.
+ */
+export interface ClusterProgramSnapshot {
+  nodes: ClusterProgramContext['nodes'];
+  edges: ClusterProgramContext['edges'];
+  selectedNodeIds: string[];
+  selectedEdgeIds: string[];
+  params: ClusterProgramParamValues;
+  /** Node metrics first, then edge metrics (the order `metric()` resolves names in). */
+  metrics: ClusterProgramMetricSnapshot[];
+}
+
+export type ClusterProgramWorkerCommand = {
+  type: 'RUN';
+  runId: string;
+  code: string;
+  snapshot: ClusterProgramSnapshot;
+};
+
+export type ClusterProgramWorkerMessage =
+  | { type: 'READY' }
+  | { type: 'RESULT'; runId: string; result: unknown }
+  | { type: 'ERROR'; runId: string; error: string };
+
 /**
  * Result of cluster program execution
  */
