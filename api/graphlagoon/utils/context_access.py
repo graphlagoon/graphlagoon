@@ -31,7 +31,8 @@ async def get_context_with_access(
     - Is a superuser (GRAPH_LAGOON_SUPERUSER_EMAILS), OR
     - Owns the context, OR
     - Has a context-level share (GraphContextShare), OR
-    - Has an exploration-level share (ExplorationShare) for any exploration in this context
+    - Has an exploration-level share (ExplorationShare) for any exploration in this context, OR
+    - Reads a case that generated this `file` context from one of its files
     """
     from graphlagoon.utils.authz import is_superuser
     from graphlagoon.utils.sharing import user_has_share_access, share_match_emails
@@ -100,7 +101,9 @@ async def get_context_with_access(
             if exp_share_result.scalar_one_or_none() is not None:
                 return context
 
-            raise forbidden_error
+        if await _file_context_of_readable_case(context, user_email):
+            return context
+        raise forbidden_error
     else:
         store = get_memory_store()
         context = store.get_graph_context(context_id)
@@ -121,4 +124,15 @@ async def get_context_with_access(
             ):
                 return context
 
+        if await _file_context_of_readable_case(context, user_email):
+            return context
         raise forbidden_error
+
+
+async def _file_context_of_readable_case(context, user_email: str) -> bool:
+    """A `file` context generated inside a case is readable by the case's readers."""
+    if getattr(context, "datasource_type", None) != "file":
+        return False
+    from graphlagoon.services.investigations import reads_case_of_file_context
+
+    return await reads_case_of_file_context(context.id, user_email)

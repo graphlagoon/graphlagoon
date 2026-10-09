@@ -38,6 +38,7 @@ from graphlagoon.utils.authz import (
     require_permission,
 )
 from graphlagoon.config import get_settings
+from graphlagoon.utils.context_access import get_context_with_access
 
 logger = logging.getLogger(__name__)
 
@@ -458,10 +459,8 @@ async def get_exploration(exploration_id: UUID, request: Request):
             if can_read(exploration.owner_email, exploration.shares, user_email):
                 return exploration_to_response(exploration, user_email)
 
-            # Otherwise check context-level access
-            await check_context_access_db(
-                session, exploration.graph_context_id, user_email
-            )
+            # Otherwise check context-level access (incl. a case's file context)
+            await get_context_with_access(exploration.graph_context_id, user_email)
             return exploration_to_response(exploration, user_email)
     else:
         store = get_memory_store()
@@ -474,8 +473,8 @@ async def get_exploration(exploration_id: UUID, request: Request):
         if can_read(exploration.owner_email, exploration.shares, user_email):
             return exploration_to_response(exploration, user_email)
 
-        # Otherwise check context-level access
-        check_context_access_memory(exploration.graph_context_id, user_email)
+        # Otherwise check context-level access (incl. a case's file context)
+        await get_context_with_access(exploration.graph_context_id, user_email)
         return exploration_to_response(exploration, user_email)
 
 

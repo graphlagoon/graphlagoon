@@ -408,6 +408,40 @@ async def _context_readable(context_id: Optional[UUID], user_email: str) -> bool
         return False
 
 
+async def reads_case_of_file_context(context_id: UUID, user_email: str) -> bool:
+    """True if a case the caller reads generated ``context_id`` from a case file.
+    Checked at read time, so members added later see the file source too."""
+    async with _session() as session:
+        if session is None:
+            store = get_memory_store()
+            case_ids = {
+                s.investigation_id
+                for s in store.investigation_sources.values()
+                if s.kind == "file" and s.context_id == context_id
+            }
+            cases = [store.get_investigation(i) for i in case_ids]
+        else:
+            from sqlalchemy import select
+            from sqlalchemy.orm import selectinload
+
+            from graphlagoon.db.models import Investigation, InvestigationSource
+
+            result = await session.execute(
+                select(Investigation)
+                .options(selectinload(Investigation.shares))
+                .join(
+                    InvestigationSource,
+                    InvestigationSource.investigation_id == Investigation.id,
+                )
+                .where(
+                    InvestigationSource.kind == "file",
+                    InvestigationSource.context_id == context_id,
+                )
+            )
+            cases = result.scalars().unique().all()
+    return any(c is not None and can_read_case(c, user_email) for c in cases)
+
+
 async def _get_row(session, model_name: str, row_id: Optional[UUID]) -> Any:
     """Exploration or GraphContext by id, from the DB or the memory store."""
     if row_id is None:

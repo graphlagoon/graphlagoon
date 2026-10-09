@@ -193,6 +193,32 @@ def test_simba_file_becomes_a_case_source(ctx, snaps):
                        headers=h(OWNER)).status_code == 422
 
 
+def test_file_source_is_readable_by_case_members_added_later(ctx, snaps):
+    if not SIMBA.is_dir():
+        pytest.skip("frontend fixtures not checked out")
+    client, url, _ = ctx
+    first, *rest = _simba_upload(client, url)
+    body = client.post(
+        f"{url}/files/{first}/context",
+        json={"mapping": SIMBA_V31, "file_ids": rest}, headers=h(OWNER),
+    ).json()
+    late, stranger = "late@example.com", "stranger@example.com"
+    gc = f"/api/graph-contexts/{body['context_id']}"
+    expand = {"node_id": "1-1-12345", "depth": 1}
+    assert client.post(f"{gc}/expand", json=expand, headers=h(late)).status_code == 403
+    client.post(f"{url}/share", json={"email": late}, headers=h(OWNER))
+
+    src = next(s for s in client.get(f"{url}/sources", headers=h(late)).json()
+               if s["kind"] == "file")
+    assert src["accessible"]
+    assert client.get(f"{url}/sources/{src['id']}/snapshot", headers=h(late)).status_code == 200
+    assert client.post(f"{gc}/expand", json=expand, headers=h(late)).status_code == 200
+    exp_url = f"/api/explorations/{src['exploration_id']}"
+    assert client.get(exp_url, headers=h(late)).status_code == 200
+    assert client.get(exp_url, headers=h(stranger)).status_code == 403
+    assert client.post(f"{gc}/expand", json=expand, headers=h(stranger)).status_code == 403
+
+
 def test_file_graph_is_capped_at_max_working_edges(ctx, snaps, monkeypatch):
     if not SIMBA.is_dir():
         pytest.skip("frontend fixtures not checked out")
