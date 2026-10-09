@@ -29,7 +29,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F1.3 · Fontes: adicionar e remover explorações, com redação por acesso
 - [x] F1.4 · Chaves de identidade no context (backend e aba no formulário)
 - [x] F1.5 · Frontend: rotas, store, API, fila (T1), "Adicionar à investigação" (T3)
-- [ ] F1.6 · Grafo unificado e workspace (T2)
+- [x] F1.6 · Grafo unificado e workspace (T2)
 - [ ] F1.7 · Papéis, notas e diário (eventos)
 - [ ] F1.8 · Área admin e seed
 - [ ] F1.9 · Docs públicas e E2E da fundação
@@ -285,10 +285,11 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   4. Seleção vinculada: selecionar uma entidade destaca a mesma entidade nas outras
      abas.
 - **Aceite:**
-  - [ ] O layout segue `screens/T2-Workspace.png`.
-  - [ ] Duas explorações que compartilham um CPF mostram um nó só, com dois anéis.
-  - [ ] Expandir um nó unificado pergunta o context, quando há mais de um.
-  - [ ] As comunidades **não** são apagadas ao carregar a vista unificada. Hoje o
+  - [x] O layout segue `screens/T2-Workspace.png` (papéis, arquivos, enriquecimento,
+    dossiê e rastreio entram nas tarefas deles).
+  - [x] Duas explorações que compartilham um CPF mostram um nó só, com dois anéis.
+  - [x] Expandir um nó unificado pergunta o context, quando há mais de um.
+  - [x] As comunidades **não** são apagadas ao carregar a vista unificada. Hoje o
     watcher em `stores/community.ts` limpa as comunidades a cada troca de `nodes`;
     corrigir ou contornar.
 - **Testes:**

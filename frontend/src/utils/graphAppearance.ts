@@ -440,3 +440,22 @@ export function computeIconTreatment(
     ? { color: 'rgba(0,0,0,0)', iconColor: appearanceColor }
     : { color: appearanceColor, iconColor: undefined };
 }
+
+// ---------------------------------------------------------------------------
+// Provenance rings (investigation workspace, T2)
+// ---------------------------------------------------------------------------
+
+/** One color per case source, in source order (teal, violet, orange, … as in T2). */
+export const PROVENANCE_PALETTE = ['#14b8a6', '#8b5cf6', '#ea580c', '#2563eb', '#db2777', '#65a30d', '#0891b2', '#a16207'];
+
+export function provenanceColor(index: number): string {
+  return PROVENANCE_PALETTE[index % PROVENANCE_PALETTE.length];
+}
+
+/** Ring colors for a node: one ring per distinct source it came from. */
+export function provenanceRingColors(
+  sourceIds: string[],
+  sourceColors: Record<string, string>,
+): string[] {
+  return [...new Set(sourceIds.map((id) => sourceColors[id]).filter(Boolean))];
+}
