@@ -47,7 +47,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F2.1 · Tabelas de enriquecimento no context e endpoint de consulta
 - [x] F2.2 · Aba de enriquecimento no inspector e "promover a nós"
 - [x] F2.3 · Upload de arquivos com hash e papel
-- [ ] F2.4 · Especificação de mapeamento, interpretadores TS e Python, presets SIMBA e QSA
+- [x] F2.4 · Especificação de mapeamento, interpretadores TS e Python, presets SIMBA e QSA
 - [ ] F2.5 · Datasource `file` e assistente de arquivo (T4)
 - [ ] F2.6 · Arquivo como enriquecimento do caso
 - [ ] F2.7 · Gravar valores de métricas como propriedade
@@ -577,8 +577,8 @@ trabalho de análise e documentação; a pessoa decide.
      - ag. 9999 / NAO-CORRENTISTA viram um nó "Desconhecido" por transação.
   4. Preset QSA da Receita: `;` como separador, sócio com CPF mascarado.
 - **Aceite:**
-  - [ ] Os testes de paridade (vitest e pytest lendo as mesmas fixtures) passam.
-  - [ ] Os presets são sugeridos quando os cabeçalhos batem.
+  - [x] Os testes de paridade (vitest e pytest lendo as mesmas fixtures) passam.
+  - [x] Os presets são sugeridos quando os cabeçalhos batem.
 - **Testes:** `utils/__tests__/fileMapping.test.ts` e `api/tests/test_file_mapping.py`.
 
 ### F2.5 · Datasource `file` e assistente (T4)
