@@ -1735,6 +1735,8 @@ class InvestigationResponse(BaseModel):
     shared_with: list[InvestigationShareOut] = Field(default_factory=list)
     has_write_access: bool = False
     can_manage: bool = False
+    # Only on the list (the queue); None on single-case responses.
+    source_count: Optional[int] = None
 
 
 class InvestigationSourceCreate(BaseModel):

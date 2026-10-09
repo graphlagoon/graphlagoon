@@ -28,7 +28,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F1.2 · API de investigações: CRUD, compartilhamento nominal, permissões, auditoria
 - [x] F1.3 · Fontes: adicionar e remover explorações, com redação por acesso
 - [x] F1.4 · Chaves de identidade no context (backend e aba no formulário)
-- [ ] F1.5 · Frontend: rotas, store, API, fila (T1), "Adicionar à investigação" (T3)
+- [x] F1.5 · Frontend: rotas, store, API, fila (T1), "Adicionar à investigação" (T3)
 - [ ] F1.6 · Grafo unificado e workspace (T2)
 - [ ] F1.7 · Papéis, notas e diário (eventos)
 - [ ] F1.8 · Área admin e seed
@@ -252,12 +252,12 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
     `GraphVisualizationView.vue`;
   - link "Investigações" no topo (`Toolbar.vue` / navegação).
 - **Aceite:**
-  - [ ] A fila lista os casos com status, responsável, fontes e prazo
+  - [x] A fila lista os casos com status, responsável, fontes e prazo
     (`screens/T1-Fila.png`).
-  - [ ] O modal mostra as explorações por context, a restrita como placeholder e a
+  - [x] O modal mostra as explorações por context, a restrita como placeholder e a
     prévia de sobreposição (`screens/T3-Adicionar.png`). A prévia pode ser
     aproximada na F1 e exata depois da F1.6.
-  - [ ] "Nova investigação" fica escondida sem `investigation.create`
+  - [x] "Nova investigação" fica escondida sem `investigation.create`
     (`usePermissions().can`).
 - **Testes:**
   - vitest do store e das views;
