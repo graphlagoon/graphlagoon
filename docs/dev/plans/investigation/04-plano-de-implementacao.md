@@ -18,7 +18,7 @@ suas ferramentas na FA.4.
 Marque `[x]` no mesmo commit que conclui a tarefa.
 
 **G · Portões (antes de F1)**
-- [ ] G1 · Corrigir o #28 (IDs de arestas paralelas colidem)
+- [x] G1 · Corrigir o #28 (IDs de arestas paralelas colidem)
 - [ ] G2 · Corrigir o M4 (injeção de fórmula em exportação CSV)
 - [ ] G3 · Sandbox dos cluster programs (#32)
 - [ ] G4 · Medir o teto do grafo no browser
@@ -93,9 +93,9 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   2. Duas linhas idênticas em tudo continuam colidindo; isso é aceitável e
      documentado.
 - **Aceite:**
-  - [ ] Duas arestas entre o mesmo par, com propriedades diferentes, têm ids
+  - [x] Duas arestas entre o mesmo par, com propriedades diferentes, têm ids
     diferentes.
-  - [ ] O id é estável entre execuções, para não invalidar snapshots salvos.
+  - [x] O id é estável entre execuções, para não invalidar snapshots salvos.
 - **Testes:** pytest com tabela sem tipo e duas transações paralelas.
 - **Docs:** marcar o #28 como resolvido em `technical-debts.md` e no decision log.
 

@@ -14,7 +14,7 @@ other backends can take its place per context.
 from __future__ import annotations
 
 import time
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar, Optional, Sequence
 
 from graphlagoon.models.schemas import (
     ColumnConfig,
@@ -63,7 +63,36 @@ from graphlagoon.services.sql_validation import (
 from graphlagoon.services.warehouse import get_warehouse_client
 
 
-def build_edge_named_struct(column_config, table_alias: str = "") -> str:
+def edge_identity_columns(context, column_config) -> list[str]:
+    """Extra edge columns the subgraph/expand struct must carry for ids.
+
+    Without an edge id column, ``_get_edge_id`` hashes every non-structural
+    column of the row into the composite id, so parallel edges stay distinct
+    (technical debt #28). The transpiled-Cypher ``r`` struct carries the
+    context's configured edge property columns; subgraph/expand must carry the
+    SAME ones or an edge fetched by both paths would get two ids and be
+    duplicated on merge. With an edge id column nothing extra is needed.
+    """
+    if column_config.edge_id_col:
+        return []
+    structural = {
+        column_config.src_col,
+        column_config.dst_col,
+        column_config.relationship_type_col,
+    }
+    names: list[str] = []
+    for prop in getattr(context, "edge_properties", None) or []:
+        name = (
+            prop.get("name") if isinstance(prop, dict) else getattr(prop, "name", None)
+        )
+        if name and name not in structural and name not in names:
+            names.append(name)
+    return names
+
+
+def build_edge_named_struct(
+    column_config, table_alias: str = "", extra_columns: Sequence[str] = ()
+) -> str:
     """Build a NAMED_STRUCT projection for an edge row.
 
     The struct is keyed by the context's OWN column names (edge_id_col,
@@ -77,12 +106,14 @@ def build_edge_named_struct(column_config, table_alias: str = "") -> str:
     graph), and a blank edge-type dropdown. Keying by the context's column names
     keeps subgraph/expand consistent with the transpiled cypher path for ANY
     schema. An empty ``edge_id_col`` (context with no edge id column) is
-    omitted from the struct; ``_get_edge_id`` generates composite ids instead.
+    omitted from the struct; ``_get_edge_id`` generates composite ids instead,
+    hashing ``extra_columns`` (see ``edge_identity_columns``) into them.
 
     Args:
         column_config: The merged :class:`ColumnConfig` for the context.
         table_alias: Optional table alias to qualify each column (e.g. ``"e"``
             for the expand queries). Empty for the unqualified subgraph query.
+        extra_columns: Additional columns appended after the structural ones.
     """
     prefix = f"{table_alias}." if table_alias else ""
     cols = [
@@ -92,9 +123,11 @@ def build_edge_named_struct(column_config, table_alias: str = "") -> str:
             column_config.src_col,
             column_config.dst_col,
             column_config.relationship_type_col,
+            *extra_columns,
         )
         if c
     ]
+    cols = list(dict.fromkeys(cols))
     fields = ", ".join(
         # Escape both positions: the string literal AND the backticked
         # identifier — an embedded backtick/quote in a stored column name must
@@ -411,8 +444,12 @@ class SqlWarehouseDatasource(GraphDatasource):
 
         # NAMED_STRUCT keyed by the context's own column names so the result
         # maps correctly for any schema (see build_edge_named_struct).
+        edge_struct = build_edge_named_struct(
+            column_config,
+            extra_columns=edge_identity_columns(context, column_config),
+        )
         query = f"""
-        SELECT {build_edge_named_struct(column_config)} AS r
+        SELECT {edge_struct} AS r
         FROM {_safe_table_name(context.edge_table_name)}
         {where_clause}
         {order_clause}
@@ -453,6 +490,9 @@ class SqlWarehouseDatasource(GraphDatasource):
             else context.node_table_name
         )
         safe_node_id = sanitize_string_literal(data.node_id)
+        edge_struct = build_edge_named_struct(
+            column_config, "e", edge_identity_columns(context, column_config)
+        )
 
         if data.depth == 1:
             # Depth 1: simple query without recursion
@@ -482,7 +522,7 @@ class SqlWarehouseDatasource(GraphDatasource):
                 UNION
                 {neighbor_query}
             )
-            SELECT {build_edge_named_struct(column_config, "e")} AS r
+            SELECT {edge_struct} AS r
             FROM {edge_table} e
             WHERE e.`{src_col}` IN (SELECT node_id FROM visited_nodes)
               AND e.`{dst_col}` IN (SELECT node_id FROM visited_nodes)
@@ -561,7 +601,7 @@ class SqlWarehouseDatasource(GraphDatasource):
             visited_nodes AS (
                 SELECT DISTINCT node_id FROM neighbors
             )
-            SELECT {build_edge_named_struct(column_config, "e")} AS r
+            SELECT {edge_struct} AS r
             FROM {edge_table} e
             WHERE e.`{src_col}` IN (SELECT node_id FROM visited_nodes)
               AND e.`{dst_col}` IN (SELECT node_id FROM visited_nodes)

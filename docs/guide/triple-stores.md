@@ -86,6 +86,21 @@ nothing shows empty strings or blank checkboxes. Two consequences to know:
 Don't use this to *hide* a type column you do have — pick the real column
 and keep real types.
 
+## Parallel edges without an edge id column
+
+When the edge table has no edge id column, each edge gets an id built from
+its source, relationship type and destination plus a fingerprint of the
+**edge property columns selected in the context**. Two transactions between
+the same pair of accounts therefore stay two edges, as long as at least one
+selected property differs (an amount, a timestamp). Select those columns as
+edge properties; rows that are identical in every selected column are
+indistinguishable and show as one edge.
+
+The fingerprint is deterministic, so saved explorations keep matching the
+edges they contain. Changing the context's edge property selection changes
+the ids of a context without an edge id column; expanding nodes in an
+exploration saved before that change may then show some edges twice.
+
 ## Performance
 
 Each fetch of derived nodes scans the edge table twice (one `UNION` arm per
