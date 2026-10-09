@@ -62,3 +62,26 @@ export interface SourceSnapshotPayload {
   };
   snapshot: GraphSnapshot | null;
 }
+
+/** Role of an entity in the case: drives the node fill (T2 legend). */
+export type InvestigationRole = 'victim' | 'mule' | 'exit' | 'discarded';
+
+/** Journal entry (03 §3.4): immutable, hash-chained, oldest first. */
+export interface InvestigationEvent {
+  id: string;
+  at: string;
+  actor_email: string;
+  kind: string;
+  payload: Record<string, unknown>;
+  prev_hash?: string | null;
+  hash: string;
+}
+
+export interface InvestigationNote {
+  id: string;
+  anchor: { kind?: 'node' | 'edge' | 'evidence' | 'none'; id?: string | null };
+  body: string;
+  author_email: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}

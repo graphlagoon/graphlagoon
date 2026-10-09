@@ -10,9 +10,11 @@ import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
+import { useAuthStore } from '@/stores/auth';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
 import { STATUS_LABELS } from '@/utils/investigationStatus';
-import { provenanceRingColors } from '@/utils/graphAppearance';
+import { provenanceRingColors, roleColorMap, ROLE_COLORS, ROLE_LABELS } from '@/utils/graphAppearance';
+import { getErrorMessage } from '@/utils/errorMessage';
 import {
   baseSourceId,
   mergedEntityCounts,
@@ -25,6 +27,7 @@ import LayoutPanel from '@/components/LayoutPanel.vue';
 import SourcesPanel from '@/components/investigation/SourcesPanel.vue';
 import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
 import type { GraphResponse } from '@/types/graph';
+import type { InvestigationEvent, InvestigationRole } from '@/types/investigation';
 
 const props = defineProps<{ id: string }>();
 
@@ -34,11 +37,15 @@ const store = useInvestigationStore();
 const graphStore = useGraphStore();
 const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
+const auth = useAuthStore();
 
 const showAdd = ref(false);
 const showLayout = ref(false);
 const activeTab = ref(UNIFIED);
-const inspectorTab = ref<'data' | 'origin'>('data');
+const inspectorTab = ref<'data' | 'notes' | 'origin'>('data');
+const showJournal = ref(false);
+const noteDraft = ref('');
+const actionError = ref<string | null>(null);
 const canvasRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
 
 const readableSources = computed(() => store.sources.filter((s) => s.accessible));
@@ -118,6 +125,9 @@ watch(
     renderedTab = null;
     activeTab.value = UNIFIED;
     await store.openInvestigation(id);
+    // The journal and notes are secondary: a failure here must not block the graph.
+    store.fetchNotes().catch(() => {});
+    store.fetchEvents().catch(() => {});
     await loadWorkspace();
   },
   { immediate: true },
@@ -126,6 +136,13 @@ watch(
 watch(() => store.sources.map((s) => s.id).join(','), loadWorkspace);
 
 watch([() => store.unified, activeTab], render);
+
+// Role fills follow the case state, without reloading the graph.
+watch(
+  () => store.roles,
+  (roles) => (graphStore.roleColors = roleColorMap(roles)),
+  { immediate: true },
+);
 
 onUnmounted(() => {
   pick(null);
@@ -138,6 +155,60 @@ onUnmounted(() => {
 const selected = computed(() => graphStore.selectedNode as UnifiedNode | null);
 const selectedSources = computed(() => (selected.value ? nodeSourceIds(selected.value) : []));
 const selectedProps = computed(() => Object.entries(selected.value?.properties ?? {}));
+
+// --- roles, notes and journal (F1.7) ---
+const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'decidido');
+const selectedRole = computed(() => (selected.value ? store.roles[selected.value.node_id] ?? '' : ''));
+const selectedNotes = computed(() =>
+  store.notes.filter((n) => n.anchor?.kind === 'node' && n.anchor.id === selected.value?.node_id),
+);
+const journal = computed(() => [...store.events].reverse());
+
+async function run(action: () => Promise<unknown>, fallback: string) {
+  actionError.value = null;
+  try {
+    await action();
+  } catch (e) {
+    actionError.value = getErrorMessage(e, fallback);
+  }
+}
+
+function onRoleChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value as InvestigationRole | '';
+  const id = selected.value?.node_id;
+  if (id) run(() => store.setRole(id, value || null), 'Failed to set role');
+}
+
+function addNote() {
+  const id = selected.value?.node_id;
+  const body = noteDraft.value.trim();
+  if (!id || !body) return;
+  run(async () => {
+    await store.addNote({ kind: 'node', id }, body);
+    noteDraft.value = '';
+  }, 'Failed to add note');
+}
+
+/** One line per journal event; unknown kinds fall back to the raw kind. */
+function describeEvent(e: InvestigationEvent): string {
+  const p = e.payload as Record<string, any>;
+  switch (e.kind) {
+    case 'case.created': return `created the case “${p.title ?? ''}”`;
+    case 'case.updated': return `updated ${Object.keys(p).join(', ') || 'the case'}`;
+    case 'case.shared': return `shared with ${p.with} (${p.permission})`;
+    case 'case.unshared': return `stopped sharing with ${p.with}`;
+    case 'source.added': return `added source “${p.title}” (${p.mode})`;
+    case 'source.removed': return `removed source “${p.title}”`;
+    case 'role.changed': return `marked ${p.entity} as ${p.to ? ROLE_LABELS[p.to] ?? p.to : 'no role'}`;
+    case 'pin.changed': return `${p.pinned ? 'pinned' : 'unpinned'} ${p.entity}`;
+    case 'note.created': return `noted on ${p.anchor?.id ?? 'the case'}: “${p.body}”`;
+    case 'note.updated': return 'edited a note';
+    case 'note.deleted': return 'deleted a note';
+    default: return e.kind;
+  }
+}
+
+const formatTime = (iso: string) => new Date(iso).toLocaleString();
 </script>
 
 <template>
@@ -215,6 +286,11 @@ const selectedProps = computed(() => Object.entries(selected.value?.properties ?
               <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
               {{ s.title_snapshot }}
             </div>
+            <div class="legend-title roles-title">Role (fill)</div>
+            <div v-for="(color, role) in ROLE_COLORS" :key="role" class="legend-row">
+              <span class="fill" :style="{ background: color }"></span>
+              {{ ROLE_LABELS[role] }}
+            </div>
           </div>
 
           <GraphCanvas3D ref="canvasRef" />
@@ -255,8 +331,24 @@ const selectedProps = computed(() => Object.entries(selected.value?.properties ?
                 highlighted in {{ selectedSources.length }} tabs
               </span>
             </div>
+            <label class="role-row">
+              <span class="muted">Role</span>
+              <select
+                :value="selectedRole"
+                :disabled="!canEdit"
+                data-testid="inspector-role"
+                @change="onRoleChange"
+              >
+                <option value="">— none —</option>
+                <option v-for="(label, role) in ROLE_LABELS" :key="role" :value="role">{{ label }}</option>
+              </select>
+            </label>
+            <div v-if="actionError" class="action-error">{{ actionError }}</div>
             <div class="inspector-tabs">
               <button :class="{ active: inspectorTab === 'data' }" @click="inspectorTab = 'data'">Data</button>
+              <button :class="{ active: inspectorTab === 'notes' }" data-testid="inspector-notes-tab" @click="inspectorTab = 'notes'">
+                Notes<template v-if="selectedNotes.length"> ({{ selectedNotes.length }})</template>
+              </button>
               <button :class="{ active: inspectorTab === 'origin' }" data-testid="inspector-origin-tab" @click="inspectorTab = 'origin'">
                 Origin
               </button>
@@ -272,6 +364,28 @@ const selectedProps = computed(() => Object.entries(selected.value?.properties ?
                 </dd>
               </template>
             </dl>
+            <div v-else-if="inspectorTab === 'notes'" class="notes" data-testid="inspector-notes">
+              <div v-for="n in selectedNotes" :key="n.id" class="note" data-testid="note">
+                <p>{{ n.body }}</p>
+                <div class="muted">
+                  {{ n.author_email }} · {{ n.created_at ? formatTime(n.created_at) : '' }}
+                  <button
+                    v-if="canEdit && n.author_email === auth.email"
+                    class="link-btn"
+                    @click="run(() => store.deleteNote(n.id), 'Failed to delete note')"
+                  >
+                    delete
+                  </button>
+                </div>
+              </div>
+              <p v-if="!selectedNotes.length" class="muted">No notes on this entity yet.</p>
+              <template v-if="canEdit">
+                <textarea v-model="noteDraft" rows="3" placeholder="Add a note…" data-testid="note-input"></textarea>
+                <button class="btn btn-primary btn-sm" :disabled="!noteDraft.trim()" data-testid="note-add" @click="addNote">
+                  Add note
+                </button>
+              </template>
+            </div>
             <div v-else class="origin" data-testid="inspector-origin">
               <div v-for="o in selected.__sources" :key="`${o.sourceId}:${o.nodeId}`" class="origin-row">
                 <strong>{{ sourceTitle(o.sourceId) }}</strong>
@@ -289,6 +403,15 @@ const selectedProps = computed(() => Object.entries(selected.value?.properties ?
         </aside>
       </div>
 
+      <section v-if="showJournal" class="journal" data-testid="journal">
+        <div v-for="e in journal" :key="e.id" class="journal-row" data-testid="journal-event">
+          <span class="muted">{{ formatTime(e.at) }}</span>
+          <strong>{{ e.actor_email }}</strong>
+          <span>{{ describeEvent(e) }}</span>
+        </div>
+        <p v-if="!journal.length" class="muted">Nothing recorded yet.</p>
+      </section>
+
       <footer class="status-bar" data-testid="workspace-status">
         <span>{{ graphStore.nodes.length }} nodes</span>
         <span>{{ graphStore.edges.length }} edges</span>
@@ -296,6 +419,9 @@ const selectedProps = computed(() => Object.entries(selected.value?.properties ?
           {{ readableSources.length }} {{ readableSources.length === 1 ? 'source' : 'sources' }}<template v-if="restrictedCount">
             + {{ restrictedCount }} restricted</template>
         </span>
+        <button class="link-btn journal-btn" data-testid="journal-toggle" @click="showJournal = !showJournal">
+          Journal ({{ store.events.length }}) {{ showJournal ? '▾' : '▴' }}
+        </button>
       </footer>
     </template>
 
@@ -577,6 +703,80 @@ const selectedProps = computed(() => Object.entries(selected.value?.properties ?
   padding: 6px 0;
   font-size: 13px;
   border-bottom: 1px solid var(--border-color);
+}
+
+.roles-title {
+  margin-top: 10px;
+}
+
+.fill {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.role-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.role-row select {
+  flex: 1;
+}
+
+.action-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-error);
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.note {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.note p {
+  margin: 0 0 2px;
+  white-space: pre-wrap;
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.journal {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-color);
+  background: var(--color-surface);
+  font-size: 13px;
+}
+
+.journal-row {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.journal-btn {
+  margin-left: auto;
 }
 
 .status-bar {

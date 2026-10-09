@@ -30,7 +30,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F1.4 · Chaves de identidade no context (backend e aba no formulário)
 - [x] F1.5 · Frontend: rotas, store, API, fila (T1), "Adicionar à investigação" (T3)
 - [x] F1.6 · Grafo unificado e workspace (T2)
-- [ ] F1.7 · Papéis, notas e diário (eventos)
+- [x] F1.7 · Papéis, notas e diário (eventos)
 - [ ] F1.8 · Área admin e seed
 - [ ] F1.9 · Docs públicas e E2E da fundação
 
@@ -310,9 +310,9 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   2. O cliente grava os eventos de UI listados em [03 §3.4](03-arquitetura.md#34-diário-eventos).
   3. Os eventos são imutáveis, sem `PUT` nem `DELETE`.
 - **Aceite:**
-  - [ ] Papel vítima, laranja, saída ou descartado muda o preenchimento do nó (legenda
+  - [x] Papel vítima, laranja, saída ou descartado muda o preenchimento do nó (legenda
     da T2).
-  - [ ] O diário lista eventos com autor e hora.
+  - [x] O diário lista eventos com autor e hora.
 - **Testes:** pytest de eventos (imutabilidade, paginação) e vitest do inspector.
 
 ### F1.8 · Área admin e seed
