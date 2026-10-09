@@ -47,10 +47,13 @@ interface MenuActionBase {
 export interface OpenUrlActionConfig extends MenuActionBase {
   kind: 'open-url';
   /**
-   * labelFormatter template producing the URL. Must literally start with
-   * http:// or https:// so a property value can never control the scheme.
+   * labelFormatter template producing the URL. Must literally start with its
+   * scheme — http(s):// for a web page, or an app scheme (vscode://,
+   * claude-cli://, …) — so a property value can never control the scheme.
+   * In-browser schemes (javascript:, data:, file:, …) are rejected.
    */
   urlTemplate: string;
+  /** Web links only — app links are always handed to the OS. */
   openIn: 'new-tab' | 'same-tab';
 }
 

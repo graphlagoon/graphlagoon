@@ -250,11 +250,17 @@
                 placeholder="https://example.com/search?q={prop:name}"
               />
               <p class="hint">
-                Must start with http:// or https://. Values are URL-encoded automatically.
+                Starts with https:// for a web page, or an app scheme (vscode://,
+                claude-cli://, obsidian://, mailto:, …) to open a desktop app.
+                Values are URL-encoded automatically.
                 Available: {{ placeholderHint }}
               </p>
               <p v-if="urlTemplateError" class="field-error">{{ urlTemplateError }}</p>
-              <div class="radio-row">
+              <p v-else-if="editingAppScheme" class="hint" data-testid="menu-action-app-link-hint">
+                Opens the app registered for <code>{{ editingAppScheme }}:</code> on the
+                clicking user's machine — the browser asks them first.
+              </p>
+              <div v-if="!editingAppScheme" class="radio-row" data-testid="menu-action-open-in">
                 <label><input type="radio" value="new-tab" v-model="editingOpenIn" /> New tab</label>
                 <label><input type="radio" value="same-tab" v-model="editingOpenIn" /> Current tab</label>
               </div>
@@ -338,7 +344,7 @@ import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
 import { useToast } from '@/composables/useToast';
 import { validateTemplate } from '@/utils/labelFormatter';
-import { validateUrlTemplate } from '@/utils/safeUrl';
+import { isAppUrl, urlScheme, validateUrlTemplate } from '@/utils/safeUrl';
 import {
   actionCompatibilityWarnings,
   hasActionCompatibilityWarnings,
@@ -438,6 +444,13 @@ const urlTemplateError = computed(() => {
   const validation = validateTemplate(editingUrlTemplate.value);
   return validation.valid ? null : validation.errors[0];
 });
+
+/** Scheme of an app-link template (null for web links) — swaps the tab choice for a hint. */
+const editingAppScheme = computed(() =>
+  editing.value?.kind === 'open-url' && isAppUrl(editingUrlTemplate.value)
+    ? urlScheme(editingUrlTemplate.value)
+    : null,
+);
 
 const textTemplateError = computed(() => {
   if (editing.value?.kind !== 'copy-text' || !editingTextTemplate.value) return null;

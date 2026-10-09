@@ -143,7 +143,8 @@ Rules for adapting them:
   re-bind its parameters; if none fits, turn the action into an \`open-url\`
   or \`copy-text\` when that makes sense, otherwise drop it and tell me.
 - Keep labels, icons, \`openIn\` and URL hosts as they are unless a rename
-  makes the label wrong. Never change the \`http(s)://\` prefix rule.
+  makes the label wrong. Never change a URL's scheme (\`https://\`,
+  \`vscode://\`, …) — it picks which app the link opens.
 - Do not wrap the answer in an export envelope — output the JSON array only.
 `
     : ''
@@ -272,9 +273,19 @@ Field rules:
   session-computed metric written as \`"metric:<name>"\` (e.g.
   \`{ "property": "metric:PageRank", "operator": "not-empty" }\`) — the action
   then stays hidden until that metric is computed in the session.
-- \`urlTemplate\` MUST literally start with \`http://\` or \`https://\` — the
-  tool rejects anything else. Interpolated values are URL-encoded
-  automatically; just write \`{prop:x}\` where the value goes.
+- \`urlTemplate\` MUST literally start with its scheme — never a placeholder:
+  - \`https://\` (or \`http://\`) for a web page, opened per \`openIn\`;
+  - any **app scheme** to open a desktop app on the clicking user's machine,
+    e.g. \`vscode://file/<absolute-root>/{prop:path}:{prop:line}\` (VS Code),
+    \`claude-cli://open?repo=<owner>/<repo>&q=<url-encoded prompt>\` (Claude
+    Code in a terminal), \`vscode://anthropic.claude-code/open?prompt=...\`
+    (Claude Code in VS Code), \`cursor://\`, \`obsidian://\`, \`slack://\`,
+    \`mailto:\`. App links ignore \`openIn\` (the browser asks before
+    launching the app). Only use a scheme I confirm my team's machines have.
+  - \`javascript:\`, \`data:\`, \`file:\`, \`blob:\` and \`about:\` are rejected.
+  Interpolated values are URL-encoded automatically; just write \`{prop:x}\`
+  where the value goes. Literal text you write yourself (e.g. a prompt in
+  \`q=\`) must already be URL-encoded (\`%20\` for spaces).
 - \`paramBindings\` maps a template's parameter id to a template string built
   from the clicked item (usually just \`{prop:<column>}\`). Required
   parameters left unbound make the tool open its parameter form pre-filled

@@ -86,6 +86,15 @@ describe('buildContextMenuActionSkill', () => {
     );
   });
 
+  it('documents app-link schemes and the in-browser schemes the tool rejects', () => {
+    const skill = buildContextMenuActionSkill(INPUT);
+    expect(skill).toContain('app scheme');
+    expect(skill).toContain('vscode://file/');
+    expect(skill).toContain('claude-cli://open?repo=');
+    expect(skill).toContain('App links ignore \`openIn\`');
+    expect(skill).toContain('\`javascript:\`, \`data:\`, \`file:\`');
+  });
+
   it('explains that a deep link must load a graph (exploration / precomputed / template)', () => {
     const skill = buildContextMenuActionSkill(INPUT);
     expect(skill).toContain('a bare graph URL opens empty');

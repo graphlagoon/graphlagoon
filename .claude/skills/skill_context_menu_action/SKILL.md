@@ -51,7 +51,7 @@ Besides code-registered actions, users can define actions per context (persisted
 |------|---------|
 | `frontend/src/types/contextMenuActions.ts` | Config shape (discriminated union on `kind`) |
 | `frontend/src/utils/menuActionMatcher.ts` | Visibility matcher (type lists + property conditions) |
-| `frontend/src/utils/safeUrl.ts` | URL build/validate/open (protocol allowlist, per-value encoding) |
+| `frontend/src/utils/safeUrl.ts` | URL build/validate/open (literal scheme, any app scheme but never in-browser ones like `javascript:`; per-value encoding; app links hand off via `location.assign`) |
 | `frontend/src/stores/contextMenuActions.ts` | Hydrate/persist (debounced PUT, write-access gated) |
 | `frontend/src/composables/useConfigurableMenuActions.ts` | Reconciles configs → menu actions (`configurable-action:` prefix) |
 | `frontend/src/components/ContextMenuActionsModal.vue` | Editor UI (+ Import JSON + Ask-AI skill modal) |
