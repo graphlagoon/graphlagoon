@@ -110,6 +110,17 @@ export interface DatasourceConnectionConfig {
   };
 }
 
+export type IdentityNormalize = 'cpf_cnpj' | 'account' | 'phone' | 'email' | 'lower' | 'none';
+
+/** How a node type maps to a real-world entity, so contexts unify on it (investigations). */
+export interface IdentityKey {
+  node_type: string;
+  /** Concept label shared across contexts: "Pessoa", "Conta", "Dispositivo". */
+  entity: string;
+  source: 'node_id' | { kind: 'prop'; name: string };
+  normalize: IdentityNormalize;
+}
+
 export interface GraphContext {
   id: string;
   title: string;
@@ -136,6 +147,7 @@ export interface GraphContext {
   context_menu_actions?: ContextMenuActionConfig[];
   /** Writer-authored custom metrics; the backend returns [] to read-only users. */
   metric_definitions?: CustomMetricDefinition[];
+  identity_keys?: IdentityKey[];
   owner_email: string;
   shared_with: string[];
   has_write_access: boolean;
@@ -710,6 +722,7 @@ export interface CreateGraphContextRequest {
   cluster_programs?: ClusterProgram[];
   context_menu_actions?: ContextMenuActionConfig[];
   metric_definitions?: CustomMetricDefinition[];
+  identity_keys?: IdentityKey[];
 }
 
 export interface ShareRequest {

@@ -255,6 +255,7 @@ def context_to_response(
         cluster_programs=context.cluster_programs or [],
         context_menu_actions=context.context_menu_actions or [],
         metric_definitions=metric_defs,
+        identity_keys=getattr(context, "identity_keys", None) or [],
         owner_email=context.owner_email,
         shared_with=shared_with,
         has_write_access=has_write,
@@ -386,6 +387,7 @@ async def create_graph_context(
                 cluster_programs=data.cluster_programs,
                 context_menu_actions=data.context_menu_actions,
                 metric_definitions=[m.model_dump() for m in data.metric_definitions],
+                identity_keys=[k.model_dump() for k in data.identity_keys],
                 owner_email=user_email,
             )
             session.add(context)
@@ -413,6 +415,7 @@ async def create_graph_context(
             cluster_programs=data.cluster_programs,
             context_menu_actions=data.context_menu_actions,
             metric_definitions=[m.model_dump() for m in data.metric_definitions],
+            identity_keys=[k.model_dump() for k in data.identity_keys],
             owner_email=user_email,
         )
         return context_to_response(context, user_email)
@@ -546,6 +549,8 @@ async def update_graph_context(
                 context.metric_definitions = [
                     m.model_dump() for m in data.metric_definitions
                 ]
+            if data.identity_keys is not None:
+                context.identity_keys = [k.model_dump() for k in data.identity_keys]
 
             await session.commit()
             await session.refresh(context)
@@ -617,6 +622,8 @@ async def update_graph_context(
             updates["metric_definitions"] = [
                 m.model_dump() for m in data.metric_definitions
             ]
+        if data.identity_keys is not None:
+            updates["identity_keys"] = [k.model_dump() for k in data.identity_keys]
 
         context = store.update_graph_context(context_id, **updates)
         return context_to_response(context, user_email)

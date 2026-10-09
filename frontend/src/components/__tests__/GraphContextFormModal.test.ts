@@ -366,5 +366,33 @@ describe('GraphContextFormModal', () => {
       expect(payload).not.toHaveProperty('node_properties')
       expect(payload).not.toHaveProperty('edge_properties')
     })
+
+    it('loads identity keys and saves an added one', async () => {
+      const pessoa = {
+        node_type: 'Person',
+        entity: 'Pessoa',
+        source: { kind: 'prop' as const, name: 'cpf' },
+        normalize: 'cpf_cnpj' as const,
+      }
+      const context = createGraphContext({ id: 'ctx-edit', identity_keys: [pessoa] })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+
+      const { getByTestId, getAllByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      expect(getByTestId('identity-key-chips').textContent).toContain('Pessoa')
+
+      await fireEvent.click(getByTestId('identity-key-add'))
+      await fireEvent.update(getAllByTestId('identity-key-node-type')[1], 'Account')
+      await fireEvent.update(getAllByTestId('identity-key-entity')[1], 'Conta')
+      await fireEvent.update(getAllByTestId('identity-key-normalize')[1], 'account')
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+      expect(payload.identity_keys).toEqual([
+        pessoa,
+        { node_type: 'Account', entity: 'Conta', source: 'node_id', normalize: 'account' },
+      ])
+    })
   })
 })
