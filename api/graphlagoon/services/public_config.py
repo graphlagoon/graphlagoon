@@ -51,6 +51,8 @@ async def build_public_config(
         # Personal agent tokens (Bearer glt_…) and their admin list.
         "agents_enabled": settings.agents_enabled,
         "agents_allow_unmasked_data": settings.agents_allow_unmasked_data,
+        "investigation_file_max_bytes": settings.investigation_file_max_bytes,
+        "investigation_max_working_edges": settings.investigation_max_working_edges,
         # Which backends this server can serve, and the named REST connections
         # (UI copy + operation flags only; transport and auth never leave the
         # process).

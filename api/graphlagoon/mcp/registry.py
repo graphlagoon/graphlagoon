@@ -30,6 +30,9 @@ AGENT_TOOL_ROUTES: dict[tuple[str, str], str] = {
         "GET",
         f"{_CASE}/artifacts/{{artifact_id}}/versions/{{version}}/content",
     ): "get_artifact",
+    ("GET", f"{_CASE}/files"): "list_files",
+    ("POST", f"{_CASE}/files"): "upload_file",
+    ("GET", f"{_CASE}/files/{{file_id}}/content"): "get_file",
     ("GET", f"{_CASE}/proposals"): "list_proposals",
     ("POST", f"{_CASE}/proposals"): "propose",
     (

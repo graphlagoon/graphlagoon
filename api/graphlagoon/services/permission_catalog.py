@@ -59,6 +59,14 @@ PERMISSIONS: tuple[Permission, ...] = (
         ),
     ),
     Permission(
+        id="investigation.upload",
+        label="Upload investigation files",
+        description=(
+            "Upload files (bank statements, QSA, CSV) to investigation cases. "
+            "Reading files already in a case stays open to its readers."
+        ),
+    ),
+    Permission(
         id="investigation.agent",
         label="Create agent tokens",
         description=(

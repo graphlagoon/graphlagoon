@@ -126,6 +126,22 @@ same device).
   is chained to the previous by a hash, so a gap or a rewrite is detectable.
   Deleting a note keeps its text in the journal.
 
+## Case files
+
+The **Files** section of the left column lists the files uploaded to the case
+(bank statements in the SIMBA layout, the Receita QSA, any CSV) with their
+role, size and sha256.
+
+- **Upload file** picks a role first: **Graph** (becomes an exploration of
+  the case), **Enrichment** (joined to the case's nodes by key) or
+  **Attachment** (kept as is). It needs the `investigation.upload`
+  [permission](./permissions.md) and edit access to the case.
+- The server computes the sha256 while receiving the file and stores it by
+  that hash; uploading the same bytes again reuses the stored copy. Files
+  above `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` are refused.
+- Uploads and every read of a file's content go to the audit log; uploads
+  also go to the journal.
+
 ## Case space
 
 The **Case space** tab keeps the case's artifacts: slides, documents,

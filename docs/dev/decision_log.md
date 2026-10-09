@@ -11236,3 +11236,57 @@ Dispositivo ligando duas contas sem duplicar contas), `InvestigationView.test.ts
 **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 15:30] - Feature Implemented: F2.3 · Upload de arquivos
+
+**Feature:** arquivos do caso com papel (`graph`, `enrichment`, `attachment`):
+`POST/GET /api/investigations/{id}/files` e `GET …/files/{fid}/content`, ferramentas
+MCP `upload_file`, `list_files` e `get_file`, seção **Files** no painel da esquerda
+(T2) com o botão de upload.
+
+**Design Decisions:**
+1. **Corpo bruto, não multipart** (o `python-multipart` não está instalado), como os
+   artefatos da FA.2: `filename` e `role` na query; `storage.receive` calcula o
+   sha256 em streaming num temporário e o `put` grava em `{id}/files/{sha256}`.
+   Mesmo conteúdo de novo: o blob é reaproveitado (`FileExistsError` ignorado) e
+   ganha linha própria, porque nome e papel podem mudar.
+2. Gate `investigation.upload` (catálogo novo) + escrita no caso; caso decidido é
+   só-leitura. Auditoria `investigation.file_upload` (rota em `AUDITED_ROUTES`) e
+   `investigation.file_read` na leitura do conteúdo (também pela ferramenta MCP);
+   upload vai para o diário (`file.uploaded`).
+3. Conteúdo sempre `attachment` + `application/octet-stream` + `nosniff`: dado do
+   caso nunca é renderizado.
+4. Settings `investigation_file_max_bytes` (200 MB, 413 `FILE_TOO_LARGE`) e
+   `investigation_max_working_edges` (50 000, o número da G4, responde Q5); os dois
+   vão no `/api/config`. `shortcut:` o teto ainda não é aplicado em lugar nenhum;
+   entra quando a F2.5 gerar grafo de arquivo.
+5. MCP: `upload_file` até `min(artifact_max_bytes, investigation_file_max_bytes)`,
+   checa `investigation.upload` do dono do token; `get_file` decodifica UTF-8 ou
+   Latin-1 (SIMBA) e devolve mascarado.
+6. Fora do MVP: download do arquivo na UI, upload em partes (Q3 segue aberta),
+   seed com arquivos.
+
+**Files:** `api/graphlagoon/services/investigation_files.py` (novo),
+`services/investigation_storage.py`, `routers/investigations.py`,
+`models/schemas.py`, `config.py`, `services/permission_catalog.py`,
+`services/audit.py`, `services/public_config.py`, `routers/admin_registry.py`,
+`mcp/server.py`, `mcp/registry.py`; `frontend/src/components/investigation/CaseFiles.vue`
+(novo), `SourcesPanel.vue` (slot `files`), `views/InvestigationView.vue`,
+`services/api.ts`, `types/investigation.ts`, `utils/adminView.ts`.
+
+**Testing:** novo `test_investigation_files.py` (hash = sha256 local, blob
+reaproveitado, papel inválido, leitor lê mas não sobe, auditoria e diário, 413),
+`test_permission_routes.py` (403 e `/api/config` sem a permissão), `test_mcp_server.py`
+(upload e leitura mascarada pelo agente), listas do catálogo em
+`test_permissions.py`/`test_admin_groups.py`; vitest `CaseFiles.test.ts` (botão some
+sem permissão, upload com papel); `vue-tsc` limpo.
+
+**Public Docs:** `investigations.md` (Case files), `permissions.md`
+(`investigation.upload`), `configuration.md` (dois settings), `agents-mcp.md`.
+**Admin-Area Impact:** dois settings em `CONFIG_FIELD_KINDS` (public), rota de
+upload em `AUDITED_ROUTES`, ações `investigation.file_upload`/`file_read` descritas
+no `adminView.ts`, permissão nova no catálogo.
+
+**Author:** Claude (AI Assistant)

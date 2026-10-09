@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** Left column of the workspace (T2): the case's explorations and the unification summary. */
+/** Left column of the workspace (T2): the case's explorations, files (slot) and the unification summary. */
 import { computed } from 'vue';
 import { Lock } from 'lucide-vue-next';
 import type { InvestigationSource } from '@/types/investigation';
@@ -60,6 +60,9 @@ const mergedDetail = computed(() =>
         </span>
       </div>
     </template>
+
+    <h4 class="heading">Files</h4>
+    <slot name="files" />
 
     <h4 class="heading">Unification</h4>
     <p class="muted" data-testid="unification-summary">
