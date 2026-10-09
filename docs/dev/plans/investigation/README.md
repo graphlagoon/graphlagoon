@@ -29,6 +29,24 @@ fraude, PLD/FT e risco** para adquirentes e bancos. As capacidades são:
    - o agente age em nome de uma pessoa e propõe;
    - a pessoa aprova e decide.
 
+## Funcionalidades: o que existe hoje e o que é proposta
+
+**Nada da coluna "Proposta" está implementado.** O estado é de outubro de 2026; a
+coluna "Tarefas" diz onde cada item é construído.
+
+| Funcionalidade | Hoje no app | Proposta | Tarefas | Tela |
+|---|---|---|---|---|
+| **Uma investigação com várias explorações de contexts diferentes** | Não existe: cada exploração tem FK para um único context, e não há entidade "investigação" | O caso agrupa N explorações em abas, com visão unificada, seleção vinculada e fonte restrita como placeholder | F1.1–F1.6 | T2, T3 |
+| Unir a mesma pessoa ou conta entre contexts | Não existe | Chaves de identidade no context | F1.4, F1.6 | T6, T2 |
+| Tabelas extras de enriquecimento, fora da query do grafo | Não existe: só tabela de arestas e de nós | Tabelas no context, consultadas por chave e auditadas | F2.1, F2.2 | T6, T2 |
+| Subir arquivos (SIMBA, QSA, CSV) salvos no Volume | Não existe | Grafo, enriquecimento ou anexo; streaming para o Volume com hash | FA.2, F2.3–F2.6 | T4 |
+| Grafo em memória enriquecido | Parcial: um por exploração; métricas customizadas | Grafo unificado do caso, propriedades gravadas, nós promovidos | F1.6, F2.2, F2.7 | T2 |
+| Seguir o dinheiro | Não existe | Rastreio temporal com regra de alocação, camadas, Sankey, raias, caminhos; também no servidor | F3.1–F3.8 | T5 |
+| Resolução de entidades revisável | Não existe | Sugestões com motivo; nunca merge de documento mascarado | F2.8 | T8 |
+| Dossiê, prazos, decisão e exportação | Não existe | Diário, hipóteses, evidências, decisão, laudo, SIMBA, resumo Siscoaf | F1.7, F4.1–F4.6 | T1, T7 |
+| Agentes de IA no caso (MCP) | Não existe | Token do usuário, ferramentas MCP, propostas com aceite humano | FA.1, FA.3–FA.7 | T11 |
+| Espaço do caso para artefatos | Não existe | Slides, docs e relatórios versionados no Volume, com aprovação humana | FA.2 | T10 |
+
 ## Ordem de leitura
 
 | # | Arquivo | Para quê |
