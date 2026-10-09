@@ -1,0 +1,71 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "CONTA A",
+        "node_type": "Conta",
+        "properties": {
+          "rotulo": "Conta A"
+        }
+      },
+      {
+        "node_id": "CONTA B",
+        "node_type": "Conta",
+        "properties": {
+          "rotulo": "Conta B"
+        }
+      },
+      {
+        "node_id": "CONTA C",
+        "node_type": "Conta",
+        "properties": {
+          "rotulo": "conta c"
+        }
+      },
+      {
+        "node_id": "CONTA D",
+        "node_type": "Conta",
+        "properties": {}
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "0:t:1",
+        "src": "CONTA A",
+        "dst": "CONTA B",
+        "relationship_type": "PIX_TRANSFER",
+        "properties": {
+          "valor": 1234.56,
+          "data": "2026-03-01"
+        }
+      },
+      {
+        "edge_id": "0:t:2",
+        "src": "CONTA B",
+        "dst": "CONTA C",
+        "relationship_type": "TED",
+        "properties": {
+          "valor": 900.0,
+          "data": "2026-03-02"
+        }
+      }
+    ],
+    "truncated": false
+  },
+  "report": {
+    "rows_read": 5,
+    "rows_discarded": 1,
+    "discarded": [
+      {
+        "from": "t",
+        "row": 4,
+        "reason": "invalid decimal_br: \"abc\""
+      }
+    ],
+    "unknown_nodes": 0,
+    "edge_rows": 3,
+    "without_counterpart": 1,
+    "missing_inputs": [],
+    "missing_columns": []
+  }
+}

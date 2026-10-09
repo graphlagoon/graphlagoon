@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "Generic transfers",
+  "inputs": {"t": {"match": "*.csv", "delimiter": ",", "header": true}},
+  "nodes": [
+    {"key": "origem", "type": "Conta", "from": "t", "id": {"col": "t.origem", "convert": ["trim", "upper"]}},
+    {"key": "destino", "type": "Conta", "from": "t", "when": {"not_empty": "t.destino"},
+     "id": {"col": "t.destino", "convert": "upper"}, "props": {"rotulo": "t.destino"}}
+  ],
+  "edges": [
+    {"from": "t", "type": {"col": "t.tipo", "map": "tipos"}, "when": {"in": ["t.tipo", ["PIX", "TED"]]},
+     "endpoints": {"self": "origem", "other": "destino"},
+     "props": {"valor": {"col": "t.valor", "convert": "decimal_br"}, "data": {"col": "t.data", "convert": "date:dd/mm/yyyy"}}}
+  ],
+  "edge_semantics": {"amount_prop": "valor", "time_prop": "data", "currency": "BRL"},
+  "tables": {"tipos": {"PIX": "PIX_TRANSFER"}}
+}

@@ -1,0 +1,85 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "12345678",
+        "node_type": "Empresa",
+        "properties": {
+          "cnpj_basico": "12345678"
+        }
+      },
+      {
+        "node_id": "socio:ANA SILVA|***456789**",
+        "node_type": "Pessoa",
+        "properties": {
+          "nome": "ANA SILVA",
+          "cpf_mascarado": "***456789**"
+        }
+      },
+      {
+        "node_id": "11222333000181",
+        "node_type": "Empresa",
+        "properties": {
+          "nome": "HOLDING XYZ LTDA",
+          "cnpj": "11222333000181"
+        }
+      },
+      {
+        "node_id": "87654321",
+        "node_type": "Empresa",
+        "properties": {
+          "cnpj_basico": "87654321"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "0:qsa:1",
+        "src": "socio:ANA SILVA|***456789**",
+        "dst": "12345678",
+        "relationship_type": "SOCIO_DE",
+        "properties": {
+          "qualificacao": "Sócio-Administrador",
+          "desde": "2020-01-15"
+        }
+      },
+      {
+        "edge_id": "0:qsa:2",
+        "src": "11222333000181",
+        "dst": "12345678",
+        "relationship_type": "SOCIO_DE",
+        "properties": {
+          "qualificacao": "Sócio",
+          "desde": "2021-03-01"
+        }
+      },
+      {
+        "edge_id": "0:qsa:3",
+        "src": "socio:ANA SILVA|***456789**",
+        "dst": "87654321",
+        "relationship_type": "SOCIO_DE",
+        "properties": {
+          "qualificacao": "Sócio",
+          "desde": "2023-07-10"
+        }
+      }
+    ],
+    "truncated": false
+  },
+  "report": {
+    "rows_read": 4,
+    "rows_discarded": 1,
+    "discarded": [
+      {
+        "from": "qsa",
+        "row": 4,
+        "reason": "invalid date:yyyymmdd: \"2023071\""
+      }
+    ],
+    "unknown_nodes": 0,
+    "edge_rows": 3,
+    "without_counterpart": 0,
+    "missing_inputs": [],
+    "missing_columns": []
+  }
+}
