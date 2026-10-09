@@ -11290,3 +11290,62 @@ upload em `AUDITED_ROUTES`, ações `investigation.file_upload`/`file_read` desc
 no `adminView.ts`, permissão nova no catálogo.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 16:30] - Feature Implemented: F2.4 · Especificação de mapeamento e presets
+
+**Feature:** interpretador da spec de mapeamento de arquivo (03 §4) em Python
+(`services/file_mapping.py`, autoritativo) e TS (`utils/fileMapping.ts`, prévia),
+presets SIMBA v3.1 e QSA da Receita nos dois lados, sugestão de preset por cabeçalho e
+fixtures douradas compartilhadas.
+
+**Design Decisions:**
+1. **Semântica única**, escrita no docstring do módulo Python e seguida linha a linha
+   no TS: arquivo escolhido pelo glob (só `*`/`?`, sem caixa), células com trim,
+   parser próprio de linha com aspas (`""` escapa) em vez do `csv` do Python, para
+   os dois lados lerem igual; linha = `{"alias.COL": valor}`; joins são **left
+   joins** entre inputs (extrato sem ORIGEM_DESTINO continua e conta como "sem
+   contraparte"); cada escopo é lido linha a linha, nós e depois arestas; erro de
+   conversão descarta a linha inteira com o motivo; valor: string = coluna, objeto =
+   `col`/`concat` (sep `-`)/`template`, depois `convert` → `map` → `normalize`;
+   parte ausente → null; prop null omitida; id null ou vazio pula o nó; nós fundem
+   por id (primeiro tipo e primeira prop vencem); id de aresta repetido fica o
+   primeiro; sem id, `"{índice}:{escopo}:{linha}"`.
+2. `direction` aceita `"in"`/`"out"` ou `{col, valor: in|out}`; valor fora do mapa
+   descarta a linha (direção errada inverte o fluxo do dinheiro). `type` de nó é
+   literal; de aresta, literal ou expressão. `map` sem a chave mantém o valor bruto.
+   `date:<fmt>` com `dd`, `mm`, `yyyy` vira ISO `yyyy-mm-dd`. `header: false` usa
+   `columns` (o CSV aberto da Receita não tem cabeçalho).
+3. **Relatório** só com contagens (sem percentual, para não depender de
+   arredondamento entre linguagens): `rows_read`, `rows_discarded`, `discarded`
+   (20 primeiros), `unknown_nodes`, `edge_rows`, `without_counterpart`,
+   `missing_inputs`, `missing_columns`.
+4. Normalizadores: `utils/identityKeys.ts` e o `_normalize` do `mcp/server.py`
+   (mesma regra), sem cópia nova.
+5. **Presets** = o `spec.json` das fixtures `simba-mini` e `qsa-mini`; os testes dos
+   dois lados comparam preset e fixture, o que segura o espelho. SIMBA: EXTRATO ×
+   ORIGEM_DESTINO (Conta → Pessoa por CPF/CNPJ, agência 9999 → `Desconhecido` por
+   transação, tipo pelo `TIPO_LANCAMENTO`, C = entra, D = sai, centavos, ddmmaaaa)
+   mais TITULARES (Pessoa TITULAR da Conta). QSA: `;`, sem cabeçalho, sócio PJ por
+   CNPJ, sócio PF por `nome|CPF mascarado` (nunca chave), `SOCIO_DE` com
+   qualificação e data. Sugestão: todo input casa um arquivo pelo nome e tem as
+   colunas que a spec lê (sem cabeçalho: mesma quantidade de colunas).
+6. Decodificação (`latin-1`) fica fora do interpretador (recebe texto); o
+   `decode()` do Python e o `TextDecoder` da F2.5 fazem isso. Fixtures em ASCII.
+7. Fora do MVP: joins encadeados, sep em template, `truncated` pelo
+   `investigation_max_working_edges` (entra com a geração no servidor, F2.5).
+
+**Files:** `api/graphlagoon/services/file_mapping.py`, `file_mapping_presets.py`
+(novos); `frontend/src/utils/fileMapping.ts`, `fileMappingPresets.ts` (novos);
+`frontend/src/__tests__/fixtures/fileMapping/{simba-mini,qsa-mini,generico}/`.
+
+**Testing:** `api/tests/test_file_mapping.py` e
+`frontend/src/utils/__tests__/fileMapping.test.ts` rodam as 3 fixtures contra o mesmo
+`expected.json` (gerado pelo Python e revisado à mão), presets = fixtures, sugestão e
+operador desconhecido; `vue-tsc` limpo.
+
+**Public Docs:** No public docs impact (o usuário vê a spec com o assistente da F2.5).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)

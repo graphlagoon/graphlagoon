@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "name": "QSA Receita",
+  "inputs": {
+    "qsa": {"match": "*", "delimiter": ";", "encoding": "latin-1", "header": false,
+            "columns": ["CNPJ_BASICO", "IDENTIFICADOR_SOCIO", "NOME_SOCIO", "CNPJ_CPF_SOCIO", "QUALIFICACAO_SOCIO",
+                        "DATA_ENTRADA_SOCIEDADE", "PAIS", "REPRESENTANTE_LEGAL", "NOME_REPRESENTANTE",
+                        "QUALIFICACAO_REPRESENTANTE", "FAIXA_ETARIA"]}
+  },
+  "nodes": [
+    {"key": "empresa", "type": "Empresa", "from": "qsa", "id": {"col": "qsa.CNPJ_BASICO", "convert": "digits"},
+     "props": {"cnpj_basico": "qsa.CNPJ_BASICO"}},
+    {"key": "socio_pj", "type": "Empresa", "from": "qsa", "when": {"eq": ["qsa.IDENTIFICADOR_SOCIO", "1"]},
+     "id": {"col": "qsa.CNPJ_CPF_SOCIO", "normalize": "cpf_cnpj"},
+     "props": {"nome": "qsa.NOME_SOCIO", "cnpj": "qsa.CNPJ_CPF_SOCIO"}},
+    {"key": "socio_pf", "type": "Pessoa", "from": "qsa", "when": {"ne": ["qsa.IDENTIFICADOR_SOCIO", "1"]},
+     "id": {"template": "socio:{qsa.NOME_SOCIO}|{qsa.CNPJ_CPF_SOCIO}"},
+     "props": {"nome": "qsa.NOME_SOCIO", "cpf_mascarado": "qsa.CNPJ_CPF_SOCIO"}}
+  ],
+  "edges": [
+    {"from": "qsa", "type": "SOCIO_DE", "direction": "in",
+     "endpoints": {"self": "empresa", "other": ["socio_pj", "socio_pf"]},
+     "props": {"qualificacao": {"col": "qsa.QUALIFICACAO_SOCIO", "map": "qsa_qualificacao"},
+               "desde": {"col": "qsa.DATA_ENTRADA_SOCIEDADE", "convert": "date:yyyymmdd"}}}
+  ],
+  "tables": {"qsa_qualificacao": {"05": "Administrador", "22": "Sócio", "49": "Sócio-Administrador"}}
+}
