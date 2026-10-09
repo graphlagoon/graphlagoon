@@ -448,7 +448,8 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
 in `/mcp`); the token comes from `--token` or `GRAPHLAGOON_AGENT_TOKEN`. With
 `databricks-sdk` installed and a Databricks profile configured (`databricks auth
 login`), the bridge also sends your Databricks OAuth token to get through the
-proxy, and the agent token travels in `X-Graphlagoon-Agent-Token`.
+proxy, and the agent token travels in `X-Graphlagoon-Agent-Token`. See
+[AI Agents (MCP)](./agents-mcp.md).
 
 | Variable | Default | Notes |
 |---|---|---|

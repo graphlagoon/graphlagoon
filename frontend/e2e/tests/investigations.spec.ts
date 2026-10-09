@@ -177,4 +177,55 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('artifact-version-2')).toContainText('approved');
     await expect(page.getByTestId('artifact-approve')).toHaveCount(0);
   });
+
+  // shortcut: the agent's side (MCP upload_artifact + propose) is seeded as the API
+  // state it produces instead of driving a real MCP client from Playwright; the MCP
+  // path itself is covered by api/tests/test_mcp_server.py and test_cli.py.
+  test('agent artifact and proposal: the person accepts on T11 and sees the artifact on T10', async ({
+    authenticatedPage: page,
+  }) => {
+    const { artifacts } = await seedInvestigations(page, [CASE]);
+    const agent = { kind: 'agent', email: 'e2e@test.com', agent_name: 'Claude Code', token_id: 'tok-1' };
+    artifacts.set('inv-1', [
+      {
+        id: 'art-agent',
+        name: 'Rastro do dinheiro.md',
+        kind: 'doc',
+        current_version: 1,
+        download_only: false,
+        versions: [
+          { version: 1, sha256: 'a'.repeat(64), size_bytes: 20, content_type: 'text/markdown', status: 'draft', actor: agent, source_evidence_ids: [], created_at: now },
+        ],
+        contents: { 1: '# Rastro: 3 saltos' },
+      },
+    ]);
+    const proposal = { id: 'prop-1', kind: 'role', payload: { entity: 'p:123', role: 'mule' }, rationale: 'Recebe e repassa em minutos', actor: agent, status: 'pending', created_at: now };
+    const accepted: string[] = [];
+    await page.route(/\/graphlagoon\/api\/investigations\/inv-1\/proposals(\/.*)?(\?.*)?$/, (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith('/accept')) {
+        accepted.push(path);
+        proposal.status = 'accepted';
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...proposal, decided_by: 'e2e@test.com' }) });
+      }
+      const pending = proposal.status === 'pending' ? [proposal] : [];
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pending) });
+    });
+
+    await page.goto('/investigations/inv-1/agents');
+    const card = page.getByTestId('proposal-prop-1');
+    await expect(card).toContainText('Claude Code');
+    await expect(card).toContainText('Recebe e repassa em minutos');
+    await card.getByTestId('proposal-accept').click();
+    await expect(card).toHaveCount(0);
+    await expect(page.getByTestId('proposals')).toContainText('Nothing to decide');
+    expect(accepted).toEqual(['/graphlagoon/api/investigations/inv-1/proposals/prop-1/accept']);
+
+    await page.goto('/investigations/inv-1');
+    await page.getByTestId('tab-space').click();
+    const artifact = page.getByTestId('artifact-art-agent');
+    await expect(artifact).toContainText('agent · Claude Code, for e2e@test.com');
+    await artifact.click();
+    await expect(page.getByTestId('artifact-preview')).toContainText('# Rastro: 3 saltos');
+  });
 });

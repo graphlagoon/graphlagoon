@@ -11102,3 +11102,38 @@ O `claude` CLI não está neste ambiente.
 **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 13:15] - Feature Implemented: FA.7 · Guia público de agentes, prompts MCP e E2E
+
+**Feature:** guia `docs/guide/agents-mcp.md` (TL;DR; Claude Code via HTTP, Claude
+Desktop e Databricks via ponte stdio, escopos, o que agentes nunca fazem,
+mascaramento, prompts, revisão), entrada no sidebar e links a partir de
+`investigations.md` e `configuration.md`; prompts MCP `investigar_golpe_pix`,
+`revisar_lojista` e `montar_dossie`; E2E do agente na T11/T10. Fecha a fase FA.
+
+**Design Decisions:**
+1. **Prompts** são roteiros numerados (fluxos A, B e D do 02-design) com o id do
+   caso como argumento e as regras de §8.1 no fim. `shortcut:` citam só as
+   ferramentas que existem hoje; `trace_money`, `lookup_enrichment`, `pin_evidence` e
+   `get_dossier` entram nos roteiros quando a F2–F4 criarem as ferramentas.
+2. **E2E com atalho:** o lado do agente (`upload_artifact` + `propose`) é semeado
+   como o estado de API que ele produz (artefato de autor agente + proposta
+   pendente), sem cliente MCP real no Playwright. A pessoa aceita na T11 (a rota
+   `accept` é chamada e a proposta some) e vê o artefato do agente na T10. O caminho
+   MCP real é coberto por `test_mcp_server.py` e `test_cli.py`.
+3. README do pacote: status diz F1 e FA concluídas; próxima F2.
+
+**Files:** `api/graphlagoon/mcp/server.py`, `api/tests/test_mcp_server.py`,
+`docs/guide/agents-mcp.md` (novo), `docs/.vitepress/config.ts`,
+`docs/guide/investigations.md`, `docs/guide/configuration.md`,
+`frontend/e2e/tests/investigations.spec.ts`, `docs/dev/plans/investigation/README.md`.
+
+**Testing:** `test_mcp_server.py` (lista os 3 prompts e renderiza um) + `test_cli.py`
+(7 verdes); E2E `investigations.spec.ts` (6 verdes); `npx vitepress build` ok.
+
+**Public Docs:** `docs/guide/agents-mcp.md` novo, no sidebar após Investigations.
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
