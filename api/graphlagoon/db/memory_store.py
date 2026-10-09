@@ -77,6 +77,9 @@ class MemoryGraphContext:
     cluster_programs: List[Dict[str, Any]] = field(default_factory=list)
     context_menu_actions: List[Dict[str, Any]] = field(default_factory=list)
     metric_definitions: List[Dict[str, Any]] = field(default_factory=list)
+    identity_keys: List[Dict[str, Any]] = field(default_factory=list)
+    enrichment_tables: List[Dict[str, Any]] = field(default_factory=list)
+    edge_semantics: Dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     shares: List[MemoryGraphContextShare] = field(default_factory=list)
@@ -153,6 +156,133 @@ class MemoryPermissionRule:
     created_at: datetime = field(default_factory=datetime.now)
 
 
+@dataclass
+class MemoryInvestigationShare:
+    id: UUID
+    investigation_id: UUID
+    shared_with_email: str
+    permission: str = "read"
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryInvestigation:
+    """In-memory twin of db.models.Investigation (shares inline)."""
+
+    id: UUID
+    title: str
+    owner_email: str
+    description: Optional[str] = None
+    assignee_email: Optional[str] = None
+    status: str = "selecao"
+    typology: Optional[str] = None
+    origin: Optional[str] = None
+    selected_at: Optional[datetime] = None
+    state: Dict[str, Any] = field(default_factory=dict)
+    decision: Optional[Dict[str, Any]] = None
+    frozen_hash: Optional[str] = None
+    frozen_at: Optional[datetime] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+    shares: List[MemoryInvestigationShare] = field(default_factory=list)
+
+
+@dataclass
+class MemoryInvestigationSource:
+    id: UUID
+    investigation_id: UUID
+    kind: str
+    title_snapshot: str
+    added_by: str
+    exploration_id: Optional[UUID] = None
+    file_id: Optional[UUID] = None
+    context_id: Optional[UUID] = None
+    mode: str = "live"
+    frozen_blob_key: Optional[str] = None
+    frozen_sha256: Optional[str] = None
+    position: int = 0
+    added_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryInvestigationFile:
+    id: UUID
+    investigation_id: UUID
+    filename: str
+    role: str
+    sha256: str
+    size_bytes: int
+    blob_key: str
+    uploaded_by: str
+    content_type: Optional[str] = None
+    mapping: Optional[Dict[str, Any]] = None
+    context_id: Optional[UUID] = None
+    uploaded_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryInvestigationEvent:
+    id: UUID
+    investigation_id: UUID
+    actor_email: str
+    kind: str
+    hash: str
+    payload: Dict[str, Any] = field(default_factory=dict)
+    prev_hash: Optional[str] = None
+    at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryInvestigationNote:
+    id: UUID
+    investigation_id: UUID
+    body: str
+    author_email: str
+    anchor: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryInvestigationEvidence:
+    id: UUID
+    investigation_id: UUID
+    title: str
+    kind: str
+    blob_key: str
+    sha256: str
+    created_by: str
+    params: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryEntityMatch:
+    id: UUID
+    investigation_id: UUID
+    left: Dict[str, Any]
+    right: Dict[str, Any]
+    score: float = 0.0
+    reasons: List[Any] = field(default_factory=list)
+    status: str = "sugerido"
+    reason_text: Optional[str] = None
+    decided_by: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+# Child tables of an investigation: table name -> dataclass. Each lives in the
+# store attribute of the same name, keyed by id; generic CRUD below serves all.
+INVESTIGATION_CHILDREN: Dict[str, type] = {
+    "investigation_sources": MemoryInvestigationSource,
+    "investigation_files": MemoryInvestigationFile,
+    "investigation_events": MemoryInvestigationEvent,
+    "investigation_notes": MemoryInvestigationNote,
+    "investigation_evidence": MemoryInvestigationEvidence,
+    "entity_matches": MemoryEntityMatch,
+}
+
+
 USAGE_LOG_MAX_ENTRIES = 10_000
 
 
@@ -170,6 +300,13 @@ class InMemoryStore:
         # permission_id -> "everyone" | "restricted"; absent ⇒ "everyone"
         self.permission_modes: Dict[str, str] = {}
         self.permission_rules: Dict[UUID, MemoryPermissionRule] = {}
+        self.investigations: Dict[UUID, MemoryInvestigation] = {}
+        self.investigation_sources: Dict[UUID, MemoryInvestigationSource] = {}
+        self.investigation_files: Dict[UUID, MemoryInvestigationFile] = {}
+        self.investigation_events: Dict[UUID, MemoryInvestigationEvent] = {}
+        self.investigation_notes: Dict[UUID, MemoryInvestigationNote] = {}
+        self.investigation_evidence: Dict[UUID, MemoryInvestigationEvidence] = {}
+        self.entity_matches: Dict[UUID, MemoryEntityMatch] = {}
         # Audit trail, newest last. Bounded so a long-running dev server
         # cannot grow without limit; the admin area reads it newest first.
         self.usage_logs: Deque[MemoryUsageLog] = deque(maxlen=USAGE_LOG_MAX_ENTRIES)
@@ -298,6 +435,7 @@ class InMemoryStore:
 
         for eid in to_delete:
             del self.explorations[eid]
+        self._null_source_explorations(set(to_delete))
 
         del self.graph_contexts[context_id]
 
@@ -425,7 +563,14 @@ class InMemoryStore:
         if exploration_id not in self.explorations:
             return False
         del self.explorations[exploration_id]
+        self._null_source_explorations({exploration_id})
         return True
+
+    def _null_source_explorations(self, exploration_ids: set) -> None:
+        """Mirror investigation_sources.exploration_id ON DELETE SET NULL."""
+        for source in self.investigation_sources.values():
+            if source.exploration_id in exploration_ids:
+                source.exploration_id = None
 
     def share_exploration(
         self, exploration_id: UUID, shared_with_email: str, permission: str = "read"
@@ -608,6 +753,119 @@ class InMemoryStore:
     def list_permission_rules(self) -> List[MemoryPermissionRule]:
         return list(self.permission_rules.values())
 
+    # Investigation operations (rules live in services.investigations)
+    def create_investigation(
+        self, title: str, owner_email: str, **fields: Any
+    ) -> MemoryInvestigation:
+        investigation = MemoryInvestigation(
+            id=uuid4(), title=title, owner_email=owner_email, **fields
+        )
+        self.investigations[investigation.id] = investigation
+        return investigation
+
+    def get_investigation(
+        self, investigation_id: UUID
+    ) -> Optional[MemoryInvestigation]:
+        return self.investigations.get(investigation_id)
+
+    def list_investigations(self) -> List[MemoryInvestigation]:
+        return sorted(
+            self.investigations.values(), key=lambda i: i.updated_at, reverse=True
+        )
+
+    def update_investigation(
+        self, investigation_id: UUID, **fields: Any
+    ) -> Optional[MemoryInvestigation]:
+        """Sets every given field, None included (PATCH semantics)."""
+        investigation = self.investigations.get(investigation_id)
+        if investigation is None:
+            return None
+        for key, value in fields.items():
+            setattr(investigation, key, value)
+        investigation.updated_at = datetime.now()
+        return investigation
+
+    def delete_investigation(self, investigation_id: UUID) -> bool:
+        if self.investigations.pop(investigation_id, None) is None:
+            return False
+        for table in INVESTIGATION_CHILDREN:  # ON DELETE CASCADE
+            rows = getattr(self, table)
+            for rid in [
+                r.id for r in rows.values() if r.investigation_id == investigation_id
+            ]:
+                del rows[rid]
+        return True
+
+    def share_investigation(
+        self, investigation_id: UUID, shared_with_email: str, permission: str = "read"
+    ) -> Optional[MemoryInvestigationShare]:
+        investigation = self.investigations.get(investigation_id)
+        if investigation is None:
+            return None
+        for share in investigation.shares:
+            if share.shared_with_email == shared_with_email:
+                share.permission = permission
+                return share
+        share = MemoryInvestigationShare(
+            id=uuid4(),
+            investigation_id=investigation_id,
+            shared_with_email=shared_with_email,
+            permission=permission,
+        )
+        investigation.shares.append(share)
+        return share
+
+    def unshare_investigation(
+        self, investigation_id: UUID, shared_with_email: str
+    ) -> bool:
+        investigation = self.investigations.get(investigation_id)
+        if investigation is None:
+            return False
+        before = len(investigation.shares)
+        investigation.shares = [
+            s for s in investigation.shares if s.shared_with_email != shared_with_email
+        ]
+        return len(investigation.shares) < before
+
+    # Generic CRUD for the child tables listed in INVESTIGATION_CHILDREN
+    def add_investigation_child(self, table: str, **fields: Any) -> Any:
+        row = INVESTIGATION_CHILDREN[table](id=uuid4(), **fields)
+        getattr(self, table)[row.id] = row
+        return row
+
+    def get_investigation_child(self, table: str, row_id: UUID) -> Optional[Any]:
+        return getattr(self, table).get(row_id)
+
+    def list_investigation_children(
+        self, table: str, investigation_id: UUID
+    ) -> List[Any]:
+        return [
+            r
+            for r in getattr(self, table).values()
+            if r.investigation_id == investigation_id
+        ]
+
+    def update_investigation_child(
+        self, table: str, row_id: UUID, **fields: Any
+    ) -> Optional[Any]:
+        row = getattr(self, table).get(row_id)
+        if row is None:
+            return None
+        for key, value in fields.items():
+            setattr(row, key, value)
+        if hasattr(row, "updated_at"):
+            row.updated_at = datetime.now()
+        return row
+
+    def delete_investigation_child(self, table: str, row_id: UUID) -> bool:
+        if getattr(self, table).pop(row_id, None) is None:
+            return False
+        if table == "investigation_files":  # sources.file_id ON DELETE SET NULL
+            for source in self.investigation_sources.values():
+                if source.file_id == row_id:
+                    source.file_id = None
+        return True
+
     # Audit operations
     def record_usage(
         self,
@@ -642,6 +900,9 @@ class InMemoryStore:
         self.groups.clear()
         self.permission_modes.clear()
         self.permission_rules.clear()
+        self.investigations.clear()
+        for table in INVESTIGATION_CHILDREN:
+            getattr(self, table).clear()
         if not keep_usage_logs:
             self.usage_logs.clear()
 

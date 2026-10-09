@@ -10386,3 +10386,41 @@ folga. O número vira o setting `investigation_max_working_edges` na F2.3. Medir
 (`make perf-report`) fica para quando algum caso real bater no teto.
 
 **Public Docs:** nenhuma. **Admin-Area Impact:** nenhum agora; o setting entra na F2.3.
+
+---
+
+## [2026-10-09 23:00] - Feature Implemented: F1.1 · Modelos, migração 016 e paridade em memória
+
+**Feature:** as 8 tabelas de investigação de 03 §2.2 (`investigations`,
+`investigation_shares`, `_sources`, `_files`, `_events`, `_notes`, `_evidence`,
+`entity_matches`) e as colunas `identity_keys`, `enrichment_tables` e `edge_semantics`
+em `graph_contexts`, com migração 016 e paridade no `InMemoryStore`.
+
+**Design Decisions:**
+1. Filhas com FK `ON DELETE CASCADE` para `investigations`; só `shares` tem
+   relationship ORM (usada pelo controle de acesso). `sources.exploration_id` e
+   `sources.file_id` são `SET NULL`; `sources.context_id` sem FK, para o placeholder
+   sobreviver ao context apagado.
+2. Memória: dataclasses `Memory…` para cada tabela; CRUD dedicado para caso e share e
+   CRUD genérico (`add/get/list/update/delete_investigation_child`) para as 6 filhas,
+   pelo mapa `INVESTIGATION_CHILDREN`. Cascade e `SET NULL` espelhados.
+3. As colunas novas do context só existem no modelo; schemas e validação entram nas
+   tarefas que as usam (F1.4, F2.1, F3.1).
+
+**Files:** `api/graphlagoon/db/models.py`, `api/graphlagoon/db/memory_store.py`,
+`api/graphlagoon/alembic/versions/016_investigations.py`,
+`api/graphlagoon/routers/admin_registry.py` (`CLEARABLE_TABLES`),
+`api/tests/test_investigation_store.py` (novo), `api/tests/test_admin_registry.py`.
+
+**Testing:** `test_investigation_store.py`, `test_admin_registry.py`,
+`test_dev_seed.py`: 48 verdes. Migração 016 rodada isolada (upgrade, upgrade
+idempotente, downgrade, re-upgrade) via `MigrationContext` sobre SQLite; DDL Postgres
+compilada do ORM. App sobe em modo memória.
+
+**Assumptions:** sem Postgres no ambiente, `make dev-db` não foi verificado (`[~]` no
+plano). Nenhuma decisão Q1–Q9 se aplica.
+
+**Public Docs:** no public docs impact. **Admin-Area Impact:** tabelas novas em
+`CLEARABLE_TABLES`; `clear_all` limpa as coleções novas.
+
+**Author:** Claude (AI Assistant)

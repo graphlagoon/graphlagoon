@@ -24,7 +24,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] G4 · Medir o teto do grafo no browser (pulada para o MVP: teto fixado em 50 mil arestas por decisão, sem medição)
 
 **F1 · Fundação**
-- [ ] F1.1 · Modelos, migração 016 e paridade em memória
+- [x] F1.1 · Modelos, migração 016 e paridade em memória
 - [ ] F1.2 · API de investigações: CRUD, compartilhamento nominal, permissões, auditoria
 - [ ] F1.3 · Fontes: adicionar e remover explorações, com redação por acesso
 - [ ] F1.4 · Chaves de identidade no context (backend e aba no formulário)
@@ -160,12 +160,14 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   3. Criar os equivalentes em memória (dataclasses `Memory…` e métodos CRUD), como
      `create_group` faz hoje.
 - **Aceite:**
-  - [ ] `alembic upgrade head` e `downgrade -1` rodam limpos.
-  - [ ] `make dev` (memória) e `make dev-db` (Postgres) sobem.
+  - [x] `alembic upgrade head` e `downgrade -1` rodam limpos (verificado com a
+    016 isolada sobre SQLite; sem Postgres no ambiente do agente).
+  - [~] `make dev` (memória) e `make dev-db` (Postgres) sobem. Memória: o app sobe;
+    `make dev-db` não verificado (sem Postgres no ambiente do agente).
 - **Testes:** pytest de CRUD do memory store para cada entidade nova.
 - **Admin:**
-  - [ ] As tabelas novas entram em `CLEARABLE_TABLES` (`routers/admin_registry.py`).
-  - [ ] `InMemoryStore.clear_all` limpa as entidades novas.
+  - [x] As tabelas novas entram em `CLEARABLE_TABLES` (`routers/admin_registry.py`).
+  - [x] `InMemoryStore.clear_all` limpa as entidades novas.
 
 ### F1.2 · API de investigações
 

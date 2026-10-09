@@ -83,6 +83,14 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
 # Tables wiped by "clear environment", in an order that respects foreign keys
 # (children first). services.environment consumes this list directly.
 CLEARABLE_TABLES: tuple[str, ...] = (
+    "entity_matches",
+    "investigation_evidence",
+    "investigation_notes",
+    "investigation_events",
+    "investigation_sources",
+    "investigation_files",
+    "investigation_shares",
+    "investigations",
     "exploration_shares",
     "explorations",
     "graph_context_shares",
