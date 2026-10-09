@@ -50,7 +50,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F2.4 · Especificação de mapeamento, interpretadores TS e Python, presets SIMBA e QSA
 - [x] F2.5 · Datasource `file` e assistente de arquivo (T4)
 - [x] F2.6 · Arquivo como enriquecimento do caso
-- [ ] F2.7 · Gravar valores de métricas como propriedade
+- [x] F2.7 · Gravar valores de métricas como propriedade
 - [ ] F2.8 · Resolução de entidades e revisão de matches (T8)
 
 **F3 · Seguir o dinheiro**
@@ -615,7 +615,7 @@ trabalho de análise e documentação; a pessoa decide.
 - **Arquivos:** `stores/metrics.ts`, `stores/customMetrics.ts`, `stores/graph.ts`
   (`patchNodeProperties`, `buildGraphSnapshot`).
 - **Aceite:**
-  - [ ] Uma ação "gravar como propriedade" persiste o valor no snapshot e o registra
+  - [x] Uma ação "gravar como propriedade" persiste o valor no snapshot e o registra
     no diário.
 - **Testes:** vitest.
 

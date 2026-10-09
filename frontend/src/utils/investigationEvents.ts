@@ -39,6 +39,7 @@ export function describeEvent(e: InvestigationEvent): string {
     case 'proposal.accepted': return `accepted the proposal: ${describeProposal({ kind: p.kind, payload: p.payload ?? {} })}`;
     case 'proposal.rejected': return `rejected the proposal: ${describeProposal({ kind: p.kind, payload: p.payload ?? {} })} (${p.reason})`;
     case 'nodes.promoted': return `promoted ${p.nodes} ${p.node_type} node(s) from enrichment table ${p.table}`;
+    case 'metric.saved': return `saved metric ${p.metric} as property ${p.property} on ${p.nodes} node(s) of “${p.exploration_title}”`;
     default: return e.kind;
   }
 }

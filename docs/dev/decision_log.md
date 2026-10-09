@@ -11466,3 +11466,37 @@ para membros adicionados depois; sem compartilhamento copiado). O `GET
 `shortcut:` 8 da F2.5. Teste: `test_investigation_files.py::test_file_source_is_readable_by_case_members_added_later`.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 19:15] - Feature Implemented: F2.7 · Gravar valores de métricas como propriedade
+
+**Feature:** botão *Save as property* em cada métrica de nó (built-in e custom) do
+`MetricsPanel`; `graphStore.saveMetricAsProperty` grava os valores nas propriedades
+dos nós (`patchNodeProperties` com merge), salva o snapshot da exploração aberta
+(`buildGraphSnapshot`) e posta `metric.saved` no diário de cada caso que tem a
+exploração como fonte.
+
+**Design Decisions:**
+1. Propriedade = nome da métrica (sobrescreve se já existir). Só nós; métricas de
+   aresta ficam sem o botão (`shortcut:` sem patch de arestas, quando o rastreio pedir).
+2. Persistência imediata só com exploração aberta e com escrita; sem ela o valor vale
+   até o próximo "salvar" (o toast avisa).
+3. Casos achados por `GET /api/investigations?exploration_id=` (filtro novo na rota
+   existente; mesma ferramenta MCP `list_investigations`, sem rota nova); só casos com
+   escrita e não decididos recebem o evento (o POST de evento exige escrita).
+   `describeEvent` descreve `metric.saved`.
+
+**Files:** `frontend/src/stores/graph.ts`, `components/MetricsPanel.vue`,
+`services/api.ts`, `utils/investigationEvents.ts`; `api/graphlagoon/services/investigations.py`,
+`routers/investigations.py`.
+
+**Testing:** vitest `stores/__tests__/graph.saveMetricProperty.test.ts`,
+`MetricsPanel.custom.test.ts`; pytest `test_investigation_sources.py` (filtro por
+exploração); `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (métricas como propriedade; fonte de
+arquivo legível por quem lê o caso).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)

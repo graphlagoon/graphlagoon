@@ -6,7 +6,7 @@ import { ALGORITHMS, getAlgorithmsByTarget } from '@/services/algorithmRegistry'
 import { getMetricsCalculator } from '@/services/metricsCalculator';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
-import type { AlgorithmDefinition, ScaleType, Priority } from '@/types/metrics';
+import type { AlgorithmDefinition, ComputedMetric, ScaleType, Priority } from '@/types/metrics';
 import { isCustomMetricId, customMetricId } from '@/types/customMetrics';
 import { formatMetricValue } from '@/utils/metricFormat';
 import { useFeatureFlags } from '@/composables/useFeatureFlags';
@@ -247,6 +247,22 @@ function deleteMetric(id: string) {
   metricsStore.deleteMetric(id);
 }
 
+const savingProperty = ref<string | null>(null);
+
+async function saveAsProperty(metric: ComputedMetric) {
+  savingProperty.value = metric.id;
+  try {
+    const r = await graphStore.saveMetricAsProperty(metric);
+    const where = r.persisted ? 'saved in the exploration' : 'save the exploration to keep it';
+    const cases = r.cases ? `, journaled in ${r.cases} case(s)` : '';
+    toast.success(`“${metric.name}” written to ${r.nodes} node(s); ${where}${cases}`);
+  } catch (error) {
+    toast.error(getErrorMessage(error, 'Failed to save the metric as a property'));
+  } finally {
+    savingProperty.value = null;
+  }
+}
+
 // Resource monitoring interval
 let resourceInterval: number | null = null;
 
@@ -444,6 +460,15 @@ function toggleSection(section: keyof typeof expandedSections.value) {
               @click="customMetricsStore.recomputeNow([def.id])"
             >
               Recompute
+            </button>
+            <button
+              v-if="def.target === 'node' && metricsStore.getMetric(customMetricId(def.id))"
+              class="mini-btn"
+              :disabled="savingProperty === customMetricId(def.id)"
+              :data-testid="`metric-save-property-${customMetricId(def.id)}`"
+              @click="saveAsProperty(metricsStore.getMetric(customMetricId(def.id))!)"
+            >
+              Save as property
             </button>
             <button class="mini-btn danger" :data-testid="`custom-metric-delete-${def.id}`" @click="deleteCustomMetric(def)">
               Delete
@@ -689,6 +714,16 @@ function toggleSection(section: keyof typeof expandedSections.value) {
                 />
                 <span>Table column</span>
               </label>
+              <button
+                v-if="metric.target === 'node'"
+                class="mini-btn"
+                :disabled="savingProperty === metric.id"
+                :data-testid="`metric-save-property-${metric.id}`"
+                title="Write the values into the node properties and save them in the exploration"
+                @click="saveAsProperty(metric)"
+              >
+                Save as property
+              </button>
               <button v-if="!metric.id.startsWith('__builtin_')" class="mini-btn danger" @click="deleteMetric(metric.id)">
                 Delete
               </button>
