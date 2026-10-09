@@ -9,7 +9,7 @@
 
 ## Objetivo
 
-Evoluir o Graph Lagoon de explorador de grafos para **sistema de investigação de
+Evoluir o Graph Lagoon de explorador de grafos para **sistema de investigação AI-first de
 fraude, PLD/FT e risco** para adquirentes e bancos. As capacidades são:
 
 1. **Investigação** como entidade nova: reúne N explorações de **contexts

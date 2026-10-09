@@ -1,4 +1,11 @@
-# Plano: Graph Lagoon como sistema de investigação (fraude, PLD/FT, follow the money)
+# Plano: Graph Lagoon como sistema de investigação AI-first (fraude, PLD/FT, follow the money)
+
+O Graph Lagoon passa a ser um **sistema de investigação AI-first**. A investigação é
+uma entidade nova acima da exploração: reúne explorações de contexts diferentes,
+arquivos e tabelas de enriquecimento, rastreia o dinheiro com método explícito e
+termina num dossiê. **Agentes de IA trabalham no caso desde o início**, via MCP:
+leem, analisam, documentam e sobem artefatos, enquanto pessoas aprovam e decidem. No
+golpe Pix, o analista passa de 7 ferramentas para 2.
 
 > Status: **proposta** em 2026-10-09, atualizada no mesmo dia com a etapa AI-first
 > (§4.6) e o armazenamento no Volume. **Nada foi implementado ainda.**
@@ -6,6 +13,32 @@
 > **Para executar, use o pacote [investigation/](investigation/README.md):** pesquisa,
 > design (telas e fluxos com imagens e mockups), arquitetura e plano de tarefas. O
 > pacote é a fonte da verdade; este arquivo é o resumo da proposta.
+
+## AI-first: agentes trabalham no caso, pessoas decidem
+
+Toda capacidade da investigação nasce com rota REST e ferramenta MCP. Assim, um
+agente (Claude Code, Claude Desktop ou outro cliente MCP) cria e evolui um caso como
+um analista faria, com o acesso da pessoa que o autorizou.
+
+| O agente | Exemplos |
+|---|---|
+| **Faz direto**, sempre registrado no diário em nome dele | ler o caso e o grafo; rodar rastreio, caminhos e tipologias no servidor; anotar; fixar evidências; subir arquivos; subir slides, documentos e relatórios em rascunho |
+| **Propõe**, para uma pessoa aceitar | papel de uma entidade, match, hipótese, selo de tipologia, status do caso |
+| **Nunca faz** | decidir, comunicar ao COAF ou à SPA, marcar no DICT, compartilhar, apagar, aprovar artefato |
+
+- **Conexão:** servidor MCP em `/mcp`, com um token criado pelo próprio usuário, com
+  escopo, validade e revogação. Atrás do proxy do Databricks, entra uma ponte local
+  stdio.
+- **Espaço do caso:** artefatos de pessoas e agentes ficam versionados no Volume, cada
+  versão com hash, autor e as evidências de origem.
+- **Dados pessoais:** vão mascarados para o agente por padrão (LGPD); só o admin
+  libera.
+- **Garantia:** um teste obriga toda rota nova a ter ferramenta MCP ou a ser marcada
+  como só humana.
+
+Detalhes em §4.6 e em [03 §8](investigation/03-arquitetura.md#8-ai-first-agentes-na-investigação).
+As telas são a T10 (espaço do caso) e a T11 (agentes); a construção é a fase FA, logo
+depois da fundação.
 
 ## O que existe hoje e o que é proposta
 
