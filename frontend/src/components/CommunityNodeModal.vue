@@ -7,6 +7,7 @@ import {
   buildNodeColumns, flattenNodeRows,
 } from '@/composables/useTableColumns'
 import { X } from 'lucide-vue-next'
+import { escapeDelimitedField } from '@/utils/csvSafe'
 import PropertyVisibilityHint from '@/components/PropertyVisibilityHint.vue'
 
 interface Props {
@@ -110,14 +111,9 @@ function handleClose() {
 }
 
 function exportCSV() {
-  const header = cols.value.map(c => c.header).join(',')
+  const header = cols.value.map(c => escapeDelimitedField(c.header, ',')).join(',')
   const body = filteredRows.value.map(row =>
-    cols.value.map(c => {
-      const v = row[c.field]
-      if (v == null) return ''
-      const s = String(v)
-      return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s
-    }).join(',')
+    cols.value.map(c => escapeDelimitedField(row[c.field], ',')).join(',')
   ).join('\n')
   const blob = new Blob([header + '\n' + body], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)

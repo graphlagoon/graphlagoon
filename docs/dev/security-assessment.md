@@ -73,7 +73,7 @@ Cada achado é pontuado por **(impacto × alcançabilidade dentro do modelo de a
 | **M1** | 🟡 Média | IDOR: `GET /api/graph-contexts/{id}` sem checagem de acesso — vaza nomes de tabela, schema, dono e roster de compartilhamento | `api/graphlagoon/routers/graph_contexts.py:334-368` | Usuário autenticado |
 | **M2** | 🟡 Média | `show_error_details=True` default → traceback completo nas respostas de erro | `api/graphlagoon/config.py:102`, `app.py:104` | Usuário autenticado |
 | **M3** | 🟡 Média | Valores de propriedade de nó entram sem filtro em SQL executado via `paramBindings` de ações de menu | `frontend/src/composables/useConfigurableMenuActions.ts:39-61` → `useTemplateExecution.ts:36` | Insider (via context compartilhado) |
-| **M4** | 🟡 Média | CSV/TSV export sem mitigação de fórmula (`= + - @`) — 4 caminhos | `frontend/src/utils/tableExport.ts:8-14` e 3 outros | Insider (via dado do grafo) |
+| **M4** | 🟡 Média | ~~CSV/TSV export sem mitigação de fórmula (`= + - @`) — 4 caminhos~~ ✅ Corrigido 2026-10-09 (`utils/csvSafe.ts`) | `frontend/src/utils/tableExport.ts:8-14` e 3 outros | Insider (via dado do grafo) |
 | **M5** | 🟡 Média | Identidade é `X-Forwarded-Email` não verificado; superuser é concedido por string; CORS `*` + `allow_credentials=True` | `middleware/auth.py:98-123`, `app.py:756-763`, `main.py:40-41` | Ator que contorne o proxy |
 | **M6** | 🟡 Média | Caminho Postgres puro não força SSL (Lakebase força) | `api/graphlagoon/db/database.py:57-66` vs `db/lakebase.py:126` | Atacante na rota (se Postgres externo) |
 | **M7** | 🟡 Média | Job async e `statement_id` não são owner-scoped (mitigado por UUID de 122 bits) | `api/graphlagoon/routers/graph.py:645-727` | Usuário autenticado (força-bruta inviável) |
@@ -339,6 +339,24 @@ Uma propriedade contendo `'; DROP ...` flui para a query executada. O caminho `?
 
 ### 🟡 M4 — CSV/TSV export sem mitigação de fórmula
 
+> **✅ Corrigido 2026-10-09 (G2 do plano de investigações):** novo módulo
+> `frontend/src/utils/csvSafe.ts`. `safeCell(v)` prefixa `'` em strings que começam
+> com `=`, `+`, `-`, `@`, tab ou CR; `safeCellText` aplica o mesmo à forma `String()`
+> de arrays/objetos/datas (um array `['=1+1']` vira `=1+1`). Números tipados e strings
+> que são um literal numérico puro (`-5`, `+1.5e3`, comuns porque o warehouse devolve
+> tudo como string) **não** são prefixados e continuam números na planilha. Os
+> caminhos usam a função: `tableExport.ts` (`escapeDelimitedField`, TSV do Query
+> Console), `ClusterNodeModal.vue` e `CommunityNodeModal.vue` (CSV manual, que agora
+> também põe aspas em campos com quebra de linha) e as duas DataTables PrimeVue
+> (`DataTablePanel.vue` e `DataGrid.vue` do Query Console) via `:exportFunction` e
+> `:exportHeader` — o cabeçalho também é saneado, porque carrega chaves de
+> propriedade e o PrimeVue o escreve sem escape. Testes: `utils/__tests__/csvSafe.test.ts`
+> e um teste de exportação por caminho (`tableExport.test.ts`,
+> `ClusterNodeModal.test.ts`, `CommunityNodeModal.test.ts`,
+> `DataTablePanel.export.test.ts`, `DataGrid.export.test.ts`). Limite conhecido:
+> só o primeiro caractere é checado (como na recomendação da OWASP); uma célula que
+> começa com espaço antes do `=` não é prefixada.
+
 Nenhum dos 4 caminhos neutraliza células iniciando com `= + - @`:
 - `frontend/src/utils/tableExport.ts:8-14` (TSV do Query Console)
 - `ClusterNodeModal.vue:110-127`, `CommunityNodeModal.vue:112-127` (CSV manual)
@@ -424,7 +442,7 @@ ou, no futuro, da identidade (OBO).
 8. **M1** — checagem de acesso em `GET /graph-contexts/{id}`.
 9. **M2** — `show_error_details=False` default + id de correlação; corrigir ordem de middleware.
 10. **M3** — validar `paramBindings` derivados de propriedade; parametrizar no backend.
-11. **M4** — mitigação de fórmula CSV nos 4 caminhos.
+11. ~~**M4** — mitigação de fórmula CSV nos 4 caminhos.~~ ✅ 2026-10-09
 12. **M5** — CORS restrito em produção + verificação de proveniência do proxy.
 
 ### Fase 3 — Higiene contínua
