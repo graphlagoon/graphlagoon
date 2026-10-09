@@ -751,6 +751,16 @@ class ApiService {
     return response.data;
   }
 
+  async transferInvestigationOwnership(
+    investigationId: string,
+    newOwnerEmail: string,
+  ): Promise<TransferOwnershipResponse> {
+    const response = await this.client.post(`/api/admin/investigations/${investigationId}/transfer`, {
+      new_owner_email: newOwnerEmail,
+    });
+    return response.data;
+  }
+
   async getAuditLog(
     params: { page?: number; page_size?: number; user?: string; action?: string } = {},
   ): Promise<AuditPage> {

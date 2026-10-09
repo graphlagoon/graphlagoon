@@ -100,16 +100,28 @@ export function describeAudit(entry: AuditEntry): string {
   switch (entry.action) {
     case 'context.transfer':
     case 'exploration.transfer':
+    case 'investigation.transfer':
       return `"${m.title ?? entry.resource_id}" from ${m.from} to ${m.to}`;
     case 'context.share':
     case 'exploration.share':
+    case 'investigation.share':
       return `with ${m.with} (${m.permission})${m.updated ? ' — updated' : ''}`;
     case 'context.unshare':
     case 'exploration.unshare':
+    case 'investigation.unshare':
       return `removed ${m.with}`;
     case 'context.delete':
     case 'exploration.delete':
-      return `"${m.title ?? entry.resource_id}" (owner ${m.owner ?? '?'})`;
+    case 'investigation.delete':
+      return `"${m.title ?? entry.resource_id}" (owner ${m.owner ?? '?'})${m.reason ? ` — reason: ${m.reason}` : ''}`;
+    case 'investigation.create':
+      return `"${m.title ?? entry.resource_id}"`;
+    case 'investigation.update':
+      return `changed ${Array.isArray(m.fields) ? m.fields.join(', ') : '?'}`;
+    case 'investigation.source_add':
+      return `exploration ${m.exploration_id ?? '?'} (${m.mode ?? 'live'})`;
+    case 'investigation.source_remove':
+      return `removed source "${m.title ?? m.source_id ?? '?'}"`;
     case 'precomputed.publish':
     case 'precomputed.delete':
     case 'preset.delete':

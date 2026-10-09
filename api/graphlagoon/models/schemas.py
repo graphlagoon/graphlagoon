@@ -1510,6 +1510,7 @@ class AdminCounts(BaseModel):
     query_templates: int
     audit_entries: int
     groups: int
+    investigations: int = 0
 
 
 class AdminStorage(BaseModel):

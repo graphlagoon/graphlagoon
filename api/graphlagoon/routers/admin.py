@@ -84,6 +84,7 @@ async def _counts() -> AdminCounts:
             Exploration,
             GraphContext,
             Group,
+            Investigation,
             QueryTemplate,
             UsageLog,
             User,
@@ -104,6 +105,7 @@ async def _counts() -> AdminCounts:
                 query_templates=await count(QueryTemplate),
                 audit_entries=await count(UsageLog),
                 groups=await count(Group),
+                investigations=await count(Investigation),
             )
     store = get_memory_store()
     return AdminCounts(
@@ -113,6 +115,7 @@ async def _counts() -> AdminCounts:
         query_templates=len(store.query_templates),
         audit_entries=len(store.usage_logs),
         groups=len(store.groups),
+        investigations=len(store.investigations),
     )
 
 
@@ -433,6 +436,38 @@ async def transfer_exploration(
 
     return TransferOwnershipResponse(
         id=exploration_id, previous_owner_email=previous, owner_email=new_owner
+    )
+
+
+@router.post(
+    "/investigations/{investigation_id}/transfer",
+    response_model=TransferOwnershipResponse,
+)
+async def transfer_investigation(
+    investigation_id: UUID,
+    data: TransferOwnershipRequest,
+    admin_email: str = Depends(require_superuser),
+):
+    """Reassign a case to another owner; also written to the case journal."""
+    from graphlagoon.services import investigations
+
+    new_owner = _validated_owner(data.new_owner_email)
+    try:
+        meta = await investigations.transfer_owner(
+            investigation_id, admin_email, new_owner
+        )
+    except investigations.InvestigationError as exc:
+        raise _error(exc.status_code, exc.code, exc.message)
+    await touch_user(new_owner)
+    await audit.record(
+        admin_email,
+        AuditAction.INVESTIGATION_TRANSFER,
+        resource_type="investigation",
+        resource_id=investigation_id,
+        metadata={"from": meta["from"], "to": new_owner, "title": meta["title"]},
+    )
+    return TransferOwnershipResponse(
+        id=investigation_id, previous_owner_email=meta["from"], owner_email=new_owner
     )
 
 

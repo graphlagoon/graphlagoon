@@ -1001,3 +1001,30 @@ async def delete_note(investigation_id: UUID, user_email: str, note_id: UUID) ->
         else:
             await session.delete(note)
             await session.commit()
+
+
+async def transfer_owner(
+    investigation_id: UUID, admin_email: str, new_owner: str
+) -> dict:
+    """Admin area: reassign the case. A share held by the new owner becomes
+    redundant and is removed; the previous owner keeps no implicit access."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, admin_email)
+        previous = inv.owner_email
+        await append_event(
+            session,
+            investigation_id,
+            admin_email,
+            "case.transferred",
+            {"from": previous, "to": new_owner},
+        )
+        if session is None:
+            inv.owner_email = new_owner
+            inv.shares = [s for s in inv.shares if s.shared_with_email != new_owner]
+        else:
+            inv.owner_email = new_owner
+            for share in list(inv.shares):
+                if share.shared_with_email == new_owner:
+                    await session.delete(share)
+            await session.commit()
+        return {"from": previous, "title": inv.title}

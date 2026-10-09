@@ -111,8 +111,10 @@ def _valid_request_for(route: APIRoute):
     cannot turn the expected 403 into a 422."""
     method = next(iter(route.methods))
     placeholder = "00000000-0000-0000-0000-000000000000"
-    path = route.path.replace("{context_id}", placeholder).replace(
-        "{exploration_id}", placeholder
+    path = (
+        route.path.replace("{context_id}", placeholder)
+        .replace("{exploration_id}", placeholder)
+        .replace("{investigation_id}", placeholder)
     )
     body = None
     if path.endswith("/transfer"):
@@ -139,6 +141,7 @@ class TestGate:
             ("POST", "/api/admin/environment/clear"),
             ("POST", "/api/admin/explorations/{exploration_id}/transfer"),
             ("POST", "/api/admin/health/warehouse"),
+            ("POST", "/api/admin/investigations/{investigation_id}/transfer"),
         ]
 
     @pytest.mark.parametrize("route", _admin_routes(), ids=lambda r: r.path)
@@ -331,6 +334,25 @@ class TestTransfer:
         assert response.status_code == 200, response.text
         assert store.get_exploration(exploration.id).owner_email == STRANGER
         assert store.usage_logs[-1].action == "exploration.transfer"
+
+    def test_transfers_investigation_into_the_journal(self, client, store):
+        inv = store.create_investigation(title="Pix", owner_email=OWNER)
+        store.share_investigation(inv.id, STRANGER, "read")
+        response = client.post(
+            f"/api/admin/investigations/{inv.id}/transfer",
+            json={"new_owner_email": STRANGER},
+            headers=_headers(SUPERUSER),
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["previous_owner_email"] == OWNER
+        assert inv.owner_email == STRANGER and inv.shares == []
+        assert store.usage_logs[-1].action == "investigation.transfer"
+        journal = store.list_investigation_children("investigation_events", inv.id)
+        assert [(e.kind, e.payload["to"]) for e in journal] == [
+            ("case.transferred", STRANGER)
+        ]
+        overview = client.get("/api/admin/overview", headers=_headers(SUPERUSER))
+        assert overview.json()["counts"]["investigations"] == 1
 
     @pytest.mark.parametrize("bad", ["*", "*@example.com", "nope", "a b@c.d", " "])
     def test_rejects_wildcards_and_junk(self, client, context, bad):

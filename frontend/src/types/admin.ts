@@ -17,6 +17,7 @@ export interface AdminCounts {
   query_templates: number;
   audit_entries: number;
   groups: number;
+  investigations?: number;
 }
 
 export interface AdminStorage {
@@ -100,6 +101,7 @@ export type AdminTab =
   | 'users'
   | 'contexts'
   | 'explorations'
+  | 'investigations'
   | 'groups'
   | 'audit'
   | 'danger';
