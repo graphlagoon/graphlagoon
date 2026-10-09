@@ -32,6 +32,9 @@ from graphlagoon.models.schemas import (
     InvestigationSourceResponse,
     InvestigationStateUpdate,
     InvestigationUpdate,
+    MatchDecision,
+    MatchResponse,
+    MatchSuggestionsCreate,
     ProposalCreate,
     ProposalReject,
     ProposalResponse,
@@ -39,6 +42,7 @@ from graphlagoon.models.schemas import (
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
 from graphlagoon.services import investigation_files as files
+from graphlagoon.services import investigation_matches as matches
 from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
@@ -712,6 +716,54 @@ async def reject_proposal(
     try:
         return await proposals.reject_proposal(
             investigation_id, get_current_user(request), proposal_id, data.reason
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+# Entity matches (F2.8, 03 §3.5/§6.2): suggestions are stored as "sugerido";
+# only a person decides (agents propose kind "match"). Recorded in the journal.
+
+
+@router.get("/{investigation_id}/matches", response_model=list[MatchResponse])
+async def list_matches(investigation_id: UUID, request: Request):
+    try:
+        return await matches.list_matches(investigation_id, get_current_user(request))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/matches", response_model=list[MatchResponse], status_code=201
+)
+async def add_match_suggestions(
+    investigation_id: UUID, data: MatchSuggestionsCreate, request: Request
+):
+    try:
+        return await matches.add_suggestions(
+            investigation_id,
+            get_current_user(request),
+            [m.model_dump() for m in data.matches],
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.patch(
+    "/{investigation_id}/matches/{match_id}",
+    response_model=MatchResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def decide_match(
+    investigation_id: UUID, match_id: UUID, data: MatchDecision, request: Request
+):
+    try:
+        return await matches.decide_match(
+            investigation_id,
+            get_current_user(request),
+            match_id,
+            data.status,
+            data.reason_text,
         )
     except service.InvestigationError as exc:
         raise _http(exc)

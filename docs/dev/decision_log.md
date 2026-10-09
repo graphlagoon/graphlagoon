@@ -11500,3 +11500,63 @@ arquivo legível por quem lê o caso).
 **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 20:15] - Feature Implemented: F2.8 · Resolução de entidades e revisão de matches (T8)
+
+**Feature:** resolução de entidades (03 §6.2) em TS (`utils/entityResolution.ts`, rodada
+pelo `workers/erWorker.ts`) e em Python (`services/entity_resolution.py`), com fixture
+compartilhada; rotas `GET/POST …/matches` e `PATCH …/matches/{mid}`; tela T8
+(`/investigations/:id/matches`, botão "Matches · N" no cabeçalho do caso); match
+aceito une as duas entidades na vista unificada (`applyAliases`); MCP `list_matches`
+e `suggest_matches`; proposta `match` ligada ao serviço novo.
+
+**Design Decisions:**
+1. Só o bloco (b) vira sugestão: 6 dígitos centrais do CPF iguais e pelo menos um lado
+   mascarado (CNPJ fica fora). Score `0,5·JW + 0,3 + 0,2·[CEP5]`, corte 0,85, arredondado
+   meio-para-cima em 4 casas nos dois lados (o `round` do Python é half-even e quebrava
+   a paridade). Campos lidos por nome de propriedade (`cpf`/`documento`, `nome`/`name`/
+   `razao_social`, `cep`/`zip`). `shortcut:` sem arestas de atributo compartilhado (c),
+   só propriedades de nós (linhas de enriquecimento só depois de promovidas).
+2. **Nunca merge automático:** o POST não aceita status (sempre `sugerido`, par repetido
+   ignorado); só `PATCH` humano (`forbid_agents`) ou a aceitação humana de uma proposta
+   `match` (`{match_id, status, reason_text}`) decide. Motivo obrigatório nos três
+   (`aceito`, `recusado`, `adiado`); `adiado` volta à fila, os outros são finais (409).
+   Diário: `match.suggested` (contagem) e `match.decided` (status, motivo, par, score).
+3. Alias no cliente: `applyAliases` dobra o lado direito no esquerdo (fontes,
+   propriedades, conflitos) e reaponta arestas, sem mexer no grafo em cache.
+   `shortcut:` o `case_graph` do MCP ainda não aplica os aliases.
+4. T8: fila ordenada pelas conexões novas que o aceite traz, depois score; cartões
+   lado a lado com os valores comparados destacados, motivos, nota de CPF mascarado,
+   efeito ("ganha N conexões, de A para A+N"), motivo e Adiar / Não é a mesma / É a
+   mesma. "Find matches" roda o worker no grafo unificado e posta as sugestões.
+5. AI-first: GET → `list_matches` (read), POST → `suggest_matches` (analyze; roda o
+   port Python no `case_graph`), PATCH → human-only no registry.
+6. E2E não feito (caro para o ganho): o vitest da T8 cobre aceitar → o anel cresce
+   (o nó ganha a aresta do lado mascarado) e o pytest cobre API e o fluxo do agente.
+   Seed sem matches.
+
+**Files:** `api/graphlagoon/services/entity_resolution.py` (novo),
+`services/investigation_matches.py` (novo), `services/investigation_proposals.py`,
+`routers/investigations.py`, `routers/admin_registry.py`, `models/schemas.py`,
+`mcp/server.py`, `mcp/registry.py`, `api/tests/test_matches.py` (novo),
+`tests/test_mcp_server.py`; `frontend/src/utils/entityResolution.ts` (novo),
+`workers/erWorker.ts` (novo), `views/InvestigationMatchesView.vue` (novo),
+`utils/unifyGraph.ts`, `stores/investigation.ts`, `views/InvestigationView.vue`,
+`views/InvestigationAgentsView.vue`, `router/index.ts`, `services/api.ts`,
+`types/investigation.ts`, `utils/investigationEvents.ts`,
+`__tests__/fixtures/er/matches.json` (novo), `utils/__tests__/entityResolution.test.ts`,
+`views/__tests__/InvestigationMatchesView.test.ts`.
+
+**Testing:** pytest `test_matches.py` (paridade da fixture; mascarado fica `sugerido`
+mesmo pedindo `aceito`; motivo obrigatório; adiar → aceitar; 409; leitor 403),
+`test_mcp_server.py` (suggest → list → PATCH do agente 403 → proposta aceita por
+pessoa → `match.decided` antes de `proposal.accepted`), `test_proposals.py`, registries;
+vitest ER (fixture, blocking, mascarado, JW) e T8; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Match review), `agents-mcp.md` (escopos).
+**Admin-Area Impact:** `POST/PATCH …/matches` em `AUDIT_EXEMPT_ROUTES` (diário do caso);
+`entity_matches` já estava em `CLEARABLE_TABLES`.
+
+**Author:** Claude (AI Assistant)

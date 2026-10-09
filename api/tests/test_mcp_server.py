@@ -302,3 +302,45 @@ def test_mask_text_keeps_the_middle_digits():
     assert mask_text("CPF 123.456.789-01") == "CPF ***.456.789-**"
     assert mask_text("12345678000199") == "**.345.678/****-**"
     assert mask_text("sha 0a12345678901b") == "sha 0a12345678901b"  # not a document
+
+
+@pytest.mark.asyncio
+async def test_agent_suggests_and_proposes_a_match_a_person_accepts(env, monkeypatch):
+    app, exploration = env
+    snap = {"nodes": [
+        {"id": "p1", "type": "Pessoa", "properties": {"nome": "Ana Lima", "cpf": CPF, "cep": "01001-000"}},
+        {"id": "t9", "type": "Titular", "properties": {"nome": "ANA LIMA", "cpf": "***.456.789-**", "cep": "01001999"}},
+    ], "edges": []}
+
+    class _Snap:
+        async def load(self, exploration_id):
+            return snapshot.compress_snapshot(snap)
+
+    monkeypatch.setattr(snapshot, "get_snapshot_service", lambda: _Snap())
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={
+            "name": "claude", "scopes": ["read", "analyze", "propose"]})).json()["token"]
+        cid = (await rest.post("/api/investigations", json={"title": "x"})).json()["id"]
+        url = f"/api/investigations/{cid}"
+        await rest.post(f"{url}/sources", json={"kind": "exploration", "exploration_id": str(exploration.id)})
+        async with _mcp(app, token) as client:
+            out = await _tool(client, "suggest_matches", investigation_id=cid)
+            assert out["found"] == 1 and out["created"][0]["status"] == "sugerido"
+            # Running again does not duplicate the pair.
+            assert (await _tool(client, "suggest_matches", investigation_id=cid))["created"] == []
+            [match] = await _tool(client, "list_matches", investigation_id=cid)
+            assert CPF not in json.dumps(match)
+            # Deciding directly is human-only; the agent proposes.
+            r = await rest.patch(f"{url}/matches/{match['id']}", json={"status": "aceito", "reason_text": "x"},
+                                 headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 403
+            proposal = await _tool(client, "propose", investigation_id=cid, kind="match", payload={
+                "match_id": match["id"], "status": "aceito", "reason_text": "mesmo CEP e nome"})
+        r = await rest.post(f"{url}/proposals/{proposal['id']}/accept")
+        assert r.status_code == 200, r.text
+        [decided] = (await rest.get(f"{url}/matches")).json()
+        assert decided["status"] == "aceito" and decided["decided_by"] == OWNER
+        events = (await rest.get(f"{url}/events")).json()
+        kinds = [e["kind"] for e in events]
+        assert kinds.index("match.decided") < kinds.index("proposal.accepted")
+        assert next(e for e in events if e["kind"] == "match.decided")["payload"]["reason"] == "mesmo CEP e nome"

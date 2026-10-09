@@ -181,3 +181,19 @@ export interface InvestigationProposal {
   decided_at?: string | null;
   decision_note?: string | null;
 }
+
+/** Entity match (F2.8, 03 §6.2): a suggestion until a person decides. */
+export type MatchStatus = 'sugerido' | 'aceito' | 'recusado' | 'adiado';
+
+export interface EntityMatch {
+  id: string;
+  left: { uid: string };
+  right: { uid: string };
+  score: number;
+  reasons: { term: string; weight: number; value: number; left?: string; right?: string; masked?: boolean }[];
+  status: MatchStatus;
+  reason_text: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+}

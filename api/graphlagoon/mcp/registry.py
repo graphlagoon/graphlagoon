@@ -37,6 +37,8 @@ AGENT_TOOL_ROUTES: dict[tuple[str, str], str] = {
     ("POST", f"{_CASE}/files/{{file_id}}/context"): "create_file_graph",
     ("GET", f"{_CASE}/proposals"): "list_proposals",
     ("POST", f"{_CASE}/proposals"): "propose",
+    ("GET", f"{_CASE}/matches"): "list_matches",
+    ("POST", f"{_CASE}/matches"): "suggest_matches",
     (
         "POST",
         "/api/graph-contexts/{context_id}/enrichment/{name}/lookup",
@@ -57,6 +59,9 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("POST", f"{_CASE}/proposals/{{proposal_id}}/reject"): (
         f"{HUMAN_ONLY} a person decides on proposals (03 §8.4)"
+    ),
+    ("PATCH", f"{_CASE}/matches/{{match_id}}"): (
+        f"{HUMAN_ONLY} a person decides on matches; agents `propose` kind match"
     ),
     ("GET", "/api/agent-tokens"): f"{HUMAN_ONLY} token management",
     ("POST", "/api/agent-tokens"): f"{HUMAN_ONLY} an agent never mints tokens",

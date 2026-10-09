@@ -1,0 +1,133 @@
+{
+  "description": "Shared ER fixture (03 §6.2): the TS worker and the Python service must return exactly `expected`.",
+  "nodes": [
+    {
+      "uid": "s1@ctx-qsa",
+      "type": "Socio",
+      "properties": {
+        "nome": "MARIA A SOUZA",
+        "cpf": "***.418.207-**",
+        "cep": "04571-010"
+      }
+    },
+    {
+      "uid": "Pessoa:12341820790",
+      "type": "Pessoa",
+      "properties": {
+        "nome": "Maria Aparecida Souza",
+        "cpf": "123.418.207-90",
+        "cep": "04571-020"
+      }
+    },
+    {
+      "uid": "Pessoa:99941820711",
+      "type": "Pessoa",
+      "properties": {
+        "nome": "João Pereira",
+        "cpf": "999.418.207-11",
+        "cep": "04571-030"
+      }
+    },
+    {
+      "uid": "Pessoa:11141820722",
+      "type": "Pessoa",
+      "properties": {
+        "nome": "MARIA APARECIDA DE SOUZA",
+        "cpf_cnpj": "11141820722"
+      }
+    },
+    {
+      "uid": "Pessoa:55512345600",
+      "type": "Pessoa",
+      "properties": {
+        "nome": "José da Silva",
+        "cpf": "555.123.456-00",
+        "cep": "01001000"
+      }
+    },
+    {
+      "uid": "t9@ctx-pix",
+      "type": "Titular",
+      "properties": {
+        "Nome": "JOSE SILVA",
+        "CPF": "•••.123.456-••",
+        "CEP": "01001-999"
+      }
+    },
+    {
+      "uid": "Empresa:12345678000199",
+      "type": "Empresa",
+      "properties": {
+        "razao_social": "LOJA BOM PRECO ME",
+        "cnpj": "**.345.678/****-**"
+      }
+    },
+    {
+      "uid": "n3@ctx-pix",
+      "type": "Conta",
+      "properties": {
+        "nome": "MARIA SOUZA"
+      }
+    }
+  ],
+  "expected": [
+    {
+      "left": {
+        "uid": "Pessoa:55512345600"
+      },
+      "right": {
+        "uid": "t9@ctx-pix"
+      },
+      "score": 1.0,
+      "reasons": [
+        {
+          "term": "name",
+          "weight": 0.5,
+          "value": 1.0,
+          "left": "JOSE SILVA",
+          "right": "JOSE SILVA"
+        },
+        {
+          "term": "cpf_middle6",
+          "weight": 0.3,
+          "value": 1,
+          "masked": true
+        },
+        {
+          "term": "cep5",
+          "weight": 0.2,
+          "value": 1
+        }
+      ]
+    },
+    {
+      "left": {
+        "uid": "s1@ctx-qsa"
+      },
+      "right": {
+        "uid": "Pessoa:12341820790"
+      },
+      "score": 0.9389,
+      "reasons": [
+        {
+          "term": "name",
+          "weight": 0.5,
+          "value": 0.8777,
+          "left": "MARIA A SOUZA",
+          "right": "MARIA APARECIDA SOUZA"
+        },
+        {
+          "term": "cpf_middle6",
+          "weight": 0.3,
+          "value": 1,
+          "masked": true
+        },
+        {
+          "term": "cep5",
+          "weight": 0.2,
+          "value": 1
+        }
+      ]
+    }
+  ]
+}

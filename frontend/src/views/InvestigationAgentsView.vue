@@ -24,7 +24,7 @@ const SCOPES = [
   { id: 'write', label: 'Write notes, evidence and draft artifacts' },
   { id: 'propose', label: 'Make proposals for you to accept' },
 ];
-const KIND_LABELS: Record<string, string> = { role: 'Role', status: 'Status', typology: 'Typology' };
+const KIND_LABELS: Record<string, string> = { role: 'Role', status: 'Status', typology: 'Typology', match: 'Match' };
 
 const config = window.__GRAPH_LAGOON_CONFIG__ ?? {};
 const agentsEnabled = config.agents_enabled === true;

@@ -244,6 +244,8 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
                 "POST",
                 "/api/investigations/{investigation_id}/proposals/{proposal_id}/reject",
             ),
+            ("POST", "/api/investigations/{investigation_id}/matches"),
+            ("PATCH", "/api/investigations/{investigation_id}/matches/{match_id}"),
         )
     },
 }

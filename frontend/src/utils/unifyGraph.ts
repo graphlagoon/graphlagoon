@@ -162,3 +162,45 @@ export function mergedEntityCounts(nodes: UnifiedNode[]): Record<string, number>
   }
   return counts;
 }
+
+/**
+ * Accepted entity matches (F2.8): each `[keep, drop]` pair folds `drop` into `keep`
+ * (sources, missing properties, conflicts) and re-points its edges. Chains resolve
+ * transitively. Only a person's accepted match gets here; nothing merges by itself.
+ */
+export function applyAliases(graph: UnifiedGraph, pairs: [string, string][]): UnifiedGraph {
+  if (pairs.length === 0) return graph;
+  const parent = new Map<string, string>();
+  const find = (u: string): string => {
+    let r = u;
+    while (parent.has(r)) r = parent.get(r)!;
+    return r;
+  };
+  for (const [keep, drop] of pairs) {
+    const k = find(keep);
+    const d = find(drop);
+    if (k !== d) parent.set(d, k);
+  }
+  const targets = new Set(pairs.map(([keep]) => find(keep)));
+  const nodes = new Map<string, UnifiedNode>();
+  const dropped: UnifiedNode[] = [];
+  for (const n of graph.nodes) {
+    if (find(n.node_id) !== n.node_id) dropped.push(n);
+    else if (!targets.has(n.node_id)) nodes.set(n.node_id, n);
+    else {
+      // A copy: merging must not touch the cached unified graph.
+      const conflicts = n.__conflicts && Object.fromEntries(Object.entries(n.__conflicts).map(([k, v]) => [k, [...v]]));
+      nodes.set(n.node_id, { ...n, __sources: [...n.__sources], properties: { ...(n.properties ?? {}) }, __conflicts: conflicts });
+    }
+  }
+  for (const n of dropped) {
+    const into = nodes.get(find(n.node_id));
+    if (!into) nodes.set(n.node_id, n); // the kept side is not loaded: show the node as is
+    else for (const o of n.__sources) mergeNode(nodes, into.node_id, into.__entity, n, o);
+  }
+  const id = (u: string) => (nodes.has(find(u)) ? find(u) : u);
+  return {
+    nodes: [...nodes.values()],
+    edges: graph.edges.map((e) => ({ ...e, src: id(e.src), dst: id(e.dst) })),
+  };
+}

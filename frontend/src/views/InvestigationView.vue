@@ -63,6 +63,7 @@ const sourceTitle = (sourceId: string) =>
   store.sources.find((s) => s.id === baseSourceId(sourceId))?.title_snapshot ?? sourceId;
 const contextTitle = (contextId: string) => store.contexts[contextId]?.title ?? contextId;
 const mergedCounts = computed(() => mergedEntityCounts(store.unified.nodes));
+const openMatches = computed(() => store.matches.filter((m) => m.status === 'sugerido' || m.status === 'adiado').length);
 
 // --- context picker for expanding a node that exists in several contexts ---
 const pickerOrigins = ref<NodeOrigin[] | null>(null);
@@ -226,6 +227,9 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
         <h1 data-testid="investigation-title">{{ store.current.title }}</h1>
         <span class="status">{{ STATUS_LABELS[store.current.status] ?? store.current.status }}</span>
         <span v-if="store.current.typology" class="muted">{{ store.current.typology }}</span>
+        <RouterLink :to="`/investigations/${id}/matches`" class="agents-link" data-testid="matches-link">
+          Matches · {{ openMatches }}
+        </RouterLink>
         <RouterLink :to="`/investigations/${id}/agents`" class="agents-link" data-testid="proposals-counter">
           Agents · {{ pendingProposals }} {{ pendingProposals === 1 ? 'proposal' : 'proposals' }}
         </RouterLink>
@@ -506,6 +510,10 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
 .muted {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.agents-link + .agents-link {
+  margin-left: 0;
 }
 
 .agents-link {

@@ -4,7 +4,8 @@ Accepting applies the change through the **same** service the UI action calls
 (``update_state`` for a role, ``update_investigation`` for status and
 typology), so it is journaled exactly like the manual action, and then records
 ``proposal.accepted`` with who proposed and who accepted. Rejecting needs a
-reason. Match and hypothesis proposals wait for their features (F2.8, F4.2).
+reason. A match proposal decides an existing match through
+``investigation_matches.decide_match`` (F2.8); hypothesis proposals wait for F4.2.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from graphlagoon.services.investigations import (
 _PROPOSALS = "investigation_proposals"
 # Status a proposal may set; "decidido" only comes from the decision (F4.5).
 CASE_STATUSES = ("selecao", "analise", "arquivado")
-SUPPORTED_KINDS = ("role", "status", "typology")
+SUPPORTED_KINDS = ("role", "status", "typology", "match")
 
 
 def _invalid(message: str) -> InvestigationError:
@@ -53,6 +54,19 @@ def validate(kind: str, payload: dict) -> dict:
         if not isinstance(typology, str) or not typology.strip() or len(typology) > 100:
             raise _invalid('A typology proposal needs "typology" (≤ 100 characters)')
         return {"typology": typology.strip()}
+    if kind == "match":
+        from graphlagoon.services.investigation_matches import DECISIONS
+
+        try:
+            match_id = str(UUID(str(payload.get("match_id"))))
+        except ValueError:
+            raise _invalid('A match proposal needs "match_id" (from list_matches)')
+        reason = payload.get("reason_text")
+        if payload.get("status") not in DECISIONS:
+            raise _invalid(f'"status" must be one of {", ".join(DECISIONS)}')
+        if not isinstance(reason, str) or not reason.strip():
+            raise _invalid('A match proposal needs "reason_text" (it goes to the journal)')
+        return {"match_id": match_id, "status": payload["status"], "reason_text": reason.strip()}
     raise InvestigationError(
         422,
         "PROPOSAL_KIND_UNSUPPORTED",
@@ -213,6 +227,16 @@ async def accept_proposal(
     if kind == "role":
         await cases.update_state(
             investigation_id, user_email, {payload["entity"]: payload["role"]}, None
+        )
+    elif kind == "match":  # the same PATCH the T8 buttons use
+        from graphlagoon.services import investigation_matches as matches
+
+        await matches.decide_match(
+            investigation_id,
+            user_email,
+            UUID(payload["match_id"]),
+            payload["status"],
+            payload["reason_text"],
         )
     else:  # status | typology: the same PATCH the case header uses
         await cases.update_investigation(investigation_id, user_email, payload)
