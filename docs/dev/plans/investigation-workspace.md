@@ -1,10 +1,26 @@
 # Plano: Graph Lagoon como sistema de investigação (fraude, PLD/FT, follow the money)
 
-> Status: **proposta** em 2026-10-09. Nada foi implementado ainda.
+> Status: **proposta** em 2026-10-09, atualizada no mesmo dia com a etapa AI-first
+> (§4.6) e o armazenamento no Volume. **Nada foi implementado ainda.**
 >
 > **Para executar, use o pacote [investigation/](investigation/README.md):** pesquisa,
-> design (telas e fluxos com imagens e mockups), arquitetura e plano de tarefas. Este
-> arquivo fica como registro da proposta original.
+> design (telas e fluxos com imagens e mockups), arquitetura e plano de tarefas. O
+> pacote é a fonte da verdade; este arquivo é o resumo da proposta.
+
+## O que existe hoje e o que é proposta
+
+| Funcionalidade | Hoje no app | Proposta | Fase |
+|---|---|---|---|
+| **Uma investigação com várias explorações de contexts diferentes** | Não existe: cada exploração tem FK para um único context | O caso agrupa N explorações em abas, com visão unificada e seleção vinculada | F1 |
+| Unir a mesma pessoa ou conta entre contexts | Não existe | Chaves de identidade no context | F1 |
+| Tabelas extras de enriquecimento | Não existe | Consultadas por chave, fora da query do grafo | F2 |
+| Subir arquivos (SIMBA, QSA, CSV) salvos no Volume | Não existe | Grafo, enriquecimento ou anexo; streaming com hash | FA, F2 |
+| Grafo em memória enriquecido | Parcial: um por exploração | Grafo unificado do caso | F1, F2 |
+| Seguir o dinheiro | Não existe | Rastreio temporal, camadas, Sankey, raias, caminhos | F3 |
+| Resolução de entidades | Não existe | Sugestões revisáveis, com motivo | F2 |
+| Dossiê, prazos, decisão, exportação | Não existe | Diário, hipóteses, evidências, decisão, laudo | F4 |
+| Agentes de IA no caso (MCP) | Não existe | Token do usuário, propostas com aceite humano | FA |
+| Espaço do caso para artefatos | Não existe | Slides, docs e relatórios versionados no Volume | FA |
 
 ## Contexto
 
@@ -17,7 +33,9 @@ Getnet) e para bancos e IPs. O produto precisa permitir:
 - **unir várias explorações** em uma única investigação;
 - **carregar CSVs** (extratos, cadastros, quebras de sigilo, listas);
 - **montar e enriquecer um grafo em memória** a partir desses CSVs;
-- **seguir o dinheiro** (follow the money): rastrear valores salto a salto entre contas.
+- **seguir o dinheiro** (follow the money): rastrear valores salto a salto entre contas;
+- **ser AI-first:** API e servidor MCP para um agente de IA criar e evoluir a
+  investigação e subir artefatos (slides, documentos, relatórios) no espaço do caso.
 
 Este documento faz três coisas:
 
@@ -209,7 +227,14 @@ Investigação (= dossiê; status, responsável, prazos 45+45 d, decisão)
 ├── Rastreios ─────── execuções parametrizadas de follow the money (semente, direção, saltos, Δ, janela, alocação)
 ├── Evidências ────── pins de estado do grafo, notas, trechos de tabela, selos de tipologia, hipóteses
 ├── Diário ───────── registro automático de cada query, upload, merge, rastreio e decisão de match
+│                     (inclusive o que agentes fizeram, "agente X em nome de Y")
+├── Espaço do caso ── artefatos versionados: slides, docs, relatórios, imagens (pessoas e agentes)  ← AI-first
+├── Agentes ──────── tokens do usuário com escopo; leem, analisam, escrevem, propõem           ← AI-first
 └── Decisão ──────── comunicar (COAF/SPA) · marcar (DICT) · arquivar, com fundamentação e exportação
+                      (sempre humana)
+
+Volume do caso: {investigations_volume_path}/{id}/ files/ · sources/ · evidence/ · artifacts/ · exports/
+                (endereçado por hash, nunca sobrescrito, acesso só pela API)
 ```
 
 ### 4.1a Explorações de contexts diferentes na mesma investigação
@@ -374,6 +399,35 @@ snapshot guarda só x/y, sem o flag de fixado.
 - **Docs públicas**: guias novos em `docs/guide/` para investigações, importação de
   arquivos, tabelas de enriquecimento e follow the money.
 
+### 4.6 AI-first e armazenamento no Volume
+
+**Armazenamento:**
+- Todo arquivo do caso (uploads, fontes congeladas, evidências, artefatos,
+  exportações) vai para o Volume do Unity Catalog via Files API, ou para um diretório
+  local em dev.
+- A raiz é o setting `investigations_volume_path`.
+- Upload em streaming, com sha256 calculado durante o recebimento.
+- Endereçado por conteúdo, nunca sobrescrito; acesso só pela API.
+- Detalhes em [03 §2.3](investigation/03-arquitetura.md#23-armazenamento-no-volume).
+
+**AI-first:** um agente de IA (Claude Code, Claude Desktop ou outro cliente MCP)
+trabalha no caso em nome de uma pessoa, com o acesso dela.
+- **Identidade:** token `glt_` criado pelo usuário, com escopos `read`, `analyze`,
+  `write` e `propose`, validade e revogação.
+- **Servidor MCP em `/mcp`:** ferramentas para ler o caso e o grafo, rodar rastreio,
+  caminhos e tipologias no servidor, anotar, fixar evidências, subir arquivos e
+  artefatos (em rascunho) e propor. Atrás do proxy do Databricks, usa uma ponte local
+  stdio.
+- **Pessoas decidem:** papéis, matches, hipóteses, tipologias e status viram
+  **propostas** que uma pessoa aceita. Decisão, comunicação, DICT, compartilhamento,
+  apagar e aprovar artefato **nunca** são do agente.
+- **Dados pessoais** vão mascarados para agentes por padrão (LGPD), e conteúdo de
+  dados volta marcado como não confiável (prompt injection).
+- **Cobertura obrigatória:** um teste de registry faz toda rota nova ter ferramenta MCP
+  ou ser marcada como só humana.
+- **Telas:** T10 (espaço do caso) e T11 (agentes).
+- Detalhes em [03 §8](investigation/03-arquitetura.md#8-ai-first-agentes-na-investigação).
+
 ---
 
 ## 5. Plano de design (como vou projetar)
@@ -413,7 +467,7 @@ adquirentes.
 |---|---|---|
 | **D0 Mapa do sistema** | Diagrama editável: fontes → grafo de trabalho → análises → dossiê → exportações, mais o modelo de objetos de §4.1 | Escopo e vocabulário (Investigação, Fonte, Rastreio, Evidência) |
 | **D1 Direções de layout** (low-fi) | 3 wireframes do workspace. **A** *Canvas-first*: grafo central, fontes à esquerda, inspector à direita, timeline embaixo. **B** *Cockpit*: grafo, Sankey e timeline em divisão sincronizada. **C** *Dossiê-first*: documento do caso com blocos vivos de grafo | Qual estrutura seguir |
-| **D2 Telas hi-fi** | (0) Configuração do context: chaves de identidade e tabelas de enriquecimento (§4.1b); (1) Fila de investigações com prazos de 45+45 d; (2) Workspace: abas de explorações de contexts diferentes, visão unificada, seleção vinculada; (3) Adicionar à investigação (explorações de outros contexts, prévia de sobreposição pelas chaves, conflitos); (4) Assistente de arquivo (papel grafo/enriquecimento/anexo → detectar SIMBA/QSA/genérico → mapear colunas → identidade e dedup → revisão e salvar mapeamento); (5) Enriquecimento e resolução de entidades (abas no inspector, match links, promover a nós); (6) Rastreio: configuração e resultado em fluxo por camadas, Sankey e tabela por salto, com o carimbo do método; (7) Timeline em raias ligada ao grafo; (8) Dossiê: diário, notas, hipóteses, evidências, selos CC 4.001, decisão e exportação | Detalhe de interação de cada tela |
+| **D2 Telas hi-fi** | (0) Configuração do context: chaves de identidade e tabelas de enriquecimento (§4.1b); (1) Fila de investigações com prazos de 45+45 d; (2) Workspace: abas de explorações de contexts diferentes, visão unificada, seleção vinculada; (3) Adicionar à investigação (explorações de outros contexts, prévia de sobreposição pelas chaves, conflitos); (4) Assistente de arquivo (papel grafo/enriquecimento/anexo → detectar SIMBA/QSA/genérico → mapear colunas → identidade e dedup → revisão e salvar mapeamento); (5) Enriquecimento e resolução de entidades (abas no inspector, match links, promover a nós); (6) Rastreio: configuração e resultado em fluxo por camadas, Sankey e tabela por salto, com o carimbo do método; (7) Timeline em raias ligada ao grafo; (8) Dossiê: diário, notas, hipóteses, evidências, selos CC 4.001, decisão e exportação; (9) Revisão de matches; (10) Anel de lojistas; (11) Espaço do caso com artefatos; (12) Agentes: conexão, propostas, atividade. As telas finais são T1–T11 em [investigation/02-design.md](investigation/02-design.md) | Detalhe de interação de cada tela |
 | **D3 Protótipo clicável** | F-A de ponta a ponta, com links entre as telas | Se o fluxo fecha sem atrito |
 | **D4 Validação → engenharia** | Revisão do fluxo contra o checklist §1.2 e §2.1 (art. 43, CC 4.001); roteiro de 5 perguntas para analistas reais; cada tela vira épico de §6 | Prioridade de implementação |
 
@@ -424,8 +478,9 @@ adquirentes.
 | Fase | Escopo | Reaproveita | Bloqueios |
 |---|---|---|---|
 | **F1 Fundação** | Entidade Investigação (DB, memory store, registries do admin) com **N explorações de contexts diferentes**; chaves de identidade no context; visão unificada com proveniência; seleção vinculada; notas e pins; permissões `investigation.*`; auditoria de leitura | Snapshot, dedup do `expandFromNode`, clusters, `admin_registry`, `permission_catalog` | #28; o clear das comunidades a cada troca de `nodes` |
+| **FA AI-first** | Tokens de agente com escopos; armazenamento do caso no Volume em streaming; espaço de artefatos versionados (T10); propostas com aceite humano (T11); servidor MCP em `/mcp`; ponte stdio para o Databricks; registry que obriga cobertura MCP | Camada de serviço da F1, `BlobStore`, `require_permission`, auditoria | Proxy do Databricks Apps (Q7) |
 | **F2 Arquivos e enriquecimento** | **Tabelas de enriquecimento no context** (+ `sql_scope.context_tables` + endpoint parametrizado + auditoria); **context de arquivo** (datasource `file`); parser em worker; assistente; mapeamentos salvos; presets SIMBA/QSA/genérico; upload com hash; arquivos como enriquecimento e como anexo; gravar métricas como propriedade; promover a nós e arestas; resolução de entidades (algoritmo 4) | `/nodes/batch`, `detectType`, `rest/mapping.py`, worker de métricas customizadas, `injectEdges`, datasource factory | M4 (injeção em CSV) |
-| **F3 Follow the money** | Modelo temporal; algoritmos 1–3 e 6 (§4.3); layouts de fluxo em camadas, raias e Sankey (§4.4); timeline com seleção de janela | `metricsWorker` (graphology), layout hierárquico, ego, hive | #28 |
+| **F3 Follow the money** | Modelo temporal; algoritmos 1–3 e 6 (§4.3); layouts de fluxo em camadas, raias e Sankey (§4.4); timeline com seleção de janela; rastreio e caminhos também no servidor (Python, mesma fixture) para os agentes | `metricsWorker` (graphology), layout hierárquico, ego, hive | #28 |
 | **F4 Dossiê e compliance** | Diário automático, hipóteses, evidências congeladas; status, responsável e prazos; decisão fundamentada; exportação (PDF, CSV, SIMBA, resumo Siscoaf); retenção; tipologias (algoritmo 5) com selos CC 4.001 | Auditoria, regras de label, métricas customizadas | #32 (sandbox) |
 | **F5 Escala e IA** | Promover fontes ao warehouse (schema de rascunho em Delta); rastreio em SQL; narrativa assistida por LLM com revisão humana (LGPD art. 20) | gsql2rsql/VLP, datasource factory | n/a |
 
@@ -436,9 +491,14 @@ adquirentes.
 - **Teto do grafo de trabalho no browser.** Medir com `make perf-report`. Os extratos
   SIMBA de um caso costumam ter de milhares a centenas de milhares de linhas, mas isso
   é **estimativa, a medir**.
-- **Onde o dado sigiloso pode ficar.** No storage do app, no Volume do Databricks ou só
-  no browser. Depende de cada instituição; a decisão #5 assume o mesmo storage dos
-  snapshots.
+- **Onde o dado sigiloso fica.** No Volume do caso (§4.6). O limite de tamanho por
+  request do Databricks Apps e da Files API está **a confirmar**; se for baixo, entra
+  upload em partes.
+- **Agentes e LLMs.** Mandar dado de cliente a um provedor de LLM é transferência de
+  dado pessoal: o padrão é mascarar, e só o admin libera. Prompt injection vindo dos
+  dados é tratado marcando o conteúdo como não confiável.
+- **Acesso de agentes no Databricks Apps.** O proxy exige login do Databricks; se o
+  `/mcp` remoto não for alcançável, usa-se a ponte local stdio.
 - **Profundidade do MED 2.0.** A fonte oficial fala em 2ª camada; fontes secundárias
   falam em 5 (**incerto**). Isso afeta o default de saltos.
 - **Siscoaf.** Sem API pública conhecida; o produto só exporta (**a confirmar**).
