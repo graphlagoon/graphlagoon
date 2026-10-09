@@ -10019,3 +10019,46 @@ Design feito num canvas de artboards, fora do repositório e privado para o auto
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-10-09 18:10] - Feature Planning: pacote de execução de investigações para agentes
+
+**O quê:** o plano, a pesquisa e o design de investigações viraram um pacote
+autossuficiente em [plans/investigation/](plans/investigation/README.md). Um agente
+consegue implementar a partir dele sem depender desta conversa nem dos artefatos
+privados no claude.ai.
+
+**Conteúdo:**
+- `README.md`: ponto de entrada, ordem de leitura, regras de trabalho (Definition of
+  Done) e decisões em aberto Q1 a Q6, cada uma com o padrão recomendado.
+- `00-pesquisa-mercado.md` e `01-pesquisa-brasil.md`: as pesquisas completas, com
+  fontes.
+- `02-design.md`: sistema visual, telas T1 a T9, direções A/B/C, fluxos (hoje, A, B,
+  C, 0) e avaliação.
+- `03-arquitetura.md`: modelo de dados (colunas novas em `graph_contexts`, 8 tabelas
+  novas), API, especificação de mapeamento de arquivo, unificação do grafo e
+  algoritmos. Inclui o **rastreio temporal** com FIFO, proporcional, LIBR e
+  contaminação total, e a fixture do golpe Pix com os valores esperados.
+- `04-plano-de-implementacao.md`: portões G1 a G4 e tarefas F1.1 a F5.3, cada uma com
+  dependências, arquivos reais, passos, aceite e testes, numa lista de progresso
+  marcável.
+- `screens/`, `diagrams/` e `mockups/`: PNG das telas e diagramas, renderizados das
+  pranchas com o Playwright do projeto, e o HTML-fonte.
+
+**Decisões fixadas no pacote:**
+1. O interpretador de mapeamento em Python é o **autoritativo**; o TS serve à prévia.
+   A paridade é garantida por fixtures douradas comuns.
+2. O diário do caso é **encadeado por hash**, separado do `usage_logs` de auditoria.
+3. Um caso decidido é imutável e não pode ser apagado (409); retenção configurável,
+   padrão 10 anos.
+4. Os critérios de aceite do rastreio usam a mesma fixture das telas T5 e T7:
+   - FIFO: 4.430 de 4.870 (91%);
+   - proporcional: Exchange = 1.597,73;
+   - com Δ = 40 min, só a saída das 15:05 é cortada.
+
+**Public Docs:** nenhuma alteração; os guias públicos estão nas tarefas F1.9 em
+diante.
+
+**Admin-Area Impact:** nenhum agora; o impacto de cada tarefa está no plano.
+
+**Author:** Claude (AI Assistant)
+
+---

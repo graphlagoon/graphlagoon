@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Seguir o dinheiro</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="height: 100vh; min-height: 800px; display: flex; flex-direction: column; background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #2c3e50; font-size: 14px; line-height: 1.5">
+<header style="min-height: 52px; box-sizing: border-box; padding: 0 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #0d1b2a; border-bottom: 1px solid rgba(20,184,166,0.25); color: #c8e8f0">
+<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: #14b8a6; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round"><path d="M3 15c2-4 4-4 6 0s4 4 6 0 4-4 6 0"></path></svg>
+<a href="T1-Fila.dc.html" style="color: #14b8a6; font-weight: 600; text-decoration: none; padding: 4px 8px">Investigações</a>
+<span style="width: 1px; height: 20px; background: rgba(200,232,240,0.15)"></span>
+<a href="T2-Workspace.dc.html" style="font-weight: 600; color: #ffffff; text-decoration: none">Golpe Pix · falsa central</a>
+<span style="font-size: 12px; color: rgba(200,232,240,0.8)">#2026-0412</span>
+<span style="font-size: 12px; color: rgba(200,232,240,0.85)">› Seguir o dinheiro</span>
+<div style="flex: 1 1 auto"></div>
+<a href="T7-Dossie.dc.html" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; color: #c8e8f0; text-decoration: none; border: 1px solid rgba(200,232,240,0.3)">Dossiê</a>
+</header>
+<div style="flex: 1 1 auto; min-height: 0; display: flex; flex-wrap: wrap">
+<aside aria-label="Parâmetros do rastreio" style="flex: 1 1 280px; max-width: 100%; box-sizing: border-box; background: #ffffff; border-right: 1px solid #dee2e6; padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; max-height: calc(100vh - 52px); font-size: 13px">
+<h2 style="margin: 0; font-size: 16px; color: #0d1b2a">Seguir o dinheiro</h2>
+<div style="padding: 10px; border-radius: 6px; background: #eff6ff; color: #1e3a8a"><b>Semente</b><br>Pix contestado · R$ 4.870,00<br>09/09 14:02 · E2E E1834…7Q2</div>
+<fieldset style="margin: 0; padding: 0; border: 0">
+<legend style="font-weight: 600; margin-bottom: 6px">Direção</legend>
+<div style="display: flex; gap: 4px; padding: 3px; border-radius: 6px; background: #f0f0f0">
+<button type="button" aria-pressed="true" style="flex: 1 1 0; min-height: 32px; border: 0; border-radius: 4px; background: #ffffff; font: inherit; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.12)">Para frente</button>
+<button type="button" aria-pressed="false" style="flex: 1 1 0; min-height: 32px; border: 0; border-radius: 4px; background: transparent; font: inherit">Para trás</button>
+</div>
+</fieldset>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Camadas máx.<input type="number" value="3" style="min-height: 34px; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400"></label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Permanência máx.<input type="text" value="24 h" style="min-height: 34px; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400"></label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Valor mínimo<input type="text" value="R$ 50" style="min-height: 34px; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400"></label>
+<label style="grid-column: span 2; display: flex; flex-direction: column; gap: 4px; font-weight: 600">Janela<input type="text" value="09/09 14:02 até 10/09 14:02" style="min-height: 34px; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400"></label>
+</div>
+<fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 6px">
+<legend style="font-weight: 600; margin-bottom: 6px">Regra de alocação</legend>
+<label style="display: flex; gap: 8px; align-items: flex-start"><input type="radio" name="aloc" checked style="margin-top: 3px"><span><b>FIFO</b> · sai primeiro o que entrou primeiro</span></label>
+<label style="display: flex; gap: 8px; align-items: flex-start"><input type="radio" name="aloc" style="margin-top: 3px"><span><b>Proporcional</b> · divide pela mistura de saldo</span></label>
+<label style="display: flex; gap: 8px; align-items: flex-start"><input type="radio" name="aloc" style="margin-top: 3px"><span><b>LIBR</b> · menor saldo intermediário</span></label>
+<label style="display: flex; gap: 8px; align-items: flex-start"><input type="radio" name="aloc" style="margin-top: 3px"><span><b>Contaminação total</b> · limite superior</span></label>
+</fieldset>
+<fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 4px">
+<legend style="font-weight: 600; margin-bottom: 6px">Parar em</legend>
+<label style="display: flex; gap: 8px"><input type="checkbox" checked>Saque</label>
+<label style="display: flex; gap: 8px"><input type="checkbox" checked>Exchange de cripto</label>
+<label style="display: flex; gap: 8px"><input type="checkbox" checked>Operador de apostas</label>
+<label style="display: flex; gap: 8px"><input type="checkbox" checked>Banco fora do caso</label>
+<label style="display: flex; gap: 8px"><input type="checkbox">Lojista</label>
+</fieldset>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 38px; padding: 6px 14px; border: 0; border-radius: 6px; background: #0f766e; color: #ffffff; font: inherit; font-weight: 600">Rastrear de novo</button>
+<button type="button" style="min-height: 38px; padding: 6px 14px; border: 1px solid #0f766e; border-radius: 6px; background: #ffffff; color: #0f766e; font: inherit; font-weight: 600">Salvar como evidência</button>
+</div>
+<p style="margin: 0; color: #6c757d">O método e os parâmetros vão junto com a evidência e com o laudo.</p>
+</aside>
+<section style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; background: #fafafa">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; background: #ffffff; border-bottom: 1px solid #dee2e6">
+<div role="group" aria-label="Visão" style="display: flex; gap: 4px; padding: 3px; border-radius: 6px; background: #f0f0f0">
+<button type="button" aria-pressed="{{ camadasPressed }}" onClick="{{ showCamadas }}" style="{{ camadasStyle }}">Camadas</button>
+<button type="button" aria-pressed="{{ sankeyPressed }}" onClick="{{ showSankey }}" style="{{ sankeyStyle }}">Sankey</button>
+</div>
+<span style="font-size: 13px; padding: 4px 10px; border-radius: 9999px; background: #eff6ff; color: #1e3a8a">R$ 4.870 contestados</span>
+<span style="font-size: 13px; padding: 4px 10px; border-radius: 9999px; background: #f0fdfa; color: #115e59; font-weight: 600">R$ 4.430 chegaram a saídas (91%)</span>
+<span style="font-size: 13px; padding: 4px 10px; border-radius: 9999px; background: #fff7ed; color: #9a3412">R$ 440 retidos em 3 contas</span>
+<span style="font-size: 13px; color: #6c757d">2 camadas até as saídas</span>
+</div>
+<div style="position: relative; flex: 1 1 auto; min-height: 300px">
+<sc-if value="{{ isCamadas }}" hint-placeholder-val="{{ true }}">
+<svg viewBox="0 0 900 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rastreio em camadas: semente, camada 1, camada 2 e saídas, com largura das setas proporcional ao valor rastreado" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%">
+<defs><marker id="tr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#0f766e"></path></marker><marker id="tr-arrow-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#94a3b8"></path></marker></defs>
+<g style="font-size: 12px; font-weight: 700; fill: #6c757d; text-transform: uppercase">
+<text x="58" y="30">Semente</text><text x="268" y="30">Camada 1</text><text x="488" y="30">Camada 2</text><text x="730" y="30">Saídas</text>
+</g>
+<g style="stroke: #e9ecef; stroke-width: 1">
+<line x1="190" y1="40" x2="190" y2="360"></line><line x1="410" y1="40" x2="410" y2="360"></line><line x1="630" y1="40" x2="630" y2="360"></line>
+</g>
+<g style="fill: none; stroke: #0f766e; stroke-opacity: 0.85">
+<line x1="104" y1="200" x2="270" y2="200" stroke-width="12" marker-end="url(#tr-arrow)"></line>
+<line x1="322" y1="190" x2="492" y2="94" stroke-width="5" marker-end="url(#tr-arrow)"></line>
+<line x1="324" y1="200" x2="490" y2="200" stroke-width="4.8" marker-end="url(#tr-arrow)"></line>
+<line x1="322" y1="212" x2="492" y2="304" stroke-width="2.4" marker-end="url(#tr-arrow)"></line>
+<line x1="536" y1="90" x2="712" y2="90" stroke-width="5" marker-end="url(#tr-arrow)"></line>
+<line x1="536" y1="200" x2="712" y2="200" stroke-width="3.9" marker-end="url(#tr-arrow)"></line>
+<line x1="536" y1="310" x2="712" y2="310" stroke-width="2.3" marker-end="url(#tr-arrow)"></line>
+</g>
+<g style="font-size: 11px; fill: #1f2937; paint-order: stroke; stroke: #fafafa; stroke-width: 4px; stroke-linejoin: round">
+<text x="128" y="188">R$ 4.870 · 14:02</text>
+<text x="352" y="128">R$ 2.000 · 14:09</text>
+<text x="380" y="192">R$ 1.900 · 14:11</text>
+<text x="350" y="282">R$ 900 · 14:15</text>
+<text x="570" y="80">R$ 2.000 · 14:40</text>
+<text x="556" y="190">R$ 1.550 de 1.850 · 15:05</text>
+<text x="572" y="300">R$ 880 · 14:31</text>
+</g>
+<circle cx="80" cy="200" r="22" fill="#2563eb"></circle>
+<circle cx="300" cy="200" r="24" fill="#ea580c"></circle>
+<circle cx="514" cy="90" r="18" fill="#ea580c"></circle>
+<circle cx="514" cy="200" r="18" fill="#ea580c"></circle>
+<circle cx="514" cy="310" r="18" fill="#ea580c"></circle>
+<rect x="714" y="72" width="36" height="36" rx="6" fill="#0d1b2a"></rect>
+<rect x="714" y="182" width="36" height="36" rx="6" fill="#0d1b2a"></rect>
+<rect x="714" y="292" width="36" height="36" rx="6" fill="#0d1b2a"></rect>
+<g style="font-size: 12px; fill: #1f2937; paint-order: stroke; stroke: #fafafa; stroke-width: 4px; stroke-linejoin: round">
+<text x="48" y="240">Conta 0001-9</text><text x="60" y="255" style="fill: #1d4ed8">vítima</text>
+<text x="262" y="244" style="font-weight: 700">Conta 4471-0</text><text x="270" y="259" style="fill: #9a3412">retém R$ 70</text>
+<text x="482" y="126">Conta 5520-3</text>
+<text x="482" y="236">Conta 8812-7</text><text x="488" y="251" style="fill: #9a3412">retém R$ 350</text><text x="480" y="266" style="fill: #6c757d">já tinha R$ 300</text>
+<text x="482" y="346">Conta 3090-1</text><text x="490" y="361" style="fill: #9a3412">retém R$ 20</text>
+<text x="760" y="94">Saque ATM</text>
+<text x="760" y="204">Exchange Gama</text>
+<text x="760" y="314">Bet Delta</text><text x="760" y="329" style="font-size: 11px; fill: #9a3412">não autorizada</text>
+</g>
+</svg>
+</sc-if>
+<sc-if value="{{ isSankey }}" hint-placeholder-val="{{ false }}">
+<svg viewBox="0 0 900 340" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Sankey do rastreio: R$ 4.870 da vítima passam pela conta 4471-0 e se dividem em três contas até saque, exchange e aposta" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%">
+<g style="fill: #14b8a6; fill-opacity: 0.32">
+<path d="M 74 60 L 300 60 L 300 294 L 74 294 Z"></path>
+<path d="M 314 60 C 427 60, 427 40, 540 40 L 540 136 C 427 136, 427 156, 314 156 Z"></path>
+<path d="M 314 156 C 427 156, 427 152, 540 152 L 540 243 C 427 243, 427 247, 314 247 Z"></path>
+<path d="M 314 247 C 427 247, 427 259, 540 259 L 540 302 C 427 302, 427 290, 314 290 Z"></path>
+<path d="M 554 40 L 780 40 L 780 136 L 554 136 Z"></path>
+<path d="M 554 152 L 780 152 L 780 226 L 554 226 Z"></path>
+<path d="M 554 259 C 667 259, 667 260, 780 260 L 780 302 C 667 302, 667 301, 554 301 Z"></path>
+</g>
+<rect x="60" y="60" width="14" height="234" fill="#2563eb"></rect>
+<rect x="300" y="60" width="14" height="234" fill="#ea580c"></rect>
+<rect x="540" y="40" width="14" height="96" fill="#ea580c"></rect>
+<rect x="540" y="152" width="14" height="91" fill="#ea580c"></rect>
+<rect x="540" y="259" width="14" height="43" fill="#ea580c"></rect>
+<rect x="780" y="40" width="14" height="96" fill="#0d1b2a"></rect>
+<rect x="780" y="152" width="14" height="74" fill="#0d1b2a"></rect>
+<rect x="780" y="260" width="14" height="42" fill="#0d1b2a"></rect>
+<g style="font-size: 12px; fill: #1f2937">
+<text x="56" y="50">Vítima · R$ 4.870</text>
+<text x="270" y="50">4471-0</text>
+<text x="572" y="94">5520-3 · R$ 2.000</text>
+<text x="572" y="200">8812-7 · R$ 1.900</text>
+<text x="572" y="284">3090-1 · R$ 900</text>
+<text x="802" y="86">Saque</text><text x="802" y="101">R$ 2.000</text>
+<text x="802" y="186">Exchange</text><text x="802" y="201">R$ 1.550</text>
+<text x="802" y="278">Bet</text><text x="802" y="293">R$ 880</text>
+</g>
+<text x="60" y="326" style="font-size: 12px; fill: #6c757d">Largura das faixas = valor rastreado (FIFO). Clique numa faixa para ver as transações.</text>
+</svg>
+</sc-if>
+</div>
+<div style="flex: 0 0 auto; background: #ffffff; border-top: 1px solid #dee2e6; padding: 10px 14px">
+<div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px"><b style="font-size: 13px">Linha do tempo em raias</b><span style="font-size: 12px; color: #6c757d">a faixa clara em cada conta é o tempo que o dinheiro ficou parado</span></div>
+<svg viewBox="0 0 900 196" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Raias por conta de 14:00 a 15:10 com as transferências em seus horários" style="width: 100%; height: 196px">
+<defs><marker id="ln-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#0f766e"></path></marker></defs>
+<g style="stroke: #e9ecef; stroke-width: 1">
+<line x1="150" y1="20" x2="890" y2="20"></line><line x1="150" y1="48" x2="890" y2="48"></line><line x1="150" y1="76" x2="890" y2="76"></line><line x1="150" y1="104" x2="890" y2="104"></line><line x1="150" y1="132" x2="890" y2="132"></line><line x1="150" y1="160" x2="890" y2="160"></line>
+</g>
+<g style="fill: #fed7aa">
+<rect x="170" y="42" width="130" height="12"></rect>
+<rect x="240" y="70" width="310" height="12"></rect>
+<rect x="260" y="98" width="540" height="12"></rect>
+<rect x="300" y="126" width="160" height="12"></rect>
+</g>
+<g style="fill: none; stroke: #0f766e; stroke-width: 2">
+<line x1="170" y1="20" x2="170" y2="44" marker-end="url(#ln-arrow)"></line>
+<line x1="240" y1="48" x2="240" y2="72" marker-end="url(#ln-arrow)"></line>
+<line x1="260" y1="48" x2="260" y2="100" marker-end="url(#ln-arrow)"></line>
+<line x1="300" y1="48" x2="300" y2="128" marker-end="url(#ln-arrow)"></line>
+<line x1="460" y1="132" x2="460" y2="156" marker-end="url(#ln-arrow)"></line>
+<line x1="550" y1="76" x2="550" y2="156" marker-end="url(#ln-arrow)"></line>
+<line x1="800" y1="104" x2="800" y2="156" marker-end="url(#ln-arrow)"></line>
+</g>
+<g style="font-size: 11px; fill: #1f2937">
+<text x="0" y="24">0001-9 vítima</text><text x="0" y="52">4471-0</text><text x="0" y="80">5520-3</text><text x="0" y="108">8812-7</text><text x="0" y="136">3090-1</text><text x="0" y="164" style="font-weight: 700">Saídas</text>
+<text x="176" y="36">4.870</text><text x="246" y="64">2.000</text><text x="266" y="92">1.900</text><text x="306" y="120">900</text><text x="466" y="150">880 bet</text><text x="556" y="150">2.000 saque</text><text x="806" y="150">1.850 exchange</text>
+</g>
+<g style="font-size: 11px; fill: #6c757d">
+<text x="140" y="188">14:00</text><text x="290" y="188">14:15</text><text x="440" y="188">14:30</text><text x="590" y="188">14:45</text><text x="740" y="188">15:00</text>
+</g>
+</svg>
+</div>
+</section>
+<aside aria-label="Saídas encontradas" style="flex: 1 1 280px; max-width: 100%; box-sizing: border-box; background: #ffffff; border-left: 1px solid #dee2e6; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; max-height: calc(100vh - 52px); font-size: 13px">
+<h2 style="margin: 0; font-size: 16px; color: #0d1b2a">Saídas</h2>
+<div style="border: 1px solid #dee2e6; border-radius: 8px; padding: 10px 12px"><b>Saque ATM</b> · via 5520-3<br><span style="font-size: 18px; font-weight: 700; color: #0d1b2a">R$ 2.000</span> <span style="color: #6c757d">· 14:40</span></div>
+<div style="border: 1px solid #dee2e6; border-radius: 8px; padding: 10px 12px"><b>Exchange Gama</b> · via 8812-7<br><span style="font-size: 18px; font-weight: 700; color: #0d1b2a">R$ 1.550</span> <span style="color: #6c757d">· 15:05 · FIFO</span><br><span style="color: #6c757d">proporcional daria R$ 1.597,73</span></div>
+<div style="border: 1px solid #fdba74; background: #fff7ed; border-radius: 8px; padding: 10px 12px"><b>Bet Delta</b> · não autorizada<br><span style="font-size: 18px; font-weight: 700; color: #7c2d12">R$ 880</span> <span style="color: #9a3412">· 14:31</span><br><span style="color: #9a3412; font-weight: 600">aviso à SPA em até 24 h</span></div>
+<div style="border-top: 1px solid #e9ecef; padding-top: 10px"><b>Retidos</b> (candidatos a bloqueio cautelar)<br>4471-0 · R$ 70<br>8812-7 · R$ 350<br>3090-1 · R$ 20</div>
+<div style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 16px; padding: 8px 10px; border-radius: 6px; background: #f8f9fa; border: 1px solid #e9ecef; color: #374151">método: para frente · 3 camadas · Δ 24 h · mín R$ 50 · FIFO · parar: saque, exchange, apostas, banco externo · janela 09/09 14:02 → 10/09 14:02</div>
+<a href="T7-Dossie.dc.html" style="display: inline-flex; justify-content: center; align-items: center; min-height: 40px; box-sizing: border-box; padding: 8px 14px; border-radius: 6px; background: #0f766e; color: #ffffff; text-decoration: none; font-weight: 600">Levar para o dossiê</a>
+</aside>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const view = (this.state && this.state.view) || 'camadas';
+const on = 'min-height: 32px; padding: 4px 14px; border: 0; border-radius: 4px; background: #0f766e; color: #ffffff; font: inherit; font-size: 13px; font-weight: 600';
+const off = 'min-height: 32px; padding: 4px 14px; border: 0; border-radius: 4px; background: transparent; color: #2c3e50; font: inherit; font-size: 13px';
+return {
+isCamadas: view === 'camadas',
+isSankey: view === 'sankey',
+camadasStyle: view === 'camadas' ? on : off,
+sankeyStyle: view === 'sankey' ? on : off,
+camadasPressed: view === 'camadas' ? 'true' : 'false',
+sankeyPressed: view === 'sankey' ? 'true' : 'false',
+showCamadas: () => this.setState({ view: 'camadas' }),
+showSankey: () => this.setState({ view: 'sankey' })
+};
+}
+}
+</script>
+</body>
+</html>

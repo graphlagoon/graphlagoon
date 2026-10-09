@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Hoje × Proposta</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #2c3e50; font-size: 14px; line-height: 1.5">
+<div style="width: 100%; max-width: 1200px; margin: 0 auto; box-sizing: border-box; padding: 40px 24px 56px; display: flex; flex-direction: column; gap: 28px">
+<header style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 32px; line-height: 40px; color: #0d1b2a">Hoje × Proposta</h1>
+<p style="margin: 0; color: #495057; max-width: 760px">Avaliação do Graph Lagoon como ferramenta de investigação: o fluxo principal em números, as dores de hoje e onde cada uma é resolvida, e as capacidades que mudam.</p>
+</header>
+<section style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 20px; color: #0d1b2a">Fluxo A (golpe Pix) em números</h2>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; overflow-x: auto">
+<table style="width: 100%; min-width: 640px; border-collapse: collapse; font-size: 14px">
+<thead><tr style="text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #6c757d"><th style="padding: 10px 16px; border-bottom: 1px solid #dee2e6; font-weight: 600">Métrica</th><th style="padding: 10px 16px; border-bottom: 1px solid #dee2e6; font-weight: 600">Hoje</th><th style="padding: 10px 16px; border-bottom: 1px solid #dee2e6; font-weight: 600">Proposta</th></tr></thead>
+<tbody>
+<tr><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">Passos</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">10</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef; font-weight: 600; color: #0f766e">9 (8 no app + Siscoaf)</td></tr>
+<tr><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">Ferramentas</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">7</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef; font-weight: 600; color: #0f766e">2</td></tr>
+<tr><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">Trocas de ferramenta</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">8</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef; font-weight: 600; color: #0f766e">1</td></tr>
+<tr><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">Exportações manuais</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">2 (CSV, prints)</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef; font-weight: 600; color: #0f766e">0 intermediárias</td></tr>
+<tr><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">Registro do que foi feito</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef">nenhum</td><td style="padding: 10px 16px; border-bottom: 1px solid #e9ecef; font-weight: 600; color: #0f766e">8 de 8 passos no diário</td></tr>
+<tr><td style="padding: 10px 16px">Método do rastreio</td><td style="padding: 10px 16px">implícito, na cabeça do analista</td><td style="padding: 10px 16px; font-weight: 600; color: #0f766e">explícito e gravado na evidência</td></tr>
+</tbody>
+</table>
+</div>
+<p style="margin: 0; font-size: 13px; color: #6c757d">Contado nos mapas da página 3 (jornada de hoje e fluxo A).</p>
+</section>
+<section style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 20px; color: #0d1b2a">Dores de hoje e onde são resolvidas</h2>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; overflow-x: auto">
+<table style="width: 100%; min-width: 820px; border-collapse: collapse; font-size: 13px">
+<thead><tr style="text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #6c757d"><th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Dor</th><th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Proposta</th><th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Tela</th><th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Fase</th></tr></thead>
+<tbody>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><b>D1</b> context sem chaves nem tabelas extras</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">chaves de identidade e tabelas de enriquecimento; o escopo de query acompanha</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">T6</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F1, F2</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><b>D2</b> arquivo só entra virando tabela</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">context de arquivo e assistente com SIMBA, QSA e genérico</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">T4</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F2</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><b>D3</b> exploração presa a 1 context</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">investigação com N explorações, abas, visão unificada e seleção vinculada</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">T2, T3</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F1</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><b>D4</b> sem fila, prazo nem decisão</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">fila com prazos de 45 + 45 dias, dossiê e decisão fundamentada</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">T1, T7</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F1, F4</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><b>D5</b> valor e horário não são de primeira classe</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">arestas temporais com valor, soma de paralelas, raias e Sankey</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">T5</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F3</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><b>D6</b> expandir não segue o dinheiro</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">rastreio temporal com regra de alocação e paradas</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">T5</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F3</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><b>D7</b> sem notas, papéis nem desfazer</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">papéis nas entidades, notas ancoradas, hipóteses, desfazer</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">T2, T7</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F1, F4</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><b>D8</b> métricas não viram evidência</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">gravar como propriedade, selos da CC 4.001, evidências congeladas</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">T2, T7</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F2, F4</td></tr>
+<tr><td style="padding: 9px 14px"><b>D9</b> CSV é o fim da linha</td><td style="padding: 9px 14px">diário automático e exportações do dossiê (PDF, SIMBA, resumo Siscoaf)</td><td style="padding: 9px 14px">T7</td><td style="padding: 9px 14px">F4</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 20px; color: #0d1b2a">Capacidades que mudam</h2>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; overflow-x: auto">
+<table style="width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13px">
+<thead><tr style="text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #6c757d"><th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Capacidade</th><th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Hoje</th><th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Proposta</th><th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Fase</th></tr></thead>
+<tbody>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Importar tabela com mapeamento salvo</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #fff7ed; color: #9a3412; font-weight: 600">não existe</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">assistente com mapeamentos salvos e sugeridos</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F2</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Resolução de entidades revisável</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #fff7ed; color: #9a3412; font-weight: 600">não existe</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">sugestões de match com motivo; nunca merge silencioso</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F2</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Linha do tempo ligada ao grafo</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #fff7ed; color: #9a3412; font-weight: 600">não existe</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">raias por conta com seleção de janela</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F3</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Caminhos entre entidades</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #fff7ed; color: #9a3412; font-weight: 600">não existe</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">mais curto, k caminhos, respeitando o tempo</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F3</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Rastreio automático até saídas</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #fff7ed; color: #9a3412; font-weight: 600">não existe</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">FIFO, proporcional, LIBR; Δ, camadas, valor mínimo, paradas</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F3</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Visão de fluxo de dinheiro</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #eff6ff; color: #1e40af; font-weight: 600">parcial</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">camadas e Sankey com largura por valor</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F3</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Casos com responsável e prazo</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #eff6ff; color: #1e40af; font-weight: 600">parcial</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">fila e dossiê da Circ. 3.978</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F1, F4</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Selos de tipologia</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #eff6ff; color: #1e40af; font-weight: 600">parcial</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">selos ligados aos itens da CC 4.001</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F4</td></tr>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">Exportar evidência</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef"><span style="padding: 2px 8px; border-radius: 9999px; background: #eff6ff; color: #1e40af; font-weight: 600">parcial</span></td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">laudo com método, parâmetros e hashes</td><td style="padding: 9px 14px; border-bottom: 1px solid #e9ecef">F4</td></tr>
+<tr><td style="padding: 9px 14px">Nativo do warehouse</td><td style="padding: 9px 14px"><span style="padding: 2px 8px; border-radius: 9999px; background: #ccfbf1; color: #115e59; font-weight: 600">existe</span></td><td style="padding: 9px 14px">mantido; arquivos grandes podem ser promovidos ao warehouse</td><td style="padding: 9px 14px">F5</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 20px; color: #0d1b2a">Avaliação dos fluxos: pontos de atenção</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 12px">
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px"><b>Explosão no "+1 salto"</b><p style="margin: 6px 0 0; font-size: 13px; color: #495057">Contas com muitas saídas multiplicam o grafo. Valor mínimo e paradas vêm ligados por padrão, e o painel mostra quantos ramos cada salto vai abrir antes de rodar. Fluxo A, T5.</p></div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px"><b>CPF mascarado do QSA</b><p style="margin: 6px 0 0; font-size: 13px; color: #495057">Nome mais 6 dígitos visíveis só geram sugestão de match. O merge exige o aceite do analista, que fica no diário com o motivo. Fluxo B, T2.</p></div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px"><b>Exploração restrita</b><p style="margin: 6px 0 0; font-size: 13px; color: #495057">Quem não tem acesso a um context vê um placeholder com o nome do dono, em vez de nada. Assim o analista sabe que falta uma parte do caso. T2, T3.</p></div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px"><b>Tabela extra amplia o escopo</b><p style="margin: 6px 0 0; font-size: 13px; color: #495057">O passo de permissão é obrigatório, e o bloqueio diz qual permissão falta e quem pode conceder. Fluxo 0, T6.</p></div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px"><b>Contraparte desconhecida</b><p style="margin: 6px 0 0; font-size: 13px; color: #495057">No SIMBA, as transações sem contraparte identificada viram um nó "desconhecido" por transação. Agrupá-las criaria um hub falso. Fluxo C, T4.</p></div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px"><b>Contraste do botão primário</b><p style="margin: 6px 0 0; font-size: 13px; color: #495057">O teal #14b8a6 com texto branco não passa 4,5:1. Nas telas novas o primário usa #0f766e; vale aplicar no app todo.</p></div>
+</div>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1480}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

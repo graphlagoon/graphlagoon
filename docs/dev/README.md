@@ -16,6 +16,7 @@ This directory contains comprehensive technical documentation for the graphlagoo
 | [potential_bugs.md](potential_bugs.md) | Cataloged potential bugs and edge cases | Understanding known issues or reproducing bugs |
 | [decision_log.md](decision_log.md) | Historical record of all significant decisions | Understanding why decisions were made |
 | [plans/](plans/) | Pre-implementation proposals and analyses (e.g. [ego-crowded-rings-qsa.md](plans/ego-crowded-rings-qsa.md)) | Picking up planned-but-unbuilt work |
+| [plans/investigation/](plans/investigation/README.md) | **Investigation system** (fraud/AML, follow the money): self-contained execution package for agents (research, design, architecture, task plan, screen images, HTML mockups) | Implementing investigations; start at its README |
 | [admin-area.md](admin-area.md) | Admin area security model + "when to update it" table (test-enforced) | Adding settings, tables, mutating routes, or touching `/api/admin` |
 
 ### 🛠️ Skills and Workflows
