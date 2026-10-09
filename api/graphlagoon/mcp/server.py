@@ -358,6 +358,66 @@ def build_server():
         )
 
     @server.tool()
+    async def lookup_enrichment(
+        ctx: Context, investigation_id: UUID, uid: str, table: str
+    ) -> dict:
+        """Rows of enrichment table ``table`` (a name from the source context's
+        ``enrichment_tables``, e.g. devices or KYC) for one entity of the case."""
+        from fastapi import HTTPException
+
+        from graphlagoon.routers.graph_contexts import run_enrichment_lookup
+        from graphlagoon.services.warehouse import get_warehouse_client
+        from graphlagoon.utils.context_access import get_context_with_access
+
+        user = _agent(ctx, "read")
+        graph = await _call(case_graph(investigation_id, user))
+        real = resolve_uid(graph, uid)
+        node = next((n for n in graph["nodes"] if n["uid"] == real), None)
+        if node is None:
+            raise _tool_error("ENTITY_NOT_FOUND", f"No entity '{uid}' in this case")
+        sources = await _call(service.list_sources(investigation_id, user))
+        context_of = {str(s["id"]): s["context_id"] for s in sources}
+        try:
+            for origin in node["sources"]:
+                context = await get_context_with_access(
+                    context_of[origin["source_id"]], user
+                )
+                spec = next(
+                    (
+                        t
+                        for t in context.enrichment_tables or []
+                        if t["name"] == table and node["type"] in t["match_node_types"]
+                    ),
+                    None,
+                )
+                if spec is None:
+                    continue
+                src = spec.get("match_source", "node_id")
+                key = (
+                    origin["node_id"]
+                    if src == "node_id"
+                    else node["properties"].get(src["name"])
+                )
+                if key is None:
+                    continue
+                result = await run_enrichment_lookup(
+                    get_warehouse_client(), context, table, [str(key)], user
+                )
+                await _audit_read(user, "lookup_enrichment", investigation_id)
+                return _out(
+                    {**result, "rows": result["rows"].get(str(key), [])}, graph["secrets"]
+                )
+        except HTTPException as exc:
+            error = (exc.detail or {}).get("error", {}) if isinstance(exc.detail, dict) else {}
+            raise _tool_error(
+                error.get("code", "FORBIDDEN"), error.get("message", str(exc.detail))
+            ) from exc
+        raise _tool_error(
+            "ENRICHMENT_TABLE_NOT_FOUND",
+            f"No enrichment table '{table}' applies to this entity",
+        )
+
+    @server.tool()
     async def list_events(
         ctx: Context,
         investigation_id: UUID,
@@ -593,7 +653,7 @@ def build_server():
 
     # -- prompts (02-design flows A, B and D) ---------------------------------
     # shortcut: the scripts name only today's tools; add trace_money,
-    # lookup_enrichment, pin_evidence and get_dossier when F2–F4 create them.
+    # pin_evidence and get_dossier when F3–F4 create them.
 
     @server.prompt(title="Investigar golpe Pix")
     def investigar_golpe_pix(investigation_id: str) -> str:
@@ -607,7 +667,8 @@ def build_server():
             "exit (cash-out, crypto, another institution). Write each hop as a note "
             "anchored to the account (`add_note`).",
             "Look for accounts that receive and forward within hours (mules) and for "
-            "people shared across sources (same CPF or device).",
+            "people shared across sources (same CPF or device); `lookup_enrichment` "
+            "reads the context's side tables (devices, KYC) for an entity.",
             "Upload a short Markdown summary of the trail (`upload_artifact`, kind md).",
             "Propose roles: victim, mule, exit (`propose` kind role, with the rationale).",
         )

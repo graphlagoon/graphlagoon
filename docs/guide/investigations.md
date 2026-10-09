@@ -86,6 +86,25 @@ their nodes when the normalized values match, so `123.456.789-01` and
 
 Nodes without a key never merge: they stay one per context.
 
+### Enrichment tables
+
+A context can attach side tables (KYC, login devices, chargebacks) in the
+context form (**Enrichment Tables** section): the table, its key column, the
+node types it applies to and which node value matches the key (the node id or
+a property), whether a node has **one** row or **many**, and the columns that
+may come out. Optionally, a table **promotes to nodes**: each distinct value
+of a column becomes a node of a given type, linked to the nodes that share it
+(for example `Dispositivo` by `device_id`, linking the accounts that used the
+same device).
+
+- Attaching or changing a table needs the **Create graph contexts**
+  permission and a table in an allowed catalog.schema
+  (`GRAPH_LAGOON_CATALOG_SCHEMAS`). Anyone who can read the context can look
+  it up; a writer without the permission can only remove a table.
+- A lookup is always by key, returns only the listed columns, is capped
+  (`GRAPH_LAGOON_ENRICHMENT_MAX_KEYS`, `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS`)
+  and is audited (`enrichment.read`).
+
 ## Roles, notes and the journal
 
 - **Role.** The inspector's *Role* selector marks an entity as **Victim**

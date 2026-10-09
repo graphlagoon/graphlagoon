@@ -72,6 +72,11 @@ class TestNormalization:
             ("main", "graphs", "nodes"),
         }
 
+    def test_context_tables_include_enrichment_tables(self):
+        context = make_context()
+        context.enrichment_tables = [{"table": "main.kyc.devices"}]
+        assert ("main", "kyc", "devices") in context_tables(context, *DEFAULTS)
+
     def test_nodeless_context_has_only_the_edge_table(self):
         assert context_tables(make_context(node=None), *DEFAULTS) == {
             ("main", "graphs", "edges")
