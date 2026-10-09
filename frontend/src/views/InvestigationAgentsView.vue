@@ -29,7 +29,8 @@ const KIND_LABELS: Record<string, string> = { role: 'Role', status: 'Status', ty
 const config = window.__GRAPH_LAGOON_CONFIG__ ?? {};
 const agentsEnabled = config.agents_enabled === true;
 const unmasked = config.agents_allow_unmasked_data === true;
-const mcpUrl = `${window.__GRAPH_LAGOON_API_URL__ || window.location.origin}/mcp`;
+// The API prefix is usually relative ("/graphlagoon"); an MCP client needs the full URL.
+const mcpUrl = new URL(`${window.__GRAPH_LAGOON_API_URL__ || ''}/mcp`, window.location.origin).href;
 
 const proposals = ref<InvestigationProposal[]>([]);
 const tokens = ref<AgentToken[]>([]);

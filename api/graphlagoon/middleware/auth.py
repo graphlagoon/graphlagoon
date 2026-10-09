@@ -199,34 +199,43 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     async def _dispatch_agent(self, request: Request, call_next, raw_token: str):
-        from graphlagoon.services.agent_tokens import resolve_token
-
-        settings = get_settings()
-        token = await resolve_token(raw_token) if settings.agents_enabled else None
-        if token is None:
-            return _error(
-                401,
-                "INVALID_AGENT_TOKEN",
-                "The agent token is invalid, expired or revoked.",
-            )
-        if _agent_rate_limited(token["id"], settings.agent_rate_limit_per_minute):
-            return _error(
-                429,
-                "AGENT_RATE_LIMITED",
-                f"Agent token limited to {settings.agent_rate_limit_per_minute} "
-                "requests per minute.",
-            )
-        actor = {
-            "kind": "agent",
-            "token_id": token["id"],
-            "name": token["name"],
-            "scopes": token["scopes"],
-            "owner_email": token["owner_email"],
-        }
-        request.state.user_email = token["owner_email"]
+        actor, error = await authenticate_agent(raw_token)
+        if error is not None:
+            return error
+        request.state.user_email = actor["owner_email"]
         request.state.actor = actor
         _current_actor.set(actor)
         return await call_next(request)
+
+
+async def authenticate_agent(raw_token: str):
+    """``(actor, None)`` for an active token under its rate limit, else
+    ``(None, error_response)``. Shared by the middleware and the MCP endpoint."""
+    from graphlagoon.services.agent_tokens import resolve_token
+
+    settings = get_settings()
+    token = await resolve_token(raw_token) if settings.agents_enabled else None
+    if token is None:
+        return None, _error(
+            401,
+            "INVALID_AGENT_TOKEN",
+            "The agent token is invalid, expired or revoked.",
+        )
+    if _agent_rate_limited(token["id"], settings.agent_rate_limit_per_minute):
+        return None, _error(
+            429,
+            "AGENT_RATE_LIMITED",
+            f"Agent token limited to {settings.agent_rate_limit_per_minute} "
+            "requests per minute.",
+        )
+    actor = {
+        "kind": "agent",
+        "token_id": token["id"],
+        "name": token["name"],
+        "scopes": token["scopes"],
+        "owner_email": token["owner_email"],
+    }
+    return actor, None
 
 
 async def ensure_user_exists(session, email: str):

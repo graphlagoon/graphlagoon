@@ -38,7 +38,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] FA.1 · Tokens de agente, escopos e ator no diário
 - [x] FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
 - [x] FA.3 · Propostas e aprovação humana (T11)
-- [ ] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
+- [x] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
 - [ ] FA.5 · Ponte MCP local (stdio) para apps atrás do proxy do Databricks
 - [ ] FA.6 · Registry de cobertura AI-first (teste obrigatório)
 - [ ] FA.7 · Guia público de agentes, prompts MCP e E2E do agente
@@ -437,11 +437,11 @@ trabalho de análise e documentação; a pessoa decide.
   2. Respostas com `untrusted_data` e mascaramento conforme a política.
   3. Uma ferramenta de decisão, compartilhamento ou apagar **não existe**.
 - **Aceite:**
-  - [ ] `claude mcp add --transport http graphlagoon http://localhost:8000/mcp --header "Authorization: Bearer …"`
+  - [x] `claude mcp add --transport http graphlagoon http://localhost:8000/mcp --header "Authorization: Bearer …"`
     lista as ferramentas.
-  - [ ] Um cliente MCP de teste roda o roteiro: criar caso → adicionar fonte → ler grafo
+  - [x] Um cliente MCP de teste roda o roteiro: criar caso → adicionar fonte → ler grafo
     → anotar → subir artefato → propor papel. Tudo aparece no diário como agente.
-  - [ ] CPF sai mascarado por padrão.
+  - [x] CPF sai mascarado por padrão.
 - **Testes:** novo `test_mcp_server.py`, com o cliente do SDK `mcp` em pytest.
 
 ### FA.5 · Ponte MCP local (stdio)
