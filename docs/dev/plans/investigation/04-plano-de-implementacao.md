@@ -49,7 +49,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F2.3 · Upload de arquivos com hash e papel
 - [x] F2.4 · Especificação de mapeamento, interpretadores TS e Python, presets SIMBA e QSA
 - [x] F2.5 · Datasource `file` e assistente de arquivo (T4)
-- [ ] F2.6 · Arquivo como enriquecimento do caso
+- [x] F2.6 · Arquivo como enriquecimento do caso
 - [ ] F2.7 · Gravar valores de métricas como propriedade
 - [ ] F2.8 · Resolução de entidades e revisão de matches (T8)
 
@@ -606,8 +606,8 @@ trabalho de análise e documentação; a pessoa decide.
 - **Passos:** um arquivo com papel `enrichment` aparece na aba de enriquecimento
   (junta por chave no cliente, com a mesma UI da F2.2), com escopo só do caso.
 - **Aceite:**
-  - [ ] O QSA mini enriquece os lojistas por CNPJ.
-  - [ ] O QSA não aparece fora do caso.
+  - [x] O QSA mini enriquece os lojistas por CNPJ.
+  - [x] O QSA não aparece fora do caso.
 - **Testes:** vitest.
 
 ### F2.7 · Gravar valores de métricas como propriedade

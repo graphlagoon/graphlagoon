@@ -120,8 +120,13 @@ export function derivedIdentityKeys(spec: MappingSpec): IdentityKey[] {
 /** The encoding of the first input whose glob matches the file name (SIMBA: latin-1). */
 export function encodingFor(spec: MappingSpec | null, filename: string): string {
   const inp = Object.values(spec?.inputs ?? {}).find((i) => glob(i.match, filename));
+  return decoderLabel(inp?.encoding);
+}
+
+/** A spec encoding as a TextDecoder label; unknown ones fall back to UTF-8. */
+export function decoderLabel(encoding: string | null | undefined): string {
   // The spec says "latin-1" (Python's name); TextDecoder knows it as "latin1".
-  const label = (inp?.encoding ?? 'utf-8').toLowerCase().replace(/^latin-1$/, 'latin1');
+  const label = (encoding ?? 'utf-8').toLowerCase().replace(/^latin-1$/, 'latin1');
   try {
     new TextDecoder(label);
     return label;

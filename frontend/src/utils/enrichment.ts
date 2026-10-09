@@ -3,6 +3,8 @@
  * context's side tables apply to a node, the lookup key, and "promote to nodes".
  */
 import type { EnrichmentTable, GraphContext } from '@/types/graph';
+import type { FileEnrichmentSpec } from '@/types/investigation';
+import { columnsOf, lines, parseLine } from '@/utils/fileMapping';
 import { baseSourceId, type UnifiedNode, type UnifySource } from '@/utils/unifyGraph';
 
 /** One table that applies to nodes of a source's context. */
@@ -88,4 +90,39 @@ export function promoteToNodes(
     }
   }
   return source;
+}
+
+// ---------------------------------------------------------------------------
+// Case files as enrichment (F2.6): joined in the browser, scoped to the case.
+// ---------------------------------------------------------------------------
+
+const digitsOf = (v: string) => v.replace(/\D/g, '');
+
+function fileKey(raw: unknown, spec: FileEnrichmentSpec): string | null {
+  if (raw === null || raw === undefined) return null;
+  const value = String(raw).trim();
+  const key = spec.key_digits ? digitsOf(value).slice(0, spec.key_digits) : value;
+  return key === '' ? null : key;
+}
+
+/** The key of `node` under an enrichment file, or null when the file does not apply to it. */
+export function fileEnrichmentKey(node: UnifiedNode, spec: FileEnrichmentSpec): string | null {
+  if (!spec.match_node_types.includes(node.node_type)) return null;
+  const src = spec.match_source;
+  const raw = src === 'node_id' ? node.__sources[0]?.nodeId ?? node.node_id : node.properties?.[src.name];
+  return fileKey(raw, spec);
+}
+
+/** The file's rows by key, each with only `spec.columns`. */
+export function fileEnrichmentRows(text: string, spec: FileEnrichmentSpec): Record<string, Row[]> {
+  const [columns, data] = columnsOf({ match: '*', ...spec.input, encoding: spec.input.encoding ?? undefined }, lines(text));
+  const at = (c: string) => columns.indexOf(c);
+  const out: Record<string, Row[]> = {};
+  for (const line of data) {
+    const cells = parseLine(line, spec.input.delimiter);
+    const key = fileKey(cells[at(spec.key_column)], spec);
+    if (key === null) continue;
+    (out[key] ??= []).push(Object.fromEntries(spec.columns.map((c) => [c, at(c) < 0 ? null : cells[at(c)] ?? null])));
+  }
+  return out;
 }

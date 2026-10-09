@@ -4,15 +4,21 @@
  * the selected node. Each table is looked up once for every node of the graph it
  * applies to: "one row" tables become node properties, "many rows" tables show as a
  * table, and a table with `promote` can turn a column into nodes (e.g. devices).
+ * Case files with the enrichment role (F2.6) show the same way: read once, joined
+ * in the browser by key, and only inside this case.
  */
 import { computed, ref, watch } from 'vue';
 import { api } from '@/services/api';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { decoderLabel } from '@/utils/fileImport';
+import type { FileEnrichmentSpec, InvestigationFile } from '@/types/investigation';
 import {
   enrichmentKey,
   enrichmentTargets,
+  fileEnrichmentKey,
+  fileEnrichmentRows,
   keyedNodes,
   promoteToNodes,
   type EnrichmentTarget,
@@ -89,6 +95,34 @@ function applyAsProperties(keyed: Lookup['keyed'], rows: Record<string, Row[]>) 
 
 watch([targets, () => store.unified.nodes], load, { immediate: true });
 
+// Case files (F2.6): each one fetched once (an audited read) and parsed here.
+const fileRows = ref<Record<string, { loading: boolean; error: string | null; rows: Record<string, Row[]> }>>({});
+const specOf = (f: InvestigationFile) => f.mapping as unknown as FileEnrichmentSpec;
+const fileTargets = computed(() =>
+  store.files.filter((f) => f.role === 'enrichment' && f.mapping && fileEnrichmentKey(props.node, specOf(f)) !== null),
+);
+
+async function loadFiles() {
+  const caseId = store.current?.id;
+  for (const f of fileTargets.value) {
+    if (!caseId || fileRows.value[f.id]) continue;
+    fileRows.value[f.id] = { loading: true, error: null, rows: {} };
+    try {
+      const buffer = await api.getInvestigationFileContent(caseId, f.id);
+      const text = new TextDecoder(decoderLabel(specOf(f).input.encoding)).decode(buffer);
+      fileRows.value[f.id] = { loading: false, error: null, rows: fileEnrichmentRows(text, specOf(f)) };
+    } catch (e) {
+      fileRows.value[f.id] = { loading: false, error: getErrorMessage(e, 'Failed to read the file'), rows: {} };
+    }
+  }
+}
+watch(fileTargets, loadFiles, { immediate: true });
+
+function fileRowsOf(f: InvestigationFile): Row[] {
+  const key = fileEnrichmentKey(props.node, specOf(f));
+  return key === null ? [] : fileRows.value[f.id]?.rows[key] ?? [];
+}
+
 function rowsOf(t: EnrichmentTarget): Row[] {
   const key = enrichmentKey(props.node, t);
   return key === null ? [] : lookups.value[idOf(t)]?.rows[key] ?? [];
@@ -128,7 +162,7 @@ async function promote(t: EnrichmentTarget) {
 
 <template>
   <div class="enrichment" data-testid="inspector-enrichment">
-    <p v-if="!targets.length" class="muted">
+    <p v-if="!targets.length && !fileTargets.length" class="muted">
       No enrichment table applies to this node. Attach one in the context form.
     </p>
     <section v-for="t in targets" :key="idOf(t)" class="card" data-testid="enrichment-card">
@@ -176,6 +210,27 @@ async function promote(t: EnrichmentTarget) {
       </button>
     </section>
     <p v-if="promoteError" class="error">{{ promoteError }}</p>
+    <section v-for="f in fileTargets" :key="f.id" class="card" data-testid="enrichment-file-card">
+      <header>
+        <strong>{{ specOf(f).name }}</strong>
+        <span class="muted">
+          case file {{ f.filename }} · {{ fileRowsOf(f).length }} {{ fileRowsOf(f).length === 1 ? 'row' : 'rows' }}
+        </span>
+      </header>
+      <p v-if="fileRows[f.id]?.loading" class="muted">Loading…</p>
+      <p v-else-if="fileRows[f.id]?.error" class="error">{{ fileRows[f.id]?.error }}</p>
+      <p v-else-if="!fileRowsOf(f).length" class="muted">No row for this node.</p>
+      <table v-else class="rows" data-testid="enrichment-file-rows">
+        <thead>
+          <tr><th v-for="c in specOf(f).columns" :key="c">{{ c }}</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(r, i) in fileRowsOf(f)" :key="i">
+            <td v-for="c in specOf(f).columns" :key="c">{{ r[c] ?? '—' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
   </div>
 </template>
 

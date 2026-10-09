@@ -152,6 +152,13 @@ role, size and sha256.
   5. **Review**: **Add to case** uploads the files and, for the graph
      role, the server builds the graph and adds it as a source that opens
      in its own tab.
+- An **Enrichment** file (for example the Receita QSA) is configured in step 3:
+  the key column, the columns to show, the node types it enriches, the node
+  property holding the key (or the node id) and, optionally, how many leading
+  digits to compare (8 turns a merchant's CNPJ into the QSA's CNPJ básico). Its
+  rows then show in the inspector's **Enrichment** tab of matching nodes, like
+  an enrichment table. The join runs in your browser and only inside this
+  case: the file never becomes part of a context.
 - A file graph lives in a **file context**: it can be opened and expanded but
   not queried (no Query Console, no SQL, no Cypher). Only its edges up to
   `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` are kept; the journal
