@@ -10605,3 +10605,61 @@ link "Investigations" no topo.
 impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 02:30] - Feature Implemented: F1.6 · Grafo unificado e workspace (T2)
+
+**Feature:** `/investigations/:id` vira o workspace: aba "Unified view" mais uma aba
+por exploração (restritas como placeholder com cadeado), painel de fontes à
+esquerda, canvas do grafo no centro, inspector à direita (Data / Origin) e barra de
+status.
+
+**Design Decisions:**
+1. **`utils/unifyGraph.ts` (pura):** nó com chave de identidade vira `"Entidade:valor"`;
+   sem chave, `"{node_id}@{contextId}"` (id primeiro, para o rótulo padrão
+   `{node_id|truncate}` mostrar o id original; a ordem difere de 03 §5.1, a unicidade
+   é a mesma). Propriedade divergente fica com o primeiro valor e o resto vai para
+   `__conflicts` (inclui `node_type`); valor nulo não conta como conflito. Arestas
+   nunca se fundem entre fontes (`{sourceId}:{edge_id}`); aresta com ponta fora da
+   própria fonte é descartada. `snapshotToGraph` é reaproveitado no `loadExploration`.
+2. **`graph.ts`, modo investigação:** `loadInvestigationGraph(mode, nodes, edges)` carrega
+   sem `currentContext` e mantém a seleção dos ids ainda presentes. Como todas as abas
+   usam o id unificado, a seleção segue a entidade entre abas (seleção vinculada).
+   `expandFromNode` delega para `expandInvestigationNode`: uma origem por context, o
+   seletor (`mode.chooseOrigin`) só abre com mais de um, e o resultado volta para a
+   view, que o unifica como fonte `expansion:<sourceId>`.
+3. **Anéis:** `provenanceRingColors` e `PROVENANCE_PALETTE` em `graphAppearance.ts`;
+   `composables/useGraphRings.ts` desenha um sprite por anel (só na vista unificada).
+   `shortcut:` um sprite por anel; instanciar como o `FastIconRenderer` se os casos
+   chegarem a dezenas de milhares de nós. `__GRAPH_NODE_VISUAL_STATE__` passa a
+   devolver `rings` para o E2E.
+4. **Comunidades (aceite):** contornado na view: antes de trocar o grafo, guarda
+   `community.getState()` da aba atual e, depois do `nextTick`, restaura o da aba de
+   destino (mesmo padrão do `loadExploration`). Vale também para a expansão. O watcher
+   do `community.ts` não mudou, então a vista normal do grafo segue igual.
+5. **Carga:** `GET …/sources/{sid}/snapshot` por fonte legível e `GET` do context de
+   cada uma (chaves de identidade), em paralelo. `shortcut:` exploração sem snapshot
+   aparece vazia com aviso (sem re-executar a query); o estilo (cores, ícones, rótulos)
+   vem da primeira fonte legível.
+6. Fora do escopo (tarefas próprias): legenda de papéis e diário (F1.7), arquivos e
+   enriquecimento (F2), Dossiê/Export/Seguir o dinheiro (F3/F4), comunidades salvas nas
+   explorações-fonte não são remapeadas para a vista unificada.
+
+**Files:** `frontend/src/utils/unifyGraph.ts` (novo), `src/composables/useGraphRings.ts`
+(novo), `src/components/investigation/SourcesPanel.vue` (novo),
+`src/views/InvestigationView.vue`, `src/stores/graph.ts`, `src/stores/investigation.ts`,
+`src/utils/graphAppearance.ts`, `src/components/GraphCanvas3D.vue`, `src/services/api.ts`,
+`src/types/investigation.ts`; testes `src/utils/__tests__/unifyGraph.test.ts`,
+`src/stores/__tests__/graph.investigation.test.ts`,
+`src/views/__tests__/InvestigationView.test.ts`, `e2e/tests/investigations.spec.ts`.
+
+**Testing:** vitest dos três testes novos mais `graph.exploration`, `graph.actions`,
+`investigation` e `community.clusterProgram` (169 verdes); `vue-tsc` limpo; E2E
+`investigations.spec.ts` (duas fontes, um nó com dois anéis, abas),
+`style-presets.spec.ts` e `context-menu.spec.ts` verdes.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** no admin-area
+impact (só leitura de rotas existentes).
+
+**Author:** Claude (AI Assistant)

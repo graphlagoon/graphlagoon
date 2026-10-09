@@ -77,4 +77,80 @@ test.describe('Investigations', () => {
       { investigation_id: 'inv-1', kind: 'exploration', exploration_id: MOCK_EXPLORATION.id, mode: 'frozen' },
     ]);
   });
+
+  test('workspace unifies two sources by CPF: one node, two rings, a tab per source', async ({
+    authenticatedPage: page,
+  }) => {
+    const ctx = (id: string, title: string, nodeType: string, prop: string) => ({
+      ...MOCK_CONTEXT,
+      id,
+      title,
+      identity_keys: [
+        { node_type: nodeType, entity: 'Pessoa', source: { kind: 'prop', name: prop }, normalize: 'cpf_cnpj' },
+      ],
+    });
+    const source = (id: string, contextId: string, title: string, position: number) => ({
+      id,
+      kind: 'exploration',
+      position,
+      title_snapshot: title,
+      accessible: true,
+      exploration_id: `exp-${id}`,
+      context_id: contextId,
+      mode: 'live',
+    });
+    const payload = (contextId: string, nodes: any[], edges: any[]) => ({
+      exploration: { id: 'x', title: 'x', graph_context_id: contextId, owner_email: 'e2e@test.com', state: {} },
+      snapshot: { nodes, edges },
+    });
+    await seedContexts(page, [ctx('ctx-pix', 'Pix', 'Titular', 'cpf'), ctx('ctx-cad', 'Cadastro', 'Cliente', 'doc')]);
+    await seedInvestigations(page, [CASE], {
+      'inv-1': [source('src-1', 'ctx-pix', 'Pix · transfers', 0), source('src-2', 'ctx-cad', 'Cadastro · clients', 1), RESTRICTED_SOURCE],
+    });
+    const snapshots: Record<string, unknown> = {
+      'src-1': payload(
+        'ctx-pix',
+        [
+          { id: 'p1', type: 'Titular', properties: { cpf: '123.456.789-01' } },
+          { id: 'a1', type: 'Conta', properties: {} },
+          { id: 'a2', type: 'Conta', properties: {} },
+        ],
+        [
+          { id: 'e1', source: 'p1', target: 'a1', type: 'OWNS', properties: {} },
+          { id: 'e2', source: 'a1', target: 'a2', type: 'PIX', properties: {} },
+        ],
+      ),
+      'src-2': payload(
+        'ctx-cad',
+        [
+          { id: 'c9', type: 'Cliente', properties: { doc: '12345678901' } },
+          { id: 'd1', type: 'Device', properties: {} },
+        ],
+        [{ id: 'e1', source: 'c9', target: 'd1', type: 'USES', properties: {} }],
+      ),
+    };
+    await page.route('**/graphlagoon/api/investigations/inv-1/sources/*/snapshot', (route) => {
+      const sid = route.request().url().split('/sources/')[1].split('/')[0];
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(snapshots[sid]) });
+    });
+
+    await page.goto('/investigations/inv-1');
+    const status = page.getByTestId('workspace-status');
+    await expect(status).toContainText('4 nodes', { timeout: 15_000 });
+    await expect(status).toContainText('3 edges');
+    await expect(status).toContainText('2 sources + 1 restricted');
+    await expect(page.getByTestId('unification-summary')).toContainText('1 entity merged by identity key: 1 by Pessoa');
+    await expect(page.getByTestId('tab-src-r')).toContainText('restricted');
+
+    const rings = (id: string) =>
+      page.evaluate((nodeId) => (window as any).__GRAPH_NODE_VISUAL_STATE__?.(nodeId)?.rings ?? null, id);
+    await expect.poll(() => rings('Pessoa:12345678901'), { timeout: 15_000 }).toHaveLength(2);
+    expect(await rings('a1@ctx-pix')).toHaveLength(1);
+
+    await page.getByTestId('tab-src-2').click();
+    await expect(status).toContainText('2 nodes');
+    await expect(status).toContainText('1 edges');
+    await page.getByTestId('tab-unified').click();
+    await expect(status).toContainText('4 nodes');
+  });
 });

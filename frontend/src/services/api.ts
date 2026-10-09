@@ -3,6 +3,7 @@ import type {
   CreateInvestigationRequest,
   Investigation,
   InvestigationSource,
+  SourceSnapshotPayload,
   SourceMode,
 } from '@/types/investigation';
 import type {
@@ -667,6 +668,12 @@ class ApiService {
       exploration_id: explorationId,
       mode,
     });
+    return response.data;
+  }
+
+  /** The source's frozen copy, or the live exploration (403 SOURCE_RESTRICTED without context access). */
+  async getInvestigationSourceSnapshot(id: string, sourceId: string): Promise<SourceSnapshotPayload> {
+    const response = await this.client.get(`/api/investigations/${id}/sources/${sourceId}/snapshot`);
     return response.data;
   }
 
