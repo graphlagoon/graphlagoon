@@ -10424,3 +10424,51 @@ plano). Nenhuma decisão Q1–Q9 se aplica.
 `CLEARABLE_TABLES`; `clear_all` limpa as coleções novas.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 23:30] - Feature Implemented: F1.2 · API de investigações
+
+**Feature:** `GET/POST /api/investigations`, `GET/PATCH/DELETE /api/investigations/{id}`,
+`POST /api/investigations/{id}/share` e `DELETE …/share/{email}`, com permissão
+`investigation.create`, auditoria e compartilhamento só nominal.
+
+**Design Decisions:**
+1. Regras em `services/investigations.py` (`load_case(session, id, user, need)`), com
+   um `_session()` que devolve a sessão ou `None` em memória, para cada operação ter
+   um só fluxo de checagem e só o passo de gravação bifurcar. O router mapeia
+   `InvestigationError` para o envelope `{"error": …}` e audita depois (padrão do
+   `admin_groups`).
+2. Acesso como 03 §7: leitura = dono, responsável, share, superuser; escrita = dono,
+   responsável, share de escrita (superuser não escreve); gerenciar (apagar,
+   compartilhar) = dono ou superuser. Sem leitura → **404**, nunca 403.
+3. Share: `*` em qualquer posição → 422 `WILDCARD_SHARE_REFUSED`, mensagem cita a
+   vedação de tipping-off; o resto passa por `validate_owner_email`. O responsável
+   também precisa ser e-mail nominal.
+4. `PATCH` não aceita `status: "decidido"` (só a rota de decisão, F4.5); `null` em
+   campo obrigatório (`title`, `status`, `state`) é ignorado. Caso com `decision` →
+   409 no `PATCH` e no `DELETE`; o superuser apaga com `?reason=` (vai para a
+   auditoria).
+5. Ações de auditoria `investigation.create/update/delete/share/unshare`; as 5 rotas
+   mutáveis em `AUDITED_ROUTES`.
+
+**Files:** `api/graphlagoon/routers/investigations.py` (novo),
+`api/graphlagoon/services/investigations.py` (novo), `api/graphlagoon/models/schemas.py`,
+`api/graphlagoon/services/permission_catalog.py`, `api/graphlagoon/services/audit.py`,
+`api/graphlagoon/routers/admin_registry.py`, `api/graphlagoon/app.py`; testes
+`test_investigations.py` (novo), `test_permission_routes.py`, `test_admin_registry.py`,
+`test_admin_groups.py` e `test_permissions.py` (catálogo com a permissão nova).
+
+**Testing:** suíte `api/tests` verde (1323 passed), exceto as falhas pré-existentes
+conhecidas do transpilador, desmarcadas. Só o caminho em memória é exercitado; o
+caminho Postgres não foi rodado (sem Postgres no ambiente).
+
+**Assumptions / skipped:** prazos calculados na listagem ficam para a F4.4;
+`selected_at` não é preenchido ainda (F4.4); a affordance `can('investigation.create')`
+entra com o frontend (F1.5).
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** permissão nova no
+catálogo (aparece na matriz do admin) e 5 rotas auditadas; `describeAudit` das ações
+novas fica para a F1.8.
+
+**Author:** Claude (AI Assistant)

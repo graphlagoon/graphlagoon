@@ -227,6 +227,7 @@ class TestPermissions:
         assert [p["id"] for p in payload["items"]] == [
             "context.create",
             "exploration.save",
+            "investigation.create",
         ]
         assert all(p["mode"] == "everyone" and p["rules"] == [] for p in payload["items"])
         assert all(p["label"] and p["description"] for p in payload["items"])

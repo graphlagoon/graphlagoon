@@ -122,6 +122,7 @@ ROUTER_MODULES = (
     "explorations",
     "graph",
     "graph_contexts",
+    "investigations",
     "precomputed_graphs",
     "query_templates",
     "similarity",
