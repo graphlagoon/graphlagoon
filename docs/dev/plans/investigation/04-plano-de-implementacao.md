@@ -19,7 +19,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 
 **G · Portões (antes de F1)**
 - [x] G1 · Corrigir o #28 (IDs de arestas paralelas colidem)
-- [ ] G2 · Corrigir o M4 (injeção de fórmula em exportação CSV)
+- [x] G2 · Corrigir o M4 (injeção de fórmula em exportação CSV)
 - [ ] G3 · Sandbox dos cluster programs (#32)
 - [ ] G4 · Medir o teto do grafo no browser
 
@@ -107,8 +107,8 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - **Passos:** uma função `safeCell(v)` prefixa `'` em valores que começam com
   `=`, `+`, `-`, `@`, tab ou CR. Os 4 caminhos usam a função.
 - **Aceite:**
-  - [ ] `=HYPERLINK(...)` exporta como texto nos 4 caminhos.
-  - [ ] Números negativos legítimos continuam números quando a célula é numérica (só
+  - [x] `=HYPERLINK(...)` exporta como texto nos 4 caminhos.
+  - [x] Números negativos legítimos continuam números quando a célula é numérica (só
     strings são prefixadas).
 - **Testes:** vitest em `utils/__tests__/csvSafe.test.ts` e um teste por caminho.
 - **Docs:** atualizar o M4 em `docs/dev/security-assessment.md`.

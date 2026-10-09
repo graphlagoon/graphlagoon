@@ -21,6 +21,7 @@ import {
   flattenNodeRows, initFilters, mergeFilters, coerceValue, decorateRows,
 } from '@/composables/useTableColumns';
 import { buildSearchText, SEARCH_FIELD } from '@/utils/searchText';
+import { primeVueExportCell, primeVueExportHeader } from '@/utils/csvSafe';
 import PropertyVisibilityHint from '@/components/PropertyVisibilityHint.vue';
 
 function formatCell(value: unknown): string {
@@ -389,6 +390,7 @@ function exportCSV() {
         :dataKey="activeTab === 'nodes' ? 'node_id' : 'edge_id'"
         size="small"
         :exportFilename="`${activeTab}-${graphStore.currentContext?.title || 'graph'}`"
+        :exportFunction="primeVueExportCell"
         stripedRows
       >
         <Column
@@ -396,6 +398,7 @@ function exportCSV() {
           :key="col.field"
           :field="col.field"
           :header="col.header"
+          :exportHeader="primeVueExportHeader(col.header || col.field)"
           :sortable="true"
           :dataType="col.type === 'date' ? 'date' : col.type === 'numeric' ? 'numeric' : 'text'"
           :showFilterMatchModes="col.type !== 'categorical'"

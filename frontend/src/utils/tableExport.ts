@@ -2,16 +2,10 @@
  * Serialize a raw tabular result (aligned `columns: string[]` + `rows:
  * (string|null)[][]`) as delimited text (CSV/TSV) — used to copy the Query
  * Console result to the clipboard as a spreadsheet-friendly TSV block.
+ * Cells are formula-neutralized (see `csvSafe.ts`, security assessment M4).
  */
 
-/** RFC-4180-style field escaping (works for both ',' and '\t' separators). */
-function escapeField(value: string | null, sep: string): string {
-  const s = value ?? '';
-  if (s.includes(sep) || s.includes('"') || s.includes('\n') || s.includes('\r')) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
+import { escapeDelimitedField as escapeField } from './csvSafe';
 
 /** Serialize a raw result as delimited text (header row + data). */
 export function toDelimited(
