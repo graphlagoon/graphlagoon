@@ -2,9 +2,12 @@
 
 > Status: **pronto para implementar**, design aprovado como proposta em 2026-10-09.
 > **Execução em andamento** no branch `feature/investigations`: portões G1–G4
-> concluídos (G4 por decisão, sem medição) e **fase F1 (fundação) concluída**: casos,
+> concluídos (G4 por decisão, sem medição), **fase F1 (fundação) concluída** (casos,
 > fontes de vários contexts, grafo unificado, papéis, notas, diário, área admin, seed e
-> [guia público](../../../guide/investigations.md). Próxima: FA. O progresso tarefa a tarefa está nos checkboxes de
+> [guia público](../../../guide/investigations.md)) e **fase FA (AI-first) concluída**
+> (tokens de agente, espaço do caso no Volume, propostas, servidor MCP com prompts,
+> ponte stdio, registry de cobertura e [guia de agentes](../../../guide/agents-mcp.md)).
+> Próxima: F2. O progresso tarefa a tarefa está nos checkboxes de
 > [04-plano-de-implementacao.md](04-plano-de-implementacao.md#progresso) e no decision log.
 >
 > Este pacote basta sozinho para um agente implementar a funcionalidade. Os
@@ -35,9 +38,9 @@ fraude, PLD/FT e risco** para adquirentes e bancos. As capacidades são:
 
 ## Funcionalidades: o que existe hoje e o que é proposta
 
-**Da coluna "Proposta", só a fase F1 está implementada** (tarefas F1.1–F1.9: caso
+**Da coluna "Proposta", estão implementadas as fases F1 e FA** (F1.1–F1.9: caso
 com várias explorações, chaves de identidade, grafo unificado, papéis, notas e
-diário); o resto ainda não. O estado é de outubro de 2026; a
+diário; FA.1–FA.7: agentes, MCP, propostas e espaço do caso); o resto ainda não. O estado é de outubro de 2026; a
 coluna "Tarefas" diz onde cada item é construído.
 
 | Funcionalidade | Hoje no app | Proposta | Tarefas | Tela |

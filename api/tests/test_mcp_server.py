@@ -130,6 +130,10 @@ async def test_agent_script_is_journaled_as_agent_and_masked(env):
             tools = {t.name for t in (await client.list_tools()).tools}
             assert {"create_investigation", "get_graph", "propose"} <= tools
             assert not tools & {"delete_investigation", "share_investigation", "approve_artifact"}
+            prompts = {p.name for p in (await client.list_prompts()).prompts}
+            assert prompts == {"investigar_golpe_pix", "revisar_lojista", "montar_dossie"}
+            prompt = await client.get_prompt("montar_dossie", {"investigation_id": "c-1"})
+            assert "c-1" in prompt.messages[0].content.text
 
             case = await _tool(client, "create_investigation", title="Golpe Pix")
             cid = case["id"]
