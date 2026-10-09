@@ -1,4 +1,4 @@
-"""Investigation cases: CRUD and nominal sharing (03-arquitetura §3.1).
+"""Investigation cases: CRUD, nominal sharing and sources (03-arquitetura §3.1–3.2).
 
 Rules live in services.investigations; this module maps them to HTTP, the
 `{"error": {...}}` envelope and the audit trail.
@@ -16,6 +16,8 @@ from graphlagoon.models.schemas import (
     InvestigationCreate,
     InvestigationResponse,
     InvestigationShareRequest,
+    InvestigationSourceCreate,
+    InvestigationSourceResponse,
     InvestigationUpdate,
 )
 from graphlagoon.services import audit
@@ -152,3 +154,69 @@ async def unshare_investigation(investigation_id: UUID, email: str, request: Req
             **{"with": email},
         )
     return {"status": "removed"}
+
+
+@router.get(
+    "/{investigation_id}/sources", response_model=list[InvestigationSourceResponse]
+)
+async def list_sources(investigation_id: UUID, request: Request):
+    try:
+        return await service.list_sources(investigation_id, get_current_user(request))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/sources",
+    response_model=InvestigationSourceResponse,
+    status_code=201,
+)
+async def add_source(
+    investigation_id: UUID, data: InvestigationSourceCreate, request: Request
+):
+    user_email = get_current_user(request)
+    try:
+        source = await service.add_source(
+            investigation_id, user_email, data.exploration_id, data.mode
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_SOURCE_ADD,
+        investigation_id,
+        source_id=str(source["id"]),
+        exploration_id=str(data.exploration_id),
+        mode=data.mode,
+        sha256=source.get("frozen_sha256"),
+    )
+    return source
+
+
+@router.delete("/{investigation_id}/sources/{source_id}")
+async def remove_source(investigation_id: UUID, source_id: UUID, request: Request):
+    user_email = get_current_user(request)
+    try:
+        meta = await service.remove_source(investigation_id, user_email, source_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_SOURCE_REMOVE,
+        investigation_id,
+        source_id=str(source_id),
+        **meta,
+    )
+    return {"status": "removed"}
+
+
+@router.get("/{investigation_id}/sources/{source_id}/snapshot")
+async def get_source_snapshot(
+    investigation_id: UUID, source_id: UUID, request: Request
+):
+    try:
+        return await service.source_snapshot(
+            investigation_id, get_current_user(request), source_id
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
