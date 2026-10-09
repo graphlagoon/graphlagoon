@@ -10517,3 +10517,39 @@ rodado (sem Postgres no ambiente).
 auditadas e 2 ações de auditoria novas; `describeAudit` fica para a F1.8.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 00:30] - Feature Implemented: F1.4 · Chaves de identidade no context
+
+**Feature:** `identity_keys` no context (03 §2.1): validação no backend, campo no
+create/update/response, seção "Identity Keys" no `GraphContextFormModal` e
+normalizadores em `utils/identityKeys.ts`.
+
+**Design Decisions:**
+1. `IdentityKey {node_type, entity, source: "node_id" | {kind:"prop", name}, normalize}`;
+   no máximo uma chave por tipo de nó (um nó resolve para uma só entidade), até 50.
+   O tipo de nó não é cruzado com `node_types` (contexts sem tipos descobertos).
+2. Formulário: seção (não aba; o modal não tem abas) com linhas editáveis e a faixa
+   "Keys of this context" em chips (T6). Linha incompleta é descartada no envio. UI em
+   inglês, como o resto do app.
+3. Normalizadores: `cpf_cnpj` devolve `null` para documento mascarado (`*`/`x`) e
+   repõe zeros à esquerda (11 ou 14 dígitos), porque colunas numéricas os perdem;
+   `account` separa grupos de dígitos por qualquer não-dígito e tira os zeros à
+   esquerda de cada um; `phone` tira o DDI 55 só com mais de 11 dígitos.
+4. `shortcut:` normalizadores só no TS; a versão Python entra quando o servidor
+   unificar (F2.8/F3.8).
+
+**Files:** `api/graphlagoon/models/schemas.py`, `api/graphlagoon/routers/graph_contexts.py`,
+`api/graphlagoon/db/memory_store.py`, `api/tests/test_context_identity_keys.py` (novo),
+`frontend/src/types/graph.ts`, `frontend/src/utils/identityKeys.ts` (novo),
+`frontend/src/utils/__tests__/identityKeys.test.ts` (novo),
+`frontend/src/components/GraphContextFormModal.vue` e seu teste.
+
+**Testing:** pytest `test_context_identity_keys.py` (+ testes de context vizinhos, 71
+verdes); vitest dos normalizadores e do modal (30 verdes); `vue-tsc` limpo.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** no admin-area
+impact (a rota de update do context já existe e já é auditada).
+
+**Author:** Claude (AI Assistant)

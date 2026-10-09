@@ -353,6 +353,7 @@ class InMemoryStore:
         cluster_programs: Optional[List[Dict[str, Any]]] = None,
         context_menu_actions: Optional[List[Dict[str, Any]]] = None,
         metric_definitions: Optional[List[Dict[str, Any]]] = None,
+        identity_keys: Optional[List[Dict[str, Any]]] = None,
     ) -> MemoryGraphContext:
         """Create a new graph context."""
         context_id = uuid4()
@@ -383,6 +384,7 @@ class InMemoryStore:
             cluster_programs=cluster_programs or [],
             context_menu_actions=context_menu_actions or [],
             metric_definitions=metric_definitions or [],
+            identity_keys=identity_keys or [],
         )
         self.graph_contexts[context_id] = context
         return context
