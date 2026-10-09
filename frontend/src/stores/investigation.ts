@@ -8,6 +8,9 @@ import type { Edge, ExplorationState, GraphContext, Node } from '@/types/graph';
 import type {
   CreateInvestigationRequest,
   Investigation,
+  InvestigationEvent,
+  InvestigationNote,
+  InvestigationRole,
   InvestigationSource,
   SourceMode,
 } from '@/types/investigation';
@@ -37,6 +40,40 @@ export const useInvestigationStore = defineStore('investigation', () => {
     Object.fromEntries(sources.value.map((s, i) => [s.id, provenanceColor(i)])),
   );
   const unified = computed(() => unifyGraph([...sourceGraphs.value, ...expansions.value], contexts.value));
+
+  /** Roles by unified node id (`state.roles`), notes and the journal (F1.7). */
+  const roles = computed<Record<string, InvestigationRole>>(
+    () => (current.value?.state?.roles as Record<string, InvestigationRole> | undefined) ?? {},
+  );
+  const notes = ref<InvestigationNote[]>([]);
+  const events = ref<InvestigationEvent[]>([]);
+
+  async function setRole(entity: string, role: InvestigationRole | null) {
+    if (!current.value) return;
+    current.value = await api.updateInvestigationState(current.value.id, { roles: { [entity]: role } });
+    void fetchEvents();
+  }
+
+  async function fetchNotes() {
+    if (current.value) notes.value = await api.getInvestigationNotes(current.value.id);
+  }
+
+  async function fetchEvents() {
+    if (current.value) events.value = await api.getInvestigationEvents(current.value.id);
+  }
+
+  async function addNote(anchor: InvestigationNote['anchor'], body: string) {
+    if (!current.value) return;
+    notes.value.push(await api.createInvestigationNote(current.value.id, anchor, body));
+    void fetchEvents();
+  }
+
+  async function deleteNote(noteId: string) {
+    if (!current.value) return;
+    await api.deleteInvestigationNote(current.value.id, noteId);
+    notes.value = notes.value.filter((n) => n.id !== noteId);
+    void fetchEvents();
+  }
 
   async function fetchInvestigations() {
     loading.value = true;
@@ -171,6 +208,14 @@ export const useInvestigationStore = defineStore('investigation', () => {
     graphLoading,
     sourceColors,
     unified,
+    roles,
+    notes,
+    events,
+    setRole,
+    fetchNotes,
+    fetchEvents,
+    addNote,
+    deleteNote,
     loadWorkspace,
     addExpansion,
   };

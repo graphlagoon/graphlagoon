@@ -349,6 +349,7 @@ function collectAppearanceContext(): AppearanceContext {
     getEdgeTypeColor: (type: string) => edgeColorMap.get(type) || '#888888',
 
     communityColorMap: communityStore.communityColorMap,
+    roleColorMap: graphStore.roleColors,
   };
 }
 
@@ -2173,9 +2174,9 @@ watch(
   { deep: true }
 );
 
-// Community color changes — debounced (same pattern as nodeTypeColors)
+// Community and investigation role color changes — debounced (same pattern as nodeTypeColors)
 watch(
-  () => communityStore.communityColorMap,
+  () => [communityStore.communityColorMap, graphStore.roleColors],
   () => {
     if (colorUpdateTimeout3D) clearTimeout(colorUpdateTimeout3D);
     colorUpdateTimeout3D = setTimeout(() => { updateVisuals(); }, 50);

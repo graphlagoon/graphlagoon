@@ -195,4 +195,14 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/admin/groups/resolution/refresh"): (
         "cache refresh; no data change"
     ),
+    **{
+        route: "recorded in the case's immutable, hash-chained journal"
+        for route in (
+            ("POST", "/api/investigations/{investigation_id}/events"),
+            ("PATCH", "/api/investigations/{investigation_id}/state"),
+            ("POST", "/api/investigations/{investigation_id}/notes"),
+            ("PATCH", "/api/investigations/{investigation_id}/notes/{note_id}"),
+            ("DELETE", "/api/investigations/{investigation_id}/notes/{note_id}"),
+        )
+    },
 }

@@ -345,6 +345,8 @@ export const useGraphStore = defineStore('graph', () => {
   const currentContext = ref<GraphContext | null>(null);
   const currentExploration = ref<Exploration | null>(null);
   const investigationMode = shallowRef<InvestigationGraphMode | null>(null);
+  /** Investigation role fills (nodeId -> color); null outside a case. */
+  const roleColors = shallowRef<Map<string, string> | null>(null);
 
   // Selection state
   const selectedNodeIds = ref<Set<string>>(new Set());
@@ -2726,6 +2728,7 @@ export const useGraphStore = defineStore('graph', () => {
     currentContext.value = null;
     currentExploration.value = null;
     investigationMode.value = null;
+    roleColors.value = null;
     savedStateFingerprint.value = null;
     currentPrecomputedGraph.value = null;
     currentStylePreset.value = null;
@@ -2856,6 +2859,7 @@ export const useGraphStore = defineStore('graph', () => {
     expandFromNode,
     supportsExpand,
     investigationMode,
+    roleColors,
     loadInvestigationGraph,
     supportsSubgraph,
     shouldLoadProgressively,

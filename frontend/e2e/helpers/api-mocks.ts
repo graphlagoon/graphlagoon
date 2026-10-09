@@ -1110,7 +1110,9 @@ export async function seedAdmin(
 
 /**
  * Seed investigations (cases) and their sources. Call AFTER setupAPIMocks.
- * `POST .../sources` echoes an accessible source and is recorded in `added`.
+ * `POST /investigations` creates a case the other routes then serve; `POST .../sources`
+ * echoes an accessible source (recorded in `added`) and adds it to the case.
+ * State, notes and the journal are kept in memory so the workspace round-trips.
  */
 export async function seedInvestigations(
   page: Page,
@@ -1118,54 +1120,84 @@ export async function seedInvestigations(
   sources: Record<string, any[]> = {},
 ) {
   const added: any[] = [];
+  const cases = new Map<string, any>(investigations.map((i) => [i.id, i]));
+  const srcs = new Map<string, any[]>(investigations.map((i) => [i.id, [...(sources[i.id] ?? [])]]));
+  const notes = new Map<string, any[]>();
+  const events = new Map<string, any[]>();
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const journal = (id: string, kind: string, payload: Record<string, unknown>) => {
+    const list = events.get(id) ?? [];
+    list.push({ id: `ev-${list.length + 1}`, at: new Date().toISOString(), actor_email: 'e2e@test.com', kind, payload, hash: 'h' });
+    events.set(id, list);
+  };
+
   await page.route('**/graphlagoon/api/investigations', (route) => {
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON();
-      route.fulfill({
-        status: 201,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          id: 'inv-new',
-          status: 'selecao',
-          owner_email: 'e2e@test.com',
-          state: {},
-          shared_with: [],
-          has_write_access: true,
-          can_manage: true,
-          created_at: new Date().toISOString(),
-          ...body,
-        }),
-      });
+      const inv = {
+        id: cases.has('inv-new') ? `inv-new-${cases.size}` : 'inv-new',
+        status: 'selecao',
+        owner_email: 'e2e@test.com',
+        state: {},
+        shared_with: [],
+        has_write_access: true,
+        can_manage: true,
+        created_at: new Date().toISOString(),
+        ...body,
+      };
+      cases.set(inv.id, inv);
+      srcs.set(inv.id, []);
+      journal(inv.id, 'case.created', { title: inv.title });
+      route.fulfill(json(inv, 201));
     } else {
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(investigations) });
+      route.fulfill(json([...cases.values()].map((i) => ({ ...i, source_count: i.source_count ?? srcs.get(i.id)?.length ?? 0 }))));
     }
   });
-  for (const inv of investigations) {
-    await page.route(`**/graphlagoon/api/investigations/${inv.id}`, (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(inv) }),
-    );
-    await page.route(`**/graphlagoon/api/investigations/${inv.id}/sources`, (route) => {
-      if (route.request().method() === 'POST') {
-        const body = route.request().postDataJSON();
-        const source = {
-          id: `src-${added.length + 1}`,
-          kind: 'exploration',
-          position: added.length,
-          title_snapshot: body.exploration_id,
-          accessible: true,
-          exploration_id: body.exploration_id,
-          mode: body.mode,
-        };
-        added.push({ investigation_id: inv.id, ...body });
-        route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(source) });
-      } else {
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(sources[inv.id] ?? []),
-        });
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events))?(\?.*)?$/, (route) => {
+    const req = route.request();
+    const [, id, sub] = new URL(req.url()).pathname.match(/investigations\/([^/]+)(?:\/(\w+))?$/)!;
+    const inv = cases.get(id);
+    if (!inv) return route.fulfill(json({ detail: { error: { code: 'INVESTIGATION_NOT_FOUND' } } }, 404));
+    const method = req.method();
+    if (!sub) return route.fulfill(json(inv));
+    if (sub === 'sources') {
+      if (method !== 'POST') return route.fulfill(json(srcs.get(id) ?? []));
+      const body = req.postDataJSON();
+      const list = srcs.get(id)!;
+      const source = {
+        id: `src-${added.length + 1}`,
+        kind: 'exploration',
+        position: list.length,
+        title_snapshot: body.exploration_id,
+        accessible: true,
+        exploration_id: body.exploration_id,
+        mode: body.mode,
+      };
+      added.push({ investigation_id: id, ...body });
+      list.push(source);
+      journal(id, 'source.added', { title: source.title_snapshot, mode: body.mode });
+      return route.fulfill(json(source, 201));
+    }
+    if (sub === 'state') {
+      const roles = { ...(inv.state?.roles ?? {}) };
+      for (const [entity, role] of Object.entries(req.postDataJSON().roles ?? {})) {
+        if (role) roles[entity] = role;
+        else delete roles[entity];
+        journal(id, 'role.changed', { entity, to: role });
       }
-    });
-  }
+      inv.state = { ...inv.state, roles };
+      return route.fulfill(json(inv));
+    }
+    if (sub === 'notes') {
+      const list = notes.get(id) ?? [];
+      notes.set(id, list);
+      if (method !== 'POST') return route.fulfill(json(list));
+      const note = { id: `note-${list.length + 1}`, author_email: 'e2e@test.com', created_at: new Date().toISOString(), ...req.postDataJSON() };
+      list.push(note);
+      journal(id, 'note.created', { anchor: note.anchor, body: note.body });
+      return route.fulfill(json(note, 201));
+    }
+    return route.fulfill(json(events.get(id) ?? []));
+  });
   return { added };
 }
