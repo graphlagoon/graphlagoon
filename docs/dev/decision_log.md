@@ -11418,3 +11418,39 @@ arquivos; JSON inválido bloqueia), `CaseFiles.test.ts`, `useDatasourceCapabilit
 **Admin-Area Impact:** duas rotas em `AUDIT_EXEMPT_ROUTES` (diário do caso).
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 18:00] - Feature Implemented: F2.6 · Arquivo como enriquecimento do caso
+
+**Feature:** arquivo do caso com papel `enrichment` e mapeamento aparece na aba
+Enrichment do inspector (T2), junto por chave no browser, com a mesma UI de tabela da F2.2.
+
+**Design Decisions:**
+1. O mapeamento de enriquecimento é um `FileEnrichmentSpec` (não a spec de grafo):
+   `input` (delimitador, cabeçalho, colunas, encoding), `key_column`, `columns`,
+   `match_node_types`, `match_source` (`node_id` ou propriedade) e `key_digits`
+   opcional (chave do nó → só dígitos, N primeiros: CNPJ → CNPJ básico do QSA).
+   Validado no `PATCH …/files/{fid}` (F2.5); preset `QSA_ENRICHMENT` no assistente.
+2. Funções puras `fileEnrichmentKey`/`fileEnrichmentRows` em `utils/enrichment.ts`
+   (reusam `parseLine`/`columnsOf` do interpretador). A aba lê cada arquivo uma vez
+   (`GET …/content`, leitura auditada) e decodifica com o encoding da spec; só as
+   `columns` aparecem. Sempre "várias linhas"; `shortcut:` sem "promover a nós" nem
+   "Shared by" para arquivos.
+3. Escopo do caso: os arquivos vêm do `store.files` do caso aberto (movidos do
+   `CaseFiles` para o store na F2.5); nada vai para o context, então
+   `enrichmentTargets` e os contexts não veem o arquivo, e quem não lê o caso recebe
+   404 nas rotas de arquivo.
+
+**Files:** `frontend/src/utils/enrichment.ts`, `utils/fileImport.ts` (`decoderLabel`),
+`components/investigation/EnrichmentTab.vue`.
+
+**Testing:** vitest `EnrichmentTab.test.ts` (QSA mini enriquece o lojista por CNPJ com
+os sócios certos, sem consulta a context; Pessoa não casa; o arquivo não vira tabela de
+context); `test_investigation_files.py` (estranho ao caso: 404 na lista e no conteúdo);
+`vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (arquivo de enriquecimento).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)

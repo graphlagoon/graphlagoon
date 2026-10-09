@@ -232,3 +232,7 @@ def test_enrichment_file_mapping(ctx):
     assert r.status_code == 422
     assert client.patch(f"{url}/files/{f['id']}", json={"mapping": spec},
                         headers=h(READER)).status_code == 403
+    # F2.6: the enrichment file stays in the case.
+    stranger = h("stranger@example.com")
+    assert client.get(f"{url}/files", headers=stranger).status_code == 404
+    assert client.get(f"{url}/files/{f['id']}/content", headers=stranger).status_code == 404
