@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Revisão de matches</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #2c3e50; font-size: 14px; line-height: 1.5">
+<header style="min-height: 52px; box-sizing: border-box; padding: 0 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #0d1b2a; border-bottom: 1px solid rgba(20,184,166,0.25); color: #c8e8f0">
+<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: #14b8a6; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round"><path d="M3 15c2-4 4-4 6 0s4 4 6 0 4-4 6 0"></path></svg>
+<a href="T1-Fila.dc.html" style="color: #14b8a6; font-weight: 600; text-decoration: none; padding: 4px 8px">Investigações</a>
+<span style="width: 1px; height: 20px; background: rgba(200,232,240,0.15)"></span>
+<a href="T9-Anel.dc.html" style="font-weight: 600; color: #ffffff; text-decoration: none">Lojista recém-credenciado com chargebacks</a>
+<span style="font-size: 12px; color: rgba(200,232,240,0.8)">#2026-0409 › Revisão de matches</span>
+</header>
+<div style="flex: 1 1 auto; display: flex; flex-wrap: wrap">
+<aside aria-label="Fila de sugestões" style="flex: 1 1 300px; max-width: 100%; box-sizing: border-box; background: #ffffff; border-right: 1px solid #dee2e6; padding: 16px; display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+<h2 style="margin: 0 0 4px; font-size: 16px; color: #0d1b2a">3 sugestões para revisar</h2>
+<p style="margin: 0 0 6px; color: #6c757d">Ordenadas por quanto mudam o caso, não só pelo score.</p>
+<button type="button" aria-current="true" style="text-align: left; padding: 10px 12px; border-radius: 8px; border: 2px solid #0f766e; background: #f0fdfa; font: inherit; display: flex; flex-direction: column; gap: 2px"><b>Sócio da Loja Bom Preço ME</b><span style="color: #495057">= titular em 3 lojistas descredenciados</span><span style="color: #115e59; font-weight: 600">score 0,91 · liga 4 lojistas</span></button>
+<button type="button" style="text-align: left; padding: 10px 12px; border-radius: 8px; border: 1px solid #dee2e6; background: #ffffff; font: inherit; display: flex; flex-direction: column; gap: 2px"><b>Telefone do estabelecimento</b><span style="color: #495057">= telefone de 2 lojistas no mesmo CEP</span><span style="color: #495057">score 1,00 · exato</span></button>
+<button type="button" style="text-align: left; padding: 10px 12px; border-radius: 8px; border: 1px solid #dee2e6; background: #ffffff; font: inherit; display: flex; flex-direction: column; gap: 2px"><b>Sócio da Mercearia Sol LTDA</b><span style="color: #495057">= cliente pessoa física do banco</span><span style="color: #495057">score 0,62 · fraco</span></button>
+</aside>
+<main style="flex: 999 1 640px; min-width: 0; box-sizing: border-box; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px"><h1 style="margin: 0; font-size: 20px; line-height: 28px; color: #0d1b2a">São a mesma pessoa?</h1><span style="font-size: 13px; padding: 2px 10px; border-radius: 9999px; background: #ccfbf1; color: #115e59; font-weight: 600">score 0,91</span></div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px">
+<section style="background: #ffffff; border: 2px solid #b45309; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #92400e">ARQUIVO DO CASO · qsa_receita_2026-09.csv</span>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 4px 12px">
+<span style="color: #6c757d">Nome</span><span><mark style="background: #ccfbf1; color: inherit">MARIA A SOUZA</mark></span>
+<span style="color: #6c757d">CPF</span><span><mark style="background: #ccfbf1; color: inherit">•••.418.207-••</mark> (mascarado na origem)</span>
+<span style="color: #6c757d">Qualificação</span><span>sócia-administradora</span>
+<span style="color: #6c757d">Empresa</span><span>Loja Bom Preço ME · CNPJ aberto há 41 dias</span>
+<span style="color: #6c757d">CEP</span><span><mark style="background: #ccfbf1; color: inherit">04571-•••</mark></span>
+</div>
+</section>
+<section style="background: #ffffff; border: 2px solid #0f766e; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #115e59">CONTEXT · Lojistas, credenciamento</span>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 4px 12px">
+<span style="color: #6c757d">Nome</span><span><mark style="background: #ccfbf1; color: inherit">Maria Aparecida Souza</mark></span>
+<span style="color: #6c757d">CPF</span><span><mark style="background: #ccfbf1; color: inherit">•••.418.207-••</mark> (exibido mascarado)</span>
+<span style="color: #6c757d">Papel</span><span>titular de 3 lojistas descredenciados em 2026</span>
+<span style="color: #6c757d">Motivo da saída</span><span>chargeback acima do limite</span>
+<span style="color: #6c757d">CEP</span><span><mark style="background: #ccfbf1; color: inherit">04571-•••</mark></span>
+</div>
+</section>
+</div>
+<section style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+<b style="font-size: 14px">Por que o sistema sugere</b>
+<ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px">
+<li>Nome parecido: Jaro-Winkler 0,96 entre "MARIA A SOUZA" e "Maria Aparecida Souza"</li>
+<li>Os 6 dígitos visíveis do CPF coincidem</li>
+<li>Mesmo CEP do estabelecimento</li>
+</ul>
+<div style="padding: 8px 10px; border-radius: 6px; background: #eff6ff; color: #1e3a8a">O CPF vem mascarado na Receita, então este match nunca vira merge automático. Ele só une as entidades com o seu aceite.</div>
+</section>
+<section style="background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; padding: 14px 16px; font-size: 13px; color: #7c2d12"><b>Se aceitar:</b> a Loja Bom Preço ME passa a dividir a sócia com 3 lojistas descredenciados, e o anel do caso cresce de 6 para 9 lojistas.</section>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+<label style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Motivo (vai para o diário)<input type="text" placeholder="ex.: confirmado pelo endereço residencial no KYC" style="min-height: 40px; box-sizing: border-box; padding: 8px 12px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400"></label>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 40px; padding: 8px 14px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Adiar</button>
+<button type="button" style="min-height: 40px; padding: 8px 14px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Não é a mesma</button>
+<a href="T9-Anel.dc.html" style="display: inline-flex; align-items: center; min-height: 40px; box-sizing: border-box; padding: 8px 14px; border-radius: 6px; background: #0f766e; color: #ffffff; text-decoration: none; font-weight: 600">É a mesma pessoa</a>
+</div>
+</div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

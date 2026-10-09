@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Anel de lojistas</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="height: 100vh; min-height: 760px; display: flex; flex-direction: column; background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #2c3e50; font-size: 14px; line-height: 1.5">
+<header style="min-height: 52px; box-sizing: border-box; padding: 0 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #0d1b2a; border-bottom: 1px solid rgba(20,184,166,0.25); color: #c8e8f0">
+<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: #14b8a6; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round"><path d="M3 15c2-4 4-4 6 0s4 4 6 0 4-4 6 0"></path></svg>
+<a href="T1-Fila.dc.html" style="color: #14b8a6; font-weight: 600; text-decoration: none; padding: 4px 8px">Investigações</a>
+<span style="width: 1px; height: 20px; background: rgba(200,232,240,0.15)"></span>
+<span style="font-weight: 600; color: #ffffff">Lojista recém-credenciado com chargebacks</span>
+<span style="font-size: 12px; color: rgba(200,232,240,0.8)">#2026-0409</span>
+<span style="font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; background: rgba(249,115,22,0.25); color: #ffedd5">análise · 6 d restantes</span>
+<div style="flex: 1 1 auto"></div>
+<a href="T8-Matches.dc.html" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; color: #c8e8f0; text-decoration: none; border: 1px solid rgba(200,232,240,0.3)">Matches (2)</a>
+<a href="T7-Dossie.dc.html" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; color: #c8e8f0; text-decoration: none; border: 1px solid rgba(200,232,240,0.3)">Dossiê</a>
+</header>
+<div role="tablist" aria-label="Explorações do caso" style="display: flex; flex-wrap: wrap; gap: 0; background: #ffffff; border-bottom: 1px solid #dee2e6; padding: 0 12px; font-size: 14px">
+<span role="tab" aria-selected="true" style="padding: 10px 14px; border-bottom: 3px solid #0f766e; font-weight: 600; color: #0d1b2a">Visão unificada</span>
+<span role="tab" aria-selected="false" style="padding: 10px 14px; color: #495057">Lojistas · credenciamento</span>
+<span role="tab" aria-selected="false" style="padding: 10px 14px; color: #495057">qsa_receita_2026-09.csv</span>
+<span role="tab" aria-selected="false" style="padding: 10px 14px; color: #495057">Terminais (tabela extra)</span>
+</div>
+<div style="flex: 1 1 auto; min-height: 0; display: flex; flex-wrap: wrap">
+<aside aria-label="Selos de tipologia" style="flex: 1 1 280px; max-width: 100%; box-sizing: border-box; background: #ffffff; border-right: 1px solid #dee2e6; padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; font-size: 13px">
+<h2 style="margin: 0; font-size: 16px; color: #0d1b2a">Selos de tipologia</h2>
+<p style="margin: 0; color: #6c757d">Clique num selo para destacar os lojistas no grafo.</p>
+<button type="button" aria-pressed="true" style="text-align: left; padding: 10px 12px; border-radius: 8px; border: 2px solid #c2410c; background: #fff7ed; font: inherit; display: flex; flex-direction: column; gap: 2px"><b style="color: #7c2d12">CC 4.001 III-f</b><span>contas abertas juntas com elementos em comum</span><span style="color: #9a3412; font-weight: 600">7 de 9 lojistas</span></button>
+<button type="button" aria-pressed="false" style="text-align: left; padding: 10px 12px; border-radius: 8px; border: 1px solid #dee2e6; background: #ffffff; font: inherit; display: flex; flex-direction: column; gap: 2px"><b>CC 4.001 IV-v a IV-z</b><span>POS incompatível com o perfil ou longe do lojista</span><span style="color: #495057">3 lojistas</span></button>
+<button type="button" aria-pressed="false" style="text-align: left; padding: 10px 12px; border-radius: 8px; border: 1px solid #dee2e6; background: #ffffff; font: inherit; display: flex; flex-direction: column; gap: 2px"><b>Regra interna</b><span>antecipação seguida de chargeback</span><span style="color: #495057">4 lojistas</span></button>
+<p style="margin: 6px 0 0; font-size: 12px; color: #6c757d">Selos sugerem; quem decide é o analista. Cada selo aceito vai para o dossiê com o item da norma.</p>
+</aside>
+<section aria-label="Grafo" style="position: relative; flex: 999 1 560px; min-width: 0; min-height: 520px; background: #fafafa">
+<div style="position: absolute; left: 12px; top: 10px; font-size: 12px; color: #495057; background: rgba(255,255,255,0.94); border: 1px solid #dee2e6; border-radius: 6px; padding: 4px 8px">Layout bipartido: lojistas × elementos compartilhados</div>
+<svg viewBox="0 0 860 560" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Nove lojistas ligados por uma sócia, uma conta de liquidação e um terminal em comum" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%">
+<g style="stroke: #94a3b8; stroke-width: 1.5; fill: none">
+<line x1="250" y1="67" x2="606" y2="140" stroke="#c2410c" stroke-width="2.5"></line>
+<line x1="250" y1="122" x2="606" y2="140" stroke="#c2410c" stroke-width="2.5"></line>
+<line x1="250" y1="177" x2="606" y2="140" stroke="#c2410c" stroke-width="2.5"></line>
+<line x1="250" y1="232" x2="606" y2="140" stroke="#c2410c" stroke-width="2.5"></line>
+<line x1="250" y1="67" x2="606" y2="290"></line>
+<line x1="250" y1="122" x2="606" y2="290"></line>
+<line x1="250" y1="287" x2="606" y2="290"></line>
+<line x1="250" y1="342" x2="606" y2="290"></line>
+<line x1="250" y1="397" x2="606" y2="290"></line>
+<line x1="250" y1="452" x2="606" y2="290"></line>
+<line x1="250" y1="397" x2="606" y2="440"></line>
+<line x1="250" y1="452" x2="606" y2="440"></line>
+<line x1="250" y1="507" x2="606" y2="440"></line>
+</g>
+<g style="font-size: 13px">
+<rect x="40" y="50" width="210" height="34" rx="6" fill="#fff7ed" stroke="#c2410c" stroke-width="2.5"></rect><text x="52" y="72" fill="#7c2d12" font-weight="700">Loja Bom Preço ME</text>
+<rect x="40" y="105" width="210" height="34" rx="6" fill="#f1f3f5" stroke="#adb5bd"></rect><text x="52" y="127" fill="#495057">Empório Dois Irmãos · desc.</text>
+<rect x="40" y="160" width="210" height="34" rx="6" fill="#f1f3f5" stroke="#adb5bd"></rect><text x="52" y="182" fill="#495057">Casa Nova Utilid. · desc.</text>
+<rect x="40" y="215" width="210" height="34" rx="6" fill="#f1f3f5" stroke="#adb5bd"></rect><text x="52" y="237" fill="#495057">Variedades JM · desc.</text>
+<rect x="40" y="270" width="210" height="34" rx="6" fill="#ffffff" stroke="#adb5bd"></rect><text x="52" y="292" fill="#1f2937">Ótica Visão Clara</text>
+<rect x="40" y="325" width="210" height="34" rx="6" fill="#ffffff" stroke="#adb5bd"></rect><text x="52" y="347" fill="#1f2937">Pet Mundo</text>
+<rect x="40" y="380" width="210" height="34" rx="6" fill="#ffffff" stroke="#adb5bd"></rect><text x="52" y="402" fill="#1f2937">Auto Peças Rota</text>
+<rect x="40" y="435" width="210" height="34" rx="6" fill="#ffffff" stroke="#adb5bd"></rect><text x="52" y="457" fill="#1f2937">Moda Lima</text>
+<rect x="40" y="490" width="210" height="34" rx="6" fill="#ffffff" stroke="#adb5bd"></rect><text x="52" y="512" fill="#1f2937">Celular Expresso</text>
+</g>
+<circle cx="620" cy="140" r="16" fill="#ffffff" stroke="#7c3aed" stroke-width="3"></circle>
+<rect x="606" y="276" width="28" height="28" rx="4" fill="#ffffff" stroke="#0f766e" stroke-width="3"></rect>
+<rect x="609" y="429" width="22" height="22" fill="#ffffff" stroke="#475569" stroke-width="3" transform="rotate(45 620 440)"></rect>
+<g style="font-size: 13px; fill: #1f2937">
+<text x="646" y="136" font-weight="700">Sócia M. A. Souza</text><text x="646" y="153" style="font-size: 12px; fill: #6d28d9">QSA · match aceito</text>
+<text x="646" y="286" font-weight="700">Conta de liquidação</text><text x="646" y="303" style="font-size: 12px; fill: #115e59">0099-1 · 6 lojistas</text>
+<text x="646" y="436" font-weight="700">Terminal T-88</text><text x="646" y="453" style="font-size: 12px; fill: #475569">tabela extra promovida</text>
+</g>
+</svg>
+</section>
+<aside aria-label="Comunidade selecionada" style="flex: 1 1 300px; max-width: 100%; box-sizing: border-box; background: #ffffff; border-left: 1px solid #dee2e6; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; font-size: 13px">
+<div><div style="font-size: 12px; color: #6c757d">Comunidade (Louvain) + componente</div><h2 style="margin: 0; font-size: 18px; color: #0d1b2a">Anel de 9 lojistas</h2></div>
+<div style="display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px">
+<b style="color: #0d1b2a">7 de 9</b><span>CNPJs abertos há menos de 90 dias</span>
+<b style="color: #0d1b2a">6</b><span>liquidam na mesma conta 0099-1</span>
+<b style="color: #0d1b2a">3</b><span>usam o terminal T-88</span>
+<b style="color: #0d1b2a">3</b><span>já descredenciados, todos com a mesma sócia</span>
+</div>
+<div style="padding: 8px 10px; border-radius: 6px; background: #f8f9fa; color: #495057">Hoje este anel só aparece depois de cruzar QSA e terminais no Excel. Aqui ele surge com Louvain e componentes, que o app já tem.</div>
+<a href="T7-Dossie.dc.html" style="display: inline-flex; justify-content: center; align-items: center; min-height: 40px; box-sizing: border-box; padding: 8px 14px; border-radius: 6px; background: #0f766e; color: #ffffff; text-decoration: none; font-weight: 600">Levar o anel ao dossiê</a>
+<button type="button" style="min-height: 40px; padding: 8px 14px; border-radius: 6px; border: 1px solid #c2410c; background: #ffffff; color: #9a3412; font: inherit; font-weight: 600">Propor descredenciamento</button>
+</aside>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

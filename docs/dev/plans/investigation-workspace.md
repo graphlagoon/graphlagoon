@@ -1,7 +1,10 @@
 # Plano: Graph Lagoon como sistema de investigação (fraude, PLD/FT, follow the money)
 
-> Status: **proposta** em 2026-10-09. Nada foi implementado ainda. O design de UX
-> está sendo feito em canvas, seguindo as fases D0–D4 abaixo.
+> Status: **proposta** em 2026-10-09. Nada foi implementado ainda.
+>
+> **Para executar, use o pacote [investigation/](investigation/README.md):** pesquisa,
+> design (telas e fluxos com imagens e mockups), arquitetura e plano de tarefas. Este
+> arquivo fica como registro da proposta original.
 
 ## Contexto
 
