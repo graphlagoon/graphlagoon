@@ -9,10 +9,14 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from graphlagoon.middleware.auth import get_current_user
 from graphlagoon.models.schemas import (
+    ArtifactResponse,
+    ArtifactTextUpload,
     InvestigationCreate,
     InvestigationEventCreate,
     InvestigationEventResponse,
@@ -27,6 +31,8 @@ from graphlagoon.models.schemas import (
     InvestigationUpdate,
 )
 from graphlagoon.services import audit
+from graphlagoon.services import investigation_artifacts as artifacts
+from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import forbid_agents, require_permission
@@ -333,3 +339,159 @@ async def delete_note(investigation_id: UUID, note_id: UUID, request: Request):
     except service.InvestigationError as exc:
         raise _http(exc)
     return {"status": "deleted"}
+
+
+# Case space (FA.2, 03 §8.5). A binary goes as the raw request body (streamed to
+# a temp file while hashed, never held in memory) with name/kind/note in the
+# query; text goes as JSON. Recorded in the case journal (AUDIT_EXEMPT_ROUTES).
+
+
+async def _receive_artifact(
+    request: Request,
+    name: Optional[str],
+    kind: Optional[str],
+    note: Optional[str],
+    evidence: list[str],
+) -> tuple[storage.Received, dict]:
+    from graphlagoon.config import get_settings
+
+    max_bytes = get_settings().artifact_max_bytes
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = ArtifactTextUpload.model_validate(await request.json())
+        except ValueError as exc:  # pydantic's ValidationError included
+            raise _http(service.InvestigationError(422, "INVALID_BODY", str(exc)))
+        data = body.text.encode("utf-8")
+
+        async def chunks():
+            yield data
+
+        meta = {
+            "name": body.name,
+            "kind": body.kind,
+            "note": body.note,
+            "source_evidence_ids": body.source_evidence_ids,
+        }
+    else:
+        chunks = request.stream
+        meta = {"name": name, "kind": kind, "note": note, "source_evidence_ids": evidence}
+    try:
+        received = await storage.receive(chunks(), max_bytes)
+    except storage.TooLarge:
+        raise _http(
+            service.InvestigationError(
+                413, "ARTIFACT_TOO_LARGE", f"Artifacts are limited to {max_bytes} bytes"
+            )
+        )
+    return received, meta
+
+
+@router.get(
+    "/{investigation_id}/artifacts", response_model=list[ArtifactResponse]
+)
+async def list_artifacts(investigation_id: UUID, request: Request):
+    try:
+        return await artifacts.list_artifacts(
+            investigation_id, get_current_user(request)
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/artifacts",
+    response_model=ArtifactResponse,
+    status_code=201,
+)
+async def create_artifact(
+    investigation_id: UUID,
+    request: Request,
+    name: Optional[str] = None,
+    kind: Optional[str] = None,
+    note: Optional[str] = None,
+    source_evidence_ids: list[str] = Query(default_factory=list),
+):
+    received, meta = await _receive_artifact(
+        request, name, kind, note, source_evidence_ids
+    )
+    try:
+        return await artifacts.create_artifact(
+            investigation_id, get_current_user(request), received, **meta
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/artifacts/{artifact_id}/versions",
+    response_model=ArtifactResponse,
+    status_code=201,
+)
+async def add_artifact_version(
+    investigation_id: UUID,
+    artifact_id: UUID,
+    request: Request,
+    name: Optional[str] = None,
+    note: Optional[str] = None,
+    source_evidence_ids: list[str] = Query(default_factory=list),
+):
+    received, meta = await _receive_artifact(
+        request, name, None, note, source_evidence_ids
+    )
+    meta.pop("kind")
+    try:
+        return await artifacts.add_version(
+            investigation_id, get_current_user(request), artifact_id, received, **meta
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.get("/{investigation_id}/artifacts/{artifact_id}/versions/{version}/content")
+async def get_artifact_content(
+    investigation_id: UUID,
+    artifact_id: UUID,
+    version: int,
+    request: Request,
+    download: bool = False,
+):
+    try:
+        data, meta = await artifacts.get_content(
+            investigation_id, get_current_user(request), artifact_id, version
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    # html/svg are never rendered by the browser (XSS): attachment + opaque type.
+    attach = download or meta["download_only"]
+    media_type = (
+        "application/octet-stream" if meta["download_only"] else meta["content_type"]
+    )
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f"{'attachment' if attach else 'inline'}; "
+                f"filename*=UTF-8''{quote(meta['name'])}"
+            ),
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+            "X-Content-SHA256": meta["sha256"],
+        },
+    )
+
+
+@router.post(
+    "/{investigation_id}/artifacts/{artifact_id}/versions/{version}/approve",
+    response_model=ArtifactResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def approve_artifact_version(
+    investigation_id: UUID, artifact_id: UUID, version: int, request: Request
+):
+    try:
+        return await artifacts.approve_version(
+            investigation_id, get_current_user(request), artifact_id, version
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)

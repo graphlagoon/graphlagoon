@@ -385,36 +385,13 @@ async def unshare_investigation(
 # ---------------------------------------------------------------------------
 
 _SOURCES = "investigation_sources"
-_store_singleton = None
 
 
 def _blob_store():
-    """Case storage (03 §2.3): `investigations/` under the snapshot volume or dir.
+    """Case storage (03 §2.3); a function so tests can swap the store."""
+    from graphlagoon.services import investigation_storage
 
-    shortcut: reuses the snapshot service's volume and auth; FA.2 adds the
-    `investigations_volume_path` setting and its own configure step.
-    """
-    global _store_singleton
-    if _store_singleton is None:
-        import os
-
-        from graphlagoon.config import get_settings
-        from graphlagoon.services import snapshot
-        from graphlagoon.services.named_store import build_blob_store
-
-        settings = snapshot._snapshot_settings or get_settings()
-        volume = settings.databricks_volume_path
-        _store_singleton = build_blob_store(
-            local_dir=os.path.join(
-                settings.exploration_snapshots_dir, "investigations"
-            ),
-            volume_path=f"{volume.rstrip('/')}/investigations" if volume else None,
-            databricks_host=settings.databricks_host,
-            databricks_token=settings.databricks_token,
-            header_provider=snapshot._snapshot_header_provider,
-            what="investigation",
-        )
-    return _store_singleton
+    return investigation_storage.get_store()
 
 
 async def _context_readable(context_id: Optional[UUID], user_email: str) -> bool:
@@ -576,7 +553,9 @@ async def add_source(
                 json.dumps(payload, sort_keys=True, default=str).encode("utf-8"),
                 mtime=0,
             )
-            key = f"{investigation_id}/sources/{source_id}.json.gz"
+            from graphlagoon.services.investigation_storage import source_key
+
+            key = source_key(investigation_id, source_id)
             await _blob_store().save(key, data)
             fields["frozen_blob_key"] = key
             fields["frozen_sha256"] = hashlib.sha256(data).hexdigest()

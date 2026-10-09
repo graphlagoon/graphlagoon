@@ -2,6 +2,7 @@ import axios, { type AxiosInstance } from 'axios';
 import type {
   CreateInvestigationRequest,
   Investigation,
+  InvestigationArtifact,
   InvestigationEvent,
   InvestigationNote,
   InvestigationRole,
@@ -714,6 +715,37 @@ class ApiService {
 
   async deleteInvestigationNote(id: string, noteId: string): Promise<void> {
     await this.client.delete(`/api/investigations/${id}/notes/${noteId}`);
+  }
+
+  // Case space (FA.2): the file goes as the raw body (streamed by the server).
+  async getInvestigationArtifacts(id: string): Promise<InvestigationArtifact[]> {
+    const response = await this.client.get(`/api/investigations/${id}/artifacts`);
+    return response.data;
+  }
+
+  async uploadInvestigationArtifact(id: string, file: File, artifactId?: string): Promise<InvestigationArtifact> {
+    const path = artifactId ? `artifacts/${artifactId}/versions` : 'artifacts';
+    const response = await this.client.post(`/api/investigations/${id}/${path}`, file, {
+      params: { name: file.name },
+      // Never application/json: the server reads that as a text artifact.
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+    return response.data;
+  }
+
+  async getArtifactContent(id: string, artifactId: string, version: number): Promise<Blob> {
+    const response = await this.client.get(
+      `/api/investigations/${id}/artifacts/${artifactId}/versions/${version}/content`,
+      { responseType: 'blob' },
+    );
+    return response.data;
+  }
+
+  async approveArtifactVersion(id: string, artifactId: string, version: number): Promise<InvestigationArtifact> {
+    const response = await this.client.post(
+      `/api/investigations/${id}/artifacts/${artifactId}/versions/${version}/approve`,
+    );
+    return response.data;
   }
 
   // Admin area (superuser only; every route 403s for anyone else)

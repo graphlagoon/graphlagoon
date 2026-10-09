@@ -36,7 +36,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 
 **FA · AI-first: agentes na investigação**
 - [x] FA.1 · Tokens de agente, escopos e ator no diário
-- [ ] FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
+- [x] FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
 - [ ] FA.3 · Propostas e aprovação humana (T11)
 - [ ] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
 - [ ] FA.5 · Ponte MCP local (stdio) para apps atrás do proxy do Databricks
@@ -390,14 +390,14 @@ trabalho de análise e documentação; a pessoa decide.
   - `views/InvestigationView.vue`: aba "Espaço do caso" com
     `components/investigation/ArtifactsSpace.vue` (novo).
 - **Aceite:**
-  - [ ] Em `make dev` os arquivos vão para o diretório local; com Databricks, para o
+  - [x] Em `make dev` os arquivos vão para o diretório local; com Databricks, para o
     Volume em `{investigations_volume_path}/{id}/artifacts/…`.
-  - [ ] Um arquivo maior que a memória disponível do processo sobe sem estourar (teste
+  - [x] Um arquivo maior que a memória disponível do processo sobe sem estourar (teste
     com gerador em stream).
-  - [ ] Nova versão nunca sobrescreve a anterior.
-  - [ ] `html` e `svg` só para download.
-  - [ ] Aprovar exige humano.
-  - [ ] A tela segue `screens/T10-Espaco.png`.
+  - [x] Nova versão nunca sobrescreve a anterior.
+  - [x] `html` e `svg` só para download.
+  - [x] Aprovar exige humano.
+  - [x] A tela segue `screens/T10-Espaco.png`.
 - **Testes:**
   - novo `test_investigation_storage.py` (local e Databricks com Files API mockada);
   - novo `test_artifacts.py`;

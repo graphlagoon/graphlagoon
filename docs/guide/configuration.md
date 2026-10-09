@@ -427,6 +427,16 @@ default.
 | `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA` | `false` | Let agents read CPF, CNPJ and account numbers unmasked. |
 | `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per token (per server process). |
 
+## Investigation storage
+
+Frozen sources and the case space (versioned artifacts) are stored as files,
+never overwritten. Uploads stream to disk while their sha256 is computed.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_INVESTIGATIONS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to an `investigations` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set; otherwise files go to `{GRAPH_LAGOON_EXPLORATION_SNAPSHOTS_DIR}/investigations`. Give write access to the app's service principal only. |
+| `GRAPH_LAGOON_ARTIFACT_MAX_BYTES` | `104857600` | Maximum size of one artifact version (100 MB). |
+
 ## Programmatic Configuration
 
 ```python

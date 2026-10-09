@@ -10849,3 +10849,64 @@ stores; `vue-tsc` limpo.
 quatro settings em `CONFIG_FIELD_KINDS`, ações `agent_token.create|revoke`.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 08:00] - Feature Implemented: FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
+
+**Feature:** armazenamento do caso (`services/investigation_storage.py`) com upload em
+streaming + sha256 e sem sobrescrita; artefatos versionados
+(`investigation_artifacts`, `investigation_artifact_versions`, migração 018) com as
+rotas da 03 §8.5 e a aba "Case space" (T10) no workspace.
+
+**Design Decisions:**
+1. `BlobStore.save_stream(key, path)`: local move + `os.link` (falha se a chave
+   existe; sem hard link, checa e renomeia); Databricks `PUT` com corpo em stream,
+   `Content-Length` explícito e `overwrite=false` (409 → `FileExistsError`).
+2. `investigation_storage`: raiz `investigations_volume_path` (padrão
+   `{databricks_volume_path}/investigations`) ou `{exploration_snapshots_dir}/investigations`
+   (o mesmo diretório da F1.3, então fontes congeladas antigas continuam legíveis);
+   `configure_investigation_storage` no startup com o header provider do app. As
+   fontes congeladas da F1.3 passaram a usar este store (`source_key`).
+3. **Diferença da 03:** sem multipart (o projeto não tem `python-multipart`); binário
+   vai como corpo cru (`application/octet-stream`, nome/kind/note na query), lido de
+   `request.stream()` direto para um temporário enquanto o hash é calculado; texto vai
+   como JSON `{name, text}`. Limite `artifact_max_bytes` (100 MB) → 413.
+4. Tipo pela extensão (lista da 03 §8.5), content-type decidido pelo servidor; nova
+   versão precisa da mesma extensão e grava em `v{n}/{nome do artefato}`. `html`/`svg`
+   saem como `attachment` + `application/octet-stream`; todo conteúdo com `nosniff` e
+   `CSP: sandbox`. A API nunca devolve `blob_key`.
+5. Aprovar: `forbid_agents` + escrita no caso; versão já aprovada → 409. Versões
+   gravam `actor` (pessoa ou "agente X por Y"); eventos `artifact.created`,
+   `artifact.version_added`, `artifact.approved` no diário (rotas em
+   `AUDIT_EXEMPT_ROUTES`). `investigation_id` desnormalizado na versão (cascade e
+   paridade em memória por caso).
+6. T10: filtros por tipo/autor/status, preview de `md`/`txt` como texto puro
+   (`shortcut:` sem renderizar markdown, não há lib no projeto), imagem e PDF via blob
+   URL; demais tipos só download. "Levar ao dossiê" fica para a F4.2.
+   `shortcut:` download carrega o blob inteiro na memória do servidor; ler em stream
+   se artefatos crescerem.
+
+**Files:** `api/graphlagoon/services/blob_storage.py`, `services/investigation_storage.py`
+(novo), `services/investigation_artifacts.py` (novo), `services/investigations.py`,
+`routers/investigations.py`, `routers/admin_registry.py`, `models/schemas.py`,
+`db/models.py`, `db/memory_store.py`, `alembic/versions/018_artifacts.py`, `config.py`,
+`app.py`; `api/tests/test_investigation_storage.py`, `api/tests/test_artifacts.py`
+(novos); `frontend/src/components/investigation/ArtifactsSpace.vue` (novo),
+`views/InvestigationView.vue`, `services/api.ts`, `types/investigation.ts`,
+`components/__tests__/ArtifactsSpace.test.ts` (novo),
+`views/__tests__/InvestigationView.test.ts`, `e2e/helpers/api-mocks.ts`,
+`e2e/tests/investigations.spec.ts`.
+
+**Testing:** pytest storage (stream de 64 MiB com pico de memória < 8 MiB, limite,
+não sobrescreve local e Databricks com Files API mockada) e artefatos (versões,
+html/svg, agente sobe rascunho e leva 403 ao aprovar) mais investigações, registry,
+admin, tokens e blob storage (236 verdes); vitest do `ArtifactsSpace` e do
+`InvestigationView`; `vue-tsc` limpo; E2E "case space" verde.
+
+**Public Docs:** `docs/guide/investigations.md` (seção Case space) e
+`docs/guide/configuration.md` (Investigation storage). **Admin-Area Impact:** duas
+tabelas em `CLEARABLE_TABLES`, dois settings em `CONFIG_FIELD_KINDS`, três rotas em
+`AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
+
+**Author:** Claude (AI Assistant)

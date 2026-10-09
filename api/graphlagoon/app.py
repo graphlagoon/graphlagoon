@@ -41,6 +41,7 @@ from graphlagoon.services.precomputed import (
     volume_provider,
 )
 from graphlagoon.services.style_presets import configure_style_preset_service
+from graphlagoon.services.investigation_storage import configure_investigation_storage
 from graphlagoon.services.group_resolution import configure_group_resolution
 from graphlagoon.services.datasource import (
     close_datasources,
@@ -510,6 +511,7 @@ def create_mountable_app(
     configure_snapshot_service(settings, header_provider=header_provider)
     configure_precomputed_storage(settings, header_provider=header_provider)
     configure_style_preset_service(settings, header_provider=header_provider)
+    configure_investigation_storage(settings, header_provider=header_provider)
     configure_group_resolution(settings, header_provider=header_provider)
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
@@ -663,6 +665,7 @@ def create_app(
     configure_snapshot_service(settings, header_provider=header_provider)
     configure_precomputed_storage(settings, header_provider=header_provider)
     configure_style_preset_service(settings, header_provider=header_provider)
+    configure_investigation_storage(settings, header_provider=header_provider)
     configure_group_resolution(settings, header_provider=header_provider)
 
     # Register similarity endpoints

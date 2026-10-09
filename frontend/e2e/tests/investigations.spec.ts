@@ -153,4 +153,28 @@ test.describe('Investigations', () => {
     await page.getByTestId('tab-unified').click();
     await expect(status).toContainText('4 nodes');
   });
+
+  test('case space: upload an artifact, send a new version and approve it', async ({ authenticatedPage: page }) => {
+    await seedInvestigations(page, [CASE]);
+    await page.goto('/investigations/inv-1');
+    await page.getByTestId('tab-space').click();
+    await expect(page.getByTestId('tab-space')).toContainText('0');
+
+    const upload = async (button: string, text: string) => {
+      const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId(button).click()]);
+      await chooser.setFiles({ name: 'Resumo do caso.md', mimeType: 'text/markdown', buffer: Buffer.from(text) });
+    };
+    await upload('artifact-upload', '# v1');
+    await expect(page.getByTestId('artifact-preview')).toContainText('# v1');
+    await expect(page.getByTestId('tab-space')).toContainText('1');
+
+    await upload('artifact-new-version', '# v2');
+    await expect(page.getByTestId('artifact-preview')).toContainText('# v2');
+    await expect(page.getByTestId('artifact-version-1')).toContainText('draft');
+    await expect(page.getByTestId('tab-space')).toContainText('1');
+
+    await page.getByTestId('artifact-approve').click();
+    await expect(page.getByTestId('artifact-version-2')).toContainText('approved');
+    await expect(page.getByTestId('artifact-approve')).toHaveCount(0);
+  });
 });

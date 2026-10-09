@@ -275,6 +275,35 @@ class MemoryEntityMatch:
 
 
 @dataclass
+class MemoryInvestigationArtifact:
+    id: UUID
+    investigation_id: UUID
+    name: str
+    kind: str
+    current_version: int = 1
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class MemoryInvestigationArtifactVersion:
+    id: UUID
+    investigation_id: UUID
+    artifact_id: UUID
+    version: int
+    blob_key: str
+    sha256: str
+    size_bytes: int
+    content_type: str
+    status: str = "draft"
+    actor: Dict[str, Any] = field(default_factory=dict)
+    source_evidence_ids: List[Any] = field(default_factory=list)
+    note: Optional[str] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+
+
+@dataclass
 class MemoryAgentToken:
     id: UUID
     owner_email: str
@@ -295,6 +324,8 @@ INVESTIGATION_CHILDREN: Dict[str, type] = {
     "investigation_notes": MemoryInvestigationNote,
     "investigation_evidence": MemoryInvestigationEvidence,
     "entity_matches": MemoryEntityMatch,
+    "investigation_artifacts": MemoryInvestigationArtifact,
+    "investigation_artifact_versions": MemoryInvestigationArtifactVersion,
 }
 
 
@@ -322,6 +353,10 @@ class InMemoryStore:
         self.investigation_notes: Dict[UUID, MemoryInvestigationNote] = {}
         self.investigation_evidence: Dict[UUID, MemoryInvestigationEvidence] = {}
         self.entity_matches: Dict[UUID, MemoryEntityMatch] = {}
+        self.investigation_artifacts: Dict[UUID, MemoryInvestigationArtifact] = {}
+        self.investigation_artifact_versions: Dict[
+            UUID, MemoryInvestigationArtifactVersion
+        ] = {}
         self.agent_tokens: Dict[UUID, MemoryAgentToken] = {}
         # Audit trail, newest last. Bounded so a long-running dev server
         # cannot grow without limit; the admin area reads it newest first.

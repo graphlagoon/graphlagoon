@@ -1816,6 +1816,44 @@ class InvestigationNoteResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+# Case space (03-arquitetura §8.5)
+ArtifactKind = Literal["slides", "doc", "report", "image", "data", "other"]
+
+
+class ArtifactTextUpload(BaseModel):
+    """JSON body for a text artifact (md, txt, csv, json, …); binaries go raw."""
+
+    name: str = Field(min_length=1, max_length=200)
+    text: str
+    kind: Optional[ArtifactKind] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+    source_evidence_ids: list[str] = Field(default_factory=list)
+
+
+class ArtifactVersionResponse(BaseModel):
+    version: int
+    sha256: str
+    size_bytes: int
+    content_type: str
+    status: Literal["draft", "approved"]
+    actor: dict[str, Any] = Field(default_factory=dict)
+    source_evidence_ids: list[str] = Field(default_factory=list)
+    note: Optional[str] = None
+    created_at: Optional[datetime] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+
+
+class ArtifactResponse(BaseModel):
+    id: UUID
+    name: str
+    kind: str
+    current_version: int
+    created_at: Optional[datetime] = None
+    download_only: bool = False
+    versions: list[ArtifactVersionResponse] = Field(default_factory=list)  # newest first
+
+
 # ---------------------------------------------------------------------------
 # Agent tokens (03-arquitetura §8.2)
 # ---------------------------------------------------------------------------
