@@ -1694,3 +1694,27 @@ class InvestigationResponse(BaseModel):
     shared_with: list[InvestigationShareOut] = Field(default_factory=list)
     has_write_access: bool = False
     can_manage: bool = False
+
+
+class InvestigationSourceCreate(BaseModel):
+    kind: Literal["exploration"] = "exploration"  # "file" arrives with F2.5
+    exploration_id: UUID
+    mode: Literal["live", "frozen"] = "live"
+
+
+class InvestigationSourceResponse(BaseModel):
+    """`accessible: false` carries only title, context name and owner."""
+
+    id: UUID
+    kind: str
+    position: int
+    title_snapshot: str
+    context_title: Optional[str] = None
+    owner_email: Optional[str] = None
+    accessible: bool
+    exploration_id: Optional[UUID] = None
+    context_id: Optional[UUID] = None
+    mode: Optional[str] = None
+    frozen_sha256: Optional[str] = None
+    added_by: Optional[str] = None
+    added_at: Optional[datetime] = None

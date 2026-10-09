@@ -26,7 +26,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 **F1 · Fundação**
 - [x] F1.1 · Modelos, migração 016 e paridade em memória
 - [x] F1.2 · API de investigações: CRUD, compartilhamento nominal, permissões, auditoria
-- [ ] F1.3 · Fontes: adicionar e remover explorações, com redação por acesso
+- [x] F1.3 · Fontes: adicionar e remover explorações, com redação por acesso
 - [ ] F1.4 · Chaves de identidade no context (backend e aba no formulário)
 - [ ] F1.5 · Frontend: rotas, store, API, fila (T1), "Adicionar à investigação" (T3)
 - [ ] F1.6 · Grafo unificado e workspace (T2)
@@ -214,8 +214,8 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
      quando quem chama não lê o context. Nada de dados.
   4. Auditar a adição e a remoção de fonte.
 - **Aceite:**
-  - [ ] Explorações de dois contexts diferentes no mesmo caso.
-  - [ ] Um usuário sem acesso a um dos contexts vê o placeholder e nenhum nó dele.
+  - [x] Explorações de dois contexts diferentes no mesmo caso.
+  - [x] Um usuário sem acesso a um dos contexts vê o placeholder e nenhum nó dele.
 - **Testes:** `api/tests/test_investigation_sources.py`, cobrindo redação, acesso
   negado e o hash do congelamento.
 

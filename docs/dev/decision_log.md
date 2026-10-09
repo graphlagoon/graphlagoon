@@ -10472,3 +10472,48 @@ catálogo (aparece na matriz do admin) e 5 rotas auditadas; `describeAudit` das 
 novas fica para a F1.8.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 23:55] - Feature Implemented: F1.3 · Fontes: adicionar e remover explorações
+
+**Feature:** `GET/POST /api/investigations/{id}/sources`,
+`DELETE …/sources/{sid}` e `GET …/sources/{sid}/snapshot` (03 §3.2).
+
+**Design Decisions:**
+1. **Acesso:** adicionar exige escrita no caso e leitura do context da exploração via
+   `get_context_with_access` (já cobre dono, share de exploração, share de context e
+   superuser). Exploração repetida no mesmo caso → 409.
+2. **Redação:** quem não lê o context recebe `accessible: false` com só `id`, `kind`,
+   `position`, `title_snapshot`, `context_title` e `owner_email`; o `/snapshot` dá 403
+   `SOURCE_RESTRICTED`.
+3. **Congelamento:** `{exploration (estado), snapshot}` em JSON canônico, gzip com
+   `mtime=0` (o hash depende só do conteúdo), chave
+   `{investigation_id}/sources/{source_id}.json.gz`, `sha256` dos bytes gravados.
+   Remover a fonte não apaga o blob (só a retenção apaga, 03 §2.3).
+4. **Armazenamento:** `BlobStore` via `build_blob_store`, raiz
+   `{databricks_volume_path}/investigations` ou `{exploration_snapshots_dir}/investigations`.
+   `shortcut:` reusa o volume e a autenticação do serviço de snapshot; a FA.2 cria o
+   setting `investigations_volume_path` e o próprio configure.
+5. Ações de auditoria `investigation.source_add` (com `sha256`) e
+   `investigation.source_remove`; as duas rotas mutáveis em `AUDITED_ROUTES`.
+6. `add_investigation_child` aceita `id` explícito (a chave do blob precisa dele antes
+   de gravar).
+
+**Files:** `api/graphlagoon/services/investigations.py`,
+`api/graphlagoon/routers/investigations.py`, `api/graphlagoon/models/schemas.py`,
+`api/graphlagoon/services/audit.py`, `api/graphlagoon/routers/admin_registry.py`,
+`api/graphlagoon/db/memory_store.py`, `api/tests/test_investigation_sources.py` (novo).
+
+**Testing:** `test_investigation_sources.py` (dois contexts, placeholder, acesso
+negado, hash e imutabilidade do congelado, auditoria) e suíte `api/tests` verde
+(1330 passed, falhas conhecidas do transpilador desmarcadas). Caminho Postgres não
+rodado (sem Postgres no ambiente).
+
+**Assumptions / skipped:** fonte `kind: "file"` fica para a F2.5; evento
+`source.added` no diário fica para a F1.7; reordenar fontes não foi pedido.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** 2 rotas
+auditadas e 2 ações de auditoria novas; `describeAudit` fica para a F1.8.
+
+**Author:** Claude (AI Assistant)

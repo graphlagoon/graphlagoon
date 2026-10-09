@@ -829,7 +829,7 @@ class InMemoryStore:
 
     # Generic CRUD for the child tables listed in INVESTIGATION_CHILDREN
     def add_investigation_child(self, table: str, **fields: Any) -> Any:
-        row = INVESTIGATION_CHILDREN[table](id=uuid4(), **fields)
+        row = INVESTIGATION_CHILDREN[table](**{"id": uuid4(), **fields})
         getattr(self, table)[row.id] = row
         return row
 

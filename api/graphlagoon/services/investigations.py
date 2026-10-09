@@ -330,3 +330,279 @@ async def unshare_investigation(
         await session.delete(share)
         await session.commit()
         return True
+
+
+# ---------------------------------------------------------------------------
+# Sources (03-arquitetura §3.2): explorations from any context, redacted per caller
+# ---------------------------------------------------------------------------
+
+_SOURCES = "investigation_sources"
+_store_singleton = None
+
+
+def _blob_store():
+    """Case storage (03 §2.3): `investigations/` under the snapshot volume or dir.
+
+    shortcut: reuses the snapshot service's volume and auth; FA.2 adds the
+    `investigations_volume_path` setting and its own configure step.
+    """
+    global _store_singleton
+    if _store_singleton is None:
+        import os
+
+        from graphlagoon.config import get_settings
+        from graphlagoon.services import snapshot
+        from graphlagoon.services.named_store import build_blob_store
+
+        settings = snapshot._snapshot_settings or get_settings()
+        volume = settings.databricks_volume_path
+        _store_singleton = build_blob_store(
+            local_dir=os.path.join(
+                settings.exploration_snapshots_dir, "investigations"
+            ),
+            volume_path=f"{volume.rstrip('/')}/investigations" if volume else None,
+            databricks_host=settings.databricks_host,
+            databricks_token=settings.databricks_token,
+            header_provider=snapshot._snapshot_header_provider,
+            what="investigation",
+        )
+    return _store_singleton
+
+
+async def _context_readable(context_id: Optional[UUID], user_email: str) -> bool:
+    from fastapi import HTTPException
+
+    from graphlagoon.utils.context_access import get_context_with_access
+
+    if context_id is None:
+        return False
+    try:
+        await get_context_with_access(context_id, user_email)
+        return True
+    except HTTPException:
+        return False
+
+
+async def _get_row(session, model_name: str, row_id: Optional[UUID]) -> Any:
+    """Exploration or GraphContext by id, from the DB or the memory store."""
+    if row_id is None:
+        return None
+    if session is None:
+        store = get_memory_store()
+        return (
+            store.get_exploration(row_id)
+            if model_name == "Exploration"
+            else store.get_graph_context(row_id)
+        )
+    from graphlagoon.db import models
+
+    return await session.get(getattr(models, model_name), row_id)
+
+
+async def _list_sources(session, investigation_id: UUID) -> list:
+    if session is None:
+        rows = get_memory_store().list_investigation_children(
+            _SOURCES, investigation_id
+        )
+    else:
+        from sqlalchemy import select
+
+        from graphlagoon.db.models import InvestigationSource
+
+        result = await session.execute(
+            select(InvestigationSource).where(
+                InvestigationSource.investigation_id == investigation_id
+            )
+        )
+        rows = result.scalars().all()
+    return sorted(rows, key=lambda s: s.position)
+
+
+async def _serialize_source(session, source: Any, user_email: str) -> dict:
+    exploration = await _get_row(session, "Exploration", source.exploration_id)
+    context = await _get_row(session, "GraphContext", source.context_id)
+    base = {
+        "id": source.id,
+        "kind": source.kind,
+        "position": source.position,
+        "title_snapshot": source.title_snapshot,
+        "context_title": context.title if context else None,
+        "owner_email": exploration.owner_email if exploration else source.added_by,
+    }
+    if not await _context_readable(source.context_id, user_email):
+        return {**base, "accessible": False}
+    return {
+        **base,
+        "accessible": True,
+        "exploration_id": source.exploration_id,
+        "context_id": source.context_id,
+        "mode": source.mode,
+        "frozen_sha256": source.frozen_sha256,
+        "added_by": source.added_by,
+        "added_at": source.added_at,
+    }
+
+
+async def list_sources(investigation_id: UUID, user_email: str) -> list[dict]:
+    async with _session() as session:
+        await load_case(session, investigation_id, user_email)
+        return [
+            await _serialize_source(session, s, user_email)
+            for s in await _list_sources(session, investigation_id)
+        ]
+
+
+async def _exploration_payload(exploration: Any) -> dict:
+    """What a source shows: the exploration's state plus its saved snapshot."""
+    from graphlagoon.services.snapshot import decompress_snapshot, get_snapshot_service
+
+    snapshot = None
+    if (exploration.state or {}).get("has_snapshot"):
+        raw = await get_snapshot_service().load(exploration.id)
+        snapshot = decompress_snapshot(raw) if raw else None
+    return {
+        "exploration": {
+            "id": str(exploration.id),
+            "title": exploration.title,
+            "graph_context_id": str(exploration.graph_context_id),
+            "owner_email": exploration.owner_email,
+            "state": exploration.state or {},
+        },
+        "snapshot": snapshot,
+    }
+
+
+async def add_source(
+    investigation_id: UUID,
+    user_email: str,
+    exploration_id: UUID,
+    mode: str,
+) -> dict:
+    import gzip
+    import hashlib
+    import json
+    from uuid import uuid4
+
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        _ensure_not_decided(inv)
+        exploration = await _get_row(session, "Exploration", exploration_id)
+        if exploration is None:
+            raise InvestigationError(
+                404,
+                "EXPLORATION_NOT_FOUND",
+                f"Exploration with id '{exploration_id}' not found",
+            )
+        # Reading the context covers every way to read the exploration
+        # (ownership, exploration share, context share, superuser).
+        if not await _context_readable(exploration.graph_context_id, user_email):
+            raise InvestigationError(
+                403,
+                "FORBIDDEN",
+                "You need read access to the exploration and its graph context",
+            )
+        existing = await _list_sources(session, investigation_id)
+        if any(s.exploration_id == exploration_id for s in existing):
+            raise InvestigationError(
+                409,
+                "SOURCE_EXISTS",
+                "This exploration is already a source of the investigation",
+            )
+
+        source_id = uuid4()
+        fields = {
+            "id": source_id,
+            "investigation_id": investigation_id,
+            "kind": "exploration",
+            "exploration_id": exploration_id,
+            "context_id": exploration.graph_context_id,
+            "mode": mode,
+            "title_snapshot": exploration.title,
+            "added_by": user_email,
+            "position": len(existing),
+        }
+        if mode == "frozen":
+            payload = await _exploration_payload(exploration)
+            # mtime=0 keeps the bytes (and so the hash) a pure function of content.
+            data = gzip.compress(
+                json.dumps(payload, sort_keys=True, default=str).encode("utf-8"),
+                mtime=0,
+            )
+            key = f"{investigation_id}/sources/{source_id}.json.gz"
+            await _blob_store().save(key, data)
+            fields["frozen_blob_key"] = key
+            fields["frozen_sha256"] = hashlib.sha256(data).hexdigest()
+
+        if session is None:
+            source = get_memory_store().add_investigation_child(_SOURCES, **fields)
+        else:
+            from graphlagoon.db.models import InvestigationSource
+
+            source = InvestigationSource(**fields)
+            session.add(source)
+            await session.commit()
+            await session.refresh(source)
+        return await _serialize_source(session, source, user_email)
+
+
+async def _get_source(session, investigation_id: UUID, source_id: UUID) -> Any:
+    if session is None:
+        source = get_memory_store().get_investigation_child(_SOURCES, source_id)
+    else:
+        from graphlagoon.db.models import InvestigationSource
+
+        source = await session.get(InvestigationSource, source_id)
+    if source is None or source.investigation_id != investigation_id:
+        raise InvestigationError(
+            404, "SOURCE_NOT_FOUND", f"Source with id '{source_id}' not found"
+        )
+    return source
+
+
+async def remove_source(
+    investigation_id: UUID, user_email: str, source_id: UUID
+) -> dict:
+    """Removes the source row; a frozen blob stays (deleted only by retention)."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        _ensure_not_decided(inv)
+        source = await _get_source(session, investigation_id, source_id)
+        meta = {
+            "title": source.title_snapshot,
+            "exploration_id": str(source.exploration_id),
+        }
+        if session is None:
+            get_memory_store().delete_investigation_child(_SOURCES, source_id)
+        else:
+            await session.delete(source)
+            await session.commit()
+        return meta
+
+
+async def source_snapshot(
+    investigation_id: UUID, user_email: str, source_id: UUID
+) -> dict:
+    """The frozen copy, or the live exploration, if the caller reads its context."""
+    import gzip
+    import json
+
+    async with _session() as session:
+        await load_case(session, investigation_id, user_email)
+        source = await _get_source(session, investigation_id, source_id)
+        if not await _context_readable(source.context_id, user_email):
+            raise InvestigationError(
+                403, "SOURCE_RESTRICTED", "You don't have access to this source"
+            )
+        if source.mode == "frozen":
+            raw = await _blob_store().load(source.frozen_blob_key)
+            if raw is None:
+                raise InvestigationError(
+                    404, "SOURCE_SNAPSHOT_MISSING", "Frozen copy not found"
+                )
+            return json.loads(gzip.decompress(raw))
+        exploration = await _get_row(session, "Exploration", source.exploration_id)
+        if exploration is None:
+            raise InvestigationError(
+                404, "EXPLORATION_NOT_FOUND", "The source exploration was deleted"
+            )
+        return await _exploration_payload(exploration)
