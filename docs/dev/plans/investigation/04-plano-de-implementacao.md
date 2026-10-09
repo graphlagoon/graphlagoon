@@ -7,6 +7,12 @@ algoritmos) está em [03-arquitetura.md](03-arquitetura.md). As telas estão em
 
 Antes de começar, leia as regras de trabalho no [README](README.md#regras-de-trabalho-definition-of-done).
 
+**Regra AI-first, a partir da FA.6:** toda tarefa que cria rota em
+`routers/investigations.py` também entrega a ferramenta MCP correspondente
+([03 §8.3](03-arquitetura.md#83-servidor-mcp)) ou registra a rota como só humana. O
+teste `test_agent_registry.py` cobra isso. Tarefas da F1 feitas antes da FA ganham as
+suas ferramentas na FA.4.
+
 ## Progresso
 
 Marque `[x]` no mesmo commit que conclui a tarefa.
@@ -28,6 +34,15 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [ ] F1.8 · Área admin e seed
 - [ ] F1.9 · Docs públicas e E2E da fundação
 
+**FA · AI-first: agentes na investigação**
+- [ ] FA.1 · Tokens de agente, escopos e ator no diário
+- [ ] FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
+- [ ] FA.3 · Propostas e aprovação humana (T11)
+- [ ] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
+- [ ] FA.5 · Ponte MCP local (stdio) para apps atrás do proxy do Databricks
+- [ ] FA.6 · Registry de cobertura AI-first (teste obrigatório)
+- [ ] FA.7 · Guia público de agentes, prompts MCP e E2E do agente
+
 **F2 · Arquivos e enriquecimento**
 - [ ] F2.1 · Tabelas de enriquecimento no context e endpoint de consulta
 - [ ] F2.2 · Aba de enriquecimento no inspector e "promover a nós"
@@ -46,6 +61,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [ ] F3.5 · Linha do tempo em raias com seleção de janela
 - [ ] F3.6 · Caminhos
 - [ ] F3.7 · Componentes conexos no registry de algoritmos
+- [ ] F3.8 · Rastreio e caminhos no servidor (Python) com paridade e ferramentas MCP
 
 **F4 · Dossiê e compliance**
 - [ ] F4.1 · Evidências congeladas
@@ -323,6 +339,145 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 
 ---
 
+## FA · AI-first: agentes na investigação
+
+Ver [03 §8](03-arquitetura.md#8-ai-first-agentes-na-investigação) e as telas
+`screens/T10-Espaco.png` e `screens/T11-Agentes.png`. **Princípio:** o agente faz o
+trabalho de análise e documentação; a pessoa decide.
+
+### FA.1 · Tokens de agente, escopos e ator no diário
+
+- **Depende de:** F1.2, F1.7.
+- **Arquivos:**
+  - `db/models.py` (`agent_tokens`, colunas de ator em `investigation_events`);
+  - migração `017_agents.py`; `memory_store.py`;
+  - `middleware/auth.py` (Bearer `glt_…`);
+  - `utils/authz.py` (`require_agent_scope`, `forbid_agents`);
+  - router `routers/agent_tokens.py`;
+  - `config.py` (`agents_enabled`, `agent_token_max_days`, `agents_allow_unmasked_data`,
+    `agent_rate_limit_per_minute`);
+  - catálogo: `investigation.agent`;
+  - admin: listar e revogar tokens.
+- **Passos:**
+  1. Gerar o token `glt_` + 32 bytes base64url; guardar só o sha256; mostrar uma vez.
+  2. Escopos `read`, `analyze`, `write`, `propose`; validade máxima configurável.
+  3. O token resolve para o e-mail do dono e marca o ator `agent`. Diário, auditoria e
+     versões gravam o ator.
+  4. `forbid_agents` em todas as rotas só humanas de [03 §8.7](03-arquitetura.md#87-registry-de-cobertura-teste).
+  5. Limite de taxa por token.
+- **Aceite:**
+  - [ ] Token expirado ou revogado leva 401.
+  - [ ] Agente em rota só humana leva 403, mesmo com o dono superuser.
+  - [ ] Os eventos mostram "agente X em nome de Y".
+  - [ ] Com `agents_enabled = false`, as rotas de token devolvem 404.
+- **Testes:** novo `test_agent_tokens.py`; `test_permission_routes.py`;
+  `test_admin_registry.py` (settings e rotas novas).
+
+### FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
+
+- **Depende de:** FA.1.
+- **Arquivos:**
+  - `services/blob_storage.py`: `save_stream(key, path)` local e Databricks;
+  - `services/investigation_storage.py` (novo): layout de [03 §2.3](03-arquitetura.md#23-armazenamento-no-volume),
+    streaming com sha256, nunca sobrescreve;
+  - `config.py`: `investigations_volume_path`, `artifact_max_bytes`;
+  - tabelas `investigation_artifacts` e `investigation_artifact_versions`;
+  - rotas de [03 §8.5](03-arquitetura.md#85-espaço-do-caso-artefatos);
+  - `views/InvestigationView.vue`: aba "Espaço do caso" com
+    `components/investigation/ArtifactsSpace.vue` (novo).
+- **Aceite:**
+  - [ ] Em `make dev` os arquivos vão para o diretório local; com Databricks, para o
+    Volume em `{investigations_volume_path}/{id}/artifacts/…`.
+  - [ ] Um arquivo maior que a memória disponível do processo sobe sem estourar (teste
+    com gerador em stream).
+  - [ ] Nova versão nunca sobrescreve a anterior.
+  - [ ] `html` e `svg` só para download.
+  - [ ] Aprovar exige humano.
+  - [ ] A tela segue `screens/T10-Espaco.png`.
+- **Testes:**
+  - novo `test_investigation_storage.py` (local e Databricks com Files API mockada);
+  - novo `test_artifacts.py`;
+  - vitest do `ArtifactsSpace`;
+  - E2E de envio de nova versão e de aprovação.
+
+### FA.3 · Propostas e aprovação humana (T11)
+
+- **Depende de:** FA.1, F1.7.
+- **Arquivos:**
+  - tabela `investigation_proposals`;
+  - rotas `GET`/`POST .../proposals`, `POST .../proposals/{pid}/accept|reject` (só
+    humano);
+  - `views/InvestigationAgentsView.vue` (novo, T11): conexão, tokens, propostas,
+    atividade;
+  - contador de propostas na barra do caso.
+- **Passos:** aceitar chama o **mesmo** serviço da ação na UI (papel, match, hipótese,
+  tipologia, status) e grava evento com quem propôs e quem aceitou.
+- **Aceite:**
+  - [ ] Uma proposta de papel aceita muda o papel exatamente como a ação manual.
+  - [ ] Recusar exige motivo.
+  - [ ] A tela segue `screens/T11-Agentes.png`.
+- **Testes:** novo `test_proposals.py` e vitest da view.
+
+### FA.4 · Servidor MCP em `/mcp`
+
+- **Depende de:** FA.1, FA.2, FA.3.
+- **Arquivos:**
+  - `api/pyproject.toml`: extra opcional `mcp` com o SDK oficial;
+  - `api/graphlagoon/mcp/server.py` (novo): FastMCP, Streamable HTTP montado em `/mcp`
+    no `app.py` quando `agents_enabled`;
+  - ferramentas de leitura e escrita da F1 e da FA ([03 §8.3](03-arquitetura.md#83-servidor-mcp)),
+    resources e prompts.
+- **Passos:**
+  1. As ferramentas chamam a camada de serviço com a identidade do token, nunca HTTP
+     para o próprio app.
+  2. Respostas com `untrusted_data` e mascaramento conforme a política.
+  3. Uma ferramenta de decisão, compartilhamento ou apagar **não existe**.
+- **Aceite:**
+  - [ ] `claude mcp add --transport http graphlagoon http://localhost:8000/mcp --header "Authorization: Bearer …"`
+    lista as ferramentas.
+  - [ ] Um cliente MCP de teste roda o roteiro: criar caso → adicionar fonte → ler grafo
+    → anotar → subir artefato → propor papel. Tudo aparece no diário como agente.
+  - [ ] CPF sai mascarado por padrão.
+- **Testes:** novo `test_mcp_server.py`, com o cliente do SDK `mcp` em pytest.
+
+### FA.5 · Ponte MCP local (stdio)
+
+- **Por quê:** no Databricks Apps o agente pode não alcançar `/mcp` por causa do
+  proxy (Q7).
+- **Arquivos:**
+  - `api/graphlagoon/cli.py`: subcomando `graphlagoon mcp-bridge --url <app>`. O CLI
+    está quebrado hoje (decision log de 2026-09-15); conserte junto;
+  - processo stdio que expõe as mesmas ferramentas e repassa para a API do app usando
+    o OAuth do Databricks CLI (`databricks-sdk`) ou um token `glt_`.
+- **Aceite:**
+  - [ ] `claude mcp add graphlagoon -- graphlagoon mcp-bridge --url http://localhost:8000`
+    funciona contra o `make dev`.
+  - [ ] O guia documenta o uso com o Databricks.
+- **Testes:** teste de smoke do CLI (não existe hoje).
+
+### FA.6 · Registry de cobertura AI-first
+
+- **Arquivos:** `api/graphlagoon/mcp/registry.py` e `api/tests/test_agent_registry.py`
+  ([03 §8.7](03-arquitetura.md#87-registry-de-cobertura-teste)).
+- **Aceite:**
+  - [ ] O teste falha se uma rota de investigação não tiver ferramenta nem motivo de
+    exceção.
+  - [ ] O teste falha se uma rota só humana aceitar token de agente.
+  - [ ] A regra AI-first do topo deste plano passa a valer para F2–F4.
+
+### FA.7 · Guia público de agentes e E2E
+
+- **Arquivos:**
+  - `docs/guide/agents-mcp.md` (novo, com TL;DR): conectar Claude Code ou Desktop,
+    escopos, política de mascaramento, o que agentes não fazem, ponte local;
+  - sidebar;
+  - prompts MCP `investigar_golpe_pix`, `revisar_lojista`, `montar_dossie`;
+  - E2E: o agente (cliente MCP de teste) sobe um artefato e propõe um papel; a pessoa
+    aceita na T11 e vê o artefato na T10.
+- **Aceite:** `make docs-build` passa.
+
+---
+
 ## F2 · Arquivos e enriquecimento
 
 ### F2.1 · Tabelas de enriquecimento no context
@@ -374,17 +529,20 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 
 ### F2.3 · Upload de arquivos
 
-- **Depende de:** F1.2, G2.
+- **Depende de:** F1.2, G2, FA.2 (armazenamento no Volume).
 - **Arquivos:**
   - `routers/investigations.py`: `POST .../files` (multipart), `GET .../files`,
     `GET .../files/{fid}/content`;
   - `services/investigation_files.py`;
-  - `services/blob_storage.py` (reuso);
+  - `services/investigation_storage.py` (criado na FA.2);
   - `config.py`: settings `investigation_file_max_bytes` e
     `investigation_max_working_edges` (vem da G4), classificados em
     `CONFIG_FIELD_KINDS`.
 - **Passos:**
-  1. Calcular o sha256 no servidor e gravar em `investigations/{id}/files/{sha256}`.
+  1. Receber em **streaming** e calcular o sha256 enquanto grava num temporário.
+     Depois gravar **no Volume** em `{investigations_volume_path}/{id}/files/{sha256}`
+     com `save_stream`. Se a chave já existe, reaproveita; nunca sobrescreve
+     ([03 §2.3](03-arquitetura.md#23-armazenamento-no-volume)).
   2. Papéis `graph`, `enrichment` e `attachment`.
   3. Catálogo de permissões: `investigation.upload`, com gate no `POST`.
   4. Auditar o upload e a leitura do conteúdo.
@@ -556,6 +714,22 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
     cluster.
 - **Testes:** vitest.
 
+### F3.8 · Rastreio e caminhos no servidor, com ferramentas MCP
+
+- **Por quê:** o agente não roda web workers. As análises que ele usa precisam existir
+  no servidor, com o mesmo resultado.
+- **Depende de:** F3.3, F3.6, FA.4.
+- **Arquivos:**
+  - `api/graphlagoon/services/trace.py` (porte de `utils/trace.ts`);
+  - `services/paths.py`;
+  - ferramentas MCP `trace_money` e `find_paths`, mais as rotas
+    `POST .../analysis/trace` e `.../analysis/paths`.
+- **Aceite:**
+  - [ ] O teste pytest lê **a mesma** fixture `frontend/src/__tests__/fixtures/trace/golpe-pix.json`
+    e chega aos mesmos números do vitest em todas as regras.
+  - [ ] O resultado do rastreio pode virar evidência (F4.1) com o carimbo do método.
+- **Testes:** `api/tests/test_trace.py` e `test_paths.py`.
+
 ---
 
 ## F4 · Dossiê e compliance
@@ -588,6 +762,8 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   - [ ] Cada selo cita o item da CC 4.001.
   - [ ] Os selos sugerem; aceitar um selo grava evento.
   - [ ] A tela segue `screens/T9-Anel.png`.
+  - [ ] Existe implementação Python espelhada (`services/typologies.py`) para a
+    ferramenta MCP `run_typologies`, com paridade por fixtures comuns.
 - **Testes:** vitest de cada tipologia com grafos pequenos.
 
 ### F4.4 · Status e prazos

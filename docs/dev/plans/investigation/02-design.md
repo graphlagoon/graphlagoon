@@ -42,6 +42,8 @@ fictícios.
 | T7 | Dossiê e decisão | [png](screens/T7-Dossie.png) | [html](mockups/T7-Dossie.dc.html) | resumo com selos CC 4.001; hipóteses (status, a favor, contra); evidências congeladas com hash; diário; painel de decisão (resultado, ações, fundamentação, aviso de tipping-off, exportações, registrar) |
 | T8 | Revisão de matches | [png](screens/T8-Matches.png) | [html](mockups/T8-Matches.dc.html) | fila de sugestões ordenada por impacto; comparação lado a lado com os trechos coincidentes destacados; motivos; efeito de aceitar; motivo da decisão; aceitar / recusar / adiar |
 | T9 | Anel de lojistas | [png](screens/T9-Anel.png) | [html](mockups/T9-Anel.dc.html) | selos de tipologia clicáveis; layout bipartido lojistas × elementos compartilhados; painel da comunidade com números e ações |
+| T10 | Espaço do caso (artefatos) | [png](screens/T10-Espaco.png) | [html](mockups/T10-Espaco.dc.html) | aba nova no caso; filtros por tipo, autor (pessoa ou agente) e status; lista com tipo, versão, evidências de origem, selo de autor ("agente · Claude, por você") e status (rascunho ou aprovado); pré-visualização segura (md, pdf, imagem; o resto só download); histórico de versões; aprovar e levar ao dossiê; indicador de agentes conectados e propostas na barra |
+| T11 | Agentes | [png](screens/T11-Agentes.png) | [html](mockups/T11-Agentes.dc.html) | conectar agente (nome, escopos, validade, comando `claude mcp add`, token visto uma vez, política de mascaramento); tokens ativos com revogar; propostas aguardando aceite com motivo; atividade dos agentes, inclusive tentativas bloqueadas |
 
 ### Direções de layout
 
@@ -129,6 +131,19 @@ Contagem: 9 passos (8 no app), 2 ferramentas, 1 troca, 0 exportações intermedi
 | 5 | Seguir o dinheiro | T5 | novo |
 | 6 | Caminho que respeita o tempo entre investigados | T5 | novo |
 | 7 | Laudo com método, parâmetros e hashes | T7 | novo |
+
+### Fluxo D: o agente investiga com o analista (AI-first)
+
+| # | Quem | Passo | Tela / ferramenta MCP | Status |
+|---|---|---|---|---|
+| 1 | Analista | Cria um token de agente com escopos `read`, `analyze`, `write`, `propose` e conecta o Claude Code | T11 | novo |
+| 2 | Agente | Lê o caso e o grafo unificado (dados pessoais mascarados) | `get_investigation`, `get_graph` | novo |
+| 3 | Agente | Roda o rastreio no servidor e fixa a evidência com o método | `trace_money`, `pin_evidence` | novo |
+| 4 | Agente | Consulta o enriquecimento e escreve notas | `lookup_enrichment`, `add_note` | novo |
+| 5 | Agente | Sobe slides e o resumo do caso em rascunho, citando as evidências | `upload_artifact` | novo |
+| 6 | Agente | Propõe papel, hipótese e selo de tipologia | `propose` | novo |
+| 7 | Analista | Aceita ou recusa as propostas e aprova artefatos | T11, T10 | novo |
+| 8 | Analista | Decide e exporta; o agente não consegue (rota só humana) | T7 | novo |
 
 ### Fluxo 0: preparar o context (dono do context)
 
