@@ -1,0 +1,154 @@
+"""Investigation cases: CRUD and nominal sharing (03-arquitetura §3.1).
+
+Rules live in services.investigations; this module maps them to HTTP, the
+`{"error": {...}}` envelope and the audit trail.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from graphlagoon.middleware.auth import get_current_user
+from graphlagoon.models.schemas import (
+    InvestigationCreate,
+    InvestigationResponse,
+    InvestigationShareRequest,
+    InvestigationUpdate,
+)
+from graphlagoon.services import audit
+from graphlagoon.services import investigations as service
+from graphlagoon.services.audit import AuditAction
+from graphlagoon.utils.authz import require_permission
+
+router = APIRouter(prefix="/api/investigations", tags=["investigations"])
+
+
+def _http(exc: service.InvestigationError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={"error": {"code": exc.code, "message": exc.message, "details": {}}},
+    )
+
+
+async def _record(user_email: str, action: str, investigation_id: UUID, **meta):
+    await audit.record(
+        user_email,
+        action,
+        resource_type="investigation",
+        resource_id=investigation_id,
+        metadata=meta,
+    )
+
+
+@router.get("", response_model=list[InvestigationResponse])
+async def list_investigations(
+    request: Request,
+    status: Optional[str] = None,
+    assignee: Optional[str] = None,
+    typology: Optional[str] = None,
+):
+    return await service.list_investigations(
+        get_current_user(request), status, assignee, typology
+    )
+
+
+@router.post("", response_model=InvestigationResponse, status_code=201)
+async def create_investigation(
+    data: InvestigationCreate,
+    user_email: str = Depends(require_permission("investigation.create")),
+):
+    try:
+        inv = await service.create_investigation(user_email, data.model_dump())
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email, AuditAction.INVESTIGATION_CREATE, inv["id"], title=inv["title"]
+    )
+    return inv
+
+
+@router.get("/{investigation_id}", response_model=InvestigationResponse)
+async def get_investigation(investigation_id: UUID, request: Request):
+    try:
+        return await service.get_investigation(
+            investigation_id, get_current_user(request)
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.patch("/{investigation_id}", response_model=InvestigationResponse)
+async def update_investigation(
+    investigation_id: UUID, data: InvestigationUpdate, request: Request
+):
+    user_email = get_current_user(request)
+    changes = data.model_dump(exclude_unset=True)
+    try:
+        inv = await service.update_investigation(investigation_id, user_email, changes)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_UPDATE,
+        investigation_id,
+        fields=sorted(changes),
+    )
+    return inv
+
+
+@router.delete("/{investigation_id}")
+async def delete_investigation(
+    investigation_id: UUID, request: Request, reason: Optional[str] = None
+):
+    user_email = get_current_user(request)
+    try:
+        meta = await service.delete_investigation(investigation_id, user_email, reason)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email, AuditAction.INVESTIGATION_DELETE, investigation_id, **meta
+    )
+    return {"status": "deleted"}
+
+
+@router.post("/{investigation_id}/share")
+async def share_investigation(
+    investigation_id: UUID, data: InvestigationShareRequest, request: Request
+):
+    user_email = get_current_user(request)
+    try:
+        email = await service.share_investigation(
+            investigation_id, user_email, data.email, data.permission
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_SHARE,
+        investigation_id,
+        **{"with": email},
+        permission=data.permission,
+    )
+    return {"status": "shared"}
+
+
+@router.delete("/{investigation_id}/share/{email}")
+async def unshare_investigation(investigation_id: UUID, email: str, request: Request):
+    user_email = get_current_user(request)
+    try:
+        removed = await service.unshare_investigation(
+            investigation_id, user_email, email
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    if removed:
+        await _record(
+            user_email,
+            AuditAction.INVESTIGATION_UNSHARE,
+            investigation_id,
+            **{"with": email},
+        )
+    return {"status": "removed"}

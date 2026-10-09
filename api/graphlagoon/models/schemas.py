@@ -1638,3 +1638,59 @@ class PermissionInspection(BaseModel):
     resolution: dict[str, Any]
     group_memberships: list[dict[str, Any]]
     permissions: list[dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Investigations (docs/dev/plans/investigation/03-arquitetura.md §3.1)
+# ---------------------------------------------------------------------------
+
+InvestigationStatus = Literal["selecao", "analise", "decidido", "arquivado"]
+
+
+class InvestigationCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    typology: Optional[str] = Field(default=None, max_length=100)
+    origin: Optional[str] = Field(default=None, max_length=50)
+    assignee_email: Optional[str] = Field(default=None, max_length=255)
+
+
+class InvestigationUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    # "decidido" is reached only through the decision route (F4.5).
+    status: Optional[Literal["selecao", "analise", "arquivado"]] = None
+    assignee_email: Optional[str] = Field(default=None, max_length=255)
+    typology: Optional[str] = Field(default=None, max_length=100)
+    state: Optional[dict[str, Any]] = None
+
+
+class InvestigationShareRequest(BaseModel):
+    email: str
+    permission: Literal["read", "write"] = "read"
+
+
+class InvestigationShareOut(BaseModel):
+    email: str
+    permission: str
+
+
+class InvestigationResponse(BaseModel):
+    id: UUID
+    title: str
+    description: Optional[str] = None
+    owner_email: str
+    assignee_email: Optional[str] = None
+    status: str
+    typology: Optional[str] = None
+    origin: Optional[str] = None
+    selected_at: Optional[datetime] = None
+    state: dict[str, Any] = Field(default_factory=dict)
+    decision: Optional[dict[str, Any]] = None
+    frozen_hash: Optional[str] = None
+    frozen_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    shared_with: list[InvestigationShareOut] = Field(default_factory=list)
+    has_write_access: bool = False
+    can_manage: bool = False
