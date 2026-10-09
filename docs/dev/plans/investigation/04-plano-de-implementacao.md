@@ -35,7 +35,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F1.9 · Docs públicas e E2E da fundação
 
 **FA · AI-first: agentes na investigação**
-- [ ] FA.1 · Tokens de agente, escopos e ator no diário
+- [x] FA.1 · Tokens de agente, escopos e ator no diário
 - [ ] FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
 - [ ] FA.3 · Propostas e aprovação humana (T11)
 - [ ] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
@@ -370,10 +370,10 @@ trabalho de análise e documentação; a pessoa decide.
   4. `forbid_agents` em todas as rotas só humanas de [03 §8.7](03-arquitetura.md#87-registry-de-cobertura-teste).
   5. Limite de taxa por token.
 - **Aceite:**
-  - [ ] Token expirado ou revogado leva 401.
-  - [ ] Agente em rota só humana leva 403, mesmo com o dono superuser.
-  - [ ] Os eventos mostram "agente X em nome de Y".
-  - [ ] Com `agents_enabled = false`, as rotas de token devolvem 404.
+  - [x] Token expirado ou revogado leva 401.
+  - [x] Agente em rota só humana leva 403, mesmo com o dono superuser.
+  - [x] Os eventos mostram "agente X em nome de Y".
+  - [x] Com `agents_enabled = false`, as rotas de token devolvem 404.
 - **Testes:** novo `test_agent_tokens.py`; `test_permission_routes.py`;
   `test_admin_registry.py` (settings e rotas novas).
 

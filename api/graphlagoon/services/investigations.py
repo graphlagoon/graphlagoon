@@ -726,23 +726,34 @@ async def append_event(
     from datetime import datetime
     from uuid import uuid4
 
+    from graphlagoon.middleware.auth import get_current_actor
+
     events = await _list_events(session, investigation_id)
     prev_hash = events[-1].hash if events else None
     at = datetime.now()
-    body = _canonical(
-        {
-            "investigation_id": str(investigation_id),
-            "at": at.isoformat(),
-            "actor_email": actor_email,
-            "kind": kind,
-            "payload": payload,
+    hashed = {
+        "investigation_id": str(investigation_id),
+        "at": at.isoformat(),
+        "actor_email": actor_email,
+        "kind": kind,
+        "payload": payload,
+    }
+    agent = get_current_actor()
+    actor_fields = {}
+    if agent:  # "agent X on behalf of Y": X joins the hash, Y stays actor_email
+        actor_fields = {
+            "actor_kind": "agent",
+            "agent_token_id": agent["token_id"],
+            "agent_name": agent["name"],
         }
-    )
+        hashed["agent"] = {"token_id": str(agent["token_id"]), "name": agent["name"]}
+    body = _canonical(hashed)
     fields = {
         "id": uuid4(),
         "investigation_id": investigation_id,
         "at": at,
         "actor_email": actor_email,
+        **actor_fields,
         "kind": kind,
         "payload": json.loads(_canonical(payload)),
         "prev_hash": prev_hash,
@@ -763,6 +774,9 @@ def _serialize_event(e: Any) -> dict:
         "id": e.id,
         "at": e.at,
         "actor_email": e.actor_email,
+        "actor_kind": e.actor_kind or "human",
+        "agent_token_id": e.agent_token_id,
+        "agent_name": e.agent_name,
         "kind": e.kind,
         "payload": e.payload or {},
         "prev_hash": e.prev_hash,

@@ -9,6 +9,7 @@ import type {
   AdminPermission,
   AdminPermissionUpdate,
   AdminUser,
+  AgentToken,
   AuditEntry,
   PermissionInspection,
   ResolverStatus,
@@ -34,6 +35,7 @@ export const useAdminStore = defineStore('admin', () => {
   const contexts = ref<GraphContext[]>([]);
   const explorations = ref<Exploration[]>([]);
   const investigations = ref<Investigation[]>([]);
+  const agentTokens = ref<AgentToken[]>([]);
   const audit = ref<AuditEntry[]>([]);
   const auditTotal = ref(0);
   const auditActions = ref<string[]>([]);
@@ -96,6 +98,22 @@ export const useAdminStore = defineStore('admin', () => {
   async function fetchInvestigations() {
     const result = await run('investigations', () => api.getInvestigations(), 'Failed to load investigations');
     if (result) investigations.value = result;
+  }
+
+  async function fetchAgentTokens() {
+    const result = await run('agents', () => api.getAdminAgentTokens(), 'Failed to load agent tokens');
+    if (result) agentTokens.value = result;
+  }
+
+  async function revokeAgentToken(tokenId: string): Promise<boolean> {
+    const ok = await run('revoke', async () => (await api.revokeAgentTokenAsAdmin(tokenId), true), 'Revoke failed');
+    if (ok) {
+      const now = new Date().toISOString();
+      agentTokens.value = agentTokens.value.map((t) =>
+        t.id === tokenId ? { ...t, revoked_at: t.revoked_at ?? now, active: false } : t,
+      );
+    }
+    return !!ok;
   }
 
   async function fetchAudit(params: { page?: number; page_size?: number; user?: string; action?: string } = {}) {
@@ -262,6 +280,7 @@ export const useAdminStore = defineStore('admin', () => {
     contexts,
     explorations,
     investigations,
+    agentTokens,
     audit,
     auditTotal,
     auditActions,
@@ -279,6 +298,8 @@ export const useAdminStore = defineStore('admin', () => {
     fetchExplorations,
     fetchInvestigations,
     transferInvestigation,
+    fetchAgentTokens,
+    revokeAgentToken,
     fetchAudit,
     fetchGroups,
     saveGroup,

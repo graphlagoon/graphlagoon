@@ -100,6 +100,7 @@ def require_superuser(request: Request) -> str:
     """
     from graphlagoon.middleware.auth import get_current_user
 
+    forbid_agents(request)  # admin powers are human-only (03 §8.7)
     user_email = get_current_user(request)
     if not is_superuser(user_email):
         raise HTTPException(
@@ -113,3 +114,67 @@ def require_superuser(request: Request) -> str:
             },
         )
     return user_email
+
+
+# ---------------------------------------------------------------------------
+# Agent tokens (03-arquitetura §8.2): an agent acts for its owner, limited by
+# its scopes, and never on the human-only routes of §8.7.
+# ---------------------------------------------------------------------------
+
+
+def _agent(request: Request):
+    actor = getattr(request.state, "actor", None)
+    return actor if actor and actor.get("kind") == "agent" else None
+
+
+def _agent_forbidden(message: str, **details) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={"error": {"code": "AGENT_FORBIDDEN", "message": message, "details": details}},
+    )
+
+
+def _check_agent_scope(actor: dict, scope: str) -> None:
+    if scope not in actor.get("scopes", []):
+        raise _agent_forbidden(
+            f'This agent token lacks the "{scope}" scope.', scope=scope
+        )
+
+
+def forbid_agents(request: Request) -> None:
+    """Dependency for human-only routes: 403 for an agent token, even when its
+    owner holds the permission (a superuser included)."""
+    if _agent(request):
+        raise _agent_forbidden("This action is reserved to people; agents may not do it.")
+
+
+forbid_agents.forbids_agents = True
+
+
+def require_agent_scope(scope: str):
+    """Dependency: an agent token must carry ``scope``; people pass through.
+    Declaring it overrides the method-based default of ``agent_guard``."""
+
+    def dependency(request: Request) -> None:
+        actor = _agent(request)
+        if actor:
+            _check_agent_scope(actor, scope)
+
+    dependency.agent_scope = scope
+    return dependency
+
+
+def agent_guard(request: Request) -> None:
+    """API-wide dependency (``create_api_router``): an agent on a route without
+    an explicit ``require_agent_scope``/``forbid_agents`` needs ``read`` for
+    GET and ``write`` for anything else, so new routes are covered by default."""
+    actor = _agent(request)
+    if not actor:
+        return
+    route = request.scope.get("route")
+    calls = [d.call for d in route.dependant.dependencies] if route else []
+    if any(getattr(c, "forbids_agents", False) for c in calls):
+        forbid_agents(request)
+    if any(getattr(c, "agent_scope", None) for c in calls):
+        return  # the route's own require_agent_scope decides
+    _check_agent_scope(actor, "read" if request.method in ("GET", "HEAD") else "write")
