@@ -9957,3 +9957,65 @@ rota de enriquecimento.
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-10-09 17:05] - Design: investigação, hoje × proposta (fases D0–D3 do plano)
+
+Design feito num canvas de artboards, fora do repositório e privado para o autor, com
+18 pranchas em 5 páginas:
+- **Mapa do sistema** (hoje × proposta).
+- **Hoje:** 4 telas reais (screenshots de `docs/public/screenshots/`) com as dores D1–D9
+  anotadas.
+- **Fluxos:** jornada atual do golpe Pix; fluxos propostos A (golpe Pix → rastreio),
+  B (lojistas de fachada), C (SIMBA) e 0 (preparar o context).
+- **Telas hi-fi T1–T7:**
+  - fila;
+  - workspace com abas e visão unificada;
+  - adicionar ao caso;
+  - assistente de arquivo SIMBA;
+  - seguir o dinheiro (camadas/Sankey + raias);
+  - context com chaves e enriquecimento;
+  - dossiê.
+- **Comparação** hoje × proposta.
+
+**Avaliação do fluxo principal (contada nos mapas):**
+
+| | Hoje | Proposta (fluxo A) |
+|---|---|---|
+| Passos | 10 | 9 (8 no app + Siscoaf) |
+| Ferramentas | 7 | 2 |
+| Trocas de ferramenta | 8 | 1 |
+| Exportações manuais | 2 | 0 intermediárias |
+| Registro do que foi feito | nenhum | 8 de 8 passos no diário |
+
+**Design Decisions:**
+1. **Mesmo vocabulário visual do app:** barra navy de 52 px, painéis acoplados, botões
+   flutuantes sobre o canvas, status bar. A investigação é uma extensão, não um produto à
+   parte.
+2. **Botão primário escurecido para `#0f766e`.** O `#14b8a6` com texto branco não passa
+   4,5:1. Vale aplicar no app todo (achado de acessibilidade, fora do escopo daqui).
+3. **Cores separadas por canal:**
+   - proveniência = **anel** do nó: teal Pix, roxo Cadastro, âmbar arquivo;
+   - papel = **preenchimento**: azul vítima, laranja laranja;
+   - saída = **forma quadrada** navy.
+
+   Nunca só cor: a legenda e os rótulos estão sempre presentes.
+4. **Exploração restrita aparece como placeholder** com o dono do context, e não some.
+   O analista precisa saber que falta parte do caso (LC 105).
+5. **Rastreio com o método visível:** carimbo de parâmetros no painel, resultado em
+   FIFO com o valor proporcional ao lado. Isso mostra que a regra de alocação muda o
+   número.
+6. **Contraparte desconhecida do SIMBA vira um nó por transação.** Agrupá-las criaria um
+   hub falso.
+
+**Pontos de atenção encontrados nos fluxos:**
+- explosão de fan-out no "+1 salto";
+- CPF mascarado do QSA só gera sugestão de match;
+- anexar uma tabela amplia o escopo do context, então o bloqueio precisa dizer a quem
+  pedir.
+
+**Public Docs:** nenhuma alteração (design).
+
+**Admin-Area Impact:** nenhum.
+
+**Author:** Claude (AI Assistant)
+
+---
