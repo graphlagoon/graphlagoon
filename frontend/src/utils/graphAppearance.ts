@@ -200,6 +200,9 @@ export interface AppearanceContext {
 
   // Community color override (nodeId -> hex color)
   communityColorMap: Map<string, string> | null;
+
+  // Investigation role fill (nodeId -> hex color); wins over community and type.
+  roleColorMap?: Map<string, string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +235,7 @@ export function computeNodeAppearance(
 ): NodeAppearanceResult {
   const baseColor = isCluster
     ? (clusterColor || '#9333ea')
-    : (ctx.communityColorMap?.get(nodeId) ?? ctx.getNodeTypeColor(nodeType));
+    : (ctx.roleColorMap?.get(nodeId) ?? ctx.communityColorMap?.get(nodeId) ?? ctx.getNodeTypeColor(nodeType));
   let color = baseColor;
   let size = isCluster ? clusterBaseSize : ctx.baseNodeSize;
 
@@ -439,4 +442,51 @@ export function computeIconTreatment(
   return hasIcon
     ? { color: 'rgba(0,0,0,0)', iconColor: appearanceColor }
     : { color: appearanceColor, iconColor: undefined };
+}
+
+// ---------------------------------------------------------------------------
+// Provenance rings (investigation workspace, T2)
+// ---------------------------------------------------------------------------
+
+/** One color per case source, in source order (teal, violet, orange, … as in T2). */
+export const PROVENANCE_PALETTE = ['#14b8a6', '#8b5cf6', '#ea580c', '#2563eb', '#db2777', '#65a30d', '#0891b2', '#a16207'];
+
+export function provenanceColor(index: number): string {
+  return PROVENANCE_PALETTE[index % PROVENANCE_PALETTE.length];
+}
+
+/** Ring colors for a node: one ring per distinct source it came from. */
+export function provenanceRingColors(
+  sourceIds: string[],
+  sourceColors: Record<string, string>,
+): string[] {
+  return [...new Set(sourceIds.map((id) => sourceColors[id]).filter(Boolean))];
+}
+
+// ---------------------------------------------------------------------------
+// Case roles (investigation workspace, T2): node fill
+// ---------------------------------------------------------------------------
+
+/** Fill per role (02-design): victim blue, mule orange, exit navy, discarded gray. */
+export const ROLE_COLORS: Record<string, string> = {
+  victim: '#2563eb',
+  mule: '#ea580c',
+  exit: '#0d1b2a',
+  discarded: '#9ca3af',
+};
+
+export const ROLE_LABELS: Record<string, string> = {
+  victim: 'Victim',
+  mule: 'Mule / suspect',
+  exit: 'Exit (cash-out)',
+  discarded: 'Discarded',
+};
+
+/** nodeId -> fill color for the nodes that have a known role. */
+export function roleColorMap(roles: Record<string, string>): Map<string, string> {
+  return new Map(
+    Object.entries(roles)
+      .filter(([, role]) => ROLE_COLORS[role])
+      .map(([id, role]) => [id, ROLE_COLORS[role]]),
+  );
 }

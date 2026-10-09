@@ -130,6 +130,10 @@ const clusterStore = useClusterStore();
 const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
 const queryConsoleStore = useQueryConsoleStore();
+// A file context (investigations F2.5) has no query language: no console.
+const supportsQuery = computed(
+  () => capabilitiesFor(resolveDatasourceType(graphStore.currentContext)).supportsQuery,
+);
 const queryTemplatesStore = useQueryTemplatesStore();
 const { executeTemplateAsGraph } = useTemplateExecution();
 
@@ -908,6 +912,7 @@ watch(
           </button>
 
           <button
+            v-if="supportsQuery"
             class="toolbar-btn"
             :class="{ active: queryConsoleStore.isOpen }"
             :aria-pressed="queryConsoleStore.isOpen"
@@ -1046,7 +1051,7 @@ watch(
 
     <!-- Query Console (bottom drawer) -->
     <QueryConsolePanel
-      v-if="queryConsoleStore.isOpen"
+      v-if="queryConsoleStore.isOpen && supportsQuery"
       @close="queryConsoleStore.close()"
       @focus-node="handleFocusNode"
     />

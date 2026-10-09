@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
-from typing import Optional, Any, Literal, TypeAlias
+from typing import Optional, Any, Literal, TypeAlias, Union
 from uuid import UUID
 from datetime import datetime
 
@@ -22,7 +22,9 @@ GraphModel = Literal[
 # endpoint — a native graph database, so it defines no tables at all. "rest" is
 # a dev-registered named connection to an external graph-serving API: the only
 # type with multiple instances, selected by datasource_name.
-DatasourceType = Literal["sql_warehouse", "neptune", "rest"]
+# "file" is a graph generated on the server from a case file (investigations
+# F2.5); only POST /api/investigations/{id}/files/{fid}/context creates one.
+DatasourceType = Literal["sql_warehouse", "neptune", "rest", "file"]
 
 # Contexts created before datasources were pluggable are all warehouse contexts,
 # so this default is what keeps every existing context working untouched.
@@ -419,6 +421,85 @@ def _validate_unique_metric_definitions(
     return definitions
 
 
+# Identity keys (investigations, 03 §2.1): how a node of this context maps to a
+# real-world entity, so explorations of different contexts unify on it.
+class PropRef(BaseModel):
+    kind: Literal["prop"] = "prop"
+    name: str = Field(min_length=1, max_length=200)
+
+
+IdentityNormalize = Literal["cpf_cnpj", "account", "phone", "email", "lower", "none"]
+
+
+class IdentityKey(BaseModel):
+    node_type: str = Field(min_length=1, max_length=200)
+    entity: str = Field(min_length=1, max_length=100)
+    source: Union[Literal["node_id"], PropRef] = "node_id"
+    normalize: IdentityNormalize = "none"
+
+    @model_validator(mode="after")
+    def _strip(self) -> "IdentityKey":
+        self.node_type = self.node_type.strip()
+        self.entity = self.entity.strip()
+        if not self.node_type or not self.entity:
+            raise ValueError("node_type and entity must not be blank")
+        return self
+
+
+def _validate_identity_keys(keys: list[IdentityKey]) -> list[IdentityKey]:
+    """One key per node type: a node resolves to a single entity key."""
+    seen: set[str] = set()
+    for k in keys:
+        if k.node_type in seen:
+            raise ValueError(f"duplicate identity key for node type: {k.node_type}")
+        seen.add(k.node_type)
+    return keys
+
+
+# Enrichment tables (investigations F2.1, 03 §2.1): side tables looked up by a
+# node's key and shown in the inspector; only ``columns`` ever leave the warehouse.
+class PromoteSpec(BaseModel):
+    node_type: str = Field(min_length=1, max_length=100)
+    id_column: str = Field(min_length=1, max_length=200)
+    edge_type: str = Field(min_length=1, max_length=100)
+
+
+class EnrichmentTable(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,40}$")
+    label: str = Field(min_length=1, max_length=100)
+    table: str = Field(min_length=1, max_length=400)
+    key_column: str = Field(min_length=1, max_length=200)
+    match_node_types: list[str] = Field(min_length=1, max_length=50)
+    match_source: Union[Literal["node_id"], PropRef] = "node_id"
+    cardinality: Literal["one", "many"] = "one"
+    columns: list[str] = Field(min_length=1, max_length=50)
+    promote: Optional[PromoteSpec] = None
+
+    @model_validator(mode="after")
+    def _identifiers(self) -> "EnrichmentTable":
+        from graphlagoon.services.sql_identifiers import (
+            qualified_from_dotted,
+            validate_identifier_part,
+        )
+
+        qualified_from_dotted(self.table)
+        for column in [self.key_column, *self.columns]:
+            validate_identifier_part(column)
+        if self.promote and self.promote.id_column not in self.columns:
+            raise ValueError("promote.id_column must be one of the columns")
+        return self
+
+
+def _validate_enrichment_tables(tables: list[EnrichmentTable]) -> None:
+    names = [t.name for t in tables]
+    if len(names) != len(set(names)):
+        raise ValueError("enrichment table names must be unique in a context")
+
+
+class EnrichmentLookupRequest(BaseModel):
+    keys: list[str] = Field(min_length=1)
+
+
 # Graph Context models
 def _validate_distinct_tables(
     edge_table_name: Optional[str], node_table_name: Optional[str]
@@ -480,10 +561,14 @@ class GraphContextCreate(BaseModel):
         "evaluated in the frontend's sandboxed worker). Only returned to users "
         "with write access.",
     )
+    identity_keys: list[IdentityKey] = Field(default_factory=list, max_length=50)
+    enrichment_tables: list[EnrichmentTable] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextCreate":
         _validate_unique_metric_definitions(self.metric_definitions)
+        _validate_identity_keys(self.identity_keys)
+        _validate_enrichment_tables(self.enrichment_tables)
         return self
 
     @model_validator(mode="after")
@@ -503,6 +588,11 @@ class GraphContextCreate(BaseModel):
         rejected — a client that sends leftovers from the warehouse form still
         gets a valid context instead of a validation error it cannot act on.
         """
+        if self.datasource_type == "file":
+            raise ValueError(
+                "file contexts are generated from a case file "
+                "(POST /api/investigations/{id}/files/{file_id}/context)"
+            )
         if self.datasource_type == "sql_warehouse":
             if not self.edge_table_name:
                 raise ValueError(
@@ -560,11 +650,17 @@ class GraphContextUpdate(BaseModel):
     cluster_programs: Optional[list[dict]] = None
     context_menu_actions: Optional[list[dict]] = None
     metric_definitions: Optional[list[MetricDefinition]] = None
+    identity_keys: Optional[list[IdentityKey]] = Field(default=None, max_length=50)
+    enrichment_tables: Optional[list[EnrichmentTable]] = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextUpdate":
         if self.metric_definitions is not None:
             _validate_unique_metric_definitions(self.metric_definitions)
+        if self.identity_keys is not None:
+            _validate_identity_keys(self.identity_keys)
+        if self.enrichment_tables is not None:
+            _validate_enrichment_tables(self.enrichment_tables)
         return self
 
 
@@ -591,6 +687,8 @@ class GraphContextResponse(BaseModel):
     context_menu_actions: list[dict] = Field(default_factory=list)
     # Empty for read-only users — see routers.graph_contexts.context_to_response.
     metric_definitions: list[MetricDefinition] = Field(default_factory=list)
+    identity_keys: list[IdentityKey] = Field(default_factory=list)
+    enrichment_tables: list[EnrichmentTable] = Field(default_factory=list)
     owner_email: str
     shared_with: list[str] = Field(default_factory=list)
     has_write_access: bool = False
@@ -1469,6 +1567,7 @@ class AdminCounts(BaseModel):
     query_templates: int
     audit_entries: int
     groups: int
+    investigations: int = 0
 
 
 class AdminStorage(BaseModel):
@@ -1638,3 +1737,292 @@ class PermissionInspection(BaseModel):
     resolution: dict[str, Any]
     group_memberships: list[dict[str, Any]]
     permissions: list[dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Investigations (docs/dev/plans/investigation/03-arquitetura.md §3.1)
+# ---------------------------------------------------------------------------
+
+InvestigationStatus = Literal["selecao", "analise", "decidido", "arquivado"]
+
+
+class InvestigationCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    typology: Optional[str] = Field(default=None, max_length=100)
+    origin: Optional[str] = Field(default=None, max_length=50)
+    assignee_email: Optional[str] = Field(default=None, max_length=255)
+
+
+class InvestigationUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    # "decidido" is reached only through the decision route (F4.5).
+    status: Optional[Literal["selecao", "analise", "arquivado"]] = None
+    assignee_email: Optional[str] = Field(default=None, max_length=255)
+    typology: Optional[str] = Field(default=None, max_length=100)
+    state: Optional[dict[str, Any]] = None
+
+
+class InvestigationShareRequest(BaseModel):
+    email: str
+    permission: Literal["read", "write"] = "read"
+
+
+class InvestigationShareOut(BaseModel):
+    email: str
+    permission: str
+
+
+class InvestigationResponse(BaseModel):
+    id: UUID
+    title: str
+    description: Optional[str] = None
+    owner_email: str
+    assignee_email: Optional[str] = None
+    status: str
+    typology: Optional[str] = None
+    origin: Optional[str] = None
+    selected_at: Optional[datetime] = None
+    state: dict[str, Any] = Field(default_factory=dict)
+    decision: Optional[dict[str, Any]] = None
+    frozen_hash: Optional[str] = None
+    frozen_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    shared_with: list[InvestigationShareOut] = Field(default_factory=list)
+    has_write_access: bool = False
+    can_manage: bool = False
+    # Only on the list (the queue); None on single-case responses.
+    source_count: Optional[int] = None
+
+
+class InvestigationSourceCreate(BaseModel):
+    kind: Literal["exploration"] = "exploration"  # "file" arrives with F2.5
+    exploration_id: UUID
+    mode: Literal["live", "frozen"] = "live"
+
+
+class InvestigationSourceResponse(BaseModel):
+    """`accessible: false` carries only title, context name and owner."""
+
+    id: UUID
+    kind: str
+    position: int
+    title_snapshot: str
+    context_title: Optional[str] = None
+    owner_email: Optional[str] = None
+    accessible: bool
+    exploration_id: Optional[UUID] = None
+    context_id: Optional[UUID] = None
+    mode: Optional[str] = None
+    frozen_sha256: Optional[str] = None
+    added_by: Optional[str] = None
+    added_at: Optional[datetime] = None
+
+
+InvestigationRole = Literal["victim", "mule", "exit", "discarded"]
+
+
+class InvestigationStateUpdate(BaseModel):
+    """Merge patch by unified node id: a null role clears it, false unpins."""
+
+    roles: Optional[dict[str, Optional[InvestigationRole]]] = None
+    pins: Optional[dict[str, bool]] = None
+
+
+class InvestigationEventCreate(BaseModel):
+    kind: str = Field(min_length=1, max_length=50)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class InvestigationEventResponse(BaseModel):
+    id: UUID
+    at: datetime
+    actor_email: str
+    # "agent" when an agent token acted for actor_email (03 §8.1 item 3)
+    actor_kind: Literal["human", "agent"] = "human"
+    agent_token_id: Optional[UUID] = None
+    agent_name: Optional[str] = None
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    prev_hash: Optional[str] = None
+    hash: str
+
+
+class NoteAnchor(BaseModel):
+    kind: Literal["node", "edge", "evidence", "none"] = "none"
+    id: Optional[str] = Field(default=None, max_length=512)
+
+
+class InvestigationNoteCreate(BaseModel):
+    anchor: NoteAnchor = Field(default_factory=NoteAnchor)
+    body: str = Field(min_length=1, max_length=10_000)
+
+
+class InvestigationNoteUpdate(BaseModel):
+    body: str = Field(min_length=1, max_length=10_000)
+
+
+class InvestigationNoteResponse(BaseModel):
+    id: UUID
+    anchor: dict[str, Any] = Field(default_factory=dict)
+    body: str
+    author_email: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+# Case space (03-arquitetura §8.5)
+ArtifactKind = Literal["slides", "doc", "report", "image", "data", "other"]
+
+
+class ArtifactTextUpload(BaseModel):
+    """JSON body for a text artifact (md, txt, csv, json, …); binaries go raw."""
+
+    name: str = Field(min_length=1, max_length=200)
+    text: str
+    kind: Optional[ArtifactKind] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+    source_evidence_ids: list[str] = Field(default_factory=list)
+
+
+class ArtifactVersionResponse(BaseModel):
+    version: int
+    sha256: str
+    size_bytes: int
+    content_type: str
+    status: Literal["draft", "approved"]
+    actor: dict[str, Any] = Field(default_factory=dict)
+    source_evidence_ids: list[str] = Field(default_factory=list)
+    note: Optional[str] = None
+    created_at: Optional[datetime] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+
+
+class ArtifactResponse(BaseModel):
+    id: UUID
+    name: str
+    kind: str
+    current_version: int
+    created_at: Optional[datetime] = None
+    download_only: bool = False
+    versions: list[ArtifactVersionResponse] = Field(default_factory=list)  # newest first
+
+
+class InvestigationFileResponse(BaseModel):
+    id: UUID
+    filename: str
+    role: str
+    sha256: str
+    size_bytes: int
+    content_type: Optional[str] = None
+    mapping: Optional[dict[str, Any]] = None
+    context_id: Optional[UUID] = None
+    uploaded_by: str
+    uploaded_at: Optional[datetime] = None
+
+
+class FileContextCreate(BaseModel):
+    """Generate a file graph (F2.5): the mapping spec (03 §4) applied to the
+    file plus ``file_ids`` (the other inputs of a multi-file layout like SIMBA)."""
+
+    mapping: dict[str, Any]
+    file_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
+class FileEnrichmentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    delimiter: str = Field(default=",", min_length=1, max_length=1)
+    header: bool = True
+    columns: list[str] = Field(default_factory=list, max_length=200)
+    encoding: Optional[str] = Field(default=None, max_length=20)
+
+
+class FileEnrichmentSpec(BaseModel):
+    """How an ``enrichment`` file joins the case's nodes (F2.6): rows keyed by
+    ``key_column``; a node of ``match_node_types`` matches by its id or a
+    property, reduced to its first ``key_digits`` digits when set (CNPJ →
+    CNPJ básico for the QSA)."""
+
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1] = 1
+    kind: Literal["enrichment"] = "enrichment"
+    name: str = Field(min_length=1, max_length=100)
+    input: FileEnrichmentInput = Field(default_factory=FileEnrichmentInput)
+    key_column: str = Field(min_length=1, max_length=200)
+    columns: list[str] = Field(min_length=1, max_length=50)
+    match_node_types: list[str] = Field(min_length=1, max_length=20)
+    match_source: Union[Literal["node_id"], PropRef] = "node_id"
+    key_digits: Optional[int] = Field(default=None, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _columns_known(self) -> "FileEnrichmentSpec":
+        if not self.input.header:
+            known = set(self.input.columns)
+            missing = [c for c in [self.key_column, *self.columns] if c not in known]
+            if missing:
+                raise ValueError(f"column '{missing[0]}' is not in input.columns")
+        return self
+
+
+class FileMappingUpdate(BaseModel):
+    mapping: dict[str, Any]
+
+# Proposals (03-arquitetura §8.4)
+ProposalKind = Literal[
+    "role", "match", "hypothesis", "hypothesis_status", "typology", "status"
+]
+
+
+class ProposalCreate(BaseModel):
+    kind: ProposalKind
+    payload: dict[str, Any] = Field(default_factory=dict)
+    rationale: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ProposalReject(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ProposalResponse(BaseModel):
+    id: UUID
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    rationale: Optional[str] = None
+    actor: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "accepted", "rejected"]
+    created_at: Optional[datetime] = None
+    decided_by: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    decision_note: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Agent tokens (03-arquitetura §8.2)
+# ---------------------------------------------------------------------------
+
+AgentScope: TypeAlias = Literal["read", "analyze", "write", "propose"]
+
+
+class AgentTokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    scopes: list[AgentScope] = Field(min_length=1)
+    expires_in_days: int = Field(default=30, ge=1)
+
+
+class AgentTokenResponse(BaseModel):
+    id: UUID
+    owner_email: str
+    name: str
+    scopes: list[str]
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: Optional[datetime] = None
+    active: bool
+
+
+class AgentTokenCreated(AgentTokenResponse):
+    token: str  # shown once; only its sha256 is stored

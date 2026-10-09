@@ -50,6 +50,30 @@ PERMISSIONS: tuple[Permission, ...] = (
             "this only gates persisting the result."
         ),
     ),
+    Permission(
+        id="investigation.create",
+        label="Create investigations",
+        description=(
+            "Open new investigation cases. Working on a case someone shared "
+            "with you stays open — this only gates creating one."
+        ),
+    ),
+    Permission(
+        id="investigation.upload",
+        label="Upload investigation files",
+        description=(
+            "Upload files (bank statements, QSA, CSV) to investigation cases. "
+            "Reading files already in a case stays open to its readers."
+        ),
+    ),
+    Permission(
+        id="investigation.agent",
+        label="Create agent tokens",
+        description=(
+            "Mint personal tokens that let an AI agent act on investigations "
+            "with your access. Only offered when agents are enabled."
+        ),
+    ),
 )
 
 PERMISSION_IDS: frozenset[str] = frozenset(p.id for p in PERMISSIONS)

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Direção A: canvas-first</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="min-height: 100vh; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; gap: 12px; background: #f8f8f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #343a40">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px"><span style="font-size: 22px; font-weight: 700">A · Canvas-first</span><span style="font-size: 14px; color: #495057">o grafo ocupa o centro; o resto se acopla em volta, como o app já faz hoje</span></div>
+<div style="flex: 1 1 auto; display: flex; flex-direction: column; border: 2px solid #495057; border-radius: 10px; background: #ffffff; overflow: hidden">
+<div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #343a40; color: #f1f3f5; font-size: 13px">barra superior · caso · status · prazo · Dossiê</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 2px solid #ced4da; font-size: 13px">
+<span style="padding: 4px 10px; border: 2px solid #495057; border-radius: 6px; font-weight: 700">Visão unificada</span>
+<span style="padding: 4px 10px; border: 1px dashed #868e96; border-radius: 6px">Exploração 1</span>
+<span style="padding: 4px 10px; border: 1px dashed #868e96; border-radius: 6px">Exploração 2</span>
+<span style="padding: 4px 10px; border: 1px dashed #868e96; border-radius: 6px">Arquivo</span>
+<span style="padding: 4px 10px; border: 1px dashed #868e96; border-radius: 6px">+</span>
+</div>
+<div style="flex: 1 1 auto; display: flex; flex-wrap: wrap; min-height: 420px">
+<div style="flex: 1 1 200px; max-width: 100%; box-sizing: border-box; padding: 14px; border-right: 2px solid #ced4da; display: flex; flex-direction: column; gap: 10px">
+<b style="font-size: 13px">FONTES</b>
+<div style="height: 10px; width: 80%; background: #dee2e6; border-radius: 4px"></div>
+<div style="height: 10px; width: 65%; background: #dee2e6; border-radius: 4px"></div>
+<div style="height: 10px; width: 72%; background: #dee2e6; border-radius: 4px"></div>
+<b style="font-size: 13px; margin-top: 10px">ARQUIVOS</b>
+<div style="height: 10px; width: 70%; background: #dee2e6; border-radius: 4px"></div>
+<div style="height: 10px; width: 55%; background: #dee2e6; border-radius: 4px"></div>
+<b style="font-size: 13px; margin-top: 10px">MATCHES</b>
+<div style="height: 10px; width: 60%; background: #dee2e6; border-radius: 4px"></div>
+</div>
+<div style="flex: 999 1 480px; min-width: 0; position: relative; display: flex; align-items: center; justify-content: center; background: #fcfcfb">
+<svg viewBox="0 0 400 240" aria-hidden="true" style="width: 70%; max-width: 520px; fill: none; stroke: #868e96; stroke-width: 2"><circle cx="60" cy="120" r="16"></circle><circle cx="170" cy="120" r="20"></circle><circle cx="280" cy="50" r="14"></circle><circle cx="280" cy="120" r="14"></circle><circle cx="280" cy="190" r="14"></circle><rect x="340" y="36" width="28" height="28"></rect><rect x="340" y="106" width="28" height="28"></rect><rect x="340" y="176" width="28" height="28"></rect><path d="M76 120H150M188 112L266 56M190 120H266M188 128L266 184M294 50H340M294 120H340M294 190H340"></path></svg>
+<span style="position: absolute; left: 14px; top: 12px; font-size: 13px; font-weight: 700">CANVAS DO GRAFO</span>
+<div style="position: absolute; left: 14px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px"><span style="padding: 4px 8px; border: 1px solid #868e96; border-radius: 6px">Layout</span><span style="padding: 4px 8px; border: 1px solid #868e96; border-radius: 6px">Table</span><span style="padding: 4px 8px; border: 2px solid #343a40; border-radius: 6px; font-weight: 700">Seguir o dinheiro</span></div>
+</div>
+<div style="flex: 1 1 240px; max-width: 100%; box-sizing: border-box; padding: 14px; border-left: 2px solid #ced4da; display: flex; flex-direction: column; gap: 10px">
+<b style="font-size: 13px">INSPECTOR</b>
+<div style="display: flex; gap: 6px; font-size: 12px"><span style="padding: 2px 6px; border: 1px solid #868e96; border-radius: 4px">Props</span><span style="padding: 2px 6px; border: 2px solid #343a40; border-radius: 4px">Enriquec.</span><span style="padding: 2px 6px; border: 1px solid #868e96; border-radius: 4px">Notas</span></div>
+<div style="height: 60px; border: 1px dashed #adb5bd; border-radius: 6px"></div>
+<div style="height: 60px; border: 1px dashed #adb5bd; border-radius: 6px"></div>
+</div>
+</div>
+<div style="height: 90px; box-sizing: border-box; border-top: 2px solid #ced4da; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+<b style="font-size: 13px">LINHA DO TEMPO (recolhível)</b>
+<div style="height: 8px; width: 60%; background: #e9ecef; border-radius: 4px"></div>
+<div style="height: 8px; width: 40%; margin-left: 18%; background: #e9ecef; border-radius: 4px"></div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

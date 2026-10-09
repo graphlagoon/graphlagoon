@@ -11,9 +11,8 @@ using your domain rules.
 - **Not the tool for** statistical community detection (use
   [Louvain](./communities-metrics.md)); anything needing data beyond the
   loaded graph (programs run in your browser and see only what's on
-  screen); or heavy computation — code runs synchronously on the UI
-  thread, so an expensive program on a large graph will freeze the page
-  while it runs.
+  screen); or heavy computation — a program that takes longer than
+  10 seconds is stopped.
 :::
 
 Sometimes the grouping you need doesn't exist in any algorithm menu:
@@ -25,7 +24,14 @@ collapsed shapes or as colored communities.
 
 Programs run entirely in your browser. The code is never sent to the
 server, and it can't see anything beyond the graph data already on your
-screen.
+screen: each run happens in a **dedicated Web Worker** whose network,
+storage and messaging APIs (`fetch`, `XMLHttpRequest`, `WebSocket`,
+`importScripts`, nested `Worker`s, `indexedDB`, `navigator`…) are removed
+before your code executes, with no access to the page (`window`, the DOM)
+either. A run that does not finish within **10 seconds** has its worker
+terminated, and the page stays responsive while a program runs. The
+clusters it returns are validated back on the page before anything is
+drawn — return plain data only (no functions).
 
 Open the panel from the toolbar **Clusters** button; cluster programs live
 in its **Programs** tab.
@@ -140,6 +146,10 @@ problem before anything is drawn:
 - `Cluster "X": invalid node_ids: a, b, c (and 12 more)`
 - `Cluster "X": invalid figure "blob". Must be one of: circle, box, diamond, hexagon, star`
 - `Missing required parameter: depth`
+- `Timed out after 10s` — the program did not finish in time (an endless
+  loop, or too much work for the loaded graph)
+- `Program result cannot be transferred: …` — the returned value contains
+  something other than plain data, such as a function
 
 Anything your own code throws surfaces with its message (the built-in BFS
 throws `Start node "…" not found in the graph`). There's no step debugger

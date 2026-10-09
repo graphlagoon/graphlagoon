@@ -96,24 +96,54 @@ export function isIdleUser(user: AdminUser): boolean {
 
 /** One-line human summary of an audit entry's metadata. */
 export function describeAudit(entry: AuditEntry): string {
-  const m = entry.metadata || {};
+  const agent = (entry.metadata?.agent as { name?: string } | undefined)?.name;
+  const body = describeAuditBody(entry);
+  return agent ? `${body} — via agent ${agent}` : body;
+}
+
+function describeAuditBody(entry: AuditEntry): string {
+  const { agent: _agent, ...m } = entry.metadata || {};
   switch (entry.action) {
     case 'context.transfer':
     case 'exploration.transfer':
+    case 'investigation.transfer':
       return `"${m.title ?? entry.resource_id}" from ${m.from} to ${m.to}`;
     case 'context.share':
     case 'exploration.share':
+    case 'investigation.share':
       return `with ${m.with} (${m.permission})${m.updated ? ' — updated' : ''}`;
     case 'context.unshare':
     case 'exploration.unshare':
+    case 'investigation.unshare':
       return `removed ${m.with}`;
     case 'context.delete':
     case 'exploration.delete':
-      return `"${m.title ?? entry.resource_id}" (owner ${m.owner ?? '?'})`;
+    case 'investigation.delete':
+      return `"${m.title ?? entry.resource_id}" (owner ${m.owner ?? '?'})${m.reason ? ` — reason: ${m.reason}` : ''}`;
+    case 'investigation.create':
+      return `"${m.title ?? entry.resource_id}"`;
+    case 'investigation.update':
+      return `changed ${Array.isArray(m.fields) ? m.fields.join(', ') : '?'}`;
+    case 'investigation.source_add':
+      return `exploration ${m.exploration_id ?? '?'} (${m.mode ?? 'live'})`;
+    case 'investigation.file_upload':
+      return `${m.filename ?? '?'} (${m.role ?? '?'}) sha256 ${String(m.sha256 ?? '?').slice(0, 12)}`;
+    case 'investigation.file_read':
+      return `file ${m.file_id ?? '?'}${m.tool ? ` via MCP ${m.tool}` : ''}`;
+    case 'investigation.source_remove':
+      return `removed source "${m.title ?? m.source_id ?? '?'}"`;
     case 'precomputed.publish':
     case 'precomputed.delete':
     case 'preset.delete':
       return `${m.name ?? '?'}${m.provider ? ` via ${m.provider}` : ''}`;
+    case 'agent_token.create':
+      return `"${m.name ?? entry.resource_id}" (${Array.isArray(m.scopes) ? m.scopes.join(', ') : '?'})`;
+    case 'agent.read':
+      return `MCP ${m.tool ?? '?'}`;
+    case 'enrichment.read':
+      return `${m.table ?? '?'}: ${m.keys ?? 0} key(s), ${m.rows ?? 0} row(s)`;
+    case 'agent_token.revoke':
+      return `token ${entry.resource_id}${m.by_admin ? ' — by an admin' : ''}`;
     case 'admin.clear_all':
       return `cleared: ${Array.isArray(m.cleared) ? m.cleared.join(', ') : '?'}`;
     case 'group.create':

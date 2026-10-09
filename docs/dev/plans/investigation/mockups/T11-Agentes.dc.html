@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Agentes na investigação</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #2c3e50; font-size: 14px; line-height: 1.5">
+<header style="min-height: 52px; box-sizing: border-box; padding: 0 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #0d1b2a; border-bottom: 1px solid rgba(20,184,166,0.25); color: #c8e8f0">
+<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: #14b8a6; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round"><path d="M3 15c2-4 4-4 6 0s4 4 6 0 4-4 6 0"></path></svg>
+<a href="T1-Fila.dc.html" style="color: #14b8a6; font-weight: 600; text-decoration: none; padding: 4px 8px">Investigações</a>
+<span style="width: 1px; height: 20px; background: rgba(200,232,240,0.15)"></span>
+<a href="T2-Workspace.dc.html" style="font-weight: 600; color: #ffffff; text-decoration: none">Golpe Pix · falsa central</a>
+<span style="font-size: 12px; color: rgba(200,232,240,0.8)">#2026-0412 › Agentes</span>
+<div style="flex: 1 1 auto"></div>
+<a href="T10-Espaco.dc.html" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; color: #c8e8f0; text-decoration: none; border: 1px solid rgba(200,232,240,0.3)">Espaço do caso</a>
+</header>
+<div style="width: 100%; max-width: 1360px; margin: 0 auto; box-sizing: border-box; padding: 20px 24px; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+<section aria-label="Conectar um agente" style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+<h2 style="margin: 0; font-size: 16px; color: #0d1b2a">Conectar um agente</h2>
+<p style="margin: 0; color: #495057">O agente age em seu nome, com o seu acesso. Ele nunca vê o que você não vê.</p>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Nome do token<input type="text" value="Claude Code · notebook" style="min-height: 36px; box-sizing: border-box; padding: 6px 10px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400"></label>
+<fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 4px">
+<legend style="font-weight: 600; margin-bottom: 6px">O que o agente pode fazer</legend>
+<label style="display: flex; gap: 8px"><input type="checkbox" checked>Ler o caso e o grafo</label>
+<label style="display: flex; gap: 8px"><input type="checkbox" checked>Rodar análises (rastreio, caminhos, tipologias)</label>
+<label style="display: flex; gap: 8px"><input type="checkbox" checked>Escrever notas, evidências e artefatos em rascunho</label>
+<label style="display: flex; gap: 8px"><input type="checkbox" checked>Fazer propostas para você aceitar</label>
+<label style="display: flex; gap: 8px; color: #6c757d"><input type="checkbox" disabled>Decidir, comunicar, marcar no DICT, compartilhar (nunca para agentes)</label>
+</fieldset>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Validade<select style="min-height: 36px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400; background: #ffffff"><option>30 dias</option></select></label>
+<button type="button" style="align-self: flex-start; min-height: 38px; padding: 6px 14px; border-radius: 6px; border: 0; background: #0f766e; color: #ffffff; font: inherit; font-weight: 600">Criar token</button>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<b>Comando para o Claude Code</b>
+<code style="display: block; padding: 8px 10px; border-radius: 6px; background: #0d1b2a; color: #c8e8f0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all">claude mcp add --transport http graphlagoon https://graphlagoon.empresa.com.br/mcp --header "Authorization: Bearer glt_••••"</code>
+<span style="color: #6c757d">O token aparece uma vez só. Fica guardado com hash e pode ser revogado a qualquer momento.</span>
+</div>
+<div style="padding: 8px 10px; border-radius: 6px; background: #fff7ed; border: 1px solid #fdba74; color: #7c2d12">Política do administrador: CPF, CNPJ e contas vão <b>mascarados</b> para agentes.</div>
+</div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+<h2 style="margin: 0; font-size: 16px; color: #0d1b2a">Tokens ativos</h2>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f1f3f5"><span style="flex: 1 1 200px"><b>Claude Code · notebook</b><br><span style="color: #6c757d">você · expira em 28 dias · usado há 2 min</span></span><button type="button" style="min-height: 32px; padding: 4px 10px; border-radius: 6px; border: 1px solid #c2410c; background: #ffffff; color: #9a3412; font: inherit">Revogar</button></div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0"><span style="flex: 1 1 200px"><b>Agente de triagem</b><br><span style="color: #6c757d">M. Tavares · expira em 12 dias · usado ontem</span></span><button type="button" style="min-height: 32px; padding: 4px 10px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Detalhes</button></div>
+</div>
+</section>
+<section aria-label="Propostas aguardando você" style="flex: 1 1 380px; min-width: 0; background: #ffffff; border: 2px solid #0f766e; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+<h2 style="margin: 0; font-size: 16px; color: #0d1b2a">3 propostas aguardando você</h2>
+<p style="margin: 0; color: #495057">Mudanças no raciocínio do caso só valem com o seu aceite.</p>
+<div style="border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #5b21b6">PAPEL · CLAUDE</span>
+<b>Marcar a conta 5520-3 como laranja</b>
+<span style="color: #495057">Recebeu R$ 2.000 e sacou tudo em 31 min; mesmo dispositivo da 8812-7 (E4).</span>
+<div style="display: flex; gap: 8px"><button type="button" style="min-height: 34px; padding: 4px 12px; border-radius: 6px; border: 0; background: #0f766e; color: #ffffff; font: inherit; font-weight: 600">Aceitar</button><button type="button" style="min-height: 34px; padding: 4px 12px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Recusar</button></div>
+</div>
+<div style="border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #5b21b6">HIPÓTESE · CLAUDE</span>
+<b>H4 · 8812-7 é conta de passagem</b>
+<span style="color: #495057">Saldo anterior de R$ 300; saída para exchange 54 min depois da entrada.</span>
+<div style="display: flex; gap: 8px"><button type="button" style="min-height: 34px; padding: 4px 12px; border-radius: 6px; border: 0; background: #0f766e; color: #ffffff; font: inherit; font-weight: 600">Aceitar</button><button type="button" style="min-height: 34px; padding: 4px 12px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Recusar</button></div>
+</div>
+<div style="border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #5b21b6">TIPOLOGIA · CLAUDE</span>
+<b>Selo CC 4.001 IV-k / IV-ad em 4471-0</b>
+<span style="color: #495057">Repassou 98,6% do recebido em 13 minutos.</span>
+<div style="display: flex; gap: 8px"><button type="button" style="min-height: 34px; padding: 4px 12px; border-radius: 6px; border: 0; background: #0f766e; color: #ffffff; font: inherit; font-weight: 600">Aceitar</button><button type="button" style="min-height: 34px; padding: 4px 12px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Recusar</button></div>
+</div>
+</section>
+<section aria-label="Atividade dos agentes" style="flex: 1 1 340px; min-width: 0; background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+<h2 style="margin: 0; font-size: 16px; color: #0d1b2a">Atividade dos agentes</h2>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<li style="display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f1f3f5"><span style="flex: 0 0 44px; color: #6c757d; font-variant-numeric: tabular-nums">15:12</span><span>Rodou <code>trace_money</code> (FIFO, 3 camadas) e fixou a evidência E5</span></li>
+<li style="display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f1f3f5"><span style="flex: 0 0 44px; color: #6c757d; font-variant-numeric: tabular-nums">15:13</span><span>Consultou o enriquecimento KYC de 3 contas (leitura auditada)</span></li>
+<li style="display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f1f3f5"><span style="flex: 0 0 44px; color: #6c757d; font-variant-numeric: tabular-nums">15:14</span><span>Enviou "Apresentação para o comitê.pptx", v3, em rascunho</span></li>
+<li style="display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f1f3f5"><span style="flex: 0 0 44px; color: #6c757d; font-variant-numeric: tabular-nums">15:15</span><span>Fez 3 propostas: papel, hipótese, tipologia</span></li>
+<li style="display: flex; gap: 10px; padding: 7px 0"><span style="flex: 0 0 44px; color: #6c757d; font-variant-numeric: tabular-nums">15:16</span><span style="color: #9a3412"><b>Bloqueado:</b> tentou registrar a decisão; só pessoas decidem</span></li>
+</ol>
+<div style="padding: 8px 10px; border-radius: 6px; background: #f8f9fa; color: #495057">Tudo o que o agente faz entra no diário como "Claude, em nome de você", com o token usado.</div>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

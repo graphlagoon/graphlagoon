@@ -1107,3 +1107,148 @@ export async function seedAdmin(
   }
   return calls;
 }
+
+/**
+ * Seed investigations (cases) and their sources. Call AFTER setupAPIMocks.
+ * `POST /investigations` creates a case the other routes then serve; `POST .../sources`
+ * echoes an accessible source (recorded in `added`) and adds it to the case, with
+ * title and context taken from `explorations` when the id is there.
+ * State, notes and the journal are kept in memory so the workspace round-trips.
+ */
+export async function seedInvestigations(
+  page: Page,
+  investigations: any[],
+  sources: Record<string, any[]> = {},
+  explorations: any[] = [],
+) {
+  const added: any[] = [];
+  const cases = new Map<string, any>(investigations.map((i) => [i.id, i]));
+  const srcs = new Map<string, any[]>(investigations.map((i) => [i.id, [...(sources[i.id] ?? [])]]));
+  const notes = new Map<string, any[]>();
+  const events = new Map<string, any[]>();
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const journal = (id: string, kind: string, payload: Record<string, unknown>) => {
+    const list = events.get(id) ?? [];
+    list.push({ id: `ev-${list.length + 1}`, at: new Date().toISOString(), actor_email: 'e2e@test.com', kind, payload, hash: 'h' });
+    events.set(id, list);
+  };
+
+  await page.route('**/graphlagoon/api/investigations', (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON();
+      const inv = {
+        id: cases.has('inv-new') ? `inv-new-${cases.size}` : 'inv-new',
+        status: 'selecao',
+        owner_email: 'e2e@test.com',
+        state: {},
+        shared_with: [],
+        has_write_access: true,
+        can_manage: true,
+        created_at: new Date().toISOString(),
+        ...body,
+      };
+      cases.set(inv.id, inv);
+      srcs.set(inv.id, []);
+      journal(inv.id, 'case.created', { title: inv.title });
+      route.fulfill(json(inv, 201));
+    } else {
+      route.fulfill(json([...cases.values()].map((i) => ({ ...i, source_count: i.source_count ?? srcs.get(i.id)?.length ?? 0 }))));
+    }
+  });
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events))?(\?.*)?$/, (route) => {
+    const req = route.request();
+    const [, id, sub] = new URL(req.url()).pathname.match(/investigations\/([^/]+)(?:\/(\w+))?$/)!;
+    const inv = cases.get(id);
+    if (!inv) return route.fulfill(json({ detail: { error: { code: 'INVESTIGATION_NOT_FOUND' } } }, 404));
+    const method = req.method();
+    if (!sub) return route.fulfill(json(inv));
+    if (sub === 'sources') {
+      if (method !== 'POST') return route.fulfill(json(srcs.get(id) ?? []));
+      const body = req.postDataJSON();
+      const list = srcs.get(id)!;
+      const exp = explorations.find((e) => e.id === body.exploration_id);
+      const source = {
+        id: `src-${added.length + 1}`,
+        kind: 'exploration',
+        position: list.length,
+        title_snapshot: exp?.title ?? body.exploration_id,
+        accessible: true,
+        exploration_id: body.exploration_id,
+        context_id: exp?.graph_context_id,
+        mode: body.mode,
+      };
+      added.push({ investigation_id: id, ...body });
+      list.push(source);
+      journal(id, 'source.added', { title: source.title_snapshot, mode: body.mode });
+      return route.fulfill(json(source, 201));
+    }
+    if (sub === 'state') {
+      const roles = { ...(inv.state?.roles ?? {}) };
+      for (const [entity, role] of Object.entries(req.postDataJSON().roles ?? {})) {
+        if (role) roles[entity] = role;
+        else delete roles[entity];
+        journal(id, 'role.changed', { entity, to: role });
+      }
+      inv.state = { ...inv.state, roles };
+      return route.fulfill(json(inv));
+    }
+    if (sub === 'notes') {
+      const list = notes.get(id) ?? [];
+      notes.set(id, list);
+      if (method !== 'POST') return route.fulfill(json(list));
+      const note = { id: `note-${list.length + 1}`, author_email: 'e2e@test.com', created_at: new Date().toISOString(), ...req.postDataJSON() };
+      list.push(note);
+      journal(id, 'note.created', { anchor: note.anchor, body: note.body });
+      return route.fulfill(json(note, 201));
+    }
+    return route.fulfill(json(events.get(id) ?? []));
+  });
+  // Case space (FA.2): raw-body upload, versions, content and approval, in memory.
+  const artifacts = new Map<string, any[]>();
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+\/artifacts(\/.*)?(\?.*)?$/, (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const [, id, rest = ''] = url.pathname.match(/investigations\/([^/]+)\/artifacts\/?(.*)$/)!;
+    const list = artifacts.get(id) ?? [];
+    artifacts.set(id, list);
+    const version = (n: number) => ({
+      version: n,
+      sha256: `sha${n}`.padEnd(64, '0'),
+      size_bytes: req.postDataBuffer()?.length ?? 0,
+      content_type: 'text/markdown',
+      status: 'draft',
+      actor: { kind: 'human', email: 'e2e@test.com' },
+      source_evidence_ids: [],
+      created_at: new Date().toISOString(),
+    });
+    const contents = (a: any, n: number) => (a.contents ??= {})[n];
+    const out = ({ contents: _c, ...a }: any) => a;
+    if (!rest) {
+      if (req.method() !== 'POST') return route.fulfill(json(list.map(out)));
+      const name = url.searchParams.get('name') ?? 'file';
+      const a: any = { id: `art-${list.length + 1}`, name, kind: 'doc', current_version: 1, download_only: false, versions: [version(1)] };
+      a.contents = { 1: req.postData() ?? '' };
+      list.unshift(a);
+      journal(id, 'artifact.created', { name, version: 1 });
+      return route.fulfill(json(out(a), 201));
+    }
+    const [aid, , n, action] = rest.split('/');
+    const a = list.find((x) => x.id === aid);
+    if (!a) return route.fulfill(json({ detail: { error: { code: 'ARTIFACT_NOT_FOUND' } } }, 404));
+    if (!n) {
+      a.current_version += 1;
+      a.versions.unshift(version(a.current_version));
+      a.contents[a.current_version] = req.postData() ?? '';
+      journal(id, 'artifact.version_added', { name: a.name, version: a.current_version });
+      return route.fulfill(json(out(a), 201));
+    }
+    if (action === 'approve') {
+      const v = a.versions.find((x: any) => x.version === Number(n));
+      Object.assign(v, { status: 'approved', approved_by: 'e2e@test.com', approved_at: new Date().toISOString() });
+      journal(id, 'artifact.approved', { name: a.name, version: v.version });
+      return route.fulfill(json(out(a)));
+    }
+    return route.fulfill({ status: 200, contentType: 'text/markdown', body: contents(a, Number(n)) ?? '' });
+  });
+  return { added, artifacts };
+}

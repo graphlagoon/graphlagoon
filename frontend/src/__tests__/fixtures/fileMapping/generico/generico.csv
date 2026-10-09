@@ -1,0 +1,6 @@
+origem,destino,valor,data,tipo
+conta a,Conta B,"1.234,56",01/03/2026,PIX
+Conta B, conta c ,"900,00",02/03/2026,TED
+Conta C,,"50,00",03/03/2026,PIX
+Conta A,Conta D,abc,04/03/2026,PIX
+Conta D,Conta A,"10,00",05/03/2026,BOLETO

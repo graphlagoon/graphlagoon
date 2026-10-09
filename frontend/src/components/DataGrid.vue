@@ -20,6 +20,7 @@ import Popover from 'primevue/popover';
 import { type ColMeta, initFilters } from '@/composables/useTableColumns';
 import { useDebouncedModel } from '@/composables/useDebouncedModel';
 import { SEARCH_FIELD } from '@/utils/searchText';
+import { primeVueExportCell, primeVueExportHeader } from '@/utils/csvSafe';
 
 const props = withDefaults(
   defineProps<{
@@ -150,6 +151,7 @@ defineExpose({ exportCSV, clearFilters });
         dataKey="__i"
         size="small"
         :exportFilename="exportFilename"
+        :exportFunction="primeVueExportCell"
         stripedRows
         data-testid="data-grid-table"
       >
@@ -158,6 +160,7 @@ defineExpose({ exportCSV, clearFilters });
           :key="col.field"
           :field="col.field"
           :header="col.header"
+          :exportHeader="primeVueExportHeader(col.header || col.field)"
           :sortable="true"
           :dataType="col.type === 'date' ? 'date' : col.type === 'numeric' ? 'numeric' : 'text'"
           :showFilterMatchModes="col.type !== 'categorical'"

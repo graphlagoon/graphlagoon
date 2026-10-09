@@ -24,6 +24,7 @@ from graphlagoon.config import Settings, get_settings
 from graphlagoon.db.database import get_session_maker, is_database_available
 from graphlagoon.db.memory_store import get_memory_store
 from graphlagoon.models.schemas import (
+    AgentTokenResponse,
     AdminConfigEntry,
     AdminCounts,
     AdminHealth,
@@ -38,6 +39,7 @@ from graphlagoon.models.schemas import (
     TransferOwnershipResponse,
 )
 from graphlagoon.routers.admin_registry import CONFIG_FIELD_KINDS
+from graphlagoon.routers.agent_tokens import require_agents_enabled
 from graphlagoon.services import audit
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.services.environment import (
@@ -84,6 +86,7 @@ async def _counts() -> AdminCounts:
             Exploration,
             GraphContext,
             Group,
+            Investigation,
             QueryTemplate,
             UsageLog,
             User,
@@ -104,6 +107,7 @@ async def _counts() -> AdminCounts:
                 query_templates=await count(QueryTemplate),
                 audit_entries=await count(UsageLog),
                 groups=await count(Group),
+                investigations=await count(Investigation),
             )
     store = get_memory_store()
     return AdminCounts(
@@ -113,6 +117,7 @@ async def _counts() -> AdminCounts:
         query_templates=len(store.query_templates),
         audit_entries=len(store.usage_logs),
         groups=len(store.groups),
+        investigations=len(store.investigations),
     )
 
 
@@ -434,6 +439,74 @@ async def transfer_exploration(
     return TransferOwnershipResponse(
         id=exploration_id, previous_owner_email=previous, owner_email=new_owner
     )
+
+
+@router.post(
+    "/investigations/{investigation_id}/transfer",
+    response_model=TransferOwnershipResponse,
+)
+async def transfer_investigation(
+    investigation_id: UUID,
+    data: TransferOwnershipRequest,
+    admin_email: str = Depends(require_superuser),
+):
+    """Reassign a case to another owner; also written to the case journal."""
+    from graphlagoon.services import investigations
+
+    new_owner = _validated_owner(data.new_owner_email)
+    try:
+        meta = await investigations.transfer_owner(
+            investigation_id, admin_email, new_owner
+        )
+    except investigations.InvestigationError as exc:
+        raise _error(exc.status_code, exc.code, exc.message)
+    await touch_user(new_owner)
+    await audit.record(
+        admin_email,
+        AuditAction.INVESTIGATION_TRANSFER,
+        resource_type="investigation",
+        resource_id=investigation_id,
+        metadata={"from": meta["from"], "to": new_owner, "title": meta["title"]},
+    )
+    return TransferOwnershipResponse(
+        id=investigation_id, previous_owner_email=meta["from"], owner_email=new_owner
+    )
+
+
+# ---------------------------------------------------------------------------
+# Agent tokens (03-arquitetura §8.2): list and revoke anyone's
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/agent-tokens",
+    response_model=list[AgentTokenResponse],
+    dependencies=[Depends(require_agents_enabled)],
+)
+async def list_all_agent_tokens():
+    from graphlagoon.services import agent_tokens
+
+    return await agent_tokens.list_tokens()
+
+
+@router.delete(
+    "/agent-tokens/{token_id}", dependencies=[Depends(require_agents_enabled)]
+)
+async def revoke_any_agent_token(
+    token_id: UUID, admin_email: str = Depends(require_superuser)
+):
+    from graphlagoon.services import agent_tokens
+
+    if not await agent_tokens.revoke_token(token_id):
+        raise _error(404, "AGENT_TOKEN_NOT_FOUND", f"Agent token '{token_id}' not found")
+    await audit.record(
+        admin_email,
+        AuditAction.AGENT_TOKEN_REVOKE,
+        resource_type="agent_token",
+        resource_id=token_id,
+        metadata={"by_admin": True},
+    )
+    return {"status": "revoked"}
 
 
 # ---------------------------------------------------------------------------

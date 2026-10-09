@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed, nextTick, toRaw, watch } from 'vue';
+import { ref, shallowRef, computed, nextTick, toRaw, watch } from 'vue';
 import { buildSearchText } from '@/utils/searchText';
 import { extractErrorDetails, getErrorMessage } from '@/utils/errorMessage';
 import type {
@@ -35,6 +35,7 @@ import { useSimilarityStore } from '@/stores/similarity';
 import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
 import { isSqlScript } from '@/utils/sqlScript';
+import { snapshotToGraph, type NodeOrigin } from '@/utils/unifyGraph';
 import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
 import { useToast } from '@/composables/useToast';
 import {
@@ -47,6 +48,20 @@ import {
   type StepResult,
 } from '@/composables/useCancellableQuery';
 import type { QueryMetadata, GraphJobStatusResponse, GraphResponse } from '@/types/graph';
+import type { ComputedMetric } from '@/types/metrics';
+
+/**
+ * Investigation workspace (F1.6): the graph is a union of sources from several
+ * contexts, so there is no `currentContext`. Expansion asks the workspace which
+ * origin to expand from and hands the result back for unification.
+ */
+export interface InvestigationGraphMode {
+  origins: Map<string, NodeOrigin[]>;
+  /** Provenance ring colors per node id. */
+  rings: Map<string, string[]>;
+  chooseOrigin: (origins: NodeOrigin[]) => Promise<NodeOrigin | null>;
+  applyExpansion: (origin: NodeOrigin, response: GraphResponse) => void | Promise<void>;
+}
 
 /**
  * Built-in defaults for the Behaviors panel.
@@ -330,6 +345,9 @@ export const useGraphStore = defineStore('graph', () => {
   // Current context and exploration
   const currentContext = ref<GraphContext | null>(null);
   const currentExploration = ref<Exploration | null>(null);
+  const investigationMode = shallowRef<InvestigationGraphMode | null>(null);
+  /** Investigation role fills (nodeId -> color); null outside a case. */
+  const roleColors = shallowRef<Map<string, string> | null>(null);
 
   // Selection state
   const selectedNodeIds = ref<Set<string>>(new Set());
@@ -1481,6 +1499,7 @@ export const useGraphStore = defineStore('graph', () => {
     edgeLimit: number = 100,
     directed: boolean = false
   ) {
+    if (investigationMode.value) return expandInvestigationNode(nodeId, depth, edgeTypes, edgeLimit, directed);
     if (!currentContext.value) return;
     // Belt to the UI's suspenders: expansion affordances are hidden for a
     // connection without expand support, but programmatic callers land here.
@@ -1510,6 +1529,53 @@ export const useGraphStore = defineStore('graph', () => {
 
       nodes.value = [...nodes.value, ...newNodes];
       edges.value = [...edges.value, ...newEdges];
+    } catch (e: unknown) {
+      queryError.value = extractErrorDetails(e, 'Failed to expand node');
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /** Loads a unified (or per-source) investigation graph, keeping the selection of entities still present. */
+  function loadInvestigationGraph(mode: InvestigationGraphMode, newNodes: Node[], newEdges: Edge[]) {
+    currentContext.value = null;
+    currentExploration.value = null;
+    investigationMode.value = mode;
+    nodes.value = newNodes;
+    edges.value = newEdges;
+    // Linked selection: the same entity has the same id in every tab.
+    const nodeIds = new Set(newNodes.map((n) => n.node_id));
+    const edgeIds = new Set(newEdges.map((e) => e.edge_id));
+    selectedNodeIds.value = new Set([...selectedNodeIds.value].filter((id) => nodeIds.has(id)));
+    selectedEdgeIds.value = new Set([...selectedEdgeIds.value].filter((id) => edgeIds.has(id)));
+  }
+
+  async function expandInvestigationNode(
+    nodeId: string,
+    depth: number,
+    edgeTypes: string[],
+    edgeLimit: number,
+    directed: boolean,
+  ) {
+    const mode = investigationMode.value!;
+    const origins = mode.origins.get(nodeId) ?? [];
+    // One origin per context: expanding twice in the same context brings the same rows.
+    const perContext = origins.filter((o, i) => origins.findIndex((p) => p.contextId === o.contextId) === i);
+    const origin = perContext.length > 1 ? await mode.chooseOrigin(perContext) : perContext[0];
+    if (!origin) return;
+
+    loading.value = true;
+    loadingMessage.value = 'Expanding node…';
+    queryError.value = null;
+    try {
+      const response = await api.expandFromNode(origin.contextId, {
+        node_id: origin.nodeId,
+        depth: Math.min(depth, 2),
+        edge_types: edgeTypes,
+        edge_limit: Math.max(4, Math.min(edgeLimit, 1000)),
+        directed,
+      });
+      await mode.applyExpansion(origin, response);
     } catch (e: unknown) {
       queryError.value = extractErrorDetails(e, 'Failed to expand node');
     } finally {
@@ -2556,6 +2622,41 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  /**
+   * "Save as property" (investigations F2.7): writes a node metric's values into the
+   * node properties, saves the open exploration's snapshot and journals
+   * `metric.saved` in every case (with write access) that has it as a source.
+   * Without an open writable exploration the values only live until the next save.
+   */
+  async function saveMetricAsProperty(
+    metric: ComputedMetric,
+  ): Promise<{ nodes: number; persisted: boolean; cases: number }> {
+    const property = metric.name;
+    const patch = new Map<string, Record<string, unknown>>();
+    for (const n of nodes.value) {
+      if (metric.values.has(n.node_id)) patch.set(n.node_id, { [property]: metric.values.get(n.node_id) });
+    }
+    patchNodeProperties(patch, { clearPending: false, merge: true });
+
+    const exp = currentExploration.value;
+    if (!exp?.has_write_access || patch.size === 0) return { nodes: patch.size, persisted: false, cases: 0 };
+    currentExploration.value = await api.updateExploration(exp.id, { snapshot: buildGraphSnapshot() });
+
+    const cases = (await api.getInvestigations({ exploration_id: exp.id })).filter(
+      (c) => c.has_write_access && c.status !== 'decidido',
+    );
+    const payload = {
+      metric: metric.name,
+      algorithm: metric.algorithmId,
+      property,
+      nodes: patch.size,
+      exploration_id: exp.id,
+      exploration_title: exp.title,
+    };
+    await Promise.all(cases.map((c) => api.postInvestigationEvent(c.id, 'metric.saved', payload)));
+    return { nodes: patch.size, persisted: true, cases: cases.length };
+  }
+
   async function loadExploration(explorationId: string) {
     loading.value = true;
     error.value = null;
@@ -2613,20 +2714,9 @@ export const useGraphStore = defineStore('graph', () => {
           const tSnapshot = performance.now();
           const snapshot = await api.getExplorationSnapshot(explorationId);
           const tFetched = performance.now();
-          nodes.value = snapshot.nodes.map((n) => ({
-            node_id: n.id,
-            node_type: n.type,
-            properties: n.properties,
-            x: n.x,
-            y: n.y,
-          }));
-          edges.value = snapshot.edges.map((e) => ({
-            edge_id: e.id,
-            src: e.source,
-            dst: e.target,
-            relationship_type: e.type,
-            properties: e.properties,
-          }));
+          const graph = snapshotToGraph(snapshot);
+          nodes.value = graph.nodes;
+          edges.value = graph.edges;
           recordGraphLoad(
             'snapshot',
             { nodes: snapshot.nodes, edges: snapshot.edges },
@@ -2673,6 +2763,8 @@ export const useGraphStore = defineStore('graph', () => {
     edges.value = [];
     currentContext.value = null;
     currentExploration.value = null;
+    investigationMode.value = null;
+    roleColors.value = null;
     savedStateFingerprint.value = null;
     currentPrecomputedGraph.value = null;
     currentStylePreset.value = null;
@@ -2802,9 +2894,13 @@ export const useGraphStore = defineStore('graph', () => {
     applyStylePreset,
     expandFromNode,
     supportsExpand,
+    investigationMode,
+    roleColors,
+    loadInvestigationGraph,
     supportsSubgraph,
     shouldLoadProgressively,
     patchNodeProperties,
+    saveMetricAsProperty,
     enrichNodeProperties,
     prioritizeNodeProperties,
     executeGraphQuery,

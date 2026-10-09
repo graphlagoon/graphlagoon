@@ -123,7 +123,14 @@ describe('describeAudit', () => {
     expect(describeAudit(entry('group.create', { name: 'builders', members: 3 }))).toBe('"builders" (3 members)');
     expect(describeAudit(entry('group.update', { name: 'builders', members: 1 }))).toBe('"builders" (1 member)');
     expect(describeAudit(entry('group.delete', { name: 'builders', rules_removed: 2 }))).toBe('"builders" — 2 rule(s) removed');
+    expect(describeAudit(entry('investigation.create', { title: 'T', agent: { name: 'claude' } }))).toBe(
+      '"T" — via agent claude',
+    );
     expect(describeAudit(entry('group.delete', { name: 'builders' }))).toBe('"builders"');
+    expect(describeAudit(entry('investigation.transfer', { title: 'Pix', from: 'a', to: 'b' }))).toBe('"Pix" from a to b');
+    expect(describeAudit(entry('investigation.update', { fields: ['status', 'title'] }))).toBe('changed status, title');
+    expect(describeAudit(entry('investigation.delete', { title: 'Pix', owner: 'o', reason: 'dup' }))).toBe('"Pix" (owner o) — reason: dup');
+    expect(describeAudit(entry('investigation.source_add', { exploration_id: 'e1', mode: 'frozen' }))).toBe('exploration e1 (frozen)');
     expect(describeAudit(entry('permission.update', { permission: 'context.create', mode: 'restricted', rules: 1 }))).toBe('context.create: restricted, 1 rule(s)');
   });
 

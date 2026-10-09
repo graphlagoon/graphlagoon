@@ -1,10 +1,10 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, toRaw } from 'vue'
 import { recordPerf } from '@/utils/perfMetrics'
 import type {
   Cluster,
   ClusterProgram,
-  ClusterProgramContext,
+  ClusterProgramSnapshot,
   ClusterProgramResult,
   ClusterProgramExecution,
   ClusterProgramParamValues,
@@ -14,6 +14,8 @@ import type {
   CreateClusterInput,
 } from '@/types/cluster'
 import { resolveParamValues } from '@/utils/clusterProgramParams'
+import { runClusterProgramInWorker } from '@/services/clusterProgramRunner'
+import { programUsesMetricLookup } from '@/workers/clusterProgramEvaluate'
 import { useGraphStore } from '@/stores/graph'
 import { useMetricsStore } from '@/stores/metrics'
 import { api } from '@/services/api'
@@ -252,7 +254,9 @@ export const useClusterStore = defineStore('cluster', () => {
   /**
    * Compute the clusters produced by a program WITHOUT mutating store state.
    *
-   * Runs the program's user code and validates its output, returning the
+   * Runs the program's user code in a sandboxed worker
+   * (`services/clusterProgramRunner.ts`: stripped global scope, hard timeout
+   * of CLUSTER_PROGRAM_TIMEOUT_MS) and validates its output here, returning the
    * normalized `Cluster[]` (each tagged with `source_program_id`). This does
    * NOT touch `clusters.value`, `executions`, `loading`, or `error`, and does
    * NOT record perf — so it can be reused by callers that only want the result
@@ -262,10 +266,10 @@ export const useClusterStore = defineStore('cluster', () => {
    * `paramValues` fills the program's declared parameters (exposed to the code
    * as `params.<id>`). When omitted, declared defaults are used.
    */
-  function computeClustersFromProgram(
+  async function computeClustersFromProgram(
     programId: string,
     paramValues?: ClusterProgramParamValues
-  ): ClusterProgramResult {
+  ): Promise<ClusterProgramResult> {
     const program = programs.value.find(p => p.program_id === programId)
     if (!program) {
       return { success: false, error: 'Program not found' }
@@ -283,53 +287,46 @@ export const useClusterStore = defineStore('cluster', () => {
     }
 
     try {
-      // Prepare execution context
+      // Structured-clone-safe snapshot (toRaw strips the Vue proxies, which
+      // cannot be cloned into a worker). Metric values are shipped only when
+      // the program can reach `metric(...)`.
       const graphStore = useGraphStore()
       const metricsStore = useMetricsStore()
-      const context: ClusterProgramContext = {
-        nodes: graphStore.nodes.map(n => ({
-          node_id: n.node_id,
-          node_type: n.node_type,
-          properties: n.properties,
-        })),
-        edges: graphStore.edges.map(e => ({
-          edge_id: e.edge_id,
-          src: e.src,
-          dst: e.dst,
-          relationship_type: e.relationship_type,
-          properties: e.properties,
-        })),
+      const withValues = programUsesMetricLookup(program.code)
+      const snapshot: ClusterProgramSnapshot = {
+        nodes: graphStore.nodes.map(n => {
+          const raw = toRaw(n)
+          return { node_id: raw.node_id, node_type: raw.node_type, properties: toRaw(raw.properties) }
+        }),
+        edges: graphStore.edges.map(e => {
+          const raw = toRaw(e)
+          return {
+            edge_id: raw.edge_id,
+            src: raw.src,
+            dst: raw.dst,
+            relationship_type: raw.relationship_type,
+            properties: toRaw(raw.properties),
+          }
+        }),
         selectedNodeIds: Array.from(graphStore.selectedNodeIds),
         selectedEdgeIds: Array.from(graphStore.selectedEdgeIds),
-        params: resolved.params,
-        // A name shared by a node and an edge metric resolves node-first;
-        // programs iterate both, so the lookup cannot be target-scoped.
-        metric: (ref, id) => {
-          const nodeValue = metricsStore.metricResolver('node', id, ref)
-          return nodeValue !== undefined ? nodeValue : metricsStore.metricResolver('edge', id, ref)
-        },
+        params: { ...resolved.params },
         metrics: [...metricsStore.nodeMetrics, ...metricsStore.edgeMetrics].map(m => ({
           id: m.id,
           name: m.name,
           target: m.target as 'node' | 'edge',
           valueType: m.valueType,
+          ...(withValues ? { values: Array.from(toRaw(m.values).entries()) } : {}),
         })),
       }
 
-      // Execute user code in a function context
-      // Note: Using Function constructor to eval the code
-      // The code should return an array of cluster objects
-      // (`metric`/`metrics` are in scope — a program declaring its own
-      // top-level const with either name would now throw a redeclaration)
-      const fn = new Function('context', `
-        'use strict';
-        const { nodes, edges, selectedNodeIds, selectedEdgeIds, params, metric, metrics } = context;
-
-        // User code:
-        ${program.code}
-      `)
-
-      const result = fn(context)
+      // Run the user code in the sandboxed worker (stripped scope, hard
+      // timeout). The output is validated below, on the main thread.
+      const outcome = await runClusterProgramInWorker(program.code, snapshot)
+      if (!outcome.ok) {
+        throw new Error(outcome.error)
+      }
+      const result: any = outcome.result
 
       // Validate result
       if (!Array.isArray(result)) {
@@ -376,7 +373,7 @@ export const useClusterStore = defineStore('cluster', () => {
         }
 
         // Validate node_ids reference existing nodes
-        const validNodeIds = new Set(context.nodes.map(n => n.node_id))
+        const validNodeIds = new Set(snapshot.nodes.map(n => n.node_id))
         const invalidNodeIds = cluster.node_ids.filter(id => !validNodeIds.has(id))
         if (invalidNodeIds.length > 0) {
           throw new Error(
@@ -433,7 +430,7 @@ export const useClusterStore = defineStore('cluster', () => {
       paramValues && Object.keys(paramValues).length > 0 ? paramValues : undefined
 
     try {
-      const result = computeClustersFromProgram(programId, paramValues)
+      const result = await computeClustersFromProgram(programId, paramValues)
       const duration = result.duration_ms ?? 0
 
       if (!result.success) {

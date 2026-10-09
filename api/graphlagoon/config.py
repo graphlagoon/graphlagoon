@@ -162,6 +162,51 @@ class Settings(BaseSettings):
         "is unreachable.",
     )
 
+    # AI agents acting for a user (03-arquitetura §8)
+    agents_enabled: bool = Field(
+        default=False,
+        description="Allow personal agent tokens (Bearer glt_…). Off: token "
+        "routes return 404 and agent tokens are rejected.",
+    )
+    agent_token_max_days: int = Field(
+        default=90, description="Maximum validity, in days, of an agent token"
+    )
+    agents_allow_unmasked_data: bool = Field(
+        default=False,
+        description="Let agents read CPF, CNPJ and account numbers unmasked",
+    )
+    agent_rate_limit_per_minute: int = Field(
+        default=120, description="Requests per minute allowed for each agent token"
+    )
+
+    # Case storage (03-arquitetura §2.3): files, frozen sources, artifacts
+    investigations_volume_path: Optional[str] = Field(
+        default=None,
+        description="Databricks Volume path for investigation files and artifacts. "
+        "Defaults to an 'investigations' subdirectory of databricks_volume_path "
+        "when that is set; otherwise files go to "
+        "{exploration_snapshots_dir}/investigations.",
+    )
+    artifact_max_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        description="Maximum size of one artifact version in the case space, in bytes",
+    )
+    investigation_file_max_bytes: int = Field(
+        default=200 * 1024 * 1024,
+        description="Maximum size of one file uploaded to an investigation, in bytes",
+    )
+    investigation_max_working_edges: int = Field(
+        default=50_000,
+        description="Ceiling of edges in an investigation's working graph in the "
+        "browser (G4: fixed for the MVP, not measured)",
+    )
+    enrichment_max_keys: int = Field(
+        default=500, description="Maximum node keys in one enrichment lookup"
+    )
+    enrichment_max_rows: int = Field(
+        default=5000, description="Maximum rows one enrichment lookup returns"
+    )
+
     # Exploration snapshots (file-based graph state persistence)
     exploration_snapshots_dir: str = Field(
         default="./tmp/explorations",
@@ -336,6 +381,15 @@ class Settings(BaseSettings):
             return self.style_presets_volume_path
         if self.databricks_volume_path:
             return f"{self.databricks_volume_path.rstrip('/')}/style-presets"
+        return None
+
+    @property
+    def investigations_volume_path_effective(self) -> Optional[str]:
+        """Volume path for case storage, if any (same fallback as presets)."""
+        if self.investigations_volume_path:
+            return self.investigations_volume_path
+        if self.databricks_volume_path:
+            return f"{self.databricks_volume_path.rstrip('/')}/investigations"
         return None
 
     @property

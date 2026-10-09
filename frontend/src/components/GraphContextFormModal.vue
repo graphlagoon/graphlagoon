@@ -13,7 +13,15 @@ import {
   useDatasourceDescriptors,
   type DatasourceDescriptor,
 } from '@/composables/useDatasourceCapabilities';
-import type { DatasourceType, GraphContext, ColumnInfo } from '@/types/graph';
+import type {
+  DatasourceType,
+  EnrichmentTable,
+  GraphContext,
+  ColumnInfo,
+  IdentityKey,
+  IdentityNormalize,
+} from '@/types/graph';
+import { describeIdentityKey } from '@/utils/identityKeys';
 
 /**
  * Create/edit modal for a graph context.
@@ -80,6 +88,102 @@ function emptyForm() {
     node_types: '',
     relationship_types: '',
     default_behaviors: '',
+    identity_keys: [] as IdentityKeyRow[],
+    enrichment_tables: [] as EnrichmentRow[],
+  };
+}
+
+/** Editable enrichment-table row: lists as comma-separated text, `prop` empty = node id. */
+interface EnrichmentRow {
+  name: string;
+  label: string;
+  table: string;
+  key_column: string;
+  match_node_types: string;
+  prop: string;
+  cardinality: 'one' | 'many';
+  columns: string;
+  promote_node_type: string;
+  promote_id_column: string;
+  promote_edge_type: string;
+}
+
+function rowFromEnrichment(t: EnrichmentTable): EnrichmentRow {
+  return {
+    name: t.name,
+    label: t.label,
+    table: t.table,
+    key_column: t.key_column,
+    match_node_types: t.match_node_types.join(', '),
+    prop: t.match_source === 'node_id' ? '' : t.match_source.name,
+    cardinality: t.cardinality,
+    columns: t.columns.join(', '),
+    promote_node_type: t.promote?.node_type || '',
+    promote_id_column: t.promote?.id_column || '',
+    promote_edge_type: t.promote?.edge_type || '',
+  };
+}
+
+function slug(text: string): string {
+  const s = text.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '_').replace(/^[^a-z]+|_+$/g, '');
+  return s.slice(0, 41) || 'table';
+}
+
+function enrichmentFromRow(row: EnrichmentRow): EnrichmentTable {
+  const prop = row.prop.trim();
+  const promote = row.promote_node_type.trim() && row.promote_id_column.trim()
+    ? {
+        node_type: row.promote_node_type.trim(),
+        id_column: row.promote_id_column.trim(),
+        edge_type: row.promote_edge_type.trim() || 'RELATED_TO',
+      }
+    : null;
+  return {
+    name: row.name.trim() || slug(row.label || row.table.split('.').pop() || ''),
+    label: row.label.trim() || row.table.trim(),
+    table: row.table.trim(),
+    key_column: row.key_column.trim(),
+    match_node_types: splitCsv(row.match_node_types),
+    match_source: prop ? { kind: 'prop', name: prop } : 'node_id',
+    cardinality: row.cardinality,
+    columns: splitCsv(row.columns),
+    promote,
+  };
+}
+
+/** Editable identity-key row: `prop` empty means the node id is the source. */
+interface IdentityKeyRow {
+  node_type: string;
+  entity: string;
+  prop: string;
+  normalize: IdentityNormalize;
+}
+
+const NORMALIZERS: { value: IdentityNormalize; label: string }[] = [
+  { value: 'cpf_cnpj', label: 'CPF/CNPJ' },
+  { value: 'account', label: 'Account (bank-agency-account)' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'email', label: 'E-mail' },
+  { value: 'lower', label: 'Lowercase' },
+  { value: 'none', label: 'As is' },
+];
+
+function rowFromKey(key: IdentityKey): IdentityKeyRow {
+  return {
+    node_type: key.node_type,
+    entity: key.entity,
+    prop: key.source === 'node_id' ? '' : key.source.name,
+    normalize: key.normalize,
+  };
+}
+
+function keyFromRow(row: IdentityKeyRow): IdentityKey {
+  const prop = row.prop.trim();
+  return {
+    node_type: row.node_type.trim(),
+    entity: row.entity.trim(),
+    source: prop ? { kind: 'prop', name: prop } : 'node_id',
+    normalize: row.normalize,
   };
 }
 
@@ -105,6 +209,8 @@ function formFromContext(context: GraphContext) {
       context.default_behaviors && Object.keys(context.default_behaviors).length > 0
         ? JSON.stringify(context.default_behaviors, null, 2)
         : '',
+    identity_keys: (context.identity_keys || []).map(rowFromKey),
+    enrichment_tables: (context.enrichment_tables || []).map(rowFromEnrichment),
   };
 }
 
@@ -411,6 +517,55 @@ watch(
   { immediate: true },
 );
 
+// --- Identity keys -------------------------------------------------------------
+
+/** Complete rows only: a half-filled row is dropped rather than rejected by the API. */
+const identityKeys = computed(() =>
+  form.value.identity_keys
+    .filter((r) => r.node_type.trim() && r.entity.trim())
+    .map(keyFromRow),
+);
+const nodeTypeOptions = computed(() => splitCsv(form.value.node_types));
+const nodePropertyOptions = computed(() =>
+  props.mode === 'edit'
+    ? (props.context?.node_properties || []).map((p) => p.name)
+    : nodeTableColumns.value.map((c) => c.name),
+);
+
+function addIdentityKey() {
+  form.value.identity_keys.push({
+    node_type: nodeTypeOptions.value[0] || '',
+    entity: '',
+    prop: '',
+    normalize: 'none',
+  });
+}
+
+// --- Enrichment tables -----------------------------------------------------------
+
+/** Complete rows only, like identity keys. */
+const enrichmentTables = computed(() =>
+  form.value.enrichment_tables
+    .filter((r) => r.table.trim() && r.key_column.trim() && splitCsv(r.columns).length && splitCsv(r.match_node_types).length)
+    .map(enrichmentFromRow),
+);
+
+function addEnrichmentTable() {
+  form.value.enrichment_tables.push({
+    name: '',
+    label: '',
+    table: '',
+    key_column: '',
+    match_node_types: nodeTypeOptions.value[0] || '',
+    prop: '',
+    cardinality: 'one',
+    columns: '',
+    promote_node_type: '',
+    promote_id_column: '',
+    promote_edge_type: '',
+  });
+}
+
 // --- Submit -------------------------------------------------------------------
 
 function splitCsv(value: string): string[] {
@@ -459,6 +614,8 @@ async function submit() {
         node_types: nodeTypes.length > 0 ? nodeTypes : undefined,
         relationship_types: relationshipTypes.length > 0 ? relationshipTypes : undefined,
         default_behaviors: defaultBehaviors,
+        identity_keys: identityKeys.value.length > 0 ? identityKeys.value : undefined,
+        enrichment_tables: enrichmentTables.value.length > 0 ? enrichmentTables.value : undefined,
       });
     } else if (props.mode === 'create') {
       // Property columns = every live column minus the structural ones —
@@ -492,6 +649,8 @@ async function submit() {
         node_types: !nodeless && nodeTypes.length > 0 ? nodeTypes : undefined,
         relationship_types: relationshipTypes.length > 0 ? relationshipTypes : undefined,
         default_behaviors: defaultBehaviors,
+        identity_keys: identityKeys.value.length > 0 ? identityKeys.value : undefined,
+        enrichment_tables: enrichmentTables.value.length > 0 ? enrichmentTables.value : undefined,
       });
     } else {
       if (!props.context) return;
@@ -507,6 +666,8 @@ async function submit() {
         node_types: nodeTypes,
         relationship_types: relationshipTypes,
         default_behaviors: defaultBehaviors ?? {},
+        identity_keys: identityKeys.value,
+        enrichment_tables: enrichmentTables.value,
       });
     }
 
@@ -866,6 +1027,178 @@ async function submit() {
           </div>
         </div>
 
+        <!-- Identity keys (investigations): how this context's nodes unify with
+             other contexts' nodes for the same real-world entity. -->
+        <div class="column-config-section" data-testid="identity-keys-section">
+          <div class="section-header-row">
+            <h4>Identity Keys</h4>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline"
+              data-testid="identity-key-add"
+              @click="addIdentityKey"
+            >
+              + Add key
+            </button>
+          </div>
+          <div v-if="identityKeys.length" class="identity-key-chips" data-testid="identity-key-chips">
+            <span class="hint">Keys of this context:</span>
+            <span v-for="(k, i) in identityKeys" :key="i" class="identity-key-chip">
+              {{ describeIdentityKey(k) }}
+            </span>
+          </div>
+          <span v-else class="hint">
+            Optional. An investigation merges nodes from different contexts that share
+            the same entity and normalized value (e.g. Pessoa by CPF).
+          </span>
+          <div
+            v-for="(row, i) in form.identity_keys"
+            :key="i"
+            class="form-row identity-key-row"
+            data-testid="identity-key-row"
+          >
+            <div class="form-group">
+              <label>Node type</label>
+              <input
+                v-model="row.node_type"
+                type="text"
+                class="form-control"
+                list="identity-node-types"
+                data-testid="identity-key-node-type"
+              />
+            </div>
+            <div class="form-group">
+              <label>Entity</label>
+              <input
+                v-model="row.entity"
+                type="text"
+                class="form-control"
+                placeholder="Pessoa"
+                data-testid="identity-key-entity"
+              />
+            </div>
+            <div class="form-group">
+              <label>Property</label>
+              <input
+                v-model="row.prop"
+                type="text"
+                class="form-control"
+                list="identity-node-props"
+                placeholder="(node id)"
+                data-testid="identity-key-prop"
+              />
+            </div>
+            <div class="form-group">
+              <label>Normalize</label>
+              <select v-model="row.normalize" class="form-control" data-testid="identity-key-normalize">
+                <option v-for="n in NORMALIZERS" :key="n.value" :value="n.value">{{ n.label }}</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline identity-key-remove"
+              title="Remove key"
+              @click="form.identity_keys.splice(i, 1)"
+            >
+              &times;
+            </button>
+          </div>
+          <datalist id="identity-node-types">
+            <option v-for="t in nodeTypeOptions" :key="t" :value="t" />
+          </datalist>
+          <datalist id="identity-node-props">
+            <option v-for="p in nodePropertyOptions" :key="p" :value="p" />
+          </datalist>
+        </div>
+
+        <!-- Enrichment tables (investigations): side tables looked up by a node's key
+             and shown in the inspector. -->
+        <div class="column-config-section" data-testid="enrichment-section">
+          <div class="section-header-row">
+            <h4>Enrichment Tables</h4>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline"
+              data-testid="enrichment-add"
+              @click="addEnrichmentTable"
+            >
+              + Attach table
+            </button>
+          </div>
+          <p class="enrichment-warning" data-testid="enrichment-warning">
+            Attaching a table widens what this context's readers can query, so it needs
+            the "Create graph contexts" permission and a table in an allowed catalog.
+            Lookups are always by key, only the listed columns come out, and every read
+            is audited.
+          </p>
+          <div
+            v-for="(row, i) in form.enrichment_tables"
+            :key="i"
+            class="enrichment-row"
+            data-testid="enrichment-row"
+          >
+            <div class="form-row">
+              <div class="form-group">
+                <label>Name in the inspector</label>
+                <input v-model="row.label" type="text" class="form-control" placeholder="Login devices" data-testid="enrichment-label" />
+              </div>
+              <div class="form-group">
+                <label>Table</label>
+                <input v-model="row.table" type="text" class="form-control" placeholder="catalog.schema.table" data-testid="enrichment-table" />
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline identity-key-remove"
+                title="Remove table"
+                @click="form.enrichment_tables.splice(i, 1)"
+              >
+                &times;
+              </button>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Key column</label>
+                <input v-model="row.key_column" type="text" class="form-control" data-testid="enrichment-key" />
+              </div>
+              <div class="form-group">
+                <label>Node types</label>
+                <input v-model="row.match_node_types" type="text" class="form-control" list="identity-node-types" data-testid="enrichment-node-types" />
+              </div>
+              <div class="form-group">
+                <label>Matches node property</label>
+                <input v-model="row.prop" type="text" class="form-control" list="identity-node-props" placeholder="(node id)" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Columns that may leave</label>
+                <input v-model="row.columns" type="text" class="form-control" placeholder="device_id, ip, seen_at" data-testid="enrichment-columns" />
+              </div>
+              <div class="form-group">
+                <label>Rows per node</label>
+                <select v-model="row.cardinality" class="form-control" data-testid="enrichment-cardinality">
+                  <option value="one">one (columns become node properties)</option>
+                  <option value="many">many (table in the inspector)</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Promote to nodes of type</label>
+                <input v-model="row.promote_node_type" type="text" class="form-control" placeholder="(optional) Dispositivo" />
+              </div>
+              <div class="form-group">
+                <label>by column</label>
+                <input v-model="row.promote_id_column" type="text" class="form-control" placeholder="device_id" />
+              </div>
+              <div class="form-group">
+                <label>edge type</label>
+                <input v-model="row.promote_edge_type" type="text" class="form-control" placeholder="USOU" />
+              </div>
+            </div>
+          </div>
+        </div>
+
         <p v-if="mode === 'edit'" class="hint">
           Property columns aren't edited here — use "Check schema" on the context card
           to review and resync them against the live table.
@@ -1024,6 +1357,46 @@ async function submit() {
 
 .hint-error {
   color: var(--error-color);
+}
+
+.identity-key-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.identity-key-chip {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 999px;
+}
+
+.identity-key-row {
+  align-items: flex-end;
+}
+
+.enrichment-warning {
+  font-size: 0.8rem;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  border: 1px solid var(--warning-color, #f0b429);
+  border-radius: 6px;
+}
+
+.enrichment-row {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color, #d0d7de);
+}
+
+.enrichment-row .form-row {
+  align-items: flex-end;
+}
+
+.identity-key-remove {
+  margin-bottom: 12px;
 }
 
 .column-config-section {

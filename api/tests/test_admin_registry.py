@@ -91,6 +91,10 @@ def test_memory_store_clear_all_empties_every_collection():
         "restricted",
         [{"group_id": group.id, "effect": "allow"}],
     )
+    inv = store.create_investigation("case", "a@b.co")
+    store.add_investigation_child(
+        "investigation_notes", investigation_id=inv.id, body="n", author_email="a@b.co"
+    )
     store.clear_all(keep_usage_logs=False)
     not_empty = [
         name
@@ -112,12 +116,14 @@ def test_clear_all_keeps_audit_by_default():
 
 ROUTER_MODULES = (
     "admin",
+    "agent_tokens",
     "admin_groups",
     "catalog",
     "config",
     "explorations",
     "graph",
     "graph_contexts",
+    "investigations",
     "precomputed_graphs",
     "query_templates",
     "similarity",

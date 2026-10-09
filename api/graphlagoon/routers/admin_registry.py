@@ -78,16 +78,38 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "neptune_http_timeout": "public",
     "neptune_discovery_sample_limit": "public",
     "group_cache_ttl_seconds": "public",
+    "agents_enabled": "public",
+    "agent_token_max_days": "public",
+    "agents_allow_unmasked_data": "public",
+    "agent_rate_limit_per_minute": "public",
+    "investigations_volume_path": "public",
+    "artifact_max_bytes": "public",
+    "investigation_file_max_bytes": "public",
+    "investigation_max_working_edges": "public",
+    "enrichment_max_keys": "public",
+    "enrichment_max_rows": "public",
 }
 
 # Tables wiped by "clear environment", in an order that respects foreign keys
 # (children first). services.environment consumes this list directly.
 CLEARABLE_TABLES: tuple[str, ...] = (
+    "investigation_proposals",
+    "investigation_artifact_versions",
+    "investigation_artifacts",
+    "entity_matches",
+    "investigation_evidence",
+    "investigation_notes",
+    "investigation_events",
+    "investigation_sources",
+    "investigation_files",
+    "investigation_shares",
+    "investigations",
     "exploration_shares",
     "explorations",
     "graph_context_shares",
     "query_templates",
     "graph_contexts",
+    "agent_tokens",
     "permission_rules",
     "group_members",
     "permission_modes",
@@ -115,12 +137,25 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("DELETE", "/api/graph-contexts/{context_id}/style-presets/{name}"),
         ("POST", "/api/admin/contexts/{context_id}/transfer"),
         ("POST", "/api/admin/explorations/{exploration_id}/transfer"),
+        ("POST", "/api/admin/investigations/{investigation_id}/transfer"),
         ("POST", "/api/admin/environment/clear"),
         ("DELETE", "/api/dev/clear-all"),
         ("POST", "/api/admin/groups"),
         ("PUT", "/api/admin/groups/{group_id}"),
         ("DELETE", "/api/admin/groups/{group_id}"),
         ("PUT", "/api/admin/permissions/{permission_id}"),
+        ("POST", "/api/agent-tokens"),
+        ("DELETE", "/api/agent-tokens/{token_id}"),
+        ("DELETE", "/api/admin/agent-tokens/{token_id}"),
+        ("POST", "/api/investigations"),
+        ("PATCH", "/api/investigations/{investigation_id}"),
+        ("DELETE", "/api/investigations/{investigation_id}"),
+        ("POST", "/api/investigations/{investigation_id}/share"),
+        ("DELETE", "/api/investigations/{investigation_id}/share/{email}"),
+        ("POST", "/api/investigations/{investigation_id}/sources"),
+        ("DELETE", "/api/investigations/{investigation_id}/sources/{source_id}"),
+        ("POST", "/api/investigations/{investigation_id}/files"),
+        ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"),
     }
 )
 
@@ -180,4 +215,35 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/admin/groups/resolution/refresh"): (
         "cache refresh; no data change"
     ),
+    **{
+        route: "recorded in the case's immutable, hash-chained journal"
+        for route in (
+            ("POST", "/api/investigations/{investigation_id}/events"),
+            ("PATCH", "/api/investigations/{investigation_id}/state"),
+            ("POST", "/api/investigations/{investigation_id}/notes"),
+            ("PATCH", "/api/investigations/{investigation_id}/notes/{note_id}"),
+            ("DELETE", "/api/investigations/{investigation_id}/notes/{note_id}"),
+            ("POST", "/api/investigations/{investigation_id}/artifacts"),
+            (
+                "POST",
+                "/api/investigations/{investigation_id}/artifacts/{artifact_id}/versions",
+            ),
+            (
+                "POST",
+                "/api/investigations/{investigation_id}/artifacts/{artifact_id}"
+                "/versions/{version}/approve",
+            ),
+            ("PATCH", "/api/investigations/{investigation_id}/files/{file_id}"),
+            ("POST", "/api/investigations/{investigation_id}/files/{file_id}/context"),
+            ("POST", "/api/investigations/{investigation_id}/proposals"),
+            (
+                "POST",
+                "/api/investigations/{investigation_id}/proposals/{proposal_id}/accept",
+            ),
+            (
+                "POST",
+                "/api/investigations/{investigation_id}/proposals/{proposal_id}/reject",
+            ),
+        )
+    },
 }

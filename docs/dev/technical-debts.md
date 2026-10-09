@@ -746,6 +746,22 @@ is the real fix if this proves to matter in practice.
 
 **Effort:** Trivial for (a); Small for (b)
 
+**Resolved (2026-10-09, plan task G1):** option (b). With no edge id column,
+`_get_edge_id` appends `@{digest}` to `src@type@dst`, where the digest is the
+first 16 hex chars of a sha256 over the row's non-structural, non-NULL
+columns, sorted by name, scalars stringified (`EDGE_ID_DIGEST_LEN`). `hashlib`,
+not `hash()`, so ids are identical across processes and saved snapshots keep
+matching. A row with only structural columns keeps the bare `src@type@dst`
+(`src@@dst` typeless), so contexts without edge properties see no id change.
+To keep subgraph/expand and transpiled Cypher hashing the same columns,
+`build_edge_named_struct` now also carries the context's configured edge
+property columns when there is no edge id column (`edge_identity_columns`) —
+exactly the set the transpiler puts in the `r` struct. Rows identical in every
+column still collide (accepted; documented in the Triple Stores guide). The
+frontend never builds composite ids (it only prefixes the backend id for
+closed-cluster remaps), so no frontend change. Pinned by
+`api/tests/test_edge_ids.py`.
+
 ---
 
 ### 29. 🟢 Cypher Binding-Error Wrapper Can Mask Unrelated Errors on Constrained Contexts
@@ -1100,7 +1116,7 @@ The app sets no CSP. The custom-metric worker ([frontend/src/workers/customMetri
 
 ---
 
-### 32. 🟡 Cluster programs still run unsandboxed on the main thread
+### 32. ✅ Cluster programs still run unsandboxed on the main thread
 
 **Location:** [frontend/src/stores/cluster.ts](frontend/src/stores/cluster.ts) (`computeClustersFromProgram`, `new Function` on the main thread)
 
@@ -1110,6 +1126,8 @@ Custom metrics introduced a sandbox (dedicated worker, stripped scope, hard time
 **Recommendation:** Move cluster-program evaluation onto the custom-metric runner pattern (`services/customMetricRunner.ts` + `workers/customMetricSandbox.ts`), keeping the current output validation. Note cluster programs are also persisted per exploration, so the "only writers run writer code" argument does not fully apply to them — the sandbox matters more there, not less.
 
 **Effort:** Medium
+
+**Resolved (2026-10-09, plan task G3):** programs run in a dedicated, per-run module worker ([frontend/src/workers/clusterProgramWorker.ts](frontend/src/workers/clusterProgramWorker.ts)) that strips its scope with `hardenScope` from `customMetricSandbox.ts` before any user code runs; [frontend/src/services/clusterProgramRunner.ts](frontend/src/services/clusterProgramRunner.ts) terminates it after `CLUSTER_PROGRAM_TIMEOUT_MS` (10 s). Output validation stays on the main thread in `computeClustersFromProgram` (now async). `metric(ref, id)` is rebuilt in the worker from shipped values, only when the code mentions `metric`. Still open: a CSP behind it (#31).
 
 ---
 
@@ -1206,11 +1224,11 @@ The admin work made `get_current_user` consult the `configure_auth` provider (so
 | 22 | 🔴 Critical | Performance | No pagination | High |
 | 23 | 🟡 High | Performance | Force layout runs continuously | Medium |
 | 27 | 🟢 Medium | Backend | Derived node table scans edge table twice | Small |
-| 28 | 🟢 Medium | Backend | `_get_edge_id` composite collides for parallel edges | Trivial–Small |
+| 28 | ✅ Resolved (2026-10-09) | Backend | `_get_edge_id` composite collides for parallel edges | Trivial–Small |
 | 29 | 🟢 Medium | Backend | Cypher binding-error wrapper can mask unrelated errors | Small |
 | 30 | 🟢 Medium | Backend | Dev-generator typeless columns lack automated tests (manually verified) | Small |
 | 31 | 🟡 High | Frontend/Backend | No CSP behind the custom-metric sandbox | Medium |
-| 32 | 🟡 High | Frontend | Cluster programs still run unsandboxed on the main thread | Medium |
+| 32 | ✅ Resolved (2026-10-09) | Frontend | Cluster programs still run unsandboxed on the main thread | Medium |
 | 33 | 🟢 Medium | Performance | Custom-metric snapshot cloned per recompute cycle | Medium |
 | 34 | 🟢 Medium | Frontend | `{metric:name}` first-match resolution on name collisions | Small |
 | 35 | 🟢 Medium | Backend | Admin DB-mode paths (counts, users, transfer, alembic_version) have no PostgreSQL test coverage | Small |

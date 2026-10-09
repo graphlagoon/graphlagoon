@@ -6,7 +6,7 @@ from typing import Optional
 import json
 import logging
 
-from fastapi import FastAPI, APIRouter, Request
+from fastapi import Depends, FastAPI, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -41,12 +41,14 @@ from graphlagoon.services.precomputed import (
     volume_provider,
 )
 from graphlagoon.services.style_presets import configure_style_preset_service
+from graphlagoon.services.investigation_storage import configure_investigation_storage
 from graphlagoon.services.group_resolution import configure_group_resolution
 from graphlagoon.services.datasource import (
     close_datasources,
     configure_datasources,
 )
 from graphlagoon.middleware.auth import AuthMiddleware, configure_auth, UserProvider
+from graphlagoon.mcp.server import mcp_lifespan, mount_mcp
 from graphlagoon.services.public_config import build_public_config
 
 # Configure logging
@@ -205,9 +207,13 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         config,
         query_templates,
         similarity,
+        investigations,
+        agent_tokens,
     )
+    from graphlagoon.utils.authz import agent_guard
 
-    router = APIRouter()
+    # Scope check for agent tokens on every API route (03 §8.2).
+    router = APIRouter(dependencies=[Depends(agent_guard)])
     router.include_router(config.router)
     router.include_router(admin.router)
     router.include_router(admin_groups.router)
@@ -219,6 +225,8 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(style_presets.router)
     router.include_router(catalog.router)
     router.include_router(similarity.router)
+    router.include_router(investigations.router)
+    router.include_router(agent_tokens.router)
 
     return router
 
@@ -504,6 +512,7 @@ def create_mountable_app(
     configure_snapshot_service(settings, header_provider=header_provider)
     configure_precomputed_storage(settings, header_provider=header_provider)
     configure_style_preset_service(settings, header_provider=header_provider)
+    configure_investigation_storage(settings, header_provider=header_provider)
     configure_group_resolution(settings, header_provider=header_provider)
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
@@ -554,7 +563,8 @@ def create_mountable_app(
                 from graphlagoon.db.lakebase import start_lakebase_token_refresh
 
                 await start_lakebase_token_refresh()
-        yield
+        async with mcp_lifespan(app):
+            yield
         if settings.lakebase_enabled:
             from graphlagoon.db.lakebase import stop_lakebase_token_refresh
 
@@ -582,6 +592,7 @@ def create_mountable_app(
     # API routers
     api_router = create_api_router(settings)
     app.include_router(api_router)
+    mount_mcp(app, settings=settings)
 
     # Frontend router
     if include_frontend and TEMPLATES_DIR.exists():
@@ -657,6 +668,7 @@ def create_app(
     configure_snapshot_service(settings, header_provider=header_provider)
     configure_precomputed_storage(settings, header_provider=header_provider)
     configure_style_preset_service(settings, header_provider=header_provider)
+    configure_investigation_storage(settings, header_provider=header_provider)
     configure_group_resolution(settings, header_provider=header_provider)
 
     # Register similarity endpoints
@@ -719,7 +731,8 @@ def create_app(
         else:
             logger.info("Database disabled - running without persistence")
 
-        yield
+        async with mcp_lifespan(app):
+            yield
 
         # Shutdown
         logger.info("Shutting down Graph Lagoon Studio...")
@@ -771,6 +784,8 @@ def create_app(
     # Include API routers under /graphlagoon prefix
     api_router = create_api_router(settings)
     app.include_router(api_router, prefix="/graphlagoon")
+    # Before the frontend catch-all, which would answer GET /graphlagoon/mcp.
+    mount_mcp(app, "/graphlagoon", settings=settings)
 
     # Frontend router (must be last - catches all routes)
     if include_frontend and TEMPLATES_DIR.exists():

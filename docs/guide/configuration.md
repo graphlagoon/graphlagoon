@@ -414,6 +414,64 @@ lives in the admin area, not in env vars — see
 |---|---|---|
 | `GRAPH_LAGOON_GROUP_CACHE_TTL_SECONDS` | `600` | Per-user TTL of the Databricks group-membership (SCIM) cache. Stale entries are served when SCIM is unreachable. |
 
+## AI agents
+
+Personal agent tokens let an AI agent act on investigations with the access of
+the person who created the token (`Authorization: Bearer glt_…`). Off by
+default.
+
+With agents on and the `mcp` extra installed (`pip install "graphlagoon[mcp]"`),
+the app serves an MCP server (Streamable HTTP) at `{app URL}/graphlagoon/mcp`
+(`/mcp` under the mount prefix of `create_mountable_app`). It accepts agent
+tokens only:
+
+```bash
+claude mcp add --transport http graphlagoon http://localhost:8000/graphlagoon/mcp \
+  --header "Authorization: Bearer glt_…"
+```
+
+The tools read cases, the unified graph, the journal and the case space, write
+notes, sources and draft artifacts, and make proposals. There is no tool to
+decide, share, delete, approve an artifact or accept a proposal. Every read is
+recorded in the audit log (`agent.read`).
+
+When the agent cannot reach `/mcp` directly (the Databricks Apps proxy wants a
+Databricks login), run the local stdio bridge, which forwards every MCP message
+to the app:
+
+```bash
+claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
+  graphlagoon mcp-bridge --url https://<app>.databricksapps.com
+```
+
+`--url` takes the app URL (`/graphlagoon/mcp` is appended unless it already ends
+in `/mcp`); the token comes from `--token` or `GRAPHLAGOON_AGENT_TOKEN`. With
+`databricks-sdk` installed and a Databricks profile configured (`databricks auth
+login`), the bridge also sends your Databricks OAuth token to get through the
+proxy, and the agent token travels in `X-Graphlagoon-Agent-Token`. See
+[AI Agents (MCP)](./agents-mcp.md).
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_AGENTS_ENABLED` | `false` | Off: the token routes return 404 and agent tokens are rejected. |
+| `GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS` | `90` | Maximum validity of a token. |
+| `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA` | `false` | Let agents read CPF, CNPJ and account numbers unmasked. |
+| `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per token (per server process). |
+
+## Investigation storage
+
+Frozen sources and the case space (versioned artifacts) are stored as files,
+never overwritten. Uploads stream to disk while their sha256 is computed.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_INVESTIGATIONS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to an `investigations` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set; otherwise files go to `{GRAPH_LAGOON_EXPLORATION_SNAPSHOTS_DIR}/investigations`. Give write access to the app's service principal only. |
+| `GRAPH_LAGOON_ARTIFACT_MAX_BYTES` | `104857600` | Maximum size of one artifact version (100 MB). |
+| `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` | `209715200` | Maximum size of one file uploaded to a case (200 MB); larger uploads get 413. |
+| `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Ceiling of edges in a case's working graph in the browser. |
+| `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` | `500` | Node keys per enrichment lookup (a context's enrichment tables). |
+| `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` | `5000` | Rows one enrichment lookup returns; more are cut and flagged `truncated`. |
+
 ## Programmatic Configuration
 
 ```python

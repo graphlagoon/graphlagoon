@@ -13,6 +13,7 @@ from graphlagoon.db.database import is_database_available, get_session_maker
 from graphlagoon.db.memory_store import get_memory_store, MemoryGraphContext
 from graphlagoon.models.schemas import (
     DEFAULT_DATASOURCE_TYPE,
+    EnrichmentLookupRequest,
     GraphContextCreate,
     GraphContextUpdate,
     GraphContextResponse,
@@ -125,6 +126,29 @@ async def _validate_or_400(
                     "code": e.code,
                     "message": e.message,
                     "details": e.details,
+                }
+            },
+        )
+
+
+async def _check_enrichment_tables(request: Request, new, stored, context) -> None:
+    """Attaching or changing an enrichment table takes ``context.create`` and a
+    table inside the author's scope; a writer without it may only remove."""
+    from graphlagoon.services.enrichment import changed_tables, scope_problem
+
+    changed = changed_tables(new, stored)
+    if not changed:
+        return
+    await require_permission("context.create")(request)
+    problem = scope_problem(changed, context)
+    if problem:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "ENRICHMENT_SCOPE_DENIED",
+                    "message": problem,
+                    "details": {},
                 }
             },
         )
@@ -255,6 +279,8 @@ def context_to_response(
         cluster_programs=context.cluster_programs or [],
         context_menu_actions=context.context_menu_actions or [],
         metric_definitions=metric_defs,
+        identity_keys=getattr(context, "identity_keys", None) or [],
+        enrichment_tables=getattr(context, "enrichment_tables", None) or [],
         owner_email=context.owner_email,
         shared_with=shared_with,
         has_write_access=has_write,
@@ -351,6 +377,8 @@ async def create_graph_context(
     _reject_metric_definitions_if_disabled(data.metric_definitions)
 
     await _validate_datasource_or_400(data.datasource_type, data.datasource_name)
+    enrichment_tables = [t.model_dump() for t in data.enrichment_tables]
+    await _check_enrichment_tables(request, enrichment_tables, [], data)
 
     # Table validation only means something for a table-backed context; a
     # schemaless graph database has nothing to check here.
@@ -386,6 +414,8 @@ async def create_graph_context(
                 cluster_programs=data.cluster_programs,
                 context_menu_actions=data.context_menu_actions,
                 metric_definitions=[m.model_dump() for m in data.metric_definitions],
+                identity_keys=[k.model_dump() for k in data.identity_keys],
+                enrichment_tables=enrichment_tables,
                 owner_email=user_email,
             )
             session.add(context)
@@ -413,6 +443,8 @@ async def create_graph_context(
             cluster_programs=data.cluster_programs,
             context_menu_actions=data.context_menu_actions,
             metric_definitions=[m.model_dump() for m in data.metric_definitions],
+            identity_keys=[k.model_dump() for k in data.identity_keys],
+            enrichment_tables=enrichment_tables,
             owner_email=user_email,
         )
         return context_to_response(context, user_email)
@@ -486,6 +518,13 @@ async def update_graph_context(
             # Check write access
             if not can_write(context.owner_email, context.shares, user_email):
                 raise HTTPException(status_code=403, detail="No write access")
+            if data.enrichment_tables is not None:
+                await _check_enrichment_tables(
+                    request,
+                    [t.model_dump() for t in data.enrichment_tables],
+                    context.enrichment_tables,
+                    context,
+                )
 
             _normalize_typeless_types(data, context)
 
@@ -546,6 +585,12 @@ async def update_graph_context(
                 context.metric_definitions = [
                     m.model_dump() for m in data.metric_definitions
                 ]
+            if data.identity_keys is not None:
+                context.identity_keys = [k.model_dump() for k in data.identity_keys]
+            if data.enrichment_tables is not None:
+                context.enrichment_tables = [
+                    t.model_dump() for t in data.enrichment_tables
+                ]
 
             await session.commit()
             await session.refresh(context)
@@ -561,6 +606,13 @@ async def update_graph_context(
         # Check write access
         if not can_write(context.owner_email, context.shares, user_email):
             raise HTTPException(status_code=403, detail="No write access")
+        if data.enrichment_tables is not None:
+            await _check_enrichment_tables(
+                request,
+                [t.model_dump() for t in data.enrichment_tables],
+                context.enrichment_tables,
+                context,
+            )
 
         _normalize_typeless_types(data, context)
 
@@ -616,6 +668,12 @@ async def update_graph_context(
         if data.metric_definitions is not None:
             updates["metric_definitions"] = [
                 m.model_dump() for m in data.metric_definitions
+            ]
+        if data.identity_keys is not None:
+            updates["identity_keys"] = [k.model_dump() for k in data.identity_keys]
+        if data.enrichment_tables is not None:
+            updates["enrichment_tables"] = [
+                t.model_dump() for t in data.enrichment_tables
             ]
 
         context = store.update_graph_context(context_id, **updates)
@@ -891,3 +949,45 @@ async def unshare_graph_context(context_id: UUID, email: str, request: Request):
         )
 
     return {"status": "removed"}
+
+
+@router.post("/{context_id}/enrichment/{name}/lookup")
+async def lookup_enrichment(
+    context_id: UUID,
+    name: str,
+    body: EnrichmentLookupRequest,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """Declared columns of enrichment table ``name`` for a batch of node keys.
+    Anyone who can read the context may look up; attaching is the author's."""
+    from graphlagoon.utils.context_access import get_context_with_access
+
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    return await run_enrichment_lookup(warehouse, context, name, body.keys, user_email)
+
+
+async def run_enrichment_lookup(warehouse, context, name, keys, user_email) -> dict:
+    """Lookup + ``enrichment.read`` audit, shared by the route and the MCP tool."""
+    from graphlagoon.services import enrichment
+
+    try:
+        result = await enrichment.lookup(warehouse, context, name, keys)
+    except enrichment.EnrichmentError as e:
+        raise HTTPException(
+            status_code=e.status,
+            detail={"error": {"code": e.code, "message": e.message, "details": {}}},
+        )
+    await audit.record(
+        user_email,
+        AuditAction.ENRICHMENT_READ,
+        resource_type="graph_context",
+        resource_id=context.id,
+        metadata={
+            "table": name,
+            "keys": len(keys),
+            "rows": sum(len(r) for r in result["rows"].values()),
+        },
+    )
+    return result

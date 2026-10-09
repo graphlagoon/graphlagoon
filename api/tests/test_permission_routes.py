@@ -41,7 +41,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 from graphlagoon.config import get_settings  # noqa: E402
 from graphlagoon.db.memory_store import InMemoryStore  # noqa: E402
 from graphlagoon.middleware.auth import AuthMiddleware  # noqa: E402
-from graphlagoon.routers import config, explorations, graph_contexts  # noqa: E402
+from graphlagoon.routers import (  # noqa: E402
+    config,
+    explorations,
+    graph_contexts,
+    investigations,
+)
 from graphlagoon.services.group_resolution import (  # noqa: E402
     StubGroupResolver,
     set_group_resolver,
@@ -89,8 +94,9 @@ def client(superuser_env, store):
     app.include_router(graph_contexts.router)
     app.include_router(explorations.router)
     app.include_router(config.router)
-    app.dependency_overrides[graph_contexts.get_warehouse] = (
-        lambda: _UnreachableWarehouse()
+    app.include_router(investigations.router)
+    app.dependency_overrides[graph_contexts.get_warehouse] = lambda: (
+        _UnreachableWarehouse()
     )
     yield TestClient(app)
 
@@ -225,21 +231,107 @@ class TestDenyExplorationSave:
         assert response.status_code == 200, response.text
 
 
+class TestInvestigationCreate:
+    def _restrict(self, store):
+        group = store.create_group(
+            "analysts", members=[{"kind": "email", "value": MEMBER}]
+        )
+        store.set_permission(
+            "investigation.create",
+            "restricted",
+            [{"group_id": group.id, "effect": "allow"}],
+        )
+
+    def test_member_allowed(self, client, store):
+        self._restrict(store)
+        response = client.post(
+            "/api/investigations", json={"title": "c"}, headers=_headers(MEMBER)
+        )
+        assert response.status_code == 201, response.text
+
+    def test_outsider_denied(self, client, store):
+        self._restrict(store)
+        response = client.post(
+            "/api/investigations", json={"title": "c"}, headers=_headers(OUTSIDER)
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"]["details"]["permission"] == (
+            "investigation.create"
+        )
+
+
+def test_investigation_upload_is_gated(client, store):
+    group = store.create_group("uploaders", members=[{"kind": "email", "value": MEMBER}])
+    store.set_permission(
+        "investigation.upload", "restricted", [{"group_id": group.id, "effect": "allow"}]
+    )
+    case = client.post(
+        "/api/investigations", json={"title": "c"}, headers=_headers(OUTSIDER)
+    ).json()
+    url = f"/api/investigations/{case['id']}/files"
+    params = {"filename": "a.csv", "role": "attachment"}
+    denied = client.post(url, content=b"a;b", params=params, headers=_headers(OUTSIDER))
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["error"]["details"]["permission"] == (
+        "investigation.upload"
+    )
+    assert "investigation.upload" not in client.get(
+        "/api/config", headers=_headers(OUTSIDER)
+    ).json()["permissions"]
+
+
 class TestConfigCarriesPermissions:
     def test_superuser_gets_full_catalog(self, client, store):
         _restrict_context_create_to(store, MEMBER)
         payload = client.get("/api/config", headers=_headers(SUPERUSER)).json()
-        assert payload["permissions"] == ["context.create", "exploration.save"]
+        assert payload["permissions"] == [
+            "context.create",
+            "exploration.save",
+            "investigation.agent",
+            "investigation.create",
+            "investigation.upload",
+        ]
 
     def test_restricted_outsider_lacks_the_id(self, client, store):
         _restrict_context_create_to(store, MEMBER)
         payload = client.get("/api/config", headers=_headers(OUTSIDER)).json()
-        assert payload["permissions"] == ["exploration.save"]
+        assert payload["permissions"] == [
+            "exploration.save",
+            "investigation.agent",
+            "investigation.create",
+            "investigation.upload",
+        ]
         member_payload = client.get("/api/config", headers=_headers(MEMBER)).json()
         assert member_payload["permissions"] == [
             "context.create",
             "exploration.save",
+            "investigation.agent",
+            "investigation.create",
+            "investigation.upload",
         ]
+
+
+def test_agent_token_creation_is_gated(superuser_env, store, monkeypatch):
+    from graphlagoon.routers import agent_tokens
+
+    monkeypatch.setenv("GRAPH_LAGOON_AGENTS_ENABLED", "true")
+    get_settings.cache_clear()
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+    app.include_router(agent_tokens.router)
+    group = store.create_group("agents", members=[{"kind": "email", "value": MEMBER}])
+    store.set_permission(
+        "investigation.agent", "restricted", [{"group_id": group.id, "effect": "allow"}]
+    )
+    body = {"name": "claude", "scopes": ["read"]}
+    client = TestClient(app)
+    denied = client.post("/api/agent-tokens", json=body, headers=_headers(OUTSIDER))
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["error"]["details"]["permission"] == (
+        "investigation.agent"
+    )
+    ok = client.post("/api/agent-tokens", json=body, headers=_headers(MEMBER))
+    assert ok.status_code == 201, ok.text
 
 
 # ── Query scope: two tiers keyed on context.create ───────────────────────────
@@ -344,7 +436,7 @@ class TestReaderTierScope:
         response = _run_sql(
             query_client,
             reader_context.id,
-            "WITH picked AS (SELECT * FROM main.graphs.edges) " "SELECT * FROM picked",
+            "WITH picked AS (SELECT * FROM main.graphs.edges) SELECT * FROM picked",
             OUTSIDER,
         )
         assert _scope_error(response) is None, response.text
@@ -555,6 +647,6 @@ class TestPrefilterInsideOpaqueScript:
                 context,
                 OUTSIDER,
                 None,
-                "MY_FINAL_EDGES AS (SELECT * FROM __EDGES__ " "JOIN __NODES__ ON 1=1)",
+                "MY_FINAL_EDGES AS (SELECT * FROM __EDGES__ JOIN __NODES__ ON 1=1)",
             )
         )

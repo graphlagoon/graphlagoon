@@ -39,6 +39,7 @@ from graphlagoon.routers import (  # noqa: E402
     config,
     explorations,
     graph_contexts,
+    investigations,
     query_templates,
 )
 
@@ -78,6 +79,7 @@ def app(env, store, warehouse_stub):
         admin_groups,
         graph_contexts,
         explorations,
+        investigations,
         query_templates,
     ):
         app.include_router(module.router)
@@ -163,6 +165,12 @@ class TestSeed:
         assert "context.share" in actions or "exploration.share" in actions
         assert stats.transfers >= 1 and "context.transfer" in actions
         assert stats.templates >= 1
+        # Cases unify explorations from different contexts.
+        assert stats.investigations >= 1
+        assert len(store.investigations) == stats.investigations
+        for inv in store.investigations.values():
+            sources = store.list_investigation_children("investigation_sources", inv.id)
+            assert len({s.context_id for s in sources}) >= 2
         group_names = {g.name for g in store.groups.values()}
         assert {"analysts", "restricted-demo"} <= group_names
         assert "permission.update" in actions

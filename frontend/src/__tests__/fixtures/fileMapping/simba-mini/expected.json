@@ -1,0 +1,106 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "1-1-12345",
+        "node_type": "Conta",
+        "properties": {
+          "banco": "001",
+          "agencia": "0001",
+          "conta": "0012345"
+        }
+      },
+      {
+        "node_id": "98765432100",
+        "node_type": "Pessoa",
+        "properties": {
+          "nome": "JOAO VITIMA",
+          "cpf_cnpj": "98765432100"
+        }
+      },
+      {
+        "node_id": "11122233344",
+        "node_type": "Pessoa",
+        "properties": {
+          "nome": "CARLOS MULA",
+          "cpf_cnpj": "111.222.333-44"
+        }
+      },
+      {
+        "node_id": "desconhecido:OD5",
+        "node_type": "Desconhecido",
+        "properties": {
+          "observacao": "NAO-CORRENTISTA"
+        }
+      },
+      {
+        "node_id": "12345678901",
+        "node_type": "Pessoa",
+        "properties": {
+          "nome": "ANA SILVA",
+          "cpf_cnpj": "12345678901",
+          "renda": 3500.0
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "OD1",
+        "src": "98765432100",
+        "dst": "1-1-12345",
+        "relationship_type": "TRANSF_INTERBANCARIA",
+        "properties": {
+          "valor": 1500.0,
+          "data": "2026-03-05",
+          "descricao": "PIX RECEBIDO"
+        }
+      },
+      {
+        "edge_id": "OD2",
+        "src": "1-1-12345",
+        "dst": "11122233344",
+        "relationship_type": "TRANSF_INTERBANCARIA",
+        "properties": {
+          "valor": 1400.0,
+          "data": "2026-03-05",
+          "descricao": "PIX ENVIADO"
+        }
+      },
+      {
+        "edge_id": "OD5",
+        "src": "desconhecido:OD5",
+        "dst": "1-1-12345",
+        "relationship_type": "DEPOSITO_ESPECIE",
+        "properties": {
+          "valor": 200.0,
+          "data": "2026-03-07",
+          "descricao": "DEPOSITO"
+        }
+      },
+      {
+        "edge_id": "1:titulares:1",
+        "src": "12345678901",
+        "dst": "1-1-12345",
+        "relationship_type": "TITULAR",
+        "properties": {}
+      }
+    ],
+    "truncated": false
+  },
+  "report": {
+    "rows_read": 6,
+    "rows_discarded": 1,
+    "discarded": [
+      {
+        "from": "lanc",
+        "row": 4,
+        "reason": "invalid date:ddmmyyyy: \"32032026\""
+      }
+    ],
+    "unknown_nodes": 1,
+    "edge_rows": 5,
+    "without_counterpart": 1,
+    "missing_inputs": [],
+    "missing_columns": []
+  }
+}

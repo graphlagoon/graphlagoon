@@ -9,6 +9,7 @@ import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration } from '@/types/graph';
 import { confirmAction } from '@/composables/useConfirm';
+import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
 
 const router = useRouter();
 const contextsStore = useContextsStore();
@@ -20,6 +21,8 @@ const explorations = ref<Exploration[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const filterContextId = ref<string>('');
+/** Exploration being added to an investigation (T3). */
+const investigationTarget = ref<Exploration | null>(null);
 
 // Rename modal state. Renaming lives here rather than on the graph page: the
 // list is where you go looking for an exploration whose name no longer says
@@ -340,6 +343,13 @@ async function quickShare(email: string) {
               Open
             </button>
             <button
+              class="btn btn-outline btn-sm"
+              :data-testid="`exploration-add-to-investigation-${exploration.id}`"
+              @click="investigationTarget = exploration"
+            >
+              Add to investigation
+            </button>
+            <button
               v-if="canManage(exploration)"
               class="btn btn-outline btn-sm"
               :data-testid="`exploration-rename-${exploration.id}`"
@@ -365,6 +375,13 @@ async function quickShare(email: string) {
         </div>
       </div>
     </div>
+
+    <AddToInvestigationModal
+      v-if="investigationTarget"
+      :open="true"
+      :exploration-id="investigationTarget.id"
+      @close="investigationTarget = null"
+    />
 
     <!-- Rename Modal -->
     <div v-if="renameTarget" class="modal-overlay" @click.self="renameTarget = null">

@@ -84,7 +84,7 @@ export type NodeColumnConfig = NodeStructure;
  * transpiling Cypher to Spark SQL. `neptune` is Amazon Neptune's openCypher
  * endpoint — a native graph database, so it defines no tables at all.
  */
-export type DatasourceType = "sql_warehouse" | "neptune" | "rest";
+export type DatasourceType = "sql_warehouse" | "neptune" | "rest" | "file";
 
 /**
  * A named REST connection as the server advertises it in
@@ -108,6 +108,44 @@ export interface DatasourceConnectionConfig {
     fetch_nodes: boolean;
     schema_discovery: boolean;
   };
+}
+
+export type IdentityNormalize = 'cpf_cnpj' | 'account' | 'phone' | 'email' | 'lower' | 'none';
+
+/** How a node type maps to a real-world entity, so contexts unify on it (investigations). */
+export interface IdentityKey {
+  node_type: string;
+  /** Concept label shared across contexts: "Pessoa", "Conta", "Dispositivo". */
+  entity: string;
+  source: 'node_id' | { kind: 'prop'; name: string };
+  normalize: IdentityNormalize;
+}
+
+/** A side table looked up by a node's key and shown in the inspector (investigations). */
+export interface EnrichmentTable {
+  /** Slug, unique in the context; used in the lookup URL. */
+  name: string;
+  label: string;
+  /** catalog.schema.table */
+  table: string;
+  key_column: string;
+  match_node_types: string[];
+  match_source: 'node_id' | { kind: 'prop'; name: string };
+  cardinality: 'one' | 'many';
+  /** The only columns a lookup returns. */
+  columns: string[];
+  promote?: { node_type: string; id_column: string; edge_type: string } | null;
+}
+
+/** POST /graph-contexts/{id}/enrichment/{name}/lookup: rows grouped by key. */
+export interface EnrichmentLookupResult {
+  name: string;
+  label: string;
+  key_column: string;
+  columns: string[];
+  cardinality: 'one' | 'many';
+  rows: Record<string, Record<string, string | null>[]>;
+  truncated: boolean;
 }
 
 export interface GraphContext {
@@ -136,6 +174,8 @@ export interface GraphContext {
   context_menu_actions?: ContextMenuActionConfig[];
   /** Writer-authored custom metrics; the backend returns [] to read-only users. */
   metric_definitions?: CustomMetricDefinition[];
+  identity_keys?: IdentityKey[];
+  enrichment_tables?: EnrichmentTable[];
   owner_email: string;
   shared_with: string[];
   has_write_access: boolean;
@@ -710,6 +750,8 @@ export interface CreateGraphContextRequest {
   cluster_programs?: ClusterProgram[];
   context_menu_actions?: ContextMenuActionConfig[];
   metric_definitions?: CustomMetricDefinition[];
+  identity_keys?: IdentityKey[];
+  enrichment_tables?: EnrichmentTable[];
 }
 
 export interface ShareRequest {

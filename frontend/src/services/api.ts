@@ -1,5 +1,22 @@
 import axios, { type AxiosInstance } from 'axios';
 import type {
+  CreateInvestigationRequest,
+  Investigation,
+  InvestigationArtifact,
+  InvestigationFile,
+  FileContextResult,
+  FileEnrichmentSpec,
+  FileRole,
+  InvestigationProposal,
+  InvestigationEvent,
+  InvestigationNote,
+  InvestigationRole,
+  InvestigationSource,
+  SourceSnapshotPayload,
+  SourceMode,
+} from '@/types/investigation';
+import type { MappingSpec } from '@/utils/fileMapping';
+import type {
   AdminConfigEntry,
   AdminGroup,
   AdminGroupPayload,
@@ -10,6 +27,7 @@ import type {
   AdminPermissionsResponse,
   AdminPermissionUpdate,
   AdminUserPage,
+  AgentToken,
   AuditPage,
   ClearEnvironmentResponse,
   PermissionInspection,
@@ -18,6 +36,7 @@ import type {
 } from '@/types/admin';
 import type {
   DatasetsResponse,
+  EnrichmentLookupResult,
   GraphContext,
   GraphResponse,
   NodeBatchResponse,
@@ -97,6 +116,14 @@ declare global {
        * opaque to both the SELECT-only validator and the table-scope check.
        */
       allow_raw_sql_scripts?: boolean;
+      /** Personal agent tokens (GRAPH_LAGOON_AGENTS_ENABLED). */
+      agents_enabled?: boolean;
+      /** Whether agents read CPF, CNPJ and accounts unmasked (T11 policy note). */
+      agents_allow_unmasked_data?: boolean;
+      /** Upload ceiling for case files, in bytes (413 above it). */
+      investigation_file_max_bytes?: number;
+      /** Ceiling of edges in a case's working graph (G4, Q5). */
+      investigation_max_working_edges?: number;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
@@ -197,6 +224,12 @@ class ApiService {
   // Graph Contexts
   async getGraphContexts(): Promise<GraphContext[]> {
     const response = await this.client.get('/api/graph-contexts');
+    return response.data;
+  }
+
+  /** Declared columns of a context's enrichment table for a batch of node keys. */
+  async lookupEnrichment(contextId: string, name: string, keys: string[]): Promise<EnrichmentLookupResult> {
+    const response = await this.client.post(`/api/graph-contexts/${contextId}/enrichment/${name}/lookup`, { keys });
     return response.data;
   }
 
@@ -630,6 +663,190 @@ class ApiService {
     return response.data;
   }
 
+  // Investigations
+  /** `exploration_id`: only the cases that have that exploration as a source. */
+  async getInvestigations(params: { exploration_id?: string } = {}): Promise<Investigation[]> {
+    const response = await this.client.get('/api/investigations', { params });
+    return response.data;
+  }
+
+  async getInvestigation(id: string): Promise<Investigation> {
+    const response = await this.client.get(`/api/investigations/${id}`);
+    return response.data;
+  }
+
+  async createInvestigation(data: CreateInvestigationRequest): Promise<Investigation> {
+    const response = await this.client.post('/api/investigations', data);
+    return response.data;
+  }
+
+  async getInvestigationSources(id: string): Promise<InvestigationSource[]> {
+    const response = await this.client.get(`/api/investigations/${id}/sources`);
+    return response.data;
+  }
+
+  async addInvestigationSource(
+    id: string,
+    explorationId: string,
+    mode: SourceMode,
+  ): Promise<InvestigationSource> {
+    const response = await this.client.post(`/api/investigations/${id}/sources`, {
+      kind: 'exploration',
+      exploration_id: explorationId,
+      mode,
+    });
+    return response.data;
+  }
+
+  /** The source's frozen copy, or the live exploration (403 SOURCE_RESTRICTED without context access). */
+  async getInvestigationSourceSnapshot(id: string, sourceId: string): Promise<SourceSnapshotPayload> {
+    const response = await this.client.get(`/api/investigations/${id}/sources/${sourceId}/snapshot`);
+    return response.data;
+  }
+
+  /** Merge patch by unified node id: a null role clears it. */
+  async updateInvestigationState(
+    id: string,
+    patch: { roles?: Record<string, InvestigationRole | null>; pins?: Record<string, boolean> },
+  ): Promise<Investigation> {
+    const response = await this.client.patch(`/api/investigations/${id}/state`, patch);
+    return response.data;
+  }
+
+  /** Journal, oldest first. shortcut: one page of 500; paginate with `after` when cases grow. */
+  async getInvestigationEvents(id: string, limit = 500): Promise<InvestigationEvent[]> {
+    const response = await this.client.get(`/api/investigations/${id}/events`, { params: { limit } });
+    return response.data;
+  }
+
+  /** Client-side journal entry (`nodes.promoted`, `trace.run`, …). */
+  async postInvestigationEvent(id: string, kind: string, payload: Record<string, unknown>): Promise<InvestigationEvent> {
+    const response = await this.client.post(`/api/investigations/${id}/events`, { kind, payload });
+    return response.data;
+  }
+
+  async getInvestigationNotes(id: string): Promise<InvestigationNote[]> {
+    const response = await this.client.get(`/api/investigations/${id}/notes`);
+    return response.data;
+  }
+
+  async createInvestigationNote(
+    id: string,
+    anchor: InvestigationNote['anchor'],
+    body: string,
+  ): Promise<InvestigationNote> {
+    const response = await this.client.post(`/api/investigations/${id}/notes`, { anchor, body });
+    return response.data;
+  }
+
+  async deleteInvestigationNote(id: string, noteId: string): Promise<void> {
+    await this.client.delete(`/api/investigations/${id}/notes/${noteId}`);
+  }
+
+  // Case space (FA.2): the file goes as the raw body (streamed by the server).
+  async getInvestigationArtifacts(id: string): Promise<InvestigationArtifact[]> {
+    const response = await this.client.get(`/api/investigations/${id}/artifacts`);
+    return response.data;
+  }
+
+  async uploadInvestigationArtifact(id: string, file: File, artifactId?: string): Promise<InvestigationArtifact> {
+    const path = artifactId ? `artifacts/${artifactId}/versions` : 'artifacts';
+    const response = await this.client.post(`/api/investigations/${id}/${path}`, file, {
+      params: { name: file.name },
+      // Never application/json: the server reads that as a text artifact.
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+    return response.data;
+  }
+
+  async getArtifactContent(id: string, artifactId: string, version: number): Promise<Blob> {
+    const response = await this.client.get(
+      `/api/investigations/${id}/artifacts/${artifactId}/versions/${version}/content`,
+      { responseType: 'blob' },
+    );
+    return response.data;
+  }
+
+  // Case files (F2.3): raw body like artifacts; the server hashes while streaming.
+  async getInvestigationFiles(id: string): Promise<InvestigationFile[]> {
+    const response = await this.client.get(`/api/investigations/${id}/files`);
+    return response.data;
+  }
+
+  async uploadInvestigationFile(id: string, file: File, role: FileRole): Promise<InvestigationFile> {
+    const response = await this.client.post(`/api/investigations/${id}/files`, file, {
+      params: { filename: file.name, role },
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+    return response.data;
+  }
+
+  /** Raw bytes of a case file (audited read). */
+  async getInvestigationFileContent(id: string, fileId: string): Promise<ArrayBuffer> {
+    const response = await this.client.get(`/api/investigations/${id}/files/${fileId}/content`, {
+      responseType: 'arraybuffer',
+    });
+    return response.data;
+  }
+
+  /** Generates the file graph on the server (F2.5): a `file` context, an exploration and a source. */
+  async createFileContext(
+    id: string,
+    fileId: string,
+    body: { mapping: MappingSpec; file_ids?: string[]; title?: string },
+  ): Promise<FileContextResult> {
+    const response = await this.client.post(`/api/investigations/${id}/files/${fileId}/context`, body);
+    return response.data;
+  }
+
+  /** How an enrichment file joins the case's nodes (F2.6). */
+  async setInvestigationFileMapping(id: string, fileId: string, mapping: FileEnrichmentSpec): Promise<InvestigationFile> {
+    const response = await this.client.patch(`/api/investigations/${id}/files/${fileId}`, { mapping });
+    return response.data;
+  }
+
+  // Proposals (FA.3): accept/reject are human-only on the server.
+  async getInvestigationProposals(id: string, status?: InvestigationProposal['status']): Promise<InvestigationProposal[]> {
+    const response = await this.client.get(`/api/investigations/${id}/proposals`, { params: { status } });
+    return response.data;
+  }
+
+  async acceptProposal(id: string, proposalId: string): Promise<InvestigationProposal> {
+    const response = await this.client.post(`/api/investigations/${id}/proposals/${proposalId}/accept`);
+    return response.data;
+  }
+
+  async rejectProposal(id: string, proposalId: string, reason: string): Promise<InvestigationProposal> {
+    const response = await this.client.post(`/api/investigations/${id}/proposals/${proposalId}/reject`, { reason });
+    return response.data;
+  }
+
+  // The caller's own agent tokens (03 §8.2); the secret comes back once, on create.
+  async getAgentTokens(): Promise<AgentToken[]> {
+    const response = await this.client.get('/api/agent-tokens');
+    return response.data;
+  }
+
+  async createAgentToken(data: {
+    name: string;
+    scopes: string[];
+    expires_in_days: number;
+  }): Promise<AgentToken & { token: string }> {
+    const response = await this.client.post('/api/agent-tokens', data);
+    return response.data;
+  }
+
+  async revokeAgentToken(tokenId: string): Promise<void> {
+    await this.client.delete(`/api/agent-tokens/${tokenId}`);
+  }
+
+  async approveArtifactVersion(id: string, artifactId: string, version: number): Promise<InvestigationArtifact> {
+    const response = await this.client.post(
+      `/api/investigations/${id}/artifacts/${artifactId}/versions/${version}/approve`,
+    );
+    return response.data;
+  }
+
   // Admin area (superuser only; every route 403s for anyone else)
   async getAdminOverview(): Promise<AdminOverview> {
     const response = await this.client.get('/api/admin/overview');
@@ -666,6 +883,25 @@ class ApiService {
       new_owner_email: newOwnerEmail,
     });
     return response.data;
+  }
+
+  async transferInvestigationOwnership(
+    investigationId: string,
+    newOwnerEmail: string,
+  ): Promise<TransferOwnershipResponse> {
+    const response = await this.client.post(`/api/admin/investigations/${investigationId}/transfer`, {
+      new_owner_email: newOwnerEmail,
+    });
+    return response.data;
+  }
+
+  async getAdminAgentTokens(): Promise<AgentToken[]> {
+    const response = await this.client.get('/api/admin/agent-tokens');
+    return response.data;
+  }
+
+  async revokeAgentTokenAsAdmin(tokenId: string): Promise<void> {
+    await this.client.delete(`/api/admin/agent-tokens/${tokenId}`);
   }
 
   async getAuditLog(

@@ -38,6 +38,7 @@ import { isStationaryRightClick, resolveContextMenuTarget } from '@/utils/contex
 import { settleLayoutAuto } from '@/utils/settleLayoutClient';
 import { seedNewNodePositions } from '@/utils/seedNewNodePositions';
 import { useDevPerf } from '@/composables/useDevPerf';
+import { useGraphRings } from '@/composables/useGraphRings';
 
 const emit = defineEmits<{
   'cluster-node-click': [clusterId: string]
@@ -241,6 +242,7 @@ const edgeDataMap = ref<Map<string, Edge>>(new Map());
 const labels = useGraphLabels(getGraph3d, initialLayoutDone, degreeDimmedNodeIds, focusedNodeIds);
 const icons = useGraphIcons(getGraph3d, initialLayoutDone);
 const edgeIcons = useGraphEdgeIcons(getGraph3d, initialLayoutDone);
+const rings = useGraphRings(getGraph3d);
 
 const layout = useGraphLayout(
   getGraph3d,
@@ -347,6 +349,7 @@ function collectAppearanceContext(): AppearanceContext {
     getEdgeTypeColor: (type: string) => edgeColorMap.get(type) || '#888888',
 
     communityColorMap: communityStore.communityColorMap,
+    roleColorMap: graphStore.roleColors,
   };
 }
 
@@ -536,6 +539,7 @@ function updateOverlays() {
   labels.updateLabels();
   icons.updateIcons();
   edgeIcons.updateIcons();
+  rings.updateRings();
 }
 
 function updateVisuals() {
@@ -617,6 +621,7 @@ function updateVisuals() {
 
   // Update icon billboards (must be after node appearance is computed)
   icons.updateIcons();
+  rings.updateRings();
 
   const t3 = performance.now();
   recordPerf('updateVisuals', t3 - t0, {
@@ -1300,6 +1305,7 @@ async function initGraph() {
   graph3d.onEngineTick(() => {
     icons.updateIcons();
     edgeIcons.updateIcons();
+    rings.updateRings();
   });
 
   graph3d.onEngineStop(() => {
@@ -1316,6 +1322,7 @@ async function initGraph() {
   if (scene) {
     labels.initRenderer(scene);
     icons.initRenderer(scene);
+    rings.initRenderer(scene);
     const atlas = icons.getAtlas();
     if (atlas) {
       edgeIcons.initRenderer(scene, atlas);
@@ -1370,7 +1377,9 @@ async function initGraph() {
     (window as any).__GRAPH_NODE_VISUAL_STATE__ = (nodeId: string) => {
       if (!graph3d) return null;
       const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
-      return node ? { color: node.color, iconColor: node.__iconColor } : null;
+      return node
+        ? { color: node.color, iconColor: node.__iconColor, rings: graphStore.investigationMode?.rings.get(nodeId) ?? [] }
+        : null;
     };
 
     const devRenderer = graph3d.renderer?.() as THREE.WebGLRenderer | null;
@@ -1586,6 +1595,9 @@ watch(
     updateOverlays();
   }
 );
+
+// Investigation workspace: provenance rings follow the loaded source set.
+watch(() => graphStore.investigationMode, () => rings.updateRings());
 
 // Layout execution settings — apply to graph3d live
 watch(
@@ -2162,9 +2174,9 @@ watch(
   { deep: true }
 );
 
-// Community color changes — debounced (same pattern as nodeTypeColors)
+// Community and investigation role color changes — debounced (same pattern as nodeTypeColors)
 watch(
-  () => communityStore.communityColorMap,
+  () => [communityStore.communityColorMap, graphStore.roleColors],
   () => {
     if (colorUpdateTimeout3D) clearTimeout(colorUpdateTimeout3D);
     colorUpdateTimeout3D = setTimeout(() => { updateVisuals(); }, 50);
@@ -2600,6 +2612,7 @@ onUnmounted(() => {
   labels.dispose();
   icons.dispose();
   edgeIcons.dispose();
+  rings.dispose();
   axisRotation.dispose();
   guides.dispose();
   if (hoverRAF) {

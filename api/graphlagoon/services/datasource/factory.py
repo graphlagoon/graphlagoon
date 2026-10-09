@@ -80,6 +80,11 @@ def _build(type_name: str, name: Optional[str] = None) -> GraphDatasource:
             )
         return RestDatasource(spec)
 
+    if type_name == "file":
+        from graphlagoon.services.datasource.file import FileDatasource
+
+        return FileDatasource()
+
     raise UnknownDatasourceError(f"Unknown datasource type: '{type_name}'")
 
 

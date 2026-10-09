@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Assistente de arquivo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #2c3e50; font-size: 14px; line-height: 1.5">
+<header style="min-height: 52px; box-sizing: border-box; padding: 0 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #0d1b2a; border-bottom: 1px solid rgba(20,184,166,0.25); color: #c8e8f0">
+<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: #14b8a6; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round"><path d="M3 15c2-4 4-4 6 0s4 4 6 0 4-4 6 0"></path></svg>
+<a href="T1-Fila.dc.html" style="color: #14b8a6; font-weight: 600; text-decoration: none; padding: 4px 8px">Investigações</a>
+<span style="width: 1px; height: 20px; background: rgba(200,232,240,0.15)"></span>
+<span style="font-weight: 600; color: #ffffff">Ofício de quebra de sigilo · 3 investigados</span>
+<span style="font-size: 12px; color: rgba(200,232,240,0.8)">#2026-0405</span>
+</header>
+<main style="width: 100%; max-width: 1280px; margin: 0 auto; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px">
+<h1 style="margin: 0; font-size: 22px; line-height: 30px; color: #0d1b2a">Adicionar arquivo ao caso</h1>
+<span style="font-size: 13px; color: #6c757d">papel escolhido: <b style="color: #2c3e50">grafo</b> (vira um context de arquivo)</span>
+</div>
+<ol aria-label="Etapas" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px">
+<li style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 9999px; background: #ccfbf1; color: #115e59"><b>1</b> Arquivos</li>
+<li style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 9999px; background: #ccfbf1; color: #115e59"><b>2</b> Papel</li>
+<li aria-current="step" style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 9999px; background: #0f766e; color: #ffffff; font-weight: 600"><b>3</b> Mapear colunas</li>
+<li style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 9999px; background: #ffffff; border: 1px solid #dee2e6; color: #495057"><b>4</b> Identidade</li>
+<li style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 9999px; background: #ffffff; border: 1px solid #dee2e6; color: #495057"><b>5</b> Revisar</li>
+</ol>
+<div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start">
+<section style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px"><span style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 4px; background: #ccfbf1; color: #115e59">DETECTADO</span><b>Layout SIMBA</b><span style="color: #6c757d; font-size: 13px">memorando MI001-SPPEA v3.1 · 5 arquivos separados por TAB</span></div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">
+<span style="padding: 4px 8px; border-radius: 6px; background: #f8f9fa; border: 1px solid #e9ecef">AGENCIAS.TXT · 6 · 3b1e…</span>
+<span style="padding: 4px 8px; border-radius: 6px; background: #f8f9fa; border: 1px solid #e9ecef">CONTAS.TXT · 9 · c07d…</span>
+<span style="padding: 4px 8px; border-radius: 6px; background: #f8f9fa; border: 1px solid #e9ecef">TITULARES.TXT · 12 · 8a52…</span>
+<span style="padding: 4px 8px; border-radius: 6px; background: #f8f9fa; border: 1px solid #e9ecef">EXTRATO.TXT · 418 · 51f9…</span>
+<span style="padding: 4px 8px; border-radius: 6px; background: #f8f9fa; border: 1px solid #e9ecef">ORIGEM_DESTINO.TXT · 436 · e4a0…</span>
+</div>
+</div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; overflow-x: auto">
+<table style="width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13px">
+<thead><tr style="text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #6c757d">
+<th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Coluna</th>
+<th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Exemplo</th>
+<th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Vira</th>
+<th style="padding: 10px 14px; border-bottom: 1px solid #dee2e6; font-weight: 600">Conversão</th>
+</tr></thead>
+<tbody style="font-family: inherit">
+<tr><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">EXTRATO.CODIGO_CHAVE_EXTRATO</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">000184</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef"><select aria-label="Papel da coluna CODIGO_CHAVE_EXTRATO" style="min-height: 32px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; background: #ffffff"><option>id da aresta</option></select></td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef; color: #6c757d">nenhuma</td></tr>
+<tr><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">EXTRATO.NUMERO_BANCO + AGENCIA + CONTA</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">001 · 0412 · 44710</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef"><select aria-label="Papel da conta do extrato" style="min-height: 32px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; background: #ffffff"><option>nó Conta (investigada)</option></select></td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">chave = banco + agência + conta</td></tr>
+<tr><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">ORIGEM_DESTINO.CPF_CNPJ_OD</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">***.031.664-**</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef"><select aria-label="Papel do CPF ou CNPJ da contraparte" style="min-height: 32px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; background: #ffffff"><option>nó Pessoa (contraparte)</option></select></td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">só dígitos</td></tr>
+<tr><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">EXTRATO.DATA_LANCAMENTO</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">09092026</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef"><select aria-label="Papel da data" style="min-height: 32px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; background: #ffffff"><option>horário da aresta</option></select></td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">ddmmaaaa → 09/09/2026</td></tr>
+<tr><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">ORIGEM_DESTINO.VALOR_TRANSACAO</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">487000</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef"><select aria-label="Papel do valor" style="min-height: 32px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; background: #ffffff"><option>valor da aresta</option></select></td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">centavos → R$ 4.870,00</td></tr>
+<tr><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">EXTRATO.NATUREZA</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">C</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef"><select aria-label="Papel da natureza" style="min-height: 32px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; background: #ffffff"><option>direção da aresta</option></select></td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">C = entra na conta, D = sai</td></tr>
+<tr><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">EXTRATO.TIPO_LANCAMENTO</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">120</td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef"><select aria-label="Papel do tipo de lançamento" style="min-height: 32px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; background: #ffffff"><option>tipo de relação</option></select></td><td style="padding: 8px 14px; border-bottom: 1px solid #e9ecef">tabela do layout (120 = transferência interbancária)</td></tr>
+<tr style="background: #fff7ed"><td style="padding: 8px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px">ORIGEM_DESTINO com agência 9999</td><td style="padding: 8px 14px">NAO-CORRENTISTA</td><td style="padding: 8px 14px"><select aria-label="Papel da contraparte não identificada" style="min-height: 32px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; background: #ffffff"><option>nó "Desconhecido"</option></select></td><td style="padding: 8px 14px">um por transação, nunca agrupados</td></tr>
+</tbody>
+</table>
+</div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+<b>Prévia de 3 arestas</b>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 8px; font-size: 13px">
+<div style="padding: 10px; border-radius: 6px; background: #f8f9fa">Conta 001·0412·44710 → <b>Pessoa ***.031.664-**</b><br><span style="color: #6c757d">R$ 4.870,00 · 09/09/2026 · transf. interbancária</span></div>
+<div style="padding: 10px; border-radius: 6px; background: #f8f9fa">Conta 001·0412·44710 → <b>Desconhecido #1</b><br><span style="color: #6c757d">R$ 1.200,00 · 10/09/2026 · saque eletrônico</span></div>
+<div style="padding: 10px; border-radius: 6px; background: #f8f9fa"><b>Pessoa ***.880.112-**</b> → Conta 001·0412·44710<br><span style="color: #6c757d">R$ 15.000,00 · 11/09/2026 · depósito em espécie</span></div>
+</div>
+</div>
+</section>
+<aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+<b style="font-size: 14px">Qualidade do arquivo</b>
+<div style="padding: 8px 10px; border-radius: 6px; background: #fff7ed; color: #7c2d12"><b>31%</b> das transações sem contraparte identificada. Viram 128 nós "Desconhecido", visíveis e filtráveis.</div>
+<div style="padding: 8px 10px; border-radius: 6px; background: #eff6ff; color: #1e3a8a">Este layout não traz chave Pix nem EndToEndId. Vínculos por chave Pix não serão criados.</div>
+<div style="padding: 8px 10px; border-radius: 6px; background: #f8f9fa">2 linhas com data inválida ficam de fora e são listadas no diário.</div>
+</div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 600">Salvar este mapeamento como<input type="text" value="SIMBA v3.1 (padrão)" style="min-height: 38px; box-sizing: border-box; padding: 8px 10px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400"></label>
+<label style="display: flex; gap: 8px; align-items: flex-start"><input type="checkbox" checked style="margin-top: 3px">Sugerir sozinho quando os cabeçalhos baterem</label>
+</div>
+<div style="background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 12px 14px; font-size: 13px; color: #134e4a"><b>Cadeia de custódia.</b> Os 5 arquivos brutos ficam guardados com hash SHA-256 e nunca são alterados. O mapeamento usado vai junto para o laudo.</div>
+</aside>
+</div>
+<div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 4px">
+<a href="T3-Adicionar.dc.html" style="display: inline-flex; align-items: center; min-height: 40px; box-sizing: border-box; padding: 8px 16px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; color: #2c3e50; text-decoration: none">Voltar</a>
+<button type="button" style="min-height: 40px; padding: 8px 16px; border-radius: 6px; border: 0; background: #0f766e; color: #ffffff; font: inherit; font-weight: 600">Próximo: identidade</button>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
