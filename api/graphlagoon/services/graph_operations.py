@@ -5,6 +5,7 @@ This module contains the graph processing logic that was previously in sql-wareh
 It processes raw DataFrame results from the warehouse and constructs GraphResponse objects.
 """
 
+import hashlib
 import json
 import logging
 import time
@@ -54,6 +55,12 @@ class QueryExecutionError(Exception):
 # empty column name itself stays stored verbatim, meaning "absent".
 DEFAULT_NODE_TYPE = "Node"
 DEFAULT_RELATIONSHIP_TYPE = "RELATED_TO"
+
+# Hex chars of the sha256 digest appended to composite edge ids (64 bits):
+# collisions between distinct parallel edges of one node pair are negligible,
+# and ids stay short. Changing it changes every composite id — saved
+# snapshots would stop matching re-fetched edges.
+EDGE_ID_DIGEST_LEN = 16
 
 
 def merge_column_config(context) -> dict:
@@ -119,6 +126,29 @@ def resolve_node_table(context) -> str:
     return derived_node_table_sql(context.edge_table_name, config)
 
 
+def _edge_property_digest(row_dict: dict, structure_cols: set) -> str:
+    """Stable digest of the row's non-structural columns, or "" when none.
+
+    Columns are sorted by name and NULLs are skipped (a NULL and an absent
+    column must hash the same: the properties dict drops NULLs too). Scalars
+    are stringified the way ``_stringify_scalar`` does, so a value that comes
+    back as ``1.5`` on one path and ``"1.5"`` on another still yields one id.
+    ``hashlib`` (not ``hash()``, which is salted per process) keeps the id
+    identical across runs and workers — saved snapshots keep matching.
+    """
+    payload = {
+        key: _stringify_scalar(value)
+        for key, value in sorted(row_dict.items())
+        if key not in structure_cols and value is not None
+    }
+    if not payload:
+        return ""
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), default=str, ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:EDGE_ID_DIGEST_LEN]
+
+
 def _get_edge_id(
     row_dict: dict,
     edge_id_col: Optional[str],
@@ -128,11 +158,23 @@ def _get_edge_id(
 ) -> str:
     """Get edge_id from row, or generate composite key if edge_id_col is None.
 
+    The composite is ``{src}@{relationship_type}@{dst}``, plus ``@{digest}``
+    when the row carries any other non-NULL column: the digest is a stable
+    hash of those columns sorted by name (see ``_edge_property_digest``), so
+    parallel edges between the same pair — e.g. two transactions — no longer
+    collide onto one id (technical debt #28). Two rows identical in every
+    column still share an id; that is accepted (they are indistinguishable).
+    A row with only structural columns keeps the bare ``src@type@dst`` form.
+
     With an absent relationship type column (``rel_type_col=""``) the
     composite is ``src@@dst`` — deliberately NOT the constant type: both the
     subgraph/expand path and the transpiled-Cypher path omit the column from
     their structs, so the two produce identical ids and dedup stays
-    consistent. Edge ids are opaque to the frontend.
+    consistent. For the same reason subgraph/expand put the context's
+    configured edge property columns in their struct whenever there is no
+    edge id column (``edge_identity_columns``): the Cypher ``r`` struct
+    carries exactly those, so both paths hash the same columns. Edge ids are
+    opaque to the frontend.
     """
     if edge_id_col and edge_id_col in row_dict:
         return row_dict[edge_id_col]
@@ -141,10 +183,13 @@ def _get_edge_id(
     # structural columns no longer match the query result (a stale/renamed
     # column) — that case must reach the guard in process_graph_query_result as a
     # classified error, not crash here with an unhandled KeyError (500).
-    return (
+    composite = (
         f"{row_dict.get(src_col, '')}@{row_dict.get(rel_type_col, '')}"
         f"@{row_dict.get(dst_col, '')}"
     )
+    structure_cols = {c for c in (edge_id_col, src_col, dst_col, rel_type_col) if c}
+    digest = _edge_property_digest(row_dict, structure_cols)
+    return f"{composite}@{digest}" if digest else composite
 
 
 def _parse_statement_result(

@@ -10117,3 +10117,75 @@ FA.7.
 **Author:** Claude (AI Assistant)
 
 ---
+
+## [2026-10-09 20:30] - Feature Implemented: G1 · Corrigir o #28 (IDs de arestas paralelas colidem)
+
+**Feature:** sem coluna de id de aresta, o id composto `src@tipo@dst` agora recebe
+`@{digest}`: um hash estável das demais colunas da linha. Duas transações entre as
+mesmas contas deixam de virar uma aresta só no merge.
+
+**Requirements:** tarefa G1 de `docs/dev/plans/investigation/04-plano-de-implementacao.md`
+(dívida #28 em `docs/dev/technical-debts.md`).
+
+**Design Decisions:**
+1. **Digest:** sha256 (`hashlib`, nunca `hash()`, que muda por processo) de um JSON
+   canônico das colunas não estruturais e não nulas, ordenadas por nome; primeiros
+   16 hex (`EDGE_ID_DIGEST_LEN`, 64 bits). Escalares viram string como em
+   `_stringify_scalar`, então `1.5` e `"1.5"` dão o mesmo id; NULL e coluna ausente
+   também.
+2. **Compatibilidade:** linha só com colunas estruturais mantém `src@tipo@dst`
+   (`src@@dst` sem tipo). Contexts sem propriedades de aresta não mudam de id, e o
+   teste existente `a@@b` continua valendo.
+3. **Mesmo id nos dois caminhos:** o struct `r` do Cypher transpilado carrega as
+   propriedades de aresta configuradas no context; subgraph/expand só carregavam as
+   estruturais. Hashear só de um lado daria dois ids para a mesma aresta e duplicaria
+   no merge do expand. Por isso `build_edge_named_struct` ganhou `extra_columns`, e
+   `edge_identity_columns(context, config)` devolve as propriedades configuradas
+   quando não há `edge_id_col` (vazio quando há). Efeito colateral aceito: nesse caso
+   as arestas de subgraph/expand passam a vir com propriedades, como as do Cypher.
+4. **Linhas idênticas em tudo continuam colidindo:** aceitável e documentado
+   (guia Triple Stores e dívida #28).
+5. **Frontend:** não monta ids compostos. Usa o `edge_id` do backend como opaco; o
+   remapeamento de cluster fechado (`stores/graph.ts`) só prefixa o id do backend, e
+   herda a unicidade. Sem mudança no frontend.
+6. **Fora do escopo:** o datasource REST usa `src->dst:label#i` (índice da resposta),
+   que não colide dentro de uma resposta; Neptune usa o id nativo.
+
+**Files Created:**
+- [api/tests/test_edge_ids.py](api/tests/test_edge_ids.py)
+
+**Files Modified:**
+- [api/graphlagoon/services/graph_operations.py](api/graphlagoon/services/graph_operations.py) (`_get_edge_id`, `_edge_property_digest`, `EDGE_ID_DIGEST_LEN`)
+- [api/graphlagoon/services/datasource/sql_warehouse.py](api/graphlagoon/services/datasource/sql_warehouse.py) (`edge_identity_columns`, `build_edge_named_struct(extra_columns)`, subgraph/expand)
+- [docs/guide/triple-stores.md](docs/guide/triple-stores.md)
+- [docs/dev/technical-debts.md](docs/dev/technical-debts.md) (#28 resolvido)
+
+**Testing:**
+- [x] `api/tests/test_edge_ids.py` (22 testes): transações paralelas sem tipo e com
+  tipo, linhas idênticas colidem, forma do id, valor fixo (golden), ordem de colunas,
+  NULL × ausente, escalar × string, estabilidade entre processos com `PYTHONHASHSEED`
+  diferentes, SQL de subgraph/expand com as colunas de propriedade, e as chaves do
+  struct `r` do transpilador iguais a `edge_identity_columns`.
+- [x] Suite backend: 1293 passed, 1 skipped (fora as falhas pré-existentes conhecidas
+  de `test_cypher_comments.py` e `test_transpile_options`).
+- [x] `npx vitepress build` ok. Sem mudança no frontend; vitest/vue-tsc/E2E não rodados.
+
+**Public Docs:** nova seção "Parallel edges without an edge id column" em
+`docs/guide/triple-stores.md`.
+
+**Admin-Area Impact:** no admin-area impact.
+
+**Assumptions:**
+- Nenhuma das decisões Q1–Q9 se aplica à G1.
+- Snapshots salvos antes da G1, de contexts sem coluna de id e com propriedades de
+  aresta, guardam os ids antigos; expandir nós neles pode duplicar essas arestas uma
+  vez. O mesmo vale se o admin mudar a seleção de propriedades de aresta. Aceito: é o
+  custo único da correção.
+- Uma propriedade de aresta configurada que sumiu da tabela agora também falha no
+  subgraph/expand (antes só no Cypher), com o erro de schema já classificado.
+- Nota geral do plano: este ambiente não tem credenciais de push nem `gh` CLI; push e
+  PR ficam com o mantenedor (decisão do orquestrador).
+
+**Author:** Claude (AI Assistant)
+
+---
