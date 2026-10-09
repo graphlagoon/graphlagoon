@@ -71,6 +71,9 @@ export interface InvestigationEvent {
   id: string;
   at: string;
   actor_email: string;
+  /** 'agent' when an agent token acted on behalf of actor_email (03 §8.1). */
+  actor_kind?: 'human' | 'agent';
+  agent_name?: string | null;
   kind: string;
   payload: Record<string, unknown>;
   prev_hash?: string | null;

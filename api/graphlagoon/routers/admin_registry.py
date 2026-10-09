@@ -78,6 +78,10 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "neptune_http_timeout": "public",
     "neptune_discovery_sample_limit": "public",
     "group_cache_ttl_seconds": "public",
+    "agents_enabled": "public",
+    "agent_token_max_days": "public",
+    "agents_allow_unmasked_data": "public",
+    "agent_rate_limit_per_minute": "public",
 }
 
 # Tables wiped by "clear environment", in an order that respects foreign keys
@@ -96,6 +100,7 @@ CLEARABLE_TABLES: tuple[str, ...] = (
     "graph_context_shares",
     "query_templates",
     "graph_contexts",
+    "agent_tokens",
     "permission_rules",
     "group_members",
     "permission_modes",
@@ -130,6 +135,9 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("PUT", "/api/admin/groups/{group_id}"),
         ("DELETE", "/api/admin/groups/{group_id}"),
         ("PUT", "/api/admin/permissions/{permission_id}"),
+        ("POST", "/api/agent-tokens"),
+        ("DELETE", "/api/agent-tokens/{token_id}"),
+        ("DELETE", "/api/admin/agent-tokens/{token_id}"),
         ("POST", "/api/investigations"),
         ("PATCH", "/api/investigations/{investigation_id}"),
         ("DELETE", "/api/investigations/{investigation_id}"),

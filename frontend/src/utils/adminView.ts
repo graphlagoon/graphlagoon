@@ -96,7 +96,13 @@ export function isIdleUser(user: AdminUser): boolean {
 
 /** One-line human summary of an audit entry's metadata. */
 export function describeAudit(entry: AuditEntry): string {
-  const m = entry.metadata || {};
+  const agent = (entry.metadata?.agent as { name?: string } | undefined)?.name;
+  const body = describeAuditBody(entry);
+  return agent ? `${body} — via agent ${agent}` : body;
+}
+
+function describeAuditBody(entry: AuditEntry): string {
+  const { agent: _agent, ...m } = entry.metadata || {};
   switch (entry.action) {
     case 'context.transfer':
     case 'exploration.transfer':
@@ -126,6 +132,10 @@ export function describeAudit(entry: AuditEntry): string {
     case 'precomputed.delete':
     case 'preset.delete':
       return `${m.name ?? '?'}${m.provider ? ` via ${m.provider}` : ''}`;
+    case 'agent_token.create':
+      return `"${m.name ?? entry.resource_id}" (${Array.isArray(m.scopes) ? m.scopes.join(', ') : '?'})`;
+    case 'agent_token.revoke':
+      return `token ${entry.resource_id}${m.by_admin ? ' — by an admin' : ''}`;
     case 'admin.clear_all':
       return `cleared: ${Array.isArray(m.cleared) ? m.cleared.join(', ') : '?'}`;
     case 'group.create':

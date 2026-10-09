@@ -95,8 +95,8 @@ def client(superuser_env, store):
     app.include_router(explorations.router)
     app.include_router(config.router)
     app.include_router(investigations.router)
-    app.dependency_overrides[graph_contexts.get_warehouse] = (
-        lambda: _UnreachableWarehouse()
+    app.dependency_overrides[graph_contexts.get_warehouse] = lambda: (
+        _UnreachableWarehouse()
     )
     yield TestClient(app)
 
@@ -267,19 +267,48 @@ class TestConfigCarriesPermissions:
         assert payload["permissions"] == [
             "context.create",
             "exploration.save",
+            "investigation.agent",
             "investigation.create",
         ]
 
     def test_restricted_outsider_lacks_the_id(self, client, store):
         _restrict_context_create_to(store, MEMBER)
         payload = client.get("/api/config", headers=_headers(OUTSIDER)).json()
-        assert payload["permissions"] == ["exploration.save", "investigation.create"]
+        assert payload["permissions"] == [
+            "exploration.save",
+            "investigation.agent",
+            "investigation.create",
+        ]
         member_payload = client.get("/api/config", headers=_headers(MEMBER)).json()
         assert member_payload["permissions"] == [
             "context.create",
             "exploration.save",
+            "investigation.agent",
             "investigation.create",
         ]
+
+
+def test_agent_token_creation_is_gated(superuser_env, store, monkeypatch):
+    from graphlagoon.routers import agent_tokens
+
+    monkeypatch.setenv("GRAPH_LAGOON_AGENTS_ENABLED", "true")
+    get_settings.cache_clear()
+    app = FastAPI()
+    app.add_middleware(AuthMiddleware)
+    app.include_router(agent_tokens.router)
+    group = store.create_group("agents", members=[{"kind": "email", "value": MEMBER}])
+    store.set_permission(
+        "investigation.agent", "restricted", [{"group_id": group.id, "effect": "allow"}]
+    )
+    body = {"name": "claude", "scopes": ["read"]}
+    client = TestClient(app)
+    denied = client.post("/api/agent-tokens", json=body, headers=_headers(OUTSIDER))
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["error"]["details"]["permission"] == (
+        "investigation.agent"
+    )
+    ok = client.post("/api/agent-tokens", json=body, headers=_headers(MEMBER))
+    assert ok.status_code == 201, ok.text
 
 
 # ── Query scope: two tiers keyed on context.create ───────────────────────────
@@ -384,7 +413,7 @@ class TestReaderTierScope:
         response = _run_sql(
             query_client,
             reader_context.id,
-            "WITH picked AS (SELECT * FROM main.graphs.edges) " "SELECT * FROM picked",
+            "WITH picked AS (SELECT * FROM main.graphs.edges) SELECT * FROM picked",
             OUTSIDER,
         )
         assert _scope_error(response) is None, response.text
@@ -595,6 +624,6 @@ class TestPrefilterInsideOpaqueScript:
                 context,
                 OUTSIDER,
                 None,
-                "MY_FINAL_EDGES AS (SELECT * FROM __EDGES__ " "JOIN __NODES__ ON 1=1)",
+                "MY_FINAL_EDGES AS (SELECT * FROM __EDGES__ JOIN __NODES__ ON 1=1)",
             )
         )

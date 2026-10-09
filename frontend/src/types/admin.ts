@@ -102,6 +102,7 @@ export type AdminTab =
   | 'contexts'
   | 'explorations'
   | 'investigations'
+  | 'agents'
   | 'groups'
   | 'audit'
   | 'danger';
@@ -185,4 +186,16 @@ export interface PermissionInspection {
     reason: string;
     matched?: { effect: PermissionEffect; group_id: string; group_name: string } | null;
   }>;
+}
+
+/** Personal agent token (03-arquitetura §8.2); the secret is never listed. */
+export interface AgentToken {
+  id: string;
+  owner_email: string;
+  name: string;
+  scopes: string[];
+  created_at: string;
+  expires_at: string;
+  revoked_at?: string | null;
+  active: boolean;
 }

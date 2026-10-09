@@ -29,9 +29,12 @@ from graphlagoon.models.schemas import (
 from graphlagoon.services import audit
 from graphlagoon.services import investigations as service
 from graphlagoon.services.audit import AuditAction
-from graphlagoon.utils.authz import require_permission
+from graphlagoon.utils.authz import forbid_agents, require_permission
 
 router = APIRouter(prefix="/api/investigations", tags=["investigations"])
+
+# Human-only routes (03 §8.7) carry forbid_agents; every other route takes the
+# agent's scope from utils.authz.agent_guard (GET → read, writes → write).
 
 
 def _http(exc: service.InvestigationError) -> HTTPException:
@@ -107,7 +110,7 @@ async def update_investigation(
     return inv
 
 
-@router.delete("/{investigation_id}")
+@router.delete("/{investigation_id}", dependencies=[Depends(forbid_agents)])
 async def delete_investigation(
     investigation_id: UUID, request: Request, reason: Optional[str] = None
 ):
@@ -122,7 +125,7 @@ async def delete_investigation(
     return {"status": "deleted"}
 
 
-@router.post("/{investigation_id}/share")
+@router.post("/{investigation_id}/share", dependencies=[Depends(forbid_agents)])
 async def share_investigation(
     investigation_id: UUID, data: InvestigationShareRequest, request: Request
 ):
@@ -143,7 +146,9 @@ async def share_investigation(
     return {"status": "shared"}
 
 
-@router.delete("/{investigation_id}/share/{email}")
+@router.delete(
+    "/{investigation_id}/share/{email}", dependencies=[Depends(forbid_agents)]
+)
 async def unshare_investigation(investigation_id: UUID, email: str, request: Request):
     user_email = get_current_user(request)
     try:

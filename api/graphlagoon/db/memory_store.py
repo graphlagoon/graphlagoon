@@ -230,6 +230,9 @@ class MemoryInvestigationEvent:
     payload: Dict[str, Any] = field(default_factory=dict)
     prev_hash: Optional[str] = None
     at: datetime = field(default_factory=datetime.now)
+    actor_kind: str = "human"
+    agent_token_id: Optional[UUID] = None
+    agent_name: Optional[str] = None
 
 
 @dataclass
@@ -271,6 +274,18 @@ class MemoryEntityMatch:
     created_at: datetime = field(default_factory=datetime.now)
 
 
+@dataclass
+class MemoryAgentToken:
+    id: UUID
+    owner_email: str
+    name: str
+    token_hash: str
+    expires_at: datetime
+    scopes: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.now)
+    revoked_at: Optional[datetime] = None
+
+
 # Child tables of an investigation: table name -> dataclass. Each lives in the
 # store attribute of the same name, keyed by id; generic CRUD below serves all.
 INVESTIGATION_CHILDREN: Dict[str, type] = {
@@ -307,6 +322,7 @@ class InMemoryStore:
         self.investigation_notes: Dict[UUID, MemoryInvestigationNote] = {}
         self.investigation_evidence: Dict[UUID, MemoryInvestigationEvidence] = {}
         self.entity_matches: Dict[UUID, MemoryEntityMatch] = {}
+        self.agent_tokens: Dict[UUID, MemoryAgentToken] = {}
         # Audit trail, newest last. Bounded so a long-running dev server
         # cannot grow without limit; the admin area reads it newest first.
         self.usage_logs: Deque[MemoryUsageLog] = deque(maxlen=USAGE_LOG_MAX_ENTRIES)
@@ -905,6 +921,7 @@ class InMemoryStore:
         self.investigations.clear()
         for table in INVESTIGATION_CHILDREN:
             getattr(self, table).clear()
+        self.agent_tokens.clear()
         if not keep_usage_logs:
             self.usage_logs.clear()
 

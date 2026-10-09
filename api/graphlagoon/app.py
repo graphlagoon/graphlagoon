@@ -6,7 +6,7 @@ from typing import Optional
 import json
 import logging
 
-from fastapi import FastAPI, APIRouter, Request
+from fastapi import Depends, FastAPI, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -206,9 +206,12 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         query_templates,
         similarity,
         investigations,
+        agent_tokens,
     )
+    from graphlagoon.utils.authz import agent_guard
 
-    router = APIRouter()
+    # Scope check for agent tokens on every API route (03 §8.2).
+    router = APIRouter(dependencies=[Depends(agent_guard)])
     router.include_router(config.router)
     router.include_router(admin.router)
     router.include_router(admin_groups.router)
@@ -221,6 +224,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(catalog.router)
     router.include_router(similarity.router)
     router.include_router(investigations.router)
+    router.include_router(agent_tokens.router)
 
     return router
 

@@ -48,6 +48,8 @@ async def build_public_config(
         # Whether a hand-written BEGIN...END script may run on the raw-SQL
         # path — the editor offers to run one only when the server accepts it.
         "allow_raw_sql_scripts": settings.allow_raw_sql_scripts,
+        # Personal agent tokens (Bearer glt_…) and their admin list.
+        "agents_enabled": settings.agents_enabled,
         # Which backends this server can serve, and the named REST connections
         # (UI copy + operation flags only; transport and auth never leave the
         # process).

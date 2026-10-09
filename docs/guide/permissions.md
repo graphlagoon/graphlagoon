@@ -32,6 +32,7 @@ the default: **until an admin writes a rule, nothing changes for anyone.**
 | `context.create` | Creating graph contexts; browsing the warehouse catalog (listing catalogs/schemas/tables, table schema and preview, type discovery); and the **wide** query tier — see [Query scope](#query-scope) below. |
 | `exploration.save` | Saving or updating explorations. Exploring and querying stay open — this only gates persisting the result. |
 | `investigation.create` | Opening new [investigation](./investigations.md) cases. Working on a case someone shared with you or assigned to you stays open. |
+| `investigation.agent` | Creating personal agent tokens, so an AI agent can work on investigations with your access. Only when `GRAPH_LAGOON_AGENTS_ENABLED` is on. |
 
 ## Query scope
 

@@ -58,6 +58,14 @@ PERMISSIONS: tuple[Permission, ...] = (
             "with you stays open — this only gates creating one."
         ),
     ),
+    Permission(
+        id="investigation.agent",
+        label="Create agent tokens",
+        description=(
+            "Mint personal tokens that let an AI agent act on investigations "
+            "with your access. Only offered when agents are enabled."
+        ),
+    ),
 )
 
 PERMISSION_IDS: frozenset[str] = frozenset(p.id for p in PERMISSIONS)

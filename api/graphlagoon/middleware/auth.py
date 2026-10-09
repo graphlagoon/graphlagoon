@@ -2,8 +2,11 @@ from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable, Optional, Union
+from collections import deque
 from collections.abc import Awaitable
+from contextvars import ContextVar
 import inspect
+import time
 
 from graphlagoon.config import get_settings
 
@@ -49,6 +52,53 @@ def get_user_provider() -> Optional[UserProvider]:
     return _user_provider
 
 
+# The actor of the current request: None for a person, or
+# {"kind": "agent", "token_id", "name", "scopes", "owner_email"} for an agent
+# token. A ContextVar so services (journal, audit) can attribute writes
+# without threading the request through every call.
+_current_actor: ContextVar[Optional[dict]] = ContextVar(
+    "graphlagoon_actor", default=None
+)
+
+# token id -> monotonic timestamps of its requests in the last minute.
+# shortcut: per-process memory, so N workers allow N× the limit; move to a
+# shared store if the app runs with several workers.
+_agent_request_times: dict = {}
+
+
+def get_current_actor() -> Optional[dict]:
+    """The agent acting in this request, or None when a person is."""
+    return _current_actor.get()
+
+
+def _agent_rate_limited(token_id, limit_per_minute: int) -> bool:
+    now = time.monotonic()
+    window = _agent_request_times.setdefault(token_id, deque())
+    while window and now - window[0] >= 60:
+        window.popleft()
+    if len(window) >= limit_per_minute:
+        return True
+    window.append(now)
+    return False
+
+
+def _error(status_code: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": {"error": {"code": code, "message": message, "details": {}}}},
+    )
+
+
+def _bearer_agent_token(request: Request) -> Optional[str]:
+    from graphlagoon.services.agent_tokens import TOKEN_PREFIX
+
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    value = value.strip()
+    if scheme.lower() == "bearer" and value.startswith(TOKEN_PREFIX):
+        return value
+    return None
+
+
 # Headers to check for user email (in order of priority)
 EMAIL_HEADERS = [
     "x-forwarded-email",  # Used by Databricks proxy
@@ -85,6 +135,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         settings = get_settings()
+        _current_actor.set(None)
+
+        # An agent token wins over proxy headers: the agent acts *for* its
+        # owner, and every write must say so.
+        raw_token = _bearer_agent_token(request)
+        if raw_token is not None:
+            return await self._dispatch_agent(request, call_next, raw_token)
+
         user_email = None
 
         # First, try custom user provider if configured
@@ -138,6 +196,36 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         await touch_user(user_email)
 
+        return await call_next(request)
+
+    async def _dispatch_agent(self, request: Request, call_next, raw_token: str):
+        from graphlagoon.services.agent_tokens import resolve_token
+
+        settings = get_settings()
+        token = await resolve_token(raw_token) if settings.agents_enabled else None
+        if token is None:
+            return _error(
+                401,
+                "INVALID_AGENT_TOKEN",
+                "The agent token is invalid, expired or revoked.",
+            )
+        if _agent_rate_limited(token["id"], settings.agent_rate_limit_per_minute):
+            return _error(
+                429,
+                "AGENT_RATE_LIMITED",
+                f"Agent token limited to {settings.agent_rate_limit_per_minute} "
+                "requests per minute.",
+            )
+        actor = {
+            "kind": "agent",
+            "token_id": token["id"],
+            "name": token["name"],
+            "scopes": token["scopes"],
+            "owner_email": token["owner_email"],
+        }
+        request.state.user_email = token["owner_email"]
+        request.state.actor = actor
+        _current_actor.set(actor)
         return await call_next(request)
 
 

@@ -20,6 +20,7 @@ import type {
   AdminPermissionsResponse,
   AdminPermissionUpdate,
   AdminUserPage,
+  AgentToken,
   AuditPage,
   ClearEnvironmentResponse,
   PermissionInspection,
@@ -107,6 +108,8 @@ declare global {
        * opaque to both the SELECT-only validator and the table-scope check.
        */
       allow_raw_sql_scripts?: boolean;
+      /** Personal agent tokens (GRAPH_LAGOON_AGENTS_ENABLED). */
+      agents_enabled?: boolean;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
@@ -759,6 +762,15 @@ class ApiService {
       new_owner_email: newOwnerEmail,
     });
     return response.data;
+  }
+
+  async getAdminAgentTokens(): Promise<AgentToken[]> {
+    const response = await this.client.get('/api/admin/agent-tokens');
+    return response.data;
+  }
+
+  async revokeAgentTokenAsAdmin(tokenId: string): Promise<void> {
+    await this.client.delete(`/api/admin/agent-tokens/${tokenId}`);
   }
 
   async getAuditLog(

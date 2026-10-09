@@ -10790,3 +10790,62 @@ duas cenas novas geradas; `cd docs && npx vitepress build` passa.
 **Admin-Area Impact:** no admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 06:30] - Feature Implemented: FA.1 · Tokens de agente, escopos e ator no diário
+
+**Feature:** tokens pessoais de agente (`glt_` + 32 bytes base64url, só o sha256 é
+guardado, mostrado uma vez), escopos `read`/`analyze`/`write`/`propose`, Bearer no
+`AuthMiddleware`, `forbid_agents` nas rotas só humanas, limite de taxa por token,
+ator "agente X em nome de Y" no diário e na auditoria, lista e revogação no admin.
+
+**Design Decisions:**
+1. O middleware resolve `Authorization: Bearer glt_…` **antes** dos headers do proxy:
+   `request.state.user_email` = dono, `request.state.actor` = agente, e uma
+   `ContextVar` (`get_current_actor()`) para o diário e a auditoria gravarem o ator sem
+   passar o request por todos os serviços. Token desconhecido, expirado, revogado ou
+   `agents_enabled=false` → 401 `INVALID_AGENT_TOKEN`; acima do limite → 429.
+2. Escopo por padrão, para nenhuma rota nova ficar aberta: `agent_guard` é dependência
+   do `create_api_router`; GET exige `read`, o resto `write`. Uma rota declara outro
+   escopo com `require_agent_scope(...)` (marcador lido pelo guard) ou bloqueia com
+   `forbid_agents`. Rotas montadas sem o `create_api_router` não têm o guard.
+3. Só humanas hoje: `DELETE` do caso, share/unshare, todas as rotas de token
+   (`/api/agent-tokens`) e todo `/api/admin` e `/api/dev/clear-all`
+   (`require_superuser` chama `forbid_agents`, então o dono superuser não empresta o
+   poder ao agente). Decisão, aprovação, propostas e exportações entram com as suas
+   tarefas.
+4. Diário: colunas `actor_kind`, `agent_token_id`, `agent_name`; o agente entra no
+   hash do evento só quando existe (eventos humanos mantêm o formato anterior).
+   Auditoria: `metadata.agent = {token_id, name}`; o admin mostra "— via agent X".
+5. `shortcut:` limite de taxa em memória por processo (N workers ⇒ N× o limite);
+   evoluir para store compartilhado se o app rodar com vários workers.
+6. Fora do MVP: `last_used_at`, UI do usuário para criar token (só API; guia na
+   FA.7), auditoria de toda leitura do agente e aplicação de
+   `agents_allow_unmasked_data` (FA.4, nas ferramentas MCP), `PATCH` de status pelo
+   agente via proposta (FA.3). Seed sem tokens: agentes ficam desligados por padrão.
+
+**Files:** `api/graphlagoon/middleware/auth.py`, `utils/authz.py`,
+`services/agent_tokens.py` (novo), `routers/agent_tokens.py` (novo),
+`routers/admin.py`, `routers/admin_registry.py`, `routers/investigations.py`,
+`services/investigations.py`, `services/audit.py`, `services/permission_catalog.py`,
+`services/public_config.py`, `config.py`, `app.py`, `db/models.py`,
+`db/memory_store.py`, `alembic/versions/017_agents.py`, `models/schemas.py`;
+testes `test_agent_tokens.py` (novo), `test_permission_routes.py`, `test_admin.py`,
+`test_admin_registry.py`, `test_admin_groups.py`, `test_permissions.py`;
+`frontend/src/views/AdminView.vue`, `stores/admin.ts`, `services/api.ts`,
+`types/admin.ts`, `types/investigation.ts`, `utils/adminView.ts`,
+`views/InvestigationView.vue`, `views/__tests__/AdminView.logic.test.ts`.
+
+**Testing:** pytest `test_agent_tokens.py` (401 expirado/revogado, 403 em rota só
+humana com dono superuser, escopo, validade máxima, 429, admin, 404 desligado),
+registry, admin, permissões, auditoria e diário (186 verdes); vitest do AdminView e
+stores; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/configuration.md` (seção AI agents) e
+`docs/guide/permissions.md` (`investigation.agent`). **Admin-Area Impact:** aba
+"Agent tokens" (visível com `agents_enabled`), rotas
+`GET/DELETE /api/admin/agent-tokens`, tabela `agent_tokens` em `CLEARABLE_TABLES`,
+quatro settings em `CONFIG_FIELD_KINDS`, ações `agent_token.create|revoke`.
+
+**Author:** Claude (AI Assistant)

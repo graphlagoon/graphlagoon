@@ -115,6 +115,7 @@ def _valid_request_for(route: APIRoute):
         route.path.replace("{context_id}", placeholder)
         .replace("{exploration_id}", placeholder)
         .replace("{investigation_id}", placeholder)
+        .replace("{token_id}", placeholder)
     )
     body = None
     if path.endswith("/transfer"):
@@ -133,6 +134,8 @@ class TestGate:
     def test_expected_routes(self):
         found = sorted((next(iter(r.methods)), r.path) for r in _admin_routes())
         assert found == [
+            ("DELETE", "/api/admin/agent-tokens/{token_id}"),
+            ("GET", "/api/admin/agent-tokens"),
             ("GET", "/api/admin/audit"),
             ("GET", "/api/admin/config"),
             ("GET", "/api/admin/overview"),
