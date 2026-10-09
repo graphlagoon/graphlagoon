@@ -11454,3 +11454,15 @@ context); `test_investigation_files.py` (estranho ao caso: 404 na lista e no con
 **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 18:30] - Bug Fixed: F2.5 · Context de arquivo restrito para os outros membros do caso
+
+**Fix:** quem lê o caso lê o context `file` gerado nele (regra em
+`utils/context_access.py` → `reads_case_of_file_context`, checada na leitura, então vale
+para membros adicionados depois; sem compartilhamento copiado). O `GET
+/api/explorations/{id}` passa a cair no mesmo `get_context_with_access`. Fecha o
+`shortcut:` 8 da F2.5. Teste: `test_investigation_files.py::test_file_source_is_readable_by_case_members_added_later`.
+
+**Author:** Claude (AI Assistant)
