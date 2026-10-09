@@ -44,6 +44,11 @@ class AuditAction:
     GROUP_UPDATE = "group.update"
     GROUP_DELETE = "group.delete"
     PERMISSION_UPDATE = "permission.update"
+    INVESTIGATION_CREATE = "investigation.create"
+    INVESTIGATION_UPDATE = "investigation.update"
+    INVESTIGATION_DELETE = "investigation.delete"
+    INVESTIGATION_SHARE = "investigation.share"
+    INVESTIGATION_UNSHARE = "investigation.unshare"
 
     @classmethod
     def all(cls) -> list[str]:

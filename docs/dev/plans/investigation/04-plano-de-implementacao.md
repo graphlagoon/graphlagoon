@@ -25,7 +25,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 
 **F1 · Fundação**
 - [x] F1.1 · Modelos, migração 016 e paridade em memória
-- [ ] F1.2 · API de investigações: CRUD, compartilhamento nominal, permissões, auditoria
+- [x] F1.2 · API de investigações: CRUD, compartilhamento nominal, permissões, auditoria
 - [ ] F1.3 · Fontes: adicionar e remover explorações, com redação por acesso
 - [ ] F1.4 · Chaves de identidade no context (backend e aba no formulário)
 - [ ] F1.5 · Frontend: rotas, store, API, fila (T1), "Adicionar à investigação" (T3)
@@ -192,9 +192,9 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   5. As rotas mutáveis vão para `AUDITED_ROUTES`.
   6. O `DELETE` de caso com decisão registrada devolve 409 (retenção; ver F4.5).
 - **Aceite:**
-  - [ ] O dono, o responsável, quem tem share e o superuser veem o caso; os demais
+  - [x] O dono, o responsável, quem tem share e o superuser veem o caso; os demais
     levam 404.
-  - [ ] O share com curinga é recusado.
+  - [x] O share com curinga é recusado.
 - **Testes:**
   - novo `api/tests/test_investigations.py`;
   - casos de allow e deny em `test_permission_routes.py`;

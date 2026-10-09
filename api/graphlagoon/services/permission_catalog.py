@@ -50,6 +50,14 @@ PERMISSIONS: tuple[Permission, ...] = (
             "this only gates persisting the result."
         ),
     ),
+    Permission(
+        id="investigation.create",
+        label="Create investigations",
+        description=(
+            "Open new investigation cases. Working on a case someone shared "
+            "with you stays open — this only gates creating one."
+        ),
+    ),
 )
 
 PERMISSION_IDS: frozenset[str] = frozenset(p.id for p in PERMISSIONS)

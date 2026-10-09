@@ -205,6 +205,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         config,
         query_templates,
         similarity,
+        investigations,
     )
 
     router = APIRouter()
@@ -219,6 +220,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(style_presets.router)
     router.include_router(catalog.router)
     router.include_router(similarity.router)
+    router.include_router(investigations.router)
 
     return router
 

@@ -129,6 +129,11 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("PUT", "/api/admin/groups/{group_id}"),
         ("DELETE", "/api/admin/groups/{group_id}"),
         ("PUT", "/api/admin/permissions/{permission_id}"),
+        ("POST", "/api/investigations"),
+        ("PATCH", "/api/investigations/{investigation_id}"),
+        ("DELETE", "/api/investigations/{investigation_id}"),
+        ("POST", "/api/investigations/{investigation_id}/share"),
+        ("DELETE", "/api/investigations/{investigation_id}/share/{email}"),
     }
 )
 

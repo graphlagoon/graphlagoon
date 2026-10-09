@@ -41,7 +41,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 from graphlagoon.config import get_settings  # noqa: E402
 from graphlagoon.db.memory_store import InMemoryStore  # noqa: E402
 from graphlagoon.middleware.auth import AuthMiddleware  # noqa: E402
-from graphlagoon.routers import config, explorations, graph_contexts  # noqa: E402
+from graphlagoon.routers import (  # noqa: E402
+    config,
+    explorations,
+    graph_contexts,
+    investigations,
+)
 from graphlagoon.services.group_resolution import (  # noqa: E402
     StubGroupResolver,
     set_group_resolver,
@@ -89,6 +94,7 @@ def client(superuser_env, store):
     app.include_router(graph_contexts.router)
     app.include_router(explorations.router)
     app.include_router(config.router)
+    app.include_router(investigations.router)
     app.dependency_overrides[graph_contexts.get_warehouse] = (
         lambda: _UnreachableWarehouse()
     )
@@ -225,20 +231,54 @@ class TestDenyExplorationSave:
         assert response.status_code == 200, response.text
 
 
+class TestInvestigationCreate:
+    def _restrict(self, store):
+        group = store.create_group(
+            "analysts", members=[{"kind": "email", "value": MEMBER}]
+        )
+        store.set_permission(
+            "investigation.create",
+            "restricted",
+            [{"group_id": group.id, "effect": "allow"}],
+        )
+
+    def test_member_allowed(self, client, store):
+        self._restrict(store)
+        response = client.post(
+            "/api/investigations", json={"title": "c"}, headers=_headers(MEMBER)
+        )
+        assert response.status_code == 201, response.text
+
+    def test_outsider_denied(self, client, store):
+        self._restrict(store)
+        response = client.post(
+            "/api/investigations", json={"title": "c"}, headers=_headers(OUTSIDER)
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"]["details"]["permission"] == (
+            "investigation.create"
+        )
+
+
 class TestConfigCarriesPermissions:
     def test_superuser_gets_full_catalog(self, client, store):
         _restrict_context_create_to(store, MEMBER)
         payload = client.get("/api/config", headers=_headers(SUPERUSER)).json()
-        assert payload["permissions"] == ["context.create", "exploration.save"]
+        assert payload["permissions"] == [
+            "context.create",
+            "exploration.save",
+            "investigation.create",
+        ]
 
     def test_restricted_outsider_lacks_the_id(self, client, store):
         _restrict_context_create_to(store, MEMBER)
         payload = client.get("/api/config", headers=_headers(OUTSIDER)).json()
-        assert payload["permissions"] == ["exploration.save"]
+        assert payload["permissions"] == ["exploration.save", "investigation.create"]
         member_payload = client.get("/api/config", headers=_headers(MEMBER)).json()
         assert member_payload["permissions"] == [
             "context.create",
             "exploration.save",
+            "investigation.create",
         ]
 
 
