@@ -10308,3 +10308,66 @@ continua com as mesmas colunas).
 - Só o primeiro caractere é checado; `" =1+1"` não é prefixado.
 
 **Author:** Claude (AI Assistant)
+
+## [2026-10-09 22:00] - Feature Implemented: G3 · Sandbox dos cluster programs (#32)
+
+**Feature:** cluster programs saem da thread principal. Cada execução sobe um worker
+de módulo dedicado que remove rede, storage, mensageria e workers aninhados do escopo
+(`hardenScope` de `customMetricSandbox.ts`) antes de rodar o código, e a thread
+principal o encerra após 10 s (`CLUSTER_PROGRAM_TIMEOUT_MS`).
+
+**Requirements:** tarefa G3 de `docs/dev/plans/investigation/04-plano-de-implementacao.md`
+(tech debt #32; avança o C1 de `docs/dev/security-assessment.md`).
+
+**Design Decisions:**
+1. **Mesmo padrão do custom metric:** worker captura o próprio `postMessage`, despe o
+   escopo, responde `READY` e serve um `RUN`. Worker por execução, sem pool: sempre
+   terminado ao fim, então código do usuário não sobrevive em segundo plano.
+2. **Validação continua na thread principal** (`computeClustersFromProgram`), então
+   uma mensagem forjada não injeta cluster inválido. A função virou `async`; os dois
+   chamadores (`executeProgram`, `runClusterProgramAsCommunity`) passam a aguardar.
+3. **Snapshot clonável:** `toRaw` nos nós/arestas (proxies Vue não clonam). O helper
+   `metric(ref, id)` é reconstruído no worker (`clusterProgramEvaluate.ts`) com a mesma
+   semântica do `metricResolver` (id, depois nome no alvo; nó antes de aresta). Os
+   valores das métricas só são enviados quando o código menciona `metric`.
+4. **Resultado não clonável** (ex.: função) vira erro legível
+   `Program result cannot be transferred: …`.
+5. **Revisão da tentativa anterior (interrompida):** a implementação já estava no
+   working tree; revisada contra o padrão do custom metric e o `metricResolver`,
+   mantida sem mudanças de código.
+
+**Files Created:**
+- [frontend/src/workers/clusterProgramWorker.ts](frontend/src/workers/clusterProgramWorker.ts)
+- [frontend/src/workers/clusterProgramEvaluate.ts](frontend/src/workers/clusterProgramEvaluate.ts)
+- [frontend/src/services/clusterProgramRunner.ts](frontend/src/services/clusterProgramRunner.ts)
+- [frontend/src/__tests__/fixtures/inlineClusterProgramWorker.ts](frontend/src/__tests__/fixtures/inlineClusterProgramWorker.ts) (substituto em processo; o happy-dom não tem worker)
+- [frontend/src/services/__tests__/clusterProgramRunner.test.ts](frontend/src/services/__tests__/clusterProgramRunner.test.ts)
+- [frontend/src/workers/__tests__/clusterProgramEvaluate.test.ts](frontend/src/workers/__tests__/clusterProgramEvaluate.test.ts)
+
+**Files Modified:**
+- [frontend/src/stores/cluster.ts](frontend/src/stores/cluster.ts), [frontend/src/stores/community.ts](frontend/src/stores/community.ts)
+- [frontend/src/types/cluster.ts](frontend/src/types/cluster.ts) (snapshot, protocolo, timeout)
+- [frontend/src/utils/clusterProgramSkill.ts](frontend/src/utils/clusterProgramSkill.ts) (prompt de IA cita o sandbox e o limite)
+- [frontend/src/__tests__/setup.ts](frontend/src/__tests__/setup.ts), [frontend/src/stores/__tests__/cluster.test.ts](frontend/src/stores/__tests__/cluster.test.ts)
+- [docs/guide/clusters.md](docs/guide/clusters.md), [docs/dev/technical-debts.md](docs/dev/technical-debts.md) (#32 resolvido), [docs/dev/security-assessment.md](docs/dev/security-assessment.md) (C1 passo 6 parcial)
+
+**Testing:**
+- [x] vitest: `cluster.test.ts` (inclui timeout e os 3 programas padrão),
+  `clusterProgramRunner.test.ts`, `clusterProgramEvaluate.test.ts`,
+  `community.clusterProgram.test.ts`, `community.table.test.ts`: 126 verdes.
+- [x] `vue-tsc --noEmit` limpo.
+- [x] E2E com o worker real no Chromium: `graph.spec.ts` "a program run lands in the
+  Results tab…" e "deleting a cluster is undoable…", 2 passed.
+
+**Public Docs:** `docs/guide/clusters.md` explica o sandbox, o limite de 10 s e as
+duas mensagens de erro novas.
+
+**Admin-Area Impact:** no admin-area impact.
+
+**Assumptions:**
+- Nenhuma das decisões Q1–Q9 se aplica à G3.
+- Timeout fixo de 10 s, igual ao do custom metric; não virou setting.
+- Fora do escopo (C1 restante): CSP (#31/B1), confirmação de autor e propagação
+  silenciosa de programas para o context.
+
+**Author:** Claude (AI Assistant)

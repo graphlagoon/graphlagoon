@@ -1116,7 +1116,7 @@ The app sets no CSP. The custom-metric worker ([frontend/src/workers/customMetri
 
 ---
 
-### 32. 🟡 Cluster programs still run unsandboxed on the main thread
+### 32. ✅ Cluster programs still run unsandboxed on the main thread
 
 **Location:** [frontend/src/stores/cluster.ts](frontend/src/stores/cluster.ts) (`computeClustersFromProgram`, `new Function` on the main thread)
 
@@ -1126,6 +1126,8 @@ Custom metrics introduced a sandbox (dedicated worker, stripped scope, hard time
 **Recommendation:** Move cluster-program evaluation onto the custom-metric runner pattern (`services/customMetricRunner.ts` + `workers/customMetricSandbox.ts`), keeping the current output validation. Note cluster programs are also persisted per exploration, so the "only writers run writer code" argument does not fully apply to them — the sandbox matters more there, not less.
 
 **Effort:** Medium
+
+**Resolved (2026-10-09, plan task G3):** programs run in a dedicated, per-run module worker ([frontend/src/workers/clusterProgramWorker.ts](frontend/src/workers/clusterProgramWorker.ts)) that strips its scope with `hardenScope` from `customMetricSandbox.ts` before any user code runs; [frontend/src/services/clusterProgramRunner.ts](frontend/src/services/clusterProgramRunner.ts) terminates it after `CLUSTER_PROGRAM_TIMEOUT_MS` (10 s). Output validation stays on the main thread in `computeClustersFromProgram` (now async). `metric(ref, id)` is rebuilt in the worker from shipped values, only when the code mentions `metric`. Still open: a CSP behind it (#31).
 
 ---
 
@@ -1226,7 +1228,7 @@ The admin work made `get_current_user` consult the `configure_auth` provider (so
 | 29 | 🟢 Medium | Backend | Cypher binding-error wrapper can mask unrelated errors | Small |
 | 30 | 🟢 Medium | Backend | Dev-generator typeless columns lack automated tests (manually verified) | Small |
 | 31 | 🟡 High | Frontend/Backend | No CSP behind the custom-metric sandbox | Medium |
-| 32 | 🟡 High | Frontend | Cluster programs still run unsandboxed on the main thread | Medium |
+| 32 | ✅ Resolved (2026-10-09) | Frontend | Cluster programs still run unsandboxed on the main thread | Medium |
 | 33 | 🟢 Medium | Performance | Custom-metric snapshot cloned per recompute cycle | Medium |
 | 34 | 🟢 Medium | Frontend | `{metric:name}` first-match resolution on name collisions | Small |
 | 35 | 🟢 Medium | Backend | Admin DB-mode paths (counts, users, transfer, alembic_version) have no PostgreSQL test coverage | Small |

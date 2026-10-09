@@ -175,7 +175,7 @@ export const useCommunityStore = defineStore('community', () => {
    *
    * Branches on the selected algorithm:
    * - Louvain: serializes the graph and runs the dedicated worker.
-   * - Cluster program: runs the program synchronously (no worker) and converts
+   * - Cluster program: runs the program in its sandboxed worker and converts
    *   its Cluster[] output into the community map — WITHOUT creating collapsed
    *   cluster geometry.
    */
@@ -189,7 +189,7 @@ export const useCommunityStore = defineStore('community', () => {
 
     try {
       if (!isLouvain.value) {
-        runClusterProgramAsCommunity(selectedProgramId.value!)
+        await runClusterProgramAsCommunity(selectedProgramId.value!)
       } else {
         const graph = serializeGraph()
 
@@ -291,12 +291,12 @@ export const useCommunityStore = defineStore('community', () => {
    * Executes the program NON-mutatingly (no cluster geometry) and populates
    * communityMap from its output. Modularity is undefined for this path.
    */
-  function runClusterProgramAsCommunity(programId: string): void {
+  async function runClusterProgramAsCommunity(programId: string): Promise<void> {
     const clusterStore = useClusterStore()
     const graphStore = useGraphStore()
 
     ensureProgramParams(programId)
-    const result = clusterStore.computeClustersFromProgram(
+    const result = await clusterStore.computeClustersFromProgram(
       programId,
       programParams.value[programId]
     )
