@@ -11062,3 +11062,43 @@ rota do registry e ao marcar como só humana uma rota sem `forbid_agents`.
 **Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 12:30] - Feature Implemented: FA.5 · Ponte MCP local (stdio)
+
+**Feature:** `graphlagoon mcp-bridge --url <app> [--token glt_…]`, um servidor MCP
+stdio que repassa cada mensagem ao `/mcp` remoto (Streamable HTTP). CLI consertado:
+`graphlagoon` e `graphlagoon serve` sobem `graphlagoon.main:app` (antes `src.app:app`).
+
+**Design Decisions:**
+1. **Proxy de mensagens, não de ferramentas:** o bridge liga o `stdio_server` ao
+   `streamable_http_client` do SDK e bombeia `SessionMessage` nos dois sentidos.
+   Ferramentas, resources e prompts vêm do servidor sem duplicar nada; sai quando o
+   stdin fecha.
+2. **URL:** `--url` é a URL do app; acrescenta `/graphlagoon/mcp` se não terminar em
+   `/mcp`. Token por `--token` ou `GRAPHLAGOON_AGENT_TOKEN` (para `claude mcp add -e`).
+3. **Databricks:** com `databricks-sdk` instalado e um perfil que resolve
+   (`Config()`), o `Authorization` leva o OAuth do SDK (renovado a cada request) e o
+   `glt_` vai em `X-Graphlagoon-Agent-Token`, que o `AuthMiddleware` passou a aceitar.
+   Suposição não validada contra um proxy real do Databricks Apps: que ele repassa
+   esse cabeçalho.
+4. **Bug achado:** o `main.py` (o que o `make dev` roda) não delegava o lifespan do
+   app montado, então o `/mcp` respondia 500 ("Task group is not initialized") e as
+   migrações não rodavam no startup. Agora delega, como o `integration.md` manda.
+5. Fora do MVP: opção de desligar o OAuth, autenticação interativa, logs do bridge.
+
+**Files:** `api/graphlagoon/cli.py`, `api/graphlagoon/middleware/auth.py`,
+`api/graphlagoon/main.py`, `api/tests/test_cli.py` (novo), `docs/guide/configuration.md`.
+
+**Testing:** `test_cli.py` (serve aponta para o app empacotado; URL e cabeçalhos; o
+bridge com pipes em memória lista as ferramentas e cria um caso, com e sem o OAuth
+do Databricks) mais `test_mcp_server`, `test_agent_tokens`, `test_agent_registry`
+(18 verdes). Manual: `graphlagoon serve` + cliente stdio do SDK rodando
+`graphlagoon mcp-bridge --url http://localhost:8765` (lista ferramentas, cria caso).
+O `claude` CLI não está neste ambiente.
+
+**Public Docs:** `docs/guide/configuration.md` (AI agents: ponte local).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)

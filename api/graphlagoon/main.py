@@ -10,6 +10,7 @@ Run with:
 
 import os
 import random
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,8 +33,17 @@ if os.environ.get("DEBUGPY_ENABLE", "").lower() in ("1", "true"):
         debugpy.wait_for_client()
     print("Debugger attached!")
 
+
+# Starlette does not run a mounted sub-app's lifespan (migrations, the MCP
+# session manager); delegate it, as integration.md tells integrators to.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with graphlagoon_app.router.lifespan_context(graphlagoon_app):
+        yield
+
+
 # Host application — mirrors what an external integrator would write
-app = FastAPI(title="Graph Lagoon Host")
+app = FastAPI(title="Graph Lagoon Host", lifespan=lifespan)
 
 # CORS (dev-friendly defaults)
 app.add_middleware(

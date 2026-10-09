@@ -96,7 +96,10 @@ def _bearer_agent_token(request: Request) -> Optional[str]:
     value = value.strip()
     if scheme.lower() == "bearer" and value.startswith(TOKEN_PREFIX):
         return value
-    return None
+    # The mcp-bridge sends it here when Authorization carries the Databricks
+    # OAuth token that gets it through the Apps proxy (FA.5).
+    value = request.headers.get("x-graphlagoon-agent-token", "").strip()
+    return value if value.startswith(TOKEN_PREFIX) else None
 
 
 # Headers to check for user email (in order of priority)

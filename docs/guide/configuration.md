@@ -435,6 +435,21 @@ notes, sources and draft artifacts, and make proposals. There is no tool to
 decide, share, delete, approve an artifact or accept a proposal. Every read is
 recorded in the audit log (`agent.read`).
 
+When the agent cannot reach `/mcp` directly (the Databricks Apps proxy wants a
+Databricks login), run the local stdio bridge, which forwards every MCP message
+to the app:
+
+```bash
+claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
+  graphlagoon mcp-bridge --url https://<app>.databricksapps.com
+```
+
+`--url` takes the app URL (`/graphlagoon/mcp` is appended unless it already ends
+in `/mcp`); the token comes from `--token` or `GRAPHLAGOON_AGENT_TOKEN`. With
+`databricks-sdk` installed and a Databricks profile configured (`databricks auth
+login`), the bridge also sends your Databricks OAuth token to get through the
+proxy, and the agent token travels in `X-Graphlagoon-Agent-Token`.
+
 | Variable | Default | Notes |
 |---|---|---|
 | `GRAPH_LAGOON_AGENTS_ENABLED` | `false` | Off: the token routes return 404 and agent tokens are rejected. |

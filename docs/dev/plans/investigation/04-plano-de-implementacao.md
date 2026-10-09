@@ -39,7 +39,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] FA.2 · Armazenamento do caso no Volume e espaço de artefatos (T10)
 - [x] FA.3 · Propostas e aprovação humana (T11)
 - [x] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
-- [ ] FA.5 · Ponte MCP local (stdio) para apps atrás do proxy do Databricks
+- [x] FA.5 · Ponte MCP local (stdio) para apps atrás do proxy do Databricks
 - [x] FA.6 · Registry de cobertura AI-first (teste obrigatório)
 - [ ] FA.7 · Guia público de agentes, prompts MCP e E2E do agente
 
@@ -454,9 +454,9 @@ trabalho de análise e documentação; a pessoa decide.
   - processo stdio que expõe as mesmas ferramentas e repassa para a API do app usando
     o OAuth do Databricks CLI (`databricks-sdk`) ou um token `glt_`.
 - **Aceite:**
-  - [ ] `claude mcp add graphlagoon -- graphlagoon mcp-bridge --url http://localhost:8000`
+  - [x] `claude mcp add graphlagoon -- graphlagoon mcp-bridge --url http://localhost:8000`
     funciona contra o `make dev`.
-  - [ ] O guia documenta o uso com o Databricks.
+  - [x] O guia documenta o uso com o Databricks.
 - **Testes:** teste de smoke do CLI (não existe hoje).
 
 ### FA.6 · Registry de cobertura AI-first
