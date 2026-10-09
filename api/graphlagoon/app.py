@@ -48,6 +48,7 @@ from graphlagoon.services.datasource import (
     configure_datasources,
 )
 from graphlagoon.middleware.auth import AuthMiddleware, configure_auth, UserProvider
+from graphlagoon.mcp.server import mcp_lifespan, mount_mcp
 from graphlagoon.services.public_config import build_public_config
 
 # Configure logging
@@ -562,7 +563,8 @@ def create_mountable_app(
                 from graphlagoon.db.lakebase import start_lakebase_token_refresh
 
                 await start_lakebase_token_refresh()
-        yield
+        async with mcp_lifespan(app):
+            yield
         if settings.lakebase_enabled:
             from graphlagoon.db.lakebase import stop_lakebase_token_refresh
 
@@ -590,6 +592,7 @@ def create_mountable_app(
     # API routers
     api_router = create_api_router(settings)
     app.include_router(api_router)
+    mount_mcp(app, settings=settings)
 
     # Frontend router
     if include_frontend and TEMPLATES_DIR.exists():
@@ -728,7 +731,8 @@ def create_app(
         else:
             logger.info("Database disabled - running without persistence")
 
-        yield
+        async with mcp_lifespan(app):
+            yield
 
         # Shutdown
         logger.info("Shutting down Graph Lagoon Studio...")
@@ -780,6 +784,8 @@ def create_app(
     # Include API routers under /graphlagoon prefix
     api_router = create_api_router(settings)
     app.include_router(api_router, prefix="/graphlagoon")
+    # Before the frontend catch-all, which would answer GET /graphlagoon/mcp.
+    mount_mcp(app, "/graphlagoon", settings=settings)
 
     # Frontend router (must be last - catches all routes)
     if include_frontend and TEMPLATES_DIR.exists():
