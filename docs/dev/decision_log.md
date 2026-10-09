@@ -10965,3 +10965,66 @@ da T11, do workspace e do `ArtifactsSpace`; `vue-tsc` limpo; E2E
 rotas em `AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 11:00] - Feature Implemented: FA.4 · Servidor MCP em `/mcp`
+
+**Feature:** servidor MCP (SDK oficial `mcp`, extra opcional `mcp` no
+`pyproject.toml`) em `api/graphlagoon/mcp/server.py`, montado em
+`{api_prefix}/mcp` quando `agents_enabled`, com ferramentas de leitura
+(`list_investigations`, `get_investigation`, `get_graph`, `search_entities`,
+`get_entity`, `list_events`, `list_notes`, `list_artifacts`, `get_artifact`,
+`list_proposals`), escrita (`create_investigation`, `add_source`, `add_note`,
+`upload_artifact`) e `propose`, mais os resources `investigation://{id}/summary`
+e `investigation://{id}/events`.
+
+**Design Decisions:**
+1. **SDK 2.x:** o `FastMCP` virou `mcp.server.mcpserver.MCPServer` no `mcp` 2
+   (instalado 2.3.0); usamos ele e declaramos `mcp>=2.0` (extra `mcp`, `all` e
+   `dev`, para o teste rodar no CI). Sem o pacote, `mount_mcp` só avisa no log.
+2. **Transporte:** Streamable HTTP **stateless** com respostas JSON (sem sessão em
+   memória, funciona com vários workers). Rota exata `{prefix}/mcp` registrada antes
+   do catch-all do frontend; o `run()` do session manager entra no lifespan dos dois
+   apps (`mcp_lifespan`). Proteção de DNS rebinding desligada: autenticação é Bearer.
+3. **Diferença do plano:** o caminho é `/graphlagoon/mcp` no `create_app` (as rotas da
+   API vivem sob `/graphlagoon`), `/mcp` no `create_mountable_app`. A T11 passou a
+   mostrar a URL absoluta (antes saía relativa).
+4. **Identidade:** um endpoint ASGI aceita só token de agente (401 sem ele). Sob o
+   `AuthMiddleware` o token já vem resolvido e com limite de taxa; sem ele (app
+   montado) o endpoint resolve via `authenticate_agent` (extraído do middleware).
+   Cada ferramenta lê o ator do request, checa o escopo (`read`/`write`/`propose`),
+   põe o ator na `ContextVar` e chama o serviço como o dono: diário e auditoria saem
+   "agente X por Y". `create_investigation` checa `investigation.create`.
+5. **Mascaramento** (padrão, `agents_allow_unmasked_data=false`): CPF e CNPJ por
+   regex em qualquer string (`***.456.789-**`, `**.345.678/****-**`), campos com nome
+   de conta/agência (só os 2 últimos dígitos), e os valores de chave de identidade
+   `account` do caso (também dentro do id unificado). Um id mascarado que o agente
+   devolve (`get_entity`, nota ancorada, proposta de papel) volta ao id real
+   procurando no grafo do caso; ambíguo → erro. A busca compara o texto mascarado
+   (sem oráculo de CPF). Tudo sai em `{"untrusted_data": …}`.
+6. **Grafo do caso no servidor:** porte do `unifyGraph`/`identityKeys` do frontend
+   (fontes legíveis; restritas só contadas). `shortcut:` sem conflitos por
+   propriedade e sem fixture de paridade com o vitest; fazer na F3.8.
+7. Toda ferramenta de leitura grava `agent.read` na auditoria (com `tool` e o
+   agente), fechando o pendente da FA.1. `shortcut:` conteúdo binário de artefato sai
+   sem máscara.
+8. Fora do MVP: prompts (FA.7), `lookup_enrichment`/análises (F2/F3/F4), ferramenta
+   de editar título/descrição, tool annotations.
+
+**Files:** `api/graphlagoon/mcp/__init__.py`, `api/graphlagoon/mcp/server.py` (novos),
+`app.py`, `middleware/auth.py`, `services/audit.py`, `api/pyproject.toml`;
+`api/tests/test_mcp_server.py` (novo); `frontend/src/views/InvestigationAgentsView.vue`,
+`frontend/src/utils/adminView.ts`.
+
+**Testing:** `test_mcp_server.py` com o cliente do SDK via Streamable HTTP (httpx2
+ASGI): roteiro criar caso → fonte → grafo → nota → artefato → proposta de papel, tudo
+no diário como agente; CPF e conta mascarados e a proposta gravada com o id real;
+escopo `read` não escreve; sem token 401. Mais registry, tokens, auditoria,
+artefatos, propostas e investigações (72 verdes); vitest da T11.
+
+**Public Docs:** `docs/guide/configuration.md` (AI agents: endpoint MCP e comando
+`claude mcp add`). **Admin-Area Impact:** ação de auditoria `agent.read` (descrita no
+admin como "MCP <tool>"); sem rota, tabela ou setting novos.
+
+**Author:** Claude (AI Assistant)

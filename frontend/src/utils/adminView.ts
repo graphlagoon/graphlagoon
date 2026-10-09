@@ -134,6 +134,8 @@ function describeAuditBody(entry: AuditEntry): string {
       return `${m.name ?? '?'}${m.provider ? ` via ${m.provider}` : ''}`;
     case 'agent_token.create':
       return `"${m.name ?? entry.resource_id}" (${Array.isArray(m.scopes) ? m.scopes.join(', ') : '?'})`;
+    case 'agent.read':
+      return `MCP ${m.tool ?? '?'}`;
     case 'agent_token.revoke':
       return `token ${entry.resource_id}${m.by_admin ? ' — by an admin' : ''}`;
     case 'admin.clear_all':

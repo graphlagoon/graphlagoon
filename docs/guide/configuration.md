@@ -420,6 +420,21 @@ Personal agent tokens let an AI agent act on investigations with the access of
 the person who created the token (`Authorization: Bearer glt_…`). Off by
 default.
 
+With agents on and the `mcp` extra installed (`pip install "graphlagoon[mcp]"`),
+the app serves an MCP server (Streamable HTTP) at `{app URL}/graphlagoon/mcp`
+(`/mcp` under the mount prefix of `create_mountable_app`). It accepts agent
+tokens only:
+
+```bash
+claude mcp add --transport http graphlagoon http://localhost:8000/graphlagoon/mcp \
+  --header "Authorization: Bearer glt_…"
+```
+
+The tools read cases, the unified graph, the journal and the case space, write
+notes, sources and draft artifacts, and make proposals. There is no tool to
+decide, share, delete, approve an artifact or accept a proposal. Every read is
+recorded in the audit log (`agent.read`).
+
 | Variable | Default | Notes |
 |---|---|---|
 | `GRAPH_LAGOON_AGENTS_ENABLED` | `false` | Off: the token routes return 404 and agent tokens are rejected. |

@@ -54,6 +54,7 @@ class AuditAction:
     INVESTIGATION_TRANSFER = "investigation.transfer"
     AGENT_TOKEN_CREATE = "agent_token.create"
     AGENT_TOKEN_REVOKE = "agent_token.revoke"
+    AGENT_READ = "agent.read"  # every MCP read tool call (03 §8.6)
 
     @classmethod
     def all(cls) -> list[str]:
