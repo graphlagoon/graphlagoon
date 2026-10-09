@@ -10713,3 +10713,43 @@ verdes); vitest do `InvestigationView` e utils (1000 verdes); `vue-tsc` limpo; E
 em `AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 04:15] - Feature Implemented: F1.8 · Área admin e seed
+
+**Feature:** aba "Investigations" na área admin (todos os casos com dono, responsável,
+status, fontes e shares; abrir e transferir), contagem de casos no Overview,
+`describeAudit` para as ações `investigation.*` e casos de exemplo no seed.
+
+**Design Decisions:**
+1. A aba reusa `GET /api/investigations`, que já devolve tudo ao superuser (mesmo
+   padrão de contexts/explorations); filtro por texto e por dono.
+2. `POST /api/admin/investigations/{id}/transfer` (auditado como
+   `investigation.transfer`) chama `services.investigations.transfer_owner`: troca o
+   dono, remove o share redundante do novo dono e grava `case.transferred` no diário.
+   O dono anterior não guarda acesso implícito (igual às outras transferências).
+3. `AdminCounts.investigations` com padrão `0` (clientes antigos não quebram).
+4. Seed: até 4 casos, cada um de um usuário com explorações em 2+ contexts (até 3
+   fontes vivas), um share de escrita nominal, metade em análise e uma nota. Roda
+   antes das transferências de context do seed, que tirariam do dono o acesso às
+   próprias explorações. `shortcut:` as explorações do seed não têm snapshot, então
+   as fontes aparecem com o aviso "No saved graph" no workspace até alguém salvar.
+
+**Files:** `api/graphlagoon/routers/admin.py`, `services/investigations.py`,
+`services/audit.py`, `models/schemas.py`, `routers/admin_registry.py`,
+`dev/seed.py`, `api/tests/test_admin.py`, `api/tests/test_dev_seed.py`;
+`frontend/src/views/AdminView.vue`, `src/stores/admin.ts`, `src/services/api.ts`,
+`src/types/admin.ts`, `src/utils/adminView.ts`,
+`src/components/admin/TransferOwnershipModal.vue`,
+`src/views/__tests__/AdminView.logic.test.ts`.
+
+**Testing:** pytest `test_admin.py`, `test_admin_registry.py`, `test_audit.py`,
+`test_dev_seed.py` (100 verdes); vitest do AdminView e store admin (27); `vue-tsc`
+limpo; E2E `admin.spec.ts` verde.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** aba
+Investigations, contagem no Overview, rota de transferência em `AUDITED_ROUTES` e
+ação `investigation.transfer`.
+
+**Author:** Claude (AI Assistant)

@@ -206,6 +206,7 @@ class SeedStats:
     shares: int = 0
     deletes: int = 0
     transfers: int = 0
+    investigations: int = 0
     repaired: int = 0
     skipped: bool = False
 
@@ -358,6 +359,74 @@ class SeedClient:
                 f"{method} {path} as {user} → {response.status_code}: {response.text[:300]}"
             )
         return response
+
+
+CASES = [
+    ("Golpe Pix · falsa central", "Golpe Pix", "notificacao_med"),
+    ("Lojistas de fachada · região sul", "Lojista de fachada", "monitoramento"),
+    ("Contas laranja · abertura em lote", "Conta laranja", "monitoramento"),
+    ("Ofício judicial 2026/118", "Lavagem", "oficio"),
+]
+
+
+async def seed_investigations(
+    client: "SeedClient",
+    roster: list[SeedUser],
+    exploration_ids: list[tuple[str, str]],
+    exploration_ctx: dict[str, str],
+    rng: random.Random,
+) -> int:
+    """A few cases, each owned by a user with explorations in two or more
+    contexts, so every case unifies sources from different contexts."""
+    by_owner: dict[str, dict[str, str]] = {}  # owner -> {context id: exploration id}
+    for exp_id, owner in exploration_ids:
+        if exp_id in exploration_ctx:
+            by_owner.setdefault(owner, {}).setdefault(exploration_ctx[exp_id], exp_id)
+    owners = [o for o, per_ctx in by_owner.items() if len(per_ctx) >= 2]
+    created = 0
+    for (title, typology, origin), owner in zip(CASES, owners):
+        case = (
+            await client.request(
+                "POST",
+                "/api/investigations",
+                owner,
+                json={
+                    "title": title,
+                    "typology": typology,
+                    "origin": origin,
+                    "description": "Seeded case",
+                },
+            )
+        ).json()
+        for exp_id in list(by_owner[owner].values())[:3]:
+            await client.request(
+                "POST",
+                f"/api/investigations/{case['id']}/sources",
+                owner,
+                json={"kind": "exploration", "exploration_id": exp_id, "mode": "live"},
+            )
+        other = rng.choice([u for u in roster if u.email != owner])
+        await client.request(
+            "POST",
+            f"/api/investigations/{case['id']}/share",
+            owner,
+            json={"email": other.email, "permission": "write"},
+        )
+        if created % 2 == 0:
+            await client.request(
+                "PATCH",
+                f"/api/investigations/{case['id']}",
+                owner,
+                json={"status": "analise"},
+            )
+        await client.request(
+            "POST",
+            f"/api/investigations/{case['id']}/notes",
+            owner,
+            json={"body": "Seeded note: check the shared entities first."},
+        )
+        created += 1
+    return created
 
 
 async def run_seed(
@@ -565,6 +634,7 @@ async def run_seed(
         # Poisson-ish: a few contexts get many, most get a couple.
         weights = [rng.expovariate(1.0) + 0.2 for _ in seeded]
         exploration_ids: list[tuple[str, str]] = []  # (id, owner)
+        exploration_ctx: dict[str, str] = {}  # id -> context id
         node_cache: dict[str, list[dict[str, Any]]] = {}
 
         async def fetch_nodes(ctx: SeedContext) -> list[dict[str, Any]]:
@@ -619,6 +689,7 @@ async def run_seed(
                 )
             ).json()
             exploration_ids.append((created["id"], ctx.owner))
+            exploration_ctx[created["id"]] = ctx.id
             stats.explorations += 1
             if rng.random() < 0.3:
                 other = rng.choice([u for u in roster if u.email != ctx.owner])
@@ -640,7 +711,14 @@ async def run_seed(
             exploration_ids, k=min(len(exploration_ids), max(1, explorations // 20))
         ):
             await client.request("DELETE", f"/api/explorations/{exp_id}", owner)
+            exploration_ctx.pop(exp_id, None)
             stats.deletes += 1
+        # Investigations before the transfers below, which can take a context
+        # away from the owner of its explorations.
+        stats.investigations = await seed_investigations(
+            client, roster, exploration_ids, exploration_ctx, rng
+        )
+        log(f"investigations: {stats.investigations}")
         inactive = [u for u in roster if u.profile == "inactive"]
         transfer_targets = rng.sample(seeded, k=min(len(seeded), 3))
         for ctx in transfer_targets:

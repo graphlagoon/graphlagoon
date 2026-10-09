@@ -7,7 +7,7 @@ import { computed, ref, watch } from 'vue';
  */
 const props = defineProps<{
   open: boolean;
-  kind: 'context' | 'exploration';
+  kind: 'context' | 'exploration' | 'investigation';
   title: string;
   currentOwner: string;
   busy?: boolean;

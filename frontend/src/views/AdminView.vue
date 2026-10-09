@@ -23,6 +23,8 @@ import {
 } from '@/utils/adminView';
 import type { AdminTab } from '@/types/admin';
 import type { Exploration, GraphContext } from '@/types/graph';
+import type { Investigation } from '@/types/investigation';
+import { STATUS_LABELS } from '@/utils/investigationStatus';
 import { confirmAction } from '@/composables/useConfirm';
 
 /**
@@ -42,6 +44,7 @@ const TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'users', label: 'Users' },
   { id: 'contexts', label: 'Contexts' },
   { id: 'explorations', label: 'Explorations' },
+  { id: 'investigations', label: 'Investigations' },
   { id: 'groups', label: 'Groups & permissions' },
   { id: 'audit', label: 'Audit' },
   { id: 'danger', label: 'Danger zone' },
@@ -69,6 +72,9 @@ async function loadTab(id: AdminTab, force = false) {
       break;
     case 'explorations':
       await Promise.all([admin.fetchExplorations(), admin.fetchContexts(), admin.fetchUsers({ page_size: 200 })]);
+      break;
+    case 'investigations':
+      await Promise.all([admin.fetchInvestigations(), admin.fetchUsers({ page_size: 200 })]);
       break;
     case 'groups':
       // Users feed the member/inspector datalists; permissions feed the
@@ -143,6 +149,16 @@ const filteredExplorations = computed(() =>
   }),
 );
 
+const filteredInvestigations = computed(() => {
+  const owner = (ownerFilter.value || '').toLowerCase();
+  const q = resourceQuery.value.trim().toLowerCase();
+  return admin.investigations.filter(
+    (i) =>
+      (!owner || i.owner_email.toLowerCase() === owner) &&
+      (!q || [i.title, i.owner_email, i.assignee_email ?? '', i.typology ?? ''].join(' ').toLowerCase().includes(q)),
+  );
+});
+
 async function removeContext(ctx: GraphContext) {
   const ok = await confirmAction({
     title: `Delete context “${ctx.title}”?`,
@@ -169,19 +185,22 @@ async function removeExploration(exp: Exploration) {
 
 // --- Transfer ---------------------------------------------------------------
 
-const transferTarget = ref<{ kind: 'context' | 'exploration'; id: string; title: string; owner: string } | null>(null);
+type TransferKind = 'context' | 'exploration' | 'investigation';
+const transferTarget = ref<{ kind: TransferKind; id: string; title: string; owner: string } | null>(null);
 
-function openTransfer(kind: 'context' | 'exploration', item: GraphContext | Exploration) {
+function openTransfer(kind: TransferKind, item: GraphContext | Exploration | Investigation) {
   transferTarget.value = { kind, id: item.id, title: item.title, owner: item.owner_email };
 }
 
 async function confirmTransfer(newOwner: string) {
   const target = transferTarget.value;
   if (!target) return;
-  const ok =
-    target.kind === 'context'
-      ? await admin.transferContext(target.id, newOwner)
-      : await admin.transferExploration(target.id, newOwner);
+  const transfer = {
+    context: admin.transferContext,
+    exploration: admin.transferExploration,
+    investigation: admin.transferInvestigation,
+  }[target.kind];
+  const ok = await transfer(target.id, newOwner);
   if (ok) {
     toast.success(`"${target.title}" now belongs to ${newOwner}`);
     transferTarget.value = null;
@@ -331,6 +350,7 @@ function openGraph(id: string) {
               <div><span class="count">{{ admin.overview.counts.users }}</span><span>users</span></div>
               <div><span class="count">{{ admin.overview.counts.contexts }}</span><span>contexts</span></div>
               <div><span class="count">{{ admin.overview.counts.explorations }}</span><span>explorations</span></div>
+              <div><span class="count">{{ admin.overview.counts.investigations ?? 0 }}</span><span>investigations</span></div>
               <div><span class="count">{{ admin.overview.counts.query_templates }}</span><span>templates</span></div>
               <div><span class="count">{{ admin.overview.counts.audit_entries }}</span><span>audit entries</span></div>
             </div>
@@ -499,6 +519,38 @@ function openGraph(id: string) {
           <div class="list-item-actions">
             <button type="button" class="btn btn-secondary btn-sm" data-testid="admin-transfer-exploration-btn" @click="openTransfer('exploration', exp)">Transfer</button>
             <button type="button" class="btn btn-danger btn-sm" @click="removeExploration(exp)">Delete</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Investigations: a superuser sees every case and its owner -->
+    <section v-else-if="tab === 'investigations'" class="tab-panel" data-testid="admin-investigations">
+      <div class="search-bar card">
+        <input v-model="resourceQuery" type="text" class="form-control" placeholder="Search investigations…" />
+        <span v-if="ownerFilter" class="chip owner-chip">
+          owner: {{ ownerFilter }} <button type="button" class="chip-close" aria-label="Clear owner filter" @click="ownerFilter = null">&times;</button>
+        </span>
+        <span class="muted">{{ filteredInvestigations.length }} of {{ admin.investigations.length }}</span>
+      </div>
+      <div v-if="admin.loading.investigations && admin.investigations.length === 0" class="loading"></div>
+      <div v-else-if="filteredInvestigations.length === 0" class="empty-state card"><h3>No investigations</h3></div>
+      <div v-else class="card" data-testid="admin-investigations-list">
+        <div v-for="inv in filteredInvestigations" :key="inv.id" class="list-item" :data-investigation-id="inv.id">
+          <div class="list-item-content">
+            <div class="list-item-title">{{ inv.title }}</div>
+            <div class="list-item-subtitle">
+              owner <code>{{ inv.owner_email }}</code>
+              <template v-if="inv.assignee_email"> · assignee <code>{{ inv.assignee_email }}</code></template>
+              · {{ STATUS_LABELS[inv.status] ?? inv.status }}
+              · {{ inv.source_count ?? 0 }} sources
+              · {{ inv.shared_with?.length || 0 }} shares
+              · updated {{ formatRelative(inv.updated_at) }}
+            </div>
+          </div>
+          <div class="list-item-actions">
+            <button type="button" class="btn btn-outline btn-sm" @click="router.push(`/investigations/${inv.id}`)">Open</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-testid="admin-transfer-investigation-btn" @click="openTransfer('investigation', inv)">Transfer</button>
           </div>
         </div>
       </div>

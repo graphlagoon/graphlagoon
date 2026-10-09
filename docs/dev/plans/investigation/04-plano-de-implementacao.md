@@ -31,7 +31,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F1.5 · Frontend: rotas, store, API, fila (T1), "Adicionar à investigação" (T3)
 - [x] F1.6 · Grafo unificado e workspace (T2)
 - [x] F1.7 · Papéis, notas e diário (eventos)
-- [ ] F1.8 · Área admin e seed
+- [x] F1.8 · Área admin e seed
 - [ ] F1.9 · Docs públicas e E2E da fundação
 
 **FA · AI-first: agentes na investigação**
@@ -325,8 +325,8 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   - `graphlagoon/dev/seed.py`: 3 a 5 casos de exemplo com fontes de contexts
     diferentes.
 - **Aceite:**
-  - [ ] O superuser vê todos os casos e quem é dono de cada um.
-  - [ ] O `make dev` semeia casos.
+  - [x] O superuser vê todos os casos e quem é dono de cada um.
+  - [x] O `make dev` semeia casos.
 - **Testes:** `test_admin.py`, `test_dev_seed.py` e `test_admin_registry.py`.
 
 ### F1.9 · Docs públicas e E2E da fundação

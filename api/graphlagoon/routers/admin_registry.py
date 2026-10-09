@@ -123,6 +123,7 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("DELETE", "/api/graph-contexts/{context_id}/style-presets/{name}"),
         ("POST", "/api/admin/contexts/{context_id}/transfer"),
         ("POST", "/api/admin/explorations/{exploration_id}/transfer"),
+        ("POST", "/api/admin/investigations/{investigation_id}/transfer"),
         ("POST", "/api/admin/environment/clear"),
         ("DELETE", "/api/dev/clear-all"),
         ("POST", "/api/admin/groups"),

@@ -14,6 +14,7 @@ import type {
   ResolverStatus,
 } from '@/types/admin';
 import type { Exploration, GraphContext } from '@/types/graph';
+import type { Investigation } from '@/types/investigation';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 
@@ -32,6 +33,7 @@ export const useAdminStore = defineStore('admin', () => {
   const usersTotal = ref(0);
   const contexts = ref<GraphContext[]>([]);
   const explorations = ref<Exploration[]>([]);
+  const investigations = ref<Investigation[]>([]);
   const audit = ref<AuditEntry[]>([]);
   const auditTotal = ref(0);
   const auditActions = ref<string[]>([]);
@@ -88,6 +90,12 @@ export const useAdminStore = defineStore('admin', () => {
   async function fetchExplorations() {
     const result = await run('explorations', () => api.getAllExplorations(), 'Failed to load explorations');
     if (result) explorations.value = result;
+  }
+
+  /** The regular listing: a superuser already gets every case. */
+  async function fetchInvestigations() {
+    const result = await run('investigations', () => api.getInvestigations(), 'Failed to load investigations');
+    if (result) investigations.value = result;
   }
 
   async function fetchAudit(params: { page?: number; page_size?: number; user?: string; action?: string } = {}) {
@@ -207,6 +215,19 @@ export const useAdminStore = defineStore('admin', () => {
     return true;
   }
 
+  async function transferInvestigation(investigationId: string, newOwner: string): Promise<boolean> {
+    const result = await run(
+      'transfer',
+      () => api.transferInvestigationOwnership(investigationId, newOwner),
+      'Transfer failed',
+    );
+    if (!result) return false;
+    investigations.value = investigations.value.map((i) =>
+      i.id === investigationId ? { ...i, owner_email: result.owner_email } : i,
+    );
+    return true;
+  }
+
   async function deleteContext(contextId: string): Promise<boolean> {
     const ok = await run('delete', async () => (await api.deleteGraphContext(contextId), true), 'Delete failed');
     if (ok) contexts.value = contexts.value.filter((c) => c.id !== contextId);
@@ -228,6 +249,7 @@ export const useAdminStore = defineStore('admin', () => {
     if (!result) return false;
     contexts.value = [];
     explorations.value = [];
+    investigations.value = [];
     return true;
   }
 
@@ -239,6 +261,7 @@ export const useAdminStore = defineStore('admin', () => {
     usersTotal,
     contexts,
     explorations,
+    investigations,
     audit,
     auditTotal,
     auditActions,
@@ -254,6 +277,8 @@ export const useAdminStore = defineStore('admin', () => {
     fetchUsers,
     fetchContexts,
     fetchExplorations,
+    fetchInvestigations,
+    transferInvestigation,
     fetchAudit,
     fetchGroups,
     saveGroup,
