@@ -316,25 +316,43 @@ test.describe('Style presets', () => {
 });
 
 /**
- * The sphere/icon state of one node, read straight from graphData.
+ * The sphere/icon state of one node, read straight from graphData once the
+ * graph holding it is built and laid out.
  *
  * Deliberately not rendering-dependent: `color` and `__iconColor` are plain JS
  * state written by updateVisuals(), so these assertions hold identically on a
- * GPU and on CI's software renderer. The hook itself is dev-only, so its
- * absence means the suite is pointed at a production build — worth saying out
- * loud rather than failing later on `undefined.color`.
+ * GPU and on CI's software renderer.
+ *
+ * `__GRAPH_LAYOUT_DONE__` alone is not a readiness signal here: it turns true
+ * on the initial (empty) mount and stays true while a large fresh load empties
+ * the scene for its headless settle — on a slow runner that leaves seconds of
+ * "done" over an empty graph. Waiting for the node itself closes that window.
+ * The state is captured by the same poll that first sees the node, i.e. the
+ * earliest post-swap state, so a regression that only heals on a later camera
+ * idle still fails.
  */
-async function readVisualState(page: Page, nodeId: string) {
-  const state = await page.evaluate(
-    (id) => (window as any).__GRAPH_NODE_VISUAL_STATE__?.(id) ?? null,
-    nodeId,
-  );
-  expect(
-    state,
-    'no __GRAPH_NODE_VISUAL_STATE__ for the node: the graph never finished '
-      + 'building, or the app is a production build without the dev hook',
-  ).not.toBeNull();
-  return state as { color: string; iconColor?: string };
+async function waitForNodeVisualState(page: Page, nodeId: string) {
+  try {
+    const handle = await page.waitForFunction(
+      (id) => {
+        const w = window as any;
+        if (!w.__GRAPH_LAYOUT_DONE__?.()) return null;
+        return w.__GRAPH_NODE_VISUAL_STATE__?.(id) ?? null;
+      },
+      nodeId,
+      { timeout: 30_000 },
+    );
+    return (await handle.jsonValue()) as { color: string; iconColor?: string };
+  } catch (error) {
+    const hookInstalled = await page.evaluate(
+      () => typeof (window as any).__GRAPH_NODE_VISUAL_STATE__ === 'function',
+    );
+    throw new Error(
+      hookInstalled
+        ? `node ${nodeId} never appeared in a laid-out graph: ${error}`
+        : 'no __GRAPH_NODE_VISUAL_STATE__ hook: the app is a production build without the dev hooks',
+    );
+  }
 }
 
 /**
@@ -392,13 +410,9 @@ test.describe('Style presets — icons on first load', () => {
     await expect(page.getByTestId('graph-status-style')).toContainText('icones', {
       timeout: 20_000,
     });
-    await page.waitForFunction(() => (window as any).__GRAPH_LAYOUT_DONE__?.(), null, {
-      timeout: 30_000,
-    });
-
     // No camera move, no zoom: the sphere must already be transparent with the
     // appearance color handed to the icon billboard.
-    const state = await readVisualState(page, 'p1');
+    const state = await waitForNodeVisualState(page, 'p1');
     expect(state.color).toBe('rgba(0,0,0,0)');
     expect(state.iconColor).toBeTruthy();
   });
@@ -417,11 +431,7 @@ test.describe('Style presets — icons on first load', () => {
     await expect(page.getByTestId('graph-status-style')).toContainText('icones3d', {
       timeout: 20_000,
     });
-    await page.waitForFunction(() => (window as any).__GRAPH_LAYOUT_DONE__?.(), null, {
-      timeout: 30_000,
-    });
-
-    const state = await readVisualState(page, 'p1');
+    const state = await waitForNodeVisualState(page, 'p1');
     expect(state.color).toBe('rgba(0,0,0,0)');
     expect(state.iconColor).toBeTruthy();
   });
