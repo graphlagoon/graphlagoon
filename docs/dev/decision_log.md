@@ -9705,6 +9705,76 @@ No public docs impact. No admin-area impact.
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-09-15 14:10] - Avaliação: subir o app fora do Databricks Apps (comunicando com Databricks)
+
+**Tipo:** Fase 1 do skill_feature_creation — avaliação de viabilidade, sem código.
+
+**Pergunta:** hoje, é possível hospedar o Graph Lagoon fora do runtime de Databricks Apps
+(VM/container/k8s próprio) e ainda falar com o Databricks?
+
+**Resposta curta:** Sim para *tudo que fala com o Databricks*; **não** para *quem é o usuário*.
+O único bloqueador real é identidade: não existe login embutido. Tudo o mais já é agnóstico ao
+runtime. Além disso o entrypoint standalone documentado está quebrado.
+
+**O que já funciona fora (verificado no código):**
+
+| Camada | Estado | Evidência |
+|---|---|---|
+| Warehouse SQL (PAT) | pronto | `config.py:116`, `Settings.warehouse_headers` (`config.py:378-385`) |
+| Warehouse SQL (OAuth M2M) | pronto | `services/databricks_oauth.py:129-135` lê `DATABRICKS_HOST/CLIENT_ID/CLIENT_SECRET` do ambiente — nada é exclusivo do runtime de Apps; basta criar um service principal + OAuth secret e exportar as três vars |
+| Rodar localmente contra Databricks | já existe | `Makefile:206` (`make dev-databricks`) sobe `uvicorn graphlagoon.main:app` contra o workspace |
+| Volumes (snapshots / precomputed / style presets) | pronto | `services/snapshot.py:327+`, `services/named_store.py:51-83` — Files API por HTTPS com o mesmo token |
+| Grupos / SCIM | pronto | `services/group_resolution.py:85-130` — aceita `header_provider` ou PAT |
+| Persistência Postgres externo | pronto | `database_enabled` + `database_url` |
+| Persistência Lakebase | funciona, com ressalvas | `db/lakebase.py:40` usa `WorkspaceClient()` (cadeia de auth padrão do SDK, funciona fora); porém `:94` cai em `current_user.me()` quando não há `DATABRICKS_CLIENT_ID`, e a instância precisa ser alcançável pela rede de fora |
+
+**Bloqueador — identidade do usuário final:**
+`middleware/auth.py:57-123` resolve identidade de `X-Forwarded-Email`, cabeçalho que o proxy do
+Databricks injeta. Fora dele há exatamente dois caminhos suportados:
+(a) **proxy autenticador na frente** (oauth2-proxy, ALB+OIDC, Cloudflare Access, nginx auth_request)
+que injete o cabeçalho, com o app acessível *somente* através dele; ou
+(b) **`configure_auth(user_provider=...)`** (`middleware/auth.py:21-46`) num host app próprio,
+validando o próprio token OIDC — é o caminho do `integration.md`.
+Não existe tela de login real: `dev_mode=true` transforma qualquer request anônimo em
+`dev@graphlagoon.local` e o frontend manda o e-mail digitado do localStorage
+(`frontend/src/services/api.ts:148-153`, só em devMode) — ou seja, qualquer um se declara
+superuser. Com `dev_mode=false` o frontend para de mandar o cabeçalho e tudo vira 403 sem proxy.
+`docs/dev/security-assessment.md` §2 documenta explicitamente a premissa "nunca exposto na
+internet, sempre atrás do proxy" — sair do Databricks Apps é sair dessa premissa.
+
+**Achados colaterais (paper cuts no caminho standalone, reproduzidos):**
+1. `graphlagoon serve` (documentado em `docs/guide/getting-started.md:40`) →
+   `error: unrecognized arguments: serve` — o CLI não tem subcomando.
+2. `graphlagoon` → `ModuleNotFoundError: No module named 'src'` — `cli.py:37` ainda aponta para
+   `src.app:app`, caminho anterior à reorganização do repo. O entrypoint do wheel está morto;
+   hoje só dá para subir via `uvicorn graphlagoon.main:app` ou host app próprio.
+3. Sem cobertura de teste do CLI (`api/tests` não tem `test_cli*`), por isso passou despercebido.
+
+**Checklist de hardening que o deploy de fora exige (hoje manual):**
+- `GRAPH_LAGOON_DEV_MODE=false` (desliga identidade anônima e `/api/dev/clear-all`,
+  `routers/graph.py:891,928`)
+- `GRAPH_LAGOON_SHOW_ERROR_DETAILS=false`
+- CORS: hoje `*` + `allow_credentials=True` em `main.py:39-45` e default de `app.py:751-759`
+- Postgres externo não força SSL (`db/database.py:57-66`) — relevante ao sair da rede privada
+- C1 do security assessment (cluster programs em `new Function`, `frontend/src/stores/cluster.ts:324`)
+  piora com base de usuários maior
+
+**Decisão:** viável. Trabalho para tornar suportável, em ordem:
+1. consertar o CLI (`graphlagoon serve` + `graphlagoon.main:app`) + teste de smoke — pequeno;
+2. guia público "self-hosted / fora do Databricks" com o requisito de proxy, matriz de env e o
+   checklist de hardening — médio;
+3. opcional: tornar a confiança no `X-Forwarded-Email` explícita (allowlist de proxy /
+   flag dedicada em vez de depender de `dev_mode`), CORS default-deny, SSL obrigatório no
+   Postgres externo.
+
+**Public Docs:** nenhuma alteração ainda — esta entrada é avaliação. Os itens 2 e 3 acima, se
+executados, exigem página nova em `docs/guide/` + sidebar.
+
+**Admin-Area Impact:** nenhum (nenhum setting, tabela ou rota criada).
+
+**Author:** Claude (AI Assistant)
+
+---
 ## [2026-10-09 11:20] - Feature Implemented: links de app nas ações "Open URL" (vscode://, claude-cli://, …)
 
 **Feature:** a ação de menu de contexto *Open URL* aceitava só `http(s)://`. Agora aceita
