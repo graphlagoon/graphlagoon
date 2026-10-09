@@ -170,17 +170,26 @@ async def list_investigations(
     status: Optional[str] = None,
     assignee: Optional[str] = None,
     typology: Optional[str] = None,
+    exploration_id: Optional[UUID] = None,
 ) -> list[dict]:
+    """``exploration_id``: only cases that have that exploration as a source."""
     filters = {"status": status, "assignee_email": assignee, "typology": typology}
     filters = {k: v for k, v in filters.items() if v is not None}
 
     async with _session() as session:
         if session is None:
+            store = get_memory_store()
+            with_exp = {
+                s.investigation_id
+                for s in store.investigation_sources.values()
+                if s.exploration_id == exploration_id
+            }
             rows = [
                 inv
-                for inv in get_memory_store().list_investigations()
+                for inv in store.list_investigations()
                 if can_read_case(inv, user_email)
                 and all(getattr(inv, k) == v for k, v in filters.items())
+                and (exploration_id is None or inv.id in with_exp)
             ]
         else:
             from sqlalchemy import or_, select
@@ -203,6 +212,16 @@ async def list_investigations(
                 )
             for key, value in filters.items():
                 query = query.where(getattr(Investigation, key) == value)
+            if exploration_id is not None:
+                from graphlagoon.db.models import InvestigationSource
+
+                query = query.where(
+                    Investigation.id.in_(
+                        select(InvestigationSource.investigation_id).where(
+                            InvestigationSource.exploration_id == exploration_id
+                        )
+                    )
+                )
             result = await session.execute(
                 query.order_by(Investigation.updated_at.desc())
             )

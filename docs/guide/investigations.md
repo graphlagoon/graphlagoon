@@ -125,6 +125,10 @@ same device).
   removed, roles and notes. Entries cannot be edited or deleted, and each one
   is chained to the previous by a hash, so a gap or a rewrite is detectable.
   Deleting a note keeps its text in the journal.
+- **Metrics as properties.** In the explorer, *Save as property* on a computed
+  node metric (Metrics panel) writes its values into the node properties and
+  saves them in the exploration's snapshot. Every case that has the exploration
+  as a source gets a journal entry naming the metric and the property.
 
 ## Case files
 
@@ -223,7 +227,8 @@ ready-made prompts are in [AI Agents (MCP)](./agents-mcp.md).
   LC 105/01) requires need-to-know access.
 - **Restricted sources.** If a case includes an exploration from a context
   you can't read, you see a locked placeholder with the context name and its
-  owner (to ask for access), and none of its nodes.
+  owner (to ask for access), and none of its nodes. A graph generated from a
+  case file is readable by everyone who reads the case.
 
 ## Admin area
 

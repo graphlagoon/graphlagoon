@@ -48,6 +48,7 @@ import {
   type StepResult,
 } from '@/composables/useCancellableQuery';
 import type { QueryMetadata, GraphJobStatusResponse, GraphResponse } from '@/types/graph';
+import type { ComputedMetric } from '@/types/metrics';
 
 /**
  * Investigation workspace (F1.6): the graph is a union of sources from several
@@ -2621,6 +2622,41 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  /**
+   * "Save as property" (investigations F2.7): writes a node metric's values into the
+   * node properties, saves the open exploration's snapshot and journals
+   * `metric.saved` in every case (with write access) that has it as a source.
+   * Without an open writable exploration the values only live until the next save.
+   */
+  async function saveMetricAsProperty(
+    metric: ComputedMetric,
+  ): Promise<{ nodes: number; persisted: boolean; cases: number }> {
+    const property = metric.name;
+    const patch = new Map<string, Record<string, unknown>>();
+    for (const n of nodes.value) {
+      if (metric.values.has(n.node_id)) patch.set(n.node_id, { [property]: metric.values.get(n.node_id) });
+    }
+    patchNodeProperties(patch, { clearPending: false, merge: true });
+
+    const exp = currentExploration.value;
+    if (!exp?.has_write_access || patch.size === 0) return { nodes: patch.size, persisted: false, cases: 0 };
+    currentExploration.value = await api.updateExploration(exp.id, { snapshot: buildGraphSnapshot() });
+
+    const cases = (await api.getInvestigations({ exploration_id: exp.id })).filter(
+      (c) => c.has_write_access && c.status !== 'decidido',
+    );
+    const payload = {
+      metric: metric.name,
+      algorithm: metric.algorithmId,
+      property,
+      nodes: patch.size,
+      exploration_id: exp.id,
+      exploration_title: exp.title,
+    };
+    await Promise.all(cases.map((c) => api.postInvestigationEvent(c.id, 'metric.saved', payload)));
+    return { nodes: patch.size, persisted: true, cases: cases.length };
+  }
+
   async function loadExploration(explorationId: string) {
     loading.value = true;
     error.value = null;
@@ -2864,6 +2900,7 @@ export const useGraphStore = defineStore('graph', () => {
     supportsSubgraph,
     shouldLoadProgressively,
     patchNodeProperties,
+    saveMetricAsProperty,
     enrichNodeProperties,
     prioritizeNodeProperties,
     executeGraphQuery,
