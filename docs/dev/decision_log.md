@@ -11028,3 +11028,37 @@ artefatos, propostas e investigações (72 verdes); vitest da T11.
 admin como "MCP <tool>"); sem rota, tabela ou setting novos.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 11:45] - Feature Implemented: FA.6 · Registry de cobertura AI-first
+
+**Feature:** `api/graphlagoon/mcp/registry.py` com `AGENT_TOOL_ROUTES` (rota →
+ferramenta MCP) e `AGENT_EXEMPT_ROUTES` (rota → motivo), e
+`api/tests/test_agent_registry.py`, que torna obrigatória a regra AI-first para
+F2–F4.
+
+**Design Decisions:**
+1. Chave `(método, caminho)`, como o `AUDIT_EXEMPT_ROUTES` do admin. Motivo que
+   começa com `human-only:` marca rota só humana; os demais são exceções com
+   justificativa (PATCH do caso e do `state` → `propose`; `POST …/events` são
+   análises do cliente; remover fonte, editar e apagar nota ficam com pessoas).
+2. Cobertos: `routers/investigations.py` e `/api/agent-tokens` (criar/revogar token é
+   só humano, 03 §8.7). As rotas de enriquecimento entram em `COVERED_ROUTERS` na F2.1.
+3. O teste falha quando: rota sem ferramenta nem motivo, entrada de rota que não
+   existe mais, ferramenta registrada que o servidor MCP não tem, ferramenta com nome
+   de ação só humana (delete/share/approve/accept/…), rota só humana sem
+   `forbid_agents` ou rota com `forbid_agents` não registrada como só humana, e — ao
+   vivo — rota só humana que não devolve 403 `AGENT_FORBIDDEN` a um token com todos
+   os escopos de um superusuário.
+4. Decisão e exportações oficiais (`format=siscoaf|simba`) entram como só humanas
+   quando a F4.5/F4.6 criarem as rotas.
+
+**Files:** `api/graphlagoon/mcp/registry.py`, `api/tests/test_agent_registry.py` (novos).
+
+**Testing:** `test_agent_registry.py` (4 verdes); conferido que falha ao tirar uma
+rota do registry e ao marcar como só humana uma rota sem `forbid_agents`.
+
+**Public Docs:** No public docs impact. **Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
