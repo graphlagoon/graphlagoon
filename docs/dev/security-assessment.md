@@ -437,7 +437,7 @@ parsing é *onde* se pode ler; o que ela não consegue garantir por parsing é
 ou, no futuro, da identidade (OBO).
 
 ### Fase 2 — Hardening estrutural (próximo ciclo)
-6. **C1 (definitivo)** — mover `new Function` para Web Worker isolado (sem DOM, `connect-src 'none'`, timeout) e adotar CSP real (**B1**).
+6. **C1 (definitivo)** — mover `new Function` para Web Worker isolado (sem DOM, `connect-src 'none'`, timeout) e adotar CSP real (**B1**). *(2026-10-09, G3: Worker isolado com escopo despido e timeout de 10 s feito, `workers/clusterProgramWorker.ts`; falta a CSP, B1 / tech debt #31.)*
 7. **A5** — reduzir escopo OAuth; grants read-only no SP restritos aos catálogos visualizados.
 8. **M1** — checagem de acesso em `GET /graph-contexts/{id}`.
 9. **M2** — `show_error_details=False` default + id de correlação; corrigir ordem de middleware.

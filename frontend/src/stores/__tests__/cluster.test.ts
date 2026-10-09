@@ -7,6 +7,8 @@ import { createComputedMetric } from '@/__tests__/fixtures/metrics'
 import { api } from '@/services/api'
 import type { GraphContext } from '@/types/graph'
 import type { ClusterProgram } from '@/types/cluster'
+import { setClusterProgramWorkerFactory } from '@/services/clusterProgramRunner'
+import { InlineClusterProgramWorker } from '@/__tests__/fixtures/inlineClusterProgramWorker'
 
 function makeContext(overrides: Partial<GraphContext> = {}): GraphContext {
   return {
@@ -351,7 +353,7 @@ describe('cluster store', () => {
   // ==========================================================================
 
   describe('computeClustersFromProgram', () => {
-    it('returns clusters WITHOUT mutating the store', () => {
+    it('returns clusters WITHOUT mutating the store', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       const prog = store.createProgram({
@@ -359,7 +361,7 @@ describe('cluster store', () => {
         code: `return [{ cluster_name: 'C', node_ids: ['n1', 'n2'] }]`,
       })
 
-      const result = store.computeClustersFromProgram(prog.program_id)
+      const result = await store.computeClustersFromProgram(prog.program_id)
 
       expect(result.success).toBe(true)
       expect(result.clusters).toHaveLength(1)
@@ -369,7 +371,7 @@ describe('cluster store', () => {
       expect(store.getExecutionHistory(prog.program_id)).toHaveLength(0)
     })
 
-    it('tags returned clusters with source_program_id', () => {
+    it('tags returned clusters with source_program_id', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       const prog = store.createProgram({
@@ -377,11 +379,11 @@ describe('cluster store', () => {
         code: `return [{ cluster_name: 'C', node_ids: ['n1'] }]`,
       })
 
-      const result = store.computeClustersFromProgram(prog.program_id)
+      const result = await store.computeClustersFromProgram(prog.program_id)
       expect(result.clusters?.[0].source_program_id).toBe(prog.program_id)
     })
 
-    it('returns failure (not throw) on invalid output, without mutating', () => {
+    it('returns failure (not throw) on invalid output, without mutating', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       const prog = store.createProgram({
@@ -389,15 +391,15 @@ describe('cluster store', () => {
         code: `return [{ node_ids: ['n1'] }]`,
       })
 
-      const result = store.computeClustersFromProgram(prog.program_id)
+      const result = await store.computeClustersFromProgram(prog.program_id)
       expect(result.success).toBe(false)
       expect(result.error).toContain('cluster_name')
       expect(store.clusters).toHaveLength(0)
     })
 
-    it('returns error for nonexistent program', () => {
+    it('returns error for nonexistent program', async () => {
       const store = useClusterStore()
-      const result = store.computeClustersFromProgram('nonexistent')
+      const result = await store.computeClustersFromProgram('nonexistent')
       expect(result.success).toBe(false)
       expect(result.error).toContain('not found')
     })
@@ -420,12 +422,12 @@ describe('cluster store', () => {
       })
     }
 
-    it('injects provided param values into the code as params.<id>', () => {
+    it('injects provided param values into the code as params.<id>', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       const prog = createParamProgram(store)
 
-      const result = store.computeClustersFromProgram(prog.program_id, {
+      const result = await store.computeClustersFromProgram(prog.program_id, {
         suffix: 'custom',
         count: 7,
       })
@@ -433,7 +435,7 @@ describe('cluster store', () => {
       expect(result.clusters?.[0].cluster_name).toBe('prefix-custom-7')
     })
 
-    it('number params arrive as real numbers (not strings)', () => {
+    it('number params arrive as real numbers (not strings)', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       const prog = store.createProgram({
@@ -442,21 +444,21 @@ describe('cluster store', () => {
         parameters: [{ id: 'count', type: 'number', default: 1, required: true }],
       })
 
-      const result = store.computeClustersFromProgram(prog.program_id, { count: '5' })
+      const result = await store.computeClustersFromProgram(prog.program_id, { count: '5' })
       expect(result.clusters?.[0].cluster_name).toBe('number')
     })
 
-    it('uses declared defaults when no values passed', () => {
+    it('uses declared defaults when no values passed', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       const prog = createParamProgram(store)
 
-      const result = store.computeClustersFromProgram(prog.program_id)
+      const result = await store.computeClustersFromProgram(prog.program_id)
       expect(result.success).toBe(true)
       expect(result.clusters?.[0].cluster_name).toBe('prefix-default-1')
     })
 
-    it('fails without throwing when a required param has no value or default', () => {
+    it('fails without throwing when a required param has no value or default', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       const prog = store.createProgram({
@@ -465,7 +467,7 @@ describe('cluster store', () => {
         parameters: [{ id: 'req', type: 'text', required: true }],
       })
 
-      const result = store.computeClustersFromProgram(prog.program_id)
+      const result = await store.computeClustersFromProgram(prog.program_id)
       expect(result.success).toBe(false)
       expect(result.error).toContain('Missing required parameter: req')
       expect(store.clusters).toHaveLength(0)
@@ -517,11 +519,11 @@ describe('cluster store', () => {
     describe('default BFS program', () => {
       // Graph: n1(Person)—n2(Person), n1—n3(Company), n3—n4(Company)
 
-      it('returns a SINGLE cluster with root + reached nodes by default', () => {
+      it('returns a SINGLE cluster with root + reached nodes by default', async () => {
         setupGraphForCluster()
         const store = useClusterStore()
 
-        const result = store.computeClustersFromProgram('default-bfs-from-node', {
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', {
           start_node_id: 'n1',
           depth: '2',
         })
@@ -533,11 +535,11 @@ describe('cluster store', () => {
         expect(new Set(cluster.node_ids)).toEqual(new Set(['n1', 'n2', 'n3', 'n4']))
       })
 
-      it('group_by_level=true clusters nodes by BFS level (start + one ring per depth)', () => {
+      it('group_by_level=true clusters nodes by BFS level (start + one ring per depth)', async () => {
         setupGraphForCluster()
         const store = useClusterStore()
 
-        const result = store.computeClustersFromProgram('default-bfs-from-node', {
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', {
           start_node_id: 'n1',
           depth: '2',
           group_by_level: true,
@@ -555,11 +557,11 @@ describe('cluster store', () => {
         expect(clusters[2].node_ids).toEqual(['n4'])
       })
 
-      it('depth 1 stops after the first level', () => {
+      it('depth 1 stops after the first level', async () => {
         setupGraphForCluster()
         const store = useClusterStore()
 
-        const result = store.computeClustersFromProgram('default-bfs-from-node', {
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', {
           start_node_id: 'n1',
           depth: '1',
         })
@@ -570,11 +572,11 @@ describe('cluster store', () => {
         expect(ids).not.toContain('n4')
       })
 
-      it('uses the default depth (3) when not provided', () => {
+      it('uses the default depth (3) when not provided', async () => {
         setupGraphForCluster()
         const store = useClusterStore()
 
-        const result = store.computeClustersFromProgram('default-bfs-from-node', {
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', {
           start_node_id: 'n1',
         })
 
@@ -584,11 +586,11 @@ describe('cluster store', () => {
         expect(new Set(allIds)).toEqual(new Set(['n1', 'n2', 'n3', 'n4']))
       })
 
-      it('allow list drops node types not listed (and does not traverse through them)', () => {
+      it('allow list drops node types not listed (and does not traverse through them)', async () => {
         setupGraphForCluster()
         const store = useClusterStore()
 
-        const result = store.computeClustersFromProgram('default-bfs-from-node', {
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', {
           start_node_id: 'n1',
           depth: '3',
           allow_types: 'Person',
@@ -600,11 +602,11 @@ describe('cluster store', () => {
         expect(new Set(allIds)).toEqual(new Set(['n1', 'n2']))
       })
 
-      it('empty allow list allows all types', () => {
+      it('empty allow list allows all types', async () => {
         setupGraphForCluster()
         const store = useClusterStore()
 
-        const result = store.computeClustersFromProgram('default-bfs-from-node', {
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', {
           start_node_id: 'n1',
           depth: '3',
           allow_types: '',
@@ -614,20 +616,20 @@ describe('cluster store', () => {
         expect(new Set(allIds)).toEqual(new Set(['n1', 'n2', 'n3', 'n4']))
       })
 
-      it('fails without a start_node_id (required param)', () => {
+      it('fails without a start_node_id (required param)', async () => {
         setupGraphForCluster()
         const store = useClusterStore()
 
-        const result = store.computeClustersFromProgram('default-bfs-from-node', { depth: '2' })
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', { depth: '2' })
         expect(result.success).toBe(false)
         expect(result.error).toContain('Missing required parameter: start_node_id')
       })
 
-      it('fails with a clear error when the start node does not exist', () => {
+      it('fails with a clear error when the start node does not exist', async () => {
         setupGraphForCluster()
         const store = useClusterStore()
 
-        const result = store.computeClustersFromProgram('default-bfs-from-node', {
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', {
           start_node_id: 'ghost',
           depth: '1',
         })
@@ -636,7 +638,7 @@ describe('cluster store', () => {
       })
     })
 
-    it('legacy programs without parameters still execute (params = {})', () => {
+    it('legacy programs without parameters still execute (params = {})', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       // Simulates an old exploration state: program with no `parameters` field
@@ -652,7 +654,7 @@ describe('cluster store', () => {
         executions: [],
       })
 
-      const result = store.computeClustersFromProgram('legacy')
+      const result = await store.computeClustersFromProgram('legacy')
       expect(result.success).toBe(true)
       expect(result.clusters?.[0].cluster_name).toBe('0-params')
     })
@@ -1133,7 +1135,7 @@ describe('cluster store', () => {
       return metricsStore
     }
 
-    it('programs read metrics via metric(ref, id), by name or id, node-first', () => {
+    it('programs read metrics via metric(ref, id), by name or id, node-first', async () => {
       setupGraphForCluster()
       seedMetrics()
       const store = useClusterStore()
@@ -1148,13 +1150,13 @@ describe('cluster store', () => {
           ]
         `,
       })
-      const result = store.computeClustersFromProgram(prog.program_id)
+      const result = await store.computeClustersFromProgram(prog.program_id)
       expect(result.success).toBe(true)
       expect(result.clusters?.[0].node_ids).toEqual(['n1'])
       expect(result.clusters?.[1].node_ids).toEqual(['n1'])
     })
 
-    it('exposes the metrics list for discoverability', () => {
+    it('exposes the metrics list for discoverability', async () => {
       setupGraphForCluster()
       seedMetrics()
       const store = useClusterStore()
@@ -1165,13 +1167,13 @@ describe('cluster store', () => {
           return [{ cluster_name: names.join(','), node_ids: [] }]
         `,
       })
-      const result = store.computeClustersFromProgram(prog.program_id)
+      const result = await store.computeClustersFromProgram(prog.program_id)
       expect(result.success).toBe(true)
       // Includes the built-in degree metric alongside the seeded ones
       expect(result.clusters?.[0].cluster_name).toBe('Degree:node,PageRank:node,Weight:edge')
     })
 
-    it('uncomputed metrics return undefined; old programs run unchanged', () => {
+    it('uncomputed metrics return undefined; old programs run unchanged', async () => {
       setupGraphForCluster()
       const store = useClusterStore()
       const prog = store.createProgram({
@@ -1181,9 +1183,163 @@ describe('cluster store', () => {
           return [{ cluster_name: 'byType', node_ids: nodes.filter(n => n.node_type === 'Person').map(n => n.node_id) }]
         `,
       })
-      const result = store.computeClustersFromProgram(prog.program_id)
+      const result = await store.computeClustersFromProgram(prog.program_id)
       expect(result.success).toBe(true)
       expect(result.clusters?.[0].node_ids).toEqual(['n1', 'n2'])
+    })
+  })
+
+  // ==========================================================================
+  // Sandbox (tech debt #32): programs run in a worker, with a timeout
+  // ==========================================================================
+
+  describe('sandboxed execution', () => {
+    it('runs program code in a worker, never on the main thread', async () => {
+      setupGraphForCluster()
+      const store = useClusterStore()
+      const spawned: InlineClusterProgramWorker[] = []
+      setClusterProgramWorkerFactory(() => {
+        const w = new InlineClusterProgramWorker()
+        spawned.push(w)
+        return w as unknown as Worker
+      })
+      const prog = store.createProgram({
+        program_name: 'One',
+        code: `return [{ cluster_name: 'all', node_ids: nodes.map(n => n.node_id) }]`,
+      })
+
+      const result = await store.computeClustersFromProgram(prog.program_id)
+
+      expect(result.success).toBe(true)
+      expect(spawned).toHaveLength(1)
+      // The worker is always terminated once the run settles
+      expect(spawned[0].terminated).toBe(true)
+    })
+
+    it('a program that never returns times out and records the error', async () => {
+      vi.useFakeTimers()
+      try {
+        setupGraphForCluster()
+        const store = useClusterStore()
+        const terminate = vi.fn()
+        // A worker stuck in user code: it never answers.
+        setClusterProgramWorkerFactory(
+          () => ({ postMessage: vi.fn(), terminate, onmessage: null, onerror: null }) as unknown as Worker
+        )
+        const prog = store.createProgram({ program_name: 'Loop', code: 'while (true) {}' })
+
+        const pending = store.executeProgram(prog.program_id)
+        await vi.advanceTimersByTimeAsync(10_000)
+        const result = await pending
+
+        expect(result.success).toBe(false)
+        expect(result.error).toMatch(/Timed out after 10s/)
+        expect(terminate).toHaveBeenCalled()
+        expect(store.getExecutionHistory(prog.program_id)[0].error).toMatch(/Timed out/)
+        expect(store.loading).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('a forged result is still validated on the main thread', async () => {
+      setupGraphForCluster()
+      const store = useClusterStore()
+      setClusterProgramWorkerFactory(() => {
+        const w = new InlineClusterProgramWorker()
+        // Answer RUN with an invalid cluster regardless of the code.
+        w.postMessage = (cmd) => {
+          queueMicrotask(() =>
+            w.onmessage?.({
+              data: { type: 'RESULT', runId: cmd.runId, result: [{ cluster_name: 'x', node_ids: ['ghost'] }] },
+            } as MessageEvent)
+          )
+        }
+        return w as unknown as Worker
+      })
+      const prog = store.createProgram({ program_name: 'Ok', code: 'return []' })
+
+      const result = await store.computeClustersFromProgram(prog.program_id)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('invalid node_ids')
+    })
+
+    it('reactive node properties reach the worker (snapshot is clone-safe)', async () => {
+      const graphStore = setupGraphForCluster()
+      graphStore.nodes = graphStore.nodes.map(n => ({ ...n, properties: { tags: ['a'], score: 1 } }))
+      const store = useClusterStore()
+      const prog = store.createProgram({
+        program_name: 'Props',
+        code: `return [{ cluster_name: 'tagged', node_ids: nodes.filter(n => n.properties.tags[0] === 'a').map(n => n.node_id) }]`,
+      })
+
+      const result = await store.computeClustersFromProgram(prog.program_id)
+
+      expect(result.success).toBe(true)
+      expect(result.clusters?.[0].node_ids).toEqual(['n1', 'n2', 'n3', 'n4'])
+    })
+
+    it('returning non-cloneable values is an error, not a crash', async () => {
+      setupGraphForCluster()
+      const store = useClusterStore()
+      const prog = store.createProgram({
+        program_name: 'Fn',
+        code: `return [{ cluster_name: 'x', node_ids: ['n1'], color: () => 1 }]`,
+      })
+
+      const result = await store.computeClustersFromProgram(prog.program_id)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('cannot be transferred')
+    })
+
+    describe('the three default programs still work', () => {
+      it('Orphan Clusters groups the leaves of a hub', async () => {
+        const graphStore = useGraphStore()
+        graphStore.nodes = ['hub', 'a', 'b', 'c', 'x', 'y'].map(id => ({ node_id: id, node_type: 'T' }))
+        graphStore.edges = [
+          { edge_id: 'e1', src: 'hub', dst: 'a', relationship_type: 'R' },
+          { edge_id: 'e2', src: 'hub', dst: 'b', relationship_type: 'R' },
+          { edge_id: 'e3', src: 'c', dst: 'hub', relationship_type: 'R' },
+          { edge_id: 'e4', src: 'hub', dst: 'x', relationship_type: 'R' },
+          { edge_id: 'e5', src: 'x', dst: 'y', relationship_type: 'R' },
+        ]
+        const store = useClusterStore()
+
+        const result = await store.computeClustersFromProgram('default-orphan-clusters')
+
+        expect(result.success).toBe(true)
+        expect(result.clusters).toHaveLength(1)
+        expect(result.clusters?.[0].cluster_name).toBe('cluster_orphan_hub')
+        expect([...(result.clusters?.[0].node_ids ?? [])].sort()).toEqual(['a', 'b', 'c'])
+        expect(result.clusters?.[0].figure).toBe('star')
+      })
+
+      it('Group by Node Type creates one cluster per type', async () => {
+        setupGraphForCluster()
+        const store = useClusterStore()
+
+        const result = await store.executeProgram('default-group-by-node-type')
+
+        expect(result.success).toBe(true)
+        expect(result.clusters?.map(c => c.cluster_name)).toEqual(['Person Cluster', 'Company Cluster'])
+        expect(result.clusters?.[0].node_ids).toEqual(['n1', 'n2'])
+        expect(store.clusters).toHaveLength(2)
+      })
+
+      it('BFS from Node reaches the neighbourhood of the start node', async () => {
+        setupGraphForCluster()
+        const store = useClusterStore()
+
+        const result = await store.computeClustersFromProgram('default-bfs-from-node', {
+          start_node_id: 'n2',
+          depth: '1',
+        })
+
+        expect(result.success).toBe(true)
+        expect([...(result.clusters?.[0].node_ids ?? [])].sort()).toEqual(['n1', 'n2'])
+      })
     })
   })
 })
