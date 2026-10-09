@@ -1,5 +1,11 @@
 import axios, { type AxiosInstance } from 'axios';
 import type {
+  CreateInvestigationRequest,
+  Investigation,
+  InvestigationSource,
+  SourceMode,
+} from '@/types/investigation';
+import type {
   AdminConfigEntry,
   AdminGroup,
   AdminGroupPayload,
@@ -627,6 +633,40 @@ class ApiService {
     // Uses parentClient: same origin in prod, VITE_BACKEND_ORIGIN in dev.
     // Shares auth interceptors with the main client.
     const response = await this.parentClient.post(endpoint, body);
+    return response.data;
+  }
+
+  // Investigations
+  async getInvestigations(): Promise<Investigation[]> {
+    const response = await this.client.get('/api/investigations');
+    return response.data;
+  }
+
+  async getInvestigation(id: string): Promise<Investigation> {
+    const response = await this.client.get(`/api/investigations/${id}`);
+    return response.data;
+  }
+
+  async createInvestigation(data: CreateInvestigationRequest): Promise<Investigation> {
+    const response = await this.client.post('/api/investigations', data);
+    return response.data;
+  }
+
+  async getInvestigationSources(id: string): Promise<InvestigationSource[]> {
+    const response = await this.client.get(`/api/investigations/${id}/sources`);
+    return response.data;
+  }
+
+  async addInvestigationSource(
+    id: string,
+    explorationId: string,
+    mode: SourceMode,
+  ): Promise<InvestigationSource> {
+    const response = await this.client.post(`/api/investigations/${id}/sources`, {
+      kind: 'exploration',
+      exploration_id: explorationId,
+      mode,
+    });
     return response.data;
   }
 

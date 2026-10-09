@@ -109,6 +109,9 @@ def test_two_contexts_in_one_case(env):
     ]
     assert len({s["context_id"] for s in sources}) == 2
     assert _add(env, env["exp_a"]).status_code == 409  # already a source
+    # The queue counts sources per case.
+    queue = env["client"].get("/api/investigations", headers=h(OWNER)).json()
+    assert [c["source_count"] for c in queue] == [2]
 
 
 def test_restricted_source_is_a_placeholder(env):

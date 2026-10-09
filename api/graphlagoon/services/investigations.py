@@ -206,7 +206,32 @@ async def list_investigations(
                 query.order_by(Investigation.updated_at.desc())
             )
             rows = result.scalars().all()
-        return [serialize(inv, user_email) for inv in rows]
+        counts = await _source_counts(session, [inv.id for inv in rows])
+        return [
+            {**serialize(inv, user_email), "source_count": counts.get(inv.id, 0)}
+            for inv in rows
+        ]
+
+
+async def _source_counts(session, ids: list) -> dict:
+    """Sources per case, for the queue (one grouped query, not one per case)."""
+    if not ids:
+        return {}
+    if session is None:
+        store = get_memory_store()
+        return {
+            i: len(store.list_investigation_children(_SOURCES, i)) for i in ids
+        }
+    from sqlalchemy import func, select
+
+    from graphlagoon.db.models import InvestigationSource
+
+    result = await session.execute(
+        select(InvestigationSource.investigation_id, func.count())
+        .where(InvestigationSource.investigation_id.in_(ids))
+        .group_by(InvestigationSource.investigation_id)
+    )
+    return dict(result.all())
 
 
 async def create_investigation(user_email: str, data: dict) -> dict:

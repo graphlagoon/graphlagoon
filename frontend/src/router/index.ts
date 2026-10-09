@@ -28,6 +28,17 @@ const router = createRouter({
       component: () => import('@/views/ExplorationsView.vue'),
     },
     {
+      path: '/investigations',
+      name: 'investigations',
+      component: () => import('@/views/InvestigationsView.vue'),
+    },
+    {
+      path: '/investigations/:id',
+      name: 'investigation',
+      component: () => import('@/views/InvestigationView.vue'),
+      props: true,
+    },
+    {
       path: '/dev/generator',
       name: 'dev-generator',
       component: () => import('@/views/DevGeneratorView.vue'),

@@ -12,6 +12,7 @@ import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration } from '@/types/graph';
 import type { ExportPNGOptions } from '@/stores/toolbar';
 import ExportModal from '@/components/ExportModal.vue';
+import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
 import { downloadJson } from '@/utils/portableExport';
 import { GRAPH_SHORTCUTS } from '@/utils/shortcuts';
 import {
@@ -35,6 +36,7 @@ import {
   Shield,
   FlaskConical,
   LogOut,
+  Briefcase,
 } from 'lucide-vue-next';
 
 const route = useRoute();
@@ -59,6 +61,7 @@ const showUserMenu = ref(false);
 const showSaveModal = ref(false);
 const showExplorationSelector = ref(false);
 const showExportModal = ref(false);
+const showAddToInvestigation = ref(false);
 const explorations = ref<Exploration[]>([]);
 const saveTitle = ref('');
 const saveError = ref<string | null>(null);
@@ -143,6 +146,8 @@ function handleExportPng(options: ExportPNGOptions) {
       <RouterLink to="/contexts" class="nav-link" data-testid="nav-contexts">Contexts</RouterLink>
       <span class="title-sep" aria-hidden="true"></span>
       <RouterLink to="/explorations" class="nav-link" data-testid="nav-explorations">Explorations</RouterLink>
+      <span class="title-sep" aria-hidden="true"></span>
+      <RouterLink to="/investigations" class="nav-link" data-testid="nav-investigations">Investigations</RouterLink>
 
       <template v-if="isGraphPage">
         <span class="title-sep" aria-hidden="true"></span>
@@ -320,6 +325,16 @@ function handleExportPng(options: ExportPNGOptions) {
             <Save :size="15" /><span class="btn-text">Save</span>
           </button>
 
+          <button
+            v-if="graphStore.currentExploration"
+            class="toolbar-btn"
+            title="Add this exploration to an investigation"
+            data-testid="toolbar-add-to-investigation"
+            @click="showAddToInvestigation = true"
+          >
+            <Briefcase :size="15" /><span class="btn-text">Investigation</span>
+          </button>
+
         </div>
     </div>
 
@@ -455,6 +470,13 @@ function handleExportPng(options: ExportPNGOptions) {
     </div>
 
     <!-- Export Modal -->
+    <AddToInvestigationModal
+      v-if="showAddToInvestigation"
+      :open="showAddToInvestigation"
+      :exploration-id="graphStore.currentExploration?.id"
+      @close="showAddToInvestigation = false"
+    />
+
     <ExportModal
       :visible="showExportModal"
       :canvas-width="toolbarStore.canvasWidth"
