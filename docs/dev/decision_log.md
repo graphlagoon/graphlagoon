@@ -9858,3 +9858,61 @@ qualquer esquema de app — `vscode://`, `claude-cli://`, `cursor://`, `obsidian
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-10-09 15:27] - Feature Planning: Graph Lagoon como sistema de investigação
+
+**Purpose:** evoluir o Graph Lagoon de explorador de grafos para **sistema de investigação**
+de fraude, PLD/FT e risco para adquirentes e bancos, com quatro capacidades:
+- unir várias explorações;
+- carregar CSVs;
+- montar e enriquecer um grafo em memória;
+- seguir o dinheiro.
+
+Plano completo: [plans/investigation-workspace.md](plans/investigation-workspace.md).
+
+**User Story:** como analista de prevenção a fraude ou de PLD, quero juntar num mesmo caso
+explorações, extratos (inclusive SIMBA) e cadastros (QSA), resolver as entidades e rastrear
+valores salto a salto, para fechar o dossiê e decidir comunicar, marcar ou arquivar.
+
+**Avaliação feita (resumo):**
+- **Mercado.** Foram avaliados workbenches de vínculos (i2, Linkurious, Maltego, Bloom),
+  ER e redes (Quantexa, Palantir), fraude/PLD com casos (Actimize, SAS, Feedzai, Unit21,
+  Lucinity) e follow the money (Reactor, TRM, Elliptic, Valid8). Não há **aplicação de
+  investigação aberta e nativa do warehouse**. Os métodos de rastreio (Δ, alocação) são
+  opacos em todas.
+- **Contexto brasileiro.**
+  - Circ. 3.978: dossiê, prazos de 45+45 dias, parâmetros auditáveis, 10 anos de retenção.
+  - CC 4.001: indicadores que são padrões de grafo.
+  - MED 2.0 (Res. BCB 493/2025): rastreio Pix em camadas.
+  - Res. BCB 587/2026 (DICT), RC6, portarias SPA de bets, LGPD e LC 105.
+  - SIMBA: 5 arquivos TAB, com 29–35% de contrapartes sem identificação.
+- **Código.** Não há upload de CSV nem grafo só no cliente. A exploração é 1:1 com o
+  context. Não há timeline nem path finding. Bloqueios: #28 (IDs de arestas paralelas
+  colidem), #32 e M4.
+
+**Design Decisions (propostas, a validar no design):**
+1. A **Investigação** é uma entidade nova acima da Exploração e funciona como o dossiê
+   da Circ. 3.978 art. 43.
+2. A identidade das entidades vem de chaves de negócio (CPF/CNPJ, conta, chave Pix,
+   dispositivo). O merge preserva a origem; match incerto vira "match link".
+3. O grafo de trabalho fica em memória no browser, com proveniência. O CSV é parseado no
+   cliente, e o arquivo bruto vai ao servidor com SHA-256.
+4. A transação é uma aresta temporal com valor. O rastreio roda em worker e o método
+   (saltos, Δ, alocação FIFO/proporcional/LIBR, paradas) vai gravado na evidência.
+5. Novas permissões `investigation.create`, `investigation.upload` e
+   `investigation.export`. Auditoria de leitura. Sem e-filing no Siscoaf.
+
+**Implementation:** nenhuma ainda. As fases de design D0–D4 e o roadmap F1–F5 estão no plano.
+
+**Files Created:**
+- [docs/dev/plans/investigation-workspace.md](plans/investigation-workspace.md)
+
+**Public Docs:** nenhuma alteração. Isto é planejamento; F1–F4 vão exigir guia novo em
+`docs/guide/`.
+
+**Admin-Area Impact:** nenhum agora. A F1 vai adicionar tabelas (investigações, fontes),
+rotas mutáveis e permissões, então serão necessários `CLEARABLE_TABLES`,
+`AUDITED_ROUTES`, `AuditAction` e o catálogo.
+
+**Author:** Claude (AI Assistant)
+
+---
