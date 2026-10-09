@@ -1854,6 +1854,35 @@ class ArtifactResponse(BaseModel):
     versions: list[ArtifactVersionResponse] = Field(default_factory=list)  # newest first
 
 
+# Proposals (03-arquitetura §8.4)
+ProposalKind = Literal[
+    "role", "match", "hypothesis", "hypothesis_status", "typology", "status"
+]
+
+
+class ProposalCreate(BaseModel):
+    kind: ProposalKind
+    payload: dict[str, Any] = Field(default_factory=dict)
+    rationale: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ProposalReject(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ProposalResponse(BaseModel):
+    id: UUID
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    rationale: Optional[str] = None
+    actor: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "accepted", "rejected"]
+    created_at: Optional[datetime] = None
+    decided_by: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    decision_note: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Agent tokens (03-arquitetura §8.2)
 # ---------------------------------------------------------------------------

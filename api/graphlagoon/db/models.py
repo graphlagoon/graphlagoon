@@ -500,6 +500,26 @@ class InvestigationArtifactVersion(Base):
     approved_at = Column(DateTime, nullable=True)
 
 
+class InvestigationProposal(Base):
+    """A change an agent proposes; a person accepts (through the same service
+    as the manual action) or rejects it with a reason (03-arquitetura §8.4)."""
+
+    __tablename__ = "investigation_proposals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = _investigation_fk()
+    # role | match | hypothesis | hypothesis_status | typology | status
+    kind = Column(String(30), nullable=False)
+    payload = Column(JSON, nullable=False, default={})
+    rationale = Column(Text, nullable=True)
+    actor = Column(JSON, nullable=False, default={})
+    status = Column(String(10), nullable=False, default="pending")  # pending | accepted | rejected
+    created_at = Column(DateTime, server_default=func.now())
+    decided_by = Column(String(255), nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+    decision_note = Column(Text, nullable=True)
+
+
 class AgentToken(Base):
     """Personal token an AI agent uses to act for its owner (03-arquitetura §8.2).
 

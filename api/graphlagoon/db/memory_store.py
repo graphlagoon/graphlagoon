@@ -304,6 +304,21 @@ class MemoryInvestigationArtifactVersion:
 
 
 @dataclass
+class MemoryInvestigationProposal:
+    id: UUID
+    investigation_id: UUID
+    kind: str
+    payload: Dict[str, Any] = field(default_factory=dict)
+    rationale: Optional[str] = None
+    actor: Dict[str, Any] = field(default_factory=dict)
+    status: str = "pending"
+    created_at: datetime = field(default_factory=datetime.now)
+    decided_by: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    decision_note: Optional[str] = None
+
+
+@dataclass
 class MemoryAgentToken:
     id: UUID
     owner_email: str
@@ -326,6 +341,7 @@ INVESTIGATION_CHILDREN: Dict[str, type] = {
     "entity_matches": MemoryEntityMatch,
     "investigation_artifacts": MemoryInvestigationArtifact,
     "investigation_artifact_versions": MemoryInvestigationArtifactVersion,
+    "investigation_proposals": MemoryInvestigationProposal,
 }
 
 
@@ -357,6 +373,7 @@ class InMemoryStore:
         self.investigation_artifact_versions: Dict[
             UUID, MemoryInvestigationArtifactVersion
         ] = {}
+        self.investigation_proposals: Dict[UUID, MemoryInvestigationProposal] = {}
         self.agent_tokens: Dict[UUID, MemoryAgentToken] = {}
         # Audit trail, newest last. Bounded so a long-running dev server
         # cannot grow without limit; the admin area reads it newest first.
