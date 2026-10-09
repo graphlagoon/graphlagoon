@@ -20,6 +20,7 @@ from graphlagoon.models.schemas import (
     InvestigationCreate,
     InvestigationEventCreate,
     InvestigationEventResponse,
+    InvestigationFileResponse,
     InvestigationNoteCreate,
     InvestigationNoteResponse,
     InvestigationNoteUpdate,
@@ -35,6 +36,7 @@ from graphlagoon.models.schemas import (
 )
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
+from graphlagoon.services import investigation_files as files
 from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
@@ -523,6 +525,90 @@ async def approve_artifact_version(
         )
     except service.InvestigationError as exc:
         raise _http(exc)
+
+
+# Case files (F2.3, 03 §3.3): raw request body like the case space (no
+# multipart parser installed), filename and role in the query. Upload and
+# content reads are audited (sensitive reads).
+
+
+@router.get(
+    "/{investigation_id}/files", response_model=list[InvestigationFileResponse]
+)
+async def list_files(investigation_id: UUID, request: Request):
+    try:
+        return await files.list_files(investigation_id, get_current_user(request))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/files",
+    response_model=InvestigationFileResponse,
+    status_code=201,
+)
+async def upload_file(
+    investigation_id: UUID,
+    request: Request,
+    filename: Optional[str] = None,
+    role: Optional[str] = None,
+    user_email: str = Depends(require_permission("investigation.upload")),
+):
+    from graphlagoon.config import get_settings
+
+    max_bytes = get_settings().investigation_file_max_bytes
+    try:
+        received = await storage.receive(request.stream(), max_bytes)
+    except storage.TooLarge:
+        raise _http(
+            service.InvestigationError(
+                413, "FILE_TOO_LARGE", f"Files are limited to {max_bytes} bytes"
+            )
+        )
+    try:
+        row = await files.upload_file(
+            investigation_id, user_email, received, filename, role
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_FILE_UPLOAD,
+        investigation_id,
+        file_id=str(row["id"]),
+        filename=row["filename"],
+        role=row["role"],
+        sha256=row["sha256"],
+    )
+    return row
+
+
+@router.get("/{investigation_id}/files/{file_id}/content")
+async def get_file_content(investigation_id: UUID, file_id: UUID, request: Request):
+    user_email = get_current_user(request)
+    try:
+        data, meta = await files.get_content(investigation_id, user_email, file_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_FILE_READ,
+        investigation_id,
+        file_id=str(file_id),
+        sha256=meta["sha256"],
+    )
+    # Case data is never rendered by the browser: always a download.
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename*=UTF-8''{quote(meta['filename'])}"
+            ),
+            "X-Content-Type-Options": "nosniff",
+            "X-Content-SHA256": meta["sha256"],
+        },
+    )
 
 
 # Proposals (FA.3, 03 §8.4): an agent proposes (scope "propose"); only a person

@@ -173,11 +173,13 @@ class TestCheckPermission:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
+            "investigation.upload",
         ]
         assert asyncio.run(effective_permissions("bob@corp.com")) == [
             "context.create",
             "investigation.agent",
             "investigation.create",
+            "investigation.upload",
         ]
 
     def test_inspect_names_the_matched_rule(self, fresh_store):

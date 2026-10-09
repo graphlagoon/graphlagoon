@@ -126,6 +126,22 @@ export interface InvestigationArtifact {
   versions: ArtifactVersion[];
 }
 
+export type FileRole = 'graph' | 'enrichment' | 'attachment';
+
+/** A file uploaded to the case (F2.3), stored by its sha256. */
+export interface InvestigationFile {
+  id: string;
+  filename: string;
+  role: FileRole;
+  sha256: string;
+  size_bytes: number;
+  content_type?: string | null;
+  mapping?: Record<string, unknown> | null;
+  context_id?: string | null;
+  uploaded_by: string;
+  uploaded_at?: string | null;
+}
+
 export type ProposalKind = 'role' | 'match' | 'hypothesis' | 'hypothesis_status' | 'typology' | 'status';
 
 /** A change an agent proposes; a person accepts or rejects it (T11, 03 §8.4). */

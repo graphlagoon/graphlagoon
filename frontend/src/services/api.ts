@@ -3,6 +3,8 @@ import type {
   CreateInvestigationRequest,
   Investigation,
   InvestigationArtifact,
+  InvestigationFile,
+  FileRole,
   InvestigationProposal,
   InvestigationEvent,
   InvestigationNote,
@@ -115,6 +117,10 @@ declare global {
       agents_enabled?: boolean;
       /** Whether agents read CPF, CNPJ and accounts unmasked (T11 policy note). */
       agents_allow_unmasked_data?: boolean;
+      /** Upload ceiling for case files, in bytes (413 above it). */
+      investigation_file_max_bytes?: number;
+      /** Ceiling of edges in a case's working graph (G4, Q5). */
+      investigation_max_working_edges?: number;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
@@ -754,6 +760,20 @@ class ApiService {
       `/api/investigations/${id}/artifacts/${artifactId}/versions/${version}/content`,
       { responseType: 'blob' },
     );
+    return response.data;
+  }
+
+  // Case files (F2.3): raw body like artifacts; the server hashes while streaming.
+  async getInvestigationFiles(id: string): Promise<InvestigationFile[]> {
+    const response = await this.client.get(`/api/investigations/${id}/files`);
+    return response.data;
+  }
+
+  async uploadInvestigationFile(id: string, file: File, role: FileRole): Promise<InvestigationFile> {
+    const response = await this.client.post(`/api/investigations/${id}/files`, file, {
+      params: { filename: file.name, role },
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
     return response.data;
   }
 
