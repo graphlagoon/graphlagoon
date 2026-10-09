@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance } from 'axios';
 import type {
   CreateInvestigationRequest,
+  EntityMatch,
   Investigation,
   InvestigationArtifact,
   InvestigationFile,
@@ -12,6 +13,7 @@ import type {
   InvestigationNote,
   InvestigationRole,
   InvestigationSource,
+  MatchStatus,
   SourceSnapshotPayload,
   SourceMode,
 } from '@/types/investigation';
@@ -722,6 +724,27 @@ class ApiService {
   /** Client-side journal entry (`nodes.promoted`, `trace.run`, …). */
   async postInvestigationEvent(id: string, kind: string, payload: Record<string, unknown>): Promise<InvestigationEvent> {
     const response = await this.client.post(`/api/investigations/${id}/events`, { kind, payload });
+    return response.data;
+  }
+
+  async getInvestigationMatches(id: string): Promise<EntityMatch[]> {
+    const response = await this.client.get(`/api/investigations/${id}/matches`);
+    return response.data;
+  }
+
+  /** Stored as `sugerido`; a pair already in the case is skipped. Returns the new ones. */
+  async addInvestigationMatches(id: string, matches: Pick<EntityMatch, 'left' | 'right' | 'score' | 'reasons'>[]): Promise<EntityMatch[]> {
+    const response = await this.client.post(`/api/investigations/${id}/matches`, { matches });
+    return response.data;
+  }
+
+  async decideInvestigationMatch(
+    id: string,
+    matchId: string,
+    status: Exclude<MatchStatus, 'sugerido'>,
+    reasonText: string,
+  ): Promise<EntityMatch> {
+    const response = await this.client.patch(`/api/investigations/${id}/matches/${matchId}`, { status, reason_text: reasonText });
     return response.data;
   }
 

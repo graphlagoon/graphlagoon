@@ -51,7 +51,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F2.5 · Datasource `file` e assistente de arquivo (T4)
 - [x] F2.6 · Arquivo como enriquecimento do caso
 - [x] F2.7 · Gravar valores de métricas como propriedade
-- [ ] F2.8 · Resolução de entidades e revisão de matches (T8)
+- [x] F2.8 · Resolução de entidades e revisão de matches (T8)
 
 **F3 · Seguir o dinheiro**
 - [ ] F3.1 · Semântica de valor e horário nas arestas
@@ -627,9 +627,9 @@ trabalho de análise e documentação; a pessoa decide.
   - API `.../matches` (GET, POST, PATCH);
   - `views/InvestigationMatchesView.vue` (novo, T8).
 - **Aceite:**
-  - [ ] Match com CPF mascarado **nunca** vira merge automático.
-  - [ ] Aceitar, recusar e adiar gravam o motivo no diário.
-  - [ ] A tela segue `screens/T8-Matches.png`.
+  - [x] Match com CPF mascarado **nunca** vira merge automático.
+  - [x] Aceitar, recusar e adiar gravam o motivo no diário.
+  - [x] A tela segue `screens/T8-Matches.png`.
 - **Testes:** vitest do worker (blocking, Jaro-Winkler, mascarado); pytest da API; E2E
   aceitar → anel cresce.
 

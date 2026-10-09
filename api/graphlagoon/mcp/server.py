@@ -24,6 +24,7 @@ from graphlagoon.middleware import auth
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
 from graphlagoon.services import investigation_files as files
+from graphlagoon.services import investigation_matches as matches
 from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
@@ -515,6 +516,29 @@ def build_server():
         await _audit_read(user, "list_proposals", investigation_id)
         return _out(rows, graph["secrets"])
 
+    @server.tool()
+    async def list_matches(ctx: Context, investigation_id: UUID) -> dict:
+        """Entity match suggestions of the case with status (sugerido, aceito,
+        recusado, adiado), score and reasons."""
+        user = _agent(ctx, "read")
+        rows = await _call(matches.list_matches(investigation_id, user))
+        graph = await _call(case_graph(investigation_id, user))
+        await _audit_read(user, "list_matches", investigation_id)
+        return _out(rows, graph["secrets"])
+
+    @server.tool()
+    async def suggest_matches(ctx: Context, investigation_id: UUID) -> dict:
+        """Run entity resolution (03 §6.2) on the unified graph and store new
+        suggestions as "sugerido". Nothing merges: to accept, reject or defer one,
+        `propose` kind "match" with {"match_id", "status", "reason_text"}."""
+        user = _agent(ctx, "analyze")
+        from graphlagoon.services.entity_resolution import suggest
+
+        graph = await _call(case_graph(investigation_id, user))
+        found = suggest(graph["nodes"])
+        created = await _call(matches.add_suggestions(investigation_id, user, found))
+        return _out({"found": len(found), "created": created}, graph["secrets"])
+
     # -- write (attributed to the agent) ------------------------------------
 
     @server.tool()
@@ -750,7 +774,8 @@ def build_server():
     ) -> dict:
         """Propose a change a person accepts or rejects: kind "role" with
         {"entity": uid, "role": victim|mule|exit|discarded|null}, "status" with
-        {"status": selecao|analise|arquivado}, or "typology" with {"typology"}."""
+        {"status": selecao|analise|arquivado}, "typology" with {"typology"}, or
+        "match" with {"match_id", "status": aceito|recusado|adiado, "reason_text"}."""
         user = _agent(ctx, "propose")
         if kind == "role" and isinstance(payload.get("entity"), str):
             graph = await _call(case_graph(investigation_id, user))

@@ -71,10 +71,10 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
 
 | Scope | The agent can |
 |---|---|
-| `read` | read cases, the unified graph, entities, the journal, notes, artifacts, case files (`list_files`, `get_file`, masked) and proposals; look up an entity in its context's enrichment tables (`lookup_enrichment`) |
-| `analyze` | run server analyses (arrives with follow-the-money and typologies) |
+| `read` | read cases, the unified graph, entities, the journal, notes, artifacts, case files (`list_files`, `get_file`, masked), proposals and entity matches (`list_matches`); look up an entity in its context's enrichment tables (`lookup_enrichment`) |
+| `analyze` | run server analyses: entity resolution (`suggest_matches`, stores suggestions, never merges); follow-the-money and typologies arrive later |
 | `write` | create cases, add sources, write notes, upload artifacts as **drafts**, upload case files (`upload_file`, up to the artifact size), turn a graph file into a source with a preset or mapping (`create_file_graph`) and set how an enrichment file joins nodes (`set_file_mapping`); the file tools need your `investigation.upload` permission |
-| `propose` | propose an entity role, the case status or a typology |
+| `propose` | propose an entity role, the case status, a typology or a decision on an entity match (`match` with `match_id`, `status` and `reason_text`) |
 
 The token acts with **your** access and never more: cases you cannot see,
 restricted sources and permissions apply the same way. Tokens expire (at most

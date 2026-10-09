@@ -2,17 +2,21 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { snapshotToGraph, unifyGraph, type NodeOrigin, type UnifySource } from '@/utils/unifyGraph';
+import { applyAliases, snapshotToGraph, unifyGraph, type NodeOrigin, type UnifySource } from '@/utils/unifyGraph';
+import type { MatchSuggestion } from '@/utils/entityResolution';
+import type { ErWorkerInput, ErWorkerOutput } from '@/workers/erWorker';
 import { provenanceColor } from '@/utils/graphAppearance';
 import type { Edge, ExplorationState, GraphContext, Node } from '@/types/graph';
 import type {
   CreateInvestigationRequest,
+  EntityMatch,
   Investigation,
   InvestigationEvent,
   InvestigationFile,
   InvestigationNote,
   InvestigationRole,
   InvestigationSource,
+  MatchStatus,
   SourceMode,
 } from '@/types/investigation';
 
@@ -42,7 +46,14 @@ export const useInvestigationStore = defineStore('investigation', () => {
   const sourceColors = computed<Record<string, string>>(() =>
     Object.fromEntries(sources.value.map((s, i) => [s.id, provenanceColor(i)])),
   );
-  const unified = computed(() => unifyGraph([...sourceGraphs.value, ...expansions.value, ...derived.value], contexts.value));
+  /** Entity matches (F2.8); the accepted ones alias their two entities in the unified view. */
+  const matches = ref<EntityMatch[]>([]);
+  const unified = computed(() =>
+    applyAliases(
+      unifyGraph([...sourceGraphs.value, ...expansions.value, ...derived.value], contexts.value),
+      matches.value.filter((m) => m.status === 'aceito').map((m) => [m.left.uid, m.right.uid]),
+    ),
+  );
 
   /** Roles by unified node id (`state.roles`), notes and the journal (F1.7). */
   const roles = computed<Record<string, InvestigationRole>>(
@@ -133,6 +144,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     const inv = current.value;
     if (!inv) return;
     graphLoading.value = true;
+    fetchMatches().catch(() => {}); // accepted matches alias entities once they arrive
     const readable = sources.value.filter((s) => s.accessible && s.context_id);
     const contextIds = [...new Set(readable.map((s) => s.context_id!))];
     try {
@@ -193,6 +205,40 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
+  async function fetchMatches() {
+    if (current.value) matches.value = await api.getInvestigationMatches(current.value.id);
+  }
+
+  /** Runs entity resolution (erWorker) on the unified graph and stores the new suggestions. */
+  async function findMatches(): Promise<number> {
+    if (!current.value) return 0;
+    const nodes = unified.value.nodes.map((n) => ({ uid: n.node_id, properties: { ...(n.properties ?? {}) } }));
+    const found = await new Promise<MatchSuggestion[]>((resolve, reject) => {
+      const worker = new Worker(new URL('@/workers/erWorker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (e: MessageEvent<ErWorkerOutput>) => {
+        worker.terminate();
+        if (e.data.type === 'RESULT') resolve(e.data.matches);
+        else reject(new Error(e.data.error));
+      };
+      worker.onerror = (e) => {
+        worker.terminate();
+        reject(new Error(e.message));
+      };
+      worker.postMessage({ type: 'RUN', nodes } as ErWorkerInput);
+    });
+    const created = found.length ? await api.addInvestigationMatches(current.value.id, found) : [];
+    await fetchMatches();
+    if (created.length) void fetchEvents();
+    return created.length;
+  }
+
+  async function decideMatch(matchId: string, status: Exclude<MatchStatus, 'sugerido'>, reasonText: string) {
+    if (!current.value) return;
+    const updated = await api.decideInvestigationMatch(current.value.id, matchId, status, reasonText);
+    matches.value = matches.value.map((m) => (m.id === updated.id ? updated : m));
+    void fetchEvents();
+  }
+
   /**
    * Adds explorations one by one (the API takes one per call). Stops at the first
    * failure and reports how many made it, so a partial add is never silent.
@@ -250,5 +296,9 @@ export const useInvestigationStore = defineStore('investigation', () => {
     addExpansion,
     derived,
     addDerived,
+    matches,
+    fetchMatches,
+    findMatches,
+    decideMatch,
   };
 });

@@ -2000,6 +2000,43 @@ class ProposalResponse(BaseModel):
     decision_note: Optional[str] = None
 
 
+class MatchSide(BaseModel):
+    """One entity of a match: its unified id (plus whatever the client adds)."""
+
+    model_config = ConfigDict(extra="allow")
+    uid: str = Field(min_length=1, max_length=500)
+
+
+class MatchSuggestionIn(BaseModel):
+    left: MatchSide
+    right: MatchSide
+    score: float = Field(ge=0, le=1)
+    reasons: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+
+
+class MatchSuggestionsCreate(BaseModel):
+    # No status field: a suggestion is always stored as "sugerido".
+    matches: list[MatchSuggestionIn] = Field(max_length=1000)
+
+
+class MatchDecision(BaseModel):
+    status: Literal["aceito", "recusado", "adiado"]
+    reason_text: str = Field(min_length=1, max_length=2000)
+
+
+class MatchResponse(BaseModel):
+    id: UUID
+    left: dict[str, Any]
+    right: dict[str, Any]
+    score: float
+    reasons: list[dict[str, Any]] = Field(default_factory=list)
+    status: Literal["sugerido", "aceito", "recusado", "adiado"]
+    reason_text: Optional[str] = None
+    decided_by: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
 # ---------------------------------------------------------------------------
 # Agent tokens (03-arquitetura §8.2)
 # ---------------------------------------------------------------------------

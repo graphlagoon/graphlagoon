@@ -45,6 +45,12 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/investigations/:id/matches',
+      name: 'investigation-matches',
+      component: () => import('@/views/InvestigationMatchesView.vue'),
+      props: true,
+    },
+    {
       path: '/dev/generator',
       name: 'dev-generator',
       component: () => import('@/views/DevGeneratorView.vue'),

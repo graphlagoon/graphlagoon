@@ -3,6 +3,9 @@ import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { STATUS_LABELS } from '@/utils/investigationStatus';
 import type { InvestigationEvent, InvestigationProposal } from '@/types/investigation';
 
+const MATCH_VERB: Record<string, string> = { aceito: 'accept', recusado: 'reject', adiado: 'defer' };
+const MATCH_DONE: Record<string, string> = { aceito: 'accepted', recusado: 'rejected', adiado: 'deferred' };
+
 /** One line for what a proposal would change. */
 export function describeProposal(p: Pick<InvestigationProposal, 'kind' | 'payload'>): string {
   const d = p.payload as Record<string, any>;
@@ -10,6 +13,7 @@ export function describeProposal(p: Pick<InvestigationProposal, 'kind' | 'payloa
     case 'role': return `mark ${d.entity} as ${d.role ? ROLE_LABELS[d.role as keyof typeof ROLE_LABELS] ?? d.role : 'no role'}`;
     case 'status': return `set the case status to ${STATUS_LABELS[d.status as keyof typeof STATUS_LABELS] ?? d.status}`;
     case 'typology': return `set the typology to ${d.typology}`;
+    case 'match': return `${MATCH_VERB[d.status] ?? d.status} match ${d.match_id}: ${d.reason_text}`;
     default: return p.kind;
   }
 }
@@ -40,6 +44,8 @@ export function describeEvent(e: InvestigationEvent): string {
     case 'proposal.rejected': return `rejected the proposal: ${describeProposal({ kind: p.kind, payload: p.payload ?? {} })} (${p.reason})`;
     case 'nodes.promoted': return `promoted ${p.nodes} ${p.node_type} node(s) from enrichment table ${p.table}`;
     case 'metric.saved': return `saved metric ${p.metric} as property ${p.property} on ${p.nodes} node(s) of “${p.exploration_title}”`;
+    case 'match.suggested': return `found ${p.count} entity match suggestion(s)`;
+    case 'match.decided': return `${MATCH_DONE[p.status] ?? p.status} the match ${p.left?.uid} = ${p.right?.uid}: “${p.reason}”`;
     default: return e.kind;
   }
 }

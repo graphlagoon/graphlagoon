@@ -193,6 +193,26 @@ reports, images and data (`md`, `txt`, `pdf`, `png`, `jpg`, `pptx`, `docx`,
   [Configuration](./configuration.md#investigation-storage)) and are only
   reached through the app, which checks access.
 
+## Match review
+
+The **Matches** button in the case header (with the number of open
+suggestions) opens the match review. *Find matches* looks for entities that
+may be the same person even though no identity key joined them: the 6 central
+CPF digits are equal and **at least one side has a masked CPF** (a full CPF
+already merges by identity key). The score adds a name similarity
+(Jaro-Winkler, after removing accents and DE/DA/DO/DOS/DAS/E), the CPF digits
+and the same 5-digit CEP; from 0.85 up it becomes a suggestion.
+
+- The queue is ordered by how many new connections accepting would bring,
+  then by score. Each suggestion shows both entities side by side with the
+  compared values highlighted, the reasons and the effect of accepting.
+- **Nothing merges by itself**, least of all with a masked CPF. *Same entity*,
+  *Not the same* and *Defer* each need a reason, which goes to the journal.
+  An accepted match joins the two entities in the unified view; accepted and
+  rejected are final, a deferred one stays in the queue.
+- Agents run the same search (`suggest_matches`) and **propose** a decision;
+  a person accepts it on the agents page.
+
 ## Agents and proposals
 
 The **Agents** button in the case header (with the number of pending
