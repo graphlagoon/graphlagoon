@@ -60,7 +60,8 @@ open it, save it, and reload the case.
   contexts and merged. The legend on the canvas names each color.
 - **Sources panel** (left) lists the sources with their context and node
   count, and how many entities were merged and by which key.
-- **Inspector** (right) shows the selected node's *Data*, its *Notes* and its
+- **Inspector** (right) shows the selected node's *Data*, its *Enrichment*
+  (see [Enrichment tables](#enrichment-tables)), its *Notes* and its
   *Origin*: every source and original id behind it. When sources disagree on
   a property, the first value is kept and the others are listed with the
   source they came from.
@@ -101,6 +102,12 @@ same device).
   permission and a table in an allowed catalog.schema
   (`GRAPH_LAGOON_CATALOG_SCHEMAS`). Anyone who can read the context can look
   it up; a writer without the permission can only remove a table.
+- In the workspace, the inspector's **Enrichment** tab looks a table up for
+  every node of the graph it applies to. A *one row* table adds its columns
+  to the nodes' properties; a *many rows* table shows the selected node's rows,
+  and with promotion a *Shared by* count (how many nodes of the graph share
+  the value). **Promote … to … nodes** adds those nodes and their links to
+  the case graph and writes it to the journal.
 - A lookup is always by key, returns only the listed columns, is capped
   (`GRAPH_LAGOON_ENRICHMENT_MAX_KEYS`, `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS`)
   and is audited (`enrichment.read`).

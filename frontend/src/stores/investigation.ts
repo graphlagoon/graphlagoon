@@ -35,11 +35,13 @@ export const useInvestigationStore = defineStore('investigation', () => {
   const sourceGraphs = ref<SourceGraph[]>([]);
   const contexts = ref<Record<string, GraphContext>>({});
   const expansions = ref<UnifySource[]>([]);
+  /** Nodes promoted from enrichment tables (F2.2). shortcut: session only; the journal records them. */
+  const derived = ref<UnifySource[]>([]);
   const graphLoading = ref(false);
   const sourceColors = computed<Record<string, string>>(() =>
     Object.fromEntries(sources.value.map((s, i) => [s.id, provenanceColor(i)])),
   );
-  const unified = computed(() => unifyGraph([...sourceGraphs.value, ...expansions.value], contexts.value));
+  const unified = computed(() => unifyGraph([...sourceGraphs.value, ...expansions.value, ...derived.value], contexts.value));
 
   /** Roles by unified node id (`state.roles`), notes and the journal (F1.7). */
   const roles = computed<Record<string, InvestigationRole>>(
@@ -144,6 +146,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
         ctxs.filter((c): c is GraphContext => c !== null).map((c) => [c.id, c]),
       );
       expansions.value = [];
+      derived.value = [];
     } finally {
       graphLoading.value = false;
     }
@@ -165,6 +168,14 @@ export const useInvestigationStore = defineStore('investigation', () => {
       edges: [...(prev?.edges ?? []), ...edges.filter((e) => !seenEdges.has(e.edge_id))],
     };
     expansions.value = [...expansions.value.filter((e) => e.id !== id), next];
+  }
+
+  /** Adds (or replaces) promoted nodes and journals the promotion. */
+  async function addDerived(source: UnifySource, payload: Record<string, unknown>) {
+    if (!current.value) return;
+    await api.postInvestigationEvent(current.value.id, 'nodes.promoted', payload);
+    derived.value = [...derived.value.filter((d) => d.id !== source.id), source];
+    void fetchEvents();
   }
 
   /**
@@ -219,5 +230,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     deleteNote,
     loadWorkspace,
     addExpansion,
+    derived,
+    addDerived,
   };
 });

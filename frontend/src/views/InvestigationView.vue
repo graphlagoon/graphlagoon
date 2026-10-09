@@ -28,6 +28,7 @@ import LayoutPanel from '@/components/LayoutPanel.vue';
 import SourcesPanel from '@/components/investigation/SourcesPanel.vue';
 import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
 import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue';
+import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import { api } from '@/services/api';
 import type { GraphResponse } from '@/types/graph';
 import type { InvestigationRole } from '@/types/investigation';
@@ -49,7 +50,7 @@ const activeTab = ref(UNIFIED);
 const view = ref<'graph' | 'space'>('graph');
 const artifactCount = ref<number | null>(null);
 const pendingProposals = ref(0);
-const inspectorTab = ref<'data' | 'notes' | 'origin'>('data');
+const inspectorTab = ref<'data' | 'enrichment' | 'notes' | 'origin'>('data');
 const showJournal = ref(false);
 const noteDraft = ref('');
 const actionError = ref<string | null>(null);
@@ -362,6 +363,13 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
             <div v-if="actionError" class="action-error">{{ actionError }}</div>
             <div class="inspector-tabs">
               <button :class="{ active: inspectorTab === 'data' }" @click="inspectorTab = 'data'">Data</button>
+              <button
+                :class="{ active: inspectorTab === 'enrichment' }"
+                data-testid="inspector-enrichment-tab"
+                @click="inspectorTab = 'enrichment'"
+              >
+                Enrichment
+              </button>
               <button :class="{ active: inspectorTab === 'notes' }" data-testid="inspector-notes-tab" @click="inspectorTab = 'notes'">
                 Notes<template v-if="selectedNotes.length"> ({{ selectedNotes.length }})</template>
               </button>
@@ -380,6 +388,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
                 </dd>
               </template>
             </dl>
+            <EnrichmentTab v-else-if="inspectorTab === 'enrichment'" :node="selected" :can-edit="canEdit" />
             <div v-else-if="inspectorTab === 'notes'" class="notes" data-testid="inspector-notes">
               <div v-for="n in selectedNotes" :key="n.id" class="note" data-testid="note">
                 <p>{{ n.body }}</p>

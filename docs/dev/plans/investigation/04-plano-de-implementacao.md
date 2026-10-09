@@ -45,7 +45,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 
 **F2 · Arquivos e enriquecimento**
 - [x] F2.1 · Tabelas de enriquecimento no context e endpoint de consulta
-- [ ] F2.2 · Aba de enriquecimento no inspector e "promover a nós"
+- [x] F2.2 · Aba de enriquecimento no inspector e "promover a nós"
 - [ ] F2.3 · Upload de arquivos com hash e papel
 - [ ] F2.4 · Especificação de mapeamento, interpretadores TS e Python, presets SIMBA e QSA
 - [ ] F2.5 · Datasource `file` e assistente de arquivo (T4)
@@ -528,8 +528,8 @@ trabalho de análise e documentação; a pessoa decide.
   3. "Promover a nós" cria nós (ex.: Dispositivo) e arestas derivadas, marcados com
      `__derived` e registrados no diário.
 - **Aceite:**
-  - [ ] A aba segue `screens/T2-Workspace.png` (painel da direita).
-  - [ ] Promover cria um nó Dispositivo ligando as contas.
+  - [x] A aba segue `screens/T2-Workspace.png` (painel da direita).
+  - [x] Promover cria um nó Dispositivo ligando as contas.
 - **Testes:** vitest do componente e da promoção.
 
 ### F2.3 · Upload de arquivos

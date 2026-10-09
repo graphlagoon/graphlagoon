@@ -31,6 +31,7 @@ import type {
 } from '@/types/admin';
 import type {
   DatasetsResponse,
+  EnrichmentLookupResult,
   GraphContext,
   GraphResponse,
   NodeBatchResponse,
@@ -214,6 +215,12 @@ class ApiService {
   // Graph Contexts
   async getGraphContexts(): Promise<GraphContext[]> {
     const response = await this.client.get('/api/graph-contexts');
+    return response.data;
+  }
+
+  /** Declared columns of a context's enrichment table for a batch of node keys. */
+  async lookupEnrichment(contextId: string, name: string, keys: string[]): Promise<EnrichmentLookupResult> {
+    const response = await this.client.post(`/api/graph-contexts/${contextId}/enrichment/${name}/lookup`, { keys });
     return response.data;
   }
 
@@ -699,6 +706,12 @@ class ApiService {
   /** Journal, oldest first. shortcut: one page of 500; paginate with `after` when cases grow. */
   async getInvestigationEvents(id: string, limit = 500): Promise<InvestigationEvent[]> {
     const response = await this.client.get(`/api/investigations/${id}/events`, { params: { limit } });
+    return response.data;
+  }
+
+  /** Client-side journal entry (`nodes.promoted`, `trace.run`, …). */
+  async postInvestigationEvent(id: string, kind: string, payload: Record<string, unknown>): Promise<InvestigationEvent> {
+    const response = await this.client.post(`/api/investigations/${id}/events`, { kind, payload });
     return response.data;
   }
 

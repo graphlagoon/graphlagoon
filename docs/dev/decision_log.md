@@ -11193,3 +11193,46 @@ máscara), `test_agent_registry.py`, `test_admin_registry.py`; vitest do
 auditoria `enrichment.read`.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 14:45] - Feature Implemented: F2.2 · Aba de enriquecimento no inspector e "promover a nós"
+
+**Feature:** aba **Enrichment** no inspector do workspace (T2): tabelas de
+enriquecimento dos contexts do nó, propriedades em lote ("uma linha"), tabela com
+contagem de compartilhamento ("várias linhas") e "Promote … to … nodes".
+
+**Design Decisions:**
+1. Funções puras em `utils/enrichment.ts`: `enrichmentTargets` (tabelas dos contexts
+   das origens do nó que casam o tipo, uma por context+nome), `enrichmentKey` (id do
+   nó no context ou propriedade), `keyedNodes`, `promoteToNodes`.
+2. Cada tabela é consultada **uma vez para todos os nós do grafo** a que se aplica
+   (`shortcut:` só as 500 primeiras chaves, o padrão do servidor), quando a aba abre.
+   "Uma linha": colunas viram propriedades dos nós unificados e passam por
+   `patchNodeProperties` (redesenho); reaplicadas quando o grafo unificado é refeito.
+   "Várias linhas": tabela das linhas do nó, com "Shared by" (quantos nós do grafo
+   têm o mesmo valor da coluna de promoção) como agregado.
+3. **Promover** gera uma fonte derivada `derived:<sourceId>:<tabela>` no store da
+   investigação (como as expansões, em vez de injetar no graph store como
+   `similarity.injectEdges`), então sobrevive à troca de aba e unifica como qualquer
+   fonte: o nó-chave entra com seu id no context e se funde a si mesmo; nós e arestas
+   levam `properties.__derived = "enrichment:<tabela>"`. `baseSourceId` trata
+   `derived:` como a fonte de origem (anel e aba). Grava `nodes.promoted` no diário
+   (já permitido ao cliente) antes de adicionar. `shortcut:` nós promovidos vivem na
+   sessão; persistir com as evidências (F4.1).
+4. Sem o bloco de "arquivo do caso" do T2 (F2.6) nem o alerta de renda incompatível.
+
+**Files:** `frontend/src/components/investigation/EnrichmentTab.vue` (novo),
+`utils/enrichment.ts` (novo), `utils/unifyGraph.ts`, `stores/investigation.ts`,
+`services/api.ts` (`lookupEnrichment`, `postInvestigationEvent`),
+`views/InvestigationView.vue`, `utils/investigationEvents.ts`.
+
+**Testing:** `utils/__tests__/enrichment.test.ts` (alvos por tipo; promoção cria um
+Dispositivo ligando duas contas sem duplicar contas), `InvestigationView.test.ts`
+(aba consulta em lote, mostra linhas, promove e grava no diário); `unifyGraph.test.ts`;
+`vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (inspector e aba Enrichment).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)

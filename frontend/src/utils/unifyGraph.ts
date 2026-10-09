@@ -140,9 +140,14 @@ export function unifyGraph(
   return { nodes: [...nodes.values()], edges: [...edges.values()] };
 }
 
-/** Distinct real sources of a node (an expansion counts as the source it grew from). */
+/**
+ * Distinct real sources of a node: an expansion (`expansion:<id>`) or derived nodes
+ * (`derived:<id>:<table>`, promoted from an enrichment table) count as their source.
+ */
 export function baseSourceId(sourceId: string): string {
-  return sourceId.startsWith('expansion:') ? sourceId.slice('expansion:'.length) : sourceId;
+  if (sourceId.startsWith('expansion:')) return sourceId.slice('expansion:'.length);
+  if (sourceId.startsWith('derived:')) return sourceId.split(':')[1];
+  return sourceId;
 }
 
 export function nodeSourceIds(node: UnifiedNode): string[] {
