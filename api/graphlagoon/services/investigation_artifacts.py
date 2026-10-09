@@ -19,6 +19,7 @@ from graphlagoon.services.investigations import (
     _ensure_not_decided,
     _session,
     append_event,
+    current_actor,
     load_case,
 )
 
@@ -75,20 +76,6 @@ def _check_name(name: Optional[str]) -> str:
             f"Accepted types: {', '.join(sorted(TYPES))}",
         )
     return name
-
-
-def _actor(user_email: str) -> dict:
-    from graphlagoon.middleware.auth import get_current_actor
-
-    agent = get_current_actor()
-    if agent:
-        return {
-            "kind": "agent",
-            "email": user_email,
-            "agent_name": agent["name"],
-            "token_id": str(agent["token_id"]),
-        }
-    return {"kind": "human", "email": user_email}
 
 
 def _serialize_version(v: Any) -> dict:
@@ -236,7 +223,7 @@ async def _store_version(
             "size_bytes": received.size_bytes,
             "content_type": TYPES[extension(artifact.name)][0],
             "status": "draft",
-            "actor": _actor(user_email),
+            "actor": current_actor(user_email),
             "source_evidence_ids": source_evidence_ids,
             "note": note,
             "created_at": datetime.now(),

@@ -50,6 +50,7 @@ async def build_public_config(
         "allow_raw_sql_scripts": settings.allow_raw_sql_scripts,
         # Personal agent tokens (Bearer glt_…) and their admin list.
         "agents_enabled": settings.agents_enabled,
+        "agents_allow_unmasked_data": settings.agents_allow_unmasked_data,
         # Which backends this server can serve, and the named REST connections
         # (UI copy + operation flags only; transport and auth never leave the
         # process).

@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
-from graphlagoon.middleware.auth import get_current_user
+from graphlagoon.middleware.auth import get_current_actor, get_current_user
 from graphlagoon.models.schemas import (
     ArtifactResponse,
     ArtifactTextUpload,
@@ -29,18 +29,42 @@ from graphlagoon.models.schemas import (
     InvestigationSourceResponse,
     InvestigationStateUpdate,
     InvestigationUpdate,
+    ProposalCreate,
+    ProposalReject,
+    ProposalResponse,
 )
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
+from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
 from graphlagoon.services.audit import AuditAction
-from graphlagoon.utils.authz import forbid_agents, require_permission
+from graphlagoon.utils.authz import (
+    forbid_agents,
+    require_agent_scope,
+    require_permission,
+)
 
 router = APIRouter(prefix="/api/investigations", tags=["investigations"])
 
 # Human-only routes (03 §8.7) carry forbid_agents; every other route takes the
 # agent's scope from utils.authz.agent_guard (GET → read, writes → write).
+
+
+def _agent_must_propose(what: str) -> None:
+    """Roles, status and typology change through a proposal when an agent asks
+    (03 §8.4, Q9): the agent proposes, a person accepts."""
+    if get_current_actor():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "AGENT_MUST_PROPOSE",
+                    "message": f"Agents propose {what} changes; POST …/proposals.",
+                    "details": {},
+                }
+            },
+        )
 
 
 def _http(exc: service.InvestigationError) -> HTTPException:
@@ -103,6 +127,8 @@ async def update_investigation(
 ):
     user_email = get_current_user(request)
     changes = data.model_dump(exclude_unset=True)
+    if {"status", "typology"} & changes.keys():
+        _agent_must_propose("status and typology")
     try:
         inv = await service.update_investigation(investigation_id, user_email, changes)
     except service.InvestigationError as exc:
@@ -280,6 +306,8 @@ async def post_event(
 async def update_state(
     investigation_id: UUID, data: InvestigationStateUpdate, request: Request
 ):
+    if data.roles:
+        _agent_must_propose("role")
     try:
         return await service.update_state(
             investigation_id, get_current_user(request), data.roles, data.pins
@@ -492,6 +520,75 @@ async def approve_artifact_version(
     try:
         return await artifacts.approve_version(
             investigation_id, get_current_user(request), artifact_id, version
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+# Proposals (FA.3, 03 §8.4): an agent proposes (scope "propose"); only a person
+# accepts or rejects. Recorded in the case journal (AUDIT_EXEMPT_ROUTES).
+
+
+@router.get(
+    "/{investigation_id}/proposals", response_model=list[ProposalResponse]
+)
+async def list_proposals(
+    investigation_id: UUID, request: Request, status: Optional[str] = None
+):
+    try:
+        return await proposals.list_proposals(
+            investigation_id, get_current_user(request), status
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/proposals",
+    response_model=ProposalResponse,
+    status_code=201,
+    dependencies=[Depends(require_agent_scope("propose"))],
+)
+async def create_proposal(
+    investigation_id: UUID, data: ProposalCreate, request: Request
+):
+    try:
+        return await proposals.create_proposal(
+            investigation_id,
+            get_current_user(request),
+            data.kind,
+            data.payload,
+            data.rationale,
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/proposals/{proposal_id}/accept",
+    response_model=ProposalResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def accept_proposal(investigation_id: UUID, proposal_id: UUID, request: Request):
+    try:
+        return await proposals.accept_proposal(
+            investigation_id, get_current_user(request), proposal_id
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/proposals/{proposal_id}/reject",
+    response_model=ProposalResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def reject_proposal(
+    investigation_id: UUID, proposal_id: UUID, data: ProposalReject, request: Request
+):
+    try:
+        return await proposals.reject_proposal(
+            investigation_id, get_current_user(request), proposal_id, data.reason
         )
     except service.InvestigationError as exc:
         raise _http(exc)

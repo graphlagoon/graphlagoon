@@ -10910,3 +10910,58 @@ tabelas em `CLEARABLE_TABLES`, dois settings em `CONFIG_FIELD_KINDS`, três rota
 `AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 09:30] - Feature Implemented: FA.3 · Propostas e aprovação humana (T11)
+
+**Feature:** tabela `investigation_proposals` (migração 019), rotas `GET/POST
+…/proposals` e `POST …/proposals/{pid}/accept|reject`, a página T11
+(`/investigations/:id/agents`: conectar agente com criação de token, tokens ativos,
+propostas, atividade dos agentes) e o contador de propostas no cabeçalho do caso.
+
+**Design Decisions:**
+1. Aceitar chama o **mesmo** serviço da ação manual: papel → `update_state`, status e
+   tipologia → `update_investigation`; o evento (`role.changed`, `case.updated`) sai
+   igual ao manual, com a pessoa que aceitou como ator, e depois vem
+   `proposal.accepted` com `proposed_by` (o ator da proposta). Teste compara o diário
+   e o `state` de um caso via proposta com outro via PATCH manual.
+2. Tipos suportados agora: `role`, `status` (sem `decidido`), `typology`. `match`,
+   `hypothesis` e `hypothesis_status` → 422 `PROPOSAL_KIND_UNSUPPORTED` até a F2.8 e
+   a F4.2 criarem os serviços. Payload validado na criação.
+3. Criar exige escopo `propose` (`require_agent_scope`) e escrita no caso; aceitar e
+   recusar são `forbid_agents` e exigem escrita; recusar exige motivo (422 sem ele);
+   proposta já decidida → 409.
+4. Agente que tenta mudar papel (`PATCH …/state` com `roles`) ou status/tipologia
+   (`PATCH` do caso) leva 403 `AGENT_MUST_PROPOSE` (Q9). Pins e outros campos seguem
+   diretos.
+5. `current_actor()` saiu do serviço de artefatos para `services/investigations.py`
+   (usado por versões e propostas). `public_config` passa a expor
+   `agents_allow_unmasked_data` (nota de política na T11).
+6. T11: criação de token na própria página (a FA.1 não deixou UI), com o comando
+   `claude mcp add … /mcp` mostrando o token uma vez (o `/mcp` chega na FA.4).
+   `describeEvent` foi para `utils/investigationEvents.ts` com `describeProposal`.
+   `shortcut:` aceitar checa e aplica em duas sessões; dois aceites simultâneos
+   aplicam duas vezes (idempotente para estes tipos).
+
+**Files:** `api/graphlagoon/services/investigation_proposals.py` (novo),
+`services/investigations.py`, `services/investigation_artifacts.py`,
+`services/public_config.py`, `routers/investigations.py`, `routers/admin_registry.py`,
+`models/schemas.py`, `db/models.py`, `db/memory_store.py`,
+`alembic/versions/019_proposals.py`, `api/tests/test_proposals.py` (novo);
+`frontend/src/views/InvestigationAgentsView.vue` (novo), `views/InvestigationView.vue`,
+`utils/investigationEvents.ts` (novo), `router/index.ts`, `services/api.ts`,
+`types/investigation.ts`, `views/__tests__/InvestigationAgentsView.test.ts` (novo),
+`views/__tests__/InvestigationView.test.ts`.
+
+**Testing:** pytest `test_proposals.py` (aceite igual ao manual, agente bloqueado no
+aceite e no PATCH direto, motivo obrigatório, status, tipos não suportados) mais
+artefatos, investigações, registry, admin, tokens e auditoria (180 verdes); vitest
+da T11, do workspace e do `ArtifactsSpace`; `vue-tsc` limpo; E2E
+`investigations.spec.ts` verde.
+
+**Public Docs:** `docs/guide/investigations.md` (seção Agents and proposals).
+**Admin-Area Impact:** tabela `investigation_proposals` em `CLEARABLE_TABLES`; três
+rotas em `AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
+
+**Author:** Claude (AI Assistant)

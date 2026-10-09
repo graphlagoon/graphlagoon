@@ -125,3 +125,19 @@ export interface InvestigationArtifact {
   /** Newest first. */
   versions: ArtifactVersion[];
 }
+
+export type ProposalKind = 'role' | 'match' | 'hypothesis' | 'hypothesis_status' | 'typology' | 'status';
+
+/** A change an agent proposes; a person accepts or rejects it (T11, 03 §8.4). */
+export interface InvestigationProposal {
+  id: string;
+  kind: ProposalKind;
+  payload: Record<string, unknown>;
+  rationale?: string | null;
+  actor: InvestigationActor;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at?: string | null;
+  decided_by?: string | null;
+  decided_at?: string | null;
+  decision_note?: string | null;
+}

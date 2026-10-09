@@ -120,6 +120,25 @@ reports, images and data (`md`, `txt`, `pdf`, `png`, `jpg`, `pptx`, `docx`,
   [Configuration](./configuration.md#investigation-storage)) and are only
   reached through the app, which checks access.
 
+## Agents and proposals
+
+The **Agents** button in the case header (with the number of pending
+proposals) opens the agents page of the case. It needs agents turned on by
+the administrator (see [Configuration](./configuration.md#ai-agents)).
+
+- **Connect an agent.** Create a personal token: a name, what the agent may
+  do (read, run analyses, write notes and draft artifacts, make proposals)
+  and a validity. The token is shown **once**, inside the command to add the
+  app to Claude Code; only its hash is stored. Revoke it under *Active
+  tokens*. The agent acts with your access and never more.
+- **Proposals.** An agent cannot change an entity's role, the case status
+  or its typology directly: it proposes. Each proposal shows what it would
+  change and the agent's rationale. **Accept** applies it exactly as if you
+  had made the change yourself; **Reject** asks for a reason. Both go to the
+  journal with who proposed and who decided. Only people decide.
+- **Agent activity** lists what agents did on the case. In the journal,
+  their entries read "agent X on behalf of Y".
+
 ## Access and sharing
 
 - **Who sees a case:** its owner, its assignee, the people it was shared

@@ -89,6 +89,7 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
 # Tables wiped by "clear environment", in an order that respects foreign keys
 # (children first). services.environment consumes this list directly.
 CLEARABLE_TABLES: tuple[str, ...] = (
+    "investigation_proposals",
     "investigation_artifact_versions",
     "investigation_artifacts",
     "entity_matches",
@@ -225,6 +226,15 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
                 "POST",
                 "/api/investigations/{investigation_id}/artifacts/{artifact_id}"
                 "/versions/{version}/approve",
+            ),
+            ("POST", "/api/investigations/{investigation_id}/proposals"),
+            (
+                "POST",
+                "/api/investigations/{investigation_id}/proposals/{proposal_id}/accept",
+            ),
+            (
+                "POST",
+                "/api/investigations/{investigation_id}/proposals/{proposal_id}/reject",
             ),
         )
     },

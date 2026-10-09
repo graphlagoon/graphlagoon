@@ -3,6 +3,7 @@ import type {
   CreateInvestigationRequest,
   Investigation,
   InvestigationArtifact,
+  InvestigationProposal,
   InvestigationEvent,
   InvestigationNote,
   InvestigationRole,
@@ -111,6 +112,8 @@ declare global {
       allow_raw_sql_scripts?: boolean;
       /** Personal agent tokens (GRAPH_LAGOON_AGENTS_ENABLED). */
       agents_enabled?: boolean;
+      /** Whether agents read CPF, CNPJ and accounts unmasked (T11 policy note). */
+      agents_allow_unmasked_data?: boolean;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
@@ -739,6 +742,41 @@ class ApiService {
       { responseType: 'blob' },
     );
     return response.data;
+  }
+
+  // Proposals (FA.3): accept/reject are human-only on the server.
+  async getInvestigationProposals(id: string, status?: InvestigationProposal['status']): Promise<InvestigationProposal[]> {
+    const response = await this.client.get(`/api/investigations/${id}/proposals`, { params: { status } });
+    return response.data;
+  }
+
+  async acceptProposal(id: string, proposalId: string): Promise<InvestigationProposal> {
+    const response = await this.client.post(`/api/investigations/${id}/proposals/${proposalId}/accept`);
+    return response.data;
+  }
+
+  async rejectProposal(id: string, proposalId: string, reason: string): Promise<InvestigationProposal> {
+    const response = await this.client.post(`/api/investigations/${id}/proposals/${proposalId}/reject`, { reason });
+    return response.data;
+  }
+
+  // The caller's own agent tokens (03 §8.2); the secret comes back once, on create.
+  async getAgentTokens(): Promise<AgentToken[]> {
+    const response = await this.client.get('/api/agent-tokens');
+    return response.data;
+  }
+
+  async createAgentToken(data: {
+    name: string;
+    scopes: string[];
+    expires_in_days: number;
+  }): Promise<AgentToken & { token: string }> {
+    const response = await this.client.post('/api/agent-tokens', data);
+    return response.data;
+  }
+
+  async revokeAgentToken(tokenId: string): Promise<void> {
+    await this.client.delete(`/api/agent-tokens/${tokenId}`);
   }
 
   async approveArtifactVersion(id: string, artifactId: string, version: number): Promise<InvestigationArtifact> {

@@ -17,6 +17,7 @@ vi.mock('@/services/api', () => ({
     updateInvestigationState: vi.fn(),
     createInvestigationNote: vi.fn(),
     getInvestigationArtifacts: vi.fn(async () => []),
+    getInvestigationProposals: vi.fn(async () => []),
   },
 }))
 vi.mock('@/components/GraphCanvas3D.vue', () => ({ default: { render: () => null } }))

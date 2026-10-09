@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/auth';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
 import { STATUS_LABELS } from '@/utils/investigationStatus';
 import { provenanceRingColors, roleColorMap, ROLE_COLORS, ROLE_LABELS } from '@/utils/graphAppearance';
+import { describeEvent } from '@/utils/investigationEvents';
 import { getErrorMessage } from '@/utils/errorMessage';
 import {
   baseSourceId,
@@ -29,7 +30,7 @@ import AddToInvestigationModal from '@/components/investigation/AddToInvestigati
 import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue';
 import { api } from '@/services/api';
 import type { GraphResponse } from '@/types/graph';
-import type { InvestigationEvent, InvestigationRole } from '@/types/investigation';
+import type { InvestigationRole } from '@/types/investigation';
 
 const props = defineProps<{ id: string }>();
 
@@ -47,6 +48,7 @@ const activeTab = ref(UNIFIED);
 /** The graph tabs or the case space (T10). */
 const view = ref<'graph' | 'space'>('graph');
 const artifactCount = ref<number | null>(null);
+const pendingProposals = ref(0);
 const inspectorTab = ref<'data' | 'notes' | 'origin'>('data');
 const showJournal = ref(false);
 const noteDraft = ref('');
@@ -136,6 +138,8 @@ watch(
     store.fetchNotes().catch(() => {});
     store.fetchEvents().catch(() => {});
     api.getInvestigationArtifacts(id).then((a) => (artifactCount.value = a.length)).catch(() => {});
+    pendingProposals.value = 0;
+    api.getInvestigationProposals(id, 'pending').then((p) => (pendingProposals.value = p.length)).catch(() => {});
     await loadWorkspace();
   },
   { immediate: true },
@@ -207,28 +211,6 @@ function addNote() {
   }, 'Failed to add note');
 }
 
-/** One line per journal event; unknown kinds fall back to the raw kind. */
-function describeEvent(e: InvestigationEvent): string {
-  const p = e.payload as Record<string, any>;
-  switch (e.kind) {
-    case 'case.created': return `created the case “${p.title ?? ''}”`;
-    case 'case.updated': return `updated ${Object.keys(p).join(', ') || 'the case'}`;
-    case 'case.shared': return `shared with ${p.with} (${p.permission})`;
-    case 'case.unshared': return `stopped sharing with ${p.with}`;
-    case 'source.added': return `added source “${p.title}” (${p.mode})`;
-    case 'source.removed': return `removed source “${p.title}”`;
-    case 'role.changed': return `marked ${p.entity} as ${p.to ? ROLE_LABELS[p.to] ?? p.to : 'no role'}`;
-    case 'pin.changed': return `${p.pinned ? 'pinned' : 'unpinned'} ${p.entity}`;
-    case 'note.created': return `noted on ${p.anchor?.id ?? 'the case'}: “${p.body}”`;
-    case 'note.updated': return 'edited a note';
-    case 'note.deleted': return 'deleted a note';
-    case 'artifact.created': return `uploaded “${p.name}” v1`;
-    case 'artifact.version_added': return `uploaded “${p.name}” v${p.version}`;
-    case 'artifact.approved': return `approved “${p.name}” v${p.version}`;
-    default: return e.kind;
-  }
-}
-
 const formatTime = (iso: string) => new Date(iso).toLocaleString();
 </script>
 
@@ -242,6 +224,9 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
         <h1 data-testid="investigation-title">{{ store.current.title }}</h1>
         <span class="status">{{ STATUS_LABELS[store.current.status] ?? store.current.status }}</span>
         <span v-if="store.current.typology" class="muted">{{ store.current.typology }}</span>
+        <RouterLink :to="`/investigations/${id}/agents`" class="agents-link" data-testid="proposals-counter">
+          Agents · {{ pendingProposals }} {{ pendingProposals === 1 ? 'proposal' : 'proposals' }}
+        </RouterLink>
       </header>
 
       <nav class="tabs" data-testid="workspace-tabs">
@@ -507,6 +492,16 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
 .muted {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.agents-link {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  color: var(--text-color);
+  text-decoration: none;
 }
 
 .status {
