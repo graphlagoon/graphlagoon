@@ -11137,3 +11137,59 @@ mascaramento, prompts, revisão), entrada no sidebar e links a partir de
 **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 14:00] - Feature Implemented: F2.1 · Tabelas de enriquecimento no context
+
+**Feature:** `enrichment_tables` no context (03 §2.1): validação, gate de autor ao
+anexar, `POST /api/graph-contexts/{id}/enrichment/{name}/lookup`, ferramenta MCP
+`lookup_enrichment` e seção "Enrichment Tables" no formulário do context (T6).
+
+**Design Decisions:**
+1. `EnrichmentTable` valida no schema: nome slug único, `table` por
+   `qualified_from_dotted`, `key_column`/`columns` por `validate_identifier_part`
+   (1..50 colunas), `promote.id_column` ∈ `columns`; até 20 tabelas por context.
+2. **Gate:** só entradas novas ou alteradas (comparadas à versão armazenada
+   normalizada) exigem `context.create` (reuso de `require_permission(...)` dentro
+   do handler) e passam pelo `check_scope` de autor contra a allowlist mais os
+   schemas das tabelas de aresta/nó, **sem** as de enriquecimento (uma tabela não
+   abona a si mesma). Remover ou salvar sem mudar não exige nada. Fora → 403
+   `ENRICHMENT_SCOPE_DENIED`.
+3. `context_tables()` inclui as tabelas de enriquecimento: o SQL livre de um leitor
+   pode lê-las (escopo ampliado de propósito, é o que o aviso da T6 diz).
+4. Consulta em `services/enrichment.py`: `SELECT <chave>, <colunas> … WHERE <chave>
+   IN (:k0, …) LIMIT max_rows+1`, chaves como parâmetros nomeados STRING, deduplicadas,
+   1..200 caracteres; settings novos `enrichment_max_keys` (500) e
+   `enrichment_max_rows` (5000, além disso `truncated`). Resposta agrupada por chave,
+   cada linha só com `columns`. Acesso de leitura = `get_context_with_access`.
+5. Auditoria `enrichment.read` (em `AUDITED_ROUTES`, descrita no `adminView.ts`).
+6. **MCP:** `lookup_enrichment(investigation_id, uid, table)` resolve a entidade
+   (id mascarado aceito), acha a fonte cujo context tem a tabela para o tipo do nó,
+   tira a chave (id do nó ou propriedade) e chama o mesmo `run_enrichment_lookup` da
+   rota; saída mascarada. Rota no registry; `test_agent_registry` cobre as rotas
+   `/enrichment/` do router de contexts. Prompt `investigar_golpe_pix` cita a
+   ferramenta.
+7. Formulário: seção (o modal não tem abas) com aviso, linhas editáveis (listas em
+   texto separado por vírgula) e "promover a nós" opcional. Sem prévia com contas da
+   última exploração nem "usada em N investigações" (T6): fora do MVP.
+
+**Files:** `api/graphlagoon/models/schemas.py`, `services/enrichment.py` (novo),
+`services/sql_scope.py`, `routers/graph_contexts.py`, `mcp/server.py`,
+`mcp/registry.py`, `config.py`, `services/audit.py`, `routers/admin_registry.py`,
+`db/memory_store.py`; `frontend/src/components/GraphContextFormModal.vue`,
+`types/graph.ts`, `utils/adminView.ts`.
+
+**Testing:** novo `test_enrichment.py` (validação, injeção, chaves malformadas,
+limites, writer sem permissão, allowlist do autor, leitor consulta só colunas
+declaradas, auditoria), `test_sql_scope.py`, `test_mcp_server.py` (ferramenta com
+máscara), `test_agent_registry.py`, `test_admin_registry.py`; vitest do
+`GraphContextFormModal`. O caso de permissão ficou em `test_enrichment.py` em vez de
+`test_permission_routes.py` (mesmo fixture de grupos).
+
+**Public Docs:** `docs/guide/investigations.md` (Enrichment tables),
+`configuration.md` (dois settings), `agents-mcp.md` (escopo read).
+**Admin-Area Impact:** dois settings em `CONFIG_FIELD_KINDS` (public) e a ação de
+auditoria `enrichment.read`.
+
+**Author:** Claude (AI Assistant)

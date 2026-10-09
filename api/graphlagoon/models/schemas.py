@@ -454,6 +454,50 @@ def _validate_identity_keys(keys: list[IdentityKey]) -> list[IdentityKey]:
     return keys
 
 
+# Enrichment tables (investigations F2.1, 03 §2.1): side tables looked up by a
+# node's key and shown in the inspector; only ``columns`` ever leave the warehouse.
+class PromoteSpec(BaseModel):
+    node_type: str = Field(min_length=1, max_length=100)
+    id_column: str = Field(min_length=1, max_length=200)
+    edge_type: str = Field(min_length=1, max_length=100)
+
+
+class EnrichmentTable(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,40}$")
+    label: str = Field(min_length=1, max_length=100)
+    table: str = Field(min_length=1, max_length=400)
+    key_column: str = Field(min_length=1, max_length=200)
+    match_node_types: list[str] = Field(min_length=1, max_length=50)
+    match_source: Union[Literal["node_id"], PropRef] = "node_id"
+    cardinality: Literal["one", "many"] = "one"
+    columns: list[str] = Field(min_length=1, max_length=50)
+    promote: Optional[PromoteSpec] = None
+
+    @model_validator(mode="after")
+    def _identifiers(self) -> "EnrichmentTable":
+        from graphlagoon.services.sql_identifiers import (
+            qualified_from_dotted,
+            validate_identifier_part,
+        )
+
+        qualified_from_dotted(self.table)
+        for column in [self.key_column, *self.columns]:
+            validate_identifier_part(column)
+        if self.promote and self.promote.id_column not in self.columns:
+            raise ValueError("promote.id_column must be one of the columns")
+        return self
+
+
+def _validate_enrichment_tables(tables: list[EnrichmentTable]) -> None:
+    names = [t.name for t in tables]
+    if len(names) != len(set(names)):
+        raise ValueError("enrichment table names must be unique in a context")
+
+
+class EnrichmentLookupRequest(BaseModel):
+    keys: list[str] = Field(min_length=1)
+
+
 # Graph Context models
 def _validate_distinct_tables(
     edge_table_name: Optional[str], node_table_name: Optional[str]
@@ -516,11 +560,13 @@ class GraphContextCreate(BaseModel):
         "with write access.",
     )
     identity_keys: list[IdentityKey] = Field(default_factory=list, max_length=50)
+    enrichment_tables: list[EnrichmentTable] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextCreate":
         _validate_unique_metric_definitions(self.metric_definitions)
         _validate_identity_keys(self.identity_keys)
+        _validate_enrichment_tables(self.enrichment_tables)
         return self
 
     @model_validator(mode="after")
@@ -598,6 +644,7 @@ class GraphContextUpdate(BaseModel):
     context_menu_actions: Optional[list[dict]] = None
     metric_definitions: Optional[list[MetricDefinition]] = None
     identity_keys: Optional[list[IdentityKey]] = Field(default=None, max_length=50)
+    enrichment_tables: Optional[list[EnrichmentTable]] = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextUpdate":
@@ -605,6 +652,8 @@ class GraphContextUpdate(BaseModel):
             _validate_unique_metric_definitions(self.metric_definitions)
         if self.identity_keys is not None:
             _validate_identity_keys(self.identity_keys)
+        if self.enrichment_tables is not None:
+            _validate_enrichment_tables(self.enrichment_tables)
         return self
 
 
@@ -632,6 +681,7 @@ class GraphContextResponse(BaseModel):
     # Empty for read-only users — see routers.graph_contexts.context_to_response.
     metric_definitions: list[MetricDefinition] = Field(default_factory=list)
     identity_keys: list[IdentityKey] = Field(default_factory=list)
+    enrichment_tables: list[EnrichmentTable] = Field(default_factory=list)
     owner_email: str
     shared_with: list[str] = Field(default_factory=list)
     has_write_access: bool = False

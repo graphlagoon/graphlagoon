@@ -209,6 +209,75 @@ async def test_scopes_and_people_are_kept_out(env):
         assert (await rest.post("/mcp", json={})).status_code == 401
 
 
+@pytest.mark.asyncio
+async def test_lookup_enrichment_reads_the_context_table_masked(env, monkeypatch):
+    from graphlagoon.services import warehouse as warehouse_module
+
+    app, exploration = env
+    InMemoryStore.get_instance().update_graph_context(
+        exploration.graph_context_id,
+        enrichment_tables=[
+            {
+                "name": "devices",
+                "label": "Dispositivos",
+                "table": "main.graphs.devices",
+                "key_column": "account_id",
+                "match_node_types": ["Conta"],
+                "match_source": "node_id",
+                "cardinality": "many",
+                "columns": ["device_id", "conta_destino"],
+            }
+        ],
+    )
+    seen = []
+
+    class _Warehouse:
+        async def execute_statement(self, statement, parameters=None, **_):
+            from graphlagoon.models.schemas import StatementResponse
+
+            seen.append(parameters)
+            names = ["account_id", "device_id", "conta_destino"]
+            return StatementResponse(
+                statement_id="s",
+                status={"state": "SUCCEEDED"},
+                manifest={
+                    "schema": {
+                        "column_count": 3,
+                        "columns": [
+                            {"name": n, "type_name": "STRING", "type_text": "STRING", "position": i}
+                            for i, n in enumerate(names)
+                        ],
+                    },
+                    "total_row_count": 1,
+                },
+                result={"data_array": [["c1", "dev-9", "0001-99887766"]]},
+            )
+
+    monkeypatch.setattr(warehouse_module, "get_warehouse_client", lambda: _Warehouse())
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (
+            await rest.post("/api/agent-tokens", json={"name": "ro", "scopes": ["read"]})
+        ).json()["token"]
+        cid = (await rest.post("/api/investigations", json={"title": "x"})).json()["id"]
+        await rest.post(
+            f"/api/investigations/{cid}/sources",
+            json={"exploration_id": str(exploration.id)},
+        )
+        async with _mcp(app, token) as client:
+            graph = await _tool(client, "get_graph", investigation_id=cid)
+            conta = next(n for n in graph["nodes"] if n["type"] == "Conta")
+            out = await _tool(
+                client, "lookup_enrichment", investigation_id=cid, uid=conta["uid"], table="devices"
+            )
+            assert out["rows"] == [{"device_id": "dev-9", "conta_destino": "****-******66"}]
+            assert seen[0][0]["value"] == "c1"
+            missing = await client.call_tool(
+                "lookup_enrichment",
+                {"investigation_id": cid, "uid": conta["uid"], "table": "kyc"},
+            )
+            assert missing.is_error and "ENRICHMENT_TABLE_NOT_FOUND" in missing.content[0].text
+
+
 def test_mask_text_keeps_the_middle_digits():
     assert mask_text("CPF 123.456.789-01") == "CPF ***.456.789-**"
     assert mask_text("12345678000199") == "**.345.678/****-**"

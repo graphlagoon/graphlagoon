@@ -4,8 +4,8 @@ Every investigation route either has an MCP tool (``AGENT_TOOL_ROUTES``) or a
 reason it has none (``AGENT_EXEMPT_ROUTES``). A reason starting with
 ``HUMAN_ONLY`` marks a route agents must never reach: it carries
 ``forbid_agents`` and has no tool. ``tests/test_agent_registry.py`` enforces
-both, so a new route in ``routers/investigations.py`` (or the enrichment
-routes, F2.1) must land here with its tool or its reason.
+both, so a new route in ``routers/investigations.py`` (or an enrichment route
+in ``routers/graph_contexts.py``) must land here with its tool or its reason.
 """
 
 HUMAN_ONLY = "human-only:"
@@ -32,6 +32,10 @@ AGENT_TOOL_ROUTES: dict[tuple[str, str], str] = {
     ): "get_artifact",
     ("GET", f"{_CASE}/proposals"): "list_proposals",
     ("POST", f"{_CASE}/proposals"): "propose",
+    (
+        "POST",
+        "/api/graph-contexts/{context_id}/enrichment/{name}/lookup",
+    ): "lookup_enrichment",
 }
 
 # (method, path) → why there is no tool.

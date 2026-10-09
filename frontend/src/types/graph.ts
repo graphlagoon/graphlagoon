@@ -121,6 +121,33 @@ export interface IdentityKey {
   normalize: IdentityNormalize;
 }
 
+/** A side table looked up by a node's key and shown in the inspector (investigations). */
+export interface EnrichmentTable {
+  /** Slug, unique in the context; used in the lookup URL. */
+  name: string;
+  label: string;
+  /** catalog.schema.table */
+  table: string;
+  key_column: string;
+  match_node_types: string[];
+  match_source: 'node_id' | { kind: 'prop'; name: string };
+  cardinality: 'one' | 'many';
+  /** The only columns a lookup returns. */
+  columns: string[];
+  promote?: { node_type: string; id_column: string; edge_type: string } | null;
+}
+
+/** POST /graph-contexts/{id}/enrichment/{name}/lookup: rows grouped by key. */
+export interface EnrichmentLookupResult {
+  name: string;
+  label: string;
+  key_column: string;
+  columns: string[];
+  cardinality: 'one' | 'many';
+  rows: Record<string, Record<string, string | null>[]>;
+  truncated: boolean;
+}
+
 export interface GraphContext {
   id: string;
   title: string;
@@ -148,6 +175,7 @@ export interface GraphContext {
   /** Writer-authored custom metrics; the backend returns [] to read-only users. */
   metric_definitions?: CustomMetricDefinition[];
   identity_keys?: IdentityKey[];
+  enrichment_tables?: EnrichmentTable[];
   owner_email: string;
   shared_with: string[];
   has_write_access: boolean;
@@ -723,6 +751,7 @@ export interface CreateGraphContextRequest {
   context_menu_actions?: ContextMenuActionConfig[];
   metric_definitions?: CustomMetricDefinition[];
   identity_keys?: IdentityKey[];
+  enrichment_tables?: EnrichmentTable[];
 }
 
 export interface ShareRequest {

@@ -71,7 +71,7 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
 
 | Scope | The agent can |
 |---|---|
-| `read` | read cases, the unified graph, entities, the journal, notes, artifacts and proposals |
+| `read` | read cases, the unified graph, entities, the journal, notes, artifacts and proposals; look up an entity in its context's enrichment tables (`lookup_enrichment`) |
 | `analyze` | run server analyses (arrives with follow-the-money and typologies) |
 | `write` | create cases, add sources, write notes, upload artifacts as **drafts** |
 | `propose` | propose an entity role, the case status or a typology |
