@@ -1111,13 +1111,15 @@ export async function seedAdmin(
 /**
  * Seed investigations (cases) and their sources. Call AFTER setupAPIMocks.
  * `POST /investigations` creates a case the other routes then serve; `POST .../sources`
- * echoes an accessible source (recorded in `added`) and adds it to the case.
+ * echoes an accessible source (recorded in `added`) and adds it to the case, with
+ * title and context taken from `explorations` when the id is there.
  * State, notes and the journal are kept in memory so the workspace round-trips.
  */
 export async function seedInvestigations(
   page: Page,
   investigations: any[],
   sources: Record<string, any[]> = {},
+  explorations: any[] = [],
 ) {
   const added: any[] = [];
   const cases = new Map<string, any>(investigations.map((i) => [i.id, i]));
@@ -1164,13 +1166,15 @@ export async function seedInvestigations(
       if (method !== 'POST') return route.fulfill(json(srcs.get(id) ?? []));
       const body = req.postDataJSON();
       const list = srcs.get(id)!;
+      const exp = explorations.find((e) => e.id === body.exploration_id);
       const source = {
         id: `src-${added.length + 1}`,
         kind: 'exploration',
         position: list.length,
-        title_snapshot: body.exploration_id,
+        title_snapshot: exp?.title ?? body.exploration_id,
         accessible: true,
         exploration_id: body.exploration_id,
+        context_id: exp?.graph_context_id,
         mode: body.mode,
       };
       added.push({ investigation_id: id, ...body });

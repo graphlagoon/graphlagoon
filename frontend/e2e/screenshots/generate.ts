@@ -11,6 +11,7 @@ import {
   seedQueryTemplates,
   seedPrecomputedGraphs,
   seedSimilarityEndpoints,
+  seedInvestigations,
   enableDatasources,
 } from '../helpers/api-mocks';
 import { MOCK_EXPLORATION, MOCK_REST_CONNECTION } from '../fixtures/mock-data';
@@ -208,6 +209,53 @@ const DEMO_PRESETS = {
   },
 };
 
+// Investigations guide: a case whose two sources share companies by name, so the
+// unified view merges them (two rings) and shows two role fills.
+const COMPANY_KEY = [
+  { node_type: 'Company', entity: 'Company', source: { kind: 'prop', name: 'name' }, normalize: 'lower' },
+];
+const DEMO_CASE = {
+  id: 'case-pix',
+  title: 'Golpe Pix · falsa central',
+  status: 'analise',
+  typology: 'Golpe Pix',
+  owner_email: 'demo@graphlagoon.dev',
+  assignee_email: 'ana.costa@example.com',
+  state: { roles: { 'person-0@ctx-screenshot': 'victim', 'Company:globex data': 'mule' } },
+  shared_with: [],
+  has_write_access: true,
+  can_manage: true,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
+const DEMO_CASES = [
+  DEMO_CASE,
+  { ...DEMO_CASE, id: 'case-shell', title: 'Lojistas de fachada · região sul', typology: 'Lojista de fachada', status: 'selecao', assignee_email: 'bruno.rocha@example.com', state: {} },
+  { ...DEMO_CASE, id: 'case-mules', title: 'Contas laranja · abertura em lote', typology: 'Conta laranja', status: 'arquivado', assignee_email: null, state: {} },
+];
+const caseSource = (id: string, contextId: string, title: string, position: number) => ({
+  id, kind: 'exploration', position, title_snapshot: title, accessible: true,
+  exploration_id: `exp-${id}`, context_id: contextId, mode: 'live',
+});
+/** The curated graph split in two: people ↔ companies, and companies → products. */
+function caseSnapshot(sid: string) {
+  const types = sid === 'src-social' ? ['WORKS_AT', 'KNOWS'] : ['BUILDS'];
+  const edges = SCREENSHOT_GRAPH_RESPONSE.edges.filter((e) => types.includes(e.relationship_type));
+  const ids = new Set(edges.flatMap((e) => [e.src, e.dst]));
+  return {
+    exploration: {
+      id: sid, title: sid, graph_context_id: 'x', owner_email: 'demo@graphlagoon.dev',
+      state: DEMO_PRESETS.docs,
+    },
+    snapshot: {
+      nodes: SCREENSHOT_GRAPH_RESPONSE.nodes
+        .filter((n) => ids.has(n.node_id))
+        .map((n) => ({ id: n.node_id, type: n.node_type, properties: n.properties })),
+      edges: edges.map((e) => ({ id: e.edge_id, source: e.src, target: e.dst, type: e.relationship_type, properties: {} })),
+    },
+  };
+}
+
 /** Authenticated page with mock data. Reuses the E2E mock infrastructure. */
 async function setupPage(page: Page) {
   await page.addInitScript(() => {
@@ -232,9 +280,10 @@ async function setupPage(page: Page) {
   await setupAPIMocks(page);
 
   const contexts = [
-    SCREENSHOT_CONTEXT,
+    { ...SCREENSHOT_CONTEXT, identity_keys: COMPANY_KEY },
     {
       ...SCREENSHOT_CONTEXT,
+      identity_keys: COMPANY_KEY,
       id: 'ctx-supply',
       title: 'Supply Chain',
       description: 'Supplier and product graph',
@@ -271,6 +320,16 @@ async function setupPage(page: Page) {
     },
   });
   await seedSimilarityEndpoints(page, DEMO_SIMILARITY_ENDPOINTS);
+  await seedInvestigations(page, DEMO_CASES, {
+    'case-pix': [
+      caseSource('src-social', SCREENSHOT_CONTEXT.id, 'Social · who works where', 0),
+      caseSource('src-supply', 'ctx-supply', 'Supply · who builds what', 1),
+    ],
+  });
+  await page.route('**/graphlagoon/api/investigations/case-pix/sources/*/snapshot', (route) => {
+    const sid = route.request().url().split('/sources/')[1].split('/')[0];
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(caseSnapshot(sid)) });
+  });
   // Advertise a named REST connection so the datasource picker shows the full
   // roster (rest-connections scene). Invisible everywhere else — the picker
   // only exists inside the create-context modal.
@@ -290,6 +349,30 @@ interface Scene {
 }
 
 const SCENES: Scene[] = [
+  {
+    guide: 'investigations',
+    scene: 'queue',
+    path: '/investigations',
+    prepare: async (page) => {
+      await expect(page.getByTestId('investigation-row-case-pix')).toBeVisible();
+      await page.getByTestId('investigations-status').selectOption('all');
+      await page.waitForTimeout(300);
+    },
+  },
+  {
+    guide: 'investigations',
+    scene: 'workspace',
+    path: '/investigations/case-pix',
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      // The first fit runs before the layout spreads out; Space + C refits.
+      await page.locator(CANVAS).hover();
+      await page.keyboard.down('Space');
+      await page.keyboard.press('c');
+      await page.keyboard.up('Space');
+      await page.waitForTimeout(1000);
+    },
+  },
   {
     guide: 'index',
     scene: 'contexts',

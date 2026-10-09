@@ -22,6 +22,7 @@ export default defineConfig({
           { text: 'Getting Started', link: '/guide/getting-started' },
           { text: 'Exploring the Graph', link: '/guide/exploring-the-graph' },
           { text: 'Explorations & Sharing', link: '/guide/explorations' },
+          { text: 'Investigations', link: '/guide/investigations' },
         ],
       },
       {
