@@ -436,7 +436,7 @@ ou, no futuro, da identidade (OBO).
 
 O relatório encontrou várias defesas bem-feitas que **devem ser preservadas**:
 
-- **`safeUrl.ts`** — defesa de URL em 4 camadas (prefixo `https?://` obrigatório, `encodeURIComponent` por propriedade, allowlist de protocolo via `new URL()`, `noopener,noreferrer`). Enforce duplo (import + runtime).
+- **`safeUrl.ts`** — defesa de URL em 4 camadas (esquema literal obrigatório no template, `encodeURIComponent` por propriedade, recheck do esquema via `new URL()`, `noopener,noreferrer`). Enforce duplo (import + runtime). *Revisado em 2026-10-09:* qualquer esquema de app (`vscode://`, `claude-cli://`, …) é aceito — confiança no autor do template (quem tem write no contexto) por decisão do produto; o browser pede confirmação antes de lançar o app. O que **não pode regredir**: o esquema nunca vem de um valor do dado, e os esquemas que rodam dentro da página (`javascript:`, `vbscript:`, `data:`, `blob:`, `file:`, `about:`, `filesystem:`, `view-source:`) continuam bloqueados sempre — liberar seria XSS armazenado contra todo leitor do contexto.
 - **Zero sinks de HTML** — sem `v-html`/`innerHTML` dinâmico; tudo por `{{ }}` autoescapado.
 - **Labels em canvas/GPU** (`FastLabelRenderer`) — não-DOM, imune a XSS.
 - **Label formatter parser-based** (sem eval), com registry de modifiers.

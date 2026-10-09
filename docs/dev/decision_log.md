@@ -9705,3 +9705,86 @@ No public docs impact. No admin-area impact.
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-10-09 11:20] - Feature Implemented: links de app nas ações "Open URL" (vscode://, claude-cli://, …)
+
+**Feature:** a ação de menu de contexto *Open URL* aceitava só `http(s)://`. Agora aceita
+qualquer esquema de app — `vscode://`, `claude-cli://`, `cursor://`, `obsidian://`, `mailto:`,
+… — para abrir apps desktop (VS Code, Claude Code, …) a partir do nó clicado.
+
+**Requisitos (do usuário):**
+- Genérico: qualquer app, não uma lista fixa (nem só Claude Code).
+- Confiar no usuário que configurou o template (quem tem write no contexto).
+
+**Design Decisions:**
+1. **Sem allowlist de esquemas (nem env, nem admin).** A primeira proposta era um
+   `GRAPH_LAGOON_URL_ACTION_EXTRA_SCHEMES` opt-in; o usuário rejeitou: o autor do template é
+   confiável. Qualquer esquema RFC 3986 escrito literalmente no início do template é aceito.
+   Mitigação nativa: o browser pergunta "Abrir <app>?" antes de lançar.
+2. **Denylist fixa de esquemas in-browser** (`javascript`, `vbscript`, `data`, `blob`, `file`,
+   `filesystem`, `about`, `view-source`). Não conflita com o requisito — esses esquemas não
+   abrem app nenhum, rodam/renderizam dentro da página: liberar seria XSS armazenado contra
+   todo leitor do contexto (inclusive superusers). Validado na edição, no import e de novo no
+   runtime após `new URL` (que também precisa bater com o esquema literal do template).
+3. **O dado continua não-confiável.** O esquema precisa estar literal no template (a regex de
+   esquema não aceita `{`, então placeholder nunca compõe o esquema) e todo valor interpolado
+   segue `encodeURIComponent`.
+4. **App links sempre via `location.assign`, ignorando `openIn`.** Verificado no Chromium
+   (Playwright): `location.assign('claude-cli://…')` não navega a página (estado do grafo
+   preservado), enquanto `window.open` deixa uma aba `about:blank` órfã. O editor esconde o
+   rádio nova aba/aba atual para app links e mostra uma dica com o esquema.
+5. **Sem permissão nova (Step 2.4b).** Autorar ações já é gated por write no contexto; clicar
+   é leitura. O controle de "quem escolhe o app" é o compartilhamento do contexto.
+6. **Receita VS Code verificada** com o `vscode-uri` real: `%2F` dentro do path é decodificado
+   pelo VS Code, então `vscode://file/<raiz>/{prop:rel}` funciona; caminho absoluto num valor
+   vira `//home/...` (quebra) — documentado `{prop:path|replace:/^%2F/:}`.
+
+**Frontend Changes:**
+- `utils/safeUrl.ts`: `urlScheme()`, `isAppUrl()`, nova `validateUrlTemplate` (esquema literal,
+  denylist in-browser, `http(s)` ainda exige `://`), recheck pós-`new URL`, `openUrl` faz
+  hand-off de app links.
+- `components/ContextMenuActionsModal.vue`: hint atualizado; rádio de aba oculto + hint
+  `menu-action-app-link-hint` para app links.
+- `utils/contextMenuActionSkill.ts`: contrato do prompt de IA lista esquemas de app (VS Code,
+  Claude Code terminal/VS Code, Cursor, Obsidian, mailto), regra de encoding de texto literal.
+- `types/contextMenuActions.ts`: doc de `urlTemplate`/`openIn`.
+
+**Files Created:**
+- [frontend/src/components/__tests__/ContextMenuActionsModal.appLinks.test.ts](../../frontend/src/components/__tests__/ContextMenuActionsModal.appLinks.test.ts)
+
+**Files Modified:**
+- [frontend/src/utils/safeUrl.ts](../../frontend/src/utils/safeUrl.ts), [frontend/src/components/ContextMenuActionsModal.vue](../../frontend/src/components/ContextMenuActionsModal.vue),
+  [frontend/src/utils/contextMenuActionSkill.ts](../../frontend/src/utils/contextMenuActionSkill.ts), [frontend/src/types/contextMenuActions.ts](../../frontend/src/types/contextMenuActions.ts)
+- Testes: `safeUrl.test.ts`, `contextMenuActionImport.test.ts`, `contextMenuActionSkill.test.ts`
+- Docs: `docs/guide/context-menu-actions.md`, `docs/dev/security-assessment.md` (§7 revisado),
+  `.claude/skills/skill_context_menu_action/SKILL.md`
+
+**Testing:**
+- [x] Unit: 2421/2421 (novos: esquemas de app aceitos, in-browser rejeitados em qualquer caixa,
+  placeholder não compõe esquema, encoding em app links, missing-guard, receita VS Code,
+  `openUrl` hand-off; import aceita/rejeita; modal esconde rádio e bloqueia `javascript:`)
+- [x] `npx vue-tsc --noEmit` limpo
+- [x] E2E `context-menu.spec.ts` 3/3
+- [x] Probe Chromium de `location.assign` vs `window.open` em esquema custom
+
+**Public Docs:**
+- [x] `docs/guide/context-menu-actions.md`: TL;DR, regras de segurança, nova seção
+  "Opening desktop apps" (`#app-links`) com tabela de exemplos, pegadinhas e modelo de confiança
+- [x] `make docs-build` passa
+- [x] Screenshots: sem regeneração — a cena `context-menu-actions-menu` mostra o menu, que não mudou
+
+**Admin-Area Impact:** No admin-area impact (nenhum setting, tabela, rota ou audit action).
+
+**Security Considerations:**
+- Relaxa a regra "prefixo `https?://` obrigatório" do §7 da security assessment por decisão
+  explícita do produto; §7 atualizado com o novo invariante a não regredir.
+- Prompt injection via dado: um valor do nó pode virar texto de `q=`/`prompt=` do Claude Code.
+  O Claude Code só pré-preenche (não envia) e marca "Prompt from an external link";
+  documentado para o leitor revisar antes do Enter.
+
+**Known Limitations:**
+- Sem handler registrado, o clique não faz nada (Chromium silencioso) — sem como detectar do browser.
+- Ações salvas com `openIn` continuam com o campo; para app links ele é ignorado.
+
+**Author:** Claude (AI Assistant)
+
+---

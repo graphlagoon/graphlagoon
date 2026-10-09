@@ -2,12 +2,14 @@
 
 ::: tip TL;DR
 Custom entries in the right-click menu, configured once per context: open
-a URL built from the clicked item's data, copy formatted text, or run a
-query template with the item bound as a parameter.
+a URL built from the clicked item's data (a web page, or a desktop app such
+as VS Code or Claude Code), copy formatted text, or run a query template with
+the item bound as a parameter.
 
 - **Use it when** the clicked node should bridge to another system —
-  PubMed for a gene, your CRM for an account — or when a curated query
-  from *this* node should be one click away.
+  PubMed for a gene, your CRM for an account, the source file in VS Code,
+  a Claude Code session in the right repo — or when a curated query from
+  *this* node should be one click away.
 - **Not the tool for** bulk operations (an action sees exactly one
   clicked item); logic beyond the three kinds — for arbitrary JavaScript
   over the graph, use a [cluster program](./clusters.md) with a node
@@ -54,18 +56,25 @@ Every action has:
 
 ### Open URL
 
-Builds a URL from the clicked item and opens it in a **new tab** or the
-**current tab**. The URL is a [label-template](#templates) string:
+Builds a URL from the clicked item and opens it. The URL is a
+[label-template](#templates) string:
 
 ```
 https://pubmed.ncbi.nlm.nih.gov/?term={prop:symbol}
 ```
 
+A web link (`https://`, `http://`) opens in a **new tab** or the **current
+tab**. Any other scheme — `vscode://`, `claude-cli://`, `obsidian://`,
+`mailto:` … — is an [app link](#app-links): the browser hands it to the
+desktop app registered for that scheme.
+
 Safety rules, enforced rather than suggested:
 
-- The template must literally start with `http://` or `https://` — a property
-  value can never choose the scheme, and `javascript:`/`data:` URLs are
-  rejected outright.
+- The template must literally start with its scheme — a property value can
+  never choose the scheme or which app opens.
+- `javascript:`, `data:`, `file:`, `blob:`, `about:` and similar are rejected
+  outright. They don't open an app: they run or render *inside* Graph Lagoon,
+  for every reader of the context.
 - Every interpolated value is URL-encoded before the template renders, so a
   property containing `&`, `?` or `/` cannot restructure the URL. Metric
   values get the same encoding.
@@ -145,6 +154,50 @@ also carry one of:
 - `?template=<name>&template.<param>=…` — auto-run a
   [query template](./query-templates.md).
 
+## Opening desktop apps {#app-links}
+
+An *Open URL* action whose template starts with anything other than
+`http(s)://` is an **app link**. Clicking it does not open a tab: the browser
+asks "Open *&lt;app&gt;*?" and passes the URL to the app that registered the
+scheme on the **clicking user's machine**. The graph stays open behind it.
+
+Any scheme works. Graph Lagoon does not keep a list of apps, so you choose
+which app the action opens:
+
+| Opens | Template |
+| --- | --- |
+| A file at a line in VS Code | `vscode://file/home/me/repo/{prop:path}:{prop:line}` |
+| Claude Code in a terminal, in the right repo, prompt pre-filled | `claude-cli://open?repo=acme/payments&q=Explain%20{node_id}` |
+| A Claude Code tab inside VS Code | `vscode://anthropic.claude-code/open?prompt=Explain%20{node_id}` |
+| The same file in Cursor | `cursor://file/home/me/repo/{prop:path}:{prop:line}` |
+| A note in Obsidian | `obsidian://open?vault=kb&file={prop:note}` |
+| An email draft | `mailto:{prop:email}?subject=About%20{prop:name}` |
+
+Things that behave differently from web links:
+
+- **Install the app first.** If nothing on the machine has registered the
+  scheme, the click does nothing. Claude Code registers `claude-cli://` the
+  first time you send a prompt in an interactive session; see Anthropic's
+  [deep-link docs](https://code.claude.com/docs/en/deep-links).
+- **No new tab / current tab choice.** The editor hides it for app links.
+- **Encode the literal text yourself.** Values from the graph are URL-encoded
+  automatically, but text you type into the template is not. Write a space as
+  `%20` and a line break as `%0A` in a `q=` or `prompt=` parameter.
+- **Slashes inside values arrive as `%2F`.** Apps that decode the URL, such as
+  VS Code, handle that fine. Put the fixed folder in the template and
+  interpolate the path relative to it. If the column holds absolute paths,
+  remove the encoded leading slash with
+  `vscode://file/{prop:path|replace:/^%2F/:}:{prop:line}`.
+
+**Who decides.** The app an action opens is chosen by whoever can
+[edit the context's actions](#storage-and-permissions): the owner and write
+shares. Graph Lagoon trusts that author. Readers only click, and the browser
+asks them before any app launches. Grant write access with that in mind.
+The data is still never trusted: a node's properties cannot change the scheme.
+They can still put text into a prompt, though. Claude Code pre-fills a
+`claude-cli://` prompt without sending it and flags it as coming from an
+external link. Read the prompt before you press Enter.
+
 ## Asking an AI to write actions
 
 The robot button in the editor's header generates a copy-pasteable prompt for
@@ -155,7 +208,8 @@ current?") before producing anything.
 
 The AI's final answer is a JSON array — paste it into the editor's **Import
 JSON** box and the actions are added after validation (unknown kinds, bad
-operators and non-`http(s)` URL templates are rejected with a pointed error).
+operators and `javascript:`/`data:`/`file:` URL templates are rejected with a
+pointed error).
 
 ## Exporting and importing
 

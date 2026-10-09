@@ -44,11 +44,28 @@ describe('parseImportedActionConfigs', () => {
     expect(result.error).toContain('unknown kind');
   });
 
-  it('rejects open-url templates without the http(s) prefix', () => {
+  it('rejects open-url templates with an in-browser scheme', () => {
     const result = parseImportedActionConfigs(
       JSON.stringify([{ ...VALID_OPEN_URL, urlTemplate: 'javascript:alert(1)' }]),
     );
     expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('not allowed');
+  });
+
+  it('accepts open-url app links (vscode://, claude-cli://)', () => {
+    const result = parseImportedActionConfigs(
+      JSON.stringify([
+        { ...VALID_OPEN_URL, urlTemplate: 'vscode://file/repo/{prop:symbol}' },
+        { ...VALID_OPEN_URL, urlTemplate: 'claude-cli://open?q={prop:symbol}' },
+      ]),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.configs.map((c) => (c.kind === 'open-url' ? c.urlTemplate : ''))).toEqual([
+      'vscode://file/repo/{prop:symbol}',
+      'claude-cli://open?q={prop:symbol}',
+    ]);
   });
 
   it('rejects a bad match target and bad condition operator', () => {
