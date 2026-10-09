@@ -139,6 +139,9 @@ the administrator (see [Configuration](./configuration.md#ai-agents)).
 - **Agent activity** lists what agents did on the case. In the journal,
   their entries read "agent X on behalf of Y".
 
+How to connect Claude Code or Claude Desktop, the scopes, masking and the
+ready-made prompts are in [AI Agents (MCP)](./agents-mcp.md).
+
 ## Access and sharing
 
 - **Who sees a case:** its owner, its assignee, the people it was shared

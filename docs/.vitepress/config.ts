@@ -23,6 +23,7 @@ export default defineConfig({
           { text: 'Exploring the Graph', link: '/guide/exploring-the-graph' },
           { text: 'Explorations & Sharing', link: '/guide/explorations' },
           { text: 'Investigations', link: '/guide/investigations' },
+          { text: 'AI Agents (MCP)', link: '/guide/agents-mcp' },
         ],
       },
       {

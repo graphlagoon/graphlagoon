@@ -41,7 +41,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
 - [x] FA.5 · Ponte MCP local (stdio) para apps atrás do proxy do Databricks
 - [x] FA.6 · Registry de cobertura AI-first (teste obrigatório)
-- [ ] FA.7 · Guia público de agentes, prompts MCP e E2E do agente
+- [x] FA.7 · Guia público de agentes, prompts MCP e E2E do agente
 
 **F2 · Arquivos e enriquecimento**
 - [ ] F2.1 · Tabelas de enriquecimento no context e endpoint de consulta
