@@ -11,6 +11,7 @@ does not leak (tipping-off). Shares are nominal e-mails only.
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 from uuid import UUID
@@ -243,11 +244,15 @@ async def create_investigation(user_email: str, data: dict) -> dict:
             inv = get_memory_store().create_investigation(
                 owner_email=user_email, **data
             )
+            await append_event(session, inv.id, user_email, "case.created", data)
         else:
+            from uuid import uuid4
+
             from graphlagoon.db.models import Investigation
 
-            inv = Investigation(owner_email=user_email, state={}, **data)
+            inv = Investigation(id=uuid4(), owner_email=user_email, state={}, **data)
             session.add(inv)
+            await append_event(session, inv.id, user_email, "case.created", data)
             await session.commit()
             await _refresh(session, inv)
         return serialize(inv, user_email)
@@ -276,6 +281,14 @@ async def update_investigation(
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
         _ensure_not_decided(inv)
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "case.updated",
+            {k: v for k, v in changes.items() if k != "state"}
+            | ({"state": "changed"} if "state" in changes else {}),
+        )
         if session is None:
             get_memory_store().update_investigation(investigation_id, **changes)
         else:
@@ -320,6 +333,13 @@ async def share_investigation(
     email = nominal_email(email)
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "manage")
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "case.shared",
+            {"with": email, "permission": permission},
+        )
         if session is None:
             get_memory_store().share_investigation(investigation_id, email, permission)
         else:
@@ -347,11 +367,14 @@ async def unshare_investigation(
 ) -> bool:
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "manage")
-        if session is None:
-            return get_memory_store().unshare_investigation(investigation_id, email)
         share = next((s for s in inv.shares if s.shared_with_email == email), None)
         if share is None:
             return False
+        await append_event(
+            session, investigation_id, user_email, "case.unshared", {"with": email}
+        )
+        if session is None:
+            return get_memory_store().unshare_investigation(investigation_id, email)
         await session.delete(share)
         await session.commit()
         return True
@@ -558,6 +581,19 @@ async def add_source(
             fields["frozen_blob_key"] = key
             fields["frozen_sha256"] = hashlib.sha256(data).hexdigest()
 
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "source.added",
+            {
+                "source_id": str(source_id),
+                "exploration_id": str(exploration_id),
+                "title": exploration.title,
+                "mode": mode,
+                "sha256": fields.get("frozen_sha256"),
+            },
+        )
         if session is None:
             source = get_memory_store().add_investigation_child(_SOURCES, **fields)
         else:
@@ -596,6 +632,13 @@ async def remove_source(
             "title": source.title_snapshot,
             "exploration_id": str(source.exploration_id),
         }
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "source.removed",
+            {"source_id": str(source_id), **meta},
+        )
         if session is None:
             get_memory_store().delete_investigation_child(_SOURCES, source_id)
         else:
@@ -631,3 +674,330 @@ async def source_snapshot(
                 404, "EXPLORATION_NOT_FOUND", "The source exploration was deleted"
             )
         return await _exploration_payload(exploration)
+
+
+# ---------------------------------------------------------------------------
+# Journal (03-arquitetura §3.4): immutable, hash-chained events
+# ---------------------------------------------------------------------------
+
+_EVENTS = "investigation_events"
+_NOTES = "investigation_notes"
+EVENT_PAYLOAD_MAX_BYTES = 16 * 1024
+# Kinds the client may post; everything else is written by the server itself.
+CLIENT_EVENT_KINDS = frozenset(
+    {"trace.run", "path.run", "typology.accepted", "nodes.promoted", "metric.saved"}
+)
+ROLES = ("victim", "mule", "exit", "discarded")
+
+
+def _canonical(payload: Any) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+
+async def _list_events(session, investigation_id: UUID) -> list:
+    if session is None:
+        rows = get_memory_store().list_investigation_children(
+            _EVENTS, investigation_id
+        )
+    else:
+        from sqlalchemy import select
+
+        from graphlagoon.db.models import InvestigationEvent
+
+        result = await session.execute(
+            select(InvestigationEvent).where(
+                InvestigationEvent.investigation_id == investigation_id
+            )
+        )
+        rows = result.scalars().all()
+    return sorted(rows, key=lambda e: (e.at, str(e.id)))
+
+
+async def append_event(
+    session, investigation_id: UUID, actor_email: str, kind: str, payload: dict
+) -> Any:
+    """Adds one journal event (the caller commits). ``hash`` chains to the
+    previous event: sha256(prev_hash + canonical json of this one).
+
+    shortcut: prev_hash is read without a lock, so two concurrent writers can
+    fork the chain; serialize per case if the chain must be verifiable.
+    """
+    import hashlib
+    from datetime import datetime
+    from uuid import uuid4
+
+    events = await _list_events(session, investigation_id)
+    prev_hash = events[-1].hash if events else None
+    at = datetime.now()
+    body = _canonical(
+        {
+            "investigation_id": str(investigation_id),
+            "at": at.isoformat(),
+            "actor_email": actor_email,
+            "kind": kind,
+            "payload": payload,
+        }
+    )
+    fields = {
+        "id": uuid4(),
+        "investigation_id": investigation_id,
+        "at": at,
+        "actor_email": actor_email,
+        "kind": kind,
+        "payload": json.loads(_canonical(payload)),
+        "prev_hash": prev_hash,
+        "hash": hashlib.sha256(((prev_hash or "") + body).encode("utf-8")).hexdigest(),
+    }
+    if session is None:
+        return get_memory_store().add_investigation_child(_EVENTS, **fields)
+    from graphlagoon.db.models import InvestigationEvent
+
+    event = InvestigationEvent(**fields)
+    session.add(event)
+    await session.flush()
+    return event
+
+
+def _serialize_event(e: Any) -> dict:
+    return {
+        "id": e.id,
+        "at": e.at,
+        "actor_email": e.actor_email,
+        "kind": e.kind,
+        "payload": e.payload or {},
+        "prev_hash": e.prev_hash,
+        "hash": e.hash,
+    }
+
+
+async def list_events(
+    investigation_id: UUID,
+    user_email: str,
+    after: Optional[UUID] = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Oldest first; ``after`` is the id of the last event of the previous page."""
+    async with _session() as session:
+        await load_case(session, investigation_id, user_email)
+        events = await _list_events(session, investigation_id)
+        start = 0
+        if after is not None:
+            ids = [e.id for e in events]
+            if after not in ids:
+                raise InvestigationError(
+                    404, "EVENT_NOT_FOUND", f"Event with id '{after}' not found"
+                )
+            start = ids.index(after) + 1
+        return [_serialize_event(e) for e in events[start : start + limit]]
+
+
+async def post_client_event(
+    investigation_id: UUID, user_email: str, kind: str, payload: dict
+) -> dict:
+    if kind not in CLIENT_EVENT_KINDS:
+        raise InvestigationError(
+            422,
+            "EVENT_KIND_NOT_ALLOWED",
+            f"Clients may only post {sorted(CLIENT_EVENT_KINDS)}",
+        )
+    if len(_canonical(payload).encode("utf-8")) > EVENT_PAYLOAD_MAX_BYTES:
+        raise InvestigationError(
+            422, "EVENT_PAYLOAD_TOO_LARGE", "Event payload is limited to 16 KB"
+        )
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        _ensure_not_decided(inv)
+        event = await append_event(
+            session, investigation_id, user_email, kind, payload
+        )
+        if session is not None:
+            await session.commit()
+        return _serialize_event(event)
+
+
+# ---------------------------------------------------------------------------
+# Case state: roles and pins by unified node id (03 §5.1)
+# ---------------------------------------------------------------------------
+
+
+async def update_state(
+    investigation_id: UUID,
+    user_email: str,
+    roles: Optional[dict[str, Optional[str]]],
+    pins: Optional[dict[str, bool]],
+) -> dict:
+    """Merges role/pin changes into ``state``; one journal event per change."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        _ensure_not_decided(inv)
+        state = dict(inv.state or {})
+        cur_roles = dict(state.get("roles") or {})
+        cur_pins = list(state.get("pins") or [])
+        events = []
+        for entity, role in (roles or {}).items():
+            before = cur_roles.get(entity)
+            if role == before:
+                continue
+            if role is None:
+                cur_roles.pop(entity, None)
+            else:
+                cur_roles[entity] = role
+            events.append(("role.changed", {"entity": entity, "from": before, "to": role}))
+        for entity, pinned in (pins or {}).items():
+            if pinned == (entity in cur_pins):
+                continue
+            cur_pins = [*cur_pins, entity] if pinned else [p for p in cur_pins if p != entity]
+            events.append(("pin.changed", {"entity": entity, "pinned": pinned}))
+        state["roles"] = cur_roles
+        state["pins"] = cur_pins
+        for kind, payload in events:
+            await append_event(session, investigation_id, user_email, kind, payload)
+        if session is None:
+            get_memory_store().update_investigation(investigation_id, state=state)
+        else:
+            inv.state = state
+            await session.commit()
+            await _refresh(session, inv)
+        return serialize(inv, user_email)
+
+
+# ---------------------------------------------------------------------------
+# Notes (03 §3.5): anyone with write access adds; only the author edits/deletes
+# ---------------------------------------------------------------------------
+
+
+def _serialize_note(n: Any) -> dict:
+    return {
+        "id": n.id,
+        "anchor": n.anchor or {},
+        "body": n.body,
+        "author_email": n.author_email,
+        "created_at": n.created_at,
+        "updated_at": n.updated_at,
+    }
+
+
+async def list_notes(investigation_id: UUID, user_email: str) -> list[dict]:
+    async with _session() as session:
+        await load_case(session, investigation_id, user_email)
+        if session is None:
+            rows = get_memory_store().list_investigation_children(
+                _NOTES, investigation_id
+            )
+        else:
+            from sqlalchemy import select
+
+            from graphlagoon.db.models import InvestigationNote
+
+            result = await session.execute(
+                select(InvestigationNote).where(
+                    InvestigationNote.investigation_id == investigation_id
+                )
+            )
+            rows = result.scalars().all()
+        return [_serialize_note(n) for n in sorted(rows, key=lambda n: n.created_at)]
+
+
+async def _get_note(session, investigation_id: UUID, note_id: UUID) -> Any:
+    if session is None:
+        note = get_memory_store().get_investigation_child(_NOTES, note_id)
+    else:
+        from graphlagoon.db.models import InvestigationNote
+
+        note = await session.get(InvestigationNote, note_id)
+    if note is None or note.investigation_id != investigation_id:
+        raise InvestigationError(
+            404, "NOTE_NOT_FOUND", f"Note with id '{note_id}' not found"
+        )
+    return note
+
+
+def _ensure_author(note: Any, user_email: str) -> None:
+    if note.author_email != user_email:
+        raise InvestigationError(
+            403, "FORBIDDEN", "Only the author can change or delete a note"
+        )
+
+
+async def create_note(
+    investigation_id: UUID, user_email: str, anchor: dict, body: str
+) -> dict:
+    from datetime import datetime
+    from uuid import uuid4
+
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        _ensure_not_decided(inv)
+        now = datetime.now()
+        fields = {
+            "id": uuid4(),
+            "investigation_id": investigation_id,
+            "anchor": anchor,
+            "body": body,
+            "author_email": user_email,
+            "created_at": now,
+            "updated_at": now,
+        }
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "note.created",
+            {"note_id": str(fields["id"]), "anchor": anchor, "body": body},
+        )
+        if session is None:
+            note = get_memory_store().add_investigation_child(_NOTES, **fields)
+        else:
+            from graphlagoon.db.models import InvestigationNote
+
+            note = InvestigationNote(**fields)
+            session.add(note)
+            await session.commit()
+            await session.refresh(note)
+        return _serialize_note(note)
+
+
+async def update_note(
+    investigation_id: UUID, user_email: str, note_id: UUID, changes: dict
+) -> dict:
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        _ensure_not_decided(inv)
+        note = await _get_note(session, investigation_id, note_id)
+        _ensure_author(note, user_email)
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "note.updated",
+            {"note_id": str(note_id), **changes},
+        )
+        if session is None:
+            get_memory_store().update_investigation_child(_NOTES, note_id, **changes)
+        else:
+            for key, value in changes.items():
+                setattr(note, key, value)
+            await session.commit()
+            await session.refresh(note)
+        return _serialize_note(note)
+
+
+async def delete_note(investigation_id: UUID, user_email: str, note_id: UUID) -> None:
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        _ensure_not_decided(inv)
+        note = await _get_note(session, investigation_id, note_id)
+        _ensure_author(note, user_email)
+        # The journal keeps the text: deleting a note never erases what was said.
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "note.deleted",
+            {"note_id": str(note_id), "body": note.body},
+        )
+        if session is None:
+            get_memory_store().delete_investigation_child(_NOTES, note_id)
+        else:
+            await session.delete(note)
+            await session.commit()

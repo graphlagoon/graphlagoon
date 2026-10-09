@@ -9,15 +9,21 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from graphlagoon.middleware.auth import get_current_user
 from graphlagoon.models.schemas import (
     InvestigationCreate,
+    InvestigationEventCreate,
+    InvestigationEventResponse,
+    InvestigationNoteCreate,
+    InvestigationNoteResponse,
+    InvestigationNoteUpdate,
     InvestigationResponse,
     InvestigationShareRequest,
     InvestigationSourceCreate,
     InvestigationSourceResponse,
+    InvestigationStateUpdate,
     InvestigationUpdate,
 )
 from graphlagoon.services import audit
@@ -220,3 +226,105 @@ async def get_source_snapshot(
         )
     except service.InvestigationError as exc:
         raise _http(exc)
+
+
+# Journal, state and notes (F1.7): recorded in the case's own hash-chained
+# journal rather than the audit log (see AUDIT_EXEMPT_ROUTES).
+
+
+@router.get(
+    "/{investigation_id}/events", response_model=list[InvestigationEventResponse]
+)
+async def list_events(
+    investigation_id: UUID,
+    request: Request,
+    after: Optional[UUID] = None,
+    limit: int = Query(100, ge=1, le=500),
+):
+    try:
+        return await service.list_events(
+            investigation_id, get_current_user(request), after, limit
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/events",
+    response_model=InvestigationEventResponse,
+    status_code=201,
+)
+async def post_event(
+    investigation_id: UUID, data: InvestigationEventCreate, request: Request
+):
+    try:
+        return await service.post_client_event(
+            investigation_id, get_current_user(request), data.kind, data.payload
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.patch("/{investigation_id}/state", response_model=InvestigationResponse)
+async def update_state(
+    investigation_id: UUID, data: InvestigationStateUpdate, request: Request
+):
+    try:
+        return await service.update_state(
+            investigation_id, get_current_user(request), data.roles, data.pins
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.get("/{investigation_id}/notes", response_model=list[InvestigationNoteResponse])
+async def list_notes(investigation_id: UUID, request: Request):
+    try:
+        return await service.list_notes(investigation_id, get_current_user(request))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/notes",
+    response_model=InvestigationNoteResponse,
+    status_code=201,
+)
+async def create_note(
+    investigation_id: UUID, data: InvestigationNoteCreate, request: Request
+):
+    try:
+        return await service.create_note(
+            investigation_id,
+            get_current_user(request),
+            data.anchor.model_dump(),
+            data.body,
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.patch(
+    "/{investigation_id}/notes/{note_id}", response_model=InvestigationNoteResponse
+)
+async def update_note(
+    investigation_id: UUID,
+    note_id: UUID,
+    data: InvestigationNoteUpdate,
+    request: Request,
+):
+    try:
+        return await service.update_note(
+            investigation_id, get_current_user(request), note_id, data.model_dump()
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.delete("/{investigation_id}/notes/{note_id}")
+async def delete_note(investigation_id: UUID, note_id: UUID, request: Request):
+    try:
+        await service.delete_note(investigation_id, get_current_user(request), note_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    return {"status": "deleted"}

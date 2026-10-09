@@ -200,6 +200,9 @@ export interface AppearanceContext {
 
   // Community color override (nodeId -> hex color)
   communityColorMap: Map<string, string> | null;
+
+  // Investigation role fill (nodeId -> hex color); wins over community and type.
+  roleColorMap?: Map<string, string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +235,7 @@ export function computeNodeAppearance(
 ): NodeAppearanceResult {
   const baseColor = isCluster
     ? (clusterColor || '#9333ea')
-    : (ctx.communityColorMap?.get(nodeId) ?? ctx.getNodeTypeColor(nodeType));
+    : (ctx.roleColorMap?.get(nodeId) ?? ctx.communityColorMap?.get(nodeId) ?? ctx.getNodeTypeColor(nodeType));
   let color = baseColor;
   let size = isCluster ? clusterBaseSize : ctx.baseNodeSize;
 
@@ -458,4 +461,32 @@ export function provenanceRingColors(
   sourceColors: Record<string, string>,
 ): string[] {
   return [...new Set(sourceIds.map((id) => sourceColors[id]).filter(Boolean))];
+}
+
+// ---------------------------------------------------------------------------
+// Case roles (investigation workspace, T2): node fill
+// ---------------------------------------------------------------------------
+
+/** Fill per role (02-design): victim blue, mule orange, exit navy, discarded gray. */
+export const ROLE_COLORS: Record<string, string> = {
+  victim: '#2563eb',
+  mule: '#ea580c',
+  exit: '#0d1b2a',
+  discarded: '#9ca3af',
+};
+
+export const ROLE_LABELS: Record<string, string> = {
+  victim: 'Victim',
+  mule: 'Mule / suspect',
+  exit: 'Exit (cash-out)',
+  discarded: 'Discarded',
+};
+
+/** nodeId -> fill color for the nodes that have a known role. */
+export function roleColorMap(roles: Record<string, string>): Map<string, string> {
+  return new Map(
+    Object.entries(roles)
+      .filter(([, role]) => ROLE_COLORS[role])
+      .map(([id, role]) => [id, ROLE_COLORS[role]]),
+  );
 }

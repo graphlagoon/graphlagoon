@@ -2,6 +2,9 @@ import axios, { type AxiosInstance } from 'axios';
 import type {
   CreateInvestigationRequest,
   Investigation,
+  InvestigationEvent,
+  InvestigationNote,
+  InvestigationRole,
   InvestigationSource,
   SourceSnapshotPayload,
   SourceMode,
@@ -675,6 +678,39 @@ class ApiService {
   async getInvestigationSourceSnapshot(id: string, sourceId: string): Promise<SourceSnapshotPayload> {
     const response = await this.client.get(`/api/investigations/${id}/sources/${sourceId}/snapshot`);
     return response.data;
+  }
+
+  /** Merge patch by unified node id: a null role clears it. */
+  async updateInvestigationState(
+    id: string,
+    patch: { roles?: Record<string, InvestigationRole | null>; pins?: Record<string, boolean> },
+  ): Promise<Investigation> {
+    const response = await this.client.patch(`/api/investigations/${id}/state`, patch);
+    return response.data;
+  }
+
+  /** Journal, oldest first. shortcut: one page of 500; paginate with `after` when cases grow. */
+  async getInvestigationEvents(id: string, limit = 500): Promise<InvestigationEvent[]> {
+    const response = await this.client.get(`/api/investigations/${id}/events`, { params: { limit } });
+    return response.data;
+  }
+
+  async getInvestigationNotes(id: string): Promise<InvestigationNote[]> {
+    const response = await this.client.get(`/api/investigations/${id}/notes`);
+    return response.data;
+  }
+
+  async createInvestigationNote(
+    id: string,
+    anchor: InvestigationNote['anchor'],
+    body: string,
+  ): Promise<InvestigationNote> {
+    const response = await this.client.post(`/api/investigations/${id}/notes`, { anchor, body });
+    return response.data;
+  }
+
+  async deleteInvestigationNote(id: string, noteId: string): Promise<void> {
+    await this.client.delete(`/api/investigations/${id}/notes/${noteId}`);
   }
 
   // Admin area (superuser only; every route 403s for anyone else)

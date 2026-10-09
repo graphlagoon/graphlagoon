@@ -10663,3 +10663,53 @@ status.
 impact (só leitura de rotas existentes).
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 03:30] - Feature Implemented: F1.7 · Papéis, notas e diário
+
+**Feature:** diário do caso imutável e encadeado (`GET/POST …/events`), `PATCH
+…/state` para papéis e pins, CRUD de notas (`…/notes`), e no workspace: seletor de
+papel e aba "Notes" no inspector, legenda "Role (fill)" e o diário no rodapé.
+
+**Design Decisions:**
+1. `services.investigations.append_event`: `hash = sha256(prev_hash + json canônico)`
+   (chaves ordenadas, sem espaços, `at` em ISO), gravado na mesma sessão da mutação.
+   Toda mutação do servidor grava evento: `case.created/updated/shared/unshared`,
+   `source.added/removed`, `role.changed`, `pin.changed`, `note.created/updated/deleted`
+   (o `note.deleted` guarda o texto: apagar a nota não apaga o que foi dito).
+   `shortcut:` o `prev_hash` é lido sem lock; dois escritores simultâneos bifurcam a
+   cadeia; serializar por caso se a cadeia precisar ser verificável.
+2. Sem `PUT`/`DELETE` em eventos. `POST …/events` aceita só os tipos do cliente da 03
+   §3.4 (`trace.run`, `path.run`, `typology.accepted`, `nodes.promoted`,
+   `metric.saved`), payload ≤ 16 KB; o resto é 422. **Diferença da 03:**
+   `role.changed` é gravado pelo servidor no `PATCH …/state` (fonte confiável, sem
+   evento duplicado), não pelo cliente.
+3. Paginação: mais antigo primeiro, `after=<id do último evento>`, `limit` até 500.
+   `shortcut:` o front pede uma página de 500.
+4. `PATCH …/state` é merge por id unificado: `{roles: {uid: papel|null}, pins: {uid:
+   bool}}`; papéis `victim`, `mule`, `exit`, `discarded`. Notas: escrita no caso para
+   criar; editar e apagar só o autor; caso decidido é só-leitura (409).
+5. Preenchimento: `ROLE_COLORS` em `graphAppearance.ts` (azul, laranja, navy,
+   cinza, de 02 §Codificação), `graphStore.roleColors` entra no `AppearanceContext`
+   e vence comunidade e tipo; muda sem recarregar o grafo. A forma (quadrado para
+   saída) ficou de fora. UI de pins ficou de fora (só API).
+6. As rotas novas são `AUDIT_EXEMPT_ROUTES`: ficam no diário do próprio caso.
+
+**Files:** `api/graphlagoon/services/investigations.py`, `routers/investigations.py`,
+`models/schemas.py`, `routers/admin_registry.py`, `api/tests/test_investigation_events.py`
+(novo); `frontend/src/views/InvestigationView.vue`, `src/stores/investigation.ts`,
+`src/stores/graph.ts`, `src/utils/graphAppearance.ts`, `src/components/GraphCanvas3D.vue`,
+`src/services/api.ts`, `src/types/investigation.ts`,
+`src/views/__tests__/InvestigationView.test.ts`, `e2e/helpers/api-mocks.ts`
+(`seedInvestigations` com estado, notas e diário em memória).
+
+**Testing:** pytest `test_investigation_events.py` (cadeia, imutabilidade, paginação,
+tipos do cliente, papéis, notas) mais investigações e `test_admin_registry` (67
+verdes); vitest do `InvestigationView` e utils (1000 verdes); `vue-tsc` limpo; E2E
+`investigations.spec.ts` verde.
+
+**Public Docs:** no public docs impact (F1.9). **Admin-Area Impact:** 5 rotas novas
+em `AUDIT_EXEMPT_ROUTES` (registradas no diário do caso).
+
+**Author:** Claude (AI Assistant)

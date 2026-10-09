@@ -1761,3 +1761,51 @@ class InvestigationSourceResponse(BaseModel):
     frozen_sha256: Optional[str] = None
     added_by: Optional[str] = None
     added_at: Optional[datetime] = None
+
+
+InvestigationRole = Literal["victim", "mule", "exit", "discarded"]
+
+
+class InvestigationStateUpdate(BaseModel):
+    """Merge patch by unified node id: a null role clears it, false unpins."""
+
+    roles: Optional[dict[str, Optional[InvestigationRole]]] = None
+    pins: Optional[dict[str, bool]] = None
+
+
+class InvestigationEventCreate(BaseModel):
+    kind: str = Field(min_length=1, max_length=50)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class InvestigationEventResponse(BaseModel):
+    id: UUID
+    at: datetime
+    actor_email: str
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    prev_hash: Optional[str] = None
+    hash: str
+
+
+class NoteAnchor(BaseModel):
+    kind: Literal["node", "edge", "evidence", "none"] = "none"
+    id: Optional[str] = Field(default=None, max_length=512)
+
+
+class InvestigationNoteCreate(BaseModel):
+    anchor: NoteAnchor = Field(default_factory=NoteAnchor)
+    body: str = Field(min_length=1, max_length=10_000)
+
+
+class InvestigationNoteUpdate(BaseModel):
+    body: str = Field(min_length=1, max_length=10_000)
+
+
+class InvestigationNoteResponse(BaseModel):
+    id: UUID
+    anchor: dict[str, Any] = Field(default_factory=dict)
+    body: str
+    author_email: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
