@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Direção B: cockpit</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="min-height: 100vh; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; gap: 12px; background: #f8f8f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #343a40">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px"><span style="font-size: 22px; font-weight: 700">B · Cockpit</span><span style="font-size: 14px; color: #495057">quatro visões sincronizadas: selecionar numa filtra as outras</span></div>
+<div style="flex: 1 1 auto; display: flex; flex-direction: column; border: 2px solid #495057; border-radius: 10px; background: #ffffff; overflow: hidden">
+<div style="height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #343a40; color: #f1f3f5; font-size: 13px">barra superior · caso · status · prazo · Dossiê</div>
+<div style="flex: 1 1 auto; display: flex; flex-wrap: wrap; min-height: 460px">
+<div style="flex: 1 1 170px; max-width: 100%; box-sizing: border-box; padding: 14px; border-right: 2px solid #ced4da; display: flex; flex-direction: column; gap: 10px">
+<b style="font-size: 13px">PARÂMETROS</b>
+<div style="height: 26px; border: 1px dashed #adb5bd; border-radius: 6px"></div>
+<div style="height: 26px; border: 1px dashed #adb5bd; border-radius: 6px"></div>
+<div style="height: 26px; border: 1px dashed #adb5bd; border-radius: 6px"></div>
+<b style="font-size: 13px; margin-top: 8px">FONTES</b>
+<div style="height: 10px; width: 70%; background: #dee2e6; border-radius: 4px"></div>
+<div style="height: 10px; width: 55%; background: #dee2e6; border-radius: 4px"></div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr); gap: 0">
+<div style="position: relative; border-right: 2px solid #ced4da; border-bottom: 2px solid #ced4da; display: flex; align-items: center; justify-content: center; min-height: 220px">
+<span style="position: absolute; left: 12px; top: 10px; font-size: 13px; font-weight: 700">GRAFO</span>
+<svg viewBox="0 0 300 160" aria-hidden="true" style="width: 80%; fill: none; stroke: #868e96; stroke-width: 2"><circle cx="40" cy="80" r="12"></circle><circle cx="130" cy="80" r="15"></circle><circle cx="220" cy="35" r="10"></circle><circle cx="220" cy="80" r="10"></circle><circle cx="220" cy="125" r="10"></circle><path d="M52 80H115M144 72L210 38M145 80H210M144 88L210 122"></path></svg>
+</div>
+<div style="position: relative; border-bottom: 2px solid #ced4da; display: flex; align-items: center; justify-content: center; min-height: 220px">
+<span style="position: absolute; left: 12px; top: 10px; font-size: 13px; font-weight: 700">SANKEY</span>
+<svg viewBox="0 0 300 160" aria-hidden="true" style="width: 80%"><path d="M30 30 L110 30 L110 130 L30 130 Z M120 30 C170 30 170 20 220 20 L220 60 C170 60 170 70 120 70 Z M120 72 C170 72 170 72 220 72 L220 105 C170 105 170 105 120 105 Z M120 107 C170 107 170 118 220 118 L220 138 C170 138 170 128 120 128 Z" fill="#e9ecef" stroke="#868e96" stroke-width="1.5"></path></svg>
+</div>
+<div style="position: relative; border-right: 2px solid #ced4da; display: flex; flex-direction: column; justify-content: center; gap: 12px; padding: 34px 16px 12px; min-height: 160px">
+<span style="position: absolute; left: 12px; top: 10px; font-size: 13px; font-weight: 700">RAIAS NO TEMPO</span>
+<div style="height: 8px; width: 30%; margin-left: 5%; background: #e9ecef; border-radius: 4px"></div>
+<div style="height: 8px; width: 55%; margin-left: 15%; background: #e9ecef; border-radius: 4px"></div>
+<div style="height: 8px; width: 70%; margin-left: 20%; background: #e9ecef; border-radius: 4px"></div>
+<div style="height: 8px; width: 25%; margin-left: 30%; background: #e9ecef; border-radius: 4px"></div>
+</div>
+<div style="position: relative; display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 34px 16px 12px; min-height: 160px">
+<span style="position: absolute; left: 12px; top: 10px; font-size: 13px; font-weight: 700">TRANSAÇÕES</span>
+<div style="height: 10px; background: #dee2e6; border-radius: 4px"></div>
+<div style="height: 10px; background: #e9ecef; border-radius: 4px"></div>
+<div style="height: 10px; background: #e9ecef; border-radius: 4px"></div>
+<div style="height: 10px; background: #e9ecef; border-radius: 4px"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

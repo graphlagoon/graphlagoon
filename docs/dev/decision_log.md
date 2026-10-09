@@ -9858,3 +9858,280 @@ qualquer esquema de app — `vscode://`, `claude-cli://`, `cursor://`, `obsidian
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-10-09 15:27] - Feature Planning: Graph Lagoon como sistema de investigação
+
+**Purpose:** evoluir o Graph Lagoon de explorador de grafos para **sistema de investigação**
+de fraude, PLD/FT e risco para adquirentes e bancos, com quatro capacidades:
+- unir várias explorações;
+- carregar CSVs;
+- montar e enriquecer um grafo em memória;
+- seguir o dinheiro.
+
+Plano completo: [plans/investigation-workspace.md](plans/investigation-workspace.md).
+
+**User Story:** como analista de prevenção a fraude ou de PLD, quero juntar num mesmo caso
+explorações, extratos (inclusive SIMBA) e cadastros (QSA), resolver as entidades e rastrear
+valores salto a salto, para fechar o dossiê e decidir comunicar, marcar ou arquivar.
+
+**Avaliação feita (resumo):**
+- **Mercado.** Foram avaliados workbenches de vínculos (i2, Linkurious, Maltego, Bloom),
+  ER e redes (Quantexa, Palantir), fraude/PLD com casos (Actimize, SAS, Feedzai, Unit21,
+  Lucinity) e follow the money (Reactor, TRM, Elliptic, Valid8). Não há **aplicação de
+  investigação aberta e nativa do warehouse**. Os métodos de rastreio (Δ, alocação) são
+  opacos em todas.
+- **Contexto brasileiro.**
+  - Circ. 3.978: dossiê, prazos de 45+45 dias, parâmetros auditáveis, 10 anos de retenção.
+  - CC 4.001: indicadores que são padrões de grafo.
+  - MED 2.0 (Res. BCB 493/2025): rastreio Pix em camadas.
+  - Res. BCB 587/2026 (DICT), RC6, portarias SPA de bets, LGPD e LC 105.
+  - SIMBA: 5 arquivos TAB, com 29–35% de contrapartes sem identificação.
+- **Código.** Não há upload de CSV nem grafo só no cliente. A exploração é 1:1 com o
+  context. Não há timeline nem path finding. Bloqueios: #28 (IDs de arestas paralelas
+  colidem), #32 e M4.
+
+**Design Decisions (propostas, a validar no design):**
+1. A **Investigação** é uma entidade nova acima da Exploração e funciona como o dossiê
+   da Circ. 3.978 art. 43.
+2. A identidade das entidades vem de chaves de negócio (CPF/CNPJ, conta, chave Pix,
+   dispositivo). O merge preserva a origem; match incerto vira "match link".
+3. O grafo de trabalho fica em memória no browser, com proveniência. O CSV é parseado no
+   cliente, e o arquivo bruto vai ao servidor com SHA-256.
+4. A transação é uma aresta temporal com valor. O rastreio roda em worker e o método
+   (saltos, Δ, alocação FIFO/proporcional/LIBR, paradas) vai gravado na evidência.
+5. Novas permissões `investigation.create`, `investigation.upload` e
+   `investigation.export`. Auditoria de leitura. Sem e-filing no Siscoaf.
+
+**Implementation:** nenhuma ainda. As fases de design D0–D4 e o roadmap F1–F5 estão no plano.
+
+**Files Created:**
+- [docs/dev/plans/investigation-workspace.md](plans/investigation-workspace.md)
+
+**Public Docs:** nenhuma alteração. Isto é planejamento; F1–F4 vão exigir guia novo em
+`docs/guide/`.
+
+**Admin-Area Impact:** nenhum agora. A F1 vai adicionar tabelas (investigações, fontes),
+rotas mutáveis e permissões, então serão necessários `CLEARABLE_TABLES`,
+`AUDITED_ROUTES`, `AuditAction` e o catálogo.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 16:05] - Feature Planning (rev. 2): explorações multi-context, arquivos e tabelas de enriquecimento
+
+Detalhamento do plano [plans/investigation-workspace.md](plans/investigation-workspace.md)
+após perguntas do usuário. Ver §4.1a–4.5 do plano.
+
+**Decisões novas:**
+1. **Investigação = N explorações de contexts diferentes.** Cada exploração continua presa
+   ao seu context (FK inalterada) e é vista em abas. A investigação acrescenta uma visão
+   unificada, que une as entidades pelas **chaves de identidade** declaradas no context,
+   e a seleção vinculada entre abas. Compartilhar a investigação não concede acesso aos
+   contexts (LC 105).
+2. **Tabelas de enriquecimento no context:** tabelas extras que não entram na query do
+   grafo e são consultadas por chave (cardinalidade one/many, colunas declaradas). Elas
+   **entram em `sql_scope.context_tables()`**, porque senão leitores sem `context.create`
+   levam 403. Como anexar uma tabela amplia o escopo dos leitores, só anexa quem tem
+   `context.create`, e a tabela precisa estar na allowlist. A consulta é por endpoint
+   parametrizado, nunca SQL livre.
+3. **Arquivos têm três papéis:**
+   - **grafo:** um context de arquivo, com datasource `file` novo;
+   - **enriquecimento:** escopo da investigação;
+   - **anexo:** com hash.
+4. **Algoritmos novos:** rastreio temporal com alocação, caminhos (incluindo os que
+   respeitam o tempo), agregação de arestas paralelas, resolução de entidades,
+   tipologias em janela de tempo, componentes conexos. Os existentes (centralidades,
+   Louvain, ego, métricas customizadas) são reaproveitados.
+5. **Layouts novos:** fluxo em camadas (estende o hierárquico), linha do tempo em raias,
+   Sankey, bipartido (talvez um preset do hive), mapa (depois).
+6. **Interação e documentação novas:**
+   - workspace com abas e seleção vinculada, rastreio interativo, papéis nas entidades;
+   - fila de matches, desfazer;
+   - diário automático, notas ancoradas, hipóteses, evidências congeladas, dossiê gerado.
+
+**Public Docs:** nenhuma alteração (planejamento).
+
+**Admin-Area Impact:** nenhum agora. Na F2, tabelas de enriquecimento ampliam o escopo de
+query, o que exige um teste em `test_sql_scope` e entrada em `AUDITED_ROUTES` para a
+rota de enriquecimento.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 17:05] - Design: investigação, hoje × proposta (fases D0–D3 do plano)
+
+Design feito num canvas de artboards, fora do repositório e privado para o autor, com
+18 pranchas em 5 páginas:
+- **Mapa do sistema** (hoje × proposta).
+- **Hoje:** 4 telas reais (screenshots de `docs/public/screenshots/`) com as dores D1–D9
+  anotadas.
+- **Fluxos:** jornada atual do golpe Pix; fluxos propostos A (golpe Pix → rastreio),
+  B (lojistas de fachada), C (SIMBA) e 0 (preparar o context).
+- **Telas hi-fi T1–T7:**
+  - fila;
+  - workspace com abas e visão unificada;
+  - adicionar ao caso;
+  - assistente de arquivo SIMBA;
+  - seguir o dinheiro (camadas/Sankey + raias);
+  - context com chaves e enriquecimento;
+  - dossiê.
+- **Comparação** hoje × proposta.
+
+**Avaliação do fluxo principal (contada nos mapas):**
+
+| | Hoje | Proposta (fluxo A) |
+|---|---|---|
+| Passos | 10 | 9 (8 no app + Siscoaf) |
+| Ferramentas | 7 | 2 |
+| Trocas de ferramenta | 8 | 1 |
+| Exportações manuais | 2 | 0 intermediárias |
+| Registro do que foi feito | nenhum | 8 de 8 passos no diário |
+
+**Design Decisions:**
+1. **Mesmo vocabulário visual do app:** barra navy de 52 px, painéis acoplados, botões
+   flutuantes sobre o canvas, status bar. A investigação é uma extensão, não um produto à
+   parte.
+2. **Botão primário escurecido para `#0f766e`.** O `#14b8a6` com texto branco não passa
+   4,5:1. Vale aplicar no app todo (achado de acessibilidade, fora do escopo daqui).
+3. **Cores separadas por canal:**
+   - proveniência = **anel** do nó: teal Pix, roxo Cadastro, âmbar arquivo;
+   - papel = **preenchimento**: azul vítima, laranja laranja;
+   - saída = **forma quadrada** navy.
+
+   Nunca só cor: a legenda e os rótulos estão sempre presentes.
+4. **Exploração restrita aparece como placeholder** com o dono do context, e não some.
+   O analista precisa saber que falta parte do caso (LC 105).
+5. **Rastreio com o método visível:** carimbo de parâmetros no painel, resultado em
+   FIFO com o valor proporcional ao lado. Isso mostra que a regra de alocação muda o
+   número.
+6. **Contraparte desconhecida do SIMBA vira um nó por transação.** Agrupá-las criaria um
+   hub falso.
+
+**Pontos de atenção encontrados nos fluxos:**
+- explosão de fan-out no "+1 salto";
+- CPF mascarado do QSA só gera sugestão de match;
+- anexar uma tabela amplia o escopo do context, então o bloqueio precisa dizer a quem
+  pedir.
+
+**Public Docs:** nenhuma alteração (design).
+
+**Admin-Area Impact:** nenhum.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 18:10] - Feature Planning: pacote de execução de investigações para agentes
+
+**O quê:** o plano, a pesquisa e o design de investigações viraram um pacote
+autossuficiente em [plans/investigation/](plans/investigation/README.md). Um agente
+consegue implementar a partir dele sem depender desta conversa nem dos artefatos
+privados no claude.ai.
+
+**Conteúdo:**
+- `README.md`: ponto de entrada, ordem de leitura, regras de trabalho (Definition of
+  Done) e decisões em aberto Q1 a Q6, cada uma com o padrão recomendado.
+- `00-pesquisa-mercado.md` e `01-pesquisa-brasil.md`: as pesquisas completas, com
+  fontes.
+- `02-design.md`: sistema visual, telas T1 a T9, direções A/B/C, fluxos (hoje, A, B,
+  C, 0) e avaliação.
+- `03-arquitetura.md`: modelo de dados (colunas novas em `graph_contexts`, 8 tabelas
+  novas), API, especificação de mapeamento de arquivo, unificação do grafo e
+  algoritmos. Inclui o **rastreio temporal** com FIFO, proporcional, LIBR e
+  contaminação total, e a fixture do golpe Pix com os valores esperados.
+- `04-plano-de-implementacao.md`: portões G1 a G4 e tarefas F1.1 a F5.3, cada uma com
+  dependências, arquivos reais, passos, aceite e testes, numa lista de progresso
+  marcável.
+- `screens/`, `diagrams/` e `mockups/`: PNG das telas e diagramas, renderizados das
+  pranchas com o Playwright do projeto, e o HTML-fonte.
+
+**Decisões fixadas no pacote:**
+1. O interpretador de mapeamento em Python é o **autoritativo**; o TS serve à prévia.
+   A paridade é garantida por fixtures douradas comuns.
+2. O diário do caso é **encadeado por hash**, separado do `usage_logs` de auditoria.
+3. Um caso decidido é imutável e não pode ser apagado (409); retenção configurável,
+   padrão 10 anos.
+4. Os critérios de aceite do rastreio usam a mesma fixture das telas T5 e T7:
+   - FIFO: 4.430 de 4.870 (91%);
+   - proporcional: Exchange = 1.597,73;
+   - com Δ = 40 min, só a saída das 15:05 é cortada.
+
+**Public Docs:** nenhuma alteração; os guias públicos estão nas tarefas F1.9 em
+diante.
+
+**Admin-Area Impact:** nenhum agora; o impacto de cada tarefa está no plano.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 19:45] - Feature Planning: investigações AI-first e armazenamento no Volume
+
+**Pedido:** confirmar que os arquivos enviados vão para o Volume e incluir uma etapa
+AI-first: API e servidor MCP para um agente de IA criar e evoluir a investigação e
+subir artefatos (slides, docs, relatórios) no espaço do caso.
+
+**Achado sobre o armazenamento:** o plano já mandava arquivos ao `BlobStore` (local ou
+Volume via Files API). Mas o `BlobStore.save()` recebe o arquivo inteiro em memória e
+sobrescreve, e não havia setting próprio. Corrigido no plano:
+- `investigations_volume_path` (padrão: subpasta de `databricks_volume_path`);
+- `save_stream` com sha256 calculado durante o upload;
+- endereçamento por conteúdo, nunca sobrescrever;
+- layout `files/`, `sources/`, `evidence/`, `artifacts/`, `exports/` (03 §2.3);
+- limite de request do Databricks Apps e da Files API como Q3.
+
+**Etapa nova FA (7 tarefas, entre F1 e F2):**
+- FA.1: tokens de agente `glt_` (escopos `read`, `analyze`, `write`, `propose`; hash
+  guardado; validade; revogação) e ator no diário.
+- FA.2: armazenamento no Volume e espaço de artefatos versionados (T10).
+- FA.3: propostas com aceite humano (T11).
+- FA.4: servidor MCP em `/mcp` (SDK oficial, Streamable HTTP, ferramentas sobre a
+  camada de serviço).
+- FA.5: ponte stdio para apps atrás do proxy do Databricks.
+- FA.6: registry com teste que obriga cobertura MCP.
+- FA.7: guia público e E2E.
+- Também a **F3.8**: rastreio e caminhos portados para Python com paridade pela mesma
+  fixture, porque o agente não roda web workers. E a F4.3 ganhou tipologias espelhadas
+  em Python.
+
+**Design Decisions:**
+1. **O agente age em nome de uma pessoa,** nunca com mais acesso que ela.
+2. **O que o agente faz direto:** notas, evidências, fontes, artefatos em rascunho.
+3. **O que vira proposta:** papel, match, hipótese, tipologia, status.
+4. **Só humano:** decidir, comunicar, marcar no DICT, compartilhar, apagar, aprovar
+   artefato. Bloqueado por `forbid_agents` mesmo para superuser.
+5. **Dados pessoais vão mascarados** para agentes por padrão (LGPD: envio a provedor
+   de LLM); o admin libera com `agents_allow_unmasked_data`.
+6. **Conteúdo de dados vai marcado como `untrusted_data`** nas respostas MCP (prompt
+   injection). Nenhuma ferramenta executa código nem expõe caminho de Volume.
+7. **HTML e SVG de artefatos só para download,** nunca renderizados (XSS).
+8. **Regra AI-first no Definition of Done (#11):** a partir da FA.6, rota nova de
+   investigação entrega ferramenta MCP ou é registrada como só humana.
+
+**Files Modified:** `plans/investigation/` (README, 02, 03, 04), telas novas
+`screens/T10-Espaco.png`, `screens/T11-Agentes.png` e os mockups.
+
+**Public Docs:** nenhuma alteração ainda; o guia `docs/guide/agents-mcp.md` está na
+FA.7.
+
+**Admin-Area Impact:** nenhum agora. A FA traz settings, tabelas, rotas e a permissão
+`investigation.agent`, previstos na FA.1 e na FA.2.
+
+**Author:** Claude (AI Assistant)
+
+---
+## [2026-10-09 20:20] - Docs: plano de investigações AI-first desde o início, repositório igual ao artefato
+
+O título, o resumo e o topo do plano passam a apresentar o produto como **sistema de
+investigação AI-first**: agentes de IA trabalham no caso via MCP e pessoas decidem. A
+seção "AI-first: agentes trabalham no caso, pessoas decidem" (o que o agente faz
+direto, propõe e nunca faz) fica logo no início, nos dois lugares:
+- no `plans/investigation-workspace.md` e no `plans/investigation/README.md`;
+- no documento do plano no claude.ai, renomeado para "Plano: Graph Lagoon como
+  sistema de investigação AI-first".
+
+No documento também foram corrigidas as legendas dos diagramas, o armazenamento no
+Volume e a lista de riscos.
+
+**Public Docs:** nenhuma alteração. **Admin-Area Impact:** nenhum.
+
+**Author:** Claude (AI Assistant)
+
+---

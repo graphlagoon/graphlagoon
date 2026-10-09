@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Context: tabelas de enriquecimento</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0f766e}a:hover{color:#115e59}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif; color: #2c3e50; font-size: 14px; line-height: 1.5">
+<header style="min-height: 52px; box-sizing: border-box; padding: 0 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: #0d1b2a; border-bottom: 1px solid rgba(20,184,166,0.25); color: #c8e8f0">
+<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: #14b8a6; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round"><path d="M3 15c2-4 4-4 6 0s4 4 6 0 4-4 6 0"></path></svg>
+<nav aria-label="Principal" style="display: flex; align-items: center; gap: 4px">
+<a href="#" aria-current="page" style="color: #14b8a6; font-weight: 600; text-decoration: none; padding: 4px 8px">Contexts</a>
+<a href="#" style="color: rgba(200,232,240,0.8); text-decoration: none; padding: 4px 8px">Explorations</a>
+<a href="T1-Fila.dc.html" style="color: rgba(200,232,240,0.8); text-decoration: none; padding: 4px 8px">Investigações</a>
+</nav>
+</header>
+<main style="width: 100%; max-width: 1160px; margin: 0 auto; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px">
+<h1 style="margin: 0; font-size: 22px; line-height: 30px; color: #0d1b2a">Editar context · Pix transferências</h1>
+<span style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; padding: 2px 6px; border-radius: 4px; background: #e9ecef">dev_catalog.pix.transferencias</span>
+<span style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; padding: 2px 6px; border-radius: 4px; background: #e9ecef">dev_catalog.pix.contas</span>
+</div>
+<div role="tablist" aria-label="Seções do context" style="display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid #dee2e6">
+<span role="tab" aria-selected="false" style="padding: 8px 12px; color: #495057">Tabelas do grafo</span>
+<span role="tab" aria-selected="false" style="padding: 8px 12px; color: #495057; display: inline-flex; align-items: center; gap: 6px">Chaves de identidade <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.06em; padding: 1px 5px; border-radius: 4px; background: #ffedd5; color: #9a3412">NOVO</span></span>
+<span role="tab" aria-selected="true" style="padding: 8px 12px; border-bottom: 3px solid #0f766e; font-weight: 600; color: #0d1b2a; display: inline-flex; align-items: center; gap: 6px">Enriquecimento <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.06em; padding: 1px 5px; border-radius: 4px; background: #ffedd5; color: #9a3412">NOVO</span></span>
+<span role="tab" aria-selected="false" style="padding: 8px 12px; color: #495057">Ações do menu</span>
+<span role="tab" aria-selected="false" style="padding: 8px 12px; color: #495057">Métricas</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: #495057">Chaves deste context: <span style="padding: 2px 8px; border-radius: 9999px; background: #ffffff; border: 1px solid #dee2e6">Conta → banco + agência + conta</span><span style="padding: 2px 8px; border-radius: 9999px; background: #ffffff; border: 1px solid #dee2e6">Pessoa → CPF (prop. <code>titular_cpf</code>)</span></div>
+<div role="note" style="display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 8px; background: #fff7ed; border: 1px solid #fdba74; color: #7c2d12; font-size: 13px">
+<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="flex: 0 0 auto; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 2"><path d="M12 3l9 16H3z"></path><path d="M12 10v4M12 17v.5"></path></svg>
+<span><b>Anexar uma tabela amplia o que os leitores deste context podem consultar.</b> Por isso exige a permissão "Criar contexts" e uma tabela de catálogo permitido (dev_catalog.cadastro, dev_catalog.risco). A consulta é sempre por chave, só as colunas marcadas saem, e cada leitura é auditada.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+<section aria-label="Tabelas anexadas" style="flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 15px; color: #0d1b2a">Anexadas (2)</h2>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px"><b style="font-size: 14px">Cadastro KYC</b><code style="font-size: 12px; color: #495057">dev_catalog.cadastro.kyc_clientes</code></div>
+<div>Chave: <code>cpf</code> = <code>titular_cpf</code> de <b>Conta</b> · <b>uma linha</b> por nó</div>
+<div style="color: #6c757d">Colunas: renda, ocupacao, data_abertura (3 de 14)</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center"><span style="color: #6c757d">usada em 4 investigações</span><div style="flex: 1 1 auto"></div><button type="button" style="min-height: 32px; padding: 4px 10px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Editar</button><button type="button" style="min-height: 32px; padding: 4px 10px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Remover</button></div>
+</div>
+<div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px"><b style="font-size: 14px">Dispositivos de login</b><code style="font-size: 12px; color: #495057">dev_catalog.risco.dispositivos_login</code></div>
+<div>Chave: <code>conta_id</code> = id do nó <b>Conta</b> · <b>várias linhas</b> por nó</div>
+<div style="color: #6c757d">Colunas: device_id, visto_em, ip_hash (3 de 9)</div>
+<div style="padding: 6px 8px; border-radius: 6px; background: #f0fdfa; color: #115e59">Pode virar nós: <b>Dispositivo</b> (por device_id), ligando contas que compartilham o aparelho</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center"><span style="color: #6c757d">usada em 2 investigações</span><div style="flex: 1 1 auto"></div><button type="button" style="min-height: 32px; padding: 4px 10px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Editar</button><button type="button" style="min-height: 32px; padding: 4px 10px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Remover</button></div>
+</div>
+</section>
+<section aria-label="Anexar tabela" style="flex: 1 1 460px; min-width: 0; background: #ffffff; border: 2px solid #0f766e; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; font-size: 13px">
+<h2 style="margin: 0; font-size: 15px; color: #0d1b2a">Anexar tabela</h2>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Tabela<input type="text" value="dev_catalog.risco.chargebacks" style="min-height: 38px; box-sizing: border-box; padding: 6px 10px; border: 1px solid #ced4da; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 400"></label>
+<span style="display: inline-flex; align-items: center; gap: 6px; color: #115e59"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round"><path d="M5 12l5 5 9-10"></path></svg>catálogo permitido · você pode criar contexts</span>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 10px">
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Coluna-chave<select style="min-height: 36px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400; background: #ffffff"><option>conta_id</option></select></label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Bate com<select style="min-height: 36px; padding: 4px 8px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400; background: #ffffff"><option>id do nó Conta</option></select></label>
+</div>
+<fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: 16px">
+<legend style="font-weight: 600; margin-bottom: 6px">Linhas por nó</legend>
+<label style="display: flex; gap: 6px"><input type="radio" name="card">uma</label>
+<label style="display: flex; gap: 6px"><input type="radio" name="card" checked>várias</label>
+</fieldset>
+<fieldset style="margin: 0; padding: 0; border: 0">
+<legend style="font-weight: 600; margin-bottom: 6px">Colunas que podem sair</legend>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 4px 12px">
+<label style="display: flex; gap: 6px"><input type="checkbox" checked>data</label>
+<label style="display: flex; gap: 6px"><input type="checkbox" checked>valor</label>
+<label style="display: flex; gap: 6px"><input type="checkbox" checked>motivo</label>
+<label style="display: flex; gap: 6px"><input type="checkbox" checked>bandeira</label>
+<label style="display: flex; gap: 6px; color: #9a3412"><input type="checkbox">pan_hash (sensível)</label>
+<label style="display: flex; gap: 6px"><input type="checkbox">lote_id</label>
+</div>
+</fieldset>
+<div style="border-top: 1px solid #e9ecef; padding-top: 10px; display: flex; flex-direction: column; gap: 6px">
+<b>Prévia com 3 contas da última exploração</b>
+<table style="width: 100%; border-collapse: collapse; font-size: 12px">
+<thead><tr style="text-align: left; color: #6c757d"><th style="padding: 4px 0; font-weight: 600">Conta</th><th style="padding: 4px 0; font-weight: 600">Linhas</th><th style="padding: 4px 0; font-weight: 600">Exemplo</th></tr></thead>
+<tbody>
+<tr><td style="padding: 4px 0; border-top: 1px solid #e9ecef">4471-0</td><td style="padding: 4px 0; border-top: 1px solid #e9ecef">2</td><td style="padding: 4px 0; border-top: 1px solid #e9ecef">12/09 · R$ 340 · fraude</td></tr>
+<tr><td style="padding: 4px 0; border-top: 1px solid #e9ecef">5520-3</td><td style="padding: 4px 0; border-top: 1px solid #e9ecef">0</td><td style="padding: 4px 0; border-top: 1px solid #e9ecef; color: #6c757d">nenhuma</td></tr>
+<tr><td style="padding: 4px 0; border-top: 1px solid #e9ecef">8812-7</td><td style="padding: 4px 0; border-top: 1px solid #e9ecef">1</td><td style="padding: 4px 0; border-top: 1px solid #e9ecef">10/09 · R$ 95 · desacordo</td></tr>
+</tbody>
+</table>
+</div>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600">Nome no inspector<input type="text" value="Chargebacks" style="min-height: 36px; box-sizing: border-box; padding: 6px 10px; border: 1px solid #ced4da; border-radius: 6px; font: inherit; font-weight: 400"></label>
+<div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px">
+<button type="button" style="min-height: 38px; padding: 6px 14px; border-radius: 6px; border: 1px solid #ced4da; background: #ffffff; font: inherit">Cancelar</button>
+<button type="button" style="min-height: 38px; padding: 6px 14px; border-radius: 6px; border: 0; background: #0f766e; color: #ffffff; font: inherit; font-weight: 600">Anexar tabela</button>
+</div>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
