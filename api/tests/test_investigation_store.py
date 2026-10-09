@@ -31,6 +31,16 @@ CHILD_FIELDS = {
         "created_by": OWNER,
     },
     "entity_matches": {"left": {"node_id": "a"}, "right": {"node_id": "b"}},
+    "investigation_artifacts": {"name": "a.pdf", "kind": "document"},
+    "investigation_artifact_versions": {
+        "artifact_id": None,
+        "version": 1,
+        "blob_key": "k",
+        "sha256": "0" * 64,
+        "size_bytes": 1,
+        "content_type": "application/pdf",
+    },
+    "investigation_proposals": {"kind": "role"},
 }
 
 
