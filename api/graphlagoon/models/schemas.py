@@ -1904,6 +1904,19 @@ class ArtifactResponse(BaseModel):
     versions: list[ArtifactVersionResponse] = Field(default_factory=list)  # newest first
 
 
+class InvestigationFileResponse(BaseModel):
+    id: UUID
+    filename: str
+    role: str
+    sha256: str
+    size_bytes: int
+    content_type: Optional[str] = None
+    mapping: Optional[dict[str, Any]] = None
+    context_id: Optional[UUID] = None
+    uploaded_by: str
+    uploaded_at: Optional[datetime] = None
+
+
 # Proposals (03-arquitetura §8.4)
 ProposalKind = Literal[
     "role", "match", "hypothesis", "hypothesis_status", "typology", "status"

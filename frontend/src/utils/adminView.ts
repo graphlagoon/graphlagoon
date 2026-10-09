@@ -126,6 +126,10 @@ function describeAuditBody(entry: AuditEntry): string {
       return `changed ${Array.isArray(m.fields) ? m.fields.join(', ') : '?'}`;
     case 'investigation.source_add':
       return `exploration ${m.exploration_id ?? '?'} (${m.mode ?? 'live'})`;
+    case 'investigation.file_upload':
+      return `${m.filename ?? '?'} (${m.role ?? '?'}) sha256 ${String(m.sha256 ?? '?').slice(0, 12)}`;
+    case 'investigation.file_read':
+      return `file ${m.file_id ?? '?'}${m.tool ? ` via MCP ${m.tool}` : ''}`;
     case 'investigation.source_remove':
       return `removed source "${m.title ?? m.source_id ?? '?'}"`;
     case 'precomputed.publish':

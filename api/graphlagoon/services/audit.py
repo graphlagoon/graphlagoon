@@ -52,6 +52,8 @@ class AuditAction:
     INVESTIGATION_SOURCE_ADD = "investigation.source_add"
     INVESTIGATION_SOURCE_REMOVE = "investigation.source_remove"
     INVESTIGATION_TRANSFER = "investigation.transfer"
+    INVESTIGATION_FILE_UPLOAD = "investigation.file_upload"
+    INVESTIGATION_FILE_READ = "investigation.file_read"
     AGENT_TOKEN_CREATE = "agent_token.create"
     AGENT_TOKEN_REVOKE = "agent_token.revoke"
     ENRICHMENT_READ = "enrichment.read"

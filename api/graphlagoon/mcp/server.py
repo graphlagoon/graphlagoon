@@ -23,6 +23,7 @@ from graphlagoon.config import get_settings
 from graphlagoon.middleware import auth
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
+from graphlagoon.services import investigation_files as files
 from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
@@ -478,6 +479,32 @@ def build_server():
         return _out(result)
 
     @server.tool()
+    async def list_files(ctx: Context, investigation_id: UUID) -> dict:
+        """Files uploaded to the case (statements, QSA, CSV) with role and sha256."""
+        user = _agent(ctx, "read")
+        rows = await _call(files.list_files(investigation_id, user))
+        await _audit_read(user, "list_files", investigation_id)
+        return _out(rows)
+
+    @server.tool()
+    async def get_file(ctx: Context, investigation_id: UUID, file_id: UUID) -> dict:
+        """A case file's content as text (decoded as UTF-8, else Latin-1)."""
+        user = _agent(ctx, "read")
+        data, meta = await _call(files.get_content(investigation_id, user, file_id))
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = data.decode("latin-1")  # SIMBA layouts are Latin-1
+        await audit.record(
+            user,
+            AuditAction.INVESTIGATION_FILE_READ,
+            resource_type="investigation",
+            resource_id=investigation_id,
+            metadata={"file_id": str(file_id), "sha256": meta["sha256"], "tool": "get_file"},
+        )
+        return _out({**meta, "text": text})
+
+    @server.tool()
     async def list_proposals(
         ctx: Context, investigation_id: UUID, status: Optional[str] = None
     ) -> dict:
@@ -616,6 +643,52 @@ def build_server():
                 artifacts.add_version(investigation_id, user, artifact_id, received, **meta)
             )
         return _out(result)
+
+    @server.tool()
+    async def upload_file(
+        ctx: Context,
+        investigation_id: UUID,
+        filename: str,
+        role: str,
+        text: Optional[str] = None,
+        content_base64: Optional[str] = None,
+    ) -> dict:
+        """Upload a file to the case with role graph, enrichment or attachment.
+        Give ``text`` or ``content_base64``; up to artifact_max_bytes (bigger files
+        go through the UI). Needs the person's investigation.upload permission."""
+        from graphlagoon.services.permissions import check_permission
+
+        user = _agent(ctx, "write")
+        if not (await check_permission(user, "investigation.upload")).allowed:
+            raise _tool_error("PERMISSION_DENIED", "Missing investigation.upload")
+        if (text is None) == (content_base64 is None):
+            raise _tool_error("INVALID_BODY", "Give exactly one of text or content_base64")
+        try:
+            data = text.encode() if text is not None else base64.b64decode(content_base64)
+        except ValueError as exc:
+            raise _tool_error("INVALID_BODY", "content_base64 is not valid base64") from exc
+        settings = get_settings()
+        max_bytes = min(settings.artifact_max_bytes, settings.investigation_file_max_bytes)
+
+        async def chunks():
+            yield data
+
+        try:
+            received = await storage.receive(chunks(), max_bytes)
+        except storage.TooLarge as exc:
+            raise _tool_error(
+                "FILE_TOO_LARGE", f"Agents upload files up to {max_bytes} bytes"
+            ) from exc
+        row = await _call(files.upload_file(investigation_id, user, received, filename, role))
+        await audit.record(
+            user,
+            AuditAction.INVESTIGATION_FILE_UPLOAD,
+            resource_type="investigation",
+            resource_id=investigation_id,
+            metadata={"file_id": str(row["id"]), "filename": row["filename"],
+                      "role": row["role"], "sha256": row["sha256"]},
+        )
+        return _out(row)
 
     # -- proposals ----------------------------------------------------------
 

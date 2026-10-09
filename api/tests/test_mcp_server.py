@@ -168,6 +168,16 @@ async def test_agent_script_is_journaled_as_agent_and_masked(env):
                 client, "get_artifact", investigation_id=cid, artifact_id=arts[0]["id"]
             )
             assert CPF not in content["text"]
+            up = await _tool(
+                client,
+                "upload_file",
+                investigation_id=cid,
+                filename="qsa.csv",
+                role="enrichment",
+                text=f"cnpj;socio\n12.345.678/0001-90;{CPF}",
+            )
+            got = await _tool(client, "get_file", investigation_id=cid, file_id=up["id"])
+            assert CPF not in got["text"] and "0001-90" not in got["text"]
             await _tool(
                 client,
                 "propose",
@@ -187,6 +197,7 @@ async def test_agent_script_is_journaled_as_agent_and_masked(env):
             "source.added",
             "note.created",
             "artifact.created",
+            "file.uploaded",
             "proposal.created",
         }
         assert all(

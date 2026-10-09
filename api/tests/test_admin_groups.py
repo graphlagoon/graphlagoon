@@ -229,6 +229,7 @@ class TestPermissions:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
+            "investigation.upload",
         ]
         assert all(p["mode"] == "everyone" and p["rules"] == [] for p in payload["items"])
         assert all(p["label"] and p["description"] for p in payload["items"])

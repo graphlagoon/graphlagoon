@@ -46,7 +46,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 **F2 · Arquivos e enriquecimento**
 - [x] F2.1 · Tabelas de enriquecimento no context e endpoint de consulta
 - [x] F2.2 · Aba de enriquecimento no inspector e "promover a nós"
-- [ ] F2.3 · Upload de arquivos com hash e papel
+- [x] F2.3 · Upload de arquivos com hash e papel
 - [ ] F2.4 · Especificação de mapeamento, interpretadores TS e Python, presets SIMBA e QSA
 - [ ] F2.5 · Datasource `file` e assistente de arquivo (T4)
 - [ ] F2.6 · Arquivo como enriquecimento do caso
@@ -134,7 +134,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   3. Registrar o resultado no decision log.
 - **Aceite:**
   - [x] Um número `INVESTIGATION_MAX_WORKING_EDGES` decidido e justificado.
-  - [ ] Esse número vira setting na F2.3 e responde a Q5 do README.
+  - [x] Esse número vira setting na F2.3 e responde a Q5 do README.
 
 ---
 
@@ -552,9 +552,9 @@ trabalho de análise e documentação; a pessoa decide.
   3. Catálogo de permissões: `investigation.upload`, com gate no `POST`.
   4. Auditar o upload e a leitura do conteúdo.
 - **Aceite:**
-  - [ ] O hash devolvido bate com o `sha256sum` local.
-  - [ ] Acima do limite, 413.
-  - [ ] Sem permissão, o botão some e a rota devolve 403.
+  - [x] O hash devolvido bate com o `sha256sum` local.
+  - [x] Acima do limite, 413.
+  - [x] Sem permissão, o botão some e a rota devolve 403.
 - **Testes:** novo `test_investigation_files.py` e `test_permission_routes.py`.
 
 ### F2.4 · Especificação de mapeamento e presets

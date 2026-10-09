@@ -84,6 +84,8 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "agent_rate_limit_per_minute": "public",
     "investigations_volume_path": "public",
     "artifact_max_bytes": "public",
+    "investigation_file_max_bytes": "public",
+    "investigation_max_working_edges": "public",
     "enrichment_max_keys": "public",
     "enrichment_max_rows": "public",
 }
@@ -152,6 +154,7 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("DELETE", "/api/investigations/{investigation_id}/share/{email}"),
         ("POST", "/api/investigations/{investigation_id}/sources"),
         ("DELETE", "/api/investigations/{investigation_id}/sources/{source_id}"),
+        ("POST", "/api/investigations/{investigation_id}/files"),
         ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"),
     }
 )

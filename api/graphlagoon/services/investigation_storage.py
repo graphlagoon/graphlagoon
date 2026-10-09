@@ -6,7 +6,8 @@ Layout under the root::
 
     {investigation_id}/sources/{source_id}.json.gz
     {investigation_id}/artifacts/{artifact_id}/v{n}/{name}
-    (files/{sha256}, evidence/…, exports/… arrive with F2.3, F4.1, F4.6)
+    {investigation_id}/files/{sha256}
+    (evidence/…, exports/… arrive with F4.1, F4.6)
 
 Uploads stream into a temp file while the sha256 is computed, and only then
 go to the store with ``save_stream``; nothing is ever overwritten. The paths
@@ -66,6 +67,10 @@ def artifact_key(
     investigation_id: UUID, artifact_id: UUID, version: int, name: str
 ) -> str:
     return f"{investigation_id}/artifacts/{artifact_id}/v{version}/{name}"
+
+
+def file_key(investigation_id: UUID, sha256: str) -> str:
+    return f"{investigation_id}/files/{sha256}"
 
 
 class TooLarge(Exception):

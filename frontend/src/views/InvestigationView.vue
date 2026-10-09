@@ -28,6 +28,7 @@ import LayoutPanel from '@/components/LayoutPanel.vue';
 import SourcesPanel from '@/components/investigation/SourcesPanel.vue';
 import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
 import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue';
+import CaseFiles from '@/components/investigation/CaseFiles.vue';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import { api } from '@/services/api';
 import type { GraphResponse } from '@/types/graph';
@@ -286,7 +287,11 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           :merged-counts="mergedCounts"
           :active-tab="activeTab"
           @select="openTab($event)"
-        />
+        >
+          <template #files>
+            <CaseFiles :investigation-id="id" :can-edit="canEdit" />
+          </template>
+        </SourcesPanel>
 
         <section class="canvas-area" data-testid="graph-container">
           <div v-if="store.graphLoading || graphStore.loading" class="overlay">

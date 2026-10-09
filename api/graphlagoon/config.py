@@ -191,6 +191,15 @@ class Settings(BaseSettings):
         default=100 * 1024 * 1024,
         description="Maximum size of one artifact version in the case space, in bytes",
     )
+    investigation_file_max_bytes: int = Field(
+        default=200 * 1024 * 1024,
+        description="Maximum size of one file uploaded to an investigation, in bytes",
+    )
+    investigation_max_working_edges: int = Field(
+        default=50_000,
+        description="Ceiling of edges in an investigation's working graph in the "
+        "browser (G4: fixed for the MVP, not measured)",
+    )
     enrichment_max_keys: int = Field(
         default=500, description="Maximum node keys in one enrichment lookup"
     )
