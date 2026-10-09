@@ -94,9 +94,10 @@ async def list_investigations(
     status: Optional[str] = None,
     assignee: Optional[str] = None,
     typology: Optional[str] = None,
+    exploration_id: Optional[UUID] = None,
 ):
     return await service.list_investigations(
-        get_current_user(request), status, assignee, typology
+        get_current_user(request), status, assignee, typology, exploration_id
     )
 
 

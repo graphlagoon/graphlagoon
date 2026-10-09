@@ -112,6 +112,13 @@ def test_two_contexts_in_one_case(env):
     # The queue counts sources per case.
     queue = env["client"].get("/api/investigations", headers=h(OWNER)).json()
     assert [c["source_count"] for c in queue] == [2]
+    # The cases that hold an exploration (F2.7 journals metric.saved in them).
+    by_exp = lambda e: env["client"].get(  # noqa: E731
+        "/api/investigations", params={"exploration_id": str(e.id)}, headers=h(OWNER)
+    ).json()
+    assert len(by_exp(env["exp_a"])) == 1
+    other = env["store"].create_exploration(env["exp_a"].graph_context_id, "x", OWNER, {})
+    assert by_exp(other) == []
 
 
 def test_restricted_source_is_a_placeholder(env):

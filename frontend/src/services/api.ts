@@ -664,8 +664,9 @@ class ApiService {
   }
 
   // Investigations
-  async getInvestigations(): Promise<Investigation[]> {
-    const response = await this.client.get('/api/investigations');
+  /** `exploration_id`: only the cases that have that exploration as a source. */
+  async getInvestigations(params: { exploration_id?: string } = {}): Promise<Investigation[]> {
+    const response = await this.client.get('/api/investigations', { params });
     return response.data;
   }
 
