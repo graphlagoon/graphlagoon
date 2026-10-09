@@ -193,14 +193,90 @@ O método que as melhores ferramentas usam, e que a literatura formaliza:
 ### 4.1 Modelo de objetos
 
 ```
+Context (warehouse · Neptune · REST · ARQUIVO)
+├── tabelas de arestas e nós (o que vira grafo, igual a hoje)
+├── chaves de identidade por tipo de nó (CPF/CNPJ, ISPB+agência+conta, chave Pix…)   ← novo
+└── tabelas de enriquecimento (não viram grafo; são consultadas por chave)          ← novo
+
 Investigação (= dossiê; status, responsável, prazos 45+45 d, decisão)
-├── Fontes ─────────── exploração (de qualquer context) · CSV/SIMBA/QSA · consulta · lista de enriquecimento
-│                      (cada fonte tem hash, autor, data; nunca é alterada)
-├── Grafo de trabalho ─ união das fontes com resolução de entidades e proveniência por nó e aresta
-├── Rastreios ──────── execuções parametrizadas de follow the money (semente, direção, saltos, Δ, janela, alocação)
-├── Evidências ─────── pins de estado do grafo, notas, trechos de tabela, selos de tipologia
-└── Decisão ────────── comunicar (COAF/SPA) · marcar (DICT) · arquivar, com fundamentação e exportação
+├── Explorações ───── N explorações, cada uma do SEU context (contexts diferentes)
+│                     aba por exploração + visão unificada (união pelas chaves de identidade)
+├── Arquivos ──────── como grafo (vira um context de arquivo) · como enriquecimento · como anexo
+│                     (cada arquivo tem hash, autor e data; nunca é alterado)
+├── Rastreios ─────── execuções parametrizadas de follow the money (semente, direção, saltos, Δ, janela, alocação)
+├── Evidências ────── pins de estado do grafo, notas, trechos de tabela, selos de tipologia, hipóteses
+├── Diário ───────── registro automático de cada query, upload, merge, rastreio e decisão de match
+└── Decisão ──────── comunicar (COAF/SPA) · marcar (DICT) · arquivar, com fundamentação e exportação
 ```
+
+### 4.1a Explorações de contexts diferentes na mesma investigação
+
+Este é um requisito central. A exploração **continua presa ao seu context**: a FK não
+muda e cada exploração continua consultando o próprio warehouse ao expandir. A
+investigação **agrupa** várias delas e oferece duas leituras.
+
+- **Abas.** Cada exploração continua como é hoje: canvas, filtros, estilos e expansão
+  contra o seu context.
+- **Visão unificada.** É uma união derivada. Nós de contexts diferentes que são a mesma
+  entidade real (o mesmo CPF, a mesma conta) se juntam pelas **chaves de identidade**
+  que cada context declara.
+  - Cada nó guarda de qual exploração e context veio, e a cor de proveniência mostra
+    isso.
+  - Ao expandir um nó unificado, o analista escolhe em qual context (ou em todos).
+  - Sem chave declarada, a união só acontece pelo `node_id` idêntico.
+- **Seleção vinculada.** Selecionar o CPF X numa aba destaca X em todas as outras ("aparece
+  em 3 explorações").
+- **Referência viva ou congelada.** Enquanto o caso está aberto, a exploração é
+  referência viva. Pins de evidência e o fechamento do caso **congelam** o snapshot,
+  com hash, para que a evidência não mude se alguém editar a exploração depois.
+- **Need-to-know (LC 105).** Compartilhar a investigação **não** concede acesso aos
+  contexts. Quem não tem acesso vê um placeholder ("1 exploração restrita"), nunca o
+  dado.
+
+### 4.1b Tabelas de enriquecimento no context
+
+Um context passa a declarar **tabelas extras que não entram na query do grafo**. Elas
+são consultadas por chave para enriquecer o que já está na tela.
+
+```
+enrichment_tables: [{ name: "kyc", table: "cat.sch.kyc_clientes",
+                      key: { column: "cpf", matches: "prop:cpf" | "node_id" },
+                      node_types: ["Pessoa"], cardinality: "one" | "many",
+                      columns: ["renda", "ocupacao", "data_abertura"], label: "Cadastro KYC" }]
+```
+
+- **Cardinalidade `one`** (uma linha por nó). As colunas viram propriedades sob
+  demanda, num join em lote como o `/nodes/batch` que já existe. Ficam disponíveis em
+  labels, cores, filtros, métricas e na Data Table.
+- **Cardinalidade `many`** (logins, dispositivos, chargebacks). As linhas aparecem numa
+  aba do inspector e podem virar agregados (contagem, soma, última data). Também podem
+  ser **promovidas a nós e arestas**: a tabela de dispositivos cria nós "Dispositivo"
+  ligando as contas que o compartilham. É assim que nascem os vínculos para resolução de
+  entidades.
+- **Segurança (obrigatório).** Hoje `sql_scope.context_tables()` só devolve as tabelas
+  de arestas e nós, e quem não tem `context.create` só pode ler essas. As tabelas de
+  enriquecimento **entram em `context_tables()`**, então anexar uma **amplia o que os
+  leitores do context podem ler**. Daí três regras:
+  - só anexa quem tem `context.create` e quando a tabela está na allowlist
+    `catalog.schema`. Senão, quem só tem share de escrita escalaria para qualquer tabela;
+  - a consulta é um endpoint parametrizado por chave (`POST
+    /graph-contexts/{id}/enrichment/{name}`), não SQL livre;
+  - só as `columns` declaradas saem, e a leitura é auditada.
+- **Arquivo como enriquecimento** usa a mesma UI de join, mas com escopo da investigação
+  e não do context: lista de PEP, export de KYC, contas marcadas.
+
+### 4.1c Arquivos: três papéis
+
+| Papel | O que vira | Exemplo |
+|---|---|---|
+| **Grafo** | Um **context de arquivo** (novo `DatasourceType`), com colunas mapeadas para nós e arestas pelo assistente. Gera explorações como qualquer outro context, então entra na investigação do mesmo jeito | SIMBA, extrato interno, export do MED |
+| **Enriquecimento** | Tabela de enriquecimento com escopo da investigação (§4.1b) | QSA, PEP, CEIS, KYC |
+| **Anexo** | Arquivo não parseado, com hash, anexado ao dossiê | ofício, PDF, print |
+
+O parse acontece no browser, para prévia e mapeamento. O bruto vai ao servidor com
+SHA-256, para o mesmo storage dos snapshots (local ou Volume Databricks). Acima do teto
+medido no browser, a opção é **promover ao warehouse** (F5): vira uma tabela Delta e o
+context de arquivo passa a ser um context SQL normal.
 
 ### 4.2 Decisões de arquitetura
 
@@ -216,6 +292,84 @@ Investigação (= dossiê; status, responsável, prazos 45+45 d, decisão)
 | 8 | **O método do rastreio é explícito e vai junto da evidência** (direção, saltos, Δ, janela, valor mínimo, alocação FIFO/proporcional/LIBR, regras de parada) | Diferencial contra ferramentas opacas, defesa em juízo e Circ. 3.978 art. 40. |
 | 9 | **Novas permissões no catálogo:** `investigation.create`, `investigation.upload`, `investigation.export`. Compartilhamento só nominal; auditoria de **leitura** | Receita da Step 2.4b; LC 105, need-to-know e vedação de tipping-off. |
 | 10 | **Sem e-filing** no Siscoaf; exportação de um resumo estruturado para colar ou enviar | Não há API pública conhecida (**a confirmar**). Mantém o produto como ferramenta auxiliar. |
+| 11 | **Contexts ganham chaves de identidade e tabelas de enriquecimento**; tabelas de enriquecimento entram no escopo de query (§4.1b) | Permitem unir contexts diferentes e enriquecer sem virar grafo. O escopo precisa acompanhar, ou leitores sem `context.create` levam 403. |
+| 12 | **Arquivo de grafo é um context** (datasource `file`) | Reaproveita exploração, estilos, métricas e a própria investigação sem caminho especial. |
+
+### 4.3 Algoritmos: o que existe e o que é novo
+
+**Já existem:**
+- degree, weighted-degree, PageRank, eigenvector, betweenness, closeness, HITS e
+  edge-betweenness (`algorithmRegistry.ts`);
+- Louvain e similaridade;
+- BFS e ego k-hop;
+- métricas customizadas com `ctx.neighbors`, `ctx.edgesOf` e `ctx.degreeOf`. Elas
+  bastam para padrões de 1 salto, como contar entradas e saídas.
+
+**Novos**, em ordem de prioridade. Todos rodam em worker sobre graphology, porque o
+`metricsWorker` já monta o multigrafo direcionado. Versões em SQL ficam para a F5.
+
+| # | Algoritmo | Para quê | Observação |
+|---|---|---|---|
+| 1 | **Rastreio temporal de fluxo**: para frente e para trás, t(saída) ≥ t(entrada), Δ máximo, limite de saltos, valor mínimo, paradas por tipo de nó; alocação FIFO, proporcional, LIBR e poison (limite superior) | O núcleo do follow the money | Buffers por nó em ordem temporal (Kosyfaki, ICDE'21), O(E log E). Devolve o valor rastreado por aresta, recebido, repassado e retido por nó, o total por saída e a camada de cada nó |
+| 2 | **Caminhos**: mais curto (com e sem peso), k mais curtos (Yen), todos os caminhos simples com limite de saltos, **caminho que respeita o tempo** (chegada mais cedo) | "Como o dinheiro chegou de A até B" | Dijkstra/bidirecional existem prontos em `graphology-shortest-path` (dependência nova); Yen e temporal são implementação própria |
+| 3 | **Agregação de arestas paralelas**: soma, contagem, mín/máx, primeira e última data, por par e direção | Exibição, Sankey, largura por valor | Simples; exige resolver o #28 antes |
+| 4 | **Resolução de entidades**: normalização determinística (dígitos de CPF/CNPJ, padding de conta), fuzzy (Jaro-Winkler em nome + CPF mascarado parcial do QSA), blocking | Unir contexts e arquivos | Sai como "match link" com score e motivo, nunca merge silencioso |
+| 5 | **Detecção de tipologias em janela de tempo**: fan-in e fan-out na janela; passagem (entrada ≈ saída dentro de Δ, retenção baixa); fracionamento (N transações abaixo do limiar na janela); **ciclos temporais** (Johnson com limite); hubs de atributo compartilhado (dispositivo, IP, endereço); dormente que vira ativo | Selos ligados aos itens da CC 4.001 | Os de 1 salto já dão para fazer como métrica customizada. Janela, ciclos e explicabilidade pedem implementação nativa |
+| 6 | **Componentes conexos** (fracos e fortes) | Separar anéis independentes | Trivial; hoje só existe o "Orphan Clusters" |
+| 7 | **Métricas em janela de tempo**: grau e volume na janela | Comparar períodos | Extensão do registry |
+
+### 4.4 Layouts: o que existe e o que é novo
+
+**Já existem:** force (2D e 3D), ego (radial e em camadas), hive, hierárquico (com
+`traversal:'out'` já documentado como "money flow"), circular e grid.
+
+| Novo | O que mostra | Base |
+|---|---|---|
+| **Fluxo em camadas do rastreio** | x = salto a partir da semente (ou tempo); nós de cada camada ordenados para reduzir cruzamentos; largura da aresta = valor rastreado; saídas fixas à direita | Estende o hierárquico |
+| **Linha do tempo em raias** (swimlanes) | Uma raia por conta (y) e x = tempo; cada transação é uma seta entre raias no seu horário. Mostra permanência, divisão e a "corrida" de minutos de um golpe Pix | Novo. É a visão que mais conta a história do rastreio |
+| **Sankey** (visão, não layout de grafo) | Semente → camadas → saídas, ou centrado num ator; clique na faixa abre as transações | Novo; `d3-sankey` |
+| **Bipartido** | Lojistas × sócios, cartões × lojistas (card testing), contas × dispositivos | O hive com 2 eixos por `node_type` já se aproxima; talvez baste um preset |
+| **Mapa** (depois) | Terminais, agências, CEP (CC 4.001 IV-z: POS longe do lojista) | Novo; exige geocodificação. Baixa prioridade |
+
+Além disso, **posições fixadas passam a ser persistidas** nas evidências. Hoje o
+snapshot guarda só x/y, sem o flag de fixado.
+
+### 4.5 Novas formas de interação e de documentação
+
+**Interação:**
+- **Workspace da investigação**: abas de explorações + visão unificada + **seleção
+  vinculada** entre abas.
+- **"Adicionar à investigação"** a partir de qualquer exploração, seleção, resultado do
+  Query Console ou cluster.
+- **Rastreio interativo**:
+  - clique direito → "Seguir o dinheiro → para frente / para trás";
+  - "+1 salto" para avançar camada a camada;
+  - parâmetros ao vivo num painel;
+  - marcar um nó como saída para encerrar o ramo.
+- **Papéis nas entidades** (vítima, suspeito, laranja, saída, descartado), que dirigem o
+  estilo e o relatório.
+- **Timeline com seleção de janela** (brushing) ligada ao grafo e ao Sankey, com
+  reprodução no tempo.
+- **Fila de revisão de matches**: aceitar ou rejeitar, com motivo, e isso vai para o
+  diário.
+- **Inspector com abas de enriquecimento**: tabelas extras do context e arquivos do caso,
+  consultados sob demanda.
+- **Desfazer e histórico** do estado da investigação. Hoje só há desfazer para regras,
+  clusters e métricas.
+
+**Documentação do caso:**
+- **Diário automático**: cada query, upload (com hash), merge, rastreio (com
+  parâmetros) e decisão de match, com data, hora e autor. Dá reprodutibilidade, cadeia
+  de custódia e atende a Circ. 3.978 art. 40.
+- **Notas ancoradas** em nó, aresta, região do canvas ou evidência, com @menções.
+- **Evidências fixadas**: estado congelado do grafo com legenda, parâmetros e hash.
+- **Hipóteses**: uma lista leve no estilo ACH (análise de hipóteses concorrentes), com
+  evidências a favor e contra e um status.
+- **Dossiê gerado**: resumo, entidades, fluxos rastreados (com o método), indicadores da
+  CC 4.001 encontrados, decisão e fundamentação, hashes dos arquivos. Exporta em PDF, como
+  pacote CSV/JSON e como resumo para o Siscoaf.
+- **Docs públicas**: guias novos em `docs/guide/` para investigações, importação de
+  arquivos, tabelas de enriquecimento e follow the money.
 
 ---
 
@@ -256,7 +410,7 @@ adquirentes.
 |---|---|---|
 | **D0 Mapa do sistema** | Diagrama editável: fontes → grafo de trabalho → análises → dossiê → exportações, mais o modelo de objetos de §4.1 | Escopo e vocabulário (Investigação, Fonte, Rastreio, Evidência) |
 | **D1 Direções de layout** (low-fi) | 3 wireframes do workspace. **A** *Canvas-first*: grafo central, fontes à esquerda, inspector à direita, timeline embaixo. **B** *Cockpit*: grafo, Sankey e timeline em divisão sincronizada. **C** *Dossiê-first*: documento do caso com blocos vivos de grafo | Qual estrutura seguir |
-| **D2 Telas hi-fi** | (1) Fila de investigações com prazos de 45+45 d; (2) Workspace; (3) Adicionar fontes e mesclar explorações (prévia de sobreposição, chaves de identidade, conflitos); (4) Assistente de CSV (detectar formato SIMBA/QSA/genérico → mapear colunas → identidade e dedup → revisão e salvar mapeamento); (5) Enriquecimento e resolução de entidades (match links, arestas derivadas de atributo compartilhado, listas PEP/CEIS); (6) Rastreio: configuração e resultado em grafo por camadas, Sankey e tabela por salto, com o carimbo do método; (7) Timeline ligada ao grafo; (8) Dossiê: evidências, selos CC 4.001, decisão e exportação | Detalhe de interação de cada tela |
+| **D2 Telas hi-fi** | (0) Configuração do context: chaves de identidade e tabelas de enriquecimento (§4.1b); (1) Fila de investigações com prazos de 45+45 d; (2) Workspace: abas de explorações de contexts diferentes, visão unificada, seleção vinculada; (3) Adicionar à investigação (explorações de outros contexts, prévia de sobreposição pelas chaves, conflitos); (4) Assistente de arquivo (papel grafo/enriquecimento/anexo → detectar SIMBA/QSA/genérico → mapear colunas → identidade e dedup → revisão e salvar mapeamento); (5) Enriquecimento e resolução de entidades (abas no inspector, match links, promover a nós); (6) Rastreio: configuração e resultado em fluxo por camadas, Sankey e tabela por salto, com o carimbo do método; (7) Timeline em raias ligada ao grafo; (8) Dossiê: diário, notas, hipóteses, evidências, selos CC 4.001, decisão e exportação | Detalhe de interação de cada tela |
 | **D3 Protótipo clicável** | F-A de ponta a ponta, com links entre as telas | Se o fluxo fecha sem atrito |
 | **D4 Validação → engenharia** | Revisão do fluxo contra o checklist §1.2 e §2.1 (art. 43, CC 4.001); roteiro de 5 perguntas para analistas reais; cada tela vira épico de §6 | Prioridade de implementação |
 
@@ -266,10 +420,10 @@ adquirentes.
 
 | Fase | Escopo | Reaproveita | Bloqueios |
 |---|---|---|---|
-| **F1 Fundação** | Entidade Investigação (DB, memory store, registries do admin); fontes múltiplas; merge de explorações com chaves de identidade e proveniência; notas e pins; permissões `investigation.*`; auditoria de leitura | Snapshot, dedup do `expandFromNode`, clusters, `admin_registry`, `permission_catalog` | #28; o clear das comunidades a cada troca de `nodes` |
-| **F2 CSV e enriquecimento** | Parser em worker; assistente de mapeamento; mapeamentos salvos; presets SIMBA/QSA/genérico; upload com hash; joins por chave; gravar métricas customizadas como propriedade; arestas derivadas | `detectType`, `rest/mapping.py`, worker de métricas customizadas, `injectEdges` | M4 (injeção em CSV) |
-| **F3 Follow the money** | Modelo temporal; worker de rastreio (FIFO, proporcional, LIBR, Δ, saltos, paradas); Sankey; timeline; soma de arestas paralelas; caminhos (mais curto e todos, com limite) | `metricsWorker` (graphology), layout hierárquico, ego | #28 |
-| **F4 Dossiê e compliance** | Status, responsável e prazos; decisão fundamentada; exportação (PDF, CSV, SIMBA, resumo Siscoaf); retenção; selos CC 4.001 | Auditoria, regras de label, métricas customizadas | #32 (sandbox) |
+| **F1 Fundação** | Entidade Investigação (DB, memory store, registries do admin) com **N explorações de contexts diferentes**; chaves de identidade no context; visão unificada com proveniência; seleção vinculada; notas e pins; permissões `investigation.*`; auditoria de leitura | Snapshot, dedup do `expandFromNode`, clusters, `admin_registry`, `permission_catalog` | #28; o clear das comunidades a cada troca de `nodes` |
+| **F2 Arquivos e enriquecimento** | **Tabelas de enriquecimento no context** (+ `sql_scope.context_tables` + endpoint parametrizado + auditoria); **context de arquivo** (datasource `file`); parser em worker; assistente; mapeamentos salvos; presets SIMBA/QSA/genérico; upload com hash; arquivos como enriquecimento e como anexo; gravar métricas como propriedade; promover a nós e arestas; resolução de entidades (algoritmo 4) | `/nodes/batch`, `detectType`, `rest/mapping.py`, worker de métricas customizadas, `injectEdges`, datasource factory | M4 (injeção em CSV) |
+| **F3 Follow the money** | Modelo temporal; algoritmos 1–3 e 6 (§4.3); layouts de fluxo em camadas, raias e Sankey (§4.4); timeline com seleção de janela | `metricsWorker` (graphology), layout hierárquico, ego, hive | #28 |
+| **F4 Dossiê e compliance** | Diário automático, hipóteses, evidências congeladas; status, responsável e prazos; decisão fundamentada; exportação (PDF, CSV, SIMBA, resumo Siscoaf); retenção; tipologias (algoritmo 5) com selos CC 4.001 | Auditoria, regras de label, métricas customizadas | #32 (sandbox) |
 | **F5 Escala e IA** | Promover fontes ao warehouse (schema de rascunho em Delta); rastreio em SQL; narrativa assistida por LLM com revisão humana (LGPD art. 20) | gsql2rsql/VLP, datasource factory | n/a |
 
 ---

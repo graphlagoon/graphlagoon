@@ -9916,3 +9916,44 @@ rotas mutáveis e permissões, então serão necessários `CLEARABLE_TABLES`,
 **Author:** Claude (AI Assistant)
 
 ---
+## [2026-10-09 16:05] - Feature Planning (rev. 2): explorações multi-context, arquivos e tabelas de enriquecimento
+
+Detalhamento do plano [plans/investigation-workspace.md](plans/investigation-workspace.md)
+após perguntas do usuário. Ver §4.1a–4.5 do plano.
+
+**Decisões novas:**
+1. **Investigação = N explorações de contexts diferentes.** Cada exploração continua presa
+   ao seu context (FK inalterada) e é vista em abas. A investigação acrescenta uma visão
+   unificada, que une as entidades pelas **chaves de identidade** declaradas no context,
+   e a seleção vinculada entre abas. Compartilhar a investigação não concede acesso aos
+   contexts (LC 105).
+2. **Tabelas de enriquecimento no context:** tabelas extras que não entram na query do
+   grafo e são consultadas por chave (cardinalidade one/many, colunas declaradas). Elas
+   **entram em `sql_scope.context_tables()`**, porque senão leitores sem `context.create`
+   levam 403. Como anexar uma tabela amplia o escopo dos leitores, só anexa quem tem
+   `context.create`, e a tabela precisa estar na allowlist. A consulta é por endpoint
+   parametrizado, nunca SQL livre.
+3. **Arquivos têm três papéis:**
+   - **grafo:** um context de arquivo, com datasource `file` novo;
+   - **enriquecimento:** escopo da investigação;
+   - **anexo:** com hash.
+4. **Algoritmos novos:** rastreio temporal com alocação, caminhos (incluindo os que
+   respeitam o tempo), agregação de arestas paralelas, resolução de entidades,
+   tipologias em janela de tempo, componentes conexos. Os existentes (centralidades,
+   Louvain, ego, métricas customizadas) são reaproveitados.
+5. **Layouts novos:** fluxo em camadas (estende o hierárquico), linha do tempo em raias,
+   Sankey, bipartido (talvez um preset do hive), mapa (depois).
+6. **Interação e documentação novas:**
+   - workspace com abas e seleção vinculada, rastreio interativo, papéis nas entidades;
+   - fila de matches, desfazer;
+   - diário automático, notas ancoradas, hipóteses, evidências congeladas, dossiê gerado.
+
+**Public Docs:** nenhuma alteração (planejamento).
+
+**Admin-Area Impact:** nenhum agora. Na F2, tabelas de enriquecimento ampliam o escopo de
+query, o que exige um teste em `test_sql_scope` e entrada em `AUDITED_ROUTES` para a
+rota de enriquecimento.
+
+**Author:** Claude (AI Assistant)
+
+---
