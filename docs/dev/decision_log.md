@@ -10753,3 +10753,40 @@ Investigations, contagem no Overview, rota de transferência em `AUDITED_ROUTES`
 ação `investigation.transfer`.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 05:00] - Feature Implemented: F1.9 · Docs públicas e E2E da fundação
+
+**Feature:** guia `docs/guide/investigations.md` (bloco TL;DR, fila, adicionar
+explorações vivas/congeladas, workspace, chaves de identidade, papéis, notas, diário,
+acesso e compartilhamento nominal, área admin), entrada na sidebar, linha
+`investigation.create` no catálogo de `permissions.md`, duas cenas de screenshot e a
+jornada E2E "criar caso → duas explorações de dois contexts → vista unificada".
+
+**Design Decisions:**
+1. Cenas `investigations-queue` e `investigations-workspace` em
+   `e2e/screenshots/generate.ts`: o grafo curado dividido em duas fontes (pessoas ↔
+   empresas, empresas → produtos) com chave `Company` por nome, para a vista
+   unificada mostrar anéis duplos e dois papéis. O workspace refaz o enquadramento
+   (Espaço + C) depois do layout, porque o primeiro ajuste roda antes de o grafo
+   abrir.
+2. `seedInvestigations` aceita as explorações para devolver título e `context_id` na
+   fonte criada, e serve o caso novo (`inv-new`) por uma rota genérica.
+3. Bug achado pela jornada: adicionar fontes não atualizava o diário na tela; o
+   store agora recarrega os eventos depois de `addExplorations`.
+4. README do pacote: cabeçalho de status diz que a F1 está concluída.
+
+**Files:** `docs/guide/investigations.md` (novo), `docs/.vitepress/config.ts`,
+`docs/guide/permissions.md`, `docs/public/screenshots/investigations-*.png` (novos),
+`frontend/e2e/tests/user-journeys.spec.ts`, `frontend/e2e/helpers/api-mocks.ts`,
+`frontend/e2e/screenshots/generate.ts`, `frontend/src/stores/investigation.ts`,
+`docs/dev/plans/investigation/README.md`.
+
+**Testing:** E2E `user-journeys.spec.ts` e `investigations.spec.ts` (12 verdes); as
+duas cenas novas geradas; `cd docs && npx vitepress build` passa.
+
+**Public Docs:** novo guia Investigations, sidebar e permissão no catálogo.
+**Admin-Area Impact:** no admin-area impact.
+
+**Author:** Claude (AI Assistant)

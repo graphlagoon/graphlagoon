@@ -189,6 +189,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     } finally {
       const row = investigations.value.find((i) => i.id === investigationId);
       if (row) row.source_count = (row.source_count ?? 0) + added;
+      if (added && current.value?.id === investigationId) fetchEvents().catch(() => {});
     }
   }
 

@@ -7,7 +7,7 @@
  */
 import { test, superuserTest, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
-import { seedContexts, seedExplorations, mockSchemaDrift, seedPrecomputedGraphs, seedQueryTemplates } from '../helpers/api-mocks';
+import { seedContexts, seedExplorations, seedInvestigations, mockSchemaDrift, seedPrecomputedGraphs, seedQueryTemplates } from '../helpers/api-mocks';
 import { openUserMenu } from '../helpers/user-menu';
 
 test.describe('User Journeys', () => {
@@ -37,6 +37,82 @@ test.describe('User Journeys', () => {
     // Verify toolbar panels are available
     await expect(page.getByTitle('Filters', { exact: true })).toBeVisible();
     await expect(page.getByTitle('Query', { exact: true })).toBeVisible();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Journey: new investigation → two explorations from two contexts → unified view
+  // ---------------------------------------------------------------------------
+  test('user opens a case, adds explorations from two contexts and sees them unified', async ({
+    authenticatedPage: page,
+  }) => {
+    const ctx = (id: string, title: string, nodeType: string) => ({
+      ...MOCK_CONTEXT,
+      id,
+      title,
+      identity_keys: [{ node_type: nodeType, entity: 'Pessoa', source: { kind: 'prop', name: 'cpf' }, normalize: 'cpf_cnpj' }],
+    });
+    const pix = { ...MOCK_EXPLORATION, id: 'exp-pix', title: 'Pix transfers', graph_context_id: 'ctx-pix' };
+    const kyc = { ...MOCK_EXPLORATION, id: 'exp-kyc', title: 'KYC clients', graph_context_id: 'ctx-kyc' };
+    await seedContexts(page, [ctx('ctx-pix', 'Pix', 'Titular'), ctx('ctx-kyc', 'Cadastro', 'Cliente')]);
+    await seedExplorations(page, [pix, kyc]);
+    await seedInvestigations(page, [], {}, [pix, kyc]);
+    const graphs: Record<string, unknown> = {
+      'ctx-pix': {
+        nodes: [
+          { id: 'p1', type: 'Titular', properties: { cpf: '123.456.789-01' } },
+          { id: 'a1', type: 'Conta', properties: {} },
+        ],
+        edges: [{ id: 'e1', source: 'p1', target: 'a1', type: 'OWNS', properties: {} }],
+      },
+      'ctx-kyc': {
+        nodes: [
+          { id: 'c9', type: 'Cliente', properties: { cpf: '12345678901' } },
+          { id: 'd1', type: 'Device', properties: {} },
+        ],
+        edges: [{ id: 'e1', source: 'c9', target: 'd1', type: 'USES', properties: {} }],
+      },
+    };
+    await page.route('**/graphlagoon/api/investigations/*/sources/*/snapshot', (route) => {
+      const ctxId = route.request().url().includes('/sources/src-1/') ? 'ctx-pix' : 'ctx-kyc';
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          exploration: { id: 'x', title: 'x', graph_context_id: ctxId, owner_email: 'e2e@test.com', state: {} },
+          snapshot: graphs[ctxId],
+        }),
+      });
+    });
+
+    // Create the case from the queue
+    await page.goto('/investigations');
+    await page.getByTestId('new-investigation-btn').click();
+    await page.getByTestId('new-investigation-title').fill('Golpe Pix · falsa central');
+    await page.getByTestId('new-investigation-submit').click();
+    await page.waitForURL('**/investigations/inv-new');
+    await expect(page.getByTestId('investigation-title')).toHaveText('Golpe Pix · falsa central');
+
+    // Add one exploration from each context
+    await page.getByTestId('investigation-add-sources').click();
+    const modal = page.getByTestId('add-to-investigation-modal');
+    await modal.getByTestId('add-exp-exp-pix').locator('input').check();
+    await modal.getByTestId('add-exp-exp-kyc').locator('input').check();
+    await expect(modal.getByTestId('add-preview')).toContainText('2 new explorations, from 2 contexts');
+    await modal.getByTestId('add-submit').click();
+    await expect(modal).toHaveCount(0);
+
+    // The unified view merges the person shared by CPF: 4 nodes in, 3 out
+    const status = page.getByTestId('workspace-status');
+    await expect(status).toContainText('3 nodes', { timeout: 15_000 });
+    await expect(status).toContainText('2 edges');
+    await expect(status).toContainText('2 sources');
+    await expect(page.getByTestId('tab-unified')).toHaveClass(/active/);
+    await expect(page.getByTestId('tab-src-1')).toContainText('Pix transfers');
+    await expect(page.getByTestId('tab-src-2')).toContainText('KYC clients');
+
+    // The journal recorded the case and both sources
+    await page.getByTestId('journal-toggle').click();
+    await expect(page.getByTestId('journal-event')).toHaveCount(3);
   });
 
   // ---------------------------------------------------------------------------

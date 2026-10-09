@@ -31,6 +31,7 @@ the default: **until an admin writes a rule, nothing changes for anyone.**
 |---|---|
 | `context.create` | Creating graph contexts; browsing the warehouse catalog (listing catalogs/schemas/tables, table schema and preview, type discovery); and the **wide** query tier — see [Query scope](#query-scope) below. |
 | `exploration.save` | Saving or updating explorations. Exploring and querying stay open — this only gates persisting the result. |
+| `investigation.create` | Opening new [investigation](./investigations.md) cases. Working on a case someone shared with you or assigned to you stays open. |
 
 ## Query scope
 
