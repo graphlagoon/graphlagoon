@@ -40,7 +40,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] FA.3 · Propostas e aprovação humana (T11)
 - [x] FA.4 · Servidor MCP em `/mcp` com as ferramentas da F1 e da FA
 - [ ] FA.5 · Ponte MCP local (stdio) para apps atrás do proxy do Databricks
-- [ ] FA.6 · Registry de cobertura AI-first (teste obrigatório)
+- [x] FA.6 · Registry de cobertura AI-first (teste obrigatório)
 - [ ] FA.7 · Guia público de agentes, prompts MCP e E2E do agente
 
 **F2 · Arquivos e enriquecimento**
@@ -464,10 +464,10 @@ trabalho de análise e documentação; a pessoa decide.
 - **Arquivos:** `api/graphlagoon/mcp/registry.py` e `api/tests/test_agent_registry.py`
   ([03 §8.7](03-arquitetura.md#87-registry-de-cobertura-teste)).
 - **Aceite:**
-  - [ ] O teste falha se uma rota de investigação não tiver ferramenta nem motivo de
+  - [x] O teste falha se uma rota de investigação não tiver ferramenta nem motivo de
     exceção.
-  - [ ] O teste falha se uma rota só humana aceitar token de agente.
-  - [ ] A regra AI-first do topo deste plano passa a valer para F2–F4.
+  - [x] O teste falha se uma rota só humana aceitar token de agente.
+  - [x] A regra AI-first do topo deste plano passa a valer para F2–F4.
 
 ### FA.7 · Guia público de agentes e E2E
 
