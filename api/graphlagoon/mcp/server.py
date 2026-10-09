@@ -690,6 +690,54 @@ def build_server():
         )
         return _out(row)
 
+    @server.tool()
+    async def create_file_graph(
+        ctx: Context,
+        investigation_id: UUID,
+        file_id: UUID,
+        preset: Optional[str] = None,
+        mapping: Optional[dict[str, Any]] = None,
+        file_ids: Optional[list[UUID]] = None,
+        title: Optional[str] = None,
+    ) -> dict:
+        """Turn a graph-role case file into a graph source of the case: give a
+        ``preset`` ("simba_v31", "qsa_receita") or a ``mapping`` spec;
+        ``file_ids`` are the other files of a multi-file layout (SIMBA). Returns
+        the new source and the quality report. Needs investigation.upload."""
+        from graphlagoon.services.file_mapping_presets import PRESETS
+        from graphlagoon.services.permissions import check_permission
+
+        user = _agent(ctx, "write")
+        if not (await check_permission(user, "investigation.upload")).allowed:
+            raise _tool_error("PERMISSION_DENIED", "Missing investigation.upload")
+        if (preset is None) == (mapping is None):
+            raise _tool_error("INVALID_BODY", "Give exactly one of preset or mapping")
+        if preset is not None and preset not in PRESETS:
+            raise _tool_error("INVALID_BODY", f"Presets: {', '.join(PRESETS)}")
+        spec = PRESETS[preset] if preset is not None else mapping
+        result = await _call(
+            files.generate_context(
+                investigation_id, user, file_id, spec, file_ids or [], title
+            )
+        )
+        return _out(result)
+
+    @server.tool()
+    async def set_file_mapping(
+        ctx: Context, investigation_id: UUID, file_id: UUID, mapping: dict[str, Any]
+    ) -> dict:
+        """Set how an enrichment-role file joins the case's nodes, e.g. the QSA:
+        {"name": "QSA", "input": {"delimiter": ";", "header": false, "columns": [...]},
+        "key_column": "CNPJ_BASICO", "columns": [...], "match_node_types": ["Lojista"],
+        "match_source": {"kind": "prop", "name": "cnpj"}, "key_digits": 8}.
+        Needs investigation.upload."""
+        from graphlagoon.services.permissions import check_permission
+
+        user = _agent(ctx, "write")
+        if not (await check_permission(user, "investigation.upload")).allowed:
+            raise _tool_error("PERMISSION_DENIED", "Missing investigation.upload")
+        return _out(await _call(files.set_mapping(investigation_id, user, file_id, mapping)))
+
     # -- proposals ----------------------------------------------------------
 
     @server.tool()

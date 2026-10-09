@@ -116,3 +116,119 @@ def test_upload_over_the_limit_is_413(ctx, monkeypatch):
     assert r.status_code == 413
     assert r.json()["detail"]["error"]["code"] == "FILE_TOO_LARGE"
     assert not [p for p in root.rglob("*") if p.is_file()]
+
+
+# -- F2.5 file graph, F2.6 enrichment mapping --------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from graphlagoon.services import snapshot  # noqa: E402
+from graphlagoon.services.file_mapping_presets import SIMBA_V31  # noqa: E402
+from graphlagoon.services.snapshot import LocalSnapshotService  # noqa: E402
+
+SIMBA = Path(__file__).resolve().parents[2] / "frontend/src/__tests__/fixtures/fileMapping/simba-mini"
+
+
+def _simba_upload(client, url):
+    ids = []
+    for p in sorted(SIMBA.glob("*.TXT")):
+        r = client.post(
+            f"{url}/files", content=p.read_bytes(),
+            params={"filename": p.name, "role": "graph"}, headers=h(OWNER),
+        )
+        assert r.status_code == 201, r.text
+        ids.append(r.json()["id"])
+    return ids
+
+
+@pytest.fixture
+def snaps(monkeypatch, tmp_path):
+    svc = LocalSnapshotService(str(tmp_path / "snaps"))
+    monkeypatch.setattr(snapshot, "get_snapshot_service", lambda: svc)
+
+
+def test_simba_file_becomes_a_case_source(ctx, snaps):
+    if not SIMBA.is_dir():
+        pytest.skip("frontend fixtures not checked out")
+    client, url, _ = ctx
+    first, *rest = _simba_upload(client, url)
+    r = client.post(
+        f"{url}/files/{first}/context",
+        json={"mapping": SIMBA_V31, "file_ids": rest, "title": "Quebra CASO1"},
+        headers=h(OWNER),
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["source"]["kind"] == "file" and body["source"]["accessible"]
+    assert body["report"]["truncated_edges"] == 0
+    assert body["file"]["context_id"] == body["context_id"]
+
+    ctx_json = client.get(f"/api/graph-contexts/{body['context_id']}", headers=h(OWNER)).json()
+    assert ctx_json["datasource_type"] == "file"
+    assert {k["node_type"] for k in ctx_json["identity_keys"]} == {"Conta", "Pessoa"}
+
+    snap = client.get(
+        f"{url}/sources/{body['source']['id']}/snapshot", headers=h(OWNER)
+    ).json()["snapshot"]
+    assert any(n["type"] == "Desconhecido" for n in snap["nodes"])
+    assert len(snap["edges"]) > 0
+
+    # The file datasource: no query language, expand walks the stored graph.
+    gc = f"/api/graph-contexts/{body['context_id']}"
+    assert client.post(f"{gc}/cypher", json={"query": "MATCH (a)-[r]->(b) RETURN a,r,b"},
+                       headers=h(OWNER)).status_code == 400
+    exp = client.post(f"{gc}/expand", json={"node_id": "1-1-12345", "depth": 1},
+                      headers=h(OWNER)).json()
+    assert len(exp["edges"]) > 0
+
+    kinds = [e["kind"] for e in client.get(f"{url}/events", headers=h(OWNER)).json()]
+    assert "source.added" in kinds
+    # Already generated; a reader may not generate.
+    assert client.post(f"{url}/files/{first}/context", json={"mapping": SIMBA_V31},
+                       headers=h(OWNER)).status_code == 409
+    assert client.post(f"{url}/files/{first}/context", json={"mapping": SIMBA_V31},
+                       headers=h(READER)).status_code == 403
+    # The public create route never makes a file context.
+    assert client.post("/api/graph-contexts", json={"title": "x", "datasource_type": "file"},
+                       headers=h(OWNER)).status_code == 422
+
+
+def test_file_graph_is_capped_at_max_working_edges(ctx, snaps, monkeypatch):
+    if not SIMBA.is_dir():
+        pytest.skip("frontend fixtures not checked out")
+    client, url, _ = ctx
+    monkeypatch.setenv("GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES", "2")
+    get_settings.cache_clear()
+    first, *rest = _simba_upload(client, url)
+    body = client.post(
+        f"{url}/files/{first}/context",
+        json={"mapping": SIMBA_V31, "file_ids": rest}, headers=h(OWNER),
+    ).json()
+    assert body["report"]["truncated_edges"] > 0
+    snap = client.get(
+        f"{url}/sources/{body['source']['id']}/snapshot", headers=h(OWNER)
+    ).json()["snapshot"]
+    assert len(snap["edges"]) == 2
+
+
+def test_enrichment_file_mapping(ctx):
+    client, url, _ = ctx
+    f = client.post(
+        f"{url}/files", content=b'"12345678";"2";"ANA"\n',
+        params={"filename": "qsa.csv", "role": "enrichment"}, headers=h(OWNER),
+    ).json()
+    spec = {
+        "name": "QSA",
+        "input": {"delimiter": ";", "header": False, "columns": ["CNPJ_BASICO", "ID", "NOME"]},
+        "key_column": "CNPJ_BASICO", "columns": ["NOME"],
+        "match_node_types": ["Lojista"], "match_source": {"kind": "prop", "name": "cnpj"},
+        "key_digits": 8,
+    }
+    r = client.patch(f"{url}/files/{f['id']}", json={"mapping": spec}, headers=h(OWNER))
+    assert r.status_code == 200, r.text
+    assert r.json()["mapping"]["key_digits"] == 8
+    bad = {**spec, "columns": ["NOPE"]}
+    r = client.patch(f"{url}/files/{f['id']}", json={"mapping": bad}, headers=h(OWNER))
+    assert r.status_code == 422
+    assert client.patch(f"{url}/files/{f['id']}", json={"mapping": spec},
+                        headers=h(READER)).status_code == 403

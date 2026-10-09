@@ -20,6 +20,8 @@ import type {
 } from "@/types/graph";
 
 export interface DatasourceCapabilities {
+  /** A query language at all (graph query bar and Query Console); a file context has none. */
+  supportsQuery: boolean;
   /** Raw SQL graph queries and the query console's `sql` mode. */
   supportsSql: boolean;
   /** Cypher→SQL transpilation: the review flow, VLP modes, procedural BFS options, CTE fallback. */
@@ -35,6 +37,7 @@ export interface DatasourceCapabilities {
 }
 
 const SQL_WAREHOUSE: DatasourceCapabilities = {
+  supportsQuery: true,
   supportsSql: true,
   supportsTranspile: true,
   supportsCtePrefilter: true,
@@ -49,6 +52,7 @@ const SQL_WAREHOUSE: DatasourceCapabilities = {
  * and no wide projection worth deferring — it returns whole property maps.
  */
 const NEPTUNE: DatasourceCapabilities = {
+  supportsQuery: true,
   supportsSql: false,
   supportsTranspile: false,
   supportsCtePrefilter: false,
@@ -64,6 +68,21 @@ const NEPTUNE: DatasourceCapabilities = {
  * that arrives from the server as `restOps` on its descriptor.
  */
 const REST: DatasourceCapabilities = {
+  supportsQuery: true,
+  supportsSql: false,
+  supportsTranspile: false,
+  supportsCtePrefilter: false,
+  supportsDrift: false,
+  supportsCatalog: false,
+  supportsProgressiveLoad: false,
+};
+
+/**
+ * A graph generated on the server from a case file (investigations F2.5): it is
+ * opened and expanded, never queried.
+ */
+const FILE: DatasourceCapabilities = {
+  supportsQuery: false,
   supportsSql: false,
   supportsTranspile: false,
   supportsCtePrefilter: false,
@@ -76,6 +95,7 @@ const CAPABILITIES: Record<DatasourceType, DatasourceCapabilities> = {
   sql_warehouse: SQL_WAREHOUSE,
   neptune: NEPTUNE,
   rest: REST,
+  file: FILE,
 };
 
 export const DEFAULT_DATASOURCE_TYPE: DatasourceType = "sql_warehouse";
@@ -119,6 +139,13 @@ export const DATASOURCE_COPY: Record<DatasourceType, DatasourceCopy> = {
       "What you can query — and how complete the answer is — is defined by " +
       "the connection, not by Graph Lagoon.",
   },
+  file: {
+    label: "Case file",
+    kind: "File",
+    tagline: "Investigation · uploaded file",
+    description: "A graph generated from a file uploaded to an investigation.",
+    caveat: "It holds only what the file holds, and it cannot be queried.",
+  },
   sql_warehouse: {
     label: "Databricks",
     kind: "SQL Warehouse",
@@ -145,6 +172,7 @@ export const DATASOURCE_LABELS: Record<DatasourceType, string> = {
   sql_warehouse: DATASOURCE_COPY.sql_warehouse.label,
   neptune: DATASOURCE_COPY.neptune.label,
   rest: DATASOURCE_COPY.rest.label,
+  file: DATASOURCE_COPY.file.label,
 };
 
 /**

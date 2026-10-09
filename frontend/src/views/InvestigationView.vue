@@ -289,7 +289,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           @select="openTab($event)"
         >
           <template #files>
-            <CaseFiles :investigation-id="id" :can-edit="canEdit" />
+            <CaseFiles :investigation-id="id" :can-edit="canEdit" @source-added="openTab($event)" />
           </template>
         </SourcesPanel>
 

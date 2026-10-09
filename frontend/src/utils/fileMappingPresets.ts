@@ -5,6 +5,7 @@
  * both check it.
  */
 import type { MappingSpec } from '@/utils/fileMapping';
+import type { FileEnrichmentSpec } from '@/types/investigation';
 
 /**
  * SIMBA v3.1 (MI001-SPPEA): TAB, ddmmyyyy, cents; EXTRATO × ORIGEM_DESTINO are
@@ -277,4 +278,18 @@ export const QSA_RECEITA: MappingSpec = {
 export const FILE_MAPPING_PRESETS: Record<string, MappingSpec> = {
   simba_v31: SIMBA_V31,
   qsa_receita: QSA_RECEITA,
+};
+
+/**
+ * The QSA as an enrichment file (F2.6): the partners of a company, joined to the
+ * case's merchants by CNPJ básico (the first 8 digits of the CNPJ).
+ */
+export const QSA_ENRICHMENT: FileEnrichmentSpec = {
+  name: 'QSA Receita (sócios)',
+  input: { delimiter: ';', header: false, columns: QSA_RECEITA.inputs.qsa.columns, encoding: 'latin-1' },
+  key_column: 'CNPJ_BASICO',
+  columns: ['NOME_SOCIO', 'CNPJ_CPF_SOCIO', 'QUALIFICACAO_SOCIO', 'DATA_ENTRADA_SOCIEDADE'],
+  match_node_types: ['Lojista', 'Empresa'],
+  match_source: { kind: 'prop', name: 'cnpj' },
+  key_digits: 8,
 };

@@ -245,3 +245,13 @@ describe('useDatasourceDescriptors', () => {
     expect(ids).toEqual(['sql_warehouse']);
   });
 });
+
+describe('file datasource (investigations F2.5)', () => {
+  it('has no query language: no SQL, no transpile, no console', () => {
+    const caps = capabilitiesFor(resolveDatasourceType({ datasource_type: 'file' }));
+    expect(caps.supportsQuery).toBe(false);
+    expect(caps.supportsSql).toBe(false);
+    expect(caps.supportsTranspile).toBe(false);
+    expect(capabilitiesFor('sql_warehouse').supportsQuery).toBe(true);
+  });
+});
