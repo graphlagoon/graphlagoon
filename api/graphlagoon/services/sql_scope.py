@@ -98,11 +98,12 @@ def normalize_table_name(
 
 
 def context_tables(context, default_catalog: str, default_schema: str) -> set:
-    """The normalized tables a context declares (edge + node)."""
+    """The normalized tables a context declares (edge, node and enrichment)."""
     tables = set()
     for name in (
         getattr(context, "edge_table_name", None),
         getattr(context, "node_table_name", None),
+        *(t.get("table") for t in getattr(context, "enrichment_tables", None) or []),
     ):
         if not name:
             continue

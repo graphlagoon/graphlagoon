@@ -40,10 +40,9 @@ from graphlagoon.mcp.registry import (  # noqa: E402
     human_only_routes,
 )
 from graphlagoon.middleware import auth  # noqa: E402
-from graphlagoon.routers import agent_tokens, investigations  # noqa: E402
+from graphlagoon.routers import agent_tokens, graph_contexts, investigations  # noqa: E402
 
 SUPERUSER = "admin@example.com"
-# Enrichment routes (F2.1) join this list when they exist.
 COVERED_ROUTERS = (investigations.router, agent_tokens.router)
 
 
@@ -52,6 +51,10 @@ def _routes(router) -> dict[tuple[str, str], object]:
 
 
 ALL_ROUTES = {k: v for router in COVERED_ROUTERS for k, v in _routes(router).items()}
+# Of the graph-context routes, only the enrichment ones are case tooling (F2.1).
+ALL_ROUTES |= {
+    k: v for k, v in _routes(graph_contexts.router).items() if "/enrichment/" in k[1]
+}
 
 
 def _forbids_agents(route) -> bool:

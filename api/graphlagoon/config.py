@@ -191,6 +191,12 @@ class Settings(BaseSettings):
         default=100 * 1024 * 1024,
         description="Maximum size of one artifact version in the case space, in bytes",
     )
+    enrichment_max_keys: int = Field(
+        default=500, description="Maximum node keys in one enrichment lookup"
+    )
+    enrichment_max_rows: int = Field(
+        default=5000, description="Maximum rows one enrichment lookup returns"
+    )
 
     # Exploration snapshots (file-based graph state persistence)
     exploration_snapshots_dir: str = Field(

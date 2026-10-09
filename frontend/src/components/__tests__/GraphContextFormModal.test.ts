@@ -394,5 +394,37 @@ describe('GraphContextFormModal', () => {
         { node_type: 'Account', entity: 'Conta', source: 'node_id', normalize: 'account' },
       ])
     })
+
+    it('attaches an enrichment table', async () => {
+      const context = createGraphContext({ id: 'ctx-edit' })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      await fireEvent.click(getByTestId('enrichment-add'))
+      await fireEvent.update(getByTestId('enrichment-label'), 'Login devices')
+      await fireEvent.update(getByTestId('enrichment-table'), 'main.risk.devices')
+      await fireEvent.update(getByTestId('enrichment-key'), 'account_id')
+      await fireEvent.update(getByTestId('enrichment-node-types'), 'Conta')
+      await fireEvent.update(getByTestId('enrichment-columns'), 'device_id, ip')
+      await fireEvent.update(getByTestId('enrichment-cardinality'), 'many')
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+      expect(payload.enrichment_tables).toEqual([
+        {
+          name: 'login_devices',
+          label: 'Login devices',
+          table: 'main.risk.devices',
+          key_column: 'account_id',
+          match_node_types: ['Conta'],
+          match_source: 'node_id',
+          cardinality: 'many',
+          columns: ['device_id', 'ip'],
+          promote: null,
+        },
+      ])
+    })
   })
 })

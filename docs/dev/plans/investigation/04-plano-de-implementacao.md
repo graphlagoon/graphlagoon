@@ -44,7 +44,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] FA.7 · Guia público de agentes, prompts MCP e E2E do agente
 
 **F2 · Arquivos e enriquecimento**
-- [ ] F2.1 · Tabelas de enriquecimento no context e endpoint de consulta
+- [x] F2.1 · Tabelas de enriquecimento no context e endpoint de consulta
 - [ ] F2.2 · Aba de enriquecimento no inspector e "promover a nós"
 - [ ] F2.3 · Upload de arquivos com hash e papel
 - [ ] F2.4 · Especificação de mapeamento, interpretadores TS e Python, presets SIMBA e QSA
@@ -505,9 +505,9 @@ trabalho de análise e documentação; a pessoa decide.
   4. Auditar a leitura com `AuditAction` novo `enrichment.read` e entrada em
      `AUDITED_ROUTES`.
 - **Aceite:**
-  - [ ] Quem só tem share de escrita no context **não** consegue anexar tabela.
-  - [ ] A consulta só devolve as colunas declaradas.
-  - [ ] Um leitor sem `context.create` consegue consultar a tabela anexada.
+  - [x] Quem só tem share de escrita no context **não** consegue anexar tabela.
+  - [x] A consulta só devolve as colunas declaradas.
+  - [x] Um leitor sem `context.create` consegue consultar a tabela anexada.
 - **Testes:**
   - `test_sql_scope.py` (escopo ampliado);
   - novo `test_enrichment.py` (colunas, chaves malformadas, injeção, limites);
