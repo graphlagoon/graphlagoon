@@ -132,10 +132,30 @@ The **Files** section of the left column lists the files uploaded to the case
 (bank statements in the SIMBA layout, the Receita QSA, any CSV) with their
 role, size and sha256.
 
-- **Upload file** picks a role first: **Graph** (becomes an exploration of
-  the case), **Enrichment** (joined to the case's nodes by key) or
-  **Attachment** (kept as is). It needs the `investigation.upload`
-  [permission](./permissions.md) and edit access to the case.
+- **Add file…** opens the file assistant. It needs the `investigation.upload`
+  [permission](./permissions.md) and edit access to the case. Its five steps:
+  1. **Files**: pick every file of the layout at once (a SIMBA delivery is
+     five TAB-separated files).
+  2. **Role**: **Graph** (becomes an exploration of the case), **Enrichment**
+     (joined to the case's nodes by key) or **Attachment** (kept as is).
+  3. **Map columns**: a known layout (SIMBA v3.1, Receita QSA) is detected
+     from the file names and headers. The table shows what each column
+     becomes and how it is converted (cents, `ddmmaaaa` dates, `C`/`D` as
+     the direction of the money). The mapping itself is JSON you can edit;
+     it is checked as you type and saved, by name, with the file. The
+     quality panel shows the share of transactions without an identified
+     counterpart, the “Desconhecido” nodes (one per unidentified
+     transaction, never grouped), discarded rows with the reason, and a
+     preview of the first edges.
+  4. **Identity**: node types whose id is normalized as a CPF/CNPJ,
+     account, phone or e-mail merge with the other sources of the case.
+  5. **Review**: **Add to case** uploads the files and, for the graph
+     role, the server builds the graph and adds it as a source that opens
+     in its own tab.
+- A file graph lives in a **file context**: it can be opened and expanded but
+  not queried (no Query Console, no SQL, no Cypher). Only its edges up to
+  `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` are kept; the journal
+  records how many were dropped.
 - The server computes the sha256 while receiving the file and stores it by
   that hash; uploading the same bytes again reuses the stored copy. Files
   above `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` are refused.

@@ -73,7 +73,7 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
 |---|---|
 | `read` | read cases, the unified graph, entities, the journal, notes, artifacts, case files (`list_files`, `get_file`, masked) and proposals; look up an entity in its context's enrichment tables (`lookup_enrichment`) |
 | `analyze` | run server analyses (arrives with follow-the-money and typologies) |
-| `write` | create cases, add sources, write notes, upload artifacts as **drafts**, upload case files (`upload_file`, up to the artifact size; needs your `investigation.upload` permission) |
+| `write` | create cases, add sources, write notes, upload artifacts as **drafts**, upload case files (`upload_file`, up to the artifact size), turn a graph file into a source with a preset or mapping (`create_file_graph`) and set how an enrichment file joins nodes (`set_file_mapping`); the file tools need your `investigation.upload` permission |
 | `propose` | propose an entity role, the case status or a typology |
 
 The token acts with **your** access and never more: cases you cannot see,

@@ -33,6 +33,8 @@ AGENT_TOOL_ROUTES: dict[tuple[str, str], str] = {
     ("GET", f"{_CASE}/files"): "list_files",
     ("POST", f"{_CASE}/files"): "upload_file",
     ("GET", f"{_CASE}/files/{{file_id}}/content"): "get_file",
+    ("PATCH", f"{_CASE}/files/{{file_id}}"): "set_file_mapping",
+    ("POST", f"{_CASE}/files/{{file_id}}/context"): "create_file_graph",
     ("GET", f"{_CASE}/proposals"): "list_proposals",
     ("POST", f"{_CASE}/proposals"): "propose",
     (

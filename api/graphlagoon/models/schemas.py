@@ -22,7 +22,9 @@ GraphModel = Literal[
 # endpoint — a native graph database, so it defines no tables at all. "rest" is
 # a dev-registered named connection to an external graph-serving API: the only
 # type with multiple instances, selected by datasource_name.
-DatasourceType = Literal["sql_warehouse", "neptune", "rest"]
+# "file" is a graph generated on the server from a case file (investigations
+# F2.5); only POST /api/investigations/{id}/files/{fid}/context creates one.
+DatasourceType = Literal["sql_warehouse", "neptune", "rest", "file"]
 
 # Contexts created before datasources were pluggable are all warehouse contexts,
 # so this default is what keeps every existing context working untouched.
@@ -586,6 +588,11 @@ class GraphContextCreate(BaseModel):
         rejected — a client that sends leftovers from the warehouse form still
         gets a valid context instead of a validation error it cannot act on.
         """
+        if self.datasource_type == "file":
+            raise ValueError(
+                "file contexts are generated from a case file "
+                "(POST /api/investigations/{id}/files/{file_id}/context)"
+            )
         if self.datasource_type == "sql_warehouse":
             if not self.edge_table_name:
                 raise ValueError(
@@ -1916,6 +1923,53 @@ class InvestigationFileResponse(BaseModel):
     uploaded_by: str
     uploaded_at: Optional[datetime] = None
 
+
+class FileContextCreate(BaseModel):
+    """Generate a file graph (F2.5): the mapping spec (03 §4) applied to the
+    file plus ``file_ids`` (the other inputs of a multi-file layout like SIMBA)."""
+
+    mapping: dict[str, Any]
+    file_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+
+class FileEnrichmentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    delimiter: str = Field(default=",", min_length=1, max_length=1)
+    header: bool = True
+    columns: list[str] = Field(default_factory=list, max_length=200)
+    encoding: Optional[str] = Field(default=None, max_length=20)
+
+
+class FileEnrichmentSpec(BaseModel):
+    """How an ``enrichment`` file joins the case's nodes (F2.6): rows keyed by
+    ``key_column``; a node of ``match_node_types`` matches by its id or a
+    property, reduced to its first ``key_digits`` digits when set (CNPJ →
+    CNPJ básico for the QSA)."""
+
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1] = 1
+    kind: Literal["enrichment"] = "enrichment"
+    name: str = Field(min_length=1, max_length=100)
+    input: FileEnrichmentInput = Field(default_factory=FileEnrichmentInput)
+    key_column: str = Field(min_length=1, max_length=200)
+    columns: list[str] = Field(min_length=1, max_length=50)
+    match_node_types: list[str] = Field(min_length=1, max_length=20)
+    match_source: Union[Literal["node_id"], PropRef] = "node_id"
+    key_digits: Optional[int] = Field(default=None, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _columns_known(self) -> "FileEnrichmentSpec":
+        if not self.input.header:
+            known = set(self.input.columns)
+            missing = [c for c in [self.key_column, *self.columns] if c not in known]
+            if missing:
+                raise ValueError(f"column '{missing[0]}' is not in input.columns")
+        return self
+
+
+class FileMappingUpdate(BaseModel):
+    mapping: dict[str, Any]
 
 # Proposals (03-arquitetura §8.4)
 ProposalKind = Literal[

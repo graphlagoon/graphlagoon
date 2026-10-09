@@ -17,6 +17,8 @@ from graphlagoon.middleware.auth import get_current_actor, get_current_user
 from graphlagoon.models.schemas import (
     ArtifactResponse,
     ArtifactTextUpload,
+    FileContextCreate,
+    FileMappingUpdate,
     InvestigationCreate,
     InvestigationEventCreate,
     InvestigationEventResponse,
@@ -610,6 +612,40 @@ async def get_file_content(investigation_id: UUID, file_id: UUID, request: Reque
         },
     )
 
+
+
+@router.patch(
+    "/{investigation_id}/files/{file_id}", response_model=InvestigationFileResponse
+)
+async def set_file_mapping(
+    investigation_id: UUID,
+    file_id: UUID,
+    data: FileMappingUpdate,
+    user_email: str = Depends(require_permission("investigation.upload")),
+):
+    """Stores how an enrichment file joins the case's nodes (F2.6)."""
+    try:
+        return await files.set_mapping(investigation_id, user_email, file_id, data.mapping)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/files/{file_id}/context", status_code=201)
+async def create_file_context(
+    investigation_id: UUID,
+    file_id: UUID,
+    data: FileContextCreate,
+    user_email: str = Depends(require_permission("investigation.upload")),
+):
+    """Generates the file graph on the server (F2.5): a ``file`` context, an
+    exploration and a source of the case. Edges are capped at
+    ``investigation_max_working_edges``."""
+    try:
+        return await files.generate_context(
+            investigation_id, user_email, file_id, data.mapping, data.file_ids, data.title
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
 
 # Proposals (FA.3, 03 §8.4): an agent proposes (scope "propose"); only a person
 # accepts or rejects. Recorded in the case journal (AUDIT_EXEMPT_ROUTES).

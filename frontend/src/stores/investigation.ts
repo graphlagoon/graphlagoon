@@ -9,6 +9,7 @@ import type {
   CreateInvestigationRequest,
   Investigation,
   InvestigationEvent,
+  InvestigationFile,
   InvestigationNote,
   InvestigationRole,
   InvestigationSource,
@@ -49,6 +50,20 @@ export const useInvestigationStore = defineStore('investigation', () => {
   );
   const notes = ref<InvestigationNote[]>([]);
   const events = ref<InvestigationEvent[]>([]);
+  /** Case files (F2.3), newest first. */
+  const files = ref<InvestigationFile[]>([]);
+
+  async function fetchFiles() {
+    if (current.value) files.value = await api.getInvestigationFiles(current.value.id);
+  }
+
+  /** After the file wizard (F2.5): new rows, and the generated source if any (opens via the sources watch). */
+  function addFiles(rows: InvestigationFile[], source: InvestigationSource | null) {
+    const ids = new Set(rows.map((r) => r.id));
+    files.value = [...rows, ...files.value.filter((f) => !ids.has(f.id))];
+    if (source) sources.value.push(source);
+    void fetchEvents();
+  }
 
   async function setRole(entity: string, role: InvestigationRole | null) {
     if (!current.value) return;
@@ -223,6 +238,9 @@ export const useInvestigationStore = defineStore('investigation', () => {
     roles,
     notes,
     events,
+    files,
+    fetchFiles,
+    addFiles,
     setRole,
     fetchNotes,
     fetchEvents,

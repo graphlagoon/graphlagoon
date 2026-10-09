@@ -84,7 +84,7 @@ export type NodeColumnConfig = NodeStructure;
  * transpiling Cypher to Spark SQL. `neptune` is Amazon Neptune's openCypher
  * endpoint — a native graph database, so it defines no tables at all.
  */
-export type DatasourceType = "sql_warehouse" | "neptune" | "rest";
+export type DatasourceType = "sql_warehouse" | "neptune" | "rest" | "file";
 
 /**
  * A named REST connection as the server advertises it in

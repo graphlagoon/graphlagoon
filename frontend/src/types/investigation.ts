@@ -1,5 +1,6 @@
 /** Investigations (cases): see docs/dev/plans/investigation/03-arquitetura.md §3. */
 import type { ExplorationState, GraphSnapshot } from '@/types/graph';
+import type { MappingReport } from '@/utils/fileMapping';
 
 export type InvestigationStatus = 'selecao' | 'analise' | 'decidido' | 'arquivado';
 
@@ -140,6 +141,29 @@ export interface InvestigationFile {
   context_id?: string | null;
   uploaded_by: string;
   uploaded_at?: string | null;
+}
+
+/** How an `enrichment` file joins the case's nodes (F2.6, `FileEnrichmentSpec` on the server). */
+export interface FileEnrichmentSpec {
+  version?: 1;
+  kind?: 'enrichment';
+  name: string;
+  input: { delimiter: string; header: boolean; columns?: string[]; encoding?: string | null };
+  key_column: string;
+  columns: string[];
+  match_node_types: string[];
+  match_source: 'node_id' | { kind: 'prop'; name: string };
+  /** Node key → its digits, first N (CNPJ → CNPJ básico for the QSA). */
+  key_digits?: number | null;
+}
+
+/** `POST …/files/{fid}/context` (F2.5). */
+export interface FileContextResult {
+  source: InvestigationSource;
+  file: InvestigationFile;
+  context_id: string;
+  exploration_id: string;
+  report: MappingReport & { truncated_edges: number };
 }
 
 export type ProposalKind = 'role' | 'match' | 'hypothesis' | 'hypothesis_status' | 'typology' | 'status';

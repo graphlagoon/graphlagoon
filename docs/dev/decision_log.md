@@ -11349,3 +11349,72 @@ operador desconhecido; `vue-tsc` limpo.
 **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 17:30] - Feature Implemented: F2.5 · Datasource `file` e assistente (T4)
+
+**Feature:** `DatasourceType` ganha `"file"`; `POST /api/investigations/{id}/files/{fid}/context`
+gera o grafo no servidor (context `file` + exploração + fonte `kind: file`);
+`PATCH …/files/{fid}` guarda o mapeamento de um arquivo de enriquecimento (usado pela
+F2.6); assistente `FileImportWizard.vue` (T4) aberto por "Add file…" na seção Files.
+
+**Design Decisions:**
+1. **Onde mora o grafo:** no snapshot service, sob o id do context (formato snapshot);
+   a exploração ganha o mesmo grafo como snapshot, então o workspace, o MCP
+   (`case_graph`) e o "freeze" funcionam sem mudança. `FileDatasource` não consulta
+   nada: Cypher/SQL/tabela → 400 `DATASOURCE_UNSUPPORTED_OPERATION`; subgraph,
+   expand e fetch_nodes andam no grafo guardado. `GraphContextCreate` recusa `file`
+   (só a rota do caso cria). `available_datasource_types` não muda (não aparece no
+   seletor).
+2. **Teto:** `investigation_max_working_edges` é aplicado na geração: ficam as N
+   primeiras arestas, os nós que elas tocam e os nós que nunca tiveram aresta;
+   `report.truncated_edges` e o diário (`source.added`) dizem quantas caíram.
+3. Vários arquivos (SIMBA = 5): a rota recebe `file_ids` além do `fid`; cada um é
+   decodificado com o `encoding` do primeiro input cujo glob casa o nome. O arquivo
+   principal (o do primeiro input) guarda `mapping` e `context_id`; gerar de novo → 409.
+4. Identity keys do context derivadas do mapeamento: tipo de nó cujo id é
+   normalizado como `cpf_cnpj`/`account`/`phone`/`email` vira chave com
+   `entity = tipo` (espelho TS em `utils/fileImport.ts` para o passo 4).
+   `edge_semantics` do mapeamento vai para o context.
+5. Gate `investigation.upload` + escrita no caso nas duas rotas; sem auditoria própria
+   (`AUDIT_EXEMPT_ROUTES`: ficam no diário, `source.added` com arquivos/hash/totais e
+   `file.mapped`). MCP: `create_file_graph` (preset ou mapping) e `set_file_mapping`
+   no registry.
+6. Capability nova `supportsQuery` no front (false só para `file`): esconde o botão e o
+   painel do Query Console; copy "Case file" no `DATASOURCE_COPY`.
+7. **Assistente:** um modal com os 5 passos. Lê os arquivos no browser (sha256 local
+   via WebCrypto quando houver), detecta preset (`suggestPresets`), senão começa por
+   um spec genérico de duas colunas; a tabela coluna → vira → conversão é derivada do
+   spec, que é editado como JSON (`shortcut:` sem edição célula a célula); prévia de 3
+   arestas e painel de qualidade com o `interpretMapping` do TS. "Salvar mapeamento"
+   = nome no spec guardado na linha do arquivo (`shortcut:` sem biblioteca de presets
+   do usuário). Papel enrichment configura chave/colunas/tipos/`key_digits`; anexo
+   pula os passos 3–4. Um retry depois de falha na geração não sobe os arquivos de novo.
+8. `shortcut:` o context `file` é do autor; outro membro do caso vê a fonte como
+   restrita até o context ser compartilhado (compartilhar com o caso fica para depois).
+9. E2E não feito (caro para o ganho): vitest do assistente com o SIMBA mini real e
+   pytest do upload → grafo cobrem o fluxo.
+
+**Files:** `api/graphlagoon/services/datasource/file.py` (novo), `datasource/factory.py`,
+`models/schemas.py`, `services/investigation_files.py`, `routers/investigations.py`,
+`routers/admin_registry.py`, `mcp/server.py`, `mcp/registry.py`;
+`frontend/src/components/investigation/FileImportWizard.vue` (novo), `CaseFiles.vue`,
+`utils/fileImport.ts` (novo), `utils/fileMapping.ts` (exports), `utils/fileMappingPresets.ts`
+(`QSA_ENRICHMENT`), `composables/useDatasourceCapabilities.ts`, `views/GraphVisualizationView.vue`,
+`views/InvestigationView.vue`, `stores/investigation.ts` (`files`), `services/api.ts`,
+`types/{graph,investigation}.ts`, `utils/investigationEvents.ts`.
+
+**Testing:** `test_investigation_files.py` (SIMBA mini → fonte `file`, identity keys,
+snapshot com Desconhecido, cypher 400, expand, 409, leitor 403, create público 422;
+teto de arestas; mapeamento de enriquecimento 422/403), `test_mcp_server.py`
+(`set_file_mapping`), `test_agent_registry.py`, `test_admin_registry.py`; vitest
+`FileImportWizard.test.ts` (detecção, tabela, qualidade, identidade, geração com 5
+arquivos; JSON inválido bloqueia), `CaseFiles.test.ts`, `useDatasourceCapabilities.test.ts`;
+`vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (assistente e context de arquivo),
+`agents-mcp.md` (duas ferramentas).
+**Admin-Area Impact:** duas rotas em `AUDIT_EXEMPT_ROUTES` (diário do caso).
+
+**Author:** Claude (AI Assistant)

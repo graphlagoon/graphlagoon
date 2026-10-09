@@ -291,7 +291,7 @@ export function parseLine(line: string, delimiter: string): string[] {
   }
 }
 
-function lines(text: string): string[] {
+export function lines(text: string): string[] {
   return text
     .replace(/^﻿+/, '')
     .split(/\r?\n/)
@@ -299,18 +299,18 @@ function lines(text: string): string[] {
 }
 
 /** Case-insensitive; only * and ? are special. */
-function glob(pattern: string, name: string): boolean {
+export function glob(pattern: string, name: string): boolean {
   const regex = [...pattern]
     .map((c) => (c === '*' ? '.*' : c === '?' ? '.' : c.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')))
     .join('');
   return new RegExp(`^(?:${regex})$`, 'is').test(name);
 }
 
-function matchFile(inp: MappingInput, names: string[]): string | null {
+export function matchFile(inp: MappingInput, names: string[]): string | null {
   return [...names].sort().find((n) => glob(inp.match, n)) ?? null;
 }
 
-function columnsOf(inp: MappingInput, all: string[]): [string[], string[]] {
+export function columnsOf(inp: MappingInput, all: string[]): [string[], string[]] {
   if (inp.header === false) return [[...(inp.columns ?? [])], all];
   if (!all.length) return [[], []];
   return [parseLine(all[0], inp.delimiter ?? ','), all.slice(1)];

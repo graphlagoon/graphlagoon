@@ -48,7 +48,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F2.2 · Aba de enriquecimento no inspector e "promover a nós"
 - [x] F2.3 · Upload de arquivos com hash e papel
 - [x] F2.4 · Especificação de mapeamento, interpretadores TS e Python, presets SIMBA e QSA
-- [ ] F2.5 · Datasource `file` e assistente de arquivo (T4)
+- [x] F2.5 · Datasource `file` e assistente de arquivo (T4)
 - [ ] F2.6 · Arquivo como enriquecimento do caso
 - [ ] F2.7 · Gravar valores de métricas como propriedade
 - [ ] F2.8 · Resolução de entidades e revisão de matches (T8)
@@ -592,10 +592,10 @@ trabalho de análise e documentação; a pessoa decide.
   - `POST .../files/{fid}/context`, que gera o grafo no servidor e cria o context de
     arquivo e a exploração.
 - **Aceite:**
-  - [ ] O assistente segue `screens/T4-Arquivo.png`: passos, detecção, tabela de
+  - [x] O assistente segue `screens/T4-Arquivo.png`: passos, detecção, tabela de
     mapeamento, qualidade, salvar mapeamento.
-  - [ ] O grafo do arquivo abre como exploração do caso.
-  - [ ] Capabilities do context `file`: sem SQL e sem transpile; a UI esconde o Query
+  - [x] O grafo do arquivo abre como exploração do caso.
+  - [x] Capabilities do context `file`: sem SQL e sem transpile; a UI esconde o Query
     Console.
 - **Testes:** pytest do datasource; vitest do assistente; E2E do upload do SIMBA mini
   até o grafo.

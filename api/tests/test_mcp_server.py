@@ -178,6 +178,15 @@ async def test_agent_script_is_journaled_as_agent_and_masked(env):
             )
             got = await _tool(client, "get_file", investigation_id=cid, file_id=up["id"])
             assert CPF not in got["text"] and "0001-90" not in got["text"]
+            mapped = await _tool(
+                client,
+                "set_file_mapping",
+                investigation_id=cid,
+                file_id=up["id"],
+                mapping={"name": "QSA", "input": {"delimiter": ";"}, "key_column": "cnpj",
+                         "columns": ["socio"], "match_node_types": ["Lojista"]},
+            )
+            assert mapped["mapping"]["key_column"] == "cnpj"
             await _tool(
                 client,
                 "propose",

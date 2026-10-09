@@ -22,7 +22,10 @@ export function describeEvent(e: InvestigationEvent): string {
     case 'case.updated': return `updated ${Object.keys(p).join(', ') || 'the case'}`;
     case 'case.shared': return `shared with ${p.with} (${p.permission})`;
     case 'case.unshared': return `stopped sharing with ${p.with}`;
-    case 'source.added': return `added source “${p.title}” (${p.mode})`;
+    case 'source.added': return p.files
+      ? `added file graph “${p.title}”: ${p.nodes} nodes, ${p.edges} edges${p.truncated_edges ? ` (${p.truncated_edges} edges over the ceiling dropped)` : ''}`
+      : `added source “${p.title}” (${p.mode})`;
+    case 'file.mapped': return `set the mapping “${p.name}” of ${p.filename}`;
     case 'source.removed': return `removed source “${p.title}”`;
     case 'role.changed': return `marked ${p.entity} as ${p.to ? ROLE_LABELS[p.to] ?? p.to : 'no role'}`;
     case 'pin.changed': return `${p.pinned ? 'pinned' : 'unpinned'} ${p.entity}`;
