@@ -1783,6 +1783,10 @@ class InvestigationEventResponse(BaseModel):
     id: UUID
     at: datetime
     actor_email: str
+    # "agent" when an agent token acted for actor_email (03 §8.1 item 3)
+    actor_kind: Literal["human", "agent"] = "human"
+    agent_token_id: Optional[UUID] = None
+    agent_name: Optional[str] = None
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)
     prev_hash: Optional[str] = None
@@ -1810,3 +1814,31 @@ class InvestigationNoteResponse(BaseModel):
     author_email: str
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Agent tokens (03-arquitetura §8.2)
+# ---------------------------------------------------------------------------
+
+AgentScope: TypeAlias = Literal["read", "analyze", "write", "propose"]
+
+
+class AgentTokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    scopes: list[AgentScope] = Field(min_length=1)
+    expires_in_days: int = Field(default=30, ge=1)
+
+
+class AgentTokenResponse(BaseModel):
+    id: UUID
+    owner_email: str
+    name: str
+    scopes: list[str]
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: Optional[datetime] = None
+    active: bool
+
+
+class AgentTokenCreated(AgentTokenResponse):
+    token: str  # shown once; only its sha256 is stored

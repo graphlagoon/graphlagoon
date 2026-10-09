@@ -162,6 +162,23 @@ class Settings(BaseSettings):
         "is unreachable.",
     )
 
+    # AI agents acting for a user (03-arquitetura §8)
+    agents_enabled: bool = Field(
+        default=False,
+        description="Allow personal agent tokens (Bearer glt_…). Off: token "
+        "routes return 404 and agent tokens are rejected.",
+    )
+    agent_token_max_days: int = Field(
+        default=90, description="Maximum validity, in days, of an agent token"
+    )
+    agents_allow_unmasked_data: bool = Field(
+        default=False,
+        description="Let agents read CPF, CNPJ and account numbers unmasked",
+    )
+    agent_rate_limit_per_minute: int = Field(
+        default=120, description="Requests per minute allowed for each agent token"
+    )
+
     # Exploration snapshots (file-based graph state persistence)
     exploration_snapshots_dir: str = Field(
         default="./tmp/explorations",

@@ -52,6 +52,8 @@ class AuditAction:
     INVESTIGATION_SOURCE_ADD = "investigation.source_add"
     INVESTIGATION_SOURCE_REMOVE = "investigation.source_remove"
     INVESTIGATION_TRANSFER = "investigation.transfer"
+    AGENT_TOKEN_CREATE = "agent_token.create"
+    AGENT_TOKEN_REVOKE = "agent_token.revoke"
 
     @classmethod
     def all(cls) -> list[str]:
@@ -98,6 +100,14 @@ async def record(
     leaves no orphan log line). Without it a short-lived session is used —
     that is the right choice *after* a destructive step such as clear-all.
     """
+    from graphlagoon.middleware.auth import get_current_actor
+
+    agent = get_current_actor()
+    if agent:  # attribute the action to the agent acting for user_email
+        metadata = {
+            **(metadata or {}),
+            "agent": {"token_id": str(agent["token_id"]), "name": agent["name"]},
+        }
     bounded = _bounded_metadata(metadata)
     try:
         if is_database_available():

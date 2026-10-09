@@ -399,6 +399,12 @@ class InvestigationEvent(Base):
     investigation_id = _investigation_fk()
     at = Column(DateTime, server_default=func.now())
     actor_email = Column(String(255), nullable=False)
+    # "human" | "agent"; an agent acts for actor_email through agent_token_id
+    actor_kind = Column(
+        String(10), nullable=False, default="human", server_default="human"
+    )
+    agent_token_id = Column(UUID(as_uuid=True), nullable=True)
+    agent_name = Column(String(100), nullable=True)
     kind = Column(String(50), nullable=False)
     payload = Column(JSON, nullable=False, default={})
     prev_hash = Column(String(64), nullable=True)
@@ -448,3 +454,21 @@ class EntityMatch(Base):
     decided_by = Column(String(255), nullable=True)
     decided_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class AgentToken(Base):
+    """Personal token an AI agent uses to act for its owner (03-arquitetura §8.2).
+
+    Only the sha256 of the token is stored; the token is shown once on creation.
+    """
+
+    __tablename__ = "agent_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_email = Column(String(255), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    scopes = Column(JSON, nullable=False, default=[])
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)

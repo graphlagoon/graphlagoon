@@ -21,7 +21,7 @@ import {
   isIdleUser,
   sortUsers,
 } from '@/utils/adminView';
-import type { AdminTab } from '@/types/admin';
+import type { AdminTab, AgentToken } from '@/types/admin';
 import type { Exploration, GraphContext } from '@/types/graph';
 import type { Investigation } from '@/types/investigation';
 import { STATUS_LABELS } from '@/utils/investigationStatus';
@@ -45,11 +45,15 @@ const TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'contexts', label: 'Contexts' },
   { id: 'explorations', label: 'Explorations' },
   { id: 'investigations', label: 'Investigations' },
+  { id: 'agents', label: 'Agent tokens' },
   { id: 'groups', label: 'Groups & permissions' },
   { id: 'audit', label: 'Audit' },
   { id: 'danger', label: 'Danger zone' },
 ];
-const visibleTabs = computed(() => TABS.filter((t) => t.id !== 'danger' || devMode.value));
+const agentsEnabled = computed(() => !!admin.overview?.public_config?.agents_enabled);
+const visibleTabs = computed(() =>
+  TABS.filter((t) => (t.id !== 'danger' || devMode.value) && (t.id !== 'agents' || agentsEnabled.value)),
+);
 
 const tab = ref<AdminTab>('overview');
 const loaded = ref<Set<AdminTab>>(new Set());
@@ -75,6 +79,9 @@ async function loadTab(id: AdminTab, force = false) {
       break;
     case 'investigations':
       await Promise.all([admin.fetchInvestigations(), admin.fetchUsers({ page_size: 200 })]);
+      break;
+    case 'agents':
+      await admin.fetchAgentTokens();
       break;
     case 'groups':
       // Users feed the member/inspector datalists; permissions feed the
@@ -158,6 +165,18 @@ const filteredInvestigations = computed(() => {
       (!q || [i.title, i.owner_email, i.assignee_email ?? '', i.typology ?? ''].join(' ').toLowerCase().includes(q)),
   );
 });
+
+async function revokeAgentToken(token: AgentToken) {
+  const ok = await confirmAction({
+    title: `Revoke agent token “${token.name}”?`,
+    message: `Owned by ${token.owner_email}. The agent loses access at once.`,
+    confirmLabel: 'Revoke',
+    danger: true,
+  });
+  if (!ok) return;
+  if (await admin.revokeAgentToken(token.id)) toast.success(`Revoked "${token.name}"`);
+  else toast.error(admin.error || 'Revoke failed');
+}
 
 async function removeContext(ctx: GraphContext) {
   const ok = await confirmAction({
@@ -551,6 +570,36 @@ function openGraph(id: string) {
           <div class="list-item-actions">
             <button type="button" class="btn btn-outline btn-sm" @click="router.push(`/investigations/${inv.id}`)">Open</button>
             <button type="button" class="btn btn-secondary btn-sm" data-testid="admin-transfer-investigation-btn" @click="openTransfer('investigation', inv)">Transfer</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Agent tokens (03-arquitetura §8.2): every user's, revocable -->
+    <section v-else-if="tab === 'agents'" class="tab-panel" data-testid="admin-agents">
+      <div v-if="admin.loading.agents && admin.agentTokens.length === 0" class="loading"></div>
+      <div v-else-if="admin.agentTokens.length === 0" class="empty-state card"><h3>No agent tokens</h3></div>
+      <div v-else class="card" data-testid="admin-agent-tokens-list">
+        <div v-for="t in admin.agentTokens" :key="t.id" class="list-item" :data-agent-token-id="t.id">
+          <div class="list-item-content">
+            <div class="list-item-title">{{ t.name }}</div>
+            <div class="list-item-subtitle">
+              owner <code>{{ t.owner_email }}</code>
+              · {{ t.scopes.join(', ') }}
+              · created {{ formatRelative(t.created_at) }}
+              · {{ t.revoked_at ? 'revoked' : t.active ? `expires ${t.expires_at.slice(0, 10)}` : 'expired' }}
+            </div>
+          </div>
+          <div class="list-item-actions">
+            <button
+              v-if="t.active"
+              type="button"
+              class="btn btn-secondary btn-sm"
+              data-testid="admin-revoke-agent-token-btn"
+              @click="revokeAgentToken(t)"
+            >
+              Revoke
+            </button>
           </div>
         </div>
       </div>

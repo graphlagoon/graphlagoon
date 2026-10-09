@@ -414,6 +414,19 @@ lives in the admin area, not in env vars — see
 |---|---|---|
 | `GRAPH_LAGOON_GROUP_CACHE_TTL_SECONDS` | `600` | Per-user TTL of the Databricks group-membership (SCIM) cache. Stale entries are served when SCIM is unreachable. |
 
+## AI agents
+
+Personal agent tokens let an AI agent act on investigations with the access of
+the person who created the token (`Authorization: Bearer glt_…`). Off by
+default.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_AGENTS_ENABLED` | `false` | Off: the token routes return 404 and agent tokens are rejected. |
+| `GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS` | `90` | Maximum validity of a token. |
+| `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA` | `false` | Let agents read CPF, CNPJ and account numbers unmasked. |
+| `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per token (per server process). |
+
 ## Programmatic Configuration
 
 ```python

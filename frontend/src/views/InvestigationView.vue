@@ -406,7 +406,10 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
       <section v-if="showJournal" class="journal" data-testid="journal">
         <div v-for="e in journal" :key="e.id" class="journal-row" data-testid="journal-event">
           <span class="muted">{{ formatTime(e.at) }}</span>
-          <strong>{{ e.actor_email }}</strong>
+          <strong v-if="e.actor_kind === 'agent'" data-testid="journal-agent">
+            agent {{ e.agent_name }} on behalf of {{ e.actor_email }}
+          </strong>
+          <strong v-else>{{ e.actor_email }}</strong>
           <span>{{ describeEvent(e) }}</span>
         </div>
         <p v-if="!journal.length" class="muted">Nothing recorded yet.</p>
