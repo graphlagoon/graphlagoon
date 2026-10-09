@@ -13,7 +13,8 @@ import {
   useDatasourceDescriptors,
   type DatasourceDescriptor,
 } from '@/composables/useDatasourceCapabilities';
-import type { DatasourceType, GraphContext, ColumnInfo } from '@/types/graph';
+import type { DatasourceType, GraphContext, ColumnInfo, IdentityKey, IdentityNormalize } from '@/types/graph';
+import { describeIdentityKey } from '@/utils/identityKeys';
 
 /**
  * Create/edit modal for a graph context.
@@ -80,6 +81,43 @@ function emptyForm() {
     node_types: '',
     relationship_types: '',
     default_behaviors: '',
+    identity_keys: [] as IdentityKeyRow[],
+  };
+}
+
+/** Editable identity-key row: `prop` empty means the node id is the source. */
+interface IdentityKeyRow {
+  node_type: string;
+  entity: string;
+  prop: string;
+  normalize: IdentityNormalize;
+}
+
+const NORMALIZERS: { value: IdentityNormalize; label: string }[] = [
+  { value: 'cpf_cnpj', label: 'CPF/CNPJ' },
+  { value: 'account', label: 'Account (bank-agency-account)' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'email', label: 'E-mail' },
+  { value: 'lower', label: 'Lowercase' },
+  { value: 'none', label: 'As is' },
+];
+
+function rowFromKey(key: IdentityKey): IdentityKeyRow {
+  return {
+    node_type: key.node_type,
+    entity: key.entity,
+    prop: key.source === 'node_id' ? '' : key.source.name,
+    normalize: key.normalize,
+  };
+}
+
+function keyFromRow(row: IdentityKeyRow): IdentityKey {
+  const prop = row.prop.trim();
+  return {
+    node_type: row.node_type.trim(),
+    entity: row.entity.trim(),
+    source: prop ? { kind: 'prop', name: prop } : 'node_id',
+    normalize: row.normalize,
   };
 }
 
@@ -105,6 +143,7 @@ function formFromContext(context: GraphContext) {
       context.default_behaviors && Object.keys(context.default_behaviors).length > 0
         ? JSON.stringify(context.default_behaviors, null, 2)
         : '',
+    identity_keys: (context.identity_keys || []).map(rowFromKey),
   };
 }
 
@@ -411,6 +450,30 @@ watch(
   { immediate: true },
 );
 
+// --- Identity keys -------------------------------------------------------------
+
+/** Complete rows only: a half-filled row is dropped rather than rejected by the API. */
+const identityKeys = computed(() =>
+  form.value.identity_keys
+    .filter((r) => r.node_type.trim() && r.entity.trim())
+    .map(keyFromRow),
+);
+const nodeTypeOptions = computed(() => splitCsv(form.value.node_types));
+const nodePropertyOptions = computed(() =>
+  props.mode === 'edit'
+    ? (props.context?.node_properties || []).map((p) => p.name)
+    : nodeTableColumns.value.map((c) => c.name),
+);
+
+function addIdentityKey() {
+  form.value.identity_keys.push({
+    node_type: nodeTypeOptions.value[0] || '',
+    entity: '',
+    prop: '',
+    normalize: 'none',
+  });
+}
+
 // --- Submit -------------------------------------------------------------------
 
 function splitCsv(value: string): string[] {
@@ -459,6 +522,7 @@ async function submit() {
         node_types: nodeTypes.length > 0 ? nodeTypes : undefined,
         relationship_types: relationshipTypes.length > 0 ? relationshipTypes : undefined,
         default_behaviors: defaultBehaviors,
+        identity_keys: identityKeys.value.length > 0 ? identityKeys.value : undefined,
       });
     } else if (props.mode === 'create') {
       // Property columns = every live column minus the structural ones —
@@ -492,6 +556,7 @@ async function submit() {
         node_types: !nodeless && nodeTypes.length > 0 ? nodeTypes : undefined,
         relationship_types: relationshipTypes.length > 0 ? relationshipTypes : undefined,
         default_behaviors: defaultBehaviors,
+        identity_keys: identityKeys.value.length > 0 ? identityKeys.value : undefined,
       });
     } else {
       if (!props.context) return;
@@ -507,6 +572,7 @@ async function submit() {
         node_types: nodeTypes,
         relationship_types: relationshipTypes,
         default_behaviors: defaultBehaviors ?? {},
+        identity_keys: identityKeys.value,
       });
     }
 
@@ -866,6 +932,90 @@ async function submit() {
           </div>
         </div>
 
+        <!-- Identity keys (investigations): how this context's nodes unify with
+             other contexts' nodes for the same real-world entity. -->
+        <div class="column-config-section" data-testid="identity-keys-section">
+          <div class="section-header-row">
+            <h4>Identity Keys</h4>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline"
+              data-testid="identity-key-add"
+              @click="addIdentityKey"
+            >
+              + Add key
+            </button>
+          </div>
+          <div v-if="identityKeys.length" class="identity-key-chips" data-testid="identity-key-chips">
+            <span class="hint">Keys of this context:</span>
+            <span v-for="(k, i) in identityKeys" :key="i" class="identity-key-chip">
+              {{ describeIdentityKey(k) }}
+            </span>
+          </div>
+          <span v-else class="hint">
+            Optional. An investigation merges nodes from different contexts that share
+            the same entity and normalized value (e.g. Pessoa by CPF).
+          </span>
+          <div
+            v-for="(row, i) in form.identity_keys"
+            :key="i"
+            class="form-row identity-key-row"
+            data-testid="identity-key-row"
+          >
+            <div class="form-group">
+              <label>Node type</label>
+              <input
+                v-model="row.node_type"
+                type="text"
+                class="form-control"
+                list="identity-node-types"
+                data-testid="identity-key-node-type"
+              />
+            </div>
+            <div class="form-group">
+              <label>Entity</label>
+              <input
+                v-model="row.entity"
+                type="text"
+                class="form-control"
+                placeholder="Pessoa"
+                data-testid="identity-key-entity"
+              />
+            </div>
+            <div class="form-group">
+              <label>Property</label>
+              <input
+                v-model="row.prop"
+                type="text"
+                class="form-control"
+                list="identity-node-props"
+                placeholder="(node id)"
+                data-testid="identity-key-prop"
+              />
+            </div>
+            <div class="form-group">
+              <label>Normalize</label>
+              <select v-model="row.normalize" class="form-control" data-testid="identity-key-normalize">
+                <option v-for="n in NORMALIZERS" :key="n.value" :value="n.value">{{ n.label }}</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline identity-key-remove"
+              title="Remove key"
+              @click="form.identity_keys.splice(i, 1)"
+            >
+              &times;
+            </button>
+          </div>
+          <datalist id="identity-node-types">
+            <option v-for="t in nodeTypeOptions" :key="t" :value="t" />
+          </datalist>
+          <datalist id="identity-node-props">
+            <option v-for="p in nodePropertyOptions" :key="p" :value="p" />
+          </datalist>
+        </div>
+
         <p v-if="mode === 'edit'" class="hint">
           Property columns aren't edited here — use "Check schema" on the context card
           to review and resync them against the live table.
@@ -1024,6 +1174,29 @@ async function submit() {
 
 .hint-error {
   color: var(--error-color);
+}
+
+.identity-key-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.identity-key-chip {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 999px;
+}
+
+.identity-key-row {
+  align-items: flex-end;
+}
+
+.identity-key-remove {
+  margin-bottom: 12px;
 }
 
 .column-config-section {

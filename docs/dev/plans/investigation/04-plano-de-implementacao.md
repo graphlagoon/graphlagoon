@@ -27,7 +27,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F1.1 · Modelos, migração 016 e paridade em memória
 - [x] F1.2 · API de investigações: CRUD, compartilhamento nominal, permissões, auditoria
 - [x] F1.3 · Fontes: adicionar e remover explorações, com redação por acesso
-- [ ] F1.4 · Chaves de identidade no context (backend e aba no formulário)
+- [x] F1.4 · Chaves de identidade no context (backend e aba no formulário)
 - [ ] F1.5 · Frontend: rotas, store, API, fila (T1), "Adicionar à investigação" (T3)
 - [ ] F1.6 · Grafo unificado e workspace (T2)
 - [ ] F1.7 · Papéis, notas e diário (eventos)
@@ -230,8 +230,8 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
     `types/graph.ts`, `utils/identityKeys.ts` (novo: normalizadores de CPF/CNPJ e
     conta).
 - **Aceite:**
-  - [ ] Salvar e recarregar as chaves.
-  - [ ] Normalizadores testados com CPF formatado e sem formatação, CNPJ e conta com
+  - [x] Salvar e recarregar as chaves.
+  - [x] Normalizadores testados com CPF formatado e sem formatação, CNPJ e conta com
     zeros à esquerda.
 - **Testes:**
   - pytest de validação;

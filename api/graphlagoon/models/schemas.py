@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
-from typing import Optional, Any, Literal, TypeAlias
+from typing import Optional, Any, Literal, TypeAlias, Union
 from uuid import UUID
 from datetime import datetime
 
@@ -419,6 +419,41 @@ def _validate_unique_metric_definitions(
     return definitions
 
 
+# Identity keys (investigations, 03 §2.1): how a node of this context maps to a
+# real-world entity, so explorations of different contexts unify on it.
+class PropRef(BaseModel):
+    kind: Literal["prop"] = "prop"
+    name: str = Field(min_length=1, max_length=200)
+
+
+IdentityNormalize = Literal["cpf_cnpj", "account", "phone", "email", "lower", "none"]
+
+
+class IdentityKey(BaseModel):
+    node_type: str = Field(min_length=1, max_length=200)
+    entity: str = Field(min_length=1, max_length=100)
+    source: Union[Literal["node_id"], PropRef] = "node_id"
+    normalize: IdentityNormalize = "none"
+
+    @model_validator(mode="after")
+    def _strip(self) -> "IdentityKey":
+        self.node_type = self.node_type.strip()
+        self.entity = self.entity.strip()
+        if not self.node_type or not self.entity:
+            raise ValueError("node_type and entity must not be blank")
+        return self
+
+
+def _validate_identity_keys(keys: list[IdentityKey]) -> list[IdentityKey]:
+    """One key per node type: a node resolves to a single entity key."""
+    seen: set[str] = set()
+    for k in keys:
+        if k.node_type in seen:
+            raise ValueError(f"duplicate identity key for node type: {k.node_type}")
+        seen.add(k.node_type)
+    return keys
+
+
 # Graph Context models
 def _validate_distinct_tables(
     edge_table_name: Optional[str], node_table_name: Optional[str]
@@ -480,10 +515,12 @@ class GraphContextCreate(BaseModel):
         "evaluated in the frontend's sandboxed worker). Only returned to users "
         "with write access.",
     )
+    identity_keys: list[IdentityKey] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextCreate":
         _validate_unique_metric_definitions(self.metric_definitions)
+        _validate_identity_keys(self.identity_keys)
         return self
 
     @model_validator(mode="after")
@@ -560,11 +597,14 @@ class GraphContextUpdate(BaseModel):
     cluster_programs: Optional[list[dict]] = None
     context_menu_actions: Optional[list[dict]] = None
     metric_definitions: Optional[list[MetricDefinition]] = None
+    identity_keys: Optional[list[IdentityKey]] = Field(default=None, max_length=50)
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextUpdate":
         if self.metric_definitions is not None:
             _validate_unique_metric_definitions(self.metric_definitions)
+        if self.identity_keys is not None:
+            _validate_identity_keys(self.identity_keys)
         return self
 
 
@@ -591,6 +631,7 @@ class GraphContextResponse(BaseModel):
     context_menu_actions: list[dict] = Field(default_factory=list)
     # Empty for read-only users — see routers.graph_contexts.context_to_response.
     metric_definitions: list[MetricDefinition] = Field(default_factory=list)
+    identity_keys: list[IdentityKey] = Field(default_factory=list)
     owner_email: str
     shared_with: list[str] = Field(default_factory=list)
     has_write_access: bool = False
