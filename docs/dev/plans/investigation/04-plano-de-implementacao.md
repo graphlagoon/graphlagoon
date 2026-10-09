@@ -32,7 +32,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F1.6 · Grafo unificado e workspace (T2)
 - [x] F1.7 · Papéis, notas e diário (eventos)
 - [x] F1.8 · Área admin e seed
-- [ ] F1.9 · Docs públicas e E2E da fundação
+- [x] F1.9 · Docs públicas e E2E da fundação
 
 **FA · AI-first: agentes na investigação**
 - [ ] FA.1 · Tokens de agente, escopos e ator no diário
@@ -338,7 +338,8 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
   - cenas em `frontend/e2e/screenshots/generate.ts`;
   - jornada em `e2e/tests/user-journeys.spec.ts`: criar caso → adicionar duas
     explorações → abrir a vista unificada.
-- **Aceite:** `make docs-build` passa.
+- **Aceite:**
+  - [x] `make docs-build` passa.
 
 ---
 
@@ -477,7 +478,8 @@ trabalho de análise e documentação; a pessoa decide.
   - prompts MCP `investigar_golpe_pix`, `revisar_lojista`, `montar_dossie`;
   - E2E: o agente (cliente MCP de teste) sobe um artefato e propõe um papel; a pessoa
     aceita na T11 e vê o artefato na T10.
-- **Aceite:** `make docs-build` passa.
+- **Aceite:**
+  - [x] `make docs-build` passa.
 
 ---
 
