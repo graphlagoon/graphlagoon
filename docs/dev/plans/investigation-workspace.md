@@ -8,7 +8,9 @@ leem, analisam, documentam e sobem artefatos, enquanto pessoas aprovam e decidem
 golpe Pix, o analista passa de 7 ferramentas para 2.
 
 > Status: **proposta** em 2026-10-09, atualizada no mesmo dia com a etapa AI-first
-> (§4.6) e o armazenamento no Volume. **Nada foi implementado ainda.**
+> (§4.6) e o armazenamento no Volume. **Execução começou** em `feature/investigations`:
+> a G1 (#28) está feita; nenhuma funcionalidade de investigação existe ainda. Progresso
+> em [investigation/04-plano-de-implementacao.md](investigation/04-plano-de-implementacao.md#progresso).
 >
 > **Para executar, use o pacote [investigation/](investigation/README.md):** pesquisa,
 > design (telas e fluxos com imagens e mockups), arquitetura e plano de tarefas. O

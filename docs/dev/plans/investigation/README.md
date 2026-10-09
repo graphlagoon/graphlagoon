@@ -1,7 +1,9 @@
 # Investigações: pacote de execução
 
 > Status: **pronto para implementar**, design aprovado como proposta em 2026-10-09.
-> Nenhuma linha de código foi escrita ainda.
+> **Execução em andamento** no branch `feature/investigations`: G1 feita (#28,
+> commit `0b6177b`). O progresso tarefa a tarefa está nos checkboxes de
+> [04-plano-de-implementacao.md](04-plano-de-implementacao.md#progresso) e no decision log.
 >
 > Este pacote basta sozinho para um agente implementar a funcionalidade. Os
 > artefatos no claude.ai (canvas e documentos) são cópias para humanos e são
@@ -31,7 +33,8 @@ fraude, PLD/FT e risco** para adquirentes e bancos. As capacidades são:
 
 ## Funcionalidades: o que existe hoje e o que é proposta
 
-**Nada da coluna "Proposta" está implementado.** O estado é de outubro de 2026; a
+**Nada da coluna "Proposta" está implementado ainda;** só os portões G (correções
+pré-requisito, fora desta tabela) começaram. O estado é de outubro de 2026; a
 coluna "Tarefas" diz onde cada item é construído.
 
 | Funcionalidade | Hoje no app | Proposta | Tarefas | Tela |
@@ -99,7 +102,9 @@ Valem para **toda** tarefa do plano:
    (`- [x]`) no mesmo commit.
 4. **Testes verdes:**
    - backend: `make test-unit-api`. O `uv run` reescreve `api/uv.lock`; restaure com
-     `git checkout -- api/uv.lock`;
+     `git checkout -- api/uv.lock`. Se o `uv run` falhar com "Distribution not found"
+     (o `gsql2rsql` aponta para um checkout irmão, `../../cyper2dsql`, que nem toda
+     máquina tem), rode `cd api && .venv/bin/pytest tests/ -q`;
    - frontend: `make test-unit-frontend`;
    - tipos: `npx vue-tsc --noEmit`. O `npm run lint` está quebrado no repo; use o
      vue-tsc;
@@ -115,8 +120,9 @@ Valem para **toda** tarefa do plano:
 8. **Dados de exemplo:** estenda `graphlagoon.dev.seed` quando criar entidade nova.
    O `make dev` semeia automaticamente.
 9. **Commits:** em inglês, no estilo `feat(investigations): …` / `test(…)` / `docs(…)`,
-   sem linha `Co-Authored-By` (preferência do mantenedor). Um branch por fase:
-   `feature/investigations-f1`, `-f2`, ….
+   sem linha `Co-Authored-By` (preferência do mantenedor). Um branch só,
+   `feature/investigations`, com um PR draft para `main` (o mesmo do prompt de
+   execução autônoma abaixo).
 10. **Não implemente o que está marcado como decisão em aberto** abaixo sem
     resposta humana; use o padrão recomendado e registre a suposição no decision log.
 11. **AI-first (a partir da FA.6):** rota nova de investigação entrega também a

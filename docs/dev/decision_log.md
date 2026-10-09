@@ -10206,3 +10206,28 @@ mesmas contas deixam de virar uma aresta só no merge.
 **Author:** Claude (AI Assistant)
 
 ---
+
+---
+
+## [2026-10-09 21:00] - Docs: plano de investigações sincronizado com `feature/groups-permissions` e status atualizado
+
+O branch `feature/investigations` nasceu do `5e5742a` e não tinha os 3 commits de docs
+que chegaram depois em `origin/feature/groups-permissions` (`c2978a1`, `8495eaa`,
+`4efea5b`: tabela "hoje × proposta", plano original atualizado, AI-first no topo,
+diagramas regerados). Foram trazidos por **merge** (não rebase, para não reescrever
+história); o único conflito foi o fim deste decision log, resolvido mantendo as duas
+entradas em ordem de horário.
+
+**Atualizações nos planos:**
+1. `investigation/README.md`: o cabeçalho deixa de dizer "nenhuma linha de código" e
+   aponta o progresso (G1 feita); a tabela "hoje × proposta" esclarece que só os
+   portões G começaram.
+2. Regra 9 do Definition of Done: "um branch por fase" contradizia o prompt de
+   execução autônoma; passa a ser um branch só, `feature/investigations`.
+3. Regra 4: alternativa `api/.venv/bin/pytest` quando o `uv run` não acha o checkout
+   irmão do `gsql2rsql` (`../../cyper2dsql`).
+4. `investigation-workspace.md`: o status diz que a execução começou.
+
+**Public Docs:** nenhuma alteração. **Admin-Area Impact:** nenhum.
+
+**Author:** Claude (AI Assistant)
