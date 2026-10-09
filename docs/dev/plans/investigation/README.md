@@ -107,6 +107,47 @@ Valem para **toda** tarefa do plano:
 | Q5 | Teto do grafo de trabalho no browser | Medir na tarefa G4 antes de fixar |
 | Q6 | Siscoaf tem API? | Não assumir: só exportar resumo estruturado |
 
+## Execução autônoma
+
+Prompt para uma sessão implementar o plano inteiro (G1 até F4) sem perguntar nada.
+Funciona colado numa sessão interativa; o contexto é resumido sozinho quando
+cresce, e o estado fica neste repositório (checkboxes, decision log e commits).
+
+```text
+Use a skill skill_feature_creation e execute o plano de investigações de ponta a ponta, sem me fazer perguntas.
+
+1. Leia docs/dev/plans/investigation/README.md (Definition of Done e decisões em aberto). Leia também 03-arquitetura.md e 02-design.md quando a tarefa pedir.
+2. Trabalhe no branch feature/investigations: se não existir, crie-o a partir do branch que contém este pacote. Faça push depois de cada tarefa. Na primeira tarefa, abra um PR draft para main com gh e mantenha a descrição com o progresso.
+3. Repita até não restar tarefa G1–G4 ou F1.1–F4.6 desmarcada em 04-plano-de-implementacao.md: pegue a próxima não marcada cujas dependências estejam feitas; implemente; rode os testes do Definition of Done e corrija até ficarem verdes; registre no decision log; marque [x]; faça commit e push.
+4. Decisões em aberto: use os padrões do README e registre cada suposição no decision log. Nunca pare para perguntar.
+5. Bloqueio real (teste que não passa depois de 3 tentativas diferentes, dependência externa indisponível): registre no decision log, troque o [ ] da tarefa por [~] com uma linha explicando, e siga para a próxima que não dependa dela.
+6. Proibido: force push, merge ou push em main, apagar dados ou arquivos fora do escopo da tarefa, mexer nas tarefas F5.
+7. Ao terminar, atualize a descrição do PR com o que foi feito, os bloqueios e as suposições, e escreva o mesmo resumo para mim.
+```
+
+**Permissões:** a sessão precisa rodar comandos sem aprovação manual.
+- Com `claude --permission-mode acceptEdits` mais uma allowlist (`/permissions`) para
+  `make`, `npm`, `npx`, `uv`, `git` e `gh`; ou
+- num container ou VM descartável, com `--dangerously-skip-permissions`.
+
+**Variante com contexto limpo por tarefa** (mais robusta para execuções longas): roda
+`claude -p` em laço, uma tarefa por chamada, e para se uma rodada não concluir nada.
+Troque a regra 3 do prompt por "implemente só a próxima tarefa não marcada" e salve
+o texto em `prompt.txt` antes de rodar:
+
+```bash
+PLAN=docs/dev/plans/investigation/04-plano-de-implementacao.md
+pendentes() { grep -cE '^- \[ \] (G[1-4]|F[1-4]\.)' "$PLAN"; }
+antes=$(pendentes)
+while [ "$antes" -gt 0 ]; do
+  claude -p "$(cat prompt.txt)" --permission-mode acceptEdits \
+    --allowedTools "Bash(make:*)" "Bash(npm:*)" "Bash(npx:*)" "Bash(uv:*)" "Bash(git:*)" "Bash(gh:*)" || break
+  depois=$(pendentes)
+  [ "$depois" -lt "$antes" ] || { echo "nenhuma tarefa concluída nesta rodada; parando"; break; }
+  antes=$depois
+done
+```
+
 ## Artefatos para humanos (privados, não necessários para executar)
 
 - Canvas de design (pranchas, fluxos, comparações): https://claude.ai/artifact/EzvJGjsh7w95HyHBHZa5a8
