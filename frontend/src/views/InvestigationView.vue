@@ -4,13 +4,17 @@
  * rendered by the regular graph store and canvas in investigation mode. Node ids
  * are unified ids in every tab, so the selection follows the entity across tabs.
  */
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
-import { Lock, Plus } from 'lucide-vue-next';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { Banknote, Lock, Plus } from 'lucide-vue-next';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useAuthStore } from '@/stores/auth';
+import { useTraceStore, type TraceDirection } from '@/stores/trace';
+import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
+import { useToast } from '@/composables/useToast';
+import { formatAmount } from '@/utils/edgeSemantics';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
 import { STATUS_LABELS } from '@/utils/investigationStatus';
 import { provenanceRingColors, roleColorMap, ROLE_COLORS, ROLE_LABELS } from '@/utils/graphAppearance';
@@ -30,6 +34,9 @@ import AddToInvestigationModal from '@/components/investigation/AddToInvestigati
 import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue';
 import CaseFiles from '@/components/investigation/CaseFiles.vue';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
+import TracePanel from '@/components/investigation/TracePanel.vue';
+import TraceExits from '@/components/investigation/TraceExits.vue';
+import TraceSankey from '@/components/investigation/TraceSankey.vue';
 import { api } from '@/services/api';
 import type { GraphResponse } from '@/types/graph';
 import type { InvestigationRole } from '@/types/investigation';
@@ -43,12 +50,15 @@ const graphStore = useGraphStore();
 const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
 const auth = useAuthStore();
+const trace = useTraceStore();
+const contextMenu = useContextMenu();
+const toast = useToast();
 
 const showAdd = ref(false);
 const showLayout = ref(false);
 const activeTab = ref(UNIFIED);
-/** The graph tabs or the case space (T10). */
-const view = ref<'graph' | 'space'>('graph');
+/** The graph tabs, the case space (T10) or the money trace (T5). */
+const view = ref<'graph' | 'space' | 'trace'>('graph');
 const artifactCount = ref<number | null>(null);
 const pendingProposals = ref(0);
 const inspectorTab = ref<'data' | 'enrichment' | 'notes' | 'origin'>('data');
@@ -91,26 +101,33 @@ function applyExpansion(origin: NodeOrigin, response: GraphResponse) {
 const communityByTab = new Map<string, Record<string, unknown> | undefined>();
 let renderedTab: string | null = null;
 
+function graphMode(rings: Map<string, string[]>): InvestigationGraphMode {
+  return {
+    origins: new Map(store.unified.nodes.map((n) => [n.node_id, n.__sources])),
+    rings,
+    chooseOrigin,
+    applyExpansion,
+  };
+}
+
 async function render() {
-  const tab = activeTab.value;
   if (renderedTab !== null) communityByTab.set(renderedTab, communityStore.getState());
+  if (view.value === 'trace') return renderTrace();
+  if (graphStore.layoutAlgorithm === 'trace-layers') {
+    graphStore.traceLayers = null;
+    graphStore.setLayoutAlgorithm('force');
+  }
+  const tab = activeTab.value;
 
   const { nodes, edges } = store.unified;
   const tabNodes = tab === UNIFIED ? nodes : nodes.filter((n) => nodeSourceIds(n).includes(tab));
   const tabEdges = tab === UNIFIED ? edges : edges.filter((e) => baseSourceId(e.__source) === tab);
 
-  const mode: InvestigationGraphMode = {
-    origins: new Map(nodes.map((n) => [n.node_id, n.__sources])),
-    // Rings tell sources apart, so only the unified view draws them.
-    rings: new Map(
-      tab === UNIFIED
-        ? nodes.map((n) => [n.node_id, provenanceRingColors(nodeSourceIds(n), store.sourceColors)])
-        : [],
-    ),
-    chooseOrigin,
-    applyExpansion,
-  };
-  graphStore.loadInvestigationGraph(mode, tabNodes, tabEdges);
+  // Rings tell sources apart, so only the unified view draws them.
+  const rings = new Map(
+    tab === UNIFIED ? nodes.map((n) => [n.node_id, provenanceRingColors(nodeSourceIds(n), store.sourceColors)]) : [],
+  );
+  graphStore.loadInvestigationGraph(graphMode(rings), tabNodes, tabEdges);
   renderedTab = tab;
   await nextTick();
   communityStore.loadState(communityByTab.get(tab));
@@ -135,6 +152,7 @@ watch(
     renderedTab = null;
     activeTab.value = UNIFIED;
     view.value = 'graph';
+    trace.reset();
     artifactCount.value = null;
     await store.openInvestigation(id);
     // The journal and notes are secondary: a failure here must not block the graph.
@@ -150,7 +168,51 @@ watch(
 
 watch(() => store.sources.map((s) => s.id).join(','), loadWorkspace);
 
-watch([() => store.unified, activeTab], render);
+watch([() => store.unified, activeTab, () => view.value === 'trace', () => trace.columns], render);
+
+// --- money trace (T5) ---
+/** The traced subgraph, laid out by layer (`trace-layers`). */
+function renderTrace() {
+  renderedTab = null;
+  const cols = trace.columns;
+  const flowIds = new Set(trace.flows.map((f) => f.id));
+  graphStore.traceLayers = cols;
+  graphStore.setLayoutAlgorithm('trace-layers');
+  graphStore.loadInvestigationGraph(
+    graphMode(new Map()),
+    store.unified.nodes.filter((n) => cols?.columns.has(n.node_id)),
+    store.unified.edges.filter((e) => flowIds.has(e.edge_id)),
+  );
+}
+
+async function followMoney(target: ContextMenuTarget, direction: TraceDirection) {
+  if (await trace.start(target, direction)) view.value = 'trace';
+  else toast.error('No edge with an amount and a time to follow from here');
+}
+
+const TRACE_ACTIONS: [TraceDirection, string][] = [
+  ['forward', 'Follow the money → forward'],
+  ['backward', 'Follow the money → backward'],
+];
+onMounted(() => {
+  for (const [direction, label] of TRACE_ACTIONS) {
+    contextMenu.addAction({ id: `trace-${direction}`, label, icon: Banknote, handler: (t) => followMoney(t, direction) });
+  }
+});
+
+const traceChips = computed(() => {
+  const r = trace.result;
+  if (!r) return null;
+  const retained = Object.values(r.nodes).filter((n) => n.retained > 0);
+  const frontier = r.frontier.reduce((s, f) => s + f.amount, 0);
+  return {
+    seed: formatAmount(r.seedTotal),
+    exits: `${formatAmount(r.exitTotal)} reached ${r.method.direction === 'backward' ? 'origins' : 'exits'} (${Math.round(r.coverage * 100)}%)`,
+    retained: `${formatAmount(retained.reduce((s, n) => s + n.retained, 0))} retained in ${retained.length} ${retained.length === 1 ? 'account' : 'accounts'}`,
+    frontier: frontier > 0 ? `${formatAmount(frontier)} at the layer limit` : null,
+    layers: trace.columns ? trace.columns.labels.length - (trace.columns.exits ? 2 : 1) : 0,
+  };
+});
 
 // Role fills follow the case state, without reloading the graph.
 watch(
@@ -160,6 +222,9 @@ watch(
 );
 
 onUnmounted(() => {
+  for (const [direction] of TRACE_ACTIONS) contextMenu.removeAction(`trace-${direction}`);
+  trace.reset();
+  graphStore.traceLayers = null;
   pick(null);
   resetMetricsCalculator();
   communityStore.clearCommunities();
@@ -225,6 +290,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
       <header class="ws-header">
         <RouterLink to="/investigations" class="back">← Investigations</RouterLink>
         <h1 data-testid="investigation-title">{{ store.current.title }}</h1>
+        <span v-if="view === 'trace'" class="muted">› Follow the money</span>
         <span class="status">{{ STATUS_LABELS[store.current.status] ?? store.current.status }}</span>
         <span v-if="store.current.typology" class="muted">{{ store.current.typology }}</span>
         <RouterLink :to="`/investigations/${id}/matches`" class="agents-link" data-testid="matches-link">
@@ -270,6 +336,9 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
         >
           <Plus :size="14" /> Add
         </button>
+        <button v-if="trace.result" class="tab" :class="{ active: view === 'trace' }" data-testid="tab-trace" @click="view = 'trace'">
+          <Banknote :size="14" /> Follow the money
+        </button>
         <button class="tab" :class="{ active: view === 'space' }" data-testid="tab-space" @click="view = 'space'">
           Case space<span v-if="artifactCount !== null" class="count">{{ artifactCount }}</span>
         </button>
@@ -282,8 +351,10 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
         @changed="onArtifactsChanged"
       />
 
-      <div v-show="view === 'graph'" class="ws-body">
+      <div v-show="view !== 'space'" class="ws-body" :class="{ tracing: view === 'trace' }">
+        <TracePanel v-if="view === 'trace'" />
         <SourcesPanel
+          v-else
           :sources="store.sources"
           :graphs="store.sourceGraphs"
           :contexts="store.contexts"
@@ -297,6 +368,18 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           </template>
         </SourcesPanel>
 
+        <div class="center">
+        <div v-if="view === 'trace' && traceChips" class="trace-bar" data-testid="trace-bar">
+          <div class="trace-toggle">
+            <button :class="{ on: trace.view === 'layers' }" data-testid="trace-view-layers" @click="trace.view = 'layers'">Layers</button>
+            <button :class="{ on: trace.view === 'sankey' }" data-testid="trace-view-sankey" @click="trace.view = 'sankey'">Sankey</button>
+          </div>
+          <span class="chip-fill seed">{{ traceChips.seed }} seed</span>
+          <span class="chip-fill exits" data-testid="trace-coverage">{{ traceChips.exits }}</span>
+          <span class="chip-fill retained">{{ traceChips.retained }}</span>
+          <span v-if="traceChips.frontier" class="chip-fill retained">{{ traceChips.frontier }}</span>
+          <span class="muted trace-sub">{{ traceChips.layers }} {{ traceChips.layers === 1 ? 'layer' : 'layers' }} to the {{ trace.direction === 'backward' ? 'origins' : 'exits' }}</span>
+        </div>
         <section class="canvas-area" data-testid="graph-container">
           <div v-if="store.graphLoading || graphStore.loading" class="overlay">
             {{ graphStore.loadingMessage || 'Loading sources…' }}
@@ -306,7 +389,15 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           </div>
           <div v-if="graphStore.queryError" class="error-banner">{{ graphStore.queryError.message }}</div>
 
-          <div v-if="activeTab === UNIFIED && readableSources.length" class="legend" data-testid="provenance-legend">
+          <TraceSankey
+            v-if="view === 'trace' && trace.view === 'sankey' && trace.result && trace.columns"
+            :flows="trace.flows"
+            :columns="trace.columns"
+            :name-of="trace.nameOf"
+            :allocation="trace.result.method.allocation"
+          />
+
+          <div v-if="view === 'graph' && activeTab === UNIFIED && readableSources.length" class="legend" data-testid="provenance-legend">
             <div class="legend-title">Provenance (ring)</div>
             <div v-for="s in readableSources" :key="s.id" class="legend-row">
               <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
@@ -333,14 +424,16 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
             />
           </div>
 
-          <div class="canvas-actions">
+          <div v-if="view === 'graph'" class="canvas-actions">
             <button class="btn btn-outline btn-sm" data-testid="workspace-layout-btn" @click="showLayout = !showLayout">
               Layout
             </button>
           </div>
         </section>
+        </div>
 
-        <aside class="inspector" data-testid="workspace-inspector">
+        <TraceExits v-if="view === 'trace'" />
+        <aside v-else class="inspector" data-testid="workspace-inspector">
           <template v-if="selected">
             <div class="muted">{{ selected.node_type }}</div>
             <h3 class="entity" data-testid="inspector-title">{{ selected.node_id }}</h3>
@@ -598,7 +691,79 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   grid-template-columns: 250px 1fr 300px;
 }
 
+.ws-body.tracing {
+  grid-template-columns: 270px 1fr 280px;
+}
+
+.center {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.trace-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--color-surface);
+  font-size: 13px;
+}
+
+.trace-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+}
+
+.trace-toggle button {
+  padding: 4px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.trace-toggle button.on {
+  background: var(--color-secondary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.chip-fill {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+}
+
+.chip-fill.seed {
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.chip-fill.exits {
+  background: #f0fdfa;
+  color: #115e59;
+  font-weight: 600;
+}
+
+.chip-fill.retained {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.trace-sub {
+  flex-basis: 100%;
+}
+
 .canvas-area {
+  flex: 1;
+  min-height: 0;
   position: relative;
   display: flex;
   flex-direction: column;

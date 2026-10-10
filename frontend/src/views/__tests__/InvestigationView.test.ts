@@ -5,6 +5,8 @@ import { setActivePinia, createPinia } from 'pinia'
 import InvestigationView from '@/views/InvestigationView.vue'
 import { useGraphStore } from '@/stores/graph'
 import { useCommunityStore } from '@/stores/community'
+import { useContextMenu } from '@/composables/useContextMenu'
+import fixture from '@/__tests__/fixtures/trace/golpe-pix.json'
 
 vi.mock('@/services/api', () => ({
   api: {
@@ -141,5 +143,40 @@ describe('InvestigationView', () => {
     expect(api.postInvestigationEvent).toHaveBeenCalledWith('inv', 'nodes.promoted', expect.objectContaining({ nodes: 1, edges: 2 }))
     expect(graph.nodes.map((n) => n.node_id)).toContain('Dispositivo:d1@c1')
     expect(graph.edges.filter((e) => e.dst === 'Dispositivo:d1@c1').map((e) => e.src).sort()).toEqual(['a@c1', 'b@c1'])
+  })
+
+  it('follow the money: the menu action opens T5 with the traced subgraph by layer and its exits', async () => {
+    vi.mocked(api.getInvestigationSources).mockResolvedValue([source('s1', 'c1')] as any)
+    vi.mocked(api.getInvestigationSourceSnapshot).mockResolvedValue({
+      exploration: { state: {} },
+      snapshot: {
+        nodes: fixture.nodes.map((n) => ({ id: n.node_id, type: n.node_type, properties: n.properties ?? {} })),
+        edges: fixture.edges.map((e) => ({ id: e.edge_id, source: e.src, target: e.dst, type: e.relationship_type, properties: e.properties })),
+      },
+    } as any)
+    vi.mocked(api.getGraphContext).mockImplementation(async (id) =>
+      ({ id, title: id, identity_keys: [], edge_semantics: fixture.edge_semantics }) as any,
+    )
+    const { getByTestId, queryByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    const graph = useGraphStore()
+    expect(graph.nodes).toHaveLength(9)
+
+    const action = useContextMenu().actions.value.find((a) => a.id === 'trace-forward')!
+    await action.handler({ type: 'node', id: '0001-9@c1', label: '0001-9' })
+    await flushPromises()
+
+    expect(getByTestId('trace-exits').textContent).toContain('Saque ATM')
+    expect(getByTestId('trace-coverage').textContent).toContain('(91%)')
+    expect(graph.layoutAlgorithm).toBe('trace-layers')
+    expect(graph.traceLayers?.labels).toEqual(['Seed', 'Layer 1', 'Layer 2', 'Exits'])
+    expect(graph.nodes).toHaveLength(8) // the untraced external bank is left out
+    expect(queryByTestId('workspace-inspector')).toBeNull()
+
+    await fireEvent.click(getByTestId('tab-unified'))
+    await flushPromises()
+    expect(graph.layoutAlgorithm).toBe('force')
+    expect(graph.nodes).toHaveLength(9)
+    expect(getByTestId('tab-trace')).toBeTruthy()
   })
 })

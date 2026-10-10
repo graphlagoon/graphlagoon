@@ -1,5 +1,5 @@
 /** Temporal money trace off the main thread (investigations F3.3); logic in utils/trace.ts. */
-import { traceForward, type TraceEdge, type TraceParams, type TraceResult } from '@/utils/trace';
+import { runTrace, type TraceEdge, type TraceParams, type TraceResult } from '@/utils/trace';
 
 export type TraceWorkerInput = {
   type: 'RUN';
@@ -14,7 +14,7 @@ self.onmessage = (event: MessageEvent<TraceWorkerInput>) => {
   if (event.data.type !== 'RUN') return;
   const { edges, nodeTypes, seed, params } = event.data;
   try {
-    postMessage({ type: 'RESULT', result: traceForward(edges, nodeTypes, seed, params) } as TraceWorkerOutput);
+    postMessage({ type: 'RESULT', result: runTrace(edges, nodeTypes, seed, params) } as TraceWorkerOutput);
   } catch (e) {
     postMessage({ type: 'ERROR', error: e instanceof Error ? e.message : String(e) } as TraceWorkerOutput);
   }

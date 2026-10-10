@@ -21,7 +21,7 @@ import {
   type AppearanceContext,
 } from '@/utils/graphAppearance';
 import { applyForceConfig, applyCommunityRadialForce, applyEdgeTypeLayoutForce, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
-import { computeTreeLayout, computeHivePositions, computeRingGuideSpec, computeHiveAxesSpec, computeHiveLinkCurvatures, computeEgoLinkCurvatures } from '@/utils/layoutModes';
+import { computeTreeLayout, computeHivePositions, computeRingGuideSpec, computeHiveAxesSpec, computeHiveLinkCurvatures, computeEgoLinkCurvatures, computeTraceLayerPositions } from '@/utils/layoutModes';
 import { useLayoutGuides } from '@/composables/useLayoutGuides';
 import { useToast } from '@/composables/useToast';
 import { forcePointerRepulsion, type PointerRepulsionForce } from '@/utils/forcePointerRepulsion';
@@ -250,6 +250,9 @@ const icons = useGraphIcons(getGraph3d, initialLayoutDone);
 const edgeIcons = useGraphEdgeIcons(getGraph3d, initialLayoutDone);
 const rings = useGraphRings(getGraph3d);
 
+/** Layout modes with fixed analytic positions (no simulation). */
+const STATIC_LAYOUTS: string[] = ['hive', 'ego', 'hierarchical', 'trace-layers'];
+
 const layout = useGraphLayout(
   getGraph3d,
   { isLayoutRunning, layoutStabilized, initialLayoutDone },
@@ -257,7 +260,7 @@ const layout = useGraphLayout(
   () => graphStore.layoutExecution,
   () => graphStore.behaviors.viewMode === '2d-proj',
   // Static modes own the node pins — start/reheat/scramble must not release them
-  () => ['hive', 'ego', 'hierarchical'].includes(graphStore.layoutAlgorithm),
+  () => STATIC_LAYOUTS.includes(graphStore.layoutAlgorithm),
 );
 
 const guides = useLayoutGuides(getGraph3d);
@@ -1021,7 +1024,8 @@ async function updateGraph() {
   // framed — updateGraph historically never re-framed, so large results could
   // sit entirely off-screen ("blank" view until the user orbits). Frame it on
   // the first painted frame of the new scene.
-  const shouldRefit = freshRequested || preSettled;
+  // The trace screen swaps whole subgraphs into fixed columns: always frame them.
+  const shouldRefit = freshRequested || preSettled || graphStore.layoutAlgorithm === 'trace-layers';
 
   // Drop the build overlay only after the new scene has actually painted.
   if (isRenderingScene.value || shouldRefit) {
@@ -1791,7 +1795,7 @@ function applyLayoutModeForces() {
   if (mode !== 'hive' && mode !== 'ego') {
     restoreModeCurvatures();
   }
-  if (mode !== 'ego' && mode !== 'hive' && mode !== 'hierarchical') {
+  if (!STATIC_LAYOUTS.includes(mode)) {
     guides.clear();
   }
 
@@ -1901,6 +1905,17 @@ function applyLayoutModeForces() {
       direction: cfg.hierarchical.direction,
       extent: { min: minAlong, max: maxAlong },
     });
+  } else if (mode === 'trace-layers') {
+    const spec = graphStore.traceLayers;
+    if (!spec) return;
+    const { levelSpacing, nodeSpacing } = cfg.hierarchical;
+    const { positions, extent } = computeTraceLayerPositions(spec.columns, { levelSpacing: levelSpacing * 2, nodeSpacing: nodeSpacing * 2 });
+    pinPositions(positions);
+    guides.showLayerLines({
+      layers: spec.labels.map((label, i) => ({ offset: i * levelSpacing * 2, label, dashed: false })),
+      direction: 'lr',
+      extent,
+    });
   } else if (mode === 'hive') {
     const { positions, axes } = computeHivePositions(graphStore.nodes, cfg.hive, {
       nodeDegrees: graphStore.nodeDegrees,
@@ -1934,7 +1949,7 @@ function applyLayoutModeForces() {
 function applyLayoutMode() {
   if (!graph3d) return;
   const mode = graphStore.layoutAlgorithm;
-  const isModeLayout = mode === 'ego' || mode === 'hive' || mode === 'hierarchical';
+  const isModeLayout = STATIC_LAYOUTS.includes(mode);
 
   if (isModeLayout) {
     // Planar layouts read correctly only in 2D. The viewMode watcher re-inits
@@ -1961,7 +1976,7 @@ function applyLayoutMode() {
     }));
   };
 
-  if (mode === 'hive' || mode === 'hierarchical' || hasFocus) {
+  if (mode === 'hive' || mode === 'hierarchical' || mode === 'trace-layers' || hasFocus) {
     // All mode layouts are fixed analytic positions — no simulation.
     // stopLayout pins remaining (cluster) nodes, zeroes cooldown, shows labels.
     layout.stopLayout();
@@ -1984,6 +1999,11 @@ watch(() => graphStore.layoutAlgorithm, (newMode, oldMode) => {
     toast.info('Pick a focus node: select one and use "Use selected node", or right-click a node → "Ego layout from here"');
   }
   applyLayoutMode();
+});
+
+// The trace screen swaps columns (new run, time window) without touching the mode
+watch(() => graphStore.traceLayers, () => {
+  if (graphStore.layoutAlgorithm === 'trace-layers') applyLayoutMode();
 });
 
 let layoutConfigDebounce: ReturnType<typeof setTimeout> | null = null;

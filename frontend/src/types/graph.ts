@@ -429,7 +429,8 @@ export interface ViewportState {
 }
 
 /** Layout algorithms a saved state may name. Anything else falls back to 'force'. */
-export const LAYOUT_ALGORITHMS = ["force", "ego", "hive", "hierarchical", "circular", "grid"] as const;
+/** `trace-layers` is driven by the money trace (T5): columns come from the trace result, not from saved config. */
+export const LAYOUT_ALGORITHMS = ["force", "ego", "hive", "hierarchical", "circular", "grid", "trace-layers"] as const;
 export type LayoutAlgorithm = (typeof LAYOUT_ALGORITHMS)[number];
 
 /** BFS direction for the ego layout: follow outgoing edges, incoming edges, or both */

@@ -11685,3 +11685,52 @@ FIFO 200, LIBR 0, total 400; desempate estável); `vue-tsc` limpo.
 **Admin-Area Impact:** no admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 23:30] - Feature Implemented: F3.4 · Tela de rastreio (T5)
+
+**Feature:** aba "Follow the money" no workspace do caso: parâmetros à esquerda
+(`TracePanel`), traçado no centro (canvas com o layout `trace-layers` ou `TraceSankey`),
+saídas, retidos e carimbo à direita (`TraceExits`); itens "Follow the money → forward /
+backward" no menu de contexto de nó e aresta; store `stores/trace.ts` roda o `traceWorker`.
+
+**Design Decisions:**
+1. Semente: da aresta, ela; do nó, as arestas de saída (para frente) ou de entrada (para
+   trás) com valor e horário. Padrões do README Q4: 3 camadas, Δ = 24 h, mínimo 50;
+   janela = semente → +24 h (para trás, −24 h → semente). Tipos de parada marcados por
+   padrão por nome (`saque|exchange|cripto|aposta|bet|externo…`); `stopNodes` fora da UI.
+2. **Para trás** = o núcleo para frente sobre arestas invertidas em tempo negado
+   (`traceBackward` em `utils/trace.ts`). Só LIFO (regra nova `lifo`, ~5 linhas no FIFO),
+   proporcional e contaminação total mantêm o sentido invertidas; FIFO e LIBR não, e a
+   tela não os oferece para trás. O porte Python (F3.8) precisa levar `lifo` e o reverso.
+3. Camadas no próprio canvas (layout `trace-layers`, colunas vindas do resultado em
+   `graphStore.traceLayers`, não persistido nem aceito em estado salvo/presets);
+   `utils/traceView.ts` monta fluxos, colunas (semente, camadas, saídas alinhadas ao
+   pagador), Sankey SVG feito à mão (sem dependência) e o carimbo.
+4. Saída mostra também "proportional would give" (segunda execução no worker), como no T5.
+5. UI em inglês como o resto do app. Fora (MVP): rótulos de valor nas arestas do canvas,
+   cartão "não autorizada · aviso à SPA", "Levar para o dossiê" (F4), clique na faixa do
+   Sankey seleciona transações (hoje tooltip), registro do rastreio no diário.
+6. "Save as evidence" desabilitado com tooltip até a F4.1.
+
+**Files:** `frontend/src/components/investigation/TracePanel.vue`, `TraceExits.vue`,
+`TraceSankey.vue`, `stores/trace.ts`, `utils/traceView.ts` (novos); `utils/trace.ts`
+(`lifo`, `traceBackward`, `runTrace`), `workers/traceWorker.ts`, `utils/layoutModes.ts`
+(`computeTraceLayerPositions`), `types/graph.ts`, `stores/graph.ts`,
+`components/GraphCanvas3D.vue`, `components/StylePresetSkillModal.vue`,
+`views/InvestigationView.vue`; testes `utils/__tests__/traceView.test.ts`,
+`components/investigation/__tests__/TraceScreen.test.ts`, `trace.test.ts`,
+`views/__tests__/InvestigationView.test.ts`, E2E `e2e/tests/investigations.spec.ts`.
+
+**Testing:** vitest trace (para trás LIFO a partir da saída das 15:05 volta à vítima, não
+ao saldo de 300), traceView (colunas, Sankey, carimbo, posições), componentes (saídas
+2.000/1.550/880, proporcional 1.597,73, retidos, padrões, evidência desabilitada, LIFO
+para trás), InvestigationView (menu → T5 → subgrafo por camada → volta ao force); E2E
+clique direito na vítima → saídas, 91% e Sankey com 7 faixas; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Follow the money).
+**Admin-Area Impact:** no admin-area impact (só frontend; nenhuma rota nova).
+
+**Author:** Claude (AI Assistant)
+

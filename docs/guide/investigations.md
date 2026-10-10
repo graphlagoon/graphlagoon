@@ -131,6 +131,33 @@ Two switches in the **Aesthetics** panel (Edges) use them, in any graph:
 - **Width by amount** makes each edge's width proportional to its amount (a
   summed edge, to its total). A weight metric chosen in the Metrics panel wins.
 
+### Follow the money
+
+Right-click an edge or an account in the case workspace and pick **Follow the
+money → forward** (where the money went) or **→ backward** (where it came
+from). From an edge, that edge is the seed; from an account, its outgoing
+edges (forward) or incoming edges (backward) with an amount and a time. The
+**Follow the money** tab opens with:
+
+- **Parameters** on the left: direction, max layers (default 3), max dwell Δ
+  (default 24 h; money that sat longer in an account stops being traced), minimum
+  amount (default 50), the time window (from the seed, 24 h), the allocation rule
+  and the node types to stop at (cash-out, exchange, betting and external banks
+  are checked by default). **Trace again** re-runs with the changes.
+- **Allocation rule:** forward, FIFO (first in, first out), proportional (splits
+  by the balance mix), LIBR (lowest intermediate balance) or total contamination
+  (an upper bound). Backward offers LIFO, proportional and total contamination.
+- **Layers** draws the traced subgraph in the canvas, one column per layer from
+  the seed to the exits; **Sankey** draws the same flow with band width equal to
+  the traced value. Chips above show the seed total, how much reached the exits
+  and how much stayed in accounts.
+- **Exits** on the right: each exit with the traced value under the chosen rule
+  (and what the proportional rule would give), the retained balances
+  (candidates for a precautionary block) and the method stamp listing every
+  parameter of the run.
+
+**Save as evidence** stays disabled until frozen evidence ships.
+
 ## Roles, notes and the journal
 
 - **Role.** The inspector's *Role* selector marks an entity as **Victim**

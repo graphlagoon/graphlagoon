@@ -57,7 +57,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F3.1 · Semântica de valor e horário nas arestas
 - [x] F3.2 · Soma de arestas paralelas e largura por valor
 - [x] F3.3 · Worker de rastreio temporal
-- [ ] F3.4 · Tela de rastreio (T5): parâmetros, camadas, Sankey, saídas
+- [x] F3.4 · Tela de rastreio (T5): parâmetros, camadas, Sankey, saídas
 - [ ] F3.5 · Linha do tempo em raias com seleção de janela
 - [ ] F3.6 · Caminhos
 - [ ] F3.7 · Componentes conexos no registry de algoritmos
@@ -688,9 +688,9 @@ trabalho de análise e documentação; a pessoa decide.
   - item "Seguir o dinheiro → para frente / para trás" no menu de contexto
     (`composables/useContextMenu.ts`).
 - **Aceite:**
-  - [ ] A tela segue `screens/T5-Rastreio.png` e `screens/T5-Rastreio-Sankey.png`.
-  - [ ] O carimbo do método lista todos os parâmetros.
-  - [ ] "Salvar como evidência" funciona depois da F4.1; até lá, o botão fica
+  - [x] A tela segue `screens/T5-Rastreio.png` e `screens/T5-Rastreio-Sankey.png`.
+  - [x] O carimbo do método lista todos os parâmetros.
+  - [x] "Salvar como evidência" funciona depois da F4.1; até lá, o botão fica
     desabilitado com um tooltip.
 - **Testes:** vitest dos componentes; E2E abrir caso → seguir o dinheiro → ver as
   saídas.
