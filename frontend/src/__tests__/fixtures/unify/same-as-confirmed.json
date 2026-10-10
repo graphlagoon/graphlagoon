@@ -1,0 +1,85 @@
+{
+  "description": "Confirmed `same_as` matches (status aceito, left = keep, right = drop) fold the dropped entity into the kept one: sources, missing properties and conflicts, with its edges re-pointed; chains resolve transitively. A suggested or refused match changes nothing.",
+  "contexts": {
+    "c-pix": {
+      "identity_keys": [
+        { "node_type": "Titular", "entity": "Pessoa", "source": { "kind": "prop", "name": "cpf" }, "normalize": "cpf_cnpj" }
+      ]
+    },
+    "c-cad": {
+      "identity_keys": [
+        { "node_type": "Cliente", "entity": "Pessoa", "source": { "kind": "prop", "name": "doc" }, "normalize": "cpf_cnpj" }
+      ]
+    },
+    "c-dev": { "identity_keys": [] }
+  },
+  "sources": [
+    {
+      "id": "s-pix",
+      "context_id": "c-pix",
+      "nodes": [
+        { "id": "p1", "type": "Titular", "properties": { "cpf": "123.456.789-01", "nome": "Ana R." } },
+        { "id": "a1", "type": "Conta", "properties": {} }
+      ],
+      "edges": [
+        { "id": "e1", "source": "p1", "target": "a1", "type": "TITULAR", "properties": {} }
+      ]
+    },
+    {
+      "id": "s-cad",
+      "context_id": "c-cad",
+      "nodes": [
+        { "id": "m1", "type": "Cliente", "properties": { "doc": "***.418.207-**", "nome": "Ana Ribeiro", "cep": "04571-020" } },
+        { "id": "a2", "type": "Conta", "properties": {} }
+      ],
+      "edges": [
+        { "id": "e1", "source": "m1", "target": "a2", "type": "POSSUI", "properties": {} }
+      ]
+    },
+    {
+      "id": "s-dev",
+      "context_id": "c-dev",
+      "nodes": [
+        { "id": "u9", "type": "Usuario", "properties": { "nome": "ana.r", "email": "ana@example.com" } },
+        { "id": "dv1", "type": "Dispositivo", "properties": {} }
+      ],
+      "edges": [
+        { "id": "e1", "source": "u9", "target": "dv1", "type": "LOGIN", "properties": { "vezes": 3 } }
+      ]
+    }
+  ],
+  "matches": [
+    { "left": { "uid": "Pessoa:12345678901" }, "right": { "uid": "m1@c-cad" }, "status": "aceito" },
+    { "left": { "uid": "m1@c-cad" }, "right": { "uid": "u9@c-dev" }, "status": "aceito" },
+    { "left": { "uid": "a1@c-pix" }, "right": { "uid": "a2@c-cad" }, "status": "sugerido" },
+    { "left": { "uid": "dv1@c-dev" }, "right": { "uid": "ghost@c-x" }, "status": "recusado" }
+  ],
+  "overrides": {},
+  "expected": {
+    "nodes": [
+      {
+        "uid": "Pessoa:12345678901",
+        "type": "Titular",
+        "entity": "Pessoa",
+        "properties": { "cpf": "123.456.789-01", "nome": "Ana R.", "doc": "***.418.207-**", "cep": "04571-020", "email": "ana@example.com" },
+        "sources": [
+          { "source_id": "s-pix", "node_id": "p1" },
+          { "source_id": "s-cad", "node_id": "m1" },
+          { "source_id": "s-dev", "node_id": "u9" }
+        ],
+        "conflicts": {
+          "node_type": [{ "value": "Cliente", "source_id": "s-cad" }, { "value": "Usuario", "source_id": "s-dev" }],
+          "nome": [{ "value": "Ana Ribeiro", "source_id": "s-cad" }, { "value": "ana.r", "source_id": "s-dev" }]
+        }
+      },
+      { "uid": "a1@c-pix", "type": "Conta", "entity": null, "properties": {}, "sources": [{ "source_id": "s-pix", "node_id": "a1" }] },
+      { "uid": "a2@c-cad", "type": "Conta", "entity": null, "properties": {}, "sources": [{ "source_id": "s-cad", "node_id": "a2" }] },
+      { "uid": "dv1@c-dev", "type": "Dispositivo", "entity": null, "properties": {}, "sources": [{ "source_id": "s-dev", "node_id": "dv1" }] }
+    ],
+    "edges": [
+      { "id": "s-cad:e1", "src": "Pessoa:12345678901", "dst": "a2@c-cad", "type": "POSSUI", "properties": {}, "source_id": "s-cad" },
+      { "id": "s-dev:e1", "src": "Pessoa:12345678901", "dst": "dv1@c-dev", "type": "LOGIN", "properties": { "vezes": 3 }, "source_id": "s-dev" },
+      { "id": "s-pix:e1", "src": "Pessoa:12345678901", "dst": "a1@c-pix", "type": "TITULAR", "properties": {}, "source_id": "s-pix" }
+    ]
+  }
+}
