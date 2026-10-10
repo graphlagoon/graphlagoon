@@ -83,8 +83,9 @@ by an administrator.
 
 ## What agents never do
 
-There is no tool to **decide** a case, **share** it, **delete** anything,
-**approve** an artifact or **accept/reject** a proposal. The matching routes
+There is no tool to **decide** a case (`POST …/decision`), **export** it
+(`GET …/export`: exports leave the app unmasked), **share** it, **delete**
+anything, **approve** an artifact or **accept/reject** a proposal. The matching routes
 answer 403 to an agent token even when its owner is a superuser. Everything an
 agent does goes to the journal as "agent X on behalf of Y" and every read is
 audited (`agent.read`).

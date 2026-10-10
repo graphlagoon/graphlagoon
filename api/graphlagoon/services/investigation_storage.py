@@ -8,7 +8,7 @@ Layout under the root::
     {investigation_id}/artifacts/{artifact_id}/v{n}/{name}
     {investigation_id}/files/{sha256}
     {investigation_id}/evidence/{evidence_id}.json.gz
-    (exports/… arrive with F4.6)
+    (exports are generated on request and audited, not stored)
 
 Uploads stream into a temp file while the sha256 is computed, and only then
 go to the store with ``save_stream``; nothing is ever overwritten. The paths

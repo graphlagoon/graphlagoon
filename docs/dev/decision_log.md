@@ -12156,3 +12156,71 @@ descrito em `adminView.ts`); setting `investigation_retention_years` em
 `CONFIG_FIELD_KINDS` (public); sem tabela nem permissão nova.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 05:10] - Feature Implemented: F4.6 · Exportações (laudo, pacote, SIMBA, resumo Siscoaf)
+
+**Feature:** `GET …/export?format=json|csv|simba|siscoaf` (`services/investigation_exports.py`),
+permissão nova `investigation.export` (catálogo + `require_permission` + botões
+escondidos com `can()`), auditada (`investigation.export` com formato e sha256 do
+arquivo, também no header `X-Content-SHA256`). `json` = pacote do caso (decisão,
+`frozen_hash` + `frozen_hash_valid` recomputado, papéis, hipóteses, fontes redigidas
+por quem chama, arquivos, evidências, métodos de rastreio, notas, diário); `csv` = o
+mesmo achatado em uma linha por item; `simba` = zip com EXTRATO, ORIGEM_DESTINO,
+TITULARES e `MANIFEST.json`; `siscoaf` = resumo estruturado (envolvidos com papel,
+transações, selos CC 4.001, narrativa, evidências, hashes). Laudo PDF = impressão do
+dossiê (CSS print esconde a navegação e os controles, mostra o diário inteiro e uma
+seção só de impressão com os hashes de fontes e arquivos).
+
+**Design Decisions:**
+1. CSV no servidor pelo espelho Python de `csvSafe.ts` (`utils/csv_safe.py`, mesma
+   regra de prefixo `'`, cabeçalho incluído), com `csv.writer` RFC 4180 e BOM UTF-8.
+2. SIMBA a partir do grafo unificado (`case_graph`, sem fontes restritas): aresta com
+   valor = lançamento da ponta que tem conta (`banco/agencia/conta`; senão o id da
+   origem ou do destino como número de conta), D quando o dinheiro sai dela; a outra
+   ponta é a contraparte por CPF/CNPJ e nome, ou agência 9999 (NAO-CORRENTISTA) sem
+   documento; arestas `TITULAR` viram TITULARES; tipo → primeiro código da tabela do
+   preset (tipo desconhecido vai como está). Zip com data fixa. shortcut: aresta
+   conta-a-conta cuja contraparte não tem documento relê como contraparte desconhecida.
+3. Método do rastreio = `params` das evidências `trace` + payloads de `trace.run`;
+   hashes dos arquivos em todos os formatos (o CSV pelas linhas `file`/`evidence`).
+4. Exportar é leitura: nada vai ao diário (o `frozen_hash` continua reprodutível) e
+   nada é gravado em `exports/` (03 §2.3 previa; a auditoria guarda o sha256). Qualquer
+   status exporta; o resumo Siscoaf diz `ready_to_communicate` só com decisão
+   `comunicar`.
+5. Rota só humana (`forbid_agents`, `HUMAN_ONLY` no registry): exportação sai sem
+   máscara (Q8) e prepara a comunicação (Q9); o agente lê o caso por `get_dossier`.
+   Sem ferramenta MCP.
+6. Fora (MVP): PDF gerado no servidor, assinatura digital do laudo, envio ao Siscoaf
+   (Q6), exportação de um subconjunto do caso.
+
+**Files:** `api/graphlagoon/services/investigation_exports.py`, `utils/csv_safe.py`,
+`api/tests/test_investigation_exports.py` (novos); `routers/investigations.py`,
+`services/permission_catalog.py`, `services/audit.py`, `services/investigation_storage.py`
+(docstring), `mcp/registry.py`, `tests/test_permission_routes.py`;
+`frontend/src/views/InvestigationDossierView.vue`, `services/api.ts`,
+`types/investigation.ts`, `utils/portableExport.ts` (`downloadBlob`),
+`utils/adminView.ts`, `views/__tests__/InvestigationDossierView.test.ts`,
+`e2e/helpers/api-mocks.ts`, `e2e/tests/investigations.spec.ts`.
+
+**Testing:** pytest `test_investigation_exports.py` (regra do `safe_cell` igual à do
+vitest; pacote com método FIFO, sha256 dos arquivos, `frozen_hash_valid` antes/depois
+da decisão, auditoria com o sha256 do header; CSV com título `=HYPERLINK(...)` sai
+prefixado; SIMBA do `simba-mini` relido pelo preset `simba_v31` dá as mesmas arestas e
+nós, sem linha descartada; resumo Siscoaf; formato inválido 422; fora do caso 404),
+`test_permission_routes.py` (export negado com a permissão restrita; listas do
+`/api/config`), registries de admin e agentes; vitest do dossiê (botões escondidos sem
+a permissão, download do Siscoaf, laudo chama `window.print`); E2E decisão +
+download; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Exports, TL;DR, admin),
+`docs/guide/permissions.md` (`investigation.export`), `docs/guide/agents-mcp.md`
+(export é só humano); `docs/dev/security-assessment.md` (M4 no servidor); README do
+pacote: F1–F4 concluídas, F5 não iniciada.
+**Admin-Area Impact:** permissão `investigation.export` no catálogo (aparece na matriz
+de permissões); ação de auditoria `investigation.export` descrita em `adminView.ts`;
+rota GET (fora de `AUDITED_ROUTES`, que cobre só mutações) audita mesmo assim; sem
+tabela nem setting novos.
+
+**Author:** Claude (AI Assistant)

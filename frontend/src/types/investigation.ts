@@ -42,6 +42,9 @@ export interface InvestigationDecision {
   decided_at: string;
 }
 
+/** `GET …/export?format=` (F4.6); the laudo is the print of the dossier. */
+export type InvestigationExportFormat = 'json' | 'csv' | 'simba' | 'siscoaf';
+
 export interface CreateInvestigationRequest {
   title: string;
   description?: string;

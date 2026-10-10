@@ -356,6 +356,10 @@ Uma propriedade contendo `'; DROP ...` flui para a query executada. O caminho `?
 > `DataTablePanel.export.test.ts`, `DataGrid.export.test.ts`). Limite conhecido:
 > só o primeiro caractere é checado (como na recomendação da OWASP); uma célula que
 > começa com espaço antes do `=` não é prefixada.
+>
+> **Servidor (F4.6):** a exportação CSV do caso (`GET …/export?format=csv`) é gerada
+> no backend com o espelho em Python, `api/graphlagoon/utils/csv_safe.py` (mesma regra,
+> cabeçalho incluído), testado em `api/tests/test_investigation_exports.py`.
 
 Nenhum dos 4 caminhos neutraliza células iniciando com `= + - @`:
 - `frontend/src/utils/tableExport.ts:8-14` (TSV do Query Console)

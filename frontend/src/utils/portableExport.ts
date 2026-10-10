@@ -54,7 +54,11 @@ export function safeFilename(base: string, extension = '.json'): string {
 
 /** Trigger a browser download of `data` serialized as pretty JSON. */
 export function downloadJson(filename: string, data: unknown): void {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  downloadBlob(filename, new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+}
+
+/** Trigger a browser download of `blob`. */
+export function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.download = filename;

@@ -280,6 +280,23 @@ def test_investigation_upload_is_gated(client, store):
     ).json()["permissions"]
 
 
+def test_investigation_export_is_gated(client, store):
+    group = store.create_group("exporters", members=[{"kind": "email", "value": MEMBER}])
+    store.set_permission(
+        "investigation.export", "restricted", [{"group_id": group.id, "effect": "allow"}]
+    )
+    case = client.post(
+        "/api/investigations", json={"title": "c"}, headers=_headers(OUTSIDER)
+    ).json()
+    denied = client.get(
+        f"/api/investigations/{case['id']}/export", headers=_headers(OUTSIDER)
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["error"]["details"]["permission"] == (
+        "investigation.export"
+    )
+
+
 class TestConfigCarriesPermissions:
     def test_superuser_gets_full_catalog(self, client, store):
         _restrict_context_create_to(store, MEMBER)
@@ -289,6 +306,7 @@ class TestConfigCarriesPermissions:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
+            "investigation.export",
             "investigation.upload",
         ]
 
@@ -299,6 +317,7 @@ class TestConfigCarriesPermissions:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
+            "investigation.export",
             "investigation.upload",
         ]
         member_payload = client.get("/api/config", headers=_headers(MEMBER)).json()
@@ -307,6 +326,7 @@ class TestConfigCarriesPermissions:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
+            "investigation.export",
             "investigation.upload",
         ]
 

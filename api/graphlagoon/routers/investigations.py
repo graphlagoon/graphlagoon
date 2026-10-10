@@ -6,7 +6,7 @@ Rules live in services.investigations; this module maps them to HTTP, the
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from urllib.parse import quote
@@ -51,6 +51,7 @@ from graphlagoon.models.schemas import (
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
 from graphlagoon.services import investigation_evidence as evidence
+from graphlagoon.services import investigation_exports as exports
 from graphlagoon.services import investigation_files as files
 from graphlagoon.services import investigation_hypotheses as hypotheses
 from graphlagoon.services import investigation_matches as matches
@@ -206,6 +207,37 @@ async def record_decision(
         frozen_hash=inv["frozen_hash"],
     )
     return inv
+
+
+@router.get("/{investigation_id}/export", dependencies=[Depends(forbid_agents)])
+async def export_investigation(
+    investigation_id: UUID,
+    format: Literal["json", "csv", "simba", "siscoaf"] = "json",
+    user_email: str = Depends(require_permission("investigation.export")),
+):
+    """F4.6: package (json), csv, SIMBA (zip) or Siscoaf summary; audited with
+    the sha256 of what left the app. Human only: exports carry unmasked data."""
+    try:
+        out = await exports.export(investigation_id, user_email, format)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_EXPORT,
+        investigation_id,
+        format=format,
+        sha256=out.sha256,
+        size_bytes=len(out.data),
+    )
+    return Response(
+        content=out.data,
+        media_type=out.media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(out.filename)}",
+            "X-Content-Type-Options": "nosniff",
+            "X-Content-SHA256": out.sha256,
+        },
+    )
 
 
 @router.post("/{investigation_id}/share", dependencies=[Depends(forbid_agents)])

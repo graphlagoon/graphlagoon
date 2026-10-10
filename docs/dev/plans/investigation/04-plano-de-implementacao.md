@@ -69,7 +69,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F4.3 · Selos de tipologia (CC 4.001) e anel de lojistas (T9)
 - [x] F4.4 · Status e prazos (45 + 45 dias) na fila
 - [x] F4.5 · Decisão, congelamento e retenção
-- [ ] F4.6 · Exportações (laudo, pacote, SIMBA, resumo Siscoaf)
+- [x] F4.6 · Exportações (laudo, pacote, SIMBA, resumo Siscoaf)
 
 **F5 · Escala e IA (opcional)**
 - [ ] F5.1 · Promover context de arquivo ao warehouse
@@ -807,8 +807,8 @@ trabalho de análise e documentação; a pessoa decide.
   1. Catálogo de permissões: `investigation.export`, com gate.
   2. Toda exportação é auditada e inclui o método do rastreio e os hashes dos arquivos.
 - **Aceite:**
-  - [ ] O CSV sai sem injeção (G2).
-  - [ ] O SIMBA exportado relê com o preset da F2.4 (ida e volta).
+  - [x] O CSV sai sem injeção (G2).
+  - [x] O SIMBA exportado relê com o preset da F2.4 (ida e volta).
 - **Testes:** pytest e vitest.
 
 ---
