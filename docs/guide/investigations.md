@@ -224,6 +224,30 @@ the journal records `evidence.created` with the hash. API:
 `GET …/evidence/{eid}` (with the snapshot). Agents pin evidence directly with
 `pin_evidence`.
 
+## Dossier
+
+**Dossier** in the workspace header opens the case as a document (T7):
+
+- **Summary**: the description, typology, origin and how many entities hold
+  each role, with indicators (sources and how many are restricted, evidence,
+  hypotheses by status, notes, journal events, pending proposals);
+- **Hypotheses**: each one (H1, H2, …) with its status (**open**,
+  **supported** or **refuted**) and the evidence **for** and **against** it.
+  Write a new one at the bottom; change the status or link and unlink evidence
+  in the row. Hypotheses are never deleted: a wrong one is refuted. Every change
+  goes to the journal;
+- **Frozen evidence**: E1, E2, … in the order they were frozen, with the kind,
+  the short hash, how it was made (the trace method stamp, or the tab and its
+  size) and who froze it;
+- **Journal**: the latest entries, or all of them.
+
+The decision panel on the right stays read-only until recording the decision
+ships. API: `POST /api/investigations/{id}/hypotheses` with
+`{text, status?, evidence_for?, evidence_against?, note?}` and
+`PATCH …/hypotheses/{hid}` (the evidence lists are replaced); both return the
+case, whose `state.hypotheses` holds them. Agents read it all with
+`get_dossier` and propose hypotheses (`hypothesis`, `hypothesis_status`).
+
 ## Case files
 
 The **Files** section of the left column lists the files uploaded to the case
@@ -318,8 +342,8 @@ the administrator (see [Configuration](./configuration.md#ai-agents)).
   and a validity. The token is shown **once**, inside the command to add the
   app to Claude Code; only its hash is stored. Revoke it under *Active
   tokens*. The agent acts with your access and never more.
-- **Proposals.** An agent cannot change an entity's role, the case status
-  or its typology directly: it proposes. Each proposal shows what it would
+- **Proposals.** An agent cannot change an entity's role, the case status,
+  its typology or its hypotheses directly: it proposes. Each proposal shows what it would
   change and the agent's rationale. **Accept** applies it exactly as if you
   had made the change yourself; **Reject** asks for a reason. Both go to the
   journal with who proposed and who decided. Only people decide.

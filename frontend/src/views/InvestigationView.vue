@@ -324,6 +324,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
         <span v-if="view === 'trace'" class="muted">› Follow the money</span>
         <span class="status">{{ STATUS_LABELS[store.current.status] ?? store.current.status }}</span>
         <span v-if="store.current.typology" class="muted">{{ store.current.typology }}</span>
+        <RouterLink :to="`/investigations/${id}/dossier`" class="agents-link" data-testid="dossier-link">Dossier</RouterLink>
         <RouterLink :to="`/investigations/${id}/matches`" class="agents-link" data-testid="matches-link">
           Matches · {{ openMatches }}
         </RouterLink>

@@ -425,6 +425,29 @@ async def seed_investigations(
             owner,
             json={"body": "Seeded note: check the shared entities first."},
         )
+        # Dossier (T7): one frozen evidence and a hypothesis that cites it.
+        evidence = (
+            await client.request(
+                "POST",
+                f"/api/investigations/{case['id']}/evidence",
+                owner,
+                json={
+                    "title": "Seeded evidence",
+                    "kind": "table",
+                    "params": {"seeded": True},
+                    "snapshot": [{"note": "seeded"}],
+                },
+            )
+        ).json()
+        await client.request(
+            "POST",
+            f"/api/investigations/{case['id']}/hypotheses",
+            owner,
+            json={
+                "text": "The shared entities are controlled by the same person",
+                "evidence_for": [evidence["id"]],
+            },
+        )
         created += 1
     return created
 

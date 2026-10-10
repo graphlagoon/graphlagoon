@@ -65,7 +65,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 
 **F4 · Dossiê e compliance**
 - [x] F4.1 · Evidências congeladas
-- [ ] F4.2 · Hipóteses e tela do dossiê (T7)
+- [x] F4.2 · Hipóteses e tela do dossiê (T7)
 - [ ] F4.3 · Selos de tipologia (CC 4.001) e anel de lojistas (T9)
 - [ ] F4.4 · Status e prazos (45 + 45 dias) na fila
 - [ ] F4.5 · Decisão, congelamento e retenção
@@ -753,7 +753,7 @@ trabalho de análise e documentação; a pessoa decide.
 - **Arquivos:** `views/InvestigationDossierView.vue` (novo); hipóteses no `state` do
   caso ([03 §2.2](03-arquitetura.md#22-tabelas-novas)).
 - **Aceite:**
-  - [ ] A tela segue `screens/T7-Dossie.png`: resumo, indicadores, hipóteses com
+  - [x] A tela segue `screens/T7-Dossie.png`: resumo, indicadores, hipóteses com
     evidências a favor e contra, evidências, diário.
 - **Testes:** vitest e E2E.
 

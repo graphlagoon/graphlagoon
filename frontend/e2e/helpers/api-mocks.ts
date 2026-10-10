@@ -1216,6 +1216,26 @@ export async function seedInvestigations(
     }
     return route.fulfill(json(events.get(id) ?? []));
   });
+  // Hypotheses (F4.2): kept in the case state, like the server.
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+\/hypotheses(\/[^/?]+)?(\?.*)?$/, (route) => {
+    const req = route.request();
+    const [, id, hid] = new URL(req.url()).pathname.match(/investigations\/([^/]+)\/hypotheses(?:\/([^/]+))?$/)!;
+    const inv = cases.get(id);
+    if (!inv) return route.fulfill(json({ detail: { error: { code: 'INVESTIGATION_NOT_FOUND' } } }, 404));
+    const list = [...(inv.state?.hypotheses ?? [])];
+    const body = req.postDataJSON();
+    if (!hid) {
+      const h = { id: `H${list.length + 1}`, status: 'aberta', evidence_for: [], evidence_against: [], ...body };
+      list.push(h);
+      journal(id, 'hypothesis.created', { id: h.id, text: h.text, status: h.status });
+    } else {
+      const i = list.findIndex((h: any) => h.id === hid);
+      journal(id, 'hypothesis.updated', { id: hid, from_status: list[i].status, ...body });
+      list[i] = { ...list[i], ...body };
+    }
+    inv.state = { ...inv.state, hypotheses: list };
+    return route.fulfill(json(inv, hid ? 200 : 201));
+  });
   // Case space (FA.2): raw-body upload, versions, content and approval, in memory.
   const artifacts = new Map<string, any[]>();
   await page.route(/\/graphlagoon\/api\/investigations\/[^/]+\/artifacts(\/.*)?(\?.*)?$/, (route) => {

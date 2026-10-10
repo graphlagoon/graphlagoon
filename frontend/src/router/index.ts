@@ -45,6 +45,12 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/investigations/:id/dossier',
+      name: 'investigation-dossier',
+      component: () => import('@/views/InvestigationDossierView.vue'),
+      props: true,
+    },
+    {
       path: '/investigations/:id/matches',
       name: 'investigation-matches',
       component: () => import('@/views/InvestigationMatchesView.vue'),

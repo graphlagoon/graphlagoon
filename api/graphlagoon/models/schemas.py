@@ -1916,6 +1916,26 @@ class EvidenceContentResponse(EvidenceResponse):
     snapshot: Any = None
 
 
+# Hypotheses in state.hypotheses (F4.2); evidence ids from …/evidence
+HypothesisStatus = Literal["aberta", "sustentada", "refutada"]
+
+
+class HypothesisCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+    status: HypothesisStatus = "aberta"
+    evidence_for: list[str] = Field(default_factory=list)
+    evidence_against: list[str] = Field(default_factory=list)
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class HypothesisUpdate(BaseModel):
+    text: Optional[str] = Field(default=None, min_length=1, max_length=1000)
+    status: Optional[HypothesisStatus] = None
+    evidence_for: Optional[list[str]] = None
+    evidence_against: Optional[list[str]] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
 # Case space (03-arquitetura §8.5)
 ArtifactKind = Literal["slides", "doc", "report", "image", "data", "other"]
 

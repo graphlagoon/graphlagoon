@@ -300,6 +300,12 @@ async def update_investigation(
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
         _ensure_not_decided(inv)
+        if "state" in changes:  # roles and hypotheses change only through their own journaled routes
+            kept = {k: v for k, v in (inv.state or {}).items() if k in ("roles", "hypotheses")}
+            changes["state"] = {
+                **{k: v for k, v in changes["state"].items() if k not in ("roles", "hypotheses")},
+                **kept,
+            }
         await append_event(
             session,
             investigation_id,

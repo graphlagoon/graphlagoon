@@ -373,7 +373,7 @@ async def test_trace_money_and_find_paths_on_the_case_graph(env, monkeypatch):
     fifo = next(c["expected"] for c in FIXTURE["cases"] if c["name"] == "fifo")
     async with mcp_lifespan(app), _rest(app) as rest:
         token = (await rest.post("/api/agent-tokens", json={
-            "name": "claude", "scopes": ["read", "analyze", "write"]})).json()["token"]
+            "name": "claude", "scopes": ["read", "analyze", "write", "propose"]})).json()["token"]
         cid = (await rest.post("/api/investigations", json={"title": "x"})).json()["id"]
         url = f"/api/investigations/{cid}"
         sid = (await rest.post(f"{url}/sources", json={"exploration_id": str(exploration.id)})).json()["id"]
@@ -401,6 +401,14 @@ async def test_trace_money_and_find_paths_on_the_case_graph(env, monkeypatch):
             assert ev["params"] == out["method"] and ev["created_by"] == OWNER
             frozen = (await rest.get(f"{url}/evidence/{ev['id']}")).json()
             assert frozen["snapshot"]["exits"][f"exchange-gama@{ctx}"] == 1597.73
+            # F4.2: the agent proposes a hypothesis on that evidence; get_dossier shows both.
+            await _tool(client, "propose", investigation_id=cid, kind="hypothesis",
+                        payload={"text": "4471-0 é conta de passagem", "evidence_for": [ev["id"]]})
+            dossier = await _tool(client, "get_dossier", investigation_id=cid)
+            assert dossier["evidence"][0]["label"] == "E1" and dossier["hypotheses"] == []
+            assert dossier["indicators"]["evidence"] == 1 and dossier["indicators"]["pending_proposals"] == 1
+            prompt = await client.get_prompt("montar_dossie", {"investigation_id": cid})
+            assert "get_dossier" in prompt.messages[0].content.text
             paths = await _tool(client, "find_paths", investigation_id=cid,
                                 source=f"0001-9@{ctx}", target=f"saque-atm@{ctx}")
             assert [n.split("@")[0] for n in paths["paths"][0]["nodes"]] == [

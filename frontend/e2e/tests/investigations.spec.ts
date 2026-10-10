@@ -230,6 +230,34 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('artifact-preview')).toContainText('# Rastro: 3 saltos');
   });
 
+  test('dossier (T7): evidence, a hypothesis with evidence for it, its status and the journal', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedInvestigations(page, [{ ...CASE, description: 'Pix de R$ 4.870 saiu da vítima', state: {} }]);
+    await page.goto('/investigations/inv-1');
+    await expect(page.getByTestId('investigation-title')).toBeVisible();
+    // An evidence frozen earlier (the trace screen posts the same body).
+    await page.evaluate(() =>
+      fetch('/graphlagoon/api/investigations/inv-1/evidence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Rastreio FIFO', kind: 'table', params: { rows: 3 }, snapshot: [] }),
+      }),
+    );
+    await page.getByTestId('dossier-link').click();
+
+    await expect(page.getByTestId('dossier-summary')).toContainText('Pix de R$ 4.870');
+    await expect(page.getByTestId('evidence-evi-1')).toContainText('E1 · Rastreio FIFO');
+    await page.getByTestId('hypothesis-input').fill('4471-0 é conta de passagem');
+    await page.getByTestId('hypothesis-add').click();
+    await expect(page.getByTestId('hypothesis-H1')).toContainText('4471-0 é conta de passagem');
+    await page.getByTestId('hypothesis-link-evidence_for-H1').selectOption('evi-1');
+    await expect(page.getByTestId('hypothesis-evidence_for-H1')).toContainText('E1 Rastreio FIFO');
+    await page.getByTestId('hypothesis-status-H1').selectOption('sustentada');
+    await expect(page.getByTestId('dossier-indicators')).toContainText('1 supported');
+    await expect(page.getByTestId('dossier-journal')).toContainText('updated hypothesis H1: open → supported');
+  });
+
   test('follow the money: right-click the victim, trace forward, see the exits and the Sankey', async ({
     authenticatedPage: page,
   }) => {

@@ -13,6 +13,7 @@ import type {
   Investigation,
   InvestigationEvent,
   InvestigationEvidence,
+  Hypothesis,
   InvestigationFile,
   InvestigationNote,
   InvestigationRole,
@@ -117,6 +118,21 @@ export const useInvestigationStore = defineStore('investigation', () => {
     evidence.value = [...evidence.value, row];
     void fetchEvents();
     return row;
+  }
+
+  /** Hypotheses of the case (`state.hypotheses`, F4.2). */
+  const hypotheses = computed<Hypothesis[]>(() => (current.value?.state?.hypotheses as Hypothesis[] | undefined) ?? []);
+
+  async function addHypothesis(body: Parameters<typeof api.createInvestigationHypothesis>[1]) {
+    if (!current.value) return;
+    current.value = await api.createInvestigationHypothesis(current.value.id, body);
+    void fetchEvents();
+  }
+
+  async function updateHypothesis(hypothesisId: string, patch: Parameters<typeof api.updateInvestigationHypothesis>[2]) {
+    if (!current.value) return;
+    current.value = await api.updateInvestigationHypothesis(current.value.id, hypothesisId, patch);
+    void fetchEvents();
   }
 
   async function fetchInvestigations() {
@@ -311,6 +327,9 @@ export const useInvestigationStore = defineStore('investigation', () => {
     evidence,
     fetchEvidence,
     pinEvidence,
+    hypotheses,
+    addHypothesis,
+    updateHypothesis,
     loadWorkspace,
     addExpansion,
     derived,

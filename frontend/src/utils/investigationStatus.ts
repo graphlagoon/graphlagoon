@@ -1,10 +1,16 @@
-import type { Investigation, InvestigationStatus } from '@/types/investigation';
+import type { HypothesisStatus, Investigation, InvestigationStatus } from '@/types/investigation';
 
 export const STATUS_LABELS: Record<InvestigationStatus, string> = {
   selecao: 'Awaiting selection',
   analise: 'In analysis',
   decidido: 'Decided',
   arquivado: 'Archived',
+};
+
+export const HYPOTHESIS_STATUS_LABELS: Record<HypothesisStatus, string> = {
+  aberta: 'open',
+  sustentada: 'supported',
+  refutada: 'refuted',
 };
 
 const DAY_MS = 86_400_000;

@@ -42,7 +42,11 @@ def h(email):
 
 
 @pytest.fixture
-def ctx(monkeypatch):
+def ctx(monkeypatch, tmp_path):
+    from graphlagoon.services import investigation_storage
+    from graphlagoon.services.blob_storage import LocalBlobStore
+
+    monkeypatch.setattr(investigation_storage, "_store", LocalBlobStore(str(tmp_path)))
     monkeypatch.setenv("GRAPH_LAGOON_DEV_MODE", "true")
     monkeypatch.setenv("GRAPH_LAGOON_AGENTS_ENABLED", "true")
     get_settings.cache_clear()
@@ -146,3 +150,47 @@ def test_reject_requires_a_reason_and_status_proposals_apply(ctx):
         {"kind": "role", "payload": {"entity": "x", "role": "boss"}},
     ):
         assert client.post(f"{url}/proposals", json=bad, headers=proposer).status_code == 422
+
+
+def test_hypothesis_proposals_apply_like_the_dossier(ctx):
+    """F4.2: hypotheses live in state.hypotheses; agents propose, the accept
+    calls the same service as the dossier, and evidence ids must be the case's."""
+    client, agent, case = ctx
+    proposer = agent(["read", "write", "propose"])
+    url = case()
+    ev = client.post(f"{url}/evidence", json={"title": "E1", "kind": "table", "snapshot": []},
+                     headers=proposer).json()["id"]
+
+    direct = client.post(f"{url}/hypotheses", json={"text": "x"}, headers=proposer)
+    assert direct.json()["detail"]["error"]["code"] == "AGENT_MUST_PROPOSE"
+    # state cannot smuggle hypotheses past the journal
+    client.patch(url, json={"state": {"hypotheses": [{"id": "H9"}]}}, headers=h(OWNER))
+    assert client.get(url, headers=h(OWNER)).json()["state"].get("hypotheses") is None
+
+    text = "4471-0 é conta de passagem"
+    p = client.post(f"{url}/proposals", json={"kind": "hypothesis", "payload": {
+        "text": text, "evidence_for": [ev]}}, headers=proposer).json()
+    assert client.post(f"{url}/proposals/{p['id']}/accept", headers=h(OWNER)).status_code == 200
+
+    manual = case()
+    ev2 = client.post(f"{manual}/evidence", json={"title": "E1", "kind": "table", "snapshot": []},
+                      headers=h(OWNER)).json()["id"]
+    r = client.post(f"{manual}/hypotheses", json={"text": text, "evidence_for": [ev2]}, headers=h(OWNER))
+    assert r.status_code == 201, r.text
+    strip = lambda hs: [{k: v for k, v in x.items() if k not in ("created_at", "evidence_for")} for x in hs]  # noqa: E731
+    [hyp] = client.get(url, headers=h(OWNER)).json()["state"]["hypotheses"]
+    assert strip([hyp]) == strip(r.json()["state"]["hypotheses"])
+    assert hyp["id"] == "H1" and hyp["status"] == "aberta" and hyp["evidence_for"] == [ev]
+
+    bad = client.post(f"{manual}/hypotheses", json={"text": "y", "evidence_against": [ev]}, headers=h(OWNER))
+    assert bad.json()["detail"]["error"]["code"] == "EVIDENCE_NOT_IN_CASE"
+
+    p = client.post(f"{url}/proposals", json={"kind": "hypothesis_status", "payload": {
+        "hypothesis_id": "H1", "status": "sustentada"}}, headers=proposer).json()
+    client.post(f"{url}/proposals/{p['id']}/accept", headers=h(OWNER))
+    [hyp] = client.get(url, headers=h(OWNER)).json()["state"]["hypotheses"]
+    assert hyp["status"] == "sustentada" and hyp["evidence_for"] == [ev]
+    kinds = [e["kind"] for e in client.get(f"{url}/events", headers=h(OWNER)).json()]
+    assert kinds.count("hypothesis.created") == 1 and "hypothesis.updated" in kinds
+    assert client.post(f"{url}/proposals", json={"kind": "hypothesis_status", "payload": {
+        "hypothesis_id": "H1", "status": "talvez"}}, headers=proposer).status_code == 422
