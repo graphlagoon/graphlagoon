@@ -1,90 +1,61 @@
-"""Investigation cases: CRUD, nominal sharing and sources (03-arquitetura §3.1–3.2).
+"""Cases (05-plano-v2): one place with items, annotations, a journal and a
+decision. Rules live in ``services/cases*.py``; this module maps them to HTTP,
+the ``{"error": {...}}`` envelope and the audit trail.
 
-Rules live in services.investigations; this module maps them to HTTP, the
-`{"error": {...}}` envelope and the audit trail.
+Human-only routes (05 §6) carry ``forbid_agents``: decision, share, delete,
+reopen, export and confirming/rejecting suggestions. The middleware allowlists
+the rest for agent tokens; reads come back through ``agent_view`` (masked) and
+binary content never reaches an agent (it reads ``…/text``).
 """
 
 from __future__ import annotations
 
 from typing import Literal, Optional
-from uuid import UUID
-
 from urllib.parse import quote
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from graphlagoon.middleware.auth import get_current_actor, get_current_user
 from graphlagoon.models.schemas import (
-    ArtifactResponse,
-    ArtifactTextUpload,
-    EvidenceContentResponse,
-    EvidenceCreate,
-    EvidenceResponse,
-    FileContextCreate,
-    FileMappingUpdate,
-    HypothesisCreate,
-    HypothesisUpdate,
+    AnnotationCreate,
+    AnnotationResponse,
+    AnnotationUpdate,
+    BriefResponse,
+    BriefUpdate,
     InvestigationCreate,
     InvestigationDecisionCreate,
     InvestigationEventCreate,
     InvestigationEventResponse,
-    InvestigationFileResponse,
-    InvestigationNoteCreate,
-    InvestigationNoteResponse,
-    InvestigationNoteUpdate,
     InvestigationResponse,
     InvestigationShareRequest,
-    InvestigationSourceCreate,
-    InvestigationSourceResponse,
-    InvestigationStateUpdate,
     InvestigationUpdate,
-    MatchDecision,
-    MatchResponse,
-    MatchSuggestionsCreate,
+    ItemCreate,
+    ItemPinRequest,
+    ItemResponse,
+    ItemRunRequest,
+    ItemSearchHit,
+    ItemTextResponse,
+    ItemUpdate,
+    ItemVersionCreate,
+    ItemVersionResponse,
     PathsRequest,
-    ProposalCreate,
-    ProposalReject,
-    ProposalResponse,
     TraceRequest,
     TypologiesRequest,
 )
-from graphlagoon.services import audit
-from graphlagoon.services import investigation_artifacts as artifacts
-from graphlagoon.services import investigation_evidence as evidence
+from graphlagoon.services import audit, case_annotations, case_items, case_queries
+from graphlagoon.services import cases as service
 from graphlagoon.services import investigation_exports as exports
-from graphlagoon.services import investigation_files as files
-from graphlagoon.services import investigation_hypotheses as hypotheses
-from graphlagoon.services import investigation_matches as matches
-from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
-from graphlagoon.services import investigations as service
+from graphlagoon.services.audit import AuditAction
+from graphlagoon.services.case_graph import case_graph
+from graphlagoon.services.masking import agent_view
 from graphlagoon.services.paths import run_case_paths
 from graphlagoon.services.trace import run_case_trace
 from graphlagoon.services.typologies import run_case_typologies
-from graphlagoon.services.audit import AuditAction
-from graphlagoon.services.masking import TEXT_EXTENSIONS, agent_view
 from graphlagoon.utils.authz import agent_forbidden, forbid_agents, require_permission
 
 router = APIRouter(prefix="/api/investigations", tags=["investigations"])
-
-# Human-only routes (05 §6) carry forbid_agents; the middleware allowlists
-# the rest for agent tokens and reads come back through agent_view (masked).
-
-
-def _agent_must_propose(what: str) -> None:
-    """Roles, status and typology change through a proposal when an agent asks
-    (03 §8.4, Q9): the agent proposes, a person accepts."""
-    if get_current_actor():
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": {
-                    "code": "AGENT_MUST_PROPOSE",
-                    "message": f"Agents propose {what} changes; POST …/proposals.",
-                    "details": {},
-                }
-            },
-        )
 
 
 def _http(exc: service.InvestigationError) -> HTTPException:
@@ -94,28 +65,15 @@ def _http(exc: service.InvestigationError) -> HTTPException:
     )
 
 
-def _agent_bytes(data: bytes, name: str) -> bytes:
-    """Raw content as an agent may see it: text files masked, binary refused
-    (05 §6: binary never reaches the agent)."""
-    if not get_current_actor():
-        return data
-    if name.rsplit(".", 1)[-1].lower() not in TEXT_EXTENSIONS:
-        raise agent_forbidden("Agents read binary files only through their text.")
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        text = data.decode("latin-1")  # SIMBA layouts are Latin-1
-    return agent_view(text).encode("utf-8")
-
-
 async def _record(user_email: str, action: str, investigation_id: UUID, **meta):
     await audit.record(
-        user_email,
-        action,
-        resource_type="investigation",
-        resource_id=investigation_id,
-        metadata=meta,
+        user_email, action, resource_type="investigation", resource_id=investigation_id, metadata=meta
     )
+
+
+# ---------------------------------------------------------------------------
+# Case
+# ---------------------------------------------------------------------------
 
 
 @router.get("", response_model=list[InvestigationResponse])
@@ -123,74 +81,56 @@ async def list_investigations(
     request: Request,
     status: Optional[str] = None,
     assignee: Optional[str] = None,
-    typology: Optional[str] = None,
+    kind_preset: Optional[str] = None,
     exploration_id: Optional[UUID] = None,
 ):
     return await service.list_investigations(
-        get_current_user(request), status, assignee, typology, exploration_id
+        get_current_user(request), status, assignee, kind_preset, exploration_id
     )
 
 
 @router.post("", response_model=InvestigationResponse, status_code=201)
 async def create_investigation(
-    data: InvestigationCreate,
-    user_email: str = Depends(require_permission("investigation.create")),
+    data: InvestigationCreate, user_email: str = Depends(require_permission("investigation.create"))
 ):
     try:
         inv = await service.create_investigation(user_email, data.model_dump())
     except service.InvestigationError as exc:
         raise _http(exc)
-    await _record(
-        user_email, AuditAction.INVESTIGATION_CREATE, inv["id"], title=inv["title"]
-    )
+    await _record(user_email, AuditAction.INVESTIGATION_CREATE, inv["id"], title=inv["title"])
     return inv
 
 
 @router.get("/{investigation_id}", response_model=InvestigationResponse)
 async def get_investigation(investigation_id: UUID, request: Request):
     try:
-        return await service.get_investigation(
-            investigation_id, get_current_user(request)
-        )
+        return await service.get_investigation(investigation_id, get_current_user(request))
     except service.InvestigationError as exc:
         raise _http(exc)
 
 
 @router.patch("/{investigation_id}", response_model=InvestigationResponse)
-async def update_investigation(
-    investigation_id: UUID, data: InvestigationUpdate, request: Request
-):
+async def update_investigation(investigation_id: UUID, data: InvestigationUpdate, request: Request):
     user_email = get_current_user(request)
     changes = data.model_dump(exclude_unset=True)
-    if {"status", "typology"} & changes.keys():
-        _agent_must_propose("status and typology")
     if "assignee_email" in changes and get_current_actor():
         raise agent_forbidden("Assigning a case is reserved to people.")
     try:
         inv = await service.update_investigation(investigation_id, user_email, changes)
     except service.InvestigationError as exc:
         raise _http(exc)
-    await _record(
-        user_email,
-        AuditAction.INVESTIGATION_UPDATE,
-        investigation_id,
-        fields=sorted(changes),
-    )
+    await _record(user_email, AuditAction.INVESTIGATION_UPDATE, investigation_id, fields=sorted(changes))
     return inv
 
 
 @router.delete("/{investigation_id}", dependencies=[Depends(forbid_agents)])
-async def delete_investigation(
-    investigation_id: UUID, request: Request, reason: Optional[str] = None
-):
+async def delete_investigation(investigation_id: UUID, request: Request, reason: Optional[str] = None):
     user_email = get_current_user(request)
     try:
         meta = await service.delete_investigation(investigation_id, user_email, reason)
     except service.InvestigationError as exc:
         raise _http(exc)
-    await _record(
-        user_email, AuditAction.INVESTIGATION_DELETE, investigation_id, **meta
-    )
+    await _record(user_email, AuditAction.INVESTIGATION_DELETE, investigation_id, **meta)
     return {"status": "deleted"}
 
 
@@ -200,11 +140,12 @@ async def delete_investigation(
     dependencies=[Depends(forbid_agents)],
 )
 async def record_decision(
-    investigation_id: UUID, data: InvestigationDecisionCreate, request: Request
+    investigation_id: UUID,
+    data: InvestigationDecisionCreate,
+    user_email: str = Depends(require_permission("investigation.decide")),
 ):
-    """F4.5: human only. Freezes the live sources, stores ``frozen_hash``, and
-    the case becomes read-only (every mutation answers 409)."""
-    user_email = get_current_user(request)
+    """Human only (05 §7). Stores ``frozen_hash`` over the journal and the
+    pinned versions; the case becomes read-only (every mutation answers 409)."""
     try:
         inv = await service.record_decision(
             investigation_id, user_email, data.outcome, data.actions, data.rationale
@@ -228,7 +169,7 @@ async def record_decision(
     dependencies=[Depends(forbid_agents)],
 )
 async def reopen_investigation(investigation_id: UUID, request: Request):
-    """F1 (05 §3): decidido → analise, human only; journaled as ``case.reopened``."""
+    """decided → analysis, human only; journaled as ``case.reopened``."""
     user_email = get_current_user(request)
     try:
         inv = await service.reopen_investigation(investigation_id, user_email)
@@ -241,11 +182,13 @@ async def reopen_investigation(investigation_id: UUID, request: Request):
 @router.get("/{investigation_id}/export", dependencies=[Depends(forbid_agents)])
 async def export_investigation(
     investigation_id: UUID,
+    request: Request,
     format: Literal["json", "csv", "simba", "siscoaf"] = "json",
-    user_email: str = Depends(require_permission("investigation.export")),
 ):
-    """F4.6: package (json), csv, SIMBA (zip) or Siscoaf summary; audited with
-    the sha256 of what left the app. Human only: exports carry unmasked data."""
+    """Package (json), csv, SIMBA (zip) or Siscoaf summary; verifies the frozen
+    hash and is audited with the sha256 of what left the app. Human only:
+    exports carry unmasked data."""
+    user_email = get_current_user(request)
     try:
         out = await exports.export(investigation_id, user_email, format)
     except service.InvestigationError as exc:
@@ -271,121 +214,479 @@ async def export_investigation(
 
 @router.post("/{investigation_id}/share", dependencies=[Depends(forbid_agents)])
 async def share_investigation(
-    investigation_id: UUID, data: InvestigationShareRequest, request: Request
+    investigation_id: UUID,
+    data: InvestigationShareRequest,
+    user_email: str = Depends(require_permission("investigation.share")),
 ):
-    user_email = get_current_user(request)
     try:
-        email = await service.share_investigation(
-            investigation_id, user_email, data.email, data.permission
-        )
+        email = await service.share_investigation(investigation_id, user_email, data.email, data.role)
     except service.InvestigationError as exc:
         raise _http(exc)
     await _record(
-        user_email,
-        AuditAction.INVESTIGATION_SHARE,
-        investigation_id,
-        **{"with": email},
-        permission=data.permission,
+        user_email, AuditAction.INVESTIGATION_SHARE, investigation_id, **{"with": email}, role=data.role
     )
     return {"status": "shared"}
 
 
-@router.delete(
-    "/{investigation_id}/share/{email}", dependencies=[Depends(forbid_agents)]
-)
-async def unshare_investigation(investigation_id: UUID, email: str, request: Request):
-    user_email = get_current_user(request)
+@router.delete("/{investigation_id}/share/{email}", dependencies=[Depends(forbid_agents)])
+async def unshare_investigation(
+    investigation_id: UUID,
+    email: str,
+    user_email: str = Depends(require_permission("investigation.share")),
+):
     try:
-        removed = await service.unshare_investigation(
-            investigation_id, user_email, email
-        )
+        removed = await service.unshare_investigation(investigation_id, user_email, email)
     except service.InvestigationError as exc:
         raise _http(exc)
     if removed:
-        await _record(
-            user_email,
-            AuditAction.INVESTIGATION_UNSHARE,
-            investigation_id,
-            **{"with": email},
-        )
+        await _record(user_email, AuditAction.INVESTIGATION_UNSHARE, investigation_id, **{"with": email})
     return {"status": "removed"}
 
 
-@router.get(
-    "/{investigation_id}/sources", response_model=list[InvestigationSourceResponse]
-)
-async def list_sources(investigation_id: UUID, request: Request):
-    try:
-        return await service.list_sources(investigation_id, get_current_user(request))
-    except service.InvestigationError as exc:
-        raise _http(exc)
+# ---------------------------------------------------------------------------
+# Items (05 §1): JSON bodies for text/JSON content; a raw body streams an upload
+# (filename, kind, subkind, title in the query; needs investigation.upload).
+# ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/{investigation_id}/sources",
-    response_model=InvestigationSourceResponse,
-    status_code=201,
-)
-async def add_source(
-    investigation_id: UUID, data: InvestigationSourceCreate, request: Request
-):
-    user_email = get_current_user(request)
-    try:
-        source = await service.add_source(
-            investigation_id, user_email, data.exploration_id, data.mode
+async def _receive_upload(request: Request, investigation_id: UUID, user_email: str) -> storage.Received:
+    from graphlagoon.config import get_settings
+    from graphlagoon.services.permissions import check_permission
+
+    if not (await check_permission(user_email, "investigation.upload")).allowed:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "PERMISSION_DENIED",
+                    "message": 'You do not have the "Upload investigation files" permission.',
+                    "details": {"permission": "investigation.upload"},
+                }
+            },
         )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-    await _record(
-        user_email,
-        AuditAction.INVESTIGATION_SOURCE_ADD,
-        investigation_id,
-        source_id=str(source["id"]),
-        exploration_id=str(data.exploration_id),
-        mode=data.mode,
-        sha256=source.get("frozen_sha256"),
-    )
-    return source
-
-
-@router.delete("/{investigation_id}/sources/{source_id}")
-async def remove_source(investigation_id: UUID, source_id: UUID, request: Request):
-    user_email = get_current_user(request)
+    max_bytes = get_settings().investigation_file_max_bytes
     try:
-        meta = await service.remove_source(investigation_id, user_email, source_id)
+        await service.ensure_case_access(investigation_id, user_email, "write")
     except service.InvestigationError as exc:
         raise _http(exc)
-    await _record(
-        user_email,
-        AuditAction.INVESTIGATION_SOURCE_REMOVE,
-        investigation_id,
-        source_id=str(source_id),
-        **meta,
-    )
-    return {"status": "removed"}
+    try:
+        return await storage.receive(request.stream(), max_bytes)
+    except storage.TooLarge:
+        raise _http(
+            service.InvestigationError(413, "FILE_TOO_LARGE", f"Files are limited to {max_bytes} bytes")
+        )
 
 
-@router.get("/{investigation_id}/sources/{source_id}/snapshot")
-async def get_source_snapshot(
-    investigation_id: UUID, source_id: UUID, request: Request
+def _is_json(request: Request) -> bool:
+    return request.headers.get("content-type", "").startswith("application/json")
+
+
+async def _json_body(request: Request, model):
+    try:
+        return model.model_validate(await request.json())
+    except ValueError as exc:  # pydantic's ValidationError included
+        raise _http(service.InvestigationError(422, "INVALID_BODY", str(exc)))
+
+
+@router.get("/{investigation_id}/items", response_model=list[ItemResponse])
+async def list_items(
+    investigation_id: UUID,
+    request: Request,
+    kind: Optional[str] = None,
+    status: Optional[str] = None,
+    include_deleted: bool = False,
 ):
     try:
         return agent_view(
-            await service.source_snapshot(
-                investigation_id, get_current_user(request), source_id
+            await case_items.list_items(
+                investigation_id, get_current_user(request), kind, status, include_deleted
             )
         )
     except service.InvestigationError as exc:
         raise _http(exc)
 
 
-# Journal, state and notes (F1.7): recorded in the case's own hash-chained
-# journal rather than the audit log (see AUDIT_EXEMPT_ROUTES).
+@router.post("/{investigation_id}/items", response_model=ItemResponse, status_code=201)
+async def create_item(
+    investigation_id: UUID,
+    request: Request,
+    kind: Optional[str] = None,
+    subkind: Optional[str] = None,
+    title: Optional[str] = None,
+    filename: Optional[str] = None,
+):
+    user_email = get_current_user(request)
+    try:
+        if _is_json(request):
+            body = await _json_body(request, ItemCreate)
+            content, content_type = case_items.encode_content(body.content, body.content_json)
+            item = await case_items.create_item(
+                investigation_id, user_email, body.model_dump(exclude={"content", "content_json"}), content, content_type
+            )
+        else:
+            received = await _receive_upload(request, investigation_id, user_email)
+            data = {
+                "kind": kind or "document",
+                "subkind": subkind or ("csv" if kind == "table" else "upload"),
+                "title": title,
+                "filename": filename or title,
+            }
+            item = await case_items.create_item(
+                investigation_id, user_email, data, None, request.headers.get("content-type"), received=received
+            )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_ITEM_ADD,
+        investigation_id,
+        item_id=str(item["id"]),
+        kind=f"{item['kind']}/{item['subkind']}",
+        title=item["title"],
+        sha256=(item["latest"] or {}).get("sha256"),
+    )
+    return agent_view(item)
 
 
-@router.get(
-    "/{investigation_id}/events", response_model=list[InvestigationEventResponse]
+@router.get("/{investigation_id}/items/{item_id}", response_model=ItemResponse)
+async def get_item(investigation_id: UUID, item_id: UUID, request: Request):
+    try:
+        return agent_view(await case_items.get_item(investigation_id, get_current_user(request), item_id))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.patch("/{investigation_id}/items/{item_id}", response_model=ItemResponse)
+async def update_item(investigation_id: UUID, item_id: UUID, data: ItemUpdate, request: Request):
+    try:
+        return agent_view(
+            await case_items.update_item(
+                investigation_id, get_current_user(request), item_id, data.model_dump(exclude_unset=True)
+            )
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.delete("/{investigation_id}/items/{item_id}")
+async def delete_item(investigation_id: UUID, item_id: UUID, request: Request):
+    user_email = get_current_user(request)
+    try:
+        meta = await case_items.delete_item(investigation_id, user_email, item_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(user_email, AuditAction.INVESTIGATION_ITEM_REMOVE, investigation_id, item_id=str(item_id), **meta)
+    return {"status": "deleted"}
+
+
+@router.get("/{investigation_id}/items/{item_id}/versions", response_model=list[ItemVersionResponse])
+async def list_versions(investigation_id: UUID, item_id: UUID, request: Request):
+    try:
+        return await case_items.list_versions(investigation_id, get_current_user(request), item_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/items/{item_id}/versions", response_model=ItemResponse, status_code=201)
+async def add_version(investigation_id: UUID, item_id: UUID, request: Request):
+    user_email = get_current_user(request)
+    try:
+        if _is_json(request):
+            body = await _json_body(request, ItemVersionCreate)
+            content, content_type = case_items.encode_content(body.content, body.content_json)
+            if content is None:
+                raise service.InvestigationError(422, "INVALID_BODY", "Give content or content_json")
+            item = await case_items.add_version(investigation_id, user_email, item_id, content, content_type)
+        else:
+            received = await _receive_upload(request, investigation_id, user_email)
+            item = await case_items.add_version(
+                investigation_id, user_email, item_id, None, request.headers.get("content-type"), received=received
+            )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    return agent_view(item)
+
+
+@router.get("/{investigation_id}/items/{item_id}/content")
+async def get_content(
+    investigation_id: UUID, item_id: UUID, request: Request, version: Optional[int] = None, download: bool = False
+):
+    """The bytes of a version. Agents read text through ``…/text`` (05 §6)."""
+    if get_current_actor():
+        raise agent_forbidden("Agents read an item through its text (…/items/{id}/text).")
+    user_email = get_current_user(request)
+    try:
+        data, meta, item = await case_items.get_content(investigation_id, user_email, item_id, version)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email, AuditAction.INVESTIGATION_ITEM_READ, investigation_id,
+        item_id=str(item_id), version=meta["version"], sha256=meta["sha256"],
+    )
+    name = (item["provenance"] or {}).get("filename") or f"{item['title']}.{'json' if meta['content_type'] == 'application/json' else 'txt'}"
+    # Case data is never rendered by the browser (XSS): opaque type unless inline JSON/text.
+    inline = meta["content_type"].startswith(("application/json", "text/plain", "text/markdown", "text/csv")) and not download
+    return Response(
+        content=data,
+        media_type=meta["content_type"] if inline else "application/octet-stream",
+        headers={
+            "Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(name)}",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+            "X-Content-SHA256": meta["sha256"],
+        },
+    )
+
+
+@router.get("/{investigation_id}/items/{item_id}/text", response_model=ItemTextResponse)
+async def get_text(investigation_id: UUID, item_id: UUID, request: Request, version: Optional[int] = None):
+    """The text extraction of a version (null when the format has none); masked for agents."""
+    try:
+        text, meta = await case_items.get_text(investigation_id, get_current_user(request), item_id, version)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    return agent_view({"text": text, "version": meta})
+
+
+@router.post("/{investigation_id}/items/{item_id}/pin", response_model=ItemVersionResponse)
+async def pin_item(investigation_id: UUID, item_id: UUID, data: ItemPinRequest, request: Request):
+    """Pins a version as evidence (immutable); a live exploration is frozen first."""
+    try:
+        return await case_items.pin_version(
+            investigation_id, get_current_user(request), item_id, data.version, data.label
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/items/{item_id}/confirm",
+    response_model=ItemResponse,
+    dependencies=[Depends(forbid_agents)],
 )
+async def confirm_item(investigation_id: UUID, item_id: UUID, request: Request):
+    try:
+        return await case_items.set_status(investigation_id, get_current_user(request), item_id, "confirmed")
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/items/{item_id}/reject",
+    response_model=ItemResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def reject_item(investigation_id: UUID, item_id: UUID, request: Request):
+    try:
+        return await case_items.set_status(investigation_id, get_current_user(request), item_id, "rejected")
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/items/{item_id}/run", response_model=ItemResponse)
+async def run_query(investigation_id: UUID, item_id: UUID, data: ItemRunRequest, request: Request):
+    """Executes a saved query (05 §1) and stores the result as a version with ``run``."""
+    try:
+        return agent_view(
+            await case_queries.run_query(
+                investigation_id, get_current_user(request), item_id, data.parameters, data.row_limit
+            )
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+# ---------------------------------------------------------------------------
+# Annotations
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{investigation_id}/annotations", response_model=list[AnnotationResponse])
+async def list_annotations(
+    investigation_id: UUID,
+    request: Request,
+    kind: Optional[str] = None,
+    status: Optional[str] = None,
+    target: Optional[str] = None,
+):
+    try:
+        return agent_view(
+            await case_annotations.list_annotations(
+                investigation_id, get_current_user(request), kind, status, target
+            )
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/annotations", response_model=AnnotationResponse, status_code=201)
+async def create_annotation(investigation_id: UUID, data: AnnotationCreate, request: Request):
+    try:
+        return agent_view(
+            await case_annotations.create_annotation(
+                investigation_id, get_current_user(request), data.kind, data.targets, data.value, data.reason
+            )
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.patch("/{investigation_id}/annotations/{annotation_id}", response_model=AnnotationResponse)
+async def update_annotation(
+    investigation_id: UUID, annotation_id: UUID, data: AnnotationUpdate, request: Request
+):
+    try:
+        return agent_view(
+            await case_annotations.update_annotation(
+                investigation_id, get_current_user(request), annotation_id, data.model_dump(exclude_unset=True)
+            )
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.delete("/{investigation_id}/annotations/{annotation_id}")
+async def delete_annotation(investigation_id: UUID, annotation_id: UUID, request: Request):
+    try:
+        await case_annotations.delete_annotation(investigation_id, get_current_user(request), annotation_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    return {"status": "deleted"}
+
+
+@router.post(
+    "/{investigation_id}/annotations/{annotation_id}/confirm",
+    response_model=AnnotationResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def confirm_annotation(investigation_id: UUID, annotation_id: UUID, request: Request):
+    try:
+        return await case_annotations.set_status(
+            investigation_id, get_current_user(request), annotation_id, "confirmed"
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/annotations/{annotation_id}/reject",
+    response_model=AnnotationResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def reject_annotation(investigation_id: UUID, annotation_id: UUID, request: Request):
+    try:
+        return await case_annotations.set_status(
+            investigation_id, get_current_user(request), annotation_id, "rejected"
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+# ---------------------------------------------------------------------------
+# Graph, analyses, journal, brief, search
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{investigation_id}/graph")
+async def get_graph(investigation_id: UUID, request: Request, item_id: Optional[str] = None):
+    """The unified case graph (identity keys and confirmed same_as applied), or
+    one item's with ``item_id``. Masked for agents."""
+    try:
+        graph = await case_graph(investigation_id, get_current_user(request), item_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    secrets = graph.pop("secrets", frozenset())
+    return agent_view(graph, secrets)
+
+
+@router.get("/{investigation_id}/items/{item_id}/snapshot")
+async def get_item_snapshot(investigation_id: UUID, item_id: UUID, request: Request):
+    """What one graph item puts on the canvas (snapshot, identity keys, edge
+    semantics); the browser unifies these with ``unifyGraph.ts``."""
+    from graphlagoon.services.case_graph import is_graph_item, item_snapshot
+    from graphlagoon.services.case_items import _context_readable, item_row
+
+    user_email = get_current_user(request)
+    try:
+        async with service._session() as session:
+            inv = await service.load_case(session, investigation_id, user_email)
+            item = await item_row(session, investigation_id, item_id)
+            if not is_graph_item(item):
+                raise service.InvestigationError(422, "NOT_A_GRAPH_ITEM", "This item puts nothing on the canvas")
+            if not await _context_readable(item.context_id, user_email):
+                raise service.InvestigationError(403, "SOURCE_RESTRICTED", "You don't have access to this item's context")
+            return agent_view(await item_snapshot(session, inv, item, user_email))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/analysis/trace")
+async def analysis_trace(investigation_id: UUID, data: TraceRequest, request: Request):
+    try:
+        return agent_view(await run_case_trace(investigation_id, get_current_user(request), data))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/analysis/paths")
+async def analysis_paths(investigation_id: UUID, data: PathsRequest, request: Request):
+    try:
+        return agent_view(await run_case_paths(investigation_id, get_current_user(request), data))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/analysis/typologies")
+async def analysis_typologies(investigation_id: UUID, data: TypologiesRequest, request: Request):
+    """Typology badges (CC 4.001): suggestions only; a person confirms them as annotations."""
+    try:
+        return agent_view(
+            await run_case_typologies(investigation_id, get_current_user(request), data.typologies, data.params)
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/analysis/er", response_model=list[AnnotationResponse])
+async def analysis_er(investigation_id: UUID, request: Request):
+    """Entity resolution on the unified graph: new pairs become ``same_as``
+    annotations, suggested (a person confirms them in the inspector)."""
+    from graphlagoon.services.entity_resolution import suggest
+
+    user_email = get_current_user(request)
+    try:
+        graph = await case_graph(investigation_id, user_email)
+        known = {
+            tuple(a["targets"])
+            for a in await case_annotations.list_annotations(investigation_id, user_email, "same_as")
+        }
+        created = []
+        for match in suggest(graph["nodes"]):
+            pair = (match["left"]["uid"], match["right"]["uid"])
+            if pair in known or pair[::-1] in known:
+                continue
+            row = await case_annotations.create_annotation(
+                investigation_id, user_email, "same_as", list(pair),
+                {"score": match["score"], "reasons": match["reasons"]},
+            )
+            if not get_current_actor():  # a person's run is still a suggestion to review
+                row = await _suggest(investigation_id, row)
+            created.append(row)
+        return agent_view(created, graph.get("secrets", frozenset()))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+async def _suggest(investigation_id: UUID, row: dict) -> dict:
+    """Entity-resolution hits are suggestions whoever ran them (05 §4b)."""
+    async with service._session() as session:
+        a = await service.get_row(session, case_annotations.TABLE, row["id"])
+        await service.update_row(session, case_annotations.TABLE, a, status="suggested")
+        await service.commit(session)
+        return case_annotations.serialize(a)
+
+
+@router.get("/{investigation_id}/events", response_model=list[InvestigationEventResponse])
 async def list_events(
     investigation_id: UUID,
     request: Request,
@@ -394,22 +695,14 @@ async def list_events(
 ):
     try:
         return agent_view(
-            await service.list_events(
-                investigation_id, get_current_user(request), after, limit
-            )
+            await service.list_events(investigation_id, get_current_user(request), after, limit)
         )
     except service.InvestigationError as exc:
         raise _http(exc)
 
 
-@router.post(
-    "/{investigation_id}/events",
-    response_model=InvestigationEventResponse,
-    status_code=201,
-)
-async def post_event(
-    investigation_id: UUID, data: InvestigationEventCreate, request: Request
-):
+@router.post("/{investigation_id}/events", response_model=InvestigationEventResponse, status_code=201)
+async def post_event(investigation_id: UUID, data: InvestigationEventCreate, request: Request):
     try:
         return await service.post_client_event(
             investigation_id, get_current_user(request), data.kind, data.payload
@@ -418,594 +711,26 @@ async def post_event(
         raise _http(exc)
 
 
-@router.patch("/{investigation_id}/state", response_model=InvestigationResponse)
-async def update_state(
-    investigation_id: UUID, data: InvestigationStateUpdate, request: Request
-):
-    if data.roles:
-        _agent_must_propose("role")
+@router.get("/{investigation_id}/brief", response_model=BriefResponse)
+async def get_brief(investigation_id: UUID, request: Request):
     try:
-        return await service.update_state(
-            investigation_id, get_current_user(request), data.roles, data.pins
-        )
+        return agent_view(await case_items.get_brief(investigation_id, get_current_user(request)))
     except service.InvestigationError as exc:
         raise _http(exc)
 
 
-@router.get("/{investigation_id}/notes", response_model=list[InvestigationNoteResponse])
-async def list_notes(investigation_id: UUID, request: Request):
+@router.put("/{investigation_id}/brief", response_model=BriefResponse)
+async def put_brief(investigation_id: UUID, data: BriefUpdate, request: Request):
+    """The single ``document/brief`` item: a new version per save (05 §6)."""
     try:
-        return await service.list_notes(investigation_id, get_current_user(request))
+        return agent_view(await case_items.put_brief(investigation_id, get_current_user(request), data.text))
     except service.InvestigationError as exc:
         raise _http(exc)
 
 
-@router.post(
-    "/{investigation_id}/notes",
-    response_model=InvestigationNoteResponse,
-    status_code=201,
-)
-async def create_note(
-    investigation_id: UUID, data: InvestigationNoteCreate, request: Request
-):
+@router.get("/{investigation_id}/search", response_model=list[ItemSearchHit])
+async def search(investigation_id: UUID, request: Request, q: str = Query(min_length=1, max_length=200)):
     try:
-        return await service.create_note(
-            investigation_id,
-            get_current_user(request),
-            data.anchor.model_dump(),
-            data.body,
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.patch(
-    "/{investigation_id}/notes/{note_id}", response_model=InvestigationNoteResponse
-)
-async def update_note(
-    investigation_id: UUID,
-    note_id: UUID,
-    data: InvestigationNoteUpdate,
-    request: Request,
-):
-    try:
-        return await service.update_note(
-            investigation_id, get_current_user(request), note_id, data.model_dump()
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.delete("/{investigation_id}/notes/{note_id}")
-async def delete_note(investigation_id: UUID, note_id: UUID, request: Request):
-    try:
-        await service.delete_note(investigation_id, get_current_user(request), note_id)
-    except service.InvestigationError as exc:
-        raise _http(exc)
-    return {"status": "deleted"}
-
-
-# Frozen evidence (F4.1, 03 §3.5): write once, no update or delete; recorded
-# in the case journal (AUDIT_EXEMPT_ROUTES). Agents pin directly (Q9).
-
-
-@router.get("/{investigation_id}/evidence", response_model=list[EvidenceResponse])
-async def list_evidence(investigation_id: UUID, request: Request):
-    try:
-        return await evidence.list_evidence(investigation_id, get_current_user(request))
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/evidence", response_model=EvidenceResponse, status_code=201
-)
-async def create_evidence(investigation_id: UUID, data: EvidenceCreate, request: Request):
-    try:
-        return await evidence.create_evidence(
-            investigation_id,
-            get_current_user(request),
-            data.title,
-            data.kind,
-            data.params,
-            data.snapshot,
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.get(
-    "/{investigation_id}/evidence/{evidence_id}",
-    response_model=EvidenceContentResponse,
-)
-async def get_evidence(investigation_id: UUID, evidence_id: UUID, request: Request):
-    try:
-        return agent_view(
-            await evidence.get_evidence(
-                investigation_id, get_current_user(request), evidence_id
-            )
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-# Hypotheses (F4.2) live in state.hypotheses; journaled. Agents propose them
-# (kinds hypothesis and hypothesis_status); accepting calls the same service.
-
-
-@router.post(
-    "/{investigation_id}/hypotheses",
-    response_model=InvestigationResponse,
-    status_code=201,
-)
-async def create_hypothesis(
-    investigation_id: UUID, data: HypothesisCreate, request: Request
-):
-    _agent_must_propose("hypothesis")
-    try:
-        return await hypotheses.add_hypothesis(
-            investigation_id, get_current_user(request), **data.model_dump()
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.patch(
-    "/{investigation_id}/hypotheses/{hypothesis_id}",
-    response_model=InvestigationResponse,
-)
-async def update_hypothesis(
-    investigation_id: UUID, hypothesis_id: str, data: HypothesisUpdate, request: Request
-):
-    _agent_must_propose("hypothesis")
-    try:
-        return await hypotheses.update_hypothesis(
-            investigation_id,
-            get_current_user(request),
-            hypothesis_id,
-            data.model_dump(exclude_unset=True),
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-# Case space (FA.2, 03 §8.5). A binary goes as the raw request body (streamed to
-# a temp file while hashed, never held in memory) with name/kind/note in the
-# query; text goes as JSON. Recorded in the case journal (AUDIT_EXEMPT_ROUTES).
-
-
-async def _receive_artifact(
-    investigation_id: UUID,
-    request: Request,
-    name: Optional[str],
-    kind: Optional[str],
-    note: Optional[str],
-    evidence: list[str],
-) -> tuple[storage.Received, dict]:
-    from graphlagoon.config import get_settings
-
-    max_bytes = get_settings().artifact_max_bytes
-    try:
-        await service.ensure_case_access(
-            investigation_id, get_current_user(request), "write"
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-    if request.headers.get("content-type", "").startswith("application/json"):
-        try:
-            body = ArtifactTextUpload.model_validate(await request.json())
-        except ValueError as exc:  # pydantic's ValidationError included
-            raise _http(service.InvestigationError(422, "INVALID_BODY", str(exc)))
-        data = body.text.encode("utf-8")
-
-        async def chunks():
-            yield data
-
-        meta = {
-            "name": body.name,
-            "kind": body.kind,
-            "note": body.note,
-            "source_evidence_ids": body.source_evidence_ids,
-        }
-    else:
-        chunks = request.stream
-        meta = {"name": name, "kind": kind, "note": note, "source_evidence_ids": evidence}
-    try:
-        received = await storage.receive(chunks(), max_bytes)
-    except storage.TooLarge:
-        raise _http(
-            service.InvestigationError(
-                413, "ARTIFACT_TOO_LARGE", f"Artifacts are limited to {max_bytes} bytes"
-            )
-        )
-    return received, meta
-
-
-@router.get(
-    "/{investigation_id}/artifacts", response_model=list[ArtifactResponse]
-)
-async def list_artifacts(investigation_id: UUID, request: Request):
-    try:
-        return await artifacts.list_artifacts(
-            investigation_id, get_current_user(request)
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/artifacts",
-    response_model=ArtifactResponse,
-    status_code=201,
-)
-async def create_artifact(
-    investigation_id: UUID,
-    request: Request,
-    name: Optional[str] = None,
-    kind: Optional[str] = None,
-    note: Optional[str] = None,
-    source_evidence_ids: list[str] = Query(default_factory=list),
-):
-    received, meta = await _receive_artifact(
-        investigation_id, request, name, kind, note, source_evidence_ids
-    )
-    try:
-        return await artifacts.create_artifact(
-            investigation_id, get_current_user(request), received, **meta
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/artifacts/{artifact_id}/versions",
-    response_model=ArtifactResponse,
-    status_code=201,
-)
-async def add_artifact_version(
-    investigation_id: UUID,
-    artifact_id: UUID,
-    request: Request,
-    name: Optional[str] = None,
-    note: Optional[str] = None,
-    source_evidence_ids: list[str] = Query(default_factory=list),
-):
-    received, meta = await _receive_artifact(
-        investigation_id, request, name, None, note, source_evidence_ids
-    )
-    meta.pop("kind")
-    try:
-        return await artifacts.add_version(
-            investigation_id, get_current_user(request), artifact_id, received, **meta
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.get("/{investigation_id}/artifacts/{artifact_id}/versions/{version}/content")
-async def get_artifact_content(
-    investigation_id: UUID,
-    artifact_id: UUID,
-    version: int,
-    request: Request,
-    download: bool = False,
-):
-    try:
-        data, meta = await artifacts.get_content(
-            investigation_id, get_current_user(request), artifact_id, version
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-    data = _agent_bytes(data, meta["name"])
-    # html/svg are never rendered by the browser (XSS): attachment + opaque type.
-    attach = download or meta["download_only"]
-    media_type = (
-        "application/octet-stream" if meta["download_only"] else meta["content_type"]
-    )
-    return Response(
-        content=data,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": (
-                f"{'attachment' if attach else 'inline'}; "
-                f"filename*=UTF-8''{quote(meta['name'])}"
-            ),
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "sandbox",
-            "X-Content-SHA256": meta["sha256"],
-        },
-    )
-
-
-@router.post(
-    "/{investigation_id}/artifacts/{artifact_id}/versions/{version}/approve",
-    response_model=ArtifactResponse,
-    dependencies=[Depends(forbid_agents)],
-)
-async def approve_artifact_version(
-    investigation_id: UUID, artifact_id: UUID, version: int, request: Request
-):
-    try:
-        return await artifacts.approve_version(
-            investigation_id, get_current_user(request), artifact_id, version
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-# Case files (F2.3, 03 §3.3): raw request body like the case space (no
-# multipart parser installed), filename and role in the query. Upload and
-# content reads are audited (sensitive reads).
-
-
-@router.get(
-    "/{investigation_id}/files", response_model=list[InvestigationFileResponse]
-)
-async def list_files(investigation_id: UUID, request: Request):
-    try:
-        return await files.list_files(investigation_id, get_current_user(request))
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/files",
-    response_model=InvestigationFileResponse,
-    status_code=201,
-)
-async def upload_file(
-    investigation_id: UUID,
-    request: Request,
-    filename: Optional[str] = None,
-    role: Optional[str] = None,
-    user_email: str = Depends(require_permission("investigation.upload")),
-):
-    from graphlagoon.config import get_settings
-
-    max_bytes = get_settings().investigation_file_max_bytes
-    try:
-        await service.ensure_case_access(investigation_id, user_email, "write")
-    except service.InvestigationError as exc:
-        raise _http(exc)
-    try:
-        received = await storage.receive(request.stream(), max_bytes)
-    except storage.TooLarge:
-        raise _http(
-            service.InvestigationError(
-                413, "FILE_TOO_LARGE", f"Files are limited to {max_bytes} bytes"
-            )
-        )
-    try:
-        row = await files.upload_file(
-            investigation_id, user_email, received, filename, role
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-    await _record(
-        user_email,
-        AuditAction.INVESTIGATION_FILE_UPLOAD,
-        investigation_id,
-        file_id=str(row["id"]),
-        filename=row["filename"],
-        role=row["role"],
-        sha256=row["sha256"],
-    )
-    return row
-
-
-@router.get("/{investigation_id}/files/{file_id}/content")
-async def get_file_content(investigation_id: UUID, file_id: UUID, request: Request):
-    user_email = get_current_user(request)
-    try:
-        data, meta = await files.get_content(investigation_id, user_email, file_id)
-    except service.InvestigationError as exc:
-        raise _http(exc)
-    await _record(
-        user_email,
-        AuditAction.INVESTIGATION_FILE_READ,
-        investigation_id,
-        file_id=str(file_id),
-        sha256=meta["sha256"],
-    )
-    data = _agent_bytes(data, meta["filename"])
-    # Case data is never rendered by the browser: always a download.
-    return Response(
-        content=data,
-        media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": (
-                f"attachment; filename*=UTF-8''{quote(meta['filename'])}"
-            ),
-            "X-Content-Type-Options": "nosniff",
-            "X-Content-SHA256": meta["sha256"],
-        },
-    )
-
-
-
-@router.patch(
-    "/{investigation_id}/files/{file_id}", response_model=InvestigationFileResponse
-)
-async def set_file_mapping(
-    investigation_id: UUID,
-    file_id: UUID,
-    data: FileMappingUpdate,
-    user_email: str = Depends(require_permission("investigation.upload")),
-):
-    """Stores how an enrichment file joins the case's nodes (F2.6)."""
-    try:
-        return await files.set_mapping(investigation_id, user_email, file_id, data.mapping)
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post("/{investigation_id}/files/{file_id}/context", status_code=201)
-async def create_file_context(
-    investigation_id: UUID,
-    file_id: UUID,
-    data: FileContextCreate,
-    user_email: str = Depends(require_permission("investigation.upload")),
-):
-    """Generates the file graph on the server (F2.5): a ``file`` context, an
-    exploration and a source of the case. Edges are capped at
-    ``investigation_max_working_edges``."""
-    try:
-        return await files.generate_context(
-            investigation_id, user_email, file_id, data.mapping, data.file_ids, data.title
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-# Proposals (FA.3, 03 §8.4): an agent proposes (scope "propose"); only a person
-# accepts or rejects. Recorded in the case journal (AUDIT_EXEMPT_ROUTES).
-
-
-@router.get(
-    "/{investigation_id}/proposals", response_model=list[ProposalResponse]
-)
-async def list_proposals(
-    investigation_id: UUID, request: Request, status: Optional[str] = None
-):
-    try:
-        return await proposals.list_proposals(
-            investigation_id, get_current_user(request), status
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/proposals",
-    response_model=ProposalResponse,
-    status_code=201,
-)
-async def create_proposal(
-    investigation_id: UUID, data: ProposalCreate, request: Request
-):
-    try:
-        return await proposals.create_proposal(
-            investigation_id,
-            get_current_user(request),
-            data.kind,
-            data.payload,
-            data.rationale,
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/proposals/{proposal_id}/accept",
-    response_model=ProposalResponse,
-    dependencies=[Depends(forbid_agents)],
-)
-async def accept_proposal(investigation_id: UUID, proposal_id: UUID, request: Request):
-    try:
-        return await proposals.accept_proposal(
-            investigation_id, get_current_user(request), proposal_id
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/proposals/{proposal_id}/reject",
-    response_model=ProposalResponse,
-    dependencies=[Depends(forbid_agents)],
-)
-async def reject_proposal(
-    investigation_id: UUID, proposal_id: UUID, data: ProposalReject, request: Request
-):
-    try:
-        return await proposals.reject_proposal(
-            investigation_id, get_current_user(request), proposal_id, data.reason
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-# Entity matches (F2.8, 03 §3.5/§6.2): suggestions are stored as "sugerido";
-# only a person decides (agents propose kind "match"). Recorded in the journal.
-
-
-@router.get("/{investigation_id}/matches", response_model=list[MatchResponse])
-async def list_matches(investigation_id: UUID, request: Request):
-    try:
-        return await matches.list_matches(investigation_id, get_current_user(request))
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/matches", response_model=list[MatchResponse], status_code=201
-)
-async def add_match_suggestions(
-    investigation_id: UUID, data: MatchSuggestionsCreate, request: Request
-):
-    try:
-        return await matches.add_suggestions(
-            investigation_id,
-            get_current_user(request),
-            [m.model_dump() for m in data.matches],
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.patch(
-    "/{investigation_id}/matches/{match_id}",
-    response_model=MatchResponse,
-    dependencies=[Depends(forbid_agents)],
-)
-async def decide_match(
-    investigation_id: UUID, match_id: UUID, data: MatchDecision, request: Request
-):
-    try:
-        return await matches.decide_match(
-            investigation_id,
-            get_current_user(request),
-            match_id,
-            data.status,
-            data.reason_text,
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-# Server analyses on the unified case graph (F3.8): same results as the browser
-# workers, journaled as trace.run / path.run; agents need the "analyze" scope.
-
-
-@router.post(
-    "/{investigation_id}/analysis/trace",
-)
-async def analysis_trace(investigation_id: UUID, data: TraceRequest, request: Request):
-    try:
-        return await run_case_trace(investigation_id, get_current_user(request), data)
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/analysis/paths",
-)
-async def analysis_paths(investigation_id: UUID, data: PathsRequest, request: Request):
-    try:
-        return await run_case_paths(investigation_id, get_current_user(request), data)
-    except service.InvestigationError as exc:
-        raise _http(exc)
-
-
-@router.post(
-    "/{investigation_id}/analysis/typologies",
-)
-async def analysis_typologies(
-    investigation_id: UUID, data: TypologiesRequest, request: Request
-):
-    """Typology badges (F4.3): suggestions only; accepting one is a journal event."""
-    try:
-        return await run_case_typologies(
-            investigation_id, get_current_user(request), data.typologies, data.params
-        )
+        return agent_view(await case_items.search(investigation_id, get_current_user(request), q))
     except service.InvestigationError as exc:
         raise _http(exc)

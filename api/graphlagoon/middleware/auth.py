@@ -54,7 +54,7 @@ def get_user_provider() -> Optional[UserProvider]:
 
 
 # The actor of the current request: None for a person, or
-# {"kind": "agent", "token_id", "name", "scopes", "owner_email", "scope",
+# {"kind": "agent", "token_id", "name", "owner_email", "scope",
 # "investigation_ids", "unmasked"} for an agent token. A ContextVar so services (journal, audit) can attribute writes
 # without threading the request through every call.
 _current_actor: ContextVar[Optional[dict]] = ContextVar(
@@ -274,7 +274,6 @@ async def authenticate_agent(raw_token: str):
         "kind": "agent",
         "token_id": token["id"],
         "name": token["name"],
-        "scopes": token["scopes"],
         "owner_email": token["owner_email"],
         "scope": token["scope"],
         "investigation_ids": token["investigation_ids"],

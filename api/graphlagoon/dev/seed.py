@@ -392,60 +392,52 @@ async def seed_investigations(
                 owner,
                 json={
                     "title": title,
-                    "typology": typology,
-                    "origin": origin,
+                    "tags": [typology, origin],
                     "description": "Seeded case",
                 },
             )
         ).json()
+        url = f"/api/investigations/{case['id']}"
         for exp_id in list(by_owner[owner].values())[:3]:
             await client.request(
                 "POST",
-                f"/api/investigations/{case['id']}/sources",
+                f"{url}/items",
                 owner,
-                json={"kind": "exploration", "exploration_id": exp_id, "mode": "live"},
+                json={"kind": "graph", "subkind": "exploration_ref", "exploration_id": exp_id},
             )
         other = rng.choice([u for u in roster if u.email != owner])
         await client.request(
-            "POST",
-            f"/api/investigations/{case['id']}/share",
-            owner,
-            json={"email": other.email, "permission": "write"},
+            "POST", f"{url}/share", owner, json={"email": other.email, "role": "editor"}
         )
         if created % 2 == 0:
-            await client.request(
-                "PATCH",
-                f"/api/investigations/{case['id']}",
-                owner,
-                json={"status": "analise"},
-            )
+            await client.request("PATCH", url, owner, json={"status": "analysis"})
         await client.request(
             "POST",
-            f"/api/investigations/{case['id']}/notes",
+            f"{url}/items",
             owner,
-            json={"body": "Seeded note: check the shared entities first."},
+            json={"kind": "note", "subkind": "free", "title": "Seeded note",
+                  "content": "Seeded note: check the shared entities first."},
         )
-        # Dossier (T7): one frozen evidence and a hypothesis that cites it.
-        evidence = (
+        # Brief, one pinned table (evidence) and a hypothesis that cites it.
+        await client.request("PUT", f"{url}/brief", owner, json={"text": f"# {title}\n\nSeeded brief."})
+        table = (
             await client.request(
                 "POST",
-                f"/api/investigations/{case['id']}/evidence",
+                f"{url}/items",
                 owner,
-                json={
-                    "title": "Seeded evidence",
-                    "kind": "table",
-                    "params": {"seeded": True},
-                    "snapshot": [{"note": "seeded"}],
-                },
+                json={"kind": "table", "subkind": "result", "title": "Seeded evidence",
+                      "content_json": {"columns": ["note"], "rows": [["seeded"]]}},
             )
         ).json()
+        await client.request("POST", f"{url}/items/{table['id']}/pin", owner, json={"label": "E1"})
         await client.request(
             "POST",
-            f"/api/investigations/{case['id']}/hypotheses",
+            f"{url}/annotations",
             owner,
             json={
-                "text": "The shared entities are controlled by the same person",
-                "evidence_for": [evidence["id"]],
+                "kind": "hypothesis",
+                "value": {"text": "The shared entities are controlled by the same person",
+                          "evidence_for": [table["id"]]},
             },
         )
         created += 1

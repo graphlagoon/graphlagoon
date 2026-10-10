@@ -1,7 +1,7 @@
 """File datasource (investigations F2.5): a graph generated from a case file.
 
 The graph is built once on the server from the case file and its mapping spec
-(``services/investigation_files.generate_context``) and stored, in snapshot
+(``services/case_graph.item_snapshot`` for a mapped table item) and stored, in snapshot
 format, under the context id on the snapshot service. Nothing here queries
 anything: there is no SQL, no Cypher and no transpile — the canned operations
 (subgraph, expand, node fetch) walk the stored graph in memory.

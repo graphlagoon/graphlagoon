@@ -116,6 +116,7 @@ def h(email):
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     monkeypatch.setenv("GRAPH_LAGOON_DEV_MODE", "true")
+    monkeypatch.setenv("GRAPH_LAGOON_AGENTS_ENABLED", "true")
     get_settings.cache_clear()
     InMemoryStore.reset()
     monkeypatch.setattr(investigation_storage, "_store", LocalBlobStore(str(tmp_path)))
@@ -137,7 +138,7 @@ def env(monkeypatch, tmp_path):
     inv_id = client.post("/api/investigations", json={"title": "Caso"}, headers=h(OWNER)).json()["id"]
     url = f"/api/investigations/{inv_id}"
     for eid in explorations:
-        r = client.post(f"{url}/sources", json={"kind": "exploration", "exploration_id": str(eid), "mode": "live"}, headers=h(OWNER))
+        r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "exploration_ref", "exploration_id": str(eid)}, headers=h(OWNER))
         assert r.status_code == 201, r.text
     yield client, url, store.get_investigation(UUID(inv_id))
     InMemoryStore.reset()
@@ -151,18 +152,24 @@ async def test_case_graph_applies_case_keys_and_accepted_matches(env):
     assert len(graph["nodes"]) == 4 and "Pessoa:12345678901" in {n["uid"] for n in graph["nodes"]}
 
     # The case's own key for Cliente (05 §1 settings.identity_keys) merges "9" into the Pessoa.
-    inv.state["identity_keys"] = [{**KEY, "node_type": "Cliente", "source": {"kind": "prop", "name": "doc"}}]
+    inv.settings["identity_keys"] = [{**KEY, "node_type": "Cliente", "source": {"kind": "prop", "name": "doc"}}]
     graph = await case_graph(inv.id, OWNER)
     [ana] = [n for n in graph["nodes"] if n["uid"] == "Pessoa:12345678901"]
     assert [o["node_id"] for o in ana["sources"]] == ["p1", "9"] and ana["properties"]["renda"] == 1800
     assert ana["conflicts"] == {"node_type": [{"value": "Cliente", "source_id": ana["sources"][1]["source_id"]}]}
 
-    # An accepted match (left = keep) folds the masked Cliente in; a suggestion alone does not.
+    # A confirmed same_as (targets = [keep, drop]) folds the masked Cliente in; an agent's
+    # suggestion alone does not (05 §6).
     masked = next(n["uid"] for n in graph["nodes"] if n["uid"].startswith("m1@"))
-    pair = {"left": {"uid": "Pessoa:12345678901"}, "right": {"uid": masked}, "score": 0.9, "reasons": []}
-    [m] = client.post(f"{url}/matches", json={"matches": [pair]}, headers=h(OWNER)).json()
+    token = client.post("/api/agent-tokens", json={"name": "claude"}, headers=h(OWNER)).json()["token"]
+    r = client.post(
+        f"{url}/annotations",
+        json={"kind": "same_as", "targets": ["Pessoa:12345678901", masked], "value": {"score": 0.9}, "reason": "KYC"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 201 and r.json()["status"] == "suggested", r.text
     assert len((await case_graph(inv.id, OWNER))["nodes"]) == 3
-    r = client.patch(f"{url}/matches/{m['id']}", json={"status": "aceito", "reason_text": "KYC"}, headers=h(OWNER))
+    r = client.post(f"{url}/annotations/{r.json()['id']}/confirm", headers=h(OWNER))
     assert r.status_code == 200, r.text
     graph = await case_graph(inv.id, OWNER)
     [ana] = [n for n in graph["nodes"] if n["uid"] == "Pessoa:12345678901"]

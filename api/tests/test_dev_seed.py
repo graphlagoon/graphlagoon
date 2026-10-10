@@ -173,11 +173,14 @@ class TestSeed:
         assert stats.investigations >= 1
         assert len(store.investigations) == stats.investigations
         for inv in store.investigations.values():
-            sources = store.list_investigation_children("investigation_sources", inv.id)
-            assert len({s.context_id for s in sources}) >= 2
-            # Dossier (F4.2): a frozen evidence cited by a hypothesis.
-            [ev] = store.list_investigation_children("investigation_evidence", inv.id)
-            assert inv.state["hypotheses"][0]["evidence_for"] == [str(ev.id)]
+            items = store.list_investigation_children("case_items", inv.id)
+            graphs = [i for i in items if i.kind == "graph"]
+            assert len({g.context_id for g in graphs}) >= 2
+            # A pinned version (evidence) cited by a hypothesis annotation; a brief.
+            [pinned] = [v for v in store.list_investigation_children("case_item_versions", inv.id) if v.pinned_at]
+            [hyp] = [a for a in store.list_investigation_children("case_annotations", inv.id) if a.kind == "hypothesis"]
+            assert hyp.value["evidence_for"] == [str(pinned.item_id)]
+            assert any(i.subkind == "brief" for i in items)
         group_names = {g.name for g in store.groups.values()}
         assert {"analysts", "restricted-demo"} <= group_names
         assert "permission.update" in actions

@@ -319,7 +319,7 @@ async def run_case_trace(
 ) -> dict:
     """Trace on the case's unified graph (the sources the caller reads) and
     journal ``trace.run``. ``graph`` lets the MCP tool reuse the one it built."""
-    from graphlagoon.services import investigations as service
+    from graphlagoon.services import cases as service
     from graphlagoon.services.case_graph import case_graph, journal_analysis
 
     if graph is None:

@@ -67,12 +67,20 @@ PERMISSIONS: tuple[Permission, ...] = (
         ),
     ),
     Permission(
-        id="investigation.export",
-        label="Export investigations",
+        id="investigation.decide",
+        label="Decide investigations",
         description=(
-            "Download a case as the JSON package, CSV, SIMBA layout or Siscoaf "
-            "summary, and print the dossier as the laudo. Reading the case in "
-            "the app stays open to its readers."
+            "Record the decision of a case (communicate or archive), which "
+            "freezes it with a hash. Analysing and writing in a case stays open "
+            "to its editors."
+        ),
+    ),
+    Permission(
+        id="investigation.share",
+        label="Share investigations",
+        description=(
+            "Share a case with named people and assign it. Only the case owner "
+            "(or a superuser) can do it; this gate decides who may do it at all."
         ),
     ),
     Permission(

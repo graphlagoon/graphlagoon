@@ -268,9 +268,12 @@ def test_investigation_upload_is_gated(client, store):
     case = client.post(
         "/api/investigations", json={"title": "c"}, headers=_headers(OUTSIDER)
     ).json()
-    url = f"/api/investigations/{case['id']}/files"
-    params = {"filename": "a.csv", "role": "attachment"}
-    denied = client.post(url, content=b"a;b", params=params, headers=_headers(OUTSIDER))
+    url = f"/api/investigations/{case['id']}/items"
+    params = {"filename": "a.csv", "kind": "table", "subkind": "csv"}
+    denied = client.post(
+        url, content=b"a;b", params=params,
+        headers={**_headers(OUTSIDER), "Content-Type": "application/octet-stream"},
+    )
     assert denied.status_code == 403
     assert denied.json()["detail"]["error"]["details"]["permission"] == (
         "investigation.upload"
@@ -280,21 +283,22 @@ def test_investigation_upload_is_gated(client, store):
     ).json()["permissions"]
 
 
-def test_investigation_export_is_gated(client, store):
-    group = store.create_group("exporters", members=[{"kind": "email", "value": MEMBER}])
-    store.set_permission(
-        "investigation.export", "restricted", [{"group_id": group.id, "effect": "allow"}]
-    )
+def test_investigation_decide_and_share_are_gated(client, store):
+    group = store.create_group("deciders", members=[{"kind": "email", "value": MEMBER}])
+    for permission in ("investigation.decide", "investigation.share"):
+        store.set_permission(permission, "restricted", [{"group_id": group.id, "effect": "allow"}])
     case = client.post(
         "/api/investigations", json={"title": "c"}, headers=_headers(OUTSIDER)
     ).json()
-    denied = client.get(
-        f"/api/investigations/{case['id']}/export", headers=_headers(OUTSIDER)
+    url = f"/api/investigations/{case['id']}"
+    denied = client.post(
+        f"{url}/decision", json={"outcome": "arquivar", "rationale": "x"}, headers=_headers(OUTSIDER)
     )
     assert denied.status_code == 403
-    assert denied.json()["detail"]["error"]["details"]["permission"] == (
-        "investigation.export"
-    )
+    assert denied.json()["detail"]["error"]["details"]["permission"] == "investigation.decide"
+    denied = client.post(f"{url}/share", json={"email": "a@example.com"}, headers=_headers(OUTSIDER))
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["error"]["details"]["permission"] == "investigation.share"
 
 
 class TestConfigCarriesPermissions:
@@ -306,7 +310,8 @@ class TestConfigCarriesPermissions:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
-            "investigation.export",
+            "investigation.decide",
+            "investigation.share",
             "investigation.upload",
         ]
 
@@ -317,7 +322,8 @@ class TestConfigCarriesPermissions:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
-            "investigation.export",
+            "investigation.decide",
+            "investigation.share",
             "investigation.upload",
         ]
         member_payload = client.get("/api/config", headers=_headers(MEMBER)).json()
@@ -326,7 +332,8 @@ class TestConfigCarriesPermissions:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
-            "investigation.export",
+            "investigation.decide",
+            "investigation.share",
             "investigation.upload",
         ]
 

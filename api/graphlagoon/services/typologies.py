@@ -341,7 +341,7 @@ async def run_case_typologies(
 ) -> dict:
     """Typologies on the case's unified graph (restricted sources are left out
     and counted). Read-only: nothing is journaled until a person accepts a badge."""
-    from graphlagoon.services import investigations as service
+    from graphlagoon.services import cases as service
     from graphlagoon.services.case_graph import case_graph
 
     unknown = sorted(set(only or []) - set(TYPOLOGY_IDS))

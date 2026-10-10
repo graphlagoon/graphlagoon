@@ -39,7 +39,7 @@ def test_mcp_url_and_headers():
 async def test_bridge_forwards_tools_to_remote_mcp(env, databricks):  # noqa: F811
     app, _ = env
     async with mcp_lifespan(app), _rest(app) as rest:
-        r = await rest.post("/api/agent-tokens", json={"name": "bridge", "scopes": ["read", "write"]})
+        r = await rest.post("/api/agent-tokens", json={"name": "bridge"})
         headers = cli.bridge_headers(r.json()["token"], databricks)
         if databricks:  # what the Apps proxy would see; the app ignores it
             headers["Authorization"] = "Bearer dapi-oauth"
@@ -62,7 +62,7 @@ async def test_bridge_forwards_tools_to_remote_mcp(env, databricks):  # noqa: F8
             )
             async with Client(_Stdio()) as client:
                 tools = {t.name for t in (await client.list_tools()).tools}
-                assert {"create_investigation", "propose"} <= tools
+                assert {"create_investigation", "annotate", "add_item"} <= tools
                 result = await client.call_tool("create_investigation", {"title": "Via ponte"})
                 assert not result.is_error, result.content
                 case = json.loads(result.content[0].text)["untrusted_data"]
