@@ -20,6 +20,8 @@ vi.mock('@/services/api', () => ({
     createInvestigationHypothesis: vi.fn(),
     updateInvestigationHypothesis: vi.fn(),
     recordInvestigationDecision: vi.fn(),
+    getInvestigationFiles: vi.fn(async () => []),
+    exportInvestigation: vi.fn(async () => ({ blob: new Blob(['{}']), filename: 'investigation-inv-1-siscoaf.json' })),
   },
 }))
 
@@ -108,5 +110,28 @@ describe('InvestigationDossierView (T7)', () => {
     expect(getByTestId('decision-outcome').textContent).toContain('Communicate to COAF')
     expect(getByTestId('decision-hash').textContent).toContain('ffff…beef')
     expect(queryByTestId('hypothesis-input')).toBeNull()
+  })
+
+  it('offers the exports only with investigation.export; laudo prints the page', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true, permissions: [] } as any
+    const first = render(InvestigationDossierView, { props: { id: 'inv-1' }, global: { stubs } })
+    await flushPromises()
+    expect(first.queryByTestId('dossier-exports')).toBeNull()
+    first.unmount()
+
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true, permissions: ['investigation.export'] } as any
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    URL.revokeObjectURL = vi.fn()
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {})
+    const { getByTestId } = render(InvestigationDossierView, { props: { id: 'inv-1' }, global: { stubs } })
+    await flushPromises()
+    await fireEvent.click(getByTestId('export-siscoaf'))
+    await flushPromises()
+    expect(api.exportInvestigation).toHaveBeenCalledWith('inv-1', 'siscoaf')
+    expect(URL.createObjectURL).toHaveBeenCalled()
+    await fireEvent.click(getByTestId('export-laudo'))
+    await flushPromises()
+    expect(print).toHaveBeenCalled()
+    window.__GRAPH_LAGOON_CONFIG__ = undefined as any
   })
 })

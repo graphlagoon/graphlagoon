@@ -67,6 +67,15 @@ PERMISSIONS: tuple[Permission, ...] = (
         ),
     ),
     Permission(
+        id="investigation.export",
+        label="Export investigations",
+        description=(
+            "Download a case as the JSON package, CSV, SIMBA layout or Siscoaf "
+            "summary, and print the dossier as the laudo. Reading the case in "
+            "the app stays open to its readers."
+        ),
+    ),
+    Permission(
         id="investigation.agent",
         label="Create agent tokens",
         description=(

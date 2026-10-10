@@ -260,6 +260,24 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('dossier-journal')).toContainText('updated hypothesis H1: open → supported');
   });
 
+  test('decision (F4.5) freezes the dossier; exports download (F4.6)', async ({ authenticatedPage: page }) => {
+    await seedInvestigations(page, [{ ...CASE, state: {} }]);
+    await page.goto('/investigations/inv-1/dossier');
+    await expect(page.getByTestId('decision-form')).toBeVisible();
+    await page.getByTestId('decision-action-dict').check();
+    await page.getByTestId('decision-rationale').fill('Conta de passagem (E1).');
+    await page.getByTestId('decision-record').click();
+    await expect(page.getByTestId('decision-outcome')).toContainText('Communicate to COAF');
+    await expect(page.getByTestId('decision-hash')).toContainText('ffff…beef');
+    await expect(page.getByTestId('decision-form')).toHaveCount(0);
+    await expect(page.getByTestId('hypothesis-input')).toHaveCount(0);
+    await expect(page.getByTestId('dossier-journal')).toContainText('decided: communicate to COAF (dict)');
+
+    const download = page.waitForEvent('download');
+    await page.getByTestId('export-siscoaf').click();
+    expect((await download).suggestedFilename()).toBe('investigation-inv-1-siscoaf.json');
+  });
+
   test('follow the money: right-click the victim, trace forward, see the exits and the Sankey', async ({
     authenticatedPage: page,
   }) => {

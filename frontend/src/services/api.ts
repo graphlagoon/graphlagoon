@@ -5,6 +5,7 @@ import type {
   Investigation,
   InvestigationArtifact,
   InvestigationDecision,
+  InvestigationExportFormat,
   InvestigationFile,
   FileContextResult,
   FileEnrichmentSpec,
@@ -815,6 +816,17 @@ class ApiService {
   ): Promise<Investigation> {
     const response = await this.client.post(`/api/investigations/${id}/decision`, body);
     return response.data;
+  }
+
+  /** Export (F4.6, `investigation.export`, audited): the file and its server-given name. */
+  async exportInvestigation(id: string, format: InvestigationExportFormat): Promise<{ blob: Blob; filename: string }> {
+    const response = await this.client.get(`/api/investigations/${id}/export`, {
+      params: { format },
+      responseType: 'blob',
+    });
+    const disposition = String(response.headers['content-disposition'] ?? '');
+    const match = /filename\*=UTF-8''([^;]+)/.exec(disposition);
+    return { blob: response.data, filename: match ? decodeURIComponent(match[1]) : `investigation-${id.slice(0, 8)}.${format}` };
   }
 
   // Case space (FA.2): the file goes as the raw body (streamed by the server).

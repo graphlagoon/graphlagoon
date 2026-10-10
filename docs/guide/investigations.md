@@ -9,9 +9,9 @@ tamper-evident journal of everything done on it.
   (Pix transfers in one context, customer records in another) and you need
   them on one canvas, with who-did-what recorded.
 - **Not the tool for** a single exploration you just want to save or share
-  (that's [Explorations & Sharing](./explorations.md)), or for loading files,
-  following the money and writing the final report — those arrive in later
-  releases.
+  (that's [Explorations & Sharing](./explorations.md)), or for sending the
+  communication to COAF: the app records the decision and exports a
+  structured Siscoaf summary, and a person files it in Siscoaf.
 :::
 
 An investigation is a case file. It does not copy data out of the
@@ -316,6 +316,32 @@ API: `POST /api/investigations/{id}/decision` with
 returns the case with `status: "decidido"`, `decision`, `frozen_hash` and
 `frozen_at`. Recording is audited (`investigation.decide`).
 
+## Exports
+
+The decision panel also exports the case, for people with the
+**Export investigations** permission (`investigation.export`; the buttons are
+hidden without it). Each export is a download, generated on request from what
+you can read, and recorded in the audit log with its format and sha256.
+
+| Button | Format | What it holds |
+|---|---|---|
+| **Siscoaf summary** | `siscoaf` (JSON) | The decision, the involved entities with their role, type, name, document and account, the transactions that touch them (count, total, first and last date), the accepted CC 4.001 badges, a narrative (description + rationale), evidence (E1, E2, … with hashes), trace methods, file hashes and the frozen hash. To paste into Siscoaf: the app has no Siscoaf connection and sends nothing |
+| **Package JSON** | `json` | The whole case record: case and decision, the frozen hash and whether it still verifies (`frozen_hash_valid`), roles, hypotheses, sources (redacted as on screen), files, evidence and trace methods with their hashes, notes and the journal |
+| **CSV** | `csv` | The same record flattened, one row per item (`section, id, title, kind, sha256, detail, actor, at`), safe against spreadsheet formulas: a cell starting with `=`, `+`, `-`, `@`, tab or CR gets a leading `'` |
+| **SIMBA layout** | `simba` (zip) | The case's transactions as `…_EXTRATO.TXT`, `…_ORIGEM_DESTINO.TXT` and `…_TITULARES.TXT` (SIMBA v3.1: TAB, Latin-1, ddmmyyyy, cents) plus `MANIFEST.json` with the hashes and trace methods. The *SIMBA v3.1* import preset reads it back |
+| **Laudo PDF** | print | The dossier printed by the browser (*Save as PDF*): summary, hypotheses, evidence with method stamps and hashes, the full journal, the decision with the frozen hash, and the hashes of every source and file. Navigation and controls are left out |
+
+How the SIMBA layout is written: each transaction (an edge with an amount) is
+a lançamento of the end that has an account (`banco`, `agencia`, `conta`
+properties, as an imported SIMBA gives), debit when money leaves it; the
+other end is the counterpart, by its CPF/CNPJ and name, or agency 9999
+(NAO-CORRENTISTA) when it has no document. Restricted sources are not
+exported.
+
+API: `GET /api/investigations/{id}/export?format=json|csv|simba|siscoaf`.
+Agents cannot export (the route is human-only: exports leave the app with
+unmasked data); they read the case with `get_dossier`.
+
 ## Case files
 
 The **Files** section of the left column lists the files uploaded to the case
@@ -443,4 +469,5 @@ and its owner, assignee, status and sources, plus **Transfer** to hand a case
 to a new owner (for example when someone leaves). Transfers, creations,
 edits, shares and source changes are in the **Audit** tab; the case journal
 records the transfer too. Recorded decisions are audited as
-`investigation.decide`, with the outcome and the frozen hash.
+`investigation.decide`, with the outcome and the frozen hash, and exports as
+`investigation.export`, with the format and the sha256 of the file.

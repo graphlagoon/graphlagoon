@@ -3,9 +3,13 @@
  * Dossier (T7, investigations F4.2): summary and indicators, hypotheses with the
  * evidence for and against each, the frozen evidence (E1, E2, … oldest first) and
  * the journal. The decision panel (F4.5) records the outcome, actions and rationale;
- * the server freezes the case and from then on the dossier is read-only.
+ * the server freezes the case and from then on the dossier is read-only. Exports
+ * (F4.6, `investigation.export`) download from the server; the laudo is this page
+ * printed (print CSS below), with the file and source hashes it adds on paper.
  */
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
+import { usePermissions } from '@/composables/usePermissions';
+import { downloadBlob } from '@/utils/portableExport';
 import { useInvestigationStore } from '@/stores/investigation';
 import { api } from '@/services/api';
 import { describeEvent } from '@/utils/investigationEvents';
@@ -20,6 +24,7 @@ import type {
   Hypothesis,
   HypothesisStatus,
   InvestigationEvidence,
+  InvestigationExportFormat,
   InvestigationRole,
 } from '@/types/investigation';
 
@@ -41,6 +46,7 @@ watch(
     store.fetchEvidence().catch((e) => (error.value = getErrorMessage(e, 'Failed to load the evidence')));
     store.fetchEvents().catch(() => {});
     store.fetchNotes().catch(() => {});
+    store.fetchFiles().catch(() => {});
     api.getInvestigationProposals(id, 'pending').then((p) => (pendingProposals.value = p.length)).catch(() => {});
   },
   { immediate: true },
@@ -138,6 +144,33 @@ async function recordDecision() {
   deciding.value = false;
 }
 
+const { can } = usePermissions();
+const EXPORTS: { format: InvestigationExportFormat; label: string }[] = [
+  { format: 'siscoaf', label: 'Siscoaf summary' },
+  { format: 'json', label: 'Package JSON' },
+  { format: 'csv', label: 'CSV' },
+  { format: 'simba', label: 'SIMBA layout' },
+];
+const exporting = ref<string | null>(null);
+
+async function download(format: InvestigationExportFormat) {
+  exporting.value = format;
+  await act(async () => {
+    const { blob, filename } = await api.exportInvestigation(props.id, format);
+    downloadBlob(filename, blob);
+  }, 'Failed to export the case');
+  exporting.value = null;
+}
+
+/** Laudo PDF: the browser prints this page (Save as PDF) with the whole journal. */
+async function printLaudo() {
+  showAllEvents.value = true;
+  await nextTick();
+  window.print();
+}
+
+const printedAt = new Date().toLocaleString();
+
 function addHypothesis() {
   const text = draft.value.trim();
   if (!text) return;
@@ -176,6 +209,10 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
         </span>
       </header>
       <div v-if="error" class="error" data-testid="dossier-error">{{ error }}</div>
+      <p class="print-only muted">
+        Laudo · printed {{ printedAt }} · {{ inv.owner_email }}{{ inv.assignee_email ? ` · assignee ${inv.assignee_email}` : '' }}
+        <template v-if="inv.frozen_hash"> · frozen hash {{ inv.frozen_hash }}</template>
+      </p>
 
       <div class="cols">
         <main class="main">
@@ -285,6 +322,18 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
               {{ showAllEvents ? 'Show the latest only' : `See all ${store.events.length} events` }}
             </button>
           </section>
+
+          <section class="card print-only" data-testid="dossier-hashes">
+            <h2>Sources and files</h2>
+            <div v-for="src in store.sources" :key="src.id" class="journal-row">
+              <span>{{ src.title_snapshot }}</span>
+              <span class="mono">{{ src.accessible ? `${src.mode} · ${src.frozen_sha256 ?? 'live'}` : 'restricted' }}</span>
+            </div>
+            <div v-for="f in store.files" :key="f.id" class="journal-row">
+              <span>{{ f.filename }} ({{ f.role }})</span>
+              <span class="mono">sha256 {{ f.sha256 }}</span>
+            </div>
+          </section>
         </main>
 
         <aside class="card decision" data-testid="dossier-decision">
@@ -331,6 +380,19 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
             </p>
           </form>
           <p v-else class="muted">Not decided yet. Only people with write access to the case record the decision.</p>
+          <div v-if="can('investigation.export')" class="exports" data-testid="dossier-exports">
+            <button
+              v-for="x in EXPORTS"
+              :key="x.format"
+              class="btn btn-secondary btn-sm"
+              :disabled="exporting !== null"
+              :data-testid="`export-${x.format}`"
+              @click="download(x.format)"
+            >
+              {{ x.label }}
+            </button>
+            <button class="btn btn-secondary btn-sm" data-testid="export-laudo" @click="printLaudo">Laudo PDF</button>
+          </div>
         </aside>
       </div>
     </template>
@@ -633,6 +695,63 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
 .rationale {
   white-space: pre-wrap;
   line-height: 1.5;
+}
+
+.exports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.print-only {
+  display: none;
+}
+
+/* Laudo PDF: the dossier as a document, without the app chrome or controls. */
+@media print {
+  :global(.toolbar),
+  :global(.toast-container) {
+    display: none !important;
+  }
+
+  :global(.app) {
+    height: auto;
+    display: block;
+  }
+
+  .dossier {
+    height: auto;
+    overflow: visible;
+    padding: 0;
+  }
+
+  .cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .decision {
+    position: static;
+    border-width: 1px;
+  }
+
+  .back,
+  .exports,
+  .decide,
+  .add,
+  .link-btn,
+  .link-select,
+  .x {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block;
+  }
+
+  .card {
+    break-inside: avoid;
+  }
 }
 
 .notice {

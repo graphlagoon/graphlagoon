@@ -1156,7 +1156,7 @@ export async function seedInvestigations(
       route.fulfill(json([...cases.values()].map((i) => ({ ...i, source_count: i.source_count ?? srcs.get(i.id)?.length ?? 0 }))));
     }
   });
-  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events|evidence))?(\?.*)?$/, (route) => {
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events|evidence|decision|export))?(\?.*)?$/, (route) => {
     const req = route.request();
     const [, id, sub] = new URL(req.url()).pathname.match(/investigations\/([^/]+)(?:\/(\w+))?$/)!;
     const inv = cases.get(id);
@@ -1213,6 +1213,23 @@ export async function seedInvestigations(
       journal(id, 'evidence.created', { evidence_id: row.id, title: row.title, kind: row.kind, sha256 });
       const { snapshot: _s, ...out } = row;
       return route.fulfill(json(out, 201));
+    }
+    if (sub === 'decision') {
+      const decided_at = new Date().toISOString();
+      inv.decision = { ...req.postDataJSON(), decided_by: 'e2e@test.com', decided_at };
+      Object.assign(inv, { status: 'decidido', frozen_hash: 'f'.repeat(60) + 'beef', frozen_at: decided_at, has_write_access: true });
+      for (const s of srcs.get(id) ?? []) s.mode = 'frozen';
+      journal(id, 'decision.recorded', { ...inv.decision, frozen_sources: [] });
+      return route.fulfill(json(inv));
+    }
+    if (sub === 'export') {
+      const format = new URL(req.url()).searchParams.get('format');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'content-disposition': `attachment; filename*=UTF-8''investigation-${id}-${format}.json` },
+        body: JSON.stringify({ format }),
+      });
     }
     if (sub === 'events' && method === 'POST') {
       const body = req.postDataJSON();
