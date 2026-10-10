@@ -27,16 +27,14 @@ export interface TraceColumns {
 
 /**
  * Edges that carried traced value to a node the trace reached (frontier and
- * below-minimum edges are left out), sorted by time, optionally inside `focus`.
+ * below-minimum edges are left out), sorted by time.
  */
-export function traceFlows(result: TraceResult, edges: TraceEdge[], focus: [number, number] | null = null): TraceFlow[] {
+export function traceFlows(result: TraceResult, edges: TraceEdge[]): TraceFlow[] {
   const flows: TraceFlow[] = [];
   for (const e of edges) {
     const value = result.edgeTrace[e.id];
     if (!value || !(e.dst in result.nodes)) continue;
-    const t = Math.abs(e.t);
-    if (focus && (t < focus[0] || t > focus[1])) continue;
-    flows.push({ id: e.id, src: e.src, dst: e.dst, value, t });
+    flows.push({ id: e.id, src: e.src, dst: e.dst, value, t: Math.abs(e.t) });
   }
   return flows.sort((a, b) => a.t - b.t || (a.id < b.id ? -1 : 1));
 }

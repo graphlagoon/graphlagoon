@@ -1,5 +1,6 @@
 /**
- * Money trace of the open case (T5, F3.4): parameters, seed and result. Runs
+ * Money trace of the open case (T5, F3.4): parameters, seed, result and the time
+ * window picked on the swimlanes (F3.5). Runs
  * `workers/traceWorker.ts` on the unified case graph of the investigation store.
  */
 import { defineStore } from 'pinia';
@@ -73,6 +74,8 @@ export const useTraceStore = defineStore('trace', () => {
   const running = ref(false);
   const error = ref<string | null>(null);
   const view = ref<'layers' | 'sankey'>('layers');
+  /** Time window selected on the swimlanes (F3.5): filters the graph and the Sankey, not the run. */
+  const focus = ref<[number, number] | null>(null);
 
   const edges = computed(() => toTraceEdges(investigation.unified.edges, null));
   const nodeTypes = computed<Record<string, string>>(() =>
@@ -83,7 +86,11 @@ export const useTraceStore = defineStore('trace', () => {
   );
   const nameOf = (id: string) => names.value.get(id) ?? id.split('@')[0];
   const allNodeTypes = computed(() => [...new Set(Object.values(nodeTypes.value))].sort());
-  const flows = computed(() => (result.value ? traceFlows(result.value, walked.value) : []));
+  const allFlows = computed(() => (result.value ? traceFlows(result.value, walked.value) : []));
+  const flows = computed(() => {
+    const f = focus.value;
+    return f ? allFlows.value.filter((x) => x.t >= f[0] && x.t <= f[1]) : allFlows.value;
+  });
   const columns = computed(() => (result.value ? traceColumns(result.value, flows.value, result.value.method.direction) : null));
 
   function defaultWindow(): [number, number] | null {
@@ -155,6 +162,7 @@ export const useTraceStore = defineStore('trace', () => {
       walked.value = orientEdges(input.edges, params.direction);
       result.value = main;
       proportional.value = prop;
+      focus.value = null;
     } catch (e) {
       if (my === token) error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -168,6 +176,7 @@ export const useTraceStore = defineStore('trace', () => {
     result.value = null;
     proportional.value = null;
     walked.value = [];
+    focus.value = null;
     running.value = false;
     error.value = null;
   }
@@ -188,6 +197,8 @@ export const useTraceStore = defineStore('trace', () => {
     running,
     error,
     view,
+    focus,
+    allFlows,
     edges,
     allNodeTypes,
     nameOf,

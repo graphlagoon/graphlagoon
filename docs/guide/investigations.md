@@ -156,6 +156,12 @@ edges (forward) or incoming edges (backward) with an amount and a time. The
   (candidates for a precautionary block) and the method stamp listing every
   parameter of the run.
 
+- **Swimlane timeline** below: one lane per account plus one for the exits, an
+  arrow at the time of each traced transfer and a light band for how long the
+  money sat in each account. Drag across it to pick a time window: the layers
+  and the Sankey then show only the transfers inside it (the exits and the method
+  stamp still describe the whole run). Click, or **clear**, to drop the window.
+
 **Save as evidence** stays disabled until frozen evidence ships.
 
 ## Roles, notes and the journal

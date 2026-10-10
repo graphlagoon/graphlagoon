@@ -11734,3 +11734,37 @@ clique direito na vítima → saídas, 91% e Sankey com 7 faixas; `vue-tsc` limp
 
 **Author:** Claude (AI Assistant)
 
+---
+
+## [2026-10-10 23:55] - Feature Implemented: F3.5 · Linha do tempo em raias
+
+**Feature:** `SwimlaneTimeline.vue` abaixo do traçado na aba "Follow the money": uma
+raia por conta (ordem das colunas) e uma raia comum das saídas, seta vertical no
+horário de cada transferência rastreada, faixa de permanência por conta; arrastar
+seleciona uma janela que filtra o canvas (`trace-layers`) e o Sankey.
+
+**Design Decisions:**
+1. Faixa = primeira chegada rastreada → última saída rastreada (até o fim do eixo quando
+   o dinheiro nunca saiu), como no T5; a vítima não tem faixa.
+2. A janela é só de exibição (`trace.focus`): filtra os fluxos que montam colunas,
+   subgrafo e Sankey; saídas, retidos, chips e carimbo seguem descrevendo a execução
+   inteira. Nova execução limpa a janela. Clique sem arrastar (ou "clear") limpa.
+3. Para trás, as setas desenham o sentido real do dinheiro (as arestas percorridas estão
+   invertidas).
+4. SVG feito à mão, sem dependência; ticks de 1 min a 7 dias, no máximo ~6.
+
+**Files:** `frontend/src/components/investigation/SwimlaneTimeline.vue` (novo),
+`stores/trace.ts` (`focus`, `allFlows`), `utils/traceView.ts`,
+`components/investigation/TraceExits.vue`, `views/InvestigationView.vue`,
+`components/investigation/__tests__/SwimlaneTimeline.test.ts` (novo).
+
+**Testing:** vitest `SwimlaneTimeline.test.ts` (6 raias, 7 setas, 4 faixas; arrastar
+emite a janela e clicar limpa; janela 14:05–14:20 deixa 3 fluxos no Sankey e tira a
+vítima das colunas), testes do T5 e do workspace; E2E do rastreio segue verde;
+`vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Follow the money: swimlane timeline).
+**Admin-Area Impact:** no admin-area impact.
+
+**Author:** Claude (AI Assistant)
+

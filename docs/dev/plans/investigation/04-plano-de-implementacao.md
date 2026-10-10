@@ -58,7 +58,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F3.2 · Soma de arestas paralelas e largura por valor
 - [x] F3.3 · Worker de rastreio temporal
 - [x] F3.4 · Tela de rastreio (T5): parâmetros, camadas, Sankey, saídas
-- [ ] F3.5 · Linha do tempo em raias com seleção de janela
+- [x] F3.5 · Linha do tempo em raias com seleção de janela
 - [ ] F3.6 · Caminhos
 - [ ] F3.7 · Componentes conexos no registry de algoritmos
 - [ ] F3.8 · Rastreio e caminhos no servidor (Python) com paridade e ferramentas MCP
@@ -699,8 +699,8 @@ trabalho de análise e documentação; a pessoa decide.
 
 - **Arquivos:** `components/investigation/SwimlaneTimeline.vue` (novo).
 - **Aceite:**
-  - [ ] Uma raia por conta, com setas no horário e faixas de permanência.
-  - [ ] Selecionar uma janela filtra o grafo e o Sankey.
+  - [x] Uma raia por conta, com setas no horário e faixas de permanência.
+  - [x] Selecionar uma janela filtra o grafo e o Sankey.
 - **Testes:** vitest.
 
 ### F3.6 · Caminhos

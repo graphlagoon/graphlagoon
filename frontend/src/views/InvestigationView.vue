@@ -37,6 +37,7 @@ import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import TracePanel from '@/components/investigation/TracePanel.vue';
 import TraceExits from '@/components/investigation/TraceExits.vue';
 import TraceSankey from '@/components/investigation/TraceSankey.vue';
+import SwimlaneTimeline from '@/components/investigation/SwimlaneTimeline.vue';
 import { api } from '@/services/api';
 import type { GraphResponse } from '@/types/graph';
 import type { InvestigationRole } from '@/types/investigation';
@@ -430,6 +431,14 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
             </button>
           </div>
         </section>
+        <SwimlaneTimeline
+          v-if="view === 'trace' && trace.result"
+          :result="trace.result"
+          :flows="trace.allFlows"
+          :name-of="trace.nameOf"
+          :focus="trace.focus"
+          @update:focus="trace.focus = $event"
+        />
         </div>
 
         <TraceExits v-if="view === 'trace'" />
