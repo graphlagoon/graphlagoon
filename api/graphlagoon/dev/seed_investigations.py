@@ -6,9 +6,10 @@
 Works with nothing but the API (memory mode, no warehouse): every case gets a
 money graph from SIMBA files uploaded to it and turned into a graph by the
 server (``POST …/files/{fid}/context``, preset ``simba_v31``). The first case
-("Golpe Pix · falsa central de atendimento") uses the ``simba-mini`` and
-``qsa-mini`` golden fixtures; the others get a generated SIMBA bundle (victims
-→ conta laranja → mula → saída/saque), so Follow-the-money works on all of
+("Golpe Pix · falsa central de atendimento") carries the T5 design scenario
+(``trace/golpe-pix.json`` written as SIMBA, plus the ``qsa-mini`` fixture); the
+others get a generated SIMBA bundle (victims → conta laranja → 3–4 layers of
+mules → saque/exchange/bet/PJ), so Follow-the-money reaches exits on all of
 them. Explorations left by ``graphlagoon.dev.seed`` are attached as live
 sources to a few cases when they exist.
 
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import random
 import struct
@@ -34,7 +36,7 @@ import sys
 import zlib
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -46,9 +48,17 @@ from graphlagoon.dev.seed import (
     wait_for_health,
 )
 from graphlagoon.services.file_mapping_presets import PRESETS
+from graphlagoon.services.investigation_exports import (
+    EXTRATO_COLS,
+    OD_COLS,
+    TITULARES_COLS,
+    _tsv,
+    simba_tables,
+)
 
 MARKER = "[seed:investigations]"
 FIXTURES = Path(__file__).resolve().parents[3] / "frontend/src/__tests__/fixtures/fileMapping"
+GOLPE_PIX = FIXTURES.parent / "trace/golpe-pix.json"
 ANALYSTS = [
     f"{name}@{SEED_DOMAIN}"
     for name in (
@@ -64,8 +74,8 @@ ANALYSTS = [
 AGENT_TOKEN_BUDGET = 100
 
 # (title, typology, origin, final status, data). The first five cover every
-# status, so even --cases 5 shows them all. Data: "mini" = the golden SIMBA +
-# QSA fixtures; "simba" = a generated bundle; "qsa" = QSA fixture + bundle;
+# status, so even --cases 5 shows them all. Data: "mini" = the golpe-pix trace
+# fixture as SIMBA + the QSA fixture; "simba" = a generated bundle; "qsa" = QSA fixture + bundle;
 # "live" = live explorations from the regular seed (when any) + bundle.
 CASES = [
     ("Golpe Pix · falsa central de atendimento", "Golpe Pix", "notificacao_med", "analise", "mini"),
@@ -139,6 +149,7 @@ class CaseGraph:
     exits: list[str] = field(default_factory=list)
     discarded: list[str] = field(default_factory=list)
     pairs: list[tuple[str, str, float]] = field(default_factory=list)  # match candidates
+    hops: int = 5  # trace layers from victims[0] to the exits
 
 
 @dataclass
@@ -156,6 +167,7 @@ class InvStats:
     deleted: int = 0
     agent: bool = False
     flagship: Optional[str] = None
+    flagship_trace: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -171,103 +183,218 @@ def _account_uid(banco: str, agencia: str, conta: str) -> str:
     return "Conta:" + "-".join(p.lstrip("0") or "0" for p in (banco, agencia, conta))
 
 
-def simba_bundle(rng: random.Random, prefix: str) -> tuple[dict[str, str], CaseGraph, int]:
-    """SIMBA v3.1 files for victims → conta A (laranja) → mula → conta B →
-    saída + saque, all on one day. Returns (files, graph, OD number of the
-    saque, whose ``Desconhecido`` node id needs the context id)."""
-    day = date(2026, rng.randint(3, 8), rng.randint(1, 28)).strftime("%d%m%Y")
+class Bundle:
+    """A money graph written as SIMBA v3.1 files by the F4.6 export
+    (``simba_tables``). Every transfer has one reported account (``Conta``) end
+    and one counterpart (``Pessoa`` by CPF/CNPJ, or agency 9999 =
+    ``Desconhecido``), so flows alternate account → holder → account.
+    shortcut: SIMBA dates have no time of day; OD codes follow the clock so the
+    trace (ordered by date, then edge id) keeps the intraday order, and the time
+    goes in DESCRICAO."""
 
-    def person():
-        return _cpf(rng), f"{rng.choice(FIRST)} {rng.choice(LAST)} {rng.choice(LAST)}"
+    def __init__(self) -> None:
+        self.nodes: dict[str, dict] = {}
+        self.moves: list[tuple[datetime, str, str, float, str]] = []
+        self.holders: list[tuple[str, str]] = []
 
-    victims = [person() for _ in range(rng.randint(2, 5))]
-    laranja, mula = person(), person()
-    saida = (_cpf(rng), f"{laranja[1].split()[0]} {laranja[1].split()[-1]}")  # a near-duplicate name
-    acct_a = ("260", f"{rng.randint(1, 9999):04d}", str(rng.randint(10**6, 10**7 - 1)))
-    acct_b = ("077", f"{rng.randint(1, 9999):04d}", str(rng.randint(10**6, 10**7 - 1)))
-    ext, od = [], []
+    def pessoa(self, doc: str, nome: str, renda: Optional[float] = None) -> str:
+        uid = f"Pessoa:{doc}"
+        self.nodes[uid] = {"uid": uid, "type": "Pessoa", "entity": "Pessoa",
+                           "properties": {"cpf_cnpj": doc, "nome": nome, "renda": renda}}
+        return uid
 
-    def lanc(acct, nat, tipo, desc, cents, doc="", nome="", obs="", agencia=None):
-        k = len(ext) + 1
-        ext.append([f"E{k}", *acct, day, desc, tipo, str(cents), nat])
-        cp_bank = ("999", "9999", "999999999") if agencia == "9999" else (
-            rng.choice(["001", "104", "237", "341"]), f"{rng.randint(1, 9999):04d}",
-            str(rng.randint(10**5, 10**6 - 1)))
-        od.append([f"OD{k}", f"E{k}", str(cents), *cp_bank, "F" if doc else "", doc, nome, obs])
-        return k
+    def conta(self, banco: str, agencia: str, conta: str, holder: Optional[str] = None) -> str:
+        uid = _account_uid(banco, agencia, conta)
+        self.nodes[uid] = {"uid": uid, "type": "Conta", "entity": "Conta",
+                           "properties": {"banco": banco, "agencia": agencia, "conta": conta}}
+        if holder:
+            self.holders.append((holder, uid))
+        return uid
 
-    supplier = person()  # an ordinary payment: the "descartado" entity
-    lanc(acct_a, "C", "120", "TED RECEBIDA", rng.randint(50, 300) * 100, *supplier)
-    total = 0
-    for doc, nome in victims:
-        cents = rng.randint(800, 9000) * 100
-        total += cents
-        lanc(acct_a, "C", "223", "PIX RECEBIDO", cents, doc, nome)
-    moved = total * 95 // 100
-    lanc(acct_a, "D", "209", "PIX ENVIADO", moved, *mula)
-    lanc(acct_b, "C", "120", "TED RECEBIDA", moved, *mula)
-    to_exit = moved * 60 // 100
-    lanc(acct_b, "D", "209", "PIX ENVIADO", to_exit, *saida)
-    saque = lanc(acct_b, "D", "114", "SAQUE", moved * 38 // 100, obs="SAQUE EM ESPECIE", agencia="9999")
+    def unknown(self, observacao: str) -> str:
+        """A one-transaction counterpart; its uid on the server is ``desconhecido:<OD>@<context>``."""
+        key = f"?{len(self.nodes)}"
+        self.nodes[key] = {"uid": key, "type": "Desconhecido", "entity": None,
+                           "properties": {"observacao": observacao}}
+        return key
 
-    def tsv(header, rows):
-        return "\n".join("\t".join(r) for r in [header, *rows]) + "\n"
+    def move(self, when: datetime, src: str, dst: str, amount: float, kind: str = "PIX") -> None:
+        self.moves.append((when, src, dst, round(amount, 2), kind))
 
-    files = {
-        f"{prefix}_EXTRATO.TXT": tsv(
-            ["CODIGO_CHAVE_EXTRATO", "NUMERO_BANCO", "NUMERO_AGENCIA", "NUMERO_CONTA",
-             "DATA_LANCAMENTO", "DESCRICAO", "TIPO_LANCAMENTO", "VALOR", "NATUREZA"], ext),
-        f"{prefix}_ORIGEM_DESTINO.TXT": tsv(
-            ["CODIGO_CHAVE_OD", "CODIGO_CHAVE_EXTRATO", "VALOR_TRANSACAO", "NUMERO_BANCO_OD",
-             "NUMERO_AGENCIA_OD", "NUMERO_CONTA_OD", "TIPO_PESSOA_OD", "CPF_CNPJ_OD",
-             "NOME_PESSOA_OD", "OBSERVACAO"], od),
-        f"{prefix}_TITULARES.TXT": tsv(
-            ["NUMERO_BANCO", "NUMERO_AGENCIA", "NUMERO_CONTA", "TIPO_TITULAR",
-             "CPF_CNPJ_TITULAR", "NOME_TITULAR", "VALOR_RENDA"],
-            [[*acct_a, "T", laranja[0], laranja[1], "141200"],
-             [*acct_b, "T", mula[0], mula[1], "260000"]]),
-    }
-    uid = {doc: f"Pessoa:{doc}" for doc, _ in [*victims, laranja, mula, saida, supplier]}
+    def files(self, prefix: str) -> tuple[dict[str, bytes], dict[str, str]]:
+        """SIMBA files and the OD code of each ``unknown`` counterpart."""
+        edges, codes = [], {}
+        for k, (when, src, dst, amount, kind) in enumerate(sorted(self.moves, key=lambda m: m[0]), 1):
+            code = f"OD{k:03d}"
+            side = "ENVIADO" if self.nodes[src]["type"] == "Conta" else "RECEBIDO"
+            edges.append({"id": code, "src": src, "dst": dst, "amount": amount,
+                          "t": int(when.timestamp() * 1000),
+                          "type": "SAQUE" if kind == "SAQUE" else "TRANSF_INTERBANCARIA",
+                          "properties": {"descricao": f"{kind if kind == 'SAQUE' else f'{kind} {side}'} {when:%H:%M}"}})
+            codes.update({u: code for u in (src, dst) if u.startswith("?")})
+        edges += [{"id": f"T{k}", "src": h, "dst": c, "amount": None, "type": "TITULAR"}
+                  for k, (h, c) in enumerate(self.holders)]
+        extrato, od, titulares, _ = simba_tables({"nodes": list(self.nodes.values()), "edges": edges})
+        return {
+            f"{prefix}_EXTRATO.TXT": _tsv(EXTRATO_COLS, extrato),
+            f"{prefix}_ORIGEM_DESTINO.TXT": _tsv(OD_COLS, od),
+            f"{prefix}_TITULARES.TXT": _tsv(TITULARES_COLS, titulares),
+        }, codes
+
+
+# The T5 design scenario (frontend fixture trace/golpe-pix.json) as SIMBA:
+# fixture node → reported account (+ holder), counterpart person/company, or 9999.
+GOLPE_PIX_NODES = {
+    "externo": ("unknown", "TED DE NAO-CORRENTISTA"),
+    "0001-9": ("conta", ("104", "0001", "0001-9"), ("31415926535", "MARIA APARECIDA SOUZA")),
+    "4471-0": ("pessoa", "27182818284", "RAFAEL COSTA LIMA"),
+    "5520-3": ("conta", ("260", "0412", "5520-3"), ("16180339887", "JULIANA ALVES PEREIRA")),
+    # The qsa-mini partner (masked CPF ***456789**): the entity-resolution hit.
+    "8812-7": ("conta", ("077", "0001", "8812-7"), ("12345678901", "ANA SILVA")),
+    "3090-1": ("conta", ("336", "0001", "3090-1"), ("14142135623", "MARCOS GOMES RIBEIRO")),
+    "saque-atm": ("unknown", "SAQUE ATM"),
+    "exchange-gama": ("pessoa", "12345678000190", "EXCHANGE GAMA LTDA"),
+    "bet-delta": ("pessoa", "98765432000110", "BET DELTA APOSTAS LTDA"),
+}
+
+
+def golpe_pix_bundle(qsa_context: Optional[str]) -> tuple[dict[str, bytes], CaseGraph, list]:
+    """SIMBA files of the golpe-pix trace fixture: victim → 4471-0 → three
+    mule accounts → Saque ATM / Exchange Gama / Bet Delta (FIFO 91% at 3 hops).
+    Returns (files, graph, [(graph list, OD code, label)])."""
+    fixture = json.loads(GOLPE_PIX.read_text(encoding="utf-8"))
+    b, uid, names = Bundle(), {}, {}
+    for n in fixture["nodes"]:
+        kind, *spec = GOLPE_PIX_NODES[n["node_id"]]
+        if kind == "conta":
+            (banco, agencia, conta), (doc, nome) = spec
+            uid[n["node_id"]] = b.conta(banco, agencia, conta, holder=b.pessoa(doc, nome))
+            names[f"Pessoa:{doc}"] = nome
+        else:
+            uid[n["node_id"]] = b.pessoa(*spec) if kind == "pessoa" else b.unknown(*spec)
+        label = spec[-1] if kind == "pessoa" else f"Conta {n['node_id']}"
+        names[uid[n["node_id"]]] = (n.get("properties") or {}).get("nome") or label
+    for e in fixture["edges"]:
+        p = e["properties"]
+        when = datetime.fromisoformat(p["data_hora"]).replace(tzinfo=None)  # wall clock, as SIMBA has it
+        b.move(when, uid[e["src"]], uid[e["dst"]], p["valor"], e["relationship_type"])
+    files, codes = b.files("CASO1")
+    ana, rafael, victim = "Pessoa:12345678901", uid["4471-0"], "Pessoa:31415926535"
     g = CaseGraph(
-        names={uid[d]: n for d, n in [*victims, laranja, mula, saida, supplier]},
-        victims=[uid[d] for d, _ in victims],
-        mules=[_account_uid(*acct_a), uid[laranja[0]], uid[mula[0]], _account_uid(*acct_b)],
-        exits=[uid[saida[0]]],
-        discarded=[uid[supplier[0]]],
-    )
-    g.pairs = [
-        (uid[laranja[0]], uid[saida[0]], 0.86),
-        (g.victims[0], g.victims[1], 0.71),
-        (uid[mula[0]], uid[laranja[0]], 0.74),
-        (uid[saida[0]], uid[mula[0]], 0.68),
-    ]
-    return files, g, saque
-
-
-def mini_graph(qsa_context: Optional[str], simba_context: str) -> CaseGraph:
-    """Node ids of the ``simba-mini`` (+ ``qsa-mini``) fixtures, see their expected.json."""
-    g = CaseGraph(
-        names={
-            "Pessoa:98765432100": "JOAO VITIMA",
-            "Pessoa:11122233344": "CARLOS MULA",
-            "Pessoa:12345678901": "ANA SILVA",
-        },
-        victims=["Pessoa:98765432100"],
-        mules=["Conta:1-1-12345", "Pessoa:12345678901"],
-        exits=["Pessoa:11122233344"],
-        discarded=[f"desconhecido:OD5@{simba_context}"],
+        names=names,
+        victims=[uid["0001-9"], victim],
+        mules=[uid["8812-7"], ana, rafael, uid["3090-1"], uid["5520-3"]],
+        exits=[uid["exchange-gama"], uid["bet-delta"]],
+        hops=fixture["params"]["maxHops"],
     )
     if qsa_context:
         socio = f"socio:ANA SILVA|***456789**@{qsa_context}"
         g.names[socio] = "ANA SILVA"
-        # The real entity-resolution hit: same name, CPF middle six digits.
-        g.pairs.append(("Pessoa:12345678901", socio, 0.8))
-    g.pairs += [
-        ("Pessoa:98765432100", "Pessoa:11122233344", 0.62),
-        ("Pessoa:11122233344", "Pessoa:12345678901", 0.66),
-        ("Pessoa:98765432100", "Pessoa:12345678901", 0.58),
+        g.pairs.append((ana, socio, 0.8))
+    g.pairs += [(victim, rafael, 0.62), (rafael, ana, 0.66), (victim, ana, 0.58)]
+    return files, g, [("exits", codes[uid["saque-atm"]], names[uid["saque-atm"]]),
+                      ("discarded", codes[uid["externo"]], names[uid["externo"]])]
+
+
+EXIT_KINDS = {
+    "exchange": "EXCHANGE {} LTDA",
+    "bet": "BET {} APOSTAS LTDA",
+    "pj": "{} COMERCIO E SERVICOS LTDA",
+}
+
+
+def simba_bundle(rng: random.Random, prefix: str) -> tuple[dict[str, bytes], CaseGraph, list]:
+    """SIMBA v3.1 files for victims → laranja account(s) → 3–4 layers of mules
+    (fan-out/fan-in, minutes to hours in each) → 2–4 exits (saque, exchange,
+    bet, PJ), within a day and a half so a forward trace from the first victim
+    (Δ 24h) reaches them. Returns (files, graph, [(graph list, OD code, label)])."""
+    b = Bundle()
+    clock = datetime(2026, rng.randint(3, 8), rng.randint(1, 28), rng.randint(8, 11), rng.randint(0, 59))
+
+    def person():
+        return _cpf(rng), f"{rng.choice(FIRST)} {rng.choice(LAST)} {rng.choice(LAST)}"
+
+    def account(holder: str) -> str:
+        return b.conta(rng.choice(["077", "260", "290", "323", "380"]), f"{rng.randint(1, 9999):04d}",
+                       f"{rng.randint(10**5, 10**6 - 1)}-{rng.randint(0, 9)}", holder=holder)
+
+    victims = [b.pessoa(*person()) for _ in range(rng.randint(4, 8))]
+    laranja = person()
+    saida = (_cpf(rng), f"{laranja[1].split()[0]} {laranja[1].split()[-1]}")  # a near-duplicate name
+    laranja_uid = b.pessoa(*laranja, renda=1412.0)
+    depth = rng.choice((3, 4))
+    layers = [[account(laranja_uid)] + [account(b.pessoa(*person())) for _ in range(rng.randint(0, 1))]]
+    mules = [b.pessoa(*person()), b.pessoa(*saida)] + [b.pessoa(*person()) for _ in range(rng.randint(0, 2))]
+    layers.append(mules)
+    layers.append([account(mules[0])] + [account(b.pessoa(*person())) for _ in range(rng.randint(1, 3))])
+    if depth == 4:
+        layers.append([b.pessoa(*person()) for _ in range(rng.randint(2, 4))])
+    # Exits: companies by CNPJ, reported accounts of them after a person layer.
+    exits = []
+    for kind in rng.sample(list(EXIT_KINDS), k=rng.randint(1, 3)):
+        pj = b.pessoa(str(rng.randint(10**13, 10**14 - 1)), EXIT_KINDS[kind].format(rng.choice(LAST)))
+        exits.append(pj if depth == 3 else account(pj))
+    late = []
+
+    def saque(when: datetime, src: str, amount: float) -> None:
+        late.append(("exits", b.unknown("SAQUE EM ESPECIE"), "Saque em espécie"))
+        b.move(when, src, late[-1][1], amount, "SAQUE")
+
+    # Money: victims first (victims[0] earliest and largest, so FIFO spreads it), then
+    # each node forwards ~95% of what it got, minutes to hours after its last credit.
+    got: dict[str, list] = {}  # node → [cents, last arrival]
+    for k, v in enumerate(victims):
+        clock += timedelta(minutes=rng.randint(3, 50))
+        cents = rng.randint(800, 9000) * 100 if k else rng.randint(15000, 40000) * 100  # the MED notifier
+        dst = layers[0][k % len(layers[0])]
+        b.move(clock, v, dst, cents / 100)
+        got.setdefault(dst, [0, clock])[0] += cents
+        got[dst][1] = clock
+    for i, layer in enumerate(layers):
+        targets = layers[i + 1] if i + 1 < len(layers) else exits
+        fan = len(targets) if i == 0 else rng.randint(1, 3)  # the laranja spreads to every mule
+        plan = {n: rng.sample(targets, k=min(len(targets), fan)) for n in layer if n in got}
+        for t in targets:  # fan-in: every next node gets something
+            if not any(t in ts for ts in plan.values()):
+                plan[rng.choice(list(plan))].append(t)
+        for n, ts in plan.items():
+            cents, when = got[n]
+            out = cents * rng.randint(93, 99) // 100
+            if i == 2:  # the second account layer cashes part out
+                when += timedelta(minutes=rng.randint(5, 180))
+                cash = out * rng.randint(20, 40) // 100
+                saque(when, n, cash / 100)
+                out -= cash
+            for k, t in enumerate(ts):
+                when += timedelta(minutes=rng.randint(5, 240) if k == 0 else rng.randint(1, 20))
+                part = out // (len(ts) - k) if k < len(ts) - 1 else out
+                out -= part
+                b.move(when, n, t, part / 100)
+                if t in got:
+                    got[t][0] += part
+                    got[t][1] = max(got[t][1], when)
+                else:
+                    got[t] = [part, when]
+    supplier = person()  # an ordinary payment at night: the "descartado" entity
+    supplier_uid = b.pessoa(*supplier)
+    b.move(clock.replace(hour=22, minute=rng.randint(0, 59)), supplier_uid, layers[0][0], rng.randint(50, 300))
+    files, codes = b.files(prefix)
+    mula, saida_uid = mules[0], f"Pessoa:{saida[0]}"
+    g = CaseGraph(
+        names={u: n["properties"]["nome"] for u, n in b.nodes.items() if n["type"] == "Pessoa"},
+        victims=victims,
+        mules=[layers[0][0], laranja_uid, *layers[0][1:], *mules, *(layers[3] if depth == 4 else []), *layers[2]],
+        exits=list(exits),
+        discarded=[supplier_uid],
+        hops=depth + 1,
+    )
+    g.pairs = [
+        (laranja_uid, saida_uid, 0.86),
+        (victims[0], victims[1], 0.71),
+        (mula, laranja_uid, 0.74),
+        (saida_uid, mula, 0.68),
     ]
-    return g
+    return files, g, [(name, codes[key], label) for name, key, label in late]
 
 
 def png_bytes(rng: random.Random, width: int = 96, height: int = 48) -> bytes:
@@ -491,24 +618,17 @@ async def seed_case(
         qsa = _fixture("qsa-mini", "qsa-mini.csv")
         if qsa:
             qsa_ctx = (await upload_graph(client, url, owner, {"QSA_SOCIOS.csv": qsa}, "qsa_receita", "QSA Receita"))["context_id"]
-    mini = (
-        {n: _fixture("simba-mini", n) for n in ("CASO1_EXTRATO.TXT", "CASO1_ORIGEM_DESTINO.TXT",
-                                               "CASO1_TITULARES.TXT", "CASO1_CONTAS.TXT", "CASO1_AGENCIAS.TXT")}
-        if data == "mini"
-        else {}
-    )
-    if mini and all(mini.values()):
-        simba = await upload_graph(client, url, owner, mini, "simba_v31", "SIMBA CASO1")
-        graph = mini_graph(qsa_ctx, simba["context_id"])
+    if data == "mini" and GOLPE_PIX.is_file():
+        files, graph, late = golpe_pix_bundle(qsa_ctx)
     else:
         if data == "mini":
-            log("  simba-mini fixture not found; using a generated bundle")
-        files, graph, saque = simba_bundle(rng, f"CASO{index + 1:02d}")
-        simba = await upload_graph(
-            client, url, owner, {n: t.encode("latin-1") for n, t in files.items()},
-            "simba_v31", f"SIMBA CASO{index + 1:02d}",
-        )
-        graph.exits.append(f"desconhecido:OD{saque}@{simba['context_id']}")  # the saque
+            log("  golpe-pix trace fixture not found; using a generated bundle")
+        files, graph, late = simba_bundle(rng, f"CASO{index + 1:02d}")
+    simba = await upload_graph(client, url, owner, files, "simba_v31", f"SIMBA CASO{index + 1:02d}")
+    for name, code, label in late:  # saques and other 9999 counterparts: one node per transaction
+        node = f"desconhecido:{code}@{simba['context_id']}"
+        getattr(graph, name).append(node)
+        graph.names[node] = label
     source_id = simba["source"]["id"]
 
     # Frozen evidence: the file graph, its transactions, the file and a trace.
@@ -551,11 +671,19 @@ async def seed_case(
     try:
         trace = (await client.request(
             "POST", f"{url}/analysis/trace", owner,
-            json={"seed_node": graph.victims[0], "direction": "forward", "max_hops": 5,
+            json={"seed_node": graph.victims[0], "direction": "forward", "allocation": "fifo",
+                  "max_hops": graph.hops, "max_dwell_hours": 24,
                   "stop_nodes": graph.exits},  # SIMBA node types never match the default stops
         )).json()
+        victim = graph.names.get(graph.victims[0], graph.victims[0])
+        if index == 0:
+            stats.flagship_trace = (
+                f"{victim}, FIFO/{graph.hops} camadas/Δ 24h: {brl(trace['seedTotal'])} → "
+                + ", ".join(f"{graph.names.get(k, k)} {brl(v)}" for k, v in trace["exits"].items())
+                + f" · cobertura {trace['coverage']:.1%}"
+            )
         await pin("trace", {
-            "title": f"Trace FIFO, 5 camadas · {graph.names.get(graph.victims[0], graph.victims[0])}",
+            "title": f"Trace FIFO, {graph.hops} camadas · {victim}",
             "kind": "trace",
             "params": {**trace["method"], "engine": "server"},
             "snapshot": trace,
@@ -764,6 +892,7 @@ async def run_seed_investigations(
         log("matches: " + ", ".join(f"{k}: {v}" for k, v in sorted(stats.matches.items())))
         log(f"evidence: {stats.evidence} · typology badges: {stats.badges} · live sources: {stats.live_sources}")
         log(f"SIMBA case (Follow the money): {stats.flagship}")
+        log(f"  trace {stats.flagship_trace}")
         log(f"log in as {ANALYSTS[0]} (owner) or {ADMIN_EMAIL} (superuser, sees all)")
         return stats
     finally:
