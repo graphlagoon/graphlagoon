@@ -2,16 +2,17 @@
 
 ::: tip TL;DR
 Connect Claude Code, Claude Desktop or any MCP client to your
-[investigations](./investigations.md). The agent reads the case, runs the
-same analyses as the screen, writes notes, frozen evidence and draft
-artifacts, and **proposes** roles, matches, hypotheses, typology and status;
-you accept or reject on the case's **Agents** page.
+[investigations](./investigations.md). The agent is an analyst with your
+identity: it reads the case, runs the same analyses as the screen, adds items
+(notes, documents, tables, saved queries), runs queries, pins evidence, writes
+the brief and annotates. Roles, tags, matches, typologies and hypothesis
+statuses it writes arrive as **suggestions** you confirm or reject in place.
 
 - **Use it when** you want an agent to do the legwork on a case (read the
   graph, follow the money, check typologies, draft the dossier) while you
   keep the decisions.
-- **Not the tool for** letting an agent decide, export, share, delete or
-  approve: no tool does that, by design. Nor for sending customer data to an
+- **Not the tool for** letting an agent decide, export, share or delete:
+  no tool does that, by design. Nor for sending customer data to an
   LLM without a policy: by default the agent sees CPF, CNPJ and accounts
   masked.
 - **Needs** `GRAPH_LAGOON_AGENTS_ENABLED=true`, the `mcp` extra on the
@@ -84,39 +85,35 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
 
 | | What | Where it shows |
 |---|---|---|
-| **Directly** | Read cases, graphs, files and the dossier; run matches, traces, paths and badges; create cases, add sources, upload files and build file graphs; write notes; freeze evidence; upload artifacts as **drafts** | The journal, as "agent X on behalf of Y" |
-| **Proposes** | An entity role, a match decision, a new hypothesis or a hypothesis status, the typology, the case status | The case's Agents page, until a person accepts or rejects |
-| **Never** | Record the decision, export, share, delete, approve an artifact, accept or reject a proposal or a match, mint tokens | No tool exists; the routes answer 403 to an agent token even when its owner is a superuser |
+| **Directly** | Read cases, the material and the graph; run traces, paths, typologies and entity resolution; create cases; add items (notes, documents, tables with a mapping, saved queries, analysis results) and versions; run saved queries; pin evidence; write the brief; annotate groups and hypotheses | The material list with the **agent** chip; the journal as "agent X on behalf of Y" |
+| **Suggests** (a person confirms or rejects in place) | Roles, tags, `same_as` matches, typology badges, hypothesis statuses and case status changes — the kinds in the case's `settings.agent_suggest_kinds` | Dashed amber rows in the material list and the inspector; the queue's "suggested" counter |
+| **Never** | Record the decision, export, share, delete, confirm its own suggestions, mint tokens | No tool exists; the routes answer 403 to an agent token even when its owner is a superuser |
 
 The token acts with **your** access and never more: cases you cannot see,
-restricted sources and permissions apply the same way (`create_investigation`
-needs your `investigation.create`, the file tools your
-`investigation.upload`). Every read is audited (`agent.read`) and each token
-is limited to `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` requests per minute
-(429 above it).
+restricted items and permissions apply the same way (`create_investigation`
+needs your `investigation.create`, a CSV upload your `investigation.upload`).
+Every read is audited (`agent.read`) and each token is limited to
+`GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` requests per minute (429 above it).
 
 ## Scopes
 
-A token carries one or more scopes; a tool outside them answers
-`AGENT_FORBIDDEN`.
+A token has no read/analyze/write scopes: it is your identity plus the short
+human-only list above. Its scope is `user` (every case you read) or `case`
+(only the `investigation_ids` it names), over REST and MCP alike.
 
-| Scope | Tools |
+| Group | Tools |
 |---|---|
-| `read` | `list_investigations`, `get_investigation` (summary, roles, sources; restricted ones as placeholders), `get_graph` (unified or one source), `search_entities`, `get_entity`, `lookup_enrichment` (a context's enrichment table for one entity), `list_events`, `list_notes`, `get_dossier` (indicators, hypotheses, evidence and the latest journal), `list_evidence`, `get_evidence`, `list_artifacts`, `get_artifact`, `list_files`, `get_file` (masked), `list_proposals`, `list_matches` |
-| `analyze` | `suggest_matches` (stores suggestions, never merges), `trace_money` (follow the money, with the method stamp), `find_paths`, `run_typologies` (CC 4.001 badges, suggestions only); same results as the browser, journaled as `trace.run` / `path.run` |
-| `write` | `create_investigation`, `add_source`, `add_note`, `pin_evidence` (a trace re-run on the server with its method stamp, the unified graph or a subset of it, or a table it provides), `upload_artifact` (always a **draft**, up to `GRAPH_LAGOON_ARTIFACT_MAX_BYTES`), `upload_file`, `create_file_graph` (a graph file into a source, with a preset or mapping), `set_file_mapping` (how an enrichment file joins nodes) |
-| `propose` | `propose` with `kind`: `role` (`entity`, `role`), `status`, `typology`, `match` (`match_id`, `status`, `reason_text`), `hypothesis` (`text` and the evidence for and against) or `hypothesis_status` (`hypothesis_id`, `status`) |
+| Read | `list_investigations`, `get_investigation` (summary, roles, counts), `get_graph` (unified or one item), `search_entities`, `get_entity`, `lookup_enrichment`, `list_events`, `list_items`, `get_item` (versions and the text of one), `list_annotations`, `get_brief`, `search_case` |
+| Analyse | `trace_money`, `find_paths`, `run_typologies`, `resolve_entities` (suggested `same_as`) |
+| Write | `create_investigation`, `add_item` (or a new version with `item_id`), `run_query`, `pin_evidence`, `write_brief`, `annotate` (role, tag, group, same_as, hypothesis, hypothesis_status, typology) |
 
-Scopes apply to the MCP tools. Over the REST API an agent token acts with
-its owner's access on the case routes (`/api/investigations/*`),
-explorations, a context's graph queries and `/config`; every other route
-(administration, contexts, tokens, sharing of contexts or explorations)
-answers `AGENT_FORBIDDEN`. A token created with `scope: "case"` and
-`investigation_ids` reaches only those cases, over REST and MCP alike.
+Over the REST API an agent token acts with its owner's access on the case
+routes (`/api/investigations/*`), explorations, a context's graph queries and
+`/config`; every other route (administration, contexts, tokens, sharing of
+contexts or explorations) answers `AGENT_FORBIDDEN`.
 
-The server also exposes two resources per case,
-`investigation://{id}/summary` and `investigation://{id}/events` (the first
-500 journal events).
+The server also exposes two resources per case, `case://{id}/brief` (markdown)
+and `case://{id}/items`.
 
 ## Personal data
 
@@ -127,9 +124,9 @@ them back when the agent refers to an entity or an edge. An administrator
 can lift this with `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA`, and even then
 only tokens created with `unmasked: true` see the real values: sending
 customer data to an LLM provider is a personal-data transfer, so decide that
-with your DPO. The same masking applies when an agent reads snapshots,
-events, evidence or text files over the REST API; binary files answer 403
-to an agent.
+with your DPO. The same masking applies when an agent reads items,
+snapshots, annotations, events or text over the REST API; item bytes
+(`…/content`) answer 403 to an agent, which reads `…/text` instead.
 
 Case data comes wrapped in `untrusted_data`: values from graphs and files may
 contain text written to manipulate an agent, and the server tells the agent
@@ -142,27 +139,27 @@ slash commands (`/mcp__graphlagoon__investigar_golpe_pix`, …) and take the cas
 
 | Prompt | What the agent does |
 |---|---|
-| `investigar_golpe_pix` | Reads the case and graph, follows the money to the exits with `trace_money` (FIFO and proportional), notes each hop citing the method, freezes the trace as evidence, uploads a summary and proposes victim, mule and exit roles |
-| `revisar_lojista` | Runs `run_typologies` for partners, terminals and accounts a merchant shares with others, notes them, uploads a review and proposes roles and a typology |
-| `montar_dossie` | Reads the dossier (`get_dossier`), notes, artifacts and proposals, freezes the evidence it relies on, proposes hypotheses with the evidence for and against, and uploads a draft dossier (`dossie.md`) for the person who decides |
+| `investigar_golpe_pix` | Reads the brief, material and graph, follows the money to the exits with `trace_money` (FIFO and proportional), keeps the run as a pinned table item, writes the brief and suggests victim, mule and exit roles |
+| `revisar_lojista` | Runs `run_typologies` and `resolve_entities` for partners, terminals and accounts a merchant shares with others, notes them on the entities and suggests roles and a typology |
+| `montar_dossie` | Reads the material, annotations and journal, pins the versions it relies on, suggests hypotheses and their statuses, and writes the brief for the person who decides |
 
 ## Reviewing the agent's work
 
-- **Agents page:** pending proposals with the agent's rationale. **Accept**
-  applies the change exactly as if you made it; **Reject** asks for a reason.
-  Both go to the journal with who proposed and who decided. *Agent activity*
-  lists what agents did on the case.
-- **Case space:** artifacts the agent uploaded show "agent · name, for you"
-  and stay drafts until a person approves them.
-- **Dossier:** hypotheses and evidence the agent produced, with the method
-  stamp of each trace, ready for the [decision](./investigations.md#decision-freeze-and-retention).
+- **In place:** suggestions show as dashed amber rows in the material list and
+  in the inspector of the entity, with the agent's reason and **Confirm** /
+  **Reject**; the queue and the case header count them.
+- **Material:** items the agent added carry the **agent** chip and their
+  versions name the author; pin the ones you rely on.
+- **Dossier:** hypotheses and pinned evidence the agent produced, with the
+  method stamp of each trace, ready for the
+  [decision](./investigations.md#decision-freeze-and-retention).
 
 ## Limits
 
-- No tool edits or deletes: an agent adds notes, sources and evidence but
-  never removes them.
-- The server's unified graph does not apply accepted matches yet, so
-  `trace_money`, `find_paths` and `run_typologies` keep matched entities
-  apart.
+- No tool edits or deletes: an agent adds items, versions and annotations
+  but never removes them.
 - The rate limit is counted per server process.
 - Tokens have no "last used" date; revoke the ones you no longer need.
+- Text resources per item, `changes_since` and the org library of playbooks
+  arrive with the AI-first phase.
+

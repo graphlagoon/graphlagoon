@@ -33,8 +33,9 @@ the default: **until an admin writes a rule, nothing changes for anyone.**
 | `context.create` | Creating graph contexts; browsing the warehouse catalog (listing catalogs/schemas/tables, table schema and preview, type discovery); and the **wide** query tier — see [Query scope](#query-scope) below. |
 | `exploration.save` | Saving or updating explorations. Exploring and querying stay open — this only gates persisting the result. |
 | `investigation.create` | Opening new [investigation](./investigations.md) cases (also by an agent acting for you). Working on a case someone shared with you or assigned to you stays open. |
-| `investigation.upload` | Uploading files (bank statements, QSA, CSV) to an [investigation](./investigations.md#case-files), by hand or through an agent's file tools. Reading files already in a case stays open to its readers. |
-| `investigation.export` | Downloading a case as the Siscoaf summary, JSON package, CSV or SIMBA layout, and printing the laudo ([exports](./investigations.md#exports)). Reading the case in the app stays open to its readers. |
+| `investigation.upload` | Uploading files (bank statements, QSA, CSV) to an [investigation](./investigations.md#case-files), by hand or through an agent's `add_item`. Reading material already in a case stays open to its readers. |
+| `investigation.decide` | Recording the [decision](./investigations.md#decision-freeze-and-retention) of a case, which freezes it with a hash. Analysing and writing in the case stay open to its editors. |
+| `investigation.share` | Sharing a case with named people and assigning it. Only the owner (or a superuser) can; this gate decides who may at all. |
 | `investigation.agent` | Creating personal [agent tokens](./agents-mcp.md), so an AI agent can work on investigations with your access. Only when `GRAPH_LAGOON_AGENTS_ENABLED` is on. Existing tokens keep working until they expire or are revoked. |
 
 ## Query scope

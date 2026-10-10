@@ -211,7 +211,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 **Progresso**
 - [x] F0 · Segurança
 - [x] F1 · Caso operável
-- [ ] F2 · Novo modelo
+- [x] F2 · Novo modelo
 - [ ] F3 · Add everywhere + loop vivo
 - [ ] F4 · Workspace de análise
 - [ ] F5 · AI-first completo
@@ -239,7 +239,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 - Frontend: `types/investigation.ts`, `services/api.ts`, `stores/investigation.ts` (items + annotations + events), `CaseItemsPanel.vue` com editor markdown e brief; apagar T8/T10/T11 e rotas em `router/index.ts`.
 - `case_graph.py` aplica `same_as` confirmados + overrides; fixture `unify`.
 - `dev/seed_investigations.py` reescrito com 4 cenários (crédito de grupo econômico, fuga de garantia, Pix/MED, fraude sintética com pessoas, e-mails, telefones, dispositivos, IPs, cartões, terminais e endereços compartilhados); `investigation_exports.py` lê itens fixados.
-- **Aceite:** upload CSV com mapping aparece no canvas sem criar `GraphContext`; consulta salva reexecuta e gera versão com `run`; testes `test_case_*` e paridade InMemory verdes.
+- [x] **Aceite:** upload CSV com mapping aparece no canvas sem criar `GraphContext`; consulta salva reexecuta e gera versão com `run`; testes `test_case_*` e paridade InMemory verdes.
 
 ### F3 · Add everywhere + loop vivo
 - `stores/currentCase.ts` + chip na `Toolbar.vue`; `composables/useAddToCase.ts`; botões em `QueryConsolePanel`, `DataTablePanel`, `EnrichmentTab`, `TraceExits`, menu de seleção; drop/paste no material.
