@@ -4,12 +4,6 @@ import { createPinia, setActivePinia } from 'pinia'
 import CaseFiles from '@/components/investigation/CaseFiles.vue'
 import { useInvestigationStore } from '@/stores/investigation'
 
-vi.mock('@/services/api', () => ({
-  api: { getInvestigationFiles: vi.fn() },
-}))
-
-import { api } from '@/services/api'
-
 const FILE = { id: 'f1', filename: '1_EXTRATO.TXT', role: 'graph', sha256: 'ab'.repeat(32), size_bytes: 2048, uploaded_by: 'me@x.com' }
 
 async function flush() {
@@ -21,8 +15,9 @@ let pinia: ReturnType<typeof createPinia>
 beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
-  useInvestigationStore().current = { id: 'c1' } as any
-  vi.mocked(api.getInvestigationFiles).mockResolvedValue([FILE] as any)
+  const store = useInvestigationStore()
+  store.current = { id: 'c1' } as any
+  store.files = [FILE] as any
 })
 
 describe('CaseFiles', () => {

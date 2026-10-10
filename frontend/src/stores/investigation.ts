@@ -165,13 +165,28 @@ export const useInvestigationStore = defineStore('investigation', () => {
   async function openInvestigation(id: string) {
     loading.value = true;
     error.value = null;
+    if (current.value?.id !== id) {
+      // Another case's lists must not show while this one loads.
+      current.value = null;
+      sources.value = [];
+      files.value = [];
+      notes.value = [];
+      events.value = [];
+      evidence.value = [];
+      matches.value = [];
+      sourceGraphs.value = [];
+      expansions.value = [];
+      derived.value = [];
+    }
     try {
-      const [inv, srcs] = await Promise.all([
+      const [inv, srcs, caseFiles] = await Promise.all([
         api.getInvestigation(id),
         api.getInvestigationSources(id),
+        api.getInvestigationFiles(id),
       ]);
       current.value = inv;
       sources.value = srcs;
+      files.value = caseFiles;
     } catch (e) {
       current.value = null;
       sources.value = [];
