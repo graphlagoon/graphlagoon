@@ -1,8 +1,10 @@
 <script setup lang="ts">
 /**
- * "Add to investigation" (T3). Opened from a case (case fixed) or from an
+ * "Add to investigation" (T3, F1). Opened from a case (case fixed) or from an
  * exploration (exploration pre-checked, case chosen here). Lists the caller's
- * explorations by context; sources the caller cannot read show as placeholders.
+ * own recent explorations (server-side search, node count, empty ones
+ * disabled); superusers can switch to every context. Sources the caller cannot
+ * read show as placeholders.
  *
  * shortcut: the overlap preview only lists the identity keys the contexts share;
  * the exact node/edge overlap needs the unified graph (F1.6).
@@ -12,6 +14,7 @@ import { api } from '@/services/api';
 import { Lock } from 'lucide-vue-next';
 import { useContextsStore } from '@/stores/contexts';
 import { useInvestigationStore } from '@/stores/investigation';
+import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration, GraphContext } from '@/types/graph';
@@ -27,8 +30,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: []; added: [investigationId: string] }>();
 
+const PAGE = 50;
+
 const contextsStore = useContextsStore();
 const store = useInvestigationStore();
+const authStore = useAuthStore();
 const toast = useToast();
 
 const explorations = ref<Exploration[]>([]);
@@ -36,9 +42,13 @@ const sources = ref<InvestigationSource[]>([]);
 const caseId = ref('');
 const checked = ref<string[]>([]);
 const search = ref('');
+const scope = ref<'mine' | 'all'>('mine');
 const mode = ref<SourceMode>('live');
 const saving = ref(false);
+const listLoading = ref(false);
 const loadError = ref<string | null>(null);
+
+const isSuperuser = computed(() => window.__GRAPH_LAGOON_CONFIG__?.is_superuser === true);
 
 /** Cases the caller can add to: writable and not decided. */
 const writableCases = computed(() =>
@@ -51,6 +61,36 @@ const caseTitle = computed(() => {
   return inv?.title ?? '';
 });
 
+let listToken = 0;
+async function loadList() {
+  const token = ++listToken;
+  listLoading.value = true;
+  try {
+    const q = search.value.trim();
+    const rows = await api.getAllExplorations({ q: q || undefined, mine: scope.value === 'mine', limit: PAGE });
+    // The pre-checked exploration (opened from it) stays listed even when it is not "mine".
+    if (props.explorationId && !rows.some((e) => e.id === props.explorationId)) {
+      try {
+        rows.unshift(await api.getExploration(props.explorationId));
+      } catch {
+        /* unreadable: the row is just absent */
+      }
+    }
+    if (token === listToken) explorations.value = rows;
+  } catch (e) {
+    if (token === listToken) loadError.value = getErrorMessage(e, 'Failed to load explorations');
+  } finally {
+    if (token === listToken) listLoading.value = false;
+  }
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadList, 250);
+});
+watch(scope, loadList);
+
 watch(
   () => props.open,
   async (isOpen) => {
@@ -58,15 +98,15 @@ watch(
     caseId.value = props.investigationId ?? '';
     checked.value = props.explorationId ? [props.explorationId] : [];
     search.value = '';
+    scope.value = 'mine';
     mode.value = 'live';
     loadError.value = null;
     try {
-      const [exps] = await Promise.all([
-        api.getAllExplorations(),
+      await Promise.all([
+        loadList(),
         contextsStore.fetchContexts(),
         props.investigationId ? Promise.resolve() : store.fetchInvestigations(),
       ]);
-      explorations.value = exps;
     } catch (e) {
       loadError.value = getErrorMessage(e, 'Failed to load explorations');
     }
@@ -97,19 +137,15 @@ function contextOf(id: string): GraphContext | undefined {
   return contextsStore.contexts.find((c) => c.id === id);
 }
 
-const groups = computed(() => {
-  const q = search.value.trim().toLowerCase();
-  const byContext = new Map<string, { title: string; items: Exploration[] }>();
-  for (const exp of explorations.value) {
-    const title = contextOf(exp.graph_context_id)?.title ?? 'Unknown context';
-    if (q && !`${exp.title} ${title}`.toLowerCase().includes(q)) continue;
-    if (!byContext.has(exp.graph_context_id)) {
-      byContext.set(exp.graph_context_id, { title, items: [] });
-    }
-    byContext.get(exp.graph_context_id)!.items.push(exp);
-  }
-  return [...byContext.entries()].sort((a, b) => a[1].title.localeCompare(b[1].title));
-});
+/** Newest first, as the server orders them (kept stable across the pre-checked insert). */
+const rows = computed(() =>
+  [...explorations.value].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? '')),
+);
+
+const isEmpty = (exp: Exploration) => exp.node_count === 0;
+const nodesText = (exp: Exploration) =>
+  exp.node_count === null || exp.node_count === undefined ? 'saved graph' : `${exp.node_count} nodes`;
+const when = (iso: string) => new Date(iso).toLocaleDateString();
 
 const toAdd = computed(() => checked.value.filter((id) => !inCase.value.has(id)));
 const newContextIds = computed(
@@ -176,43 +212,75 @@ async function submit() {
             </span>
           </div>
 
-          <div class="form-group">
-            <label for="add-search">Search every context you can read</label>
+          <div class="scope-row">
+            <div class="tabs" role="tablist">
+              <button
+                type="button"
+                class="tab"
+                :class="{ on: scope === 'mine' }"
+                role="tab"
+                data-testid="add-scope-mine"
+                @click="scope = 'mine'"
+              >
+                My recent explorations
+              </button>
+              <button
+                v-if="isSuperuser"
+                type="button"
+                class="tab"
+                :class="{ on: scope === 'all' }"
+                role="tab"
+                data-testid="add-scope-all"
+                @click="scope = 'all'"
+              >
+                All contexts
+              </button>
+            </div>
             <input
               id="add-search"
               v-model="search"
-              class="form-control"
-              placeholder="title, context…"
+              class="form-control search"
+              placeholder="Search by title…"
+              aria-label="Search explorations"
               data-testid="add-search"
             />
           </div>
 
           <div v-if="loadError" class="error-message">{{ loadError }}</div>
+          <p v-if="listLoading && !rows.length" class="hint">Loading…</p>
 
-          <div v-for="[ctxId, group] in groups" :key="ctxId" class="ctx-group">
-            <div class="ctx-title">{{ group.title }}</div>
-            <label
-              v-for="exp in group.items"
-              :key="exp.id"
-              class="exp-row"
-              :class="{ 'exp-in-case': inCase.has(exp.id), 'exp-checked': checked.includes(exp.id) }"
-              :data-testid="`add-exp-${exp.id}`"
-            >
-              <input
-                v-model="checked"
-                type="checkbox"
-                :value="exp.id"
-                :disabled="inCase.has(exp.id)"
-              />
-              <span>
-                <span class="exp-title">{{ exp.title }}</span>
-                <span class="exp-sub">
-                  {{ inCase.has(exp.id) ? 'already in the case' : exp.owner_email }}
-                </span>
+          <label
+            v-for="exp in rows"
+            :key="exp.id"
+            class="exp-row"
+            :class="{
+              'exp-in-case': inCase.has(exp.id),
+              'exp-checked': checked.includes(exp.id),
+              'exp-empty': isEmpty(exp),
+            }"
+            :data-testid="`add-exp-${exp.id}`"
+          >
+            <input
+              v-model="checked"
+              type="checkbox"
+              :value="exp.id"
+              :disabled="inCase.has(exp.id) || isEmpty(exp)"
+            />
+            <span class="exp-text">
+              <span class="exp-title">{{ exp.title }}</span>
+              <span class="exp-sub">
+                {{ contextOf(exp.graph_context_id)?.title ?? 'Unknown context' }}
+                · {{ nodesText(exp) }}
+                · {{ when(exp.updated_at) }}
+                <template v-if="exp.owner_email !== authStore.email"> · {{ exp.owner_email }}</template>
+                <template v-if="inCase.has(exp.id)"> · already in the case</template>
+                <template v-else-if="isEmpty(exp)"> · empty: open it and save a graph first</template>
               </span>
-            </label>
-          </div>
-          <p v-if="!groups.length && !loadError" class="hint">No explorations match.</p>
+            </span>
+          </label>
+          <p v-if="!rows.length && !loadError && !listLoading" class="hint" data-testid="add-empty">
+            {{ search ? 'No exploration matches.' : 'No exploration of yours yet. Save one from a context to add it here.' }}
+          </p>
 
           <div
             v-for="s in restricted"
@@ -297,8 +365,41 @@ async function submit() {
   }
 }
 
-.ctx-group {
-  margin-bottom: 12px;
+.scope-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+}
+
+.tab {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tab.on {
+  background: var(--color-surface);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+}
+
+.search {
+  flex: 1;
+  min-width: 160px;
 }
 
 .ctx-title {
@@ -323,9 +424,16 @@ async function submit() {
   border-color: var(--primary-color);
 }
 
-.exp-row.exp-in-case {
+.exp-row.exp-in-case,
+.exp-row.exp-empty {
   opacity: 0.6;
   cursor: default;
+}
+
+.exp-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .exp-title {

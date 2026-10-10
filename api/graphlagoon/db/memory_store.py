@@ -178,6 +178,9 @@ class MemoryInvestigation:
     typology: Optional[str] = None
     origin: Optional[str] = None
     selected_at: Optional[datetime] = None
+    occurred_at: Optional[datetime] = None
+    alert_at: Optional[datetime] = None
+    deadline_days_override: Optional[int] = None
     state: Dict[str, Any] = field(default_factory=dict)
     decision: Optional[Dict[str, Any]] = None
     frozen_hash: Optional[str] = None
@@ -326,12 +329,12 @@ class MemoryAgentToken:
     token_hash: str
     expires_at: datetime
     scopes: List[str] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.now)
-    revoked_at: Optional[datetime] = None
-
     scope: str = "user"
     investigation_ids: List[str] = field(default_factory=list)
     unmasked: bool = False
+    created_at: datetime = field(default_factory=datetime.now)
+    revoked_at: Optional[datetime] = None
+
 
 # Child tables of an investigation: table name -> dataclass. Each lives in the
 # store attribute of the same name, keyed by id; generic CRUD below serves all.

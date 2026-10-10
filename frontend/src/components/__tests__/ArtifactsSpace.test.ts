@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/vue'
 import { flushPromises } from '@vue/test-utils'
+import { setActivePinia, createPinia } from 'pinia'
 import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue'
 
 vi.mock('@/services/api', () => ({
@@ -26,6 +27,7 @@ const page = {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.clearAllMocks()
   vi.mocked(api.getInvestigationArtifacts).mockResolvedValue([summary, page] as any)
   vi.mocked(api.getArtifactContent).mockResolvedValue(new Blob(['# <b>Resumo</b>']))

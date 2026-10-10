@@ -895,6 +895,8 @@ class ExplorationResponse(BaseModel):
     state: ExplorationState
     created_at: datetime
     updated_at: datetime
+    # Nodes in the saved state; None when only a snapshot file holds them.
+    node_count: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -1770,16 +1772,23 @@ class InvestigationCreate(BaseModel):
     typology: Optional[str] = Field(default=None, max_length=100)
     origin: Optional[str] = Field(default=None, max_length=50)
     assignee_email: Optional[str] = Field(default=None, max_length=255)
+    occurred_at: Optional[datetime] = None
+    alert_at: Optional[datetime] = None
+    deadline_days_override: Optional[int] = Field(default=None, ge=1, le=3650)
 
 
 class InvestigationUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
-    # "decidido" is reached only through the decision route (F4.5).
+    # "decidido" is reached only through the decision route (F4.5); the
+    # service checks the transition (05 §3) and answers 409 otherwise.
     status: Optional[Literal["selecao", "analise", "arquivado"]] = None
     assignee_email: Optional[str] = Field(default=None, max_length=255)
     typology: Optional[str] = Field(default=None, max_length=100)
     state: Optional[dict[str, Any]] = None
+    occurred_at: Optional[datetime] = None
+    alert_at: Optional[datetime] = None
+    deadline_days_override: Optional[int] = Field(default=None, ge=1, le=3650)
 
 
 class InvestigationShareRequest(BaseModel):
@@ -1802,6 +1811,9 @@ class InvestigationResponse(BaseModel):
     typology: Optional[str] = None
     origin: Optional[str] = None
     selected_at: Optional[datetime] = None
+    occurred_at: Optional[datetime] = None
+    alert_at: Optional[datetime] = None
+    deadline_days_override: Optional[int] = None
     # {phase: selection|analysis, due_at, days_left}; None once decided/archived (F4.4).
     deadline: Optional[dict[str, Any]] = None
     state: dict[str, Any] = Field(default_factory=dict)
@@ -2173,18 +2185,6 @@ class AgentTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     scopes: list[AgentScope] = Field(min_length=1)
     expires_in_days: int = Field(default=30, ge=1)
-
-
-class AgentTokenResponse(BaseModel):
-    id: UUID
-    owner_email: str
-    name: str
-    scopes: list[str]
-    created_at: datetime
-    expires_at: datetime
-    revoked_at: Optional[datetime] = None
-    active: bool
-
     # "user": every case the owner reads; "case": only investigation_ids
     scope: Literal["user", "case"] = "user"
     investigation_ids: list[UUID] = Field(default_factory=list)
@@ -2196,8 +2196,20 @@ class AgentTokenResponse(BaseModel):
             raise ValueError("a case-scoped token needs at least one investigation_id")
         return self
 
-class AgentTokenCreated(AgentTokenResponse):
-    token: str  # shown once; only its sha256 is stored
+
+class AgentTokenResponse(BaseModel):
+    id: UUID
+    owner_email: str
+    name: str
+    scopes: list[str]
     scope: str = "user"
     investigation_ids: list[str] = Field(default_factory=list)
     unmasked: bool = False
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: Optional[datetime] = None
+    active: bool
+
+
+class AgentTokenCreated(AgentTokenResponse):
+    token: str  # shown once; only its sha256 is stored

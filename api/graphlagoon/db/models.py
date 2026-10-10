@@ -310,6 +310,12 @@ class Investigation(Base):
     typology = Column(String(100), nullable=True)
     origin = Column(String(50), nullable=True)
     selected_at = Column(DateTime, nullable=True)
+    # When the facts happened and when the alert arrived; the selection deadline
+    # counts from alert_at (or created_at). deadline_days_override replaces the
+    # 45-day phase for this case (05 §7).
+    occurred_at = Column(DateTime, nullable=True)
+    alert_at = Column(DateTime, nullable=True)
+    deadline_days_override = Column(Integer, nullable=True)
     # roles {entityKey: role}, pins, hypotheses[], view preferences
     state = Column(JSON, nullable=False, default={})
     decision = Column(JSON, nullable=True)

@@ -76,7 +76,8 @@ def test_versions_never_overwrite_and_are_journaled(ctx):
     art = r.json()
     assert art["kind"] == "doc" and art["current_version"] == 1
     v1 = art["versions"][0]
-    assert v1["status"] == "draft" and v1["actor"] == {"kind": "human", "email": OWNER}
+    assert v1["status"] == "approved" and v1["approved_by"] == OWNER  # F1: a person's upload lands confirmed
+    assert v1["actor"] == {"kind": "human", "email": OWNER}
     assert v1["sha256"] == hashlib.sha256(b"# v1").hexdigest()
 
     r = client.post(

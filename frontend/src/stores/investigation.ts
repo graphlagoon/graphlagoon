@@ -20,6 +20,7 @@ import type {
   InvestigationSource,
   MatchStatus,
   SourceMode,
+  UpdateInvestigationRequest,
 } from '@/types/investigation';
 
 /** One readable source loaded into the workspace (T2). */
@@ -160,6 +161,58 @@ export const useInvestigationStore = defineStore('investigation', () => {
     const created = await api.createInvestigation(data);
     investigations.value.unshift({ ...created, source_count: 0 });
     return created;
+  }
+
+  /** Header edits (F1): the server answers with the whole case (deadline recomputed). */
+  async function updateInvestigation(patch: UpdateInvestigationRequest) {
+    if (!current.value) return;
+    current.value = await api.updateInvestigation(current.value.id, patch);
+    syncRow(current.value);
+    void fetchEvents();
+  }
+
+  async function shareInvestigation(email: string, permission: 'read' | 'write') {
+    if (!current.value) return;
+    await api.shareInvestigation(current.value.id, email, permission);
+    const rest = current.value.shared_with.filter((s) => s.email !== email);
+    current.value = { ...current.value, shared_with: [...rest, { email, permission }] };
+    void fetchEvents();
+  }
+
+  async function unshareInvestigation(email: string) {
+    if (!current.value) return;
+    await api.unshareInvestigation(current.value.id, email);
+    current.value = { ...current.value, shared_with: current.value.shared_with.filter((s) => s.email !== email) };
+    void fetchEvents();
+  }
+
+  async function deleteInvestigation() {
+    if (!current.value) return;
+    const id = current.value.id;
+    await api.deleteInvestigation(id);
+    investigations.value = investigations.value.filter((i) => i.id !== id);
+    current.value = null;
+  }
+
+  async function reopenInvestigation() {
+    if (!current.value) return;
+    current.value = await api.reopenInvestigation(current.value.id);
+    syncRow(current.value);
+    void fetchEvents();
+  }
+
+  async function removeSource(sourceId: string) {
+    if (!current.value) return;
+    await api.removeInvestigationSource(current.value.id, sourceId);
+    sources.value = sources.value.filter((s) => s.id !== sourceId);
+    const row = investigations.value.find((i) => i.id === current.value?.id);
+    if (row) row.source_count = Math.max(0, (row.source_count ?? 1) - 1);
+    void fetchEvents();
+  }
+
+  function syncRow(inv: Investigation) {
+    const i = investigations.value.findIndex((r) => r.id === inv.id);
+    if (i >= 0) investigations.value[i] = { ...inv, source_count: investigations.value[i].source_count };
   }
 
   async function openInvestigation(id: string) {
@@ -329,6 +382,12 @@ export const useInvestigationStore = defineStore('investigation', () => {
     error,
     fetchInvestigations,
     createInvestigation,
+    updateInvestigation,
+    shareInvestigation,
+    unshareInvestigation,
+    deleteInvestigation,
+    reopenInvestigation,
+    removeSource,
     openInvestigation,
     addExplorations,
     sourceGraphs,

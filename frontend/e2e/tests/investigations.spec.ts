@@ -56,6 +56,106 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('new-investigation-btn')).toHaveCount(0);
   });
 
+  test('F1: create → rename → share → add → remove source → analysis → decide → reopen → delete, on the case screen', async ({
+    authenticatedPage: page,
+  }) => {
+    const exploration = { ...MOCK_EXPLORATION, title: 'Pix transfers', node_count: 3, updated_at: now };
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedExplorations(page, [exploration]);
+    await seedInvestigations(page, [], {}, [exploration]);
+    await page.route('**/graphlagoon/api/investigations/*/sources/*/snapshot', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          exploration: { id: exploration.id, title: exploration.title, graph_context_id: MOCK_CONTEXT.id, owner_email: 'e2e@test.com', state: {} },
+          snapshot: {
+            nodes: [
+              { id: 'p1', type: 'Titular', properties: { nome: 'Ana Silva', cpf: '12345678901', cpf_mascarado: '***.456.789-**' } },
+              { id: 'a1', type: 'Conta', properties: {} },
+              { id: 'a2', type: 'Conta', properties: {} },
+            ],
+            edges: [
+              { id: 'e1', source: 'p1', target: 'a1', type: 'OWNS', properties: {} },
+              { id: 'e2', source: 'a1', target: 'a2', type: 'PIX', properties: {} },
+            ],
+          },
+        }),
+      }),
+    );
+
+    // create
+    await page.goto('/investigations');
+    await page.getByTestId('new-investigation-btn').click();
+    await page.getByTestId('new-investigation-title').fill('Golpe Pix');
+    await page.getByTestId('new-investigation-submit').click();
+    await page.waitForURL('**/investigations/inv-new');
+    await expect(page.getByTestId('canvas-empty')).toContainText('No sources yet');
+
+    // rename inline
+    await page.getByTestId('investigation-title').click();
+    await page.getByTestId('case-title-input').fill('Golpe Pix · falsa central');
+    await page.getByTestId('case-title-input').press('Enter');
+    await expect(page.getByTestId('investigation-title')).toHaveText('Golpe Pix · falsa central');
+
+    // share with a named person
+    await page.getByTestId('case-share').click();
+    await page.getByTestId('share-email').fill('ana@test.com');
+    await page.getByTestId('share-permission').selectOption('write');
+    await page.getByTestId('share-submit').click();
+    await expect(page.getByTestId('share-row-ana@test.com')).toContainText('can write');
+    await page.getByTestId('share-dialog').getByRole('button', { name: 'Done' }).click();
+    await expect(page.getByTestId('case-share')).toContainText('Share · 1');
+
+    // add from "my recent explorations"
+    await page.getByTestId('sources-empty-add').click();
+    const modal = page.getByTestId('add-to-investigation-modal');
+    await expect(modal.getByTestId('add-scope-mine')).toHaveClass(/on/);
+    await expect(modal.getByTestId(`add-exp-${exploration.id}`)).toContainText('3 nodes');
+    await modal.getByTestId(`add-exp-${exploration.id}`).locator('input').check();
+    await modal.getByTestId('add-submit').click();
+    await expect(modal).toHaveCount(0);
+    await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 15_000 });
+    await expect(page.getByTestId('sources-panel-src-1')).toContainText('Pix transfers');
+
+    // remove the source
+    await page.getByTestId('sources-panel-remove-src-1').click();
+    await expect(page.getByTestId('sources-empty')).toBeVisible();
+    await expect(page.getByTestId('workspace-status')).toContainText('0 sources');
+
+    // status: selection → analysis (the select only offers the allowed transitions)
+    const status = page.getByTestId('case-status');
+    await expect(status.locator('option')).toHaveText(['Awaiting selection', 'In analysis', 'Archived']);
+    await status.selectOption('analise');
+    await expect(page.getByTestId('workspace-deadline')).toContainText('analysis · 45 d left');
+
+    // decide
+    await page.getByTestId('case-decide').click();
+    await page.getByTestId('decision-action-dict').check();
+    await page.getByTestId('decision-rationale').fill('Conta de passagem.');
+    await page.getByTestId('decision-record').click();
+    await expect(page.getByTestId('decide-dialog')).toHaveCount(0);
+    await expect(status).toHaveValue('decidido');
+    await expect(status).toBeDisabled();
+    await expect(page.getByTestId('case-decide')).toHaveCount(0);
+
+    // reopen (human only)
+    await page.getByTestId('case-menu').click();
+    await page.getByTestId('case-reopen').click();
+    await expect(status).toHaveValue('analise');
+    await expect(page.getByTestId('case-decide')).toBeVisible();
+    await page.getByTestId('journal-toggle').click();
+    await expect(page.getByTestId('journal')).toContainText('reopened the case');
+    await expect(page.getByTestId('journal')).toContainText('shared with ana@test.com (write)');
+
+    // delete with confirmation → back to the queue
+    await page.getByTestId('case-menu').click();
+    await page.getByTestId('case-delete').click();
+    await page.getByTestId('case-delete-yes').click();
+    await page.waitForURL('**/investigations');
+    await expect(page.getByTestId('investigations-empty')).toBeVisible();
+  });
+
   test('adds an exploration to a case, frozen, with the restricted source as a placeholder', async ({
     authenticatedPage: page,
   }) => {

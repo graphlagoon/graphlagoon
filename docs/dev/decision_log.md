@@ -12395,3 +12395,55 @@ rota do caso B). Verdes: test_agent_tokens, test_agent_route_scoping, test_agent
 test_admin_registry, test_mcp_server, test_permission_routes, test_investigations (118).
 Public docs: `docs/guide/agents-mcp.md` (allowlist REST, `scope: case`, desmascarar exige o
 flag do token). No admin-area impact (a listagem admin de tokens já serializa os campos novos).
+
+## [2026-10-10 11:25] - Feature Implemented: F1 · Caso operável
+
+Caso editável na própria tela, sobre o modelo atual (05 §10 F1). **Decisões:**
+transições explícitas `STATUS_TRANSITIONS` em `services/investigations.py`
+(selecao↔analise→arquivado, arquivado→analise; `decidido` só pela decisão; inválida →
+409 `INVALID_STATUS_TRANSITION`); caso decidido aceita um único PATCH, `status=arquivado`
+(status fica fora do `frozen_hash`). Novo `POST /{id}/reopen` (humano, `forbid_agents`,
+auditado `investigation.reopen`, evento `case.reopened` com `previous_frozen_hash` e
+`previous_decision`; limpa decisão/hash, fontes congeladas ficam congeladas, retenção
+cai com a decisão). Colunas `occurred_at`, `alert_at`, `deadline_days_override` editadas
+na 016 (nunca rodou) + models/memory/schemas; `deadline_of` conta seleção de
+`alert_at or created_at` e usa o override. `GET /api/explorations` ganha `q`, `mine`,
+`limit`, `offset` e `node_count` (= `len(state.nodes)`; `None` quando só há snapshot;
+shortcut: filtra em Python depois da consulta de acesso). Upload humano de artefato nasce
+`approved`; agente continua `draft`. Frontend: `CaseHeader.vue` (título/descrição/
+tipologia/responsável inline, select só com transições válidas, prazo laranja <7 d,
+Dossier/Decide/Share/… com reabrir e excluir com confirmação), `ShareDialog.vue`,
+`DecideDialog.vue` (mesmo `store.recordDecision` do dossiê; labels movidos para
+`investigationStatus.ts`); fila com filtros tipologia/responsável/status, ordenação
+por coluna, contadores clicáveis e marcador "shared with you / read-only"; modal de
+adicionar abre em "My recent" (`mine=true`, busca server-side, nº nós, vazias
+desabilitadas; "All contexts" só superusuário); `SourcesPanel` com remover e vazio com
+Add; legibilidade: `utils/caseLabels.ts` (nome → doc mascarado → tipo · id curto) usado
+pelo canvas em modo caso quando o template é o padrão por id, inspector esconde `cpf/cnpj`
+cru com irmão `_mascarado`, journal resolve ids para rótulos, botão ⤢ e zoom-to-fit ao
+carregar, `nodeSize` ≤ 5 e anéis mais finos, FPS overlay desligado no caso.
+**Arquivos:** api `services/investigations.py`, `routers/{investigations,explorations,
+admin_registry}.py`, `services/{audit,investigation_artifacts}.py`, `mcp/registry.py`
+(1 linha), `db/{models,memory_store}.py`, `models/schemas.py`, `alembic/versions/016`;
+frontend `components/investigation/{CaseHeader,ShareDialog,DecideDialog,SourcesPanel,
+AddToInvestigationModal,ArtifactsSpace,EnrichmentTab}.vue`, `views/{InvestigationView,
+InvestigationsView,InvestigationDossierView}.vue`, `GraphCanvas3D.vue`,
+`composables/useGraphRings.ts`, `utils/{caseLabels,investigationStatus,
+investigationEvents}.ts`, `stores/investigation.ts`, `services/api.ts`, types.
+**Testes:** pytest `test_investigations.py` (+3: transições, reopen, prazo por
+`alert_at`/override), novo `test_explorations_list_params.py`, `test_artifacts.py`
+ajustado; verdes com `test_admin_registry`, `test_agent_registry`, `test_investigation_
+decision`, `test_investigation_sources`, `test_superuser`, `test_public_sharing`,
+`test_dev_seed_investigations`. Vitest: `CaseHeader.test.ts` (header + ShareDialog),
+`AddToInvestigationModal.test.ts`, `InvestigationsView.test.ts` (+filtros/ordenação/
+marcador/contadores); suítes de investigação verdes (1079 testes). E2E
+`investigations.spec.ts` novo caso "create → rename → share → add → remove source →
+analysis → decide → reopen → delete" sem sair da tela; mocks ganham PATCH/DELETE do caso,
+share, reopen, remover fonte, `files` (o `openInvestigation` de 34f4e53 buscava `/files`
+sem mock: as 8 E2E da tela do caso estavam falhando com 422 antes desta tarefa) e
+`mine`/`q` nas explorações; 19/19 em `investigations.spec.ts` + `user-journeys.spec.ts`.
+**Suposições:** "all contexts" só para superusuário (05 §4); o formulário de decisão do
+dossiê continua (duplicação pequena até o `mode=dossie` da F2). Fora: paginação SQL das
+explorações, retenção após reabrir. **Public docs:** `docs/guide/investigations.md`
+(header editável, fila, picker, reabrir; item "API only" removido dos limites).
+**Admin-area impact:** nova ação auditada `investigation.reopen` em `AUDITED_ROUTES`.

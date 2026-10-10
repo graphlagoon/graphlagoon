@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { PHASE_DAYS, STATUS_LABELS, URGENT_DAYS, deadlineOf } from '@/utils/investigationStatus';
+import { PHASE_DAYS, STATUS_LABELS, URGENT_DAYS, caseNumber, deadlineOf } from '@/utils/investigationStatus';
 import type { Investigation, InvestigationStatus } from '@/types/investigation';
 
 const router = useRouter();
@@ -17,40 +17,91 @@ const toast = useToast();
 const { can } = usePermissions();
 
 const search = ref('');
-const statusFilter = ref<'open' | 'all' | InvestigationStatus>('open');
+type StatusFilter = 'open' | 'all' | 'urgent' | InvestigationStatus;
+const statusFilter = ref<StatusFilter>('open');
+const typologyFilter = ref('');
+const assigneeFilter = ref('');
+type SortKey = 'title' | 'typology' | 'source_count' | 'status' | 'assignee' | 'deadline' | 'updated_at';
+const sortKey = ref<SortKey>('updated_at');
+const sortDir = ref<1 | -1>(-1);
 
 onMounted(() => store.fetchInvestigations());
 
+const isUrgent = (inv: Investigation) => {
+  const d = deadlineOf(inv);
+  return d !== null && d.daysLeft < URGENT_DAYS;
+};
+
+/** Who the row belongs to for the "Assignee" column (assignee, else owner). */
+const responsible = (inv: Investigation) => inv.assignee_email ?? inv.owner_email;
+
+const typologies = computed(() => [...new Set(store.investigations.map((i) => i.typology).filter(Boolean) as string[])].sort());
+const assignees = computed(() => [...new Set(store.investigations.map(responsible))].sort());
+
+const SORTERS: Record<SortKey, (inv: Investigation) => string | number> = {
+  title: (i) => i.title.toLowerCase(),
+  typology: (i) => (i.typology ?? '').toLowerCase(),
+  source_count: (i) => i.source_count ?? 0,
+  status: (i) => ['selecao', 'analise', 'decidido', 'arquivado'].indexOf(i.status),
+  assignee: (i) => responsible(i).toLowerCase(),
+  deadline: (i) => deadlineOf(i)?.daysLeft ?? Number.POSITIVE_INFINITY,
+  updated_at: (i) => i.updated_at ?? '',
+};
+
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
-  return store.investigations.filter((inv) => {
-    if (statusFilter.value === 'open' && (inv.status === 'decidido' || inv.status === 'arquivado')) {
-      return false;
-    }
-    if (statusFilter.value !== 'open' && statusFilter.value !== 'all' && inv.status !== statusFilter.value) {
-      return false;
-    }
+  const rows = store.investigations.filter((inv) => {
+    const f = statusFilter.value;
+    if (f === 'open' && (inv.status === 'decidido' || inv.status === 'arquivado')) return false;
+    if (f === 'urgent' && !isUrgent(inv)) return false;
+    if (f !== 'open' && f !== 'all' && f !== 'urgent' && inv.status !== f) return false;
+    if (typologyFilter.value && inv.typology !== typologyFilter.value) return false;
+    if (assigneeFilter.value && responsible(inv) !== assigneeFilter.value) return false;
     if (!q) return true;
-    return [inv.title, inv.typology, inv.origin, inv.assignee_email, inv.id]
+    return [inv.title, inv.typology, inv.origin, inv.assignee_email, inv.owner_email, inv.id]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
       .includes(q);
   });
+  const key = SORTERS[sortKey.value];
+  return [...rows].sort((a, b) => {
+    const x = key(a);
+    const y = key(b);
+    return (x < y ? -1 : x > y ? 1 : 0) * sortDir.value;
+  });
 });
+
+function sortBy(key: SortKey) {
+  if (sortKey.value === key) sortDir.value = sortDir.value === 1 ? -1 : 1;
+  else {
+    sortKey.value = key;
+    sortDir.value = key === 'updated_at' || key === 'source_count' ? -1 : 1;
+  }
+}
+
+const sortMark = (key: SortKey) => (sortKey.value === key ? (sortDir.value === 1 ? ' ▲' : ' ▼') : '');
+
+/** A counter is a status filter: clicking it again goes back to "Open". */
+function toggleCounter(filter: StatusFilter) {
+  statusFilter.value = statusFilter.value === filter ? 'open' : filter;
+}
 
 const counters = computed(() => {
   const all = store.investigations;
   return {
     analise: all.filter((i) => i.status === 'analise').length,
     selecao: all.filter((i) => i.status === 'selecao').length,
-    urgent: all.filter((i) => {
-      const d = deadlineOf(i);
-      return d !== null && d.daysLeft < URGENT_DAYS;
-    }).length,
+    urgent: all.filter(isUrgent).length,
     decided: all.filter((i) => i.status === 'decidido').length,
   };
 });
+
+/** "shared" when the case is someone else's; "read-only" when it cannot be changed. */
+function accessMark(inv: Investigation): string | null {
+  if (inv.owner_email === authStore.email) return null;
+  return inv.has_write_access ? 'shared with you' : 'read-only';
+}
 
 /** Share of the phase already used, for the deadline bar. */
 function elapsed(inv: Investigation) {
@@ -61,10 +112,6 @@ function elapsed(inv: Investigation) {
 function who(email?: string | null) {
   if (!email) return '—';
   return email === authStore.email ? 'you' : email;
-}
-
-function caseNumber(inv: Investigation) {
-  return `#${inv.id.slice(0, 8)}`;
 }
 
 function updated(inv: Investigation) {
@@ -133,19 +180,45 @@ async function create() {
           <select id="inv-status" v-model="statusFilter" class="form-control" data-testid="investigations-status">
             <option value="open">Open</option>
             <option value="all">All</option>
+            <option value="urgent">Deadline under {{ URGENT_DAYS }} days</option>
             <option v-for="(label, key) in STATUS_LABELS" :key="key" :value="key">{{ label }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="inv-typology">Typology</label>
+          <select id="inv-typology" v-model="typologyFilter" class="form-control" data-testid="investigations-typology">
+            <option value="">All</option>
+            <option v-for="t in typologies" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="inv-assignee">Assignee</label>
+          <select id="inv-assignee" v-model="assigneeFilter" class="form-control" data-testid="investigations-assignee">
+            <option value="">Anyone</option>
+            <option v-for="a in assignees" :key="a" :value="a">{{ who(a) }}</option>
           </select>
         </div>
       </div>
     </div>
 
     <div class="counters">
-      <div class="card counter"><strong>{{ counters.analise }}</strong><span>in analysis</span></div>
-      <div class="card counter"><strong>{{ counters.selecao }}</strong><span>awaiting selection</span></div>
-      <div class="card counter" :class="{ warn: counters.urgent > 0 }" data-testid="counter-urgent">
+      <button class="card counter" :class="{ on: statusFilter === 'analise' }" data-testid="counter-analise" @click="toggleCounter('analise')">
+        <strong>{{ counters.analise }}</strong><span>in analysis</span>
+      </button>
+      <button class="card counter" :class="{ on: statusFilter === 'selecao' }" data-testid="counter-selecao" @click="toggleCounter('selecao')">
+        <strong>{{ counters.selecao }}</strong><span>awaiting selection</span>
+      </button>
+      <button
+        class="card counter"
+        :class="{ warn: counters.urgent > 0, on: statusFilter === 'urgent' }"
+        data-testid="counter-urgent"
+        @click="toggleCounter('urgent')"
+      >
         <strong>{{ counters.urgent }}</strong><span>deadline in under 7 days</span>
-      </div>
-      <div class="card counter"><strong>{{ counters.decided }}</strong><span>decided</span></div>
+      </button>
+      <button class="card counter" :class="{ on: statusFilter === 'decidido' }" data-testid="counter-decided" @click="toggleCounter('decidido')">
+        <strong>{{ counters.decided }}</strong><span>decided</span>
+      </button>
     </div>
 
     <div v-if="store.loading" class="loading"></div>
@@ -159,25 +232,26 @@ async function create() {
       <table class="queue" data-testid="investigations-table">
         <thead>
           <tr>
-            <th>Case</th>
-            <th>Typology</th>
-            <th>Sources</th>
-            <th>Status</th>
-            <th>Assignee</th>
-            <th>Deadline</th>
-            <th>Updated</th>
+            <th><button class="sort" data-testid="sort-title" @click="sortBy('title')">Case{{ sortMark('title') }}</button></th>
+            <th><button class="sort" @click="sortBy('typology')">Typology{{ sortMark('typology') }}</button></th>
+            <th><button class="sort" @click="sortBy('source_count')">Sources{{ sortMark('source_count') }}</button></th>
+            <th><button class="sort" @click="sortBy('status')">Status{{ sortMark('status') }}</button></th>
+            <th><button class="sort" @click="sortBy('assignee')">Assignee{{ sortMark('assignee') }}</button></th>
+            <th><button class="sort" data-testid="sort-deadline" @click="sortBy('deadline')">Deadline{{ sortMark('deadline') }}</button></th>
+            <th><button class="sort" @click="sortBy('updated_at')">Updated{{ sortMark('updated_at') }}</button></th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="inv in filtered" :key="inv.id" :data-testid="`investigation-row-${inv.id}`">
             <td>
               <RouterLink :to="`/investigations/${inv.id}`" class="case-title">{{ inv.title }}</RouterLink>
-              <div class="muted">{{ caseNumber(inv) }}<template v-if="inv.origin"> · origin: {{ inv.origin }}</template></div>
+              <span v-if="accessMark(inv)" class="pill access" data-testid="access-mark">{{ accessMark(inv) }}</span>
+              <div class="muted">{{ caseNumber(inv.id) }}<template v-if="inv.origin"> · origin: {{ inv.origin }}</template></div>
             </td>
             <td><span v-if="inv.typology" class="pill">{{ inv.typology }}</span></td>
             <td>{{ inv.source_count ?? 0 }} source{{ inv.source_count === 1 ? '' : 's' }}</td>
             <td><span class="status" :class="`status-${inv.status}`">{{ STATUS_LABELS[inv.status] ?? inv.status }}</span></td>
-            <td>{{ who(inv.assignee_email ?? inv.owner_email) }}</td>
+            <td>{{ who(responsible(inv)) }}</td>
             <td>
               <template v-if="deadlineOf(inv)">
                 <span :class="{ late: deadlineOf(inv)!.daysLeft < URGENT_DAYS }" data-testid="deadline">
@@ -277,6 +351,14 @@ async function create() {
   flex-direction: column;
   gap: 4px;
   padding: 14px 16px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.counter.on {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 
 .counter strong {
@@ -312,6 +394,22 @@ async function create() {
   color: var(--text-muted);
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-color);
+}
+
+.sort {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pill.access {
+  margin-left: 6px;
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
 }
 
 .queue td {

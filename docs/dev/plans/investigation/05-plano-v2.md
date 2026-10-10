@@ -210,7 +210,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 
 **Progresso**
 - [x] F0 · Segurança
-- [ ] F1 · Caso operável
+- [x] F1 · Caso operável
 - [ ] F2 · Novo modelo
 - [ ] F3 · Add everywhere + loop vivo
 - [ ] F4 · Workspace de análise
@@ -230,7 +230,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 - Legibilidade: `labelFormatter` por tipo, zoom-to-fit, tamanhos, FPS off, CPF cru escondido quando há `*_mascarado`, UUIDs resolvidos para títulos.
 - `AddToInvestigationModal`: "minhas recentes" + busca + nº nós + vazias desabilitadas (`routers/explorations.py` ganha `q, mine, limit, cursor`).
 - Fila: filtros, ordenação, marcador só leitura. Upload humano já entra confirmado.
-- **Aceite:** e2e "criar → editar → compartilhar → adicionar → remover fonte → mudar status → decidir → reabrir → excluir" sem sair da tela.
+- [x] **Aceite:** e2e "criar → editar → compartilhar → adicionar → remover fonte → mudar status → decidir → reabrir → excluir" sem sair da tela.
 
 ### F2 · Novo modelo
 - `alembic/versions/016_cases.py` (apagar 016–019); `db/models.py` + `db/memory_store.py` (paridade InMemory, incluindo busca).

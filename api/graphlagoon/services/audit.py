@@ -55,6 +55,7 @@ class AuditAction:
     INVESTIGATION_FILE_UPLOAD = "investigation.file_upload"
     INVESTIGATION_FILE_READ = "investigation.file_read"
     INVESTIGATION_DECIDE = "investigation.decide"
+    INVESTIGATION_REOPEN = "investigation.reopen"
     INVESTIGATION_EXPORT = "investigation.export"
     AGENT_TOKEN_CREATE = "agent_token.create"
     AGENT_TOKEN_REVOKE = "agent_token.revoke"

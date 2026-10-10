@@ -201,3 +201,59 @@ def test_deadlines_selection_then_analysis_with_an_injected_clock(client, store,
 
     r = client.patch(f"/api/investigations/{case['id']}", json={"status": "arquivado"}, headers=h(OWNER))
     assert r.json()["deadline"] is None
+
+
+def test_status_transitions_are_explicit(client, case):
+    """F1 (05 §3): selecao → analise → arquivado; a sideways jump answers 409."""
+    url = f"/api/investigations/{case['id']}"
+    r = client.patch(url, json={"status": "arquivado"}, headers=h(OWNER))
+    assert r.status_code == 200 and r.json()["status"] == "arquivado"
+    r = client.patch(url, json={"status": "selecao"}, headers=h(OWNER))
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"]["code"] == "INVALID_STATUS_TRANSITION"
+    assert client.patch(url, json={"status": "analise"}, headers=h(OWNER)).json()["status"] == "analise"
+    # Same status again is a no-op, not an error.
+    assert client.patch(url, json={"status": "analise"}, headers=h(OWNER)).status_code == 200
+
+
+def test_reopen_is_human_only_and_journaled(client, store, case):
+    """F1: decidido → analise through POST /reopen; the old hash stays in the journal."""
+    from uuid import UUID
+
+    url = f"/api/investigations/{case['id']}"
+    assert client.post(f"{url}/reopen", headers=h(OWNER)).status_code == 409  # not decided
+    store.update_investigation(
+        UUID(case["id"]), status="decidido", decision={"outcome": "arquivar"}, frozen_hash="ab" * 32
+    )
+    assert client.post(f"{url}/reopen", headers=h(READER)).status_code == 403
+    # Archiving a decided case is the one PATCH it still takes.
+    assert client.patch(url, json={"title": "x"}, headers=h(OWNER)).status_code == 409
+    r = client.post(f"{url}/reopen", headers=h(WRITER))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "analise" and body["decision"] is None and body["frozen_hash"] is None
+    assert body["deadline"]["phase"] == "analysis"
+    event = client.get(f"{url}/events", headers=h(OWNER)).json()[-1]
+    assert event["kind"] == "case.reopened"
+    assert event["payload"]["previous_frozen_hash"] == "ab" * 32
+    assert event["payload"]["previous_decision"] == {"outcome": "arquivar"}
+    assert [e.action for e in store.usage_logs][-1] == "investigation.reopen"
+    assert client.patch(url, json={"title": "editable again"}, headers=h(OWNER)).status_code == 200
+
+
+def test_deadline_counts_from_alert_at_and_honours_the_override(client, store, case, monkeypatch):
+    from datetime import datetime, timedelta
+    from uuid import UUID
+
+    from graphlagoon.services import investigations as service
+
+    alert = datetime(2026, 9, 1, 10, 0)
+    store.update_investigation(UUID(case["id"]), created_at=alert + timedelta(days=10))
+    monkeypatch.setattr(service, "_clock", lambda: alert + timedelta(days=1))
+    r = client.patch(
+        f"/api/investigations/{case['id']}",
+        json={"alert_at": alert.isoformat(), "deadline_days_override": 10},
+        headers=h(OWNER),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["deadline"] == {"phase": "selection", "due_at": "2026-09-11T10:00:00", "days_left": 9}

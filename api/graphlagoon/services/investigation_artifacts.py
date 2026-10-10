@@ -2,8 +2,9 @@
 
 Every version is a new blob (``artifacts/{aid}/v{n}/{name}``) with its sha256,
 author (person or agent) and the evidence it used; nothing is overwritten.
-Versions start as drafts; approving is a human action (the route forbids
-agents). A decided case is read-only.
+A person's upload is approved on arrival (05 §6: humans always create
+confirmed); an agent's starts as a draft and a person approves it (the route
+forbids agents). A decided case is read-only.
 """
 
 from __future__ import annotations
@@ -204,6 +205,7 @@ async def _store_version(
     source_evidence_ids: list[str],
 ) -> Any:
     key = storage.artifact_key(investigation_id, artifact.id, version, artifact.name)
+    actor = current_actor(user_email)
     try:
         await storage.put(key, received)
     except FileExistsError:
@@ -222,8 +224,10 @@ async def _store_version(
             "sha256": received.sha256,
             "size_bytes": received.size_bytes,
             "content_type": TYPES[extension(artifact.name)][0],
-            "status": "draft",
-            "actor": current_actor(user_email),
+            "status": "draft" if actor["kind"] == "agent" else "approved",
+            "approved_by": None if actor["kind"] == "agent" else user_email,
+            "approved_at": None if actor["kind"] == "agent" else datetime.now(),
+            "actor": actor,
             "source_evidence_ids": source_evidence_ids,
             "note": note,
             "created_at": datetime.now(),

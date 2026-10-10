@@ -5,7 +5,9 @@
  */
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { api } from '@/services/api';
+import { useInvestigationStore } from '@/stores/investigation';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { shortId } from '@/utils/caseLabels';
 import type { ArtifactKind, InvestigationActor, InvestigationArtifact } from '@/types/investigation';
 
 const props = defineProps<{ investigationId: string; canEdit: boolean }>();
@@ -20,6 +22,13 @@ const KIND_LABELS: Record<ArtifactKind, string> = {
   other: 'Other',
 };
 
+const store = useInvestigationStore();
+/** Evidence ids read as E1, E2, … (dossier numbering); unknown ones as a short id, never a UUID. */
+const evidenceLabel = (id: string) => {
+  const i = store.evidence.findIndex((e) => e.id === id);
+  return i >= 0 ? `E${i + 1}` : shortId(id);
+};
+if (!store.evidence.length) store.fetchEvidence().catch(() => {});
 const artifacts = ref<InvestigationArtifact[]>([]);
 const selectedId = ref<string | null>(null);
 const error = ref<string | null>(null);
@@ -199,7 +208,7 @@ onUnmounted(clearPreview);
           <strong>{{ a.name }}</strong>
           <span class="muted">
             v{{ a.current_version }}<template v-if="latest(a)?.source_evidence_ids.length">
-              · uses {{ latest(a).source_evidence_ids.join(', ') }}</template>
+              · uses {{ latest(a).source_evidence_ids.map(evidenceLabel).join(', ') }}</template>
             · {{ when(latest(a)?.created_at) }}
           </span>
         </span>

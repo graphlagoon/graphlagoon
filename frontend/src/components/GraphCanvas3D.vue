@@ -8,7 +8,8 @@ import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import type { Node, Edge } from '@/types/graph';
 import type { GraphNode, GraphLink, GraphData } from '@/types/graph3d';
-import { formatNodeLabel, formatEdgeLabel } from '@/utils/labelFormatter';
+import { formatNodeLabel, formatEdgeLabel, findMatchingRule } from '@/utils/labelFormatter';
+import { caseNodeLabel } from '@/utils/caseLabels';
 import { buildNodeTooltip, buildEdgeTooltip, EDGE_TYPE_CHIP, type TooltipContent } from '@/utils/tooltipContent';
 import { formatAmount, formatEdgeValue } from '@/utils/edgeSemantics';
 import { drawnAmount } from '@/utils/parallelEdges';
@@ -50,6 +51,22 @@ const graphStore = useGraphStore();
 const metricsStore = useMetricsStore();
 // `{metric:<name>}` placeholders in label templates resolve through the store.
 const labelOptions = { metrics: metricsStore.metricResolver };
+/**
+ * Node label: the context's template and rules; in a case with no rule for
+ * the type and an id-based default template, the readable fallback
+ * (name → masked document → type · short id, F1).
+ */
+function nodeLabelOf(node: Node): string {
+  const { textFormatRules, textFormatDefaults } = graphStore;
+  if (
+    graphStore.investigationMode &&
+    /\{node_id/.test(textFormatDefaults.nodeTemplate) &&
+    !findMatchingRule(textFormatRules, 'node', node.node_type, 'label')
+  ) {
+    return caseNodeLabel(node);
+  }
+  return formatNodeLabel(node, textFormatRules, textFormatDefaults.nodeTemplate, labelOptions);
+}
 const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
 
@@ -442,7 +459,7 @@ async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | 
 
     const nodeLabel = isCluster
       ? (node.properties?.cluster_name as string || 'Cluster')
-      : formatNodeLabel(node, graphStore.textFormatRules, graphStore.textFormatDefaults.nodeTemplate, labelOptions);
+      : nodeLabelOf(node);
 
     // Compute property-based icon override (if configured for this node type)
     let iconOverride: string | undefined;
@@ -772,12 +789,7 @@ function refreshNodeContent() {
     if (node.isCluster) continue;
     const original = nodeDataMap.value.get(node.id);
     if (!original) continue;
-    node.label = formatNodeLabel(
-      original,
-      graphStore.textFormatRules,
-      graphStore.textFormatDefaults.nodeTemplate,
-      labelOptions,
-    );
+    node.label = nodeLabelOf(original);
   }
 
   updateVisuals();
@@ -1424,7 +1436,8 @@ async function initGraph() {
         programs: devRenderer.info.programs?.length ?? 0,
       });
 
-      if (wrapperRef.value) {
+      // The case screen has no FPS overlay (05 §3); the stats panel stays a dev tool of the explorer.
+      if (wrapperRef.value && !graphStore.investigationMode) {
         devPerf.attach(devRenderer, wrapperRef.value);
       }
     }
