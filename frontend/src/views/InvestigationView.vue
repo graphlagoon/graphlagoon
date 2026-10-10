@@ -5,7 +5,7 @@
  * are unified ids in every tab, so the selection follows the entity across tabs.
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Banknote, Lock, Plus } from 'lucide-vue-next';
+import { Banknote, Lock, Plus, Route } from 'lucide-vue-next';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
@@ -38,6 +38,7 @@ import TracePanel from '@/components/investigation/TracePanel.vue';
 import TraceExits from '@/components/investigation/TraceExits.vue';
 import TraceSankey from '@/components/investigation/TraceSankey.vue';
 import SwimlaneTimeline from '@/components/investigation/SwimlaneTimeline.vue';
+import PathBar from '@/components/investigation/PathBar.vue';
 import { api } from '@/services/api';
 import type { GraphResponse } from '@/types/graph';
 import type { InvestigationRole } from '@/types/investigation';
@@ -67,6 +68,7 @@ const showJournal = ref(false);
 const noteDraft = ref('');
 const actionError = ref<string | null>(null);
 const canvasRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
+const pathBar = ref<InstanceType<typeof PathBar> | null>(null);
 
 const readableSources = computed(() => store.sources.filter((s) => s.accessible));
 const restrictedCount = computed(() => store.sources.length - readableSources.value.length);
@@ -112,6 +114,7 @@ function graphMode(rings: Map<string, string[]>): InvestigationGraphMode {
 }
 
 async function render() {
+  pathBar.value?.close();
   if (renderedTab !== null) communityByTab.set(renderedTab, communityStore.getState());
   if (view.value === 'trace') return renderTrace();
   if (graphStore.layoutAlgorithm === 'trace-layers') {
@@ -199,6 +202,13 @@ onMounted(() => {
   for (const [direction, label] of TRACE_ACTIONS) {
     contextMenu.addAction({ id: `trace-${direction}`, label, icon: Banknote, handler: (t) => followMoney(t, direction) });
   }
+  contextMenu.addAction({
+    id: 'path-to',
+    label: 'Path to…',
+    icon: Route,
+    visible: (t) => t.type === 'node',
+    handler: (t) => pathBar.value?.start(t.id),
+  });
 });
 
 const traceChips = computed(() => {
@@ -224,6 +234,7 @@ watch(
 
 onUnmounted(() => {
   for (const [direction] of TRACE_ACTIONS) contextMenu.removeAction(`trace-${direction}`);
+  contextMenu.removeAction('path-to');
   trace.reset();
   graphStore.traceLayers = null;
   pick(null);
@@ -412,6 +423,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           </div>
 
           <GraphCanvas3D ref="canvasRef" />
+          <PathBar ref="pathBar" :name-of="trace.nameOf" />
 
           <div v-if="showLayout" class="layout-panel">
             <LayoutPanel

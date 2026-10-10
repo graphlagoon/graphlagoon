@@ -1,0 +1,55 @@
+{
+  "description": "Paths (investigations F3.6, 03 §6.3): small graph with known answers. Shared with the Python port (F3.8). Costs compare at 9 decimals.",
+  "edges": [
+    { "id": "e1", "src": "A", "dst": "B", "amount": 100, "t": 1000 },
+    { "id": "e2", "src": "B", "dst": "D", "amount": 100, "t": 2000 },
+    { "id": "e3", "src": "A", "dst": "C", "amount": 1000, "t": 1500 },
+    { "id": "e4", "src": "C", "dst": "D", "amount": 1000, "t": 3000 },
+    { "id": "e5", "src": "D", "dst": "F", "amount": 500, "t": 4000 },
+    { "id": "e6", "src": "A", "dst": "E", "amount": 10, "t": 500 },
+    { "id": "e7", "src": "E", "dst": "F", "amount": 10, "t": 600 },
+    { "id": "e8", "src": "B", "dst": "D", "amount": 50, "t": 2500 },
+    { "id": "e9", "src": "C", "dst": "B", "amount": 1000, "t": 1600 },
+    { "id": "e10", "src": "F", "dst": "G", "amount": null, "t": null }
+  ],
+  "base": { "mode": "shortest", "directed": true, "weight": "hops", "k": 3, "t0": null, "maxDwellMs": null },
+  "cases": [
+    { "name": "BFS fewest hops", "source": "A", "target": "F", "params": {},
+      "expected": [{ "nodes": ["A", "E", "F"], "edges": ["e6", "e7"], "cost": 2 }] },
+    { "name": "BFS tie: first neighbour by id, parallel edge by id", "source": "A", "target": "D", "params": {},
+      "expected": [{ "nodes": ["A", "B", "D"], "edges": ["e1", "e2"], "cost": 2 }] },
+    { "name": "BFS against direction finds nothing", "source": "F", "target": "A", "params": {}, "expected": [] },
+    { "name": "BFS undirected", "source": "F", "target": "A", "params": { "directed": false },
+      "expected": [{ "nodes": ["F", "E", "A"], "edges": ["e7", "e6"], "cost": 2 }] },
+    { "name": "Dijkstra 1 per hop", "source": "A", "target": "G", "params": { "mode": "weighted" },
+      "expected": [{ "nodes": ["A", "E", "F", "G"], "edges": ["e6", "e7", "e10"], "cost": 3 }] },
+    { "name": "Dijkstra 1/amount prefers big transfers", "source": "A", "target": "F",
+      "params": { "mode": "weighted", "weight": "inverse-amount" },
+      "expected": [{ "nodes": ["A", "C", "D", "F"], "edges": ["e3", "e4", "e5"], "cost": 0.004 }] },
+    { "name": "Dijkstra 1/amount skips edges without an amount", "source": "A", "target": "G",
+      "params": { "mode": "weighted", "weight": "inverse-amount" }, "expected": [] },
+    { "name": "Yen k=3 by hops, ties by node sequence", "source": "A", "target": "F", "params": { "mode": "k-shortest" },
+      "expected": [
+        { "nodes": ["A", "E", "F"], "edges": ["e6", "e7"], "cost": 2 },
+        { "nodes": ["A", "B", "D", "F"], "edges": ["e1", "e2", "e5"], "cost": 3 },
+        { "nodes": ["A", "C", "D", "F"], "edges": ["e3", "e4", "e5"], "cost": 3 }
+      ] },
+    { "name": "Yen k=4 by 1/amount", "source": "A", "target": "F",
+      "params": { "mode": "k-shortest", "weight": "inverse-amount", "k": 4 },
+      "expected": [
+        { "nodes": ["A", "C", "D", "F"], "edges": ["e3", "e4", "e5"], "cost": 0.004 },
+        { "nodes": ["A", "C", "B", "D", "F"], "edges": ["e3", "e9", "e2", "e5"], "cost": 0.014 },
+        { "nodes": ["A", "B", "D", "F"], "edges": ["e1", "e2", "e5"], "cost": 0.022 },
+        { "nodes": ["A", "E", "F"], "edges": ["e6", "e7"], "cost": 0.2 }
+      ] },
+    { "name": "Yen k above 10 is capped and stops when paths run out", "source": "A", "target": "F",
+      "params": { "mode": "k-shortest", "k": 50 }, "expectedCount": 4 },
+    { "name": "Earliest arrival, any departure", "source": "A", "target": "F", "params": { "mode": "earliest" },
+      "expected": [{ "nodes": ["A", "E", "F"], "edges": ["e6", "e7"], "cost": 600 }] },
+    { "name": "Earliest arrival after t0 respects time order", "source": "A", "target": "F",
+      "params": { "mode": "earliest", "t0": 700 },
+      "expected": [{ "nodes": ["A", "B", "D", "F"], "edges": ["e1", "e2", "e5"], "cost": 4000 }] },
+    { "name": "Earliest arrival with dwell limit cuts the stay in D", "source": "A", "target": "F",
+      "params": { "mode": "earliest", "t0": 700, "maxDwellMs": 1500 }, "expected": [] }
+  ]
+}

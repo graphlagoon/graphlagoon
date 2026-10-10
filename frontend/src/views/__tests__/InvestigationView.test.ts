@@ -179,4 +179,30 @@ describe('InvestigationView', () => {
     expect(graph.nodes).toHaveLength(9)
     expect(getByTestId('tab-trace')).toBeTruthy()
   })
+
+  it('path to: the next node clicked is the target and the path is selected', async () => {
+    vi.mocked(api.getInvestigationSources).mockResolvedValue([source('s1', 'c1')] as any)
+    vi.mocked(api.getInvestigationSourceSnapshot).mockResolvedValue({
+      exploration: { state: {} },
+      snapshot: {
+        nodes: fixture.nodes.map((n) => ({ id: n.node_id, type: n.node_type, properties: n.properties ?? {} })),
+        edges: fixture.edges.map((e) => ({ id: e.edge_id, source: e.src, target: e.dst, type: e.relationship_type, properties: e.properties })),
+      },
+    } as any)
+    const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    const graph = useGraphStore()
+
+    const action = useContextMenu().actions.value.find((a) => a.id === 'path-to')!
+    expect(action.visible?.({ type: 'edge', id: 'x', label: '' })).toBe(false)
+    await action.handler({ type: 'node', id: '0001-9@c1', label: '0001-9' })
+    await flushPromises()
+    expect(getByTestId('path-pick').textContent).toContain('vítima')
+
+    graph.selectNode('saque-atm@c1')
+    await flushPromises()
+    expect([...graph.selectedNodeIds]).toEqual(['0001-9@c1', '4471-0@c1', '5520-3@c1', 'saque-atm@c1'])
+    expect(graph.selectedEdgeIds.size).toBe(3)
+    expect(getByTestId('path-result').textContent).toContain('3 hops')
+  })
 })
