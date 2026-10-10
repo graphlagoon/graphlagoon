@@ -35,6 +35,7 @@ import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue';
 import CaseFiles from '@/components/investigation/CaseFiles.vue';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import TracePanel from '@/components/investigation/TracePanel.vue';
+import TypologyBadgesPanel from '@/components/investigation/TypologyBadgesPanel.vue';
 import TraceExits from '@/components/investigation/TraceExits.vue';
 import TraceSankey from '@/components/investigation/TraceSankey.vue';
 import SwimlaneTimeline from '@/components/investigation/SwimlaneTimeline.vue';
@@ -65,6 +66,8 @@ const artifactCount = ref<number | null>(null);
 const pendingProposals = ref(0);
 const inspectorTab = ref<'data' | 'enrichment' | 'notes' | 'origin'>('data');
 const showJournal = ref(false);
+/** Left column: the sources or the typology badges (T9). */
+const showTypologies = ref(false);
 const noteDraft = ref('');
 const actionError = ref<string | null>(null);
 const canvasRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
@@ -385,6 +388,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
 
       <div v-show="view !== 'space'" class="ws-body" :class="{ tracing: view === 'trace' }">
         <TracePanel v-if="view === 'trace'" />
+        <TypologyBadgesPanel v-else-if="showTypologies" :can-edit="canEdit" />
         <SourcesPanel
           v-else
           :sources="store.sources"
@@ -460,6 +464,14 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           <div v-if="view === 'graph'" class="canvas-actions">
             <button class="btn btn-outline btn-sm" data-testid="workspace-layout-btn" @click="showLayout = !showLayout">
               Layout
+            </button>
+            <button
+              class="btn btn-outline btn-sm"
+              :class="{ on: showTypologies }"
+              data-testid="workspace-typologies-btn"
+              @click="showTypologies = !showTypologies"
+            >
+              Typology badges
             </button>
             <button
               v-if="canEdit && graphStore.nodes.length"
@@ -892,6 +904,11 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   z-index: 4;
   display: flex;
   gap: 8px;
+}
+
+.canvas-actions .on {
+  border-color: #c2410c;
+  color: #c2410c;
 }
 
 .inspector {

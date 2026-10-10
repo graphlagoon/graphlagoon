@@ -413,6 +413,16 @@ async def test_trace_money_and_find_paths_on_the_case_graph(env, monkeypatch):
                                 source=f"0001-9@{ctx}", target=f"saque-atm@{ctx}")
             assert [n.split("@")[0] for n in paths["paths"][0]["nodes"]] == [
                 "0001-9", "4471-0", "5520-3", "saque-atm"]
+            # F4.3: typology badges cite CC 4.001 and only suggest (nothing journaled).
+            typ = await _tool(client, "run_typologies", investigation_id=cid, typologies=["passagem"])
+            [passagem] = typ["typologies"]
+            assert passagem["normRef"] == "CC 4.001 IV-k, IV-ad"
+            assert f"4471-0@{ctx}" in [h["nodeId"] for h in passagem["hits"]]
+
+        r = await rest.post(f"{url}/analysis/typologies", json={"typologies": ["nope"]})
+        assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "UNKNOWN_TYPOLOGY"
+        r = await rest.post(f"{url}/analysis/typologies", json={})
+        assert len(r.json()["typologies"]) == 7
 
         events = (await rest.get(f"{url}/events")).json()
         runs = [e for e in events if e["kind"] == "trace.run"]

@@ -205,4 +205,39 @@ describe('InvestigationView', () => {
     expect(graph.selectedEdgeIds.size).toBe(3)
     expect(getByTestId('path-result').textContent).toContain('3 hops')
   })
+
+  it('typology badges: a badge cites CC 4.001, highlights its entities, and accepting it writes typology.accepted', async () => {
+    vi.mocked(api.getInvestigationSources).mockResolvedValue([source('s1', 'c1')] as any)
+    vi.mocked(api.getInvestigationSourceSnapshot).mockResolvedValue({
+      exploration: { state: {} },
+      snapshot: {
+        nodes: fixture.nodes.map((n) => ({ id: n.node_id, type: n.node_type, properties: n.properties ?? {} })),
+        edges: fixture.edges.map((e) => ({ id: e.edge_id, source: e.src, target: e.dst, type: e.relationship_type, properties: e.properties })),
+      },
+    } as any)
+    vi.mocked(api.getGraphContext).mockImplementation(async (id) =>
+      ({ id, title: id, identity_keys: [], edge_semantics: fixture.edge_semantics }) as any,
+    )
+    const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    await fireEvent.click(getByTestId('workspace-typologies-btn'))
+    const badge = getByTestId('typology-passagem')
+    expect(badge.textContent).toContain('CC 4.001 IV-k, IV-ad')
+
+    await fireEvent.click(badge)
+    const graph = useGraphStore()
+    expect(graph.selectedNodeIds.has('4471-0@c1')).toBe(true)
+
+    vi.mocked(api.getInvestigationEvents).mockResolvedValue([
+      { id: 'e1', kind: 'typology.accepted', payload: { typology: 'passagem' } },
+    ] as any)
+    await fireEvent.click(getByTestId('typology-accept-passagem'))
+    await flushPromises()
+    expect(api.postInvestigationEvent).toHaveBeenCalledWith('inv', 'typology.accepted', expect.objectContaining({ typology: 'passagem', normRef: 'CC 4.001 IV-k, IV-ad' }))
+    expect(getByTestId('typology-accepted')).toBeTruthy()
+
+    await fireEvent.click(getByTestId('typology-bipartite'))
+    expect(graph.layoutAlgorithm).toBe('hive')
+    expect(graph.layoutModeConfig.hive.maxAxes).toBe(1)
+  })
 })

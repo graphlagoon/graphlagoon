@@ -308,4 +308,43 @@ test.describe('Investigations', () => {
     await page.getByTestId('trace-view-sankey').click();
     await expect(page.getByTestId('sankey-band')).toHaveCount(7);
   });
+
+  test('typology badges (T9): the merchant ring gets CC 4.001 III-f, accepted into the journal', async ({
+    authenticatedPage: page,
+  }) => {
+    await seedContexts(page, [{ ...MOCK_CONTEXT, id: 'ctx-loj', title: 'Lojistas' }]);
+    await seedInvestigations(page, [{ ...CASE, title: 'Lojista recém-credenciado com chargebacks' }], {
+      'inv-1': [{ id: 'src-1', kind: 'exploration', position: 0, title_snapshot: 'Lojistas · credenciamento', accessible: true, exploration_id: 'exp-1', context_id: 'ctx-loj', mode: 'frozen' }],
+    });
+    const shops = ['Loja Bom Preço ME', 'Empório Dois Irmãos', 'Casa Nova Utilid.', 'Variedades JM', 'Ótica Visão Clara', 'Pet Mundo', 'Auto Peças Rota', 'Moda Lima', 'Celular Expresso'];
+    const links: [number, string][] = [[0, 'socia'], [1, 'socia'], [2, 'socia'], [3, 'socia'], [0, 'conta'], [4, 'conta'], [5, 'conta'], [6, 'conta'], [7, 'conta'], [1, 'conta'], [6, 'terminal'], [7, 'terminal'], [8, 'terminal']];
+    const snapshot = {
+      exploration: { id: 'exp-1', title: 'Lojistas', graph_context_id: 'ctx-loj', owner_email: 'e2e@test.com', state: {} },
+      snapshot: {
+        nodes: [
+          ...shops.map((name, i) => ({ id: `L${i + 1}`, type: 'Lojista', properties: { nome: name } })),
+          { id: 'socia', type: 'Pessoa', properties: { nome: 'Sócia M. A. Souza' } },
+          { id: 'conta', type: 'ContaLiquidacao', properties: { nome: 'Conta de liquidação 0099-1' } },
+          { id: 'terminal', type: 'Terminal', properties: { nome: 'Terminal T-88' } },
+        ],
+        edges: links.map(([i, to], k) => ({ id: `r${k}`, source: `L${i + 1}`, target: to, type: 'compartilha', properties: {} })),
+      },
+    };
+    await page.route('**/graphlagoon/api/investigations/inv-1/sources/*/snapshot', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(snapshot) }),
+    );
+
+    await page.goto('/investigations/inv-1');
+    await expect(page.getByTestId('workspace-status')).toContainText('12 nodes', { timeout: 15_000 });
+    await page.getByTestId('workspace-typologies-btn').click();
+    const badge = page.getByTestId('typology-hub_atributo');
+    await expect(badge).toContainText('CC 4.001 III-f');
+    await expect(badge).toContainText('3 entities');
+    await badge.click();
+    await page.getByTestId('typology-bipartite').click();
+    await page.getByTestId('typology-accept-hub_atributo').click();
+    await expect(page.getByTestId('typology-accepted')).toBeVisible();
+    await page.getByTestId('journal-toggle').click();
+    await expect(page.getByTestId('journal')).toContainText('accepted the typology badge CC 4.001 III-f');
+  });
 });

@@ -188,6 +188,28 @@ method:
 direction). Ties are broken by node and edge id, so the same graph gives the same
 path.
 
+### Typology badges
+
+**Typology badges** (bottom-left of the canvas) swaps the left column for the
+patterns found in the unified graph, each citing its item of the BCB Circular
+4.001/2020:
+
+| Badge | Finds | CC 4.001 |
+|---|---|---|
+| Pass-through | inflows with ≥ 90% sent on within 24 h (FIFO) | IV-k, IV-ad |
+| Many origins | ≥ 10 distinct payers within 7 days | I-h, IV-n |
+| Many destinations | ≥ 10 distinct payees within 7 days | IV-o, IV-p |
+| Structuring | ≥ 3 transfers below R$ 50,000 within 7 days summing ≥ the limit, or one ≥ 90% of it | I-d, I-e, I-k, I-m, IV-b |
+| Cycle | money that comes back in time order in 2–6 hops (≥ 50%) | layering |
+| Shared element | a partner, account, terminal, device or address linked (by an edge with no amount) to ≥ 3 unrelated entities of one type | III-f, III-i, III-k, III-l |
+| Dormant reactivated | 180 days idle, then ≥ R$ 10,000 within 30 days | IV-e, IV-f |
+
+Click a badge to highlight its entities; **Bipartite layout** puts the most common
+node type on one axis and everything else on the other (a two-axis hive). Badges
+only suggest: **Accept** writes `typology.accepted` to the journal, and the dossier
+shows the accepted badges with their norm item. The server gives the same badges at
+`POST …/analysis/typologies` and to agents as `run_typologies`.
+
 ## Roles, notes and the journal
 
 - **Role.** The inspector's *Role* selector marks an entity as **Victim**
