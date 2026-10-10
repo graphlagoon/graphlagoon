@@ -20,6 +20,7 @@ from uuid import UUID
 
 from graphlagoon.db.database import get_session_maker, is_database_available
 from graphlagoon.db.memory_store import get_memory_store
+from graphlagoon.middleware.auth import get_current_actor
 from graphlagoon.utils.authz import can_manage, is_superuser
 from graphlagoon.utils.sharing import validate_owner_email
 
@@ -48,6 +49,10 @@ def _shared(inv: Any, user_email: str, *, write: bool = False) -> bool:
 
 
 def can_read_case(inv: Any, user_email: str) -> bool:
+    actor = get_current_actor()  # a case-scoped token sees only its cases (05 §6)
+    if actor and actor.get("scope") == "case":
+        if str(inv.id) not in actor.get("investigation_ids", []):
+            return False
     return (
         inv.owner_email == user_email
         or inv.assignee_email == user_email
@@ -215,6 +220,14 @@ async def list_investigations(
 ) -> list[dict]:
     """``exploration_id``: only cases that have that exploration as a source."""
     filters = {"status": status, "assignee_email": assignee, "typology": typology}
+async def ensure_case_access(
+    investigation_id: UUID, user_email: str, need: str = "read"
+) -> None:
+    """``load_case`` for handlers that must check access before buffering a body."""
+    async with _session() as session:
+        await load_case(session, investigation_id, user_email, need)
+
+
     filters = {k: v for k, v in filters.items() if v is not None}
 
     async with _session() as session:

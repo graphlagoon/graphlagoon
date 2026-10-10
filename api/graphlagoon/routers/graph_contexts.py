@@ -33,6 +33,7 @@ from graphlagoon.services import audit
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import (
     can_manage,
+    forbid_agents,
     can_write,
     is_superuser,
     require_permission,
@@ -796,7 +797,7 @@ async def delete_graph_context(context_id: UUID, request: Request):
     return {"status": "deleted"}
 
 
-@router.post("/{context_id}/share")
+@router.post("/{context_id}/share", dependencies=[Depends(forbid_agents)])
 async def share_graph_context(context_id: UUID, data: ShareRequest, request: Request):
     """Share a graph context with another user."""
     user_email = get_current_user(request)
@@ -893,7 +894,7 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
     return {"status": "shared"}
 
 
-@router.delete("/{context_id}/share/{email}")
+@router.delete("/{context_id}/share/{email}", dependencies=[Depends(forbid_agents)])
 async def unshare_graph_context(context_id: UUID, email: str, request: Request):
     """Remove sharing for a user."""
     user_email = get_current_user(request)

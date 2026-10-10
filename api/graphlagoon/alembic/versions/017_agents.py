@@ -51,6 +51,11 @@ def upgrade() -> None:
             sa.Column("name", sa.String(100), nullable=False),
             sa.Column("token_hash", sa.String(64), nullable=False, unique=True),
             sa.Column("scopes", postgresql.JSON(), nullable=False, server_default="[]"),
+            sa.Column("scope", sa.String(10), nullable=False, server_default="user"),
+            sa.Column(
+                "investigation_ids", postgresql.JSON(), nullable=False, server_default="[]"
+            ),
+            sa.Column("unmasked", sa.Boolean(), nullable=False, server_default=sa.false()),
             sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
             sa.Column("expires_at", sa.DateTime(), nullable=False),
             sa.Column("revoked_at", sa.DateTime(), nullable=True),

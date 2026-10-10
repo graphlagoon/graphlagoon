@@ -32,6 +32,7 @@ from graphlagoon.services import audit
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import (
     can_manage,
+    forbid_agents,
     can_read,
     can_write,
     is_superuser,
@@ -39,6 +40,7 @@ from graphlagoon.utils.authz import (
 )
 from graphlagoon.config import get_settings
 from graphlagoon.utils.context_access import get_context_with_access
+from graphlagoon.services.masking import agent_view
 
 logger = logging.getLogger(__name__)
 
@@ -713,10 +715,10 @@ async def get_exploration_snapshot(exploration_id: UUID, request: Request):
             detail="Snapshot file not found (may have been deleted)",
         )
 
-    return decompress_snapshot(data)
+    return agent_view(decompress_snapshot(data))
 
 
-@router.post("/api/explorations/{exploration_id}/share")
+@router.post("/api/explorations/{exploration_id}/share", dependencies=[Depends(forbid_agents)])
 async def share_exploration(exploration_id: UUID, data: ShareRequest, request: Request):
     """Share an exploration with another user."""
     user_email = get_current_user(request)
@@ -813,7 +815,7 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
     return {"status": "shared"}
 
 
-@router.delete("/api/explorations/{exploration_id}/share/{email}")
+@router.delete("/api/explorations/{exploration_id}/share/{email}", dependencies=[Depends(forbid_agents)])
 async def unshare_exploration(exploration_id: UUID, email: str, request: Request):
     """Remove sharing for an exploration."""
     user_email = get_current_user(request)

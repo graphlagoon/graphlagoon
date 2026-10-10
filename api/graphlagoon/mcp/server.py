@@ -4,15 +4,14 @@ Streamable HTTP (stateless, JSON responses) mounted in the app when
 ``agents_enabled`` and the optional ``mcp`` extra is installed. Only agent
 tokens get in. Each tool calls the service layer as the token's owner with the
 agent as actor (never HTTP to the app itself), wraps what comes from data in
-``untrusted_data`` and masks CPF, CNPJ and accounts unless
-``agents_allow_unmasked_data``. Decision, sharing, deleting, approving and
+``untrusted_data`` and masks CPF, CNPJ and accounts unless the token is
+``unmasked`` and ``agents_allow_unmasked_data`` allows it. Decision, sharing, deleting, approving and
 accepting proposals have no tool (§8.7, see ``registry.py``).
 """
 
 import base64
 import json
 import logging
-import re
 from contextlib import nullcontext
 from typing import Any, Optional
 from uuid import UUID
@@ -31,55 +30,18 @@ from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.services.case_graph import case_graph
+from graphlagoon.services.masking import (  # noqa: F401
+    TEXT_EXTENSIONS,
+    _masking,
+    mask,
+    mask_text,
+)
 
 logger = logging.getLogger(__name__)
 
 MCP_PATH = "/mcp"
-TEXT_EXTENSIONS = frozenset({"md", "txt", "csv", "json", "html", "svg"})
 
-# ---------------------------------------------------------------------------
-# Masking (03 §8.6): CPF/CNPJ anywhere in a string, account-like fields, and
-# the case's account identity values (they also live inside unified ids).
-# ---------------------------------------------------------------------------
-
-_CNPJ = re.compile(
-    r"(?<![0-9A-Za-z])(\d{2})\.?(\d{3})\.?(\d{3})/?(\d{4})-?(\d{2})(?![0-9A-Za-z])"
-)
-_CPF = re.compile(r"(?<![0-9A-Za-z])(\d{3})\.?(\d{3})\.?(\d{3})-?(\d{2})(?![0-9A-Za-z])")
-_ACCOUNT_KEY = re.compile(r"conta|account|acct|ag[eê]ncia|agency|iban", re.I)
-
-
-def _mask_digits(value: str) -> str:
-    """Every digit but the last two becomes ``*``."""
-    return re.sub(r"\d(?=(?:\D*\d){2})", "*", value)
-
-
-def mask_text(text: str, secrets: frozenset = frozenset()) -> str:
-    for secret in secrets:
-        text = text.replace(secret, _mask_digits(secret))
-    text = _CNPJ.sub(lambda m: f"**.{m[2]}.{m[3]}/****-**", text)
-    return _CPF.sub(lambda m: f"***.{m[2]}.{m[3]}-**", text)
-
-
-def mask(value: Any, secrets: frozenset = frozenset()) -> Any:
-    if isinstance(value, str):
-        return mask_text(value, secrets)
-    if isinstance(value, list):
-        return [mask(v, secrets) for v in value]
-    if isinstance(value, dict):
-        return {
-            mask_text(k, secrets): (
-                _mask_digits(str(v))
-                if _ACCOUNT_KEY.search(k) and isinstance(v, (str, int))
-                else mask(v, secrets)
-            )
-            for k, v in value.items()
-        }
-    return value
-
-
-def _masking() -> bool:
-    return not get_settings().agents_allow_unmasked_data
+# Masking lives in services/masking.py (05 §6); the MCP tools use it through _out.
 
 
 def _out(data: Any, secrets: frozenset = frozenset()) -> dict:

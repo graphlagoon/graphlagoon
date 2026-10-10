@@ -209,7 +209,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 ## 10. Fases (cada uma fecha com pytest, vitest, vue-tsc e `investigations.spec.ts` verdes)
 
 **Progresso**
-- [ ] F0 · Segurança
+- [x] F0 · Segurança
 - [ ] F1 · Caso operável
 - [ ] F2 · Novo modelo
 - [ ] F3 · Add everywhere + loop vivo
