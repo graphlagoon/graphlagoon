@@ -15,6 +15,7 @@ import type {
   AlgorithmTarget,
 } from '@/types/metrics';
 import { getBatchSize, getBatchDelay, calculateStats } from '@/types/metrics';
+import { connectedComponents } from '@/utils/graphComponents';
 
 // ============================================================================
 // Worker State
@@ -142,6 +143,15 @@ async function runComputation(
         values = await computeHITS(g, params, taskState, enableRealTimeUpdates, 'hub');
         target = 'node';
         break;
+
+      case 'weak-components':
+      case 'strong-components': {
+        const edges: [string, string][] = [];
+        g.forEachEdge((_e, _a, src, dst) => edges.push([src, dst]));
+        values = connectedComponents(g.nodes(), edges, algorithmId === 'weak-components' ? 'weak' : 'strong');
+        target = 'node';
+        break;
+      }
 
       case 'edge-betweenness':
         values = await computeEdgeBetweenness(g, params, taskState, enableRealTimeUpdates);

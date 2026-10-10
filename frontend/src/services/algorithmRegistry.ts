@@ -261,6 +261,34 @@ export const ALGORITHMS: AlgorithmDefinition[] = [
   },
 
   // ============================================================================
+  // Structure (investigations F3.7): the value is the component id, 0 = largest
+  // ============================================================================
+  {
+    id: 'weak-components',
+    name: 'Weak Components',
+    category: 'structure',
+    description: 'Component id, ignoring edge direction (0 = largest)',
+    target: 'node',
+    isIterative: false,
+    requiresConnectedGraph: false,
+    complexity: 'O(E)',
+    defaultParams: {},
+    paramSchema: [EDGE_TYPE_FILTER_PARAM],
+  },
+  {
+    id: 'strong-components',
+    name: 'Strong Components',
+    category: 'structure',
+    description: 'Component id where every node reaches every other along edge direction (0 = largest)',
+    target: 'node',
+    isIterative: false,
+    requiresConnectedGraph: false,
+    complexity: 'O(E)',
+    defaultParams: {},
+    paramSchema: [EDGE_TYPE_FILTER_PARAM],
+  },
+
+  // ============================================================================
   // Edge Metrics
   // ============================================================================
   {

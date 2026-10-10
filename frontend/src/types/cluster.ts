@@ -335,7 +335,7 @@ export type UpdateClusterProgramInput = Partial<
  * program's `Cluster[]` output is converted into a node→community assignment
  * WITHOUT generating the collapsed cluster geometry.
  */
-export type CommunityAlgorithm = 'louvain' | `cluster-program:${string}`;
+export type CommunityAlgorithm = 'louvain' | 'weak-components' | 'strong-components' | `cluster-program:${string}`;
 
 /**
  * Options for creating a cluster manually
