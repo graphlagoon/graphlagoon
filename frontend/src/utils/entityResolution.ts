@@ -142,3 +142,120 @@ export function suggestMatches(nodes: ErNode[]): MatchSuggestion[] {
   const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
   return out.sort((x, y) => y.score - x.score || cmp(x.left.uid, y.left.uid) || cmp(x.right.uid, y.right.uid));
 }
+
+// ---------------------------------------------------------------------------
+// Shared attributes (05 §4b): Vínculos
+// ---------------------------------------------------------------------------
+
+export interface LinkNode {
+  uid: string;
+  type: string;
+  properties?: Record<string, unknown> | null;
+}
+
+export interface SharedLinksParams {
+  /** Property names on the entities and/or node types of attribute nodes they connect to. */
+  attributes: string[];
+  /** A pair needs at least this many shared attributes to be linked (default 1). */
+  minShared?: number;
+  /** Values shared by more entities than this are too common to mean anything (a carrier IP). */
+  maxEntities?: number;
+  /** Entity node types to link; default: every node whose type is not an attribute type. */
+  entityTypes?: string[];
+}
+
+export interface SharedLinkEdge {
+  id: string;
+  src: string;
+  dst: string;
+  /** `compartilha_<attribute>` */
+  type: string;
+  properties: { attribute: string; value: string; shared_by: number };
+}
+
+export interface SharedLinkPair {
+  left: string;
+  right: string;
+  shared: string[];
+}
+
+const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+
+/**
+ * Links entities that share attribute values, read from their own properties
+ * (`telefone`) or from attribute nodes they connect to (a `Telefone` node). Pure and
+ * deterministic; the Python twin is `entity_resolution.shared_attribute_links`
+ * (fixture `__tests__/fixtures/er/shared-attributes.json`). Nothing merges: the
+ * result is a `graph/derived` item of `compartilha_<attr>` edges a person reviews.
+ */
+export function sharedAttributeLinks(
+  graph: { nodes: LinkNode[]; edges: { src: string; dst: string }[] },
+  params: SharedLinksParams,
+): { edges: SharedLinkEdge[]; pairs: SharedLinkPair[] } {
+  const attributes = params.attributes.filter(Boolean);
+  const minShared = Math.max(1, params.minShared ?? 1);
+  const maxEntities = params.maxEntities ?? Number.POSITIVE_INFINITY;
+  const attrTypes = new Set(attributes.map((a) => a.toLowerCase()));
+  const byUid = new Map(graph.nodes.map((n) => [n.uid, n]));
+  const entityTypes = params.entityTypes?.length ? new Set(params.entityTypes) : null;
+  const isEntity = (n: LinkNode) => (entityTypes ? entityTypes.has(n.type) : !attrTypes.has(n.type.toLowerCase()));
+
+  // entity → attribute node neighbours (both directions)
+  const neighbours = new Map<string, LinkNode[]>();
+  for (const e of graph.edges) {
+    for (const [a, b] of [[e.src, e.dst], [e.dst, e.src]]) {
+      const n = byUid.get(b);
+      if (n && attrTypes.has(n.type.toLowerCase())) neighbours.set(a, [...(neighbours.get(a) ?? []), n]);
+    }
+  }
+
+  const propKey = (props: Record<string, unknown>, name: string) =>
+    Object.keys(props).find((k) => k.toLowerCase() === name.toLowerCase());
+
+  const shared = new Map<string, { left: string; right: string; attrs: Map<string, { value: string; count: number }> }>();
+  for (const attribute of attributes) {
+    const lower = attribute.toLowerCase();
+    const groups = new Map<string, Set<string>>();
+    for (const n of graph.nodes) {
+      if (!isEntity(n)) continue;
+      const values = new Set<string>();
+      const props = n.properties ?? {};
+      const k = propKey(props, attribute);
+      const v = k !== undefined ? props[k] : null;
+      if (v !== null && v !== undefined && String(v).trim() !== '') values.add(String(v).trim().toLowerCase());
+      for (const m of neighbours.get(n.uid) ?? []) if (m.type.toLowerCase() === lower) values.add(m.uid);
+      for (const value of values) groups.set(value, (groups.get(value) ?? new Set()).add(n.uid));
+    }
+    for (const [value, members] of groups) {
+      if (members.size < 2 || members.size > maxEntities) continue;
+      const ids = [...members].sort(cmp);
+      for (let i = 0; i < ids.length; i++) {
+        for (const right of ids.slice(i + 1)) {
+          const key = `${ids[i]}\u0000${right}`;
+          const pair = shared.get(key) ?? { left: ids[i], right, attrs: new Map() };
+          if (!pair.attrs.has(attribute)) pair.attrs.set(attribute, { value, count: members.size });
+          shared.set(key, pair);
+        }
+      }
+    }
+  }
+
+  const pairs: SharedLinkPair[] = [];
+  const edges: SharedLinkEdge[] = [];
+  for (const p of [...shared.values()].sort((a, b) => cmp(a.left, b.left) || cmp(a.right, b.right))) {
+    if (p.attrs.size < minShared) continue;
+    const attrs = [...p.attrs.keys()].sort(cmp);
+    pairs.push({ left: p.left, right: p.right, shared: attrs });
+    for (const attribute of attrs) {
+      const { value, count } = p.attrs.get(attribute)!;
+      edges.push({
+        id: `link:${attribute}:${p.left}:${p.right}`,
+        src: p.left,
+        dst: p.right,
+        type: `compartilha_${attribute}`,
+        properties: { attribute, value, shared_by: count },
+      });
+    }
+  }
+  return { edges, pairs };
+}

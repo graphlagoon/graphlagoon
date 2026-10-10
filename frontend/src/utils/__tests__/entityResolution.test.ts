@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fixture from '@/__tests__/fixtures/er/matches.json';
-import { jaroWinkler, middleSix, normalizeName, suggestMatches } from '@/utils/entityResolution';
+import shared from '@/__tests__/fixtures/er/shared-attributes.json';
+import { jaroWinkler, middleSix, normalizeName, sharedAttributeLinks, suggestMatches } from '@/utils/entityResolution';
 
 describe('entity resolution (03 §6.2)', () => {
   it('matches the shared fixture (parity with the Python service)', () => {
@@ -22,5 +23,20 @@ describe('entity resolution (03 §6.2)', () => {
     expect(jaroWinkler('MARTHA', 'MARHTA')).toBeCloseTo(0.9611, 4);
     expect(jaroWinkler('DWAYNE', 'DUANE')).toBeCloseTo(0.84, 2);
     expect(jaroWinkler('', 'X')).toBe(0);
+  });
+});
+
+describe('shared attributes (05 §4b, Vínculos)', () => {
+  it('matches the shared fixture (parity with the Python service)', () => {
+    const p = shared.params;
+    expect(sharedAttributeLinks(shared.graph as any, p)).toEqual(shared.expected);
+  });
+
+  it('a common value above maxEntities never links; minShared 1 links by a single attribute', () => {
+    const { pairs } = sharedAttributeLinks(shared.graph as any, { attributes: ['ip'], minShared: 1, maxEntities: 3 });
+    expect(pairs).toEqual([]);
+    const one = sharedAttributeLinks(shared.graph as any, { attributes: ['ip'], minShared: 1 });
+    expect(one.pairs).toHaveLength(6); // 4 entities share the carrier IP
+    expect(one.edges[0]).toMatchObject({ type: 'compartilha_ip', properties: { shared_by: 4 } });
   });
 });

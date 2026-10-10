@@ -142,3 +142,83 @@ def suggest(nodes: list[dict]) -> list[dict]:
                 )
     out.sort(key=lambda m: (-m["score"], m["left"]["uid"], m["right"]["uid"]))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Shared attributes (05 §4b): Vínculos. Twin of ``sharedAttributeLinks`` in
+# ``utils/entityResolution.ts`` (fixture ``er/shared-attributes.json``).
+# ---------------------------------------------------------------------------
+
+
+def shared_attribute_links(
+    graph: dict,
+    attributes: list[str],
+    min_shared: int = 1,
+    max_entities: Optional[int] = None,
+    entity_types: Optional[list[str]] = None,
+) -> dict:
+    """``graph``: ``{nodes: [{uid, type, properties}], edges: [{src, dst}]}``.
+    Links entities sharing attribute values read from their properties or from
+    attribute nodes they connect to; returns ``{edges, pairs}`` with
+    ``compartilha_<attr>`` edges between unified ids."""
+    attributes = [a for a in attributes if a]
+    min_shared = max(1, min_shared)
+    attr_types = {a.lower() for a in attributes}
+    by_uid = {n["uid"]: n for n in graph["nodes"]}
+    types = set(entity_types or [])
+
+    def is_entity(n: dict) -> bool:
+        return n["type"] in types if types else n["type"].lower() not in attr_types
+
+    neighbours: dict[str, list[dict]] = {}
+    for e in graph.get("edges") or []:
+        for a, b in ((e["src"], e["dst"]), (e["dst"], e["src"])):
+            n = by_uid.get(b)
+            if n and n["type"].lower() in attr_types:
+                neighbours.setdefault(a, []).append(n)
+
+    shared: dict[tuple[str, str], dict] = {}
+    for attribute in attributes:
+        lower = attribute.lower()
+        groups: dict[str, set[str]] = {}
+        for n in graph["nodes"]:
+            if not is_entity(n):
+                continue
+            values: set[str] = set()
+            props = n.get("properties") or {}
+            key = next((k for k in props if k.lower() == lower), None)
+            v = props.get(key) if key is not None else None
+            if v is not None and str(v).strip() != "":
+                values.add(str(v).strip().lower())
+            for m in neighbours.get(n["uid"], []):
+                if m["type"].lower() == lower:
+                    values.add(m["uid"])
+            for value in values:
+                groups.setdefault(value, set()).add(n["uid"])
+        for value, members in groups.items():
+            if len(members) < 2 or (max_entities is not None and len(members) > max_entities):
+                continue
+            ids = sorted(members)
+            for i, left in enumerate(ids):
+                for right in ids[i + 1 :]:
+                    pair = shared.setdefault((left, right), {})
+                    pair.setdefault(attribute, (value, len(members)))
+
+    pairs, edges = [], []
+    for (left, right), attrs in sorted(shared.items()):
+        if len(attrs) < min_shared:
+            continue
+        names = sorted(attrs)
+        pairs.append({"left": left, "right": right, "shared": names})
+        for attribute in names:
+            value, count = attrs[attribute]
+            edges.append(
+                {
+                    "id": f"link:{attribute}:{left}:{right}",
+                    "src": left,
+                    "dst": right,
+                    "type": f"compartilha_{attribute}",
+                    "properties": {"attribute": attribute, "value": value, "shared_by": count},
+                }
+            )
+    return {"edges": edges, "pairs": pairs}

@@ -1,0 +1,438 @@
+{
+  "description": "Generic entities (05 §4b): device, IP, Pix key, card, terminal, address and a regex capture normalize the same way on both engines; a regex key without a match stays local (uid id@context).",
+  "contexts": {
+    "c-kyc": {
+      "identity_keys": [
+        {
+          "node_type": "Dispositivo",
+          "entity": "Dispositivo",
+          "source": "node_id",
+          "normalize": "device_id"
+        },
+        {
+          "node_type": "IP",
+          "entity": "IP",
+          "source": "node_id",
+          "normalize": "ip"
+        },
+        {
+          "node_type": "ChavePix",
+          "entity": "ChavePix",
+          "source": {
+            "kind": "prop",
+            "name": "chave"
+          },
+          "normalize": "pix_key"
+        },
+        {
+          "node_type": "Cartao",
+          "entity": "Cartao",
+          "source": "node_id",
+          "normalize": "card"
+        },
+        {
+          "node_type": "Terminal",
+          "entity": "Terminal",
+          "source": "node_id",
+          "normalize": "terminal_id"
+        },
+        {
+          "node_type": "Endereco",
+          "entity": "Endereco",
+          "source": {
+            "kind": "prop",
+            "name": "logradouro"
+          },
+          "normalize": "address"
+        },
+        {
+          "node_type": "Login",
+          "entity": "Sessao",
+          "source": {
+            "kind": "prop",
+            "name": "user_agent"
+          },
+          "normalize": "regex",
+          "pattern": "sid=([A-Za-z0-9]+)"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "s-a",
+      "context_id": "c-kyc",
+      "nodes": [
+        {
+          "id": "DEV-123 456",
+          "type": "Dispositivo",
+          "properties": {}
+        },
+        {
+          "id": "177.010.001.009",
+          "type": "IP",
+          "properties": {}
+        },
+        {
+          "id": "k1",
+          "type": "ChavePix",
+          "properties": {
+            "chave": "Ana.R@Example.com"
+          }
+        },
+        {
+          "id": "k2",
+          "type": "ChavePix",
+          "properties": {
+            "chave": "+55 (11) 98765-4321"
+          }
+        },
+        {
+          "id": "k3",
+          "type": "ChavePix",
+          "properties": {
+            "chave": "123.456.789-01"
+          }
+        },
+        {
+          "id": "5311 2233 4455 1234",
+          "type": "Cartao",
+          "properties": {}
+        },
+        {
+          "id": "t-0042",
+          "type": "Terminal",
+          "properties": {}
+        },
+        {
+          "id": "e1",
+          "type": "Endereco",
+          "properties": {
+            "logradouro": "Rua das Acácias, 120 apto 31 - São Paulo"
+          }
+        },
+        {
+          "id": "l1",
+          "type": "Login",
+          "properties": {
+            "user_agent": "Mozilla/5.0 sid=AbC123 x"
+          }
+        },
+        {
+          "id": "l2",
+          "type": "Login",
+          "properties": {
+            "user_agent": "curl/8"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "DEV-123 456",
+          "target": "177.010.001.009",
+          "type": "CONECTA",
+          "properties": {
+            "quando": "2024-03-15T14:05:00",
+            "peso": "2"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s-b",
+      "context_id": "c-kyc",
+      "nodes": [
+        {
+          "id": "dev123456",
+          "type": "Dispositivo",
+          "properties": {
+            "so": "android"
+          }
+        },
+        {
+          "id": "177.10.1.9",
+          "type": "IP",
+          "properties": {}
+        },
+        {
+          "id": "k9",
+          "type": "ChavePix",
+          "properties": {
+            "chave": "ana.r@example.com"
+          }
+        },
+        {
+          "id": "k8",
+          "type": "ChavePix",
+          "properties": {
+            "chave": "11987654321"
+          }
+        },
+        {
+          "id": "5311-2233-4455-1234",
+          "type": "Cartao",
+          "properties": {}
+        },
+        {
+          "id": "T42",
+          "type": "Terminal",
+          "properties": {}
+        },
+        {
+          "id": "e9",
+          "type": "Endereco",
+          "properties": {
+            "logradouro": "R. Acacias, nº 120, ap 31, Sao Paulo"
+          }
+        },
+        {
+          "id": "l9",
+          "type": "Login",
+          "properties": {
+            "user_agent": "sid=abc123"
+          }
+        },
+        {
+          "id": "l2",
+          "type": "Login",
+          "properties": {
+            "user_agent": "wget"
+          }
+        }
+      ],
+      "edges": []
+    }
+  ],
+  "matches": [],
+  "overrides": {},
+  "expected": {
+    "nodes": [
+      {
+        "uid": "Cartao:531122*1234",
+        "type": "Cartao",
+        "entity": "Cartao",
+        "properties": {},
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "5311 2233 4455 1234"
+          },
+          {
+            "source_id": "s-b",
+            "node_id": "5311-2233-4455-1234"
+          }
+        ]
+      },
+      {
+        "uid": "ChavePix:cpf:11987654321",
+        "type": "ChavePix",
+        "entity": "ChavePix",
+        "properties": {
+          "chave": "11987654321"
+        },
+        "sources": [
+          {
+            "source_id": "s-b",
+            "node_id": "k8"
+          }
+        ]
+      },
+      {
+        "uid": "ChavePix:cpf:12345678901",
+        "type": "ChavePix",
+        "entity": "ChavePix",
+        "properties": {
+          "chave": "123.456.789-01"
+        },
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "k3"
+          }
+        ]
+      },
+      {
+        "uid": "ChavePix:email:ana.r@example.com",
+        "type": "ChavePix",
+        "entity": "ChavePix",
+        "properties": {
+          "chave": "Ana.R@Example.com"
+        },
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "k1"
+          },
+          {
+            "source_id": "s-b",
+            "node_id": "k9"
+          }
+        ],
+        "conflicts": {
+          "chave": [
+            {
+              "value": "ana.r@example.com",
+              "source_id": "s-b"
+            }
+          ]
+        }
+      },
+      {
+        "uid": "ChavePix:phone:11987654321",
+        "type": "ChavePix",
+        "entity": "ChavePix",
+        "properties": {
+          "chave": "+55 (11) 98765-4321"
+        },
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "k2"
+          }
+        ]
+      },
+      {
+        "uid": "Dispositivo:dev123456",
+        "type": "Dispositivo",
+        "entity": "Dispositivo",
+        "properties": {
+          "so": "android"
+        },
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "DEV-123 456"
+          },
+          {
+            "source_id": "s-b",
+            "node_id": "dev123456"
+          }
+        ]
+      },
+      {
+        "uid": "Endereco:rua acacias 120 ap 31 sao paulo",
+        "type": "Endereco",
+        "entity": "Endereco",
+        "properties": {
+          "logradouro": "Rua das Acácias, 120 apto 31 - São Paulo"
+        },
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "e1"
+          },
+          {
+            "source_id": "s-b",
+            "node_id": "e9"
+          }
+        ],
+        "conflicts": {
+          "logradouro": [
+            {
+              "value": "R. Acacias, nº 120, ap 31, Sao Paulo",
+              "source_id": "s-b"
+            }
+          ]
+        }
+      },
+      {
+        "uid": "IP:177.10.1.9",
+        "type": "IP",
+        "entity": "IP",
+        "properties": {},
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "177.010.001.009"
+          },
+          {
+            "source_id": "s-b",
+            "node_id": "177.10.1.9"
+          }
+        ]
+      },
+      {
+        "uid": "Sessao:abc123",
+        "type": "Login",
+        "entity": "Sessao",
+        "properties": {
+          "user_agent": "Mozilla/5.0 sid=AbC123 x"
+        },
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "l1"
+          },
+          {
+            "source_id": "s-b",
+            "node_id": "l9"
+          }
+        ],
+        "conflicts": {
+          "user_agent": [
+            {
+              "value": "sid=abc123",
+              "source_id": "s-b"
+            }
+          ]
+        }
+      },
+      {
+        "uid": "Terminal:T42",
+        "type": "Terminal",
+        "entity": "Terminal",
+        "properties": {},
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "t-0042"
+          },
+          {
+            "source_id": "s-b",
+            "node_id": "T42"
+          }
+        ]
+      },
+      {
+        "uid": "l2@c-kyc",
+        "type": "Login",
+        "entity": null,
+        "properties": {
+          "user_agent": "curl/8"
+        },
+        "sources": [
+          {
+            "source_id": "s-a",
+            "node_id": "l2"
+          },
+          {
+            "source_id": "s-b",
+            "node_id": "l2"
+          }
+        ],
+        "conflicts": {
+          "user_agent": [
+            {
+              "value": "wget",
+              "source_id": "s-b"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "s-a:e1",
+        "src": "Dispositivo:dev123456",
+        "dst": "IP:177.10.1.9",
+        "type": "CONECTA",
+        "properties": {
+          "quando": "2024-03-15T14:05:00",
+          "peso": "2"
+        },
+        "source_id": "s-a"
+      }
+    ]
+  }
+}

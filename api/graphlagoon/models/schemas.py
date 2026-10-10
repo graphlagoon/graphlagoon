@@ -428,7 +428,9 @@ class PropRef(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
-IdentityNormalize = Literal["cpf_cnpj", "account", "phone", "email", "lower", "none"]
+IdentityNormalize = Literal[
+    "cpf_cnpj", "account", "phone", "email", "device_id", "ip", "pix_key", "card", "terminal_id", "address", "regex", "lower", "none",
+]
 
 
 class IdentityKey(BaseModel):
@@ -436,6 +438,8 @@ class IdentityKey(BaseModel):
     entity: str = Field(min_length=1, max_length=100)
     source: Union[Literal["node_id"], PropRef] = "node_id"
     normalize: IdentityNormalize = "none"
+    # regex only: group 1 (else the whole match), lowercased
+    pattern: Optional[str] = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def _strip(self) -> "IdentityKey":
@@ -503,11 +507,16 @@ class EdgeSemantics(BaseModel):
     amount_unit: Literal["units", "cents"] = "units"
     time_prop: Optional[str] = Field(default=None, max_length=200)
     currency: str = Field(default="BRL", pattern=r"^[A-Z]{3}$")
+    # Generic relations (05 §4b): a weight stands in for the amount, a timestamp for the time.
+    weight_prop: Optional[str] = Field(default=None, max_length=200)
+    timestamp_prop: Optional[str] = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def _blank_is_none(self) -> "EdgeSemantics":
         self.amount_prop = (self.amount_prop or "").strip() or None
         self.time_prop = (self.time_prop or "").strip() or None
+        self.weight_prop = (self.weight_prop or "").strip() or None
+        self.timestamp_prop = (self.timestamp_prop or "").strip() or None
         return self
 
 
@@ -1968,6 +1977,38 @@ class ItemPinRequest(BaseModel):
 class ItemRunRequest(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     row_limit: int = Field(default=1000, ge=1, le=100000)
+
+
+class TableJoinRequest(BaseModel):
+    """Join two or more table items by ``key_column`` (the first shared column when omitted)."""
+
+    item_ids: list[UUID] = Field(min_length=2, max_length=20)
+    key_column: Optional[str] = Field(default=None, max_length=200)
+    title: Optional[str] = Field(default=None, max_length=255)
+
+
+class TableSide(BaseModel):
+    item_id: UUID
+    version: Optional[int] = Field(default=None, ge=1)
+
+
+class TableCompareRequest(BaseModel):
+    """Two tables, or two runs of one query (same ``item_id``, two ``version``s)."""
+
+    left: TableSide
+    right: TableSide
+    key_column: Optional[str] = Field(default=None, max_length=200)
+
+
+class TablePromoteRequest(BaseModel):
+    """``as = enrichment`` (key_column, match_node_types, match_source, key_digits) or
+    ``as = graph`` (source_column, target_column, source_type, target_type, edge_type,
+    normalize, amount_prop, time_prop); options missing fall back to the first columns."""
+
+    item_ids: list[UUID] = Field(min_length=1, max_length=50)
+    as_: Literal["graph", "enrichment"] = Field(alias="as")
+    options: dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ItemTextResponse(BaseModel):

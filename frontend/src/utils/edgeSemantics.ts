@@ -2,7 +2,7 @@
  * Amount and time of an edge, read through its context's `edge_semantics`
  * (investigations F3.1, 03 §2.1). Pure: the trace/path workers import it too.
  */
-import type { Edge, EdgeSemantics } from '@/types/graph';
+import type { Edge, EdgeSemantics, EdgeSemanticsByType } from '@/types/graph';
 
 export interface EdgeValue {
   amount: number | null;
@@ -54,15 +54,27 @@ export function formatAmount(amount: number, currency = 'BRL'): string {
 export function edgeValue(edge: Edge, semantics: EdgeSemantics | null | undefined): EdgeValue {
   if (!semantics) return { amount: edge.__amount ?? null, t: edge.__t ?? null };
   const props = edge.properties ?? {};
+  // A generic relation (login, device use) has a weight and a timestamp instead (05 §4b).
+  const amountProp = semantics.amount_prop || semantics.weight_prop;
+  const timeProp = semantics.time_prop || semantics.timestamp_prop;
   return {
-    amount: semantics.amount_prop ? parseAmount(props[semantics.amount_prop], semantics.amount_unit) : null,
-    t: semantics.time_prop ? parseTime(props[semantics.time_prop]) : null,
+    amount: amountProp ? parseAmount(props[amountProp], semantics.amount_unit) : null,
+    t: timeProp ? parseTime(props[timeProp]) : null,
   };
+}
+
+/** The semantics for one edge: the case's per-type override (`*` = any type), else its context's. */
+export function semanticsFor(
+  relationshipType: string,
+  byType: EdgeSemanticsByType | null | undefined,
+  fallback: EdgeSemantics | null | undefined,
+): EdgeSemantics | null | undefined {
+  return byType?.[relationshipType] ?? byType?.['*'] ?? fallback;
 }
 
 /** Tags for a unified edge from its own context's semantics; nothing when the context declares none. */
 export function edgeValueTags(edge: Edge, semantics: EdgeSemantics | null | undefined): Pick<Edge, '__amount' | '__t'> {
-  if (!semantics?.amount_prop && !semantics?.time_prop) return {};
+  if (!semantics?.amount_prop && !semantics?.time_prop && !semantics?.weight_prop && !semantics?.timestamp_prop) return {};
   const { amount, t } = edgeValue(edge, semantics);
   return { ...(amount !== null ? { __amount: amount } : {}), ...(t !== null ? { __t: t } : {}) };
 }

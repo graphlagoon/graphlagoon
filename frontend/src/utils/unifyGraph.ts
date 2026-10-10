@@ -2,9 +2,9 @@
  * Unified case graph (investigations, 03 §5.1): N sources from different
  * contexts merged into one graph by the contexts' identity keys. Pure.
  */
-import type { Edge, GraphContext, GraphSnapshot, IdentityKey, Node } from '@/types/graph';
+import type { Edge, EdgeSemanticsByType, GraphContext, GraphSnapshot, IdentityKey, Node } from '@/types/graph';
 import { identityKeyOf } from '@/utils/identityKeys';
-import { edgeValueTags } from '@/utils/edgeSemantics';
+import { edgeValueTags, semanticsFor } from '@/utils/edgeSemantics';
 
 /** Where a unified node came from: one entry per (source, original node). */
 export interface NodeOrigin {
@@ -30,6 +30,8 @@ export interface UnifySource {
   contextId: string;
   nodes: Node[];
   edges: Edge[];
+  /** A derived item (Vínculos, selections): its node ids are already unified ids, kept as they are. */
+  unified?: boolean;
 }
 
 export interface UnifiedGraph {
@@ -107,12 +109,14 @@ function mergeNode(
  * stays per context (`"{node_id}@{contextId}"`, id first so the default label reads
  * the original id). Edges are never merged across sources; each carries its own
  * context's amount and time (`__amount`/`__t`). Case-level `overrides` replace a
- * context's key for the same node type in every context (05 §1 `settings.identity_keys`).
+ * context's key for the same node type in every context (05 §1 `settings.identity_keys`);
+ * `edgeOverrides` (`settings.edge_semantics`, by relationship type) win over a context's.
  */
 export function unifyGraph(
   sources: UnifySource[],
   contexts: Record<string, Pick<GraphContext, 'identity_keys' | 'edge_semantics'> | null | undefined>,
   overrides: IdentityKey[] = [],
+  edgeOverrides: EdgeSemanticsByType | null = null,
 ): UnifiedGraph {
   const nodes = new Map<string, UnifiedNode>();
   const edges = new Map<string, UnifiedEdge>();
@@ -122,9 +126,9 @@ export function unifyGraph(
     const semantics = contexts[s.contextId]?.edge_semantics;
     const uidOf = new Map<string, string>();
     for (const n of s.nodes) {
-      const key = keys.get(n.node_type);
+      const key = s.unified ? undefined : keys.get(n.node_type);
       const keyed = key ? identityKeyOf(key, { id: n.node_id, properties: n.properties }) : null;
-      const uid = keyed ?? `${n.node_id}@${s.contextId}`;
+      const uid = s.unified ? n.node_id : (keyed ?? `${n.node_id}@${s.contextId}`);
       uidOf.set(n.node_id, uid);
       mergeNode(nodes, uid, keyed ? key!.entity : undefined, n, {
         sourceId: s.id,
@@ -139,7 +143,9 @@ export function unifyGraph(
       if (!src || !dst) continue;
       const id = `${s.id}:${e.edge_id}`;
       // Amount/time are tagged per edge: sources of different contexts name them differently.
-      if (!edges.has(id)) edges.set(id, { ...e, ...edgeValueTags(e, semantics), edge_id: id, src, dst, __source: s.id });
+      if (!edges.has(id)) {
+        edges.set(id, { ...e, ...edgeValueTags(e, semanticsFor(e.relationship_type, edgeOverrides, semantics)), edge_id: id, src, dst, __source: s.id });
+      }
     }
   }
 

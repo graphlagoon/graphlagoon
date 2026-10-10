@@ -130,6 +130,26 @@ def write_status(inv: Any, kind: str) -> str:
 # ---------------------------------------------------------------------------
 
 KIND_PRESETS = ("credito", "garantia", "pix_med", "lavagem", "lojista", "fraude_sintetica", "livre")
+
+# Vocabularies a preset suggests (05 §4b); never imposed, editable in the case's settings.
+# Twin of ``frontend/src/utils/casePresets.ts``.
+PRESET_DEFAULTS: dict[str, dict] = {
+    "credito": {"roles": ["controlador", "coligada", "garantidor", "devedor"], "link_attributes": ["endereco", "telefone", "email"]},
+    "garantia": {"roles": ["devedor", "adquirente", "cessionário", "bem"], "link_attributes": ["endereco", "email"]},
+    "pix_med": {"roles": ["vítima", "mula", "beneficiário final", "ponto de saque"], "link_attributes": ["telefone", "device_id"]},
+    "lavagem": {"roles": ["origem", "passagem", "destino", "laranja"], "link_attributes": ["endereco", "telefone"]},
+    "lojista": {"roles": ["lojista", "sócio", "adquirente", "terminal"], "link_attributes": ["terminal", "endereco", "telefone"]},
+    "fraude_sintetica": {
+        "roles": ["identidade real", "identidade sintética", "mula", "ponto de cash-out"],
+        "link_attributes": ["telefone", "email", "device_id", "endereco"],
+    },
+    "livre": {"roles": [], "link_attributes": []},
+}
+
+
+def preset_defaults(kind_preset: Optional[str]) -> dict:
+    """``settings`` a new case starts with: the preset's vocabularies."""
+    return {"vocabularies": dict(PRESET_DEFAULTS.get(kind_preset or "livre", PRESET_DEFAULTS["livre"]))}
 STATUSES = ("open", "analysis", "decided", "archived")
 PHASE_DAYS = 45
 # Only Pix/MED has phases by default (Circ. 3.978: 45 + 45 days from the alert).
@@ -548,6 +568,7 @@ async def _assignee_share(session, inv: Any, email: Optional[str]) -> None:
 async def create_investigation(user_email: str, data: dict) -> dict:
     if data.get("assignee_email"):
         data["assignee_email"] = nominal_email(data["assignee_email"])
+    data["settings"] = {**preset_defaults(data.get("kind_preset")), **(data.get("settings") or {})}
     async with _session() as session:
         if session is None:
             inv = get_memory_store().create_investigation(owner_email=user_email, **data)

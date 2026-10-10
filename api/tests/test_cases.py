@@ -325,3 +325,28 @@ def test_016_runs_on_sqlite_and_replaces_the_old_chain():
         with Operations.context(MigrationContext.configure(conn)):
             migration.upgrade()
         assert set(migration.TABLES) <= set(sa.inspect(conn).get_table_names())
+
+
+def test_preset_defaults_and_settings_patch(client):
+    """A preset only fills defaults (05 §4b); the settings PATCH keeps identity keys,
+    edge semantics by type, vocabularies and label templates as given."""
+    inv = _case(client, kind_preset="fraude_sintetica")
+    vocab = inv["settings"]["vocabularies"]
+    assert vocab["roles"] == ["identidade real", "identidade sintética", "mula", "ponto de cash-out"]
+    assert vocab["link_attributes"] == ["telefone", "email", "device_id", "endereco"]
+    assert _case(client)["settings"]["vocabularies"] == {"roles": [], "link_attributes": []}
+    assert _case(client, settings={"vocabularies": {"roles": ["x"]}})["settings"]["vocabularies"] == {"roles": ["x"]}
+
+    url = f"/api/investigations/{inv['id']}"
+    settings = {
+        "identity_keys": [{"node_type": "Login", "entity": "Sessao", "source": {"kind": "prop", "name": "ua"}, "normalize": "regex", "pattern": "sid=(\\w+)"}],
+        "edge_semantics": {"USA": {"weight_prop": "vezes", "timestamp_prop": "quando"}, "*": {"amount_prop": "valor", "time_prop": "data"}},
+        "vocabularies": {"roles": ["mula"], "tags": ["kyc"], "link_attributes": ["telefone"]},
+        "label_templates": {"Pessoa": "{nome} · {cpf_mascarado}"},
+        "agent_suggest_kinds": ["role"],
+    }
+    r = client.patch(url, json={"settings": settings}, headers=h(OWNER))
+    assert r.status_code == 200 and r.json()["settings"] == settings
+    assert client.get(url, headers=h(OWNER)).json()["settings"] == settings
+    events = client.get(f"{url}/events", headers=h(OWNER)).json()
+    assert events[-1]["kind"] == "case.updated" and "settings" in events[-1]["payload"]

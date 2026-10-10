@@ -27,7 +27,7 @@ from typing import Any, Optional
 from graphlagoon.services.case_graph import _normalize
 
 CONVERTERS = ("cents", "decimal_br", "trim", "upper", "digits")
-NORMALIZERS = ("cpf_cnpj", "account", "phone", "email", "lower", "none")
+NORMALIZERS = ("cpf_cnpj", "account", "phone", "email", "device_id", "ip", "pix_key", "card", "terminal_id", "address", "lower", "none")
 WHEN_OPS = ("eq", "ne", "in", "empty", "not_empty")
 MAX_DISCARDED = 20
 

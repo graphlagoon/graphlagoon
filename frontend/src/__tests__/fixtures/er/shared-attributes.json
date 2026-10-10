@@ -1,0 +1,185 @@
+{
+  "description": "Vínculos (05 §4b): p1, p2 and p3 share a phone node and a device property; p4 shares only the carrier IP, which 4 entities share and the threshold excludes; p5 is alone. minShared 2 keeps the synthetic trio only.",
+  "graph": {
+    "nodes": [
+      {
+        "uid": "Pessoa:1",
+        "type": "Pessoa",
+        "properties": {
+          "nome": "Ana",
+          "device_id": "DEV-1",
+          "ip": "177.1.1.1"
+        }
+      },
+      {
+        "uid": "Pessoa:2",
+        "type": "Pessoa",
+        "properties": {
+          "nome": "Bia",
+          "device_id": "dev-1",
+          "ip": "177.1.1.1"
+        }
+      },
+      {
+        "uid": "Pessoa:3",
+        "type": "Pessoa",
+        "properties": {
+          "nome": "Caio",
+          "Device_Id": "DEV-1 ",
+          "ip": "177.1.1.1"
+        }
+      },
+      {
+        "uid": "Pessoa:4",
+        "type": "Pessoa",
+        "properties": {
+          "nome": "Davi",
+          "device_id": "dev-9",
+          "ip": "177.1.1.1"
+        }
+      },
+      {
+        "uid": "Pessoa:5",
+        "type": "Pessoa",
+        "properties": {
+          "nome": "Eva",
+          "device_id": null,
+          "ip": ""
+        }
+      },
+      {
+        "uid": "Telefone:11999990000",
+        "type": "Telefone",
+        "properties": {}
+      },
+      {
+        "uid": "Telefone:11888880000",
+        "type": "Telefone",
+        "properties": {}
+      }
+    ],
+    "edges": [
+      {
+        "src": "Pessoa:1",
+        "dst": "Telefone:11999990000"
+      },
+      {
+        "src": "Pessoa:2",
+        "dst": "Telefone:11999990000"
+      },
+      {
+        "src": "Telefone:11999990000",
+        "dst": "Pessoa:3"
+      },
+      {
+        "src": "Pessoa:5",
+        "dst": "Telefone:11888880000"
+      }
+    ]
+  },
+  "params": {
+    "attributes": [
+      "telefone",
+      "device_id",
+      "ip"
+    ],
+    "minShared": 2,
+    "maxEntities": 3
+  },
+  "expected": {
+    "edges": [
+      {
+        "id": "link:device_id:Pessoa:1:Pessoa:2",
+        "src": "Pessoa:1",
+        "dst": "Pessoa:2",
+        "type": "compartilha_device_id",
+        "properties": {
+          "attribute": "device_id",
+          "value": "dev-1",
+          "shared_by": 3
+        }
+      },
+      {
+        "id": "link:telefone:Pessoa:1:Pessoa:2",
+        "src": "Pessoa:1",
+        "dst": "Pessoa:2",
+        "type": "compartilha_telefone",
+        "properties": {
+          "attribute": "telefone",
+          "value": "Telefone:11999990000",
+          "shared_by": 3
+        }
+      },
+      {
+        "id": "link:device_id:Pessoa:1:Pessoa:3",
+        "src": "Pessoa:1",
+        "dst": "Pessoa:3",
+        "type": "compartilha_device_id",
+        "properties": {
+          "attribute": "device_id",
+          "value": "dev-1",
+          "shared_by": 3
+        }
+      },
+      {
+        "id": "link:telefone:Pessoa:1:Pessoa:3",
+        "src": "Pessoa:1",
+        "dst": "Pessoa:3",
+        "type": "compartilha_telefone",
+        "properties": {
+          "attribute": "telefone",
+          "value": "Telefone:11999990000",
+          "shared_by": 3
+        }
+      },
+      {
+        "id": "link:device_id:Pessoa:2:Pessoa:3",
+        "src": "Pessoa:2",
+        "dst": "Pessoa:3",
+        "type": "compartilha_device_id",
+        "properties": {
+          "attribute": "device_id",
+          "value": "dev-1",
+          "shared_by": 3
+        }
+      },
+      {
+        "id": "link:telefone:Pessoa:2:Pessoa:3",
+        "src": "Pessoa:2",
+        "dst": "Pessoa:3",
+        "type": "compartilha_telefone",
+        "properties": {
+          "attribute": "telefone",
+          "value": "Telefone:11999990000",
+          "shared_by": 3
+        }
+      }
+    ],
+    "pairs": [
+      {
+        "left": "Pessoa:1",
+        "right": "Pessoa:2",
+        "shared": [
+          "device_id",
+          "telefone"
+        ]
+      },
+      {
+        "left": "Pessoa:1",
+        "right": "Pessoa:3",
+        "shared": [
+          "device_id",
+          "telefone"
+        ]
+      },
+      {
+        "left": "Pessoa:2",
+        "right": "Pessoa:3",
+        "shared": [
+          "device_id",
+          "telefone"
+        ]
+      }
+    ]
+  }
+}

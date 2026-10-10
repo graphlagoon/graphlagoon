@@ -4,6 +4,7 @@
  * from `interpretMapping` (fileMapping.ts).
  */
 import type { IdentityKey } from '@/types/graph';
+import { KEY_NORMALIZERS } from '@/utils/identityKeys';
 import {
   columnsOf,
   glob,
@@ -103,9 +104,7 @@ export function mappingRows(spec: MappingSpec, files: Record<string, string>): M
   return rows;
 }
 
-const KEY_NORMALIZERS = ['cpf_cnpj', 'account', 'phone', 'email'];
-
-/** Mirror of `derived_identity_keys` (services/investigation_files.py). */
+/** Mirror of `derived_identity_keys` (services/case_graph.py). */
 export function derivedIdentityKeys(spec: MappingSpec): IdentityKey[] {
   const keys = new Map<string, IdentityKey>();
   for (const n of spec.nodes) {
