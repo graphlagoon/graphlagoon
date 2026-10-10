@@ -344,3 +344,63 @@ async def test_agent_suggests_and_proposes_a_match_a_person_accepts(env, monkeyp
         kinds = [e["kind"] for e in events]
         assert kinds.index("match.decided") < kinds.index("proposal.accepted")
         assert next(e for e in events if e["kind"] == "match.decided")["payload"]["reason"] == "mesmo CEP e nome"
+
+
+@pytest.mark.asyncio
+async def test_trace_money_and_find_paths_on_the_case_graph(env, monkeypatch):
+    """F3.8: the golpe-pix fixture as a case source; the route and the MCP tool
+    give the browser's FIFO numbers, with the method stamp, and journal the run."""
+    from tests.test_trace import FIXTURE
+
+    app, exploration = env
+    snap = {
+        "nodes": [{"id": n["node_id"], "type": n["node_type"], "properties": n.get("properties", {})}
+                  for n in FIXTURE["nodes"]],
+        "edges": [{"id": e["edge_id"], "source": e["src"], "target": e["dst"],
+                   "type": e["relationship_type"], "properties": e["properties"]}
+                  for e in FIXTURE["edges"]],
+    }
+
+    class _Snap:
+        async def load(self, exploration_id):
+            return snapshot.compress_snapshot(snap)
+
+    monkeypatch.setattr(snapshot, "get_snapshot_service", lambda: _Snap())
+    ctx = str(exploration.graph_context_id)
+    InMemoryStore.get_instance().update_graph_context(
+        exploration.graph_context_id, edge_semantics=FIXTURE["edge_semantics"]
+    )
+    fifo = next(c["expected"] for c in FIXTURE["cases"] if c["name"] == "fifo")
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={
+            "name": "claude", "scopes": ["read", "analyze"]})).json()["token"]
+        cid = (await rest.post("/api/investigations", json={"title": "x"})).json()["id"]
+        url = f"/api/investigations/{cid}"
+        sid = (await rest.post(f"{url}/sources", json={"exploration_id": str(exploration.id)})).json()["id"]
+
+        r = await rest.post(f"{url}/analysis/trace", json={"seed_edge_ids": [f"{sid}:e2"]})
+        assert r.status_code == 200, r.text
+        result = r.json()
+        assert result["exits"] == {f"{k}@{ctx}": v for k, v in fifo["exits"].items()}
+        assert result["coverage"] == fifo["coverage"]
+        assert result["method"]["window"] == FIXTURE["params"]["window"]
+        assert result["method"]["engine"] == "server"
+
+        async with _mcp(app, token) as client:
+            tools = {t.name for t in (await client.list_tools()).tools}
+            assert {"trace_money", "find_paths"} <= tools
+            prompt = await client.get_prompt("investigar_golpe_pix", {"investigation_id": cid})
+            assert "trace_money" in prompt.messages[0].content.text
+            out = await _tool(client, "trace_money", investigation_id=cid,
+                              seed_node=f"0001-9@{ctx}", allocation="proportional")
+            assert out["exits"][f"exchange-gama@{ctx}"] == 1597.73
+            assert out["method"]["seedEdgeIds"] == [f"{sid}:e2"]
+            paths = await _tool(client, "find_paths", investigation_id=cid,
+                                source=f"0001-9@{ctx}", target=f"saque-atm@{ctx}")
+            assert [n.split("@")[0] for n in paths["paths"][0]["nodes"]] == [
+                "0001-9", "4471-0", "5520-3", "saque-atm"]
+
+        events = (await rest.get(f"{url}/events")).json()
+        runs = [e for e in events if e["kind"] == "trace.run"]
+        assert [e["payload"]["allocation"] for e in runs] == ["fifo", "proportional"]
+        assert any(e["kind"] == "path.run" for e in events)

@@ -29,6 +29,7 @@ from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
 from graphlagoon.services.audit import AuditAction
+from graphlagoon.services.case_graph import case_graph
 
 logger = logging.getLogger(__name__)
 
@@ -86,128 +87,25 @@ def _out(data: Any, secrets: frozenset = frozenset()) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Unified case graph: server port of frontend/src/utils/unifyGraph.ts and
-# identityKeys.ts. shortcut: no per-property conflicts and no parity fixture
-# with the vitest suite yet; add both when an analysis depends on them (F3.8).
+# Unified case graph: services/case_graph.py; ids the agent saw masked map back here.
 # ---------------------------------------------------------------------------
 
 
-def _normalize(value: Any, how: str) -> Optional[str]:
-    if value is None:
-        return None
-    raw = str(value).strip()
-    if not raw:
-        return None
-    if how == "cpf_cnpj":
-        if re.search(r"[*xX]", raw):  # a masked document is never a key
-            return None
-        digits = re.sub(r"\D", "", raw)
-        if not digits or len(digits) > 14:
-            return None
-        return digits.zfill(11 if len(digits) <= 11 else 14)
-    if how == "account":
-        parts = [p.lstrip("0") or "0" for p in re.split(r"\D+", raw) if p]
-        return "-".join(parts) or None
-    if how == "phone":
-        digits = re.sub(r"\D", "", raw)
-        if len(digits) > 11 and digits.startswith("55"):
-            digits = digits[2:]
-        return digits or None
-    if how in ("email", "lower"):
-        return raw.lower()
-    return raw
-
-
-def unify(parts: list[tuple[str, str, list, dict]]) -> dict:
-    """``parts``: (source_id, context_id, identity_keys, snapshot) per source.
-    Returns nodes, edges and the account values to mask."""
-    nodes: dict[str, dict] = {}
-    edges: list[dict] = []
-    secrets: set[str] = set()
-    for source_id, context_id, keys, snapshot in parts:
-        by_type = {k.get("node_type"): k for k in keys or []}
-        uid_of: dict[str, str] = {}
-        for n in snapshot.get("nodes") or []:
-            node_id, props = str(n.get("id")), n.get("properties") or {}
-            key = by_type.get(n.get("type"))
-            keyed = None
-            if key:
-                src = key.get("source", "node_id")
-                raw = node_id if src == "node_id" else props.get(src.get("name"))
-                normalized = _normalize(raw, key.get("normalize", "none"))
-                if normalized is not None:
-                    keyed = f"{key['entity']}:{normalized}"
-                    if key.get("normalize") == "account":
-                        secrets.update(
-                            s for s in (normalized, str(raw)) if len(re.sub(r"\D", "", s)) >= 5
-                        )
-            uid = keyed or f"{node_id}@{context_id}"
-            uid_of[node_id] = uid
-            origin = {"source_id": source_id, "node_id": node_id}
-            node = nodes.get(uid)
-            if node is None:
-                nodes[uid] = {
-                    "uid": uid,
-                    "type": n.get("type"),
-                    "entity": key["entity"] if keyed else None,
-                    "properties": dict(props),
-                    "sources": [origin],
-                }
-                continue
-            if origin not in node["sources"]:
-                node["sources"].append(origin)
-            for k, v in props.items():
-                if node["properties"].get(k) is None:
-                    node["properties"][k] = v
-        for e in snapshot.get("edges") or []:
-            src, dst = uid_of.get(str(e.get("source"))), uid_of.get(str(e.get("target")))
-            if src and dst:  # an edge whose endpoint is not in its source would dangle
-                edges.append(
-                    {
-                        "id": f"{source_id}:{e.get('id')}",
-                        "src": src,
-                        "dst": dst,
-                        "type": e.get("type"),
-                        "properties": e.get("properties") or {},
-                        "source_id": source_id,
-                    }
-                )
-    return {"nodes": list(nodes.values()), "edges": edges, "secrets": frozenset(secrets)}
-
-
-async def case_graph(
-    investigation_id: UUID, user_email: str, source_id: Optional[str] = None
-) -> dict:
-    """The unified graph of the sources the caller may read (restricted ones are
-    counted, never read), or a single source when ``source_id`` is given."""
-    parts, restricted = [], 0
-    for s in await service.list_sources(investigation_id, user_email):
-        if source_id is not None and str(s["id"]) != source_id:
-            continue
-        if not s["accessible"]:
-            restricted += 1
-            continue
-        payload = await service.source_snapshot(investigation_id, user_email, s["id"])
-        async with service._session() as session:
-            context = await service._get_row(session, "GraphContext", s["context_id"])
-        keys = (context.identity_keys or []) if context else []
-        parts.append((str(s["id"]), str(s["context_id"]), keys, payload.get("snapshot") or {}))
-    graph = unify(parts)
-    graph["restricted_sources"] = restricted
-    return graph
-
-
-def resolve_uid(graph: dict, given: str) -> str:
-    """An id as the agent saw it (possibly masked) back to the real unified id."""
-    uids = [n["uid"] for n in graph["nodes"]]
-    if given in uids or not _masking():
+def resolve_uid(graph: dict, given: str, kind: str = "node") -> str:
+    """An id as the agent saw it (possibly masked) back to the real unified id
+    of a node, or of an edge with ``kind="edge"``."""
+    ids = [n["uid"] for n in graph["nodes"]] if kind == "node" else [
+        e["id"] for e in graph["edges"]
+    ]
+    if given in ids or not _masking():
         return given
-    matches = [u for u in uids if mask_text(u, graph["secrets"]) == given]
+    matches = [u for u in ids if mask_text(u, graph["secrets"]) == given]
     if len(matches) == 1:
         return matches[0]
+    what = "entity" if kind == "node" else "edge"
     raise _tool_error(
-        "ENTITY_NOT_FOUND" if not matches else "ENTITY_AMBIGUOUS",
-        f"No single entity matches '{given}' in this case",
+        f"{what.upper()}_NOT_FOUND" if not matches else f"{what.upper()}_AMBIGUOUS",
+        f"No single {what} matches '{given}' in this case",
     )
 
 
@@ -539,6 +437,98 @@ def build_server():
         created = await _call(matches.add_suggestions(investigation_id, user, found))
         return _out({"found": len(found), "created": created}, graph["secrets"])
 
+    @server.tool()
+    async def trace_money(
+        ctx: Context,
+        investigation_id: UUID,
+        seed_edge_ids: Optional[list[str]] = None,
+        seed_node: Optional[str] = None,
+        direction: str = "forward",
+        allocation: Optional[str] = None,
+        max_hops: int = 3,
+        max_dwell_hours: Optional[float] = 24,
+        min_amount: float = 50,
+        window: Optional[list[Any]] = None,
+        stop_types: Optional[list[str]] = None,
+        stop_nodes: Optional[list[str]] = None,
+    ) -> dict:
+        """Follow the money (03 §6.1) on the unified graph, from edges
+        (``seed_edge_ids``) or from an account's outgoing edges (``seed_node``;
+        incoming when direction="backward"). allocation: fifo (default forward),
+        proportional, libr, total (upper bound), lifo (default backward; backward
+        allows lifo, proportional, total). Defaults: 3 hops, Δ 24 h, minimum 50,
+        window seed → +24 h, cash-out/crypto/bet/external node types as stops.
+        Amounts and times come from each context's edge_semantics. Returns
+        edgeTrace, per-node layer/tracedIn/tracedOut/retained, exits, frontier,
+        coverage and ``method`` (every parameter: cite it, and keep it as the
+        evidence stamp). Journaled as trace.run."""
+        from graphlagoon.models.schemas import TraceRequest
+        from graphlagoon.services.trace import run_case_trace
+
+        user = _agent(ctx, "analyze")
+        graph = await _call(case_graph(investigation_id, user))
+
+        def resolve(ids, kind="node"):
+            return [resolve_uid(graph, i, kind) for i in ids or []]
+
+        try:
+            req = TraceRequest(
+                seed_edge_ids=resolve(seed_edge_ids, "edge"),
+                seed_node=resolve([seed_node])[0] if seed_node else None,
+                direction=direction,
+                allocation=allocation,
+                max_hops=max_hops,
+                max_dwell_hours=max_dwell_hours,
+                min_amount=min_amount,
+                window=window,
+                stop_types=stop_types,
+                stop_nodes=resolve(stop_nodes),
+            )
+        except ValueError as exc:
+            raise _tool_error("INVALID_BODY", str(exc)) from exc
+        result = await _call(run_case_trace(investigation_id, user, req, graph))
+        return _out(result, graph["secrets"])
+
+    @server.tool()
+    async def find_paths(
+        ctx: Context,
+        investigation_id: UUID,
+        source: str,
+        target: str,
+        mode: str = "shortest",
+        directed: bool = True,
+        weight: str = "hops",
+        k: int = 3,
+        t0: Optional[Any] = None,
+        max_dwell_hours: Optional[float] = None,
+    ) -> dict:
+        """Paths between two entities of the unified graph (03 §6.3). mode:
+        "shortest" (fewest hops), "weighted" (Dijkstra; weight "hops" or
+        "inverse-amount" to prefer big transfers), "k-shortest" (Yen, k ≤ 10) or
+        "earliest" (time-respecting earliest arrival after ``t0``, with Δ
+        ``max_dwell_hours`` at intermediate accounts). Returns the paths (node and
+        edge ids, cost) and ``method``. Journaled as path.run."""
+        from graphlagoon.models.schemas import PathsRequest
+        from graphlagoon.services.paths import run_case_paths
+
+        user = _agent(ctx, "analyze")
+        graph = await _call(case_graph(investigation_id, user))
+        try:
+            req = PathsRequest(
+                source=resolve_uid(graph, source),
+                target=resolve_uid(graph, target),
+                mode=mode,
+                directed=directed,
+                weight=weight,
+                k=k,
+                t0=t0,
+                max_dwell_hours=max_dwell_hours,
+            )
+        except ValueError as exc:
+            raise _tool_error("INVALID_BODY", str(exc)) from exc
+        result = await _call(run_case_paths(investigation_id, user, req, graph))
+        return _out(result, graph["secrets"])
+
     # -- write (attributed to the agent) ------------------------------------
 
     @server.tool()
@@ -798,8 +788,8 @@ def build_server():
         return json.dumps(await list_events(ctx, UUID(investigation_id), None, 500))
 
     # -- prompts (02-design flows A, B and D) ---------------------------------
-    # shortcut: the scripts name only today's tools; add trace_money,
-    # pin_evidence and get_dossier when F3–F4 create them.
+    # shortcut: the scripts name only today's tools; add pin_evidence and
+    # get_dossier when F4 creates them.
 
     @server.prompt(title="Investigar golpe Pix")
     def investigar_golpe_pix(investigation_id: str) -> str:
@@ -809,9 +799,12 @@ def build_server():
             "a Pix scam (golpe Pix): find where the contested money went",
             "Read the case (`get_investigation`) and the unified graph (`get_graph`); "
             "find the victim and the contested transfer (`search_entities`, `get_entity`).",
-            "Follow the money forward in time, hop by hop, until it stops or reaches an "
-            "exit (cash-out, crypto, another institution). Write each hop as a note "
-            "anchored to the account (`add_note`).",
+            "Follow the money with `trace_money` from the contested transfer "
+            "(`seed_edge_ids`) or the victim's account (`seed_node`): FIFO by default; "
+            "run proportional too and report both. Read the exits, the accounts that "
+            "retain value and the coverage; `find_paths` shows how the money reached "
+            "an exit. Write each hop as a note anchored to the account (`add_note`) "
+            "and cite the trace `method` (rule, Δ, hops, window).",
             "Look for accounts that receive and forward within hours (mules) and for "
             "people shared across sources (same CPF or device); `lookup_enrichment` "
             "reads the context's side tables (devices, KYC) for an entity.",

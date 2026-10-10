@@ -164,6 +164,12 @@ edges (forward) or incoming edges (backward) with an amount and a time. The
 
 **Save as evidence** stays disabled until frozen evidence ships.
 
+The same trace and paths run on the server, over the unified graph of the
+sources you can read: `POST /api/investigations/{id}/analysis/trace` and
+`…/analysis/paths` (and the agent tools `trace_money` and `find_paths`). They give
+the same numbers as the screen, return the method stamp and write `trace.run` /
+`path.run` to the journal.
+
 ### Paths
 
 Right-click a node and pick **Path to…**, then click the target node. The path is

@@ -11843,3 +11843,57 @@ tabela de métricas).
 **Admin-Area Impact:** no admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 01:10] - Feature Implemented: F3.8 · Rastreio e caminhos no servidor, com ferramentas MCP
+
+**Feature:** porte Python de `utils/trace.ts` (FIFO, LIFO, proporcional, LIBR, total;
+para trás = para frente nas arestas invertidas em tempo negado) e de `utils/paths.ts`
+(BFS, Dijkstra, Yen, chegada mais cedo); rotas `POST …/analysis/trace` e
+`…/analysis/paths` no grafo unificado do caso; ferramentas MCP `trace_money` e
+`find_paths`; prompt `investigar_golpe_pix` usa `trace_money`/`find_paths`.
+
+**Design Decisions:**
+1. Núcleos com as chaves do TS (`maxHops`, `edgeTrace`, `tracedIn`…), para o carimbo
+   do servidor e o do browser serem iguais (F4.1). Arredondamento meio-para-cima como
+   `Math.round` (`floor(x·100 + 0,5)`), não o `round` bancário do Python.
+2. O unify do servidor saiu de `mcp/server.py` para `services/case_graph.py` (rota e
+   MCP usam o mesmo; serviço não depende do pacote mcp) e cada aresta ganhou `amount`
+   e `t` pela `edge_semantics` do **seu** context (porte de `parseAmount`/`parseTime`
+   em `services/trace.py`; `1_000` recusado como no JS).
+3. Pedido em snake_case (`TraceRequest`, `PathsRequest`) com os padrões da T5:
+   semente = arestas ou `seed_node` (saídas para frente, entradas para trás), 3
+   camadas, Δ 24 h, mínimo 50, janela semente → +Δ, tipos de parada pela mesma regex
+   da tela; FIFO/LIBR para trás recusados (422). Semente sem valor/horário → 422
+   `TRACE_SEED_EMPTY`.
+4. `method` = parâmetros + `seedEdgeIds` (paridade) + `engine: "server"` e
+   `restrictedSources` (fontes restritas ficam fora do rastreio e o carimbo diz).
+5. Diário: `trace.run`/`path.run` via `post_client_event` (parâmetros + totais;
+   `seedEdgeIds` cortado em 100 por causa do limite de 16 KB). Leitor ou caso decidido
+   analisam sem evento (403/409 ignorados).
+6. Agente: escopo `analyze` (MCP e REST via `require_agent_scope`); ids mascarados de
+   nó **e de aresta** voltam ao real (`resolve_uid(…, kind="edge")`); saída mascarada.
+   Sem permissão nova: é análise sobre o que o usuário já lê.
+7. Fora (MVP): conflitos por propriedade no unify, "proportional would give" no
+   servidor (o agente roda as duas regras), filtro de tipo de aresta.
+
+**Files:** `api/graphlagoon/services/trace.py`, `services/paths.py`,
+`services/case_graph.py`, `api/tests/test_trace.py`, `api/tests/test_paths.py` (novos);
+`mcp/server.py`, `mcp/registry.py`, `routers/investigations.py`,
+`routers/admin_registry.py`, `models/schemas.py`, `services/file_mapping.py`,
+`tests/test_mcp_server.py`.
+
+**Testing:** `test_trace.py` (os 8 casos da fixture `golpe-pix.json` iguais ao
+`expected`, ordem de entrada, para trás LIFO), `test_paths.py` (13 casos de
+`paths/small.json`, ordem de entrada), `test_mcp_server.py` (fixture como fonte do caso:
+rota dá os números FIFO e o carimbo; `trace_money` proporcional 1.597,73 por
+`seed_node`; `find_paths` vítima → saque; `trace.run`/`path.run` no diário; prompt cita
+`trace_money`), mais registry de agentes e admin, file_mapping, matches, fontes.
+
+**Public Docs:** `docs/guide/agents-mcp.md` (escopo `analyze`, prompt),
+`docs/guide/investigations.md` (rotas e ferramentas de servidor).
+**Admin-Area Impact:** rotas de análise em `AUDIT_EXEMPT_ROUTES` (só leitura; vão ao
+diário); sem tabela, setting ou permissão novos.
+
+**Author:** Claude (AI Assistant)

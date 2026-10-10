@@ -39,6 +39,8 @@ AGENT_TOOL_ROUTES: dict[tuple[str, str], str] = {
     ("POST", f"{_CASE}/proposals"): "propose",
     ("GET", f"{_CASE}/matches"): "list_matches",
     ("POST", f"{_CASE}/matches"): "suggest_matches",
+    ("POST", f"{_CASE}/analysis/trace"): "trace_money",
+    ("POST", f"{_CASE}/analysis/paths"): "find_paths",
     (
         "POST",
         "/api/graph-contexts/{context_id}/enrichment/{name}/lookup",
@@ -74,8 +76,8 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
         "roles go through `propose`; pins are a UI view preference"
     ),
     ("POST", f"{_CASE}/events"): (
-        "records client-side analyses (trace.run, …); server analyses journal "
-        "themselves (F3.8)"
+        "records client-side analyses (trace.run, …); the server ones "
+        "(trace_money, find_paths) journal themselves"
     ),
     ("DELETE", f"{_CASE}/sources/{{source_id}}"): (
         "removing a source is left to people in the UI (agents add, never delete)"
