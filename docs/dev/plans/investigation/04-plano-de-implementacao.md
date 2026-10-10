@@ -56,7 +56,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 **F3 · Seguir o dinheiro**
 - [x] F3.1 · Semântica de valor e horário nas arestas
 - [x] F3.2 · Soma de arestas paralelas e largura por valor
-- [ ] F3.3 · Worker de rastreio temporal
+- [x] F3.3 · Worker de rastreio temporal
 - [ ] F3.4 · Tela de rastreio (T5): parâmetros, camadas, Sankey, saídas
 - [ ] F3.5 · Linha do tempo em raias com seleção de janela
 - [ ] F3.6 · Caminhos
@@ -668,13 +668,13 @@ trabalho de análise e documentação; a pessoa decide.
   - fixture `src/__tests__/fixtures/trace/golpe-pix.json`.
 - **Passos:** implementar exatamente [03 §6.1](03-arquitetura.md#61-rastreio-temporal-seguir-o-dinheiro).
 - **Aceite (fixture do golpe Pix, a mesma das telas):**
-  - [ ] **FIFO:** saídas Saque 2.000, Exchange 1.550 e Bet 880 (total 4.430, 91%);
+  - [x] **FIFO:** saídas Saque 2.000, Exchange 1.550 e Bet 880 (total 4.430, 91%);
     retidos 4471-0 = 70, 8812-7 = 350, 3090-1 = 20.
-  - [ ] **Proporcional:** Exchange = 1.597,73.
-  - [ ] Respeita Δ: com Δ = 40 min, a saída das 15:05 em 8812-7 (54 min parada) não é
+  - [x] **Proporcional:** Exchange = 1.597,73.
+  - [x] Respeita Δ: com Δ = 40 min, a saída das 15:05 em 8812-7 (54 min parada) não é
     seguida; as saídas de 5520-3 (31 min) e 3090-1 (16 min) são.
-  - [ ] Respeita paradas, camadas e valor mínimo.
-  - [ ] **LIBR** e **contaminação total** testados com casos próprios descritos em
+  - [x] Respeita paradas, camadas e valor mínimo.
+  - [x] **LIBR** e **contaminação total** testados com casos próprios descritos em
     [03 §6.1](03-arquitetura.md#61-rastreio-temporal-seguir-o-dinheiro).
 - **Testes:** `utils/__tests__/trace.test.ts`.
 
