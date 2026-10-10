@@ -3,18 +3,17 @@
 import { computed } from 'vue';
 import { useTraceStore } from '@/stores/trace';
 import { formatAmount } from '@/utils/edgeSemantics';
-import { formatTraceTime, methodStamp, traceFlows } from '@/utils/traceView';
+import { formatTraceTime, methodStamp } from '@/utils/traceView';
 
 const trace = useTraceStore();
 
 const exits = computed(() => {
   const r = trace.result;
   if (!r) return [];
-  const flows = traceFlows(r, trace.walked);
   return Object.entries(r.exits)
     .sort((a, b) => b[1] - a[1])
     .map(([id, amount]) => {
-      const into = flows.filter((f) => f.dst === id);
+      const into = trace.allFlows.filter((f) => f.dst === id);
       const alt = trace.proportional?.exits[id] ?? null;
       return {
         id,
