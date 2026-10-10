@@ -37,8 +37,9 @@ KEYS = [
         "entity": "Pessoa",
         "source": {"kind": "prop", "name": "titular_cpf"},
         "normalize": "cpf_cnpj",
+        "pattern": None,
     },
-    {"node_type": "Conta", "entity": "Conta", "source": "node_id", "normalize": "account"},
+    {"node_type": "Conta", "entity": "Conta", "source": "node_id", "normalize": "account", "pattern": None},
 ]
 
 
