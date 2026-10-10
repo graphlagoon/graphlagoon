@@ -14,6 +14,8 @@ export interface Investigation {
   typology?: string | null;
   origin?: string | null;
   selected_at?: string | null;
+  /** Computed by the server (F4.4); null once decided or archived. */
+  deadline?: { phase: 'selection' | 'analysis'; due_at: string; days_left: number } | null;
   state: Record<string, unknown>;
   decision?: Record<string, unknown> | null;
   created_at?: string | null;

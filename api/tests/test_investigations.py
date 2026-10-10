@@ -173,3 +173,31 @@ def test_mutations_are_audited(client, store, case):
         "investigation.share",
         "investigation.update",
     ]
+
+
+def test_deadlines_selection_then_analysis_with_an_injected_clock(client, store, case, monkeypatch):
+    """F4.4: 45 days to select from creation, 45 to analyse from selected_at."""
+    from datetime import datetime, timedelta
+    from uuid import UUID
+
+    from graphlagoon.services import investigations as service
+
+    created = datetime(2026, 9, 1, 10, 0)
+    store.update_investigation(UUID(case["id"]), created_at=created)
+    clock = {"now": created + timedelta(days=40, hours=1)}
+    monkeypatch.setattr(service, "_clock", lambda: clock["now"])
+
+    got = client.get(f"/api/investigations/{case['id']}", headers=h(OWNER)).json()["deadline"]
+    assert got["phase"] == "selection" and got["days_left"] == 5  # under 7: orange in the queue
+    assert got["due_at"].startswith("2026-10-16T10:00")
+
+    r = client.patch(f"/api/investigations/{case['id']}", json={"status": "analise"}, headers=h(OWNER))
+    assert r.json()["selected_at"].startswith("2026-10-11T11:00")
+    assert r.json()["deadline"]["phase"] == "analysis" and r.json()["deadline"]["days_left"] == 45
+
+    clock["now"] += timedelta(days=50)  # overdue counts below zero
+    [row] = client.get("/api/investigations", headers=h(OWNER)).json()
+    assert row["deadline"]["days_left"] == -5
+
+    r = client.patch(f"/api/investigations/{case['id']}", json={"status": "arquivado"}, headers=h(OWNER))
+    assert r.json()["deadline"] is None

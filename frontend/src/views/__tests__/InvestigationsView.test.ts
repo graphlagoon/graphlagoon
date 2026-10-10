@@ -12,7 +12,8 @@ import { api } from '@/services/api'
 
 const now = new Date().toISOString()
 const CASES = [
-  { id: 'aaaaaaaa-1', title: 'Golpe Pix', status: 'analise', typology: 'Golpe Pix', owner_email: 'me@x.com', assignee_email: 'ana@x.com', created_at: now, updated_at: now, source_count: 2 },
+  { id: 'aaaaaaaa-1', title: 'Golpe Pix', status: 'analise', typology: 'Golpe Pix', owner_email: 'me@x.com', assignee_email: 'ana@x.com', created_at: now, updated_at: now, source_count: 2, deadline: { phase: 'analysis', due_at: now, days_left: 45 } },
+  { id: 'cccccccc-3', title: 'Urgent', status: 'selecao', owner_email: 'me@x.com', created_at: now, updated_at: now, source_count: 0, deadline: { phase: 'selection', due_at: now, days_left: 6 } },
   { id: 'bbbbbbbb-2', title: 'Old case', status: 'arquivado', owner_email: 'me@x.com', created_at: now, updated_at: now, source_count: 1 },
 ]
 
@@ -36,6 +37,11 @@ describe('InvestigationsView', () => {
     expect(row.textContent).toContain('ana@x.com')
     expect(row.textContent).toContain('2 sources')
     expect(row.textContent).toContain('analysis · 45 d left')
+    // F4.4: the server's deadline; under 7 days it turns orange and counts as urgent.
+    const urgent = getByTestId('investigation-row-cccccccc-3')
+    expect(urgent.querySelector('[data-testid="deadline"]')!.classList).toContain('late')
+    expect(row.querySelector('[data-testid="deadline"]')!.classList).not.toContain('late')
+    expect(getByTestId('counter-urgent').textContent).toContain('1')
     // Archived cases are outside the default "Open" filter.
     expect(queryByTestId('investigation-row-bbbbbbbb-2')).toBeNull()
   })

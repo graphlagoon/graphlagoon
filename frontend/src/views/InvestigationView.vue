@@ -16,7 +16,7 @@ import { useContextMenu, type ContextMenuTarget } from '@/composables/useContext
 import { useToast } from '@/composables/useToast';
 import { formatAmount } from '@/utils/edgeSemantics';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
-import { STATUS_LABELS } from '@/utils/investigationStatus';
+import { STATUS_LABELS, URGENT_DAYS, deadlineOf } from '@/utils/investigationStatus';
 import { provenanceRingColors, roleColorMap, ROLE_COLORS, ROLE_LABELS } from '@/utils/graphAppearance';
 import { describeEvent } from '@/utils/investigationEvents';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -314,6 +314,7 @@ function pinGraphEvidence() {
 }
 
 const formatTime = (iso: string) => new Date(iso).toLocaleString();
+const deadline = computed(() => (store.current ? deadlineOf(store.current) : null));
 </script>
 
 <template>
@@ -326,6 +327,14 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
         <h1 data-testid="investigation-title">{{ store.current.title }}</h1>
         <span v-if="view === 'trace'" class="muted">› Follow the money</span>
         <span class="status">{{ STATUS_LABELS[store.current.status] ?? store.current.status }}</span>
+        <span
+          v-if="deadline"
+          class="status"
+          :class="{ urgent: deadline.daysLeft < URGENT_DAYS }"
+          data-testid="workspace-deadline"
+        >
+          {{ deadline.phase }} · {{ deadline.daysLeft }} d left
+        </span>
         <span v-if="store.current.typology" class="muted">{{ store.current.typology }}</span>
         <RouterLink :to="`/investigations/${id}/dossier`" class="agents-link" data-testid="dossier-link">Dossier</RouterLink>
         <RouterLink :to="`/investigations/${id}/matches`" class="agents-link" data-testid="matches-link">
@@ -687,6 +696,12 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   font-size: 12px;
   background: var(--color-primary-subtle);
   color: var(--color-primary);
+}
+
+.status.urgent {
+  background: #c2410c;
+  color: #fff;
+  font-weight: 600;
 }
 
 .tabs {
