@@ -60,7 +60,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F3.4 · Tela de rastreio (T5): parâmetros, camadas, Sankey, saídas
 - [x] F3.5 · Linha do tempo em raias com seleção de janela
 - [x] F3.6 · Caminhos
-- [ ] F3.7 · Componentes conexos no registry de algoritmos
+- [x] F3.7 · Componentes conexos no registry de algoritmos
 - [ ] F3.8 · Rastreio e caminhos no servidor (Python) com paridade e ferramentas MCP
 
 **F4 · Dossiê e compliance**
@@ -715,7 +715,7 @@ trabalho de análise e documentação; a pessoa decide.
 
 - **Arquivos:** `services/algorithmRegistry.ts` e `workers/metricsWorker.ts`.
 - **Aceite:**
-  - [ ] Componentes fracos e fortes viram métrica (id do componente) e opção de
+  - [x] Componentes fracos e fortes viram métrica (id do componente) e opção de
     cluster.
 - **Testes:** vitest.
 

@@ -37,6 +37,11 @@ Louvain runs on the **filtered** graph, so active filters change the
 result — often deliberately: filter to one relationship type and detect
 communities within it.
 
+**Weak components** (connected ignoring edge direction) and **Strong
+components** (every node reaches every other along edge direction) make each
+component a community: community 0 is the largest. They honour the same
+**Edge types** filter and report no modularity.
+
 **Any cluster program** can also be run as a community algorithm — the
 dropdown lists every program by name (see
 [Cluster Programs](./clusters.md)). Instead of collapsing nodes, the
@@ -82,6 +87,7 @@ on a connected graph.
 | Betweenness | Bridge-ness: how often a node sits on shortest paths | |
 | Closeness | Average distance to everyone else | Needs a connected graph |
 | HITS Authority / Hub | Pointed-to vs pointing-at importance | Needs a connected graph |
+| Weak / Strong Components | The node's component id (0 = largest), ignoring or following edge direction | |
 | Edge Betweenness | The same bridge idea, for edges | |
 
 Every algorithm accepts an **edge-type** allow-list (empty = all).

@@ -9,7 +9,7 @@
 // Algorithm Definitions
 // ============================================================================
 
-export type AlgorithmCategory = 'centrality' | 'edge' | 'graph';
+export type AlgorithmCategory = 'centrality' | 'structure' | 'edge' | 'graph';
 export type AlgorithmTarget = 'node' | 'edge' | 'graph';
 export type ScaleType = 'linear' | 'log' | 'sqrt';
 export type Priority = 'low' | 'medium' | 'high';

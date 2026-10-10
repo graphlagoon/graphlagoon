@@ -13,6 +13,7 @@ import type { SerializedGraph } from '@/types/metrics'
 import type { Cluster, ClusterProgramParamValues, CommunityAlgorithm } from '@/types/cluster'
 import type { CommunityWorkerInput, CommunityWorkerOutput } from '@/workers/communityWorker'
 import { defaultParamValues } from '@/utils/clusterProgramParams'
+import { connectedComponents } from '@/utils/graphComponents'
 
 // 19-color qualitative palette for community coloring
 const COMMUNITY_PALETTE = [
@@ -46,7 +47,7 @@ export const useCommunityStore = defineStore('community', () => {
   const collapseEnabled = ref(false)
   const tableColumnEnabled = ref(false)
 
-  // Algorithm selection: 'louvain' (worker) or 'cluster-program:<programId>'
+  // Algorithm selection: 'louvain' (worker), weak/strong components or 'cluster-program:<programId>'
   const algorithm = ref<CommunityAlgorithm>('louvain')
 
   // Algorithm params (Louvain-specific)
@@ -74,7 +75,7 @@ export const useCommunityStore = defineStore('community', () => {
    * algorithm, or null for Louvain.
    */
   const selectedProgramId = computed((): string | null =>
-    isLouvain.value ? null : algorithm.value.slice('cluster-program:'.length)
+    algorithm.value.startsWith('cluster-program:') ? algorithm.value.slice('cluster-program:'.length) : null
   )
 
   /**
@@ -188,8 +189,10 @@ export const useCommunityStore = defineStore('community', () => {
     progressValue.value = 0
 
     try {
-      if (!isLouvain.value) {
-        await runClusterProgramAsCommunity(selectedProgramId.value!)
+      if (selectedProgramId.value) {
+        await runClusterProgramAsCommunity(selectedProgramId.value)
+      } else if (algorithm.value === 'weak-components' || algorithm.value === 'strong-components') {
+        runComponents(algorithm.value === 'weak-components' ? 'weak' : 'strong')
       } else {
         const graph = serializeGraph()
 
@@ -326,6 +329,24 @@ export const useCommunityStore = defineStore('community', () => {
     communityCount.value = new Set(map.values()).size
     modularity.value = null
     communityLabels.value = labels
+    lastComputedAt.value = Date.now()
+  }
+
+  /**
+   * Weak or strong components as communities (investigations F3.7). Same edge
+   * type filter as Louvain; ids from utils/graphComponents (0 = largest).
+   * shortcut: on the main thread, O(N + E); move to the worker if it shows up in a profile.
+   */
+  function runComponents(kind: 'weak' | 'strong'): void {
+    const graph = serializeGraph()
+    const types = new Set(edgeTypeFilter.value)
+    const edges = graph.edges
+      .filter(e => types.size === 0 || types.has(e.attributes.relationship_type as string))
+      .map((e): [string, string] => [e.source, e.target])
+    communityMap.value = connectedComponents(graph.nodes.map(n => n.id), edges, kind)
+    communityCount.value = new Set(communityMap.value.values()).size
+    modularity.value = null
+    communityLabels.value = {}
     lastComputedAt.value = Date.now()
   }
 

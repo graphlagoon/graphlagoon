@@ -11808,3 +11808,38 @@ alvo → caminho vítima → 4471-0 → 5520-3 → Saque ATM selecionado); `vue-
 **Admin-Area Impact:** no admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 00:40] - Feature Implemented: F3.7 · Componentes conexos
+
+**Feature:** componentes fracos e fortes como métrica de nó no registry
+("Weak Components", "Strong Components": valor = id do componente) e como algoritmo
+de comunidade em Clusters → Communities (cor, radial, colapso e coluna como Louvain).
+
+**Design Decisions:**
+1. Núcleo puro `utils/graphComponents.ts` (BFS para fracos, Tarjan iterativo para
+   fortes) usado pelo `metricsWorker` e pela store de comunidades; sem graphology
+   (`graphology-components` não está instalado e são ~80 linhas).
+2. Ids determinísticos: 0 = maior componente, empate pelo menor id de nó; nó isolado é
+   um componente. Assim a paleta de comunidades fica estável entre execuções.
+3. "Opção de cluster" = opção do seletor de algoritmo de comunidades (que já colapsa
+   em clusters com "Collapse"); usa o mesmo filtro de tipos de aresta do Louvain,
+   sem modularidade. Roda na thread principal (O(N + E)), atalho comentado.
+4. Categoria nova `structure` em `AlgorithmCategory`; `selectedProgramId` agora testa
+   o prefixo `cluster-program:` em vez de "não é Louvain".
+
+**Files:** `frontend/src/utils/graphComponents.ts`, `utils/__tests__/graphComponents.test.ts`
+(novos); `services/algorithmRegistry.ts`, `workers/metricsWorker.ts`, `types/metrics.ts`,
+`types/cluster.ts`, `stores/community.ts`, `components/ClusterProgramPanel.vue`,
+`components/CommunityNodeModal.vue`, `services/__tests__/algorithmRegistry.test.ts`.
+
+**Testing:** vitest `graphComponents.test.ts` (fracos, fortes, ordem dos ids, opção de
+comunidade com filtro de tipo), registry, `community.clusterProgram`,
+`CommunityNodeModal`; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/communities-metrics.md` (componentes como comunidade e na
+tabela de métricas).
+**Admin-Area Impact:** no admin-area impact.
+
+**Author:** Claude (AI Assistant)

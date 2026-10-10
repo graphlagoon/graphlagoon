@@ -239,6 +239,8 @@ function toggleEdgeTypeFilter(edgeType: string) {
               data-testid="community-algorithm-select"
             >
               <option value="louvain">Louvain</option>
+              <option value="weak-components">Weak components</option>
+              <option value="strong-components">Strong components</option>
               <option
                 v-for="program in clusterStore.programs"
                 :key="program.program_id"
@@ -247,7 +249,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
                 {{ program.program_name }}
               </option>
             </select>
-            <small v-if="!communityStore.isLouvain" class="help-text">
+            <small v-if="communityStore.selectedProgramId" class="help-text">
               Runs the cluster program as a community algorithm (no collapsed nodes).
               Nodes in multiple clusters use the first; uncovered nodes form an "others" community.
             </small>
@@ -289,7 +291,7 @@ function toggleEdgeTypeFilter(edgeType: string) {
           </div>
 
           <!-- Edge type filter (Louvain only) -->
-          <div v-if="communityStore.isLouvain && graphStore.edgeTypes.length > 1" class="form-row">
+          <div v-if="!communityStore.selectedProgramId && graphStore.edgeTypes.length > 1" class="form-row">
             <label>Edge types</label>
             <div class="edge-type-chips">
               <button

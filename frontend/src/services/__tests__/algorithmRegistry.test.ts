@@ -12,8 +12,8 @@ import {
 } from '@/services/algorithmRegistry'
 
 describe('ALGORITHMS registry', () => {
-  it('contains 9 algorithm definitions', () => {
-    expect(ALGORITHMS).toHaveLength(9)
+  it('contains 11 algorithm definitions', () => {
+    expect(ALGORITHMS).toHaveLength(11)
   })
 
   it('each algorithm has required fields', () => {
@@ -66,8 +66,8 @@ describe('getAlgorithmsByCategory', () => {
 })
 
 describe('getAlgorithmsByTarget', () => {
-  it('node target returns 8 algorithms', () => {
-    expect(getAlgorithmsByTarget('node')).toHaveLength(8)
+  it('node target returns 10 algorithms', () => {
+    expect(getAlgorithmsByTarget('node')).toHaveLength(10)
   })
 
   it('edge target returns 1 algorithm', () => {
@@ -79,7 +79,7 @@ describe('getNodeAlgorithms / getEdgeAlgorithms', () => {
   it('getNodeAlgorithms returns only node-targeted', () => {
     const nodes = getNodeAlgorithms()
     expect(nodes.every(a => a.target === 'node')).toBe(true)
-    expect(nodes.length).toBe(8)
+    expect(nodes.length).toBe(10)
   })
 
   it('getEdgeAlgorithms returns only edge-targeted', () => {

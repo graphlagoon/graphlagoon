@@ -35,9 +35,12 @@ const nodes = computed(() => {
   return graphStore.nodes.filter(n => idSet.has(n.node_id))
 })
 
-const algorithmLabel = computed(() =>
-  communityStore.isLouvain ? 'Louvain' : 'Cluster Program'
-)
+const ALGORITHM_LABELS: Record<string, string> = {
+  louvain: 'Louvain',
+  'weak-components': 'Weak components',
+  'strong-components': 'Strong components',
+}
+const algorithmLabel = computed(() => ALGORITHM_LABELS[communityStore.algorithm] ?? 'Cluster Program')
 
 // ─── Property keys ───
 
