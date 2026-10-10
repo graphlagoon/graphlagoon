@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render } from '@testing-library/vue'
 import { createPinia, setActivePinia } from 'pinia'
 import CaseFiles from '@/components/investigation/CaseFiles.vue'
