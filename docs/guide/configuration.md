@@ -416,40 +416,22 @@ lives in the admin area, not in env vars — see
 
 ## AI agents
 
-Personal agent tokens let an AI agent act on investigations with the access of
-the person who created the token (`Authorization: Bearer glt_…`). Off by
-default.
+Personal agent tokens let an AI agent act on
+[investigations](./investigations.md) with the access of the person who
+created the token (`Authorization: Bearer glt_…`; creating one needs the
+`investigation.agent` [permission](./permissions.md)). Off by default.
 
 With agents on and the `mcp` extra installed (`pip install "graphlagoon[mcp]"`),
 the app serves an MCP server (Streamable HTTP) at `{app URL}/graphlagoon/mcp`
 (`/mcp` under the mount prefix of `create_mountable_app`). It accepts agent
-tokens only:
-
-```bash
-claude mcp add --transport http graphlagoon http://localhost:8000/graphlagoon/mcp \
-  --header "Authorization: Bearer glt_…"
-```
-
-The tools read cases, the unified graph, the journal and the case space, write
-notes, sources and draft artifacts, and make proposals. There is no tool to
-decide, share, delete, approve an artifact or accept a proposal. Every read is
-recorded in the audit log (`agent.read`).
-
-When the agent cannot reach `/mcp` directly (the Databricks Apps proxy wants a
-Databricks login), run the local stdio bridge, which forwards every MCP message
-to the app:
-
-```bash
-claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
-  graphlagoon mcp-bridge --url https://<app>.databricksapps.com
-```
-
-`--url` takes the app URL (`/graphlagoon/mcp` is appended unless it already ends
-in `/mcp`); the token comes from `--token` or `GRAPHLAGOON_AGENT_TOKEN`. With
-`databricks-sdk` installed and a Databricks profile configured (`databricks auth
-login`), the bridge also sends your Databricks OAuth token to get through the
-proxy, and the agent token travels in `X-Graphlagoon-Agent-Token`. See
-[AI Agents (MCP)](./agents-mcp.md).
+tokens only. Its tools read cases, run the server analyses (matches, follow
+the money, paths, typology badges), write notes, sources, files, frozen
+evidence and draft artifacts, and make proposals; none decides, exports,
+shares, deletes, approves an artifact or accepts a proposal. Every read is
+recorded in the audit log (`agent.read`). Where the agent cannot reach `/mcp`
+directly (the Databricks Apps proxy wants a Databricks login), the local
+`graphlagoon mcp-bridge` forwards every message. Connection commands, scopes
+and masking: [AI Agents (MCP)](./agents-mcp.md).
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -460,15 +442,17 @@ proxy, and the agent token travels in `X-Graphlagoon-Agent-Token`. See
 
 ## Investigation storage
 
-Frozen sources and the case space (versioned artifacts) are stored as files,
-never overwritten. Uploads stream to disk while their sha256 is computed.
+Case files, frozen sources, frozen evidence and the case space (versioned
+artifacts) of an [investigation](./investigations.md) are stored as files,
+never overwritten, and reached only through the app. Uploads stream to disk
+while their sha256 is computed.
 
 | Variable | Default | Notes |
 |---|---|---|
 | `GRAPH_LAGOON_INVESTIGATIONS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to an `investigations` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set; otherwise files go to `{GRAPH_LAGOON_EXPLORATION_SNAPSHOTS_DIR}/investigations`. Give write access to the app's service principal only. |
 | `GRAPH_LAGOON_ARTIFACT_MAX_BYTES` | `104857600` | Maximum size of one artifact version (100 MB). |
 | `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` | `209715200` | Maximum size of one file uploaded to a case (200 MB); larger uploads get 413. |
-| `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Ceiling of edges in a case's working graph in the browser. |
+| `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Ceiling of edges in a case's working graph in the browser: a graph built from a case file keeps only this many edges. |
 | `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a decided case is retained: it cannot be deleted before then, except by a superuser with a reason. |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` | `500` | Node keys per enrichment lookup (a context's enrichment tables). |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` | `5000` | Rows one enrichment lookup returns; more are cut and flagged `truncated`. |

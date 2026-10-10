@@ -155,7 +155,7 @@ The toolbar groups what you can do with a loaded graph:
 
 ### 4. Save what you found
 
-An **exploration** captures the current state of your investigation so you
+An **exploration** captures the current state of your analysis so you
 can come back to it or share it as a link (`?exploration=<id>`). Use
 **Save** in the toolbar; find saved ones under **Explorations** or with
 **Load**.

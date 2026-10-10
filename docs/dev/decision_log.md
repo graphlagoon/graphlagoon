@@ -12224,3 +12224,51 @@ rota GET (fora de `AUDITED_ROUTES`, que cobre só mutações) audita mesmo assim
 tabela nem setting novos.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 05:40] - Docs: plataforma de investigação — revisão da documentação pública
+
+**Contexto:** G1–G4, F1, FA, F2, F3 e F4 implementadas em `feature/investigations` (F5
+não iniciada); `investigations.md` e `agents-mcp.md` foram escritos aos pedaços por
+várias tarefas.
+
+**Mudanças:**
+1. `docs/guide/investigations.md` reorganizado: TL;DR (use / não use / precisa),
+   status e prazos, "The flow at a glance" (caso → arquivos → visão unificada →
+   enriquecimento → rastreio/caminhos → tipologias → evidências/hipóteses → dossiê →
+   decisão → exportação), "Who can do what" (as 4 permissões `investigation.*` e a
+   matriz por papel no caso, conferida com `can_read/write/manage_case`: superusuário lê
+   tudo, compartilha e apaga, mas só edita como dono/responsável/write), tabela
+   direto / propõe / nunca do agente (README Q9 + `mcp/registry.py`), "Personal data",
+   "Settings" com padrões (de `config.py`), "Limits and known gaps" honesto (sem botão
+   para editar status/título, compartilhar, remover fonte e apagar: só API; prazos sem
+   notificação; nós promovidos ficam na sessão; matches aceitos não entram no grafo
+   unificado do servidor; fracionamento em 7 dias corridos, sem `pos_incompativel`;
+   laudo = impressão do browser; sem upload em partes; rate limit por processo).
+   Âncoras usadas por outras páginas mantidas.
+2. `docs/guide/agents-mcp.md`: TL;DR com a permissão `investigation.agent`, tabela Q9,
+   escopos com a lista completa de ferramentas do `mcp/server.py`, recursos MCP, rate
+   limit (429), máscara de CNPJ, seção "Limits".
+3. `docs/guide/configuration.md`: seção AI agents sem duplicar os comandos do bridge
+   (aponta para o guia); storage cita arquivos e evidências. Todas as settings de
+   agente/investigação já estavam listadas. `permissions.md`: TL;DR e abertura citam
+   investigações; linhas de `investigation.*` mencionam o agente.
+4. Links cruzados: `explorations.md` (TL;DR e "Add to investigation"; "investigation"
+   genérico virou "analysis" para não confundir com o recurso), `exploring-the-graph.md`,
+   `communities-metrics.md` (Save as property; TL;DR não diz mais que métricas são
+   sempre de sessão), `getting-started.md` (idem, uma palavra).
+5. `docs/dev/architecture.md`: seção "Investigations" (entidades, acesso, layout do
+   storage, paridade browser/servidor, MCP e registry) e bloco de endpoints.
+
+**Files:** `docs/guide/investigations.md`, `docs/guide/agents-mcp.md`,
+`docs/guide/configuration.md`, `docs/guide/permissions.md`, `docs/guide/explorations.md`,
+`docs/guide/exploring-the-graph.md`, `docs/guide/communities-metrics.md`,
+`docs/guide/getting-started.md`, `docs/dev/architecture.md`.
+
+**Testing:** `cd docs && npx vitepress build` ok; âncoras novas conferidas por script.
+Screenshots não regenerados; nenhuma página nova (a página longa fica inteira para não
+quebrar âncoras).
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)

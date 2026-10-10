@@ -1,21 +1,23 @@
 # Explorations & Sharing
 
 ::: tip TL;DR
-An exploration saves your whole investigation — query, visible nodes
+An exploration saves your whole analysis — query, visible nodes
 **with positions**, filters, look, analysis — under a shareable
 `?exploration=<id>` URL.
 
-- **Use it when** you want to resume an investigation later, hand a
+- **Use it when** you want to resume an analysis later, hand a
   colleague exactly what you're seeing, or deep-link a finding from a
   dashboard or ticket.
 - **Not the tool for** exporting data (use [Export](./exploring-the-graph.md#export));
   a *live* view of the tables (it snapshots the query result at save
-  time); or reusable styling across graphs (that's a
-  [style preset](./style-presets.md)). Sharing requires database
+  time); reusable styling across graphs (that's a
+  [style preset](./style-presets.md)); or a case that combines explorations
+  from several contexts with evidence and a decision (that's an
+  [investigation](./investigations.md)). Sharing requires database
   persistence — with the in-memory store, explorations reset on restart.
 :::
 
-An investigation is more than a query: it's the nodes you expanded, the
+An analysis is more than a query: it's the nodes you expanded, the
 layout you untangled, the filters, colors and labels that made the picture
 readable, the communities you detected. An **exploration** captures all of
 that under a name, gives it a shareable URL (`?exploration=<id>`), and
@@ -23,6 +25,11 @@ brings it back exactly as you left it — including node positions.
 
 Nine other guides reference `?exploration=` links; this page is what those
 links actually load.
+
+An exploration is also the unit an [investigation](./investigations.md)
+is built from: **Add to investigation** (in the Explorations list, or in the
+graph toolbar while one is open) puts it in a case, *live* (following later
+saves) or *frozen* (a hashed copy of its saved graph).
 
 ![Explorations](/screenshots/explorations-list.png)
 
@@ -139,7 +146,7 @@ So a link like
 https://<host>/graph/<ctx>?exploration=<id>&layout=ego&layout.ego.focusNodeId=n42
 ```
 
-opens your saved investigation but centred as an ego view — the pattern
+opens your saved analysis but centred as an ego view — the pattern
 [context-menu actions](./context-menu-actions.md) use for "re-open from
 this node" deep links. See [Query Templates →
 Precedence](./query-templates.md#preset-precomputed-template-or-exploration)
@@ -151,7 +158,7 @@ for the full comparison of the four data sources.
   *"Failed to load graph"* overlay and the server's message (404
   *Exploration not found* / 403). Unlike `?style=` or `?layout=`, a bad
   `?exploration=` does not silently fall back to a default load — you
-  asked for a specific investigation, and getting a different one would be
+  asked for a specific exploration, and getting a different one would be
   worse than an error.
 - A missing snapshot is invisible: the saved query re-runs and the
   snapshot is rebuilt.

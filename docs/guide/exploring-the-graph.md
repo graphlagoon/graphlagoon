@@ -10,7 +10,11 @@ compute; and the status bar tells you when the view is partial
 :::
 
 This page covers the Filters panel, the Query Console, the Data Table,
-selection and camera controls, neighbor expansion, and export.
+selection and camera controls, neighbor expansion, and export. To put graphs from several contexts on one canvas,
+follow money across them and record evidence, open them in an
+[investigation](./investigations.md); its **Sum parallel edges** and
+**Width by amount** switches (Aesthetics → Edges) work in any graph whose
+context names an [amount and a time](./investigations.md#amount-and-time).
 
 ![Filters](/screenshots/exploring-the-graph-filters.png)
 

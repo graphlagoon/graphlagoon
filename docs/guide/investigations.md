@@ -1,39 +1,111 @@
 # Investigations
 
 ::: tip TL;DR
-A **case** that gathers explorations from **different contexts** into one
-workspace, merges the same person or account across them, and keeps a
-tamper-evident journal of everything done on it.
+A **case** that gathers explorations and files from **different contexts**
+into one workspace, merges the same person or account across them, follows
+the money, records evidence and hypotheses, and ends in a human decision with
+a tamper-evident journal and a reproducible hash.
 
 - **Use it when** a fraud, AML or risk analysis spans more than one graph
-  (Pix transfers in one context, customer records in another) and you need
-  them on one canvas, with who-did-what recorded.
+  (Pix transfers in one context, customer records in another, a bank
+  statement someone sent) and you need them on one canvas, with who-did-what
+  recorded until the decision.
 - **Not the tool for** a single exploration you just want to save or share
-  (that's [Explorations & Sharing](./explorations.md)), or for sending the
-  communication to COAF: the app records the decision and exports a
-  structured Siscoaf summary, and a person files it in Siscoaf.
+  (that's [Explorations & Sharing](./explorations.md)); filing the
+  communication to COAF (the app exports a structured Siscoaf summary and a
+  person files it in Siscoaf); tracing over the whole warehouse (traces,
+  paths and badges run over the case graph, capped at
+  `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` edges); or letting an AI
+  decide (agents only propose, see [AI Agents (MCP)](./agents-mcp.md)).
+- **Needs** database persistence (PostgreSQL) for cases to survive a
+  restart, and a case storage folder or Volume for files and frozen copies
+  (see [Settings](#settings)).
 :::
 
 An investigation is a case file. It does not copy data out of the
 warehouse: it points at explorations you already have, from any context you
-can read, and shows them side by side and merged. Open **Investigations** in
-the top navigation to see the queue of cases you own, are assigned to, or
-that were shared with you.
+can read, adds files sent to you (bank statements, the Receita QSA, any
+CSV), and shows them side by side and merged. Open **Investigations** in the
+top navigation to see the queue of cases you own, are assigned to, or that
+were shared with you.
 
 ![Investigation queue](/screenshots/investigations-queue.png)
 
 The queue shows each case's typology, number of sources, status, assignee
-and deadline (Circ. 3.978: 45 days from creation while awaiting selection, 45 days
-from the move to analysis, recorded as `selected_at`). The server computes the
-deadline (`deadline: {phase, due_at, days_left}` on every case; none once decided
-or archived); under 7 days left it turns orange, in the queue and in the workspace
-header. Filter by text or status; the counters on top summarize the open work.
+and deadline. Filter by text or status (*Open* hides decided and archived
+cases); the counters on top summarize the open work.
+
+**Status and deadlines** (Circ. 3.978): a case starts *Awaiting selection*
+with 45 days from creation; moving it to *In analysis* records
+`selected_at` and starts another 45 days. *Decided* is reached only by
+[recording the decision](#decision-freeze-and-retention); *Archived* closes
+a case without one. The server computes the deadline
+(`deadline: {phase, due_at, days_left}` on every case, none once decided or
+archived); under 7 days left it turns orange, in the queue and in the
+workspace header.
+
+## The flow at a glance
+
+1. **[Create a case](#creating-a-case-and-adding-explorations)** and add
+   explorations from any context, *live* or *frozen*.
+2. **[Add files](#case-files)**: a SIMBA bank statement becomes a graph
+   source; a QSA becomes an enrichment table of the case.
+3. **[Read the unified view](#the-workspace)**: the same CPF, CNPJ, account
+   or phone merges across sources by [identity keys](#identity-keys); the
+   [match review](#match-review) suggests the ones a masked CPF kept apart.
+4. **[Enrich](#enrichment-tables)** entities from side tables (KYC, devices)
+   and promote shared values to nodes.
+5. **[Follow the money](#follow-the-money)** forward or backward with a
+   chosen allocation rule, and find **[paths](#paths)** between two entities.
+6. **[Check typology badges](#typology-badges)** citing the CC 4.001 items.
+7. **Mark [roles](#roles-notes-and-the-journal)** (victim, mule, exit),
+   write notes, freeze **[evidence](#frozen-evidence)** and write
+   **[hypotheses](#dossier)** citing it.
+8. **[Read the dossier](#dossier)** and **[record the decision](#decision-freeze-and-retention)**:
+   the case freezes and gets its frozen hash.
+9. **[Export](#exports)** the Siscoaf summary, the JSON package, the CSV, the
+   SIMBA layout or the printed laudo.
+
+An [AI agent](#agents-and-proposals) can do the legwork of steps 1–7 with
+your access; the decision and the exports stay with people.
+
+## Who can do what
+
+The app-wide [permissions](./permissions.md) gate four actions. Until an
+administrator writes a rule, everyone holds them.
+
+| Permission | Gates | Without it |
+|---|---|---|
+| `investigation.create` | Creating a case (**New investigation**) | You still work on cases assigned to or shared with you |
+| `investigation.upload` | Uploading files to a case (**Add file…**, and the agent's file tools) | You still read the files already in a case |
+| `investigation.export` | The export buttons and the laudo | You still read the case in the app |
+| `investigation.agent` | Creating personal agent tokens (only when agents are enabled) | No agent can act for you |
+
+On a given case:
+
+| Who | Sees | Edits (sources, files, roles, notes, evidence, hypotheses, artifacts) | Records the decision | Shares, deletes |
+|---|---|---|---|---|
+| Owner | Yes | Yes | Yes (once) | Yes; delete only after the [retention](#decision-freeze-and-retention) period |
+| Assignee, *write* share | Yes | Yes | Yes (once) | No |
+| *Read* share | Yes | No | No | No |
+| Superuser | Every case | Only as owner, assignee or *write* share | Same | Yes, also a retained case with a reason; transfers cases |
+| AI agent | What its owner sees | What its owner edits, within its [scopes](./agents-mcp.md#scopes) | Never | Never |
+| Anyone else | "Not found": a case's existence does not leak | — | — | — |
+
+- **Sharing is nominal only.** A case is shared with named e-mails, never
+  with `*` or `*@domain`: the tipping-off prohibition (Lei 9.613/98 art. 11,
+  LC 105/01) requires need-to-know access.
+- **Restricted sources.** If a case includes an exploration from a context
+  you can't read, you see a locked placeholder with the context name and its
+  owner (to ask for access), and none of its nodes; traces, badges and
+  exports leave it out too. A graph generated from a case file is readable
+  by everyone who reads the case.
+- A case with a recorded decision is **read-only** for everyone.
 
 ## Creating a case and adding explorations
 
 1. **New investigation** (top right of the queue) asks for a title and,
-   optionally, a typology, origin and assignee. The button only shows if you
-   hold the `investigation.create` [permission](./permissions.md).
+   optionally, a typology, origin and assignee.
 2. In the case, **+ Add** opens the picker: your explorations grouped by
    context. Tick one or more; the preview counts how many new contexts come
    in and which [identity keys](#identity-keys) they share.
@@ -50,18 +122,64 @@ A source only shows a graph if its exploration has a **saved graph**
 (snapshot). An exploration saved without one appears empty with a warning;
 open it, save it, and reload the case.
 
+## Case files
+
+The **Files** section of the left column lists the files uploaded to the case
+(bank statements in the SIMBA layout, the Receita QSA, any CSV) with their
+role, size and sha256.
+
+**Add file…** opens the file assistant (needs `investigation.upload` and edit
+access to the case). Its five steps:
+
+1. **Files**: pick every file of the layout at once (a SIMBA delivery is
+   five TAB-separated files).
+2. **Role**: **Graph** (becomes a source of the case), **Enrichment**
+   (joined to the case's nodes by key) or **Attachment** (kept as is).
+3. **Map columns**: a known layout (SIMBA v3.1, Receita QSA) is detected
+   from the file names and headers. The table shows what each column
+   becomes and how it is converted (cents, `ddmmaaaa` dates, `C`/`D` as
+   the direction of the money). The mapping itself is JSON you can edit;
+   it is checked as you type and saved, by name, with the file. The
+   quality panel shows the share of transactions without an identified
+   counterpart, the “Desconhecido” nodes (one per unidentified
+   transaction, never grouped), discarded rows with the reason, and a
+   preview of the first edges.
+4. **Identity**: node types whose id is normalized as a CPF/CNPJ,
+   account, phone or e-mail merge with the other sources of the case.
+5. **Review**: **Add to case** uploads the files and, for the graph
+   role, the server builds the graph and adds it as a source that opens
+   in its own tab.
+
+- An **Enrichment** file (for example the Receita QSA) is configured in step 3:
+  the key column, the columns to show, the node types it enriches, the node
+  property holding the key (or the node id) and, optionally, how many leading
+  digits to compare (8 turns a merchant's CNPJ into the QSA's CNPJ básico). Its
+  rows then show in the inspector's **Enrichment** tab of matching nodes. The
+  join runs in your browser and only inside this case: the file never becomes
+  part of a context.
+- A file graph lives in a **file context**: it can be opened and expanded but
+  not queried (no Query Console, no SQL, no Cypher). Only its first
+  `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` edges are kept; the journal
+  records how many were dropped.
+- The server computes the sha256 while receiving the file and stores it by
+  that hash; uploading the same bytes again reuses the stored copy. Files
+  above `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` are refused (413).
+- Uploads and every read of a file's content go to the audit log; uploads
+  also go to the journal.
+
 ## The workspace
 
 ![Investigation workspace](/screenshots/investigations-workspace.png)
 
 - **Tabs.** *Unified view* shows every source together; each source also has
   its own tab, exactly as the exploration looks on its own. Selecting an
-  entity in one tab keeps it selected in the others.
+  entity in one tab keeps it selected in the others. *Follow the money*
+  appears after a trace; *Case space* holds the [artifacts](#case-space).
 - **Rings = provenance.** In the unified view each node gets one colored
   ring per source it came from. A node with two rings was found in two
   contexts and merged. The legend on the canvas names each color.
 - **Sources panel** (left) lists the sources with their context and node
-  count, and how many entities were merged and by which key.
+  count, how many entities were merged and by which key, and the case files.
 - **Inspector** (right) shows the selected node's *Data*, its *Enrichment*
   (see [Enrichment tables](#enrichment-tables)), its *Notes* and its
   *Origin*: every source and original id behind it. When sources disagree on
@@ -69,6 +187,12 @@ open it, save it, and reload the case.
   source they came from.
 - **Expanding** a merged node asks which context to expand from, since each
   context has different neighbors.
+- The header links to the **Dossier**, **Matches** (open suggestions) and
+  **Agents** (pending proposals) pages of the case.
+
+Everything else the explorer does (labels, styles, filters,
+[communities and metrics](./communities-metrics.md), the data table) works
+in each tab as it does on a single graph.
 
 ### Identity keys
 
@@ -89,7 +213,26 @@ their nodes when the normalized values match, so `123.456.789-01` and
 
 Nodes without a key never merge: they stay one per context.
 
-### Enrichment tables
+### Match review
+
+The **Matches** page finds entities that may be the same person even though
+no identity key joined them: the 6 central CPF digits are equal and **at
+least one side has a masked CPF** (a full CPF already merges by identity
+key). The score adds a name similarity (Jaro-Winkler, after removing accents
+and DE/DA/DO/DOS/DAS/E), the CPF digits and the same 5-digit CEP; from 0.85
+up it becomes a suggestion.
+
+- The queue is ordered by how many new connections accepting would bring,
+  then by score. Each suggestion shows both entities side by side with the
+  compared values highlighted, the reasons and the effect of accepting.
+- **Nothing merges by itself**, least of all with a masked CPF. *Same entity*,
+  *Not the same* and *Defer* each need a reason, which goes to the journal.
+  An accepted match joins the two entities in the unified view; accepted and
+  rejected are final, a deferred one stays in the queue.
+- Agents run the same search (`suggest_matches`) and **propose** a decision;
+  a person accepts it on the Agents page.
+
+## Enrichment tables
 
 A context can attach side tables (KYC, login devices, chargebacks) in the
 context form (**Enrichment Tables** section): the table, its key column, the
@@ -100,10 +243,10 @@ of a column becomes a node of a given type, linked to the nodes that share it
 (for example `Dispositivo` by `device_id`, linking the accounts that used the
 same device).
 
-- Attaching or changing a table needs the **Create graph contexts**
-  permission and a table in an allowed catalog.schema
-  (`GRAPH_LAGOON_CATALOG_SCHEMAS`). Anyone who can read the context can look
-  it up; a writer without the permission can only remove a table.
+- Attaching or changing a table needs the `context.create` permission and a
+  table in an allowed catalog.schema (`GRAPH_LAGOON_CATALOG_SCHEMAS`). Anyone
+  who can read the context can look it up; a writer without the permission
+  can only remove a table.
 - In the workspace, the inspector's **Enrichment** tab looks a table up for
   every node of the graph it applies to. A *one row* table adds its columns
   to the nodes' properties; a *many rows* table shows the selected node's rows,
@@ -114,15 +257,15 @@ same device).
   (`GRAPH_LAGOON_ENRICHMENT_MAX_KEYS`, `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS`)
   and is audited (`enrichment.read`).
 
-### Amount and time
+## Amount and time
 
 The context form's **Amount and Time** section names the edge properties that
 hold each transaction's amount (in units or in cents, with a currency) and its
 time (ISO date or datetime, `dd/mm/yyyy [hh:mm]`, or epoch seconds or
-milliseconds). A file context gets them from its mapping (`edge_semantics`;
-the SIMBA preset sets `valor` and `data`). Each edge then shows its amount and
-time in the hover tooltip, and in a case graph every edge keeps its own
-context's semantics, so sources that name the amount differently still add up.
+milliseconds). A file context gets them from its mapping (the SIMBA preset
+sets `valor` and `data`). Each edge then shows its amount and time in the
+hover tooltip, and in a case graph every edge keeps its own context's
+semantics, so sources that name the amount differently still add up.
 
 Two switches in the **Aesthetics** panel (Edges) use them, in any graph:
 
@@ -133,7 +276,9 @@ Two switches in the **Aesthetics** panel (Edges) use them, in any graph:
 - **Width by amount** makes each edge's width proportional to its amount (a
   summed edge, to its total). A weight metric chosen in the Metrics panel wins.
 
-### Follow the money
+Follow the money, earliest-arrival paths and most badges need both.
+
+## Follow the money
 
 Right-click an edge or an account in the case workspace and pick **Follow the
 money → forward** (where the money went) or **→ backward** (where it came
@@ -157,7 +302,6 @@ edges (forward) or incoming edges (backward) with an amount and a time. The
   (and what the proportional rule would give), the retained balances
   (candidates for a precautionary block) and the method stamp listing every
   parameter of the run.
-
 - **Swimlane timeline** below: one lane per account plus one for the exits, an
   arrow at the time of each traced transfer and a light band for how long the
   money sat in each account. Drag across it to pick a time window: the layers
@@ -167,13 +311,7 @@ edges (forward) or incoming edges (backward) with an amount and a time. The
 **Save as evidence** freezes the run (the whole result plus its method stamp) as
 [frozen evidence](#frozen-evidence).
 
-The same trace and paths run on the server, over the unified graph of the
-sources you can read: `POST /api/investigations/{id}/analysis/trace` and
-`…/analysis/paths` (and the agent tools `trace_money` and `find_paths`). They give
-the same numbers as the screen, return the method stamp and write `trace.run` /
-`path.run` to the journal.
-
-### Paths
+## Paths
 
 Right-click a node and pick **Path to…**, then click the target node. The path is
 selected (highlighted) in the canvas and named in the bar on top, which picks the
@@ -190,7 +328,14 @@ method:
 direction). Ties are broken by node and edge id, so the same graph gives the same
 path.
 
-### Typology badges
+The trace and the paths also run on the server, over the unified graph of the
+sources you can read: `POST /api/investigations/{id}/analysis/trace` and
+`…/analysis/paths` (the agent tools `trace_money` and `find_paths`). They give
+the same numbers as the screen, return the method stamp (with
+`engine: "server"` and the restricted sources left out) and write `trace.run` /
+`path.run` to the journal.
+
+## Typology badges
 
 **Typology badges** (bottom-left of the canvas) swaps the left column for the
 patterns found in the unified graph, each citing its item of the BCB Circular
@@ -209,8 +354,9 @@ patterns found in the unified graph, each citing its item of the BCB Circular
 Click a badge to highlight its entities; **Bipartite layout** puts the most common
 node type on one axis and everything else on the other (a two-axis hive). Badges
 only suggest: **Accept** writes `typology.accepted` to the journal, and the dossier
-shows the accepted badges with their norm item. The server gives the same badges at
-`POST …/analysis/typologies` and to agents as `run_typologies`.
+and the Siscoaf summary show the accepted badges with their norm item. The server
+gives the same badges at `POST …/analysis/typologies` and to agents as
+`run_typologies`.
 
 ## Roles, notes and the journal
 
@@ -221,10 +367,13 @@ shows the accepted badges with their norm item. The server gives the same badges
   entity. Anyone who can edit the case adds them; only the author can delete
   one.
 - **Journal.** The *Journal* button in the status bar lists every change to
-  the case with author and time: creation, edits, shares, sources added or
-  removed, roles and notes. Entries cannot be edited or deleted, and each one
-  is chained to the previous by a hash, so a gap or a rewrite is detectable.
-  Deleting a note keeps its text in the journal.
+  the case with author and time: creation, edits, shares, sources and files
+  added or removed, roles, notes, enrichment promotions, traces and paths,
+  accepted badges, evidence, hypotheses, matches, proposals and the
+  decision. Entries cannot be edited or deleted, and each one is chained to
+  the previous by a hash, so a gap or a rewrite is detectable. Deleting a
+  note keeps its text in the journal; an agent's entries read "agent X on
+  behalf of Y".
 - **Metrics as properties.** In the explorer, *Save as property* on a computed
   node metric (Metrics panel) writes its values into the node properties and
   saves them in the exploration's snapshot. Every case that has the exploration
@@ -250,11 +399,12 @@ the journal records `evidence.created` with the hash. API:
 
 ## Dossier
 
-**Dossier** in the workspace header opens the case as a document (T7):
+**Dossier** in the workspace header opens the case as a document:
 
 - **Summary**: the description, typology, origin and how many entities hold
   each role, with indicators (sources and how many are restricted, evidence,
-  hypotheses by status, notes, journal events, pending proposals);
+  hypotheses by status, notes, journal events, pending proposals) and the
+  accepted typology badges;
 - **Hypotheses**: each one (H1, H2, …) with its status (**open**,
   **supported** or **refuted**) and the evidence **for** and **against** it.
   Write a new one at the bottom; change the status or link and unlink evidence
@@ -263,10 +413,10 @@ the journal records `evidence.created` with the hash. API:
 - **Frozen evidence**: E1, E2, … in the order they were frozen, with the kind,
   the short hash, how it was made (the trace method stamp, or the tab and its
   size) and who froze it;
-- **Journal**: the latest entries, or all of them.
+- **Journal**: the latest entries, or all of them;
+- **Decision panel** on the right: records the decision and holds the exports.
 
-The decision panel on the right records the decision (see below). API:
-`POST /api/investigations/{id}/hypotheses` with
+API: `POST /api/investigations/{id}/hypotheses` with
 `{text, status?, evidence_for?, evidence_against?, note?}` and
 `PATCH …/hypotheses/{hid}` (the evidence lists are replaced); both return the
 case, whose `state.hypotheses` holds them. Agents read it all with
@@ -274,11 +424,12 @@ case, whose `state.hypotheses` holds them. Agents read it all with
 
 ## Decision, freeze and retention
 
-The decision panel of the dossier closes the case. Pick the **outcome**
-(*Communicate to COAF via Siscoaf* or *Archive with a rationale*), the
-**actions** taken with it (flag the accounts in DICT, notify the SPA,
-request a precautionary block) and write the **rationale**, citing the
-evidence. **Record decision** then, in one step:
+Pick the **outcome** (*Communicate to COAF via Siscoaf* or *Archive with a
+rationale*), the **actions** taken with it (flag the accounts in DICT,
+notify the SPA, request a precautionary block) and write the **rationale**,
+citing the evidence. The app records these actions; it does not perform them
+(there is no DICT, SPA or Siscoaf connection). **Record decision** then, in
+one step:
 
 1. freezes every **live** source (the same frozen copy with sha256 that
    adding a source as *frozen* makes), so the case no longer follows the
@@ -298,12 +449,8 @@ auditor can be given access; that line goes to the journal after the
 decision and stays out of the hash, so the hash can be recomputed and
 compared at any time (the JSON export does it, see below).
 
-| Who | What |
-|---|---|
-| Owner, assignee, *write* share | Record the decision (once) |
-| Agents | Never: the route is human-only (LGPD art. 20; agents propose, people decide) |
-| Owner | Delete the case after the retention period |
-| Superuser | Delete a retained case with `?reason=…` (audited) |
+The decision is a person's: owner, assignee or a *write* share records it,
+once. Agents cannot (LGPD art. 20; agents propose, people decide).
 
 **Retention.** A decided case cannot be deleted for
 `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` (default 10) after its
@@ -319,9 +466,11 @@ returns the case with `status: "decidido"`, `decision`, `frozen_hash` and
 ## Exports
 
 The decision panel also exports the case, for people with the
-**Export investigations** permission (`investigation.export`; the buttons are
-hidden without it). Each export is a download, generated on request from what
-you can read, and recorded in the audit log with its format and sha256.
+`investigation.export` permission (the buttons are hidden without it). Each
+export is a download, generated on request from what you can read, in any
+status, and recorded in the audit log with its format and sha256. Exporting
+is a read: it adds nothing to the journal, so the frozen hash stays
+reproducible.
 
 | Button | Format | What it holds |
 |---|---|---|
@@ -339,51 +488,8 @@ other end is the counterpart, by its CPF/CNPJ and name, or agency 9999
 exported.
 
 API: `GET /api/investigations/{id}/export?format=json|csv|simba|siscoaf`.
-Agents cannot export (the route is human-only: exports leave the app with
-unmasked data); they read the case with `get_dossier`.
-
-## Case files
-
-The **Files** section of the left column lists the files uploaded to the case
-(bank statements in the SIMBA layout, the Receita QSA, any CSV) with their
-role, size and sha256.
-
-- **Add file…** opens the file assistant. It needs the `investigation.upload`
-  [permission](./permissions.md) and edit access to the case. Its five steps:
-  1. **Files**: pick every file of the layout at once (a SIMBA delivery is
-     five TAB-separated files).
-  2. **Role**: **Graph** (becomes an exploration of the case), **Enrichment**
-     (joined to the case's nodes by key) or **Attachment** (kept as is).
-  3. **Map columns**: a known layout (SIMBA v3.1, Receita QSA) is detected
-     from the file names and headers. The table shows what each column
-     becomes and how it is converted (cents, `ddmmaaaa` dates, `C`/`D` as
-     the direction of the money). The mapping itself is JSON you can edit;
-     it is checked as you type and saved, by name, with the file. The
-     quality panel shows the share of transactions without an identified
-     counterpart, the “Desconhecido” nodes (one per unidentified
-     transaction, never grouped), discarded rows with the reason, and a
-     preview of the first edges.
-  4. **Identity**: node types whose id is normalized as a CPF/CNPJ,
-     account, phone or e-mail merge with the other sources of the case.
-  5. **Review**: **Add to case** uploads the files and, for the graph
-     role, the server builds the graph and adds it as a source that opens
-     in its own tab.
-- An **Enrichment** file (for example the Receita QSA) is configured in step 3:
-  the key column, the columns to show, the node types it enriches, the node
-  property holding the key (or the node id) and, optionally, how many leading
-  digits to compare (8 turns a merchant's CNPJ into the QSA's CNPJ básico). Its
-  rows then show in the inspector's **Enrichment** tab of matching nodes, like
-  an enrichment table. The join runs in your browser and only inside this
-  case: the file never becomes part of a context.
-- A file graph lives in a **file context**: it can be opened and expanded but
-  not queried (no Query Console, no SQL, no Cypher). Only its edges up to
-  `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` are kept; the journal
-  records how many were dropped.
-- The server computes the sha256 while receiving the file and stores it by
-  that hash; uploading the same bytes again reuses the stored copy. Files
-  above `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` are refused.
-- Uploads and every read of a file's content go to the audit log; uploads
-  also go to the journal.
+Agents cannot export (exports leave the app with unmasked data); they read
+the case with `get_dossier`.
 
 ## Case space
 
@@ -400,74 +506,112 @@ reports, images and data (`md`, `txt`, `pdf`, `png`, `jpg`, `pptx`, `docx`,
   browser, since they can carry scripts. The other types are download only.
 - **Approve.** Every version starts as a *draft*. Only a person with edit
   access approves it; an AI agent can upload drafts but never approve.
-- Uploads, new versions and approvals go to the journal. Files live in the
-  case storage (a Unity Catalog Volume on Databricks, see
-  [Configuration](./configuration.md#investigation-storage)) and are only
-  reached through the app, which checks access.
-
-## Match review
-
-The **Matches** button in the case header (with the number of open
-suggestions) opens the match review. *Find matches* looks for entities that
-may be the same person even though no identity key joined them: the 6 central
-CPF digits are equal and **at least one side has a masked CPF** (a full CPF
-already merges by identity key). The score adds a name similarity
-(Jaro-Winkler, after removing accents and DE/DA/DO/DOS/DAS/E), the CPF digits
-and the same 5-digit CEP; from 0.85 up it becomes a suggestion.
-
-- The queue is ordered by how many new connections accepting would bring,
-  then by score. Each suggestion shows both entities side by side with the
-  compared values highlighted, the reasons and the effect of accepting.
-- **Nothing merges by itself**, least of all with a masked CPF. *Same entity*,
-  *Not the same* and *Defer* each need a reason, which goes to the journal.
-  An accepted match joins the two entities in the unified view; accepted and
-  rejected are final, a deferred one stays in the queue.
-- Agents run the same search (`suggest_matches`) and **propose** a decision;
-  a person accepts it on the agents page.
+- Uploads, new versions and approvals go to the journal.
 
 ## Agents and proposals
 
 The **Agents** button in the case header (with the number of pending
 proposals) opens the agents page of the case. It needs agents turned on by
-the administrator (see [Configuration](./configuration.md#ai-agents)).
+the administrator (`GRAPH_LAGOON_AGENTS_ENABLED`) and, to create a token, the
+`investigation.agent` permission.
 
 - **Connect an agent.** Create a personal token: a name, what the agent may
-  do (read, run analyses, write notes and draft artifacts, make proposals)
-  and a validity. The token is shown **once**, inside the command to add the
-  app to Claude Code; only its hash is stored. Revoke it under *Active
-  tokens*. The agent acts with your access and never more.
-- **Proposals.** An agent cannot change an entity's role, the case status,
-  its typology or its hypotheses directly: it proposes. Each proposal shows what it would
-  change and the agent's rationale. **Accept** applies it exactly as if you
-  had made the change yourself; **Reject** asks for a reason. Both go to the
-  journal with who proposed and who decided. Only people decide.
-- **Agent activity** lists what agents did on the case. In the journal,
-  their entries read "agent X on behalf of Y".
+  do (read, run analyses, write, propose) and a validity. The token is shown
+  **once**, inside the command to add the app to Claude Code; only its hash
+  is stored. Revoke it under *Active tokens*. The agent acts with your access
+  and never more.
+- **Proposals.** Each proposal shows what it would change and the agent's
+  rationale. **Accept** applies it exactly as if you had made the change
+  yourself; **Reject** asks for a reason. Both go to the journal with who
+  proposed and who decided.
+- **Agent activity** lists what agents did on the case.
 
-How to connect Claude Code or Claude Desktop, the scopes, masking and the
-ready-made prompts are in [AI Agents (MCP)](./agents-mcp.md).
+| An agent… | What |
+|---|---|
+| **does directly** (journaled as "agent X on behalf of Y") | read the case, graph, files and dossier; run matches, traces, paths and badges; create cases, add sources, upload files and build file graphs; write notes; freeze evidence; upload artifacts as **drafts** |
+| **proposes** (a person accepts or rejects) | an entity role, a match decision, a hypothesis or its status, the typology, the case status |
+| **never does** (no tool; the routes answer 403 to agent tokens) | record the decision, export, share, delete, approve an artifact, accept or reject a proposal or a match, mint tokens |
 
-## Access and sharing
+How to connect Claude Code or Claude Desktop, the scopes and the ready-made
+prompts are in [AI Agents (MCP)](./agents-mcp.md).
 
-- **Who sees a case:** its owner, its assignee, the people it was shared
-  with, and superusers. Anyone else gets "not found", so a case's existence
-  does not leak.
-- **Who edits:** the owner, the assignee and people with a *write* share. A
-  case with a recorded decision is read-only.
-- **Sharing is nominal only.** A case is shared with named e-mails, never
-  with `*` or `*@domain`: the tipping-off prohibition (Lei 9.613/98 art. 11,
-  LC 105/01) requires need-to-know access.
-- **Restricted sources.** If a case includes an exploration from a context
-  you can't read, you see a locked placeholder with the context name and its
-  owner (to ask for access), and none of its nodes. A graph generated from a
-  case file is readable by everyone who reads the case.
+## Personal data
+
+- **In the app** people see the data their contexts and files hold, as they
+  are. A masked CPF in the source stays masked and never merges by
+  identity key.
+- **Agents** see CPF, CNPJ and account numbers **masked** by default
+  (`***.456.789-**`, accounts down to the last two digits), including inside
+  entity ids; see [Personal data](./agents-mcp.md#personal-data).
+- **Exports** leave the app unmasked, which is why they need
+  `investigation.export`, are human-only and are audited with their sha256.
+- **Files and frozen copies** live in the case storage and are reached only
+  through the app, which checks access on every read.
+
+## Settings
+
+All optional; the defaults suit a single analyst team. Details in
+[Configuration](./configuration.md#investigation-storage).
+
+| Variable | Default | Does |
+|---|---|---|
+| `GRAPH_LAGOON_INVESTIGATIONS_VOLUME_PATH` | `{DATABRICKS_VOLUME_PATH}/investigations`, else `{EXPLORATION_SNAPSHOTS_DIR}/investigations` | Where files, frozen sources, evidence and artifacts are stored |
+| `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` | `209715200` (200 MB) | Largest file uploaded to a case |
+| `GRAPH_LAGOON_ARTIFACT_MAX_BYTES` | `104857600` (100 MB) | Largest artifact version in the case space |
+| `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Edges kept from a file graph |
+| `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a decided case cannot be deleted |
+| `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` / `_MAX_ROWS` | `500` / `5000` | Keys per enrichment lookup / rows it returns |
+| `GRAPH_LAGOON_AGENTS_ENABLED` | `false` | Agent tokens and the `/mcp` server ([AI agents](./configuration.md#ai-agents)) |
+| `GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS` | `90` | Longest token validity |
+| `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA` | `false` | Agents read CPF, CNPJ and accounts unmasked |
+| `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per agent token |
+
+## Limits and known gaps
+
+This is an MVP. What it does not do yet, so you can plan around it:
+
+- **API only, no button:** editing a case's title, description, assignee,
+  typology or status after creation (`PATCH /api/investigations/{id}`; the
+  status also changes by accepting an agent's proposal), sharing it
+  (`POST …/share` with `{email, permission}`), removing a source
+  (`DELETE …/sources/{source_id}`) and deleting the case
+  (`DELETE /api/investigations/{id}`). Superusers transfer cases in the
+  admin area.
+- **Deadlines** count calendar days from creation and from `selected_at`;
+  there are no notifications, no SLA setting and no special deadlines (the
+  24 h SPA notice).
+- **Case graph size.** Everything renders in the browser; a file graph keeps
+  only its first `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` edges.
+  Tracing in the warehouse (SQL) is not available.
+- **Promoted enrichment nodes** live in your session: pin evidence to keep
+  them. Enrichment files have no promotion or *Shared by* count, and a
+  lookup covers the first 500 keys of a graph.
+- **Accepted matches** join entities in the browser's unified view only; the
+  server's unified graph (server trace, paths, badges and agent tools) still
+  keeps them apart.
+- **Badges:** *Structuring* counts 7 calendar days instead of 5 business
+  days; the incompatible POS pattern (CC 4.001 IV-v to IV-z) is missing,
+  since acquirer POS data is not modeled.
+- **Evidence** from an enrichment row or a file has no button (the API takes
+  `kind: table` or `file`); evidence has no thumbnail.
+- **Exports:** the laudo is the browser's *Save as PDF*, not a server PDF,
+  and it has no digital signature; there is no Siscoaf, DICT or SPA
+  connection; the whole case is exported, never a subset; case files have
+  no download button.
+- **Uploads** go in one request (no chunked upload), so a proxy limit below
+  `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` wins.
+- **Agent rate limit** is counted per server process (N workers allow N× the
+  limit).
 
 ## Admin area
 
 Superusers get an **Investigations** tab in the admin area with every case
 and its owner, assignee, status and sources, plus **Transfer** to hand a case
-to a new owner (for example when someone leaves). Transfers, creations,
-edits, shares and source changes are in the **Audit** tab; the case journal
-records the transfer too. Recorded decisions are audited as
-`investigation.decide`, with the outcome and the frozen hash, and exports as
-`investigation.export`, with the format and the sha256 of the file.
+to a new owner (for example when someone leaves); the case journal records
+the transfer too. Creations, edits, shares, source changes and transfers are
+in the **Audit** tab, along with recorded decisions (`investigation.decide`,
+with the outcome and the frozen hash), exports (`investigation.export`, with
+the format and the sha256 of the file), file reads, enrichment lookups
+(`enrichment.read`) and every agent read (`agent.read`). The four
+`investigation.*` permissions appear in the permission matrix of
+[Groups & Permissions](./permissions.md).
