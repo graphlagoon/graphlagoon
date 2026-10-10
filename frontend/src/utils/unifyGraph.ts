@@ -4,6 +4,7 @@
  */
 import type { Edge, GraphContext, GraphSnapshot, Node } from '@/types/graph';
 import { identityKeyOf } from '@/utils/identityKeys';
+import { edgeValueTags } from '@/utils/edgeSemantics';
 
 /** Where a unified node came from: one entry per (source, original node). */
 export interface NodeOrigin {
@@ -104,17 +105,19 @@ function mergeNode(
 /**
  * Nodes merge by identity key (`"Pessoa:12345678901"`); a node without a usable key
  * stays per context (`"{node_id}@{contextId}"`, id first so the default label reads
- * the original id). Edges are never merged across sources.
+ * the original id). Edges are never merged across sources; each carries its own
+ * context's amount and time (`__amount`/`__t`).
  */
 export function unifyGraph(
   sources: UnifySource[],
-  contexts: Record<string, Pick<GraphContext, 'identity_keys'> | null | undefined>,
+  contexts: Record<string, Pick<GraphContext, 'identity_keys' | 'edge_semantics'> | null | undefined>,
 ): UnifiedGraph {
   const nodes = new Map<string, UnifiedNode>();
   const edges = new Map<string, UnifiedEdge>();
 
   for (const s of sources) {
     const keys = new Map((contexts[s.contextId]?.identity_keys ?? []).map((k) => [k.node_type, k]));
+    const semantics = contexts[s.contextId]?.edge_semantics;
     const uidOf = new Map<string, string>();
     for (const n of s.nodes) {
       const key = keys.get(n.node_type);
@@ -133,7 +136,8 @@ export function unifyGraph(
       // An edge whose endpoint is not in its own source would dangle in the canvas.
       if (!src || !dst) continue;
       const id = `${s.id}:${e.edge_id}`;
-      if (!edges.has(id)) edges.set(id, { ...e, edge_id: id, src, dst, __source: s.id });
+      // Amount/time are tagged per edge: sources of different contexts name them differently.
+      if (!edges.has(id)) edges.set(id, { ...e, ...edgeValueTags(e, semantics), edge_id: id, src, dst, __source: s.id });
     }
   }
 

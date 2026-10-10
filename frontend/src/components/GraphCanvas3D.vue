@@ -10,6 +10,7 @@ import type { Node, Edge } from '@/types/graph';
 import type { GraphNode, GraphLink, GraphData } from '@/types/graph3d';
 import { formatNodeLabel, formatEdgeLabel } from '@/utils/labelFormatter';
 import { buildNodeTooltip, buildEdgeTooltip, EDGE_TYPE_CHIP, type TooltipContent } from '@/utils/tooltipContent';
+import { formatEdgeValue } from '@/utils/edgeSemantics';
 import { numericValueMap } from '@/types/metrics';
 import {
   getMultiEdgeCurvature3D,
@@ -693,12 +694,15 @@ function linkTooltipFor(link: GraphLink): TooltipContent {
   const original = edgeDataMap.value.get(link.id);
   if (!original) return { body: link.relationshipType, typeChip: EDGE_TYPE_CHIP };
 
-  return buildEdgeTooltip(
+  const tip = buildEdgeTooltip(
     original,
     graphStore.textFormatRules,
     graphStore.textFormatDefaults,
     labelOptions,
   );
+  // Amount and time from the context's edge semantics (F3.1).
+  const value = formatEdgeValue(graphStore.edgeValueOf(original), graphStore.edgeCurrency);
+  return value ? { ...tip, body: `${tip.body}\n${value}` } : tip;
 }
 
 /**

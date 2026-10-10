@@ -36,6 +36,7 @@ import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
 import { isSqlScript } from '@/utils/sqlScript';
 import { snapshotToGraph, type NodeOrigin } from '@/utils/unifyGraph';
+import { edgeValue, type EdgeValue } from '@/utils/edgeSemantics';
 import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
 import { useToast } from '@/composables/useToast';
 import {
@@ -346,6 +347,12 @@ export const useGraphStore = defineStore('graph', () => {
   const currentContext = ref<GraphContext | null>(null);
   const currentExploration = ref<Exploration | null>(null);
   const investigationMode = shallowRef<InvestigationGraphMode | null>(null);
+  /** Amount/time of an edge (F3.1): the context's semantics, or the unify-time tags of a case graph. */
+  const edgeSemantics = computed(() => currentContext.value?.edge_semantics ?? null);
+  const edgeCurrency = computed(() => edgeSemantics.value?.currency || 'BRL');
+  function edgeValueOf(edge: Edge): EdgeValue {
+    return edgeValue(edge, edgeSemantics.value);
+  }
   /** Investigation role fills (nodeId -> color); null outside a case. */
   const roleColors = shallowRef<Map<string, string> | null>(null);
 
@@ -2879,6 +2886,9 @@ export const useGraphStore = defineStore('graph', () => {
     setTableFilteredIds,
     enhancedNodes,
     enhancedEdges,
+    edgeSemantics,
+    edgeCurrency,
+    edgeValueOf,
     searchMatchedNodeIds,
     searchHiddenNodeIds,
     focusedNodeIds,

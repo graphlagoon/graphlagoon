@@ -11560,3 +11560,45 @@ vitest ER (fixture, blocking, mascarado, JW) e T8; `vue-tsc` limpo.
 `entity_matches` já estava em `CLEARABLE_TABLES`.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 21:00] - Feature Implemented: F3.1 · Semântica de valor e horário
+
+**Feature:** `edge_semantics` no context (03 §2.1): validação, create/update/response,
+seção "Amount and Time" no `GraphContextFormModal`, leitura de valor e horário por
+aresta (`utils/edgeSemantics.ts`) e etiqueta por aresta no grafo unificado do caso.
+
+**Design Decisions:**
+1. `EdgeSemantics {amount_prop?, amount_unit: units|cents, time_prop?, currency: ^[A-Z]{3}$}`
+   (forma da 03; o `direction?` do plano ficou de fora: a direção já vem da aresta).
+   Nome em branco vira `null`. O mapeamento de arquivo valida o mesmo esquema (Python
+   via o modelo, TS com as mesmas duas regras) e o context gerado guarda a forma
+   normalizada; o preset SIMBA já declarava `valor`/`data`/`BRL` (e `cents` converte
+   para unidades, então `amount_unit` fica `units`).
+2. `edgeValue(edge, semantics) → {amount, t}` puro (importável pelos workers da F3.3):
+   valor número, `"1234.56"` ou `"1.234,56"` (÷100 em `cents`); horário ISO,
+   `dd/mm/yyyy [hh:mm]`, epoch s ou ms; data sem hora = meia-noite local.
+3. Grafo do caso mistura contexts: `unifyGraph` etiqueta cada aresta com `__amount`/`__t`
+   da semântica do **seu** context; sem `currentContext`, `edgeValue(e, null)` lê as
+   etiquetas. A store do grafo expõe `edgeSemantics`, `edgeCurrency` (BRL no caso) e
+   `edgeValueOf(edge)`.
+4. UI: o tooltip da aresta ganha uma linha `R$ 1.234,56 · data`. `shortcut:` moeda do
+   caso fixa em BRL; uma moeda por aresta quando houver caso multimoeda.
+
+**Files:** `api/graphlagoon/models/schemas.py`, `routers/graph_contexts.py`,
+`db/memory_store.py`, `services/file_mapping.py`, `services/investigation_files.py`,
+`api/tests/test_context_edge_semantics.py` (novo); `frontend/src/types/graph.ts`,
+`utils/edgeSemantics.ts` (novo), `utils/unifyGraph.ts`, `utils/fileMapping.ts`,
+`stores/graph.ts`, `components/GraphCanvas3D.vue`, `components/GraphContextFormModal.vue`,
+`utils/__tests__/edgeSemantics.test.ts` (novo), `components/__tests__/GraphContextFormModal.test.ts`.
+
+**Testing:** pytest `test_context_edge_semantics.py` (validação, mapeamento recusa
+moeda inválida, salvar e recarregar), `test_file_mapping.py`, `test_investigation_files.py`,
+`test_context_identity_keys.py`; vitest edgeSemantics (parsers, unificação com três
+contexts), unifyGraph, fileMapping e modal; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Amount and time).
+**Admin-Area Impact:** no admin-area impact (campo novo na rota de update do context).
+
+**Author:** Claude (AI Assistant)

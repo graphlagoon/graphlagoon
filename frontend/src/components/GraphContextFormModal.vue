@@ -15,6 +15,7 @@ import {
 } from '@/composables/useDatasourceCapabilities';
 import type {
   DatasourceType,
+  EdgeSemantics,
   EnrichmentTable,
   GraphContext,
   ColumnInfo,
@@ -90,6 +91,7 @@ function emptyForm() {
     default_behaviors: '',
     identity_keys: [] as IdentityKeyRow[],
     enrichment_tables: [] as EnrichmentRow[],
+    edge_semantics: { amount_prop: '', amount_unit: 'units', time_prop: '', currency: 'BRL' } as EdgeSemanticsForm,
   };
 }
 
@@ -211,6 +213,12 @@ function formFromContext(context: GraphContext) {
         : '',
     identity_keys: (context.identity_keys || []).map(rowFromKey),
     enrichment_tables: (context.enrichment_tables || []).map(rowFromEnrichment),
+    edge_semantics: {
+      amount_prop: context.edge_semantics?.amount_prop ?? '',
+      amount_unit: context.edge_semantics?.amount_unit ?? 'units',
+      time_prop: context.edge_semantics?.time_prop ?? '',
+      currency: context.edge_semantics?.currency ?? 'BRL',
+    },
   };
 }
 
@@ -541,6 +549,30 @@ function addIdentityKey() {
   });
 }
 
+// --- Edge semantics --------------------------------------------------------------
+
+interface EdgeSemanticsForm {
+  amount_prop: string;
+  amount_unit: 'units' | 'cents';
+  time_prop: string;
+  currency: string;
+}
+
+const edgeSemantics = computed<EdgeSemantics>(() => {
+  const f = form.value.edge_semantics;
+  return {
+    amount_prop: f.amount_prop.trim() || null,
+    amount_unit: f.amount_unit,
+    time_prop: f.time_prop.trim() || null,
+    currency: f.currency.trim().toUpperCase() || 'BRL',
+  };
+});
+const edgePropertyOptions = computed(() =>
+  props.mode === 'edit'
+    ? (props.context?.edge_properties || []).map((p) => p.name)
+    : edgeTableColumns.value.map((c) => c.name),
+);
+
 // --- Enrichment tables -----------------------------------------------------------
 
 /** Complete rows only, like identity keys. */
@@ -616,6 +648,7 @@ async function submit() {
         default_behaviors: defaultBehaviors,
         identity_keys: identityKeys.value.length > 0 ? identityKeys.value : undefined,
         enrichment_tables: enrichmentTables.value.length > 0 ? enrichmentTables.value : undefined,
+        edge_semantics: edgeSemantics.value,
       });
     } else if (props.mode === 'create') {
       // Property columns = every live column minus the structural ones —
@@ -651,6 +684,7 @@ async function submit() {
         default_behaviors: defaultBehaviors,
         identity_keys: identityKeys.value.length > 0 ? identityKeys.value : undefined,
         enrichment_tables: enrichmentTables.value.length > 0 ? enrichmentTables.value : undefined,
+        edge_semantics: edgeSemantics.value,
       });
     } else {
       if (!props.context) return;
@@ -668,6 +702,7 @@ async function submit() {
         default_behaviors: defaultBehaviors ?? {},
         identity_keys: identityKeys.value,
         enrichment_tables: enrichmentTables.value,
+        edge_semantics: edgeSemantics.value,
       });
     }
 
@@ -1108,6 +1143,40 @@ async function submit() {
           </datalist>
           <datalist id="identity-node-props">
             <option v-for="p in nodePropertyOptions" :key="p" :value="p" />
+          </datalist>
+        </div>
+
+        <!-- Edge semantics (investigations): which edge properties are the amount and
+             the time, for sums, widths and money tracing. -->
+        <div class="column-config-section" data-testid="edge-semantics-section">
+          <h4>Amount and Time</h4>
+          <span class="hint">
+            Optional. Edge properties holding each transaction's amount and time; the
+            graph sums parallel edges and scales widths by amount.
+          </span>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Amount property</label>
+              <input v-model="form.edge_semantics.amount_prop" type="text" class="form-control" list="edge-props" placeholder="valor" data-testid="semantics-amount" />
+            </div>
+            <div class="form-group">
+              <label>Unit</label>
+              <select v-model="form.edge_semantics.amount_unit" class="form-control" data-testid="semantics-unit">
+                <option value="units">units (12.34)</option>
+                <option value="cents">cents (1234)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Currency</label>
+              <input v-model="form.edge_semantics.currency" type="text" class="form-control" maxlength="3" data-testid="semantics-currency" />
+            </div>
+            <div class="form-group">
+              <label>Time property</label>
+              <input v-model="form.edge_semantics.time_prop" type="text" class="form-control" list="edge-props" placeholder="data" data-testid="semantics-time" />
+            </div>
+          </div>
+          <datalist id="edge-props">
+            <option v-for="p in edgePropertyOptions" :key="p" :value="p" />
           </datalist>
         </div>
 

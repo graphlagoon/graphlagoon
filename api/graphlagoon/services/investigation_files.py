@@ -14,6 +14,7 @@ from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from graphlagoon.db.memory_store import get_memory_store
+from graphlagoon.models.schemas import EdgeSemantics
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services.investigations import (
     InvestigationError,
@@ -357,11 +358,13 @@ async def generate_context(
             "identity_keys": derived_identity_keys(mapping),
             "owner_email": user_email,
         }
+        # Same shape as a context saved in the form (F3.1): defaults filled in.
+        semantics = EdgeSemantics.model_validate(mapping.get("edge_semantics") or {}).model_dump()
         state = {"has_snapshot": True}
         if session is None:
             store = get_memory_store()
             context = store.create_graph_context(**context_fields)
-            context.edge_semantics = mapping.get("edge_semantics") or {}
+            context.edge_semantics = semantics
             exploration = store.create_exploration(
                 graph_context_id=context.id, title=name, owner_email=user_email, state=state
             )
@@ -369,7 +372,7 @@ async def generate_context(
             from graphlagoon.db.models import Exploration, GraphContext
 
             context = GraphContext(
-                **context_fields, edge_semantics=mapping.get("edge_semantics") or {}
+                **context_fields, edge_semantics=semantics
             )
             session.add(context)
             await session.flush()

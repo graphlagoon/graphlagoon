@@ -423,6 +423,7 @@ class InMemoryStore:
         metric_definitions: Optional[List[Dict[str, Any]]] = None,
         identity_keys: Optional[List[Dict[str, Any]]] = None,
         enrichment_tables: Optional[List[Dict[str, Any]]] = None,
+        edge_semantics: Optional[Dict[str, Any]] = None,
     ) -> MemoryGraphContext:
         """Create a new graph context."""
         context_id = uuid4()
@@ -455,6 +456,7 @@ class InMemoryStore:
             metric_definitions=metric_definitions or [],
             identity_keys=identity_keys or [],
             enrichment_tables=enrichment_tables or [],
+            edge_semantics=edge_semantics or {},
         )
         self.graph_contexts[context_id] = context
         return context

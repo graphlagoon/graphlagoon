@@ -57,7 +57,7 @@ export interface MappingSpec {
   edges?: EdgeMapping[];
   edge_semantics?: {
     amount_prop?: string;
-    amount_unit?: string;
+    amount_unit?: 'units' | 'cents';
     time_prop?: string;
     currency?: string;
   };
@@ -245,7 +245,14 @@ export function validateSpec(spec: unknown): Set<string> {
     validateProps(edge.props ?? {}, `${where}.props`, s, refs);
   });
   if ('edge_semantics' in s) {
-    keys(s.edge_semantics, 'edge_semantics', ['amount_prop', 'amount_unit', 'time_prop', 'currency']);
+    const sem = keys(s.edge_semantics, 'edge_semantics', ['amount_prop', 'amount_unit', 'time_prop', 'currency']);
+    // Same shape the context accepts (F3.1, EdgeSemantics in schemas.py).
+    if (sem.amount_unit !== undefined && sem.amount_unit !== 'units' && sem.amount_unit !== 'cents') {
+      throw new MappingError(`edge_semantics: unknown amount_unit '${String(sem.amount_unit)}'`);
+    }
+    if (sem.currency !== undefined && !/^[A-Z]{3}$/.test(String(sem.currency))) {
+      throw new MappingError(`edge_semantics: currency must be a 3-letter code`);
+    }
   }
   for (const r of refs) if (!(alias(r) in s.inputs)) throw new MappingError(`'${r}': unknown input alias`);
   return refs;

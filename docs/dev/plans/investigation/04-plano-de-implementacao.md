@@ -54,7 +54,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F2.8 · Resolução de entidades e revisão de matches (T8)
 
 **F3 · Seguir o dinheiro**
-- [ ] F3.1 · Semântica de valor e horário nas arestas
+- [x] F3.1 · Semântica de valor e horário nas arestas
 - [ ] F3.2 · Soma de arestas paralelas e largura por valor
 - [ ] F3.3 · Worker de rastreio temporal
 - [ ] F3.4 · Tela de rastreio (T5): parâmetros, camadas, Sankey, saídas
@@ -645,7 +645,7 @@ trabalho de análise e documentação; a pessoa decide.
   - formulário do context;
   - mapeamento de arquivo (F2.4) preenche os mesmos campos.
 - **Aceite:**
-  - [ ] Um context com semântica declarada expõe valor e horário de cada aresta à UI e
+  - [x] Um context com semântica declarada expõe valor e horário de cada aresta à UI e
     aos workers.
 - **Testes:** pytest de validação e vitest.
 
