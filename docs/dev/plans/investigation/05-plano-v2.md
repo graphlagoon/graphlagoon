@@ -212,7 +212,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 - [x] F0 · Segurança
 - [x] F1 · Caso operável
 - [x] F2 · Novo modelo
-- [ ] F3 · Add everywhere + loop vivo
+- [x] F3 · Add everywhere + loop vivo
 - [ ] F4 · Workspace de análise
 - [ ] F5 · AI-first completo
 - [ ] F6 · Compliance e acabamento
@@ -244,7 +244,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 ### F3 · Add everywhere + loop vivo
 - `stores/currentCase.ts` + chip na `Toolbar.vue`; `composables/useAddToCase.ts`; botões em `QueryConsolePanel`, `DataTablePanel`, `EnrichmentTab`, `TraceExits`, menu de seleção; drop/paste no material.
 - Popover `+ Adicionar` com as 5 abas; "Nova exploração" via `GraphVisualizationView?case=` com auto-anexo ao salvar; Query Console dentro do caso (prop `contextId` + emit `result`).
-- **Aceite:** resultado do console vira tabela do caso em 2 cliques; consulta salva aparece em "Consultas" com histórico de runs; exploração nova criada do caso aparece como ref viva; um caso com 5+ tabelas de origens diferentes permite juntar duas por chave e promover três a enriquecimento de uma vez.
+- [x] **Aceite:** resultado do console vira tabela do caso em 2 cliques; consulta salva aparece em "Consultas" com histórico de runs; exploração nova criada do caso aparece como ref viva; um caso com 5+ tabelas de origens diferentes permite juntar duas por chave e promover três a enriquecimento de uma vez.
 
 ### F4 · Workspace de análise
 - `CaseFilterChips.vue`, montar `FilterPanel`/`DataTablePanel`/`MetricsPanel`/comunidades/`LayoutPanel` no caso (todos já leem o `graphStore` único; `InvestigationView` já usa `graphStore.loadInvestigationGraph`); `GroupsPanel.vue`; `SelectionInspector.vue`; `AnalysisBar.vue` com popovers; `CaseSettingsDrawer.vue`; `EntityPage` (drawer); `CaseTimeline` na faixa inferior; visões salvas; persistir grupos/comunidades/expansões.

@@ -201,6 +201,19 @@ export interface UpdateItemRequest {
   position?: number;
 }
 
+/** `POST …/items/compare`: two tables (or two runs of one query) diffed by key. */
+export interface TableDiff {
+  key_column: string;
+  columns: { left: string[]; right: string[]; shared: string[] };
+  counts: { left: number; right: number; only_left: number; only_right: number; changed: number; same: number };
+  only_left: unknown[][];
+  only_right: unknown[][];
+  changed: { key: string; fields: Record<string, { left: unknown; right: unknown }> }[];
+  truncated: boolean;
+  left: { item_id: string; title: string; version: number };
+  right: { item_id: string; title: string; version: number };
+}
+
 export interface ItemSearchHit extends CaseItem {
   match: 'title' | 'text';
   snippet?: string | null;

@@ -8,6 +8,8 @@ import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useDatasourceCapabilities } from '@/composables/useDatasourceCapabilities';
 import { useTemplateExecution } from '@/composables/useTemplateExecution';
 import { useToast } from '@/composables/useToast';
+import { useAddToCase } from '@/composables/useAddToCase';
+import { useCurrentCaseStore } from '@/stores/currentCase';
 import { substituteTemplateParams } from '@/utils/templateSubstitution';
 import { SAFE_VALUE_RE, TEMPLATE_PARAM_PREFIX } from '@/utils/templateUrlParams';
 import type { QueryTemplate } from '@/types/graph';
@@ -31,6 +33,55 @@ const templatesStore = useQueryTemplatesStore();
 const router = useRouter();
 const toast = useToast();
 const { executeTemplateAsGraph } = useTemplateExecution();
+const currentCase = useCurrentCaseStore();
+const addToCase = useAddToCase();
+const caseBusy = ref(false);
+
+/** The template, with these parameters declared, as a saved query of the case (05 §4). */
+async function saveAsCaseQuery() {
+  const contextId = graphStore.currentContext?.id;
+  if (!contextId || caseBusy.value) return;
+  caseBusy.value = true;
+  try {
+    await addToCase.saveQuery({
+      context_id: contextId,
+      text: props.template.query,
+      language: props.template.query_type,
+      parameters: props.template.parameters.map((p) => ({ ...p, default: values.value[p.id] || p.default })),
+      output: resultMode.value,
+      title: props.template.name,
+    });
+  } finally {
+    caseBusy.value = false;
+  }
+}
+
+/** Runs in table mode and adds the rows as a table of the case. */
+async function runAndAddResult() {
+  if (!canExecute.value || caseBusy.value) return;
+  caseBusy.value = true;
+  try {
+    const substituted = substituteTemplateParams(props.template.query, paramIds.value, values.value);
+    consoleStore.mode = props.template.query_type;
+    if (props.template.query_type === 'cypher') consoleStore.cypherQuery = substituted;
+    else consoleStore.sqlQuery = substituted;
+    await consoleStore.runQuery();
+    if (consoleStore.error || !consoleStore.rawColumns.length) {
+      toast.error(consoleStore.error?.message ?? 'A consulta não devolveu linhas');
+      return;
+    }
+    await addToCase.addTable({
+      columns: consoleStore.rawColumns,
+      rows: consoleStore.rawRows,
+      title: `${props.template.name} · ${consoleStore.rawRows.length} linhas`,
+      description: substituted,
+      provenance: { context_id: graphStore.currentContext?.id, tool: 'template', params: { template: props.template.name, values: values.value } },
+    });
+    emit('close');
+  } finally {
+    caseBusy.value = false;
+  }
+}
 const capabilities = useDatasourceCapabilities(
   computed(() => graphStore.currentContext),
 );
@@ -238,6 +289,24 @@ async function copyLink() {
 
         <div class="modal-footer">
           <button class="btn btn-outline" @click="emit('close')">Cancel</button>
+          <button
+            class="btn btn-outline"
+            data-testid="template-save-case-query"
+            :disabled="!currentCase.hasCase || caseBusy"
+            :title="currentCase.hasCase ? `Salvar como consulta do caso ${currentCase.title}` : 'Escolha um caso atual na barra superior'"
+            @click="saveAsCaseQuery"
+          >
+            Salvar como consulta do caso
+          </button>
+          <button
+            class="btn btn-outline"
+            data-testid="template-add-result-to-case"
+            :disabled="!currentCase.hasCase || !canExecute || caseBusy"
+            :title="currentCase.hasCase ? 'Executar como tabela e adicionar o resultado ao caso' : 'Escolha um caso atual na barra superior'"
+            @click="runAndAddResult"
+          >
+            Adicionar resultado ao caso
+          </button>
           <button
             v-if="resultMode === 'graph'"
             class="btn btn-outline"

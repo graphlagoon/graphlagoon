@@ -9,7 +9,8 @@ import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration } from '@/types/graph';
 import { confirmAction } from '@/composables/useConfirm';
-import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
+import { useCurrentCaseStore } from '@/stores/currentCase';
+import { useAddToCase } from '@/composables/useAddToCase';
 
 const router = useRouter();
 const contextsStore = useContextsStore();
@@ -21,8 +22,19 @@ const explorations = ref<Exploration[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const filterContextId = ref<string>('');
-/** Exploration being added to an investigation (T3). */
-const investigationTarget = ref<Exploration | null>(null);
+/** "Adicionar ao caso <atual>" on each row (05 §4). */
+const currentCase = useCurrentCaseStore();
+const addToCase = useAddToCase();
+const addingToCase = ref<string | null>(null);
+async function addExplorationToCase(exploration: Exploration) {
+  if (addingToCase.value) return;
+  addingToCase.value = exploration.id;
+  try {
+    await addToCase.addExploration(exploration.id);
+  } finally {
+    addingToCase.value = null;
+  }
+}
 
 // Rename modal state. Renaming lives here rather than on the graph page: the
 // list is where you go looking for an exploration whose name no longer says
@@ -345,9 +357,11 @@ async function quickShare(email: string) {
             <button
               class="btn btn-outline btn-sm"
               :data-testid="`exploration-add-to-investigation-${exploration.id}`"
-              @click="investigationTarget = exploration"
+              :disabled="!currentCase.hasCase || addingToCase === exploration.id"
+              :title="currentCase.hasCase ? `Adicionar ao caso ${currentCase.title}` : 'Escolha um caso atual na barra superior'"
+              @click="addExplorationToCase(exploration)"
             >
-              Add to investigation
+              Adicionar ao caso<template v-if="currentCase.hasCase"> {{ currentCase.shortId }}</template>
             </button>
             <button
               v-if="canManage(exploration)"
@@ -375,13 +389,6 @@ async function quickShare(email: string) {
         </div>
       </div>
     </div>
-
-    <AddToInvestigationModal
-      v-if="investigationTarget"
-      :open="true"
-      :exploration-id="investigationTarget.id"
-      @close="investigationTarget = null"
-    />
 
     <!-- Rename Modal -->
     <div v-if="renameTarget" class="modal-overlay" @click.self="renameTarget = null">

@@ -40,10 +40,13 @@ from graphlagoon.models.schemas import (
     ItemVersionCreate,
     ItemVersionResponse,
     PathsRequest,
+    TableCompareRequest,
+    TableJoinRequest,
+    TablePromoteRequest,
     TraceRequest,
     TypologiesRequest,
 )
-from graphlagoon.services import audit, case_annotations, case_items, case_queries
+from graphlagoon.services import audit, case_annotations, case_items, case_queries, case_tables
 from graphlagoon.services import cases as service
 from graphlagoon.services import investigation_exports as exports
 from graphlagoon.services import investigation_storage as storage
@@ -148,7 +151,7 @@ async def record_decision(
     pinned versions; the case becomes read-only (every mutation answers 409)."""
     try:
         inv = await service.record_decision(
-            investigation_id, user_email, data.outcome, data.actions, data.rationale
+            investigation_id, user_email, data.outcome, data.actions, data.rationale, data.reviewer_email
         )
     except service.InvestigationError as exc:
         raise _http(exc)
@@ -346,6 +349,51 @@ async def create_item(
         sha256=(item["latest"] or {}).get("sha256"),
     )
     return agent_view(item)
+
+
+# Table operations (05 §3): static paths, declared before ``/items/{item_id}``.
+
+
+@router.post("/{investigation_id}/items/join", response_model=ItemResponse, status_code=201)
+async def join_tables(investigation_id: UUID, data: TableJoinRequest, request: Request):
+    """A new ``table/result`` item: the tables joined by the key column; its
+    provenance names the parents."""
+    user_email = get_current_user(request)
+    try:
+        item = await case_tables.join_tables(investigation_id, user_email, data.item_ids, data.key_column, data.title)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email, AuditAction.INVESTIGATION_ITEM_ADD, investigation_id,
+        item_id=str(item["id"]), kind="table/result", title=item["title"], sha256=(item["latest"] or {}).get("sha256"),
+    )
+    return agent_view(item)
+
+
+@router.post("/{investigation_id}/items/compare")
+async def compare_tables(investigation_id: UUID, data: TableCompareRequest, request: Request):
+    """Diff by key of two tables, or of two runs of one query: rows only on one
+    side, rows whose shared columns changed, and how many are the same."""
+    try:
+        return agent_view(
+            await case_tables.compare_tables(
+                investigation_id, get_current_user(request), data.left.model_dump(), data.right.model_dump(), data.key_column
+            )
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post("/{investigation_id}/items/promote", response_model=list[ItemResponse])
+async def promote_tables(investigation_id: UUID, data: TablePromoteRequest, request: Request):
+    """Promotes tables (or the latest run of queries) to the graph or to
+    enrichment in one go: each gets ``mapping.as`` with a spec over its columns."""
+    try:
+        return agent_view(
+            await case_tables.promote(investigation_id, get_current_user(request), data.item_ids, data.as_, data.options)
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
 
 
 @router.get("/{investigation_id}/items/{item_id}", response_model=ItemResponse)

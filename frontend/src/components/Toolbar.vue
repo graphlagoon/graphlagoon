@@ -12,7 +12,9 @@ import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration } from '@/types/graph';
 import type { ExportPNGOptions } from '@/stores/toolbar';
 import ExportModal from '@/components/ExportModal.vue';
-import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
+import CurrentCaseChip from '@/components/investigation/CurrentCaseChip.vue';
+import { useCurrentCaseStore } from '@/stores/currentCase';
+import { useAddToCase } from '@/composables/useAddToCase';
 import { downloadJson } from '@/utils/portableExport';
 import { GRAPH_SHORTCUTS } from '@/utils/shortcuts';
 import {
@@ -48,6 +50,8 @@ const toolbarStore = useToolbarStore();
 const toast = useToast();
 const { devMode, isSuperuser } = usePersistence();
 const { canSaveExplorations } = usePermissions();
+const currentCase = useCurrentCaseStore();
+const addToCase = useAddToCase();
 
 const isGraphPage = computed(() => route.name === 'graph');
 const toolbarHandlers = computed(() => toolbarStore.handlers);
@@ -62,7 +66,20 @@ const showUserMenu = ref(false);
 const showSaveModal = ref(false);
 const showExplorationSelector = ref(false);
 const showExportModal = ref(false);
-const showAddToInvestigation = ref(false);
+const addingToCase = ref(false);
+/** Started from a case (`?case=`): saving attaches the exploration and goes back (05 §4). */
+const caseReturnId = computed(() => (route.query?.case as string | undefined) ?? null);
+
+async function addExplorationToCase() {
+  const id = graphStore.currentExploration?.id;
+  if (!id || addingToCase.value) return;
+  addingToCase.value = true;
+  try {
+    await addToCase.addExploration(id);
+  } finally {
+    addingToCase.value = false;
+  }
+}
 const explorations = ref<Exploration[]>([]);
 const saveTitle = ref('');
 const saveError = ref<string | null>(null);
@@ -109,6 +126,17 @@ async function saveExploration() {
   const result = await graphStore.saveExploration(saveTitle.value);
   if (result.success) {
     showSaveModal.value = false;
+    if (caseReturnId.value && graphStore.currentExploration?.id) {
+      const caseId = caseReturnId.value;
+      try {
+        await api.createInvestigationItem(caseId, { kind: 'graph', subkind: 'exploration_ref', exploration_id: graphStore.currentExploration.id });
+      } catch (e) {
+        // Already attached (409) is fine: the reference is live.
+        if ((e as { response?: { status?: number } })?.response?.status !== 409) toast.error(getErrorMessage(e, 'Falha ao anexar ao caso'));
+      }
+      await router.push(`/investigations/${caseId}`);
+      return;
+    }
     if (graphStore.currentExploration?.id && graphStore.currentContext?.id) {
       router.replace({
         name: 'graph',
@@ -329,11 +357,12 @@ function handleExportPng(options: ExportPNGOptions) {
           <button
             v-if="graphStore.currentExploration"
             class="toolbar-btn"
-            title="Add this exploration to an investigation"
+            :disabled="!currentCase.hasCase || addingToCase"
+            :title="currentCase.hasCase ? `Adicionar esta exploração ao caso ${currentCase.title}` : 'Escolha um caso atual na barra superior'"
             data-testid="toolbar-add-to-investigation"
-            @click="showAddToInvestigation = true"
+            @click="addExplorationToCase"
           >
-            <Briefcase :size="15" /><span class="btn-text">Investigation</span>
+            <Briefcase :size="15" /><span class="btn-text">Adicionar ao caso<template v-if="currentCase.hasCase"> {{ currentCase.shortId }}</template></span>
           </button>
 
         </div>
@@ -341,6 +370,7 @@ function handleExportPng(options: ExportPNGOptions) {
 
     <!-- Right: export + about + user -->
     <div class="toolbar-right">
+      <CurrentCaseChip />
       <span v-if="isGraphPage && graphStore.loading" class="loading-indicator" data-testid="toolbar-loading">
         <Loader2 :size="14" class="spin" />
         <span class="btn-text">Loading…</span>
@@ -444,12 +474,13 @@ function handleExportPng(options: ExportPNGOptions) {
         <form @submit.prevent="saveExploration">
           <div class="form-group">
             <label>Title</label>
-            <input v-model="saveTitle" class="form-control" required />
+            <input v-model="saveTitle" class="form-control" required data-testid="save-exploration-title" />
           </div>
+          <p v-if="caseReturnId" class="save-hint" data-testid="save-exploration-case-hint">Ao salvar, a exploração entra no caso {{ currentCase.title || currentCase.shortId }} como referência viva.</p>
           <div v-if="saveError" class="save-error">{{ saveError }}</div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline" @click="showSaveModal = false">Cancel</button>
-            <button type="submit" class="btn btn-primary">Save</button>
+            <button type="submit" class="btn btn-primary" data-testid="save-exploration-submit">Save</button>
           </div>
         </form>
       </div>
@@ -478,14 +509,6 @@ function handleExportPng(options: ExportPNGOptions) {
         </div>
       </div>
     </div>
-
-    <!-- Export Modal -->
-    <AddToInvestigationModal
-      v-if="showAddToInvestigation"
-      :open="showAddToInvestigation"
-      :exploration-id="graphStore.currentExploration?.id"
-      @close="showAddToInvestigation = false"
-    />
 
     <ExportModal
       :visible="showExportModal"

@@ -12448,6 +12448,55 @@ explorações, retenção após reabrir. **Public docs:** `docs/guide/investigat
 (header editável, fila, picker, reabrir; item "API only" removido dos limites).
 **Admin-area impact:** nova ação auditada `investigation.reopen` em `AUDITED_ROUTES`.
 
+## [2026-10-10 17:10] - Feature Implemented: F3 · Add everywhere + loop vivo
+
+"Adicionar ao caso" de qualquer lugar (05 §4) e operações entre tabelas (05 §3).
+**Decisões:** (1) caso atual app-wide em `stores/currentCase.ts` (id+título em
+localStorage, validado no load: 404/403 limpa; 5 recentes) com chip `[● título · #id ▾]`
+na `Toolbar` (`CurrentCaseChip.vue`: recentes + busca na fila + "Novo caso"); abrir um caso
+ou um grafo com `?case=` torna-o atual (watch de rota no chip, sem tocar `InvestigationView`
+nem `router`); (2) um composable `useAddToCase(caseId?)` atrás de todos os botões
+(`addTable/addSelection/addExploration/addDocument/addNote/addPasted/saveQuery/runQuery`),
+um toast "Adicionado ao caso <título> · ver"; sem caso atual os botões ficam desabilitados
+com tooltip; (3) `AddToInvestigationModal` → `AddItemsPopover` com 5 abas; "Nova exploração"
+abre `/graph/<ctx>?case=<id>` (breadcrumb "← Caso" no `GraphVisualizationView`; o salvar da
+`Toolbar` anexa como `exploration_ref` e volta); "Consulta" embute `QueryConsolePanel`
+com prop `contextId` (carrega o context e seta `queryConsole.contextOverride`, sem mexer no
+`graphStore`) e emit `result`; "Arquivo" sobe direto pelo caminho F2 ou emite `upload`
+para o wizard; (4) seleção do grafo vira `graph/selection` (snapshot filtrado) pela ação
+nativa do menu de contexto; `DataTablePanel` manda linhas selecionadas (ou visíveis);
+`TemplateExecuteModal` salva como consulta do caso (parâmetros do template declarados)
+ou executa e adiciona; (5) tabelas: `POST /items/join|compare|promote` em
+`services/case_tables.py` (lê JSON `{columns, rows}` ou CSV; join = outer por chave com
+sufixo de título em colunas repetidas e provenance `parent_item_ids`; compare = diff por
+chave de duas tabelas ou dois runs; promote = `mapping.as` em lote, consulta → materializa
+`table/result` do último run); `case_graph._mapped_table` lê tabela JSON como texto para o
+`file_mapping`; (6) no material: drop/colar (arquivo → documento/csv; URL → link; TSV → tabela;
+texto → nota), multi-seleção de tabelas → Juntar/Comparar/Promover em lote/Unir no grafo
+(`TableOpsDialog`), cartão da consulta (`QueryItemCard`: `:name` com fonte valor fixo |
+seleção atual | grupo | propriedade, histórico de runs, Comparar 2 runs, Fixar run, "Usar no
+dossiê" = tag `dossier`, Promover → grafo | enriquecimento); (7) MCP: `add_table`,
+`join_tables`, `compare_tables`, `promote_tables`, `create_exploration` (devolve `url`
+`/graph/<ctx>?exploration=&case=`). **Arquivos:** api `services/case_tables.py` (novo),
+`routers/investigations.py`, `models/schemas.py`, `services/case_graph.py` (hook JSON),
+`mcp/{registry,server}.py`; frontend `stores/currentCase.ts`, `composables/useAddToCase.ts`,
+`components/investigation/{CurrentCaseChip,AddItemsPopover,TableOpsDialog,TableDiffView,
+QueryItemCard}.vue`, `CaseItemsPanel.vue`, `Toolbar.vue`, `QueryConsolePanel.vue`,
+`DataTablePanel.vue`, `TemplateExecuteModal.vue`, `useContextMenu.ts`, `stores/queryConsole.ts`
+(`contextOverride`), `views/{GraphVisualizationView,ExplorationsView}.vue`,
+`utils/caseTables.ts`, `services/api.ts`, `types/investigation.ts`; `InvestigationView.vue`
+só nas 2 linhas do popover (F4 em paralelo). **Testes:** pytest `test_case_tables.py` (4),
+registry/mcp/scoping/cases verdes; vitest `currentCase`, `useAddToCase`, `AddItemsPopover`,
+`QueryConsolePanel.addToCase`, `CaseItemsPanel` (+join/compare/promote, colar, parâmetros);
+E2E `investigations.spec.ts` +4 (chip + lista de explorações, console → tabela em 2 cliques
++ consulta salva com histórico, nova exploração volta como ref viva, 5 tabelas: juntar 2 e
+promover 3), mocks com join/compare/promote/content/POST explorations. **Suposições:**
+"Unir no grafo" usa um spec de dois endpoints (origem/destino/tipo/normalizador); layouts
+mais ricos ficam no wizard; `match_node_types` vazio vira `["*"]` (sem efeito até alguém
+casar `*`); textos novos em pt-BR (i18n geral é F6); `EnrichmentTab` e `TraceExits` não
+ganharam botão (F4 os reescreve como renderizadores de item). **No public docs impact**
+(guia reescrito na F5). **No admin-area impact** (join reutiliza `investigation.item_add`).
+
 ## [2026-10-10 13:10] - Feature Implemented: F2 · Novo modelo
 
 Modelo de dados v2 (05 §1) em uma migração `016_cases.py` (016–019 apagadas; nunca

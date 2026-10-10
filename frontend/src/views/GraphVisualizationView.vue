@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, type Ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { RouterLink, useRoute } from 'vue-router';
+import { useCurrentCaseStore } from '@/stores/currentCase';
 import { useGraphStore } from '@/stores/graph';
 import { useToolbarStore, type PanelId } from '@/stores/toolbar';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
@@ -70,6 +71,9 @@ const props = defineProps<{
 }>();
 
 const route = useRoute();
+const currentCaseStore = useCurrentCaseStore();
+/** `?case=<id>`: a new exploration started from the case popover (F3). */
+const caseReturnId = computed(() => (route.query.case as string | undefined) ?? null);
 const toast = useToast();
 
 /**
@@ -759,6 +763,11 @@ watch(
 
 <template>
   <div ref="graphContainerRef" class="graph-visualization" :class="{ fullscreen: isFullscreen }">
+    <!-- Started from a case (?case=): the way back; saving attaches the exploration (05 §4). -->
+    <div v-if="caseReturnId" class="case-breadcrumb" data-testid="case-breadcrumb">
+      <RouterLink :to="`/investigations/${caseReturnId}`" class="case-breadcrumb-link">← Caso {{ currentCaseStore.title || currentCaseStore.shortId }}</RouterLink>
+      <span class="case-breadcrumb-hint">Salvar a exploração anexa ao caso e volta.</span>
+    </div>
     <div class="main-content">
       <FilterPanel v-if="showFilters" @close="showFilters = false; toolbarStore.setPanelActive('filters', false)" />
       <BehaviorPanel
@@ -1099,6 +1108,26 @@ watch(
 </template>
 
 <style scoped>
+.case-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border-color, #ddd);
+  background: color-mix(in srgb, var(--color-primary, #0f766e) 8%, var(--card-background, #fff));
+  font-size: 12px;
+}
+
+.case-breadcrumb-link {
+  font-weight: 600;
+  color: var(--color-primary, #0f766e);
+  text-decoration: none;
+}
+
+.case-breadcrumb-hint {
+  color: var(--text-muted, #666);
+}
+
 .graph-visualization {
   display: flex;
   flex-direction: column;

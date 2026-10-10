@@ -1,3 +1,14 @@
+<script lang="ts">
+/** A finished run, for a host that embeds the console (the case's "Consulta" tab, F3). */
+export interface ConsoleResult {
+  contextId: string;
+  query: string;
+  mode: 'cypher' | 'sql';
+  columns: string[];
+  rows: (string | null)[][];
+}
+</script>
+
 <script setup lang="ts">
 /**
  * Query Console — a resizable bottom drawer to run a generic OpenCypher/SQL
@@ -5,7 +16,7 @@
  * mirrors the visualization's nodes/edges): here any projection is allowed and
  * results are shown as arbitrary columns/rows via <DataGrid>.
  */
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { X, Play, SlidersHorizontal } from 'lucide-vue-next';
 import CypherEditor from './CypherEditor.vue';
 import DataGrid from './DataGrid.vue';
@@ -20,15 +31,54 @@ import {
 } from '@/composables/useDatasourceCapabilities';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
 import { useDrawerResize } from '@/composables/useDrawerResize';
+import { useAddToCase } from '@/composables/useAddToCase';
+import { useCurrentCaseStore } from '@/stores/currentCase';
+import { api } from '@/services/api';
 import { toDelimited } from '@/utils/tableExport';
+import type { GraphContext } from '@/types/graph';
+
+const props = defineProps<{
+  /**
+   * Run against this context instead of the graph store's current one (F3:
+   * the console embedded in a case). Unset = the existing behaviour.
+   */
+  contextId?: string;
+  /** Case the buttons add to; defaults to the current case. */
+  caseId?: string;
+}>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'focus-node', nodeId: string): void;
+  (e: 'result', result: ConsoleResult): void;
 }>();
 
 const graphStore = useGraphStore();
 const consoleStore = useQueryConsoleStore();
+const currentCase = useCurrentCaseStore();
+const addToCase = useAddToCase(computed(() => props.caseId));
+
+// The context the console talks to: loaded here when embedded, borrowed otherwise.
+const ownContext = ref<GraphContext | null>(null);
+const context = computed(() => (props.contextId ? ownContext.value : graphStore.currentContext));
+watch(
+  () => props.contextId,
+  async (id) => {
+    ownContext.value = null;
+    consoleStore.contextOverride = null;
+    if (!id) return;
+    try {
+      ownContext.value = await api.getGraphContext(id);
+      consoleStore.contextOverride = ownContext.value;
+    } catch {
+      ownContext.value = null;
+    }
+  },
+  { immediate: true },
+);
+onUnmounted(() => {
+  if (props.contextId) consoleStore.contextOverride = null;
+});
 
 const { height, isResizing, onMouseDown } = useDrawerResize({
   initialHeight: 440,
@@ -37,13 +87,13 @@ const { height, isResizing, onMouseDown } = useDrawerResize({
 });
 
 // Autocomplete inputs for the Cypher editor (same source as GraphQueryPanel).
-const nodeTypes = computed(() => graphStore.currentContext?.node_types || []);
-const relationshipTypes = computed(() => graphStore.currentContext?.relationship_types || []);
-const nodeProperties = computed(() => graphStore.currentContext?.node_properties || []);
-const edgeProperties = computed(() => graphStore.currentContext?.edge_properties || []);
+const nodeTypes = computed(() => context.value?.node_types || []);
+const relationshipTypes = computed(() => context.value?.relationship_types || []);
+const nodeProperties = computed(() => context.value?.node_properties || []);
+const edgeProperties = computed(() => context.value?.edge_properties || []);
 
-const capabilities = useDatasourceCapabilities(computed(() => graphStore.currentContext));
-const datasource = useDatasourceDescriptor(computed(() => graphStore.currentContext));
+const capabilities = useDatasourceCapabilities(context);
+const datasource = useDatasourceDescriptor(context);
 const isRestContext = computed(() => datasource.value.type === 'rest');
 /** What the single query mode is called — the connection's own language for REST. */
 const queryModeLabel = computed(() =>
@@ -84,7 +134,7 @@ const showEmpty = computed(
 );
 
 const exportFilename = computed(
-  () => `query-${graphStore.currentContext?.title || 'result'}`,
+  () => `query-${context.value?.title || 'result'}`,
 );
 
 // The active query text for the current mode (used for save-as-template).
@@ -97,7 +147,7 @@ const canSave = computed(() => activeQuery.value.trim().length > 0);
 // 3D graph. Matches the context's node_id_col (or a literal "node_id" column).
 const nodeIdField = computed<string | undefined>(() => {
   const idCol = capabilities.value.supportsCatalog
-    ? graphStore.currentContext?.node_structure?.node_id_col
+    ? context.value?.node_structure?.node_id_col
     : undefined;
   // '~id' is what a native graph database labels its identity column when a
   // query projects one (e.g. RETURN id(n) AS `~id`).
@@ -127,9 +177,47 @@ function setMode(mode: 'cypher' | 'sql') {
   consoleStore.mode = mode;
 }
 
-function run() {
+async function run() {
   if (runDisabled.value) return;
-  consoleStore.runQuery();
+  const query = activeQuery.value.trim();
+  const mode = consoleStore.mode;
+  await consoleStore.runQuery();
+  if (!consoleStore.error && !consoleStore.canceled && context.value) {
+    emit('result', { contextId: context.value.id, query, mode, columns: consoleStore.rawColumns, rows: consoleStore.rawRows });
+  }
+}
+
+// --- Adicionar ao caso (05 §4): the result as a table, the text as a saved query ---
+const canAddToCase = computed(() => !!(props.caseId ?? currentCase.caseId));
+const caseLabel = computed(() => (props.caseId ? '' : currentCase.shortId));
+const addingResult = ref(false);
+const savingQuery = ref(false);
+
+async function addResultToCase() {
+  if (!showResults.value || addingResult.value) return;
+  addingResult.value = true;
+  try {
+    const first = activeQuery.value.trim().split('\n')[0];
+    await addToCase.addTable({
+      columns: consoleStore.rawColumns,
+      rows: consoleStore.rawRows,
+      title: `Resultado · ${first.length > 50 ? `${first.slice(0, 47)}…` : first}`,
+      description: activeQuery.value.trim(),
+      provenance: { context_id: context.value?.id, tool: 'console', params: { mode: consoleStore.mode, query: activeQuery.value.trim() } },
+    });
+  } finally {
+    addingResult.value = false;
+  }
+}
+
+async function saveAsCaseQuery() {
+  if (!canSave.value || !context.value || savingQuery.value) return;
+  savingQuery.value = true;
+  try {
+    await addToCase.saveQuery({ context_id: context.value.id, text: activeQuery.value.trim(), language: consoleStore.mode, output: 'table' });
+  } finally {
+    savingQuery.value = false;
+  }
 }
 
 function onEditorKeydown(e: KeyboardEvent) {
@@ -159,7 +247,7 @@ function onFocusNode(payload: { id: string; multi: boolean }) {
 // Seed a helpful, editable example query the first time the console opens.
 onMounted(() => {
   if (!consoleStore.cypherQuery) {
-    const ctx = graphStore.currentContext;
+    const ctx = context.value;
     const label = ctx?.node_types?.[0] ? `:${ctx.node_types[0]}` : '';
     if (isRestContext.value) {
       // Cypher shapes mean nothing to a REST connection; its spec ships the
@@ -176,8 +264,8 @@ onMounted(() => {
     // Nodeless (triple-store-only) context: the edge table is the only real
     // table, so it is the only useful seed.
     const table =
-      graphStore.currentContext?.node_table_name ||
-      graphStore.currentContext?.edge_table_name ||
+      context.value?.node_table_name ||
+      context.value?.edge_table_name ||
       'nodes';
     consoleStore.sqlQuery = `SELECT * FROM ${table} LIMIT 100`;
   }
@@ -243,6 +331,21 @@ onMounted(() => {
           data-testid="query-console-save-template"
           @click="showSaveTemplate = true"
         >Save</button>
+        <span class="btn-sep"></span>
+        <button
+          class="action-btn"
+          :title="canAddToCase ? 'Adicionar o resultado como tabela do caso' : 'Escolha um caso atual na barra superior'"
+          :disabled="!showResults || !canAddToCase || addingResult"
+          data-testid="query-console-add-result"
+          @click="addResultToCase"
+        >Adicionar resultado{{ caseLabel ? ` ${caseLabel}` : '' }}</button>
+        <button
+          class="action-btn"
+          :title="canAddToCase ? 'Salvar como consulta do caso (reexecutável, com histórico)' : 'Escolha um caso atual na barra superior'"
+          :disabled="!canSave || !canAddToCase || savingQuery"
+          data-testid="query-console-save-case-query"
+          @click="saveAsCaseQuery"
+        >Salvar como consulta do caso</button>
         <span class="btn-sep"></span>
         <button class="action-btn" title="Export CSV (respects filters)" :disabled="!showResults" @click="exportCSV">CSV</button>
         <button class="action-btn" title="Copy result to clipboard (TSV)" :disabled="!showResults" @click="copyResult">

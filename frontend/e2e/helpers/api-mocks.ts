@@ -1153,6 +1153,29 @@ export async function seedInvestigations(
     id, tags: [], status: 'confirmed', author_kind: 'human', author_email: 'e2e@test.com', provenance: {},
     current_version: 0, position: 0, accessible: true, pinned: [], created_at: now(), ...body,
   });
+  // Table content (`_content` = {columns, rows}) backs GET …/content and the F3 table operations.
+  const tableOf = (item: any) => {
+    const c = item?._content ?? {};
+    return { columns: (c.columns ?? []) as string[], rows: (c.rows ?? []) as any[][] };
+  };
+  const sharedKey = (tables: { columns: string[] }[]) =>
+    tables[0]?.columns.find((c) => tables.every((t) => t.columns.some((o) => o.toLowerCase() === c.toLowerCase()))) ?? null;
+  const joinTables = (items: any[], key: string) => {
+    const tables = items.map(tableOf);
+    const cols = [key, ...tables.flatMap((t) => t.columns.filter((c) => c !== key))];
+    const byKey = new Map<string, any[]>();
+    tables.forEach((t, ti) => {
+      const ki = t.columns.indexOf(key);
+      for (const r of t.rows) {
+        const k = String(r[ki]);
+        const row = byKey.get(k) ?? [k, ...tables.flatMap((x) => x.columns.filter((c) => c !== key).map(() => null))];
+        let offset = 1 + tables.slice(0, ti).reduce((n, x) => n + x.columns.filter((c) => c !== key).length, 0);
+        t.columns.forEach((c, i) => { if (c !== key) row[offset++] = r[i]; });
+        byKey.set(k, row);
+      }
+    });
+    return { columns: cols, rows: [...byKey.values()] };
+  };
   const version = (item: any, run?: any) => ({
     id: `v-${item.id}-${item.current_version + 1}`, item_id: item.id, version: item.current_version + 1,
     sha256: `${item.current_version + 1}`.padStart(64, 'e'), size_bytes: 1, content_type: 'application/json', has_text: true,
@@ -1164,6 +1187,17 @@ export async function seedInvestigations(
     const suggested = [...list, ...notes].filter((x) => x.status === 'suggested').length;
     return { item_count: i.item_count ?? list.length, suggested_count: suggested || (i.suggested_count ?? 0) };
   };
+
+  // Saving a new exploration (F3 "Nova exploração" from the case) creates one the case can reference.
+  await page.route(/\/graphlagoon\/api\/graph-contexts\/([^/?]+)\/explorations(\?.*)?$/, (route) => {
+    const req = route.request();
+    const ctxId = req.url().match(/graph-contexts\/([^/?]+)\/explorations/)![1];
+    if (req.method() !== 'POST') return route.fulfill(json(explorations.filter((e) => e.graph_context_id === ctxId)));
+    const body = req.postDataJSON();
+    const exp = { id: `exp-new-${explorations.length + 1}`, graph_context_id: ctxId, owner_email: 'e2e@test.com', shared_with: [], has_write_access: true, created_at: now(), updated_at: now(), node_count: body.snapshot?.nodes?.length ?? null, ...body };
+    explorations.push(exp);
+    return route.fulfill(json(exp, 201));
+  });
 
   await page.route('**/graphlagoon/api/investigations', (route) => {
     if (route.request().method() === 'POST') {
@@ -1285,6 +1319,63 @@ export async function seedInvestigations(
       return route.fulfill(json({ paths: [], typologies: [], method: {} }));
     }
 
+    if (sub === 'items' && (a === 'join' || a === 'compare' || a === 'promote')) {
+      const body = req.postDataJSON();
+      if (a === 'join') {
+        const parents = body.item_ids.map((i: string) => list.find((x) => x.id === i));
+        const key = body.key_column ?? sharedKey(parents.map(tableOf)) ?? 'id';
+        const item = base(`item-${added.length + 1}`, {
+          kind: 'table', subkind: 'result', title: body.title ?? `${parents.map((p: any) => p.title).join(' + ')} por ${key}`,
+          provenance: { tool: 'join', parent_item_ids: body.item_ids, key_column: key }, position: list.length, _content: joinTables(parents, key),
+        });
+        item.latest = version(item);
+        item.current_version = 1;
+        added.push({ investigation_id: id, op: 'join', ...body });
+        list.push(item);
+        journal(id, 'item.created', { item_id: item.id, kind: 'table', subkind: 'result', title: item.title });
+        return route.fulfill(json(item, 201));
+      }
+      if (a === 'compare') {
+        const l = list.find((x) => x.id === body.left.item_id);
+        const r = list.find((x) => x.id === body.right.item_id);
+        const [lt, rt] = [tableOf(l), tableOf(r)];
+        const key = body.key_column ?? sharedKey([lt, rt]) ?? lt.columns[0];
+        const [li, ri] = [lt.columns.indexOf(key), rt.columns.indexOf(key)];
+        const lm = new Map(lt.rows.map((x) => [String(x[li]), x]));
+        const rm = new Map(rt.rows.map((x) => [String(x[ri]), x]));
+        const shared = lt.columns.filter((c) => c !== key && rt.columns.includes(c));
+        const changed = [...lm].filter(([k]) => rm.has(k)).flatMap(([k, x]) => {
+          const fields: Record<string, any> = {};
+          for (const c of shared) {
+            const [lv, rv] = [x[lt.columns.indexOf(c)], rm.get(k)![rt.columns.indexOf(c)]];
+            if (String(lv ?? '') !== String(rv ?? '')) fields[c] = { left: lv, right: rv };
+          }
+          return Object.keys(fields).length ? [{ key: k, fields }] : [];
+        });
+        const only_left = [...lm].filter(([k]) => !rm.has(k)).map(([, x]) => x);
+        const only_right = [...rm].filter(([k]) => !lm.has(k)).map(([, x]) => x);
+        added.push({ investigation_id: id, op: 'compare', ...body });
+        return route.fulfill(json({
+          key_column: key, columns: { left: lt.columns, right: rt.columns, shared },
+          counts: { left: lt.rows.length, right: rt.rows.length, only_left: only_left.length, only_right: only_right.length, changed: changed.length, same: lm.size - only_left.length - changed.length },
+          only_left, only_right, changed, truncated: false,
+          left: { item_id: l.id, title: l.title, version: body.left.version ?? l.current_version },
+          right: { item_id: r.id, title: r.title, version: body.right.version ?? r.current_version },
+        }));
+      }
+      const out = body.item_ids.map((i: string) => {
+        const item = list.find((x) => x.id === i)!;
+        const columns = tableOf(item).columns;
+        item.mapping = body.as === 'enrichment'
+          ? { as: 'enrichment', spec: { name: item.title, key_column: body.options?.key_column ?? columns[0], columns: columns.filter((c) => c !== (body.options?.key_column ?? columns[0])), match_node_types: body.options?.match_node_types ?? ['*'], match_source: 'node_id', input: { delimiter: '\t', header: true } } }
+          : { as: 'graph', spec: { version: 1, inputs: { t: { match: '*' } }, nodes: [], ...body.options } };
+        journal(id, 'item.updated', { item_id: item.id, title: item.title, fields: ['mapping'] });
+        return item;
+      });
+      added.push({ investigation_id: id, op: 'promote', ...body });
+      return route.fulfill(json(out));
+    }
+
     if (sub === 'items') {
       if (!a) {
         if (method !== 'POST') {
@@ -1301,6 +1392,7 @@ export async function seedInvestigations(
           description: body.description ?? null,
           position: list.length,
         });
+        if (body.content_json && typeof body.content_json === 'object' && 'columns' in body.content_json) item._content = body.content_json;
         delete item.content;
         delete item.content_json;
         if (body.content !== undefined || body.content_json !== undefined || !isJson) {
@@ -1361,6 +1453,7 @@ export async function seedInvestigations(
         return route.fulfill(json(item));
       }
       if (b === 'text') return route.fulfill(json({ text: '', version: item.latest }));
+      if (b === 'content') return route.fulfill(json(item._content ?? {}));
       return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     }
 
