@@ -175,3 +175,53 @@ async def test_case_graph_applies_case_keys_and_accepted_matches(env):
     [ana] = [n for n in graph["nodes"] if n["uid"] == "Pessoa:12345678901"]
     assert len(graph["nodes"]) == 2 and [o["node_id"] for o in ana["sources"]] == ["p1", "9", "m1"]
     assert ana["properties"]["cep"] == "04571-020" and graph["edges"][0]["src"] == "Pessoa:12345678901"
+
+
+# ---------------------------------------------------------------------------
+# Generic entities (05 §4b): Vínculos parity, pre-unified derived items, edge
+# semantics by relationship type
+# ---------------------------------------------------------------------------
+
+ER_ROOT = ROOT.parent / "er"
+
+
+@pytest.mark.skipif(not (ER_ROOT / "shared-attributes.json").exists(), reason="frontend fixtures not checked out")
+def test_shared_attribute_links_match_the_typescript_engine():
+    from graphlagoon.services.entity_resolution import shared_attribute_links
+
+    fx = json.loads((ER_ROOT / "shared-attributes.json").read_text())
+    p = fx["params"]
+    got = shared_attribute_links(fx["graph"], p["attributes"], p.get("minShared", 1), p.get("maxEntities"), p.get("entityTypes"))
+    assert got == fx["expected"]
+    # The carrier IP (4 entities) is above maxEntities; without a ceiling it links everyone.
+    assert shared_attribute_links(fx["graph"], ["ip"], 1, 3)["pairs"] == []
+    assert len(shared_attribute_links(fx["graph"], ["ip"], 1)["pairs"]) == 6
+
+
+def test_unified_parts_keep_their_ids_and_case_semantics_apply_by_edge_type():
+    base = {
+        "nodes": [{"id": "p1", "type": "Pessoa", "properties": {"cpf": "12345678901"}}, {"id": "d1", "type": "Dispositivo", "properties": {}}],
+        "edges": [{"id": "e1", "source": "p1", "target": "d1", "type": "USA", "properties": {"quando": "2024-03-15T14:05:00", "vezes": "3"}}],
+    }
+    key = {"node_type": "Pessoa", "entity": "Pessoa", "source": {"kind": "prop", "name": "cpf"}, "normalize": "cpf_cnpj"}
+    derived = {
+        "unified": True,
+        "nodes": [{"id": "Pessoa:12345678901", "type": "Pessoa", "properties": {}}, {"id": "d1@ctx", "type": "Dispositivo", "properties": {}}],
+        "edges": [{"id": "l1", "source": "Pessoa:12345678901", "target": "d1@ctx", "type": "compartilha_device_id", "properties": {"shared_by": 2}}],
+    }
+    graph = unify(
+        [("s1", "ctx", [key], base, None), ("s2", "s2", [], derived, None, True)],
+        edge_overrides={"USA": {"weight_prop": "vezes", "timestamp_prop": "quando"}},
+    )
+    assert {n["uid"] for n in graph["nodes"]} == {"Pessoa:12345678901", "d1@ctx"}
+    [ana] = [n for n in graph["nodes"] if n["uid"] == "Pessoa:12345678901"]
+    assert [o["source_id"] for o in ana["sources"]] == ["s1", "s2"]
+    from graphlagoon.services.trace import parse_time
+
+    usa, link = graph["edges"]
+    assert (usa["amount"], usa["t"]) == (3.0, parse_time("2024-03-15T14:05:00")) and link["src"] == "Pessoa:12345678901"
+    # A derived item's normalizer list reaches mapped files too.
+    from graphlagoon.services.case_graph import derived_identity_keys
+
+    keys = derived_identity_keys({"nodes": [{"type": "Dispositivo", "id": {"col": "t.dev", "normalize": "device_id"}}, {"type": "Log", "id": {"col": "t.x", "normalize": "lower"}}]})
+    assert [k["node_type"] for k in keys] == ["Dispositivo"]

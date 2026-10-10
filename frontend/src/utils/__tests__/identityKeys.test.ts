@@ -36,3 +36,33 @@ describe('identity-key normalizers', () => {
     expect(identityKeyOf({ node_type: 'P', entity: 'X', source: 'node_id', normalize: 'none' }, node)).toBe('X:7');
   });
 });
+
+describe('generic normalizers (05 §4b)', () => {
+  it('device, ip, terminal and address clean punctuation, zeros, case and accents', () => {
+    expect(normalizeIdentityValue('DEV-123 456', 'device_id')).toBe('dev123456');
+    expect(normalizeIdentityValue('177.010.001.009', 'ip')).toBe('177.10.1.9');
+    expect(normalizeIdentityValue('[fe80::1%eth0]', 'ip')).toBe('fe80::1');
+    expect(normalizeIdentityValue('300.1.1.1', 'ip')).toBeNull();
+    expect(normalizeIdentityValue('t-0042', 'terminal_id')).toBe('T42');
+    expect(normalizeIdentityValue('R. Acácias, nº 120, apto 31', 'address')).toBe('rua acacias 120 ap 31');
+  });
+
+  it('pix key detects its type; card keeps BIN and last 4; a masked card only its visible digits', () => {
+    expect(normalizeIdentityValue('Ana.R@Example.com', 'pix_key')).toBe('email:ana.r@example.com');
+    expect(normalizeIdentityValue('+55 11 98765-4321', 'pix_key')).toBe('phone:11987654321');
+    expect(normalizeIdentityValue('123.456.789-01', 'pix_key')).toBe('cpf:12345678901');
+    expect(normalizeIdentityValue('12.345.678/0001-95', 'pix_key')).toBe('cnpj:12345678000195');
+    expect(normalizeIdentityValue('123e4567-e89b-12d3-a456-426614174000', 'pix_key')).toBe('evp:123e4567-e89b-12d3-a456-426614174000');
+    expect(normalizeIdentityValue('???', 'pix_key')).toBeNull();
+    expect(normalizeIdentityValue('5311 2233 4455 1234', 'card')).toBe('531122*1234');
+    expect(normalizeIdentityValue('5311 **** **** 1234', 'card')).toBe('5311*1234');
+  });
+
+  it('regex captures group 1 lowercased; no match, no pattern or a bad pattern give no key', () => {
+    expect(normalizeIdentityValue('sid=AbC12 x', 'regex', 'sid=([A-Za-z0-9]+)')).toBe('abc12');
+    expect(normalizeIdentityValue('nothing', 'regex', 'sid=([A-Za-z0-9]+)')).toBeNull();
+    expect(normalizeIdentityValue('x', 'regex')).toBeNull();
+    expect(normalizeIdentityValue('x', 'regex', '(')).toBeNull();
+    expect(identityKeyOf({ node_type: 'Login', entity: 'Sessao', source: { kind: 'prop', name: 'ua' }, normalize: 'regex', pattern: 'sid=(\\w+)' }, { id: 'l1', properties: { ua: 'sid=Z9' } })).toBe('Sessao:z9');
+  });
+});

@@ -84,12 +84,21 @@ def parse_time(raw: Any) -> Optional[int]:
         return None
 
 
+def semantics_for(relationship_type: Any, by_type: Optional[dict], fallback: Optional[dict]) -> Optional[dict]:
+    """The case's per-type override (``*`` = any type), else the context's semantics."""
+    if by_type:
+        return by_type.get(relationship_type) or by_type.get("*") or fallback
+    return fallback
+
+
 def edge_value(properties: dict, semantics: Optional[dict]) -> tuple:
-    """(amount, t) of an edge read through its context's ``edge_semantics``."""
+    """(amount, t) of an edge read through its context's ``edge_semantics``; a
+    generic relation's ``weight_prop``/``timestamp_prop`` stand in (05 §4b)."""
     if not semantics:
         return None, None
     props = properties or {}
-    amount_prop, time_prop = semantics.get("amount_prop"), semantics.get("time_prop")
+    amount_prop = semantics.get("amount_prop") or semantics.get("weight_prop")
+    time_prop = semantics.get("time_prop") or semantics.get("timestamp_prop")
     amount = (
         parse_amount(props.get(amount_prop), semantics.get("amount_unit") or "units")
         if amount_prop

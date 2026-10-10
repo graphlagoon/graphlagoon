@@ -86,7 +86,7 @@ export class MappingError extends Error {}
 class RowError extends Error {}
 
 const CONVERTERS = ['cents', 'decimal_br', 'trim', 'upper', 'digits'];
-const NORMALIZERS = ['cpf_cnpj', 'account', 'phone', 'email', 'lower', 'none'];
+const NORMALIZERS = ['cpf_cnpj', 'account', 'phone', 'email', 'device_id', 'ip', 'pix_key', 'card', 'terminal_id', 'address', 'lower', 'none'];
 const WHEN_OPS = ['eq', 'ne', 'in', 'empty', 'not_empty'];
 const MAX_DISCARDED = 20;
 

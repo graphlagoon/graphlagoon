@@ -126,7 +126,20 @@ export interface DatasourceConnectionConfig {
   };
 }
 
-export type IdentityNormalize = 'cpf_cnpj' | 'account' | 'phone' | 'email' | 'lower' | 'none';
+export type IdentityNormalize =
+  | 'cpf_cnpj'
+  | 'account'
+  | 'phone'
+  | 'email'
+  | 'device_id'
+  | 'ip'
+  | 'pix_key'
+  | 'card'
+  | 'terminal_id'
+  | 'address'
+  | 'regex'
+  | 'lower'
+  | 'none';
 
 /** How a node type maps to a real-world entity, so contexts unify on it (investigations). */
 export interface IdentityKey {
@@ -135,6 +148,8 @@ export interface IdentityKey {
   entity: string;
   source: 'node_id' | { kind: 'prop'; name: string };
   normalize: IdentityNormalize;
+  /** `regex` only: the capture (group 1, else the whole match) is the key, lowercased. */
+  pattern?: string;
 }
 
 /** A side table looked up by a node's key and shown in the inspector (investigations). */
@@ -159,7 +174,13 @@ export interface EdgeSemantics {
   amount_unit?: 'units' | 'cents';
   time_prop?: string | null;
   currency?: string;
+  /** Generic relations (05 §4b): a weight stands in for the amount, a timestamp for the time. */
+  weight_prop?: string | null;
+  timestamp_prop?: string | null;
 }
+
+/** A case's `settings.edge_semantics`: by relationship type, `*` for every other type. */
+export type EdgeSemanticsByType = Record<string, EdgeSemantics>;
 
 /** POST /graph-contexts/{id}/enrichment/{name}/lookup: rows grouped by key. */
 export interface EnrichmentLookupResult {
