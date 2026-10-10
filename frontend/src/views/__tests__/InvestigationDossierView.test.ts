@@ -19,6 +19,7 @@ vi.mock('@/services/api', () => ({
     getInvestigationProposals: vi.fn(async () => [{ id: 'p1' }]),
     createInvestigationHypothesis: vi.fn(),
     updateInvestigationHypothesis: vi.fn(),
+    recordInvestigationDecision: vi.fn(),
   },
 }))
 
@@ -84,5 +85,28 @@ describe('InvestigationDossierView (T7)', () => {
     const against = within(getByTestId('hypothesis-evidence_against-H1'))
     await fireEvent.update(against.getByRole('combobox'), 'e2')
     expect(api.updateInvestigationHypothesis).toHaveBeenLastCalledWith('inv-1', 'H1', { evidence_against: ['e2'] })
+  })
+
+  it('records the decision and then shows it frozen and read-only', async () => {
+    const decided = {
+      ...CASE, status: 'decidido', frozen_hash: 'f'.repeat(4) + '0'.repeat(56) + 'beef',
+      decision: { outcome: 'comunicar', actions: ['dict'], rationale: 'Conta de passagem (E1).', decided_by: 'ana@x.com', decided_at: '2026-10-09T15:00:00' },
+    }
+    vi.mocked(api.recordInvestigationDecision).mockResolvedValue(decided as any)
+    const { getByTestId, queryByTestId } = render(InvestigationDossierView, { props: { id: 'inv-1' }, global: { stubs } })
+    await flushPromises()
+
+    expect((getByTestId('decision-record') as HTMLButtonElement).disabled).toBe(true)
+    await fireEvent.click(getByTestId('decision-action-dict'))
+    await fireEvent.update(getByTestId('decision-rationale'), ' Conta de passagem (E1). ')
+    await fireEvent.click(getByTestId('decision-record'))
+    await flushPromises()
+    expect(api.recordInvestigationDecision).toHaveBeenCalledWith('inv-1', {
+      outcome: 'comunicar', actions: ['dict'], rationale: 'Conta de passagem (E1).',
+    })
+    expect(queryByTestId('decision-form')).toBeNull()
+    expect(getByTestId('decision-outcome').textContent).toContain('Communicate to COAF')
+    expect(getByTestId('decision-hash').textContent).toContain('ffff…beef')
+    expect(queryByTestId('hypothesis-input')).toBeNull()
   })
 })

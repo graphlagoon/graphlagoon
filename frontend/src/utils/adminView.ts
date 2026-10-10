@@ -130,6 +130,8 @@ function describeAuditBody(entry: AuditEntry): string {
       return `${m.filename ?? '?'} (${m.role ?? '?'}) sha256 ${String(m.sha256 ?? '?').slice(0, 12)}`;
     case 'investigation.file_read':
       return `file ${m.file_id ?? '?'}${m.tool ? ` via MCP ${m.tool}` : ''}`;
+    case 'investigation.decide':
+      return `decided: ${m.outcome ?? '?'} · hash ${String(m.frozen_hash ?? '?').slice(0, 12)}`;
     case 'investigation.source_remove':
       return `removed source "${m.title ?? m.source_id ?? '?'}"`;
     case 'precomputed.publish':

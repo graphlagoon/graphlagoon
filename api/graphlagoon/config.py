@@ -200,6 +200,11 @@ class Settings(BaseSettings):
         description="Ceiling of edges in an investigation's working graph in the "
         "browser (G4: fixed for the MVP, not measured)",
     )
+    investigation_retention_years: int = Field(
+        default=10,
+        description="Years a decided investigation is retained (not deletable "
+        "without a superuser's reason) after its decision",
+    )
     enrichment_max_keys: int = Field(
         default=500, description="Maximum node keys in one enrichment lookup"
     )

@@ -17,7 +17,10 @@ export interface Investigation {
   /** Computed by the server (F4.4); null once decided or archived. */
   deadline?: { phase: 'selection' | 'analysis'; due_at: string; days_left: number } | null;
   state: Record<string, unknown>;
-  decision?: Record<string, unknown> | null;
+  decision?: InvestigationDecision | null;
+  /** sha256 of the canonical case record at the decision (F4.5). */
+  frozen_hash?: string | null;
+  frozen_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   shared_with: { email: string; permission: 'read' | 'write' }[];
@@ -25,6 +28,18 @@ export interface Investigation {
   can_manage: boolean;
   /** Only on the list endpoint (the queue). */
   source_count?: number | null;
+}
+
+export type DecisionOutcome = 'comunicar' | 'arquivar';
+export type DecisionAction = 'dict' | 'spa' | 'bloqueio_cautelar';
+
+/** 03 §2.2: recorded once by a person; the case is read-only afterwards. */
+export interface InvestigationDecision {
+  outcome: DecisionOutcome;
+  actions: DecisionAction[];
+  rationale: string;
+  decided_by: string;
+  decided_at: string;
 }
 
 export interface CreateInvestigationRequest {

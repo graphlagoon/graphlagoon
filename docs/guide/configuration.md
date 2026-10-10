@@ -469,6 +469,7 @@ never overwritten. Uploads stream to disk while their sha256 is computed.
 | `GRAPH_LAGOON_ARTIFACT_MAX_BYTES` | `104857600` | Maximum size of one artifact version (100 MB). |
 | `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` | `209715200` | Maximum size of one file uploaded to a case (200 MB); larger uploads get 413. |
 | `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Ceiling of edges in a case's working graph in the browser. |
+| `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a decided case is retained: it cannot be deleted before then, except by a superuser with a reason. |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` | `500` | Node keys per enrichment lookup (a context's enrichment tables). |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` | `5000` | Rows one enrichment lookup returns; more are cut and flagged `truncated`. |
 

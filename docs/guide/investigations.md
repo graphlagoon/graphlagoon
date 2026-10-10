@@ -265,12 +265,56 @@ the journal records `evidence.created` with the hash. API:
   size) and who froze it;
 - **Journal**: the latest entries, or all of them.
 
-The decision panel on the right stays read-only until recording the decision
-ships. API: `POST /api/investigations/{id}/hypotheses` with
+The decision panel on the right records the decision (see below). API:
+`POST /api/investigations/{id}/hypotheses` with
 `{text, status?, evidence_for?, evidence_against?, note?}` and
 `PATCH …/hypotheses/{hid}` (the evidence lists are replaced); both return the
 case, whose `state.hypotheses` holds them. Agents read it all with
 `get_dossier` and propose hypotheses (`hypothesis`, `hypothesis_status`).
+
+## Decision, freeze and retention
+
+The decision panel of the dossier closes the case. Pick the **outcome**
+(*Communicate to COAF via Siscoaf* or *Archive with a rationale*), the
+**actions** taken with it (flag the accounts in DICT, notify the SPA,
+request a precautionary block) and write the **rationale**, citing the
+evidence. **Record decision** then, in one step:
+
+1. freezes every **live** source (the same frozen copy with sha256 that
+   adding a source as *frozen* makes), so the case no longer follows the
+   explorations it points at;
+2. writes `decision.recorded` to the journal, with the outcome, actions,
+   rationale and the hash of each source it froze;
+3. computes the case's **frozen hash**: the sha256 of the canonical record of
+   the case (title, description, typology, origin and the decision; state with
+   roles and hypotheses; sources with their hashes; files and evidence with
+   their hashes; journal up to the decision). The dossier shows it next to the
+   decision.
+
+From then on the case is **read-only**: every change (edit, roles, notes,
+evidence, hypotheses, sources, files, proposals, matches, artifacts, another
+decision) answers `409 INVESTIGATION_DECIDED`. Sharing still works, so an
+auditor can be given access; that line goes to the journal after the
+decision and stays out of the hash, so the hash can be recomputed and
+compared at any time (the JSON export does it, see below).
+
+| Who | What |
+|---|---|
+| Owner, assignee, *write* share | Record the decision (once) |
+| Agents | Never: the route is human-only (LGPD art. 20; agents propose, people decide) |
+| Owner | Delete the case after the retention period |
+| Superuser | Delete a retained case with `?reason=…` (audited) |
+
+**Retention.** A decided case cannot be deleted for
+`GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` (default 10) after its
+decision: `DELETE` answers `409 INVESTIGATION_RETAINED`, except for a
+superuser who gives a reason (`DELETE /api/investigations/{id}?reason=…`),
+which the audit log records.
+
+API: `POST /api/investigations/{id}/decision` with
+`{outcome: "comunicar" | "arquivar", actions: ["dict" | "spa" | "bloqueio_cautelar"], rationale}`;
+returns the case with `status: "decidido"`, `decision`, `frozen_hash` and
+`frozen_at`. Recording is audited (`investigation.decide`).
 
 ## Case files
 
@@ -398,4 +442,5 @@ Superusers get an **Investigations** tab in the admin area with every case
 and its owner, assignee, status and sources, plus **Transfer** to hand a case
 to a new owner (for example when someone leaves). Transfers, creations,
 edits, shares and source changes are in the **Audit** tab; the case journal
-records the transfer too.
+records the transfer too. Recorded decisions are audited as
+`investigation.decide`, with the outcome and the frozen hash.

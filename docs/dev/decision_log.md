@@ -12103,3 +12103,56 @@ contador); E2E de investigações inteiro (9 testes); `vue-tsc` limpo.
 **Admin-Area Impact:** nenhum (sem tabela, rota, setting ou permissão novos).
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 04:20] - Feature Implemented: F4.5 · Decisão, congelamento e retenção
+
+**Feature:** `POST …/decision` (`{outcome: comunicar|arquivar, actions: [dict, spa,
+bloqueio_cautelar], rationale}`), só humana (`forbid_agents` + `HUMAN_ONLY` no registry
+MCP): congela toda fonte viva pelo caminho da F1.3 (`_freeze_source`, extraído de
+`add_source`), grava `decision.recorded` no diário, calcula o `frozen_hash` e põe o caso
+em `decidido`; daí em diante toda mutação devolve 409 (`_ensure_not_decided`, que já
+cobria rotas de caso, fontes, notas, eventos, evidências, hipóteses, propostas, matches,
+arquivos e artefatos). Painel de decisão do dossiê (T7) com resultado, ações,
+fundamentação, aviso de tipping-off e, depois de decidido, decisão + hash curto.
+Setting `investigation_retention_years` (10).
+
+**Design Decisions:**
+1. `frozen_hash` = sha256 do JSON canônico de: campos do caso + decisão, `state`,
+   fontes (com `frozen_sha256`), arquivos e evidências (com sha256) e o diário **até**
+   `decision.recorded`. Dono e status ficam fora; linhas posteriores do diário (share,
+   transferência pelo admin) também, então o hash é recomputável a qualquer hora
+   (`compute_frozen_hash`, `verify_frozen_hash`).
+2. Share/unshare continuam liberados depois da decisão (dar acesso a um auditor);
+   não alteram o hash. Toda outra mutação: 409.
+3. Retenção: `DELETE` de caso decidido = 409 enquanto `frozen_at + N anos` não passar
+   (relógio injetável `_clock`); superuser apaga antes com `?reason=` (auditado, já
+   existia). Depois do prazo o dono apaga normalmente.
+4. Status `decidido` para os dois resultados; `arquivado` continua sendo o arquivamento
+   sem decisão (PATCH).
+5. Exploração apagada (SET NULL) congela como stub `{exploration: null}`, para todas as
+   fontes terminarem `frozen`.
+6. Quem decide: escrita no caso (dono, responsável, share de escrita).
+
+**Files:** `api/graphlagoon/services/investigations.py`, `routers/investigations.py`,
+`models/schemas.py`, `config.py`, `routers/admin_registry.py`, `services/audit.py`,
+`services/public_config.py`, `mcp/registry.py`, `api/tests/test_investigation_decision.py`
+(novo); `frontend/src/views/InvestigationDossierView.vue`, `stores/investigation.ts`,
+`services/api.ts`, `types/investigation.ts`, `utils/investigationEvents.ts`,
+`utils/adminView.ts`, `views/__tests__/InvestigationDossierView.test.ts`.
+
+**Testing:** pytest `test_investigation_decision.py` (fonte viva vira frozen com o hash
+no evento; hash recomputado = gravado, também depois de um share; evidência adulterada
+muda o hash; 9 mutações + remover fonte → 409; leitor 403; fundamentação vazia 422;
+retenção com relógio +11 anos), `test_investigations.py`, `test_investigation_sources.py`,
+registries de admin e agentes (rota humana recusa token de agente); vitest do dossiê
+(registrar decisão, painel congelado, formulário e hipóteses somem); `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Decision, freeze and retention),
+`docs/guide/configuration.md` (`GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS`).
+**Admin-Area Impact:** `POST …/decision` em `AUDITED_ROUTES` (`investigation.decide`,
+descrito em `adminView.ts`); setting `investigation_retention_years` em
+`CONFIG_FIELD_KINDS` (public); sem tabela nem permissão nova.
+
+**Author:** Claude (AI Assistant)

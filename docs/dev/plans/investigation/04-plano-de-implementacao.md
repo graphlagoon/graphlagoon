@@ -68,7 +68,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F4.2 · Hipóteses e tela do dossiê (T7)
 - [x] F4.3 · Selos de tipologia (CC 4.001) e anel de lojistas (T9)
 - [x] F4.4 · Status e prazos (45 + 45 dias) na fila
-- [ ] F4.5 · Decisão, congelamento e retenção
+- [x] F4.5 · Decisão, congelamento e retenção
 - [ ] F4.6 · Exportações (laudo, pacote, SIMBA, resumo Siscoaf)
 
 **F5 · Escala e IA (opcional)**
@@ -793,8 +793,8 @@ trabalho de análise e documentação; a pessoa decide.
      o superuser com motivo, auditado.
   5. Setting `investigation_retention_years` (padrão 10).
 - **Aceite:**
-  - [ ] Depois da decisão, nenhuma mutação é aceita.
-  - [ ] O hash é reprodutível.
+  - [x] Depois da decisão, nenhuma mutação é aceita.
+  - [x] O hash é reprodutível.
 - **Testes:** pytest.
 
 ### F4.6 · Exportações
