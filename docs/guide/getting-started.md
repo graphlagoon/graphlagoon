@@ -73,6 +73,10 @@ generated users, graphs, contexts, explorations and shares (30 / 5 / 60 / 200
 by default), so there is something to click on immediately. The seed prints
 which e-mails to log in as; `dev@graphlagoon.local` is a local superuser.
 `SEED_DATA=0 make dev` starts empty; `make dev-seed` reseeds a running stack.
+`make dev-seed-investigations` adds ~20 demo investigation cases (SIMBA file
+graphs, evidence, artifacts, agent proposals, every status; `SEED_ARGS=--reset`
+replaces them). Start the API with `GRAPH_LAGOON_AGENTS_ENABLED=true` to have
+an agent token write the artifacts and proposals.
 
 Reseeding is also the repair. Contexts live in PostgreSQL (a Docker volume)
 while their tables live in the Spark warehouse (a local directory), so the two

@@ -2,7 +2,7 @@
         dev dev-db dev-gsql2rsql dev-gsql2rsql-db \
         dev-databricks dev-databricks-db dev-databricks-lakebase \
         dev-neptune dev-neptune-db \
-        dev-stop dev-logs dev-logs-follow dev-seed dev-seed-big dev-reset \
+        dev-stop dev-logs dev-logs-follow dev-seed dev-seed-big dev-seed-investigations dev-reset \
         lint lint-frontend lint-api format \
         test test-unit test-coverage test-e2e test-e2e-headed test-e2e-ui test-e2e-report \
         test-integration test-integration-headed test-all \
@@ -43,6 +43,7 @@ help:
 	@echo "  make dev-logs              Show logs"
 	@echo "  make dev-seed              Seed users/contexts/explorations (auto after dev*; SEED_DATA=0 skips)"
 	@echo "  make dev-seed-big          Large seed (200 users / 500 contexts / 2000 explorations)"
+	@echo "  make dev-seed-investigations  ~20 demo investigation cases (SEED_ARGS=--reset replaces them)"
 	@echo "  make dev-reset             Wipe the dev environment and seed it from scratch"
 	@echo ""
 	@echo "$(GREEN)Quality$(RESET)"
@@ -263,6 +264,14 @@ dev-seed:
 
 dev-seed-big:
 	@$(MAKE) --no-print-directory dev-seed SEED_USERS=200 SEED_CONTEXTS=500 SEED_EXPLORATIONS=2000 SEED_GRAPHS=8
+
+# Demo cases with files, evidence, artifacts and proposals; agent-authored when
+# the API runs with GRAPH_LAGOON_AGENTS_ENABLED=true.
+SEED_CASES ?= 20
+dev-seed-investigations:
+	@echo "$(CYAN)Seeding $(SEED_CASES) investigation cases (seed $(SEED))...$(RESET)"
+	@cd api && uv run python -m graphlagoon.dev.seed_investigations --api $(SEED_API) \
+		--cases $(SEED_CASES) --seed $(SEED) $(SEED_ARGS)
 
 # Throw the whole dev environment away and build it again. Use it when the
 # contexts and the warehouse have drifted apart badly enough that a plain
