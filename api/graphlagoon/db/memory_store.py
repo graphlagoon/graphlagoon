@@ -278,6 +278,7 @@ class MemoryAgentToken:
     unmasked: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     revoked_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
 
 
 @dataclass

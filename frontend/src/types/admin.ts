@@ -103,6 +103,8 @@ export type AdminTab =
   | 'explorations'
   | 'investigations'
   | 'agents'
+  | 'library'
+  | 'vocabularies'
   | 'groups'
   | 'audit'
   | 'danger';
@@ -200,5 +202,36 @@ export interface AgentToken {
   created_at: string;
   expires_at: string;
   revoked_at?: string | null;
+  /** Last request with the token (bumped at most once a minute). */
+  last_used_at?: string | null;
   active: boolean;
+}
+
+// --- Org library and vocabularies (05 §6; superusers write, everyone reads) ---
+
+export interface OrgLibraryDoc {
+  slug: string;
+  title: string;
+  kind: 'playbook' | 'template';
+  body: string;
+  updated_at?: string | null;
+  /** The built-in playbook, not edited yet (deleting a stored one restores it). */
+  seeded: boolean;
+}
+
+export interface OrgVocabularyValue {
+  value: string;
+  label?: string | null;
+  /** kind_presets the value suits; empty = every preset. */
+  presets: string[];
+  norm_ref?: string | null;
+}
+
+export type OrgVocabularyKind = 'role' | 'tag' | 'typology' | 'link_attribute';
+
+export interface OrgVocabulary {
+  kind: OrgVocabularyKind;
+  values: OrgVocabularyValue[];
+  updated_at?: string | null;
+  seeded: boolean;
 }

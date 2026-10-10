@@ -21,7 +21,8 @@ import {
   isIdleUser,
   sortUsers,
 } from '@/utils/adminView';
-import type { AdminTab, AgentToken } from '@/types/admin';
+import type { AdminTab, AgentToken, OrgLibraryDoc, OrgVocabulary, OrgVocabularyValue } from '@/types/admin';
+import { api } from '@/services/api';
 import type { Exploration, GraphContext } from '@/types/graph';
 import type { Investigation } from '@/types/investigation';
 import { STATUS_LABELS } from '@/utils/investigationStatus';
@@ -46,6 +47,8 @@ const TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'explorations', label: 'Explorations' },
   { id: 'investigations', label: 'Investigations' },
   { id: 'agents', label: 'Agent tokens' },
+  { id: 'library', label: 'Library' },
+  { id: 'vocabularies', label: 'Vocabularies' },
   { id: 'groups', label: 'Groups & permissions' },
   { id: 'audit', label: 'Audit' },
   { id: 'danger', label: 'Danger zone' },
@@ -83,6 +86,12 @@ async function loadTab(id: AdminTab, force = false) {
     case 'agents':
       await admin.fetchAgentTokens();
       break;
+    case 'library':
+      await loadLibrary();
+      break;
+    case 'vocabularies':
+      await loadVocabularies();
+      break;
     case 'groups':
       // Users feed the member/inspector datalists; permissions feed the
       // matrix and the per-group rule counts.
@@ -106,6 +115,96 @@ function selectTab(id: AdminTab) {
 }
 
 onMounted(() => loadTab('overview'));
+
+// --- Library and vocabularies (05 §6) ----------------------------------------
+// Local state on purpose: two small editors over /api/admin/library and
+// /api/admin/vocabularies; agents read the same data as org:// resources.
+
+const library = ref<OrgLibraryDoc[]>([]);
+const libraryError = ref<string | null>(null);
+const libraryDraft = ref<{ slug: string; title: string; kind: 'playbook' | 'template'; body: string; isNew: boolean } | null>(null);
+const vocabularies = ref<OrgVocabulary[]>([]);
+const vocabKind = ref<OrgVocabulary['kind']>('role');
+const vocabRows = ref<Array<{ value: string; label: string; presets: string; norm_ref: string }>>([]);
+const vocabBusy = ref(false);
+
+async function loadLibrary() {
+  libraryError.value = null;
+  try {
+    library.value = await api.getOrgLibrary();
+  } catch (e) {
+    libraryError.value = (e as Error).message || 'Failed to load the library';
+  }
+}
+function editDoc(doc: OrgLibraryDoc) {
+  libraryDraft.value = { slug: doc.slug, title: doc.title, kind: doc.kind, body: doc.body, isNew: false };
+}
+function newDoc() {
+  libraryDraft.value = { slug: '', title: '', kind: 'playbook', body: '# Title\n\nCase {investigation_id}: …\n\n1. Read the brief (`get_brief`).\n', isNew: true };
+}
+async function saveDoc() {
+  const d = libraryDraft.value;
+  if (!d) return;
+  try {
+    const payload = { title: d.title.trim(), kind: d.kind, body: d.body };
+    const saved = d.isNew ? await api.createAdminLibraryDoc({ slug: d.slug.trim(), ...payload }) : await api.putAdminLibraryDoc(d.slug, payload);
+    library.value = [...library.value.filter((x) => x.slug !== saved.slug), saved].sort((a, b) => a.slug.localeCompare(b.slug));
+    libraryDraft.value = null;
+    toast.success(`Saved ${saved.slug}`);
+  } catch (e) {
+    toast.error((e as Error).message || 'Save failed');
+  }
+}
+async function deleteDoc(doc: OrgLibraryDoc) {
+  const what = doc.seeded ? null : 'Delete this doc? A built-in playbook with the same slug shows again.';
+  if (what && !(await confirmAction({ title: 'Delete library doc', message: what, confirmLabel: 'Delete', danger: true }))) return;
+  try {
+    await api.deleteAdminLibraryDoc(doc.slug);
+    await loadLibrary();
+    if (libraryDraft.value?.slug === doc.slug) libraryDraft.value = null;
+  } catch (e) {
+    toast.error((e as Error).message || 'Delete failed');
+  }
+}
+
+function showVocab(kind: OrgVocabulary['kind']) {
+  vocabKind.value = kind;
+  const v = vocabularies.value.find((x) => x.kind === kind);
+  vocabRows.value = (v?.values ?? []).map((e) => ({ value: e.value, label: e.label ?? '', presets: e.presets.join(', '), norm_ref: e.norm_ref ?? '' }));
+}
+async function loadVocabularies() {
+  try {
+    vocabularies.value = await api.getOrgVocabularies();
+    showVocab(vocabKind.value);
+  } catch (e) {
+    toast.error((e as Error).message || 'Failed to load the vocabularies');
+  }
+}
+async function saveVocab() {
+  vocabBusy.value = true;
+  try {
+    const values: OrgVocabularyValue[] = vocabRows.value
+      .filter((r) => r.value.trim())
+      .map((r) => ({ value: r.value.trim(), label: r.label.trim() || null, presets: r.presets.split(',').map((x) => x.trim()).filter(Boolean), norm_ref: r.norm_ref.trim() || null }));
+    const saved = await api.putAdminVocabulary(vocabKind.value, values);
+    vocabularies.value = vocabularies.value.map((v) => (v.kind === saved.kind ? saved : v));
+    showVocab(saved.kind);
+    toast.success(`Saved ${saved.kind}`);
+  } catch (e) {
+    toast.error((e as Error).message || 'Save failed');
+  } finally {
+    vocabBusy.value = false;
+  }
+}
+async function resetVocab() {
+  try {
+    const saved = await api.resetAdminVocabulary(vocabKind.value);
+    vocabularies.value = vocabularies.value.map((v) => (v.kind === saved.kind ? saved : v));
+    showVocab(saved.kind);
+  } catch (e) {
+    toast.error((e as Error).message || 'Reset failed');
+  }
+}
 
 // --- Overview ---------------------------------------------------------------
 
@@ -605,6 +704,79 @@ function openGraph(id: string) {
       </div>
     </section>
 
+    <!-- Org library (05 §6): playbooks agents read as org://playbooks/{slug} and MCP prompts -->
+    <section v-else-if="tab === 'library'" class="tab-panel" data-testid="admin-library">
+      <p class="admin-subtitle">
+        Playbooks and templates in markdown. Agents get them as prompts and <code>org://playbooks/{slug}</code>;
+        <code>{investigation_id}</code> is replaced by the case. Built-in ones are marked <em>seeded</em>; editing one
+        stores your version, deleting your version restores it.
+      </p>
+      <div v-if="libraryError" class="error">{{ libraryError }}</div>
+      <div class="two-cols">
+        <div class="card" data-testid="admin-library-list">
+          <div v-for="doc in library" :key="doc.slug" class="list-item" :data-library-slug="doc.slug">
+            <div class="list-item-content">
+              <div class="list-item-title">{{ doc.title }} <code>{{ doc.slug }}</code></div>
+              <div class="list-item-subtitle">{{ doc.kind }}<template v-if="doc.seeded"> · seeded</template><template v-else-if="doc.updated_at"> · edited {{ formatRelative(doc.updated_at) }}</template></div>
+            </div>
+            <div class="list-item-actions">
+              <button type="button" class="btn btn-secondary btn-sm" @click="editDoc(doc)">Edit</button>
+              <button v-if="!doc.seeded" type="button" class="btn btn-outline btn-sm" @click="deleteDoc(doc)">Delete</button>
+            </div>
+          </div>
+          <div class="list-item">
+            <button type="button" class="btn btn-primary btn-sm" data-testid="admin-library-new" @click="newDoc">New doc</button>
+          </div>
+        </div>
+        <form v-if="libraryDraft" class="card doc-editor" data-testid="admin-library-editor" @submit.prevent="saveDoc">
+          <div class="form-row">
+            <label>Slug <input v-model="libraryDraft.slug" class="form-control" :disabled="!libraryDraft.isNew" pattern="[a-z0-9_-]+" required /></label>
+            <label>Title <input v-model="libraryDraft.title" class="form-control" required /></label>
+            <label>Kind
+              <select v-model="libraryDraft.kind" class="form-control"><option value="playbook">playbook</option><option value="template">template</option></select>
+            </label>
+          </div>
+          <textarea v-model="libraryDraft.body" class="form-control body" rows="18" spellcheck="false"></textarea>
+          <div class="form-row">
+            <button type="submit" class="btn btn-primary btn-sm" data-testid="admin-library-save">Save</button>
+            <button type="button" class="btn btn-outline btn-sm" @click="libraryDraft = null">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Org vocabularies (05 §4b): suggestions per preset, never imposed -->
+    <section v-else-if="tab === 'vocabularies'" class="tab-panel" data-testid="admin-vocabularies">
+      <p class="admin-subtitle">
+        Suggested roles, tags, typologies and link attributes, per case type (presets, comma separated; empty = every
+        type). The case settings offer them; agents read them with <code>list_vocabulary</code>. Reset restores the built-in list.
+      </p>
+      <div class="card">
+        <div class="form-row">
+          <button v-for="v in vocabularies" :key="v.kind" type="button" class="btn btn-sm" :class="v.kind === vocabKind ? 'btn-primary' : 'btn-outline'" :data-testid="`admin-vocab-${v.kind}`" @click="showVocab(v.kind)">
+            {{ v.kind }}<template v-if="v.seeded"> (seeded)</template>
+          </button>
+        </div>
+        <table class="admin-table" data-testid="admin-vocab-table">
+          <thead><tr><th>Value</th><th>Label</th><th>Presets</th><th>Norm. ref.</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="(r, i) in vocabRows" :key="i">
+              <td><input v-model="r.value" class="form-control" /></td>
+              <td><input v-model="r.label" class="form-control" /></td>
+              <td><input v-model="r.presets" class="form-control" placeholder="pix_med, lavagem" /></td>
+              <td><input v-model="r.norm_ref" class="form-control" placeholder="CC 4.001 …" /></td>
+              <td><button type="button" class="btn btn-outline btn-sm" @click="vocabRows.splice(i, 1)">×</button></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="form-row">
+          <button type="button" class="btn btn-outline btn-sm" @click="vocabRows.push({ value: '', label: '', presets: '', norm_ref: '' })">+ value</button>
+          <button type="button" class="btn btn-primary btn-sm" :disabled="vocabBusy" data-testid="admin-vocab-save" @click="saveVocab">Save {{ vocabKind }}</button>
+          <button type="button" class="btn btn-outline btn-sm" @click="resetVocab">Reset to built-in</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Groups & permissions -->
     <section v-else-if="tab === 'groups'" class="tab-panel" data-testid="admin-groups">
       <GroupsPanel />
@@ -678,6 +850,12 @@ function openGraph(id: string) {
 
 <style scoped>
 .admin-subtitle { color: var(--text-secondary); font-size: var(--text-sm, 0.875rem); }
+.two-cols { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 2fr); gap: var(--space-4, 16px); align-items: start; }
+.doc-editor { display: flex; flex-direction: column; gap: var(--space-2, 8px); }
+.doc-editor .body { font-family: var(--font-mono, monospace); font-size: 12px; }
+.form-row { display: flex; flex-wrap: wrap; gap: var(--space-2, 8px); align-items: end; margin: var(--space-2, 8px) 0; }
+.form-row label { display: flex; flex-direction: column; gap: 2px; font-size: var(--text-sm, 0.875rem); }
+.error { color: var(--color-error, #b91c1c); margin-bottom: var(--space-2, 8px); }
 .dev-banner {
   background: #fef3c7; color: #78350f; border: 1px solid #fcd34d;
   border-radius: var(--radius-md, 6px); padding: var(--space-3, 12px) var(--space-4, 16px);

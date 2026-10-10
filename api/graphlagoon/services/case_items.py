@@ -674,7 +674,12 @@ async def search(investigation_id: UUID, user_email: str, q: str, limit: int = 5
                 text = data.decode("utf-8") if data else ""
                 at = text.lower().find(needle)
                 if at >= 0:
-                    where, snippet = "text", text[max(0, at - 60) : at + 100]
+                    start, end = max(0, at - 60), min(len(text), at + 100)
+                    while start > 0 and not text[start - 1].isspace():  # whole tokens: never half a CPF
+                        start -= 1
+                    while end < len(text) and not text[end].isspace():
+                        end += 1
+                    where, snippet = "text", text[start:end]
             if where is not None:
                 hits.append({**serialize_item(item, versions.get(item.id, [])), "match": where, "snippet": snippet})
                 if len(hits) >= limit:

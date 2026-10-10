@@ -37,8 +37,21 @@ def serialize(token: Any) -> dict:
         "created_at": token.created_at,
         "expires_at": token.expires_at,
         "revoked_at": token.revoked_at,
+        "last_used_at": getattr(token, "last_used_at", None),
         "active": is_active(token),
     }
+
+
+TOUCH_EVERY = timedelta(minutes=1)
+
+
+def _touch(token: Any, now: Optional[datetime] = None) -> bool:
+    """Bumps ``last_used_at`` when it is older than a minute; True when it did."""
+    now = now or datetime.now()
+    if token.last_used_at is not None and now - token.last_used_at < TOUCH_EVERY:
+        return False
+    token.last_used_at = now
+    return True
 
 
 async def create_token(
@@ -125,7 +138,7 @@ async def revoke_token(token_id: UUID, owner_email: Optional[str] = None) -> boo
 
 async def resolve_token(raw: str) -> Optional[dict]:
     """The active token for a raw ``glt_…`` secret, or None (unknown,
-    expired or revoked)."""
+    expired or revoked). Records the activity (``last_used_at``)."""
     digest = hash_token(raw)
     if not is_database_available():
         token = next(
@@ -136,17 +149,23 @@ async def resolve_token(raw: str) -> Optional[dict]:
             ),
             None,
         )
-    else:
-        from sqlalchemy import select
+        if token is None or not is_active(token):
+            return None
+        _touch(token)
+        return serialize(token)
 
-        from graphlagoon.db.models import AgentToken
+    from sqlalchemy import select
 
-        async with get_session_maker()() as session:
-            token = (
-                await session.execute(
-                    select(AgentToken).where(AgentToken.token_hash == digest)
-                )
-            ).scalar_one_or_none()
-    if token is None or not is_active(token):
-        return None
-    return serialize(token)
+    from graphlagoon.db.models import AgentToken
+
+    async with get_session_maker()() as session:
+        token = (
+            await session.execute(
+                select(AgentToken).where(AgentToken.token_hash == digest)
+            )
+        ).scalar_one_or_none()
+        if token is None or not is_active(token):
+            return None
+        if _touch(token):
+            await session.commit()
+        return serialize(token)

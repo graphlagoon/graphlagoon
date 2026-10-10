@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Agent tokens (05 §2: /settings/agents). A token is the person's identity for
+ * Agent tokens (05 §6: /settings/agents). A token is the person's identity for
  * an MCP client: scope "every case I read" or specific cases, optional
  * unmasked data (when the org allows it), validity, the `claude mcp add`
- * command, revoke.
+ * command and the stdio bridge, last activity, revoke.
  */
 import { computed, onMounted, ref } from 'vue';
 import { api } from '@/services/api';
@@ -26,10 +26,32 @@ const form = ref({ name: 'Claude Code', scope: 'user' as 'user' | 'case', invest
 const created = ref<{ name: string; token: string } | null>(null);
 
 const activeTokens = computed(() => tokens.value.filter((t) => t.active));
+const secret = computed(() => created.value?.token ?? 'glt_…');
+/** Claude Code talks Streamable HTTP to /mcp directly. */
 const command = computed(
-  () => `claude mcp add --transport http graphlagoon ${mcpUrl} --header "Authorization: Bearer ${created.value?.token ?? 'glt_…'}"`,
+  () => `claude mcp add --transport http graphlagoon ${mcpUrl} --header "Authorization: Bearer ${secret.value}"`,
+);
+/** Claude Desktop and stdio-only clients go through the bridge shipped in the package. */
+const bridgeCommand = computed(
+  () => `GRAPHLAGOON_AGENT_TOKEN=${secret.value} graphlagoon mcp-bridge --url ${new URL(window.__GRAPH_LAGOON_API_URL__ || '/', window.location.origin).href}`,
 );
 const caseTitle = (id: string) => cases.value.find((c) => c.id === id)?.title ?? id.slice(0, 8);
+const lastUsed = (iso?: string | null) => {
+  if (!iso) return 'never used';
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (minutes < 2) return 'used just now';
+  if (minutes < 60) return `used ${minutes} min ago`;
+  if (minutes < 48 * 60) return `used ${Math.round(minutes / 60)} h ago`;
+  return `used ${Math.round(minutes / 1440)} days ago`;
+};
+
+async function copy(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    /* clipboard unavailable (http, permissions): the command stays selectable */
+  }
+}
 
 async function run(action: () => Promise<unknown>, fallback: string) {
   error.value = null;
@@ -117,19 +139,24 @@ const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime()
             Create token
           </button>
           <div class="field">
-            <span>Command for Claude Code</span>
+            <span>Claude Code (Streamable HTTP) <button type="button" class="link-btn" data-testid="token-copy" @click="copy(command)">copy</button></span>
             <pre class="cmd" data-testid="token-command">{{ command }}</pre>
+            <span>Claude Desktop or any stdio client (bridge) <button type="button" class="link-btn" @click="copy(bridgeCommand)">copy</button></span>
+            <pre class="cmd" data-testid="token-bridge-command">{{ bridgeCommand }}</pre>
             <p class="muted">
               <template v-if="created">Copy it now: the token “{{ created.name }}” is shown only once.</template>
               The token appears once. Only its hash is stored, and it can be revoked at any time.
+              On Databricks Apps run the bridge after <code>databricks auth login</code>; see the guide.
             </p>
           </div>
         </template>
         <p v-else class="muted">You don't have the permission to create agent tokens.</p>
         <div class="policy" data-testid="agents-policy">
-          The agent can do what you can in a case, except decide, share, delete and export. Roles, tags, matches,
-          typologies and hypothesis statuses it writes arrive as suggestions you confirm in the case. Administrator
-          policy: personal data is <strong>{{ orgUnmasked ? 'available unmasked to tokens marked so' : 'always masked' }}</strong>.
+          The agent can do what you can in a case, except decide, share, delete, reopen, export and confirm
+          suggestions. The kinds in the case's ⚙ “Agent” section (by default roles, tags, matches, typologies,
+          hypothesis statuses and status changes) arrive as suggestions you confirm in the case; everything else
+          applies directly with the agent's chip. Administrator policy: personal data is
+          <strong>{{ orgUnmasked ? 'available unmasked to tokens marked so' : 'always masked' }}</strong>.
         </div>
       </section>
 
@@ -141,6 +168,7 @@ const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime()
             <div class="muted">
               {{ t.scope === 'case' ? (t.investigation_ids ?? []).map(caseTitle).join(', ') : 'every case' }}
               <template v-if="t.unmasked"> · unmasked</template> · expires in {{ daysLeft(t.expires_at) }} days
+              · <span :data-testid="`token-last-used-${t.id}`">{{ lastUsed(t.last_used_at) }}</span>
             </div>
           </div>
           <button class="btn btn-outline btn-sm danger" :data-testid="`token-revoke-${t.id}`" @click="revoke(t)">Revoke</button>
@@ -241,5 +269,15 @@ const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime()
 
 .danger {
   color: var(--color-error);
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
 }
 </style>

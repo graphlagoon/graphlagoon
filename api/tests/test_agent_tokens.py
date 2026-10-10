@@ -345,3 +345,29 @@ def test_agents_disabled_hides_token_routes_and_rejects_tokens(client, env):
         assert r.status_code == 404, (method, path)
     r = client.get("/api/investigations", headers=bearer(token["token"]))
     assert r.status_code == 401
+
+
+def test_unmasked_needs_org_policy_and_token_flag_and_use_is_recorded(client, env, case_with_source):
+    """``unmasked`` = org allows ∧ token marked; REST text reads follow it. Each
+    use bumps ``last_used_at`` (at most once a minute)."""
+    url, _, _ = case_with_source
+    doc = client.post(f"{url}/items", json={"kind": "document", "subkind": "markdown", "title": "d", "content": f"CPF {CPF}"},
+                      headers=h(OWNER)).json()
+    plain = mint(client)
+    marked = mint(client, unmasked=True)
+    assert plain["last_used_at"] is None and marked["unmasked"] is True
+    for token in (plain, marked):  # org policy off: the flag changes nothing
+        r = client.get(f"{url}/items/{doc['id']}/text", headers=bearer(token["token"]))
+        assert r.status_code == 200 and r.json()["text"] == "CPF ***.456.789-**"
+    env.setenv("GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA", "true")
+    get_settings.cache_clear()
+    r = client.get(f"{url}/items/{doc['id']}/text", headers=bearer(marked["token"]))
+    assert r.json()["text"] == f"CPF {CPF}"
+    r = client.get(f"{url}/items/{doc['id']}/text", headers=bearer(plain["token"]))
+    assert r.json()["text"] == "CPF ***.456.789-**"  # still masked: the token is not marked
+    listed = {t["id"]: t for t in client.get("/api/agent-tokens", headers=h(OWNER)).json()}
+    assert listed[plain["id"]]["last_used_at"] is not None and listed[marked["id"]]["last_used_at"] is not None
+    # a case token that names this case also works, one that names another does not
+    other = client.post("/api/investigations", json={"title": "other"}, headers=h(OWNER)).json()
+    scoped = mint(client, scope="case", investigation_ids=[other["id"]])
+    assert client.get(f"{url}/items/{doc['id']}/text", headers=bearer(scoped["token"])).status_code == 403

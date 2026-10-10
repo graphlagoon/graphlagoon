@@ -214,7 +214,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 - [x] F2 · Novo modelo
 - [x] F3 · Add everywhere + loop vivo
 - [x] F4 · Workspace de análise
-- [ ] F5 · AI-first completo
+- [x] F5 · AI-first completo
 - [x] F6 · Compliance e acabamento
 
 ### F0 · Segurança (1 PR, bloqueia tudo)
@@ -255,7 +255,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 ### F5 · AI-first completo
 - `mcp/server.py` reescrito (recursos texto, ferramentas 1:1, `search_case` por ILIKE em `text_blob` + títulos, FTS Postgres opcional, `changes_since`); `org_library` + `org_vocabularies` com UI simples em `AdminView`; tokens user/case em `/settings/agents`; `agent_suggest_kinds` e chips Confirmar/Recusar.
 - `test_mcp_server.py`, `test_agent_registry.py` (tool ↔ rota humana), teste de mascaramento em `read_item`; `docs/guide/investigations.md`, `agents-mcp.md`, `docs/dev/plans/investigation/agent-capabilities.md` reescritos.
-- **Aceite:** cliente MCP lê brief, busca, salva e roda consulta, adiciona tabela e grupo, sugere papéis; humano confirma inline; registry verde.
+- [x] **Aceite:** cliente MCP lê brief, busca, salva e roda consulta, adiciona tabela e grupo, sugere papéis; humano confirma inline; registry verde.
 
 ### F6 · Compliance e acabamento
 - Prazo por `alert_at` + dias configuráveis; `archived` só após decisão ou motivo; `frozen_hash` verificado no export; retenção apaga blobs; rate limit por token em store compartilhado; primário `#0f766e`; pt-BR; i18n dos enums; journal com filtro.
