@@ -14,6 +14,11 @@ export interface Investigation {
   typology?: string | null;
   origin?: string | null;
   selected_at?: string | null;
+  /** When the facts happened / when the alert arrived (F1); selection counts from alert_at. */
+  occurred_at?: string | null;
+  alert_at?: string | null;
+  /** Replaces the 45-day phase for this case. */
+  deadline_days_override?: number | null;
   /** Computed by the server (F4.4); null once decided or archived. */
   deadline?: { phase: 'selection' | 'analysis'; due_at: string; days_left: number } | null;
   state: Record<string, unknown>;
@@ -51,6 +56,19 @@ export interface CreateInvestigationRequest {
   typology?: string;
   origin?: string;
   assignee_email?: string;
+}
+
+/** `PATCH /api/investigations/{id}`: every field optional; status must follow the transitions (409 otherwise). */
+export interface UpdateInvestigationRequest {
+  title?: string;
+  description?: string | null;
+  typology?: string | null;
+  origin?: string | null;
+  assignee_email?: string | null;
+  status?: Exclude<InvestigationStatus, 'decidido'>;
+  occurred_at?: string | null;
+  alert_at?: string | null;
+  deadline_days_override?: number | null;
 }
 
 export type SourceMode = 'live' | 'frozen';

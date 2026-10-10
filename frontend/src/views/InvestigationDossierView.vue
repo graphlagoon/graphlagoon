@@ -13,7 +13,7 @@ import { downloadBlob } from '@/utils/portableExport';
 import { useInvestigationStore } from '@/stores/investigation';
 import { api } from '@/services/api';
 import { describeEvent } from '@/utils/investigationEvents';
-import { deadlineOf, HYPOTHESIS_STATUS_LABELS, STATUS_LABELS, URGENT_DAYS } from '@/utils/investigationStatus';
+import { DECISION_ACTION_LABELS, DECISION_OUTCOME_LABELS, deadlineOf, HYPOTHESIS_STATUS_LABELS, STATUS_LABELS, URGENT_DAYS } from '@/utils/investigationStatus';
 import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { methodStamp } from '@/utils/traceView';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -119,15 +119,8 @@ async function act(action: () => Promise<unknown>, fallback: string) {
   }
 }
 
-const OUTCOMES: Record<DecisionOutcome, string> = {
-  comunicar: 'Communicate to COAF via Siscoaf',
-  arquivar: 'Archive with a rationale',
-};
-const ACTIONS: Record<DecisionAction, string> = {
-  dict: 'Flag the accounts in DICT',
-  spa: 'Notify the SPA (24 h)',
-  bloqueio_cautelar: 'Request a precautionary block',
-};
+const OUTCOMES = DECISION_OUTCOME_LABELS;
+const ACTIONS = DECISION_ACTION_LABELS;
 const RETENTION_YEARS = window.__GRAPH_LAGOON_CONFIG__?.investigation_retention_years ?? 10;
 const outcome = ref<DecisionOutcome>('comunicar');
 const actions = ref<DecisionAction[]>([]);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render } from '@testing-library/vue'
+import { render, fireEvent } from '@testing-library/vue'
 import { setActivePinia, createPinia } from 'pinia'
 import InvestigationsView from '@/views/InvestigationsView.vue'
 
@@ -12,9 +12,10 @@ import { api } from '@/services/api'
 
 const now = new Date().toISOString()
 const CASES = [
-  { id: 'aaaaaaaa-1', title: 'Golpe Pix', status: 'analise', typology: 'Golpe Pix', owner_email: 'me@x.com', assignee_email: 'ana@x.com', created_at: now, updated_at: now, source_count: 2, deadline: { phase: 'analysis', due_at: now, days_left: 45 } },
-  { id: 'cccccccc-3', title: 'Urgent', status: 'selecao', owner_email: 'me@x.com', created_at: now, updated_at: now, source_count: 0, deadline: { phase: 'selection', due_at: now, days_left: 6 } },
-  { id: 'bbbbbbbb-2', title: 'Old case', status: 'arquivado', owner_email: 'me@x.com', created_at: now, updated_at: now, source_count: 1 },
+  { id: 'aaaaaaaa-1', title: 'Golpe Pix', status: 'analise', typology: 'Golpe Pix', owner_email: 'me@x.com', assignee_email: 'ana@x.com', created_at: now, updated_at: now, source_count: 2, has_write_access: true, deadline: { phase: 'analysis', due_at: now, days_left: 45 } },
+  { id: 'cccccccc-3', title: 'Urgent', status: 'selecao', owner_email: 'me@x.com', created_at: now, updated_at: now, source_count: 0, has_write_access: true, deadline: { phase: 'selection', due_at: now, days_left: 6 } },
+  { id: 'bbbbbbbb-2', title: 'Old case', status: 'arquivado', owner_email: 'me@x.com', created_at: now, updated_at: now, source_count: 1, has_write_access: true },
+  { id: 'dddddddd-4', title: 'Lent to me', status: 'analise', typology: 'Lavagem', owner_email: 'zoe@x.com', assignee_email: 'zoe@x.com', created_at: now, updated_at: now, source_count: 3, has_write_access: false, deadline: { phase: 'analysis', due_at: now, days_left: 20 } },
 ]
 
 async function renderView() {
@@ -43,6 +44,35 @@ describe('InvestigationsView', () => {
     expect(row.querySelector('[data-testid="deadline"]')!.classList).not.toContain('late')
     expect(getByTestId('counter-urgent').textContent).toContain('1')
     // Archived cases are outside the default "Open" filter.
+    expect(queryByTestId('investigation-row-bbbbbbbb-2')).toBeNull()
+  })
+
+  it('filters by typology and assignee, sorts by a column, marks read-only cases and uses counters as filters', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
+    localStorage.setItem('userEmail', 'me@x.com')
+    const { getByTestId, queryByTestId, container } = await renderView()
+    const ids = () => [...container.querySelectorAll('tbody tr')].map((r) => r.getAttribute('data-testid'))
+    expect(getByTestId('investigation-row-dddddddd-4').querySelector('[data-testid="access-mark"]')!.textContent).toContain('read-only')
+    expect(getByTestId('investigation-row-aaaaaaaa-1').querySelector('[data-testid="access-mark"]')).toBeNull()
+
+    await fireEvent.update(getByTestId('investigations-typology'), 'Lavagem')
+    expect(ids()).toEqual(['investigation-row-dddddddd-4'])
+    await fireEvent.update(getByTestId('investigations-typology'), '')
+    await fireEvent.update(getByTestId('investigations-assignee'), 'ana@x.com')
+    expect(ids()).toEqual(['investigation-row-aaaaaaaa-1'])
+    await fireEvent.update(getByTestId('investigations-assignee'), '')
+
+    await fireEvent.click(getByTestId('sort-deadline'))
+    expect(ids()).toEqual(['investigation-row-cccccccc-3', 'investigation-row-dddddddd-4', 'investigation-row-aaaaaaaa-1'])
+    await fireEvent.click(getByTestId('sort-deadline'))
+    expect(ids()[0]).toBe('investigation-row-aaaaaaaa-1')
+
+    await fireEvent.click(getByTestId('counter-urgent'))
+    expect(ids()).toEqual(['investigation-row-cccccccc-3'])
+    await fireEvent.click(getByTestId('counter-urgent')) // again: back to "Open"
+    expect(ids()).toHaveLength(3)
+    await fireEvent.click(getByTestId('counter-decided'))
+    expect(ids()).toEqual([])
     expect(queryByTestId('investigation-row-bbbbbbbb-2')).toBeNull()
   })
 

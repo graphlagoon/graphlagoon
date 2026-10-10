@@ -569,6 +569,8 @@ export interface Exploration {
   state: ExplorationState;
   created_at: string;
   updated_at: string;
+  /** Nodes in the saved state; null when only the snapshot file knows (F1). */
+  node_count?: number | null;
 }
 
 export interface DatasetsResponse {

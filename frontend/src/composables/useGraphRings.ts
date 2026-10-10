@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { useGraphStore } from '@/stores/graph';
 import type { GraphNode } from '@/types/graph3d';
 
-const RING_GAP = 0.3;
+const RING_GAP = 0.22;
 
 function ringTexture(): THREE.Texture {
   const size = 128;
@@ -19,7 +19,7 @@ function ringTexture(): THREE.Texture {
   const ctx = canvas.getContext('2d');
   if (ctx) {
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 6;
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.arc(size / 2, size / 2, size / 2 - 4, 0, Math.PI * 2);
     ctx.stroke();
@@ -72,7 +72,7 @@ export function useGraphRings(getGraph3d: () => any) {
           }
           sprite.material = material(color);
           sprite.position.set(node.x || 0, node.y || 0, node.z || 0);
-          const s = diameter * (1.35 + RING_GAP * i);
+          const s = diameter * (1.25 + RING_GAP * i);
           sprite.scale.set(s, s, 1);
           sprite.visible = true;
           used++;

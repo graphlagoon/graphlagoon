@@ -163,7 +163,7 @@ async function promote(t: EnrichmentTarget) {
 <template>
   <div class="enrichment" data-testid="inspector-enrichment">
     <p v-if="!targets.length && !fileTargets.length" class="muted">
-      No enrichment table applies to this node. Attach one in the context form.
+      No enrichment table applies to this node.
     </p>
     <section v-for="t in targets" :key="idOf(t)" class="card" data-testid="enrichment-card">
       <header>

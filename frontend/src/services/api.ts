@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance } from 'axios';
 import type {
   CreateInvestigationRequest,
+  UpdateInvestigationRequest,
   EntityMatch,
   Investigation,
   InvestigationArtifact,
@@ -284,8 +285,10 @@ class ApiService {
   }
 
   // Explorations
-  async getAllExplorations(): Promise<Exploration[]> {
-    const response = await this.client.get('/api/explorations');
+  async getAllExplorations(
+    params: { q?: string; mine?: boolean; limit?: number; offset?: number } = {},
+  ): Promise<Exploration[]> {
+    const response = await this.client.get('/api/explorations', { params });
     return response.data;
   }
 
@@ -686,6 +689,33 @@ class ApiService {
   async createInvestigation(data: CreateInvestigationRequest): Promise<Investigation> {
     const response = await this.client.post('/api/investigations', data);
     return response.data;
+  }
+
+  async updateInvestigation(id: string, data: UpdateInvestigationRequest): Promise<Investigation> {
+    const response = await this.client.patch(`/api/investigations/${id}`, data);
+    return response.data;
+  }
+
+  async deleteInvestigation(id: string): Promise<void> {
+    await this.client.delete(`/api/investigations/${id}`);
+  }
+
+  async shareInvestigation(id: string, email: string, permission: 'read' | 'write'): Promise<void> {
+    await this.client.post(`/api/investigations/${id}/share`, { email, permission });
+  }
+
+  async unshareInvestigation(id: string, email: string): Promise<void> {
+    await this.client.delete(`/api/investigations/${id}/share/${encodeURIComponent(email)}`);
+  }
+
+  /** F1: decidido → analise (human only); the decision stays in the journal. */
+  async reopenInvestigation(id: string): Promise<Investigation> {
+    const response = await this.client.post(`/api/investigations/${id}/reopen`);
+    return response.data;
+  }
+
+  async removeInvestigationSource(id: string, sourceId: string): Promise<void> {
+    await this.client.delete(`/api/investigations/${id}/sources/${sourceId}`);
   }
 
   async getInvestigationSources(id: string): Promise<InvestigationSource[]> {

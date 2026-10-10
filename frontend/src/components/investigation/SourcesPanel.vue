@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Left column of the workspace (T2): the case's explorations, files (slot) and the unification summary. */
 import { computed } from 'vue';
-import { Lock } from 'lucide-vue-next';
+import { Lock, Plus, X } from 'lucide-vue-next';
 import type { InvestigationSource } from '@/types/investigation';
 import type { GraphContext } from '@/types/graph';
 import type { SourceGraph } from '@/stores/investigation';
@@ -13,9 +13,11 @@ const props = defineProps<{
   colors: Record<string, string>;
   mergedCounts: Record<string, number>;
   activeTab: string;
+  /** Shows "Add" and the remove buttons (write access, not decided). */
+  canEdit?: boolean;
 }>();
 
-const emit = defineEmits<{ select: [tab: string] }>();
+const emit = defineEmits<{ select: [tab: string]; remove: [sourceId: string]; add: [] }>();
 
 const graphOf = computed(() => new Map(props.graphs.map((g) => [g.id, g])));
 const mergedTotal = computed(() => Object.values(props.mergedCounts).reduce((a, b) => a + b, 0));
@@ -28,28 +30,44 @@ const mergedDetail = computed(() =>
 
 <template>
   <aside class="sources-panel" data-testid="sources-panel">
-    <h4 class="heading">Explorations</h4>
-    <p v-if="sources.length === 0" class="muted">No sources yet.</p>
-    <template v-for="s in sources" :key="s.id">
-      <button
-        v-if="s.accessible"
-        class="source-card"
-        :class="{ active: activeTab === s.id }"
-        :data-testid="`sources-panel-${s.id}`"
-        @click="emit('select', s.id)"
-      >
-        <span class="dot" :style="{ background: colors[s.id] }"></span>
-        <span class="body">
-          <span class="title">{{ s.title_snapshot }}</span>
-          <span class="sub">
-            {{ contexts[s.context_id ?? '']?.title ?? s.context_title ?? 'context' }}
-            · {{ graphOf.get(s.id)?.nodes.length ?? 0 }} nodes
-            · {{ s.mode === 'frozen' ? 'frozen' : 'live' }}
-          </span>
-          <span v-if="graphOf.get(s.id)?.error" class="warn">{{ graphOf.get(s.id)?.error }}</span>
-        </span>
+    <div class="heading-row">
+      <h4 class="heading">Explorations</h4>
+      <button v-if="canEdit" class="add-btn" data-testid="sources-panel-add" @click="emit('add')">
+        <Plus :size="12" /> Add
       </button>
-      <div v-else class="source-card restricted" :data-testid="`sources-panel-${s.id}`">
+    </div>
+    <div v-if="sources.length === 0" class="empty" data-testid="sources-empty">
+      <p class="muted">No sources yet. Add a recent exploration, or start one from a context.</p>
+      <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="sources-empty-add" @click="emit('add')">
+        <Plus :size="12" /> Add exploration
+      </button>
+    </div>
+    <template v-for="s in sources" :key="s.id">
+      <div v-if="s.accessible" class="source-row" :class="{ active: activeTab === s.id }">
+        <button class="source-card" :data-testid="`sources-panel-${s.id}`" @click="emit('select', s.id)">
+          <span class="dot" :style="{ background: colors[s.id] }"></span>
+          <span class="body">
+            <span class="title">{{ s.title_snapshot }}</span>
+            <span class="sub">
+              {{ contexts[s.context_id ?? '']?.title ?? s.context_title ?? 'context' }}
+              · {{ graphOf.get(s.id)?.nodes.length ?? 0 }} nodes
+              · {{ s.mode === 'frozen' ? 'frozen' : 'live' }}
+            </span>
+            <span v-if="graphOf.get(s.id)?.error" class="warn">{{ graphOf.get(s.id)?.error }}</span>
+          </span>
+        </button>
+        <button
+          v-if="canEdit"
+          class="remove"
+          :title="`Remove “${s.title_snapshot}” from the case`"
+          :aria-label="`Remove ${s.title_snapshot}`"
+          :data-testid="`sources-panel-remove-${s.id}`"
+          @click.stop="emit('remove', s.id)"
+        >
+          <X :size="12" />
+        </button>
+      </div>
+      <div v-else class="source-row restricted" :data-testid="`sources-panel-${s.id}`">
         <Lock :size="14" class="lock" />
         <span class="body">
           <span class="title">{{ s.context_title ?? s.title_snapshot }}</span>
@@ -58,6 +76,15 @@ const mergedDetail = computed(() =>
             <a :href="`mailto:${s.owner_email}`">{{ s.owner_email }}</a>
           </span>
         </span>
+        <button
+          v-if="canEdit"
+          class="remove"
+          aria-label="Remove restricted source"
+          :data-testid="`sources-panel-remove-${s.id}`"
+          @click.stop="emit('remove', s.id)"
+        >
+          <X :size="12" />
+        </button>
       </div>
     </template>
 
@@ -90,28 +117,89 @@ const mergedDetail = computed(() =>
   color: var(--text-muted);
 }
 
-.source-card {
+.heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+}
+
+.empty p {
+  margin: 0;
+}
+
+.source-row {
+  position: relative;
   display: flex;
   gap: 8px;
-  width: 100%;
   margin-bottom: 8px;
-  padding: 10px;
-  text-align: left;
   border: 1px solid transparent;
   border-radius: 6px;
   background: var(--color-bg-subtle);
+}
+
+.source-row.active {
+  border-color: var(--color-primary);
+}
+
+.source-row.restricted {
+  padding: 10px;
+  border: 1px dashed var(--border-color);
+  background: transparent;
+}
+
+.source-card {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 28px 10px 10px;
+  text-align: left;
+  border: none;
+  background: none;
   cursor: pointer;
   font: inherit;
 }
 
-.source-card.active {
-  border-color: var(--color-primary);
+.remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  padding: 3px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
 }
 
-.source-card.restricted {
-  border: 1px dashed var(--border-color);
-  background: transparent;
-  cursor: default;
+.remove:hover {
+  background: var(--border-color);
+  color: var(--text-color);
 }
 
 .dot {

@@ -72,6 +72,7 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", f"{_CASE}/decision"): (
         f"{HUMAN_ONLY} the decision is a person's (Q9, LGPD art. 20)"
     ),
+    ("POST", f"{_CASE}/reopen"): f"{HUMAN_ONLY} reopening a decided case (05 §3)",
     ("GET", f"{_CASE}/export"): (
         f"{HUMAN_ONLY} exports leave the app unmasked (Q8) and prepare the "
         "communication (Q9); agents read the case through get_dossier"

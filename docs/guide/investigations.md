@@ -32,8 +32,10 @@ were shared with you.
 ![Investigation queue](/screenshots/investigations-queue.png)
 
 The queue shows each case's typology, number of sources, status, assignee
-and deadline. Filter by text or status (*Open* hides decided and archived
-cases); the counters on top summarize the open work.
+and deadline. Filter by text, status, typology or assignee (*Open* hides
+decided and archived cases), sort by any column, and click a counter on top
+to use it as a filter. A case someone else owns is marked *shared with you*
+or *read-only*.
 
 **Status and deadlines** (Circ. 3.978): a case starts *Awaiting selection*
 with 45 days from creation; moving it to *In analysis* records
@@ -42,7 +44,18 @@ with 45 days from creation; moving it to *In analysis* records
 a case without one. The server computes the deadline
 (`deadline: {phase, due_at, days_left}` on every case, none once decided or
 archived); under 7 days left it turns orange, in the queue and in the
-workspace header.
+case header. The selection phase counts from the alert date (`alert_at`)
+when the case has one, and `deadline_days_override` replaces the 45 days
+for a single case.
+
+**Editing a case.** In the case header, click the title, description,
+typology or assignee to edit it in place. The status select only offers the
+allowed moves (*Awaiting selection* ↔ *In analysis* → *Archived*; an
+archived case can go back to analysis); anything else is refused with 409.
+**Decide** records the decision from the case screen; **Share** manages the
+named people (read or write); the **…** menu reopens a decided case
+(*Reopen*, people only: the decision and its hash stay in the journal as
+`case.reopened`) and deletes the case after a confirmation.
 
 ## The flow at a glance
 
@@ -106,9 +119,13 @@ On a given case:
 
 1. **New investigation** (top right of the queue) asks for a title and,
    optionally, a typology, origin and assignee.
-2. In the case, **+ Add** opens the picker: your explorations grouped by
-   context. Tick one or more; the preview counts how many new contexts come
-   in and which [identity keys](#identity-keys) they share.
+2. In the case, **Add** opens the picker on **My recent explorations**
+   (yours, newest first, with their node count; search by title). An
+   exploration saved without a graph is listed but cannot be added.
+   Superusers can switch to **All contexts**. Tick one or more; the preview
+   counts how many new contexts come in and which
+   [identity keys](#identity-keys) they share. The × on a source in the left
+   column removes it from the case.
 3. Pick the mode:
    - **Live** follows the exploration: later saves show up in the case.
    - **Frozen** copies the exploration's saved graph now, with a SHA-256
@@ -570,15 +587,10 @@ All optional; the defaults suit a single analyst team. Details in
 
 This is an MVP. What it does not do yet, so you can plan around it:
 
-- **API only, no button:** editing a case's title, description, assignee,
-  typology or status after creation (`PATCH /api/investigations/{id}`; the
-  status also changes by accepting an agent's proposal), sharing it
-  (`POST …/share` with `{email, permission}`), removing a source
-  (`DELETE …/sources/{source_id}`) and deleting the case
-  (`DELETE /api/investigations/{id}`). Superusers transfer cases in the
-  admin area.
-- **Deadlines** count calendar days from creation and from `selected_at`;
-  there are no notifications, no SLA setting and no special deadlines (the
+- **Transfer** of a case to another owner is done by superusers in the
+  admin area only.
+- **Deadlines** count calendar days from the alert (or creation) and from
+  `selected_at`; there are no notifications and no special deadlines (the
   24 h SPA notice).
 - **Case graph size.** Everything renders in the browser; a file graph keeps
   only its first `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` edges.

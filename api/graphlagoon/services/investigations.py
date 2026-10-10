@@ -99,16 +99,43 @@ def _clock() -> datetime:
     return datetime.now()
 
 
+# Allowed status changes through PATCH (05 §3). "decidido" comes only from the
+# decision route and leaves only through reopen (→ analise) or archiving.
+STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    "selecao": frozenset({"analise", "arquivado"}),
+    "analise": frozenset({"selecao", "arquivado"}),
+    "decidido": frozenset({"arquivado"}),
+    "arquivado": frozenset({"analise"}),
+}
+
+
+def check_transition(inv: Any, new_status: str) -> None:
+    if new_status == inv.status:
+        return
+    if new_status not in STATUS_TRANSITIONS.get(inv.status, ()):
+        raise InvestigationError(
+            409,
+            "INVALID_STATUS_TRANSITION",
+            f"A case in '{inv.status}' cannot move to '{new_status}'",
+        )
+
+
 def deadline_of(inv: Any, now: Optional[datetime] = None) -> Optional[dict]:
-    """``{phase, due_at, days_left}`` of an open case, None once decided or archived."""
+    """``{phase, due_at, days_left}`` of an open case, None once decided or archived.
+
+    Selection counts from ``alert_at`` (the notice that opened the case) or
+    creation; analysis from ``selected_at``. ``deadline_days_override``
+    replaces the 45 days of each phase for this case.
+    """
     phase = {"selecao": "selection", "analise": "analysis"}.get(inv.status)
-    start = inv.created_at if phase == "selection" else (inv.selected_at or inv.created_at)
+    alert = getattr(inv, "alert_at", None) or inv.created_at
+    start = alert if phase == "selection" else (inv.selected_at or alert)
     if phase is None or start is None:
         return None
     now = now or _clock()
     if (start.tzinfo is None) != (now.tzinfo is None):  # naive DB times vs an aware clock
         start, now = start.replace(tzinfo=None), now.replace(tzinfo=None)
-    due = start + timedelta(days=PHASE_DAYS)
+    due = start + timedelta(days=getattr(inv, "deadline_days_override", None) or PHASE_DAYS)
     return {
         "phase": phase,
         "due_at": due,
@@ -127,6 +154,9 @@ def serialize(inv: Any, user_email: str) -> dict:
         "typology": inv.typology,
         "origin": inv.origin,
         "selected_at": inv.selected_at,
+        "occurred_at": getattr(inv, "occurred_at", None),
+        "alert_at": getattr(inv, "alert_at", None),
+        "deadline_days_override": getattr(inv, "deadline_days_override", None),
         "deadline": deadline_of(inv),
         "state": inv.state or {},
         "decision": inv.decision,
@@ -190,6 +220,14 @@ async def load_case(
     return inv
 
 
+async def ensure_case_access(
+    investigation_id: UUID, user_email: str, need: str = "read"
+) -> None:
+    """``load_case`` for handlers that must check access before buffering a body."""
+    async with _session() as session:
+        await load_case(session, investigation_id, user_email, need)
+
+
 def under_retention(inv: Any) -> bool:
     """A decided case is kept ``investigation_retention_years`` from its freeze."""
     from graphlagoon.config import get_settings
@@ -220,14 +258,6 @@ async def list_investigations(
 ) -> list[dict]:
     """``exploration_id``: only cases that have that exploration as a source."""
     filters = {"status": status, "assignee_email": assignee, "typology": typology}
-async def ensure_case_access(
-    investigation_id: UUID, user_email: str, need: str = "read"
-) -> None:
-    """``load_case`` for handlers that must check access before buffering a body."""
-    async with _session() as session:
-        await load_case(session, investigation_id, user_email, need)
-
-
     filters = {k: v for k, v in filters.items() if v is not None}
 
     async with _session() as session:
@@ -353,7 +383,11 @@ async def update_investigation(
 
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        _ensure_not_decided(inv)
+        # A decided case is read-only, except for closing it (status is outside the frozen hash).
+        if set(changes) != {"status"} or changes["status"] != "arquivado":
+            _ensure_not_decided(inv)
+        if "status" in changes:
+            check_transition(inv, changes["status"])
         if "state" in changes:  # roles and hypotheses change only through their own journaled routes
             kept = {k: v for k, v in (inv.state or {}).items() if k in ("roles", "hypotheses")}
             changes["state"] = {
@@ -370,6 +404,38 @@ async def update_investigation(
         )
         if changes.get("status") == "analise" and inv.selected_at is None:
             changes["selected_at"] = _clock()  # the analysis deadline counts from here
+        if session is None:
+            get_memory_store().update_investigation(investigation_id, **changes)
+        else:
+            for key, value in changes.items():
+                setattr(inv, key, value)
+            await session.commit()
+            await _refresh(session, inv)
+        return serialize(inv, user_email)
+
+
+async def reopen_investigation(investigation_id: UUID, user_email: str) -> dict:
+    """decidido → analise, people only (the route forbids agents). The decision
+    and its hash leave the case but stay in the journal (``case.reopened``);
+    sources frozen at the decision stay frozen."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        if inv.status != "decidido":
+            raise InvestigationError(
+                409, "INVALID_STATUS_TRANSITION", "Only a decided case can be reopened"
+            )
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "case.reopened",
+            {
+                "previous_frozen_hash": inv.frozen_hash,
+                "previous_decision": inv.decision,
+                "to": "analise",
+            },
+        )
+        changes = {"status": "analise", "decision": None, "frozen_hash": None, "frozen_at": None}
         if session is None:
             get_memory_store().update_investigation(investigation_id, **changes)
         else:

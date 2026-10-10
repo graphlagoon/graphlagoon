@@ -222,6 +222,22 @@ async def record_decision(
     return inv
 
 
+@router.post(
+    "/{investigation_id}/reopen",
+    response_model=InvestigationResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def reopen_investigation(investigation_id: UUID, request: Request):
+    """F1 (05 §3): decidido → analise, human only; journaled as ``case.reopened``."""
+    user_email = get_current_user(request)
+    try:
+        inv = await service.reopen_investigation(investigation_id, user_email)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(user_email, AuditAction.INVESTIGATION_REOPEN, investigation_id)
+    return inv
+
+
 @router.get("/{investigation_id}/export", dependencies=[Depends(forbid_agents)])
 async def export_investigation(
     investigation_id: UUID,
@@ -559,6 +575,7 @@ async def update_hypothesis(
 
 
 async def _receive_artifact(
+    investigation_id: UUID,
     request: Request,
     name: Optional[str],
     kind: Optional[str],
@@ -568,6 +585,12 @@ async def _receive_artifact(
     from graphlagoon.config import get_settings
 
     max_bytes = get_settings().artifact_max_bytes
+    try:
+        await service.ensure_case_access(
+            investigation_id, get_current_user(request), "write"
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             body = ArtifactTextUpload.model_validate(await request.json())
@@ -575,7 +598,6 @@ async def _receive_artifact(
             raise _http(service.InvestigationError(422, "INVALID_BODY", str(exc)))
         data = body.text.encode("utf-8")
 
-    investigation_id: UUID,
         async def chunks():
             yield data
 
@@ -585,12 +607,6 @@ async def _receive_artifact(
             "note": body.note,
             "source_evidence_ids": body.source_evidence_ids,
         }
-    try:
-        await service.ensure_case_access(
-            investigation_id, get_current_user(request), "write"
-        )
-    except service.InvestigationError as exc:
-        raise _http(exc)
     else:
         chunks = request.stream
         meta = {"name": name, "kind": kind, "note": note, "source_evidence_ids": evidence}
@@ -680,6 +696,7 @@ async def get_artifact_content(
         )
     except service.InvestigationError as exc:
         raise _http(exc)
+    data = _agent_bytes(data, meta["name"])
     # html/svg are never rendered by the browser (XSS): attachment + opaque type.
     attach = download or meta["download_only"]
     media_type = (
@@ -696,7 +713,6 @@ async def get_artifact_content(
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "sandbox",
             "X-Content-SHA256": meta["sha256"],
-    data = _agent_bytes(data, meta["name"])
         },
     )
 
@@ -748,6 +764,10 @@ async def upload_file(
 
     max_bytes = get_settings().investigation_file_max_bytes
     try:
+        await service.ensure_case_access(investigation_id, user_email, "write")
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    try:
         received = await storage.receive(request.stream(), max_bytes)
     except storage.TooLarge:
         raise _http(
@@ -763,10 +783,6 @@ async def upload_file(
         raise _http(exc)
     await _record(
         user_email,
-    try:
-        await service.ensure_case_access(investigation_id, user_email, "write")
-    except service.InvestigationError as exc:
-        raise _http(exc)
         AuditAction.INVESTIGATION_FILE_UPLOAD,
         investigation_id,
         file_id=str(row["id"]),
@@ -791,6 +807,7 @@ async def get_file_content(investigation_id: UUID, file_id: UUID, request: Reque
         file_id=str(file_id),
         sha256=meta["sha256"],
     )
+    data = _agent_bytes(data, meta["filename"])
     # Case data is never rendered by the browser: always a download.
     return Response(
         content=data,
@@ -807,7 +824,6 @@ async def get_file_content(investigation_id: UUID, file_id: UUID, request: Reque
 
 
 @router.patch(
-    data = _agent_bytes(data, meta["filename"])
     "/{investigation_id}/files/{file_id}", response_model=InvestigationFileResponse
 )
 async def set_file_mapping(

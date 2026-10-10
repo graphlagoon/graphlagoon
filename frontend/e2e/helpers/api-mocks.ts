@@ -478,13 +478,19 @@ export async function mockSchemaDrift(page: Page, contextId: string, drift: any)
  * Seed explorations via API mock. Call AFTER setupAPIMocks (later routes take precedence).
  */
 export async function seedExplorations(page: Page, explorations: any[]) {
-  // Override GET /api/explorations to return all explorations
-  await page.route('**/graphlagoon/api/explorations', (route) => {
+  // Override GET /api/explorations (with the F1 `mine`/`q` params) to return the seeded explorations
+  await page.route(/\/graphlagoon\/api\/explorations(\?.*)?$/, (route) => {
     if (route.request().method() === 'GET') {
+      const params = new URL(route.request().url()).searchParams;
+      const q = (params.get('q') ?? '').toLowerCase();
+      const mine = params.get('mine') === 'true';
+      const rows = explorations.filter(
+        (e) => (!mine || e.owner_email === 'e2e@test.com') && (!q || String(e.title).toLowerCase().includes(q)),
+      );
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(explorations),
+        body: JSON.stringify(rows),
       });
     } else {
       route.continue();
@@ -1128,6 +1134,11 @@ export async function seedInvestigations(
   const events = new Map<string, any[]>();
   const evidence = new Map<string, any[]>();
   const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  // The server recomputes the deadline on every status change (45 days per open phase).
+  const deadline = (inv: any) => {
+    const phase = ({ selecao: 'selection', analise: 'analysis' } as Record<string, string>)[inv.status];
+    inv.deadline = phase ? { phase, due_at: new Date(Date.now() + 45 * 864e5).toISOString(), days_left: 45 } : null;
+  };
   const journal = (id: string, kind: string, payload: Record<string, unknown>) => {
     const list = events.get(id) ?? [];
     list.push({ id: `ev-${list.length + 1}`, at: new Date().toISOString(), actor_email: 'e2e@test.com', kind, payload, hash: 'h' });
@@ -1156,13 +1167,59 @@ export async function seedInvestigations(
       route.fulfill(json([...cases.values()].map((i) => ({ ...i, source_count: i.source_count ?? srcs.get(i.id)?.length ?? 0 }))));
     }
   });
-  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events|evidence|decision|export))?(\?.*)?$/, (route) => {
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events|evidence|decision|export|share|reopen|files)(\/[^/?]+)?)?(\?.*)?$/, (route) => {
     const req = route.request();
-    const [, id, sub] = new URL(req.url()).pathname.match(/investigations\/([^/]+)(?:\/(\w+))?$/)!;
+    const [, id, sub, rest] = new URL(req.url()).pathname.match(/investigations\/([^/]+)(?:\/(\w+))?(?:\/([^/]+))?$/)!;
     const inv = cases.get(id);
     if (!inv) return route.fulfill(json({ detail: { error: { code: 'INVESTIGATION_NOT_FOUND' } } }, 404));
     const method = req.method();
-    if (!sub) return route.fulfill(json(inv));
+    if (!sub) {
+      if (method === 'PATCH') {
+        // F1: explicit transitions; the server answers 409 to anything else.
+        const body = req.postDataJSON();
+        const allowed: Record<string, string[]> = { selecao: ['analise', 'arquivado'], analise: ['selecao', 'arquivado'], decidido: ['arquivado'], arquivado: ['analise'] };
+        if (body.status && body.status !== inv.status && !allowed[inv.status]?.includes(body.status)) {
+          return route.fulfill(json({ detail: { error: { code: 'INVALID_STATUS_TRANSITION', message: 'invalid transition' } } }, 409));
+        }
+        Object.assign(inv, body, { updated_at: new Date().toISOString() });
+        if (body.status === 'analise' && !inv.selected_at) inv.selected_at = new Date().toISOString();
+        if (body.status) deadline(inv);
+        journal(id, 'case.updated', body);
+        return route.fulfill(json(inv));
+      }
+      if (method === 'DELETE') {
+        cases.delete(id);
+        return route.fulfill(json({ status: 'deleted' }));
+      }
+      return route.fulfill(json(inv));
+    }
+    if (sub === 'files') return route.fulfill(json([])); // the store fetches the case files on open (34f4e53)
+    if (sub === 'share') {
+      if (method === 'POST') {
+        const body = req.postDataJSON();
+        inv.shared_with = [...(inv.shared_with ?? []).filter((s: any) => s.email !== body.email), body];
+        journal(id, 'case.shared', { with: body.email, permission: body.permission });
+        return route.fulfill(json({ status: 'shared' }));
+      }
+      const email = decodeURIComponent(rest ?? '');
+      inv.shared_with = (inv.shared_with ?? []).filter((s: any) => s.email !== email);
+      journal(id, 'case.unshared', { with: email });
+      return route.fulfill(json({ status: 'removed' }));
+    }
+    if (sub === 'reopen') {
+      if (inv.status !== 'decidido') return route.fulfill(json({ detail: { error: { code: 'INVALID_STATUS_TRANSITION' } } }, 409));
+      journal(id, 'case.reopened', { previous_frozen_hash: inv.frozen_hash, previous_decision: inv.decision, to: 'analise' });
+      Object.assign(inv, { status: 'analise', decision: null, frozen_hash: null, frozen_at: null });
+      deadline(inv);
+      return route.fulfill(json(inv));
+    }
+    if (sub === 'sources' && rest && method === 'DELETE') {
+      const list = srcs.get(id) ?? [];
+      const gone = list.find((s) => s.id === rest);
+      srcs.set(id, list.filter((s) => s.id !== rest));
+      journal(id, 'source.removed', { title: gone?.title_snapshot });
+      return route.fulfill(json({ status: 'removed' }));
+    }
     if (sub === 'sources') {
       if (method !== 'POST') return route.fulfill(json(srcs.get(id) ?? []));
       const body = req.postDataJSON();
@@ -1218,6 +1275,7 @@ export async function seedInvestigations(
       const decided_at = new Date().toISOString();
       inv.decision = { ...req.postDataJSON(), decided_by: 'e2e@test.com', decided_at };
       Object.assign(inv, { status: 'decidido', frozen_hash: 'f'.repeat(60) + 'beef', frozen_at: decided_at, has_write_access: true });
+      deadline(inv);
       for (const s of srcs.get(id) ?? []) s.mode = 'frozen';
       journal(id, 'decision.recorded', { ...inv.decision, frozen_sources: [] });
       return route.fulfill(json(inv));

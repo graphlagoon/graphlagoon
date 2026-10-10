@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from uuid import UUID
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
     from graphlagoon.db.models import Exploration
@@ -115,6 +115,9 @@ def exploration_to_response(
     shared_with = [share.shared_with_email for share in exploration.shares]
     state_data = exploration.state
     has_write = can_write(exploration.owner_email, exploration.shares, user_email)
+    nodes = state_data.get("nodes") if isinstance(state_data, dict) else None
+    # The state lists the nodes it laid out; a snapshot-only state keeps them in the file.
+    node_count = len(nodes) if nodes else (None if (state_data or {}).get("has_snapshot") else 0)
     return ExplorationResponse(
         id=exploration.id,
         graph_context_id=exploration.graph_context_id,
@@ -127,6 +130,7 @@ def exploration_to_response(
         else state_data,
         created_at=exploration.created_at,
         updated_at=exploration.updated_at,
+        node_count=node_count,
     )
 
 
@@ -207,12 +211,43 @@ def check_context_access_memory(
     raise HTTPException(status_code=403, detail="No access to this context")
 
 
+def _page(
+    explorations: list,
+    user_email: str,
+    q: Optional[str],
+    mine: bool,
+    limit: Optional[int],
+    offset: int,
+) -> list[ExplorationResponse]:
+    """F1 (05 §4): title search, "only mine", and a window; newest first.
+    shortcut: filtered in Python after the access query; paginate in SQL
+    when a user owns thousands of explorations."""
+    needle = (q or "").strip().lower()
+    rows = [
+        e
+        for e in explorations
+        if (not mine or e.owner_email == user_email)
+        and (not needle or needle in (e.title or "").lower())
+    ]
+    rows = rows[offset:]
+    if limit is not None:
+        rows = rows[:limit]
+    return [exploration_to_response(e, user_email) for e in rows]
+
+
 @router.get("/api/explorations", response_model=list[ExplorationResponse])
-async def list_all_explorations(request: Request):
+async def list_all_explorations(
+    request: Request,
+    q: Optional[str] = None,
+    mine: bool = False,
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
     """List all explorations the user has access to.
 
     Includes explorations from contexts the user owns/has context-level shares,
     plus explorations directly shared with the user via ExplorationShare.
+    ``q`` (title), ``mine`` (owner = caller), ``limit``/``offset`` narrow it.
     """
     user_email = get_current_user(request)
 
@@ -238,7 +273,7 @@ async def list_all_explorations(request: Request):
                     .order_by(Exploration.updated_at.desc())
                 )
                 explorations = result.scalars().all()
-                return [exploration_to_response(e, user_email) for e in explorations]
+                return _page(explorations, user_email, q, mine, limit, offset)
 
             # Get all context IDs the user has access to (via ownership or
             # context share — exact, domain wildcard or public)
@@ -281,7 +316,7 @@ async def list_all_explorations(request: Request):
                 .order_by(Exploration.updated_at.desc())
             )
             explorations = result.scalars().all()
-            return [exploration_to_response(e, user_email) for e in explorations]
+            return _page(explorations, user_email, q, mine, limit, offset)
     else:
         store = get_memory_store()
         if is_superuser(user_email):
@@ -309,7 +344,7 @@ async def list_all_explorations(request: Request):
                     seen_ids.add(e.id)
 
         explorations.sort(key=lambda e: e.updated_at, reverse=True)
-        return [exploration_to_response(e, user_email) for e in explorations]
+        return _page(explorations, user_email, q, mine, limit, offset)
 
 
 @router.get(

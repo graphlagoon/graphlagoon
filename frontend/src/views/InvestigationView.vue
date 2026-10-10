@@ -5,7 +5,7 @@
  * are unified ids in every tab, so the selection follows the entity across tabs.
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Banknote, Lock, Plus, Route } from 'lucide-vue-next';
+import { Banknote, Lock, Maximize2, Plus, Route } from 'lucide-vue-next';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
@@ -16,7 +16,7 @@ import { useContextMenu, type ContextMenuTarget } from '@/composables/useContext
 import { useToast } from '@/composables/useToast';
 import { formatAmount } from '@/utils/edgeSemantics';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
-import { STATUS_LABELS, URGENT_DAYS, deadlineOf } from '@/utils/investigationStatus';
+import { caseNodeLabel, hiddenRawDocumentKeys, shortId } from '@/utils/caseLabels';
 import { provenanceRingColors, roleColorMap, ROLE_COLORS, ROLE_LABELS } from '@/utils/graphAppearance';
 import { describeEvent } from '@/utils/investigationEvents';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -30,6 +30,7 @@ import {
 import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import LayoutPanel from '@/components/LayoutPanel.vue';
 import SourcesPanel from '@/components/investigation/SourcesPanel.vue';
+import CaseHeader from '@/components/investigation/CaseHeader.vue';
 import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
 import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue';
 import CaseFiles from '@/components/investigation/CaseFiles.vue';
@@ -150,6 +151,28 @@ async function loadWorkspace() {
   // shortcut: the first readable source's style (colors, icons, labels) dresses every tab.
   const styled = store.sourceGraphs.find((g) => g.state);
   if (styled?.state) graphStore.applyStylePreset(styled.state);
+  // Small base nodes and thin rings read better on a unified graph (05 §3).
+  graphStore.updateAesthetics({ nodeSize: Math.min(graphStore.aesthetics.nodeSize, CASE_NODE_SIZE) });
+  zoomToFitSoon();
+}
+
+const CASE_NODE_SIZE = 5;
+
+/** Frames the graph once the canvas has built the new scene. */
+function zoomToFitSoon() {
+  requestAnimationFrame(() => requestAnimationFrame(() => canvasRef.value?.zoomToFit?.()));
+}
+
+/** Readable name of a unified node (inspector, journal): label, else type · short id. */
+const labelById = computed(() => new Map(store.unified.nodes.map((n) => [n.node_id, caseNodeLabel(n)])));
+const nameOf = (id: string) => labelById.value.get(id) ?? shortId(id);
+
+function removeSource(sourceId: string) {
+  const source = store.sources.find((s) => s.id === sourceId);
+  run(() => store.removeSource(sourceId), 'Failed to remove the source').then(() => {
+    if (!actionError.value) toast.success(`Removed “${source?.title_snapshot ?? 'source'}” from the case`);
+    else toast.error(actionError.value);
+  });
 }
 
 watch(
@@ -249,7 +272,11 @@ onUnmounted(() => {
 // --- inspector ---
 const selected = computed(() => graphStore.selectedNode as UnifiedNode | null);
 const selectedSources = computed(() => (selected.value ? nodeSourceIds(selected.value) : []));
-const selectedProps = computed(() => Object.entries(selected.value?.properties ?? {}));
+const selectedProps = computed(() => {
+  const props = selected.value?.properties ?? {};
+  const hidden = hiddenRawDocumentKeys(props);
+  return Object.entries(props).filter(([k]) => !hidden.has(k));
+});
 
 // --- roles, notes and journal (F1.7) ---
 const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'decidido');
@@ -314,7 +341,6 @@ function pinGraphEvidence() {
 }
 
 const formatTime = (iso: string) => new Date(iso).toLocaleString();
-const deadline = computed(() => (store.current ? deadlineOf(store.current) : null));
 </script>
 
 <template>
@@ -322,28 +348,11 @@ const deadline = computed(() => (store.current ? deadlineOf(store.current) : nul
     <div v-if="store.loading && !store.current" class="loading"></div>
     <div v-else-if="store.error" class="error-message">{{ store.error }}</div>
     <template v-else-if="store.current">
-      <header class="ws-header">
-        <RouterLink to="/investigations" class="back">← Investigations</RouterLink>
-        <h1 data-testid="investigation-title">{{ store.current.title }}</h1>
-        <span v-if="view === 'trace'" class="muted">› Follow the money</span>
-        <span class="status">{{ STATUS_LABELS[store.current.status] ?? store.current.status }}</span>
-        <span
-          v-if="deadline"
-          class="status"
-          :class="{ urgent: deadline.daysLeft < URGENT_DAYS }"
-          data-testid="workspace-deadline"
-        >
-          {{ deadline.phase }} · {{ deadline.daysLeft }} d left
-        </span>
-        <span v-if="store.current.typology" class="muted">{{ store.current.typology }}</span>
-        <RouterLink :to="`/investigations/${id}/dossier`" class="agents-link" data-testid="dossier-link">Dossier</RouterLink>
-        <RouterLink :to="`/investigations/${id}/matches`" class="agents-link" data-testid="matches-link">
-          Matches · {{ openMatches }}
-        </RouterLink>
-        <RouterLink :to="`/investigations/${id}/agents`" class="agents-link" data-testid="proposals-counter">
-          Agents · {{ pendingProposals }} {{ pendingProposals === 1 ? 'proposal' : 'proposals' }}
-        </RouterLink>
-      </header>
+      <CaseHeader
+        :pending-proposals="pendingProposals"
+        :open-matches="openMatches"
+        :subtitle="view === 'trace' ? '› Follow the money' : null"
+      />
 
       <nav class="tabs" data-testid="workspace-tabs">
         <button
@@ -406,7 +415,10 @@ const deadline = computed(() => (store.current ? deadlineOf(store.current) : nul
           :colors="store.sourceColors"
           :merged-counts="mergedCounts"
           :active-tab="activeTab"
+          :can-edit="canEdit"
           @select="openTab($event)"
+          @remove="removeSource($event)"
+          @add="showAdd = true"
         >
           <template #files>
             <CaseFiles :investigation-id="id" :can-edit="canEdit" @source-added="openTab($event)" />
@@ -429,8 +441,11 @@ const deadline = computed(() => (store.current ? deadlineOf(store.current) : nul
           <div v-if="store.graphLoading || graphStore.loading" class="overlay">
             {{ graphStore.loadingMessage || 'Loading sources…' }}
           </div>
-          <div v-else-if="store.sources.length === 0" class="overlay">
-            No sources yet. Add explorations from any context you can read.
+          <div v-else-if="store.sources.length === 0" class="overlay empty-canvas" data-testid="canvas-empty">
+            <p>No sources yet. Add a recent exploration, start a new one from a context, or import a file.</p>
+            <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="canvas-empty-add" @click="showAdd = true">
+              <Plus :size="14" /> Add exploration
+            </button>
           </div>
           <div v-if="graphStore.queryError" class="error-banner">{{ graphStore.queryError.message }}</div>
 
@@ -476,6 +491,15 @@ const deadline = computed(() => (store.current ? deadlineOf(store.current) : nul
             </button>
             <button
               class="btn btn-outline btn-sm"
+              title="Fit the graph in the view"
+              aria-label="Fit to view"
+              data-testid="workspace-fit-btn"
+              @click="canvasRef?.zoomToFit?.()"
+            >
+              <Maximize2 :size="14" />
+            </button>
+            <button
+              class="btn btn-outline btn-sm"
               :class="{ on: showTypologies }"
               data-testid="workspace-typologies-btn"
               @click="showTypologies = !showTypologies"
@@ -506,8 +530,8 @@ const deadline = computed(() => (store.current ? deadlineOf(store.current) : nul
         <TraceExits v-if="view === 'trace'" />
         <aside v-else class="inspector" data-testid="workspace-inspector">
           <template v-if="selected">
-            <div class="muted">{{ selected.node_type }}</div>
-            <h3 class="entity" data-testid="inspector-title">{{ selected.node_id }}</h3>
+            <div class="muted">{{ selected.node_type }} · {{ shortId(selected.node_id) }}</div>
+            <h3 class="entity" :title="selected.node_id" data-testid="inspector-title">{{ caseNodeLabel(selected) }}</h3>
             <div class="chips">
               <span
                 v-for="sid in selectedSources"
@@ -608,7 +632,7 @@ const deadline = computed(() => (store.current ? deadlineOf(store.current) : nul
             agent {{ e.agent_name }} on behalf of {{ e.actor_email }}
           </strong>
           <strong v-else>{{ e.actor_email }}</strong>
-          <span>{{ describeEvent(e) }}</span>
+          <span>{{ describeEvent(e, nameOf) }}</span>
         </div>
         <p v-if="!journal.length" class="muted">Nothing recorded yet.</p>
       </section>
@@ -658,50 +682,10 @@ const deadline = computed(() => (store.current ? deadlineOf(store.current) : nul
   min-height: 0;
 }
 
-.ws-header {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 10px 16px 4px;
-}
-
-.ws-header h1 {
-  margin: 0;
-  font-size: 18px;
-}
-
 .back,
 .muted {
   font-size: 12px;
   color: var(--text-muted);
-}
-
-.agents-link + .agents-link {
-  margin-left: 0;
-}
-
-.agents-link {
-  margin-left: auto;
-  padding: 4px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-pill);
-  font-size: 13px;
-  color: var(--text-color);
-  text-decoration: none;
-}
-
-.status {
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  font-size: 12px;
-  background: var(--color-primary-subtle);
-  color: var(--color-primary);
-}
-
-.status.urgent {
-  background: #c2410c;
-  color: #fff;
-  font-weight: 600;
 }
 
 .tabs {
@@ -857,6 +841,21 @@ const deadline = computed(() => (store.current ? deadlineOf(store.current) : nul
   justify-content: center;
   color: var(--text-muted);
   pointer-events: none;
+}
+
+.empty-canvas {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty-canvas p {
+  margin: 0;
+  max-width: 360px;
+  text-align: center;
+}
+
+.empty-canvas button {
+  pointer-events: auto;
 }
 
 .error-banner {
