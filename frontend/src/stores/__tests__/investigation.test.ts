@@ -7,6 +7,7 @@ vi.mock('@/services/api', () => ({
     getInvestigations: vi.fn(),
     getInvestigation: vi.fn(),
     getInvestigationSources: vi.fn(),
+    getInvestigationFiles: vi.fn(),
     createInvestigation: vi.fn(),
     addInvestigationSource: vi.fn(),
   },
@@ -39,6 +40,24 @@ describe('investigation store', () => {
     expect(api.addInvestigationSource).toHaveBeenCalledWith('inv1', 'e1', 'frozen')
     expect(store.sources.map((s) => s.id)).toEqual(['s1'])
     expect(store.investigations[0].source_count).toBe(2)
+  })
+
+  it('opening another case never shows the previous case files', async () => {
+    vi.mocked(api.getInvestigationSources).mockResolvedValue([])
+    vi.mocked(api.getInvestigation).mockImplementation(async (id: string) => ({ id }) as any)
+    vi.mocked(api.getInvestigationFiles).mockResolvedValueOnce([{ id: 'f1' }] as any)
+    const store = useInvestigationStore()
+    await store.openInvestigation('inv1')
+    expect(store.files.map((f) => f.id)).toEqual(['f1'])
+
+    let release!: (v: any) => void
+    vi.mocked(api.getInvestigationFiles).mockReturnValueOnce(new Promise((r) => (release = r)))
+    const opening = store.openInvestigation('inv2')
+    expect(store.files).toEqual([]) // cleared while inv2 loads
+    release([])
+    await opening
+    expect(store.current?.id).toBe('inv2')
+    expect(store.files).toEqual([])
   })
 
   it('a failed open clears the case and keeps the error', async () => {

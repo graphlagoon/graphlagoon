@@ -12,6 +12,7 @@ vi.mock('@/services/api', () => ({
   api: {
     getInvestigation: vi.fn(),
     getInvestigationSources: vi.fn(),
+    getInvestigationFiles: vi.fn(async () => []),
     getInvestigationSourceSnapshot: vi.fn(),
     getGraphContext: vi.fn(),
     getInvestigationNotes: vi.fn(),

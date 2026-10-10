@@ -8,6 +8,7 @@ vi.mock('@/services/api', () => ({
   api: {
     getInvestigation: vi.fn(),
     getInvestigationSources: vi.fn(async () => []),
+    getInvestigationFiles: vi.fn(async () => []),
     getInvestigationEvents: vi.fn(async () => []),
     getInvestigationProposals: vi.fn(),
     acceptProposal: vi.fn(),
