@@ -126,7 +126,7 @@ def write_status(inv: Any, kind: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Status, deadlines (05 §3, §7)
+# Status, deadlines (05 §3, §7): phases per preset in settings, override per case
 # ---------------------------------------------------------------------------
 
 KIND_PRESETS = ("credito", "garantia", "pix_med", "lavagem", "lojista", "fraude_sintetica", "livre")
@@ -151,9 +151,9 @@ def preset_defaults(kind_preset: Optional[str]) -> dict:
     """``settings`` a new case starts with: the preset's vocabularies."""
     return {"vocabularies": dict(PRESET_DEFAULTS.get(kind_preset or "livre", PRESET_DEFAULTS["livre"]))}
 STATUSES = ("open", "analysis", "decided", "archived")
-PHASE_DAYS = 45
-# Only Pix/MED has phases by default (Circ. 3.978: 45 + 45 days from the alert).
-PRESET_PHASES: dict[str, dict[str, int]] = {"pix_med": {"open": PHASE_DAYS, "analysis": PHASE_DAYS}}
+# Phase names: "selection" runs while the case is open, "analysis" after. A
+# per-case ``deadline_days`` may still spell the first phase "open" (F1).
+PHASES = {"open": ("selection", "open"), "analysis": ("analysis",)}
 
 # Allowed status changes through PATCH. "decided" comes only from the decision
 # route and leaves only through reopen (→ analysis) or archiving.
@@ -179,17 +179,29 @@ def check_transition(inv: Any, new_status: str) -> None:
         )
 
 
+def phase_days(inv: Any) -> dict[str, int]:
+    """Days of each phase: the case's own ``deadline_days``, else the preset's
+    entry in ``settings.investigation_deadline_days``; empty = no deadline."""
+    from graphlagoon.config import get_settings
+
+    phases = inv.deadline_days or get_settings().investigation_deadline_days.get(inv.kind_preset or "") or {}
+    return {k: int(v) for k, v in phases.items() if v}
+
+
 def deadline_of(inv: Any, now: Optional[datetime] = None) -> Optional[dict]:
-    """``{phase, due_at, days_left}`` of an open case whose preset (or
-    ``deadline_days`` override) has phases; None otherwise. Both phases count
-    from ``alert_at`` (or creation): analysis is due open + analysis days later."""
-    phases = inv.deadline_days or PRESET_PHASES.get(inv.kind_preset)
-    start = inv.alert_at or inv.created_at
+    """``{phase, due_at, days_left, total_days}`` of an open case whose preset
+    (or ``deadline_days`` override) has phases; None otherwise. Both phases
+    count from ``alert_at`` (else ``occurred_at``, else creation): analysis is
+    due selection + analysis days after it."""
+    phases = phase_days(inv)
+    start = inv.alert_at or inv.occurred_at or inv.created_at
     if not phases or inv.status not in ("open", "analysis") or start is None:
         return None
-    days = phases.get("open") or PHASE_DAYS
+    days = next((phases[k] for k in PHASES["open"] if k in phases), 0)
     if inv.status == "analysis":
-        days += phases.get("analysis") or PHASE_DAYS
+        days += phases.get("analysis", 0)
+    if not days:
+        return None
     now = now or _clock()
     if (start.tzinfo is None) != (now.tzinfo is None):  # naive DB times vs an aware clock
         start, now = start.replace(tzinfo=None), now.replace(tzinfo=None)
@@ -198,6 +210,7 @@ def deadline_of(inv: Any, now: Optional[datetime] = None) -> Optional[dict]:
         "phase": inv.status,
         "due_at": due,
         "days_left": math.ceil((due - now) / timedelta(days=1)),
+        "total_days": days,
     }
 
 
@@ -597,6 +610,7 @@ _REQUIRED_FIELDS = ("title", "status", "kind_preset", "tags", "settings", "state
 
 async def update_investigation(investigation_id: UUID, user_email: str, changes: dict) -> dict:
     changes = {k: v for k, v in changes.items() if v is not None or k not in _REQUIRED_FIELDS}
+    archive_reason = (changes.pop("archive_reason", None) or "").strip()
     if changes.get("assignee_email"):
         changes["assignee_email"] = nominal_email(changes["assignee_email"])
     async with _session() as session:
@@ -606,6 +620,19 @@ async def update_investigation(investigation_id: UUID, user_email: str, changes:
         # A decided case is read-only, except for closing it (status is outside the frozen hash).
         if set(changes) != {"status"} or changes["status"] != "archived":
             ensure_not_decided(inv)
+        if changes.get("status") == "archived" and inv.status not in ("decided", "archived"):
+            # 05 §7: archived only after a decision, or explicitly without one, with a reason.
+            if not archive_reason:
+                raise InvestigationError(
+                    422,
+                    "ARCHIVE_REASON_REQUIRED",
+                    "A case without a decision is archived only with a reason (archive_reason).",
+                )
+            if get_current_actor():
+                raise InvestigationError(403, "AGENT_FORBIDDEN", "Archiving without a decision is reserved to people.")
+            await append_event(
+                session, investigation_id, user_email, "case.archived_without_decision", {"reason": archive_reason}
+            )
         if "status" in changes:
             if get_current_actor() and write_status(inv, "status_change") == "suggested":
                 # The agent suggests the change in place (05 §6); the case does not move.
@@ -677,7 +704,12 @@ async def delete_investigation(investigation_id: UUID, user_email: str, reason: 
         else:
             await session.delete(inv)
             await session.commit()
-        return meta
+    # Rows first (the retention check above is the gate), then every blob of the
+    # case: item versions and their text extractions live under one prefix.
+    from graphlagoon.services import investigation_storage
+
+    await investigation_storage.get_store().delete_prefix(f"{investigation_id}/")
+    return meta
 
 
 async def share_investigation(investigation_id: UUID, user_email: str, email: str, role: str) -> str:

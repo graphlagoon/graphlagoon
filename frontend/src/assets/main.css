@@ -19,10 +19,19 @@
 
 /* ─── Design Tokens ───────────────────────────────────────────────────────── */
 :root {
-  /* Color – Brand */
-  --color-primary: #14b8a6;
-  --color-primary-hover: #0f9d8c;
-  --color-primary-subtle: rgba(20, 184, 166, 0.12);
+  /* Color – Brand (05 §3: #0f766e is the primary; #14b8a6 only on borders and focus) */
+  --color-primary: #0f766e;
+  --color-primary-hover: #115e59;
+  --color-primary-subtle: rgba(15, 118, 110, 0.12);
+  --color-primary-accent: #14b8a6;
+  --color-primary-accent-subtle: rgba(20, 184, 166, 0.3);
+
+  /* Color – Case screens (05 §3) */
+  --color-suggested-bg: #fffbeb;
+  --color-suggested-fg: #b45309;
+  --color-agent: #475569;
+  --color-agent-subtle: rgba(71, 85, 105, 0.12);
+  --color-deadline-warn: #9a3412;
   --color-secondary: #164e63;
   --color-secondary-hover: #0e3a4a;
 
@@ -125,7 +134,7 @@
   --transition-base: 0.2s ease;
 
   /* Focus ring */
-  --focus-ring: 0 0 0 3px var(--color-primary-subtle);
+  --focus-ring: 0 0 0 3px var(--color-primary-accent-subtle);
   --focus-ring-error: 0 0 0 3px rgba(220, 53, 69, 0.2);
 }
 
@@ -268,13 +277,13 @@ body {
 
 .form-control:focus {
   outline: none;
-  border-color: var(--color-primary);
+  border-color: var(--color-primary-accent);
   box-shadow: var(--focus-ring);
 }
 
 .form-control:focus-visible {
   outline: none;
-  border-color: var(--color-primary);
+  border-color: var(--color-primary-accent);
   box-shadow: var(--focus-ring);
 }
 
@@ -305,7 +314,7 @@ select.form-select:focus,
 select.filter-select:focus,
 select.field-input:focus {
   outline: none;
-  border-color: var(--color-primary);
+  border-color: var(--color-primary-accent);
   box-shadow: var(--focus-ring);
 }
 

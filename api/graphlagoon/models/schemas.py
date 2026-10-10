@@ -1808,6 +1808,9 @@ class InvestigationUpdate(BaseModel):
     tags: Optional[list[str]] = Field(default=None, max_length=50)
     settings: Optional[dict[str, Any]] = None
     state: Optional[dict[str, Any]] = None
+    # Required to archive a case that has no decision (05 §7); journaled as
+    # ``case.archived_without_decision``. Ignored for any other change.
+    archive_reason: Optional[str] = Field(default=None, max_length=2000)
 
 
 class InvestigationShareRequest(BaseModel):

@@ -554,8 +554,11 @@ async def finish(client: SeedClient, url: str, owner: str, final: str, stats: In
         actions = ["dict", "spa"] if outcome == "comunicar" else []
         await client.request("POST", f"{url}/decision", owner,
                              json={"outcome": outcome, "actions": actions, "rationale": rationale})
-    elif status == "archived":
-        await client.request("PATCH", url, owner, json={"status": "archived"})
+    elif status == "archived":  # no decision: the rule (05 §7) wants a reason
+        await client.request(
+            "PATCH", url, owner,
+            json={"status": "archived", "archive_reason": "Arquivado na triagem: sem indícios após a análise inicial."},
+        )
     stats.statuses[status] += 1
 
 

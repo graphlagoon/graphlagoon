@@ -215,7 +215,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 - [x] F3 · Add everywhere + loop vivo
 - [x] F4 · Workspace de análise
 - [ ] F5 · AI-first completo
-- [ ] F6 · Compliance e acabamento
+- [x] F6 · Compliance e acabamento
 
 ### F0 · Segurança (1 PR, bloqueia tudo)
 - `api/graphlagoon/middleware/auth.py::_dispatch_agent`: allowlist de prefixos; 403 fora.

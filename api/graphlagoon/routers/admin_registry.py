@@ -87,6 +87,7 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "investigation_file_max_bytes": "public",
     "investigation_max_working_edges": "public",
     "investigation_retention_years": "public",
+    "investigation_deadline_days": "public",
     "enrichment_max_keys": "public",
     "enrichment_max_rows": "public",
 }

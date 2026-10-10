@@ -61,10 +61,20 @@ _current_actor: ContextVar[Optional[dict]] = ContextVar(
     "graphlagoon_actor", default=None
 )
 
-# token id -> monotonic timestamps of its requests in the last minute.
-# shortcut: per-process memory, so N workers allow N× the limit; move to a
-# shared store if the app runs with several workers.
-_agent_request_times: dict = {}
+AGENT_REQUEST_ACTION = "agent.request"  # usage_logs line per agent request (the shared counter)
+
+
+class _MemoryWindows:
+    """shortcut: fixtures still call ``auth._agent_request_times.clear()``; the
+    windows live on the InMemoryStore now. Drop once the fixtures stop."""
+
+    def clear(self) -> None:
+        from graphlagoon.db.memory_store import get_memory_store
+
+        get_memory_store().agent_request_times.clear()
+
+
+_agent_request_times = _MemoryWindows()
 
 
 def get_current_actor() -> Optional[dict]:
@@ -72,14 +82,52 @@ def get_current_actor() -> Optional[dict]:
     return _current_actor.get()
 
 
-def _agent_rate_limited(token_id, limit_per_minute: int) -> bool:
-    now = time.monotonic()
-    window = _agent_request_times.setdefault(token_id, deque())
-    while window and now - window[0] >= 60:
-        window.popleft()
-    if len(window) >= limit_per_minute:
-        return True
-    window.append(now)
+async def _agent_rate_limited(token_id, owner_email: str, limit_per_minute: int) -> bool:
+    """Sliding minute per token in the shared store: the ``usage_logs`` table in
+    Postgres (every worker counts the same rows), the InMemoryStore otherwise."""
+    from datetime import datetime, timedelta
+
+    from graphlagoon.db.database import get_session_maker, is_database_available
+
+    if not is_database_available():
+        from graphlagoon.db.memory_store import get_memory_store
+
+        now = time.monotonic()
+        window = get_memory_store().agent_request_times.setdefault(token_id, deque())
+        while window and now - window[0] >= 60:
+            window.popleft()
+        if len(window) >= limit_per_minute:
+            return True
+        window.append(now)
+        return False
+
+    from sqlalchemy import func, select
+
+    from graphlagoon.db.models import UsageLog
+
+    now = datetime.now()
+    async with get_session_maker()() as session:
+        count = await session.scalar(
+            select(func.count())
+            .select_from(UsageLog)
+            .where(
+                UsageLog.action == AGENT_REQUEST_ACTION,
+                UsageLog.resource_id == token_id,
+                UsageLog.created_at >= now - timedelta(seconds=60),
+            )
+        )
+        if (count or 0) >= limit_per_minute:
+            return True
+        session.add(
+            UsageLog(
+                user_email=owner_email,
+                action=AGENT_REQUEST_ACTION,
+                resource_type="agent_token",
+                resource_id=token_id,
+                created_at=now,
+            )
+        )
+        await session.commit()
     return False
 
 
@@ -263,7 +311,7 @@ async def authenticate_agent(raw_token: str):
             "INVALID_AGENT_TOKEN",
             "The agent token is invalid, expired or revoked.",
         )
-    if _agent_rate_limited(token["id"], settings.agent_rate_limit_per_minute):
+    if await _agent_rate_limited(token["id"], token["owner_email"], settings.agent_rate_limit_per_minute):
         return None, _error(
             429,
             "AGENT_RATE_LIMITED",

@@ -7,6 +7,7 @@
 import { computed, ref, watch } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import type { PathsContent } from '@/composables/useCaseAnalyses';
+import { formatDate } from '@/utils/format';
 
 const props = defineProps<{ content: PathsContent; nameOf: (id: string) => string }>();
 const graphStore = useGraphStore();
@@ -44,7 +45,7 @@ watch(
     <span v-if="!content.paths.length" data-testid="path-none">no path</span>
     <span v-else-if="current" data-testid="path-result">
       {{ current.nodes.map(nameOf).join(' → ') }} · {{ current.edges.length }} {{ current.edges.length === 1 ? 'hop' : 'hops' }}
-      <template v-if="content.params.mode === 'earliest'"> · arrives {{ new Date(current.cost).toLocaleString() }}</template>
+      <template v-if="content.params.mode === 'earliest'"> · chega {{ formatDate(current.cost) }}</template>
     </span>
     <span v-if="content.paths.length > 1" class="pager">
       <button :disabled="index === 0" @click="show(index - 1)">‹</button>

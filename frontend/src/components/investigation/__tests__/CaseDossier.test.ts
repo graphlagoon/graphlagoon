@@ -66,17 +66,17 @@ describe('CaseDossier (mode=dossie)', () => {
     expect(summary).toContain('Pix de R$ 4.870')
     expect(summary).toContain('Resumo do agente')
     expect(summary).toContain('CC 4.001 IV-k · Conta de passagem')
-    expect(summary).toContain('Pix with MED')
+    expect(summary).toContain('Pix com MED')
     expect(summary).toContain('2 Mule')
     expect(getByTestId('dossier-group-grp').textContent).toContain('Cluster sintético · 2')
     const ind = getByTestId('dossier-indicators').textContent!
-    expect(ind).toMatch(/2\s*Graphs\s*1 restricted/)
-    expect(ind).toMatch(/2\s*Evidence/)
-    expect(ind).toContain('1 supported · 0 open · 0 refuted')
-    expect(ind).toMatch(/1\s*Suggestions/)
+    expect(ind).toMatch(/2\s*Grafos\s*1 restrito/)
+    expect(ind).toMatch(/2\s*Evidências/)
+    expect(ind).toContain('1 sustentada(s) · 0 aberta(s) · 0 refutada(s)')
+    expect(ind).toMatch(/1\s*Sugestões/)
 
     expect(getByTestId('hypothesis-evidence_for-H1').textContent).toContain('E1 Rastreio FIFO, 2 camadas')
-    expect(getByTestId('hypothesis-evidence_against-H1').textContent).toContain('none')
+    expect(getByTestId('hypothesis-evidence_against-H1').textContent).toContain('nenhuma')
     const e1 = getByTestId('evidence-e1').textContent!
     expect(e1).toContain('E1 · Rastreio FIFO, 2 camadas')
     expect(e1).toContain('hash 7c1e…90ab')
@@ -131,9 +131,10 @@ describe('CaseDossier (mode=dossie)', () => {
       outcome: 'comunicar', actions: ['dict'], rationale: 'Conta de passagem (E1).', reviewer_email: 'rev@x.com',
     })
     expect(queryByTestId('decision-form')).toBeNull()
-    expect(getByTestId('decision-outcome').textContent).toContain('Communicate to COAF')
+    expect(getByTestId('decision-outcome').textContent).toContain('Comunicar ao COAF')
     expect(getByTestId('decision-hash').textContent).toContain('ffff…beef')
-    expect(getByTestId('dossier-decision').textContent).toContain('reviewer rev@x.com')
+    expect(getByTestId('dossier-decision').textContent).toContain('revisor rev@x.com')
+    expect(getByTestId('dossier-decision').textContent).toContain('09/10/2026 15:00')
     expect(queryByTestId('hypothesis-input')).toBeNull()
   })
 

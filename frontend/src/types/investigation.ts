@@ -22,7 +22,7 @@ export interface Investigation {
   /** {open, analysis} days; overrides the preset's phases (Pix/MED: 45 + 45 from alert_at). */
   deadline_days?: Record<string, number> | null;
   /** Computed by the server; null without phases or once decided/archived. */
-  deadline?: { phase: 'open' | 'analysis'; due_at: string; days_left: number } | null;
+  deadline?: { phase: 'open' | 'analysis'; due_at: string; days_left: number; total_days?: number } | null;
   tags: string[];
   /** identity_keys, edge_semantics, enrichment_tables, agent_suggest_kinds, label_templates, vocabularies */
   settings: Record<string, unknown>;
@@ -83,6 +83,8 @@ export interface UpdateInvestigationRequest {
   tags?: string[];
   settings?: Record<string, unknown>;
   state?: Record<string, unknown>;
+  /** Required to archive a case without a decision (05 §7); journaled. */
+  archive_reason?: string;
 }
 
 // ---------------------------------------------------------------------------

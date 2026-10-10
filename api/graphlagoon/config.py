@@ -205,6 +205,13 @@ class Settings(BaseSettings):
         description="Years a decided investigation is retained (not deletable "
         "without a superuser's reason) after its decision",
     )
+    investigation_deadline_days: dict[str, dict[str, int]] = Field(
+        default={"pix_med": {"selection": 45, "analysis": 45}},
+        description="Deadline phases per case type (kind_preset), in days from "
+        "the alert (JSON: {preset: {selection, analysis}}). Pix/MED: 45 + 45 "
+        "(Circ. 3.978). A case without an entry has no deadline unless it sets "
+        "deadline_days itself.",
+    )
     enrichment_max_keys: int = Field(
         default=500, description="Maximum node keys in one enrichment lookup"
     )

@@ -428,63 +428,82 @@ with `{kind: "hypothesis", value: {text, status?, evidence_for?, evidence_agains
 annotation on it (open, supported, refuted). Agents read it all with
 `list_annotations` and suggest with `annotate`.
 
+## Deadlines
+
+The header and the queue show the case's **deadline** when its type has
+phases: *seleção* while the case is open, then *análise*. Both count from the
+case's `alert_at` (else `occurred_at`, else its creation). The days per phase
+come from `GRAPH_LAGOON_INVESTIGATION_DEADLINE_DAYS` (JSON by case type;
+default `{"pix_med": {"selection": 45, "analysis": 45}}`, Circ. 3.978) and a
+case may override them in its settings (⚙ → prazos, `deadline_days`). A type
+without an entry has no deadline. Under 7 days left the badge turns orange
+(`#9a3412`); the bar shows how much of the phase is used. The API returns it as
+`deadline: {phase, due_at, days_left, total_days}`, `null` once decided or
+archived.
+
 ## Decision, freeze and retention
 
-Pick the **outcome** (*Communicate to COAF via Siscoaf* or *Archive with a
-rationale*), the **actions** taken with it (flag the accounts in DICT,
-notify the SPA, request a precautionary block) and write the **rationale**,
-citing the evidence. The app records these actions; it does not perform them
-(there is no DICT, SPA or Siscoaf connection). **Record decision** then, in
-one step:
+Pick the **outcome** (*Comunicar ao COAF via Siscoaf*, *Arquivar com
+fundamentação*, *Medida cautelar* or *Apenas parecer*), the **actions** taken
+with it (DICT, SPA, bloqueio cautelar) and write the **rationale**, pre-filled
+with the supported hypotheses and the pinned evidence. The app records these
+actions; it does not perform them (there is no DICT, SPA or Siscoaf
+connection). **Registrar decisão** then, in one step:
 
-1. freezes every **live** source (the same frozen copy with sha256 that
-   adding a source as *frozen* makes), so the case no longer follows the
-   explorations it points at;
-2. writes `decision.recorded` to the journal, with the outcome, actions,
-   rationale and the hash of each source it froze;
-3. computes the case's **frozen hash**: the sha256 of the canonical record of
-   the case (title, description, typology, origin and the decision; state with
-   roles and hypotheses; sources with their hashes; files and evidence with
-   their hashes; journal up to the decision). The dossier shows it next to the
-   decision.
+1. writes `decision.recorded` to the journal, with the outcome, actions,
+   rationale and reviewer;
+2. computes the case's **frozen hash**: the sha256 of the canonical JSON
+   (sorted keys) of the case and its decision, the **pinned versions** (item,
+   version, sha256, label, who pinned) and the **journal up to the decision**;
+3. sets `status: "decided"` and `frozen_at`.
 
-From then on the case is **read-only**: every change (edit, roles, notes,
-evidence, hypotheses, sources, files, proposals, matches, artifacts, another
-decision) answers `409 INVESTIGATION_DECIDED`. Sharing still works, so an
-auditor can be given access; that line goes to the journal after the
-decision and stays out of the hash, so the hash can be recomputed and
-compared at any time (the JSON export does it, see below).
+From then on the case is **read-only**: every change answers
+`409 INVESTIGATION_DECIDED`, except archiving it and sharing it (an auditor can
+be given access). Those lines go to the journal after the decision and stay out
+of the hash, so it can be recomputed and compared at any time: every export
+does (see below).
 
-The decision is a person's: owner, assignee or a *write* share records it,
-once. Agents cannot (LGPD art. 20; agents suggest, people decide).
+The decision is a person's: owner, assignee or an editor share records it,
+once. Agents cannot (LGPD art. 20; agents suggest, people decide). **Reabrir**
+(decided → analysis, people only) clears the decision and the hash from the
+case; both stay in the journal (`case.reopened`).
+
+**Archiving.** `archived` is reached from `decided`, or from an open case with
+an explicit reason: the status select asks for it and sends
+`{status: "archived", archive_reason}`; without one the API answers
+`422 ARCHIVE_REASON_REQUIRED`. The reason is journaled as
+`case.archived_without_decision`. Agents cannot archive without a decision.
 
 **Retention.** A decided case cannot be deleted for
 `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` (default 10) after its
 decision: `DELETE` answers `409 INVESTIGATION_RETAINED`, except for a
 superuser who gives a reason (`DELETE /api/investigations/{id}?reason=…`),
-which the audit log records.
+which the audit log records. Deleting a case removes its rows and **every
+blob** of the case from the storage (item versions and their text
+extractions).
 
 API: `POST /api/investigations/{id}/decision` with
-`{outcome: "comunicar" | "arquivar", actions: ["dict" | "spa" | "bloqueio_cautelar"], rationale}`;
-returns the case with `status: "decidido"`, `decision`, `frozen_hash` and
+`{outcome: "comunicar" | "arquivar" | "medida" | "parecer", actions: ["dict" | "spa" | "bloqueio_cautelar"], rationale, reviewer_email?}`;
+returns the case with `status: "decided"`, `decision`, `frozen_hash` and
 `frozen_at`. Recording is audited (`investigation.decide`).
 
 ## Exports
 
-The decision panel also exports the case, for people with the
-`investigation.export` permission (the buttons are hidden without it). Each
-export is a download, generated on request from what you can read, in any
-status, and recorded in the audit log with its format and sha256. Exporting
-is a read: it adds nothing to the journal, so the frozen hash stays
-reproducible.
+The dossier and the decision panel export the case. Each export is a download,
+generated on request from what you can read, in any status, and recorded in
+the audit log with its format and sha256. Exporting is a read: it adds nothing
+to the journal, so the frozen hash stays reproducible. Every format
+**recomputes the frozen hash** and reports
+`integrity: {frozen_hash, verified}` (`verified: null` while undecided,
+`false` when a pinned version or a journal line no longer matches).
 
 | Button | Format | What it holds |
 |---|---|---|
-| **Siscoaf summary** | `siscoaf` (JSON) | The decision, the involved entities with their role, type, name, document and account, the transactions that touch them (count, total, first and last date), the accepted CC 4.001 badges, a narrative (description + rationale), evidence (E1, E2, … with hashes), trace methods, file hashes and the frozen hash. To paste into Siscoaf: the app has no Siscoaf connection and sends nothing |
-| **Package JSON** | `json` | The whole case record: case and decision, the frozen hash and whether it still verifies (`frozen_hash_valid`), roles, hypotheses, sources (redacted as on screen), files, evidence and trace methods with their hashes, notes and the journal |
-| **CSV** | `csv` | The same record flattened, one row per item (`section, id, title, kind, sha256, detail, actor, at`), safe against spreadsheet formulas: a cell starting with `=`, `+`, `-`, `@`, tab or CR gets a leading `'` |
-| **SIMBA layout** | `simba` (zip) | The case's transactions as `…_EXTRATO.TXT`, `…_ORIGEM_DESTINO.TXT` and `…_TITULARES.TXT` (SIMBA v3.1: TAB, Latin-1, ddmmyyyy, cents) plus `MANIFEST.json` with the hashes and trace methods. The *SIMBA v3.1* import preset reads it back |
-| **Laudo PDF** | print | The dossier printed by the browser (*Save as PDF*): summary, hypotheses, evidence with method stamps and hashes, the full journal, the decision with the frozen hash, and the hashes of every source and file. Navigation and controls are left out |
+| **Resumo Siscoaf** | `siscoaf` (JSON) | The decision, the involved entities with their role, type, name, document and account, the transactions that touch them (count, total, first and last date), the confirmed CC 4.001 badges, a narrative (description + rationale), evidence (E1, E2, … with hashes), the tables flagged for the dossier, trace methods and `integrity`. To paste into Siscoaf: the app has no Siscoaf connection and sends nothing |
+| **Pacote JSON** | `json` | The whole case record: case and decision, `integrity`, roles, hypotheses, annotations, every item with its versions, `evidence` (the pinned versions), `dossier` (the latest run of each table flagged *usar no dossiê*), trace methods and the journal |
+| **CSV** | `csv` | The same record flattened, one row per item (`section, id, title, kind, sha256, detail, actor, at`; sections `case, decision, item, evidence, dossier, annotation, event`), through `utils/csv_safe`: a cell starting with `=`, `+`, `-`, `@`, tab or CR gets a leading `'` |
+| **Layout SIMBA** | `simba` (zip) | The case's transactions as `…_EXTRATO.TXT`, `…_ORIGEM_DESTINO.TXT` and `…_TITULARES.TXT` (SIMBA v3.1: TAB, Latin-1, ddmmyyyy, cents) plus `MANIFEST.json` with the hashes, the verification and the trace methods. The *SIMBA v3.1* import preset reads it back |
+| **Laudo PDF** | print | The dossier printed by the browser (*Salvar como PDF*): summary, hypotheses, evidence with method stamps and hashes, the full journal, the decision with the frozen hash, and the hashes of every item. Navigation and controls are left out |
 
 How the SIMBA layout is written: each transaction (an edge with an amount) is
 a lançamento of the end that has an account (`banco`, `agencia`, `conta`
@@ -495,7 +514,7 @@ exported.
 
 API: `GET /api/investigations/{id}/export?format=json|csv|simba|siscoaf`.
 Agents cannot export (exports leave the app with unmasked data); they read
-the case with `get_brief`, `list_items` and `get_item`.
+the case through the MCP tools.
 
 ## Case space
 

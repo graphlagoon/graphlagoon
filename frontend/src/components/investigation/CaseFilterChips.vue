@@ -13,6 +13,7 @@ import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { ROLE_LABELS } from '@/utils/graphAppearance';
 import type { CaseItem, CaseViewContent } from '@/types/investigation';
+import { formatDate } from '@/utils/format';
 
 const props = defineProps<{ canEdit: boolean }>();
 const emit = defineEmits<{ 'apply-view': [content: CaseViewContent] }>();
@@ -62,7 +63,7 @@ const chips = computed<Chip[]>(() => [
 const windowLabel = computed(() => {
   const w = filters.window;
   if (!w) return null;
-  const f = (t: number) => new Date(t).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const f = (t: number) => formatDate(t).slice(0, 5) + formatDate(t).slice(10); // dd/mm HH:mm
   return `${f(w[0])} – ${f(w[1])}`;
 });
 

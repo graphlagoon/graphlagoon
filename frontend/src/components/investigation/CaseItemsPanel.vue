@@ -16,6 +16,8 @@ import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { useAddToCase } from '@/composables/useAddToCase';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { formatRelative } from '@/utils/format';
+import { ITEM_KIND_PLURALS } from '@/utils/investigationStatus';
 import type { CaseItem, ItemKind } from '@/types/investigation';
 
 const props = defineProps<{ canEdit: boolean; activeItem?: string | null }>();
@@ -72,11 +74,11 @@ function toggleExpand(id: string) {
 }
 
 const GROUPS: { kind: ItemKind; label: string; icon: typeof GitBranch }[] = [
-  { kind: 'graph', label: 'Graphs', icon: GitBranch },
-  { kind: 'query', label: 'Queries', icon: Terminal },
-  { kind: 'table', label: 'Tables', icon: Table2 },
-  { kind: 'document', label: 'Documents', icon: FileText },
-  { kind: 'note', label: 'Notes', icon: StickyNote },
+  { kind: 'graph', label: ITEM_KIND_PLURALS.graph, icon: GitBranch },
+  { kind: 'query', label: ITEM_KIND_PLURALS.query, icon: Terminal },
+  { kind: 'table', label: ITEM_KIND_PLURALS.table, icon: Table2 },
+  { kind: 'document', label: ITEM_KIND_PLURALS.document, icon: FileText },
+  { kind: 'note', label: ITEM_KIND_PLURALS.note, icon: StickyNote },
 ];
 const PREFIX: Record<ItemKind, string> = { graph: 'G', query: 'Q', table: 'T', document: 'D', note: 'N' };
 
@@ -178,7 +180,7 @@ function rerun(item: CaseItem) {
 
 const authorChip = (item: CaseItem) => (item.author_kind === 'agent' ? 'agent' : item.author_email === auth.email ? 'you' : item.author_email.split('@')[0]);
 const lastRun = (item: CaseItem) => item.latest?.run as { row_count?: number; duration_ms?: number; run_by?: string; author_kind?: string } | null | undefined;
-const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '');
+const timeAgo = (iso?: string | null) => formatRelative(iso);
 </script>
 
 <template>
@@ -403,9 +405,9 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
 .suggested-count {
   padding: 1px 8px;
   border-radius: var(--radius-pill);
-  background: #fffbeb;
-  border: 1px solid #b45309;
-  color: #b45309;
+  background: var(--color-suggested-bg);
+  border: 1px solid var(--color-suggested-fg);
+  color: var(--color-suggested-fg);
   font-size: 11px;
 }
 
@@ -477,8 +479,8 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
 }
 
 .item.suggested {
-  background: #fffbeb;
-  border: 1px dashed #b45309;
+  background: var(--color-suggested-bg);
+  border: 1px dashed var(--color-suggested-fg);
 }
 
 .item.rejected {
@@ -522,8 +524,8 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
 }
 
 .chip.agent {
-  background: #ede9fe;
-  color: #5b21b6;
+  background: var(--color-agent-subtle);
+  color: var(--color-agent);
 }
 
 .badge {
@@ -538,7 +540,7 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
 }
 
 .suggested-badge {
-  color: #b45309;
+  color: var(--color-suggested-fg);
 }
 
 .actions {
