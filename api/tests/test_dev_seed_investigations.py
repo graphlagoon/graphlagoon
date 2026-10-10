@@ -1,5 +1,6 @@
 """The investigations dev seed, run in-process against the whole API (memory mode)."""
 
+import json
 import sys
 
 import pytest
@@ -31,11 +32,12 @@ from fastapi import FastAPI  # noqa: E402
 from graphlagoon.app import create_api_router  # noqa: E402
 from graphlagoon.config import get_settings  # noqa: E402
 from graphlagoon.db.memory_store import InMemoryStore  # noqa: E402
-from graphlagoon.dev.seed import ADMIN_EMAIL, run_seed  # noqa: E402
+from graphlagoon.dev.seed import ADMIN_EMAIL  # noqa: E402
 from graphlagoon.dev.seed_investigations import MARKER, run_seed_investigations  # noqa: E402
 from graphlagoon.middleware import auth  # noqa: E402
-from graphlagoon.services import investigation_evidence, investigation_storage  # noqa: E402
+from graphlagoon.services import case_items, investigation_storage  # noqa: E402
 from graphlagoon.services.blob_storage import LocalBlobStore  # noqa: E402
+from graphlagoon.services.case_graph import case_graph  # noqa: E402
 
 
 @pytest.fixture
@@ -68,43 +70,46 @@ def in_process(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_seeds_every_status_artifacts_and_proposals_then_resets(in_process):
+async def test_seeds_the_four_scenarios_on_items_and_annotations_then_resets(in_process):
     store = in_process
     quiet = lambda *_: None  # noqa: E731
-    await run_seed(
-        "http://testserver", users=5, contexts=10, explorations=30, graphs=1, seed=1,
-        no_graphs=True, log=quiet,
-    )
-    regular = {i.id for i in store.investigations.values()}
-
     stats = await run_seed_investigations("http://testserver", cases=6, log=quiet)
 
     seeded = [i for i in store.investigations.values() if MARKER in (i.description or "")]
-    assert len(seeded) == 6
-    assert {i.status for i in seeded} == {"selecao", "analise", "arquivado", "decidido"}
+    assert len(seeded) == 6 and stats.agent
+    assert {i.kind_preset for i in seeded} >= {"credito", "garantia", "pix_med", "fraude_sintetica"}
+    assert {i.status for i in seeded} == {"open", "analysis", "decided", "archived"}
     assert {i.decision["outcome"] for i in seeded if i.decision} == {"comunicar", "arquivar"}
-    artifacts = store.list_investigation_children("investigation_artifacts", seeded[0].id)
-    assert stats.artifacts >= 6 and len(artifacts) == 5
-    versions = [
-        v for i in seeded for v in store.list_investigation_children("investigation_artifact_versions", i.id)
-    ]
-    assert len(versions) == stats.versions and {v.status for v in versions} == {"draft", "approved"}
-    assert all(v.actor["kind"] == "agent" for v in versions)
-    assert set(stats.proposals) == {"accepted", "pending", "rejected"}
-    assert {"aceito", "recusado", "adiado", "sugerido"} <= set(stats.matches)
-    assert stats.live_sources >= 2 and stats.badges >= 1
-    # The flagship SIMBA case has a trace evidence with money reaching an exit.
+    assert not store.graph_contexts and not store.explorations  # no context per upload (05 §1)
+    items = list(store.case_items.values())
+    assert {i.kind for i in items} == {"table", "query", "document", "note"}
+    assert stats.items["table"] >= 8 and stats.pinned >= 2 and stats.suggested >= 5
+    assert {i.author_kind for i in items} == {"human", "agent"}
+    annotations = list(store.case_annotations.values())
+    assert {a.kind for a in annotations} >= {"role", "group", "tag", "hypothesis", "hypothesis_status", "same_as", "typology"}
+    assert any(a.status == "suggested" and a.author_kind == "agent" for a in annotations)
+
+    # Every scenario puts a graph on the canvas from a mapped table, no context involved.
+    for inv in seeded:
+        graph = await case_graph(inv.id, inv.owner_email)
+        assert graph["nodes"], inv.title
+    synthetic = next(i for i in seeded if i.kind_preset == "fraude_sintetica")
+    types = {n["type"] for n in (await case_graph(synthetic.id, synthetic.owner_email))["nodes"]}
+    assert types >= {"Pessoa", "Telefone", "Email", "Dispositivo", "IP", "Cartao", "Terminal", "Endereco"}
+    credito = next(i for i in seeded if i.kind_preset == "credito")
+    kinds = {(i.kind, i.subkind) for i in items if i.investigation_id == credito.id}
+    assert {("query", "sql"), ("document", "brief"), ("table", "csv")} <= kinds
+
+    # The flagship Pix/MED case: the T5 golpe-pix scenario as SIMBA, trace saved and pinned.
     flagship = next(i for i in seeded if i.title.startswith("Golpe Pix · falsa central"))
-    trace = next(
-        e for e in store.list_investigation_children("investigation_evidence", flagship.id) if e.kind == "trace"
-    )
-    assert trace is not None and stats.flagship.endswith(str(flagship.id))
-    # It is the T5 golpe-pix scenario: FIFO reaches Saque ATM, Exchange Gama and Bet Delta (91%).
-    frozen = await investigation_evidence.get_evidence(flagship.id, flagship.owner_email, trace.id)
-    assert (sorted(frozen["snapshot"]["exits"].values()), frozen["snapshot"]["coverage"]) == ([880, 1550, 2000], 0.9097)
+    assert stats.flagship.endswith(str(flagship.id))
+    trace_item = next(i for i in items if i.investigation_id == flagship.id and (i.provenance or {}).get("tool") == "trace")
+    data, version, _ = await case_items.get_content(flagship.id, flagship.owner_email, trace_item.id)
+    trace = json.loads(data)
+    assert version["pinned_at"] and (sorted(trace["exits"].values()), trace["coverage"]) == ([880, 1550, 2000], 0.9097)
+    brief = await case_items.get_brief(flagship.id, flagship.owner_email)
+    assert brief["item"]["author_kind"] == "agent" and "FIFO" in brief["text"]
 
     again = await run_seed_investigations("http://testserver", cases=2, reset=True, log=quiet)
     assert again.deleted == 6
-    left = [i for i in store.investigations.values() if MARKER in (i.description or "")]
-    assert len(left) == 2
-    assert regular <= set(store.investigations)  # the regular seed's cases are untouched
+    assert len([i for i in store.investigations.values() if MARKER in (i.description or "")]) == 2

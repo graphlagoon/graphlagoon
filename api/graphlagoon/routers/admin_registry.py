@@ -94,15 +94,10 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
 # Tables wiped by "clear environment", in an order that respects foreign keys
 # (children first). services.environment consumes this list directly.
 CLEARABLE_TABLES: tuple[str, ...] = (
-    "investigation_proposals",
-    "investigation_artifact_versions",
-    "investigation_artifacts",
-    "entity_matches",
-    "investigation_evidence",
-    "investigation_notes",
+    "case_item_versions",
+    "case_items",
+    "case_annotations",
     "investigation_events",
-    "investigation_sources",
-    "investigation_files",
     "investigation_shares",
     "investigations",
     "exploration_shares",
@@ -111,6 +106,8 @@ CLEARABLE_TABLES: tuple[str, ...] = (
     "query_templates",
     "graph_contexts",
     "agent_tokens",
+    "org_library",
+    "org_vocabularies",
     "permission_rules",
     "group_members",
     "permission_modes",
@@ -153,9 +150,8 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("DELETE", "/api/investigations/{investigation_id}"),
         ("POST", "/api/investigations/{investigation_id}/share"),
         ("DELETE", "/api/investigations/{investigation_id}/share/{email}"),
-        ("POST", "/api/investigations/{investigation_id}/sources"),
-        ("DELETE", "/api/investigations/{investigation_id}/sources/{source_id}"),
-        ("POST", "/api/investigations/{investigation_id}/files"),
+        ("POST", "/api/investigations/{investigation_id}/items"),
+        ("DELETE", "/api/investigations/{investigation_id}/items/{item_id}"),
         ("POST", "/api/investigations/{investigation_id}/decision"),
         ("POST", "/api/investigations/{investigation_id}/reopen"),
         ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"),
@@ -225,42 +221,25 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
         "read-only analysis; journaled as path.run when the case is writable"
     ),
     ("POST", "/api/investigations/{investigation_id}/analysis/typologies"): (
-        "read-only analysis; accepting a badge is journaled as typology.accepted"
+        "read-only analysis; a person confirms a badge as a typology annotation"
     ),
     **{
-        route: "recorded in the case's immutable, hash-chained journal"
+        route: "recorded in the case's append-only journal (frozen_hash covers it)"
         for route in (
             ("POST", "/api/investigations/{investigation_id}/events"),
-            ("PATCH", "/api/investigations/{investigation_id}/state"),
-            ("POST", "/api/investigations/{investigation_id}/notes"),
-            ("POST", "/api/investigations/{investigation_id}/evidence"),
-            ("POST", "/api/investigations/{investigation_id}/hypotheses"),
-            ("PATCH", "/api/investigations/{investigation_id}/hypotheses/{hypothesis_id}"),
-            ("PATCH", "/api/investigations/{investigation_id}/notes/{note_id}"),
-            ("DELETE", "/api/investigations/{investigation_id}/notes/{note_id}"),
-            ("POST", "/api/investigations/{investigation_id}/artifacts"),
-            (
-                "POST",
-                "/api/investigations/{investigation_id}/artifacts/{artifact_id}/versions",
-            ),
-            (
-                "POST",
-                "/api/investigations/{investigation_id}/artifacts/{artifact_id}"
-                "/versions/{version}/approve",
-            ),
-            ("PATCH", "/api/investigations/{investigation_id}/files/{file_id}"),
-            ("POST", "/api/investigations/{investigation_id}/files/{file_id}/context"),
-            ("POST", "/api/investigations/{investigation_id}/proposals"),
-            (
-                "POST",
-                "/api/investigations/{investigation_id}/proposals/{proposal_id}/accept",
-            ),
-            (
-                "POST",
-                "/api/investigations/{investigation_id}/proposals/{proposal_id}/reject",
-            ),
-            ("POST", "/api/investigations/{investigation_id}/matches"),
-            ("PATCH", "/api/investigations/{investigation_id}/matches/{match_id}"),
+            ("PATCH", "/api/investigations/{investigation_id}/items/{item_id}"),
+            ("POST", "/api/investigations/{investigation_id}/items/{item_id}/versions"),
+            ("POST", "/api/investigations/{investigation_id}/items/{item_id}/pin"),
+            ("POST", "/api/investigations/{investigation_id}/items/{item_id}/confirm"),
+            ("POST", "/api/investigations/{investigation_id}/items/{item_id}/reject"),
+            ("POST", "/api/investigations/{investigation_id}/items/{item_id}/run"),
+            ("POST", "/api/investigations/{investigation_id}/annotations"),
+            ("PATCH", "/api/investigations/{investigation_id}/annotations/{annotation_id}"),
+            ("DELETE", "/api/investigations/{investigation_id}/annotations/{annotation_id}"),
+            ("POST", "/api/investigations/{investigation_id}/annotations/{annotation_id}/confirm"),
+            ("POST", "/api/investigations/{investigation_id}/annotations/{annotation_id}/reject"),
+            ("POST", "/api/investigations/{investigation_id}/analysis/er"),
+            ("PUT", "/api/investigations/{investigation_id}/brief"),
         )
     },
 }

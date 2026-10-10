@@ -229,7 +229,8 @@ class TestPermissions:
             "exploration.save",
             "investigation.agent",
             "investigation.create",
-            "investigation.export",
+            "investigation.decide",
+            "investigation.share",
             "investigation.upload",
         ]
         assert all(p["mode"] == "everyone" and p["rules"] == [] for p in payload["items"])

@@ -72,12 +72,8 @@ def client(env):
     return TestClient(app)
 
 
-def mint(client, email=OWNER, scopes=("read", "write"), **extra):
-    r = client.post(
-        "/api/agent-tokens",
-        json={"name": "claude", "scopes": list(scopes), **extra},
-        headers=h(email),
-    )
+def mint(client, email=OWNER, **extra):
+    r = client.post("/api/agent-tokens", json={"name": "claude", **extra}, headers=h(email))
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -96,8 +92,9 @@ def test_token_shown_once_and_acts_for_owner_in_the_journal(client):
     assert case.status_code == 201, case.text
     assert case.json()["owner_email"] == OWNER
     url = f"/api/investigations/{case.json()['id']}"
-    note = client.post(f"{url}/notes", json={"body": "mule"}, headers=agent)
+    note = client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": "mule"}, headers=agent)
     assert note.status_code == 201, note.text
+    assert note.json()["author_kind"] == "agent" and note.json()["agent_token_id"] == created["id"]
 
     events = client.get(f"{url}/events", headers=h(OWNER)).json()
     assert {e["actor_kind"] for e in events} == {"agent"}
@@ -124,14 +121,14 @@ def test_expired_or_revoked_token_is_401(client):
 
 
 def test_agent_on_human_only_routes_is_403_even_for_superuser_owner(client):
-    agent = bearer(mint(client, SUPERUSER, scopes=("read", "write"))["token"])
+    agent = bearer(mint(client, SUPERUSER)["token"])
     case = client.post("/api/investigations", json={"title": "Pix"}, headers=agent)
     url = f"/api/investigations/{case.json()['id']}"
     for method, path, body in (
         ("DELETE", url, None),
         ("POST", f"{url}/share", {"email": "x@example.com", "permission": "read"}),
         ("DELETE", f"{url}/share/x@example.com", None),
-        ("POST", "/api/agent-tokens", {"name": "n", "scopes": ["read"]}),
+        ("POST", "/api/agent-tokens", {"name": "n"}),
         ("GET", "/api/agent-tokens", None),
         ("GET", "/api/admin/overview", None),
         ("GET", "/api/admin/agent-tokens", None),
@@ -143,11 +140,10 @@ def test_agent_on_human_only_routes_is_403_even_for_superuser_owner(client):
     assert client.delete(url, headers=h(SUPERUSER)).status_code == 200
 
 
-def test_scopes_are_kept_but_no_longer_enforced(client):
-    # F0 (05 §6): the agent does what its owner can; the scopes column stays
-    # until the token UI drops it.
-    token = mint(client, scopes=("read",))
-    assert token["scopes"] == ["read"] and token["scope"] == "user"
+def test_tokens_have_no_scopes_the_agent_acts_as_its_owner(client):
+    # 05 §6: identity plus a short human-only list; no read/analyze/write scopes.
+    token = mint(client, scopes=["read"])  # ignored
+    assert "scopes" not in token and token["scope"] == "user"
     agent = bearer(token["token"])
     assert client.get("/api/investigations", headers=agent).status_code == 200
     r = client.post("/api/investigations", json={"title": "Pix"}, headers=agent)
@@ -157,11 +153,7 @@ def test_scopes_are_kept_but_no_longer_enforced(client):
 def test_case_scoped_token_reaches_only_its_cases(client):
     a = client.post("/api/investigations", json={"title": "A"}, headers=h(OWNER)).json()
     b = client.post("/api/investigations", json={"title": "B"}, headers=h(OWNER)).json()
-    r = client.post(
-        "/api/agent-tokens",
-        json={"name": "n", "scopes": ["read"], "scope": "case"},
-        headers=h(OWNER),
-    )
+    r = client.post("/api/agent-tokens", json={"name": "n", "scope": "case"}, headers=h(OWNER))
     assert r.status_code == 422  # a case token names its cases
     agent = bearer(
         mint(client, scope="case", investigation_ids=[a["id"]])["token"]
@@ -170,7 +162,7 @@ def test_case_scoped_token_reaches_only_its_cases(client):
     r = client.get(f"/api/investigations/{b['id']}", headers=agent)
     assert r.status_code == 403
     assert r.json()["detail"]["error"]["code"] == "AGENT_FORBIDDEN"
-    r = client.get(f"/api/investigations/{b['id']}/notes", headers=agent)
+    r = client.get(f"/api/investigations/{b['id']}/items", headers=agent)
     assert r.status_code == 403
     listed = client.get("/api/investigations", headers=agent).json()
     assert [i["id"] for i in listed] == [a["id"]]
@@ -181,7 +173,7 @@ def test_case_scoped_token_reaches_only_its_cases(client):
         {"kind": "agent", "scope": "case", "investigation_ids": [a["id"]]}
     )
     try:
-        from graphlagoon.services.investigations import can_read_case
+        from graphlagoon.services.cases import can_read_case
 
         store = InMemoryStore.get_instance()
         assert can_read_case(store.get_investigation(UUID(a["id"])), OWNER)
@@ -243,41 +235,38 @@ def case_with_source(client, env, tmp_path):
     case = client.post("/api/investigations", json={"title": "A"}, headers=h(OWNER)).json()
     url = f"/api/investigations/{case['id']}"
     r = client.post(
-        f"{url}/sources", json={"exploration_id": str(exploration.id)}, headers=h(OWNER)
+        f"{url}/items",
+        json={"kind": "graph", "subkind": "exploration_ref", "exploration_id": str(exploration.id)},
+        headers=h(OWNER),
     )
     assert r.status_code == 201, r.text
     return url, r.json()["id"], exploration
 
 
 def test_rest_reads_are_masked_for_agents(client, env, case_with_source):
-    url, source_id, exploration = case_with_source
+    url, item_id, exploration = case_with_source
     agent = bearer(mint(client)["token"])
-    person = client.get(f"{url}/sources/{source_id}/snapshot", headers=h(OWNER)).text
+    person = client.get(f"{url}/items/{item_id}/snapshot", headers=h(OWNER)).text
     assert CPF in person and "1234-567890" in person
-    masked = client.get(f"{url}/sources/{source_id}/snapshot", headers=agent)
+    masked = client.get(f"{url}/items/{item_id}/snapshot", headers=agent)
     assert masked.status_code == 200, masked.text
     assert CPF not in masked.text and "1234-567890" not in masked.text
     assert "***.456.789-**" in masked.text
+    assert CPF not in client.get(f"{url}/graph", headers=agent).text
     masked = client.get(f"/api/explorations/{exploration.id}/snapshot", headers=agent)
     assert masked.status_code == 200 and CPF not in masked.text
 
-    # files: text comes back masked, binary never reaches the agent
+    # items: text comes back masked, bytes never reach the agent
     up = client.post(
-        f"{url}/files?filename=qsa.csv&role=enrichment",
+        f"{url}/items?filename=qsa.csv&kind=table&subkind=csv",
         content=f"cpf\n{CPF}".encode(),
         headers={**agent, "Content-Type": "application/octet-stream"},
     )
     assert up.status_code == 201, up.text
-    got = client.get(f"{url}/files/{up.json()['id']}/content", headers=agent)
+    got = client.get(f"{url}/items/{up.json()['id']}/text", headers=agent)
     assert got.status_code == 200 and CPF not in got.text and "456.789" in got.text
-    assert CPF in client.get(f"{url}/files/{up.json()['id']}/content", headers=h(OWNER)).text
-    pdf = client.post(
-        f"{url}/files?filename=extrato.pdf&role=attachment",
-        content=b"%PDF-1.4 " + CPF.encode(),
-        headers={**agent, "Content-Type": "application/octet-stream"},
-    )
-    assert pdf.status_code == 201, pdf.text
-    r = client.get(f"{url}/files/{pdf.json()['id']}/content", headers=agent)
+    assert CPF in client.get(f"{url}/items/{up.json()['id']}/content", headers=h(OWNER)).text
+    r = client.get(f"{url}/items/{up.json()['id']}/content", headers=agent)
     assert r.status_code == 403
     assert r.json()["detail"]["error"]["code"] == "AGENT_FORBIDDEN"
     # events carry what the agent did, masked for it
@@ -286,23 +275,23 @@ def test_rest_reads_are_masked_for_agents(client, env, case_with_source):
 
     # unmasked needs both the org setting and the token flag
     unmasked = bearer(mint(client, unmasked=True)["token"])
-    assert CPF not in client.get(f"{url}/sources/{source_id}/snapshot", headers=unmasked).text
+    assert CPF not in client.get(f"{url}/items/{item_id}/snapshot", headers=unmasked).text
     env.setenv("GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA", "true")
     get_settings.cache_clear()
-    assert CPF in client.get(f"{url}/sources/{source_id}/snapshot", headers=unmasked).text
-    assert CPF not in client.get(f"{url}/sources/{source_id}/snapshot", headers=agent).text
+    assert CPF in client.get(f"{url}/items/{item_id}/snapshot", headers=unmasked).text
+    assert CPF not in client.get(f"{url}/items/{item_id}/snapshot", headers=agent).text
 
 
 def test_upload_checks_access_before_reading_the_body(client, case_with_source):
     url, _, _ = case_with_source
     outsider = bearer(mint(client, "outsider@example.com")["token"])
     r = client.post(
-        f"{url}/files?filename=a.csv",
+        f"{url}/items?filename=a.csv&kind=table&subkind=csv",
         content=b"x",
         headers={**outsider, "Content-Type": "application/octet-stream"},
     )
     assert r.status_code == 404
-    r = client.post(f"{url}/artifacts", json={"name": "a.md", "text": "x"}, headers=outsider)
+    r = client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": "x"}, headers=outsider)
     assert r.status_code == 404
 
 
@@ -317,15 +306,11 @@ def test_agent_may_not_assign_a_case(client):
 
 
 def test_max_validity_and_rate_limit(client, env):
-    r = client.post(
-        "/api/agent-tokens",
-        json={"name": "n", "scopes": ["read"], "expires_in_days": 91},
-        headers=h(OWNER),
-    )
+    r = client.post("/api/agent-tokens", json={"name": "n", "expires_in_days": 91}, headers=h(OWNER))
     assert r.status_code == 422
     env.setenv("GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE", "2")
     get_settings.cache_clear()
-    agent = bearer(mint(client, scopes=("read",))["token"])
+    agent = bearer(mint(client)["token"])
     codes = [
         client.get("/api/investigations", headers=agent).status_code for _ in "abc"
     ]

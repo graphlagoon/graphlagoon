@@ -59,7 +59,6 @@ async def create_agent_token(
     token, raw = await service.create_token(
         user_email,
         data.name.strip(),
-        data.scopes,
         data.expires_in_days,
         scope=data.scope,
         investigation_ids=data.investigation_ids,
@@ -72,7 +71,6 @@ async def create_agent_token(
         resource_id=token["id"],
         metadata={
             "name": token["name"],
-            "scopes": token["scopes"],
             "scope": token["scope"],
             "investigation_ids": token["investigation_ids"],
             "unmasked": token["unmasked"],

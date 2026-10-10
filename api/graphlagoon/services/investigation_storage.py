@@ -2,12 +2,10 @@
 ``investigations_volume_path`` (a Volume, via the Files API) or, without one,
 at ``{exploration_snapshots_dir}/investigations`` on local disk.
 
-Layout under the root::
+Layout under the root (05 §1: every blob is an item version)::
 
-    {investigation_id}/sources/{source_id}.json.gz
-    {investigation_id}/artifacts/{artifact_id}/v{n}/{name}
-    {investigation_id}/files/{sha256}
-    {investigation_id}/evidence/{evidence_id}.json.gz
+    {investigation_id}/items/{item_id}/{sha256}        the version's bytes
+    {investigation_id}/items/{item_id}/{sha256}.txt    its text extraction
     (exports are generated on request and audited, not stored)
 
 Uploads stream into a temp file while the sha256 is computed, and only then
@@ -60,22 +58,13 @@ def get_store() -> BlobStore:
     return _store
 
 
-def source_key(investigation_id: UUID, source_id: UUID) -> str:
-    return f"{investigation_id}/sources/{source_id}.json.gz"
+def version_key(investigation_id: UUID, item_id: UUID, sha256: str) -> str:
+    """Content-addressed: the same bytes in the same item share one blob."""
+    return f"{investigation_id}/items/{item_id}/{sha256}"
 
 
-def artifact_key(
-    investigation_id: UUID, artifact_id: UUID, version: int, name: str
-) -> str:
-    return f"{investigation_id}/artifacts/{artifact_id}/v{version}/{name}"
-
-
-def file_key(investigation_id: UUID, sha256: str) -> str:
-    return f"{investigation_id}/files/{sha256}"
-
-
-def evidence_key(investigation_id: UUID, evidence_id: UUID) -> str:
-    return f"{investigation_id}/evidence/{evidence_id}.json.gz"
+def text_key(investigation_id: UUID, item_id: UUID, sha256: str) -> str:
+    return f"{version_key(investigation_id, item_id, sha256)}.txt"
 
 
 class TooLarge(Exception):
@@ -124,7 +113,7 @@ async def put(key: str, received: Received) -> None:
 
 
 async def save_bytes(key: str, data: bytes) -> None:
-    """Small payloads built in memory (frozen sources)."""
+    """Small payloads built in memory (text extractions, query results)."""
     await get_store().save(key, data)
 
 

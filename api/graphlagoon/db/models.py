@@ -5,7 +5,6 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     JSON,
@@ -279,8 +278,10 @@ class PermissionRule(Base):
     group = relationship("Group", back_populates="rules")
 
 
+
+
 # ---------------------------------------------------------------------------
-# Investigations (docs/dev/plans/investigation/03-arquitetura.md §2.2)
+# Investigations v2 (docs/dev/plans/investigation/05-plano-v2.md §1)
 # ---------------------------------------------------------------------------
 
 
@@ -294,29 +295,29 @@ def _investigation_fk():
 
 
 class Investigation(Base):
-    """A case: N explorations (any context), files and notes, ending in a decision."""
+    """A case: one place where items (graphs, queries, tables, documents, notes)
+    accumulate with versions and authors, ending in a decision."""
 
     __tablename__ = "investigations"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
+    # credito | garantia | pix_med | lavagem | lojista | fraude_sintetica | livre
+    kind_preset = Column(String(30), nullable=False, default="livre", server_default="livre")
+    # open | analysis | decided | archived
+    status = Column(String(20), nullable=False, default="open", server_default="open")
     owner_email = Column(String(255), nullable=False, index=True)
     assignee_email = Column(String(255), nullable=True)
-    # "selecao" | "analise" | "decidido" | "arquivado"
-    status = Column(
-        String(20), nullable=False, default="selecao", server_default="selecao"
-    )
-    typology = Column(String(100), nullable=True)
-    origin = Column(String(50), nullable=True)
-    selected_at = Column(DateTime, nullable=True)
-    # When the facts happened and when the alert arrived; the selection deadline
-    # counts from alert_at (or created_at). deadline_days_override replaces the
-    # 45-day phase for this case (05 §7).
     occurred_at = Column(DateTime, nullable=True)
     alert_at = Column(DateTime, nullable=True)
-    deadline_days_override = Column(Integer, nullable=True)
-    # roles {entityKey: role}, pins, hypotheses[], view preferences
+    # {open: days, analysis: days}: overrides the preset's phases (05 §7)
+    deadline_days = Column(JSON, nullable=True)
+    tags = Column(JSON, nullable=False, default=[])
+    # identity_keys, edge_semantics, enrichment_tables, agent_suggest_kinds,
+    # label_templates, vocabularies
+    settings = Column(JSON, nullable=False, default={})
+    # view only: layout, pins, views, groups_closed
     state = Column(JSON, nullable=False, default={})
     decision = Column(JSON, nullable=True)
     frozen_hash = Column(String(64), nullable=True)
@@ -337,209 +338,131 @@ class InvestigationShare(Base):
     __tablename__ = "investigation_shares"
     __table_args__ = (
         UniqueConstraint(
-            "investigation_id",
-            "shared_with_email",
-            name="uq_investigation_shares_investigation_email",
+            "investigation_id", "email", name="uq_investigation_shares_investigation_email"
         ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     investigation_id = _investigation_fk()
-    shared_with_email = Column(String(255), nullable=False)
-    permission = Column(String(10), nullable=False, default="read")  # read | write
+    email = Column(String(255), nullable=False)
+    role = Column(String(10), nullable=False, default="reader")  # reader | editor
     created_at = Column(DateTime, server_default=func.now())
 
     investigation = relationship("Investigation", back_populates="shares")
 
 
-class InvestigationFile(Base):
-    __tablename__ = "investigation_files"
+class CaseItem(Base):
+    """Anything in the case (05 §1): kind graph|table|query|document|note with a
+    subkind, an author, provenance and N immutable versions."""
+
+    __tablename__ = "case_items"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     investigation_id = _investigation_fk()
-    filename = Column(String(255), nullable=False)
-    role = Column(String(20), nullable=False)  # graph | enrichment | attachment
-    sha256 = Column(String(64), nullable=False)
-    size_bytes = Column(BigInteger, nullable=False)
-    content_type = Column(String(255), nullable=True)
-    blob_key = Column(String(512), nullable=False)
-    mapping = Column(JSON, nullable=True)
-    context_id = Column(UUID(as_uuid=True), nullable=True)
-    uploaded_by = Column(String(255), nullable=False)
-    uploaded_at = Column(DateTime, server_default=func.now())
-
-
-class InvestigationSource(Base):
-    __tablename__ = "investigation_sources"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    investigation_id = _investigation_fk()
-    kind = Column(String(20), nullable=False)  # exploration | file
+    kind = Column(String(20), nullable=False)
+    subkind = Column(String(30), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    tags = Column(JSON, nullable=False, default=[])
+    status = Column(String(20), nullable=False, default="confirmed")  # suggested | confirmed | rejected
+    author_kind = Column(String(10), nullable=False, default="human")  # human | agent
+    author_email = Column(String(255), nullable=False)
+    agent_token_id = Column(UUID(as_uuid=True), nullable=True)
+    # context_id, exploration_id, query_item_id, run_id, tool, params, parent_item_id, tool_call_id
+    provenance = Column(JSON, nullable=False, default={})
     exploration_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("explorations.id", ondelete="SET NULL"),
-        nullable=True,
+        UUID(as_uuid=True), ForeignKey("explorations.id", ondelete="SET NULL"), nullable=True
     )
-    file_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("investigation_files.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    # Denormalized (no FK) so access can be checked — and a placeholder shown —
-    # even after the exploration is gone.
     context_id = Column(UUID(as_uuid=True), nullable=True)
-    mode = Column(String(10), nullable=False, default="live")  # live | frozen
-    frozen_blob_key = Column(String(512), nullable=True)
-    frozen_sha256 = Column(String(64), nullable=True)
-    title_snapshot = Column(String(255), nullable=False)
-    added_by = Column(String(255), nullable=False)
-    added_at = Column(DateTime, server_default=func.now())
+    query = Column(JSON, nullable=True)  # {text, language, parameters[], output}
+    mapping = Column(JSON, nullable=True)  # {as: graph|enrichment, spec}; of the case, never a context
+    anchor = Column(JSON, nullable=True)  # {entity_ids[], edge_ids[], item_id}
+    current_version = Column(Integer, nullable=False, default=0)
     position = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class CaseItemVersion(Base):
+    """Immutable content of an item; a pinned version is the evidence."""
+
+    __tablename__ = "case_item_versions"
+    __table_args__ = (
+        UniqueConstraint("item_id", "version", name="uq_case_item_versions_version"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = _investigation_fk()
+    item_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("case_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    blob_key = Column(String(512), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    content_type = Column(String(255), nullable=False)
+    text_blob_key = Column(String(512), nullable=True)  # text extraction for search and MCP
+    # {statement_id, started_at, duration_ms, row_count, params, run_by, author_kind}
+    run = Column(JSON, nullable=True)
+    created_by = Column(String(255), nullable=False)
+    author_kind = Column(String(10), nullable=False, default="human")
+    created_at = Column(DateTime, server_default=func.now())
+    pinned_at = Column(DateTime, nullable=True)
+    pinned_by = Column(String(255), nullable=True)
+    pin_label = Column(String(255), nullable=True)
+
+
+class CaseAnnotation(Base):
+    """role | tag | group | same_as | hypothesis | hypothesis_status | typology |
+    status_change over entities or items; an agent's may arrive ``suggested``."""
+
+    __tablename__ = "case_annotations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = _investigation_fk()
+    kind = Column(String(30), nullable=False)
+    targets = Column(JSON, nullable=False, default=[])  # entity ids or item ids
+    value = Column(JSON, nullable=False, default={})
+    reason = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="confirmed")
+    author_kind = Column(String(10), nullable=False, default="human")
+    author_email = Column(String(255), nullable=False)
+    agent_token_id = Column(UUID(as_uuid=True), nullable=True)
+    confirmed_by = Column(String(255), nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
 
 
 class InvestigationEvent(Base):
-    """Immutable, hash-chained case journal: hash = sha256(prev_hash + canonical json)."""
+    """Append-only case journal; ``frozen_hash`` covers it at the decision."""
 
     __tablename__ = "investigation_events"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     investigation_id = _investigation_fk()
-    at = Column(DateTime, server_default=func.now())
     actor_email = Column(String(255), nullable=False)
-    # "human" | "agent"; an agent acts for actor_email through agent_token_id
-    actor_kind = Column(
-        String(10), nullable=False, default="human", server_default="human"
-    )
+    actor_kind = Column(String(10), nullable=False, default="human", server_default="human")
     agent_token_id = Column(UUID(as_uuid=True), nullable=True)
     agent_name = Column(String(100), nullable=True)
     kind = Column(String(50), nullable=False)
     payload = Column(JSON, nullable=False, default={})
-    prev_hash = Column(String(64), nullable=True)
-    hash = Column(String(64), nullable=False)
-
-
-class InvestigationNote(Base):
-    __tablename__ = "investigation_notes"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    investigation_id = _investigation_fk()
-    anchor = Column(JSON, nullable=False, default={})  # {kind, id}
-    body = Column(Text, nullable=False)
-    author_email = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class InvestigationEvidence(Base):
-    """Immutable frozen evidence (gz blob + sha256)."""
-
-    __tablename__ = "investigation_evidence"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    investigation_id = _investigation_fk()
-    title = Column(String(255), nullable=False)
-    kind = Column(String(20), nullable=False)  # graph_state | trace | table | file
-    blob_key = Column(String(512), nullable=False)
-    sha256 = Column(String(64), nullable=False)
-    params = Column(JSON, nullable=False, default={})
-    created_by = Column(String(255), nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
-
-
-class EntityMatch(Base):
-    __tablename__ = "entity_matches"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    investigation_id = _investigation_fk()
-    left = Column(JSON, nullable=False)  # {source_id, node_id, entity_key?}
-    right = Column(JSON, nullable=False)
-    score = Column(Float, nullable=False, default=0.0)
-    reasons = Column(JSON, nullable=False, default=[])
-    # sugerido | aceito | recusado | adiado
-    status = Column(String(20), nullable=False, default="sugerido")
-    reason_text = Column(Text, nullable=True)
-    decided_by = Column(String(255), nullable=True)
-    decided_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-
-
-class InvestigationArtifact(Base):
-    """An entry in the case space (T10): slides, docs, reports, images, data."""
-
-    __tablename__ = "investigation_artifacts"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    investigation_id = _investigation_fk()
-    name = Column(String(255), nullable=False)
-    kind = Column(String(20), nullable=False)  # slides | doc | report | image | data | other
-    current_version = Column(Integer, nullable=False, default=1)
-    created_at = Column(DateTime, server_default=func.now())
-
-
-class InvestigationArtifactVersion(Base):
-    """Immutable version of an artifact; approving is a human action."""
-
-    __tablename__ = "investigation_artifact_versions"
-    __table_args__ = (
-        UniqueConstraint("artifact_id", "version", name="uq_artifact_versions_version"),
-    )
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Denormalized so a case's versions are listed (and cascade) in one hop.
-    investigation_id = _investigation_fk()
-    artifact_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("investigation_artifacts.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    version = Column(Integer, nullable=False)
-    blob_key = Column(String(512), nullable=False)
-    sha256 = Column(String(64), nullable=False)
-    size_bytes = Column(BigInteger, nullable=False)
-    content_type = Column(String(255), nullable=False)
-    status = Column(String(10), nullable=False, default="draft")  # draft | approved
-    actor = Column(JSON, nullable=False, default={})  # {kind, email, agent_name?, token_id?}
-    source_evidence_ids = Column(JSON, nullable=False, default=[])
-    note = Column(Text, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    approved_by = Column(String(255), nullable=True)
-    approved_at = Column(DateTime, nullable=True)
-
-
-class InvestigationProposal(Base):
-    """A change an agent proposes; a person accepts (through the same service
-    as the manual action) or rejects it with a reason (03-arquitetura §8.4)."""
-
-    __tablename__ = "investigation_proposals"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    investigation_id = _investigation_fk()
-    # role | match | hypothesis | hypothesis_status | typology | status
-    kind = Column(String(30), nullable=False)
-    payload = Column(JSON, nullable=False, default={})
-    rationale = Column(Text, nullable=True)
-    actor = Column(JSON, nullable=False, default={})
-    status = Column(String(10), nullable=False, default="pending")  # pending | accepted | rejected
-    created_at = Column(DateTime, server_default=func.now())
-    decided_by = Column(String(255), nullable=True)
-    decided_at = Column(DateTime, nullable=True)
-    decision_note = Column(Text, nullable=True)
 
 
 class AgentToken(Base):
-    """Personal token an AI agent uses to act for its owner (03-arquitetura §8.2).
-
-    Only the sha256 of the token is stored; the token is shown once on creation.
-    """
+    """Personal token an AI agent uses to act for its owner (05 §6): identity
+    plus a short list of human-only acts; no read/analyze/write scopes."""
 
     __tablename__ = "agent_tokens"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    owner_email = Column(String(255), nullable=False, index=True)
     name = Column(String(100), nullable=False)
+    owner_email = Column(String(255), nullable=False, index=True)
     token_hash = Column(String(64), nullable=False, unique=True)
-    scopes = Column(JSON, nullable=False, default=[])  # kept, no longer enforced (F0)
     # "user" (every case the owner reads) or "case" (only investigation_ids)
     scope = Column(String(10), nullable=False, default="user")
     investigation_ids = Column(JSON, nullable=False, default=[])
@@ -548,3 +471,25 @@ class AgentToken(Base):
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
+
+
+class OrgVocabulary(Base):
+    """Org-wide suggestions for roles, tags and typology presets (never imposed)."""
+
+    __tablename__ = "org_vocabularies"
+
+    kind = Column(String(30), primary_key=True)  # role | tag | typology_preset
+    values = Column(JSON, nullable=False, default=[])
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class OrgLibrary(Base):
+    """Playbooks and templates in markdown, read by agents through MCP (F5)."""
+
+    __tablename__ = "org_library"
+
+    slug = Column(String(100), primary_key=True)
+    title = Column(String(255), nullable=False)
+    kind = Column(String(20), nullable=False, default="playbook")  # playbook | template
+    body = Column(Text, nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

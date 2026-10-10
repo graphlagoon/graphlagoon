@@ -451,7 +451,7 @@ async def transfer_investigation(
     admin_email: str = Depends(require_superuser),
 ):
     """Reassign a case to another owner; also written to the case journal."""
-    from graphlagoon.services import investigations
+    from graphlagoon.services import cases as investigations
 
     new_owner = _validated_owner(data.new_owner_email)
     try:

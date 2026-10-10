@@ -1,18 +1,17 @@
-"""Case exports (03-arquitetura §3.5, F4.6): ``GET …/export?format=``.
+"""Case exports (05 §7): ``GET …/export?format=``.
 
 - ``json``: the package (case, decision, frozen hash and whether it still
-  verifies, sources, files and evidence with their hashes, trace methods,
-  hypotheses, notes, journal);
+  verifies, items with their pinned versions = the evidence, annotations,
+  journal);
 - ``csv``: the same record flattened, one row per item, through the M4-safe
   writer (``utils.csv_safe``);
 - ``simba``: a zip with the case's transactions in the SIMBA v3.1 layout,
-  which the ``simba_v31`` preset of F2.4 reads back, plus ``MANIFEST.json``;
+  which the ``simba_v31`` file-mapping preset reads back, plus ``MANIFEST.json``;
 - ``siscoaf``: a structured summary to paste into Siscoaf (README Q6: no API).
 
 The laudo (PDF) is the print of the dossier screen, not a server format.
-Every format carries the trace methods and the file hashes; the route audits
-each export with its sha256. Exports are reads: nothing is journaled (the
-frozen hash stays reproducible) and nothing is stored.
+Every format verifies ``frozen_hash``; the route audits each export with its
+sha256. Exports are reads: nothing is journaled and nothing is stored.
 """
 
 from __future__ import annotations
@@ -27,8 +26,8 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from graphlagoon.services import investigation_evidence, investigation_files
-from graphlagoon.services import investigations as service
+from graphlagoon.services import case_annotations, case_items
+from graphlagoon.services import cases as service
 from graphlagoon.services.case_graph import case_graph
 from graphlagoon.services.file_mapping_presets import SIMBA_V31
 from graphlagoon.utils.csv_safe import to_csv
@@ -58,44 +57,41 @@ def _dumps(value: Any) -> bytes:
 
 async def package(investigation_id: UUID, user_email: str) -> dict:
     case = await service.get_investigation(investigation_id, user_email)
-    evidence = await investigation_evidence.list_evidence(investigation_id, user_email)
+    items = await case_items.list_items(investigation_id, user_email)
+    annotations = await case_annotations.list_annotations(investigation_id, user_email)
     events = await service.list_events(investigation_id, user_email, limit=10**9)
-    state = case["state"] or {}
-    trace_methods = [
-        {"evidence_id": e["id"], "title": e["title"], "method": e["params"]}
-        for e in evidence
-        if e["kind"] == "trace"
-    ] + [
-        {"event_id": e["id"], "at": e["at"], "method": e["payload"]}
-        for e in events
-        if e["kind"] == "trace.run"
+    evidence = [
+        {"item_id": i["id"], "title": i["title"], "kind": i["kind"], "subkind": i["subkind"], **v}
+        for i in items
+        for v in i["pinned"]
     ]
+    trace_methods = [
+        {"item_id": i["id"], "title": i["title"], "method": (i["provenance"] or {}).get("params")}
+        for i in items
+        if (i["provenance"] or {}).get("tool") == "trace"
+    ] + [{"event_id": e["id"], "at": e["at"], "method": e["payload"]} for e in events if e["kind"] == "trace.run"]
+    roles = {a["targets"][0]: a["value"]["role"] for a in annotations if a["kind"] == "role" and a["status"] == "confirmed"}
     return _plain(
         {
             "format": "graphlagoon.investigation",
-            "version": 1,
+            "version": 2,
             "exported_at": datetime.now().isoformat(),
             "exported_by": user_email,
             "case": {
                 k: case[k]
                 for k in (
-                    "id", "title", "description", "owner_email", "assignee_email",
-                    "status", "typology", "origin", "created_at", "selected_at",
-                    "decision", "frozen_at",
+                    "id", "title", "description", "owner_email", "assignee_email", "status", "kind_preset",
+                    "tags", "occurred_at", "alert_at", "created_at", "decision", "frozen_at",
                 )
             },
             "frozen_hash": case["frozen_hash"],
             "frozen_hash_valid": await service.verify_frozen_hash(investigation_id, user_email),
-            "roles": state.get("roles") or {},
-            "hypotheses": state.get("hypotheses") or [],
-            "sources": await service.list_sources(investigation_id, user_email),
-            "files": [
-                {k: f[k] for k in ("id", "filename", "role", "sha256", "size_bytes", "uploaded_by", "uploaded_at")}
-                for f in await investigation_files.list_files(investigation_id, user_email)
-            ],
+            "roles": roles,
+            "hypotheses": [a for a in annotations if a["kind"] == "hypothesis"],
+            "annotations": annotations,
+            "items": items,
             "evidence": evidence,
             "trace_methods": trace_methods,
-            "notes": await service.list_notes(investigation_id, user_email),
             "events": events,
         }
     )
@@ -113,29 +109,21 @@ def package_csv(p: dict) -> str:
     if d:
         rows.append(["decision", "", d["outcome"], ",".join(d["actions"]), p["frozen_hash"], d["rationale"], d["decided_by"], d["decided_at"]])
     rows += [
-        ["source", s["id"], s["title_snapshot"], s.get("mode", "restricted"), s.get("frozen_sha256"), s.get("context_title"), s.get("added_by"), s.get("added_at")]
-        for s in p["sources"]
+        ["item", i["id"], i["title"], f"{i['kind']}/{i['subkind']}", (i["latest"] or {}).get("sha256"),
+         _canon({k: i[k] for k in ("status", "provenance", "query", "mapping") if i.get(k)}), i["author_email"], i["created_at"]]
+        for i in p["items"]
     ]
     rows += [
-        ["file", f["id"], f["filename"], f["role"], f["sha256"], f["size_bytes"], f["uploaded_by"], f["uploaded_at"]]
-        for f in p["files"]
-    ]
-    rows += [
-        ["evidence", e["id"], e["title"], e["kind"], e["sha256"], _canon(e["params"]), e["created_by"], e["created_at"]]
+        ["evidence", e["item_id"], e["title"], f"v{e['version']}", e["sha256"], e.get("pin_label") or "", e.get("pinned_by"), e.get("pinned_at")]
         for e in p["evidence"]
     ]
     rows += [
-        ["hypothesis", h["id"], h["text"], h["status"], "",
-         f"for: {' '.join(h.get('evidence_for') or [])}; against: {' '.join(h.get('evidence_against') or [])}",
-         h.get("created_by"), h.get("created_at")]
-        for h in p["hypotheses"]
+        ["annotation", a["id"], "", a["kind"], "", _canon({"targets": a["targets"], "value": a["value"], "status": a["status"]}),
+         a["author_email"], a["created_at"]]
+        for a in p["annotations"]
     ]
     rows += [
-        ["note", n["id"], "", (n["anchor"] or {}).get("kind"), "", n["body"], n["author_email"], n["created_at"]]
-        for n in p["notes"]
-    ]
-    rows += [
-        ["event", e["id"], "", e["kind"], e["hash"], _canon(e["payload"]), e["actor_email"], e["at"]]
+        ["event", e["id"], "", e["kind"], "", _canon(e["payload"]), e["actor_email"], e["at"]]
         for e in p["events"]
     ]
     return to_csv(["section", "id", "title", "kind", "sha256", "detail", "actor", "at"], rows)
@@ -285,7 +273,7 @@ async def simba_zip(investigation_id: UUID, user_email: str, p: dict) -> bytes:
         "skipped_without_account": skipped,
         "restricted_sources": graph["restricted_sources"],
         "sha256": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
-        "case_files": [{k: f[k] for k in ("filename", "sha256")} for f in p["files"]],
+        "evidence": [{k: e[k] for k in ("title", "version", "sha256")} for e in p["evidence"]],
         "trace_methods": p["trace_methods"],
     }
     files["MANIFEST.json"] = _dumps(manifest)
@@ -323,16 +311,16 @@ async def siscoaf_summary(investigation_id: UUID, user_email: str, p: dict) -> d
     times = sorted(e["t"] for e in money if e.get("t") is not None)
     day = lambda t: datetime.fromtimestamp(t / 1000).date().isoformat()  # noqa: E731
     badges = {}
-    for e in p["events"]:
-        if e["kind"] == "typology.accepted":
-            pl = e["payload"]
-            badges[pl.get("typology")] = {"norm_ref": pl.get("normRef"), "label": pl.get("label"), "entities": pl.get("hits")}
+    for a in p["annotations"]:
+        if a["kind"] == "typology" and a["status"] == "confirmed":
+            v = a["value"]
+            badges[v.get("typology")] = {"norm_ref": v.get("norm_ref"), "label": v.get("label"), "entities": len(a["targets"])}
     decision = p["case"]["decision"]
     return {
         "format": "siscoaf-summary",
         "version": 1,
         "note": "Structured summary for a person to paste into Siscoaf; this app does not send communications.",
-        "case": {k: p["case"][k] for k in ("id", "title", "typology", "origin", "created_at")},
+        "case": {k: p["case"][k] for k in ("id", "title", "kind_preset", "tags", "created_at")},
         "ready_to_communicate": bool(decision and decision["outcome"] == "comunicar"),
         "decision": decision,
         "involved": involved,
@@ -345,11 +333,10 @@ async def siscoaf_summary(investigation_id: UUID, user_email: str, p: dict) -> d
         "typologies": list(badges.values()),
         "narrative": "\n\n".join(x for x in (p["case"]["description"], decision and decision["rationale"]) if x),
         "evidence": [
-            {"label": f"E{i}", "title": e["title"], "kind": e["kind"], "sha256": e["sha256"]}
+            {"label": f"E{i}", "title": e["title"], "kind": e["kind"], "version": e["version"], "sha256": e["sha256"]}
             for i, e in enumerate(p["evidence"], 1)
         ],
         "trace_methods": p["trace_methods"],
-        "files": [{k: f[k] for k in ("filename", "sha256")} for f in p["files"]],
         "frozen_hash": p["frozen_hash"],
         "frozen_hash_valid": p["frozen_hash_valid"],
         "restricted_sources": graph["restricted_sources"],

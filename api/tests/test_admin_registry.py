@@ -93,7 +93,7 @@ def test_memory_store_clear_all_empties_every_collection():
     )
     inv = store.create_investigation("case", "a@b.co")
     store.add_investigation_child(
-        "investigation_notes", investigation_id=inv.id, body="n", author_email="a@b.co"
+        "case_items", investigation_id=inv.id, kind="note", subkind="free", title="n", author_email="a@b.co"
     )
     store.clear_all(keep_usage_logs=False)
     not_empty = [

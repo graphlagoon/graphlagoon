@@ -1766,56 +1766,66 @@ class PermissionInspection(BaseModel):
 InvestigationStatus = Literal["selecao", "analise", "decidido", "arquivado"]
 
 
+KindPreset = Literal["credito", "garantia", "pix_med", "lavagem", "lojista", "fraude_sintetica", "livre"]
+CaseStatus = Literal["open", "analysis", "decided", "archived"]
+WriteStatus = Literal["suggested", "confirmed", "rejected"]
+AuthorKind = Literal["human", "agent"]
+
+
 class InvestigationCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
-    typology: Optional[str] = Field(default=None, max_length=100)
-    origin: Optional[str] = Field(default=None, max_length=50)
+    kind_preset: KindPreset = "livre"
     assignee_email: Optional[str] = Field(default=None, max_length=255)
     occurred_at: Optional[datetime] = None
     alert_at: Optional[datetime] = None
-    deadline_days_override: Optional[int] = Field(default=None, ge=1, le=3650)
+    # {open: days, analysis: days}; overrides the preset's phases
+    deadline_days: Optional[dict[str, int]] = None
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class InvestigationUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
-    # "decidido" is reached only through the decision route (F4.5); the
-    # service checks the transition (05 §3) and answers 409 otherwise.
-    status: Optional[Literal["selecao", "analise", "arquivado"]] = None
+    kind_preset: Optional[KindPreset] = None
+    # "decided" is reached only through the decision route; the service checks
+    # the transition (05 §3) and answers 409 otherwise.
+    status: Optional[Literal["open", "analysis", "archived"]] = None
     assignee_email: Optional[str] = Field(default=None, max_length=255)
-    typology: Optional[str] = Field(default=None, max_length=100)
-    state: Optional[dict[str, Any]] = None
     occurred_at: Optional[datetime] = None
     alert_at: Optional[datetime] = None
-    deadline_days_override: Optional[int] = Field(default=None, ge=1, le=3650)
+    deadline_days: Optional[dict[str, int]] = None
+    tags: Optional[list[str]] = Field(default=None, max_length=50)
+    settings: Optional[dict[str, Any]] = None
+    state: Optional[dict[str, Any]] = None
 
 
 class InvestigationShareRequest(BaseModel):
     email: str
-    permission: Literal["read", "write"] = "read"
+    role: Literal["reader", "editor"] = "reader"
 
 
 class InvestigationShareOut(BaseModel):
     email: str
-    permission: str
+    role: str
 
 
 class InvestigationResponse(BaseModel):
     id: UUID
     title: str
     description: Optional[str] = None
+    kind_preset: str = "livre"
+    status: str
     owner_email: str
     assignee_email: Optional[str] = None
-    status: str
-    typology: Optional[str] = None
-    origin: Optional[str] = None
-    selected_at: Optional[datetime] = None
     occurred_at: Optional[datetime] = None
     alert_at: Optional[datetime] = None
-    deadline_days_override: Optional[int] = None
-    # {phase: selection|analysis, due_at, days_left}; None once decided/archived (F4.4).
+    deadline_days: Optional[dict[str, int]] = None
+    # {phase: open|analysis, due_at, days_left}; None without phases or once decided/archived
     deadline: Optional[dict[str, Any]] = None
+    tags: list[str] = Field(default_factory=list)
+    settings: dict[str, Any] = Field(default_factory=dict)
     state: dict[str, Any] = Field(default_factory=dict)
     decision: Optional[dict[str, Any]] = None
     frozen_hash: Optional[str] = None
@@ -1826,41 +1836,8 @@ class InvestigationResponse(BaseModel):
     has_write_access: bool = False
     can_manage: bool = False
     # Only on the list (the queue); None on single-case responses.
-    source_count: Optional[int] = None
-
-
-class InvestigationSourceCreate(BaseModel):
-    kind: Literal["exploration"] = "exploration"  # "file" arrives with F2.5
-    exploration_id: UUID
-    mode: Literal["live", "frozen"] = "live"
-
-
-class InvestigationSourceResponse(BaseModel):
-    """`accessible: false` carries only title, context name and owner."""
-
-    id: UUID
-    kind: str
-    position: int
-    title_snapshot: str
-    context_title: Optional[str] = None
-    owner_email: Optional[str] = None
-    accessible: bool
-    exploration_id: Optional[UUID] = None
-    context_id: Optional[UUID] = None
-    mode: Optional[str] = None
-    frozen_sha256: Optional[str] = None
-    added_by: Optional[str] = None
-    added_at: Optional[datetime] = None
-
-
-InvestigationRole = Literal["victim", "mule", "exit", "discarded"]
-
-
-class InvestigationStateUpdate(BaseModel):
-    """Merge patch by unified node id: a null role clears it, false unpins."""
-
-    roles: Optional[dict[str, Optional[InvestigationRole]]] = None
-    pins: Optional[dict[str, bool]] = None
+    item_count: Optional[int] = None
+    suggested_count: Optional[int] = None
 
 
 class InvestigationEventCreate(BaseModel):
@@ -1872,142 +1849,173 @@ class InvestigationEventResponse(BaseModel):
     id: UUID
     at: datetime
     actor_email: str
-    # "agent" when an agent token acted for actor_email (03 §8.1 item 3)
-    actor_kind: Literal["human", "agent"] = "human"
+    actor_kind: AuthorKind = "human"
     agent_token_id: Optional[UUID] = None
     agent_name: Optional[str] = None
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)
-    prev_hash: Optional[str] = None
-    hash: str
 
 
-class NoteAnchor(BaseModel):
-    kind: Literal["node", "edge", "evidence", "none"] = "none"
-    id: Optional[str] = Field(default=None, max_length=512)
+class InvestigationDecisionCreate(BaseModel):
+    """05 §7: communicate to COAF or archive, the actions taken with it, why."""
+
+    outcome: Literal["comunicar", "arquivar"]
+    actions: list[Literal["dict", "spa", "bloqueio_cautelar"]] = Field(default_factory=list)
+    rationale: str = Field(min_length=1, max_length=10000)
 
 
-class InvestigationNoteCreate(BaseModel):
-    anchor: NoteAnchor = Field(default_factory=NoteAnchor)
-    body: str = Field(min_length=1, max_length=10_000)
+# Case items (05 §1)
+ItemKind = Literal["graph", "table", "query", "document", "note"]
 
 
-class InvestigationNoteUpdate(BaseModel):
-    body: str = Field(min_length=1, max_length=10_000)
+class CaseQuerySpec(BaseModel):
+    """A saved query of the case: text with ``:name`` parameters declared like a
+    query template's, run against ``context_id`` for a table or a graph."""
+
+    text: str = Field(min_length=1, max_length=100_000)
+    language: Literal["sql", "cypher"] = "sql"
+    parameters: list[TemplateParameter] = Field(default_factory=list, max_length=50)
+    output: Literal["table", "graph"] = "table"
 
 
-class InvestigationNoteResponse(BaseModel):
+class ItemCreate(BaseModel):
+    kind: ItemKind
+    subkind: str = Field(min_length=1, max_length=30)
+    title: Optional[str] = Field(default=None, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=10_000)
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    exploration_id: Optional[UUID] = None
+    context_id: Optional[UUID] = None
+    query: Optional[CaseQuerySpec] = None
+    mapping: Optional[dict[str, Any]] = None
+    anchor: Optional[dict[str, Any]] = None
+    # Version 1: text (markdown, notes, csv) or JSON (snapshots, results)
+    content: Optional[str] = Field(default=None, max_length=4_000_000)
+    content_json: Optional[Any] = None
+
+
+class ItemUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=10_000)
+    tags: Optional[list[str]] = Field(default=None, max_length=50)
+    mapping: Optional[dict[str, Any]] = None
+    query: Optional[CaseQuerySpec] = None
+    anchor: Optional[dict[str, Any]] = None
+    position: Optional[int] = Field(default=None, ge=0)
+
+
+class ItemVersionCreate(BaseModel):
+    content: Optional[str] = Field(default=None, max_length=4_000_000)
+    content_json: Optional[Any] = None
+
+
+class ItemVersionResponse(BaseModel):
     id: UUID
-    anchor: dict[str, Any] = Field(default_factory=dict)
-    body: str
-    author_email: str
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-
-# Frozen evidence (03-arquitetura §3.5, F4.1)
-EvidenceKind = Literal["graph_state", "trace", "table", "file"]
-
-
-class EvidenceCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
-    kind: EvidenceKind
-    params: dict[str, Any] = Field(default_factory=dict)
-    snapshot: Any = None
-
-
-class EvidenceResponse(BaseModel):
-    id: UUID
-    title: str
-    kind: str
-    sha256: str
-    params: dict[str, Any] = Field(default_factory=dict)
-    created_by: str
-    created_at: Optional[datetime] = None
-
-
-class EvidenceContentResponse(EvidenceResponse):
-    snapshot: Any = None
-
-
-# Hypotheses in state.hypotheses (F4.2); evidence ids from …/evidence
-HypothesisStatus = Literal["aberta", "sustentada", "refutada"]
-
-
-class HypothesisCreate(BaseModel):
-    text: str = Field(min_length=1, max_length=1000)
-    status: HypothesisStatus = "aberta"
-    evidence_for: list[str] = Field(default_factory=list)
-    evidence_against: list[str] = Field(default_factory=list)
-    note: Optional[str] = Field(default=None, max_length=2000)
-
-
-class HypothesisUpdate(BaseModel):
-    text: Optional[str] = Field(default=None, min_length=1, max_length=1000)
-    status: Optional[HypothesisStatus] = None
-    evidence_for: Optional[list[str]] = None
-    evidence_against: Optional[list[str]] = None
-    note: Optional[str] = Field(default=None, max_length=2000)
-
-
-# Case space (03-arquitetura §8.5)
-ArtifactKind = Literal["slides", "doc", "report", "image", "data", "other"]
-
-
-class ArtifactTextUpload(BaseModel):
-    """JSON body for a text artifact (md, txt, csv, json, …); binaries go raw."""
-
-    name: str = Field(min_length=1, max_length=200)
-    text: str
-    kind: Optional[ArtifactKind] = None
-    note: Optional[str] = Field(default=None, max_length=2000)
-    source_evidence_ids: list[str] = Field(default_factory=list)
-
-
-class ArtifactVersionResponse(BaseModel):
+    item_id: UUID
     version: int
     sha256: str
     size_bytes: int
     content_type: str
-    status: Literal["draft", "approved"]
-    actor: dict[str, Any] = Field(default_factory=dict)
-    source_evidence_ids: list[str] = Field(default_factory=list)
-    note: Optional[str] = None
+    has_text: bool = False
+    run: Optional[dict[str, Any]] = None
+    created_by: str
+    author_kind: AuthorKind = "human"
     created_at: Optional[datetime] = None
-    approved_by: Optional[str] = None
-    approved_at: Optional[datetime] = None
+    pinned_at: Optional[datetime] = None
+    pinned_by: Optional[str] = None
+    pin_label: Optional[str] = None
 
 
-class ArtifactResponse(BaseModel):
+class ItemResponse(BaseModel):
     id: UUID
-    name: str
     kind: str
-    current_version: int
-    created_at: Optional[datetime] = None
-    download_only: bool = False
-    versions: list[ArtifactVersionResponse] = Field(default_factory=list)  # newest first
-
-
-class InvestigationFileResponse(BaseModel):
-    id: UUID
-    filename: str
-    role: str
-    sha256: str
-    size_bytes: int
-    content_type: Optional[str] = None
-    mapping: Optional[dict[str, Any]] = None
+    subkind: str
+    title: str
+    description: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    status: WriteStatus = "confirmed"
+    author_kind: AuthorKind = "human"
+    author_email: str
+    agent_token_id: Optional[UUID] = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    exploration_id: Optional[UUID] = None
     context_id: Optional[UUID] = None
-    uploaded_by: str
-    uploaded_at: Optional[datetime] = None
+    query: Optional[dict[str, Any]] = None
+    mapping: Optional[dict[str, Any]] = None
+    anchor: Optional[dict[str, Any]] = None
+    current_version: int = 0
+    position: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
+    # False when the item's graph context is not readable by the caller
+    accessible: bool = True
+    latest: Optional[ItemVersionResponse] = None
+    pinned: list[ItemVersionResponse] = Field(default_factory=list)
 
 
-class FileContextCreate(BaseModel):
-    """Generate a file graph (F2.5): the mapping spec (03 §4) applied to the
-    file plus ``file_ids`` (the other inputs of a multi-file layout like SIMBA)."""
+class ItemSearchHit(ItemResponse):
+    match: Literal["title", "text"]
+    snippet: Optional[str] = None
 
-    mapping: dict[str, Any]
-    file_ids: list[UUID] = Field(default_factory=list, max_length=20)
-    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+class ItemPinRequest(BaseModel):
+    version: Optional[int] = Field(default=None, ge=1)
+    label: Optional[str] = Field(default=None, max_length=255)
+
+
+class ItemRunRequest(BaseModel):
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    row_limit: int = Field(default=1000, ge=1, le=100000)
+
+
+class ItemTextResponse(BaseModel):
+    text: Optional[str] = None
+    version: ItemVersionResponse
+
+
+class BriefUpdate(BaseModel):
+    text: str = Field(max_length=1_000_000)
+
+
+class BriefResponse(BaseModel):
+    item: Optional[ItemResponse] = None
+    text: str = ""
+
+
+# Annotations (05 §1)
+AnnotationKind = Literal[
+    "role", "tag", "group", "same_as", "hypothesis", "hypothesis_status", "typology", "status_change"
+]
+
+
+class AnnotationCreate(BaseModel):
+    kind: AnnotationKind
+    targets: list[str] = Field(default_factory=list, max_length=5000)
+    value: dict[str, Any] = Field(default_factory=dict)
+    reason: Optional[str] = Field(default=None, max_length=2000)
+
+
+class AnnotationUpdate(BaseModel):
+    targets: Optional[list[str]] = Field(default=None, max_length=5000)
+    value: Optional[dict[str, Any]] = None
+    reason: Optional[str] = Field(default=None, max_length=2000)
+
+
+class AnnotationResponse(BaseModel):
+    id: UUID
+    kind: str
+    targets: list[Any] = Field(default_factory=list)
+    value: dict[str, Any] = Field(default_factory=dict)
+    reason: Optional[str] = None
+    status: WriteStatus = "confirmed"
+    author_kind: AuthorKind = "human"
+    author_email: str
+    agent_token_id: Optional[UUID] = None
+    confirmed_by: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
 
 
 class FileEnrichmentInput(BaseModel):
@@ -2019,10 +2027,10 @@ class FileEnrichmentInput(BaseModel):
 
 
 class FileEnrichmentSpec(BaseModel):
-    """How an ``enrichment`` file joins the case's nodes (F2.6): rows keyed by
-    ``key_column``; a node of ``match_node_types`` matches by its id or a
-    property, reduced to its first ``key_digits`` digits when set (CNPJ →
-    CNPJ básico for the QSA)."""
+    """How a ``table`` item with ``mapping.as = enrichment`` joins the case's
+    nodes: rows keyed by ``key_column``; a node of ``match_node_types`` matches
+    by its id or a property, reduced to its first ``key_digits`` digits when set
+    (CNPJ → CNPJ básico for the QSA)."""
 
     model_config = ConfigDict(extra="forbid")
     version: Literal[1] = 1
@@ -2043,83 +2051,6 @@ class FileEnrichmentSpec(BaseModel):
             if missing:
                 raise ValueError(f"column '{missing[0]}' is not in input.columns")
         return self
-
-
-class FileMappingUpdate(BaseModel):
-    mapping: dict[str, Any]
-
-# Proposals (03-arquitetura §8.4)
-ProposalKind = Literal[
-    "role", "match", "hypothesis", "hypothesis_status", "typology", "status"
-]
-
-
-class ProposalCreate(BaseModel):
-    kind: ProposalKind
-    payload: dict[str, Any] = Field(default_factory=dict)
-    rationale: Optional[str] = Field(default=None, max_length=2000)
-
-
-class ProposalReject(BaseModel):
-    reason: str = Field(min_length=1, max_length=2000)
-
-
-class ProposalResponse(BaseModel):
-    id: UUID
-    kind: str
-    payload: dict[str, Any] = Field(default_factory=dict)
-    rationale: Optional[str] = None
-    actor: dict[str, Any] = Field(default_factory=dict)
-    status: Literal["pending", "accepted", "rejected"]
-    created_at: Optional[datetime] = None
-    decided_by: Optional[str] = None
-    decided_at: Optional[datetime] = None
-    decision_note: Optional[str] = None
-
-
-class MatchSide(BaseModel):
-    """One entity of a match: its unified id (plus whatever the client adds)."""
-
-    model_config = ConfigDict(extra="allow")
-    uid: str = Field(min_length=1, max_length=500)
-
-
-class MatchSuggestionIn(BaseModel):
-    left: MatchSide
-    right: MatchSide
-    score: float = Field(ge=0, le=1)
-    reasons: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
-
-
-class MatchSuggestionsCreate(BaseModel):
-    # No status field: a suggestion is always stored as "sugerido".
-    matches: list[MatchSuggestionIn] = Field(max_length=1000)
-
-
-class InvestigationDecisionCreate(BaseModel):
-    """03 §2.2: communicate to COAF or archive, the actions taken with it, why."""
-
-    outcome: Literal["comunicar", "arquivar"]
-    actions: list[Literal["dict", "spa", "bloqueio_cautelar"]] = Field(default_factory=list)
-    rationale: str = Field(min_length=1, max_length=10000)
-
-
-class MatchDecision(BaseModel):
-    status: Literal["aceito", "recusado", "adiado"]
-    reason_text: str = Field(min_length=1, max_length=2000)
-
-
-class MatchResponse(BaseModel):
-    id: UUID
-    left: dict[str, Any]
-    right: dict[str, Any]
-    score: float
-    reasons: list[dict[str, Any]] = Field(default_factory=list)
-    status: Literal["sugerido", "aceito", "recusado", "adiado"]
-    reason_text: Optional[str] = None
-    decided_by: Optional[str] = None
-    decided_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
 
 
 # ---------------------------------------------------------------------------
@@ -2178,12 +2109,8 @@ class TypologiesRequest(BaseModel):
 # Agent tokens (03-arquitetura §8.2)
 # ---------------------------------------------------------------------------
 
-AgentScope: TypeAlias = Literal["read", "analyze", "write", "propose"]
-
-
 class AgentTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    scopes: list[AgentScope] = Field(min_length=1)
     expires_in_days: int = Field(default=30, ge=1)
     # "user": every case the owner reads; "case": only investigation_ids
     scope: Literal["user", "case"] = "user"
@@ -2201,7 +2128,6 @@ class AgentTokenResponse(BaseModel):
     id: UUID
     owner_email: str
     name: str
-    scopes: list[str]
     scope: str = "user"
     investigation_ids: list[str] = Field(default_factory=list)
     unmasked: bool = False

@@ -197,7 +197,7 @@ async def run_case_paths(
 ) -> dict:
     """Paths on the case's unified graph and a ``path.run`` journal event. The
     method stamp holds every parameter."""
-    from graphlagoon.services import investigations as service
+    from graphlagoon.services import cases as service
     from graphlagoon.services.case_graph import case_graph, journal_analysis
     from graphlagoon.services.trace import HOUR_MS, parse_time
 

@@ -16,7 +16,6 @@ from graphlagoon.db.database import get_session_maker, is_database_available
 from graphlagoon.db.memory_store import get_memory_store
 
 TOKEN_PREFIX = "glt_"
-SCOPES = ("read", "analyze", "write", "propose")
 
 
 def hash_token(raw: str) -> str:
@@ -32,7 +31,6 @@ def serialize(token: Any) -> dict:
         "id": token.id,
         "owner_email": token.owner_email,
         "name": token.name,
-        "scopes": list(token.scopes or []),
         "scope": token.scope,
         "investigation_ids": [str(i) for i in (token.investigation_ids or [])],
         "unmasked": bool(token.unmasked),
@@ -46,7 +44,6 @@ def serialize(token: Any) -> dict:
 async def create_token(
     owner_email: str,
     name: str,
-    scopes: list[str],
     expires_in_days: int,
     scope: str = "user",
     investigation_ids: Optional[list] = None,
@@ -59,7 +56,6 @@ async def create_token(
         "owner_email": owner_email,
         "name": name,
         "token_hash": hash_token(raw),
-        "scopes": [s for s in SCOPES if s in set(scopes)],
         "scope": scope,
         "investigation_ids": [str(i) for i in (investigation_ids or [])],
         "unmasked": unmasked,
