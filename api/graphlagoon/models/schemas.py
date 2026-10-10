@@ -496,6 +496,21 @@ def _validate_enrichment_tables(tables: list[EnrichmentTable]) -> None:
         raise ValueError("enrichment table names must be unique in a context")
 
 
+# Edge semantics (investigations F3.1, 03 §2.1): which edge properties carry the
+# amount and the time, so traces, sums and widths read them the same way.
+class EdgeSemantics(BaseModel):
+    amount_prop: Optional[str] = Field(default=None, max_length=200)
+    amount_unit: Literal["units", "cents"] = "units"
+    time_prop: Optional[str] = Field(default=None, max_length=200)
+    currency: str = Field(default="BRL", pattern=r"^[A-Z]{3}$")
+
+    @model_validator(mode="after")
+    def _blank_is_none(self) -> "EdgeSemantics":
+        self.amount_prop = (self.amount_prop or "").strip() or None
+        self.time_prop = (self.time_prop or "").strip() or None
+        return self
+
+
 class EnrichmentLookupRequest(BaseModel):
     keys: list[str] = Field(min_length=1)
 
@@ -563,6 +578,7 @@ class GraphContextCreate(BaseModel):
     )
     identity_keys: list[IdentityKey] = Field(default_factory=list, max_length=50)
     enrichment_tables: list[EnrichmentTable] = Field(default_factory=list, max_length=20)
+    edge_semantics: EdgeSemantics = Field(default_factory=EdgeSemantics)
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextCreate":
@@ -652,6 +668,7 @@ class GraphContextUpdate(BaseModel):
     metric_definitions: Optional[list[MetricDefinition]] = None
     identity_keys: Optional[list[IdentityKey]] = Field(default=None, max_length=50)
     enrichment_tables: Optional[list[EnrichmentTable]] = Field(default=None, max_length=20)
+    edge_semantics: Optional[EdgeSemantics] = None
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextUpdate":
@@ -689,6 +706,7 @@ class GraphContextResponse(BaseModel):
     metric_definitions: list[MetricDefinition] = Field(default_factory=list)
     identity_keys: list[IdentityKey] = Field(default_factory=list)
     enrichment_tables: list[EnrichmentTable] = Field(default_factory=list)
+    edge_semantics: EdgeSemantics = Field(default_factory=EdgeSemantics)
     owner_email: str
     shared_with: list[str] = Field(default_factory=list)
     has_write_access: bool = False

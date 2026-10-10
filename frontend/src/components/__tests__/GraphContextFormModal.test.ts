@@ -276,7 +276,7 @@ describe('GraphContextFormModal', () => {
       const { container } = renderModal({ open: true, mode: 'edit', context })
       await flush()
 
-      const selects = container.querySelectorAll('select')
+      const selects = container.querySelectorAll('select:not([data-testid="semantics-unit"])')
       expect(selects.length).toBe(0)
       const disabledInputs = Array.from(container.querySelectorAll('input[disabled]')) as HTMLInputElement[]
       expect(disabledInputs.some((i) => i.value === 'db.edges')).toBe(true)
@@ -425,6 +425,23 @@ describe('GraphContextFormModal', () => {
           promote: null,
         },
       ])
+    })
+
+    it('saves the edge amount and time semantics', async () => {
+      const context = createGraphContext({ id: 'ctx-edit', edge_semantics: { amount_prop: 'valor', currency: 'BRL' } })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      await fireEvent.update(getByTestId('semantics-unit'), 'cents')
+      await fireEvent.update(getByTestId('semantics-time'), 'data')
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+      expect(payload.edge_semantics).toEqual({
+        amount_prop: 'valor', amount_unit: 'cents', time_prop: 'data', currency: 'BRL',
+      })
     })
   })
 })

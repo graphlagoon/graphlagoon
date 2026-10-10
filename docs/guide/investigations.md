@@ -112,6 +112,16 @@ same device).
   (`GRAPH_LAGOON_ENRICHMENT_MAX_KEYS`, `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS`)
   and is audited (`enrichment.read`).
 
+### Amount and time
+
+The context form's **Amount and Time** section names the edge properties that
+hold each transaction's amount (in units or in cents, with a currency) and its
+time (ISO date or datetime, `dd/mm/yyyy [hh:mm]`, or epoch seconds or
+milliseconds). A file context gets them from its mapping (`edge_semantics`;
+the SIMBA preset sets `valor` and `data`). Each edge then shows its amount and
+time in the hover tooltip, and in a case graph every edge keeps its own
+context's semantics, so sources that name the amount differently still add up.
+
 ## Roles, notes and the journal
 
 - **Role.** The inspector's *Role* selector marks an entity as **Victim**

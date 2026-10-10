@@ -233,6 +233,14 @@ def validate(spec: Any) -> set:
             "edge_semantics",
             {"amount_prop", "amount_unit", "time_prop", "currency"},
         )
+        from pydantic import ValidationError
+
+        from graphlagoon.models.schemas import EdgeSemantics
+
+        try:
+            EdgeSemantics.model_validate(spec["edge_semantics"])
+        except ValidationError as e:
+            raise MappingError(f"edge_semantics: {e.errors()[0]['msg']}") from None
     for ref in refs:
         if ref.split(".", 1)[0] not in inputs:
             raise MappingError(f"'{ref}': unknown input alias")

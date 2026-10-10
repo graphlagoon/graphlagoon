@@ -18,6 +18,9 @@ export interface Edge {
   relationship_type: string;
   properties?: Record<string, unknown>;
   selected?: boolean;
+  /** Amount and time (epoch ms) tagged from the edge's own context semantics in a mixed-context case graph (F3.1). */
+  __amount?: number;
+  __t?: number;
 }
 
 export interface QueryMetadata {
@@ -137,6 +140,14 @@ export interface EnrichmentTable {
   promote?: { node_type: string; id_column: string; edge_type: string } | null;
 }
 
+/** Which edge properties carry the amount and the time (investigations F3.1). */
+export interface EdgeSemantics {
+  amount_prop?: string | null;
+  amount_unit?: 'units' | 'cents';
+  time_prop?: string | null;
+  currency?: string;
+}
+
 /** POST /graph-contexts/{id}/enrichment/{name}/lookup: rows grouped by key. */
 export interface EnrichmentLookupResult {
   name: string;
@@ -176,6 +187,7 @@ export interface GraphContext {
   metric_definitions?: CustomMetricDefinition[];
   identity_keys?: IdentityKey[];
   enrichment_tables?: EnrichmentTable[];
+  edge_semantics?: EdgeSemantics;
   owner_email: string;
   shared_with: string[];
   has_write_access: boolean;
@@ -752,6 +764,7 @@ export interface CreateGraphContextRequest {
   metric_definitions?: CustomMetricDefinition[];
   identity_keys?: IdentityKey[];
   enrichment_tables?: EnrichmentTable[];
+  edge_semantics?: EdgeSemantics;
 }
 
 export interface ShareRequest {

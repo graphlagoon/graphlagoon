@@ -281,6 +281,7 @@ def context_to_response(
         metric_definitions=metric_defs,
         identity_keys=getattr(context, "identity_keys", None) or [],
         enrichment_tables=getattr(context, "enrichment_tables", None) or [],
+        edge_semantics=getattr(context, "edge_semantics", None) or {},
         owner_email=context.owner_email,
         shared_with=shared_with,
         has_write_access=has_write,
@@ -416,6 +417,7 @@ async def create_graph_context(
                 metric_definitions=[m.model_dump() for m in data.metric_definitions],
                 identity_keys=[k.model_dump() for k in data.identity_keys],
                 enrichment_tables=enrichment_tables,
+                edge_semantics=data.edge_semantics.model_dump(),
                 owner_email=user_email,
             )
             session.add(context)
@@ -445,6 +447,7 @@ async def create_graph_context(
             metric_definitions=[m.model_dump() for m in data.metric_definitions],
             identity_keys=[k.model_dump() for k in data.identity_keys],
             enrichment_tables=enrichment_tables,
+            edge_semantics=data.edge_semantics.model_dump(),
             owner_email=user_email,
         )
         return context_to_response(context, user_email)
@@ -591,6 +594,8 @@ async def update_graph_context(
                 context.enrichment_tables = [
                     t.model_dump() for t in data.enrichment_tables
                 ]
+            if data.edge_semantics is not None:
+                context.edge_semantics = data.edge_semantics.model_dump()
 
             await session.commit()
             await session.refresh(context)
@@ -675,6 +680,8 @@ async def update_graph_context(
             updates["enrichment_tables"] = [
                 t.model_dump() for t in data.enrichment_tables
             ]
+        if data.edge_semantics is not None:
+            updates["edge_semantics"] = data.edge_semantics.model_dump()
 
         context = store.update_graph_context(context_id, **updates)
         return context_to_response(context, user_email)
