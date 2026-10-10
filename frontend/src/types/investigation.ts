@@ -42,7 +42,8 @@ export interface Investigation {
   suggested_count?: number | null;
 }
 
-export type DecisionOutcome = 'comunicar' | 'arquivar';
+/** 05 §7: communicate (Siscoaf), archive, a precautionary measure, or an opinion only. */
+export type DecisionOutcome = 'comunicar' | 'arquivar' | 'medida' | 'parecer';
 export type DecisionAction = 'dict' | 'spa' | 'bloqueio_cautelar';
 
 /** Recorded once by a person; the case is read-only afterwards. */
@@ -50,6 +51,8 @@ export interface InvestigationDecision {
   outcome: DecisionOutcome;
   actions: DecisionAction[];
   rationale: string;
+  /** Second pair of eyes named on the decision panel; informative. */
+  reviewer_email?: string | null;
   decided_by: string;
   decided_at: string;
 }
@@ -229,6 +232,31 @@ export interface ItemSnapshotPayload {
   edge_semantics: EdgeSemantics | null;
   exploration?: { id: string; title: string; state: ExplorationState } | null;
   report?: MappingReport & { truncated_edges: number };
+  /** A derived item (Vínculos, a saved selection): node ids are unified ids already. */
+  unified?: boolean;
+}
+
+/** `value` of a `group` annotation (05 §5). */
+export interface GroupValue {
+  name: string;
+  /** Hex color, or an index into the 8-color group palette. */
+  color?: string | number;
+  /** How it was made: selection | property:<name> | role | tag | community | component. */
+  by?: string;
+}
+
+/** Content of a `graph/view` item: chips, layout and closed groups (05 §5). */
+export interface CaseViewContent {
+  filters: {
+    sources: string[];
+    roles: string[];
+    tags: string[];
+    groups: string[];
+    types: string[];
+    window: [number, number] | null;
+  };
+  layout: string;
+  groups_closed: string[];
 }
 
 export interface CaseBrief {

@@ -797,7 +797,12 @@ async def verify_frozen_hash(investigation_id: UUID, user_email: str) -> Optiona
 
 
 async def record_decision(
-    investigation_id: UUID, user_email: str, outcome: str, actions: list[str], rationale: str
+    investigation_id: UUID,
+    user_email: str,
+    outcome: str,
+    actions: list[str],
+    rationale: str,
+    reviewer_email: Optional[str] = None,
 ) -> dict:
     """Records the decision (the route forbids agents and validates outcome and
     actions) and stores the case's ``frozen_hash``."""
@@ -812,6 +817,7 @@ async def record_decision(
             "outcome": outcome,
             "actions": list(dict.fromkeys(actions)),
             "rationale": rationale,
+            "reviewer_email": nominal_email(reviewer_email) if reviewer_email else None,
             "decided_by": user_email,
             "decided_at": now.isoformat(),
         }

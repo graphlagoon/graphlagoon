@@ -1,5 +1,5 @@
 {
-  "description": "Vínculos (05 §4b): p1, p2 and p3 share a phone node and a device property; p4 shares only the carrier IP, which 4 entities share and the threshold excludes; p5 is alone. minShared 2 keeps the synthetic trio only.",
+  "description": "Vínculos (05 §4b): p1, p2 and p3 share a phone node and a device property (DEV-1 / dev-1 / 'DEV-1 ' normalize alike); p4 shares only the carrier IP, which 4 entities share and the threshold excludes; p5 is alone. minShared 2 keeps the synthetic trio only.",
   "graph": {
     "nodes": [
       {
@@ -95,7 +95,7 @@
         "type": "compartilha_device_id",
         "properties": {
           "attribute": "device_id",
-          "value": "dev-1",
+          "value": "dev1",
           "shared_by": 3
         }
       },
@@ -117,7 +117,7 @@
         "type": "compartilha_device_id",
         "properties": {
           "attribute": "device_id",
-          "value": "dev-1",
+          "value": "dev1",
           "shared_by": 3
         }
       },
@@ -139,7 +139,7 @@
         "type": "compartilha_device_id",
         "properties": {
           "attribute": "device_id",
-          "value": "dev-1",
+          "value": "dev1",
           "shared_by": 3
         }
       },

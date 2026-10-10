@@ -20,12 +20,14 @@ import {
 } from '@/utils/investigationStatus';
 import type { InvestigationStatus, KindPreset, UpdateInvestigationRequest } from '@/types/investigation';
 import ShareDialog from '@/components/investigation/ShareDialog.vue';
-import DecideDialog from '@/components/investigation/DecideDialog.vue';
 
-defineProps<{
+const props = defineProps<{
   /** Extra line after the title (e.g. "› Follow the money"). */
   subtitle?: string | null;
+  /** `dossie` shows the way back to the canvas (05 §2: one screen, two modes). */
+  mode?: 'canvas' | 'dossie';
 }>();
+const emit = defineEmits<{ decide: []; settings: [] }>();
 
 const store = useInvestigationStore();
 const router = useRouter();
@@ -45,7 +47,6 @@ const editing = ref<Field | null>(null);
 const draft = ref('');
 const fieldInput = ref<HTMLInputElement | HTMLTextAreaElement | null>(null);
 const showShare = ref(false);
-const showDecide = ref(false);
 const showMenu = ref(false);
 const confirmDelete = ref(false);
 const busy = ref(false);
@@ -178,17 +179,22 @@ function toggleMenu() {
       <span v-if="suggested" class="badge suggested" data-testid="suggested-badge">● {{ suggested }} {{ suggested === 1 ? 'suggestion' : 'suggestions' }}</span>
 
       <span class="actions">
-        <RouterLink :to="`/investigations/${inv.id}/dossier`" class="btn btn-outline btn-sm" data-testid="dossier-link">
-          Dossier
+        <RouterLink
+          :to="props.mode === 'dossie' ? `/investigations/${inv.id}` : `/investigations/${inv.id}?mode=dossie`"
+          class="btn btn-outline btn-sm"
+          data-testid="dossier-link"
+        >
+          {{ props.mode === 'dossie' ? 'Canvas' : 'Dossier' }}
         </RouterLink>
         <button
           v-if="canEdit"
           class="btn btn-primary btn-sm"
           data-testid="case-decide"
-          @click="showDecide = true"
+          @click="emit('decide')"
         >
           Decide
         </button>
+        <button class="btn btn-outline btn-sm" title="Case settings" aria-label="Case settings" data-testid="case-settings-btn" @click="emit('settings')">⚙</button>
         <button
           v-if="inv.can_manage"
           class="btn btn-outline btn-sm"
@@ -273,7 +279,6 @@ function toggleMenu() {
     </div>
 
     <ShareDialog :open="showShare" @close="showShare = false" />
-    <DecideDialog :open="showDecide" @close="showDecide = false" />
   </header>
 </template>
 

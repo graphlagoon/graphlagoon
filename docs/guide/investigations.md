@@ -189,8 +189,23 @@ author); re-running adds a version, and any version can be pinned as evidence.
   source they came from.
 - **Expanding** a merged node asks which context to expand from, since each
   context has different neighbors.
-- The header links to the **Dossier**, **Matches** (open suggestions) and
-  **Agents** (pending proposals) pages of the case.
+- **Filter chips** over the canvas (source, role, tag, group, type, time
+  window, 👁 masked) filter visually without resetting the layout; **visões**
+  saves the chips, the layout and the closed groups as a `graph/view` item.
+- The **analysis bar** (Seguir o dinheiro, Caminhos, Grupos, Tipologias,
+  Vínculos, Enriquecer, Métricas) opens a parameter popover; every run is an
+  item of the case with its provenance (tool, parameters), shown in the bottom
+  strip's *Resultado* tab and pinnable as evidence. Re-running adds a version.
+- **Grupos** without code: from the selection (name, color, optionally closed
+  into one node) or by property, role, tag, community or component; groups are
+  annotations, become chips and appear in the dossier. **Vínculos** links
+  entities sharing attributes (phone, device, e-mail, address…) as a
+  `graph/derived` layer of `compartilha_<attr>` edges.
+- The header's **⚙** edits the case settings (deadlines, members, suggested
+  agent writes, vocabularies, identity keys with the generic normalizers
+  `device_id | ip | pix_key | card | terminal_id | address | regex`, edge
+  semantics by relationship type, label templates); **Dossier** is
+  `?mode=dossie` of the same screen.
 
 Everything else the explorer does (labels, styles, filters,
 [communities and metrics](./communities-metrics.md), the data table) works
@@ -389,7 +404,8 @@ the dossier numbers pinned versions E1, E2, … Agents pin with `pin_evidence`.
 
 ## Dossier
 
-**Dossier** in the workspace header opens the case as a document:
+**Dossier** in the workspace header opens the case as a document
+(`?mode=dossie`, the same store; old `/dossier` links redirect):
 
 - **Summary**: the description, typology, origin and how many entities hold
   each role, with indicators (sources and how many are restricted, evidence,

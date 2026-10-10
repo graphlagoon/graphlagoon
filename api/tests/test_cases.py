@@ -350,3 +350,7 @@ def test_preset_defaults_and_settings_patch(client):
     assert client.get(url, headers=h(OWNER)).json()["settings"] == settings
     events = client.get(f"{url}/events", headers=h(OWNER)).json()
     assert events[-1]["kind"] == "case.updated" and "settings" in events[-1]["payload"]
+    # The guided decision names a reviewer and allows a measure/opinion outcome (05 §7).
+    r = client.post(f"{url}/decision", json={"outcome": "medida", "rationale": "bloqueio", "reviewer_email": "rev@example.com"}, headers=h(OWNER))
+    assert r.status_code == 200, r.text
+    assert r.json()["decision"]["reviewer_email"] == "rev@example.com"

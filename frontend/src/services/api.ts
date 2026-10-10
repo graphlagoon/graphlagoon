@@ -710,7 +710,7 @@ class ApiService {
 
   async recordInvestigationDecision(
     id: string,
-    body: Pick<InvestigationDecision, 'outcome' | 'actions' | 'rationale'>,
+    body: Pick<InvestigationDecision, 'outcome' | 'actions' | 'rationale' | 'reviewer_email'>,
   ): Promise<Investigation> {
     const response = await this.client.post(`/api/investigations/${id}/decision`, body);
     return response.data;

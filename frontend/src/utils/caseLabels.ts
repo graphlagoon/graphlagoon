@@ -1,7 +1,8 @@
 /**
  * Readable names for case entities (F1, 05 §3 "Legibilidade"): a node is
- * named by `name | nome | razao_social`, else by its masked document, else by
- * `type · short id`. Never a raw UUID or a raw document.
+ * named by the case's label template for its type (`{nome} · {cpf_mascarado}`),
+ * else by `name | nome | razao_social`, else by its masked document, else by
+ * `type · short id`. Never a raw UUID; a raw document only with the audited 👁 toggle.
  */
 import type { Node } from '@/types/graph';
 
@@ -10,6 +11,13 @@ const MASKED_KEYS = ['cpf_mascarado', 'cnpj_mascarado', 'documento_mascarado', '
 const DOC_KEYS = ['cpf', 'cnpj', 'cpf_cnpj', 'documento', 'doc'];
 
 type Props = Record<string, unknown> | null | undefined;
+
+export interface LabelOptions {
+  /** `settings.label_templates`: node type → template with `{prop}` placeholders. */
+  templates?: Record<string, string> | null;
+  /** Show raw documents (👁, audited). */
+  unmasked?: boolean;
+}
 
 function pick(props: Props, keys: string[]): string | null {
   if (!props) return null;
@@ -37,13 +45,36 @@ export function shortId(id: string): string {
   return key.length > 12 ? `${key.slice(0, 8)}…${key.slice(-3)}` : key;
 }
 
-export function caseNodeLabel(node: Pick<Node, 'node_id' | 'node_type' | 'properties'>): string {
+/** `{prop}` placeholders filled from the properties; a document placeholder is masked unless `unmasked`. */
+export function applyLabelTemplate(template: string, node: Pick<Node, 'node_id' | 'node_type' | 'properties'>, unmasked = false): string {
+  const props = (node.properties ?? {}) as Record<string, unknown>;
+  const lower = new Map(Object.keys(props).map((k) => [k.toLowerCase(), k]));
+  const out = template.replace(/\{([^}]+)\}/g, (_, raw: string) => {
+    const key = raw.trim();
+    if (key === 'node_id' || key === 'id') return shortId(node.node_id);
+    if (key === 'node_type' || key === 'type') return node.node_type;
+    const real = lower.get(key.toLowerCase());
+    const v = real !== undefined ? props[real] : undefined;
+    if (v === null || v === undefined || String(v).trim() === '') return '';
+    const text = String(v).trim();
+    return DOC_KEYS.includes(key.toLowerCase()) && !unmasked ? maskDocument(text) : text;
+  });
+  return out.replace(/\s*[·\-|,]\s*(?=[·\-|,]|$)/g, '').trim();
+}
+
+export function caseNodeLabel(node: Pick<Node, 'node_id' | 'node_type' | 'properties'>, options: LabelOptions = {}): string {
+  const template = options.templates?.[node.node_type];
+  if (template) {
+    const text = applyLabelTemplate(template, node, options.unmasked);
+    if (text) return text;
+  }
   const props = node.properties as Props;
   const name = pick(props, NAME_KEYS);
   if (name) return name;
+  const doc = pick(props, DOC_KEYS);
+  if (doc && options.unmasked) return doc;
   const masked = pick(props, MASKED_KEYS);
   if (masked) return masked;
-  const doc = pick(props, DOC_KEYS);
   if (doc) return maskDocument(doc);
   return `${node.node_type || 'node'} · ${shortId(node.node_id)}`;
 }

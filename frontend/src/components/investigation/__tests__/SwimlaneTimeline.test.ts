@@ -4,34 +4,44 @@ import { createPinia, setActivePinia } from 'pinia'
 import fixture from '@/__tests__/fixtures/trace/golpe-pix.json'
 import SwimlaneTimeline from '@/components/investigation/SwimlaneTimeline.vue'
 import { useInvestigationStore } from '@/stores/investigation'
-import { useTraceStore } from '@/stores/trace'
-import { sankeyLayout } from '@/utils/traceView'
+import { useCaseAnalyses, type TraceContent } from '@/composables/useCaseAnalyses'
+import { traceFlows } from '@/utils/traceView'
 
-vi.mock('@/services/api', () => ({ api: {} }))
+const api = vi.hoisted(() => ({
+  createInvestigationItem: vi.fn(async (_id: string, body: any) => ({ id: 'it-1', pinned: [], current_version: 1, tags: [], accessible: true, position: 0, status: 'confirmed', author_kind: 'human', author_email: 'me', ...body })),
+  getInvestigationEvents: vi.fn(async () => []),
+}))
+vi.mock('@/services/api', () => ({ api }))
 
-const t = (hhmm: string) => Date.parse(`2026-09-09T${hhmm}:00-03:00`)
+let content: TraceContent
+let nameOf: (id: string) => string
 
 beforeEach(async () => {
   setActivePinia(createPinia())
   const inv = useInvestigationStore()
+  inv.current = { id: 'inv-1', status: 'analysis', has_write_access: true, settings: {}, state: {} } as any
   inv.contexts = { ctx: { id: 'ctx', identity_keys: [], edge_semantics: fixture.edge_semantics } } as any
   inv.sourceGraphs = [{ id: 'src', contextId: 'ctx', nodes: fixture.nodes, edges: fixture.edges, state: null, error: null }] as any
-  await useTraceStore().start({ type: 'node', id: '0001-9@ctx' }, 'forward')
+  const analyses = useCaseAnalyses()
+  nameOf = analyses.nameOf
+  // Forward from the victim: the seed is its only outgoing edge (the contested Pix).
+  await analyses.runTrace(analyses.defaultTraceParams({ type: 'node', id: '0001-9@ctx' }, 'forward')!)
+  content = inv.contents['it-1:1'] as TraceContent
 })
 
-function mount() {
-  const trace = useTraceStore()
+function mount(focus: [number, number] | null = null) {
   return render(SwimlaneTimeline, {
-    props: { result: trace.result!, flows: trace.allFlows, nameOf: trace.nameOf, focus: trace.focus },
+    props: { result: content.result, flows: traceFlows(content.result, content.walked), nameOf, focus },
   })
 }
 
-describe('swimlane timeline (F3.5)', () => {
+describe('swimlane timeline (F3.5, F4)', () => {
   it('a lane per account plus the exits, an arrow per transfer, a dwell band per account the money crossed', () => {
     const { getAllByTestId } = mount()
-    expect(getAllByTestId('swimlane-lane').map((l) => l.textContent!.trim())).toEqual([
-      'Conta 0001-9 (vítima)', '4471-0', '5520-3', '8812-7', '3090-1', 'Exits',
-    ])
+    const lanes = getAllByTestId('swimlane-lane').map((l) => l.textContent!.trim())
+    expect(lanes).toHaveLength(6)
+    expect(lanes[0]).toContain('0001-9')
+    expect(lanes[5]).toBe('Exits')
     expect(getAllByTestId('swimlane-arrow')).toHaveLength(7)
     expect(getAllByTestId('swimlane-arrow').map((a) => a.textContent).join('|')).toContain('Saque ATM')
     // 4471-0 14:02→14:15, 5520-3 14:09→14:40, 8812-7 14:11→15:05, 3090-1 14:15→14:31; the victim has none.
@@ -54,13 +64,10 @@ describe('swimlane timeline (F3.5)', () => {
     expect(events[1][0]).toBeNull()
   })
 
-  it('the window filters the flows that feed the graph and the Sankey', () => {
-    const trace = useTraceStore()
-    trace.focus = [t('14:05'), t('14:20')]
-    expect(trace.flows.map((f) => f.id)).toEqual(['src:e3', 'src:e4', 'src:e5'])
-    expect(sankeyLayout(trace.flows, trace.columns!).links).toHaveLength(3)
-    expect(trace.columns!.columns.has('0001-9@ctx')).toBe(false)
-    trace.focus = null
-    expect(trace.flows).toHaveLength(7)
+  it('without a trace result it lays the busiest entities of the case timeline', () => {
+    const flows = traceFlows(content.result, content.walked)
+    const { getAllByTestId, queryByText } = render(SwimlaneTimeline, { props: { flows, nameOf, focus: null, maxLanes: 3 } })
+    expect(getAllByTestId('swimlane-lane')).toHaveLength(3)
+    expect(queryByText('Exits')).toBeNull()
   })
 })

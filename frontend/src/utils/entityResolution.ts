@@ -9,6 +9,9 @@
  * merges: a person accepts each match.
  */
 
+import { normalizeIdentityValue } from '@/utils/identityKeys';
+import type { IdentityNormalize } from '@/types/graph';
+
 export const ER_THRESHOLD = 0.85;
 const STOPWORDS = new Set(['DE', 'DA', 'DO', 'DOS', 'DAS', 'E']);
 const MASK = /[*•xX]/;
@@ -153,6 +156,20 @@ export interface LinkNode {
   properties?: Record<string, unknown> | null;
 }
 
+/** How a property value is normalized before comparing, by attribute name (twin of the Python map). */
+export const ATTRIBUTE_NORMALIZERS: Record<string, IdentityNormalize> = {
+  telefone: 'phone', phone: 'phone', celular: 'phone',
+  email: 'email', 'e-mail': 'email',
+  device_id: 'device_id', dispositivo: 'device_id', device: 'device_id',
+  ip: 'ip',
+  endereco: 'address', address: 'address', logradouro: 'address',
+  cartao: 'card', card: 'card',
+  terminal: 'terminal_id', terminal_id: 'terminal_id',
+  cpf: 'cpf_cnpj', cnpj: 'cpf_cnpj', cpf_cnpj: 'cpf_cnpj', documento: 'cpf_cnpj',
+  conta: 'account', account: 'account',
+  chave_pix: 'pix_key', pix_key: 'pix_key',
+};
+
 export interface SharedLinksParams {
   /** Property names on the entities and/or node types of attribute nodes they connect to. */
   attributes: string[];
@@ -222,7 +239,8 @@ export function sharedAttributeLinks(
       const props = n.properties ?? {};
       const k = propKey(props, attribute);
       const v = k !== undefined ? props[k] : null;
-      if (v !== null && v !== undefined && String(v).trim() !== '') values.add(String(v).trim().toLowerCase());
+      const normalized = normalizeIdentityValue(v, ATTRIBUTE_NORMALIZERS[lower] ?? 'lower');
+      if (normalized !== null) values.add(normalized);
       for (const m of neighbours.get(n.uid) ?? []) if (m.type.toLowerCase() === lower) values.add(m.uid);
       for (const value of values) groups.set(value, (groups.get(value) ?? new Set()).add(n.uid));
     }

@@ -4,16 +4,20 @@ import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { applyAliases, snapshotToGraph, unifyGraph, type NodeOrigin, type UnifySource } from '@/utils/unifyGraph';
 import { provenanceColor } from '@/utils/graphAppearance';
-import type { Edge, ExplorationState, GraphContext, IdentityKey, Node } from '@/types/graph';
+import { groupColor, vocabularyOf } from '@/utils/casePresets';
+import type { Edge, EdgeSemanticsByType, ExplorationState, GraphContext, IdentityKey, Node } from '@/types/graph';
 import type {
   CaseAnnotation,
   CaseBrief,
   CaseItem,
+  CaseViewContent,
   CreateAnnotationRequest,
   CreateInvestigationRequest,
   CreateItemRequest,
+  GroupValue,
   Investigation,
   InvestigationEvent,
+  ItemProvenance,
   ShareRole,
   UpdateInvestigationRequest,
   UpdateItemRequest,
@@ -24,6 +28,29 @@ export interface SourceGraph extends UnifySource {
   state: ExplorationState | null;
   /** Why the item shows no graph (no snapshot, load failure). */
   error: string | null;
+}
+
+/** A confirmed `group` annotation, resolved for the UI (05 §5). */
+export interface CaseGroup {
+  id: string;
+  name: string;
+  color: string;
+  targets: string[];
+  by?: string;
+  author_kind: CaseAnnotation['author_kind'];
+}
+
+/** An analysis saved as an item (05 §3 "Resultado = item"): the content of its latest version. */
+export interface AnalysisSpec {
+  tool: 'trace' | 'paths' | 'typologies' | 'links' | 'metrics' | 'communities';
+  title: string;
+  kind: 'table' | 'graph';
+  subkind: CaseItem['subkind'];
+  params: Record<string, unknown>;
+  content: unknown;
+  /** Re-run: a new version of this item instead of a new item. */
+  itemId?: string | null;
+  description?: string;
 }
 
 /** Items that put nodes on the canvas (a saved view is chips + layout only). */
@@ -70,15 +97,20 @@ export const useInvestigationStore = defineStore('investigation', () => {
   );
   const unified = computed(() => {
     const overrides = (current.value?.settings?.identity_keys as IdentityKey[] | undefined) ?? [];
+    const edgeOverrides = (current.value?.settings?.edge_semantics as EdgeSemanticsByType | undefined) ?? null;
     return applyAliases(
       unifyGraph(
         [...sourceGraphs.value.filter((g) => !offCanvas.value.has(g.id)), ...expansions.value, ...derived.value],
         contexts.value,
         overrides,
+        edgeOverrides,
       ),
       sameAs.value,
     );
   });
+  /** Dated edges exist: trace, paths by time and the timeline have something to work with. */
+  const hasAmounts = computed(() => unified.value.edges.some((e) => e.__amount !== undefined && e.__t !== undefined));
+  const hasTimes = computed(() => unified.value.edges.some((e) => e.__t !== undefined));
 
   /** Confirmed roles by unified node id (annotations kind role). */
   const roles = computed<Record<string, string>>(() =>
@@ -87,6 +119,36 @@ export const useInvestigationStore = defineStore('investigation', () => {
         .filter((a) => a.kind === 'role' && a.status === 'confirmed' && a.targets.length === 1)
         .map((a) => [a.targets[0], String(a.value.role)]),
     ),
+  );
+  /** Confirmed tags by unified node id. */
+  const entityTags = computed<Map<string, string[]>>(() => {
+    const map = new Map<string, string[]>();
+    for (const a of annotations.value) {
+      if (a.kind !== 'tag' || a.status !== 'confirmed') continue;
+      for (const t of a.targets) map.set(t, [...new Set([...(map.get(t) ?? []), String(a.value.tag)])]);
+    }
+    return map;
+  });
+  const tagsUsed = computed(() => [...new Set([...entityTags.value.values()].flat())].sort());
+  /** Confirmed groups (05 §5), in creation order. */
+  const groups = computed<CaseGroup[]>(() =>
+    annotations.value
+      .filter((a) => a.kind === 'group' && a.status === 'confirmed')
+      .map((a, i) => {
+        const v = a.value as GroupValue;
+        return { id: a.id, name: v.name ?? `Group ${i + 1}`, color: groupColor(v.color, i), targets: a.targets, by: v.by, author_kind: a.author_kind };
+      }),
+  );
+  const groupsClosed = computed<string[]>(() => (current.value?.state?.groups_closed as string[] | undefined) ?? []);
+  const vocabulary = computed(() => vocabularyOf(current.value?.settings, current.value?.kind_preset));
+  const labelTemplates = computed(() => (current.value?.settings?.label_templates as Record<string, string> | undefined) ?? null);
+  /** Saved views (`graph/view` items). */
+  const views = computed(() => items.value.filter((i) => i.kind === 'graph' && i.subkind === 'view' && !i.deleted_at));
+  /** Analyses: results saved as items, newest first. */
+  const analyses = computed(() =>
+    items.value
+      .filter((i) => !i.deleted_at && i.provenance?.tool && ['trace', 'paths', 'typologies', 'links', 'metrics', 'communities'].includes(String(i.provenance.tool)))
+      .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')),
   );
   const hypotheses = computed(() => annotations.value.filter((a) => a.kind === 'hypothesis'));
   const suggestions = computed(() => [
@@ -188,6 +250,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
       sourceGraphs.value = [];
       expansions.value = [];
       derived.value = [];
+      contents.value = {};
     }
     try {
       const [inv, rows, notes] = await Promise.all([
@@ -446,6 +509,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
             return {
               ...base,
               ...snapshotToGraph(payload.snapshot),
+              unified: !!payload.unified,
               state: payload.exploration?.state ?? null,
               // shortcut: no query re-run here; an exploration without a snapshot shows empty.
               error: payload.snapshot ? null : 'No saved graph: open the exploration and save it',
@@ -490,6 +554,113 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
+  async function postEvent(kind: string, payload: Record<string, unknown> = {}) {
+    if (!current.value) return;
+    await api.postInvestigationEvent(current.value.id, kind, payload);
+    void fetchEvents();
+  }
+
+  // --- item contents, analyses, views, groups (F4) ----------------------------
+
+  /** JSON content of the latest version, by `${item}:${version}`; filled on creation, else fetched. */
+  const contents = ref<Record<string, unknown>>({});
+  const contentKey = (item: CaseItem) => `${item.id}:${item.current_version}`;
+
+  function rememberContent(item: CaseItem, json: unknown) {
+    contents.value = { ...contents.value, [contentKey(item)]: json };
+  }
+
+  async function loadItemJson<T = unknown>(item: CaseItem): Promise<T | null> {
+    if (!current.value || !item.current_version) return null;
+    const key = contentKey(item);
+    if (key in contents.value) return contents.value[key] as T;
+    const buffer = await api.getInvestigationItemContent(current.value.id, item.id);
+    let json: unknown = null;
+    try {
+      json = JSON.parse(new TextDecoder().decode(buffer));
+    } catch {
+      json = null;
+    }
+    rememberContent(item, json);
+    return json as T | null;
+  }
+
+  /** Saves an analysis result as an item (new) or as a new version (re-run); provenance carries tool and params. */
+  async function saveAnalysis(spec: AnalysisSpec): Promise<CaseItem | null> {
+    if (!current.value) return null;
+    const provenance: ItemProvenance = { tool: spec.tool, params: spec.params, engine: 'browser' };
+    let item: CaseItem | null;
+    if (spec.itemId) {
+      item = await api.addInvestigationItemVersion(current.value.id, spec.itemId, { content_json: spec.content });
+      upsertItem(item);
+      void fetchEvents();
+    } else {
+      item = await addItem({
+        kind: spec.kind,
+        subkind: spec.subkind,
+        title: spec.title,
+        description: spec.description,
+        provenance,
+        content_json: spec.content,
+      });
+    }
+    if (item) rememberContent(item, spec.content);
+    return item;
+  }
+
+  /** View-only state (`state.groups_closed`, …): merged, never replaced. */
+  async function saveState(patch: Record<string, unknown>) {
+    if (!current.value) return;
+    await updateInvestigation({ state: { ...(current.value.state ?? {}), ...patch } });
+  }
+
+  async function setGroupClosed(groupId: string, closed: boolean) {
+    const set = new Set(groupsClosed.value);
+    if (closed) set.add(groupId);
+    else set.delete(groupId);
+    await saveState({ groups_closed: [...set] });
+  }
+
+  /** A group from a selection or a rule (05 §5): a confirmed `group` annotation. */
+  async function addGroup(name: string, targets: string[], options: { color?: string | number; by?: string; closed?: boolean } = {}) {
+    const row = await addAnnotation({ kind: 'group', targets, value: { name, color: options.color ?? groups.value.length, by: options.by } });
+    if (row && options.closed) await setGroupClosed(row.id, true);
+    return row;
+  }
+
+  async function renameGroup(groupId: string, patch: Partial<GroupValue>) {
+    if (!current.value) return;
+    const g = annotations.value.find((a) => a.id === groupId);
+    if (!g) return;
+    await api.updateInvestigationAnnotation(current.value.id, groupId, { value: { ...g.value, ...patch } });
+    await fetchAnnotations();
+  }
+
+  /** Replaces the confirmed tags of an entity (one annotation per tag). */
+  async function setTags(entity: string, tags: string[]) {
+    if (!current.value) return;
+    const wanted = new Set(tags.map((t) => t.trim()).filter(Boolean));
+    const mine = annotations.value.filter((a) => a.kind === 'tag' && a.status === 'confirmed' && a.targets.length === 1 && a.targets[0] === entity);
+    for (const a of mine) if (!wanted.has(String(a.value.tag))) await api.deleteInvestigationAnnotation(current.value.id, a.id);
+    const have = new Set(mine.map((a) => String(a.value.tag)));
+    for (const t of wanted) if (!have.has(t)) await api.createInvestigationAnnotation(current.value.id, { kind: 'tag', targets: [entity], value: { tag: t } });
+    await fetchAnnotations();
+    void fetchEvents();
+  }
+
+  /** Saves the chips, layout and closed groups as a `graph/view` item. */
+  async function saveView(title: string, content: CaseViewContent) {
+    const item = await addItem({ kind: 'graph', subkind: 'view', title, content_json: content, provenance: { tool: 'view' } });
+    if (item) rememberContent(item, content);
+    return item;
+  }
+
+  /** "Usar no dossiê": a `dossie` tag on the item. */
+  async function setInDossier(item: CaseItem, on: boolean) {
+    const tags = item.tags.filter((t) => t !== 'dossie');
+    await updateItem(item.id, { tags: on ? [...tags, 'dossie'] : tags });
+  }
+
   return {
     investigations,
     current,
@@ -510,7 +681,18 @@ export const useInvestigationStore = defineStore('investigation', () => {
     graphLoading,
     sourceColors,
     unified,
+    hasAmounts,
+    hasTimes,
     roles,
+    entityTags,
+    tagsUsed,
+    groups,
+    groupsClosed,
+    vocabulary,
+    labelTemplates,
+    views,
+    analyses,
+    contents,
     hypotheses,
     suggestions,
     evidence,
@@ -552,5 +734,16 @@ export const useInvestigationStore = defineStore('investigation', () => {
     loadWorkspace,
     addExpansion,
     addDerived,
+    postEvent,
+    loadItemJson,
+    rememberContent,
+    saveAnalysis,
+    saveState,
+    setGroupClosed,
+    addGroup,
+    renameGroup,
+    setTags,
+    saveView,
+    setInDossier,
   };
 });

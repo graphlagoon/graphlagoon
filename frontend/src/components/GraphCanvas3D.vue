@@ -63,7 +63,7 @@ function nodeLabelOf(node: Node): string {
     /\{node_id/.test(textFormatDefaults.nodeTemplate) &&
     !findMatchingRule(textFormatRules, 'node', node.node_type, 'label')
   ) {
-    return caseNodeLabel(node);
+    return graphStore.investigationMode.labelOf?.(node) ?? caseNodeLabel(node);
   }
   return formatNodeLabel(node, textFormatRules, textFormatDefaults.nodeTemplate, labelOptions);
 }

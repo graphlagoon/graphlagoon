@@ -131,7 +131,7 @@ test.describe('Investigations', () => {
     await page.getByTestId('decision-action-dict').check();
     await page.getByTestId('decision-rationale').fill('Conta de passagem.');
     await page.getByTestId('decision-record').click();
-    await expect(page.getByTestId('decide-dialog')).toHaveCount(0);
+    await expect(page.getByTestId('decision-panel')).toHaveCount(0); // the guided panel leaves the inspector once recorded
     await expect(status).toHaveValue('decided');
     await expect(status).toBeDisabled();
     await expect(page.getByTestId('case-decide')).toHaveCount(0);
@@ -493,7 +493,8 @@ test.describe('Investigations', () => {
 
     await page.goto('/investigations/inv-1');
     await expect(page.getByTestId('workspace-status')).toContainText('12 nodes', { timeout: 15_000 });
-    await page.getByTestId('workspace-typologies-btn').click();
+    await page.getByTestId('workspace-typologies-btn').click(); // popover with parameters; the run is an item
+    await page.getByTestId('typologies-run').click();
     const badge = page.getByTestId('typology-hub_atributo');
     await expect(badge).toContainText('CC 4.001 III-f');
     await expect(badge).toContainText('3 entities');
