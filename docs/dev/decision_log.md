@@ -12447,3 +12447,64 @@ dossiê continua (duplicação pequena até o `mode=dossie` da F2). Fora: pagina
 explorações, retenção após reabrir. **Public docs:** `docs/guide/investigations.md`
 (header editável, fila, picker, reabrir; item "API only" removido dos limites).
 **Admin-area impact:** nova ação auditada `investigation.reopen` em `AUDITED_ROUTES`.
+
+## [2026-10-10 13:10] - Feature Implemented: F2 · Novo modelo
+
+Modelo de dados v2 (05 §1) em uma migração `016_cases.py` (016–019 apagadas; nunca
+rodaram): `investigations` (`kind_preset`, status `open|analysis|decided|archived`,
+`deadline_days`, `tags`, `settings`, `state` só de visualização), `investigation_shares`
+(`email`, `role reader|editor`; responsável vira editor automaticamente), `case_items` +
+`case_item_versions` (blob por sha256 em `{caso}/items/{item}/{sha}`, nunca sobrescrito;
+`text_blob_key` por `text_extract.py` — md/txt/csv/json nativos, pdf/docx via `pypdf`/
+`python-docx` opcionais; `run` das consultas; `pinned_*` = evidência imutável),
+`case_annotations` (role/tag/group/same_as/hypothesis/hypothesis_status/typology/
+status_change), `investigation_events` sem hash encadeado (`frozen_hash` = sha256 do
+journal até a decisão + versões fixadas, verificado no export), `agent_tokens` sem
+`scopes`, `org_vocabularies`, `org_library`. **Decisões:** (1) tabela com `mapping.as=graph`
+entra no canvas interpretada no read por `file_mapping` (`extra_item_ids` para layouts
+multi-arquivo como SIMBA) — zero `GraphContext`/exploração por upload; (2) escrita de
+agente registra `author_kind=agent`+`agent_token_id` e vira `suggested` só nos
+`settings.agent_suggest_kinds` (padrão role/tag/hypothesis_status/same_as/status_change/
+typology); PATCH de status por agente vira anotação `status_change` sugerida; confirmar/
+recusar é `forbid_agents`; (3) `run` de consulta usa o mesmo caminho do console
+(`resolve_datasource_or_400` + `enforce_query_scope` + `submit_table_query`/poll ou
+`prepare_*`+`execute_prepared`), `:name` com a validação de `TemplateParameter`, listas
+viram `'a', 'b'`; (4) prazo só para presets com fase (`pix_med` 45+45 de `alert_at`) ou
+`deadline_days`; (5) ER (`analysis/er`) grava `same_as` sugerido mesmo quando humano roda;
+(6) exports leem itens fixados e anotações; (7) permissões `investigation.decide|share`
+substituem `export` (export continua humano e auditado). **Arquivos:** api `services/
+{cases,case_items,case_annotations,case_queries,text_extract,case_graph,
+investigation_exports,investigation_storage}.py` (apagados `investigations` e
+`investigation_{files,artifacts,evidence,hypotheses,matches,proposals}.py`), `routers/
+investigations.py` (40 rotas), `mcp/{registry,server}.py` (tools finas: list_items/
+get_item/add_item/annotate/run_query/pin_evidence/get_brief/write_brief/search_case/
+resolve_entities; prompts mantidos), `db/{models,memory_store}.py`, `models/schemas.py`,
+`routers/{admin_registry,agent_tokens,admin}.py`, `services/{audit,permission_catalog,
+agent_tokens}.py`, `utils/context_access.py` (exceção de context de arquivo removida),
+`dev/{seed,seed_investigations}.py` (4 cenários: crédito, garantia, Pix/MED com SIMBA
+golpe-pix, fraude sintética + Pix gerados); frontend `types/investigation.ts`,
+`services/api.ts`, `stores/investigation.ts`, `components/investigation/CaseItemsPanel.vue`
+(novo), `views/{InvestigationView,InvestigationsView,InvestigationDossierView,
+AgentTokensView}.vue`, `CaseHeader/ShareDialog/AddToInvestigationModal/FileImportWizard/
+EnrichmentTab/TracePanel/TypologyBadgesPanel.vue`, `utils/{investigationStatus,
+investigationEvents,graphAppearance,adminView}.ts`, `router/index.ts` (`/settings/agents`),
+`Toolbar.vue`; apagados `InvestigationAgentsView`, `InvestigationMatchesView`,
+`ArtifactsSpace`, `CaseFiles`, `SourcesPanel`. **Testes:** novos `test_cases.py` (transições,
+reopen, prazo, share/assignee, sugestão de status por agente, hash reproduzível + export,
+paridade InMemory, migração 016 em SQLite upgrade/idempotente/downgrade/re-upgrade),
+`test_case_items.py`, `test_case_annotations.py`, `test_case_queries.py` (datasource
+mockado); `test_case_graph.py`, `test_mcp_server.py`, `test_agent_tokens.py`,
+`test_dev_seed*.py`, registries e permissões adaptados; apagados `test_investigation_*`,
+`test_artifacts`, `test_proposals`, `test_matches`. pytest 1429 verdes (5 falhas
+pré-existentes conhecidas); vitest 2571 (novo `CaseItemsPanel.test.ts`, store/view/dossier
+reescritos); vue-tsc limpo; E2E `investigations.spec.ts` (11) + `user-journeys.spec.ts`
+(8) com `seedInvestigations` re-mockado sobre items/annotations/brief. **Suposições:**
+labels da UI continuam em inglês (o mapa i18n `investigationStatus.ts` é o único lugar que
+os soletra; pt-BR é F6); dossiê segue rota até a F4; "no canvas" vive na sessão (vai para
+`state.views` na F4); `item_snapshot` reinterpreta tabelas mapeadas a cada leitura (cache
+quando pesar). **Fora/adiado:** operações entre tabelas, colar/arrastar, grupos pela
+seleção, `changes_since`/recursos de texto/`org_library` no MCP (F3–F5). **Public docs:**
+`docs/guide/{investigations,agents-mcp,permissions}.md` atualizados minimamente (reescrita
+na F5). **Admin-area impact:** `CLEARABLE_TABLES` com as tabelas novas; ações auditadas
+`investigation.item_add|item_remove|item_read` no lugar de source/file; aba Investigations
+mostra itens; tokens sem scopes na listagem.
