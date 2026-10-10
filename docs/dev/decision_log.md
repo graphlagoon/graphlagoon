@@ -12272,3 +12272,53 @@ quebrar âncoras).
 **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 06:10] - Feature Implemented: Dev seed de investigações (`make dev-seed-investigations`)
+
+**Feature:** `api/graphlagoon/dev/seed_investigations.py` (CLI `python -m
+graphlagoon.dev.seed_investigations --api … [--cases 20] [--seed 42] [--reset]`)
+enche uma API rodando com ~20 casos de demonstração/QA, só por HTTP (reusa
+`SeedClient`, `wait_for_health`, `ADMIN_EMAIL` do `dev/seed.py`).
+
+**Design Decisions:**
+1. Fonte autocontida, sem warehouse: todo caso sobe arquivos SIMBA com papel `graph`
+   e gera o grafo no servidor (`…/files/{fid}/context`, preset `simba_v31`). O
+   primeiro ("Golpe Pix · falsa central de atendimento") usa as fixtures douradas
+   `simba-mini` + `qsa-mini` (o match ANA SILVA SIMBA × sócio mascarado do QSA é o
+   real); os outros usam um pacote SIMBA gerado (vítimas → conta laranja → mula →
+   conta B → saída + saque 9999), então o rastreio atravessa 4 camadas em todos.
+   O trace de evidência passa `stop_nodes` = saídas, porque os tipos de nó do SIMBA
+   (Pessoa/Conta/Desconhecido) nunca batem nos stops padrão.
+2. Explorações do seed normal viram fontes ao vivo em 4 casos quando existem (dono da
+   exploração = dono do contexto, 2+ contextos); senão segue só com arquivos.
+3. Cobertura: os 5 primeiros planos cobrem selecao/analise/arquivado/decidido
+   (comunicar e arquivar via `POST …/decision`), então `--cases 5` já mostra todos.
+   Cada caso: compartilhamentos, papéis e pins, notas ancoradas, evidências
+   graph_state/table/file/trace, hipóteses com evidência a favor/contra, matches
+   aceito/recusado/adiado/sugerido, selos de tipologia aceitos (`typology.accepted`
+   dos resultados com hits), artefatos md/csv/pdf/png/html com 1–4 versões (alguns
+   aprovados), propostas role/typology/hypothesis/hypothesis_status/status/match
+   aceitas, pendentes e recusadas com motivo.
+4. Agente: token por dono (`POST /api/agent-tokens`, rotaciona a cada 100 requisições
+   para ficar sob o rate limit de 120/min). Com `agents_enabled` desligado (padrão do
+   `make dev`) o dono escreve artefatos e propostas, com aviso.
+5. Idempotência: marcador `[seed:investigations]` na descrição; rerun adiciona;
+   `--reset` apaga como superusuário com `?reason=` e remove os contextos `file` que
+   esses casos geraram. PNG e PDF gerados com stdlib.
+6. Fora (MVP): datas retroativas para prazos, determinismo dos ids.
+
+**Files:** `api/graphlagoon/dev/seed_investigations.py`,
+`api/tests/test_dev_seed_investigations.py` (novos); `Makefile`
+(`dev-seed-investigations`, `SEED_CASES`), `docs/guide/getting-started.md` (1 parágrafo).
+
+**Testing:** `test_dev_seed_investigations.py` roda o seed normal e o de
+investigações na app inteira em memória (ASGI): todos os status, as duas decisões,
+artefatos/versões do agente em draft e approved, propostas nos 3 status, matches nos
+4, fontes ao vivo, trace no caso SIMBA, `--reset` apaga só os marcados. Manual: API
+uvicorn em memória + CLI (20 casos; rerun com `--reset`; traces com cobertura 0,6–0,98).
+**Public Docs:** `docs/guide/getting-started.md` cita o alvo.
+**Admin-Area Impact:** No admin-area impact.
+
+**Author:** Claude (AI Assistant)
