@@ -61,7 +61,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F3.5 · Linha do tempo em raias com seleção de janela
 - [x] F3.6 · Caminhos
 - [x] F3.7 · Componentes conexos no registry de algoritmos
-- [ ] F3.8 · Rastreio e caminhos no servidor (Python) com paridade e ferramentas MCP
+- [x] F3.8 · Rastreio e caminhos no servidor (Python) com paridade e ferramentas MCP
 
 **F4 · Dossiê e compliance**
 - [ ] F4.1 · Evidências congeladas
@@ -730,9 +730,9 @@ trabalho de análise e documentação; a pessoa decide.
   - ferramentas MCP `trace_money` e `find_paths`, mais as rotas
     `POST .../analysis/trace` e `.../analysis/paths`.
 - **Aceite:**
-  - [ ] O teste pytest lê **a mesma** fixture `frontend/src/__tests__/fixtures/trace/golpe-pix.json`
+  - [x] O teste pytest lê **a mesma** fixture `frontend/src/__tests__/fixtures/trace/golpe-pix.json`
     e chega aos mesmos números do vitest em todas as regras.
-  - [ ] O resultado do rastreio pode virar evidência (F4.1) com o carimbo do método.
+  - [x] O resultado do rastreio pode virar evidência (F4.1) com o carimbo do método.
 - **Testes:** `api/tests/test_trace.py` e `test_paths.py`.
 
 ---

@@ -2056,6 +2056,50 @@ class MatchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Server analyses on the case graph (F3.8, services/trace.py and paths.py)
+# ---------------------------------------------------------------------------
+
+TimeValue: TypeAlias = Union[int, float, str]  # epoch s/ms, ISO or dd/mm/yyyy hh:mm
+
+
+class TraceRequest(BaseModel):
+    """Seed = ``seed_edge_ids`` or the outgoing (forward) / incoming (backward)
+    edges of ``seed_node``. Defaults are the T5 ones (README Q4)."""
+
+    seed_edge_ids: list[str] = Field(default_factory=list, max_length=1000)
+    seed_node: Optional[str] = None
+    direction: Literal["forward", "backward"] = "forward"
+    # Default: fifo forward, lifo backward.
+    allocation: Optional[Literal["fifo", "lifo", "proportional", "libr", "total"]] = None
+    max_hops: int = Field(3, ge=1, le=20)
+    max_dwell_hours: Optional[float] = Field(24, ge=0)  # null or 0 = no limit
+    min_amount: float = Field(50, ge=0)
+    # [start, end]; default seed → +Δ (backward −Δ → seed).
+    window: Optional[list[TimeValue]] = Field(None, min_length=2, max_length=2)
+    stop_types: Optional[list[str]] = None  # default: cash-out/crypto/bet/external types
+    stop_nodes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self):
+        if bool(self.seed_edge_ids) == (self.seed_node is not None):
+            raise ValueError("Give exactly one of seed_edge_ids or seed_node")
+        if self.direction == "backward" and self.allocation in ("fifo", "libr"):
+            raise ValueError("Backward traces use lifo, proportional or total")
+        return self
+
+
+class PathsRequest(BaseModel):
+    source: str
+    target: str
+    mode: Literal["shortest", "weighted", "k-shortest", "earliest"] = "shortest"
+    directed: bool = True  # earliest always follows direction and time
+    weight: Literal["hops", "inverse-amount"] = "hops"
+    k: int = Field(3, ge=1, le=10)
+    t0: Optional[TimeValue] = None  # earliest: departure at the source
+    max_dwell_hours: Optional[float] = Field(None, ge=0)  # earliest: Δ at intermediate nodes
+
+
+# ---------------------------------------------------------------------------
 # Agent tokens (03-arquitetura §8.2)
 # ---------------------------------------------------------------------------
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from graphlagoon.mcp.server import _normalize
+from graphlagoon.services.case_graph import _normalize
 
 CONVERTERS = ("cents", "decimal_br", "trim", "upper", "digits")
 NORMALIZERS = ("cpf_cnpj", "account", "phone", "email", "lower", "none")

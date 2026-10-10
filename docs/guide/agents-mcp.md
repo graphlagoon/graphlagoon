@@ -72,7 +72,7 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
 | Scope | The agent can |
 |---|---|
 | `read` | read cases, the unified graph, entities, the journal, notes, artifacts, case files (`list_files`, `get_file`, masked), proposals and entity matches (`list_matches`); look up an entity in its context's enrichment tables (`lookup_enrichment`) |
-| `analyze` | run server analyses: entity resolution (`suggest_matches`, stores suggestions, never merges); follow-the-money and typologies arrive later |
+| `analyze` | run server analyses: entity resolution (`suggest_matches`, stores suggestions, never merges), follow the money (`trace_money`) and paths (`find_paths`) with the same results as the browser; typologies arrive later |
 | `write` | create cases, add sources, write notes, upload artifacts as **drafts**, upload case files (`upload_file`, up to the artifact size), turn a graph file into a source with a preset or mapping (`create_file_graph`) and set how an enrichment file joins nodes (`set_file_mapping`); the file tools need your `investigation.upload` permission |
 | `propose` | propose an entity role, the case status, a typology or a decision on an entity match (`match` with `match_id`, `status` and `reason_text`) |
 
@@ -109,7 +109,7 @@ slash commands (`/mcp__graphlagoon__investigar_golpe_pix`, …) and take the cas
 
 | Prompt | What the agent does |
 |---|---|
-| `investigar_golpe_pix` | Reads the case and graph, follows the money hop by hop to the exits, notes each hop, uploads a summary and proposes victim, mule and exit roles |
+| `investigar_golpe_pix` | Reads the case and graph, follows the money to the exits with `trace_money` (FIFO and proportional), notes each hop citing the method, uploads a summary and proposes victim, mule and exit roles |
 | `revisar_lojista` | Looks for partners, terminals and accounts a merchant shares with others, notes them, uploads a review and proposes roles and a typology |
 | `montar_dossie` | Reads the journal, notes, artifacts and proposals and uploads a draft dossier (`dossie.md`) for the person who decides |
 

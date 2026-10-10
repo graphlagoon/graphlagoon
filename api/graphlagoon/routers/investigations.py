@@ -35,9 +35,11 @@ from graphlagoon.models.schemas import (
     MatchDecision,
     MatchResponse,
     MatchSuggestionsCreate,
+    PathsRequest,
     ProposalCreate,
     ProposalReject,
     ProposalResponse,
+    TraceRequest,
 )
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
@@ -46,6 +48,8 @@ from graphlagoon.services import investigation_matches as matches
 from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
+from graphlagoon.services.paths import run_case_paths
+from graphlagoon.services.trace import run_case_trace
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import (
     forbid_agents,
@@ -765,5 +769,31 @@ async def decide_match(
             data.status,
             data.reason_text,
         )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+# Server analyses on the unified case graph (F3.8): same results as the browser
+# workers, journaled as trace.run / path.run; agents need the "analyze" scope.
+
+
+@router.post(
+    "/{investigation_id}/analysis/trace",
+    dependencies=[Depends(require_agent_scope("analyze"))],
+)
+async def analysis_trace(investigation_id: UUID, data: TraceRequest, request: Request):
+    try:
+        return await run_case_trace(investigation_id, get_current_user(request), data)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/analysis/paths",
+    dependencies=[Depends(require_agent_scope("analyze"))],
+)
+async def analysis_paths(investigation_id: UUID, data: PathsRequest, request: Request):
+    try:
+        return await run_case_paths(investigation_id, get_current_user(request), data)
     except service.InvestigationError as exc:
         raise _http(exc)
