@@ -1,5 +1,6 @@
-"""AI-first coverage (FA.6, 03 §8.7): every investigation route has an MCP tool
-or a recorded reason, and human-only routes reject agent tokens."""
+"""AI-first coverage (05 §6): every investigation route has an MCP tool or a
+recorded reason, every tool names the human action it mirrors
+(``meta.human_equivalent``), and human-only routes reject agent tokens."""
 
 import re
 import sys
@@ -37,13 +38,15 @@ from graphlagoon.db.memory_store import InMemoryStore  # noqa: E402
 from graphlagoon.mcp.registry import (  # noqa: E402
     AGENT_EXEMPT_ROUTES,
     AGENT_TOOL_ROUTES,
+    TOOL_ROUTES,
+    human_equivalent,
     human_only_routes,
 )
 from graphlagoon.middleware import auth  # noqa: E402
-from graphlagoon.routers import agent_tokens, graph_contexts, investigations  # noqa: E402
+from graphlagoon.routers import agent_tokens, graph_contexts, investigations, org  # noqa: E402
 
 SUPERUSER = "admin@example.com"
-COVERED_ROUTERS = (investigations.router, agent_tokens.router)
+COVERED_ROUTERS = (investigations.router, agent_tokens.router, org.router)
 
 
 def _routes(router) -> dict[tuple[str, str], object]:
@@ -74,14 +77,23 @@ def test_every_route_has_a_tool_or_a_reason():
     assert all(why.strip() for why in AGENT_EXEMPT_ROUTES.values())
 
 
-def test_registered_tools_exist_and_human_only_actions_have_none():
+def test_every_tool_declares_an_existing_human_twin_and_vice_versa():
+    """A tool with no REST twin, or a registry tool the server lacks, fails."""
     pytest.importorskip("mcp")
     from graphlagoon.mcp.server import build_server
 
-    names = {t.name for t in build_server()._tool_manager.list_tools()}
-    unknown = set(AGENT_TOOL_ROUTES.values()) - names
-    assert not unknown, f"registry names tools the MCP server lacks: {unknown}"
-    assert not [n for n in names if re.search(r"delete|share|approve|accept|reject|decide|decision|token", n)]
+    tools = {t.name: t for t in build_server()._tool_manager.list_tools()}
+    assert set(tools) == set(TOOL_ROUTES), (
+        f"tools without a human twin in mcp/registry.TOOL_ROUTES: {set(tools) - set(TOOL_ROUTES)}; "
+        f"registry tools the server lacks: {set(TOOL_ROUTES) - set(tools)}"
+    )
+    for name, tool in tools.items():
+        declared = (tool.meta or {}).get("human_equivalent")
+        assert declared == human_equivalent(name), f"{name} must stamp meta.human_equivalent from the registry"
+        for route in TOOL_ROUTES[name]:
+            assert route in ALL_ROUTES, f"{name} names a route that does not exist: {route}"
+        assert not re.search(r"delete|share|approve|accept|reject|decide|decision|token|export|reopen", name)
+    assert all(tools for tools in AGENT_TOOL_ROUTES.values())
 
 
 def test_human_only_routes_declare_forbid_agents_and_only_they_do():
@@ -113,11 +125,7 @@ def client(monkeypatch):
 def test_human_only_routes_reject_an_agent_token_even_for_a_superuser(client):
     human = {"X-Forwarded-Email": SUPERUSER}
     case_id = client.post("/api/investigations", json={"title": "x"}, headers=human).json()["id"]
-    token = client.post(
-        "/api/agent-tokens",
-        json={"name": "all", "scopes": ["read", "analyze", "write", "propose"]},
-        headers=human,
-    ).json()["token"]
+    token = client.post("/api/agent-tokens", json={"name": "all"}, headers=human).json()["token"]
     params = {"investigation_id": case_id, "email": "a@example.com", "version": "1"}
     for method, path in sorted(human_only_routes()):
         url = re.sub(r"\{(\w+)\}", lambda m: params.get(m[1], str(uuid4())), path)

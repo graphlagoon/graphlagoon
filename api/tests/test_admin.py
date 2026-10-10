@@ -135,16 +135,24 @@ class TestGate:
         found = sorted((next(iter(r.methods)), r.path) for r in _admin_routes())
         assert found == [
             ("DELETE", "/api/admin/agent-tokens/{token_id}"),
+            ("DELETE", "/api/admin/library/{slug}"),
+            ("DELETE", "/api/admin/vocabularies/{kind}"),
             ("GET", "/api/admin/agent-tokens"),
             ("GET", "/api/admin/audit"),
             ("GET", "/api/admin/config"),
+            ("GET", "/api/admin/library"),
             ("GET", "/api/admin/overview"),
             ("GET", "/api/admin/users"),
+            ("GET", "/api/admin/vocabularies"),
+            ("GET", "/api/admin/vocabularies/{kind}"),
             ("POST", "/api/admin/contexts/{context_id}/transfer"),
             ("POST", "/api/admin/environment/clear"),
             ("POST", "/api/admin/explorations/{exploration_id}/transfer"),
             ("POST", "/api/admin/health/warehouse"),
             ("POST", "/api/admin/investigations/{investigation_id}/transfer"),
+            ("POST", "/api/admin/library"),
+            ("PUT", "/api/admin/library/{slug}"),
+            ("PUT", "/api/admin/vocabularies/{kind}"),
         ]
 
     @pytest.mark.parametrize("route", _admin_routes(), ids=lambda r: r.path)

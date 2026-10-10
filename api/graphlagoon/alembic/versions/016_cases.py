@@ -221,6 +221,7 @@ def upgrade() -> None:
             _now("created_at"),
             sa.Column("expires_at", sa.DateTime(), nullable=False),
             sa.Column("revoked_at", sa.DateTime(), nullable=True),
+            sa.Column("last_used_at", sa.DateTime(), nullable=True),
         )
     if "org_vocabularies" not in existing:
         op.create_table(

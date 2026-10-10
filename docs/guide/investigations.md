@@ -80,7 +80,7 @@ named people (read or write); the **…** menu reopens a decided case
 9. **[Export](#exports)** the Siscoaf summary, the JSON package, the CSV, the
    SIMBA layout or the printed laudo.
 
-An [AI agent](#agents-and-proposals) can do the legwork of steps 1–7 with
+An [AI agent](#agents) can do the legwork of steps 1–7 with
 your access; the decision and the exports stay with people.
 
 ## Who can do what
@@ -523,20 +523,25 @@ gone: artifacts are `document` items of the material list (an agent's arrive
 with its author chip), matches are `same_as` annotations reviewed in the
 inspector, and agent tokens live in the account menu (**Agents**).
 
-## Agents and proposals
+## Agents
 
 An agent is an analyst with the identity of the person who created its token:
 it can do what that person can in a case (read, add items and versions, run
-queries and analyses, annotate, write the brief) except decide, share, delete
-and export. Its writes are attributed to it (chip **agent** on items,
-annotations and journal lines) and the kinds in the case's
-`settings.agent_suggest_kinds` (by default roles, tags, matches, typologies,
+queries and analyses, group, annotate, write the brief) except decide, share,
+delete, reopen, export and confirm suggestions. Its writes are attributed to it
+(chip **agent** on items, annotations and journal lines; filter Pessoa / Agente
+/ Tudo) and the kinds in the case's ⚙ **Agent** section
+(`settings.agent_suggest_kinds`, by default roles, tags, matches, typologies,
 hypothesis statuses and status changes) arrive **suggested**: the material list
 and the inspector show them with **Confirm** and **Reject** in place, and the
 queue counts them. Tokens are created on the **Agents** page of the account
 menu (`/settings/agents`): scope "every case I read" or specific cases,
-optional unmasked data when the org allows it, validity, and the command to add
-the app to Claude Code. How to connect a client and the tools are in
+optional unmasked data when the org allows it, validity, last activity, and
+the commands for Claude Code and for the stdio bridge; the case footer shows
+how many of your agents reach it. Playbooks (admin area → **Library**) are the
+agent's prompts and the **Vocabularies** tab holds the suggested roles, tags,
+typologies and link attributes per case type, which the ⚙ offers with one
+click. How to connect a client, the resources and the tools are in
 [AI Agents (MCP)](./agents-mcp.md).
 
 ## Personal data
@@ -610,5 +615,8 @@ transfers are in the **Audit** tab, along with recorded decisions
 (`investigation.decide`, with the outcome and the frozen hash), exports
 (`investigation.export`, with the format and the sha256 of the file), item
 content reads, enrichment lookups (`enrichment.read`) and every agent read
-(`agent.read`). The five `investigation.*` permissions appear in the
+(`agent.read`). The **Library** and **Vocabularies** tabs edit the org's
+playbooks and suggested vocabularies (audited as `library.*` and
+`vocabulary.*`); the **Agent tokens** tab lists everyone's tokens with their
+last activity. The five `investigation.*` permissions appear in the
 permission matrix of [Groups & Permissions](./permissions.md).

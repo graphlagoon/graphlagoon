@@ -58,6 +58,10 @@ class AuditAction:
     INVESTIGATION_EXPORT = "investigation.export"
     AGENT_TOKEN_CREATE = "agent_token.create"
     AGENT_TOKEN_REVOKE = "agent_token.revoke"
+    LIBRARY_WRITE = "library.write"
+    LIBRARY_DELETE = "library.delete"
+    VOCABULARY_WRITE = "vocabulary.write"
+    VOCABULARY_DELETE = "vocabulary.delete"
     ENRICHMENT_READ = "enrichment.read"
     AGENT_READ = "agent.read"  # every MCP read tool call (03 §8.6)
 

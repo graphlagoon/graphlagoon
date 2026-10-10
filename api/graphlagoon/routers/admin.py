@@ -35,12 +35,17 @@ from graphlagoon.models.schemas import (
     AuditPage,
     ClearEnvironmentRequest,
     ClearEnvironmentResponse,
+    OrgLibraryDoc,
+    OrgLibraryDocCreate,
+    OrgLibraryDocUpdate,
+    OrgVocabulary,
+    OrgVocabularyUpdate,
     TransferOwnershipRequest,
     TransferOwnershipResponse,
 )
 from graphlagoon.routers.admin_registry import CONFIG_FIELD_KINDS
 from graphlagoon.routers.agent_tokens import require_agents_enabled
-from graphlagoon.services import audit
+from graphlagoon.services import audit, org_library, org_vocabularies
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.services.environment import (
     alembic_version,
@@ -507,6 +512,82 @@ async def revoke_any_agent_token(
         metadata={"by_admin": True},
     )
     return {"status": "revoked"}
+
+
+# ---------------------------------------------------------------------------
+# Org library and vocabularies (05 §6): what agents read as org:// resources
+# and the settings drawer offers as suggestions. Everyone reads them through
+# routers/org.py; only superusers write, audited.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/library", response_model=list[OrgLibraryDoc])
+async def list_library(kind: Optional[str] = None):
+    return await org_library.list_docs(kind)
+
+
+@router.post("/library", response_model=OrgLibraryDoc, status_code=201)
+async def create_library_doc(data: OrgLibraryDocCreate, admin_email: str = Depends(require_superuser)):
+    existing = await org_library.get_doc(data.slug)
+    if existing is not None and not existing["seeded"]:
+        raise _error(409, "LIBRARY_SLUG_EXISTS", f"'{data.slug}' already exists; PUT it to change it")
+    doc = await org_library.put_doc(data.slug, data.title, data.body, data.kind)
+    await audit.record(admin_email, AuditAction.LIBRARY_WRITE, resource_type="org_library",
+                       resource_id=None, metadata={"slug": data.slug, "kind": data.kind, "created": True})
+    return doc
+
+
+@router.put("/library/{slug}", response_model=OrgLibraryDoc)
+async def put_library_doc(slug: str, data: OrgLibraryDocUpdate, admin_email: str = Depends(require_superuser)):
+    doc = await org_library.put_doc(slug, data.title, data.body, data.kind)
+    await audit.record(admin_email, AuditAction.LIBRARY_WRITE, resource_type="org_library",
+                       resource_id=None, metadata={"slug": slug, "kind": data.kind})
+    return doc
+
+
+@router.delete("/library/{slug}")
+async def delete_library_doc(slug: str, admin_email: str = Depends(require_superuser)):
+    """Removes the stored doc; a seeded slug shows its built-in text again."""
+    if not await org_library.delete_doc(slug):
+        raise _error(404, "LIBRARY_DOC_NOT_FOUND", f"No stored doc '{slug}'")
+    await audit.record(admin_email, AuditAction.LIBRARY_DELETE, resource_type="org_library",
+                       resource_id=None, metadata={"slug": slug})
+    return {"status": "deleted", "seeded": slug in org_library.SEED}
+
+
+@router.get("/vocabularies", response_model=list[OrgVocabulary])
+async def list_vocabularies():
+    return await org_vocabularies.list_vocabularies()
+
+
+@router.get("/vocabularies/{kind}", response_model=OrgVocabulary)
+async def get_vocabulary(kind: str):
+    vocabulary = await org_vocabularies.get_vocabulary(kind)
+    if vocabulary is None:
+        raise _error(404, "VOCABULARY_NOT_FOUND", f"Vocabulary kinds: {', '.join(org_vocabularies.KINDS)}")
+    return vocabulary
+
+
+@router.put("/vocabularies/{kind}", response_model=OrgVocabulary)
+async def put_vocabulary(kind: str, data: OrgVocabularyUpdate, admin_email: str = Depends(require_superuser)):
+    try:
+        vocabulary = await org_vocabularies.put_vocabulary(kind, [v.model_dump() for v in data.values])
+    except ValueError as exc:
+        raise _error(422, "INVALID_VOCABULARY", str(exc))
+    await audit.record(admin_email, AuditAction.VOCABULARY_WRITE, resource_type="org_vocabulary",
+                       resource_id=None, metadata={"kind": kind, "count": len(vocabulary["values"])})
+    return vocabulary
+
+
+@router.delete("/vocabularies/{kind}", response_model=OrgVocabulary)
+async def reset_vocabulary(kind: str, admin_email: str = Depends(require_superuser)):
+    """Drops the override: the built-in suggestions show again."""
+    if kind not in org_vocabularies.KINDS:
+        raise _error(404, "VOCABULARY_NOT_FOUND", f"Vocabulary kinds: {', '.join(org_vocabularies.KINDS)}")
+    await org_vocabularies.delete_vocabulary(kind)
+    await audit.record(admin_email, AuditAction.VOCABULARY_DELETE, resource_type="org_vocabulary",
+                       resource_id=None, metadata={"kind": kind})
+    return await org_vocabularies.get_vocabulary(kind)
 
 
 # ---------------------------------------------------------------------------

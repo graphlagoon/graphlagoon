@@ -471,6 +471,7 @@ class AgentToken(Base):
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)  # bumped at most once a minute
 
 
 class OrgVocabulary(Base):

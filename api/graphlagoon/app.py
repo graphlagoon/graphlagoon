@@ -209,6 +209,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         similarity,
         investigations,
         agent_tokens,
+        org,
     )
     from graphlagoon.utils.authz import agent_guard
 
@@ -227,6 +228,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(similarity.router)
     router.include_router(investigations.router)
     router.include_router(agent_tokens.router)
+    router.include_router(org.router)
 
     return router
 

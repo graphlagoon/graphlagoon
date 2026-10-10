@@ -32,6 +32,9 @@ import type {
   AgentToken,
   AuditPage,
   ClearEnvironmentResponse,
+  OrgLibraryDoc,
+  OrgVocabulary,
+  OrgVocabularyValue,
   PermissionInspection,
   ResolverStatus,
   TransferOwnershipResponse,
@@ -908,6 +911,41 @@ class ApiService {
 
   async revokeAgentToken(tokenId: string): Promise<void> {
     await this.client.delete(`/api/agent-tokens/${tokenId}`);
+  }
+
+  // Org library and vocabularies (05 §6): read by everyone, written in the admin area.
+  async getOrgLibrary(kind?: 'playbook' | 'template'): Promise<OrgLibraryDoc[]> {
+    const response = await this.client.get('/api/org/library', { params: kind ? { kind } : {} });
+    return response.data;
+  }
+
+  async getOrgVocabularies(): Promise<OrgVocabulary[]> {
+    const response = await this.client.get('/api/org/vocabularies');
+    return response.data;
+  }
+
+  async putAdminLibraryDoc(slug: string, data: { title: string; kind: 'playbook' | 'template'; body: string }): Promise<OrgLibraryDoc> {
+    const response = await this.client.put(`/api/admin/library/${encodeURIComponent(slug)}`, data);
+    return response.data;
+  }
+
+  async createAdminLibraryDoc(data: { slug: string; title: string; kind: 'playbook' | 'template'; body: string }): Promise<OrgLibraryDoc> {
+    const response = await this.client.post('/api/admin/library', data);
+    return response.data;
+  }
+
+  async deleteAdminLibraryDoc(slug: string): Promise<void> {
+    await this.client.delete(`/api/admin/library/${encodeURIComponent(slug)}`);
+  }
+
+  async putAdminVocabulary(kind: string, values: OrgVocabularyValue[]): Promise<OrgVocabulary> {
+    const response = await this.client.put(`/api/admin/vocabularies/${kind}`, { values });
+    return response.data;
+  }
+
+  async resetAdminVocabulary(kind: string): Promise<OrgVocabulary> {
+    const response = await this.client.delete(`/api/admin/vocabularies/${kind}`);
+    return response.data;
   }
 
   // Admin area (superuser only; every route 403s for anyone else)

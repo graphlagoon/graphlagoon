@@ -5,6 +5,7 @@
  * and label templates. Everything lands in one `PATCH /api/investigations/{id}`.
  */
 import { computed, reactive, ref, watch } from 'vue';
+import { api } from '@/services/api';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
@@ -14,6 +15,7 @@ import { NORMALIZER_LABELS } from '@/utils/identityKeys';
 import { DEFAULT_SUGGEST_KINDS, PRESET_DEFAULTS, SUGGEST_KINDS } from '@/utils/casePresets';
 import type { EdgeSemantics, IdentityKey, IdentityNormalize } from '@/types/graph';
 import type { KindPreset } from '@/types/investigation';
+import type { OrgVocabulary, OrgVocabularyKind } from '@/types/admin';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: []; share: [] }>();
@@ -74,6 +76,30 @@ function load() {
   form.labels = Object.entries((s.label_templates as Record<string, string> | undefined) ?? {}).map(([node_type, template]) => ({ node_type, template }));
 }
 watch(() => props.open, (o) => o && load(), { immediate: true });
+
+// Org vocabularies (05 §6): suggestions for the preset, never imposed; one click adds.
+const orgVocab = ref<OrgVocabulary[]>([]);
+watch(() => props.open, async (o) => {
+  if (!o || orgVocab.value.length) return;
+  try {
+    orgVocab.value = await api.getOrgVocabularies();
+  } catch {
+    orgVocab.value = [];
+  }
+}, { immediate: true });
+const SUGGEST_FIELDS: Array<{ kind: OrgVocabularyKind; field: 'roles' | 'tags' | 'link_attributes' }> = [
+  { kind: 'role', field: 'roles' }, { kind: 'tag', field: 'tags' }, { kind: 'link_attribute', field: 'link_attributes' },
+];
+function orgSuggestions(kind: OrgVocabularyKind, field: 'roles' | 'tags' | 'link_attributes'): string[] {
+  const vocab = orgVocab.value.find((v) => v.kind === kind);
+  if (!vocab) return [];
+  const have = new Set(split(form[field]));
+  const fits = vocab.values.filter((v) => !v.presets.length || v.presets.includes(form.kind_preset));
+  return fits.map((v) => v.value).filter((v) => !have.has(v)).slice(0, 12);
+}
+function addSuggestion(field: 'roles' | 'tags' | 'link_attributes', value: string) {
+  form[field] = [...split(form[field]), value].join(', ');
+}
 
 function applyPreset() {
   const d = PRESET_DEFAULTS[form.kind_preset];
@@ -188,10 +214,16 @@ async function save() {
           </div>
         </section>
         <section>
-          <h3>Vocabularies</h3>
+          <h3>Vocabularies <span class="muted">the org's suggestions for this type; click to add</span></h3>
           <label>Roles <input v-model="form.roles" :disabled="!canEdit" placeholder="comma separated" data-testid="settings-roles" /></label>
           <label>Tags <input v-model="form.tags" :disabled="!canEdit" placeholder="comma separated" /></label>
           <label>Link attributes (Vínculos) <input v-model="form.link_attributes" :disabled="!canEdit" placeholder="telefone, email, device_id…" data-testid="settings-link-attributes" /></label>
+          <div v-for="f in SUGGEST_FIELDS" :key="f.kind" class="chips" :data-testid="`settings-org-${f.kind}`">
+            <template v-if="orgSuggestions(f.kind, f.field).length">
+              <span class="muted">{{ f.field.replace('_', ' ') }}:</span>
+              <button v-for="v in orgSuggestions(f.kind, f.field)" :key="v" type="button" class="chip" :disabled="!canEdit" @click="addSuggestion(f.field, v)">+ {{ v }}</button>
+            </template>
+          </div>
         </section>
         <section>
           <h3>Identity keys <span class="muted">override a context's key for the same node type</span></h3>
@@ -331,6 +363,28 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.chips:empty {
+  display: none;
+}
+
+.chip {
+  padding: 1px 8px;
+  border: 1px dashed var(--border-color);
+  border-radius: 999px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
 }
 
 .checks label {

@@ -1,123 +1,107 @@
-# O que o agente de IA pode e não pode fazer numa investigação
+# O agente numa investigação: o que faz, o que vira sugestão, o que nunca faz
 
-> **Documento de revisão.** Registra a política em vigor no branch
-> `feature/investigations` em 2026-10-09 e as perguntas que ficaram abertas. Ao
-> mudar a política, atualize este arquivo, o registry e o decision log no mesmo
-> commit.
+> **Documento de referência da política em vigor** (05-plano-v2 §6, F5, 2026-10-10).
+> Substitui a matriz "direto / propõe / nunca" do plano antigo, que não existe mais:
+> não há `propose`, tabela de propostas nem tela própria. Ao mudar a política,
+> atualize este arquivo, `mcp/registry.py` e o decision log no mesmo commit.
 
-**Princípio:** o agente faz o trabalho de análise e documentação; a pessoa decide
-(README, Q9). O agente sempre age **em nome de uma pessoa**, com um token `glt_`, e
-nunca tem mais acesso que ela. Tudo o que ele faz aparece no diário como "agente X em
-nome de Y".
+**Princípio:** o agente é **um analista com a identidade da pessoa**. Com um token
+`glt_` ele faz no caso o que a pessoa faz, pelas mesmas funções de serviço que a tela
+usa, e nunca tem mais acesso que ela. Toda escrita registra `author_kind=agent` +
+`agent_token_id`; só alguns tipos entram como `suggested`; uma lista curta de atos
+irreversíveis fica sem ferramenta.
 
 **Onde a política mora no código:**
 
 | O quê | Arquivo |
 |---|---|
-| Rota → ferramenta MCP, ou motivo de não ter | `api/graphlagoon/mcp/registry.py` |
-| Ferramentas MCP e escopo exigido | `api/graphlagoon/mcp/server.py` |
-| Bloqueio de rotas só humanas | `forbid_agents` em `api/graphlagoon/utils/authz.py` |
-| Teste que obriga a cobertura | `api/tests/test_agent_registry.py` |
+| Ferramenta → rota humana equivalente (`TOOL_ROUTES`), rota sem ferramenta → motivo (`AGENT_EXEMPT_ROUTES`) | `api/graphlagoon/mcp/registry.py` |
+| Ferramentas, recursos e prompts MCP (cada ferramenta carimba `meta.human_equivalent`) | `api/graphlagoon/mcp/server.py` |
+| Autoria e `suggested` (`author_fields`, `write_status`, `DEFAULT_SUGGEST_KINDS`) | `api/graphlagoon/services/cases.py` |
+| Allowlist de caminhos e escopo `user|case` do token | `api/graphlagoon/middleware/auth.py` |
+| Bloqueio de rotas só humanas (`forbid_agents`) | `api/graphlagoon/utils/authz.py` |
+| Mascaramento | `api/graphlagoon/services/masking.py` |
+| Biblioteca (playbooks) e vocabulários da org | `api/graphlagoon/services/org_library.py`, `org_vocabularies.py` |
+| Testes que obrigam a cobertura | `api/tests/test_agent_registry.py`, `test_mcp_server.py`, `test_agent_tokens.py`, `test_agent_route_scoping.py`, `test_org_library.py` |
 
-## 1. Os quatro níveis
+## 1. Os três níveis
 
 | Nível | Significado | Como é garantido |
 |---|---|---|
-| **Direto** | O agente faz sozinho; fica no diário | Ferramenta MCP + escopo do token |
-| **Proposta** | O agente sugere; uma pessoa aceita ou recusa na T11 | Rota devolve `403 AGENT_MUST_PROPOSE`; o agente usa `propose` |
-| **Só na interface** | Sem ferramenta MCP, mas não é proibido por princípio | Rota sem ferramenta, com motivo no registry |
-| **Nunca** | Ação de pessoa, mesmo que o dono do token seja superuser | `forbid_agents` + motivo `human-only:`; o teste confere que a rota devolve 403 |
+| **Direto** | O agente faz sozinho; o item/anotação nasce `confirmed` com o chip de agente; fica no diário | Ferramenta MCP = mesma função de serviço da rota REST, com `_current_actor` = token |
+| **Sugerido** | A escrita existe, com autor, mas `status=suggested`; uma pessoa confirma ou recusa **no lugar** (lista de material, inspetor) | `write_status(inv, kind)`: `kind ∈ settings.agent_suggest_kinds` (padrão `role, tag, hypothesis_status, same_as, status_change, typology`; o ⚙ do caso pode acrescentar `group`, `note` ou retirar) |
+| **Nunca** | Ato de pessoa, mesmo com dono superuser | Sem ferramenta; rota com `forbid_agents` + motivo `human-only:` no registry; o teste confere 403 `AGENT_FORBIDDEN` |
 
-## 2. Matriz atual
+Não existe "só na interface" como categoria de política: as poucas rotas sem
+ferramenta que não são humanas (apagar item/anotação, bytes de arquivo) têm o motivo
+no registry e o teste exige que ele exista.
 
-### Caso
+## 2. Ferramentas e sua rota humana
 
-| Ação | Nível | Ferramenta / rota | Escopo |
-|---|---|---|---|
-| Listar e ler casos, fontes, diário, notas, dossiê | Direto | `list_investigations`, `get_investigation`, `list_events`, `list_notes`, `get_dossier` | `read` |
-| Criar caso | Direto | `create_investigation` | `write` |
-| Adicionar exploração como fonte | Direto | `add_source` | `write` |
-| Adicionar nota | Direto | `add_note` | `write` |
-| Mudar status ou tipologia | Proposta | `propose` (kind `status`, `typology`) | `propose` |
-| Editar título ou descrição | Só na interface | `PATCH /investigations/{id}` | n/a |
-| Editar ou apagar nota | Só na interface (só o autor) | `PATCH`/`DELETE .../notes/{id}` | n/a |
-| Remover fonte | Só na interface | `DELETE .../sources/{id}` | n/a |
-| Apagar caso | **Nunca** | n/a | n/a |
-| Compartilhar ou descompartilhar | **Nunca** | n/a | n/a |
-| Registrar a decisão (comunicar ou arquivar) | **Nunca** | n/a | n/a |
-| Exportar (json, csv, SIMBA, Siscoaf) | **Nunca** | n/a | n/a |
+| Ferramenta | Rota humana equivalente | Observação |
+|---|---|---|
+| `list_cases`, `get_case`, `create_case`, `update_case` | `GET/POST /investigations`, `GET/PATCH /{id}` | `create_case` exige `investigation.create` da pessoa; token `scope=case` não cria; `update_case` não atribui responsável (handler recusa) e a mudança de status de um agente vira anotação `status_change` sugerida |
+| `get_brief`, `write_brief` | `GET/PUT /{id}/brief` | nova versão do item `document/brief` por escrita |
+| `list_items`, `read_item`, `update_item`, `search_case` | `GET /{id}/items`, `GET /items/{item}` + `/versions` + `/text`, `PATCH /items/{item}`, `GET /{id}/search` | `read_item` pagina texto já mascarado; nunca bytes |
+| `add_item`, `add_note`, `add_document`, `add_table`, `save_query`, `import_file`, `create_exploration` | `POST /{id}/items` (e `POST /items/{item}/versions`) | `import_file`/csv exige `investigation.upload`; `create_exploration` exige `exploration.save` |
+| `run_query`, `join_tables`, `compare_tables`, `promote_tables` | `POST /items/{item}/run`, `/items/join`, `/compare`, `/promote` | cada run é uma versão com `run` |
+| `pin_evidence` | `POST /items/{item}/pin` | imutável; exploração viva é congelada antes |
+| `annotate`, `list_annotations` | `POST/GET /{id}/annotations` | `role, tag, same_as, hypothesis, hypothesis_status, typology` |
+| `group` | `POST /{id}/annotations`, `PATCH /annotations/{a}` | create / add / remove; valor `{name, color, by: "agent"}` |
+| `get_graph`, `search_entities`, `get_entity`, `lookup_enrichment` | `GET /{id}/graph`, `GET /items/{item}/snapshot`, `POST /graph-contexts/{c}/enrichment/{n}/lookup` | ids mascarados são traduzidos de volta no servidor |
+| `run_analysis` (`trace`, `paths`, `typologies`, `er`, `links`, `communities`) | `POST /{id}/analysis/trace|paths|typologies|er`, `POST /{id}/events` | `er` cria `same_as` sugeridos; `links` e `communities` rodam no servidor sobre o grafo unificado; `save=true` grava `table/result` ou `graph/derived` com `provenance {tool, params, engine}` |
+| `list_events`, `changes_since` | `GET /{id}/events` (+ items, annotations) | `changes_since` devolve `now` para a próxima chamada |
+| `get_playbook`, `list_vocabulary` | `GET /api/org/library[/{slug}]`, `GET /api/org/vocabularies[/{kind}]` | leitura da biblioteca e dos vocabulários da org |
 
-### Grafo, entidades e análises
+**Recursos:** `case://{id}/brief`, `case://{id}/items`, `case://{id}/items/{item}` (texto),
+`case://{id}/graph?offset&limit`, `case://{id}/changes?since`, `org://playbooks/{slug}`,
+`org://vocabularies/{kind}`. **Prompts:** um por playbook da biblioteca (6 semeados:
+`investigar_golpe_pix`, `revisar_lojista`, `montar_dossie`, `analise_credito_grupo`,
+`fuga_garantia`, `fraude_sintetica`) mais `playbook(slug)` para qualquer doc.
 
-| Ação | Nível | Ferramenta | Escopo |
-|---|---|---|---|
-| Ler grafo unificado, buscar e ler entidades | Direto | `get_graph`, `search_entities`, `get_entity` | `read` |
-| Consultar tabela de enriquecimento | Direto | `lookup_enrichment` | `read` |
-| Seguir o dinheiro (rastreio) | Direto | `trace_money` | `analyze` |
-| Caminhos | Direto | `find_paths` | `analyze` |
-| Tipologias (selos CC 4.001) | Direto (só calcula) | `run_typologies` | `analyze` |
-| Sugerir matches de entidades | Direto (só sugere) | `suggest_matches` | `analyze` |
-| Aceitar, recusar ou adiar match | **Nunca** (o agente propõe kind `match`) | n/a | n/a |
-| Atribuir papel (vítima, laranja, saída, descartado) | Proposta | `propose` (kind `role`) | `propose` |
-| Criar hipótese ou mudar seu status | Proposta | `propose` (kind `hypothesis`, `hypothesis_status`) | `propose` |
-| Aceitar um selo de tipologia | Proposta | `propose` (kind `typology`) | `propose` |
+## 3. O que fica sem ferramenta
 
-### Evidências, arquivos e artefatos
+| Rota | Nível | Motivo |
+|---|---|---|
+| `POST /{id}/decision` | **Nunca** | a decisão é da pessoa (LGPD art. 20) |
+| `POST /{id}/share`, `DELETE /{id}/share/{email}` | **Nunca** | compartilhar com novas pessoas |
+| `DELETE /{id}` | **Nunca** | apagar caso |
+| `POST /{id}/reopen` | **Nunca** | reabrir caso decidido |
+| `GET /{id}/export` | **Nunca** | sai sem máscara e prepara a comunicação |
+| `POST /items/{i}/confirm|reject`, `POST /annotations/{a}/confirm|reject` | **Nunca** | o agente não confirma as próprias sugestões |
+| `/api/agent-tokens*` | **Nunca** | o agente não emite nem revoga token |
+| `DELETE /items/{i}`, `DELETE /annotations/{a}` | sem ferramenta | o agente acrescenta e versiona, não remove |
+| `GET /items/{i}/content` | sem ferramenta | binário nunca chega ao agente; ele lê `/text` |
+| Qualquer rota fora da allowlist (`/api/admin`, `/api/graph-contexts` exceto consultas, share de contexto/exploração) | **Nunca** | `AGENT_FORBIDDEN` no middleware |
 
-| Ação | Nível | Ferramenta | Escopo |
-|---|---|---|---|
-| Fixar evidência (inclusive um rastreio) | Direto | `pin_evidence` | `write` |
-| Editar ou apagar evidência | Ninguém: evidência é imutável | n/a | n/a |
-| Subir arquivo (SIMBA, QSA, CSV) | Direto | `upload_file` | `write` |
-| Mapear arquivo e gerar grafo dele | Direto | `set_file_mapping`, `create_file_graph` | `write` |
-| Criar artefato ou subir nova versão | Direto (entra como rascunho) | `upload_artifact` | `write` |
-| Aprovar versão de artefato | **Nunca** | n/a | n/a |
-| Ler artefatos e arquivos | Direto | `list_artifacts`, `get_artifact`, `list_files`, `get_file` | `read` |
+`agents_allow_irreversible` (05 §6) não foi implementado: nenhuma instalação pediu
+liberar decisão/share/apagar para agentes; quando pedir, é um flag no `forbid_agents`.
 
-### Tokens e administração
+## 4. Proteções que valem para tudo
 
-| Ação | Nível |
-|---|---|
-| Criar, listar ou revogar tokens | **Nunca** (o agente não emite token para si) |
-| Qualquer rota `/api/admin` | **Nunca** (`require_superuser` recusa agentes) |
-
-## 3. Proteções que valem para tudo
-
-1. **Mascaramento:** CPF, CNPJ e conta saem mascarados por padrão
-   (`agents_allow_unmasked_data = false`, Q8). Um id mascarado que o agente devolve é
-   traduzido de volta no servidor.
-2. **Dados marcados `untrusted_data`:** o conteúdo do caso vai embrulhado nas
-   respostas MCP, contra prompt injection. Nenhuma ferramenta executa código ou expõe
-   caminho do Volume.
-3. **O servidor não confia no número do agente:** `pin_evidence` de um rastreio roda
-   o rastreio de novo no servidor.
-4. **Sem sobrescrita:** artefatos e evidências só ganham versões novas.
-5. **Leituras auditadas:** toda ferramenta de leitura grava `agent.read`.
-6. **Limites:**
-   - `agents_enabled = false` desliga tudo (o padrão);
-   - validade máxima do token: `agent_token_max_days = 90`;
-   - taxa por token: `agent_rate_limit_per_minute = 120`.
-7. **Caso decidido:** depois da decisão, toda mutação devolve 409, para agente e
-   pessoa.
-
-## 4. Pontos em aberto para revisão
-
-| # | Pergunta | Hoje | Opções |
-|---|---|---|---|
-| R1 | O agente pode editar **título e descrição** do caso? | Só na interface (escolha de implementação, não da Q9) | Ferramenta `update_investigation` restrita a título e descrição |
-| R2 | O agente pode **editar as próprias notas**? | Não; só acrescenta | Permitir editar nota cujo autor é o próprio token |
-| R3 | O agente pode **remover uma fonte que ele mesmo adicionou**? | Não | Permitir dentro da mesma sessão, ou via proposta |
-| R4 | O agente pode **exportar** com dados mascarados? | Não; lê o caso via `get_dossier` | Exportação mascarada só para agentes |
-| R5 | Artefatos **binários** saem sem mascaramento | Sim (atalho da FA.4) | Bloquear binários para agentes ou mascarar o texto extraível |
-| R6 | O grafo do servidor (que o agente lê) **ignora matches aceitos** | Sim (lacuna) | Aplicar matches aceitos no `services/case_graph.py` |
-| R7 | **Proposta em lote** (vários papéis de uma vez) | Uma por chamada | Kind `batch` com aceite parcial |
-| R8 | **Status por proposta** é suficiente para o prazo legal? | Sim | Alerta para o responsável quando houver proposta de status pendente perto do prazo |
+1. **Escopo do token:** `user` (todos os casos que a pessoa lê) ou `case` (só os
+   `investigation_ids`); vale igual em REST e MCP (`can_read_case` consulta o ator).
+2. **Mascaramento no serviço:** CPF, CNPJ, contas e os valores de identidade do caso
+   saem mascarados em itens, texto, grafo, anotações, eventos e snapshots quando
+   `token.unmasked=false`; `unmasked` efetivo = org permite ∧ token marcado. Texto é
+   mascarado **antes** de paginar.
+3. **Binário nunca:** extração de texto server-side (`text_extract.py`); PDF escaneado
+   → metadados + aviso.
+4. **`untrusted_data`:** todo conteúdo do caso vai embrulhado nas respostas, contra
+   prompt injection; nenhuma ferramenta executa código.
+5. **Leituras auditadas** (`agent.read`); escritas auditadas como as humanas
+   (`investigation.item_add`, …) com o ator agente.
+6. **Limites:** `agents_enabled=false` desliga tudo (padrão); `agent_token_max_days=90`;
+   `agent_rate_limit_per_minute=120` por processo; `last_used_at` por token.
+7. **Caso decidido:** toda mutação devolve 409, para agente e pessoa.
 
 ## 5. Como mudar a política
 
-1. Altere a rota (`forbid_agents`, `AGENT_MUST_PROPOSE` ou uma ferramenta nova em
-   `mcp/server.py`).
-2. Atualize `mcp/registry.py`. O `test_agent_registry.py` falha se rota e registry
-   divergirem.
-3. Atualize este documento, a seção de agentes em `docs/guide/agents-mcp.md` e o
-   decision log.
+1. Ferramenta nova → `mcp/server.py` com `tool("nome")` **e** a entrada em
+   `TOOL_ROUTES` (o helper carimba `meta.human_equivalent` a partir dela).
+2. Rota nova em `routers/investigations.py` ou `routers/org.py` → ferramenta em
+   `TOOL_ROUTES` ou motivo em `AGENT_EXEMPT_ROUTES` (`human-only:` exige `forbid_agents`).
+3. Tipo que deixa de ser sugestão → `DEFAULT_SUGGEST_KINDS` em `services/cases.py` e
+   `casePresets.ts`; por caso, o ⚙.
+4. Rode `test_agent_registry.py`, `test_mcp_server.py`, `test_agent_route_scoping.py`;
+   atualize este arquivo, `docs/guide/agents-mcp.md` e o decision log.

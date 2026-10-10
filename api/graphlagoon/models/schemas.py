@@ -2180,8 +2180,53 @@ class AgentTokenResponse(BaseModel):
     created_at: datetime
     expires_at: datetime
     revoked_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
     active: bool
 
 
 class AgentTokenCreated(AgentTokenResponse):
     token: str  # shown once; only its sha256 is stored
+
+
+# ---------------------------------------------------------------------------
+# Org library and vocabularies (05 §6): superusers write, everyone reads
+# ---------------------------------------------------------------------------
+
+class OrgLibraryDoc(BaseModel):
+    slug: str
+    title: str
+    kind: str = "playbook"
+    body: str
+    updated_at: Optional[datetime] = None
+    seeded: bool = False  # the built-in playbook, not yet edited
+
+
+class OrgLibraryDocCreate(BaseModel):
+    slug: str = Field(min_length=1, max_length=100, pattern=r"^[a-z0-9_-]+$")
+    title: str = Field(min_length=1, max_length=255)
+    kind: Literal["playbook", "template"] = "playbook"
+    body: str = Field(max_length=200_000)
+
+
+class OrgLibraryDocUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    kind: Literal["playbook", "template"] = "playbook"
+    body: str = Field(max_length=200_000)
+
+
+class OrgVocabularyValue(BaseModel):
+    value: str = Field(min_length=1, max_length=120)
+    label: Optional[str] = Field(default=None, max_length=255)
+    presets: list[str] = Field(default_factory=list)  # kind_presets it suits; empty = all
+    norm_ref: Optional[str] = Field(default=None, max_length=120)
+
+
+class OrgVocabulary(BaseModel):
+    kind: str
+    values: list[OrgVocabularyValue]
+    updated_at: Optional[datetime] = None
+    seeded: bool = False
+
+
+class OrgVocabularyUpdate(BaseModel):
+    values: list[OrgVocabularyValue] = Field(max_length=500)

@@ -12607,6 +12607,47 @@ org_vocabularies ficam para a UI da F5 (defaults vivem em `cases.py`/`casePreset
 mascarado só casa com cartão mascarado. **Public docs:** `docs/guide/investigations.md` (chips,
 barra de análise, grupos/Vínculos, ⚙, dossiê como modo). **No admin-area impact.**
 
+## [2026-10-10 18:15] - Feature Implemented: F5 · AI-first completo
+
+**O quê:** `mcp/server.py` reescrito sobre `services/cases*.py`: recursos `case://{id}/brief|items|items/{item}` (texto
+via `text_blob_key`, nunca binário), `case://{id}/graph{?offset,limit}`, `case://{id}/changes{?since}`,
+`org://playbooks/{slug}`, `org://vocabularies/{kind}`; 34 ferramentas 1:1 com ações humanas (`list_cases, get_case,
+create_case, update_case, get_brief, write_brief, list_items, read_item, update_item, search_case, add_item, add_note,
+add_document, add_table, save_query, import_file, create_exploration, run_query, join/compare/promote_tables,
+pin_evidence, list_annotations, annotate, group, get_graph, search_entities, get_entity, lookup_enrichment,
+run_analysis(trace|paths|typologies|er|links|communities), list_events, changes_since, get_playbook, list_vocabulary`),
+cada uma com `meta.human_equivalent` vindo de `mcp/registry.TOOL_ROUTES`; prompts carregados de `org_library`
+(6 playbooks semeados como fallback + `playbook(slug)`). `services/org_library.py` e `org_vocabularies.py` (seed =
+camada de fallback; stored sobrepõe; DELETE restaura), rotas `GET/POST/PUT/DELETE /api/admin/library[/{slug}]`,
+`GET/PUT/DELETE /api/admin/vocabularies/{kind}` (auditadas `library.*`, `vocabulary.*`) e leitura pública em
+`routers/org.py` (`/api/org/library`, `/api/org/vocabularies`). Tokens: `last_used_at` (bump ≤ 1/min em
+`resolve_token`), UI `/settings/agents` com comando `claude mcp add` + bridge stdio + última atividade;
+`AgentsIndicator.vue` no rodapé do caso ("N agentes ativos" → `/settings/agents`). `AdminView` ganha abas Library e
+Vocabularies; `CaseSettingsDrawer` oferece os vocabulários da org por preset com um clique.
+**Decisões:** (1) ferramentas antigas `trace_money/find_paths/run_typologies/resolve_entities` viraram
+`run_analysis(kind, save)`; `links` e `communities` (label propagation determinística) rodam no servidor e, salvos,
+viram `graph/derived`/`table/result` como no browser; (2) `read_item` mascara **antes** de paginar (um corte não pode
+mostrar meio CPF) e `case_items.search` corta snippet em espaço em branco pelo mesmo motivo; (3) `PATCH caso/item/
+anotação` e `POST events` deixaram de ser isenções: têm ferramenta (`update_case`, `update_item`, `group`,
+`run_analysis`); só decisão/share/delete/reopen/export/confirm/reject/tokens seguem humanos, mais `DELETE item|
+annotation` e `GET content` com motivo; (4) `search_case` segue substring em Python (FTS Postgres adiado);
+`agents_allow_irreversible` não implementado (ninguém pediu). **Arquivos:** `api/graphlagoon/mcp/{server,registry}.py`,
+`services/{org_library,org_vocabularies,agent_tokens,audit,case_items}.py`, `routers/{admin,org,admin_registry}.py`,
+`app.py`, `models/schemas.py`, `db/{models,memory_store}.py`, `alembic/versions/016_cases.py`; frontend
+`views/{AgentTokensView,AdminView}.vue`, `components/investigation/{AgentsIndicator,CaseSettingsDrawer}.vue`,
+`types/admin.ts`, `services/api.ts`; hook de 2 linhas em `views/InvestigationView.vue` (import + `<AgentsIndicator>` no
+rodapé). **Testes:** `test_mcp_server.py` (ponta a ponta com o cliente SDK: brief → busca → save+run query com datasource
+mock → tabela → grupo → papel sugerido → markdown lido mascarado por tool e resource → changes_since; precedência
+org ∧ token do unmasked; er/links/communities; trace/paths/typologies), `test_org_library.py`, `test_agent_registry.py`
+(tool ↔ rota humana nos dois sentidos), `test_agent_tokens.py` (+unmasked/`last_used_at`/escopo), `test_admin*.py`
+ajustados; `test_cases.py`, `test_case_items.py`, `test_case_queries.py`, `test_agent_route_scoping.py` verdes; vitest
+`InvestigationView`, `AdminView.logic`, `SelectionInspector`; `vue-tsc` limpo; `vitepress build` ok. **Suposições:**
+vocabulários da org têm 4 kinds (`role, tag, typology, link_attribute`) com `presets[]`; chips Confirmar/Recusar da F2
+já atendem (sem mudança em `CaseItemsPanel`/`SelectionInspector`). **Public docs:** `docs/guide/agents-mcp.md`
+reescrito; `investigations.md` (seção Agents, Admin area); `docs/dev/plans/investigation/agent-capabilities.md`
+reescrito por §6. **Admin area:** abas Library e Vocabularies; ações de auditoria `library.write|delete`,
+`vocabulary.write|delete`; `test_admin.py` lista de rotas atualizada.
+
 ## [2026-10-10 21:30] - Feature Implemented: F6 · Compliance e acabamento
 
 Compliance no fluxo (05 §7) e acabamento (§3 "Legibilidade", §9). **Decisões:** (1) prazos: dias

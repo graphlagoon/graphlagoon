@@ -39,6 +39,7 @@ import CaseFilterChips from '@/components/investigation/CaseFilterChips.vue';
 import AnalysisBar, { type CasePanel } from '@/components/investigation/AnalysisBar.vue';
 import SelectionInspector from '@/components/investigation/SelectionInspector.vue';
 import CaseTimeline, { type TimelineTab } from '@/components/investigation/CaseTimeline.vue';
+import AgentsIndicator from '@/components/investigation/AgentsIndicator.vue'; // F5 hook
 import CaseSettingsDrawer from '@/components/investigation/CaseSettingsDrawer.vue';
 import EntityPage from '@/components/investigation/EntityPage.vue';
 import CaseDossier from '@/components/investigation/CaseDossier.vue';
@@ -444,6 +445,7 @@ onUnmounted(() => {
           </span>
           <span v-if="store.groups.length" data-testid="status-groups">{{ store.groups.length }} {{ store.groups.length === 1 ? 'group' : 'groups' }}</span>
           <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} suggestions</span>
+          <AgentsIndicator v-if="store.current" :investigation-id="store.current.id" /><!-- F5 hook -->
           <button class="link-btn journal-btn" data-testid="journal-toggle" @click="openJournal">Journal ({{ store.events.length }})</button>
         </footer>
       </template>
