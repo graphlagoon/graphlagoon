@@ -23,9 +23,11 @@ that were shared with you.
 ![Investigation queue](/screenshots/investigations-queue.png)
 
 The queue shows each case's typology, number of sources, status, assignee
-and deadline (45 days from creation while awaiting selection, 45 days from
-selection while in analysis). Filter by text or status; the counters on top
-summarize the open work.
+and deadline (Circ. 3.978: 45 days from creation while awaiting selection, 45 days
+from the move to analysis, recorded as `selected_at`). The server computes the
+deadline (`deadline: {phase, due_at, days_left}` on every case; none once decided
+or archived); under 7 days left it turns orange, in the queue and in the workspace
+header. Filter by text or status; the counters on top summarize the open work.
 
 ## Creating a case and adding explorations
 

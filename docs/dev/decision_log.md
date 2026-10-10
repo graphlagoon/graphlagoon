@@ -12062,3 +12062,44 @@ de agentes e admin; E2E anel de 9 lojistas (III-f, aceite no diário); `vue-tsc`
 ou permissão novos.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 03:50] - Feature Implemented: F4.4 · Status e prazos (45 + 45 dias)
+
+**Feature:** o prazo sai do browser (aproximação da F1.5) para
+`services/investigations.py`: `deadline_of(inv, now)` devolve `{phase, due_at,
+days_left}` (seleção = criação + 45 d; análise = `selected_at` + 45 d; `None` decidido
+ou arquivado) e vai em todo caso serializado (`deadline` em `InvestigationResponse`,
+lista e caso). `PATCH` para `analise` grava `selected_at` na primeira vez. A fila (T1)
+ganhou a barra de prazo e o contador "under 7 days" com teste; o cabeçalho do
+workspace mostra "analysis · N d left", laranja abaixo de 7 dias (como a T9).
+
+**Design Decisions:**
+1. Relógio injetável = `service._clock()` (naive, como os horários gravados; o teste
+   troca por monkeypatch), sem `freezegun`. Horário com fuso de um lado e naive do
+   outro é comparado sem fuso (shortcut).
+2. `days_left` = teto de (vencimento − agora) em dias; atrasado fica negativo.
+3. `selected_at` entra depois do evento `case.updated` (o payload do diário não leva
+   datetime) e não é limpo se o caso voltar para seleção.
+4. `deadlineOf` no front só lê o campo do servidor; `PHASE_DAYS` e `URGENT_DAYS` ficam
+   como constantes da barra e do destaque.
+5. Fora (MVP): prazo por data do fato ou por setting de SLA, prazos especiais (aviso à
+   SPA em 24 h da T1), notificação.
+
+**Files:** `api/graphlagoon/services/investigations.py`, `models/schemas.py`,
+`api/tests/test_investigations.py`; `frontend/src/utils/investigationStatus.ts`,
+`types/investigation.ts`, `views/InvestigationsView.vue`, `views/InvestigationView.vue`,
+`views/InvestigationDossierView.vue`, `views/__tests__/InvestigationsView.test.ts`,
+`e2e/tests/investigations.spec.ts`, `e2e/screenshots/generate.ts`.
+
+**Testing:** pytest `test_investigations.py` (relógio injetado: 5 dias na seleção,
+`selected_at` no PATCH e 45 na análise, −5 atrasado na lista, `None` arquivado), mais
+propostas, seed, MCP e diário; vitest `InvestigationsView.test.ts` (laranja abaixo de 7,
+contador); E2E de investigações inteiro (9 testes); `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (prazo calculado no servidor, campo
+`deadline`, destaque laranja).
+**Admin-Area Impact:** nenhum (sem tabela, rota, setting ou permissão novos).
+
+**Author:** Claude (AI Assistant)

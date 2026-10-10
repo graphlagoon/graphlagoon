@@ -19,6 +19,7 @@ const CASE = {
   created_at: now,
   updated_at: now,
   source_count: 2,
+  deadline: { phase: 'analysis', due_at: now, days_left: 6 },
 };
 const RESTRICTED_SOURCE = {
   id: 'src-r',
@@ -41,7 +42,8 @@ test.describe('Investigations', () => {
     await expect(row).toContainText('In analysis');
     await expect(row).toContainText('ana@test.com');
     await expect(row).toContainText('2 sources');
-    await expect(row).toContainText('d left');
+    await expect(row).toContainText('analysis · 6 d left');
+    await expect(page.getByTestId('counter-urgent')).toContainText('1');
   });
 
   test('"New investigation" needs investigation.create', async ({ authenticatedPage: page }) => {

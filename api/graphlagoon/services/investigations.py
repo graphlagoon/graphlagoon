@@ -12,7 +12,9 @@ does not leak (tipping-off). Shares are nominal e-mails only.
 from __future__ import annotations
 
 import json
+import math
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from uuid import UUID
 
@@ -83,6 +85,32 @@ def nominal_email(email: str) -> str:
     return candidate
 
 
+# Circ. 3.978: 45 days to select a case (from creation), 45 more to analyse it (from selected_at).
+PHASE_DAYS = 45
+
+
+def _clock() -> datetime:
+    """Now, naive like the stored times; tests swap it (injectable clock)."""
+    return datetime.now()
+
+
+def deadline_of(inv: Any, now: Optional[datetime] = None) -> Optional[dict]:
+    """``{phase, due_at, days_left}`` of an open case, None once decided or archived."""
+    phase = {"selecao": "selection", "analise": "analysis"}.get(inv.status)
+    start = inv.created_at if phase == "selection" else (inv.selected_at or inv.created_at)
+    if phase is None or start is None:
+        return None
+    now = now or _clock()
+    if (start.tzinfo is None) != (now.tzinfo is None):  # naive DB times vs an aware clock
+        start, now = start.replace(tzinfo=None), now.replace(tzinfo=None)
+    due = start + timedelta(days=PHASE_DAYS)
+    return {
+        "phase": phase,
+        "due_at": due,
+        "days_left": math.ceil((due - now) / timedelta(days=1)),
+    }
+
+
 def serialize(inv: Any, user_email: str) -> dict:
     return {
         "id": inv.id,
@@ -94,6 +122,7 @@ def serialize(inv: Any, user_email: str) -> dict:
         "typology": inv.typology,
         "origin": inv.origin,
         "selected_at": inv.selected_at,
+        "deadline": deadline_of(inv),
         "state": inv.state or {},
         "decision": inv.decision,
         "frozen_hash": inv.frozen_hash,
@@ -314,6 +343,8 @@ async def update_investigation(
             {k: v for k, v in changes.items() if k != "state"}
             | ({"state": "changed"} if "state" in changes else {}),
         )
+        if changes.get("status") == "analise" and inv.selected_at is None:
+            changes["selected_at"] = _clock()  # the analysis deadline counts from here
         if session is None:
             get_memory_store().update_investigation(investigation_id, **changes)
         else:

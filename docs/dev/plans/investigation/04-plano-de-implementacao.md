@@ -67,7 +67,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F4.1 · Evidências congeladas
 - [x] F4.2 · Hipóteses e tela do dossiê (T7)
 - [x] F4.3 · Selos de tipologia (CC 4.001) e anel de lojistas (T9)
-- [ ] F4.4 · Status e prazos (45 + 45 dias) na fila
+- [x] F4.4 · Status e prazos (45 + 45 dias) na fila
 - [ ] F4.5 · Decisão, congelamento e retenção
 - [ ] F4.6 · Exportações (laudo, pacote, SIMBA, resumo Siscoaf)
 
@@ -776,9 +776,9 @@ trabalho de análise e documentação; a pessoa decide.
 
 - **Arquivos:** `services/investigations.py` (cálculo de prazos) e `InvestigationsView.vue`.
 - **Aceite:**
-  - [ ] Seleção em 45 dias a partir da criação; análise em 45 dias a partir de
+  - [x] Seleção em 45 dias a partir da criação; análise em 45 dias a partir de
     `selected_at`.
-  - [ ] Com menos de 7 dias, o destaque fica laranja (como na T1).
+  - [x] Com menos de 7 dias, o destaque fica laranja (como na T1).
 - **Testes:** pytest com `freezegun` ou um relógio injetado, e vitest.
 
 ### F4.5 · Decisão, congelamento e retenção

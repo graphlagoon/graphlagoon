@@ -8,7 +8,7 @@ import { computed, ref, watch } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { api } from '@/services/api';
 import { describeEvent } from '@/utils/investigationEvents';
-import { deadlineOf, HYPOTHESIS_STATUS_LABELS, STATUS_LABELS } from '@/utils/investigationStatus';
+import { deadlineOf, HYPOTHESIS_STATUS_LABELS, STATUS_LABELS, URGENT_DAYS } from '@/utils/investigationStatus';
 import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { methodStamp } from '@/utils/traceView';
 import { getErrorMessage } from '@/utils/errorMessage';
@@ -138,7 +138,7 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
         <h1 data-testid="dossier-title">{{ inv.title }}</h1>
         <span class="muted">#{{ id.slice(0, 8) }} · Dossier</span>
         <span class="status">{{ STATUS_LABELS[inv.status] ?? inv.status }}</span>
-        <span v-if="deadline" class="muted" :class="{ urgent: deadline.daysLeft < 7 }">
+        <span v-if="deadline" class="muted" :class="{ urgent: deadline.daysLeft < URGENT_DAYS }">
           {{ deadline.phase }} · {{ deadline.daysLeft }} d left
         </span>
       </header>

@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { STATUS_LABELS, deadlineOf } from '@/utils/investigationStatus';
+import { PHASE_DAYS, STATUS_LABELS, URGENT_DAYS, deadlineOf } from '@/utils/investigationStatus';
 import type { Investigation, InvestigationStatus } from '@/types/investigation';
 
 const router = useRouter();
@@ -46,11 +46,17 @@ const counters = computed(() => {
     selecao: all.filter((i) => i.status === 'selecao').length,
     urgent: all.filter((i) => {
       const d = deadlineOf(i);
-      return d !== null && d.daysLeft < 7;
+      return d !== null && d.daysLeft < URGENT_DAYS;
     }).length,
     decided: all.filter((i) => i.status === 'decidido').length,
   };
 });
+
+/** Share of the phase already used, for the deadline bar. */
+function elapsed(inv: Investigation) {
+  const d = deadlineOf(inv);
+  return d ? Math.min(100, Math.max(0, ((PHASE_DAYS - d.daysLeft) / PHASE_DAYS) * 100)) : 0;
+}
 
 function who(email?: string | null) {
   if (!email) return '—';
@@ -136,7 +142,7 @@ async function create() {
     <div class="counters">
       <div class="card counter"><strong>{{ counters.analise }}</strong><span>in analysis</span></div>
       <div class="card counter"><strong>{{ counters.selecao }}</strong><span>awaiting selection</span></div>
-      <div class="card counter" :class="{ warn: counters.urgent > 0 }">
+      <div class="card counter" :class="{ warn: counters.urgent > 0 }" data-testid="counter-urgent">
         <strong>{{ counters.urgent }}</strong><span>deadline in under 7 days</span>
       </div>
       <div class="card counter"><strong>{{ counters.decided }}</strong><span>decided</span></div>
@@ -174,9 +180,12 @@ async function create() {
             <td>{{ who(inv.assignee_email ?? inv.owner_email) }}</td>
             <td>
               <template v-if="deadlineOf(inv)">
-                <span :class="{ late: deadlineOf(inv)!.daysLeft < 7 }">
+                <span :class="{ late: deadlineOf(inv)!.daysLeft < URGENT_DAYS }" data-testid="deadline">
                   {{ deadlineOf(inv)!.phase }} · {{ deadlineOf(inv)!.daysLeft }} d left
                 </span>
+                <div class="bar" :class="{ late: deadlineOf(inv)!.daysLeft < URGENT_DAYS }">
+                  <span :style="{ width: `${elapsed(inv)}%` }"></span>
+                </div>
               </template>
               <span v-else class="muted">—</span>
             </td>
@@ -338,6 +347,25 @@ async function create() {
 .late {
   color: #c2410c;
   font-weight: 600;
+}
+
+.bar {
+  width: 140px;
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  background: #0f766e;
+}
+
+.bar.late span {
+  background: #c2410c;
 }
 
 .no-match {

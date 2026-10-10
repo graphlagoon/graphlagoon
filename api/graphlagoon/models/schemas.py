@@ -1802,6 +1802,8 @@ class InvestigationResponse(BaseModel):
     typology: Optional[str] = None
     origin: Optional[str] = None
     selected_at: Optional[datetime] = None
+    # {phase: selection|analysis, due_at, days_left}; None once decided/archived (F4.4).
+    deadline: Optional[dict[str, Any]] = None
     state: dict[str, Any] = Field(default_factory=dict)
     decision: Optional[dict[str, Any]] = None
     frozen_hash: Optional[str] = None

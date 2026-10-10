@@ -227,6 +227,7 @@ const DEMO_CASE = {
   can_manage: true,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
+  deadline: { phase: 'analysis', due_at: new Date(Date.now() + 31 * 86_400_000).toISOString(), days_left: 31 },
 };
 const DEMO_CASES = [
   DEMO_CASE,
