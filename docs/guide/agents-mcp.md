@@ -1,31 +1,44 @@
 # AI Agents (MCP)
 
 ::: tip TL;DR
-Connect Claude Code, Claude Desktop or any MCP client to your investigations.
-The agent reads the case, writes notes, frozen evidence and draft artifacts and
-**proposes** roles, status, typology and hypotheses; you accept or reject on the case's **Agents** page.
+Connect Claude Code, Claude Desktop or any MCP client to your
+[investigations](./investigations.md). The agent reads the case, runs the
+same analyses as the screen, writes notes, frozen evidence and draft
+artifacts, and **proposes** roles, matches, hypotheses, typology and status;
+you accept or reject on the case's **Agents** page.
 
 - **Use it when** you want an agent to do the legwork on a case (read the
-  graph, follow the trail, write the summary) while you keep the decisions.
-- **Not the tool for** letting an agent decide, share, delete or approve: no
-  tool does that, by design.
-- **Needs** `GRAPH_LAGOON_AGENTS_ENABLED=true` and the `mcp` extra on the
-  server (see [Configuration](./configuration.md#ai-agents)).
+  graph, follow the money, check typologies, draft the dossier) while you
+  keep the decisions.
+- **Not the tool for** letting an agent decide, export, share, delete or
+  approve: no tool does that, by design. Nor for sending customer data to an
+  LLM without a policy: by default the agent sees CPF, CNPJ and accounts
+  masked.
+- **Needs** `GRAPH_LAGOON_AGENTS_ENABLED=true`, the `mcp` extra on the
+  server (`pip install "graphlagoon[mcp]"`) and the `investigation.agent`
+  [permission](./permissions.md) for whoever creates the token (see
+  [Configuration](./configuration.md#ai-agents)).
 :::
 
 ## Connect an agent
 
 1. Open a case, click **Agents** in its header and create a token under
-   *Connect an agent*: a name, the scopes and a validity. The token (`glt_…`)
-   is shown **once**, inside a ready-to-paste command.
+   *Connect an agent*: a name, the [scopes](#scopes) and a validity (at most
+   `GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS`, default 90 days). The token (`glt_…`)
+   is shown **once**, inside a ready-to-paste command; only its hash is
+   stored. Revoke it under *Active tokens*.
 2. Add the app to your client.
 
-**Claude Code** (talks to the app's `/mcp` endpoint directly):
+**Claude Code** (talks to the app's `/mcp` endpoint directly, Streamable
+HTTP):
 
 ```bash
 claude mcp add --transport http graphlagoon http://localhost:8000/graphlagoon/mcp \
   --header "Authorization: Bearer glt_…"
 ```
+
+The endpoint is `{app URL}/graphlagoon/mcp` (`/mcp` under the mount prefix of
+`create_mountable_app`) and accepts agent tokens only.
 
 **Claude Desktop, or any client that only runs local (stdio) servers**: use
 the bridge that ships with the `graphlagoon` package. In
@@ -46,7 +59,7 @@ the bridge that ships with the `graphlagoon` package. In
 Then ask the agent something like *"list my investigations"* to check the
 connection.
 
-## On Databricks Apps: the local bridge
+### On Databricks Apps: the local bridge
 
 The Databricks Apps proxy wants a Databricks login, which most agents cannot
 do. Run the bridge on your machine; it forwards every MCP message to the app:
@@ -67,37 +80,46 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
   and the agent token in `X-Graphlagoon-Agent-Token`. Without them it sends
   the agent token as `Authorization: Bearer`.
 
-## Scopes
+## What an agent does, proposes and never does
 
-| Scope | The agent can |
-|---|---|
-| `read` | read cases, the dossier (`get_dossier`: indicators, hypotheses, evidence and the latest journal), the unified graph, entities, the journal, notes, frozen evidence (`list_evidence`, `get_evidence`), artifacts, case files (`list_files`, `get_file`, masked), proposals and entity matches (`list_matches`); look up an entity in its context's enrichment tables (`lookup_enrichment`) |
-| `analyze` | run server analyses: entity resolution (`suggest_matches`, stores suggestions, never merges), follow the money (`trace_money`), paths (`find_paths`) and typology badges citing CC 4.001 (`run_typologies`, suggestions only) with the same results as the browser |
-| `write` | create cases, add sources, write notes, freeze evidence (`pin_evidence`: a trace re-run on the server with its method stamp, the unified graph or a subset of it, or a table it provides), upload artifacts as **drafts**, upload case files (`upload_file`, up to the artifact size), turn a graph file into a source with a preset or mapping (`create_file_graph`) and set how an enrichment file joins nodes (`set_file_mapping`); the file tools need your `investigation.upload` permission |
-| `propose` | propose an entity role, the case status, a typology, a decision on an entity match (`match` with `match_id`, `status` and `reason_text`), a new hypothesis (`hypothesis` with `text` and the evidence for and against) or a hypothesis status (`hypothesis_status` with `hypothesis_id` and `status`) |
+| | What | Where it shows |
+|---|---|---|
+| **Directly** | Read cases, graphs, files and the dossier; run matches, traces, paths and badges; create cases, add sources, upload files and build file graphs; write notes; freeze evidence; upload artifacts as **drafts** | The journal, as "agent X on behalf of Y" |
+| **Proposes** | An entity role, a match decision, a new hypothesis or a hypothesis status, the typology, the case status | The case's Agents page, until a person accepts or rejects |
+| **Never** | Record the decision, export, share, delete, approve an artifact, accept or reject a proposal or a match, mint tokens | No tool exists; the routes answer 403 to an agent token even when its owner is a superuser |
 
 The token acts with **your** access and never more: cases you cannot see,
-restricted sources and permissions apply the same way. Tokens expire (at most
-`GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS`) and can be revoked on the Agents page or
-by an administrator.
+restricted sources and permissions apply the same way (`create_investigation`
+needs your `investigation.create`, the file tools your
+`investigation.upload`). Every read is audited (`agent.read`) and each token
+is limited to `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` requests per minute
+(429 above it).
 
-## What agents never do
+## Scopes
 
-There is no tool to **decide** a case (`POST …/decision`), **export** it
-(`GET …/export`: exports leave the app unmasked), **share** it, **delete**
-anything, **approve** an artifact or **accept/reject** a proposal. The matching routes
-answer 403 to an agent token even when its owner is a superuser. Everything an
-agent does goes to the journal as "agent X on behalf of Y" and every read is
-audited (`agent.read`).
+A token carries one or more scopes; a tool outside them answers
+`AGENT_FORBIDDEN`.
+
+| Scope | Tools |
+|---|---|
+| `read` | `list_investigations`, `get_investigation` (summary, roles, sources; restricted ones as placeholders), `get_graph` (unified or one source), `search_entities`, `get_entity`, `lookup_enrichment` (a context's enrichment table for one entity), `list_events`, `list_notes`, `get_dossier` (indicators, hypotheses, evidence and the latest journal), `list_evidence`, `get_evidence`, `list_artifacts`, `get_artifact`, `list_files`, `get_file` (masked), `list_proposals`, `list_matches` |
+| `analyze` | `suggest_matches` (stores suggestions, never merges), `trace_money` (follow the money, with the method stamp), `find_paths`, `run_typologies` (CC 4.001 badges, suggestions only); same results as the browser, journaled as `trace.run` / `path.run` |
+| `write` | `create_investigation`, `add_source`, `add_note`, `pin_evidence` (a trace re-run on the server with its method stamp, the unified graph or a subset of it, or a table it provides), `upload_artifact` (always a **draft**, up to `GRAPH_LAGOON_ARTIFACT_MAX_BYTES`), `upload_file`, `create_file_graph` (a graph file into a source, with a preset or mapping), `set_file_mapping` (how an enrichment file joins nodes) |
+| `propose` | `propose` with `kind`: `role` (`entity`, `role`), `status`, `typology`, `match` (`match_id`, `status`, `reason_text`), `hypothesis` (`text` and the evidence for and against) or `hypothesis_status` (`hypothesis_id`, `status`) |
+
+The server also exposes two resources per case,
+`investigation://{id}/summary` and `investigation://{id}/events` (the first
+500 journal events).
 
 ## Personal data
 
 By default agents see CPF, CNPJ and account numbers **masked**
-(`***.456.789-**`, accounts down to their last two digits); entity ids that
-contain them are masked too, and the server maps them back when the agent
-refers to an entity. An administrator can lift this with
-`GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA` — sending customer data to an LLM
-provider is a personal-data transfer, so decide that with your DPO.
+(`***.456.789-**`, `**.345.678/****-**`, accounts down to their last two
+digits); entity ids that contain them are masked too, and the server maps
+them back when the agent refers to an entity or an edge. An administrator
+can lift this with `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA`: sending
+customer data to an LLM provider is a personal-data transfer, so decide that
+with your DPO.
 
 Case data comes wrapped in `untrusted_data`: values from graphs and files may
 contain text written to manipulate an agent, and the server tells the agent
@@ -118,7 +140,19 @@ slash commands (`/mcp__graphlagoon__investigar_golpe_pix`, …) and take the cas
 
 - **Agents page:** pending proposals with the agent's rationale. **Accept**
   applies the change exactly as if you made it; **Reject** asks for a reason.
+  Both go to the journal with who proposed and who decided. *Agent activity*
+  lists what agents did on the case.
 - **Case space:** artifacts the agent uploaded show "agent · name, for you"
   and stay drafts until a person approves them.
+- **Dossier:** hypotheses and evidence the agent produced, with the method
+  stamp of each trace, ready for the [decision](./investigations.md#decision-freeze-and-retention).
 
-See [Investigations](./investigations.md#agents-and-proposals) for both pages.
+## Limits
+
+- No tool edits or deletes: an agent adds notes, sources and evidence but
+  never removes them.
+- The server's unified graph does not apply accepted matches yet, so
+  `trace_money`, `find_paths` and `run_typologies` keep matched entities
+  apart.
+- The rate limit is counted per server process.
+- Tokens have no "last used" date; revoke the ones you no longer need.

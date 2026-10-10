@@ -4,7 +4,8 @@
 Superuser-managed **groups** (members: emails and/or Databricks workspace
 groups) plus **allow/deny rules** that decide who may perform app actions —
 today: creating graph contexts (which also governs catalog browsing and how
-wide a query may reach) and saving explorations.
+wide a query may reach), saving explorations, and creating, uploading to,
+exporting and handing agents an [investigation](./investigations.md).
 
 - **Use it when** only some people should author contexts and query across
   the warehouse, a team's Databricks group should map straight onto app
@@ -19,8 +20,8 @@ wide a query may reach) and saving explorations.
 :::
 
 Out of the box Graph Lagoon is open: anyone who can log in can create
-contexts, save explorations and query. That is right for a team of five and
-wrong for a workspace of five hundred — you may want graph modeling and
+contexts, save explorations, query and open investigations. That is right
+for a team of five and wrong for a workspace of five hundred — you may want graph modeling and
 warehouse-wide SQL in the hands of a data team while everyone else explores
 what they publish. Groups & permissions adds that boundary without touching
 the default: **until an admin writes a rule, nothing changes for anyone.**
@@ -31,10 +32,10 @@ the default: **until an admin writes a rule, nothing changes for anyone.**
 |---|---|
 | `context.create` | Creating graph contexts; browsing the warehouse catalog (listing catalogs/schemas/tables, table schema and preview, type discovery); and the **wide** query tier — see [Query scope](#query-scope) below. |
 | `exploration.save` | Saving or updating explorations. Exploring and querying stay open — this only gates persisting the result. |
-| `investigation.create` | Opening new [investigation](./investigations.md) cases. Working on a case someone shared with you or assigned to you stays open. |
-| `investigation.upload` | Uploading files (bank statements, QSA, CSV) to an [investigation](./investigations.md#case-files). Reading files already in a case stays open to its readers. |
+| `investigation.create` | Opening new [investigation](./investigations.md) cases (also by an agent acting for you). Working on a case someone shared with you or assigned to you stays open. |
+| `investigation.upload` | Uploading files (bank statements, QSA, CSV) to an [investigation](./investigations.md#case-files), by hand or through an agent's file tools. Reading files already in a case stays open to its readers. |
 | `investigation.export` | Downloading a case as the Siscoaf summary, JSON package, CSV or SIMBA layout, and printing the laudo ([exports](./investigations.md#exports)). Reading the case in the app stays open to its readers. |
-| `investigation.agent` | Creating personal agent tokens, so an AI agent can work on investigations with your access. Only when `GRAPH_LAGOON_AGENTS_ENABLED` is on. |
+| `investigation.agent` | Creating personal [agent tokens](./agents-mcp.md), so an AI agent can work on investigations with your access. Only when `GRAPH_LAGOON_AGENTS_ENABLED` is on. Existing tokens keep working until they expire or are revoked. |
 
 ## Query scope
 

@@ -10,8 +10,9 @@ metrics (degree, PageRank, betweenness, …) size nodes by importance.
   your browser over the *loaded subgraph*, so results describe what's on
   screen, not the full dataset. For graph algorithms over billions of
   edges, compute in a Spark job and publish the result as a
-  [precomputed graph](./precomputed-graphs.md). Metrics are session-only:
-  they aren't saved with explorations and go stale when the graph changes.
+  [precomputed graph](./precomputed-graphs.md). Metrics are session-only
+  (unless you **Save as property**): they aren't saved with explorations and
+  go stale when the graph changes.
 :::
 
 Two complementary ways to see structure the raw picture hides: **community
@@ -87,7 +88,7 @@ on a connected graph.
 | Betweenness | Bridge-ness: how often a node sits on shortest paths | |
 | Closeness | Average distance to everyone else | Needs a connected graph |
 | HITS Authority / Hub | Pointed-to vs pointing-at importance | Needs a connected graph |
-| Weak / Strong Components | The node's component id (0 = largest), ignoring or following edge direction | |
+| Weak / Strong Components | The node's component id (0 = largest), ignoring or following edge direction | In a case, [follow the money](./investigations.md#follow-the-money) and [paths](./investigations.md#paths) answer "how is A connected to B" |
 | Edge Betweenness | The same bridge idea, for edges | |
 
 Every algorithm accepts an **edge-type** allow-list (empty = all).
@@ -167,6 +168,10 @@ alongside properties.
   changes — a stale metric keeps its values until you delete or recompute
   it. ([Custom metrics](#custom-metrics) are the exception: their
   definitions are saved on the context and they recompute on their own.)
+  To keep a node metric's values, **Save as property** on its card writes
+  them into the node properties (named after the metric) and saves the
+  open exploration; every [investigation](./investigations.md) that uses
+  the exploration records it in its journal.
 - Metrics compute over the loaded graph; the built-in Degree counts all
   loaded edges even when filters hide some of them.
 

@@ -139,6 +139,7 @@ api_router = create_api_router()
 - `Exploration` - Saved visualization states
 - `ExplorationShare` - Exploration sharing permissions
 - `UsageLog` - Analytics and usage tracking
+- Investigation models - see [Investigations](#investigations)
 
 **Lazy Initialization Pattern:**
 - Database is configured but not initialized until first use
@@ -347,6 +348,73 @@ The transpiler requires schema information:
 - Edge types with source/destination types
 - Property data types (mapped from Spark types)
 
+## Investigations
+
+A case (`Investigation`) gathers explorations from any context and uploaded
+files into one workspace and ends in a human decision. Plan and rationale:
+`docs/dev/plans/investigation/`; user guide: `docs/guide/investigations.md`
+and `docs/guide/agents-mcp.md`.
+
+**Entities** (`db/models.py`, migration `016_investigations`, mirrored by the
+in-memory store):
+- `Investigation` - title, owner, assignee, status (`selecao` → `analise` →
+  `decidido` | `arquivado`), `selected_at`, `state` JSON (roles, pins,
+  hypotheses), `decision`, `frozen_hash`, `frozen_at`
+- `InvestigationShare` - nominal e-mail shares only (no wildcards)
+- `InvestigationSource` - an exploration (`live` or `frozen` with
+  `frozen_sha256`) or a file graph; `context_id` denormalized so a restricted
+  source still shows a placeholder
+- `InvestigationFile` - uploaded file, role (graph, enrichment, attachment),
+  sha256, mapping
+- `InvestigationEvent` - append-only journal, `hash = sha256(prev_hash +
+  canonical json)`, actor `human` or `agent` (with token and agent name)
+- `InvestigationNote`, `InvestigationEvidence` (frozen snapshot + sha256),
+  `EntityMatch`, `InvestigationArtifact` / `InvestigationArtifactVersion`
+  (drafts until a person approves), `InvestigationProposal` (agent changes
+  waiting for a person), `AgentToken` (hash only, scopes, expiry)
+
+**Access** (`services/investigations.py`): read = owner, assignee, any share,
+superuser; write = owner, assignee, write share; manage (share, delete) =
+owner or superuser. Unreadable cases answer 404. After the decision every
+mutation answers 409. Four permissions gate actions: `investigation.create`,
+`.upload`, `.export`, `.agent` (`services/permission_catalog.py`).
+
+**Storage** (`services/investigation_storage.py`): one `BlobStore` rooted at
+`investigations_volume_path` (a Unity Catalog Volume through the Files API)
+or `{exploration_snapshots_dir}/investigations` on disk. Write-once layout:
+
+```
+{investigation_id}/sources/{source_id}.json.gz          # frozen sources
+{investigation_id}/files/{sha256}                       # uploads, by content hash
+{investigation_id}/evidence/{evidence_id}.json.gz       # frozen evidence
+{investigation_id}/artifacts/{artifact_id}/v{n}/{name}  # case space versions
+```
+
+Exports are generated on request and audited with their sha256, never
+stored. A graph file becomes a `file` datasource context
+(`services/investigation_files.py`, mapping specs and presets in
+`services/file_mapping*.py`).
+
+**Unified graph and analyses.** The browser unifies sources by identity keys
+(`frontend/src/utils/unifyGraph.ts`), runs trace and paths in workers and
+typologies (`utils/typologies.ts`) on the main thread; the server has Python ports at parity (`services/case_graph.py`,
+`trace.py`, `paths.py`, `typologies.py`) behind
+`POST /api/investigations/{id}/analysis/{trace,paths,typologies}`, checked
+against shared fixtures.
+
+**MCP** (`mcp/server.py`, optional `mcp` extra): an `MCPServer` (official
+`mcp` SDK) mounted at `{prefix}/mcp` (Streamable HTTP) when `agents_enabled`,
+authenticated by personal agent tokens (`Bearer glt_…`, `middleware/auth.py`,
+per-token rate limit). Tools check a scope (`read`, `analyze`, `write`,
+`propose`), call the same services as the REST routes with the token owner as
+user, mask CPF, CNPJ and accounts unless `agents_allow_unmasked_data`, and
+wrap output in `untrusted_data`. `mcp/registry.py` maps every investigation
+route to its tool or to a reason it has none; `human-only:` routes (decision,
+export, share, delete, approve, accept/reject, tokens) carry `forbid_agents`,
+and `tests/test_agent_registry.py` enforces the coverage. `graphlagoon
+mcp-bridge` is a local stdio bridge for clients behind the Databricks Apps
+proxy.
+
 ## API Endpoints
 
 ### Authentication
@@ -393,6 +461,21 @@ GET    /api/explorations/{id}                         # Get exploration
 PUT    /api/explorations/{id}                         # Update exploration
 DELETE /api/explorations/{id}                         # Delete exploration
 POST   /api/explorations/{id}/share                   # Share exploration
+```
+
+### Investigations
+
+```
+GET|POST         /api/investigations                       # Queue / create
+GET|PATCH|DELETE /api/investigations/{id}                  # Case (DELETE: retention)
+POST|DELETE      /api/investigations/{id}/share[/{email}]  # Nominal shares
+*                /api/investigations/{id}/sources|files|notes|evidence|hypotheses|matches|artifacts|proposals|events
+PATCH            /api/investigations/{id}/state            # Roles, pins
+POST             /api/investigations/{id}/analysis/{trace|paths|typologies}
+POST             /api/investigations/{id}/decision         # Human-only, freezes the case
+GET              /api/investigations/{id}/export?format=json|csv|simba|siscoaf
+GET|POST|DELETE  /api/agent-tokens[/{id}]                  # Personal agent tokens
+POST             /api/admin/investigations/{id}/transfer   # Superuser: new owner
 ```
 
 ### Catalog (Databricks)
