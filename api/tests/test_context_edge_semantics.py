@@ -33,7 +33,8 @@ from graphlagoon.services.file_mapping import MappingError, validate  # noqa: E4
 from graphlagoon.services.file_mapping_presets import PRESETS  # noqa: E402
 
 OWNER = "owner@example.com"
-SEM = {"amount_prop": "valor", "amount_unit": "cents", "time_prop": "data", "currency": "BRL"}
+SEM = {"amount_prop": "valor", "amount_unit": "cents", "time_prop": "data", "currency": "BRL",
+       "timestamp_prop": None, "weight_prop": None}
 
 
 class TestValidation:
@@ -45,7 +46,8 @@ class TestValidation:
     def test_defaults_and_blank_props(self):
         sem = GraphContextUpdate(edge_semantics={"amount_prop": " ", "time_prop": "t"}).edge_semantics
         assert sem.model_dump() == {
-            "amount_prop": None, "amount_unit": "units", "time_prop": "t", "currency": "BRL"
+            "amount_prop": None, "amount_unit": "units", "time_prop": "t", "currency": "BRL",
+            "timestamp_prop": None, "weight_prop": None,
         }
 
     def test_file_mapping_checks_the_same_shape(self):
