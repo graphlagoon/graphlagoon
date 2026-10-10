@@ -34,7 +34,7 @@ from graphlagoon.db.memory_store import InMemoryStore  # noqa: E402
 from graphlagoon.dev.seed import ADMIN_EMAIL, run_seed  # noqa: E402
 from graphlagoon.dev.seed_investigations import MARKER, run_seed_investigations  # noqa: E402
 from graphlagoon.middleware import auth  # noqa: E402
-from graphlagoon.services import investigation_storage  # noqa: E402
+from graphlagoon.services import investigation_evidence, investigation_storage  # noqa: E402
 from graphlagoon.services.blob_storage import LocalBlobStore  # noqa: E402
 
 
@@ -99,6 +99,9 @@ async def test_seeds_every_status_artifacts_and_proposals_then_resets(in_process
         e for e in store.list_investigation_children("investigation_evidence", flagship.id) if e.kind == "trace"
     )
     assert trace is not None and stats.flagship.endswith(str(flagship.id))
+    # It is the T5 golpe-pix scenario: FIFO reaches Saque ATM, Exchange Gama and Bet Delta (91%).
+    frozen = await investigation_evidence.get_evidence(flagship.id, flagship.owner_email, trace.id)
+    assert (sorted(frozen["snapshot"]["exits"].values()), frozen["snapshot"]["coverage"]) == ([880, 1550, 2000], 0.9097)
 
     again = await run_seed_investigations("http://testserver", cases=2, reset=True, log=quiet)
     assert again.deleted == 6

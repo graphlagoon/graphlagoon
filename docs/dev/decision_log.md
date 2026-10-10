@@ -12322,3 +12322,17 @@ uvicorn em memória + CLI (20 casos; rerun com `--reset`; traces com cobertura 0
 **Admin-Area Impact:** No admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+## [2026-10-11 07:00] - Fix: seed de investigações com grafos de dinheiro rastreáveis
+
+O caso "Golpe Pix · falsa central" passa a carregar o cenário T5 (`trace/golpe-pix.json`)
+escrito como SIMBA v3.1 pelo `simba_tables` do F4.6 (+ `qsa-mini`); trace FIFO/3/Δ 24h da
+conta vítima → Saque ATM 2.000, Exchange Gama 1.550, Bet Delta 880, cobertura 91% (impresso
+no resumo, verificado no teste). Os casos gerados viram 16–40 lançamentos, 3–4 camadas de
+mulas com fan-out/fan-in e saques/exchange/bet/PJ; o trace fixado usa `hops` do grafo.
+Suposições: SIMBA não tem hora (só ddmmyyyy), então os códigos OD seguem o relógio (o trace
+desempata por id) e a hora vai na DESCRICAO; contrapartes SIMBA alternam conta ↔ titular, logo
+a mula 4471-0 é uma Pessoa. Limite: os tipos SIMBA (Conta/Pessoa/Desconhecido) não casam com
+as paradas padrão, então o trace do navegador não marca saídas sem stop nodes (o do servidor
+recebe `stop_nodes` = papéis exit). Arquivos: `api/graphlagoon/dev/seed_investigations.py`,
+`api/tests/test_dev_seed_investigations.py`. No public docs impact. No admin-area impact.
