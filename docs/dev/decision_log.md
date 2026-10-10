@@ -12336,3 +12336,62 @@ a mula 4471-0 é uma Pessoa. Limite: os tipos SIMBA (Conta/Pessoa/Desconhecido) 
 as paradas padrão, então o trace do navegador não marca saídas sem stop nodes (o do servidor
 recebe `stop_nodes` = papéis exit). Arquivos: `api/graphlagoon/dev/seed_investigations.py`,
 `api/tests/test_dev_seed_investigations.py`. No public docs impact. No admin-area impact.
+
+## [2026-10-11 11:10] - Feature Implemented: Paridade unify (pré-requisito F2/F4)
+
+Fixture `unify` compartilhada (05 §8): `frontend/src/__tests__/fixtures/unify/*.json`
+(`contexts`, `sources` no formato de snapshot, `matches`, `overrides`, `expected`), 4 casos:
+CPF formatado × numérico em dois contextos (merge, `conflicts` de `nome`/`node_type`, nó sem
+chave e documento mascarado ficam `id@context`, aresta pendente descartada); `same_as` aceito
+em cadeia (left = keep) com `sugerido`/`recusado` ignorados; chaves do caso sobrepondo a chave
+do contexto por `node_type`; normalizadores account/phone/email com dois sources do mesmo
+contexto. `unifyGraph.parity.test.ts` e `test_case_graph.py` comparam a forma canônica (nós
+por uid, arestas por id, chaves ordenadas) byte a byte com `expected`.
+Decisões: `unifyGraph(sources, contexts, overrides = [])` (terceiro parâmetro opcional; a store
+não muda); `services/case_graph.py` ganha `conflicts` por propriedade (era shortcut), `apply_aliases`
+(port de `applyAliases`) e `unify(parts, overrides, aliases)`; `case_graph(investigation_id,
+user_email, source_id)` mantém a assinatura (trace/paths/typologies/exports/MCP intactos) e lê
+os matches `aceito` via `list_matches` e as chaves do caso em `state.identity_keys`
+(shortcut: vai para `settings.identity_keys` na 016_cases). Limite: paridade de `amount`/`t` fica
+com a fixture `trace`; igualdade de valores segue `===` (bool ≠ número).
+**Files:** `frontend/src/utils/unifyGraph.ts`, `frontend/src/utils/__tests__/unifyGraph.parity.test.ts`,
+`frontend/src/__tests__/fixtures/unify/`, `api/graphlagoon/services/case_graph.py`, `api/tests/test_case_graph.py`.
+**Testing:** vitest `unifyGraph.parity.test.ts` + `unifyGraph.test.ts` (8); pytest `test_case_graph.py`
+(5, incluindo `case_graph` em memória aplicando chave do caso e match aceito) e os chamadores
+`test_mcp_server/test_trace/test_paths/test_typologies/test_investigation_exports/test_file_mapping` verdes.
+No public docs impact. No admin-area impact.
+
+**Author:** Claude (AI Assistant)
+
+## [2026-10-11 09:30] - Feature Implemented: F0 · Segurança (escopo de tokens de agente e mascaramento no serviço)
+
+`AuthMiddleware._dispatch_agent` só deixa um token `glt_` passar para `/api/investigations*`,
+`/api/explorations*`, `/api/graph-contexts/{id}/(subgraph|expand|query|cypher|nodes/batch|
+schema-drift|explorations|enrichment)`, `/api/config` e `/mcp` (prefixo `/graphlagoon` e
+`root_path` descontados); o resto responde 403 `AGENT_FORBIDDEN` antes do roteamento.
+`agent_tokens` ganha `scope (user|case)`, `investigation_ids` e `unmasked` (migração 017
+editada no lugar; `InMemoryStore` em paridade); token de caso só alcança os ids que nomeia
+(regex no middleware + `can_read_case` lê o ator, logo vale também para as ferramentas MCP e
+filtra a listagem) e não cria casos. `scopes` fica na tabela e no formulário mas o REST não o
+aplica mais (`require_agent_scope`/`_check_agent_scope` removidos; `agent_guard` só aplica
+`forbid_agents`); o MCP ainda checa `scopes` em `_agent(ctx, scope)` até a reescrita da F5.
+`forbid_agents` novo em share/unshare de contextos e explorações; `PATCH` de caso com
+`assignee_email` por agente → 403 no handler. `services/masking.py` recebe `mask*` do
+`mcp/server.py` e `agent_view(payload)`: snapshot de fonte, snapshot de exploração, eventos
+e evidência saem mascarados para agente; `files/{id}/content` e conteúdo de artefato devolvem
+texto mascarado ou 403 para binário. Desmascarado só com `agents_allow_unmasked_data` ∧
+`token.unmasked` (o middleware já faz o ∧ no ator). Upload de arquivo/artefato checa acesso
+(`ensure_case_access`) antes de bufferizar o corpo. Atalho: `agent_view` no REST não passa os
+`secrets` do grafo do caso (valores de identidade que não são CPF/CNPJ/conta passam); entra
+com a F2 quando as leituras migrarem para `services/cases.py`.
+Arquivos: `api/graphlagoon/middleware/auth.py`, `utils/authz.py`, `services/masking.py`,
+`services/agent_tokens.py`, `services/investigations.py`, `routers/{investigations,
+graph_contexts,explorations,agent_tokens}.py`, `mcp/{server,registry}.py`, `db/models.py`,
+`db/memory_store.py`, `alembic/versions/017_agents.py`, `models/schemas.py`.
+Testes: `tests/test_agent_tokens.py` (+5: token de caso, allowlist e shares, REST mascarado,
+upload checa acesso, assignee), novo `tests/test_agent_route_scoping.py` (percorre as rotas da
+app: tudo fora da allowlist → 403 com token de superusuário; token do caso A → 403 em toda
+rota do caso B). Verdes: test_agent_tokens, test_agent_route_scoping, test_agent_registry,
+test_admin_registry, test_mcp_server, test_permission_routes, test_investigations (118).
+Public docs: `docs/guide/agents-mcp.md` (allowlist REST, `scope: case`, desmascarar exige o
+flag do token). No admin-area impact (a listagem admin de tokens já serializa os campos novos).

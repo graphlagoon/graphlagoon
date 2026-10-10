@@ -2,7 +2,7 @@
  * Unified case graph (investigations, 03 §5.1): N sources from different
  * contexts merged into one graph by the contexts' identity keys. Pure.
  */
-import type { Edge, GraphContext, GraphSnapshot, Node } from '@/types/graph';
+import type { Edge, GraphContext, GraphSnapshot, IdentityKey, Node } from '@/types/graph';
 import { identityKeyOf } from '@/utils/identityKeys';
 import { edgeValueTags } from '@/utils/edgeSemantics';
 
@@ -106,17 +106,19 @@ function mergeNode(
  * Nodes merge by identity key (`"Pessoa:12345678901"`); a node without a usable key
  * stays per context (`"{node_id}@{contextId}"`, id first so the default label reads
  * the original id). Edges are never merged across sources; each carries its own
- * context's amount and time (`__amount`/`__t`).
+ * context's amount and time (`__amount`/`__t`). Case-level `overrides` replace a
+ * context's key for the same node type in every context (05 §1 `settings.identity_keys`).
  */
 export function unifyGraph(
   sources: UnifySource[],
   contexts: Record<string, Pick<GraphContext, 'identity_keys' | 'edge_semantics'> | null | undefined>,
+  overrides: IdentityKey[] = [],
 ): UnifiedGraph {
   const nodes = new Map<string, UnifiedNode>();
   const edges = new Map<string, UnifiedEdge>();
 
   for (const s of sources) {
-    const keys = new Map((contexts[s.contextId]?.identity_keys ?? []).map((k) => [k.node_type, k]));
+    const keys = new Map([...(contexts[s.contextId]?.identity_keys ?? []), ...overrides].map((k) => [k.node_type, k]));
     const semantics = contexts[s.contextId]?.edge_semantics;
     const uidOf = new Map<string, string>();
     for (const n of s.nodes) {
