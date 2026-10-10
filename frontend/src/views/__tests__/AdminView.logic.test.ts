@@ -130,7 +130,7 @@ describe('describeAudit', () => {
     expect(describeAudit(entry('investigation.transfer', { title: 'Pix', from: 'a', to: 'b' }))).toBe('"Pix" from a to b');
     expect(describeAudit(entry('investigation.update', { fields: ['status', 'title'] }))).toBe('changed status, title');
     expect(describeAudit(entry('investigation.delete', { title: 'Pix', owner: 'o', reason: 'dup' }))).toBe('"Pix" (owner o) — reason: dup');
-    expect(describeAudit(entry('investigation.source_add', { exploration_id: 'e1', mode: 'frozen' }))).toBe('exploration e1 (frozen)');
+    expect(describeAudit(entry('investigation.item_add', { kind: 'graph/exploration_ref', title: 'Pix', item_id: 'i1' }))).toBe('graph/exploration_ref "Pix"');
     expect(describeAudit(entry('permission.update', { permission: 'context.create', mode: 'restricted', rules: 1 }))).toBe('context.create: restricted, 1 rule(s)');
   });
 

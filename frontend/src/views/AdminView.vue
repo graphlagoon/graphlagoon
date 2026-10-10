@@ -162,7 +162,7 @@ const filteredInvestigations = computed(() => {
   return admin.investigations.filter(
     (i) =>
       (!owner || i.owner_email.toLowerCase() === owner) &&
-      (!q || [i.title, i.owner_email, i.assignee_email ?? '', i.typology ?? ''].join(' ').toLowerCase().includes(q)),
+      (!q || [i.title, i.owner_email, i.assignee_email ?? '', i.kind_preset ?? ''].join(' ').toLowerCase().includes(q)),
   );
 });
 
@@ -562,7 +562,7 @@ function openGraph(id: string) {
               owner <code>{{ inv.owner_email }}</code>
               <template v-if="inv.assignee_email"> · assignee <code>{{ inv.assignee_email }}</code></template>
               · {{ STATUS_LABELS[inv.status] ?? inv.status }}
-              · {{ inv.source_count ?? 0 }} sources
+              · {{ inv.item_count ?? 0 }} items
               · {{ inv.shared_with?.length || 0 }} shares
               · updated {{ formatRelative(inv.updated_at) }}
             </div>
@@ -585,7 +585,7 @@ function openGraph(id: string) {
             <div class="list-item-title">{{ t.name }}</div>
             <div class="list-item-subtitle">
               owner <code>{{ t.owner_email }}</code>
-              · {{ t.scopes.join(', ') }}
+              · {{ t.scope === 'case' ? `${(t.investigation_ids ?? []).length} case(s)` : 'every case' }}{{ t.unmasked ? ' · unmasked' : '' }}
               · created {{ formatRelative(t.created_at) }}
               · {{ t.revoked_at ? 'revoked' : t.active ? `expires ${t.expires_at.slice(0, 10)}` : 'expired' }}
             </div>

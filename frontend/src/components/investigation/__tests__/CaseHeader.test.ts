@@ -17,7 +17,7 @@ vi.mock('@/services/api', () => ({
     unshareInvestigation: vi.fn(async () => {}),
     getInvestigationEvents: vi.fn(async () => []),
     recordInvestigationDecision: vi.fn(),
-    getInvestigationSources: vi.fn(async () => []),
+    getInvestigationItems: vi.fn(async () => []),
   },
 }))
 
@@ -28,17 +28,19 @@ const CASE = {
   id: '0412aaaa-1111-2222-3333-444444444444',
   title: 'Golpe Pix',
   description: null,
-  status: 'selecao',
-  typology: 'Golpe Pix',
+  status: 'open',
+  kind_preset: 'pix_med',
+  tags: [],
+  settings: {},
   owner_email: 'me@x.com',
   assignee_email: 'ana@x.com',
   state: {},
-  shared_with: [{ email: 'bob@x.com', permission: 'read' }],
+  shared_with: [{ email: 'bob@x.com', role: 'reader' }],
   has_write_access: true,
   can_manage: true,
   created_at: now,
   updated_at: now,
-  deadline: { phase: 'selection', due_at: now, days_left: 5 },
+  deadline: { phase: 'open', due_at: now, days_left: 5 },
 }
 
 const stubs = { RouterLink: { template: '<a><slot /></a>' } }
@@ -46,7 +48,7 @@ const stubs = { RouterLink: { template: '<a><slot /></a>' } }
 function mount(overrides: Record<string, unknown> = {}) {
   const store = useInvestigationStore()
   store.current = { ...CASE, ...overrides } as any
-  return render(CaseHeader, { props: { pendingProposals: 0, openMatches: 2 }, global: { stubs } })
+  return render(CaseHeader, { global: { stubs } })
 }
 
 beforeEach(() => {
@@ -70,16 +72,16 @@ describe('CaseHeader', () => {
     expect(getByTestId('investigation-title').textContent).toContain('falsa central')
 
     const options = [...(getByTestId('case-status') as HTMLSelectElement).options].map((o) => o.value)
-    expect(options).toEqual(['selecao', 'analise', 'arquivado']) // decidido only through the decision
-    await fireEvent.update(getByTestId('case-status'), 'analise')
+    expect(options).toEqual(['open', 'analysis', 'archived']) // decided only through the decision
+    await fireEvent.update(getByTestId('case-status'), 'analysis')
     await flushPromises()
-    expect(api.updateInvestigation).toHaveBeenLastCalledWith(CASE.id, { status: 'analise' })
+    expect(api.updateInvestigation).toHaveBeenLastCalledWith(CASE.id, { status: 'analysis' })
     expect(queryByTestId('case-reopen')).toBeNull()
   })
 
   it('reopens a decided case from the menu and deletes after a confirmation', async () => {
-    vi.mocked(api.reopenInvestigation).mockResolvedValue({ ...CASE, status: 'analise', decision: null } as any)
-    const { getByTestId, queryByTestId } = mount({ status: 'decidido', decision: { outcome: 'arquivar' } })
+    vi.mocked(api.reopenInvestigation).mockResolvedValue({ ...CASE, status: 'analysis', decision: null } as any)
+    const { getByTestId, queryByTestId } = mount({ status: 'decided', decision: { outcome: 'arquivar' } })
     expect(queryByTestId('case-decide')).toBeNull() // already decided
     expect((getByTestId('case-status') as HTMLSelectElement).disabled).toBe(true)
 
@@ -87,7 +89,7 @@ describe('CaseHeader', () => {
     await fireEvent.click(getByTestId('case-reopen'))
     await flushPromises()
     expect(api.reopenInvestigation).toHaveBeenCalledWith(CASE.id)
-    expect((getByTestId('case-status') as HTMLSelectElement).value).toBe('analise')
+    expect((getByTestId('case-status') as HTMLSelectElement).value).toBe('analysis')
 
     await fireEvent.click(getByTestId('case-menu'))
     await fireEvent.click(getByTestId('case-delete'))
@@ -115,10 +117,10 @@ describe('ShareDialog', () => {
     expect(getByTestId('share-row-bob@x.com').textContent).toContain('can read')
 
     await fireEvent.update(getByTestId('share-email'), 'carla@x.com')
-    await fireEvent.update(getByTestId('share-permission'), 'write')
+    await fireEvent.update(getByTestId('share-permission'), 'editor')
     await fireEvent.click(getByTestId('share-submit'))
     await flushPromises()
-    expect(api.shareInvestigation).toHaveBeenCalledWith(CASE.id, 'carla@x.com', 'write')
+    expect(api.shareInvestigation).toHaveBeenCalledWith(CASE.id, 'carla@x.com', 'editor')
     expect(getByTestId('share-row-carla@x.com').textContent).toContain('can write')
 
     await fireEvent.click(getByTestId('share-remove-bob@x.com'))

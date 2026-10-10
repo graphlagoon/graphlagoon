@@ -3,13 +3,14 @@
 import { ref } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { getErrorMessage } from '@/utils/errorMessage';
+import type { ShareRole } from '@/types/investigation';
 
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 const store = useInvestigationStore();
 const email = ref('');
-const permission = ref<'read' | 'write'>('read');
+const role = ref<ShareRole>('reader');
 const busy = ref(false);
 const error = ref<string | null>(null);
 
@@ -30,7 +31,7 @@ async function run(action: () => Promise<unknown>, fallback: string) {
 async function share() {
   const target = email.value.trim();
   if (!target || busy.value) return;
-  if (await run(() => store.shareInvestigation(target, permission.value), 'Failed to share')) email.value = '';
+  if (await run(() => store.shareInvestigation(target, role.value), 'Failed to share')) email.value = '';
 }
 
 function unshare(target: string) {
@@ -58,9 +59,9 @@ function unshare(target: string) {
           data-testid="share-email"
           required
         />
-        <select v-model="permission" class="form-control" data-testid="share-permission">
-          <option value="read">can read</option>
-          <option value="write">can write</option>
+        <select v-model="role" class="form-control" data-testid="share-permission">
+          <option value="reader">can read</option>
+          <option value="editor">can write</option>
         </select>
         <button type="submit" class="btn btn-primary" :disabled="busy || !email.trim()" data-testid="share-submit">
           Share
@@ -70,7 +71,7 @@ function unshare(target: string) {
       <ul class="share-list" data-testid="share-list">
         <li v-for="s in store.current.shared_with" :key="s.email" :data-testid="`share-row-${s.email}`">
           <span>{{ s.email }}</span>
-          <span class="perm">{{ s.permission === 'write' ? 'can write' : 'can read' }}</span>
+          <span class="perm">{{ s.role === 'editor' ? 'can write' : 'can read' }}</span>
           <button
             type="button"
             class="link-btn"

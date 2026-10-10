@@ -8,7 +8,7 @@ vi.mock('@/services/api', () => ({
   api: {
     getAllExplorations: vi.fn(),
     getExploration: vi.fn(),
-    getInvestigationSources: vi.fn(async () => []),
+    getInvestigationItems: vi.fn(async () => []),
     getGraphContexts: vi.fn(async () => []),
   },
 }))

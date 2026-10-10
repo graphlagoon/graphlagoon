@@ -124,24 +124,22 @@ function describeAuditBody(entry: AuditEntry): string {
       return `"${m.title ?? entry.resource_id}"`;
     case 'investigation.update':
       return `changed ${Array.isArray(m.fields) ? m.fields.join(', ') : '?'}`;
-    case 'investigation.source_add':
-      return `exploration ${m.exploration_id ?? '?'} (${m.mode ?? 'live'})`;
-    case 'investigation.file_upload':
-      return `${m.filename ?? '?'} (${m.role ?? '?'}) sha256 ${String(m.sha256 ?? '?').slice(0, 12)}`;
-    case 'investigation.file_read':
-      return `file ${m.file_id ?? '?'}${m.tool ? ` via MCP ${m.tool}` : ''}`;
+    case 'investigation.item_add':
+      return `${m.kind ?? '?'} "${m.title ?? m.item_id ?? '?'}"${m.sha256 ? ` sha256 ${String(m.sha256).slice(0, 12)}` : ''}`;
+    case 'investigation.item_read':
+      return `item ${m.item_id ?? '?'} v${m.version ?? '?'}`;
     case 'investigation.decide':
       return `decided: ${m.outcome ?? '?'} · hash ${String(m.frozen_hash ?? '?').slice(0, 12)}`;
     case 'investigation.export':
       return `exported ${m.format ?? '?'} sha256 ${String(m.sha256 ?? '?').slice(0, 12)}`;
-    case 'investigation.source_remove':
-      return `removed source "${m.title ?? m.source_id ?? '?'}"`;
+    case 'investigation.item_remove':
+      return `removed ${m.kind ?? 'item'} "${m.title ?? m.item_id ?? '?'}"`;
     case 'precomputed.publish':
     case 'precomputed.delete':
     case 'preset.delete':
       return `${m.name ?? '?'}${m.provider ? ` via ${m.provider}` : ''}`;
     case 'agent_token.create':
-      return `"${m.name ?? entry.resource_id}" (${Array.isArray(m.scopes) ? m.scopes.join(', ') : '?'})`;
+      return `"${m.name ?? entry.resource_id}" (${m.scope ?? 'user'}${m.unmasked ? ', unmasked' : ''})`;
     case 'agent.read':
       return `MCP ${m.tool ?? '?'}`;
     case 'enrichment.read':

@@ -11,7 +11,7 @@ import { enrichmentTargets, fileEnrichmentKey } from '@/utils/enrichment'
 import { unifyGraph } from '@/utils/unifyGraph'
 
 vi.mock('@/services/api', () => ({
-  api: { getInvestigationFileContent: vi.fn(), lookupEnrichment: vi.fn() },
+  api: { getInvestigationItemContent: vi.fn(), lookupEnrichment: vi.fn() },
 }))
 
 import { api } from '@/services/api'
@@ -38,15 +38,15 @@ beforeEach(() => {
   const store = useInvestigationStore()
   store.current = { id: 'inv' } as any
   store.contexts = contexts as any
-  store.files = [{ id: 'f1', filename: 'qsa.csv', role: 'enrichment', mapping: QSA_ENRICHMENT, sha256: 'x', size_bytes: 1, uploaded_by: 'me' } as any]
-  vi.mocked(api.getInvestigationFileContent).mockResolvedValue(QSA.buffer.slice(QSA.byteOffset, QSA.byteOffset + QSA.byteLength) as ArrayBuffer)
+  store.items = [{ id: 'f1', kind: 'table', subkind: 'csv', title: 'qsa.csv', mapping: { as: 'enrichment', spec: QSA_ENRICHMENT }, current_version: 1, pinned: [], provenance: { filename: 'qsa.csv' } } as any]
+  vi.mocked(api.getInvestigationItemContent).mockResolvedValue(QSA.buffer.slice(QSA.byteOffset, QSA.byteOffset + QSA.byteLength) as ArrayBuffer)
 })
 
-describe('case file as enrichment (F2.6)', () => {
+describe('case table as enrichment', () => {
   it('the QSA mini enriches a merchant by CNPJ', async () => {
     const { getByTestId } = render(EnrichmentTab, { props: { node: lojista, canEdit: true }, global: { plugins: [pinia] } })
     await flushPromises()
-    expect(api.getInvestigationFileContent).toHaveBeenCalledWith('inv', 'f1')
+    expect(api.getInvestigationItemContent).toHaveBeenCalledWith('inv', 'f1')
     const rows = getByTestId('enrichment-file-rows').textContent!
     expect(rows).toContain('ANA SILVA')
     expect(rows).toContain('HOLDING XYZ LTDA')
@@ -61,6 +61,6 @@ describe('case file as enrichment (F2.6)', () => {
     const { queryByTestId } = render(EnrichmentTab, { props: { node: pessoa, canEdit: true }, global: { plugins: [pinia] } })
     await flushPromises()
     expect(queryByTestId('enrichment-file-card')).toBeNull()
-    expect(api.getInvestigationFileContent).not.toHaveBeenCalled()
+    expect(api.getInvestigationItemContent).not.toHaveBeenCalled()
   })
 })

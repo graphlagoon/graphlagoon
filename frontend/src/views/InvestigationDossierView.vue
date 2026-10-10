@@ -1,37 +1,35 @@
 <script setup lang="ts">
 /**
- * Dossier (T7, investigations F4.2): summary and indicators, hypotheses with the
- * evidence for and against each, the frozen evidence (E1, E2, … oldest first) and
- * the journal. The decision panel (F4.5) records the outcome, actions and rationale;
- * the server freezes the case and from then on the dossier is read-only. Exports
- * (F4.6, `investigation.export`) download from the server; the laudo is this page
- * printed (print CSS below), with the file and source hashes it adds on paper.
+ * Dossier (05 §2; a route until F4 makes it `mode=dossie`): summary and
+ * indicators, hypotheses (annotations) with the evidence for and against each
+ * (pinned item versions, E1, E2, … oldest first), the evidence, the journal and
+ * the decision panel. The server freezes the case at the decision and from then
+ * on the dossier is read-only. Exports download from the server; the laudo is
+ * this page printed (print CSS below), with the item hashes it adds on paper.
  */
 import { computed, nextTick, ref, watch } from 'vue';
-import { usePermissions } from '@/composables/usePermissions';
 import { downloadBlob } from '@/utils/portableExport';
 import { useInvestigationStore } from '@/stores/investigation';
 import { api } from '@/services/api';
 import { describeEvent } from '@/utils/investigationEvents';
-import { DECISION_ACTION_LABELS, DECISION_OUTCOME_LABELS, deadlineOf, HYPOTHESIS_STATUS_LABELS, STATUS_LABELS, URGENT_DAYS } from '@/utils/investigationStatus';
+import {
+  DECISION_ACTION_LABELS,
+  DECISION_OUTCOME_LABELS,
+  HYPOTHESIS_STATUS_LABELS,
+  KIND_PRESET_LABELS,
+  STATUS_LABELS,
+  URGENT_DAYS,
+  deadlineOf,
+} from '@/utils/investigationStatus';
 import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { methodStamp } from '@/utils/traceView';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { TraceResult } from '@/utils/trace';
-import type {
-  DecisionAction,
-  DecisionOutcome,
-  Hypothesis,
-  HypothesisStatus,
-  InvestigationEvidence,
-  InvestigationExportFormat,
-  InvestigationRole,
-} from '@/types/investigation';
+import type { CaseAnnotation, DecisionAction, DecisionOutcome, HypothesisStatus, InvestigationExportFormat } from '@/types/investigation';
 
 const props = defineProps<{ id: string }>();
 const store = useInvestigationStore();
 
-const pendingProposals = ref(0);
 const error = ref<string | null>(null);
 const draft = ref('');
 const showAllEvents = ref(false);
@@ -42,49 +40,47 @@ watch(
   async (id) => {
     error.value = null;
     if (store.current?.id !== id) await store.openInvestigation(id);
+    else await Promise.all([store.fetchItems(), store.fetchAnnotations()]).catch(() => {}); // pins made elsewhere
     if (!store.current) return;
-    store.fetchEvidence().catch((e) => (error.value = getErrorMessage(e, 'Failed to load the evidence')));
     store.fetchEvents().catch(() => {});
-    store.fetchNotes().catch(() => {});
-    store.fetchFiles().catch(() => {});
-    api.getInvestigationProposals(id, 'pending').then((p) => (pendingProposals.value = p.length)).catch(() => {});
+    store.fetchBrief().catch(() => {});
   },
   { immediate: true },
 );
 
 const inv = computed(() => store.current);
-const canEdit = computed(() => !!inv.value?.has_write_access && inv.value.status !== 'decidido');
+const canEdit = computed(() => !!inv.value?.has_write_access && inv.value.status !== 'decided');
 const deadline = computed(() => (inv.value ? deadlineOf(inv.value) : null));
 
-/** E1, E2, … by creation order. */
-const label = computed(() => new Map(store.evidence.map((e, i) => [e.id, `E${i + 1}`])));
-const evidenceById = computed(() => new Map(store.evidence.map((e) => [e.id, e])));
+/** E1, E2, … by pin order; keyed by item id (a hypothesis cites items). */
+const label = computed(() => new Map(store.evidence.map((e, i) => [e.item.id, `E${i + 1}`])));
+const evidenceTitle = (itemId: string) => store.items.find((i) => i.id === itemId)?.title ?? '';
 
 const roleCounts = computed(() => {
-  const counts: Partial<Record<InvestigationRole, number>> = {};
+  const counts: Record<string, number> = {};
   for (const role of Object.values(store.roles)) counts[role] = (counts[role] ?? 0) + 1;
-  return Object.entries(counts).map(([role, n]) => `${n} ${ROLE_LABELS[role as InvestigationRole] ?? role}`);
+  return Object.entries(counts).map(([role, n]) => `${n} ${ROLE_LABELS[role] ?? role}`);
 });
 
 const indicators = computed(() => {
-  const restricted = store.sources.filter((s) => !s.accessible).length;
-  const by = (s: HypothesisStatus) => store.hypotheses.filter((h) => h.status === s).length;
+  const restricted = store.restrictedItems.length;
+  const by = (s: HypothesisStatus) => store.hypotheses.filter((h) => h.value.status === s).length;
   return [
-    { label: 'Sources', value: store.sources.length, hint: restricted ? `${restricted} restricted` : '' },
-    { label: 'Evidence', value: store.evidence.length, hint: 'frozen with sha256' },
-    { label: 'Hypotheses', value: store.hypotheses.length, hint: `${by('sustentada')} supported · ${by('aberta')} open · ${by('refutada')} refuted` },
-    { label: 'Notes', value: store.notes.length, hint: '' },
+    { label: 'Graphs', value: store.graphItems.length, hint: restricted ? `${restricted} restricted` : '' },
+    { label: 'Material', value: store.items.length, hint: 'items' },
+    { label: 'Evidence', value: store.evidence.length, hint: 'pinned with sha256' },
+    { label: 'Hypotheses', value: store.hypotheses.length, hint: `${by('supported')} supported · ${by('open')} open · ${by('refuted')} refuted` },
     { label: 'Journal', value: store.events.length, hint: 'events' },
-    { label: 'Proposals', value: pendingProposals.value, hint: 'pending' },
+    { label: 'Suggestions', value: store.suggestions.length, hint: 'to review' },
   ];
 });
 
-/** Accepted typology badges (F4.3), with the CC 4.001 item they cite. */
+/** Confirmed typology badges, with the CC 4.001 item they cite. */
 const badges = computed(() => [
   ...new Set(
-    store.events
-      .filter((e) => e.kind === 'typology.accepted')
-      .map((e) => `${(e.payload as Record<string, string>).normRef} · ${(e.payload as Record<string, string>).label}`),
+    store.annotations
+      .filter((a) => a.kind === 'typology' && a.status === 'confirmed')
+      .map((a) => `${a.value.norm_ref ?? a.value.typology} · ${a.value.label ?? ''}`.replace(/ · $/, '')),
   ),
 ]);
 
@@ -95,17 +91,18 @@ function shortHash(sha: string) {
 }
 
 /** One line for how the evidence was made: the trace stamp, or its parameters. */
-function paramsLine(e: InvestigationEvidence): string {
-  const p = e.params as Record<string, unknown>;
-  if (e.kind === 'trace' && p.direction && p.allocation) {
+function paramsLine(e: (typeof store.evidence)[number]): string {
+  const p = (e.item.provenance?.params ?? {}) as Record<string, unknown>;
+  if (e.item.provenance?.tool === 'trace' && p.direction && p.allocation) {
     try {
       return methodStamp(p as unknown as TraceResult['method']);
     } catch {
       /* a stamp from another engine version: fall back to the raw parameters */
     }
   }
-  if (e.kind === 'graph_state') return `${p.tab_title ?? p.view ?? 'graph'} · ${p.nodes ?? '?'} nodes · ${p.edges ?? '?'} edges`;
-  return Object.entries(p).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ');
+  const run = e.version.run as Record<string, unknown> | null | undefined;
+  if (run) return `run · ${run.row_count ?? '?'} rows · ${run.duration_ms ?? '?'} ms`;
+  return Object.entries(p).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ') || `${e.item.kind}/${e.item.subkind}`;
 }
 
 const fmtTime = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '');
@@ -137,7 +134,6 @@ async function recordDecision() {
   deciding.value = false;
 }
 
-const { can } = usePermissions();
 const EXPORTS: { format: InvestigationExportFormat; label: string }[] = [
   { format: 'siscoaf', label: 'Siscoaf summary' },
   { format: 'json', label: 'Package JSON' },
@@ -168,23 +164,25 @@ function addHypothesis() {
   const text = draft.value.trim();
   if (!text) return;
   act(async () => {
-    await store.addHypothesis({ text });
+    await store.addHypothesis(text);
     draft.value = '';
   }, 'Failed to add the hypothesis');
 }
 
-function setStatus(h: Hypothesis, status: string) {
-  act(() => store.updateHypothesis(h.id, { status: status as HypothesisStatus }), 'Failed to update the hypothesis');
+function setStatus(h: CaseAnnotation, status: string) {
+  act(() => store.updateHypothesis(h.id, { status }), 'Failed to update the hypothesis');
 }
 
 type Side = 'evidence_for' | 'evidence_against';
-function link(h: Hypothesis, side: Side, evidenceId: string) {
-  if (!evidenceId || h[side].includes(evidenceId)) return;
-  act(() => store.updateHypothesis(h.id, { [side]: [...h[side], evidenceId] }), 'Failed to link the evidence');
+const sideOf = (h: CaseAnnotation, side: Side): string[] => (h.value[side] as string[] | undefined) ?? [];
+function link(h: CaseAnnotation, side: Side, itemId: string) {
+  if (!itemId || sideOf(h, side).includes(itemId)) return;
+  act(() => store.updateHypothesis(h.id, { [side]: [...sideOf(h, side), itemId] }), 'Failed to link the evidence');
 }
-function unlink(h: Hypothesis, side: Side, evidenceId: string) {
-  act(() => store.updateHypothesis(h.id, { [side]: h[side].filter((x) => x !== evidenceId) }), 'Failed to unlink the evidence');
+function unlink(h: CaseAnnotation, side: Side, itemId: string) {
+  act(() => store.updateHypothesis(h.id, { [side]: sideOf(h, side).filter((x) => x !== itemId) }), 'Failed to unlink the evidence');
 }
+const hypothesisNumber = (h: CaseAnnotation) => `H${store.hypotheses.indexOf(h) + 1}`;
 </script>
 
 <template>
@@ -212,10 +210,11 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
           <section class="card" data-testid="dossier-summary">
             <h2>Summary <span class="muted">built from the case and its evidence · review before deciding</span></h2>
             <p class="description">{{ inv.description || 'No description yet.' }}</p>
+            <pre v-if="store.brief.text" class="brief" data-testid="dossier-brief">{{ store.brief.text }}</pre>
             <div class="chips">
-              <span v-if="inv.typology" class="chip seal">{{ inv.typology }}</span>
+              <span class="chip seal">{{ KIND_PRESET_LABELS[inv.kind_preset] ?? inv.kind_preset }}</span>
               <span v-for="b in badges" :key="b" class="chip seal" data-testid="dossier-badge">{{ b }}</span>
-              <span v-if="inv.origin" class="chip">origin · {{ inv.origin }}</span>
+              <span v-for="t in inv.tags" :key="t" class="chip">{{ t }}</span>
               <span v-for="r in roleCounts" :key="r" class="chip">{{ r }}</span>
             </div>
             <div class="indicators" data-testid="dossier-indicators">
@@ -234,39 +233,42 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
                 <tr><th>Hypothesis</th><th>Status</th><th>For</th><th>Against</th></tr>
               </thead>
               <tbody>
-                <tr v-for="h in store.hypotheses" :key="h.id" :data-testid="`hypothesis-${h.id}`">
+                <tr v-for="h in store.hypotheses" :key="h.id" :data-testid="`hypothesis-${hypothesisNumber(h)}`">
                   <td>
-                    <strong>{{ h.id }}</strong> · {{ h.text }}
-                    <div v-if="h.note" class="muted">{{ h.note }}</div>
+                    <strong>{{ hypothesisNumber(h) }}</strong> · {{ h.value.text }}
+                    <div class="muted">
+                      {{ h.author_kind === 'agent' ? 'agent · ' : '' }}{{ h.author_email }}
+                      <template v-if="h.status === 'suggested'"> · suggested</template>
+                    </div>
                   </td>
                   <td>
                     <select
                       v-if="canEdit"
-                      :value="h.status"
+                      :value="h.value.status"
                       class="pill"
-                      :class="h.status"
-                      :data-testid="`hypothesis-status-${h.id}`"
+                      :class="h.value.status"
+                      :data-testid="`hypothesis-status-${hypothesisNumber(h)}`"
                       @change="setStatus(h, ($event.target as HTMLSelectElement).value)"
                     >
                       <option v-for="(text, s) in HYPOTHESIS_STATUS_LABELS" :key="s" :value="s">{{ text }}</option>
                     </select>
-                    <span v-else class="pill" :class="h.status">{{ HYPOTHESIS_STATUS_LABELS[h.status] }}</span>
+                    <span v-else class="pill" :class="h.value.status">{{ HYPOTHESIS_STATUS_LABELS[h.value.status as HypothesisStatus] ?? h.value.status }}</span>
                   </td>
-                  <td v-for="side in (['evidence_for', 'evidence_against'] as const)" :key="side" :data-testid="`hypothesis-${side}-${h.id}`">
-                    <span v-for="eid in h[side]" :key="eid" class="ev-chip" :title="evidenceById.get(eid)?.title">
-                      {{ label.get(eid) ?? 'E?' }} {{ evidenceById.get(eid)?.title ?? '' }}
+                  <td v-for="side in (['evidence_for', 'evidence_against'] as const)" :key="side" :data-testid="`hypothesis-${side}-${hypothesisNumber(h)}`">
+                    <span v-for="eid in sideOf(h, side)" :key="eid" class="ev-chip" :title="evidenceTitle(eid)">
+                      {{ label.get(eid) ?? 'E?' }} {{ evidenceTitle(eid) }}
                       <button v-if="canEdit" class="x" aria-label="Unlink" @click="unlink(h, side, eid)">×</button>
                     </span>
-                    <span v-if="!h[side].length" class="muted">none</span>
+                    <span v-if="!sideOf(h, side).length" class="muted">none</span>
                     <select
-                      v-if="canEdit && store.evidence.some((e) => !h[side].includes(e.id))"
+                      v-if="canEdit && store.evidence.some((e) => !sideOf(h, side).includes(e.item.id))"
                       class="link-select"
-                      :data-testid="`hypothesis-link-${side}-${h.id}`"
+                      :data-testid="`hypothesis-link-${side}-${hypothesisNumber(h)}`"
                       @change="link(h, side, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
                     >
                       <option value="">+ evidence</option>
-                      <option v-for="e in store.evidence.filter((x) => !h[side].includes(x.id))" :key="e.id" :value="e.id">
-                        {{ label.get(e.id) }} · {{ e.title }}
+                      <option v-for="e in store.evidence.filter((x) => !sideOf(h, side).includes(x.item.id))" :key="e.item.id" :value="e.item.id">
+                        {{ label.get(e.item.id) }} · {{ e.item.title }}
                       </option>
                     </select>
                   </td>
@@ -281,19 +283,17 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
           </section>
 
           <section class="card" data-testid="dossier-evidence">
-            <h2>Frozen evidence</h2>
+            <h2>Evidence <span class="muted">pinned versions, immutable</span></h2>
             <div v-if="store.evidence.length" class="evidence-grid">
-              <article v-for="e in store.evidence" :key="e.id" class="evidence" :data-testid="`evidence-${e.id}`">
-                <div class="ev-kind">{{ e.kind.replace('_', ' ') }}</div>
-                <strong>{{ label.get(e.id) }} · {{ e.title }}</strong>
-                <div class="muted mono" :title="e.sha256">hash {{ shortHash(e.sha256) }}</div>
+              <article v-for="e in store.evidence" :key="`${e.item.id}:${e.version.version}`" class="evidence" :data-testid="`evidence-${e.item.id}`">
+                <div class="ev-kind">{{ e.item.kind }} / {{ e.item.subkind }}</div>
+                <strong>{{ label.get(e.item.id) }} · {{ e.item.title }}<template v-if="e.version.pin_label"> · {{ e.version.pin_label }}</template></strong>
+                <div class="muted mono" :title="e.version.sha256">v{{ e.version.version }} · hash {{ shortHash(e.version.sha256) }}</div>
                 <div class="muted params">{{ paramsLine(e) }}</div>
-                <div class="muted">{{ e.created_by }} · {{ fmtTime(e.created_at) }}</div>
+                <div class="muted">{{ e.version.pinned_by }} · {{ fmtTime(e.version.pinned_at) }}</div>
               </article>
             </div>
-            <p v-else class="muted">
-              No evidence yet. Pin it from the workspace (Pin evidence) or the Follow the money tab (Save as evidence).
-            </p>
+            <p v-else class="muted">No evidence yet. Pin a version from the material list (📌) or the Follow the money tab.</p>
           </section>
 
           <section class="card" data-testid="dossier-journal">
@@ -306,25 +306,16 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
               </span>
             </div>
             <p v-if="!store.events.length" class="muted">Nothing recorded yet.</p>
-            <button
-              v-if="store.events.length > JOURNAL_ROWS"
-              class="link-btn"
-              data-testid="dossier-all-events"
-              @click="showAllEvents = !showAllEvents"
-            >
+            <button v-if="store.events.length > JOURNAL_ROWS" class="link-btn" data-testid="dossier-all-events" @click="showAllEvents = !showAllEvents">
               {{ showAllEvents ? 'Show the latest only' : `See all ${store.events.length} events` }}
             </button>
           </section>
 
           <section class="card print-only" data-testid="dossier-hashes">
-            <h2>Sources and files</h2>
-            <div v-for="src in store.sources" :key="src.id" class="journal-row">
-              <span>{{ src.title_snapshot }}</span>
-              <span class="mono">{{ src.accessible ? `${src.mode} · ${src.frozen_sha256 ?? 'live'}` : 'restricted' }}</span>
-            </div>
-            <div v-for="f in store.files" :key="f.id" class="journal-row">
-              <span>{{ f.filename }} ({{ f.role }})</span>
-              <span class="mono">sha256 {{ f.sha256 }}</span>
+            <h2>Material</h2>
+            <div v-for="i in store.items" :key="i.id" class="journal-row">
+              <span>{{ i.title }} ({{ i.kind }}/{{ i.subkind }})</span>
+              <span class="mono">{{ i.latest ? `v${i.latest.version} · sha256 ${i.latest.sha256}` : i.accessible ? 'live reference' : 'restricted' }}</span>
             </div>
           </section>
         </main>
@@ -368,12 +359,12 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
               Record decision
             </button>
             <p class="muted">
-              Recording freezes the case with a hash, writes the decision to the journal and retains everything for
+              Recording freezes the journal and the pinned evidence with a hash and retains everything for
               {{ RETENTION_YEARS }} years.
             </p>
           </form>
           <p v-else class="muted">Not decided yet. Only people with write access to the case record the decision.</p>
-          <div v-if="can('investigation.export')" class="exports" data-testid="dossier-exports">
+          <div class="exports" data-testid="dossier-exports">
             <button
               v-for="x in EXPORTS"
               :key="x.format"
@@ -548,13 +539,13 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
   background: var(--color-surface);
 }
 
-.pill.sustentada {
+.pill.supported {
   border-color: transparent;
   background: #ccfbf1;
   color: #115e59;
 }
 
-.pill.aberta {
+.pill.open {
   background: var(--color-bg-muted);
 }
 
@@ -751,6 +742,15 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
   padding: 10px;
   border-radius: 6px;
   background: var(--color-bg-subtle);
+  font-size: 13px;
+}
+.brief {
+  margin: 8px 0;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  white-space: pre-wrap;
+  font: inherit;
   font-size: 13px;
 }
 </style>

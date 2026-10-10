@@ -13,7 +13,7 @@ import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { decoderLabel } from '@/utils/fileImport';
-import type { FileEnrichmentSpec, InvestigationFile } from '@/types/investigation';
+import type { CaseItem, FileEnrichmentSpec } from '@/types/investigation';
 import {
   enrichmentKey,
   enrichmentTargets,
@@ -97,9 +97,9 @@ watch([targets, () => store.unified.nodes], load, { immediate: true });
 
 // Case files (F2.6): each one fetched once (an audited read) and parsed here.
 const fileRows = ref<Record<string, { loading: boolean; error: string | null; rows: Record<string, Row[]> }>>({});
-const specOf = (f: InvestigationFile) => f.mapping as unknown as FileEnrichmentSpec;
+const specOf = (f: CaseItem) => (f.mapping as { as: 'enrichment'; spec: FileEnrichmentSpec }).spec;
 const fileTargets = computed(() =>
-  store.files.filter((f) => f.role === 'enrichment' && f.mapping && fileEnrichmentKey(props.node, specOf(f)) !== null),
+  store.items.filter((f) => f.kind === 'table' && f.mapping?.as === 'enrichment' && f.current_version > 0 && fileEnrichmentKey(props.node, specOf(f)) !== null),
 );
 
 async function loadFiles() {
@@ -108,7 +108,7 @@ async function loadFiles() {
     if (!caseId || fileRows.value[f.id]) continue;
     fileRows.value[f.id] = { loading: true, error: null, rows: {} };
     try {
-      const buffer = await api.getInvestigationFileContent(caseId, f.id);
+      const buffer = await api.getInvestigationItemContent(caseId, f.id);
       const text = new TextDecoder(decoderLabel(specOf(f).input.encoding)).decode(buffer);
       fileRows.value[f.id] = { loading: false, error: null, rows: fileEnrichmentRows(text, specOf(f)) };
     } catch (e) {
@@ -118,7 +118,7 @@ async function loadFiles() {
 }
 watch(fileTargets, loadFiles, { immediate: true });
 
-function fileRowsOf(f: InvestigationFile): Row[] {
+function fileRowsOf(f: CaseItem): Row[] {
   const key = fileEnrichmentKey(props.node, specOf(f));
   return key === null ? [] : fileRows.value[f.id]?.rows[key] ?? [];
 }
@@ -214,7 +214,7 @@ async function promote(t: EnrichmentTarget) {
       <header>
         <strong>{{ specOf(f).name }}</strong>
         <span class="muted">
-          case file {{ f.filename }} · {{ fileRowsOf(f).length }} {{ fileRowsOf(f).length === 1 ? 'row' : 'rows' }}
+          case table {{ f.title }} · {{ fileRowsOf(f).length }} {{ fileRowsOf(f).length === 1 ? 'row' : 'rows' }}
         </span>
       </header>
       <p v-if="fileRows[f.id]?.loading" class="muted">Loading…</p>

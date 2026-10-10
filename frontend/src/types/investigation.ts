@@ -1,44 +1,51 @@
-/** Investigations (cases): see docs/dev/plans/investigation/03-arquitetura.md §3. */
-import type { ExplorationState, GraphSnapshot } from '@/types/graph';
+/** Investigations v2 (cases): see docs/dev/plans/investigation/05-plano-v2.md §1. */
+import type { EdgeSemantics, ExplorationState, GraphSnapshot, IdentityKey, TemplateParameter } from '@/types/graph';
 import type { MappingReport } from '@/utils/fileMapping';
 
-export type InvestigationStatus = 'selecao' | 'analise' | 'decidido' | 'arquivado';
+export type InvestigationStatus = 'open' | 'analysis' | 'decided' | 'archived';
+export type KindPreset = 'credito' | 'garantia' | 'pix_med' | 'lavagem' | 'lojista' | 'fraude_sintetica' | 'livre';
+/** A person writes `confirmed`; an agent's writes of `settings.agent_suggest_kinds` arrive `suggested`. */
+export type WriteStatus = 'suggested' | 'confirmed' | 'rejected';
+export type AuthorKind = 'human' | 'agent';
+export type ShareRole = 'reader' | 'editor';
 
 export interface Investigation {
   id: string;
   title: string;
   description?: string | null;
+  kind_preset: KindPreset;
+  status: InvestigationStatus;
   owner_email: string;
   assignee_email?: string | null;
-  status: InvestigationStatus;
-  typology?: string | null;
-  origin?: string | null;
-  selected_at?: string | null;
-  /** When the facts happened / when the alert arrived (F1); selection counts from alert_at. */
   occurred_at?: string | null;
   alert_at?: string | null;
-  /** Replaces the 45-day phase for this case. */
-  deadline_days_override?: number | null;
-  /** Computed by the server (F4.4); null once decided or archived. */
-  deadline?: { phase: 'selection' | 'analysis'; due_at: string; days_left: number } | null;
+  /** {open, analysis} days; overrides the preset's phases (Pix/MED: 45 + 45 from alert_at). */
+  deadline_days?: Record<string, number> | null;
+  /** Computed by the server; null without phases or once decided/archived. */
+  deadline?: { phase: 'open' | 'analysis'; due_at: string; days_left: number } | null;
+  tags: string[];
+  /** identity_keys, edge_semantics, enrichment_tables, agent_suggest_kinds, label_templates, vocabularies */
+  settings: Record<string, unknown>;
+  /** View only: layout, pins, views, groups_closed. */
   state: Record<string, unknown>;
   decision?: InvestigationDecision | null;
-  /** sha256 of the canonical case record at the decision (F4.5). */
+  /** sha256 of the journal and the pinned versions at the decision. */
   frozen_hash?: string | null;
   frozen_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-  shared_with: { email: string; permission: 'read' | 'write' }[];
+  shared_with: { email: string; role: ShareRole }[];
   has_write_access: boolean;
   can_manage: boolean;
   /** Only on the list endpoint (the queue). */
-  source_count?: number | null;
+  item_count?: number | null;
+  suggested_count?: number | null;
 }
 
 export type DecisionOutcome = 'comunicar' | 'arquivar';
 export type DecisionAction = 'dict' | 'spa' | 'bloqueio_cautelar';
 
-/** 03 §2.2: recorded once by a person; the case is read-only afterwards. */
+/** Recorded once by a person; the case is read-only afterwards. */
 export interface InvestigationDecision {
   outcome: DecisionOutcome;
   actions: DecisionAction[];
@@ -47,171 +54,226 @@ export interface InvestigationDecision {
   decided_at: string;
 }
 
-/** `GET …/export?format=` (F4.6); the laudo is the print of the dossier. */
+/** `GET …/export?format=`; the laudo is the print of the dossier. */
 export type InvestigationExportFormat = 'json' | 'csv' | 'simba' | 'siscoaf';
 
 export interface CreateInvestigationRequest {
   title: string;
   description?: string;
-  typology?: string;
-  origin?: string;
+  kind_preset?: KindPreset;
   assignee_email?: string;
+  tags?: string[];
+  alert_at?: string;
+  occurred_at?: string;
 }
 
 /** `PATCH /api/investigations/{id}`: every field optional; status must follow the transitions (409 otherwise). */
 export interface UpdateInvestigationRequest {
   title?: string;
   description?: string | null;
-  typology?: string | null;
-  origin?: string | null;
+  kind_preset?: KindPreset;
   assignee_email?: string | null;
-  status?: Exclude<InvestigationStatus, 'decidido'>;
+  status?: Exclude<InvestigationStatus, 'decided'>;
   occurred_at?: string | null;
   alert_at?: string | null;
-  deadline_days_override?: number | null;
+  deadline_days?: Record<string, number> | null;
+  tags?: string[];
+  settings?: Record<string, unknown>;
+  state?: Record<string, unknown>;
 }
 
-export type SourceMode = 'live' | 'frozen';
+// ---------------------------------------------------------------------------
+// Items: everything in the case, with versions and an author (05 §1)
+// ---------------------------------------------------------------------------
 
-/** `accessible: false` carries only title, context title and owner (restricted placeholder). */
-export interface InvestigationSource {
-  id: string;
-  kind: 'exploration' | 'file';
-  position: number;
-  title_snapshot: string;
-  context_title?: string | null;
-  owner_email?: string | null;
-  accessible: boolean;
-  exploration_id?: string | null;
-  context_id?: string | null;
-  mode?: SourceMode | null;
-  frozen_sha256?: string | null;
-  added_by?: string | null;
-  added_at?: string | null;
-}
+export type ItemKind = 'graph' | 'table' | 'query' | 'document' | 'note';
+export type GraphSubkind = 'exploration_ref' | 'snapshot' | 'selection' | 'derived' | 'view';
+export type TableSubkind = 'result' | 'csv' | 'enrichment' | 'metrics';
+export type QuerySubkind = 'sql' | 'cypher';
+export type DocumentSubkind = 'upload' | 'markdown' | 'link' | 'brief';
+export type NoteSubkind = 'free' | 'anchored';
+export type ItemSubkind = GraphSubkind | TableSubkind | QuerySubkind | DocumentSubkind | NoteSubkind;
 
-/** `GET …/sources/{sid}/snapshot`: the exploration state plus its saved graph snapshot. */
-export interface SourceSnapshotPayload {
-  exploration: {
-    id: string;
-    title: string;
-    graph_context_id: string;
-    owner_email: string;
-    state: ExplorationState;
-  };
-  snapshot: GraphSnapshot | null;
-}
-
-/** Role of an entity in the case: drives the node fill (T2 legend). */
-export type InvestigationRole = 'victim' | 'mule' | 'exit' | 'discarded';
-
-/** Journal entry (03 §3.4): immutable, hash-chained, oldest first. */
-export interface InvestigationEvent {
-  id: string;
-  at: string;
-  actor_email: string;
-  /** 'agent' when an agent token acted on behalf of actor_email (03 §8.1). */
-  actor_kind?: 'human' | 'agent';
-  agent_name?: string | null;
-  kind: string;
-  payload: Record<string, unknown>;
-  prev_hash?: string | null;
-  hash: string;
-}
-
-export interface InvestigationNote {
-  id: string;
-  anchor: { kind?: 'node' | 'edge' | 'evidence' | 'none'; id?: string | null };
-  body: string;
-  author_email: string;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
-
-export type HypothesisStatus = 'aberta' | 'sustentada' | 'refutada';
-
-/** A hypothesis of the case (`state.hypotheses`, F4.2); the lists hold evidence ids. */
-export interface Hypothesis {
-  id: string;
+/** A saved query of the case: `:name` parameters declared like a template's. */
+export interface CaseQuerySpec {
   text: string;
-  status: HypothesisStatus;
-  evidence_for: string[];
-  evidence_against: string[];
-  note?: string | null;
-  created_by?: string;
-  created_at?: string;
+  language: 'sql' | 'cypher';
+  parameters: TemplateParameter[];
+  output: 'table' | 'graph';
 }
 
-export type EvidenceKind = 'graph_state' | 'trace' | 'table' | 'file';
+/** How a `table` item reaches the canvas or the inspector; of the case, never a context. */
+export type ItemMapping =
+  | { as: 'graph'; spec: Record<string, unknown>; extra_item_ids?: string[] }
+  | { as: 'enrichment'; spec: FileEnrichmentSpec };
 
-/** Frozen evidence (F4.1): immutable; the sha256 covers snapshot, params and author. */
-export interface InvestigationEvidence {
+export interface ItemProvenance {
+  context_id?: string;
+  exploration_id?: string;
+  query_item_id?: string;
+  run_id?: string;
+  /** trace | paths | typologies | er | metrics… for analysis results. */
+  tool?: string;
+  params?: Record<string, unknown>;
+  parent_item_id?: string;
+  tool_call_id?: string;
+  filename?: string;
+  [key: string]: unknown;
+}
+
+export interface ItemAnchor {
+  entity_ids?: string[];
+  edge_ids?: string[];
+  item_id?: string;
+}
+
+export interface CaseItemVersion {
   id: string;
-  title: string;
-  kind: EvidenceKind;
-  sha256: string;
-  /** How it was made: the trace `method` stamp, or the graph view. */
-  params: Record<string, unknown>;
-  created_by: string;
-  created_at?: string | null;
-  /** Only on `GET …/evidence/{eid}`. */
-  snapshot?: unknown;
-}
-
-/** Who wrote an artifact version or a proposal (03 §2.2 `actor`). */
-export interface InvestigationActor {
-  kind: 'human' | 'agent';
-  email: string;
-  agent_name?: string | null;
-  token_id?: string | null;
-}
-
-export type ArtifactKind = 'slides' | 'doc' | 'report' | 'image' | 'data' | 'other';
-
-/** Immutable version in the case space (T10); approving is human-only. */
-export interface ArtifactVersion {
+  item_id: string;
   version: number;
   sha256: string;
   size_bytes: number;
   content_type: string;
-  status: 'draft' | 'approved';
-  actor: InvestigationActor;
-  source_evidence_ids: string[];
-  note?: string | null;
+  has_text: boolean;
+  /** {statement_id, started_at, duration_ms, row_count, params, run_by, author_kind, output} of a query run. */
+  run?: Record<string, unknown> | null;
+  created_by: string;
+  author_kind: AuthorKind;
   created_at?: string | null;
-  approved_by?: string | null;
-  approved_at?: string | null;
+  pinned_at?: string | null;
+  pinned_by?: string | null;
+  pin_label?: string | null;
 }
 
-export interface InvestigationArtifact {
+export interface CaseItem {
   id: string;
-  name: string;
-  kind: ArtifactKind;
-  current_version: number;
-  created_at?: string | null;
-  /** html and svg: never rendered inline (XSS). */
-  download_only: boolean;
-  /** Newest first. */
-  versions: ArtifactVersion[];
-}
-
-export type FileRole = 'graph' | 'enrichment' | 'attachment';
-
-/** A file uploaded to the case (F2.3), stored by its sha256. */
-export interface InvestigationFile {
-  id: string;
-  filename: string;
-  role: FileRole;
-  sha256: string;
-  size_bytes: number;
-  content_type?: string | null;
-  mapping?: Record<string, unknown> | null;
+  kind: ItemKind;
+  subkind: ItemSubkind;
+  title: string;
+  description?: string | null;
+  tags: string[];
+  status: WriteStatus;
+  author_kind: AuthorKind;
+  author_email: string;
+  agent_token_id?: string | null;
+  provenance: ItemProvenance;
+  exploration_id?: string | null;
   context_id?: string | null;
-  uploaded_by: string;
-  uploaded_at?: string | null;
+  query?: CaseQuerySpec | null;
+  mapping?: ItemMapping | null;
+  anchor?: ItemAnchor | null;
+  current_version: number;
+  position: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+  deleted_at?: string | null;
+  /** False when the item's graph context is not readable by the caller. */
+  accessible: boolean;
+  latest?: CaseItemVersion | null;
+  /** Pinned versions = the evidence. */
+  pinned: CaseItemVersion[];
 }
 
-/** How an `enrichment` file joins the case's nodes (F2.6, `FileEnrichmentSpec` on the server). */
+export interface CreateItemRequest {
+  kind: ItemKind;
+  subkind: ItemSubkind;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  provenance?: ItemProvenance;
+  exploration_id?: string;
+  context_id?: string;
+  query?: CaseQuerySpec;
+  mapping?: ItemMapping;
+  anchor?: ItemAnchor;
+  /** Version 1: text (markdown, notes, csv) or JSON (snapshots, results). */
+  content?: string;
+  content_json?: unknown;
+}
+
+export interface UpdateItemRequest {
+  title?: string;
+  description?: string | null;
+  tags?: string[];
+  mapping?: ItemMapping | null;
+  query?: CaseQuerySpec;
+  anchor?: ItemAnchor | null;
+  position?: number;
+}
+
+export interface ItemSearchHit extends CaseItem {
+  match: 'title' | 'text';
+  snippet?: string | null;
+}
+
+/** `GET …/items/{id}/snapshot`: what one graph item puts on the canvas. */
+export interface ItemSnapshotPayload {
+  item_id: string;
+  title: string;
+  context_id: string | null;
+  snapshot: GraphSnapshot | null;
+  identity_keys: IdentityKey[];
+  edge_semantics: EdgeSemantics | null;
+  exploration?: { id: string; title: string; state: ExplorationState } | null;
+  report?: MappingReport & { truncated_edges: number };
+}
+
+export interface CaseBrief {
+  item: CaseItem | null;
+  text: string;
+}
+
+// ---------------------------------------------------------------------------
+// Annotations over entities or items
+// ---------------------------------------------------------------------------
+
+export type AnnotationKind =
+  | 'role'
+  | 'tag'
+  | 'group'
+  | 'same_as'
+  | 'hypothesis'
+  | 'hypothesis_status'
+  | 'typology'
+  | 'status_change';
+export type HypothesisStatus = 'open' | 'supported' | 'refuted';
+
+export interface CaseAnnotation {
+  id: string;
+  kind: AnnotationKind;
+  /** Unified entity ids (role, tag, group, same_as, typology) or annotation/item ids. */
+  targets: string[];
+  value: Record<string, any>;
+  reason?: string | null;
+  status: WriteStatus;
+  author_kind: AuthorKind;
+  author_email: string;
+  agent_token_id?: string | null;
+  confirmed_by?: string | null;
+  confirmed_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface CreateAnnotationRequest {
+  kind: AnnotationKind;
+  targets?: string[];
+  value?: Record<string, unknown>;
+  reason?: string;
+}
+
+/** Journal entry: append-only, oldest first. */
+export interface InvestigationEvent {
+  id: string;
+  at: string;
+  actor_email: string;
+  /** 'agent' when an agent token acted on behalf of actor_email. */
+  actor_kind?: AuthorKind;
+  agent_name?: string | null;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+/** How a `table` item with `mapping.as = enrichment` joins the case's nodes (`FileEnrichmentSpec` on the server). */
 export interface FileEnrichmentSpec {
   version?: 1;
   kind?: 'enrichment';
@@ -223,45 +285,4 @@ export interface FileEnrichmentSpec {
   match_source: 'node_id' | { kind: 'prop'; name: string };
   /** Node key → its digits, first N (CNPJ → CNPJ básico for the QSA). */
   key_digits?: number | null;
-}
-
-/** `POST …/files/{fid}/context` (F2.5). */
-export interface FileContextResult {
-  source: InvestigationSource;
-  file: InvestigationFile;
-  context_id: string;
-  exploration_id: string;
-  report: MappingReport & { truncated_edges: number };
-}
-
-export type ProposalKind = 'role' | 'match' | 'hypothesis' | 'hypothesis_status' | 'typology' | 'status';
-
-/** A change an agent proposes; a person accepts or rejects it (T11, 03 §8.4). */
-export interface InvestigationProposal {
-  id: string;
-  kind: ProposalKind;
-  payload: Record<string, unknown>;
-  rationale?: string | null;
-  actor: InvestigationActor;
-  status: 'pending' | 'accepted' | 'rejected';
-  created_at?: string | null;
-  decided_by?: string | null;
-  decided_at?: string | null;
-  decision_note?: string | null;
-}
-
-/** Entity match (F2.8, 03 §6.2): a suggestion until a person decides. */
-export type MatchStatus = 'sugerido' | 'aceito' | 'recusado' | 'adiado';
-
-export interface EntityMatch {
-  id: string;
-  left: { uid: string };
-  right: { uid: string };
-  score: number;
-  reasons: { term: string; weight: number; value: number; left?: string; right?: string; masked?: boolean }[];
-  status: MatchStatus;
-  reason_text: string | null;
-  decided_by: string | null;
-  decided_at: string | null;
-  created_at: string;
 }

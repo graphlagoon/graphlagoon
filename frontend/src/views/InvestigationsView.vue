@@ -7,8 +7,8 @@ import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { PHASE_DAYS, STATUS_LABELS, URGENT_DAYS, caseNumber, deadlineOf } from '@/utils/investigationStatus';
-import type { Investigation, InvestigationStatus } from '@/types/investigation';
+import { KIND_PRESET_LABELS, PHASE_DAYS, STATUS_LABELS, URGENT_DAYS, caseNumber, deadlineOf } from '@/utils/investigationStatus';
+import type { Investigation, InvestigationStatus, KindPreset } from '@/types/investigation';
 
 const router = useRouter();
 const store = useInvestigationStore();
@@ -19,9 +19,9 @@ const { can } = usePermissions();
 const search = ref('');
 type StatusFilter = 'open' | 'all' | 'urgent' | InvestigationStatus;
 const statusFilter = ref<StatusFilter>('open');
-const typologyFilter = ref('');
+const presetFilter = ref('');
 const assigneeFilter = ref('');
-type SortKey = 'title' | 'typology' | 'source_count' | 'status' | 'assignee' | 'deadline' | 'updated_at';
+type SortKey = 'title' | 'kind_preset' | 'item_count' | 'status' | 'assignee' | 'deadline' | 'updated_at';
 const sortKey = ref<SortKey>('updated_at');
 const sortDir = ref<1 | -1>(-1);
 
@@ -35,14 +35,15 @@ const isUrgent = (inv: Investigation) => {
 /** Who the row belongs to for the "Assignee" column (assignee, else owner). */
 const responsible = (inv: Investigation) => inv.assignee_email ?? inv.owner_email;
 
-const typologies = computed(() => [...new Set(store.investigations.map((i) => i.typology).filter(Boolean) as string[])].sort());
+const presets = computed(() => [...new Set(store.investigations.map((i) => i.kind_preset))].sort());
+const presetLabel = (p: string) => KIND_PRESET_LABELS[p as KindPreset] ?? p;
 const assignees = computed(() => [...new Set(store.investigations.map(responsible))].sort());
 
 const SORTERS: Record<SortKey, (inv: Investigation) => string | number> = {
   title: (i) => i.title.toLowerCase(),
-  typology: (i) => (i.typology ?? '').toLowerCase(),
-  source_count: (i) => i.source_count ?? 0,
-  status: (i) => ['selecao', 'analise', 'decidido', 'arquivado'].indexOf(i.status),
+  kind_preset: (i) => presetLabel(i.kind_preset).toLowerCase(),
+  item_count: (i) => i.item_count ?? 0,
+  status: (i) => ['open', 'analysis', 'decided', 'archived'].indexOf(i.status),
   assignee: (i) => responsible(i).toLowerCase(),
   deadline: (i) => deadlineOf(i)?.daysLeft ?? Number.POSITIVE_INFINITY,
   updated_at: (i) => i.updated_at ?? '',
@@ -52,13 +53,13 @@ const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
   const rows = store.investigations.filter((inv) => {
     const f = statusFilter.value;
-    if (f === 'open' && (inv.status === 'decidido' || inv.status === 'arquivado')) return false;
+    if (f === 'open' && (inv.status === 'decided' || inv.status === 'archived')) return false;
     if (f === 'urgent' && !isUrgent(inv)) return false;
     if (f !== 'open' && f !== 'all' && f !== 'urgent' && inv.status !== f) return false;
-    if (typologyFilter.value && inv.typology !== typologyFilter.value) return false;
+    if (presetFilter.value && inv.kind_preset !== presetFilter.value) return false;
     if (assigneeFilter.value && responsible(inv) !== assigneeFilter.value) return false;
     if (!q) return true;
-    return [inv.title, inv.typology, inv.origin, inv.assignee_email, inv.owner_email, inv.id]
+    return [inv.title, presetLabel(inv.kind_preset), ...(inv.tags ?? []), inv.assignee_email, inv.owner_email, inv.id]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()
@@ -76,7 +77,7 @@ function sortBy(key: SortKey) {
   if (sortKey.value === key) sortDir.value = sortDir.value === 1 ? -1 : 1;
   else {
     sortKey.value = key;
-    sortDir.value = key === 'updated_at' || key === 'source_count' ? -1 : 1;
+    sortDir.value = key === 'updated_at' || key === 'item_count' ? -1 : 1;
   }
 }
 
@@ -90,10 +91,11 @@ function toggleCounter(filter: StatusFilter) {
 const counters = computed(() => {
   const all = store.investigations;
   return {
-    analise: all.filter((i) => i.status === 'analise').length,
-    selecao: all.filter((i) => i.status === 'selecao').length,
+    analysis: all.filter((i) => i.status === 'analysis').length,
+    open: all.filter((i) => i.status === 'open').length,
     urgent: all.filter(isUrgent).length,
-    decided: all.filter((i) => i.status === 'decidido').length,
+    decided: all.filter((i) => i.status === 'decided').length,
+    suggested: all.reduce((n, i) => n + (i.suggested_count ?? 0), 0),
   };
 });
 
@@ -120,11 +122,11 @@ function updated(inv: Investigation) {
 
 // New investigation
 const showCreate = ref(false);
-const form = ref({ title: '', typology: '', origin: '', assignee_email: '' });
+const form = ref({ title: '', kind_preset: 'livre' as KindPreset, assignee_email: '' });
 const creating = ref(false);
 
 function openCreate() {
-  form.value = { title: '', typology: '', origin: '', assignee_email: '' };
+  form.value = { title: '', kind_preset: 'livre', assignee_email: '' };
   showCreate.value = true;
 }
 
@@ -135,8 +137,7 @@ async function create() {
   try {
     const inv = await store.createInvestigation({
       title,
-      typology: form.value.typology.trim() || undefined,
-      origin: form.value.origin.trim() || undefined,
+      kind_preset: form.value.kind_preset,
       assignee_email: form.value.assignee_email.trim() || undefined,
     });
     showCreate.value = false;
@@ -171,7 +172,7 @@ async function create() {
             id="inv-search"
             v-model="search"
             class="form-control"
-            placeholder="case, typology, assignee…"
+            placeholder="case, type, tag, assignee…"
             data-testid="investigations-search"
           />
         </div>
@@ -185,10 +186,10 @@ async function create() {
           </select>
         </div>
         <div class="form-group">
-          <label for="inv-typology">Typology</label>
-          <select id="inv-typology" v-model="typologyFilter" class="form-control" data-testid="investigations-typology">
+          <label for="inv-preset">Type</label>
+          <select id="inv-preset" v-model="presetFilter" class="form-control" data-testid="investigations-preset">
             <option value="">All</option>
-            <option v-for="t in typologies" :key="t" :value="t">{{ t }}</option>
+            <option v-for="t in presets" :key="t" :value="t">{{ presetLabel(t) }}</option>
           </select>
         </div>
         <div class="form-group">
@@ -202,11 +203,11 @@ async function create() {
     </div>
 
     <div class="counters">
-      <button class="card counter" :class="{ on: statusFilter === 'analise' }" data-testid="counter-analise" @click="toggleCounter('analise')">
-        <strong>{{ counters.analise }}</strong><span>in analysis</span>
+      <button class="card counter" :class="{ on: statusFilter === 'analysis' }" data-testid="counter-analysis" @click="toggleCounter('analysis')">
+        <strong>{{ counters.analysis }}</strong><span>in analysis</span>
       </button>
-      <button class="card counter" :class="{ on: statusFilter === 'selecao' }" data-testid="counter-selecao" @click="toggleCounter('selecao')">
-        <strong>{{ counters.selecao }}</strong><span>awaiting selection</span>
+      <button class="card counter" :class="{ on: statusFilter === 'open' }" data-testid="counter-open" @click="toggleCounter('open')">
+        <strong>{{ counters.open }}</strong><span>open</span>
       </button>
       <button
         class="card counter"
@@ -216,9 +217,12 @@ async function create() {
       >
         <strong>{{ counters.urgent }}</strong><span>deadline in under 7 days</span>
       </button>
-      <button class="card counter" :class="{ on: statusFilter === 'decidido' }" data-testid="counter-decided" @click="toggleCounter('decidido')">
+      <button class="card counter" :class="{ on: statusFilter === 'decided' }" data-testid="counter-decided" @click="toggleCounter('decided')">
         <strong>{{ counters.decided }}</strong><span>decided</span>
       </button>
+      <div class="card counter" :class="{ warn: counters.suggested > 0 }" data-testid="counter-suggested">
+        <strong>{{ counters.suggested }}</strong><span>suggestions to review</span>
+      </div>
     </div>
 
     <div v-if="store.loading" class="loading"></div>
@@ -233,8 +237,8 @@ async function create() {
         <thead>
           <tr>
             <th><button class="sort" data-testid="sort-title" @click="sortBy('title')">Case{{ sortMark('title') }}</button></th>
-            <th><button class="sort" @click="sortBy('typology')">Typology{{ sortMark('typology') }}</button></th>
-            <th><button class="sort" @click="sortBy('source_count')">Sources{{ sortMark('source_count') }}</button></th>
+            <th><button class="sort" @click="sortBy('kind_preset')">Type{{ sortMark('kind_preset') }}</button></th>
+            <th><button class="sort" @click="sortBy('item_count')">Material{{ sortMark('item_count') }}</button></th>
             <th><button class="sort" @click="sortBy('status')">Status{{ sortMark('status') }}</button></th>
             <th><button class="sort" @click="sortBy('assignee')">Assignee{{ sortMark('assignee') }}</button></th>
             <th><button class="sort" data-testid="sort-deadline" @click="sortBy('deadline')">Deadline{{ sortMark('deadline') }}</button></th>
@@ -246,10 +250,13 @@ async function create() {
             <td>
               <RouterLink :to="`/investigations/${inv.id}`" class="case-title">{{ inv.title }}</RouterLink>
               <span v-if="accessMark(inv)" class="pill access" data-testid="access-mark">{{ accessMark(inv) }}</span>
-              <div class="muted">{{ caseNumber(inv.id) }}<template v-if="inv.origin"> · origin: {{ inv.origin }}</template></div>
+              <div class="muted">{{ caseNumber(inv.id) }}<template v-if="inv.tags?.length"> · {{ inv.tags.join(', ') }}</template></div>
             </td>
-            <td><span v-if="inv.typology" class="pill">{{ inv.typology }}</span></td>
-            <td>{{ inv.source_count ?? 0 }} source{{ inv.source_count === 1 ? '' : 's' }}</td>
+            <td><span class="pill">{{ presetLabel(inv.kind_preset) }}</span></td>
+            <td>
+              {{ inv.item_count ?? 0 }} item{{ inv.item_count === 1 ? '' : 's' }}
+              <span v-if="inv.suggested_count" class="pill suggested" data-testid="row-suggested">{{ inv.suggested_count }} suggested</span>
+            </td>
             <td><span class="status" :class="`status-${inv.status}`">{{ STATUS_LABELS[inv.status] ?? inv.status }}</span></td>
             <td>{{ who(responsible(inv)) }}</td>
             <td>
@@ -282,12 +289,10 @@ async function create() {
             <input id="new-inv-title" v-model="form.title" class="form-control" data-testid="new-investigation-title" required />
           </div>
           <div class="form-group">
-            <label for="new-inv-typology">Typology</label>
-            <input id="new-inv-typology" v-model="form.typology" class="form-control" placeholder="Golpe Pix" />
-          </div>
-          <div class="form-group">
-            <label for="new-inv-origin">Origin</label>
-            <input id="new-inv-origin" v-model="form.origin" class="form-control" placeholder="monitoring, MED notice, court order…" />
+            <label for="new-inv-preset">Type</label>
+            <select id="new-inv-preset" v-model="form.kind_preset" class="form-control" data-testid="new-investigation-preset">
+              <option v-for="(label, key) in KIND_PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
+            </select>
           </div>
           <div class="form-group">
             <label for="new-inv-assignee">Assignee e-mail</label>
@@ -431,13 +436,13 @@ async function create() {
   font-size: 12px;
 }
 
-.status-analise {
+.status-analysis {
   background: #e0e7ff;
   color: #3730a3;
   font-weight: 600;
 }
 
-.status-decidido {
+.status-decided {
   background: #ccfbf1;
   color: #115e59;
 }
@@ -468,5 +473,11 @@ async function create() {
 
 .no-match {
   padding: 12px 14px;
+}
+.pill.suggested {
+  margin-left: 6px;
+  background: #fffbeb;
+  border: 1px solid #b45309;
+  color: #b45309;
 }
 </style>

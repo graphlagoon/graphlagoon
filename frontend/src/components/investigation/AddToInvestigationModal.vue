@@ -18,7 +18,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { Exploration, GraphContext } from '@/types/graph';
-import type { InvestigationSource, SourceMode } from '@/types/investigation';
+import type { CaseItem } from '@/types/investigation';
 
 const props = defineProps<{
   open: boolean;
@@ -38,12 +38,11 @@ const authStore = useAuthStore();
 const toast = useToast();
 
 const explorations = ref<Exploration[]>([]);
-const sources = ref<InvestigationSource[]>([]);
+const sources = ref<CaseItem[]>([]);
 const caseId = ref('');
 const checked = ref<string[]>([]);
 const search = ref('');
 const scope = ref<'mine' | 'all'>('mine');
-const mode = ref<SourceMode>('live');
 const saving = ref(false);
 const listLoading = ref(false);
 const loadError = ref<string | null>(null);
@@ -52,7 +51,7 @@ const isSuperuser = computed(() => window.__GRAPH_LAGOON_CONFIG__?.is_superuser 
 
 /** Cases the caller can add to: writable and not decided. */
 const writableCases = computed(() =>
-  store.investigations.filter((i) => i.has_write_access && i.status !== 'decidido'),
+  store.investigations.filter((i) => i.has_write_access && i.status !== 'decided'),
 );
 const caseTitle = computed(() => {
   const inv =
@@ -99,7 +98,6 @@ watch(
     checked.value = props.explorationId ? [props.explorationId] : [];
     search.value = '';
     scope.value = 'mine';
-    mode.value = 'live';
     loadError.value = null;
     try {
       await Promise.all([
@@ -120,7 +118,7 @@ watch(caseId, async (id) => {
   sources.value = [];
   if (!id) return;
   try {
-    sources.value = await api.getInvestigationSources(id);
+    sources.value = (await api.getInvestigationItems(id, { kind: 'graph' })).filter((i) => i.subkind === 'exploration_ref');
     // Rows already in the case render checked (and disabled).
     checked.value = [...new Set([...checked.value, ...inCase.value])];
   } catch (e) {
@@ -179,7 +177,7 @@ const sharedKeys = computed(() => {
 async function submit() {
   if (!caseId.value || toAdd.value.length === 0 || saving.value) return;
   saving.value = true;
-  const { added, error } = await store.addExplorations(caseId.value, toAdd.value, mode.value);
+  const { added, error } = await store.addExplorations(caseId.value, toAdd.value);
   saving.value = false;
   if (error) {
     toast.error(added ? `Added ${added}, then failed: ${error}` : error);
@@ -288,10 +286,10 @@ async function submit() {
             class="restricted"
             data-testid="add-restricted-source"
           >
-            <span class="ctx-title"><Lock :size="12" /> {{ s.context_title || 'Restricted context' }}</span>
+            <span class="ctx-title"><Lock :size="12" /> Restricted context</span>
             <span>
-              “{{ s.title_snapshot }}” is in the case, but you don't have access to this
-              context. Ask {{ s.owner_email || 'its owner' }} for access.
+              “{{ s.title }}” is in the case, but you don't have access to its context.
+              Ask {{ s.author_email || 'its owner' }} for access.
             </span>
           </div>
         </div>
@@ -313,15 +311,11 @@ async function submit() {
             side by side, without merged entities.
           </p>
 
-          <h4>How to keep it</h4>
-          <label class="mode-opt">
-            <input v-model="mode" type="radio" value="live" />
-            <span><strong>Live reference</strong><br /><span class="hint">follows the exploration until the case closes</span></span>
-          </label>
-          <label class="mode-opt">
-            <input v-model="mode" type="radio" value="frozen" data-testid="add-mode-frozen" />
-            <span><strong>Freeze now</strong><br /><span class="hint">snapshot with hash, never changes</span></span>
-          </label>
+          <h4>How it is kept</h4>
+          <p class="hint">
+            As a live reference: the case follows the exploration. Pin a version in the material
+            list to freeze it with a hash.
+          </p>
           <p class="hint">
             Whoever opens the case without access to one of these contexts sees a
             “restricted exploration” instead of its data.

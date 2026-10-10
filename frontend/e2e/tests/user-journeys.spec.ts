@@ -55,34 +55,29 @@ test.describe('User Journeys', () => {
     const kyc = { ...MOCK_EXPLORATION, id: 'exp-kyc', title: 'KYC clients', graph_context_id: 'ctx-kyc' };
     await seedContexts(page, [ctx('ctx-pix', 'Pix', 'Titular'), ctx('ctx-kyc', 'Cadastro', 'Cliente')]);
     await seedExplorations(page, [pix, kyc]);
-    await seedInvestigations(page, [], {}, [pix, kyc]);
     const graphs: Record<string, unknown> = {
-      'ctx-pix': {
-        nodes: [
-          { id: 'p1', type: 'Titular', properties: { cpf: '123.456.789-01' } },
-          { id: 'a1', type: 'Conta', properties: {} },
-        ],
-        edges: [{ id: 'e1', source: 'p1', target: 'a1', type: 'OWNS', properties: {} }],
+      'exp-pix': {
+        exploration: { id: 'x', title: 'x', state: {} },
+        snapshot: {
+          nodes: [
+            { id: 'p1', type: 'Titular', properties: { cpf: '123.456.789-01' } },
+            { id: 'a1', type: 'Conta', properties: {} },
+          ],
+          edges: [{ id: 'e1', source: 'p1', target: 'a1', type: 'OWNS', properties: {} }],
+        },
       },
-      'ctx-kyc': {
-        nodes: [
-          { id: 'c9', type: 'Cliente', properties: { cpf: '12345678901' } },
-          { id: 'd1', type: 'Device', properties: {} },
-        ],
-        edges: [{ id: 'e1', source: 'c9', target: 'd1', type: 'USES', properties: {} }],
+      'exp-kyc': {
+        exploration: { id: 'x', title: 'x', state: {} },
+        snapshot: {
+          nodes: [
+            { id: 'c9', type: 'Cliente', properties: { cpf: '12345678901' } },
+            { id: 'd1', type: 'Device', properties: {} },
+          ],
+          edges: [{ id: 'e1', source: 'c9', target: 'd1', type: 'USES', properties: {} }],
+        },
       },
     };
-    await page.route('**/graphlagoon/api/investigations/*/sources/*/snapshot', (route) => {
-      const ctxId = route.request().url().includes('/sources/src-1/') ? 'ctx-pix' : 'ctx-kyc';
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          exploration: { id: 'x', title: 'x', graph_context_id: ctxId, owner_email: 'e2e@test.com', state: {} },
-          snapshot: graphs[ctxId],
-        }),
-      });
-    });
+    await seedInvestigations(page, [], {}, [pix, kyc], graphs);
 
     // Create the case from the queue
     await page.goto('/investigations');
@@ -101,16 +96,16 @@ test.describe('User Journeys', () => {
     await modal.getByTestId('add-submit').click();
     await expect(modal).toHaveCount(0);
 
-    // The unified view merges the person shared by CPF: 4 nodes in, 3 out
+    // The canvas merges the person shared by CPF: 4 nodes in, 3 out
     const status = page.getByTestId('workspace-status');
     await expect(status).toContainText('3 nodes', { timeout: 15_000 });
     await expect(status).toContainText('2 edges');
     await expect(status).toContainText('2 sources');
     await expect(page.getByTestId('tab-unified')).toHaveClass(/active/);
-    await expect(page.getByTestId('tab-src-1')).toContainText('Pix transfers');
-    await expect(page.getByTestId('tab-src-2')).toContainText('KYC clients');
+    await expect(page.getByTestId('item-item-1')).toContainText('Pix transfers');
+    await expect(page.getByTestId('item-item-2')).toContainText('KYC clients');
 
-    // The journal recorded the case and both sources
+    // The journal recorded the case and both items
     await page.getByTestId('journal-toggle').click();
     await expect(page.getByTestId('journal-event')).toHaveCount(3);
   });

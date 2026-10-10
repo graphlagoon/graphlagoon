@@ -1,24 +1,39 @@
+/**
+ * Enum labels for the case (05 §1: English enums on the wire, labels here).
+ * The map is the only place the UI spells a status, a preset or a hypothesis state.
+ */
 import type {
   DecisionAction,
   DecisionOutcome,
   HypothesisStatus,
   Investigation,
   InvestigationStatus,
+  KindPreset,
 } from '@/types/investigation';
 
 export const STATUS_LABELS: Record<InvestigationStatus, string> = {
-  selecao: 'Awaiting selection',
-  analise: 'In analysis',
-  decidido: 'Decided',
-  arquivado: 'Archived',
+  open: 'Open',
+  analysis: 'In analysis',
+  decided: 'Decided',
+  archived: 'Archived',
 };
 
-/** Status changes a person makes through PATCH (F1, 05 §3); the server answers 409 to any other. */
-export const STATUS_TRANSITIONS: Record<InvestigationStatus, Exclude<InvestigationStatus, 'decidido'>[]> = {
-  selecao: ['analise', 'arquivado'],
-  analise: ['selecao', 'arquivado'],
-  decidido: ['arquivado'],
-  arquivado: ['analise'],
+/** Status changes a person makes through PATCH (05 §3); the server answers 409 to any other. */
+export const STATUS_TRANSITIONS: Record<InvestigationStatus, Exclude<InvestigationStatus, 'decided'>[]> = {
+  open: ['analysis', 'archived'],
+  analysis: ['open', 'archived'],
+  decided: ['archived'],
+  archived: ['analysis'],
+};
+
+export const KIND_PRESET_LABELS: Record<KindPreset, string> = {
+  livre: 'Free',
+  credito: 'Credit (economic group)',
+  garantia: 'Collateral escape',
+  pix_med: 'Pix with MED',
+  lavagem: 'Money laundering',
+  lojista: 'Merchant review',
+  fraude_sintetica: 'Synthetic fraud',
 };
 
 export const DECISION_OUTCOME_LABELS: Record<DecisionOutcome, string> = {
@@ -33,12 +48,12 @@ export const DECISION_ACTION_LABELS: Record<DecisionAction, string> = {
 };
 
 export const HYPOTHESIS_STATUS_LABELS: Record<HypothesisStatus, string> = {
-  aberta: 'open',
-  sustentada: 'supported',
-  refutada: 'refuted',
+  open: 'open',
+  supported: 'supported',
+  refuted: 'refuted',
 };
 
-/** Circ. 3.978: each phase (selection, then analysis) has 45 days. */
+/** Circ. 3.978: each Pix/MED phase (open, then analysis) has 45 days. */
 export const PHASE_DAYS = 45;
 /** Under this many days left the deadline turns orange (T1). */
 export const URGENT_DAYS = 7;
@@ -48,7 +63,7 @@ export function caseNumber(id: string): string {
   return `#${id.replace(/-/g, '').slice(0, 6)}`;
 }
 
-/** The server's deadline of an open case (F4.4), or null once decided/archived. */
-export function deadlineOf(inv: Investigation): { phase: 'selection' | 'analysis'; daysLeft: number } | null {
+/** The server's deadline of an open case, or null without phases / once decided or archived. */
+export function deadlineOf(inv: Investigation): { phase: 'open' | 'analysis'; daysLeft: number } | null {
   return inv.deadline ? { phase: inv.deadline.phase, daysLeft: inv.deadline.days_left } : null;
 }

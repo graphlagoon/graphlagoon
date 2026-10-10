@@ -1,28 +1,22 @@
 import axios, { type AxiosInstance } from 'axios';
 import type {
+  CaseAnnotation,
+  CaseBrief,
+  CaseItem,
+  CaseItemVersion,
+  CreateAnnotationRequest,
   CreateInvestigationRequest,
-  UpdateInvestigationRequest,
-  EntityMatch,
+  CreateItemRequest,
   Investigation,
-  InvestigationArtifact,
-  InvestigationDecision,
-  InvestigationExportFormat,
-  InvestigationFile,
-  FileContextResult,
-  FileEnrichmentSpec,
-  FileRole,
-  InvestigationProposal,
   InvestigationEvent,
-  InvestigationEvidence,
-  Hypothesis,
-  InvestigationNote,
-  InvestigationRole,
-  InvestigationSource,
-  MatchStatus,
-  SourceSnapshotPayload,
-  SourceMode,
+  InvestigationExportFormat,
+  InvestigationDecision,
+  ItemSearchHit,
+  ItemSnapshotPayload,
+  ShareRole,
+  UpdateInvestigationRequest,
+  UpdateItemRequest,
 } from '@/types/investigation';
-import type { MappingSpec } from '@/utils/fileMapping';
 import type {
   AdminConfigEntry,
   AdminGroup,
@@ -674,8 +668,8 @@ class ApiService {
     return response.data;
   }
 
-  // Investigations
-  /** `exploration_id`: only the cases that have that exploration as a source. */
+  // Investigations (05 §1): one case, items with versions, annotations, a journal.
+  /** `exploration_id`: only the cases that have that exploration as a graph item. */
   async getInvestigations(params: { exploration_id?: string } = {}): Promise<Investigation[]> {
     const response = await this.client.get('/api/investigations', { params });
     return response.data;
@@ -700,146 +694,19 @@ class ApiService {
     await this.client.delete(`/api/investigations/${id}`);
   }
 
-  async shareInvestigation(id: string, email: string, permission: 'read' | 'write'): Promise<void> {
-    await this.client.post(`/api/investigations/${id}/share`, { email, permission });
+  async shareInvestigation(id: string, email: string, role: ShareRole): Promise<void> {
+    await this.client.post(`/api/investigations/${id}/share`, { email, role });
   }
 
   async unshareInvestigation(id: string, email: string): Promise<void> {
     await this.client.delete(`/api/investigations/${id}/share/${encodeURIComponent(email)}`);
   }
 
-  /** F1: decidido → analise (human only); the decision stays in the journal. */
   async reopenInvestigation(id: string): Promise<Investigation> {
     const response = await this.client.post(`/api/investigations/${id}/reopen`);
     return response.data;
   }
 
-  async removeInvestigationSource(id: string, sourceId: string): Promise<void> {
-    await this.client.delete(`/api/investigations/${id}/sources/${sourceId}`);
-  }
-
-  async getInvestigationSources(id: string): Promise<InvestigationSource[]> {
-    const response = await this.client.get(`/api/investigations/${id}/sources`);
-    return response.data;
-  }
-
-  async addInvestigationSource(
-    id: string,
-    explorationId: string,
-    mode: SourceMode,
-  ): Promise<InvestigationSource> {
-    const response = await this.client.post(`/api/investigations/${id}/sources`, {
-      kind: 'exploration',
-      exploration_id: explorationId,
-      mode,
-    });
-    return response.data;
-  }
-
-  /** The source's frozen copy, or the live exploration (403 SOURCE_RESTRICTED without context access). */
-  async getInvestigationSourceSnapshot(id: string, sourceId: string): Promise<SourceSnapshotPayload> {
-    const response = await this.client.get(`/api/investigations/${id}/sources/${sourceId}/snapshot`);
-    return response.data;
-  }
-
-  /** Merge patch by unified node id: a null role clears it. */
-  async updateInvestigationState(
-    id: string,
-    patch: { roles?: Record<string, InvestigationRole | null>; pins?: Record<string, boolean> },
-  ): Promise<Investigation> {
-    const response = await this.client.patch(`/api/investigations/${id}/state`, patch);
-    return response.data;
-  }
-
-  /** Journal, oldest first. shortcut: one page of 500; paginate with `after` when cases grow. */
-  async getInvestigationEvents(id: string, limit = 500): Promise<InvestigationEvent[]> {
-    const response = await this.client.get(`/api/investigations/${id}/events`, { params: { limit } });
-    return response.data;
-  }
-
-  /** Client-side journal entry (`nodes.promoted`, `trace.run`, …). */
-  async postInvestigationEvent(id: string, kind: string, payload: Record<string, unknown>): Promise<InvestigationEvent> {
-    const response = await this.client.post(`/api/investigations/${id}/events`, { kind, payload });
-    return response.data;
-  }
-
-  async getInvestigationMatches(id: string): Promise<EntityMatch[]> {
-    const response = await this.client.get(`/api/investigations/${id}/matches`);
-    return response.data;
-  }
-
-  /** Stored as `sugerido`; a pair already in the case is skipped. Returns the new ones. */
-  async addInvestigationMatches(id: string, matches: Pick<EntityMatch, 'left' | 'right' | 'score' | 'reasons'>[]): Promise<EntityMatch[]> {
-    const response = await this.client.post(`/api/investigations/${id}/matches`, { matches });
-    return response.data;
-  }
-
-  async decideInvestigationMatch(
-    id: string,
-    matchId: string,
-    status: Exclude<MatchStatus, 'sugerido'>,
-    reasonText: string,
-  ): Promise<EntityMatch> {
-    const response = await this.client.patch(`/api/investigations/${id}/matches/${matchId}`, { status, reason_text: reasonText });
-    return response.data;
-  }
-
-  async getInvestigationNotes(id: string): Promise<InvestigationNote[]> {
-    const response = await this.client.get(`/api/investigations/${id}/notes`);
-    return response.data;
-  }
-
-  async createInvestigationNote(
-    id: string,
-    anchor: InvestigationNote['anchor'],
-    body: string,
-  ): Promise<InvestigationNote> {
-    const response = await this.client.post(`/api/investigations/${id}/notes`, { anchor, body });
-    return response.data;
-  }
-
-  async deleteInvestigationNote(id: string, noteId: string): Promise<void> {
-    await this.client.delete(`/api/investigations/${id}/notes/${noteId}`);
-  }
-
-  // Frozen evidence (F4.1): write once, no update or delete.
-  async getInvestigationEvidence(id: string): Promise<InvestigationEvidence[]> {
-    const response = await this.client.get(`/api/investigations/${id}/evidence`);
-    return response.data;
-  }
-
-  async getInvestigationEvidenceItem(id: string, evidenceId: string): Promise<InvestigationEvidence> {
-    const response = await this.client.get(`/api/investigations/${id}/evidence/${evidenceId}`);
-    return response.data;
-  }
-
-  async createInvestigationEvidence(
-    id: string,
-    body: Pick<InvestigationEvidence, 'title' | 'kind' | 'params'> & { snapshot: unknown },
-  ): Promise<InvestigationEvidence> {
-    const response = await this.client.post(`/api/investigations/${id}/evidence`, body);
-    return response.data;
-  }
-
-  // Hypotheses (F4.2): stored in the case state; both return the updated case.
-  async createInvestigationHypothesis(
-    id: string,
-    body: Pick<Hypothesis, 'text'> & Partial<Pick<Hypothesis, 'status' | 'evidence_for' | 'evidence_against' | 'note'>>,
-  ): Promise<Investigation> {
-    const response = await this.client.post(`/api/investigations/${id}/hypotheses`, body);
-    return response.data;
-  }
-
-  async updateInvestigationHypothesis(
-    id: string,
-    hypothesisId: string,
-    patch: Partial<Pick<Hypothesis, 'text' | 'status' | 'evidence_for' | 'evidence_against' | 'note'>>,
-  ): Promise<Investigation> {
-    const response = await this.client.patch(`/api/investigations/${id}/hypotheses/${hypothesisId}`, patch);
-    return response.data;
-  }
-
-  /** Records the decision (F4.5, human only): freezes the case and returns it. */
   async recordInvestigationDecision(
     id: string,
     body: Pick<InvestigationDecision, 'outcome' | 'actions' | 'rationale'>,
@@ -848,96 +715,158 @@ class ApiService {
     return response.data;
   }
 
-  /** Export (F4.6, `investigation.export`, audited): the file and its server-given name. */
+  /** Export (human-only, audited): the file and its server-given name. */
   async exportInvestigation(id: string, format: InvestigationExportFormat): Promise<{ blob: Blob; filename: string }> {
     const response = await this.client.get(`/api/investigations/${id}/export`, {
       params: { format },
       responseType: 'blob',
     });
-    const disposition = String(response.headers['content-disposition'] ?? '');
-    const match = /filename\*=UTF-8''([^;]+)/.exec(disposition);
+    const match = /filename\*=UTF-8''([^;]+)/.exec(response.headers['content-disposition'] ?? '');
     return { blob: response.data, filename: match ? decodeURIComponent(match[1]) : `investigation-${id.slice(0, 8)}.${format}` };
   }
 
-  // Case space (FA.2): the file goes as the raw body (streamed by the server).
-  async getInvestigationArtifacts(id: string): Promise<InvestigationArtifact[]> {
-    const response = await this.client.get(`/api/investigations/${id}/artifacts`);
+  // Items
+  async getInvestigationItems(id: string, params: { kind?: string; status?: string } = {}): Promise<CaseItem[]> {
+    const response = await this.client.get(`/api/investigations/${id}/items`, { params });
     return response.data;
   }
 
-  async uploadInvestigationArtifact(id: string, file: File, artifactId?: string): Promise<InvestigationArtifact> {
-    const path = artifactId ? `artifacts/${artifactId}/versions` : 'artifacts';
-    const response = await this.client.post(`/api/investigations/${id}/${path}`, file, {
-      params: { name: file.name },
-      // Never application/json: the server reads that as a text artifact.
-      headers: { 'Content-Type': 'application/octet-stream' },
+  async createInvestigationItem(id: string, data: CreateItemRequest): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items`, data);
+    return response.data;
+  }
+
+  /** Raw-body upload (the server hashes while streaming); needs investigation.upload. */
+  async uploadInvestigationItem(
+    id: string,
+    file: File,
+    params: { kind: 'table' | 'document'; subkind: 'csv' | 'upload'; title?: string },
+  ): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items`, file, {
+      params: { ...params, filename: file.name },
+      // Never application/json: the server reads that as a JSON item.
+      headers: { 'Content-Type': file.type && file.type !== 'application/json' ? file.type : 'application/octet-stream' },
     });
     return response.data;
   }
 
-  async getArtifactContent(id: string, artifactId: string, version: number): Promise<Blob> {
-    const response = await this.client.get(
-      `/api/investigations/${id}/artifacts/${artifactId}/versions/${version}/content`,
-      { responseType: 'blob' },
-    );
+  async updateInvestigationItem(id: string, itemId: string, data: UpdateItemRequest): Promise<CaseItem> {
+    const response = await this.client.patch(`/api/investigations/${id}/items/${itemId}`, data);
     return response.data;
   }
 
-  // Case files (F2.3): raw body like artifacts; the server hashes while streaming.
-  async getInvestigationFiles(id: string): Promise<InvestigationFile[]> {
-    const response = await this.client.get(`/api/investigations/${id}/files`);
+  async deleteInvestigationItem(id: string, itemId: string): Promise<void> {
+    await this.client.delete(`/api/investigations/${id}/items/${itemId}`);
+  }
+
+  async getInvestigationItemVersions(id: string, itemId: string): Promise<CaseItemVersion[]> {
+    const response = await this.client.get(`/api/investigations/${id}/items/${itemId}/versions`);
     return response.data;
   }
 
-  async uploadInvestigationFile(id: string, file: File, role: FileRole): Promise<InvestigationFile> {
-    const response = await this.client.post(`/api/investigations/${id}/files`, file, {
-      params: { filename: file.name, role },
-      headers: { 'Content-Type': 'application/octet-stream' },
-    });
+  async addInvestigationItemVersion(id: string, itemId: string, body: { content?: string; content_json?: unknown }): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/versions`, body);
     return response.data;
   }
 
-  /** Raw bytes of a case file (audited read). */
-  async getInvestigationFileContent(id: string, fileId: string): Promise<ArrayBuffer> {
-    const response = await this.client.get(`/api/investigations/${id}/files/${fileId}/content`, {
+  async getInvestigationItemContent(id: string, itemId: string, version?: number): Promise<ArrayBuffer> {
+    const response = await this.client.get(`/api/investigations/${id}/items/${itemId}/content`, {
+      params: { version },
       responseType: 'arraybuffer',
     });
     return response.data;
   }
 
-  /** Generates the file graph on the server (F2.5): a `file` context, an exploration and a source. */
-  async createFileContext(
+  async getInvestigationItemText(id: string, itemId: string, version?: number): Promise<{ text: string | null; version: CaseItemVersion }> {
+    const response = await this.client.get(`/api/investigations/${id}/items/${itemId}/text`, { params: { version } });
+    return response.data;
+  }
+
+  /** What one graph item puts on the canvas (snapshot, identity keys, edge semantics). */
+  async getInvestigationItemSnapshot(id: string, itemId: string): Promise<ItemSnapshotPayload> {
+    const response = await this.client.get(`/api/investigations/${id}/items/${itemId}/snapshot`);
+    return response.data;
+  }
+
+  async pinInvestigationItem(id: string, itemId: string, body: { version?: number; label?: string } = {}): Promise<CaseItemVersion> {
+    const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/pin`, body);
+    return response.data;
+  }
+
+  async setInvestigationItemStatus(id: string, itemId: string, status: 'confirmed' | 'rejected'): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/${status === 'confirmed' ? 'confirm' : 'reject'}`);
+    return response.data;
+  }
+
+  async runInvestigationQuery(id: string, itemId: string, parameters: Record<string, unknown> = {}, rowLimit = 1000): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/run`, { parameters, row_limit: rowLimit });
+    return response.data;
+  }
+
+  async searchInvestigation(id: string, q: string): Promise<ItemSearchHit[]> {
+    const response = await this.client.get(`/api/investigations/${id}/search`, { params: { q } });
+    return response.data;
+  }
+
+  // Annotations
+  async getInvestigationAnnotations(id: string, params: { kind?: string; status?: string; target?: string } = {}): Promise<CaseAnnotation[]> {
+    const response = await this.client.get(`/api/investigations/${id}/annotations`, { params });
+    return response.data;
+  }
+
+  async createInvestigationAnnotation(id: string, data: CreateAnnotationRequest): Promise<CaseAnnotation> {
+    const response = await this.client.post(`/api/investigations/${id}/annotations`, data);
+    return response.data;
+  }
+
+  async updateInvestigationAnnotation(
     id: string,
-    fileId: string,
-    body: { mapping: MappingSpec; file_ids?: string[]; title?: string },
-  ): Promise<FileContextResult> {
-    const response = await this.client.post(`/api/investigations/${id}/files/${fileId}/context`, body);
+    annotationId: string,
+    data: { targets?: string[]; value?: Record<string, unknown>; reason?: string },
+  ): Promise<CaseAnnotation> {
+    const response = await this.client.patch(`/api/investigations/${id}/annotations/${annotationId}`, data);
     return response.data;
   }
 
-  /** How an enrichment file joins the case's nodes (F2.6). */
-  async setInvestigationFileMapping(id: string, fileId: string, mapping: FileEnrichmentSpec): Promise<InvestigationFile> {
-    const response = await this.client.patch(`/api/investigations/${id}/files/${fileId}`, { mapping });
+  async deleteInvestigationAnnotation(id: string, annotationId: string): Promise<void> {
+    await this.client.delete(`/api/investigations/${id}/annotations/${annotationId}`);
+  }
+
+  async setInvestigationAnnotationStatus(id: string, annotationId: string, status: 'confirmed' | 'rejected'): Promise<CaseAnnotation> {
+    const response = await this.client.post(
+      `/api/investigations/${id}/annotations/${annotationId}/${status === 'confirmed' ? 'confirm' : 'reject'}`,
+    );
     return response.data;
   }
 
-  // Proposals (FA.3): accept/reject are human-only on the server.
-  async getInvestigationProposals(id: string, status?: InvestigationProposal['status']): Promise<InvestigationProposal[]> {
-    const response = await this.client.get(`/api/investigations/${id}/proposals`, { params: { status } });
+  /** Entity resolution on the server: new pairs become suggested same_as annotations. */
+  async runInvestigationEntityResolution(id: string): Promise<CaseAnnotation[]> {
+    const response = await this.client.post(`/api/investigations/${id}/analysis/er`);
     return response.data;
   }
 
-  async acceptProposal(id: string, proposalId: string): Promise<InvestigationProposal> {
-    const response = await this.client.post(`/api/investigations/${id}/proposals/${proposalId}/accept`);
+  // Journal, brief
+  async getInvestigationEvents(id: string, limit = 500): Promise<InvestigationEvent[]> {
+    const response = await this.client.get(`/api/investigations/${id}/events`, { params: { limit } });
     return response.data;
   }
 
-  async rejectProposal(id: string, proposalId: string, reason: string): Promise<InvestigationProposal> {
-    const response = await this.client.post(`/api/investigations/${id}/proposals/${proposalId}/reject`, { reason });
+  async postInvestigationEvent(id: string, kind: string, payload: Record<string, unknown>): Promise<InvestigationEvent> {
+    const response = await this.client.post(`/api/investigations/${id}/events`, { kind, payload });
     return response.data;
   }
 
-  // The caller's own agent tokens (03 §8.2); the secret comes back once, on create.
+  async getInvestigationBrief(id: string): Promise<CaseBrief> {
+    const response = await this.client.get(`/api/investigations/${id}/brief`);
+    return response.data;
+  }
+
+  async putInvestigationBrief(id: string, text: string): Promise<CaseBrief> {
+    const response = await this.client.put(`/api/investigations/${id}/brief`, { text });
+    return response.data;
+  }
+
+  // The caller's own agent tokens (05 §6); the secret comes back once, on create.
   async getAgentTokens(): Promise<AgentToken[]> {
     const response = await this.client.get('/api/agent-tokens');
     return response.data;
@@ -945,8 +874,10 @@ class ApiService {
 
   async createAgentToken(data: {
     name: string;
-    scopes: string[];
     expires_in_days: number;
+    scope?: 'user' | 'case';
+    investigation_ids?: string[];
+    unmasked?: boolean;
   }): Promise<AgentToken & { token: string }> {
     const response = await this.client.post('/api/agent-tokens', data);
     return response.data;
@@ -954,13 +885,6 @@ class ApiService {
 
   async revokeAgentToken(tokenId: string): Promise<void> {
     await this.client.delete(`/api/agent-tokens/${tokenId}`);
-  }
-
-  async approveArtifactVersion(id: string, artifactId: string, version: number): Promise<InvestigationArtifact> {
-    const response = await this.client.post(
-      `/api/investigations/${id}/artifacts/${artifactId}/versions/${version}/approve`,
-    );
-    return response.data;
   }
 
   // Admin area (superuser only; every route 403s for anyone else)

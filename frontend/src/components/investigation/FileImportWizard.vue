@@ -15,10 +15,12 @@ import { getErrorMessage } from '@/utils/errorMessage';
 import { interpretMapping, lines, matchFile, parseLine, suggestPresets, type MappingSpec } from '@/utils/fileMapping';
 import { FILE_MAPPING_PRESETS, QSA_ENRICHMENT } from '@/utils/fileMappingPresets';
 import { derivedIdentityKeys, encodingFor, genericSpec, guessDelimiter, mappingRows } from '@/utils/fileImport';
-import type { FileContextResult, FileEnrichmentSpec, FileRole, InvestigationFile } from '@/types/investigation';
+import type { CaseItem, FileEnrichmentSpec } from '@/types/investigation';
+
+type FileRole = 'graph' | 'enrichment' | 'attachment';
 
 const props = defineProps<{ investigationId: string }>();
-const emit = defineEmits<{ close: []; done: [files: InvestigationFile[], result: FileContextResult | null] }>();
+const emit = defineEmits<{ close: []; done: [items: CaseItem[], graph: CaseItem | null] }>();
 
 interface Picked {
   file: File;
@@ -37,7 +39,7 @@ const title = ref('');
 const busy = ref(false);
 const error = ref<string | null>(null);
 /** Uploaded rows, kept so a retry after a failed generation does not upload twice. */
-const uploaded = ref<InvestigationFile[]>([]);
+const uploaded = ref<CaseItem[]>([]);
 
 const maxEdges = window.__GRAPH_LAGOON_CONFIG__?.investigation_max_working_edges ?? 50000;
 
@@ -210,28 +212,35 @@ async function submit() {
   busy.value = true;
   error.value = null;
   try {
+    // Every file is an item of the case (05 §1): a table (graph/enrichment) or a document.
     for (const p of picked.value.slice(uploaded.value.length)) {
-      uploaded.value.push(await api.uploadInvestigationFile(props.investigationId, p.file, role.value));
-    }
-    let files = [...uploaded.value];
-    let result: FileContextResult | null = null;
-    if (role.value === 'graph') {
-      // The main file (it carries the mapping and the context) is the first input's.
-      const first = Object.values(spec.value!.inputs)[0];
-      const mainName = first ? matchFile(first, files.map((f) => f.filename)) : null;
-      files.sort((a, b) => Number(b.filename === mainName) - Number(a.filename === mainName));
-      result = await api.createFileContext(props.investigationId, files[0].id, {
-        mapping: spec.value!,
-        file_ids: files.slice(1).map((f) => f.id),
-        title: title.value.trim() || undefined,
-      });
-      files = [result.file, ...files.slice(1)];
-    } else if (role.value === 'enrichment') {
-      files = await Promise.all(
-        files.map((f) => api.setInvestigationFileMapping(props.investigationId, f.id, enrichment.value!)),
+      uploaded.value.push(
+        await api.uploadInvestigationItem(
+          props.investigationId,
+          p.file,
+          role.value === 'attachment' ? { kind: 'document', subkind: 'upload' } : { kind: 'table', subkind: 'csv' },
+        ),
       );
     }
-    emit('done', files, result);
+    let items = [...uploaded.value];
+    let graph: CaseItem | null = null;
+    const nameOf = (i: CaseItem) => i.provenance.filename ?? i.title;
+    if (role.value === 'graph') {
+      // The main file carries the mapping; the others are its extra inputs (a SIMBA layout).
+      const first = Object.values(spec.value!.inputs)[0];
+      const mainName = first ? matchFile(first, items.map(nameOf)) : null;
+      items.sort((a, b) => Number(nameOf(b) === mainName) - Number(nameOf(a) === mainName));
+      graph = await api.updateInvestigationItem(props.investigationId, items[0].id, {
+        title: title.value.trim() || undefined,
+        mapping: { as: 'graph', spec: spec.value! as unknown as Record<string, unknown>, extra_item_ids: items.slice(1).map((f) => f.id) },
+      });
+      items = [graph, ...items.slice(1)];
+    } else if (role.value === 'enrichment') {
+      items = await Promise.all(
+        items.map((f) => api.updateInvestigationItem(props.investigationId, f.id, { mapping: { as: 'enrichment', spec: enrichment.value! } })),
+      );
+    }
+    emit('done', items, graph);
   } catch (e) {
     error.value = getErrorMessage(e, 'Failed to add the file');
   } finally {
@@ -281,7 +290,7 @@ watch(role, () => (error.value = null));
         <section v-else-if="step === 2" class="roles">
           <label class="role-opt">
             <input v-model="role" type="radio" value="graph" data-testid="wizard-role-graph" />
-            <span><strong>Graph</strong><br /><span class="hint">becomes a file context and an exploration of the case</span></span>
+            <span><strong>Graph</strong><br /><span class="hint">a table of the case mapped onto the canvas (no context is created)</span></span>
           </label>
           <label class="role-opt">
             <input v-model="role" type="radio" value="enrichment" data-testid="wizard-role-enrichment" />
@@ -441,7 +450,7 @@ watch(role, () => (error.value = null));
             <li v-if="role === 'enrichment'">Mapping “{{ enrichment?.name }}”</li>
           </ul>
           <div v-if="role === 'graph'" class="form-group">
-            <label for="wizard-title">Exploration title</label>
+            <label for="wizard-title">Item title</label>
             <input id="wizard-title" v-model="title" class="form-control" data-testid="wizard-title" />
           </div>
         </section>
