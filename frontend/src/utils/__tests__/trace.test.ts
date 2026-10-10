@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fixture from '@/__tests__/fixtures/trace/golpe-pix.json';
-import { toTraceEdges, traceForward, type TraceEdge, type TraceParams, type TraceResult } from '@/utils/trace';
+import { runTrace, toTraceEdges, traceForward, type TraceEdge, type TraceParams, type TraceResult } from '@/utils/trace';
 
 const edges = toTraceEdges(fixture.edges, fixture.edge_semantics);
 const types = Object.fromEntries(fixture.nodes.map(n => [n.node_id, n.node_type]));
@@ -92,5 +92,16 @@ describe('temporal trace, forward (03 §6.1)', () => {
   it('breaks time ties by edge id, whatever the input order', () => {
     const shuffled = [...edges].reverse();
     expect(traceForward(shuffled, types, fixture.seed, params)).toEqual(run());
+  });
+
+  it('backward LIFO from the 15:05 exchange payment walks back to the victim, not the 300 opening balance', () => {
+    const t = (hhmm: string) => Date.parse(`2026-09-09T${hhmm}:00-03:00`);
+    const r = runTrace(edges, types, { edgeIds: ['e8'] }, {
+      ...params, direction: 'backward', allocation: 'lifo', stopTypes: ['BancoExterno'], window: [t('13:00'), t('15:05')],
+    });
+    expect(r.edgeTrace).toEqual({ e8: 1850, e4: 1850, e2: 1850 });
+    expect(r.nodes['4471-0'].layer).toBe(2);
+    expect(r.nodes['0001-9'].retained).toBe(1850);
+    expect(r.method.window).toEqual([t('13:00'), t('15:05')]);
   });
 });

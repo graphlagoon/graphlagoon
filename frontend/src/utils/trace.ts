@@ -1,5 +1,5 @@
 /**
- * Temporal money trace, forward (investigations, 03 §6.1). Pure and deterministic:
+ * Temporal money trace, forward, and backward by reversal (investigations, 03 §6.1). Pure and deterministic:
  * `workers/traceWorker.ts` runs it off the main thread and the server port (F3.8)
  * must return the same numbers for `__tests__/fixtures/trace/golpe-pix.json`.
  *
@@ -18,7 +18,8 @@
 import type { Edge, EdgeSemantics } from '@/types/graph';
 import { edgeValue } from './edgeSemantics';
 
-export type Allocation = 'fifo' | 'proportional' | 'libr' | 'total';
+/** `lifo` exists for the backward trace (F3.4): LIFO on reversed edges is LIFO in real time. */
+export type Allocation = 'fifo' | 'lifo' | 'proportional' | 'libr' | 'total';
 
 export interface TraceEdge {
   id: string;
@@ -31,7 +32,7 @@ export interface TraceEdge {
 }
 
 export interface TraceParams {
-  direction: 'forward';
+  direction: 'forward' | 'backward';
   maxHops: number;
   /** Max dwell Δ in ms; null = no limit. */
   maxDwellMs: number | null;
@@ -116,15 +117,17 @@ function allocate(lots: Lot[], a: number, rule: Allocation): number {
     removeEmpty(lots);
     return x;
   }
-  // FIFO; total contamination drains the balance the same way but reports all of `a`.
+  // FIFO/LIFO; total contamination drains the balance like FIFO but reports all of `a`.
+  const lifo = rule === 'lifo';
   let need = a;
   let x = 0;
   while (need > 0 && lots.length) {
-    const l = lots[0];
+    const l = lifo ? lots[lots.length - 1] : lots[0];
     if (l.amount <= need) {
       x += l.traced;
       need -= l.amount;
-      lots.shift();
+      if (lifo) lots.pop();
+      else lots.shift();
     } else {
       const tr = (l.traced * need) / l.amount;
       x += tr;
@@ -234,4 +237,35 @@ export function traceForward(
     coverage: seedTotal > 0 ? Math.round((exitTotal / seedTotal) * 1e4) / 1e4 : 0,
     method: { ...params, seedEdgeIds },
   };
+}
+
+/** The edges as the trace walks them: backward = reversed and in negated time. */
+export function orientEdges(edges: TraceEdge[], direction: TraceParams['direction']): TraceEdge[] {
+  return direction === 'backward' ? edges.map(e => ({ ...e, src: e.dst, dst: e.src, t: -e.t })) : edges;
+}
+
+/**
+ * Backward ("where did it come from"): the forward walk on reversed edges in negated
+ * time. Node figures read in that reversed sense (`exits` are the origins reached).
+ * Only LIFO, proportional and total contamination keep their meaning reversed; FIFO
+ * and LIBR do not (the screen does not offer them backward).
+ */
+export function traceBackward(
+  edges: TraceEdge[],
+  nodeTypes: Record<string, string>,
+  seed: { edgeIds: string[] },
+  params: TraceParams,
+): TraceResult {
+  const w = params.window;
+  const r = traceForward(orientEdges(edges, 'backward'), nodeTypes, seed, { ...params, window: w ? [-w[1], -w[0]] : null });
+  return { ...r, method: { ...r.method, window: w } };
+}
+
+export function runTrace(
+  edges: TraceEdge[],
+  nodeTypes: Record<string, string>,
+  seed: { edgeIds: string[] },
+  params: TraceParams,
+): TraceResult {
+  return (params.direction === 'backward' ? traceBackward : traceForward)(edges, nodeTypes, seed, params);
 }

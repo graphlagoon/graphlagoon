@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
 import { seedContexts, seedExplorations, seedInvestigations } from '../helpers/api-mocks';
@@ -227,5 +228,55 @@ test.describe('Investigations', () => {
     await expect(artifact).toContainText('agent · Claude Code, for e2e@test.com');
     await artifact.click();
     await expect(page.getByTestId('artifact-preview')).toContainText('# Rastro: 3 saltos');
+  });
+
+  test('follow the money: right-click the victim, trace forward, see the exits and the Sankey', async ({
+    authenticatedPage: page,
+  }) => {
+    const pix = JSON.parse(readFileSync(new URL('../../src/__tests__/fixtures/trace/golpe-pix.json', import.meta.url), 'utf8'));
+    await seedContexts(page, [{ ...MOCK_CONTEXT, id: 'ctx-pix', title: 'Pix', edge_semantics: pix.edge_semantics }]);
+    await seedInvestigations(page, [CASE], {
+      'inv-1': [{ id: 'src-1', kind: 'exploration', position: 0, title_snapshot: 'Pix', accessible: true, exploration_id: 'exp-1', context_id: 'ctx-pix', mode: 'frozen' }],
+    });
+    const snapshot = {
+      exploration: { id: 'exp-1', title: 'Pix', graph_context_id: 'ctx-pix', owner_email: 'e2e@test.com', state: {} },
+      snapshot: {
+        nodes: pix.nodes.map((n: any) => ({ id: n.node_id, type: n.node_type, properties: n.properties ?? {} })),
+        edges: pix.edges.map((e: any) => ({ id: e.edge_id, source: e.src, target: e.dst, type: e.relationship_type, properties: e.properties })),
+      },
+    };
+    await page.route('**/graphlagoon/api/investigations/inv-1/sources/*/snapshot', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(snapshot) }),
+    );
+
+    await page.goto('/investigations/inv-1');
+    await expect(page.getByTestId('workspace-status')).toContainText('9 nodes', { timeout: 15_000 });
+
+    // WebGL is opaque to selectors: hover the node through the dev coords hook, then right-click.
+    const canvas = page.locator('.graph3d-container canvas');
+    const menu = page.getByTestId('graph-context-menu');
+    await expect(async () => {
+      const at = await page.evaluate(() => (window as any).__GRAPH_NODE_SCREEN_COORDS__?.('0001-9@ctx-pix'));
+      const box = await canvas.boundingBox();
+      expect(at && box).toBeTruthy();
+      await page.mouse.move(box!.x + at.x, box!.y + at.y);
+      await expect(canvas).toHaveClass(/clickable/, { timeout: 1_000 });
+      await page.mouse.down({ button: 'right' });
+      await page.mouse.up({ button: 'right' });
+      await expect(menu).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+    await page.getByTestId('context-menu-action-trace-forward').click();
+
+    const exits = page.getByTestId('trace-exits');
+    await expect(exits).toContainText('Saque ATM');
+    await expect(exits).toContainText('Exchange Gama');
+    await expect(exits).toContainText('Bet Delta');
+    await expect(page.getByTestId('trace-coverage')).toContainText('(91%)');
+    await expect(page.getByTestId('trace-method')).toContainText('FIFO');
+    await expect(page.getByTestId('trace-save-evidence')).toBeDisabled();
+    await expect(page.getByTestId('workspace-status')).toContainText('8 nodes');
+
+    await page.getByTestId('trace-view-sankey').click();
+    await expect(page.getByTestId('sankey-band')).toHaveCount(7);
   });
 });

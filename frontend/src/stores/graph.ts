@@ -38,6 +38,7 @@ import { isSqlScript } from '@/utils/sqlScript';
 import { snapshotToGraph, type NodeOrigin } from '@/utils/unifyGraph';
 import { edgeValue, type EdgeValue } from '@/utils/edgeSemantics';
 import { aggregateParallelEdges } from '@/utils/parallelEdges';
+import type { TraceColumns } from '@/utils/traceView';
 import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
 import { useToast } from '@/composables/useToast';
 import {
@@ -175,7 +176,7 @@ export type GraphBehaviors = typeof DEFAULT_BEHAVIORS;
 
 /** Fresh defaults per call — nested objects must never be shared by reference. */
 /** Layout algorithms a saved state may name. Anything else falls back to 'force'. */
-const KNOWN_LAYOUTS: LayoutAlgorithm[] = [...LAYOUT_ALGORITHMS];
+const KNOWN_LAYOUTS: LayoutAlgorithm[] = LAYOUT_ALGORITHMS.filter((a) => a !== 'trace-layers');
 
 export function defaultLayoutModeConfig(): LayoutModeConfig {
   return {
@@ -451,6 +452,9 @@ export const useGraphStore = defineStore('graph', () => {
     sameRingEdgeCount: number;
     siftingSkippedLargeRing: boolean;
   } | null>(null);
+
+  /** Columns of the `trace-layers` layout (T5), set by the trace screen; not persisted. */
+  const traceLayers = shallowRef<TraceColumns | null>(null);
 
 
   // 3D Force-Directed layout settings (D3-Force only, persisted with the exploration)
@@ -2846,6 +2850,7 @@ export const useGraphStore = defineStore('graph', () => {
     layoutAlgorithm,
     layoutModeConfig,
     egoLayoutStats,
+    traceLayers,
     force3DSettings,
     layoutExecution,
     behaviors,

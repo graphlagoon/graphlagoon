@@ -81,7 +81,7 @@ const skillText = computed(() =>
     edgeTypes: currentSchema.value.relationship_types,
     nodeProperties: graphStore.currentContext?.node_properties ?? [],
     edgeProperties: graphStore.currentContext?.edge_properties ?? [],
-    layoutAlgorithms: [...LAYOUT_ALGORITHMS],
+    layoutAlgorithms: LAYOUT_ALGORITHMS.filter((a) => a !== 'trace-layers'),
     customMetrics: (graphStore.currentContext?.metric_definitions ?? []).map((d) => ({
       id: d.id,
       name: d.name,

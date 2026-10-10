@@ -1365,3 +1365,22 @@ export function computeHivePositions(
 
   return { positions, axes, othersCategoryCount };
 }
+
+/**
+ * `trace-layers` (T5): one vertical column per trace layer, left to right, nodes
+ * centered in their column in the given order. Nodes without a column keep theirs.
+ */
+export function computeTraceLayerPositions(
+  columns: Map<string, number>,
+  { levelSpacing, nodeSpacing }: { levelSpacing: number; nodeSpacing: number },
+): { positions: Map<string, { x: number; y: number }>; extent: { min: number; max: number } } {
+  const byCol = new Map<number, string[]>();
+  for (const [id, col] of columns) (byCol.get(col) ?? byCol.set(col, []).get(col)!).push(id);
+  const positions = new Map<string, { x: number; y: number }>();
+  let half = 0;
+  for (const [col, ids] of byCol) {
+    ids.forEach((id, i) => positions.set(id, { x: col * levelSpacing, y: ((ids.length - 1) / 2 - i) * nodeSpacing }));
+    half = Math.max(half, ((ids.length - 1) / 2) * nodeSpacing);
+  }
+  return { positions, extent: { min: -half, max: half } };
+}
