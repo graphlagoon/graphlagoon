@@ -49,7 +49,7 @@ test.describe('Contexts', () => {
     await page.goto('/contexts');
     await page.getByTestId('create-context-btn').click();
     await expect(page.getByTestId('create-context-modal')).toBeVisible();
-    await expect(page.getByText('Create Graph Context')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Create Graph Context' })).toBeVisible();
 
     await expect(page.getByText('Title *')).toBeVisible();
     // The two tables are one control: the pair is picked together, and each
