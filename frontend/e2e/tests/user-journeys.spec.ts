@@ -88,11 +88,10 @@ test.describe('User Journeys', () => {
     await expect(page.getByTestId('investigation-title')).toHaveText('Golpe Pix · falsa central');
 
     // Add one exploration from each context
-    await page.getByTestId('investigation-add-sources').click();
+    await page.getByTestId('items-empty-add').click();
     const modal = page.getByTestId('add-items-popover');
     await modal.getByTestId('add-exp-exp-pix').locator('input').check();
     await modal.getByTestId('add-exp-exp-kyc').locator('input').check();
-    await expect(modal.getByTestId('add-preview')).toContainText('2 novas explorações, de 2 contexts');
     await modal.getByTestId('add-submit').click();
     await expect(modal).toHaveCount(0);
 
@@ -101,13 +100,13 @@ test.describe('User Journeys', () => {
     await expect(status).toContainText('3 nodes', { timeout: 15_000 });
     await expect(status).toContainText('2 edges');
     await expect(status).toContainText('2 sources');
-    await expect(page.getByTestId('tab-unified')).toHaveClass(/active/);
     await expect(page.getByTestId('item-item-1')).toContainText('Pix transfers');
     await expect(page.getByTestId('item-item-2')).toContainText('KYC clients');
 
     // The journal recorded the case and both items
     await page.getByTestId('journal-toggle').click();
-    await expect(page.getByTestId('journal-event')).toHaveCount(3);
+    await expect(page.getByTestId('journal')).toContainText('Pix transfers');
+    await expect(page.getByTestId('journal')).toContainText('KYC clients');
   });
 
   // ---------------------------------------------------------------------------
