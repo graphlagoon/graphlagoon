@@ -71,9 +71,9 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
 
 | Scope | The agent can |
 |---|---|
-| `read` | read cases, the unified graph, entities, the journal, notes, artifacts, case files (`list_files`, `get_file`, masked), proposals and entity matches (`list_matches`); look up an entity in its context's enrichment tables (`lookup_enrichment`) |
+| `read` | read cases, the unified graph, entities, the journal, notes, frozen evidence (`list_evidence`, `get_evidence`), artifacts, case files (`list_files`, `get_file`, masked), proposals and entity matches (`list_matches`); look up an entity in its context's enrichment tables (`lookup_enrichment`) |
 | `analyze` | run server analyses: entity resolution (`suggest_matches`, stores suggestions, never merges), follow the money (`trace_money`) and paths (`find_paths`) with the same results as the browser; typologies arrive later |
-| `write` | create cases, add sources, write notes, upload artifacts as **drafts**, upload case files (`upload_file`, up to the artifact size), turn a graph file into a source with a preset or mapping (`create_file_graph`) and set how an enrichment file joins nodes (`set_file_mapping`); the file tools need your `investigation.upload` permission |
+| `write` | create cases, add sources, write notes, freeze evidence (`pin_evidence`: a trace re-run on the server with its method stamp, the unified graph or a subset of it, or a table it provides), upload artifacts as **drafts**, upload case files (`upload_file`, up to the artifact size), turn a graph file into a source with a preset or mapping (`create_file_graph`) and set how an enrichment file joins nodes (`set_file_mapping`); the file tools need your `investigation.upload` permission |
 | `propose` | propose an entity role, the case status, a typology or a decision on an entity match (`match` with `match_id`, `status` and `reason_text`) |
 
 The token acts with **your** access and never more: cases you cannot see,

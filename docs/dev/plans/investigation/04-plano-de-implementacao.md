@@ -64,7 +64,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F3.8 · Rastreio e caminhos no servidor (Python) com paridade e ferramentas MCP
 
 **F4 · Dossiê e compliance**
-- [ ] F4.1 · Evidências congeladas
+- [x] F4.1 · Evidências congeladas
 - [ ] F4.2 · Hipóteses e tela do dossiê (T7)
 - [ ] F4.3 · Selos de tipologia (CC 4.001) e anel de lojistas (T9)
 - [ ] F4.4 · Status e prazos (45 + 45 dias) na fila
@@ -744,8 +744,8 @@ trabalho de análise e documentação; a pessoa decide.
 - **Arquivos:** API `.../evidence` (POST, GET) e um botão "fixar evidência" no T2 e no
   T5.
 - **Aceite:**
-  - [ ] A evidência guarda o snapshot gz, o sha256, os parâmetros e o autor.
-  - [ ] A evidência é imutável.
+  - [x] A evidência guarda o snapshot gz, o sha256, os parâmetros e o autor.
+  - [x] A evidência é imutável.
 - **Testes:** pytest (hash e imutabilidade).
 
 ### F4.2 · Hipóteses e tela do dossiê (T7)

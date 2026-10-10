@@ -12,6 +12,7 @@ import type {
   EntityMatch,
   Investigation,
   InvestigationEvent,
+  InvestigationEvidence,
   InvestigationFile,
   InvestigationNote,
   InvestigationRole,
@@ -101,6 +102,21 @@ export const useInvestigationStore = defineStore('investigation', () => {
     await api.deleteInvestigationNote(current.value.id, noteId);
     notes.value = notes.value.filter((n) => n.id !== noteId);
     void fetchEvents();
+  }
+
+  /** Frozen evidence (F4.1), oldest first: E1, E2, … */
+  const evidence = ref<InvestigationEvidence[]>([]);
+
+  async function fetchEvidence() {
+    if (current.value) evidence.value = await api.getInvestigationEvidence(current.value.id);
+  }
+
+  async function pinEvidence(body: Pick<InvestigationEvidence, 'title' | 'kind' | 'params'> & { snapshot: unknown }) {
+    if (!current.value) return null;
+    const row = await api.createInvestigationEvidence(current.value.id, body);
+    evidence.value = [...evidence.value, row];
+    void fetchEvents();
+    return row;
   }
 
   async function fetchInvestigations() {
@@ -292,6 +308,9 @@ export const useInvestigationStore = defineStore('investigation', () => {
     fetchEvents,
     addNote,
     deleteNote,
+    evidence,
+    fetchEvidence,
+    pinEvidence,
     loadWorkspace,
     addExpansion,
     derived,

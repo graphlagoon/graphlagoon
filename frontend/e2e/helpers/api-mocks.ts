@@ -1126,6 +1126,7 @@ export async function seedInvestigations(
   const srcs = new Map<string, any[]>(investigations.map((i) => [i.id, [...(sources[i.id] ?? [])]]));
   const notes = new Map<string, any[]>();
   const events = new Map<string, any[]>();
+  const evidence = new Map<string, any[]>();
   const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
   const journal = (id: string, kind: string, payload: Record<string, unknown>) => {
     const list = events.get(id) ?? [];
@@ -1155,7 +1156,7 @@ export async function seedInvestigations(
       route.fulfill(json([...cases.values()].map((i) => ({ ...i, source_count: i.source_count ?? srcs.get(i.id)?.length ?? 0 }))));
     }
   });
-  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events))?(\?.*)?$/, (route) => {
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events|evidence))?(\?.*)?$/, (route) => {
     const req = route.request();
     const [, id, sub] = new URL(req.url()).pathname.match(/investigations\/([^/]+)(?:\/(\w+))?$/)!;
     const inv = cases.get(id);
@@ -1200,6 +1201,18 @@ export async function seedInvestigations(
       list.push(note);
       journal(id, 'note.created', { anchor: note.anchor, body: note.body });
       return route.fulfill(json(note, 201));
+    }
+    if (sub === 'evidence') {
+      const list = evidence.get(id) ?? [];
+      evidence.set(id, list);
+      if (method !== 'POST') return route.fulfill(json(list.map(({ snapshot: _s, ...e }) => e)));
+      const body = req.postDataJSON();
+      const sha256 = `${list.length + 1}`.padStart(64, 'e');
+      const row = { id: `evi-${list.length + 1}`, sha256, created_by: 'e2e@test.com', created_at: new Date().toISOString(), ...body };
+      list.push(row);
+      journal(id, 'evidence.created', { evidence_id: row.id, title: row.title, kind: row.kind, sha256 });
+      const { snapshot: _s, ...out } = row;
+      return route.fulfill(json(out, 201));
     }
     return route.fulfill(json(events.get(id) ?? []));
   });

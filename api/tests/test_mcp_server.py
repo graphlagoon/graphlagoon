@@ -373,7 +373,7 @@ async def test_trace_money_and_find_paths_on_the_case_graph(env, monkeypatch):
     fifo = next(c["expected"] for c in FIXTURE["cases"] if c["name"] == "fifo")
     async with mcp_lifespan(app), _rest(app) as rest:
         token = (await rest.post("/api/agent-tokens", json={
-            "name": "claude", "scopes": ["read", "analyze"]})).json()["token"]
+            "name": "claude", "scopes": ["read", "analyze", "write"]})).json()["token"]
         cid = (await rest.post("/api/investigations", json={"title": "x"})).json()["id"]
         url = f"/api/investigations/{cid}"
         sid = (await rest.post(f"{url}/sources", json={"exploration_id": str(exploration.id)})).json()["id"]
@@ -395,6 +395,12 @@ async def test_trace_money_and_find_paths_on_the_case_graph(env, monkeypatch):
                               seed_node=f"0001-9@{ctx}", allocation="proportional")
             assert out["exits"][f"exchange-gama@{ctx}"] == 1597.73
             assert out["method"]["seedEdgeIds"] == [f"{sid}:e2"]
+            # F4.1: the agent freezes the same run as evidence, stamped with the method.
+            ev = await _tool(client, "pin_evidence", investigation_id=cid, title="E1 · proportional",
+                             kind="trace", params={"seed_node": f"0001-9@{ctx}", "allocation": "proportional"})
+            assert ev["params"] == out["method"] and ev["created_by"] == OWNER
+            frozen = (await rest.get(f"{url}/evidence/{ev['id']}")).json()
+            assert frozen["snapshot"]["exits"][f"exchange-gama@{ctx}"] == 1597.73
             paths = await _tool(client, "find_paths", investigation_id=cid,
                                 source=f"0001-9@{ctx}", target=f"saque-atm@{ctx}")
             assert [n.split("@")[0] for n in paths["paths"][0]["nodes"]] == [
@@ -402,5 +408,5 @@ async def test_trace_money_and_find_paths_on_the_case_graph(env, monkeypatch):
 
         events = (await rest.get(f"{url}/events")).json()
         runs = [e for e in events if e["kind"] == "trace.run"]
-        assert [e["payload"]["allocation"] for e in runs] == ["fifo", "proportional"]
+        assert [e["payload"]["allocation"] for e in runs] == ["fifo", "proportional", "proportional"]
         assert any(e["kind"] == "path.run" for e in events)

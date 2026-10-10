@@ -7,7 +7,8 @@ Layout under the root::
     {investigation_id}/sources/{source_id}.json.gz
     {investigation_id}/artifacts/{artifact_id}/v{n}/{name}
     {investigation_id}/files/{sha256}
-    (evidence/…, exports/… arrive with F4.1, F4.6)
+    {investigation_id}/evidence/{evidence_id}.json.gz
+    (exports/… arrive with F4.6)
 
 Uploads stream into a temp file while the sha256 is computed, and only then
 go to the store with ``save_stream``; nothing is ever overwritten. The paths
@@ -73,6 +74,10 @@ def file_key(investigation_id: UUID, sha256: str) -> str:
     return f"{investigation_id}/files/{sha256}"
 
 
+def evidence_key(investigation_id: UUID, evidence_id: UUID) -> str:
+    return f"{investigation_id}/evidence/{evidence_id}.json.gz"
+
+
 class TooLarge(Exception):
     def __init__(self, max_bytes: int):
         super().__init__(f"Upload exceeds {max_bytes} bytes")
@@ -121,6 +126,14 @@ async def put(key: str, received: Received) -> None:
 async def save_bytes(key: str, data: bytes) -> None:
     """Small payloads built in memory (frozen sources)."""
     await get_store().save(key, data)
+
+
+async def save_new(key: str, data: bytes) -> None:
+    """Like ``save_bytes`` but never overwrites: FileExistsError if ``key`` exists."""
+    store = get_store()
+    if await store.exists(key):
+        raise FileExistsError(key)
+    await store.save(key, data)
 
 
 async def load(key: str) -> Optional[bytes]:

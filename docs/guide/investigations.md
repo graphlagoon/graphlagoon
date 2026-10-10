@@ -162,7 +162,8 @@ edges (forward) or incoming edges (backward) with an amount and a time. The
   and the Sankey then show only the transfers inside it (the exits and the method
   stamp still describe the whole run). Click, or **clear**, to drop the window.
 
-**Save as evidence** stays disabled until frozen evidence ships.
+**Save as evidence** freezes the run (the whole result plus its method stamp) as
+[frozen evidence](#frozen-evidence).
 
 The same trace and paths run on the server, over the unified graph of the
 sources you can read: `POST /api/investigations/{id}/analysis/trace` and
@@ -204,6 +205,24 @@ path.
   node metric (Metrics panel) writes its values into the node properties and
   saves them in the exploration's snapshot. Every case that has the exploration
   as a source gets a journal entry naming the metric and the property.
+
+## Frozen evidence
+
+An evidence is a frozen, immutable copy of something the case relies on:
+
+- **Pin evidence** (canvas toolbar of the workspace) freezes what the current tab
+  shows: its nodes, edges, the roles on them and the selected node;
+- **Save as evidence** on the Follow the money tab freezes the trace result with
+  its method stamp (every parameter of the run).
+
+Each evidence stores a gzipped snapshot in the case storage together with its
+title, parameters, author and time, and the **sha256** of that file. There is no
+edit or delete: the copy is written once, the hash is checked on every read and
+the journal records `evidence.created` with the hash. API:
+`POST /api/investigations/{id}/evidence` with `{title, kind, params, snapshot}`
+(`kind` is `graph_state`, `trace`, `table` or `file`), `GET …/evidence` and
+`GET …/evidence/{eid}` (with the snapshot). Agents pin evidence directly with
+`pin_evidence`.
 
 ## Case files
 

@@ -273,7 +273,8 @@ test.describe('Investigations', () => {
     await expect(exits).toContainText('Bet Delta');
     await expect(page.getByTestId('trace-coverage')).toContainText('(91%)');
     await expect(page.getByTestId('trace-method')).toContainText('FIFO');
-    await expect(page.getByTestId('trace-save-evidence')).toBeDisabled();
+    await page.getByTestId('trace-save-evidence').click();
+    await expect(page.getByText(/Evidence saved · hash/)).toBeVisible();
     await expect(page.getByTestId('workspace-status')).toContainText('8 nodes');
 
     await page.getByTestId('trace-view-sankey').click();

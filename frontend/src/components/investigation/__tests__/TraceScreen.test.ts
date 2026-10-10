@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { nextTick } from 'vue'
 import fixture from '@/__tests__/fixtures/trace/golpe-pix.json'
 import TracePanel from '@/components/investigation/TracePanel.vue'
 import TraceExits from '@/components/investigation/TraceExits.vue'
@@ -8,7 +9,11 @@ import TraceSankey from '@/components/investigation/TraceSankey.vue'
 import { useInvestigationStore } from '@/stores/investigation'
 import { useTraceStore } from '@/stores/trace'
 
-vi.mock('@/services/api', () => ({ api: {} }))
+const api = vi.hoisted(() => ({
+  createInvestigationEvidence: vi.fn(async (_id: string, body: any) => ({ id: 'ev-1', sha256: 'ab'.repeat(32), created_by: 'me', ...body })),
+  getInvestigationEvents: vi.fn(async () => []),
+}))
+vi.mock('@/services/api', () => ({ api }))
 
 const amount = (v: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'BRL' }).format(v)
 
@@ -37,15 +42,24 @@ describe('trace screen (T5)', () => {
     expect(getByTestId('trace-method').textContent).toMatch(/forward · 3 layers · Δ 24 h · min .* · FIFO · stop: .*Saque.* · window .* · seed: src:e2/)
   })
 
-  it('panel: README defaults, exit-like types stop, evidence disabled until F4.1, backward offers LIFO', async () => {
+  it('panel: README defaults, exit-like types stop, save as evidence with the method, backward offers LIFO', async () => {
     const { getByTestId, queryByTestId } = render(TracePanel, { global: { plugins: [pinia] } })
     expect((getByTestId('trace-max-hops') as HTMLInputElement).value).toBe('3')
     expect((getByTestId('trace-dwell') as HTMLInputElement).value).toBe('24')
     for (const t of ['Saque', 'Exchange', 'Aposta', 'BancoExterno']) expect((getByTestId(`trace-stop-${t}`) as HTMLInputElement).checked).toBe(true)
     expect((getByTestId('trace-stop-Conta') as HTMLInputElement).checked).toBe(false)
     const save = getByTestId('trace-save-evidence') as HTMLButtonElement
-    expect(save.disabled).toBe(true)
-    expect(save.parentElement!.getAttribute('title')).toContain('F4.1')
+    expect(save.disabled).toBe(true) // no write access to the case yet
+    const inv = useInvestigationStore()
+    inv.current = { id: 'inv-1', status: 'analise', has_write_access: true, state: {} } as any
+    await nextTick()
+    await fireEvent.click(save)
+    const [id, body] = api.createInvestigationEvidence.mock.calls[0]
+    expect(id).toBe('inv-1')
+    expect(body.kind).toBe('trace')
+    expect(body.params).toMatchObject({ allocation: 'fifo', maxHops: 3, seedEdgeIds: ['src:e2'], engine: 'browser' })
+    expect(body.snapshot.exits['saque-atm@ctx']).toBe(2000)
+    expect(body.snapshot.stamp).toContain('FIFO')
 
     await fireEvent.click(getByTestId('trace-backward'))
     expect((getByTestId('trace-rule-lifo') as HTMLInputElement).checked).toBe(true)
