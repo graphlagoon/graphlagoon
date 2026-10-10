@@ -2,13 +2,12 @@
 /**
  * Typology badges (T9, F4.3): CC 4.001 patterns found in the unified graph. A badge
  * only suggests; clicking it highlights the entities, accepting it writes
- * `typology.accepted` (and so reaches the dossier through the journal).
+ * a confirmed `typology` annotation (05 §7) that reaches the dossier.
  */
 import { computed, ref } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
-import { api } from '@/services/api';
 import { edgeValue } from '@/utils/edgeSemantics';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { runTypologies, type TypologyResult } from '@/utils/typologies';
@@ -30,7 +29,7 @@ const results = computed(() =>
 );
 const found = computed(() => results.value.filter((r) => r.hits.length));
 const accepted = computed(
-  () => new Set(store.events.filter((e) => e.kind === 'typology.accepted').map((e) => (e.payload as { typology?: string }).typology)),
+  () => new Set(store.annotations.filter((a) => a.kind === 'typology' && a.status === 'confirmed').map((a) => String(a.value.typology))),
 );
 
 function entitiesOf(r: TypologyResult): string[] {
@@ -55,15 +54,11 @@ async function accept(r: TypologyResult) {
   if (!store.current || saving.value) return;
   saving.value = r.id;
   try {
-    await api.postInvestigationEvent(store.current.id, 'typology.accepted', {
-      typology: r.id,
-      normRef: r.normRef,
-      label: r.label,
-      params: r.params,
-      hits: r.hits.length,
-      nodes: r.hits.slice(0, 50).map((h) => h.nodeId), // the 16 KB event limit
+    await store.addAnnotation({
+      kind: 'typology',
+      targets: r.hits.map((h) => h.nodeId),
+      value: { typology: r.id, norm_ref: r.normRef, label: r.label, params: r.params, hits: r.hits.length },
     });
-    await store.fetchEvents();
     toast.success(`${r.normRef} accepted`);
   } catch (e) {
     toast.error(getErrorMessage(e, 'Failed to accept the badge'));

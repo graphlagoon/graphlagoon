@@ -193,7 +193,10 @@ export interface AgentToken {
   id: string;
   owner_email: string;
   name: string;
-  scopes: string[];
+  /** "user" (every case the owner reads) or "case" (only investigation_ids). */
+  scope?: 'user' | 'case';
+  investigation_ids?: string[];
+  unmasked?: boolean;
   created_at: string;
   expires_at: string;
   revoked_at?: string | null;

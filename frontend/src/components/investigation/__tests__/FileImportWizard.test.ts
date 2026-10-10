@@ -5,7 +5,7 @@ import { join } from 'path'
 import FileImportWizard from '@/components/investigation/FileImportWizard.vue'
 
 vi.mock('@/services/api', () => ({
-  api: { uploadInvestigationFile: vi.fn(), createFileContext: vi.fn(), setInvestigationFileMapping: vi.fn() },
+  api: { uploadInvestigationItem: vi.fn(), updateInvestigationItem: vi.fn() },
 }))
 
 import { api } from '@/services/api'
@@ -20,12 +20,12 @@ async function pick(getByTestId: (id: string) => HTMLElement, list: File[]) {
 }
 
 beforeEach(() => {
-  vi.mocked(api.uploadInvestigationFile).mockImplementation(async (_c, f, role) => ({ id: `id-${f.name}`, filename: f.name, role }) as any)
-  vi.mocked(api.createFileContext).mockImplementation(async (_c, fid) => ({ file: { id: fid }, source: { id: 's9' } }) as any)
+  vi.mocked(api.uploadInvestigationItem).mockImplementation(async (_c: string, f: File, p: any) => ({ id: `id-${f.name}`, title: f.name, provenance: { filename: f.name }, ...p }) as any)
+  vi.mocked(api.updateInvestigationItem).mockImplementation(async (_c: string, id: string, patch: any) => ({ id, ...patch }) as any)
 })
 
 describe('FileImportWizard', () => {
-  it('detects SIMBA, maps, shows quality and identity, then generates the graph', async () => {
+  it('detects SIMBA, maps, shows quality and identity, then maps the main table onto the canvas', async () => {
     const { getByTestId, findByTestId, emitted } = render(FileImportWizard, { props: { investigationId: 'c1' } })
     await pick(getByTestId, files())
     await waitFor(() => expect((getByTestId('wizard-next') as HTMLButtonElement).disabled).toBe(false))
@@ -42,11 +42,12 @@ describe('FileImportWizard', () => {
     await fireEvent.click(getByTestId('wizard-next')) // → review
     await fireEvent.click(getByTestId('wizard-submit'))
     await waitFor(() => expect(emitted().done).toBeTruthy())
-    expect(api.uploadInvestigationFile).toHaveBeenCalledTimes(5)
-    const [, fid, body] = vi.mocked(api.createFileContext).mock.calls[0]
+    expect(api.uploadInvestigationItem).toHaveBeenCalledTimes(5)
+    expect(vi.mocked(api.uploadInvestigationItem).mock.calls[0][2]).toEqual({ kind: 'table', subkind: 'csv' })
+    const [, fid, body] = vi.mocked(api.updateInvestigationItem).mock.calls[0]
     expect(fid).toBe('id-CASO1_EXTRATO.TXT')
-    expect(body.mapping.name).toBe('SIMBA v3.1')
-    expect(body.file_ids).toHaveLength(4)
+    expect(body.mapping).toMatchObject({ as: 'graph', spec: { name: 'SIMBA v3.1' } })
+    expect((body.mapping as any).extra_item_ids).toHaveLength(4)
     expect(await findByTestId('file-import-wizard')).toBeTruthy()
   })
 

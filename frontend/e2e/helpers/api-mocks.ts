@@ -1115,34 +1115,54 @@ export async function seedAdmin(
 }
 
 /**
- * Seed investigations (cases) and their sources. Call AFTER setupAPIMocks.
- * `POST /investigations` creates a case the other routes then serve; `POST .../sources`
- * echoes an accessible source (recorded in `added`) and adds it to the case, with
- * title and context taken from `explorations` when the id is there.
- * State, notes and the journal are kept in memory so the workspace round-trips.
+ * Seed investigations (cases) and their material (05 §1). Call AFTER setupAPIMocks.
+ * `POST /investigations` creates a case the other routes then serve; `POST .../items`
+ * records the request in `added` and keeps the item (an exploration reference gets its
+ * title and context from `explorations` when the id is there). Items, annotations,
+ * the brief and the journal are kept in memory so the case round-trips.
+ * `snapshots` answers `GET …/items/{id}/snapshot` by item id.
  */
 export async function seedInvestigations(
   page: Page,
   investigations: any[],
-  sources: Record<string, any[]> = {},
+  items: Record<string, any[]> = {},
   explorations: any[] = [],
+  snapshots: Record<string, any> = {},
 ) {
   const added: any[] = [];
   const cases = new Map<string, any>(investigations.map((i) => [i.id, i]));
-  const srcs = new Map<string, any[]>(investigations.map((i) => [i.id, [...(sources[i.id] ?? [])]]));
-  const notes = new Map<string, any[]>();
+  const material = new Map<string, any[]>(investigations.map((i) => [i.id, [...(items[i.id] ?? [])]]));
+  const annotations = new Map<string, any[]>();
   const events = new Map<string, any[]>();
-  const evidence = new Map<string, any[]>();
+  const briefs = new Map<string, string>();
   const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
-  // The server recomputes the deadline on every status change (45 days per open phase).
+  const now = () => new Date().toISOString();
+  // The server recomputes the deadline on every status change (Pix/MED: 45 + 45 days).
   const deadline = (inv: any) => {
-    const phase = ({ selecao: 'selection', analise: 'analysis' } as Record<string, string>)[inv.status];
-    inv.deadline = phase ? { phase, due_at: new Date(Date.now() + 45 * 864e5).toISOString(), days_left: 45 } : null;
+    const phased = inv.kind_preset === 'pix_med' || inv.deadline_days;
+    inv.deadline = phased && (inv.status === 'open' || inv.status === 'analysis')
+      ? { phase: inv.status, due_at: new Date(Date.now() + 45 * 864e5).toISOString(), days_left: inv.status === 'analysis' ? 90 : 45 }
+      : null;
   };
   const journal = (id: string, kind: string, payload: Record<string, unknown>) => {
     const list = events.get(id) ?? [];
-    list.push({ id: `ev-${list.length + 1}`, at: new Date().toISOString(), actor_email: 'e2e@test.com', kind, payload, hash: 'h' });
+    list.push({ id: `ev-${list.length + 1}`, at: now(), actor_email: 'e2e@test.com', actor_kind: 'human', kind, payload });
     events.set(id, list);
+  };
+  const base = (id: string, body: any) => ({
+    id, tags: [], status: 'confirmed', author_kind: 'human', author_email: 'e2e@test.com', provenance: {},
+    current_version: 0, position: 0, accessible: true, pinned: [], created_at: now(), ...body,
+  });
+  const version = (item: any, run?: any) => ({
+    id: `v-${item.id}-${item.current_version + 1}`, item_id: item.id, version: item.current_version + 1,
+    sha256: `${item.current_version + 1}`.padStart(64, 'e'), size_bytes: 1, content_type: 'application/json', has_text: true,
+    run: run ?? null, created_by: 'e2e@test.com', author_kind: 'human', created_at: now(),
+  });
+  const counts = (i: any) => {
+    const list = material.get(i.id) ?? [];
+    const notes = annotations.get(i.id) ?? [];
+    const suggested = [...list, ...notes].filter((x) => x.status === 'suggested').length;
+    return { item_count: i.item_count ?? list.length, suggested_count: suggested || (i.suggested_count ?? 0) };
   };
 
   await page.route('**/graphlagoon/api/investigations', (route) => {
@@ -1150,40 +1170,53 @@ export async function seedInvestigations(
       const body = route.request().postDataJSON();
       const inv = {
         id: cases.has('inv-new') ? `inv-new-${cases.size}` : 'inv-new',
-        status: 'selecao',
+        status: 'open',
+        kind_preset: 'livre',
         owner_email: 'e2e@test.com',
+        tags: [],
+        settings: {},
         state: {},
         shared_with: [],
         has_write_access: true,
         can_manage: true,
-        created_at: new Date().toISOString(),
+        created_at: now(),
         ...body,
       };
+      deadline(inv);
       cases.set(inv.id, inv);
-      srcs.set(inv.id, []);
+      material.set(inv.id, []);
       journal(inv.id, 'case.created', { title: inv.title });
       route.fulfill(json(inv, 201));
     } else {
-      route.fulfill(json([...cases.values()].map((i) => ({ ...i, source_count: i.source_count ?? srcs.get(i.id)?.length ?? 0 }))));
+      route.fulfill(json([...cases.values()].map((i) => ({ ...i, ...counts(i) }))));
     }
   });
-  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+(\/(sources|state|notes|events|evidence|decision|export|share|reopen|files)(\/[^/?]+)?)?(\?.*)?$/, (route) => {
+
+  const CASE_RE = /\/graphlagoon\/api\/investigations\/([^/?]+)(?:\/([^/?]+))?(?:\/([^/?]+))?(?:\/([^/?]+))?(?:\/([^/?]+))?(?:\?.*)?$/;
+  await page.route(/\/graphlagoon\/api\/investigations\/[^/?]+(\/.*)?(\?.*)?$/, (route) => {
     const req = route.request();
-    const [, id, sub, rest] = new URL(req.url()).pathname.match(/investigations\/([^/]+)(?:\/(\w+))?(?:\/([^/]+))?$/)!;
+    const url = new URL(req.url());
+    const [, id, sub, a, b] = url.pathname.match(CASE_RE)!;
     const inv = cases.get(id);
     if (!inv) return route.fulfill(json({ detail: { error: { code: 'INVESTIGATION_NOT_FOUND' } } }, 404));
     const method = req.method();
+    const list = material.get(id)!;
+    const notes = () => {
+      const l = annotations.get(id) ?? [];
+      annotations.set(id, l);
+      return l;
+    };
+
     if (!sub) {
       if (method === 'PATCH') {
-        // F1: explicit transitions; the server answers 409 to anything else.
+        // Explicit transitions; the server answers 409 to anything else.
         const body = req.postDataJSON();
-        const allowed: Record<string, string[]> = { selecao: ['analise', 'arquivado'], analise: ['selecao', 'arquivado'], decidido: ['arquivado'], arquivado: ['analise'] };
+        const allowed: Record<string, string[]> = { open: ['analysis', 'archived'], analysis: ['open', 'archived'], decided: ['archived'], archived: ['analysis'] };
         if (body.status && body.status !== inv.status && !allowed[inv.status]?.includes(body.status)) {
           return route.fulfill(json({ detail: { error: { code: 'INVALID_STATUS_TRANSITION', message: 'invalid transition' } } }, 409));
         }
-        Object.assign(inv, body, { updated_at: new Date().toISOString() });
-        if (body.status === 'analise' && !inv.selected_at) inv.selected_at = new Date().toISOString();
-        if (body.status) deadline(inv);
+        Object.assign(inv, body, { updated_at: now() });
+        deadline(inv);
         journal(id, 'case.updated', body);
         return route.fulfill(json(inv));
       }
@@ -1193,95 +1226,35 @@ export async function seedInvestigations(
       }
       return route.fulfill(json(inv));
     }
-    if (sub === 'files') return route.fulfill(json([])); // the store fetches the case files on open (34f4e53)
     if (sub === 'share') {
       if (method === 'POST') {
         const body = req.postDataJSON();
         inv.shared_with = [...(inv.shared_with ?? []).filter((s: any) => s.email !== body.email), body];
-        journal(id, 'case.shared', { with: body.email, permission: body.permission });
+        journal(id, 'case.shared', { with: body.email, role: body.role });
         return route.fulfill(json({ status: 'shared' }));
       }
-      const email = decodeURIComponent(rest ?? '');
+      const email = decodeURIComponent(a ?? '');
       inv.shared_with = (inv.shared_with ?? []).filter((s: any) => s.email !== email);
       journal(id, 'case.unshared', { with: email });
       return route.fulfill(json({ status: 'removed' }));
     }
     if (sub === 'reopen') {
-      if (inv.status !== 'decidido') return route.fulfill(json({ detail: { error: { code: 'INVALID_STATUS_TRANSITION' } } }, 409));
-      journal(id, 'case.reopened', { previous_frozen_hash: inv.frozen_hash, previous_decision: inv.decision, to: 'analise' });
-      Object.assign(inv, { status: 'analise', decision: null, frozen_hash: null, frozen_at: null });
+      if (inv.status !== 'decided') return route.fulfill(json({ detail: { error: { code: 'INVALID_STATUS_TRANSITION' } } }, 409));
+      journal(id, 'case.reopened', { previous_frozen_hash: inv.frozen_hash, previous_decision: inv.decision, to: 'analysis' });
+      Object.assign(inv, { status: 'analysis', decision: null, frozen_hash: null, frozen_at: null });
       deadline(inv);
       return route.fulfill(json(inv));
-    }
-    if (sub === 'sources' && rest && method === 'DELETE') {
-      const list = srcs.get(id) ?? [];
-      const gone = list.find((s) => s.id === rest);
-      srcs.set(id, list.filter((s) => s.id !== rest));
-      journal(id, 'source.removed', { title: gone?.title_snapshot });
-      return route.fulfill(json({ status: 'removed' }));
-    }
-    if (sub === 'sources') {
-      if (method !== 'POST') return route.fulfill(json(srcs.get(id) ?? []));
-      const body = req.postDataJSON();
-      const list = srcs.get(id)!;
-      const exp = explorations.find((e) => e.id === body.exploration_id);
-      const source = {
-        id: `src-${added.length + 1}`,
-        kind: 'exploration',
-        position: list.length,
-        title_snapshot: exp?.title ?? body.exploration_id,
-        accessible: true,
-        exploration_id: body.exploration_id,
-        context_id: exp?.graph_context_id,
-        mode: body.mode,
-      };
-      added.push({ investigation_id: id, ...body });
-      list.push(source);
-      journal(id, 'source.added', { title: source.title_snapshot, mode: body.mode });
-      return route.fulfill(json(source, 201));
-    }
-    if (sub === 'state') {
-      const roles = { ...(inv.state?.roles ?? {}) };
-      for (const [entity, role] of Object.entries(req.postDataJSON().roles ?? {})) {
-        if (role) roles[entity] = role;
-        else delete roles[entity];
-        journal(id, 'role.changed', { entity, to: role });
-      }
-      inv.state = { ...inv.state, roles };
-      return route.fulfill(json(inv));
-    }
-    if (sub === 'notes') {
-      const list = notes.get(id) ?? [];
-      notes.set(id, list);
-      if (method !== 'POST') return route.fulfill(json(list));
-      const note = { id: `note-${list.length + 1}`, author_email: 'e2e@test.com', created_at: new Date().toISOString(), ...req.postDataJSON() };
-      list.push(note);
-      journal(id, 'note.created', { anchor: note.anchor, body: note.body });
-      return route.fulfill(json(note, 201));
-    }
-    if (sub === 'evidence') {
-      const list = evidence.get(id) ?? [];
-      evidence.set(id, list);
-      if (method !== 'POST') return route.fulfill(json(list.map(({ snapshot: _s, ...e }) => e)));
-      const body = req.postDataJSON();
-      const sha256 = `${list.length + 1}`.padStart(64, 'e');
-      const row = { id: `evi-${list.length + 1}`, sha256, created_by: 'e2e@test.com', created_at: new Date().toISOString(), ...body };
-      list.push(row);
-      journal(id, 'evidence.created', { evidence_id: row.id, title: row.title, kind: row.kind, sha256 });
-      const { snapshot: _s, ...out } = row;
-      return route.fulfill(json(out, 201));
     }
     if (sub === 'decision') {
-      const decided_at = new Date().toISOString();
+      const decided_at = now();
       inv.decision = { ...req.postDataJSON(), decided_by: 'e2e@test.com', decided_at };
-      Object.assign(inv, { status: 'decidido', frozen_hash: 'f'.repeat(60) + 'beef', frozen_at: decided_at, has_write_access: true });
+      Object.assign(inv, { status: 'decided', frozen_hash: 'f'.repeat(60) + 'beef', frozen_at: decided_at, has_write_access: true });
       deadline(inv);
-      for (const s of srcs.get(id) ?? []) s.mode = 'frozen';
-      journal(id, 'decision.recorded', { ...inv.decision, frozen_sources: [] });
+      journal(id, 'decision.recorded', inv.decision);
       return route.fulfill(json(inv));
     }
     if (sub === 'export') {
-      const format = new URL(req.url()).searchParams.get('format');
+      const format = url.searchParams.get('format');
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1289,6 +1262,155 @@ export async function seedInvestigations(
         body: JSON.stringify({ format }),
       });
     }
+    if (sub === 'brief') {
+      if (method === 'PUT') {
+        const text = req.postDataJSON().text;
+        briefs.set(id, text);
+        let item = list.find((i) => i.subkind === 'brief');
+        if (!item) {
+          item = base(`brief-${id}`, { kind: 'document', subkind: 'brief', title: 'Brief' });
+          list.push(item);
+        }
+        item.latest = version(item);
+        item.current_version += 1;
+        journal(id, 'item.version_added', { item_id: item.id, title: 'Brief', version: item.current_version });
+        return route.fulfill(json({ item, text }));
+      }
+      return route.fulfill(json({ item: list.find((i) => i.subkind === 'brief') ?? null, text: briefs.get(id) ?? '' }));
+    }
+    if (sub === 'graph') return route.fulfill(json({ nodes: [], edges: [], restricted_sources: 0 }));
+    if (sub === 'search') return route.fulfill(json([]));
+    if (sub === 'analysis') {
+      if (a === 'er') return route.fulfill(json([]));
+      return route.fulfill(json({ paths: [], typologies: [], method: {} }));
+    }
+
+    if (sub === 'items') {
+      if (!a) {
+        if (method !== 'POST') {
+          const kind = url.searchParams.get('kind');
+          return route.fulfill(json(list.filter((i) => !i.deleted_at && (!kind || i.kind === kind))));
+        }
+        const isJson = (req.headers()['content-type'] ?? '').startsWith('application/json');
+        const body = isJson ? req.postDataJSON() : { kind: url.searchParams.get('kind'), subkind: url.searchParams.get('subkind'), title: url.searchParams.get('filename'), provenance: { filename: url.searchParams.get('filename') } };
+        const exp = body.exploration_id ? explorations.find((e) => e.id === body.exploration_id) : null;
+        const item = base(`item-${added.length + 1}`, {
+          ...body,
+          title: body.title ?? exp?.title ?? body.exploration_id ?? `${body.kind}/${body.subkind}`,
+          context_id: body.context_id ?? exp?.graph_context_id ?? null,
+          description: body.description ?? null,
+          position: list.length,
+        });
+        delete item.content;
+        delete item.content_json;
+        if (body.content !== undefined || body.content_json !== undefined || !isJson) {
+          item.latest = version(item);
+          item.current_version = 1;
+        }
+        added.push({ investigation_id: id, ...body });
+        list.push(item);
+        journal(id, 'item.created', { item_id: item.id, kind: item.kind, subkind: item.subkind, title: item.title, status: item.status });
+        return route.fulfill(json(item, 201));
+      }
+      const item = list.find((i) => i.id === a);
+      if (!item) return route.fulfill(json({ detail: { error: { code: 'ITEM_NOT_FOUND' } } }, 404));
+      if (!b) {
+        if (method === 'PATCH') {
+          Object.assign(item, req.postDataJSON());
+          journal(id, 'item.updated', { item_id: item.id, title: item.title, fields: Object.keys(req.postDataJSON()) });
+          return route.fulfill(json(item));
+        }
+        if (method === 'DELETE') {
+          item.deleted_at = now();
+          journal(id, 'item.deleted', { item_id: item.id, kind: item.kind, title: item.title });
+          return route.fulfill(json({ status: 'deleted' }));
+        }
+        return route.fulfill(json(item));
+      }
+      if (b === 'snapshot') {
+        const payload = snapshots[item.id] ?? snapshots[item.exploration_id] ?? { snapshot: null };
+        return route.fulfill(json({ item_id: item.id, title: item.title, context_id: item.context_id, identity_keys: [], edge_semantics: null, ...payload }));
+      }
+      if (b === 'versions') {
+        if (method === 'POST') {
+          item.latest = version(item);
+          item.current_version += 1;
+          return route.fulfill(json(item, 201));
+        }
+        return route.fulfill(json(item.latest ? [item.latest] : []));
+      }
+      if (b === 'pin') {
+        if (!item.latest) {
+          item.latest = version(item);
+          item.current_version = 1;
+        }
+        const pinned = { ...item.latest, pinned_at: now(), pinned_by: 'e2e@test.com', pin_label: req.postDataJSON()?.label ?? null };
+        item.pinned = [...item.pinned, pinned];
+        journal(id, 'item.pinned', { item_id: item.id, title: item.title, version: pinned.version, sha256: pinned.sha256, label: pinned.pin_label });
+        return route.fulfill(json(pinned));
+      }
+      if (b === 'confirm' || b === 'reject') {
+        item.status = b === 'confirm' ? 'confirmed' : 'rejected';
+        journal(id, `item.${item.status}`, { item_id: item.id, title: item.title });
+        return route.fulfill(json(item));
+      }
+      if (b === 'run') {
+        item.latest = version(item, { statement_id: 'stmt-1', row_count: 12, duration_ms: 310, params: req.postDataJSON()?.parameters ?? {}, run_by: 'e2e@test.com', author_kind: 'human', output: 'table' });
+        item.current_version += 1;
+        journal(id, 'item.version_added', { item_id: item.id, title: item.title, version: item.current_version, run: item.latest.run });
+        return route.fulfill(json(item));
+      }
+      if (b === 'text') return route.fulfill(json({ text: '', version: item.latest }));
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    }
+
+    if (sub === 'annotations') {
+      const l = notes();
+      if (!a) {
+        if (method !== 'POST') {
+          const kind = url.searchParams.get('kind');
+          const status = url.searchParams.get('status');
+          return route.fulfill(json(l.filter((x) => (!kind || x.kind === kind) && (!status || x.status === status))));
+        }
+        const body = req.postDataJSON();
+        const row = { id: `ann-${l.length + 1}`, targets: [], value: {}, reason: null, status: 'confirmed', author_kind: 'human', author_email: 'e2e@test.com', created_at: now(), ...body };
+        if (row.kind === 'hypothesis') row.value = { status: 'open', ...row.value };
+        if (row.kind === 'role') {
+          for (const old of l.filter((x) => x.kind === 'role' && x.status === 'confirmed' && x.targets[0] === row.targets[0])) l.splice(l.indexOf(old), 1);
+        }
+        if (row.kind === 'hypothesis_status') {
+          const h = l.find((x) => x.id === row.targets[0]);
+          if (h) h.value = { ...h.value, status: row.value.status };
+        }
+        l.push(row);
+        journal(id, `${row.kind}.set`, { annotation_id: row.id, targets: row.targets, value: row.value });
+        return route.fulfill(json(row, 201));
+      }
+      const row = l.find((x) => x.id === a);
+      if (!row) return route.fulfill(json({ detail: { error: { code: 'ANNOTATION_NOT_FOUND' } } }, 404));
+      if (b === 'confirm' || b === 'reject') {
+        row.status = b === 'confirm' ? 'confirmed' : 'rejected';
+        row.confirmed_by = 'e2e@test.com';
+        if (row.status === 'confirmed' && row.kind === 'role') {
+          for (const old of l.filter((x) => x.kind === 'role' && x.status === 'confirmed' && x.id !== row.id && x.targets[0] === row.targets[0])) l.splice(l.indexOf(old), 1);
+        }
+        journal(id, `${row.kind}.${row.status}`, { annotation_id: row.id, targets: row.targets, value: row.value });
+        return route.fulfill(json(row));
+      }
+      if (method === 'PATCH') {
+        const body = req.postDataJSON();
+        if (body.value) row.value = { ...row.value, ...body.value };
+        if (body.targets) row.targets = body.targets;
+        return route.fulfill(json(row));
+      }
+      if (method === 'DELETE') {
+        l.splice(l.indexOf(row), 1);
+        journal(id, `${row.kind}.removed`, { annotation_id: row.id });
+        return route.fulfill(json({ status: 'deleted' }));
+      }
+      return route.fulfill(json(row));
+    }
+
     if (sub === 'events' && method === 'POST') {
       const body = req.postDataJSON();
       journal(id, body.kind, body.payload);
@@ -1296,72 +1418,5 @@ export async function seedInvestigations(
     }
     return route.fulfill(json(events.get(id) ?? []));
   });
-  // Hypotheses (F4.2): kept in the case state, like the server.
-  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+\/hypotheses(\/[^/?]+)?(\?.*)?$/, (route) => {
-    const req = route.request();
-    const [, id, hid] = new URL(req.url()).pathname.match(/investigations\/([^/]+)\/hypotheses(?:\/([^/]+))?$/)!;
-    const inv = cases.get(id);
-    if (!inv) return route.fulfill(json({ detail: { error: { code: 'INVESTIGATION_NOT_FOUND' } } }, 404));
-    const list = [...(inv.state?.hypotheses ?? [])];
-    const body = req.postDataJSON();
-    if (!hid) {
-      const h = { id: `H${list.length + 1}`, status: 'aberta', evidence_for: [], evidence_against: [], ...body };
-      list.push(h);
-      journal(id, 'hypothesis.created', { id: h.id, text: h.text, status: h.status });
-    } else {
-      const i = list.findIndex((h: any) => h.id === hid);
-      journal(id, 'hypothesis.updated', { id: hid, from_status: list[i].status, ...body });
-      list[i] = { ...list[i], ...body };
-    }
-    inv.state = { ...inv.state, hypotheses: list };
-    return route.fulfill(json(inv, hid ? 200 : 201));
-  });
-  // Case space (FA.2): raw-body upload, versions, content and approval, in memory.
-  const artifacts = new Map<string, any[]>();
-  await page.route(/\/graphlagoon\/api\/investigations\/[^/]+\/artifacts(\/.*)?(\?.*)?$/, (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    const [, id, rest = ''] = url.pathname.match(/investigations\/([^/]+)\/artifacts\/?(.*)$/)!;
-    const list = artifacts.get(id) ?? [];
-    artifacts.set(id, list);
-    const version = (n: number) => ({
-      version: n,
-      sha256: `sha${n}`.padEnd(64, '0'),
-      size_bytes: req.postDataBuffer()?.length ?? 0,
-      content_type: 'text/markdown',
-      status: 'draft',
-      actor: { kind: 'human', email: 'e2e@test.com' },
-      source_evidence_ids: [],
-      created_at: new Date().toISOString(),
-    });
-    const contents = (a: any, n: number) => (a.contents ??= {})[n];
-    const out = ({ contents: _c, ...a }: any) => a;
-    if (!rest) {
-      if (req.method() !== 'POST') return route.fulfill(json(list.map(out)));
-      const name = url.searchParams.get('name') ?? 'file';
-      const a: any = { id: `art-${list.length + 1}`, name, kind: 'doc', current_version: 1, download_only: false, versions: [version(1)] };
-      a.contents = { 1: req.postData() ?? '' };
-      list.unshift(a);
-      journal(id, 'artifact.created', { name, version: 1 });
-      return route.fulfill(json(out(a), 201));
-    }
-    const [aid, , n, action] = rest.split('/');
-    const a = list.find((x) => x.id === aid);
-    if (!a) return route.fulfill(json({ detail: { error: { code: 'ARTIFACT_NOT_FOUND' } } }, 404));
-    if (!n) {
-      a.current_version += 1;
-      a.versions.unshift(version(a.current_version));
-      a.contents[a.current_version] = req.postData() ?? '';
-      journal(id, 'artifact.version_added', { name: a.name, version: a.current_version });
-      return route.fulfill(json(out(a), 201));
-    }
-    if (action === 'approve') {
-      const v = a.versions.find((x: any) => x.version === Number(n));
-      Object.assign(v, { status: 'approved', approved_by: 'e2e@test.com', approved_at: new Date().toISOString() });
-      journal(id, 'artifact.approved', { name: a.name, version: v.version });
-      return route.fulfill(json(out(a)));
-    }
-    return route.fulfill({ status: 200, contentType: 'text/markdown', body: contents(a, Number(n)) ?? '' });
-  });
-  return { added, artifacts };
+  return { added, material, annotations };
 }

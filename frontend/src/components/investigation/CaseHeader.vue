@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Case header (F1, 05 §3): inline title/description/typology, status select with
- * the allowed transitions, assignee, deadline, and the actions (Dossier, Decide,
- * Share, "…" with reopen and delete). Edits go through the store, which keeps
- * the queue row in sync.
+ * Case header (F1, 05 §3): inline title/description, case type, status select with
+ * the allowed transitions, assignee, deadline, suggestions counter and the actions
+ * (Dossier, Decide, Share, "…" with reopen and delete). Edits go through the
+ * store, which keeps the queue row in sync.
  */
 import { computed, nextTick, ref } from 'vue';
 import { useRouter } from 'vue-router';
@@ -11,19 +11,18 @@ import { useInvestigationStore } from '@/stores/investigation';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
 import {
+  KIND_PRESET_LABELS,
   STATUS_LABELS,
   STATUS_TRANSITIONS,
   URGENT_DAYS,
   caseNumber,
   deadlineOf,
 } from '@/utils/investigationStatus';
-import type { InvestigationStatus, UpdateInvestigationRequest } from '@/types/investigation';
+import type { InvestigationStatus, KindPreset, UpdateInvestigationRequest } from '@/types/investigation';
 import ShareDialog from '@/components/investigation/ShareDialog.vue';
 import DecideDialog from '@/components/investigation/DecideDialog.vue';
 
-const props = defineProps<{
-  pendingProposals: number;
-  openMatches: number;
+defineProps<{
   /** Extra line after the title (e.g. "› Follow the money"). */
   subtitle?: string | null;
 }>();
@@ -33,14 +32,15 @@ const router = useRouter();
 const toast = useToast();
 
 const inv = computed(() => store.current!);
-const canEdit = computed(() => inv.value.has_write_access && inv.value.status !== 'decidido');
+const canEdit = computed(() => inv.value.has_write_access && inv.value.status !== 'decided');
+const suggested = computed(() => store.suggestions.length);
 const deadline = computed(() => deadlineOf(inv.value));
 const statusOptions = computed<InvestigationStatus[]>(() => [
   inv.value.status,
   ...STATUS_TRANSITIONS[inv.value.status].filter((s) => s !== inv.value.status),
 ]);
 
-type Field = 'title' | 'description' | 'typology' | 'assignee_email';
+type Field = 'title' | 'description' | 'assignee_email';
 const editing = ref<Field | null>(null);
 const draft = ref('');
 const fieldInput = ref<HTMLInputElement | HTMLTextAreaElement | null>(null);
@@ -85,7 +85,7 @@ function cancel() {
 
 function onStatus(event: Event) {
   const status = (event.target as HTMLSelectElement).value as InvestigationStatus;
-  if (status === inv.value.status || status === 'decidido') return;
+  if (status === inv.value.status || status === 'decided') return;
   void save({ status }, 'Failed to change the status');
 }
 
@@ -115,6 +115,11 @@ async function remove() {
     confirmDelete.value = false;
     showMenu.value = false;
   }
+}
+
+function onPreset(event: Event) {
+  const kind_preset = (event.target as HTMLSelectElement).value as KindPreset;
+  if (kind_preset !== inv.value.kind_preset) void save({ kind_preset }, 'Failed to change the case type');
 }
 
 function toggleMenu() {
@@ -154,7 +159,7 @@ function toggleMenu() {
         class="status-select"
         :class="`status-${inv.status}`"
         :value="inv.status"
-        :disabled="!inv.has_write_access || busy || inv.status === 'decidido'"
+        :disabled="!inv.has_write_access || busy || inv.status === 'decided'"
         data-testid="case-status"
         @change="onStatus"
       >
@@ -169,6 +174,8 @@ function toggleMenu() {
       >
         ⏱ {{ deadline.phase }} · {{ deadline.daysLeft }} d left
       </span>
+
+      <span v-if="suggested" class="badge suggested" data-testid="suggested-badge">● {{ suggested }} {{ suggested === 1 ? 'suggestion' : 'suggestions' }}</span>
 
       <span class="actions">
         <RouterLink :to="`/investigations/${inv.id}/dossier`" class="btn btn-outline btn-sm" data-testid="dossier-link">
@@ -195,14 +202,9 @@ function toggleMenu() {
             …
           </button>
           <div v-if="showMenu" class="menu" data-testid="case-menu-list">
-            <RouterLink :to="`/investigations/${inv.id}/matches`" class="menu-item" data-testid="matches-link">
-              Matches · {{ props.openMatches }}
-            </RouterLink>
-            <RouterLink :to="`/investigations/${inv.id}/agents`" class="menu-item" data-testid="proposals-counter">
-              Agents · {{ props.pendingProposals }} {{ props.pendingProposals === 1 ? 'proposal' : 'proposals' }}
-            </RouterLink>
+            <RouterLink to="/settings/agents" class="menu-item" data-testid="agents-link">Agent tokens…</RouterLink>
             <button
-              v-if="inv.status === 'decidido' && inv.has_write_access"
+              v-if="inv.status === 'decided' && inv.has_write_access"
               class="menu-item"
               :disabled="busy"
               data-testid="case-reopen"
@@ -227,21 +229,10 @@ function toggleMenu() {
 
     <div class="row meta">
       <span class="field">
-        <span class="muted">Typology</span>
-        <input
-          v-if="editing === 'typology'"
-          ref="fieldInput"
-          v-model="draft"
-          class="form-control meta-input"
-          data-testid="case-typology-input"
-          placeholder="Golpe Pix, lavagem…"
-          @keydown.enter.prevent="commit"
-          @keydown.esc.prevent="cancel"
-          @blur="commit"
-        />
-        <button v-else class="chip" :disabled="!canEdit" data-testid="case-typology" @click="edit('typology')">
-          {{ inv.typology || (canEdit ? 'set…' : '—') }}
-        </button>
+        <span class="muted">Type</span>
+        <select class="chip" :value="inv.kind_preset" :disabled="!canEdit" data-testid="case-preset" @change="onPreset">
+          <option v-for="(label, key) in KIND_PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
+        </select>
       </span>
       <span class="field">
         <span class="muted">Assignee</span>
@@ -261,7 +252,7 @@ function toggleMenu() {
           {{ inv.assignee_email || inv.owner_email }}
         </button>
       </span>
-      <span v-if="inv.origin" class="field"><span class="muted">Origin</span><span>{{ inv.origin }}</span></span>
+      <span v-if="inv.tags?.length" class="field"><span class="muted">Tags</span><span>{{ inv.tags.join(', ') }}</span></span>
       <span class="field description">
         <textarea
           v-if="editing === 'description'"
@@ -348,13 +339,13 @@ h1.editable:hover {
   color: var(--color-primary);
 }
 
-.status-select.status-analise {
+.status-select.status-analysis {
   background: #e0e7ff;
   color: #3730a3;
   font-weight: 600;
 }
 
-.status-select.status-decidido {
+.status-select.status-decided {
   background: #ccfbf1;
   color: #115e59;
 }
@@ -467,5 +458,10 @@ h1.editable:hover {
   padding: 2px 6px;
   font-size: 12px;
   min-width: 200px;
+}
+.badge.suggested {
+  background: #fffbeb;
+  border: 1px solid #b45309;
+  color: #b45309;
 }
 </style>

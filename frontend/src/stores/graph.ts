@@ -2658,7 +2658,7 @@ export const useGraphStore = defineStore('graph', () => {
     currentExploration.value = await api.updateExploration(exp.id, { snapshot: buildGraphSnapshot() });
 
     const cases = (await api.getInvestigations({ exploration_id: exp.id })).filter(
-      (c) => c.has_write_access && c.status !== 'decidido',
+      (c) => c.has_write_access && c.status !== 'decided',
     );
     const payload = {
       metric: metric.name,

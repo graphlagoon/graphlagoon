@@ -13,10 +13,10 @@ const investigation = useInvestigationStore();
 const toast = useToast();
 const saving = ref(false);
 const canSave = computed(
-  () => !!trace.result && !!investigation.current?.has_write_access && investigation.current.status !== 'decidido',
+  () => !!trace.result && !!investigation.current?.has_write_access && investigation.current.status !== 'decided',
 );
 
-/** Freezes the run (F4.1): the whole result as the snapshot, its method stamp as the params. */
+/** Keeps the run as a pinned table item of the case: the result as content, its method stamp as provenance. */
 async function saveEvidence() {
   const r = trace.result;
   if (!r) return;

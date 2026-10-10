@@ -37,6 +37,7 @@ import {
   FlaskConical,
   LogOut,
   Briefcase,
+  Bot,
 } from 'lucide-vue-next';
 
 const route = useRoute();
@@ -403,6 +404,15 @@ function handleExportPng(options: ExportPNGOptions) {
           >
             <DatabaseZap :size="14" /> Precomputed graphs
           </button>
+
+          <RouterLink
+            to="/settings/agents"
+            class="user-menu-item"
+            data-testid="nav-agents"
+            @click="showUserMenu = false"
+          >
+            <Bot :size="14" /> Agents
+          </RouterLink>
 
           <RouterLink
             v-if="devMode"

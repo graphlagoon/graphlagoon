@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * Investigation workspace (T2): a tab per exploration plus the unified view, all
- * rendered by the regular graph store and canvas in investigation mode. Node ids
- * are unified ids in every tab, so the selection follows the entity across tabs.
+ * The case screen (05 §3): one canvas fed by the case's graph items (checked
+ * "on canvas" in the material list), an inspector with the entity's roles,
+ * suggestions, notes and origin, and the journal. Everything that enters the
+ * case is an item; roles, tags and matches are annotations.
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Banknote, Lock, Maximize2, Plus, Route } from 'lucide-vue-next';
+import { Banknote, Maximize2, Plus, Route } from 'lucide-vue-next';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
@@ -17,23 +18,16 @@ import { useToast } from '@/composables/useToast';
 import { formatAmount } from '@/utils/edgeSemantics';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
 import { caseNodeLabel, hiddenRawDocumentKeys, shortId } from '@/utils/caseLabels';
-import { provenanceRingColors, roleColorMap, ROLE_COLORS, ROLE_LABELS } from '@/utils/graphAppearance';
+import { provenanceRingColors, roleColor, roleColorMap, ROLE_LABELS } from '@/utils/graphAppearance';
 import { describeEvent } from '@/utils/investigationEvents';
 import { getErrorMessage } from '@/utils/errorMessage';
-import {
-  baseSourceId,
-  mergedEntityCounts,
-  nodeSourceIds,
-  type NodeOrigin,
-  type UnifiedNode,
-} from '@/utils/unifyGraph';
+import { baseSourceId, mergedEntityCounts, nodeSourceIds, type NodeOrigin, type UnifiedNode } from '@/utils/unifyGraph';
 import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import LayoutPanel from '@/components/LayoutPanel.vue';
-import SourcesPanel from '@/components/investigation/SourcesPanel.vue';
 import CaseHeader from '@/components/investigation/CaseHeader.vue';
+import CaseItemsPanel from '@/components/investigation/CaseItemsPanel.vue';
 import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
-import ArtifactsSpace from '@/components/investigation/ArtifactsSpace.vue';
-import CaseFiles from '@/components/investigation/CaseFiles.vue';
+import FileImportWizard from '@/components/investigation/FileImportWizard.vue';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import TracePanel from '@/components/investigation/TracePanel.vue';
 import TypologyBadgesPanel from '@/components/investigation/TypologyBadgesPanel.vue';
@@ -41,13 +35,10 @@ import TraceExits from '@/components/investigation/TraceExits.vue';
 import TraceSankey from '@/components/investigation/TraceSankey.vue';
 import SwimlaneTimeline from '@/components/investigation/SwimlaneTimeline.vue';
 import PathBar from '@/components/investigation/PathBar.vue';
-import { api } from '@/services/api';
 import type { GraphResponse } from '@/types/graph';
-import type { InvestigationRole } from '@/types/investigation';
+import type { CaseAnnotation, CaseItem } from '@/types/investigation';
 
 const props = defineProps<{ id: string }>();
-
-const UNIFIED = 'unified';
 
 const store = useInvestigationStore();
 const graphStore = useGraphStore();
@@ -59,28 +50,23 @@ const contextMenu = useContextMenu();
 const toast = useToast();
 
 const showAdd = ref(false);
+const showWizard = ref(false);
 const showLayout = ref(false);
-const activeTab = ref(UNIFIED);
-/** The graph tabs, the case space (T10) or the money trace (T5). */
-const view = ref<'graph' | 'space' | 'trace'>('graph');
-const artifactCount = ref<number | null>(null);
-const pendingProposals = ref(0);
+/** The canvas or the money trace (T5). */
+const view = ref<'graph' | 'trace'>('graph');
 const inspectorTab = ref<'data' | 'enrichment' | 'notes' | 'origin'>('data');
 const showJournal = ref(false);
-/** Left column: the sources or the typology badges (T9). */
+/** Left column: the material or the typology badges (T9). */
 const showTypologies = ref(false);
 const noteDraft = ref('');
 const actionError = ref<string | null>(null);
+const activeItem = ref<CaseItem | null>(null);
 const canvasRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
 const pathBar = ref<InstanceType<typeof PathBar> | null>(null);
 
-const readableSources = computed(() => store.sources.filter((s) => s.accessible));
-const restrictedCount = computed(() => store.sources.length - readableSources.value.length);
-const sourceTitle = (sourceId: string) =>
-  store.sources.find((s) => s.id === baseSourceId(sourceId))?.title_snapshot ?? sourceId;
-const contextTitle = (contextId: string) => store.contexts[contextId]?.title ?? contextId;
+const sourceTitle = (sourceId: string) => store.itemTitle(baseSourceId(sourceId));
+const contextTitle = (contextId: string) => store.contexts[contextId]?.title ?? store.itemTitle(contextId);
 const mergedCounts = computed(() => mergedEntityCounts(store.unified.nodes));
-const openMatches = computed(() => store.matches.filter((m) => m.status === 'sugerido' || m.status === 'adiado').length);
 
 // --- context picker for expanding a node that exists in several contexts ---
 const pickerOrigins = ref<NodeOrigin[] | null>(null);
@@ -102,11 +88,10 @@ function applyExpansion(origin: NodeOrigin, response: GraphResponse) {
   store.addExpansion(origin, response.nodes, response.edges);
 }
 
-// --- loading a tab into the graph store ---
-// The community store clears its results whenever `nodes` changes; keep each tab's
+// --- loading the unified graph into the graph store ---
+// The community store clears its results whenever `nodes` changes; keep the
 // communities and put them back after the swap (same timing as loadExploration).
-const communityByTab = new Map<string, Record<string, unknown> | undefined>();
-let renderedTab: string | null = null;
+let savedCommunities: Record<string, unknown> | undefined;
 
 function graphMode(rings: Map<string, string[]>): InvestigationGraphMode {
   return {
@@ -119,36 +104,27 @@ function graphMode(rings: Map<string, string[]>): InvestigationGraphMode {
 
 async function render() {
   pathBar.value?.close();
-  if (renderedTab !== null) communityByTab.set(renderedTab, communityStore.getState());
   if (view.value === 'trace') return renderTrace();
   if (graphStore.layoutAlgorithm === 'trace-layers') {
     graphStore.traceLayers = null;
     graphStore.setLayoutAlgorithm('force');
   }
-  const tab = activeTab.value;
-
+  if (graphStore.nodes.length) savedCommunities = communityStore.getState();
   const { nodes, edges } = store.unified;
-  const tabNodes = tab === UNIFIED ? nodes : nodes.filter((n) => nodeSourceIds(n).includes(tab));
-  const tabEdges = tab === UNIFIED ? edges : edges.filter((e) => baseSourceId(e.__source) === tab);
-
-  // Rings tell sources apart, so only the unified view draws them.
-  const rings = new Map(
-    tab === UNIFIED ? nodes.map((n) => [n.node_id, provenanceRingColors(nodeSourceIds(n), store.sourceColors)]) : [],
-  );
-  graphStore.loadInvestigationGraph(graphMode(rings), tabNodes, tabEdges);
-  renderedTab = tab;
+  const rings = new Map(nodes.map((n) => [n.node_id, provenanceRingColors(nodeSourceIds(n), store.sourceColors)]));
+  graphStore.loadInvestigationGraph(graphMode(rings), nodes, edges);
   await nextTick();
-  communityStore.loadState(communityByTab.get(tab));
+  communityStore.loadState(savedCommunities);
 }
 
-// (Re)load the graphs once per case and source set (open, add).
+// (Re)load the graphs once per case and graph-item set (open, add, remove).
 let loadedKey: string | null = null;
 async function loadWorkspace() {
-  const key = `${store.current?.id}|${store.sources.map((s) => s.id).join(',')}`;
+  const key = `${store.current?.id}|${store.graphItems.map((s) => `${s.id}:${s.current_version}:${s.mapping?.as ?? ''}`).join(',')}`;
   if (!store.current || key === loadedKey) return;
   loadedKey = key;
   await store.loadWorkspace();
-  // shortcut: the first readable source's style (colors, icons, labels) dresses every tab.
+  // shortcut: the first readable exploration's style (colors, icons, labels) dresses the canvas.
   const styled = store.sourceGraphs.find((g) => g.state);
   if (styled?.state) graphStore.applyStylePreset(styled.state);
   // Small base nodes and thin rings read better on a unified graph (05 §3).
@@ -167,43 +143,28 @@ function zoomToFitSoon() {
 const labelById = computed(() => new Map(store.unified.nodes.map((n) => [n.node_id, caseNodeLabel(n)])));
 const nameOf = (id: string) => labelById.value.get(id) ?? shortId(id);
 
-function removeSource(sourceId: string) {
-  const source = store.sources.find((s) => s.id === sourceId);
-  run(() => store.removeSource(sourceId), 'Failed to remove the source').then(() => {
-    if (!actionError.value) toast.success(`Removed “${source?.title_snapshot ?? 'source'}” from the case`);
-    else toast.error(actionError.value);
-  });
-}
-
 watch(
   () => props.id,
   async (id) => {
-    communityByTab.clear();
-    renderedTab = null;
-    activeTab.value = UNIFIED;
+    savedCommunities = undefined;
     view.value = 'graph';
+    activeItem.value = null;
     trace.reset();
-    artifactCount.value = null;
     await store.openInvestigation(id);
-    // The journal and notes are secondary: a failure here must not block the graph.
-    store.fetchNotes().catch(() => {});
+    // The journal and the brief are secondary: a failure here must not block the graph.
     store.fetchEvents().catch(() => {});
-    api.getInvestigationArtifacts(id).then((a) => (artifactCount.value = a.length)).catch(() => {});
-    pendingProposals.value = 0;
-    api.getInvestigationProposals(id, 'pending').then((p) => (pendingProposals.value = p.length)).catch(() => {});
+    store.fetchBrief().catch(() => {});
     await loadWorkspace();
   },
   { immediate: true },
 );
 
-watch(() => store.sources.map((s) => s.id).join(','), loadWorkspace);
-
-watch([() => store.unified, activeTab, () => view.value === 'trace', () => trace.columns], render);
+watch(() => store.graphItems.map((s) => `${s.id}:${s.current_version}:${s.mapping?.as ?? ''}`).join(','), loadWorkspace);
+watch([() => store.unified, () => view.value === 'trace', () => trace.columns], render);
 
 // --- money trace (T5) ---
 /** The traced subgraph, laid out by layer (`trace-layers`). */
 function renderTrace() {
-  renderedTab = null;
   const cols = trace.columns;
   const flowIds = new Set(trace.flows.map((f) => f.id));
   graphStore.traceLayers = cols;
@@ -251,12 +212,13 @@ const traceChips = computed(() => {
   };
 });
 
-// Role fills follow the case state, without reloading the graph.
+// Role fills follow the confirmed role annotations, without reloading the graph.
 watch(
   () => store.roles,
   (roles) => (graphStore.roleColors = roleColorMap(roles)),
   { immediate: true },
 );
+const legendRoles = computed(() => [...new Set(Object.values(store.roles))].sort());
 
 onUnmounted(() => {
   for (const [direction] of TRACE_ACTIONS) contextMenu.removeAction(`trace-${direction}`);
@@ -278,11 +240,22 @@ const selectedProps = computed(() => {
   return Object.entries(props).filter(([k]) => !hidden.has(k));
 });
 
-// --- roles, notes and journal (F1.7) ---
-const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'decidido');
+const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'decided');
 const selectedRole = computed(() => (selected.value ? store.roles[selected.value.node_id] ?? '' : ''));
-const selectedNotes = computed(() =>
-  store.notes.filter((n) => n.anchor?.kind === 'node' && n.anchor.id === selected.value?.node_id),
+/** Role vocabulary: the preset suggestions plus every role already used in the case. */
+const roleOptions = computed(() => {
+  const used = new Set(Object.values(store.roles));
+  for (const a of store.annotations) if (a.kind === 'role') used.add(String(a.value.role));
+  return [...new Set([...Object.keys(ROLE_LABELS), ...used])];
+});
+const selectedNotes = computed(() => store.notes.filter((n) => n.anchor?.entity_ids?.includes(selected.value?.node_id ?? '')));
+const selectedSuggestions = computed(() =>
+  store.annotations.filter((a) => a.status === 'suggested' && selected.value && a.targets.includes(selected.value.node_id)),
+);
+const selectedAnnotations = computed(() =>
+  store.annotations.filter(
+    (a) => a.status === 'confirmed' && a.kind !== 'role' && selected.value && a.targets.includes(selected.value.node_id),
+  ),
 );
 const journal = computed(() => [...store.events].reverse());
 
@@ -295,18 +268,8 @@ async function run(action: () => Promise<unknown>, fallback: string) {
   }
 }
 
-function openTab(tab: string) {
-  activeTab.value = tab;
-  view.value = 'graph';
-}
-
-function onArtifactsChanged(count: number) {
-  artifactCount.value = count;
-  store.fetchEvents().catch(() => {});
-}
-
 function onRoleChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value as InvestigationRole | '';
+  const value = (event.target as HTMLSelectElement).value;
   const id = selected.value?.node_id;
   if (id) run(() => store.setRole(id, value || null), 'Failed to set role');
 }
@@ -316,14 +279,27 @@ function addNote() {
   const body = noteDraft.value.trim();
   if (!id || !body) return;
   run(async () => {
-    await store.addNote({ kind: 'node', id }, body);
+    await store.addNote(id, body);
     noteDraft.value = '';
   }, 'Failed to add note');
 }
 
-/** Freezes what the current tab shows (F4.1): nodes, edges, roles and the selection. */
+function decideSuggestion(a: CaseAnnotation, status: 'confirmed' | 'rejected') {
+  run(() => store.setAnnotationStatus(a.id, status), 'Failed to update the suggestion');
+}
+
+const describeAnnotation = (a: CaseAnnotation) => {
+  const v = a.value;
+  if (a.kind === 'role') return `role: ${v.role}`;
+  if (a.kind === 'tag') return `tag: ${v.tag}`;
+  if (a.kind === 'group') return `group: ${v.name}`;
+  if (a.kind === 'same_as') return `same as ${nameOf(a.targets.find((t) => t !== selected.value?.node_id) ?? '')}`;
+  if (a.kind === 'typology') return `typology ${v.norm_ref ?? v.typology}`;
+  return a.kind;
+};
+
+/** Freezes what the canvas shows as a pinned graph item (evidence). */
 function pinGraphEvidence() {
-  const tab = activeTab.value === UNIFIED ? 'Unified view' : sourceTitle(activeTab.value);
   const nodes = graphStore.nodes.map((n) => ({ node_id: n.node_id, node_type: n.node_type, properties: n.properties ?? {} }));
   const edges = graphStore.edges.map((e) => ({
     edge_id: e.edge_id, src: e.src, dst: e.dst, relationship_type: e.relationship_type, properties: e.properties ?? {},
@@ -331,13 +307,26 @@ function pinGraphEvidence() {
   const ids = new Set(nodes.map((n) => n.node_id));
   store
     .pinEvidence({
-      title: `Graph · ${tab} · ${nodes.length} nodes`,
+      title: `Graph · ${nodes.length} nodes`,
       kind: 'graph_state',
-      params: { tab: activeTab.value, tab_title: tab, nodes: nodes.length, edges: edges.length, selected: selected.value?.node_id ?? null },
+      params: { nodes: nodes.length, edges: edges.length, selected: selected.value?.node_id ?? null },
       snapshot: { nodes, edges, roles: Object.fromEntries(Object.entries(store.roles).filter(([k]) => ids.has(k))) },
     })
     .then((row) => row && toast.success(`Evidence pinned · hash ${row.sha256.slice(0, 8)}`))
     .catch((e) => toast.error(getErrorMessage(e, 'Failed to pin evidence')));
+}
+
+function findMatches() {
+  run(async () => {
+    const n = await store.findMatches();
+    toast.success(n ? `${n} new match suggestion${n === 1 ? '' : 's'} to review` : 'No new matches');
+  }, 'Failed to run entity resolution');
+}
+
+function onWizardDone(items: CaseItem[]) {
+  showWizard.value = false;
+  store.fetchItems().catch(() => {});
+  toast.success(`Added ${items.length} file${items.length === 1 ? '' : 's'} to the case`);
 }
 
 const formatTime = (iso: string) => new Date(iso).toLocaleString();
@@ -348,183 +337,134 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
     <div v-if="store.loading && !store.current" class="loading"></div>
     <div v-else-if="store.error" class="error-message">{{ store.error }}</div>
     <template v-else-if="store.current">
-      <CaseHeader
-        :pending-proposals="pendingProposals"
-        :open-matches="openMatches"
-        :subtitle="view === 'trace' ? '› Follow the money' : null"
-      />
+      <CaseHeader :subtitle="view === 'trace' ? '› Follow the money' : null" />
 
       <nav class="tabs" data-testid="workspace-tabs">
-        <button
-          class="tab"
-          :class="{ active: view === 'graph' && activeTab === UNIFIED }"
-          data-testid="tab-unified"
-          @click="openTab(UNIFIED)"
-        >
+        <button class="tab" :class="{ active: view === 'graph' }" data-testid="tab-unified" @click="view = 'graph'">
           <span class="dots">
-            <span v-for="s in readableSources" :key="s.id" class="dot" :style="{ background: store.sourceColors[s.id] }"></span>
+            <span v-for="s in store.canvasItems" :key="s.id" class="dot" :style="{ background: store.sourceColors[s.id] }"></span>
           </span>
-          Unified view
-        </button>
-        <template v-for="s in store.sources" :key="s.id">
-          <button
-            v-if="s.accessible"
-            class="tab"
-            :class="{ active: view === 'graph' && activeTab === s.id }"
-            :data-testid="`tab-${s.id}`"
-            @click="openTab(s.id)"
-          >
-            <span class="dot" :style="{ background: store.sourceColors[s.id] }"></span>
-            {{ s.title_snapshot }}
-          </button>
-          <span v-else class="tab restricted" :data-testid="`tab-${s.id}`" :title="`Owner: ${s.owner_email}`">
-            <Lock :size="12" /> {{ s.context_title ?? s.title_snapshot }} · restricted
-          </span>
-        </template>
-        <button
-          v-if="store.current.has_write_access && store.current.status !== 'decidido'"
-          class="tab add"
-          data-testid="investigation-add-sources"
-          @click="showAdd = true"
-        >
-          <Plus :size="14" /> Add
+          Case
         </button>
         <button v-if="trace.result" class="tab" :class="{ active: view === 'trace' }" data-testid="tab-trace" @click="view = 'trace'">
           <Banknote :size="14" /> Follow the money
         </button>
-        <button class="tab" :class="{ active: view === 'space' }" data-testid="tab-space" @click="view = 'space'">
-          Case space<span v-if="artifactCount !== null" class="count">{{ artifactCount }}</span>
+        <button v-if="canEdit" class="tab add" data-testid="investigation-add-sources" @click="showAdd = true">
+          <Plus :size="14" /> Add
         </button>
       </nav>
 
-      <ArtifactsSpace
-        v-if="view === 'space'"
-        :investigation-id="id"
-        :can-edit="canEdit"
-        @changed="onArtifactsChanged"
-      />
-
-      <div v-show="view !== 'space'" class="ws-body" :class="{ tracing: view === 'trace' }">
+      <div class="ws-body" :class="{ tracing: view === 'trace' }">
         <TracePanel v-if="view === 'trace'" />
         <TypologyBadgesPanel v-else-if="showTypologies" :can-edit="canEdit" />
-        <SourcesPanel
+        <CaseItemsPanel
           v-else
-          :sources="store.sources"
-          :graphs="store.sourceGraphs"
-          :contexts="store.contexts"
-          :colors="store.sourceColors"
-          :merged-counts="mergedCounts"
-          :active-tab="activeTab"
           :can-edit="canEdit"
-          @select="openTab($event)"
-          @remove="removeSource($event)"
+          :active-item="activeItem?.id"
           @add="showAdd = true"
-        >
-          <template #files>
-            <CaseFiles :investigation-id="id" :can-edit="canEdit" @source-added="openTab($event)" />
-          </template>
-        </SourcesPanel>
+          @upload="showWizard = true"
+          @select="activeItem = $event"
+        />
 
         <div class="center">
-        <div v-if="view === 'trace' && traceChips" class="trace-bar" data-testid="trace-bar">
-          <div class="trace-toggle">
-            <button :class="{ on: trace.view === 'layers' }" data-testid="trace-view-layers" @click="trace.view = 'layers'">Layers</button>
-            <button :class="{ on: trace.view === 'sankey' }" data-testid="trace-view-sankey" @click="trace.view = 'sankey'">Sankey</button>
-          </div>
-          <span class="chip-fill seed">{{ traceChips.seed }} seed</span>
-          <span class="chip-fill exits" data-testid="trace-coverage">{{ traceChips.exits }}</span>
-          <span class="chip-fill retained">{{ traceChips.retained }}</span>
-          <span v-if="traceChips.frontier" class="chip-fill retained">{{ traceChips.frontier }}</span>
-          <span class="muted trace-sub">{{ traceChips.layers }} {{ traceChips.layers === 1 ? 'layer' : 'layers' }} to the {{ trace.direction === 'backward' ? 'origins' : 'exits' }}</span>
-        </div>
-        <section class="canvas-area" data-testid="graph-container">
-          <div v-if="store.graphLoading || graphStore.loading" class="overlay">
-            {{ graphStore.loadingMessage || 'Loading sources…' }}
-          </div>
-          <div v-else-if="store.sources.length === 0" class="overlay empty-canvas" data-testid="canvas-empty">
-            <p>No sources yet. Add a recent exploration, start a new one from a context, or import a file.</p>
-            <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="canvas-empty-add" @click="showAdd = true">
-              <Plus :size="14" /> Add exploration
-            </button>
-          </div>
-          <div v-if="graphStore.queryError" class="error-banner">{{ graphStore.queryError.message }}</div>
-
-          <TraceSankey
-            v-if="view === 'trace' && trace.view === 'sankey' && trace.result && trace.columns"
-            :flows="trace.flows"
-            :columns="trace.columns"
-            :name-of="trace.nameOf"
-            :allocation="trace.result.method.allocation"
-          />
-
-          <div v-if="view === 'graph' && activeTab === UNIFIED && readableSources.length" class="legend" data-testid="provenance-legend">
-            <div class="legend-title">Provenance (ring)</div>
-            <div v-for="s in readableSources" :key="s.id" class="legend-row">
-              <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
-              {{ s.title_snapshot }}
+          <div v-if="view === 'trace' && traceChips" class="trace-bar" data-testid="trace-bar">
+            <div class="trace-toggle">
+              <button :class="{ on: trace.view === 'layers' }" data-testid="trace-view-layers" @click="trace.view = 'layers'">Layers</button>
+              <button :class="{ on: trace.view === 'sankey' }" data-testid="trace-view-sankey" @click="trace.view = 'sankey'">Sankey</button>
             </div>
-            <div class="legend-title roles-title">Role (fill)</div>
-            <div v-for="(color, role) in ROLE_COLORS" :key="role" class="legend-row">
-              <span class="fill" :style="{ background: color }"></span>
-              {{ ROLE_LABELS[role] }}
-            </div>
+            <span class="chip-fill seed">{{ traceChips.seed }} seed</span>
+            <span class="chip-fill exits" data-testid="trace-coverage">{{ traceChips.exits }}</span>
+            <span class="chip-fill retained">{{ traceChips.retained }}</span>
+            <span v-if="traceChips.frontier" class="chip-fill retained">{{ traceChips.frontier }}</span>
+            <span class="muted trace-sub">{{ traceChips.layers }} {{ traceChips.layers === 1 ? 'layer' : 'layers' }} to the {{ trace.direction === 'backward' ? 'origins' : 'exits' }}</span>
           </div>
+          <section class="canvas-area" data-testid="graph-container">
+            <div v-if="store.graphLoading || graphStore.loading" class="overlay">
+              {{ graphStore.loadingMessage || 'Loading the case…' }}
+            </div>
+            <div v-else-if="store.graphItems.length === 0" class="overlay empty-canvas" data-testid="canvas-empty">
+              <p>Nothing on the canvas yet. Add a recent exploration, start a new one from a context, or upload a file with a mapping.</p>
+              <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="canvas-empty-add" @click="showAdd = true">
+                <Plus :size="14" /> Add exploration
+              </button>
+            </div>
+            <div v-if="graphStore.queryError" class="error-banner">{{ graphStore.queryError.message }}</div>
 
-          <GraphCanvas3D ref="canvasRef" />
-          <PathBar ref="pathBar" :name-of="trace.nameOf" />
-
-          <div v-if="showLayout" class="layout-panel">
-            <LayoutPanel
-              :is-layout-running="canvasRef?.isLayoutRunning ?? false"
-              @start-layout="canvasRef?.startLayout()"
-              @stop-layout="canvasRef?.stopLayout()"
-              @reheat-layout="canvasRef?.reheatLayout()"
-              @scramble-layout="canvasRef?.scrambleLayout()"
-              @start-edge-type-layout="(et: string | null, s: string) => canvasRef?.startEdgeTypeLayout(et, s as any, similarityStore.useScoreAsWeight)"
-              @close="showLayout = false"
+            <TraceSankey
+              v-if="view === 'trace' && trace.view === 'sankey' && trace.result && trace.columns"
+              :flows="trace.flows"
+              :columns="trace.columns"
+              :name-of="trace.nameOf"
+              :allocation="trace.result.method.allocation"
             />
-          </div>
 
-          <div v-if="view === 'graph'" class="canvas-actions">
-            <button class="btn btn-outline btn-sm" data-testid="workspace-layout-btn" @click="showLayout = !showLayout">
-              Layout
-            </button>
-            <button
-              class="btn btn-outline btn-sm"
-              title="Fit the graph in the view"
-              aria-label="Fit to view"
-              data-testid="workspace-fit-btn"
-              @click="canvasRef?.zoomToFit?.()"
-            >
-              <Maximize2 :size="14" />
-            </button>
-            <button
-              class="btn btn-outline btn-sm"
-              :class="{ on: showTypologies }"
-              data-testid="workspace-typologies-btn"
-              @click="showTypologies = !showTypologies"
-            >
-              Typology badges
-            </button>
-            <button
-              v-if="canEdit && graphStore.nodes.length"
-              class="btn btn-outline btn-sm"
-              title="Freeze what this tab shows as evidence (immutable, with a sha256)"
-              data-testid="pin-evidence"
-              @click="pinGraphEvidence"
-            >
-              Pin evidence
-            </button>
-          </div>
-        </section>
-        <SwimlaneTimeline
-          v-if="view === 'trace' && trace.result"
-          :result="trace.result"
-          :flows="trace.allFlows"
-          :name-of="trace.nameOf"
-          :focus="trace.focus"
-          @update:focus="trace.focus = $event"
-        />
+            <div v-if="view === 'graph' && store.canvasItems.length" class="legend" data-testid="provenance-legend">
+              <div class="legend-title">Provenance (ring)</div>
+              <div v-for="s in store.canvasItems" :key="s.id" class="legend-row">
+                <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
+                {{ s.title }}
+              </div>
+              <template v-if="legendRoles.length">
+                <div class="legend-title roles-title">Role (fill)</div>
+                <div v-for="role in legendRoles" :key="role" class="legend-row">
+                  <span class="fill" :style="{ background: roleColor(role) }"></span>
+                  {{ ROLE_LABELS[role] ?? role }}
+                </div>
+              </template>
+              <p class="muted" data-testid="unification-summary">
+                <template v-if="Object.keys(mergedCounts).length">
+                  {{ Object.values(mergedCounts).reduce((a, b) => a + b, 0) }} entities merged by identity key:
+                  {{ Object.entries(mergedCounts).map(([e, n]) => `${n} by ${e}`).join(', ') }}
+                </template>
+                <template v-else>No entity merged across items yet.</template>
+              </p>
+            </div>
+
+            <GraphCanvas3D ref="canvasRef" />
+            <PathBar ref="pathBar" :name-of="trace.nameOf" />
+
+            <div v-if="showLayout" class="layout-panel">
+              <LayoutPanel
+                :is-layout-running="canvasRef?.isLayoutRunning ?? false"
+                @start-layout="canvasRef?.startLayout()"
+                @stop-layout="canvasRef?.stopLayout()"
+                @reheat-layout="canvasRef?.reheatLayout()"
+                @scramble-layout="canvasRef?.scrambleLayout()"
+                @start-edge-type-layout="(et: string | null, s: string) => canvasRef?.startEdgeTypeLayout(et, s as any, similarityStore.useScoreAsWeight)"
+                @close="showLayout = false"
+              />
+            </div>
+
+            <div v-if="view === 'graph'" class="canvas-actions">
+              <button class="btn btn-outline btn-sm" data-testid="workspace-layout-btn" @click="showLayout = !showLayout">Layout</button>
+              <button class="btn btn-outline btn-sm" title="Fit the graph in the view" aria-label="Fit to view" data-testid="workspace-fit-btn" @click="canvasRef?.zoomToFit?.()">
+                <Maximize2 :size="14" />
+              </button>
+              <button class="btn btn-outline btn-sm" :class="{ on: showTypologies }" data-testid="workspace-typologies-btn" @click="showTypologies = !showTypologies">
+                Typology badges
+              </button>
+              <button v-if="canEdit && graphStore.nodes.length" class="btn btn-outline btn-sm" title="Suggest entities that are the same person (same_as)" data-testid="workspace-matches-btn" @click="findMatches">
+                Find matches
+              </button>
+              <button
+                v-if="canEdit && graphStore.nodes.length"
+                class="btn btn-outline btn-sm"
+                title="Freeze what the canvas shows as a pinned item (immutable, with a sha256)"
+                data-testid="pin-evidence"
+                @click="pinGraphEvidence"
+              >
+                Pin evidence
+              </button>
+            </div>
+          </section>
+          <SwimlaneTimeline
+            v-if="view === 'trace' && trace.result"
+            :result="trace.result"
+            :flows="trace.allFlows"
+            :name-of="trace.nameOf"
+            :focus="trace.focus"
+            @update:focus="trace.focus = $event"
+          />
         </div>
 
         <TraceExits v-if="view === 'trace'" />
@@ -533,53 +473,47 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
             <div class="muted">{{ selected.node_type }} · {{ shortId(selected.node_id) }}</div>
             <h3 class="entity" :title="selected.node_id" data-testid="inspector-title">{{ caseNodeLabel(selected) }}</h3>
             <div class="chips">
-              <span
-                v-for="sid in selectedSources"
-                :key="sid"
-                class="chip"
-                :style="{ borderColor: store.sourceColors[sid], color: store.sourceColors[sid] }"
-              >
+              <span v-for="sid in selectedSources" :key="sid" class="chip" :style="{ borderColor: store.sourceColors[sid], color: store.sourceColors[sid] }">
                 {{ sourceTitle(sid) }}
               </span>
-              <span v-if="selectedSources.length > 1" class="chip linked" data-testid="inspector-linked">
-                highlighted in {{ selectedSources.length }} tabs
-              </span>
+              <span v-if="selectedSources.length > 1" class="chip linked" data-testid="inspector-linked">in {{ selectedSources.length }} items</span>
+              <span v-for="a in selectedAnnotations" :key="a.id" class="chip plain" :data-testid="`inspector-annotation-${a.id}`">{{ describeAnnotation(a) }}</span>
             </div>
             <label class="role-row">
               <span class="muted">Role</span>
-              <select
-                :value="selectedRole"
-                :disabled="!canEdit"
-                data-testid="inspector-role"
-                @change="onRoleChange"
-              >
+              <select :value="selectedRole" :disabled="!canEdit" data-testid="inspector-role" @change="onRoleChange">
                 <option value="">— none —</option>
-                <option v-for="(label, role) in ROLE_LABELS" :key="role" :value="role">{{ label }}</option>
+                <option v-for="role in roleOptions" :key="role" :value="role">{{ ROLE_LABELS[role] ?? role }}</option>
               </select>
             </label>
+            <div v-if="selectedSuggestions.length" class="suggestions" data-testid="inspector-suggestions">
+              <div v-for="a in selectedSuggestions" :key="a.id" class="suggestion" :data-testid="`suggestion-${a.id}`">
+                <span>
+                  <strong>{{ describeAnnotation(a) }}</strong>
+                  <span class="muted"> · suggested by {{ a.author_kind === 'agent' ? 'agent' : a.author_email }}</span>
+                  <span v-if="a.reason" class="muted"> — {{ a.reason }}</span>
+                </span>
+                <span v-if="canEdit" class="row">
+                  <button class="link-btn ok" :data-testid="`suggestion-confirm-${a.id}`" @click="decideSuggestion(a, 'confirmed')">✓ Confirm</button>
+                  <button class="link-btn danger" :data-testid="`suggestion-reject-${a.id}`" @click="decideSuggestion(a, 'rejected')">✕ Reject</button>
+                </span>
+              </div>
+            </div>
             <div v-if="actionError" class="action-error">{{ actionError }}</div>
             <div class="inspector-tabs">
               <button :class="{ active: inspectorTab === 'data' }" @click="inspectorTab = 'data'">Data</button>
-              <button
-                :class="{ active: inspectorTab === 'enrichment' }"
-                data-testid="inspector-enrichment-tab"
-                @click="inspectorTab = 'enrichment'"
-              >
-                Enrichment
-              </button>
+              <button :class="{ active: inspectorTab === 'enrichment' }" data-testid="inspector-enrichment-tab" @click="inspectorTab = 'enrichment'">Enrichment</button>
               <button :class="{ active: inspectorTab === 'notes' }" data-testid="inspector-notes-tab" @click="inspectorTab = 'notes'">
                 Notes<template v-if="selectedNotes.length"> ({{ selectedNotes.length }})</template>
               </button>
-              <button :class="{ active: inspectorTab === 'origin' }" data-testid="inspector-origin-tab" @click="inspectorTab = 'origin'">
-                Origin
-              </button>
+              <button :class="{ active: inspectorTab === 'origin' }" data-testid="inspector-origin-tab" @click="inspectorTab = 'origin'">Origin</button>
             </div>
             <dl v-if="inspectorTab === 'data'" class="props">
               <template v-for="[k, v] in selectedProps" :key="k">
                 <dt>{{ k }}</dt>
                 <dd>
                   {{ v }}
-                  <span v-if="selected.__conflicts?.[k]" class="conflict" title="Other sources disagree">
+                  <span v-if="selected.__conflicts?.[k]" class="conflict" title="Other items disagree">
                     ≠ {{ selected.__conflicts[k].map((c) => c.value).join(', ') }}
                   </span>
                 </dd>
@@ -588,24 +522,16 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
             <EnrichmentTab v-else-if="inspectorTab === 'enrichment'" :node="selected" :can-edit="canEdit" />
             <div v-else-if="inspectorTab === 'notes'" class="notes" data-testid="inspector-notes">
               <div v-for="n in selectedNotes" :key="n.id" class="note" data-testid="note">
-                <p>{{ n.body }}</p>
+                <p>{{ n.description ?? n.title }}</p>
                 <div class="muted">
-                  {{ n.author_email }} · {{ n.created_at ? formatTime(n.created_at) : '' }}
-                  <button
-                    v-if="canEdit && n.author_email === auth.email"
-                    class="link-btn"
-                    @click="run(() => store.deleteNote(n.id), 'Failed to delete note')"
-                  >
-                    delete
-                  </button>
+                  {{ n.author_kind === 'agent' ? 'agent · ' : '' }}{{ n.author_email }} · {{ n.created_at ? formatTime(n.created_at) : '' }}
+                  <button v-if="canEdit && n.author_email === auth.email" class="link-btn" @click="run(() => store.removeItem(n.id), 'Failed to delete note')">delete</button>
                 </div>
               </div>
               <p v-if="!selectedNotes.length" class="muted">No notes on this entity yet.</p>
               <template v-if="canEdit">
                 <textarea v-model="noteDraft" rows="3" placeholder="Add a note…" data-testid="note-input"></textarea>
-                <button class="btn btn-primary btn-sm" :disabled="!noteDraft.trim()" data-testid="note-add" @click="addNote">
-                  Add note
-                </button>
+                <button class="btn btn-primary btn-sm" :disabled="!noteDraft.trim()" data-testid="note-add" @click="addNote">Add note</button>
               </template>
             </div>
             <div v-else class="origin" data-testid="inspector-origin">
@@ -621,16 +547,27 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
               </div>
             </div>
           </template>
-          <p v-else class="muted">Select a node to see its data and where it came from.</p>
+          <template v-else-if="activeItem">
+            <div class="muted">{{ activeItem.kind }} / {{ activeItem.subkind }}</div>
+            <h3 class="entity" data-testid="inspector-item-title">{{ activeItem.title }}</h3>
+            <p v-if="activeItem.description" class="muted">{{ activeItem.description }}</p>
+            <dl class="props">
+              <dt>Author</dt><dd>{{ activeItem.author_kind === 'agent' ? 'agent · ' : '' }}{{ activeItem.author_email }}</dd>
+              <dt>Status</dt><dd>{{ activeItem.status }}</dd>
+              <dt>Versions</dt><dd>{{ activeItem.current_version }}<template v-if="activeItem.pinned.length"> · {{ activeItem.pinned.length }} pinned</template></dd>
+              <template v-if="activeItem.latest"><dt>Hash</dt><dd class="mono">{{ activeItem.latest.sha256.slice(0, 12) }}…</dd></template>
+              <template v-if="activeItem.query"><dt>Query</dt><dd class="mono">{{ activeItem.query.text }}</dd></template>
+              <template v-if="activeItem.mapping"><dt>Mapping</dt><dd>{{ activeItem.mapping.as }} · {{ (activeItem.mapping.spec as any)?.name ?? '' }}</dd></template>
+            </dl>
+          </template>
+          <p v-else class="muted">Select a node to see its data and where it came from, or an item of the material.</p>
         </aside>
       </div>
 
       <section v-if="showJournal" class="journal" data-testid="journal">
         <div v-for="e in journal" :key="e.id" class="journal-row" data-testid="journal-event">
           <span class="muted">{{ formatTime(e.at) }}</span>
-          <strong v-if="e.actor_kind === 'agent'" data-testid="journal-agent">
-            agent {{ e.agent_name }} on behalf of {{ e.actor_email }}
-          </strong>
+          <strong v-if="e.actor_kind === 'agent'" data-testid="journal-agent">agent {{ e.agent_name }} on behalf of {{ e.actor_email }}</strong>
           <strong v-else>{{ e.actor_email }}</strong>
           <span>{{ describeEvent(e, nameOf) }}</span>
         </div>
@@ -641,9 +578,10 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
         <span>{{ graphStore.nodes.length }} nodes</span>
         <span>{{ graphStore.edges.length }} edges</span>
         <span>
-          {{ readableSources.length }} {{ readableSources.length === 1 ? 'source' : 'sources' }}<template v-if="restrictedCount">
-            + {{ restrictedCount }} restricted</template>
+          {{ store.canvasItems.length }} {{ store.canvasItems.length === 1 ? 'source' : 'sources' }}<template v-if="store.restrictedItems.length">
+            + {{ store.restrictedItems.length }} restricted</template>
         </span>
+        <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} suggestions</span>
         <button class="link-btn journal-btn" data-testid="journal-toggle" @click="showJournal = !showJournal">
           Journal ({{ store.events.length }}) {{ showJournal ? '▾' : '▴' }}
         </button>
@@ -651,6 +589,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
     </template>
 
     <AddToInvestigationModal :open="showAdd" :investigation-id="id" @close="showAdd = false" />
+    <FileImportWizard v-if="showWizard" :investigation-id="id" @close="showWizard = false" @done="onWizardDone" />
 
     <div v-if="pickerOrigins" class="modal-overlay" @click.self="pick(null)">
       <div class="modal picker" data-testid="expand-context-picker">
@@ -659,13 +598,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           <button class="modal-close" aria-label="Close" @click="pick(null)">&times;</button>
         </div>
         <p class="muted">This entity exists in more than one context. Its neighbors come from the one you pick.</p>
-        <button
-          v-for="o in pickerOrigins"
-          :key="o.contextId"
-          class="btn btn-outline picker-option"
-          :data-testid="`expand-context-${o.contextId}`"
-          @click="pick(o)"
-        >
+        <button v-for="o in pickerOrigins" :key="o.contextId" class="btn btn-outline picker-option" :data-testid="`expand-context-${o.contextId}`" @click="pick(o)">
           <strong>{{ contextTitle(o.contextId) }}</strong>
           <span class="muted">{{ sourceTitle(o.sourceId) }} · id {{ o.nodeId }}</span>
         </button>
@@ -716,19 +649,6 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   border-bottom-color: var(--color-primary);
 }
 
-.tab .count {
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: var(--radius-pill);
-  font-size: 11px;
-  background: var(--border-color);
-}
-
-.tab.restricted {
-  color: var(--text-muted);
-  cursor: default;
-}
-
 .tab.add {
   color: var(--color-primary);
   font-weight: 600;
@@ -749,7 +669,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 250px 1fr 300px;
+  grid-template-columns: 290px 1fr 300px;
 }
 
 .ws-body.tracing {
@@ -875,6 +795,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   top: 12px;
   right: 12px;
   z-index: 4;
+  max-width: 260px;
   padding: 10px 12px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -895,6 +816,10 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   align-items: center;
   gap: 6px;
   margin-top: 4px;
+}
+
+.legend p {
+  margin: 8px 0 0;
 }
 
 .ring {
@@ -957,6 +882,32 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   color: var(--color-primary);
 }
 
+.chip.plain {
+  border-color: var(--border-color);
+  color: var(--text-color);
+}
+
+.suggestions {
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px dashed #b45309;
+  border-radius: var(--radius-sm);
+  background: #fffbeb;
+  font-size: 13px;
+}
+
+.suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.suggestion .row {
+  display: flex;
+  gap: 10px;
+}
+
 .inspector-tabs {
   display: flex;
   gap: 12px;
@@ -994,6 +945,12 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
 .props dd {
   margin: 0;
   word-break: break-word;
+}
+
+.mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
 .conflict {
@@ -1063,6 +1020,14 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   font-size: 12px;
   color: var(--color-primary);
   cursor: pointer;
+}
+
+.link-btn.ok {
+  color: #15803d;
+}
+
+.link-btn.danger {
+  color: var(--color-error);
 }
 
 .journal {

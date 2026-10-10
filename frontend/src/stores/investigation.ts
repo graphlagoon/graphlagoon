@@ -3,147 +3,107 @@ import { computed, ref } from 'vue';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { applyAliases, snapshotToGraph, unifyGraph, type NodeOrigin, type UnifySource } from '@/utils/unifyGraph';
-import type { MatchSuggestion } from '@/utils/entityResolution';
-import type { ErWorkerInput, ErWorkerOutput } from '@/workers/erWorker';
 import { provenanceColor } from '@/utils/graphAppearance';
-import type { Edge, ExplorationState, GraphContext, Node } from '@/types/graph';
+import type { Edge, ExplorationState, GraphContext, IdentityKey, Node } from '@/types/graph';
 import type {
+  CaseAnnotation,
+  CaseBrief,
+  CaseItem,
+  CreateAnnotationRequest,
   CreateInvestigationRequest,
-  EntityMatch,
+  CreateItemRequest,
   Investigation,
   InvestigationEvent,
-  InvestigationEvidence,
-  Hypothesis,
-  InvestigationFile,
-  InvestigationNote,
-  InvestigationRole,
-  InvestigationSource,
-  MatchStatus,
-  SourceMode,
+  ShareRole,
   UpdateInvestigationRequest,
+  UpdateItemRequest,
 } from '@/types/investigation';
 
-/** One readable source loaded into the workspace (T2). */
+/** One graph item loaded into the workspace (its snapshot in the store's shape). */
 export interface SourceGraph extends UnifySource {
   state: ExplorationState | null;
-  /** Why the source shows no graph (no snapshot, load failure). */
+  /** Why the item shows no graph (no snapshot, load failure). */
   error: string | null;
 }
 
+/** Items that put nodes on the canvas (a saved view is chips + layout only). */
+export function isGraphItem(item: CaseItem): boolean {
+  if (item.deleted_at || item.status === 'rejected') return false;
+  if (item.kind === 'graph') return item.subkind !== 'view';
+  if (item.kind === 'table') return item.mapping?.as === 'graph';
+  if (item.kind === 'query') return item.query?.output === 'graph';
+  return false;
+}
+
 export const useInvestigationStore = defineStore('investigation', () => {
-  /** The queue (T1). */
+  /** The queue. */
   const investigations = ref<Investigation[]>([]);
-  /** The open case and its sources. */
+  /** The open case and its material (05 §1). */
   const current = ref<Investigation | null>(null);
-  const sources = ref<InvestigationSource[]>([]);
+  const items = ref<CaseItem[]>([]);
+  const annotations = ref<CaseAnnotation[]>([]);
+  const events = ref<InvestigationEvent[]>([]);
+  const brief = ref<CaseBrief>({ item: null, text: '' });
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  /** Workspace (T2): the readable sources' graphs, their contexts and expansions. */
+  const graphItems = computed(() => items.value.filter(isGraphItem));
+  /** Graph items the person unchecked ("no canvas"): nodes leave without a layout reset. */
+  const offCanvas = ref<Set<string>>(new Set());
+  const canvasItems = computed(() => graphItems.value.filter((i) => i.accessible && !offCanvas.value.has(i.id)));
+  const restrictedItems = computed(() => graphItems.value.filter((i) => !i.accessible));
+
+  /** Workspace: each canvas item's graph, the contexts (or per-item keys) and expansions. */
   const sourceGraphs = ref<SourceGraph[]>([]);
   const contexts = ref<Record<string, GraphContext>>({});
   const expansions = ref<UnifySource[]>([]);
-  /** Nodes promoted from enrichment tables (F2.2). shortcut: session only; the journal records them. */
+  /** Nodes promoted from enrichment tables. shortcut: session only; the journal records them. */
   const derived = ref<UnifySource[]>([]);
   const graphLoading = ref(false);
   const sourceColors = computed<Record<string, string>>(() =>
-    Object.fromEntries(sources.value.map((s, i) => [s.id, provenanceColor(i)])),
+    Object.fromEntries(graphItems.value.map((s, i) => [s.id, provenanceColor(i)])),
   );
-  /** Entity matches (F2.8); the accepted ones alias their two entities in the unified view. */
-  const matches = ref<EntityMatch[]>([]);
-  const unified = computed(() =>
-    applyAliases(
-      unifyGraph([...sourceGraphs.value, ...expansions.value, ...derived.value], contexts.value),
-      matches.value.filter((m) => m.status === 'aceito').map((m) => [m.left.uid, m.right.uid]),
+  const sameAs = computed<[string, string][]>(() =>
+    annotations.value
+      .filter((a) => a.kind === 'same_as' && a.status === 'confirmed' && a.targets.length === 2)
+      .map((a) => [a.targets[0], a.targets[1]]),
+  );
+  const unified = computed(() => {
+    const overrides = (current.value?.settings?.identity_keys as IdentityKey[] | undefined) ?? [];
+    return applyAliases(
+      unifyGraph(
+        [...sourceGraphs.value.filter((g) => !offCanvas.value.has(g.id)), ...expansions.value, ...derived.value],
+        contexts.value,
+        overrides,
+      ),
+      sameAs.value,
+    );
+  });
+
+  /** Confirmed roles by unified node id (annotations kind role). */
+  const roles = computed<Record<string, string>>(() =>
+    Object.fromEntries(
+      annotations.value
+        .filter((a) => a.kind === 'role' && a.status === 'confirmed' && a.targets.length === 1)
+        .map((a) => [a.targets[0], String(a.value.role)]),
     ),
   );
-
-  /** Roles by unified node id (`state.roles`), notes and the journal (F1.7). */
-  const roles = computed<Record<string, InvestigationRole>>(
-    () => (current.value?.state?.roles as Record<string, InvestigationRole> | undefined) ?? {},
+  const hypotheses = computed(() => annotations.value.filter((a) => a.kind === 'hypothesis'));
+  const suggestions = computed(() => [
+    ...items.value.filter((i) => i.status === 'suggested').map((i) => ({ kind: 'item' as const, item: i })),
+    ...annotations.value.filter((a) => a.status === 'suggested').map((a) => ({ kind: 'annotation' as const, annotation: a })),
+  ]);
+  /** Pinned versions across items, oldest first: E1, E2, … */
+  const evidence = computed(() =>
+    items.value
+      .flatMap((i) => i.pinned.map((v) => ({ item: i, version: v })))
+      .sort((a, b) => (a.version.pinned_at ?? '').localeCompare(b.version.pinned_at ?? '')),
   );
-  const notes = ref<InvestigationNote[]>([]);
-  const events = ref<InvestigationEvent[]>([]);
-  /** Case files (F2.3), newest first. */
-  const files = ref<InvestigationFile[]>([]);
+  const notes = computed(() => items.value.filter((i) => i.kind === 'note'));
 
-  async function fetchFiles() {
-    if (current.value) files.value = await api.getInvestigationFiles(current.value.id);
-  }
+  const itemTitle = (itemId: string) => items.value.find((i) => i.id === itemId)?.title ?? itemId;
 
-  /** After the file wizard (F2.5): new rows, and the generated source if any (opens via the sources watch). */
-  function addFiles(rows: InvestigationFile[], source: InvestigationSource | null) {
-    const ids = new Set(rows.map((r) => r.id));
-    files.value = [...rows, ...files.value.filter((f) => !ids.has(f.id))];
-    if (source) sources.value.push(source);
-    void fetchEvents();
-  }
-
-  async function setRole(entity: string, role: InvestigationRole | null) {
-    if (!current.value) return;
-    current.value = await api.updateInvestigationState(current.value.id, { roles: { [entity]: role } });
-    void fetchEvents();
-  }
-
-  async function fetchNotes() {
-    if (current.value) notes.value = await api.getInvestigationNotes(current.value.id);
-  }
-
-  async function fetchEvents() {
-    if (current.value) events.value = await api.getInvestigationEvents(current.value.id);
-  }
-
-  async function addNote(anchor: InvestigationNote['anchor'], body: string) {
-    if (!current.value) return;
-    notes.value.push(await api.createInvestigationNote(current.value.id, anchor, body));
-    void fetchEvents();
-  }
-
-  async function deleteNote(noteId: string) {
-    if (!current.value) return;
-    await api.deleteInvestigationNote(current.value.id, noteId);
-    notes.value = notes.value.filter((n) => n.id !== noteId);
-    void fetchEvents();
-  }
-
-  /** Frozen evidence (F4.1), oldest first: E1, E2, … */
-  const evidence = ref<InvestigationEvidence[]>([]);
-
-  async function fetchEvidence() {
-    if (current.value) evidence.value = await api.getInvestigationEvidence(current.value.id);
-  }
-
-  async function pinEvidence(body: Pick<InvestigationEvidence, 'title' | 'kind' | 'params'> & { snapshot: unknown }) {
-    if (!current.value) return null;
-    const row = await api.createInvestigationEvidence(current.value.id, body);
-    evidence.value = [...evidence.value, row];
-    void fetchEvents();
-    return row;
-  }
-
-  /** Hypotheses of the case (`state.hypotheses`, F4.2). */
-  const hypotheses = computed<Hypothesis[]>(() => (current.value?.state?.hypotheses as Hypothesis[] | undefined) ?? []);
-
-  async function addHypothesis(body: Parameters<typeof api.createInvestigationHypothesis>[1]) {
-    if (!current.value) return;
-    current.value = await api.createInvestigationHypothesis(current.value.id, body);
-    void fetchEvents();
-  }
-
-  async function updateHypothesis(hypothesisId: string, patch: Parameters<typeof api.updateInvestigationHypothesis>[2]) {
-    if (!current.value) return;
-    current.value = await api.updateInvestigationHypothesis(current.value.id, hypothesisId, patch);
-    void fetchEvents();
-  }
-
-  /** F4.5: the server freezes the case; the store just takes the frozen copy. */
-  async function recordDecision(body: Parameters<typeof api.recordInvestigationDecision>[1]) {
-    if (!current.value) return;
-    const id = current.value.id;
-    current.value = await api.recordInvestigationDecision(id, body);
-    sources.value = await api.getInvestigationSources(id);
-    void fetchEvents();
-  }
+  // --- queue and case ---------------------------------------------------------
 
   async function fetchInvestigations() {
     loading.value = true;
@@ -159,11 +119,16 @@ export const useInvestigationStore = defineStore('investigation', () => {
 
   async function createInvestigation(data: CreateInvestigationRequest) {
     const created = await api.createInvestigation(data);
-    investigations.value.unshift({ ...created, source_count: 0 });
+    investigations.value.unshift({ ...created, item_count: 0, suggested_count: 0 });
     return created;
   }
 
-  /** Header edits (F1): the server answers with the whole case (deadline recomputed). */
+  function syncRow(inv: Investigation) {
+    const i = investigations.value.findIndex((r) => r.id === inv.id);
+    if (i >= 0) investigations.value[i] = { ...inv, item_count: investigations.value[i].item_count, suggested_count: investigations.value[i].suggested_count };
+  }
+
+  /** Header edits: the server answers with the whole case (deadline recomputed). */
   async function updateInvestigation(patch: UpdateInvestigationRequest) {
     if (!current.value) return;
     current.value = await api.updateInvestigation(current.value.id, patch);
@@ -171,11 +136,11 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
-  async function shareInvestigation(email: string, permission: 'read' | 'write') {
+  async function shareInvestigation(email: string, role: ShareRole) {
     if (!current.value) return;
-    await api.shareInvestigation(current.value.id, email, permission);
+    await api.shareInvestigation(current.value.id, email, role);
     const rest = current.value.shared_with.filter((s) => s.email !== email);
-    current.value = { ...current.value, shared_with: [...rest, { email, permission }] };
+    current.value = { ...current.value, shared_with: [...rest, { email, role }] };
     void fetchEvents();
   }
 
@@ -201,18 +166,12 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
-  async function removeSource(sourceId: string) {
+  /** The server freezes the case; the store just takes the frozen copy. */
+  async function recordDecision(body: Parameters<typeof api.recordInvestigationDecision>[1]) {
     if (!current.value) return;
-    await api.removeInvestigationSource(current.value.id, sourceId);
-    sources.value = sources.value.filter((s) => s.id !== sourceId);
-    const row = investigations.value.find((i) => i.id === current.value?.id);
-    if (row) row.source_count = Math.max(0, (row.source_count ?? 1) - 1);
+    current.value = await api.recordInvestigationDecision(current.value.id, body);
+    syncRow(current.value);
     void fetchEvents();
-  }
-
-  function syncRow(inv: Investigation) {
-    const i = investigations.value.findIndex((r) => r.id === inv.id);
-    if (i >= 0) investigations.value[i] = { ...inv, source_count: investigations.value[i].source_count };
   }
 
   async function openInvestigation(id: string) {
@@ -221,66 +180,285 @@ export const useInvestigationStore = defineStore('investigation', () => {
     if (current.value?.id !== id) {
       // Another case's lists must not show while this one loads.
       current.value = null;
-      sources.value = [];
-      files.value = [];
-      notes.value = [];
+      items.value = [];
+      annotations.value = [];
       events.value = [];
-      evidence.value = [];
-      matches.value = [];
+      brief.value = { item: null, text: '' };
+      offCanvas.value = new Set();
       sourceGraphs.value = [];
       expansions.value = [];
       derived.value = [];
     }
     try {
-      const [inv, srcs, caseFiles] = await Promise.all([
+      const [inv, rows, notes] = await Promise.all([
         api.getInvestigation(id),
-        api.getInvestigationSources(id),
-        api.getInvestigationFiles(id),
+        api.getInvestigationItems(id),
+        api.getInvestigationAnnotations(id),
       ]);
       current.value = inv;
-      sources.value = srcs;
-      files.value = caseFiles;
+      items.value = rows;
+      annotations.value = notes;
     } catch (e) {
       current.value = null;
-      sources.value = [];
+      items.value = [];
       error.value = getErrorMessage(e, 'Failed to load investigation');
     } finally {
       loading.value = false;
     }
   }
 
+  // --- material ---------------------------------------------------------------
+
+  async function fetchItems() {
+    if (current.value) items.value = await api.getInvestigationItems(current.value.id);
+  }
+
+  function upsertItem(item: CaseItem) {
+    const i = items.value.findIndex((x) => x.id === item.id);
+    if (i >= 0) items.value[i] = item;
+    else items.value.push(item);
+    const row = investigations.value.find((x) => x.id === current.value?.id);
+    if (row && i < 0) row.item_count = (row.item_count ?? 0) + 1;
+  }
+
+  async function addItem(data: CreateItemRequest): Promise<CaseItem | null> {
+    if (!current.value) return null;
+    const item = await api.createInvestigationItem(current.value.id, data);
+    upsertItem(item);
+    void fetchEvents();
+    return item;
+  }
+
+  async function uploadItem(file: File, params: Parameters<typeof api.uploadInvestigationItem>[2]): Promise<CaseItem | null> {
+    if (!current.value) return null;
+    const item = await api.uploadInvestigationItem(current.value.id, file, params);
+    upsertItem(item);
+    void fetchEvents();
+    return item;
+  }
+
+  async function updateItem(itemId: string, patch: UpdateItemRequest) {
+    if (!current.value) return;
+    upsertItem(await api.updateInvestigationItem(current.value.id, itemId, patch));
+    void fetchEvents();
+  }
+
+  async function addVersion(itemId: string, body: { content?: string; content_json?: unknown }) {
+    if (!current.value) return;
+    upsertItem(await api.addInvestigationItemVersion(current.value.id, itemId, body));
+    void fetchEvents();
+  }
+
+  async function removeItem(itemId: string) {
+    if (!current.value) return;
+    await api.deleteInvestigationItem(current.value.id, itemId);
+    items.value = items.value.filter((i) => i.id !== itemId);
+    sourceGraphs.value = sourceGraphs.value.filter((g) => g.id !== itemId);
+    const row = investigations.value.find((i) => i.id === current.value?.id);
+    if (row) row.item_count = Math.max(0, (row.item_count ?? 1) - 1);
+    void fetchEvents();
+  }
+
+  async function pinItem(itemId: string, body: { version?: number; label?: string } = {}) {
+    if (!current.value) return null;
+    const version = await api.pinInvestigationItem(current.value.id, itemId, body);
+    await fetchItems();
+    void fetchEvents();
+    return version;
+  }
+
+  async function setItemStatus(itemId: string, status: 'confirmed' | 'rejected') {
+    if (!current.value) return;
+    upsertItem(await api.setInvestigationItemStatus(current.value.id, itemId, status));
+    void fetchEvents();
+  }
+
+  async function runQuery(itemId: string, parameters: Record<string, unknown> = {}) {
+    if (!current.value) return null;
+    const item = await api.runInvestigationQuery(current.value.id, itemId, parameters);
+    upsertItem(item);
+    void fetchEvents();
+    return item;
+  }
+
+  function toggleCanvas(itemId: string, on: boolean) {
+    const next = new Set(offCanvas.value);
+    if (on) next.delete(itemId);
+    else next.add(itemId);
+    offCanvas.value = next;
+  }
+
+  /**
+   * Adds explorations as live references, one by one (the API takes one per call).
+   * Stops at the first failure and reports how many made it.
+   */
+  async function addExplorations(investigationId: string, explorationIds: string[]): Promise<{ added: number; error: string | null }> {
+    let added = 0;
+    try {
+      for (const id of explorationIds) {
+        const item = await api.createInvestigationItem(investigationId, { kind: 'graph', subkind: 'exploration_ref', exploration_id: id });
+        if (current.value?.id === investigationId) upsertItem(item);
+        added++;
+      }
+      return { added, error: null };
+    } catch (e) {
+      return { added, error: getErrorMessage(e, 'Failed to add exploration') };
+    } finally {
+      const row = investigations.value.find((i) => i.id === investigationId);
+      if (row && current.value?.id !== investigationId) row.item_count = (row.item_count ?? 0) + added;
+      if (added && current.value?.id === investigationId) fetchEvents().catch(() => {});
+    }
+  }
+
+  /**
+   * Freezes an analysis result or a graph as an item and pins it (evidence).
+   * Returns the pinned version (sha256).
+   */
+  async function pinEvidence(body: { title: string; kind: 'trace' | 'graph_state' | 'table'; params: Record<string, unknown>; snapshot: unknown }) {
+    if (!current.value) return null;
+    const item = await addItem(
+      body.kind === 'graph_state'
+        ? { kind: 'graph', subkind: 'snapshot', title: body.title, content_json: body.snapshot, provenance: { tool: 'graph_state', params: body.params } }
+        : { kind: 'table', subkind: 'result', title: body.title, content_json: body.snapshot, provenance: { tool: body.kind, params: body.params } },
+    );
+    if (!item) return null;
+    // A frozen graph stays out of the canvas: it duplicates what is already there.
+    if (body.kind === 'graph_state') toggleCanvas(item.id, false);
+    return pinItem(item.id);
+  }
+
+  async function fetchBrief() {
+    if (current.value) brief.value = await api.getInvestigationBrief(current.value.id);
+  }
+
+  async function saveBrief(text: string) {
+    if (!current.value) return;
+    brief.value = await api.putInvestigationBrief(current.value.id, text);
+    if (brief.value.item) upsertItem(brief.value.item);
+    void fetchEvents();
+  }
+
+  // --- annotations ------------------------------------------------------------
+
+  async function fetchAnnotations() {
+    if (current.value) annotations.value = await api.getInvestigationAnnotations(current.value.id);
+  }
+
+  async function addAnnotation(data: CreateAnnotationRequest): Promise<CaseAnnotation | null> {
+    if (!current.value) return null;
+    const row = await api.createInvestigationAnnotation(current.value.id, data);
+    await fetchAnnotations(); // a confirmed role replaces the previous one server-side
+    void fetchEvents();
+    return row;
+  }
+
+  async function setAnnotationStatus(annotationId: string, status: 'confirmed' | 'rejected') {
+    if (!current.value) return;
+    await api.setInvestigationAnnotationStatus(current.value.id, annotationId, status);
+    await fetchAnnotations();
+    if (status === 'confirmed') current.value = await api.getInvestigation(current.value.id); // a status_change moves the case
+    void fetchEvents();
+  }
+
+  async function deleteAnnotation(annotationId: string) {
+    if (!current.value) return;
+    await api.deleteInvestigationAnnotation(current.value.id, annotationId);
+    annotations.value = annotations.value.filter((a) => a.id !== annotationId);
+    void fetchEvents();
+  }
+
+  /** Sets (or clears) the confirmed role of an entity. */
+  async function setRole(entity: string, role: string | null) {
+    if (role) {
+      await addAnnotation({ kind: 'role', targets: [entity], value: { role } });
+      return;
+    }
+    const existing = annotations.value.find((a) => a.kind === 'role' && a.status === 'confirmed' && a.targets[0] === entity);
+    if (existing) await deleteAnnotation(existing.id);
+  }
+
+  async function addHypothesis(text: string) {
+    return addAnnotation({ kind: 'hypothesis', value: { text, status: 'open' } });
+  }
+
+  async function updateHypothesis(annotationId: string, patch: { status?: string; evidence_for?: string[]; evidence_against?: string[]; text?: string }) {
+    if (!current.value) return;
+    if (patch.status) {
+      await addAnnotation({ kind: 'hypothesis_status', targets: [annotationId], value: { status: patch.status } });
+    }
+    const { status: _s, ...rest } = patch;
+    if (Object.keys(rest).length) {
+      await api.updateInvestigationAnnotation(current.value.id, annotationId, { value: rest });
+      await fetchAnnotations();
+      void fetchEvents();
+    }
+  }
+
+  /** A note anchored on an entity (item note/anchored). */
+  async function addNote(entityId: string | null, body: string) {
+    // The body is also the description, so the inspector shows it without fetching the version.
+    return addItem({
+      kind: 'note',
+      subkind: entityId ? 'anchored' : 'free',
+      title: body.length > 60 ? `${body.slice(0, 57)}…` : body,
+      description: body,
+      content: body,
+      anchor: entityId ? { entity_ids: [entityId] } : undefined,
+    });
+  }
+
+  /** Runs entity resolution on the server; new pairs arrive as suggested same_as. */
+  async function findMatches(): Promise<number> {
+    if (!current.value) return 0;
+    const created = await api.runInvestigationEntityResolution(current.value.id);
+    await fetchAnnotations();
+    if (created.length) void fetchEvents();
+    return created.length;
+  }
+
+  async function fetchEvents() {
+    if (current.value) events.value = await api.getInvestigationEvents(current.value.id);
+  }
+
+  // --- canvas -----------------------------------------------------------------
+
   async function loadWorkspace() {
     const inv = current.value;
     if (!inv) return;
     graphLoading.value = true;
-    fetchMatches().catch(() => {}); // accepted matches alias entities once they arrive
-    const readable = sources.value.filter((s) => s.accessible && s.context_id);
-    const contextIds = [...new Set(readable.map((s) => s.context_id!))];
+    const readable = graphItems.value.filter((s) => s.accessible);
     try {
-      const [graphs, ctxs] = await Promise.all([
-        Promise.all(
-          readable.map(async (s): Promise<SourceGraph> => {
-            const base = { id: s.id, contextId: s.context_id! };
-            try {
-              const payload = await api.getInvestigationSourceSnapshot(inv.id, s.id);
-              return {
-                ...base,
-                ...snapshotToGraph(payload.snapshot),
-                state: payload.exploration?.state ?? null,
-                // shortcut: no query re-run here; an exploration without a snapshot shows empty.
-                error: payload.snapshot ? null : 'No saved graph: open the exploration and save it',
-              };
-            } catch (e) {
-              return { ...base, nodes: [], edges: [], state: null, error: getErrorMessage(e, 'Failed to load source') };
+      const graphs = await Promise.all(
+        readable.map(async (s): Promise<SourceGraph> => {
+          const contextId = s.context_id ?? s.id;
+          const base = { id: s.id, contextId };
+          try {
+            const payload = await api.getInvestigationItemSnapshot(inv.id, s.id);
+            // Mapped tables and stored snapshots carry their own keys: a pseudo-context per item.
+            if (!s.context_id) {
+              contexts.value[s.id] = {
+                id: s.id,
+                title: s.title,
+                identity_keys: payload.identity_keys ?? [],
+                edge_semantics: payload.edge_semantics ?? undefined,
+              } as unknown as GraphContext;
             }
-          }),
-        ),
-        Promise.all(contextIds.map((id) => api.getGraphContext(id).catch(() => null))),
-      ]);
-      sourceGraphs.value = graphs;
-      contexts.value = Object.fromEntries(
-        ctxs.filter((c): c is GraphContext => c !== null).map((c) => [c.id, c]),
+            return {
+              ...base,
+              ...snapshotToGraph(payload.snapshot),
+              state: payload.exploration?.state ?? null,
+              // shortcut: no query re-run here; an exploration without a snapshot shows empty.
+              error: payload.snapshot ? null : 'No saved graph: open the exploration and save it',
+            };
+          } catch (e) {
+            return { ...base, nodes: [], edges: [], state: null, error: getErrorMessage(e, 'Failed to load item') };
+          }
+        }),
       );
+      const contextIds = [...new Set(readable.map((s) => s.context_id).filter(Boolean) as string[])];
+      const ctxs = await Promise.all(contextIds.map((id) => api.getGraphContext(id).catch(() => null)));
+      for (const c of ctxs) if (c) contexts.value[c.id] = c;
+      sourceGraphs.value = graphs;
       expansions.value = [];
       derived.value = [];
     } finally {
@@ -288,13 +466,11 @@ export const useInvestigationStore = defineStore('investigation', () => {
     }
   }
 
-  /** Unifies an expansion as the source `expansion:<sourceId>` (03 §5.1). */
+  /** Unifies an expansion as the source `expansion:<itemId>`. */
   function addExpansion(origin: NodeOrigin, nodes: Node[], edges: Edge[]) {
     const id = `expansion:${origin.sourceId}`;
     const base = sourceGraphs.value.find((g) => g.id === origin.sourceId);
     const prev = expansions.value.find((e) => e.id === id);
-    // Nodes merge by uid anyway; edges the source (or an earlier expansion) already
-    // has would come back as parallel edges.
     const prevNodes = new Set((prev?.nodes ?? []).map((n) => n.node_id));
     const seenEdges = new Set([...(base?.edges ?? []), ...(prev?.edges ?? [])].map((e) => e.edge_id));
     const next: UnifySource = {
@@ -314,72 +490,32 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
-  async function fetchMatches() {
-    if (current.value) matches.value = await api.getInvestigationMatches(current.value.id);
-  }
-
-  /** Runs entity resolution (erWorker) on the unified graph and stores the new suggestions. */
-  async function findMatches(): Promise<number> {
-    if (!current.value) return 0;
-    const nodes = unified.value.nodes.map((n) => ({ uid: n.node_id, properties: { ...(n.properties ?? {}) } }));
-    const found = await new Promise<MatchSuggestion[]>((resolve, reject) => {
-      const worker = new Worker(new URL('@/workers/erWorker.ts', import.meta.url), { type: 'module' });
-      worker.onmessage = (e: MessageEvent<ErWorkerOutput>) => {
-        worker.terminate();
-        if (e.data.type === 'RESULT') resolve(e.data.matches);
-        else reject(new Error(e.data.error));
-      };
-      worker.onerror = (e) => {
-        worker.terminate();
-        reject(new Error(e.message));
-      };
-      worker.postMessage({ type: 'RUN', nodes } as ErWorkerInput);
-    });
-    const created = found.length ? await api.addInvestigationMatches(current.value.id, found) : [];
-    await fetchMatches();
-    if (created.length) void fetchEvents();
-    return created.length;
-  }
-
-  async function decideMatch(matchId: string, status: Exclude<MatchStatus, 'sugerido'>, reasonText: string) {
-    if (!current.value) return;
-    const updated = await api.decideInvestigationMatch(current.value.id, matchId, status, reasonText);
-    matches.value = matches.value.map((m) => (m.id === updated.id ? updated : m));
-    void fetchEvents();
-  }
-
-  /**
-   * Adds explorations one by one (the API takes one per call). Stops at the first
-   * failure and reports how many made it, so a partial add is never silent.
-   */
-  async function addExplorations(
-    investigationId: string,
-    explorationIds: string[],
-    mode: SourceMode,
-  ): Promise<{ added: number; error: string | null }> {
-    let added = 0;
-    try {
-      for (const id of explorationIds) {
-        const source = await api.addInvestigationSource(investigationId, id, mode);
-        if (current.value?.id === investigationId) sources.value.push(source);
-        added++;
-      }
-      return { added, error: null };
-    } catch (e) {
-      return { added, error: getErrorMessage(e, 'Failed to add exploration') };
-    } finally {
-      const row = investigations.value.find((i) => i.id === investigationId);
-      if (row) row.source_count = (row.source_count ?? 0) + added;
-      if (added && current.value?.id === investigationId) fetchEvents().catch(() => {});
-    }
-  }
-
   return {
     investigations,
     current,
-    sources,
+    items,
+    annotations,
+    events,
+    brief,
     loading,
     error,
+    graphItems,
+    canvasItems,
+    restrictedItems,
+    offCanvas,
+    sourceGraphs,
+    contexts,
+    expansions,
+    derived,
+    graphLoading,
+    sourceColors,
+    unified,
+    roles,
+    hypotheses,
+    suggestions,
+    evidence,
+    notes,
+    itemTitle,
     fetchInvestigations,
     createInvestigation,
     updateInvestigation,
@@ -387,40 +523,34 @@ export const useInvestigationStore = defineStore('investigation', () => {
     unshareInvestigation,
     deleteInvestigation,
     reopenInvestigation,
-    removeSource,
+    recordDecision,
     openInvestigation,
+    fetchItems,
+    addItem,
+    uploadItem,
+    updateItem,
+    addVersion,
+    removeItem,
+    pinItem,
+    setItemStatus,
+    runQuery,
+    toggleCanvas,
     addExplorations,
-    sourceGraphs,
-    contexts,
-    expansions,
-    graphLoading,
-    sourceColors,
-    unified,
-    roles,
-    notes,
-    events,
-    files,
-    fetchFiles,
-    addFiles,
-    setRole,
-    fetchNotes,
-    fetchEvents,
-    addNote,
-    deleteNote,
-    evidence,
-    fetchEvidence,
     pinEvidence,
-    hypotheses,
+    fetchBrief,
+    saveBrief,
+    fetchAnnotations,
+    addAnnotation,
+    setAnnotationStatus,
+    deleteAnnotation,
+    setRole,
     addHypothesis,
     updateHypothesis,
-    recordDecision,
+    addNote,
+    findMatches,
+    fetchEvents,
     loadWorkspace,
     addExpansion,
-    derived,
     addDerived,
-    matches,
-    fetchMatches,
-    findMatches,
-    decideMatch,
   };
 });

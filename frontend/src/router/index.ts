@@ -39,22 +39,16 @@ const router = createRouter({
       props: true,
     },
     {
-      path: '/investigations/:id/agents',
-      name: 'investigation-agents',
-      component: () => import('@/views/InvestigationAgentsView.vue'),
-      props: true,
-    },
-    {
+      // shortcut: the dossier stays a route until F4 makes it `?mode=dossie` of the case.
       path: '/investigations/:id/dossier',
       name: 'investigation-dossier',
       component: () => import('@/views/InvestigationDossierView.vue'),
       props: true,
     },
     {
-      path: '/investigations/:id/matches',
-      name: 'investigation-matches',
-      component: () => import('@/views/InvestigationMatchesView.vue'),
-      props: true,
+      path: '/settings/agents',
+      name: 'settings-agents',
+      component: () => import('@/views/AgentTokensView.vue'),
     },
     {
       path: '/dev/generator',

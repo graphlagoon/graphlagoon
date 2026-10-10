@@ -10,7 +10,9 @@ import { useInvestigationStore } from '@/stores/investigation'
 import { useTraceStore } from '@/stores/trace'
 
 const api = vi.hoisted(() => ({
-  createInvestigationEvidence: vi.fn(async (_id: string, body: any) => ({ id: 'ev-1', sha256: 'ab'.repeat(32), created_by: 'me', ...body })),
+  createInvestigationItem: vi.fn(async (_id: string, body: any) => ({ id: 'it-1', pinned: [], current_version: 1, ...body })),
+  pinInvestigationItem: vi.fn(async () => ({ version: 1, sha256: 'ab'.repeat(32), pinned_by: 'me' })),
+  getInvestigationItems: vi.fn(async () => []),
   getInvestigationEvents: vi.fn(async () => []),
 }))
 vi.mock('@/services/api', () => ({ api }))
@@ -51,15 +53,16 @@ describe('trace screen (T5)', () => {
     const save = getByTestId('trace-save-evidence') as HTMLButtonElement
     expect(save.disabled).toBe(true) // no write access to the case yet
     const inv = useInvestigationStore()
-    inv.current = { id: 'inv-1', status: 'analise', has_write_access: true, state: {} } as any
+    inv.current = { id: 'inv-1', status: 'analysis', has_write_access: true, state: {} } as any
     await nextTick()
     await fireEvent.click(save)
-    const [id, body] = api.createInvestigationEvidence.mock.calls[0]
+    const [id, body] = api.createInvestigationItem.mock.calls[0]
     expect(id).toBe('inv-1')
-    expect(body.kind).toBe('trace')
-    expect(body.params).toMatchObject({ allocation: 'fifo', maxHops: 3, seedEdgeIds: ['src:e2'], engine: 'browser' })
-    expect(body.snapshot.exits['saque-atm@ctx']).toBe(2000)
-    expect(body.snapshot.stamp).toContain('FIFO')
+    expect(body.kind).toBe('table')
+    expect(body.provenance).toMatchObject({ tool: 'trace', params: { allocation: 'fifo', maxHops: 3, seedEdgeIds: ['src:e2'], engine: 'browser' } })
+    expect(body.content_json.exits['saque-atm@ctx']).toBe(2000)
+    expect(body.content_json.stamp).toContain('FIFO')
+    await vi.waitFor(() => expect(api.pinInvestigationItem).toHaveBeenCalledWith('inv-1', 'it-1', {}))
 
     await fireEvent.click(getByTestId('trace-backward'))
     expect((getByTestId('trace-rule-lifo') as HTMLInputElement).checked).toBe(true)
