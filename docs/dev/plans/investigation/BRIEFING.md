@@ -4,12 +4,21 @@ Instruções que cada agente recebe para implementar **uma** tarefa do
 [plano](04-plano-de-implementacao.md). Mantido aqui para acompanharmos como a execução
 é conduzida; mudou, commita junto.
 
+## Enquadramento (v2, 2026-10-10)
+
+- O plano em vigor é o [05-plano-v2.md](05-plano-v2.md). O 04 está concluído e é histórico.
+- **Domínio genérico:** crédito, fuga de garantia, fraude, lavagem, lojista, fraude sintética.
+  Nada de papéis, tipos de entidade ou "vítima" chumbados; vocabulários livres com presets.
+- **O agente é um analista com a identidade da pessoa** (MCP na máquina dela). Pode quase
+  tudo; escritas registram autor; só alguns tipos viram "sugerido". Não existe matriz
+  "direto/propõe/nunca" nem tabela de propostas.
+- **Um caso é um lugar só:** tudo que entra é um item do caso com versões e autor.
+
 ## Antes de começar
 
-1. [README](README.md): Definition of Done e decisões em aberto (Q1–Q9). Use os
-   padrões e registre cada suposição no decision log.
-2. A seção da tarefa no plano e só as partes de [03](03-arquitetura.md) /
-   [02](02-design.md) (e `screens/*.png`) que ela cita.
+1. [README](README.md): Definition of Done. Decisões em aberto já foram tomadas no 05.
+2. A fase da tarefa em [05-plano-v2.md](05-plano-v2.md); o [03](03-arquitetura.md) e o
+   [02](02-design.md) valem só onde o 05 não contradiz.
 3. `git log --oneline` e as entradas recentes do `docs/dev/decision_log.md`, para
    reaproveitar o que tarefas anteriores construíram.
 4. `.claude/skills/skill_feature_creation/SKILL.md` só para os passos obrigatórios:

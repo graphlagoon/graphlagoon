@@ -67,7 +67,8 @@ construído.
 | # | Arquivo | Para quê |
 |---|---|---|
 | 1 | Este README | Regras de trabalho e mapa do pacote |
-| 2 | [04-plano-de-implementacao.md](04-plano-de-implementacao.md) | **O que fazer:** tarefas em ordem, com arquivos, critérios de aceite e testes |
+| 2 | [05-plano-v2.md](05-plano-v2.md) | **O que fazer agora:** redesenho aprovado em 2026-10-10 (modelo, UX, AI-first), fases F0–F6 |
+| 2b | [04-plano-de-implementacao.md](04-plano-de-implementacao.md) | Plano original, já executado; referência histórica |
 | 3 | [03-arquitetura.md](03-arquitetura.md) | **Como fazer:** modelo de dados, API, frontend, algoritmos e segurança |
 | 4 | [02-design.md](02-design.md) | **Como deve parecer:** telas, fluxos, sistema visual, avaliação |
 | 5 | [01-pesquisa-brasil.md](01-pesquisa-brasil.md) | Regulação brasileira, tipologias, SIMBA, dados abertos |
