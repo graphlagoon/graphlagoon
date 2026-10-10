@@ -89,10 +89,10 @@ test.describe('User Journeys', () => {
 
     // Add one exploration from each context
     await page.getByTestId('investigation-add-sources').click();
-    const modal = page.getByTestId('add-to-investigation-modal');
+    const modal = page.getByTestId('add-items-popover');
     await modal.getByTestId('add-exp-exp-pix').locator('input').check();
     await modal.getByTestId('add-exp-exp-kyc').locator('input').check();
-    await expect(modal.getByTestId('add-preview')).toContainText('2 new explorations, from 2 contexts');
+    await expect(modal.getByTestId('add-preview')).toContainText('2 novas explorações, de 2 contexts');
     await modal.getByTestId('add-submit').click();
     await expect(modal).toHaveCount(0);
 

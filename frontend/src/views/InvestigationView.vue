@@ -26,7 +26,7 @@ import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import LayoutPanel from '@/components/LayoutPanel.vue';
 import CaseHeader from '@/components/investigation/CaseHeader.vue';
 import CaseItemsPanel from '@/components/investigation/CaseItemsPanel.vue';
-import AddToInvestigationModal from '@/components/investigation/AddToInvestigationModal.vue';
+import AddItemsPopover from '@/components/investigation/AddItemsPopover.vue'; // F3: popover replaces the modal
 import FileImportWizard from '@/components/investigation/FileImportWizard.vue';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import TracePanel from '@/components/investigation/TracePanel.vue';
@@ -588,7 +588,7 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
       </footer>
     </template>
 
-    <AddToInvestigationModal :open="showAdd" :investigation-id="id" @close="showAdd = false" />
+    <AddItemsPopover :open="showAdd" :investigation-id="id" @close="showAdd = false" @upload="showAdd = false; showWizard = true" /><!-- F3 -->
     <FileImportWizard v-if="showWizard" :investigation-id="id" @close="showWizard = false" @done="onWizardDone" />
 
     <div v-if="pickerOrigins" class="modal-overlay" @click.self="pick(null)">

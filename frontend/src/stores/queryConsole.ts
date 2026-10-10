@@ -18,6 +18,7 @@ import {
   type StepResult,
 } from '@/composables/useCancellableQuery';
 import type {
+  GraphContext,
   TableQueryMode,
   QueryMetadata,
   TableQueryResponse,
@@ -91,6 +92,14 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
   const metadata = ref<QueryMetadata | null>(null);
   const error = ref<QueryErrorInfo | null>(null);
   const hasRun = ref(false);
+  /**
+   * Context the console runs against when it is embedded outside a graph page
+   * (the case's "Consulta" tab, F3). Null = the graph store's current context.
+   */
+  const contextOverride = ref<GraphContext | null>(null);
+  function activeContext(): GraphContext | null {
+    return contextOverride.value ?? useGraphStore().currentContext;
+  }
 
   function open() {
     isOpen.value = true;
@@ -142,14 +151,15 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
   const cq = useCancellableQuery({
     submit: async (): Promise<StepResult> => {
       const graphStore = useGraphStore();
-      const contextId = graphStore.currentContext!.id;
+      const context = activeContext()!;
+      const contextId = context.id;
       const query = (
         mode.value === 'cypher' ? cypherQuery.value : sqlQuery.value
       ).trim();
       // A backend that runs Cypher natively rejects every option below, so
       // they are omitted entirely rather than sent and 400'd.
       const transpiles = capabilitiesFor(
-        resolveDatasourceType(graphStore.currentContext),
+        resolveDatasourceType(context),
       ).supportsTranspile;
       const resp = await api.executeTableQuery(contextId, {
         query,
@@ -184,14 +194,12 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
       };
     },
     poll: async (statementId: string): Promise<StepResult> => {
-      const graphStore = useGraphStore();
-      const contextId = graphStore.currentContext!.id;
+      const contextId = activeContext()!.id;
       const s = await api.getTableQueryStatus(contextId, statementId);
       return { status: s.status, statementId, result: s };
     },
     cancel: async (statementId: string): Promise<void> => {
-      const graphStore = useGraphStore();
-      const contextId = graphStore.currentContext?.id;
+      const contextId = activeContext()?.id;
       if (contextId) await api.cancelTableQuery(contextId, statementId);
     },
     applyResult,
@@ -211,7 +219,7 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
 
   async function runQuery(): Promise<void> {
     const graphStore = useGraphStore();
-    const contextId = graphStore.currentContext?.id;
+    const contextId = activeContext()?.id;
     if (!contextId) {
       error.value = { message: 'No active context' };
       hasRun.value = true;
@@ -234,7 +242,7 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
       error.value !== null &&
       !cq.canceled.value &&
       mode.value === 'cypher' &&
-      capabilitiesFor(resolveDatasourceType(graphStore.currentContext))
+      capabilitiesFor(resolveDatasourceType(activeContext()))
         .supportsTranspile &&
       submitRenderingMode === 'procedural' &&
       graphStore.cteFallbackEnabled
@@ -290,6 +298,7 @@ export const useQueryConsoleStore = defineStore('queryConsole', () => {
 
   return {
     isOpen,
+    contextOverride,
     mode,
     cypherQuery,
     sqlQuery,

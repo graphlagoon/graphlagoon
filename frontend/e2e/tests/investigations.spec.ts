@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
-import { seedContexts, seedExplorations, seedInvestigations } from '../helpers/api-mocks';
+import { mockTableQuery, seedContexts, seedExplorations, seedInvestigations } from '../helpers/api-mocks';
 
 const now = new Date().toISOString();
 const CASE = {
@@ -105,9 +105,9 @@ test.describe('Investigations', () => {
 
     // add from "my recent explorations": a live reference item
     await page.getByTestId('items-empty-add').click();
-    const modal = page.getByTestId('add-to-investigation-modal');
+    const modal = page.getByTestId('add-items-popover');
     await expect(modal.getByTestId('add-scope-mine')).toHaveClass(/on/);
-    await expect(modal.getByTestId(`add-exp-${exploration.id}`)).toContainText('3 nodes');
+    await expect(modal.getByTestId(`add-exp-${exploration.id}`)).toContainText('3 nós');
     await modal.getByTestId(`add-exp-${exploration.id}`).locator('input').check();
     await modal.getByTestId('add-submit').click();
     await expect(modal).toHaveCount(0);
@@ -153,7 +153,7 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('investigations-empty')).toBeVisible();
   });
 
-  test('adds an exploration to a case as a live reference, with the restricted item as a placeholder', async ({
+  test('F3: the current-case chip picks the target; the explorations list adds to it in one click; the popover shows the restricted item', async ({
     authenticatedPage: page,
   }) => {
     await seedContexts(page, [MOCK_CONTEXT]);
@@ -161,18 +161,126 @@ test.describe('Investigations', () => {
     const { added } = await seedInvestigations(page, [CASE], { 'inv-1': [RESTRICTED] });
 
     await page.goto('/explorations');
-    await page.getByTestId(`exploration-add-to-investigation-${MOCK_EXPLORATION.id}`).click();
-    const modal = page.getByTestId('add-to-investigation-modal');
-    await modal.getByTestId('add-case-select').selectOption('inv-1');
+    const addBtn = page.getByTestId(`exploration-add-to-investigation-${MOCK_EXPLORATION.id}`);
+    await expect(addBtn).toBeDisabled(); // no current case yet
+    await expect(page.getByTestId('current-case-label')).toContainText('Sem caso atual');
 
-    await expect(modal.getByTestId('add-restricted-source')).toContainText("don't have access");
-    await expect(modal.getByTestId('add-restricted-source')).toContainText('Cartões suspeitos');
-    await expect(modal.getByTestId(`add-exp-${MOCK_EXPLORATION.id}`).locator('input')).toBeChecked();
-    await expect(modal.getByTestId('add-preview')).toContainText('1 new exploration, from 1 context');
+    await page.getByTestId('current-case-chip').click();
+    await page.getByTestId('current-case-search').fill('Pix');
+    await page.getByTestId('current-case-pick-inv-1').click();
+    await expect(page.getByTestId('current-case-label')).toContainText('Golpe Pix · falsa central · #inv-');
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('graphlagoon.currentCase')!).id)).toBe('inv-1');
 
-    await modal.getByTestId('add-submit').click();
-    await expect(modal).toHaveCount(0);
+    await addBtn.click();
+    await expect(page.getByText('Adicionado ao caso Golpe Pix · falsa central')).toBeVisible();
     expect(added).toEqual([{ investigation_id: 'inv-1', kind: 'graph', subkind: 'exploration_ref', exploration_id: MOCK_EXPLORATION.id }]);
+
+    // The chip survives a reload and the case popover tells about the restricted item
+    await page.goto('/investigations/inv-1');
+    await expect(page.getByTestId('current-case-label')).toContainText('Golpe Pix');
+    await page.getByTestId('items-add').click();
+    const popover = page.getByTestId('add-items-popover');
+    await expect(popover.getByTestId('add-restricted-source')).toContainText('Cartões suspeitos');
+    await expect(popover.getByTestId(`add-exp-${MOCK_EXPLORATION.id}`)).toContainText('já está no caso');
+  });
+
+  test('F3: a console result becomes a table of the case in two clicks (run, add)', async ({ authenticatedPage: page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('graphlagoon.currentCase', JSON.stringify({ id: 'inv-1', title: 'Golpe Pix · falsa central' }));
+    });
+    await seedContexts(page, [MOCK_CONTEXT]);
+    const { added, material } = await seedInvestigations(page, [CASE]);
+    await mockTableQuery(page, { columns: ['cpf', 'valor'], rows: [['123', '10'], ['456', '20']] });
+
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('current-case-label')).toContainText('Golpe Pix');
+    await page.getByTestId('query-console-toggle').click();
+    await page.getByTestId('query-console-run').click();
+    await expect(page.getByTestId('query-console-footer')).toContainText('2 rows');
+    await page.getByTestId('query-console-add-result').click();
+    await expect(page.getByText('Adicionado ao caso Golpe Pix · falsa central')).toBeVisible();
+    expect(added[0]).toMatchObject({ investigation_id: 'inv-1', kind: 'table', subkind: 'result', content_json: { columns: ['cpf', 'valor'], rows: [['123', '10'], ['456', '20']], row_count: 2 } });
+    expect(added[0].provenance).toMatchObject({ context_id: MOCK_CONTEXT.id, tool: 'console' });
+
+    // and the same text as a saved query of the case, with history of runs
+    await page.getByTestId('query-console-save-case-query').click();
+    await expect(added).toHaveLength(2);
+    expect(added[1]).toMatchObject({ kind: 'query', context_id: MOCK_CONTEXT.id, query: { language: 'cypher', output: 'table' } });
+    await page.goto('/investigations/inv-1');
+    const query = material.get('inv-1')!.find((i) => i.kind === 'query')!;
+    await expect(page.getByTestId('items-group-query')).toContainText('never run');
+    await page.getByTestId(`item-run-${query.id}`).click();
+    await expect(page.getByTestId(`item-${query.id}`)).toContainText('12 rows · 310 ms');
+    await page.getByTestId(`item-expand-${query.id}`).click();
+    await page.getByTestId(`query-history-${query.id}`).click();
+    await expect(page.getByTestId('query-run-row-1')).toContainText('12 linhas');
+  });
+
+  test('F3: a new exploration started from the case comes back as a live reference', async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedExplorations(page, []);
+    const { added, material } = await seedInvestigations(page, [CASE], {}, []);
+
+    await page.goto('/investigations/inv-1');
+    await page.getByTestId('items-empty-add').click();
+    const popover = page.getByTestId('add-items-popover');
+    await popover.getByTestId('add-tab-new').click();
+    await popover.getByTestId(`add-new-context-${MOCK_CONTEXT.id}`).click();
+    await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}?case=inv-1`);
+    await expect(page.getByTestId('case-breadcrumb')).toContainText('← Caso Golpe Pix');
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+    await page.getByTestId('toolbar-exploration-unsaved').click();
+    await expect(page.getByTestId('save-exploration-case-hint')).toContainText('Golpe Pix');
+    await page.getByTestId('save-exploration-title').fill('Rastreio inicial');
+    await page.getByTestId('save-exploration-submit').click();
+    await page.waitForURL('**/investigations/inv-1');
+    expect(added).toEqual([{ investigation_id: 'inv-1', kind: 'graph', subkind: 'exploration_ref', exploration_id: 'exp-new-1' }]);
+    const ref = material.get('inv-1')!.find((i) => i.subkind === 'exploration_ref')!;
+    await expect(page.getByTestId(`item-${ref.id}`)).toContainText('Rastreio inicial');
+    await expect(page.getByTestId(`item-${ref.id}`)).toContainText('🔗');
+  });
+
+  test('F3: five tables from different origins — join two by key, promote three to enrichment at once', async ({ authenticatedPage: page }) => {
+    const table = (id: string, title: string, columns: string[], rows: any[][], extra: Record<string, unknown> = {}) => ({
+      ...item(id, MOCK_CONTEXT.id, title), kind: 'table', subkind: 'result', exploration_id: null, current_version: 1,
+      latest: { id: `v-${id}`, item_id: id, version: 1, sha256: 'a'.repeat(64), size_bytes: 10, content_type: 'application/json', has_text: true, created_by: 'e2e@test.com', author_kind: 'human' },
+      _content: { columns, rows }, ...extra,
+    });
+    const tables = [
+      table('t-kyc', 'KYC', ['cpf', 'nome'], [['1', 'Ana'], ['2', 'Bia']], { provenance: { tool: 'console' } }),
+      table('t-exp', 'Exposição', ['cpf', 'valor'], [['2', 10], ['3', 5]], { provenance: { filename: 'exposicao.csv' } }),
+      table('t-gar', 'Garantias', ['cpf', 'garantia'], [['1', 'imóvel']], { author_kind: 'agent' }),
+      table('t-dev', 'Dispositivos', ['cpf', 'device'], [['2', 'd1']], { provenance: { tool: 'metrics' } }),
+      table('t-pix', 'Pix 90 dias', ['cpf', 'qtd'], [['3', 7]], { provenance: { query_item_id: 'q0' } }),
+    ];
+    const { added, material } = await seedInvestigations(page, [CASE], { 'inv-1': tables });
+
+    await page.goto('/investigations/inv-1');
+    await expect(page.getByTestId('items-group-table')).toContainText('5');
+    await page.getByTestId('item-select-t-kyc').check();
+    await page.getByTestId('item-select-t-exp').check();
+    await page.getByTestId('table-op-join').click();
+    const dialog = page.getByTestId('table-ops-dialog');
+    await expect(dialog.getByTestId('ops-key')).toHaveValue('cpf');
+    await dialog.getByTestId('ops-submit').click();
+    await expect(dialog).toHaveCount(0);
+    expect(added[0]).toMatchObject({ op: 'join', item_ids: ['t-kyc', 't-exp'], key_column: 'cpf' });
+    const joined = material.get('inv-1')!.find((i) => i.provenance?.tool === 'join')!;
+    await expect(page.getByTestId(`item-${joined.id}`)).toContainText('KYC + Exposição por cpf');
+    expect(joined._content).toEqual({ columns: ['cpf', 'nome', 'valor'], rows: [['1', 'Ana', null], ['2', 'Bia', 10], ['3', null, 5]] });
+
+    await page.getByTestId('item-select-t-gar').check();
+    await page.getByTestId('item-select-t-dev').check();
+    await page.getByTestId('item-select-t-pix').check();
+    await expect(page.getByTestId('table-ops-bar')).toContainText('3 selecionadas');
+    await page.getByTestId('table-op-enrichment').click();
+    await page.getByTestId('ops-node-types').fill('Titular');
+    await page.getByTestId('ops-submit').click();
+    await expect(page.getByTestId('table-ops-dialog')).toHaveCount(0);
+    expect(added[1]).toMatchObject({ op: 'promote', as: 'enrichment', item_ids: ['t-gar', 't-dev', 't-pix'], options: { key_column: 'cpf', match_node_types: ['Titular'] } });
+    expect(material.get('inv-1')!.filter((i) => i.mapping?.as === 'enrichment').map((i) => i.id)).toEqual(['t-gar', 't-dev', 't-pix']);
   });
 
   test('the canvas unifies two items by CPF: one node, two rings; "on canvas" removes an item without a reload', async ({

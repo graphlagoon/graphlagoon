@@ -151,6 +151,7 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/investigations/{investigation_id}/share"),
         ("DELETE", "/api/investigations/{investigation_id}/share/{email}"),
         ("POST", "/api/investigations/{investigation_id}/items"),
+        ("POST", "/api/investigations/{investigation_id}/items/join"),
         ("DELETE", "/api/investigations/{investigation_id}/items/{item_id}"),
         ("POST", "/api/investigations/{investigation_id}/decision"),
         ("POST", "/api/investigations/{investigation_id}/reopen"),
@@ -222,6 +223,12 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/investigations/{investigation_id}/analysis/typologies"): (
         "read-only analysis; a person confirms a badge as a typology annotation"
+    ),
+    ("POST", "/api/investigations/{investigation_id}/items/compare"): (
+        "read-only diff of two tables (or two runs); nothing is written"
+    ),
+    ("POST", "/api/investigations/{investigation_id}/items/promote"): (
+        "sets mapping on items (journaled item.updated); a materialized run is a new item the journal records"
     ),
     **{
         route: "recorded in the case's append-only journal (frozen_hash covers it)"

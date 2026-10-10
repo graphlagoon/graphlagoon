@@ -22,7 +22,7 @@ from starlette.requests import Request
 
 from graphlagoon.config import get_settings
 from graphlagoon.middleware import auth
-from graphlagoon.services import audit, case_annotations, case_items, case_queries
+from graphlagoon.services import audit, case_annotations, case_items, case_queries, case_tables
 from graphlagoon.services import cases as service
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.services.case_graph import case_graph
@@ -540,6 +540,77 @@ def build_server():
         version with ``run`` (statement id, duration, rows, parameters)."""
         user = _agent(ctx)
         return _out(await _call(case_queries.run_query(investigation_id, user, item_id, parameters or {}, row_limit)))
+
+    @server.tool()
+    async def add_table(ctx: Context, investigation_id: UUID, title: str, columns: list[str],
+                        rows: list[list[Any]], description: Optional[str] = None,
+                        provenance: Optional[dict[str, Any]] = None) -> dict:
+        """Add a table to the case (``table/result``) from columns and rows,
+        e.g. a result you computed. Join, compare or promote it afterwards."""
+        user = _agent(ctx)
+        content, content_type = case_items.encode_content(None, {"columns": columns, "rows": rows, "row_count": len(rows)})
+        data = {"kind": "table", "subkind": "result", "title": title, "description": description,
+                "provenance": provenance or {"tool": "agent"}}
+        return _out(await _call(case_items.create_item(investigation_id, user, data, content, content_type)))
+
+    @server.tool()
+    async def join_tables(ctx: Context, investigation_id: UUID, item_ids: list[UUID],
+                          key_column: Optional[str] = None, title: Optional[str] = None) -> dict:
+        """Join two or more tables of the case by a key column (the first
+        shared column when omitted) into a new table item whose provenance
+        names its parents (05 §3)."""
+        user = _agent(ctx)
+        return _out(await _call(case_tables.join_tables(investigation_id, user, item_ids, key_column, title)))
+
+    @server.tool()
+    async def compare_tables(ctx: Context, investigation_id: UUID, left_item_id: UUID, right_item_id: UUID,
+                             left_version: Optional[int] = None, right_version: Optional[int] = None,
+                             key_column: Optional[str] = None) -> dict:
+        """Diff by key of two tables, or of two runs of one query (same item,
+        two versions): rows only on one side, rows whose shared columns
+        changed, how many are the same."""
+        user = _agent(ctx)
+        return _out(await _call(case_tables.compare_tables(
+            investigation_id, user, {"item_id": left_item_id, "version": left_version},
+            {"item_id": right_item_id, "version": right_version}, key_column,
+        )))
+
+    @server.tool()
+    async def promote_tables(ctx: Context, investigation_id: UUID, item_ids: list[UUID], as_: str,
+                             options: Optional[dict[str, Any]] = None) -> dict:
+        """Promote tables (or the latest run of queries) to the graph
+        (as_="graph": source_column, target_column, source_type, target_type,
+        edge_type, normalize, amount_prop, time_prop) or to enrichment
+        (as_="enrichment": key_column, match_node_types, match_source)."""
+        user = _agent(ctx)
+        return _out(await _call(case_tables.promote(investigation_id, user, item_ids, as_, options or {})))
+
+    @server.tool()
+    async def create_exploration(ctx: Context, investigation_id: UUID, context_id: UUID, title: str,
+                                 graph_query: Optional[str] = None) -> dict:
+        """Start a new exploration in a readable context and attach it to the
+        case as a live reference; returns ``url`` for the person to open
+        (``/graph/{context}?exploration=…&case=…``). Give ``graph_query``
+        (Cypher) to seed what it loads."""
+        from fastapi import HTTPException
+
+        from graphlagoon.models.schemas import ExplorationCreate, ExplorationState
+        from graphlagoon.routers import explorations as explorations_router
+
+        user = _agent(ctx)
+        await _permission(user, "exploration.save")
+        try:
+            exploration = await explorations_router.create_exploration(
+                context_id, ExplorationCreate(title=title, state=ExplorationState(graph_query=graph_query)), None, user
+            )
+        except HTTPException as exc:
+            error = exc.detail.get("error", {}) if isinstance(exc.detail, dict) else {}
+            raise _tool_error(error.get("code", "EXPLORATION_FAILED"), error.get("message", str(exc.detail))) from exc
+        item = await _call(case_items.create_item(
+            investigation_id, user, {"kind": "graph", "subkind": "exploration_ref", "exploration_id": exploration.id}
+        ))
+        return _out({"exploration": exploration.model_dump(), "item": item,
+                     "url": f"/graph/{context_id}?exploration={exploration.id}&case={investigation_id}"})
 
     @server.tool()
     async def pin_evidence(ctx: Context, investigation_id: UUID, item_id: UUID,

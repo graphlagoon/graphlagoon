@@ -1,7 +1,10 @@
 import { ref } from 'vue';
 import type { Component } from 'vue';
 import { useToast } from '@/composables/useToast';
-import { Copy } from 'lucide-vue-next';
+import { Briefcase, Copy } from 'lucide-vue-next';
+import { useCurrentCaseStore } from '@/stores/currentCase';
+import { useGraphStore } from '@/stores/graph';
+import { useAddToCase } from '@/composables/useAddToCase';
 
 export type ContextMenuTargetType = 'node' | 'edge';
 
@@ -41,6 +44,25 @@ function createBuiltInActions(): ContextMenuAction[] {
         } catch {
           error('Failed to copy to clipboard');
         }
+      },
+    },
+    {
+      // The selection (plus the clicked node) as a graph/selection item of the current case (05 §4).
+      id: 'add-selection-to-case',
+      label: 'Adicionar seleção ao caso',
+      icon: Briefcase,
+      visible: (t: ContextMenuTarget) => {
+        if (t.type !== 'node') return false;
+        try {
+          return useCurrentCaseStore().hasCase;
+        } catch {
+          return false; // no pinia (unit tests of the menu alone)
+        }
+      },
+      handler: async (t: ContextMenuTarget) => {
+        const graph = useGraphStore();
+        const nodeIds = new Set([...graph.selectedNodeIds, t.id]);
+        await useAddToCase().addSelection(nodeIds, graph.selectedEdgeIds);
       },
     },
   ];

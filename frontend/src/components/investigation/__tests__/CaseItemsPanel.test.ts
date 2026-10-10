@@ -9,13 +9,23 @@ vi.mock('@/services/api', () => ({
   api: {
     getInvestigationEvents: vi.fn(async () => []),
     getInvestigationItems: vi.fn(async () => []),
+    getInvestigationItemVersions: vi.fn(async () => []),
+    getInvestigationItemContent: vi.fn(async () => new TextEncoder().encode(JSON.stringify({ columns: ['cpf', 'valor'], rows: [['1', 2]] })).buffer),
+    joinInvestigationTables: vi.fn(async () => ({ id: 'joined', title: 'KYC + Exposição por cpf' })),
+    compareInvestigationTables: vi.fn(),
+    promoteInvestigationTables: vi.fn(async () => []),
     setInvestigationItemStatus: vi.fn(),
     pinInvestigationItem: vi.fn(),
     runInvestigationQuery: vi.fn(),
     putInvestigationBrief: vi.fn(),
-    createInvestigationItem: vi.fn(),
+    createInvestigationItem: vi.fn(async (_id: string, data: any) => ({ id: 'new', title: data.title, tags: [], pinned: [] })),
     deleteInvestigationItem: vi.fn(async () => {}),
+    getInvestigation: vi.fn(),
   },
+}))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn(), currentRoute: { value: { name: 'investigation' } } }),
+  useRoute: () => ({ name: 'investigation', params: {}, query: {} }),
 }))
 
 import { api } from '@/services/api'
@@ -29,6 +39,9 @@ const ITEMS = [
     latest: { version: 2, sha256: 'b'.repeat(64) }, pinned: [{ version: 1, sha256: 'c'.repeat(64), pinned_at: 'x' }] },
   { ...base, id: 'n1', kind: 'note', subkind: 'free', title: 'Achado', current_version: 1, status: 'suggested', author_kind: 'agent' },
   { ...base, id: 'b1', kind: 'document', subkind: 'brief', title: 'Brief', current_version: 1 },
+  { ...base, id: 't1', kind: 'table', subkind: 'result', title: 'KYC', current_version: 1, latest: { version: 1, sha256: 'e'.repeat(64), content_type: 'application/json' } },
+  { ...base, id: 't2', kind: 'table', subkind: 'csv', title: 'Exposição', current_version: 1, latest: { version: 1, sha256: 'f'.repeat(64), content_type: 'text/csv' } },
+  { ...base, id: 't3', kind: 'table', subkind: 'result', title: 'Garantias', current_version: 1, latest: { version: 1, sha256: '9'.repeat(64), content_type: 'application/json' } },
 ]
 
 beforeEach(() => {
@@ -38,6 +51,7 @@ beforeEach(() => {
   const store = useInvestigationStore()
   store.current = { id: 'inv', has_write_access: true, status: 'analysis' } as any
   store.items = structuredClone(ITEMS) as any
+  vi.mocked(api.getInvestigationItems).mockImplementation(async () => store.items) // adds re-fetch the list
   store.brief = { item: ITEMS[4] as any, text: '# Brief\nConta de passagem' }
 })
 
@@ -87,6 +101,72 @@ describe('CaseItemsPanel', () => {
     await flushPromises()
     expect(api.putInvestigationBrief).toHaveBeenCalledWith('inv', '# v2')
     expect(getByTestId('brief-text').textContent).toContain('# v2')
+  })
+
+  it('F3: two tables selected → Juntar by the shared key; Comparar shows the diff; three → Promover em lote', async () => {
+    vi.mocked(api.compareInvestigationTables).mockResolvedValue({
+      key_column: 'cpf', columns: { left: ['cpf', 'valor'], right: ['cpf', 'valor'], shared: ['valor'] },
+      counts: { left: 2, right: 2, only_left: 1, only_right: 1, changed: 1, same: 0 },
+      only_left: [['1', 2]], only_right: [['3', 4]], changed: [{ key: '2', fields: { valor: { left: 5, right: 6 } } }], truncated: false,
+      left: { item_id: 't1', title: 'KYC', version: 1 }, right: { item_id: 't2', title: 'Exposição', version: 1 },
+    } as any)
+    const { getByTestId, queryByTestId } = render(CaseItemsPanel, { props: { canEdit: true } })
+    expect(queryByTestId('table-ops-bar')).toBeNull()
+    await fireEvent.click(getByTestId('item-select-t1'))
+    await fireEvent.click(getByTestId('item-select-t2'))
+    expect(getByTestId('table-ops-bar').textContent).toContain('2 selecionadas')
+
+    await fireEvent.click(getByTestId('table-op-join'))
+    await flushPromises()
+    expect((getByTestId('ops-key') as HTMLInputElement).value).toBe('cpf') // the shared column
+    await fireEvent.click(getByTestId('ops-submit'))
+    await flushPromises()
+    expect(api.joinInvestigationTables).toHaveBeenCalledWith('inv', { item_ids: ['t1', 't2'], key_column: 'cpf', title: 'KYC + Exposição por cpf' })
+    expect(queryByTestId('table-ops-dialog')).toBeNull()
+
+    await fireEvent.click(getByTestId('item-select-t1'))
+    await fireEvent.click(getByTestId('item-select-t2'))
+    await fireEvent.click(getByTestId('table-op-compare'))
+    await flushPromises()
+    await fireEvent.click(getByTestId('ops-submit'))
+    await flushPromises()
+    expect(api.compareInvestigationTables).toHaveBeenCalledWith('inv', { left: { item_id: 't1' }, right: { item_id: 't2' }, key_column: 'cpf' })
+    expect(getByTestId('table-diff-summary').textContent).toContain('1 alteradas')
+    expect(getByTestId('table-diff').textContent).toContain('valor')
+
+    await fireEvent.click(getByTestId('table-ops-dialog').querySelector('.modal-close')!)
+    await fireEvent.click(getByTestId('item-select-t3'))
+    expect(getByTestId('table-ops-bar').textContent).toContain('3 selecionadas')
+    await fireEvent.click(getByTestId('table-op-enrichment'))
+    await flushPromises()
+    await fireEvent.update(getByTestId('ops-node-types'), 'Pessoa')
+    await fireEvent.click(getByTestId('ops-submit'))
+    await flushPromises()
+    expect(api.promoteInvestigationTables).toHaveBeenCalledWith('inv', { item_ids: ['t1', 't2', 't3'], as: 'enrichment', options: { key_column: 'cpf', match_node_types: ['Pessoa'] } })
+  })
+
+  it('F3: pasting text adds a note, a URL a link document; the query card lists :params with their source', async () => {
+    const { getByTestId } = render(CaseItemsPanel, { props: { canEdit: true } })
+    const panel = getByTestId('case-items-panel')
+    await fireEvent.paste(panel, { clipboardData: { files: [], getData: () => 'Conta de passagem confirmada' } } as any)
+    await flushPromises()
+    expect(api.createInvestigationItem).toHaveBeenLastCalledWith('inv', expect.objectContaining({ kind: 'note', subkind: 'free', content: 'Conta de passagem confirmada' }))
+    await fireEvent.paste(panel, { clipboardData: { files: [], getData: () => 'https://bcb.gov.br/med' } } as any)
+    await flushPromises()
+    expect(api.createInvestigationItem).toHaveBeenLastCalledWith('inv', expect.objectContaining({ kind: 'document', subkind: 'link', content: 'https://bcb.gov.br/med' }))
+
+    const store = useInvestigationStore()
+    store.items.find((i) => i.id === 'q1')!.query!.text = 'SELECT * FROM t WHERE cpf IN (:cpfs)'
+    await fireEvent.click(getByTestId('item-expand-q1'))
+    await flushPromises()
+    expect(getByTestId('query-params').textContent).toContain(':cpfs')
+    const source = getByTestId('query-param-source-cpfs') as HTMLSelectElement
+    expect([...source.options].map((o) => o.textContent)).toEqual(['valor fixo', 'seleção atual', 'grupo', 'propriedade'])
+    await fireEvent.update(getByTestId('query-param-value-cpfs'), '1, 2')
+    vi.mocked(api.runInvestigationQuery).mockResolvedValue({ ...ITEMS[1], current_version: 2, latest: { version: 2, sha256: 'd'.repeat(64), run: { row_count: 3, duration_ms: 50 } } } as any)
+    await fireEvent.click(getByTestId('query-run-q1'))
+    await flushPromises()
+    expect(api.runInvestigationQuery).toHaveBeenCalledWith('inv', 'q1', { cpfs: ['1', '2'] })
   })
 
   it('toggling "on canvas" updates the store without touching the API; read-only hides the actions', async () => {

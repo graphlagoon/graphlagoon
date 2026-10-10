@@ -12,6 +12,7 @@ import type {
   InvestigationExportFormat,
   InvestigationDecision,
   ItemSearchHit,
+  TableDiff,
   ItemSnapshotPayload,
   ShareRole,
   UpdateInvestigationRequest,
@@ -800,6 +801,28 @@ class ApiService {
 
   async runInvestigationQuery(id: string, itemId: string, parameters: Record<string, unknown> = {}, rowLimit = 1000): Promise<CaseItem> {
     const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/run`, { parameters, row_limit: rowLimit });
+    return response.data;
+  }
+
+  // Table operations (05 §3): join by key, diff by key, promote in bulk.
+  async joinInvestigationTables(id: string, body: { item_ids: string[]; key_column?: string; title?: string }): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items/join`, body);
+    return response.data;
+  }
+
+  async compareInvestigationTables(
+    id: string,
+    body: { left: { item_id: string; version?: number }; right: { item_id: string; version?: number }; key_column?: string },
+  ): Promise<TableDiff> {
+    const response = await this.client.post(`/api/investigations/${id}/items/compare`, body);
+    return response.data;
+  }
+
+  async promoteInvestigationTables(
+    id: string,
+    body: { item_ids: string[]; as: 'graph' | 'enrichment'; options?: Record<string, unknown> },
+  ): Promise<CaseItem[]> {
+    const response = await this.client.post(`/api/investigations/${id}/items/promote`, body);
     return response.data;
   }
 

@@ -13,6 +13,8 @@ import { useMetricsStore } from '@/stores/metrics';
 import { useCommunityStore } from '@/stores/community';
 import { useDrawerResize } from '@/composables/useDrawerResize';
 import { useDebouncedModel } from '@/composables/useDebouncedModel';
+import { useAddToCase } from '@/composables/useAddToCase';
+import { useCurrentCaseStore } from '@/stores/currentCase';
 import DatePicker from 'primevue/datepicker';
 import type { ComputedMetric } from '@/types/metrics';
 import {
@@ -338,6 +340,33 @@ function copyPopoverContent() {
 function exportCSV() {
   dtRef.value?.exportCSV();
 }
+
+// ─── Adicionar ao caso (05 §4): the selected rows (or every visible row) as a table ───
+const currentCase = useCurrentCaseStore();
+const addToCase = useAddToCase();
+const addingToCase = ref(false);
+const selectedCount = computed(() =>
+  activeTab.value === 'nodes' ? graphStore.selectedNodeIds.size : graphStore.selectedEdgeIds.size,
+);
+
+async function addRowsToCase() {
+  if (addingToCase.value) return;
+  const idKey = activeTab.value === 'nodes' ? 'node_id' : 'edge_id';
+  const selected = activeTab.value === 'nodes' ? graphStore.selectedNodeIds : graphStore.selectedEdgeIds;
+  const rows = (selected.size ? currentRows.value.filter(r => selected.has(r[idKey] as string)) : currentRows.value);
+  const cols = currentCols.value.filter(c => c.field !== SEARCH_FIELD);
+  addingToCase.value = true;
+  try {
+    await addToCase.addTable({
+      columns: cols.map(c => c.header || c.field),
+      rows: rows.map(r => cols.map(c => (r[c.field] ?? null) as unknown)),
+      title: `${activeTab.value === 'nodes' ? 'Nós' : 'Arestas'} · ${rows.length} ${selected.size ? 'selecionados' : 'linhas'} · ${graphStore.currentContext?.title ?? ''}`.trim(),
+      provenance: { context_id: graphStore.currentContext?.id, exploration_id: graphStore.currentExploration?.id ?? undefined, tool: 'data_table', params: { tab: activeTab.value, selected: selected.size } },
+    });
+  } finally {
+    addingToCase.value = false;
+  }
+}
 </script>
 
 <template>
@@ -368,6 +397,13 @@ function exportCSV() {
         />
         <button class="action-btn" @click="clearFilters" title="Clear all filters">Clear</button>
         <button class="action-btn" @click="exportCSV" title="Export CSV">CSV</button>
+        <button
+          class="action-btn"
+          :disabled="!currentCase.hasCase || addingToCase || !currentRows.length"
+          :title="currentCase.hasCase ? `Adicionar ${selectedCount ? 'as linhas selecionadas' : 'as linhas visíveis'} como tabela do caso ${currentCase.title}` : 'Escolha um caso atual na barra superior'"
+          data-testid="data-table-add-to-case"
+          @click="addRowsToCase"
+        >Adicionar ao caso<template v-if="selectedCount"> ({{ selectedCount }})</template></button>
         <button class="action-btn close-btn btn-icon-only" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
     </div>

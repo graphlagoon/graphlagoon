@@ -8,20 +8,68 @@
  */
 import { computed, ref } from 'vue';
 import { Bot, FileText, GitBranch, Lock, Pin, Plus, StickyNote, Table2, Terminal, Upload, User } from 'lucide-vue-next';
+import QueryItemCard from './QueryItemCard.vue';
+import TableOpsDialog, { type TableOp } from './TableOpsDialog.vue';
 import { useInvestigationStore, isGraphItem } from '@/stores/investigation';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
+import { useAddToCase } from '@/composables/useAddToCase';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { CaseItem, ItemKind } from '@/types/investigation';
 
-defineProps<{ canEdit: boolean; activeItem?: string | null }>();
+const props = defineProps<{ canEdit: boolean; activeItem?: string | null }>();
 const emit = defineEmits<{ add: []; upload: []; select: [item: CaseItem] }>();
 
 const store = useInvestigationStore();
 const auth = useAuthStore();
 const { can } = usePermissions();
 const toast = useToast();
+const addToCase = useAddToCase(computed(() => store.current?.id));
+
+// --- drop and paste (05 §3): files → documents/tables, text → note | link | table ---
+const dragging = ref(false);
+async function onDrop(event: DragEvent) {
+  dragging.value = false;
+  if (!props.canEdit) return;
+  const files = [...(event.dataTransfer?.files ?? [])];
+  if (files.length) {
+    for (const file of files) await addToCase.addDocument(file);
+    return;
+  }
+  const text = event.dataTransfer?.getData('text/plain');
+  if (text?.trim()) await addToCase.addPasted(text);
+}
+async function onPaste(event: ClipboardEvent) {
+  const target = event.target as HTMLElement | null;
+  if (!props.canEdit || target?.closest('input, textarea, [contenteditable]')) return;
+  const files = [...(event.clipboardData?.files ?? [])];
+  const text = event.clipboardData?.getData('text/plain') ?? '';
+  if (!files.length && !text.trim()) return;
+  event.preventDefault();
+  for (const file of files) await addToCase.addDocument(file);
+  if (!files.length) await addToCase.addPasted(text);
+}
+
+// --- operations between tables (05 §3): multi-select → Juntar | Comparar | Promover | Unir ---
+const selectedTables = ref<Set<string>>(new Set());
+const tableOp = ref<TableOp | null>(null);
+const opItems = computed(() => store.items.filter((i) => selectedTables.value.has(i.id)));
+function toggleTable(id: string, on: boolean) {
+  const next = new Set(selectedTables.value);
+  if (on) next.add(id);
+  else next.delete(id);
+  selectedTables.value = next;
+}
+
+/** Query cards expanded in place (parameters, history, promotion). */
+const expanded = ref<Set<string>>(new Set());
+function toggleExpand(id: string) {
+  const next = new Set(expanded.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expanded.value = next;
+}
 
 const GROUPS: { kind: ItemKind; label: string; icon: typeof GitBranch }[] = [
   { kind: 'graph', label: 'Graphs', icon: GitBranch },
@@ -134,7 +182,17 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
 </script>
 
 <template>
-  <aside class="material" data-testid="case-items-panel">
+  <aside
+    class="material"
+    :class="{ dragging }"
+    tabindex="0"
+    data-testid="case-items-panel"
+    @dragover.prevent="dragging = canEdit"
+    @dragleave="dragging = false"
+    @drop.prevent="onDrop"
+    @paste="onPaste"
+  >
+    <div v-if="dragging" class="drop-hint" data-testid="items-drop-hint">Solte para adicionar ao caso (arquivos, texto, URL ou TSV)</div>
     <header class="head">
       <h2>Material</h2>
       <span v-if="suggestedCount" class="suggested-count" data-testid="suggested-count">{{ suggestedCount }} suggested</span>
@@ -184,6 +242,14 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
         {{ g.label }} <span class="muted">{{ g.items.length }}</span>
       </button>
       <template v-if="!collapsed.has(g.kind)">
+        <div v-if="g.kind === 'table' && selectedTables.size && canEdit" class="ops-bar" data-testid="table-ops-bar">
+          <span class="muted">{{ selectedTables.size }} selecionada{{ selectedTables.size === 1 ? '' : 's' }}</span>
+          <button class="link-btn" :disabled="selectedTables.size < 2" data-testid="table-op-join" @click="tableOp = 'join'">Juntar</button>
+          <button class="link-btn" :disabled="selectedTables.size !== 2" data-testid="table-op-compare" @click="tableOp = 'compare'">Comparar</button>
+          <button class="link-btn" data-testid="table-op-enrichment" @click="tableOp = 'enrichment'">Promover em lote</button>
+          <button class="link-btn" data-testid="table-op-graph" @click="tableOp = 'graph'">Unir no grafo</button>
+          <button class="link-btn muted" @click="selectedTables = new Set()">limpar</button>
+        </div>
         <div
           v-for="item in g.items"
           :key="item.id"
@@ -215,6 +281,18 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
           <span v-if="item.subkind === 'exploration_ref'" class="badge live" title="Live reference to the exploration">🔗</span>
           <span v-if="item.status === 'suggested'" class="badge suggested-badge" :data-testid="`item-suggested-${item.id}`">suggested</span>
           <span class="actions" @click.stop>
+            <input
+              v-if="item.kind === 'table' && canEdit"
+              type="checkbox"
+              class="pick"
+              title="Selecionar para juntar, comparar ou promover"
+              :checked="selectedTables.has(item.id)"
+              :data-testid="`item-select-${item.id}`"
+              @change="toggleTable(item.id, ($event.target as HTMLInputElement).checked)"
+            />
+            <button v-if="item.kind === 'query'" class="link-btn" title="Parâmetros, histórico, promover" :data-testid="`item-expand-${item.id}`" @click="toggleExpand(item.id)">
+              {{ expanded.has(item.id) ? '▾' : '▸' }}
+            </button>
             <template v-if="item.status === 'suggested' && canEdit">
               <button class="link-btn ok" :disabled="busy === item.id" :data-testid="`item-confirm-${item.id}`" @click="decide(item, 'confirmed')">✓</button>
               <button class="link-btn danger" :disabled="busy === item.id" :data-testid="`item-reject-${item.id}`" @click="decide(item, 'rejected')">✕</button>
@@ -232,9 +310,19 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
             </template>
             <template v-else>never run · {{ item.query?.language }} → {{ item.query?.output }}</template>
           </div>
+          <QueryItemCard v-if="item.kind === 'query' && expanded.has(item.id)" :item="item" :can-edit="canEdit" />
         </div>
       </template>
     </section>
+
+    <TableOpsDialog
+      v-if="tableOp && store.current"
+      :investigation-id="store.current.id"
+      :op="tableOp"
+      :items="opItems"
+      @close="tableOp = null"
+      @done="selectedTables = new Set()"
+    />
 
     <div v-if="canEdit" class="compose">
       <template v-if="composing">
@@ -254,6 +342,34 @@ const timeAgo = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() :
 </template>
 
 <style scoped>
+.material.dragging {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -4px;
+}
+
+.drop-hint {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+  font-size: 12px;
+}
+
+.ops-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.pick {
+  margin: 0 2px;
+}
+
 .material {
   display: flex;
   flex-direction: column;
