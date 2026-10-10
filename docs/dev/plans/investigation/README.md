@@ -73,7 +73,8 @@ construído.
 | 5 | [01-pesquisa-brasil.md](01-pesquisa-brasil.md) | Regulação brasileira, tipologias, SIMBA, dados abertos |
 | 6 | [00-pesquisa-mercado.md](00-pesquisa-mercado.md) | Ferramentas de mercado e método de rastreio |
 | 7 | [BRIEFING.md](BRIEFING.md) | Instruções dadas a cada agente de execução (código mínimo, testes enxutos, git) |
-| 8 | [../investigation-workspace.md](../investigation-workspace.md) | Proposta original (contexto histórico) |
+| 8 | [agent-capabilities.md](agent-capabilities.md) | O que o agente de IA pode, propõe ou nunca faz; pontos em aberto para revisão |
+| 9 | [../investigation-workspace.md](../investigation-workspace.md) | Proposta original (contexto histórico) |
 
 ## Mapa do pacote
 
