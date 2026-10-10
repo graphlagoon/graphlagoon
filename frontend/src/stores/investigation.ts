@@ -135,6 +135,15 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
+  /** F4.5: the server freezes the case; the store just takes the frozen copy. */
+  async function recordDecision(body: Parameters<typeof api.recordInvestigationDecision>[1]) {
+    if (!current.value) return;
+    const id = current.value.id;
+    current.value = await api.recordInvestigationDecision(id, body);
+    sources.value = await api.getInvestigationSources(id);
+    void fetchEvents();
+  }
+
   async function fetchInvestigations() {
     loading.value = true;
     error.value = null;
@@ -330,6 +339,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     hypotheses,
     addHypothesis,
     updateHypothesis,
+    recordDecision,
     loadWorkspace,
     addExpansion,
     derived,

@@ -53,6 +53,7 @@ async def build_public_config(
         "agents_allow_unmasked_data": settings.agents_allow_unmasked_data,
         "investigation_file_max_bytes": settings.investigation_file_max_bytes,
         "investigation_max_working_edges": settings.investigation_max_working_edges,
+        "investigation_retention_years": settings.investigation_retention_years,
         # Which backends this server can serve, and the named REST connections
         # (UI copy + operation flags only; transport and auth never leave the
         # process).

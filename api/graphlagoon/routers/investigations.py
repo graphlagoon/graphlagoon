@@ -25,6 +25,7 @@ from graphlagoon.models.schemas import (
     HypothesisCreate,
     HypothesisUpdate,
     InvestigationCreate,
+    InvestigationDecisionCreate,
     InvestigationEventCreate,
     InvestigationEventResponse,
     InvestigationFileResponse,
@@ -177,6 +178,34 @@ async def delete_investigation(
         user_email, AuditAction.INVESTIGATION_DELETE, investigation_id, **meta
     )
     return {"status": "deleted"}
+
+
+@router.post(
+    "/{investigation_id}/decision",
+    response_model=InvestigationResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def record_decision(
+    investigation_id: UUID, data: InvestigationDecisionCreate, request: Request
+):
+    """F4.5: human only. Freezes the live sources, stores ``frozen_hash``, and
+    the case becomes read-only (every mutation answers 409)."""
+    user_email = get_current_user(request)
+    try:
+        inv = await service.record_decision(
+            investigation_id, user_email, data.outcome, data.actions, data.rationale
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(
+        user_email,
+        AuditAction.INVESTIGATION_DECIDE,
+        investigation_id,
+        outcome=data.outcome,
+        actions=inv["decision"]["actions"],
+        frozen_hash=inv["frozen_hash"],
+    )
+    return inv
 
 
 @router.post("/{investigation_id}/share", dependencies=[Depends(forbid_agents)])

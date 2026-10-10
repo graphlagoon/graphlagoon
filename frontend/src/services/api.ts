@@ -4,6 +4,7 @@ import type {
   EntityMatch,
   Investigation,
   InvestigationArtifact,
+  InvestigationDecision,
   InvestigationFile,
   FileContextResult,
   FileEnrichmentSpec,
@@ -128,6 +129,8 @@ declare global {
       investigation_file_max_bytes?: number;
       /** Ceiling of edges in a case's working graph (G4, Q5). */
       investigation_max_working_edges?: number;
+      /** Years a decided case is retained (F4.5). */
+      investigation_retention_years?: number;
       databricks_user_email?: string;
       /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
@@ -802,6 +805,15 @@ class ApiService {
     patch: Partial<Pick<Hypothesis, 'text' | 'status' | 'evidence_for' | 'evidence_against' | 'note'>>,
   ): Promise<Investigation> {
     const response = await this.client.patch(`/api/investigations/${id}/hypotheses/${hypothesisId}`, patch);
+    return response.data;
+  }
+
+  /** Records the decision (F4.5, human only): freezes the case and returns it. */
+  async recordInvestigationDecision(
+    id: string,
+    body: Pick<InvestigationDecision, 'outcome' | 'actions' | 'rationale'>,
+  ): Promise<Investigation> {
+    const response = await this.client.post(`/api/investigations/${id}/decision`, body);
     return response.data;
   }
 

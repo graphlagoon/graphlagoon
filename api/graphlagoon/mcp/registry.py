@@ -69,6 +69,9 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("PATCH", f"{_CASE}/matches/{{match_id}}"): (
         f"{HUMAN_ONLY} a person decides on matches; agents `propose` kind match"
     ),
+    ("POST", f"{_CASE}/decision"): (
+        f"{HUMAN_ONLY} the decision is a person's (Q9, LGPD art. 20)"
+    ),
     ("GET", "/api/agent-tokens"): f"{HUMAN_ONLY} token management",
     ("POST", "/api/agent-tokens"): f"{HUMAN_ONLY} an agent never mints tokens",
     ("DELETE", "/api/agent-tokens/{token_id}"): f"{HUMAN_ONLY} token management",

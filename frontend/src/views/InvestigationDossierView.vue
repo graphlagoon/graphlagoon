@@ -2,7 +2,8 @@
 /**
  * Dossier (T7, investigations F4.2): summary and indicators, hypotheses with the
  * evidence for and against each, the frozen evidence (E1, E2, … oldest first) and
- * the journal. The decision panel is a placeholder until F4.5/F4.6.
+ * the journal. The decision panel (F4.5) records the outcome, actions and rationale;
+ * the server freezes the case and from then on the dossier is read-only.
  */
 import { computed, ref, watch } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
@@ -13,7 +14,14 @@ import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { methodStamp } from '@/utils/traceView';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { TraceResult } from '@/utils/trace';
-import type { Hypothesis, HypothesisStatus, InvestigationEvidence, InvestigationRole } from '@/types/investigation';
+import type {
+  DecisionAction,
+  DecisionOutcome,
+  Hypothesis,
+  HypothesisStatus,
+  InvestigationEvidence,
+  InvestigationRole,
+} from '@/types/investigation';
 
 const props = defineProps<{ id: string }>();
 const store = useInvestigationStore();
@@ -103,6 +111,31 @@ async function act(action: () => Promise<unknown>, fallback: string) {
   } catch (e) {
     error.value = getErrorMessage(e, fallback);
   }
+}
+
+const OUTCOMES: Record<DecisionOutcome, string> = {
+  comunicar: 'Communicate to COAF via Siscoaf',
+  arquivar: 'Archive with a rationale',
+};
+const ACTIONS: Record<DecisionAction, string> = {
+  dict: 'Flag the accounts in DICT',
+  spa: 'Notify the SPA (24 h)',
+  bloqueio_cautelar: 'Request a precautionary block',
+};
+const RETENTION_YEARS = window.__GRAPH_LAGOON_CONFIG__?.investigation_retention_years ?? 10;
+const outcome = ref<DecisionOutcome>('comunicar');
+const actions = ref<DecisionAction[]>([]);
+const rationale = ref('');
+const deciding = ref(false);
+
+async function recordDecision() {
+  if (!rationale.value.trim()) return;
+  deciding.value = true;
+  await act(
+    () => store.recordDecision({ outcome: outcome.value, actions: actions.value, rationale: rationale.value.trim() }),
+    'Failed to record the decision',
+  );
+  deciding.value = false;
 }
 
 function addHypothesis() {
@@ -257,20 +290,47 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
         <aside class="card decision" data-testid="dossier-decision">
           <h2>Decision</h2>
           <template v-if="inv.decision">
-            <p><strong>{{ (inv.decision as any).outcome }}</strong></p>
-            <p>{{ (inv.decision as any).rationale }}</p>
-          </template>
-          <template v-else>
-            <p class="muted">
-              Communicate to COAF or archive with a rationale. Recording the decision, freezing the case and the
-              exports arrive next.
+            <p data-testid="decision-outcome"><strong>{{ OUTCOMES[inv.decision.outcome] ?? inv.decision.outcome }}</strong></p>
+            <ul v-if="inv.decision.actions.length" class="decided-actions">
+              <li v-for="a in inv.decision.actions" :key="a">{{ ACTIONS[a] ?? a }}</li>
+            </ul>
+            <p class="rationale">{{ inv.decision.rationale }}</p>
+            <p class="muted">{{ inv.decision.decided_by }} · {{ fmtTime(inv.decision.decided_at) }}</p>
+            <p v-if="inv.frozen_hash" class="muted mono" :title="inv.frozen_hash" data-testid="decision-hash">
+              frozen · hash {{ shortHash(inv.frozen_hash) }}
             </p>
+            <p class="muted">Read-only and retained for {{ RETENTION_YEARS }} years.</p>
+          </template>
+          <form v-else-if="canEdit" class="decide" data-testid="decision-form" @submit.prevent="recordDecision">
+            <fieldset>
+              <legend>Outcome</legend>
+              <label v-for="(text, o) in OUTCOMES" :key="o">
+                <input v-model="outcome" type="radio" :value="o" :data-testid="`decision-outcome-${o}`" /> {{ text }}
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend>Actions with it</legend>
+              <label v-for="(text, a) in ACTIONS" :key="a">
+                <input v-model="actions" type="checkbox" :value="a" :data-testid="`decision-action-${a}`" /> {{ text }}
+              </label>
+            </fieldset>
+            <label class="field">
+              <span class="legend">Rationale</span>
+              <textarea v-model="rationale" rows="5" data-testid="decision-rationale" placeholder="Why, citing the evidence (E1, E2, …)"></textarea>
+            </label>
             <p class="notice">
               The account holder is never told (tipping-off prohibition). The case is visible only to the people it
               was shared with by name.
             </p>
-            <button class="btn btn-primary" disabled>Record decision</button>
-          </template>
+            <button class="btn btn-primary" :disabled="!rationale.trim() || deciding" data-testid="decision-record">
+              Record decision
+            </button>
+            <p class="muted">
+              Recording freezes the case with a hash, writes the decision to the journal and retains everything for
+              {{ RETENTION_YEARS }} years.
+            </p>
+          </form>
+          <p v-else class="muted">Not decided yet. Only people with write access to the case record the decision.</p>
         </aside>
       </div>
     </template>
@@ -533,6 +593,46 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
   border: 2px solid var(--color-primary);
   position: sticky;
   top: 0;
+}
+
+.decide fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.decide legend,
+.decide .legend {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.decide .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.decide button {
+  width: 100%;
+  margin: 8px 0;
+}
+
+.decided-actions {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.rationale {
+  white-space: pre-wrap;
+  line-height: 1.5;
 }
 
 .notice {

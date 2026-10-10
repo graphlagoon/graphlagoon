@@ -58,6 +58,7 @@ export function describeEvent(e: InvestigationEvent): string {
     case 'metric.saved': return `saved metric ${p.metric} as property ${p.property} on ${p.nodes} node(s) of “${p.exploration_title}”`;
     case 'typology.accepted': return `accepted the typology badge ${p.normRef} (${p.label}) on ${p.hits} ${p.hits === 1 ? 'entity' : 'entities'}`;
     case 'match.suggested': return `found ${p.count} entity match suggestion(s)`;
+    case 'decision.recorded': return `decided: ${p.outcome === 'comunicar' ? 'communicate to COAF' : 'archive'}${p.actions?.length ? ` (${p.actions.join(', ')})` : ''}; froze ${p.frozen_sources?.length ?? 0} live source(s)`;
     case 'match.decided': return `${MATCH_DONE[p.status] ?? p.status} the match ${p.left?.uid} = ${p.right?.uid}: “${p.reason}”`;
     default: return e.kind;
   }

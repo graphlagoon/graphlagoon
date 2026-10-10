@@ -185,6 +185,18 @@ async def load_case(
     return inv
 
 
+def under_retention(inv: Any) -> bool:
+    """A decided case is kept ``investigation_retention_years`` from its freeze."""
+    from graphlagoon.config import get_settings
+
+    if inv.decision is None:
+        return False
+    if inv.frozen_at is None:
+        return True
+    years = get_settings().investigation_retention_years
+    return _clock() < inv.frozen_at.replace(tzinfo=None) + timedelta(days=365.25 * years)
+
+
 def _ensure_not_decided(inv: Any) -> None:
     if inv.decision is not None:
         raise InvestigationError(
@@ -362,7 +374,7 @@ async def delete_investigation(
     (409) unless a superuser gives a reason."""
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "manage")
-        if inv.decision is not None and not (
+        if under_retention(inv) and not (
             is_superuser(user_email) and (reason or "").strip()
         ):
             raise InvestigationError(
@@ -587,15 +599,36 @@ async def _exploration_payload(exploration: Any) -> dict:
     }
 
 
+async def _freeze_source(
+    investigation_id: UUID, source_id: UUID, exploration: Any
+) -> tuple[str, str]:
+    """Copies the exploration (or a stub, if it was deleted) to the source's
+    blob; returns (key, sha256). Used by mode "frozen" and by the decision."""
+    import gzip
+    import hashlib
+
+    from graphlagoon.services.investigation_storage import source_key
+
+    payload = (
+        await _exploration_payload(exploration)
+        if exploration is not None
+        else {"exploration": None, "snapshot": None}
+    )
+    # mtime=0 keeps the bytes (and so the hash) a pure function of content.
+    data = gzip.compress(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8"), mtime=0
+    )
+    key = source_key(investigation_id, source_id)
+    await _blob_store().save(key, data)
+    return key, hashlib.sha256(data).hexdigest()
+
+
 async def add_source(
     investigation_id: UUID,
     user_email: str,
     exploration_id: UUID,
     mode: str,
 ) -> dict:
-    import gzip
-    import hashlib
-    import json
     from uuid import uuid4
 
     async with _session() as session:
@@ -637,18 +670,9 @@ async def add_source(
             "position": len(existing),
         }
         if mode == "frozen":
-            payload = await _exploration_payload(exploration)
-            # mtime=0 keeps the bytes (and so the hash) a pure function of content.
-            data = gzip.compress(
-                json.dumps(payload, sort_keys=True, default=str).encode("utf-8"),
-                mtime=0,
-            )
-            from graphlagoon.services.investigation_storage import source_key
-
-            key = source_key(investigation_id, source_id)
-            await _blob_store().save(key, data)
+            key, sha = await _freeze_source(investigation_id, source_id, exploration)
             fields["frozen_blob_key"] = key
-            fields["frozen_sha256"] = hashlib.sha256(data).hexdigest()
+            fields["frozen_sha256"] = sha
 
         await append_event(
             session,
@@ -1126,3 +1150,149 @@ async def transfer_owner(
                     await session.delete(share)
             await session.commit()
         return {"from": previous, "title": inv.title}
+
+
+# ---------------------------------------------------------------------------
+# Decision (03 §3.5, F4.5): human only; freezes live sources, hashes the case,
+# and from then on every case mutation is refused (_ensure_not_decided → 409).
+# ---------------------------------------------------------------------------
+
+async def frozen_document(session, inv: Any) -> dict:
+    """The canonical record ``frozen_hash`` covers: case fields and decision,
+    state, sources, files, evidence and the journal up to ``decision.recorded``.
+    Later journal lines (a share, an admin transfer) stay out, so the hash can
+    be recomputed at any time. Owner and status are out for the same reason."""
+    from graphlagoon.services import investigation_evidence, investigation_files
+
+    events = await _list_events(session, inv.id)
+    cut = next(
+        (i for i, e in enumerate(events) if e.kind == "decision.recorded"), len(events) - 1
+    )
+    files = await investigation_files._rows(session, inv.id)
+    return {
+        "investigation": {
+            "id": str(inv.id),
+            "title": inv.title,
+            "description": inv.description,
+            "typology": inv.typology,
+            "origin": inv.origin,
+            "decision": inv.decision,
+        },
+        "state": inv.state or {},
+        "sources": [
+            {
+                "id": str(s.id),
+                "kind": s.kind,
+                "mode": s.mode,
+                "exploration_id": str(s.exploration_id) if s.exploration_id else None,
+                "context_id": str(s.context_id) if s.context_id else None,
+                "title_snapshot": s.title_snapshot,
+                "position": s.position,
+                "frozen_sha256": s.frozen_sha256,
+            }
+            for s in await _list_sources(session, inv.id)
+        ],
+        "files": sorted(
+            (
+                {
+                    "id": str(f.id),
+                    "filename": f.filename,
+                    "role": f.role,
+                    "sha256": f.sha256,
+                    "size_bytes": f.size_bytes,
+                }
+                for f in files
+            ),
+            key=lambda f: f["id"],
+        ),
+        "evidence": [
+            {
+                "id": str(e.id),
+                "kind": e.kind,
+                "title": e.title,
+                "sha256": e.sha256,
+                "params": e.params or {},
+            }
+            for e in await investigation_evidence._rows(session, inv.id)
+        ],
+        "events": [{"id": str(e.id), "hash": e.hash} for e in events[: cut + 1]],
+    }
+
+
+async def compute_frozen_hash(session, inv: Any) -> str:
+    import hashlib
+
+    document = await frozen_document(session, inv)
+    return hashlib.sha256(_canonical(document).encode("utf-8")).hexdigest()
+
+
+async def verify_frozen_hash(investigation_id: UUID, user_email: str) -> Optional[bool]:
+    """True if the stored ``frozen_hash`` still matches the case; None if undecided."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email)
+        if inv.frozen_hash is None:
+            return None
+        return await compute_frozen_hash(session, inv) == inv.frozen_hash
+
+
+async def record_decision(
+    investigation_id: UUID,
+    user_email: str,
+    outcome: str,
+    actions: list[str],
+    rationale: str,
+) -> dict:
+    """Records the decision (the route forbids agents and validates outcome and
+    actions), freezes every live source through the F1.3 freeze path and
+    stores the case's ``frozen_hash``."""
+    rationale = (rationale or "").strip()
+    if not rationale:
+        raise InvestigationError(
+            422, "RATIONALE_REQUIRED", "A decision needs its rationale"
+        )
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        _ensure_not_decided(inv)
+        now = _clock()
+        frozen = []
+        for source in await _list_sources(session, investigation_id):
+            if source.mode == "frozen":
+                continue
+            exploration = await _get_row(session, "Exploration", source.exploration_id)
+            key, sha = await _freeze_source(investigation_id, source.id, exploration)
+            changes = {"mode": "frozen", "frozen_blob_key": key, "frozen_sha256": sha}
+            if session is None:
+                get_memory_store().update_investigation_child(_SOURCES, source.id, **changes)
+            else:
+                for k, v in changes.items():
+                    setattr(source, k, v)
+            frozen.append({"source_id": str(source.id), "sha256": sha})
+        decision = {
+            "outcome": outcome,
+            "actions": list(dict.fromkeys(actions)),
+            "rationale": rationale,
+            "decided_by": user_email,
+            "decided_at": now.isoformat(),
+        }
+        await append_event(
+            session,
+            investigation_id,
+            user_email,
+            "decision.recorded",
+            {**decision, "frozen_sources": frozen},
+        )
+        inv.decision = decision  # the hash covers the decision itself
+        changes = {
+            "decision": decision,
+            "status": "decidido",
+            "frozen_hash": await compute_frozen_hash(session, inv),
+            "frozen_at": now,
+        }
+        if session is None:
+            get_memory_store().update_investigation(investigation_id, **changes)
+        else:
+            for key, value in changes.items():
+                setattr(inv, key, value)
+            await session.commit()
+            await _refresh(session, inv)
+        return serialize(inv, user_email)

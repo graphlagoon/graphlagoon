@@ -2084,6 +2084,14 @@ class MatchSuggestionsCreate(BaseModel):
     matches: list[MatchSuggestionIn] = Field(max_length=1000)
 
 
+class InvestigationDecisionCreate(BaseModel):
+    """03 §2.2: communicate to COAF or archive, the actions taken with it, why."""
+
+    outcome: Literal["comunicar", "arquivar"]
+    actions: list[Literal["dict", "spa", "bloqueio_cautelar"]] = Field(default_factory=list)
+    rationale: str = Field(min_length=1, max_length=10000)
+
+
 class MatchDecision(BaseModel):
     status: Literal["aceito", "recusado", "adiado"]
     reason_text: str = Field(min_length=1, max_length=2000)
