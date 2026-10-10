@@ -213,7 +213,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 - [x] F1 · Caso operável
 - [x] F2 · Novo modelo
 - [x] F3 · Add everywhere + loop vivo
-- [ ] F4 · Workspace de análise
+- [x] F4 · Workspace de análise
 - [ ] F5 · AI-first completo
 - [ ] F6 · Compliance e acabamento
 
@@ -250,7 +250,7 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 - `CaseFilterChips.vue`, montar `FilterPanel`/`DataTablePanel`/`MetricsPanel`/comunidades/`LayoutPanel` no caso (todos já leem o `graphStore` único; `InvestigationView` já usa `graphStore.loadInvestigationGraph`); `GroupsPanel.vue`; `SelectionInspector.vue`; `AnalysisBar.vue` com popovers; `CaseSettingsDrawer.vue`; `EntityPage` (drawer); `CaseTimeline` na faixa inferior; visões salvas; persistir grupos/comunidades/expansões.
 - `FileImportWizard` → 2 passos. Dossiê como `mode=dossie`.
 - Normalizadores novos (`device_id`, `ip`, `pix_key`, `card`, `terminal_id`, `address`, `regex`) em TS e Python com fixture; `Vínculos` por atributo compartilhado gerando `graph/derived`; presets de caso incluindo `fraude_sintetica` (§4b).
-- **Aceite:** os 3 walkthroughs (§11) mais o cenário de fraude sintética (§4b) executáveis sem sair do caso; grupo da seleção sem JS; recarregar preserva grupos, papéis e visões.
+- [x] **Aceite:** os 3 walkthroughs (§11) mais o cenário de fraude sintética (§4b) executáveis sem sair do caso; grupo da seleção sem JS; recarregar preserva grupos, papéis e visões.
 
 ### F5 · AI-first completo
 - `mcp/server.py` reescrito (recursos texto, ferramentas 1:1, `search_case` por ILIKE em `text_blob` + títulos, FTS Postgres opcional, `changes_since`); `org_library` + `org_vocabularies` com UI simples em `AdminView`; tokens user/case em `/settings/agents`; `agent_suggest_kinds` e chips Confirmar/Recusar.

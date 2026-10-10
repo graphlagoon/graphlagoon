@@ -1,18 +1,18 @@
 <script setup lang="ts">
 /**
- * Typology badges (T9, F4.3): CC 4.001 patterns found in the unified graph. A badge
- * only suggests; clicking it highlights the entities, accepting it writes
- * a confirmed `typology` annotation (05 §7) that reaches the dossier.
+ * Typology badges (T9, F4.3): renders a typologies analysis item (CC 4.001
+ * patterns found in the unified graph). A badge only suggests; clicking it
+ * highlights the entities, accepting it writes a confirmed `typology` annotation
+ * (05 §7) that reaches the dossier. Parameters live in the Tipologias popover.
  */
 import { computed, ref } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
-import { edgeValue } from '@/utils/edgeSemantics';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { runTypologies, type TypologyResult } from '@/utils/typologies';
+import type { TypologyResult } from '@/utils/typologies';
 
-defineProps<{ canEdit: boolean }>();
+const props = defineProps<{ results: TypologyResult[]; canEdit: boolean }>();
 
 const store = useInvestigationStore();
 const graphStore = useGraphStore();
@@ -20,14 +20,7 @@ const toast = useToast();
 const active = ref<string | null>(null);
 const saving = ref<string | null>(null);
 
-// shortcut: main thread; the cycle search is capped, move to a worker if big cases stall.
-const results = computed(() =>
-  runTypologies({
-    nodes: store.unified.nodes.map((n) => ({ id: n.node_id, type: n.node_type })),
-    edges: store.unified.edges.map((e) => ({ id: e.edge_id, src: e.src, dst: e.dst, ...edgeValue(e, null) })),
-  }),
-);
-const found = computed(() => results.value.filter((r) => r.hits.length));
+const found = computed(() => props.results.filter((r) => r.hits.length));
 const accepted = computed(
   () => new Set(store.annotations.filter((a) => a.kind === 'typology' && a.status === 'confirmed').map((a) => String(a.value.typology))),
 );
@@ -75,56 +68,47 @@ function bipartite() {
 </script>
 
 <template>
-  <aside class="typology-panel" data-testid="typology-panel">
-    <h4 class="heading">Typology badges</h4>
-    <p class="muted">Click a badge to highlight its entities in the graph.</p>
-    <div
-      v-for="r in found"
-      :key="r.id"
-      class="badge"
-      :class="{ active: active === r.id }"
-      :data-testid="`typology-${r.id}`"
-      role="button"
-      tabindex="0"
-      @click="highlight(r)"
-      @keydown.enter="highlight(r)"
-    >
-      <strong class="ref">{{ r.normRef }}</strong>
-      <span>{{ r.label }}</span>
-      <span class="count">{{ r.hits.length }} {{ r.hits.length === 1 ? 'entity' : 'entities' }}</span>
-      <span class="muted why" :title="r.hits.map((h) => `${h.nodeId}: ${h.explanation}`).join('\n')">
-        {{ r.hits[0].explanation }}
-      </span>
-      <span v-if="accepted.has(r.id)" class="accepted" data-testid="typology-accepted">accepted</span>
-      <button
-        v-else-if="canEdit"
-        class="btn btn-outline btn-sm"
-        :disabled="saving === r.id"
-        :data-testid="`typology-accept-${r.id}`"
-        @click.stop="accept(r)"
+  <div class="typology-panel" data-testid="typology-panel">
+    <p class="muted">Click a badge to highlight its entities in the graph. Badges suggest; the analyst decides.</p>
+    <div class="badges">
+      <div
+        v-for="r in found"
+        :key="r.id"
+        class="badge"
+        :class="{ active: active === r.id }"
+        :data-testid="`typology-${r.id}`"
+        role="button"
+        tabindex="0"
+        @click="highlight(r)"
+        @keydown.enter="highlight(r)"
       >
-        Accept
-      </button>
+        <strong class="ref">{{ r.normRef }}</strong>
+        <span>{{ r.label }}</span>
+        <span class="count">{{ r.hits.length }} {{ r.hits.length === 1 ? 'entity' : 'entities' }}</span>
+        <span class="muted why" :title="r.hits.map((h) => `${h.nodeId}: ${h.explanation}`).join('\n')">
+          {{ r.hits[0].explanation }}
+        </span>
+        <span v-if="accepted.has(r.id)" class="accepted" data-testid="typology-accepted">accepted</span>
+        <button
+          v-else-if="canEdit"
+          class="btn btn-outline btn-sm"
+          :disabled="saving === r.id"
+          :data-testid="`typology-accept-${r.id}`"
+          @click.stop="accept(r)"
+        >
+          Accept
+        </button>
+      </div>
     </div>
-    <p v-if="!found.length" class="muted" data-testid="typology-none">No typology matches this graph.</p>
-    <button class="btn btn-outline btn-sm layout" data-testid="typology-bipartite" @click="bipartite">
-      Bipartite layout
-    </button>
-    <p class="muted foot">Badges suggest; the analyst decides. Each accepted badge goes to the dossier with its norm item.</p>
-  </aside>
+    <p v-if="!found.length" class="muted" data-testid="typology-none">No typology matches this graph with these parameters.</p>
+    <button class="btn btn-outline btn-sm layout" data-testid="typology-bipartite" @click="bipartite">Bipartite layout</button>
+  </div>
 </template>
 
 <style scoped>
 .typology-panel {
-  padding: 12px;
-  overflow-y: auto;
-  border-right: 1px solid var(--border-color);
-  background: var(--color-surface);
-}
-
-.heading {
-  margin: 8px 0;
-  font-size: 15px;
+  padding: 8px 12px;
+  font-size: 13px;
 }
 
 .muted {
@@ -132,15 +116,20 @@ function bipartite() {
   color: var(--text-muted);
 }
 
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .badge {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 10px 0;
-  padding: 10px 12px;
+  width: 240px;
+  padding: 8px 10px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
@@ -184,9 +173,5 @@ function bipartite() {
 
 .layout {
   margin-top: 8px;
-}
-
-.foot {
-  margin-top: 12px;
 }
 </style>

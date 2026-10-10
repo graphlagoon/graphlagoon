@@ -39,6 +39,8 @@ export const KIND_PRESET_LABELS: Record<KindPreset, string> = {
 export const DECISION_OUTCOME_LABELS: Record<DecisionOutcome, string> = {
   comunicar: 'Communicate to COAF via Siscoaf',
   arquivar: 'Archive with a rationale',
+  medida: 'Precautionary measure (block, hold)',
+  parecer: 'Opinion only (no communication)',
 };
 
 export const DECISION_ACTION_LABELS: Record<DecisionAction, string> = {

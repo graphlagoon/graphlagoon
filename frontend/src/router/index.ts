@@ -39,11 +39,9 @@ const router = createRouter({
       props: true,
     },
     {
-      // shortcut: the dossier stays a route until F4 makes it `?mode=dossie` of the case.
+      // The dossier is `?mode=dossie` of the case (05 §2); old links still land there.
       path: '/investigations/:id/dossier',
-      name: 'investigation-dossier',
-      component: () => import('@/views/InvestigationDossierView.vue'),
-      props: true,
+      redirect: (to) => ({ path: `/investigations/${to.params.id}`, query: { mode: 'dossie' } }),
     },
     {
       path: '/settings/agents',

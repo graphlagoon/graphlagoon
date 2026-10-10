@@ -24,22 +24,21 @@ beforeEach(() => {
   vi.mocked(api.updateInvestigationItem).mockImplementation(async (_c: string, id: string, patch: any) => ({ id, ...patch }) as any)
 })
 
-describe('FileImportWizard', () => {
-  it('detects SIMBA, maps, shows quality and identity, then maps the main table onto the canvas', async () => {
+describe('FileImportWizard (2 steps)', () => {
+  it('step 1 detects SIMBA and picks graph; step 2 maps, shows quality and identity, then maps the main table onto the canvas', async () => {
     const { getByTestId, findByTestId, emitted } = render(FileImportWizard, { props: { investigationId: 'c1' } })
     await pick(getByTestId, files())
     await waitFor(() => expect((getByTestId('wizard-next') as HTMLButtonElement).disabled).toBe(false))
-    await fireEvent.click(getByTestId('wizard-next')) // → role
+    expect(getByTestId('wizard-detected-hint')).toBeTruthy()
     expect((getByTestId('wizard-role-graph') as HTMLInputElement).checked).toBe(true)
-    await fireEvent.click(getByTestId('wizard-next')) // → map
+    await fireEvent.click(getByTestId('wizard-next')) // → mapping
     expect(getByTestId('wizard-detected')).toBeTruthy()
     const table = getByTestId('wizard-mapping-table').textContent!
     expect(table).toContain('Desconhecido node when NUMERO_AGENCIA_OD = 9999')
     expect(table).toContain('C = into conta')
     expect(getByTestId('wizard-quality').textContent).toContain('“Desconhecido” nodes')
-    await fireEvent.click(getByTestId('wizard-next')) // → identity
     expect(getByTestId('wizard-identity').textContent).toMatch(/Conta[\s\S]*Pessoa/)
-    await fireEvent.click(getByTestId('wizard-next')) // → review
+    await waitFor(() => expect((getByTestId('wizard-submit') as HTMLButtonElement).disabled).toBe(false))
     await fireEvent.click(getByTestId('wizard-submit'))
     await waitFor(() => expect(emitted().done).toBeTruthy())
     expect(api.uploadInvestigationItem).toHaveBeenCalledTimes(5)
@@ -51,14 +50,22 @@ describe('FileImportWizard', () => {
     expect(await findByTestId('file-import-wizard')).toBeTruthy()
   })
 
-  it('an invalid mapping blocks the next step', async () => {
+  it('an invalid mapping (advanced JSON) blocks "Add to case"', async () => {
     const { getByTestId } = render(FileImportWizard, { props: { investigationId: 'c1' } })
     await pick(getByTestId, files())
     await waitFor(() => expect((getByTestId('wizard-next') as HTMLButtonElement).disabled).toBe(false))
     await fireEvent.click(getByTestId('wizard-next'))
-    await fireEvent.click(getByTestId('wizard-next'))
     await fireEvent.update(getByTestId('wizard-spec'), '{"version": 1, "inputs": {}, "nodes": [{"bogus": 1}]}')
     expect(getByTestId('wizard-mapping-error')).toBeTruthy()
-    expect((getByTestId('wizard-next') as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect((getByTestId('wizard-submit') as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('a document skips the mapping', async () => {
+    const { getByTestId, queryByTestId } = render(FileImportWizard, { props: { investigationId: 'c1', initialRole: 'attachment' } })
+    await pick(getByTestId, files().slice(0, 1))
+    await waitFor(() => expect((getByTestId('wizard-next') as HTMLButtonElement).disabled).toBe(false))
+    await fireEvent.click(getByTestId('wizard-next'))
+    expect(queryByTestId('mapping-step')).toBeNull()
+    expect((getByTestId('wizard-submit') as HTMLButtonElement).disabled).toBe(false)
   })
 })

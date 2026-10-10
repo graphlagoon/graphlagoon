@@ -62,6 +62,8 @@ export interface InvestigationGraphMode {
   origins: Map<string, NodeOrigin[]>;
   /** Provenance ring colors per node id. */
   rings: Map<string, string[]>;
+  /** Case label (template per type, masking); the canvas falls back to `caseNodeLabel`. */
+  labelOf?: (node: Node) => string;
   chooseOrigin: (origins: NodeOrigin[]) => Promise<NodeOrigin | null>;
   applyExpansion: (origin: NodeOrigin, response: GraphResponse) => void | Promise<void>;
 }
@@ -752,13 +754,17 @@ export const useGraphStore = defineStore('graph', () => {
     return matched;
   });
 
+  /** Nodes a case's filter chips hide (05 §3): visual only, the layout stays. */
+  const caseHiddenNodeIds = shallowRef<Set<string> | null>(null);
+
   // Node IDs that should be hidden in 'hide' search mode (for visual hiding, not data filtering)
   const searchHiddenNodeIds = computed(() => {
-    if (!filters.value.search_query || behaviors.value.searchMode !== 'hide') return null;
+    const byChips = caseHiddenNodeIds.value;
+    if (!filters.value.search_query || behaviors.value.searchMode !== 'hide') return byChips;
     const matched = searchMatchedNodeIds.value;
-    if (!matched || matched.size === 0) return null;
+    if (!matched || matched.size === 0) return byChips;
     // Return all node IDs that are NOT matched
-    const hidden = new Set<string>();
+    const hidden = new Set<string>(byChips ?? []);
     for (const entry of nodeSearchIndex.value) {
       if (!matched.has(entry.id)) hidden.add(entry.id);
     }
@@ -2780,6 +2786,7 @@ export const useGraphStore = defineStore('graph', () => {
     currentExploration.value = null;
     investigationMode.value = null;
     roleColors.value = null;
+    caseHiddenNodeIds.value = null;
     savedStateFingerprint.value = null;
     currentPrecomputedGraph.value = null;
     currentStylePreset.value = null;
@@ -2900,6 +2907,7 @@ export const useGraphStore = defineStore('graph', () => {
     edgeValueOf,
     searchMatchedNodeIds,
     searchHiddenNodeIds,
+    caseHiddenNodeIds,
     focusedNodeIds,
 
     // Actions

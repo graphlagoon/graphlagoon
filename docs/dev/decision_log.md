@@ -12557,3 +12557,52 @@ seleção, `changes_since`/recursos de texto/`org_library` no MCP (F3–F5). **P
 na F5). **Admin-area impact:** `CLEARABLE_TABLES` com as tabelas novas; ações auditadas
 `investigation.item_add|item_remove|item_read` no lugar de source/file; aba Investigations
 mostra itens; tokens sem scopes na listagem.
+
+## [2026-10-10 18:40] - Feature Implemented: F4 · Workspace de análise
+
+A tela do caso (05 §3) em componentes novos sobre a `InvestigationView` da F2: `CaseFilterChips`
+(fonte/papel/tag/grupo/tipo/janela/👁, visuais via `graphStore.caseHiddenNodeIds`, sem reset de
+layout; visões salvas = item `graph/view`), `AnalysisBar` com popovers (Seguir o dinheiro,
+Caminhos, Grupos, Tipologias, Vínculos, Enriquecer, Métricas, Console só como hook, Filtros/
+Tabela/Layout/Fit/Avançado montando `FilterPanel`/`DataTablePanel`/`MetricsPanel`/`LayoutPanel`/
+`ClusterProgramPanel` no caso), `SelectionInspector` (entidade · seleção múltipla com papel/tag/
+Agrupar/mesmo-que/nota/salvar seleção/comparar/usar como parâmetro · item · decisão guiada),
+`CaseTimeline` (Linha do tempo genérica com brush → chip de janela, Atividade com filtro pessoa/
+agente/sistema, Sugestões em lote por ferramenta, Resultado), `CaseSettingsDrawer` (⚙ → um
+`PATCH settings`), `EntityPage` (drawer), `CaseDossier` como `?mode=dossie` (rota `/dossier`
+redireciona; tabelas com tag `dossie`; grupos no resumo), `DecisionPanel` guiado (racional
+pré-preenchido com hipóteses sustentadas e evidências, revisor, aviso de tipping-off),
+`FileImportWizard` em 2 passos com `MappingStep` reutilizável. **Decisões:** (1) todo resultado de
+análise é item: trace/paths/typologies → `table/result`, Vínculos → `graph/derived` (ids já
+unificados, flag `unified` honrada por `unifyGraph.ts` e `case_graph.py`), métricas →
+`table/metrics`; provenance `{tool, params, engine}`; re-rodar = nova versão; `stores/trace.ts`,
+`TracePanel`, `TraceExits`, `DecideDialog`, `InvestigationDossierView` apagados; `PathBar`,
+`TypologyBadgesPanel`, `SwimlaneTimeline` e o novo `TraceResultPanel` renderizam por prop;
+(2) grupos = anotação `group` (`value {name, color, by}`), fechados via `state.groups_closed`
+reaproveitando o cluster fechado de `stores/cluster.ts` (ressincronizado após `applyStylePreset`,
+que recarrega clusters); (3) normalizadores `device_id|ip|pix_key|card|terminal_id|address|regex`
+(`IdentityKey.pattern`) nos dois motores, fixture `unify/generic-normalizers.json`; Vínculos
+normaliza o valor da propriedade pelo nome do atributo (`ATTRIBUTE_NORMALIZERS`, fixture
+`er/shared-attributes.json`); `settings.edge_semantics` por tipo de relação com `weight_prop`/
+`timestamp_prop` como amount/time; `PRESET_DEFAULTS` (roles, link_attributes, incl.
+`fraude_sintetica`) preenche `settings.vocabularies` na criação; (4) decisão ganha `reviewer_email`
+e resultados `medida|parecer` (aditivo). **Arquivos:** frontend `components/investigation/
+{AnalysisBar,AnalysisResultPanel,CaseFilterChips,GroupsPanel,SelectionInspector,CaseTimeline,
+CaseSettingsDrawer,EntityPage,CaseDossier,DecisionPanel,TraceResultPanel,MappingStep}.vue`,
+`FileImportWizard/CaseHeader/PathBar/SwimlaneTimeline/TypologyBadgesPanel.vue`, `views/
+InvestigationView.vue`, `stores/{investigation,caseFilters,graph}.ts`, `composables/
+useCaseAnalyses.ts`, `utils/{identityKeys,entityResolution,edgeSemantics,unifyGraph,caseLabels,
+casePresets}.ts`, `GraphCanvas3D.vue` (hook `labelOf`), `router/index.ts`; api `services/
+{case_graph,entity_resolution,trace,cases,file_mapping}.py`, `models/schemas.py`, `routers/
+investigations.py` (uma linha, já no commit da F3). **Testes:** vitest `identityKeys`,
+`entityResolution`, `unifyGraph.parity`, `useCaseAnalyses`, `CaseFilterChips`, `SelectionInspector`,
+`TraceResultPanel`, `SwimlaneTimeline`, `CaseDossier`, `FileImportWizard`, `InvestigationView`;
+pytest `test_case_graph.py` (paridade normalizadores/Vínculos, partes `unified`, semântica por
+tipo), `test_cases.py` (defaults do preset, PATCH settings, revisor); E2E novo
+`investigation-workspace.spec.ts` (Vínculos telefone+device → cluster → grupo da seleção → dossiê;
+grupos por propriedade + papéis em lote + visão → reload preserva) e `investigations.spec.ts`
+ajustado (painel de decisão, tipologias por popover); vue-tsc limpo. **Suposições:** console do
+caso é hook (F3 entrega o `QueryConsolePanel` no caso); câmera não entra na visão salva;
+org_vocabularies ficam para a UI da F5 (defaults vivem em `cases.py`/`casePresets.ts`); cartão
+mascarado só casa com cartão mascarado. **Public docs:** `docs/guide/investigations.md` (chips,
+barra de análise, grupos/Vínculos, ⚙, dossiê como modo). **No admin-area impact.**

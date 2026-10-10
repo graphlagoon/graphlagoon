@@ -1,19 +1,23 @@
 <script setup lang="ts">
 /**
- * Swimlane timeline of the money trace (T5, F3.5): a lane per account, an arrow at
- * each traced transfer's time and a band for how long the money sat in the account.
- * Dragging selects a time window (filters the graph and the Sankey); a click clears it.
+ * Swimlane timeline (T5, F3.5; generic in F4): a lane per entity, an arrow at each
+ * dated edge and a band for how long the money sat in the account. With a trace
+ * `result` the lanes follow its layers and the exits share one lane; without it
+ * (the case timeline) the lanes are the entities with dated edges, busiest first.
+ * Dragging selects a time window (a chip on the canvas); a click clears it.
  */
 import { computed, ref } from 'vue';
 import type { TraceResult } from '@/utils/trace';
 import { traceColumns, type TraceFlow } from '@/utils/traceView';
 
 const props = defineProps<{
-  result: TraceResult;
-  /** Every traced flow (unfiltered). */
+  result?: TraceResult | null;
+  /** Every traced flow (unfiltered); for the case timeline, every dated edge. */
   flows: TraceFlow[];
   nameOf: (id: string) => string;
   focus: [number, number] | null;
+  /** Case timeline: how many lanes to show (busiest entities first). */
+  maxLanes?: number;
 }>();
 const emit = defineEmits<{ 'update:focus': [value: [number, number] | null] }>();
 
@@ -23,13 +27,18 @@ const RIGHT = 100;
 const LANE_H = 26;
 const TOP = 10;
 
-const backward = computed(() => props.result.method.direction === 'backward');
-const cols = computed(() => traceColumns(props.result, props.flows, props.result.method.direction));
-const exitSet = computed(() => new Set(Object.keys(props.result.exits)));
-/** Accounts in column order, then one shared lane for the exits. */
-const lanes = computed(() => [...cols.value.columns.keys()].filter((id) => !exitSet.value.has(id)));
-const exitLane = computed(() => (cols.value.exits ? lanes.value.length : -1));
-const laneCount = computed(() => lanes.value.length + (cols.value.exits ? 1 : 0));
+const backward = computed(() => props.result?.method.direction === 'backward');
+const cols = computed(() => (props.result ? traceColumns(props.result, props.flows, props.result.method.direction) : null));
+const exitSet = computed(() => new Set(Object.keys(props.result?.exits ?? {})));
+/** Accounts in column order, then one shared lane for the exits; or the busiest entities. */
+const lanes = computed(() => {
+  if (cols.value) return [...cols.value.columns.keys()].filter((id) => !exitSet.value.has(id));
+  const count = new Map<string, number>();
+  for (const f of props.flows) for (const id of [f.src, f.dst]) count.set(id, (count.get(id) ?? 0) + 1);
+  return [...count.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, props.maxLanes ?? 12).map(([id]) => id);
+});
+const exitLane = computed(() => (cols.value?.exits ? lanes.value.length : -1));
+const laneCount = computed(() => lanes.value.length + (cols.value?.exits ? 1 : 0));
 const height = computed(() => TOP + laneCount.value * LANE_H + 28);
 const laneOf = (id: string) => (exitSet.value.has(id) ? exitLane.value : lanes.value.indexOf(id));
 const laneY = (i: number) => TOP + i * LANE_H + LANE_H / 2;
@@ -48,8 +57,12 @@ const tAt = (px: number) => domain.value[0] + ((px - LABEL_W) / (W - LABEL_W - R
 const real = (f: TraceFlow) => (backward.value ? { from: f.dst, to: f.src } : { from: f.src, to: f.dst });
 const short = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
+const laneSet = computed(() => new Set(lanes.value));
+/** Flows whose ends both have a lane (the case timeline caps the lanes). */
+const shown = computed(() => props.flows.filter((f) => (laneSet.value.has(f.src) || exitSet.value.has(f.src)) && (laneSet.value.has(f.dst) || exitSet.value.has(f.dst))));
+
 const arrows = computed(() =>
-  props.flows.map((f) => {
+  shown.value.map((f) => {
     const { from, to } = real(f);
     const y1 = laneY(laneOf(from));
     const y2 = laneY(laneOf(to));
@@ -67,9 +80,9 @@ const arrows = computed(() =>
 /** Dwell: first traced arrival → last traced departure (to the end when the money never left). */
 const bands = computed(() =>
   lanes.value.flatMap((id, i) => {
-    const arrivals = props.flows.filter((f) => real(f).to === id).map((f) => f.t);
+    const arrivals = shown.value.filter((f) => real(f).to === id).map((f) => f.t);
     if (!arrivals.length) return [];
-    const departures = props.flows.filter((f) => real(f).from === id).map((f) => f.t);
+    const departures = shown.value.filter((f) => real(f).from === id).map((f) => f.t);
     const end = departures.length ? Math.max(...departures) : domain.value[1];
     const start = Math.min(...arrivals);
     return end > start ? [{ id, x: x(start), w: x(end) - x(start), y: laneY(i) - 5 }] : [];
@@ -137,8 +150,8 @@ const focusLabel = computed(() => {
 <template>
   <section class="swimlanes" data-testid="trace-swimlanes">
     <header>
-      <strong>Swimlane timeline</strong>
-      <span class="muted">the light band in each account is how long the money sat there · drag to pick a window</span>
+      <strong>{{ result ? 'Swimlane timeline' : 'Timeline' }}</strong>
+      <span class="muted">{{ result ? 'the light band in each account is how long the money sat there · ' : '' }}drag to pick a window</span>
       <span v-if="focus" class="focus" data-testid="swimlane-focus">
         window {{ focusLabel }}
         <button class="link-btn" data-testid="swimlane-clear" @click="emit('update:focus', null)">clear</button>

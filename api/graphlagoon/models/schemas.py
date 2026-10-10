@@ -1868,9 +1868,11 @@ class InvestigationEventResponse(BaseModel):
 class InvestigationDecisionCreate(BaseModel):
     """05 §7: communicate to COAF or archive, the actions taken with it, why."""
 
-    outcome: Literal["comunicar", "arquivar"]
+    outcome: Literal["comunicar", "arquivar", "medida", "parecer"]
     actions: list[Literal["dict", "spa", "bloqueio_cautelar"]] = Field(default_factory=list)
     rationale: str = Field(min_length=1, max_length=10000)
+    # Second pair of eyes named on the decision panel (05 §7); informative.
+    reviewer_email: Optional[str] = Field(default=None, max_length=255)
 
 
 # Case items (05 §1)

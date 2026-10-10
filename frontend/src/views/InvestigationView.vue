@@ -1,72 +1,90 @@
 <script setup lang="ts">
 /**
  * The case screen (05 §3): one canvas fed by the case's graph items (checked
- * "on canvas" in the material list), an inspector with the entity's roles,
- * suggestions, notes and origin, and the journal. Everything that enters the
- * case is an item; roles, tags and matches are annotations.
+ * "on canvas" in the material list), filter chips over it, an analysis bar whose
+ * results are items, an inspector (entity · selection · item · decision) and a
+ * bottom strip (timeline · activity · suggestions · result). `?mode=dossie` is the
+ * same store laid out as a document. Everything that enters the case is an item;
+ * roles, tags, groups and matches are annotations.
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Banknote, Maximize2, Plus, Route } from 'lucide-vue-next';
+import { useRoute } from 'vue-router';
+import { Banknote, Plus, Route } from 'lucide-vue-next';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
-import { useAuthStore } from '@/stores/auth';
-import { useTraceStore, type TraceDirection } from '@/stores/trace';
+import { useClusterStore } from '@/stores/cluster';
+import { useCaseFilters } from '@/stores/caseFilters';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
 import { useToast } from '@/composables/useToast';
-import { formatAmount } from '@/utils/edgeSemantics';
+import type { TraceContent } from '@/composables/useCaseAnalyses';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
-import { caseNodeLabel, hiddenRawDocumentKeys, shortId } from '@/utils/caseLabels';
+import { caseNodeLabel } from '@/utils/caseLabels';
 import { provenanceRingColors, roleColor, roleColorMap, ROLE_LABELS } from '@/utils/graphAppearance';
-import { describeEvent } from '@/utils/investigationEvents';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { traceColumns, traceFlows } from '@/utils/traceView';
 import { baseSourceId, mergedEntityCounts, nodeSourceIds, type NodeOrigin, type UnifiedNode } from '@/utils/unifyGraph';
+import { LAYOUT_ALGORITHMS, type LayoutAlgorithm } from '@/types/graph';
 import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import LayoutPanel from '@/components/LayoutPanel.vue';
+import FilterPanel from '@/components/FilterPanel.vue';
+import DataTablePanel from '@/components/DataTablePanel.vue';
+import MetricsPanel from '@/components/MetricsPanel.vue';
+import ClusterProgramPanel from '@/components/ClusterProgramPanel.vue';
+import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
 import CaseHeader from '@/components/investigation/CaseHeader.vue';
 import CaseItemsPanel from '@/components/investigation/CaseItemsPanel.vue';
+import CaseFilterChips from '@/components/investigation/CaseFilterChips.vue';
+import AnalysisBar, { type CasePanel } from '@/components/investigation/AnalysisBar.vue';
+import SelectionInspector from '@/components/investigation/SelectionInspector.vue';
+import CaseTimeline, { type TimelineTab } from '@/components/investigation/CaseTimeline.vue';
+import CaseSettingsDrawer from '@/components/investigation/CaseSettingsDrawer.vue';
+import EntityPage from '@/components/investigation/EntityPage.vue';
+import CaseDossier from '@/components/investigation/CaseDossier.vue';
+import ShareDialog from '@/components/investigation/ShareDialog.vue';
 import AddItemsPopover from '@/components/investigation/AddItemsPopover.vue'; // F3: popover replaces the modal
 import FileImportWizard from '@/components/investigation/FileImportWizard.vue';
-import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
-import TracePanel from '@/components/investigation/TracePanel.vue';
-import TypologyBadgesPanel from '@/components/investigation/TypologyBadgesPanel.vue';
-import TraceExits from '@/components/investigation/TraceExits.vue';
-import TraceSankey from '@/components/investigation/TraceSankey.vue';
-import SwimlaneTimeline from '@/components/investigation/SwimlaneTimeline.vue';
-import PathBar from '@/components/investigation/PathBar.vue';
+import type { TraceView } from '@/components/investigation/TraceResultPanel.vue';
 import type { GraphResponse } from '@/types/graph';
-import type { CaseAnnotation, CaseItem } from '@/types/investigation';
+import type { CaseItem, CaseViewContent } from '@/types/investigation';
 
 const props = defineProps<{ id: string }>();
 
+const route = useRoute();
 const store = useInvestigationStore();
 const graphStore = useGraphStore();
 const communityStore = useCommunityStore();
 const similarityStore = useSimilarityStore();
-const auth = useAuthStore();
-const trace = useTraceStore();
+const clusterStore = useClusterStore();
+const filters = useCaseFilters();
 const contextMenu = useContextMenu();
 const toast = useToast();
 
+const mode = computed<'canvas' | 'dossie'>(() => (route.query.mode === 'dossie' ? 'dossie' : 'canvas'));
+
 const showAdd = ref(false);
 const showWizard = ref(false);
-const showLayout = ref(false);
-/** The canvas or the money trace (T5). */
-const view = ref<'graph' | 'trace'>('graph');
-const inspectorTab = ref<'data' | 'enrichment' | 'notes' | 'origin'>('data');
-const showJournal = ref(false);
-/** Left column: the material or the typology badges (T9). */
-const showTypologies = ref(false);
-const noteDraft = ref('');
-const actionError = ref<string | null>(null);
+const wizardRole = ref<'graph' | 'enrichment' | 'attachment' | undefined>(undefined);
+const showSettings = ref(false);
+const showShare = ref(false);
+const decideMode = ref(false);
+const entityPage = ref<UnifiedNode | null>(null);
 const activeItem = ref<CaseItem | null>(null);
+const activeAnalysis = ref<CaseItem | null>(null);
+const traceView = ref<TraceView>('layers');
+const timelineTab = ref<TimelineTab>('timeline');
+const timelineCollapsed = ref(true);
+const paintByGroup = ref(false);
+const selectedClusterId = ref<string | null>(null);
+const panels = ref<Record<CasePanel, boolean>>({ filters: false, table: false, metrics: false, layout: false, advanced: false });
 const canvasRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
-const pathBar = ref<InstanceType<typeof PathBar> | null>(null);
+const analysisBar = ref<InstanceType<typeof AnalysisBar> | null>(null);
 
 const sourceTitle = (sourceId: string) => store.itemTitle(baseSourceId(sourceId));
 const contextTitle = (contextId: string) => store.contexts[contextId]?.title ?? store.itemTitle(contextId);
 const mergedCounts = computed(() => mergedEntityCounts(store.unified.nodes));
+const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'decided');
 
 // --- context picker for expanding a node that exists in several contexts ---
 const pickerOrigins = ref<NodeOrigin[] | null>(null);
@@ -93,18 +111,29 @@ function applyExpansion(origin: NodeOrigin, response: GraphResponse) {
 // communities and put them back after the swap (same timing as loadExploration).
 let savedCommunities: Record<string, unknown> | undefined;
 
+const labelOf = (n: { node_id: string; node_type: string; properties?: Record<string, unknown> }) =>
+  caseNodeLabel(n, { templates: store.labelTemplates, unmasked: filters.unmasked });
+
 function graphMode(rings: Map<string, string[]>): InvestigationGraphMode {
   return {
     origins: new Map(store.unified.nodes.map((n) => [n.node_id, n.__sources])),
     rings,
+    labelOf,
     chooseOrigin,
     applyExpansion,
   };
 }
 
+/** The active trace item's content (layers mode re-lays the canvas by its columns). */
+const activeTrace = computed<TraceContent | null>(() => {
+  const item = activeAnalysis.value;
+  if (!item || item.provenance?.tool !== 'trace') return null;
+  return (store.contents[`${item.id}:${item.current_version}`] as TraceContent | undefined) ?? null;
+});
+
 async function render() {
-  pathBar.value?.close();
-  if (view.value === 'trace') return renderTrace();
+  const trace = activeTrace.value;
+  if (trace && traceView.value === 'layers') return renderTraceLayers(trace);
   if (graphStore.layoutAlgorithm === 'trace-layers') {
     graphStore.traceLayers = null;
     graphStore.setLayoutAlgorithm('force');
@@ -117,6 +146,22 @@ async function render() {
   communityStore.loadState(savedCommunities);
 }
 
+/** The traced subgraph, laid out by layer (`trace-layers`); the time-window chip filters the flows. */
+function renderTraceLayers(trace: TraceContent) {
+  const all = traceFlows(trace.result, trace.walked);
+  const w = filters.window;
+  const flows = w ? all.filter((f) => f.t >= w[0] && f.t <= w[1]) : all;
+  const cols = traceColumns(trace.result, flows, trace.result.method.direction);
+  const flowIds = new Set(flows.map((f) => f.id));
+  graphStore.traceLayers = cols;
+  graphStore.setLayoutAlgorithm('trace-layers');
+  graphStore.loadInvestigationGraph(
+    graphMode(new Map()),
+    store.unified.nodes.filter((n) => cols.columns.has(n.node_id)),
+    store.unified.edges.filter((e) => flowIds.has(e.edge_id)),
+  );
+}
+
 // (Re)load the graphs once per case and graph-item set (open, add, remove).
 let loadedKey: string | null = null;
 async function loadWorkspace() {
@@ -127,6 +172,7 @@ async function loadWorkspace() {
   // shortcut: the first readable exploration's style (colors, icons, labels) dresses the canvas.
   const styled = store.sourceGraphs.find((g) => g.state);
   if (styled?.state) graphStore.applyStylePreset(styled.state);
+  syncGroupClusters(); // the style preset reloads the cluster state and drops the group clusters
   // Small base nodes and thin rings read better on a unified graph (05 §3).
   graphStore.updateAesthetics({ nodeSize: Math.min(graphStore.aesthetics.nodeSize, CASE_NODE_SIZE) });
   zoomToFitSoon();
@@ -139,17 +185,15 @@ function zoomToFitSoon() {
   requestAnimationFrame(() => requestAnimationFrame(() => canvasRef.value?.zoomToFit?.()));
 }
 
-/** Readable name of a unified node (inspector, journal): label, else type · short id. */
-const labelById = computed(() => new Map(store.unified.nodes.map((n) => [n.node_id, caseNodeLabel(n)])));
-const nameOf = (id: string) => labelById.value.get(id) ?? shortId(id);
-
 watch(
   () => props.id,
   async (id) => {
     savedCommunities = undefined;
-    view.value = 'graph';
     activeItem.value = null;
-    trace.reset();
+    activeAnalysis.value = null;
+    decideMode.value = false;
+    entityPage.value = null;
+    filters.restore(null);
     await store.openInvestigation(id);
     // The journal and the brief are secondary: a failure here must not block the graph.
     store.fetchEvents().catch(() => {});
@@ -160,28 +204,43 @@ watch(
 );
 
 watch(() => store.graphItems.map((s) => `${s.id}:${s.current_version}:${s.mapping?.as ?? ''}`).join(','), loadWorkspace);
-watch([() => store.unified, () => view.value === 'trace', () => trace.columns], render);
+watch([() => store.unified, activeTrace, traceView, () => filters.window, () => filters.unmasked, () => store.labelTemplates], render);
 
-// --- money trace (T5) ---
-/** The traced subgraph, laid out by layer (`trace-layers`). */
-function renderTrace() {
-  const cols = trace.columns;
-  const flowIds = new Set(trace.flows.map((f) => f.id));
-  graphStore.traceLayers = cols;
-  graphStore.setLayoutAlgorithm('trace-layers');
-  graphStore.loadInvestigationGraph(
-    graphMode(new Map()),
-    store.unified.nodes.filter((n) => cols?.columns.has(n.node_id)),
-    store.unified.edges.filter((e) => flowIds.has(e.edge_id)),
-  );
+// Fills follow the confirmed roles (or the groups, when painting by group), without reloading the graph.
+watch(
+  [() => store.roles, () => store.groups, paintByGroup],
+  ([roles, groups, byGroup]) => {
+    if (byGroup) {
+      const map = new Map<string, string>();
+      for (const g of groups) for (const id of g.targets) if (!map.has(id)) map.set(id, g.color);
+      graphStore.roleColors = map;
+    } else graphStore.roleColors = roleColorMap(roles);
+  },
+  { immediate: true },
+);
+const legendRoles = computed(() => [...new Set(Object.values(store.roles))].sort());
+
+// Closed groups collapse into cluster nodes (05 §5), reusing the closed-cluster rendering.
+const GROUP_PREFIX = 'group:';
+function removeGroupClusters() {
+  for (const c of clusterStore.clusters.filter((x) => x.cluster_id.startsWith(GROUP_PREFIX))) clusterStore.deleteCluster(c.cluster_id);
+}
+function syncGroupClusters() {
+  removeGroupClusters();
+  for (const g of store.groups) {
+    if (!store.groupsClosed.includes(g.id)) continue;
+    clusterStore.createCluster({ cluster_id: `${GROUP_PREFIX}${g.id}`, cluster_name: g.name, cluster_class: 'group', figure: 'circle', state: 'closed', node_ids: g.targets, color: g.color });
+  }
+}
+watch([() => store.groups, () => store.groupsClosed], syncGroupClusters, { immediate: true });
+
+// --- analyses: context menu entries keep working, results are items ---
+async function followMoney(target: ContextMenuTarget, direction: 'forward' | 'backward') {
+  const ok = await analysisBar.value?.traceFrom({ type: target.type as 'node' | 'edge', id: target.id }, direction);
+  if (ok === false) toast.error('No edge with an amount and a time to follow from here');
 }
 
-async function followMoney(target: ContextMenuTarget, direction: TraceDirection) {
-  if (await trace.start(target, direction)) view.value = 'trace';
-  else toast.error('No edge with an amount and a time to follow from here');
-}
-
-const TRACE_ACTIONS: [TraceDirection, string][] = [
+const TRACE_ACTIONS: ['forward' | 'backward', string][] = [
   ['forward', 'Follow the money → forward'],
   ['backward', 'Follow the money → backward'],
 ];
@@ -194,133 +253,52 @@ onMounted(() => {
     label: 'Path to…',
     icon: Route,
     visible: (t) => t.type === 'node',
-    handler: (t) => pathBar.value?.start(t.id),
+    handler: (t) => analysisBar.value?.startPath(t.id),
   });
 });
 
-const traceChips = computed(() => {
-  const r = trace.result;
-  if (!r) return null;
-  const retained = Object.values(r.nodes).filter((n) => n.retained > 0);
-  const frontier = r.frontier.reduce((s, f) => s + f.amount, 0);
-  return {
-    seed: formatAmount(r.seedTotal),
-    exits: `${formatAmount(r.exitTotal)} reached ${r.method.direction === 'backward' ? 'origins' : 'exits'} (${Math.round(r.coverage * 100)}%)`,
-    retained: `${formatAmount(retained.reduce((s, n) => s + n.retained, 0))} retained in ${retained.length} ${retained.length === 1 ? 'account' : 'accounts'}`,
-    frontier: frontier > 0 ? `${formatAmount(frontier)} at the layer limit` : null,
-    layers: trace.columns ? trace.columns.labels.length - (trace.columns.exits ? 2 : 1) : 0,
-  };
-});
+function activateAnalysis(item: CaseItem) {
+  activeAnalysis.value = item;
+  activeItem.value = item;
+  traceView.value = 'layers';
+  timelineTab.value = 'result';
+  timelineCollapsed.value = false;
+}
 
-// Role fills follow the confirmed role annotations, without reloading the graph.
+// The latest version of the active analysis (a re-run adds one) stays active.
 watch(
-  () => store.roles,
-  (roles) => (graphStore.roleColors = roleColorMap(roles)),
-  { immediate: true },
+  () => store.items,
+  (items) => {
+    if (activeAnalysis.value) activeAnalysis.value = items.find((i) => i.id === activeAnalysis.value!.id) ?? null;
+    if (activeItem.value) activeItem.value = items.find((i) => i.id === activeItem.value!.id) ?? null;
+  },
 );
-const legendRoles = computed(() => [...new Set(Object.values(store.roles))].sort());
 
-onUnmounted(() => {
-  for (const [direction] of TRACE_ACTIONS) contextMenu.removeAction(`trace-${direction}`);
-  contextMenu.removeAction('path-to');
-  trace.reset();
-  graphStore.traceLayers = null;
-  pick(null);
-  resetMetricsCalculator();
-  communityStore.clearCommunities();
-  graphStore.clear();
-});
+function onRerun(tool: string) {
+  analysisBar.value?.show(tool as 'trace' | 'paths' | 'typologies' | 'links' | 'metrics');
+}
 
-// --- inspector ---
-const selected = computed(() => graphStore.selectedNode as UnifiedNode | null);
-const selectedSources = computed(() => (selected.value ? nodeSourceIds(selected.value) : []));
-const selectedProps = computed(() => {
-  const props = selected.value?.properties ?? {};
-  const hidden = hiddenRawDocumentKeys(props);
-  return Object.entries(props).filter(([k]) => !hidden.has(k));
-});
+function selectItem(item: CaseItem | null) {
+  activeItem.value = item;
+  if (item) graphStore.clearSelection();
+  if (item && store.analyses.some((a) => a.id === item.id)) activateAnalysis(item);
+}
 
-const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'decided');
-const selectedRole = computed(() => (selected.value ? store.roles[selected.value.node_id] ?? '' : ''));
-/** Role vocabulary: the preset suggestions plus every role already used in the case. */
-const roleOptions = computed(() => {
-  const used = new Set(Object.values(store.roles));
-  for (const a of store.annotations) if (a.kind === 'role') used.add(String(a.value.role));
-  return [...new Set([...Object.keys(ROLE_LABELS), ...used])];
-});
-const selectedNotes = computed(() => store.notes.filter((n) => n.anchor?.entity_ids?.includes(selected.value?.node_id ?? '')));
-const selectedSuggestions = computed(() =>
-  store.annotations.filter((a) => a.status === 'suggested' && selected.value && a.targets.includes(selected.value.node_id)),
-);
-const selectedAnnotations = computed(() =>
-  store.annotations.filter(
-    (a) => a.status === 'confirmed' && a.kind !== 'role' && selected.value && a.targets.includes(selected.value.node_id),
-  ),
-);
-const journal = computed(() => [...store.events].reverse());
+function togglePanel(panel: CasePanel) {
+  panels.value[panel] = !panels.value[panel];
+}
 
-async function run(action: () => Promise<unknown>, fallback: string) {
-  actionError.value = null;
-  try {
-    await action();
-  } catch (e) {
-    actionError.value = getErrorMessage(e, fallback);
+/** A saved view (05 §5): chips (restored by the chips component), layout and closed groups. */
+function applyView(content: CaseViewContent) {
+  if ((LAYOUT_ALGORITHMS as readonly string[]).includes(content.layout) && content.layout !== 'trace-layers') {
+    graphStore.setLayoutAlgorithm(content.layout as LayoutAlgorithm);
   }
+  if (canEdit.value) store.saveState({ groups_closed: content.groups_closed ?? [] }).catch((e) => toast.error(getErrorMessage(e, 'Failed to apply the view')));
 }
 
-function onRoleChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value;
-  const id = selected.value?.node_id;
-  if (id) run(() => store.setRole(id, value || null), 'Failed to set role');
-}
-
-function addNote() {
-  const id = selected.value?.node_id;
-  const body = noteDraft.value.trim();
-  if (!id || !body) return;
-  run(async () => {
-    await store.addNote(id, body);
-    noteDraft.value = '';
-  }, 'Failed to add note');
-}
-
-function decideSuggestion(a: CaseAnnotation, status: 'confirmed' | 'rejected') {
-  run(() => store.setAnnotationStatus(a.id, status), 'Failed to update the suggestion');
-}
-
-const describeAnnotation = (a: CaseAnnotation) => {
-  const v = a.value;
-  if (a.kind === 'role') return `role: ${v.role}`;
-  if (a.kind === 'tag') return `tag: ${v.tag}`;
-  if (a.kind === 'group') return `group: ${v.name}`;
-  if (a.kind === 'same_as') return `same as ${nameOf(a.targets.find((t) => t !== selected.value?.node_id) ?? '')}`;
-  if (a.kind === 'typology') return `typology ${v.norm_ref ?? v.typology}`;
-  return a.kind;
-};
-
-/** Freezes what the canvas shows as a pinned graph item (evidence). */
-function pinGraphEvidence() {
-  const nodes = graphStore.nodes.map((n) => ({ node_id: n.node_id, node_type: n.node_type, properties: n.properties ?? {} }));
-  const edges = graphStore.edges.map((e) => ({
-    edge_id: e.edge_id, src: e.src, dst: e.dst, relationship_type: e.relationship_type, properties: e.properties ?? {},
-  }));
-  const ids = new Set(nodes.map((n) => n.node_id));
-  store
-    .pinEvidence({
-      title: `Graph · ${nodes.length} nodes`,
-      kind: 'graph_state',
-      params: { nodes: nodes.length, edges: edges.length, selected: selected.value?.node_id ?? null },
-      snapshot: { nodes, edges, roles: Object.fromEntries(Object.entries(store.roles).filter(([k]) => ids.has(k))) },
-    })
-    .then((row) => row && toast.success(`Evidence pinned · hash ${row.sha256.slice(0, 8)}`))
-    .catch((e) => toast.error(getErrorMessage(e, 'Failed to pin evidence')));
-}
-
-function findMatches() {
-  run(async () => {
-    const n = await store.findMatches();
-    toast.success(n ? `${n} new match suggestion${n === 1 ? '' : 's'} to review` : 'No new matches');
-  }, 'Failed to run entity resolution');
+function openJournal() {
+  timelineTab.value = 'activity';
+  timelineCollapsed.value = false;
 }
 
 function onWizardDone(items: CaseItem[]) {
@@ -329,7 +307,22 @@ function onWizardDone(items: CaseItem[]) {
   toast.success(`Added ${items.length} file${items.length === 1 ? '' : 's'} to the case`);
 }
 
-const formatTime = (iso: string) => new Date(iso).toLocaleString();
+function openUpload(role?: 'graph' | 'enrichment' | 'attachment') {
+  wizardRole.value = role;
+  showWizard.value = true;
+}
+
+onUnmounted(() => {
+  for (const [direction] of TRACE_ACTIONS) contextMenu.removeAction(`trace-${direction}`);
+  contextMenu.removeAction('path-to');
+  graphStore.traceLayers = null;
+  pick(null);
+  resetMetricsCalculator();
+  communityStore.clearCommunities();
+  removeGroupClusters();
+  filters.restore(null);
+  graphStore.clear();
+});
 </script>
 
 <template>
@@ -337,259 +330,131 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
     <div v-if="store.loading && !store.current" class="loading"></div>
     <div v-else-if="store.error" class="error-message">{{ store.error }}</div>
     <template v-else-if="store.current">
-      <CaseHeader :subtitle="view === 'trace' ? '› Follow the money' : null" />
+      <CaseHeader :mode="mode" @decide="decideMode = true" @settings="showSettings = true" />
 
-      <nav class="tabs" data-testid="workspace-tabs">
-        <button class="tab" :class="{ active: view === 'graph' }" data-testid="tab-unified" @click="view = 'graph'">
-          <span class="dots">
-            <span v-for="s in store.canvasItems" :key="s.id" class="dot" :style="{ background: store.sourceColors[s.id] }"></span>
-          </span>
-          Case
-        </button>
-        <button v-if="trace.result" class="tab" :class="{ active: view === 'trace' }" data-testid="tab-trace" @click="view = 'trace'">
-          <Banknote :size="14" /> Follow the money
-        </button>
-        <button v-if="canEdit" class="tab add" data-testid="investigation-add-sources" @click="showAdd = true">
-          <Plus :size="14" /> Add
-        </button>
-      </nav>
+      <CaseDossier v-if="mode === 'dossie'" :id="id" />
 
-      <div class="ws-body" :class="{ tracing: view === 'trace' }">
-        <TracePanel v-if="view === 'trace'" />
-        <TypologyBadgesPanel v-else-if="showTypologies" :can-edit="canEdit" />
-        <CaseItemsPanel
-          v-else
-          :can-edit="canEdit"
-          :active-item="activeItem?.id"
-          @add="showAdd = true"
-          @upload="showWizard = true"
-          @select="activeItem = $event"
-        />
+      <template v-else>
+        <div class="ws-body">
+          <CaseItemsPanel :can-edit="canEdit" :active-item="activeItem?.id" @add="showAdd = true" @upload="openUpload()" @select="selectItem($event)" />
 
-        <div class="center">
-          <div v-if="view === 'trace' && traceChips" class="trace-bar" data-testid="trace-bar">
-            <div class="trace-toggle">
-              <button :class="{ on: trace.view === 'layers' }" data-testid="trace-view-layers" @click="trace.view = 'layers'">Layers</button>
-              <button :class="{ on: trace.view === 'sankey' }" data-testid="trace-view-sankey" @click="trace.view = 'sankey'">Sankey</button>
-            </div>
-            <span class="chip-fill seed">{{ traceChips.seed }} seed</span>
-            <span class="chip-fill exits" data-testid="trace-coverage">{{ traceChips.exits }}</span>
-            <span class="chip-fill retained">{{ traceChips.retained }}</span>
-            <span v-if="traceChips.frontier" class="chip-fill retained">{{ traceChips.frontier }}</span>
-            <span class="muted trace-sub">{{ traceChips.layers }} {{ traceChips.layers === 1 ? 'layer' : 'layers' }} to the {{ trace.direction === 'backward' ? 'origins' : 'exits' }}</span>
-          </div>
-          <section class="canvas-area" data-testid="graph-container">
-            <div v-if="store.graphLoading || graphStore.loading" class="overlay">
-              {{ graphStore.loadingMessage || 'Loading the case…' }}
-            </div>
-            <div v-else-if="store.graphItems.length === 0" class="overlay empty-canvas" data-testid="canvas-empty">
-              <p>Nothing on the canvas yet. Add a recent exploration, start a new one from a context, or upload a file with a mapping.</p>
-              <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="canvas-empty-add" @click="showAdd = true">
-                <Plus :size="14" /> Add exploration
-              </button>
-            </div>
-            <div v-if="graphStore.queryError" class="error-banner">{{ graphStore.queryError.message }}</div>
-
-            <TraceSankey
-              v-if="view === 'trace' && trace.view === 'sankey' && trace.result && trace.columns"
-              :flows="trace.flows"
-              :columns="trace.columns"
-              :name-of="trace.nameOf"
-              :allocation="trace.result.method.allocation"
-            />
-
-            <div v-if="view === 'graph' && store.canvasItems.length" class="legend" data-testid="provenance-legend">
-              <div class="legend-title">Provenance (ring)</div>
-              <div v-for="s in store.canvasItems" :key="s.id" class="legend-row">
-                <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
-                {{ s.title }}
+          <div class="center">
+            <CaseFilterChips :can-edit="canEdit" @apply-view="applyView" />
+            <section class="canvas-area" data-testid="graph-container">
+              <div v-if="store.graphLoading || graphStore.loading" class="overlay">{{ graphStore.loadingMessage || 'Loading the case…' }}</div>
+              <div v-else-if="store.graphItems.length === 0" class="overlay empty-canvas" data-testid="canvas-empty">
+                <p>Nothing on the canvas yet. Add a recent exploration, start a new one from a context, or upload a file with a mapping.</p>
+                <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="canvas-empty-add" @click="showAdd = true"><Plus :size="14" /> Add exploration</button>
               </div>
-              <template v-if="legendRoles.length">
-                <div class="legend-title roles-title">Role (fill)</div>
-                <div v-for="role in legendRoles" :key="role" class="legend-row">
-                  <span class="fill" :style="{ background: roleColor(role) }"></span>
-                  {{ ROLE_LABELS[role] ?? role }}
+              <div v-if="graphStore.queryError" class="error-banner">{{ graphStore.queryError.message }}</div>
+
+              <div v-if="store.canvasItems.length" class="legend" data-testid="provenance-legend">
+                <div class="legend-title">Provenance (ring)</div>
+                <div v-for="s in store.canvasItems" :key="s.id" class="legend-row">
+                  <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
+                  {{ s.title }}
                 </div>
-              </template>
-              <p class="muted" data-testid="unification-summary">
-                <template v-if="Object.keys(mergedCounts).length">
-                  {{ Object.values(mergedCounts).reduce((a, b) => a + b, 0) }} entities merged by identity key:
-                  {{ Object.entries(mergedCounts).map(([e, n]) => `${n} by ${e}`).join(', ') }}
+                <template v-if="paintByGroup && store.groups.length">
+                  <div class="legend-title roles-title">Group (fill)</div>
+                  <div v-for="g in store.groups" :key="g.id" class="legend-row"><span class="fill" :style="{ background: g.color }"></span>{{ g.name }}</div>
                 </template>
-                <template v-else>No entity merged across items yet.</template>
-              </p>
-            </div>
+                <template v-else-if="legendRoles.length">
+                  <div class="legend-title roles-title">Role (fill)</div>
+                  <div v-for="role in legendRoles" :key="role" class="legend-row">
+                    <span class="fill" :style="{ background: roleColor(role) }"></span>
+                    {{ ROLE_LABELS[role] ?? role }}
+                  </div>
+                </template>
+                <p class="muted" data-testid="unification-summary">
+                  <template v-if="Object.keys(mergedCounts).length">
+                    {{ Object.values(mergedCounts).reduce((a, b) => a + b, 0) }} entities merged by identity key:
+                    {{ Object.entries(mergedCounts).map(([e, n]) => `${n} by ${e}`).join(', ') }}
+                  </template>
+                  <template v-else>No entity merged across items yet.</template>
+                </p>
+              </div>
 
-            <GraphCanvas3D ref="canvasRef" />
-            <PathBar ref="pathBar" :name-of="trace.nameOf" />
+              <GraphCanvas3D ref="canvasRef" @cluster-node-click="selectedClusterId = $event" />
 
-            <div v-if="showLayout" class="layout-panel">
-              <LayoutPanel
-                :is-layout-running="canvasRef?.isLayoutRunning ?? false"
-                @start-layout="canvasRef?.startLayout()"
-                @stop-layout="canvasRef?.stopLayout()"
-                @reheat-layout="canvasRef?.reheatLayout()"
-                @scramble-layout="canvasRef?.scrambleLayout()"
-                @start-edge-type-layout="(et: string | null, s: string) => canvasRef?.startEdgeTypeLayout(et, s as any, similarityStore.useScoreAsWeight)"
-                @close="showLayout = false"
+              <div v-if="panels.filters" class="side-panel left" data-testid="panel-filters"><FilterPanel @close="panels.filters = false" /></div>
+              <div v-if="panels.metrics" class="side-panel right" data-testid="panel-metrics"><MetricsPanel @close="panels.metrics = false" /></div>
+              <div v-if="panels.advanced" class="side-panel right" data-testid="panel-advanced"><ClusterProgramPanel @close="panels.advanced = false" /></div>
+              <div v-if="panels.layout" class="layout-panel">
+                <LayoutPanel
+                  :is-layout-running="canvasRef?.isLayoutRunning ?? false"
+                  @start-layout="canvasRef?.startLayout()"
+                  @stop-layout="canvasRef?.stopLayout()"
+                  @reheat-layout="canvasRef?.reheatLayout()"
+                  @scramble-layout="canvasRef?.scrambleLayout()"
+                  @start-edge-type-layout="(et: string | null, s: string) => canvasRef?.startEdgeTypeLayout(et, s as any, similarityStore.useScoreAsWeight)"
+                  @close="panels.layout = false"
+                />
+              </div>
+
+              <AnalysisBar
+                ref="analysisBar"
+                :can-edit="canEdit"
+                :panels="panels"
+                :active-item="activeAnalysis"
+                v-model:paint-by-group="paintByGroup"
+                @toggle="togglePanel"
+                @fit="canvasRef?.zoomToFit?.()"
+                @settings="showSettings = true"
+                @console="toast.info('The case console arrives with the query loop (F3): save the result as a table of the case from the Query Console')"
+                @upload="openUpload('enrichment')"
+                @activate="activateAnalysis"
               />
+            </section>
+            <div v-if="panels.table" class="table-panel" data-testid="panel-table">
+              <DataTablePanel @close="panels.table = false" @focus-node="canvasRef?.focusOnNode($event)" />
             </div>
+          </div>
 
-            <div v-if="view === 'graph'" class="canvas-actions">
-              <button class="btn btn-outline btn-sm" data-testid="workspace-layout-btn" @click="showLayout = !showLayout">Layout</button>
-              <button class="btn btn-outline btn-sm" title="Fit the graph in the view" aria-label="Fit to view" data-testid="workspace-fit-btn" @click="canvasRef?.zoomToFit?.()">
-                <Maximize2 :size="14" />
-              </button>
-              <button class="btn btn-outline btn-sm" :class="{ on: showTypologies }" data-testid="workspace-typologies-btn" @click="showTypologies = !showTypologies">
-                Typology badges
-              </button>
-              <button v-if="canEdit && graphStore.nodes.length" class="btn btn-outline btn-sm" title="Suggest entities that are the same person (same_as)" data-testid="workspace-matches-btn" @click="findMatches">
-                Find matches
-              </button>
-              <button
-                v-if="canEdit && graphStore.nodes.length"
-                class="btn btn-outline btn-sm"
-                title="Freeze what the canvas shows as a pinned item (immutable, with a sha256)"
-                data-testid="pin-evidence"
-                @click="pinGraphEvidence"
-              >
-                Pin evidence
-              </button>
-            </div>
-          </section>
-          <SwimlaneTimeline
-            v-if="view === 'trace' && trace.result"
-            :result="trace.result"
-            :flows="trace.allFlows"
-            :name-of="trace.nameOf"
-            :focus="trace.focus"
-            @update:focus="trace.focus = $event"
+          <SelectionInspector
+            :active-item="activeItem"
+            :can-edit="canEdit"
+            :decide-mode="decideMode"
+            @open-entity="entityPage = $event"
+            @select-item="selectItem($event)"
+            @activate="activateAnalysis"
+            @decided="decideMode = false"
+            @cancel-decide="decideMode = false"
+            @trace="(t, d) => followMoney({ ...t, label: '' }, d)"
+            @path-from="analysisBar?.startPath($event)"
           />
         </div>
 
-        <TraceExits v-if="view === 'trace'" />
-        <aside v-else class="inspector" data-testid="workspace-inspector">
-          <template v-if="selected">
-            <div class="muted">{{ selected.node_type }} · {{ shortId(selected.node_id) }}</div>
-            <h3 class="entity" :title="selected.node_id" data-testid="inspector-title">{{ caseNodeLabel(selected) }}</h3>
-            <div class="chips">
-              <span v-for="sid in selectedSources" :key="sid" class="chip" :style="{ borderColor: store.sourceColors[sid], color: store.sourceColors[sid] }">
-                {{ sourceTitle(sid) }}
-              </span>
-              <span v-if="selectedSources.length > 1" class="chip linked" data-testid="inspector-linked">in {{ selectedSources.length }} items</span>
-              <span v-for="a in selectedAnnotations" :key="a.id" class="chip plain" :data-testid="`inspector-annotation-${a.id}`">{{ describeAnnotation(a) }}</span>
-            </div>
-            <label class="role-row">
-              <span class="muted">Role</span>
-              <select :value="selectedRole" :disabled="!canEdit" data-testid="inspector-role" @change="onRoleChange">
-                <option value="">— none —</option>
-                <option v-for="role in roleOptions" :key="role" :value="role">{{ ROLE_LABELS[role] ?? role }}</option>
-              </select>
-            </label>
-            <div v-if="selectedSuggestions.length" class="suggestions" data-testid="inspector-suggestions">
-              <div v-for="a in selectedSuggestions" :key="a.id" class="suggestion" :data-testid="`suggestion-${a.id}`">
-                <span>
-                  <strong>{{ describeAnnotation(a) }}</strong>
-                  <span class="muted"> · suggested by {{ a.author_kind === 'agent' ? 'agent' : a.author_email }}</span>
-                  <span v-if="a.reason" class="muted"> — {{ a.reason }}</span>
-                </span>
-                <span v-if="canEdit" class="row">
-                  <button class="link-btn ok" :data-testid="`suggestion-confirm-${a.id}`" @click="decideSuggestion(a, 'confirmed')">✓ Confirm</button>
-                  <button class="link-btn danger" :data-testid="`suggestion-reject-${a.id}`" @click="decideSuggestion(a, 'rejected')">✕ Reject</button>
-                </span>
-              </div>
-            </div>
-            <div v-if="actionError" class="action-error">{{ actionError }}</div>
-            <div class="inspector-tabs">
-              <button :class="{ active: inspectorTab === 'data' }" @click="inspectorTab = 'data'">Data</button>
-              <button :class="{ active: inspectorTab === 'enrichment' }" data-testid="inspector-enrichment-tab" @click="inspectorTab = 'enrichment'">Enrichment</button>
-              <button :class="{ active: inspectorTab === 'notes' }" data-testid="inspector-notes-tab" @click="inspectorTab = 'notes'">
-                Notes<template v-if="selectedNotes.length"> ({{ selectedNotes.length }})</template>
-              </button>
-              <button :class="{ active: inspectorTab === 'origin' }" data-testid="inspector-origin-tab" @click="inspectorTab = 'origin'">Origin</button>
-            </div>
-            <dl v-if="inspectorTab === 'data'" class="props">
-              <template v-for="[k, v] in selectedProps" :key="k">
-                <dt>{{ k }}</dt>
-                <dd>
-                  {{ v }}
-                  <span v-if="selected.__conflicts?.[k]" class="conflict" title="Other items disagree">
-                    ≠ {{ selected.__conflicts[k].map((c) => c.value).join(', ') }}
-                  </span>
-                </dd>
-              </template>
-            </dl>
-            <EnrichmentTab v-else-if="inspectorTab === 'enrichment'" :node="selected" :can-edit="canEdit" />
-            <div v-else-if="inspectorTab === 'notes'" class="notes" data-testid="inspector-notes">
-              <div v-for="n in selectedNotes" :key="n.id" class="note" data-testid="note">
-                <p>{{ n.description ?? n.title }}</p>
-                <div class="muted">
-                  {{ n.author_kind === 'agent' ? 'agent · ' : '' }}{{ n.author_email }} · {{ n.created_at ? formatTime(n.created_at) : '' }}
-                  <button v-if="canEdit && n.author_email === auth.email" class="link-btn" @click="run(() => store.removeItem(n.id), 'Failed to delete note')">delete</button>
-                </div>
-              </div>
-              <p v-if="!selectedNotes.length" class="muted">No notes on this entity yet.</p>
-              <template v-if="canEdit">
-                <textarea v-model="noteDraft" rows="3" placeholder="Add a note…" data-testid="note-input"></textarea>
-                <button class="btn btn-primary btn-sm" :disabled="!noteDraft.trim()" data-testid="note-add" @click="addNote">Add note</button>
-              </template>
-            </div>
-            <div v-else class="origin" data-testid="inspector-origin">
-              <div v-for="o in selected.__sources" :key="`${o.sourceId}:${o.nodeId}`" class="origin-row">
-                <strong>{{ sourceTitle(o.sourceId) }}</strong>
-                <span class="muted">
-                  {{ o.sourceId.startsWith('expansion:') ? 'expansion · ' : '' }}{{ contextTitle(o.contextId) }} · id {{ o.nodeId }}
-                </span>
-              </div>
-              <div v-for="(list, prop) in selected.__conflicts ?? {}" :key="prop" class="origin-row conflict">
-                {{ prop }}: kept “{{ prop === 'node_type' ? selected.node_type : selected.properties?.[prop] }}”;
-                also {{ list.map((c) => `“${c.value}” (${sourceTitle(c.sourceId)})`).join(', ') }}
-              </div>
-            </div>
-          </template>
-          <template v-else-if="activeItem">
-            <div class="muted">{{ activeItem.kind }} / {{ activeItem.subkind }}</div>
-            <h3 class="entity" data-testid="inspector-item-title">{{ activeItem.title }}</h3>
-            <p v-if="activeItem.description" class="muted">{{ activeItem.description }}</p>
-            <dl class="props">
-              <dt>Author</dt><dd>{{ activeItem.author_kind === 'agent' ? 'agent · ' : '' }}{{ activeItem.author_email }}</dd>
-              <dt>Status</dt><dd>{{ activeItem.status }}</dd>
-              <dt>Versions</dt><dd>{{ activeItem.current_version }}<template v-if="activeItem.pinned.length"> · {{ activeItem.pinned.length }} pinned</template></dd>
-              <template v-if="activeItem.latest"><dt>Hash</dt><dd class="mono">{{ activeItem.latest.sha256.slice(0, 12) }}…</dd></template>
-              <template v-if="activeItem.query"><dt>Query</dt><dd class="mono">{{ activeItem.query.text }}</dd></template>
-              <template v-if="activeItem.mapping"><dt>Mapping</dt><dd>{{ activeItem.mapping.as }} · {{ (activeItem.mapping.spec as any)?.name ?? '' }}</dd></template>
-            </dl>
-          </template>
-          <p v-else class="muted">Select a node to see its data and where it came from, or an item of the material.</p>
-        </aside>
-      </div>
+        <CaseTimeline
+          v-model:tab="timelineTab"
+          v-model:collapsed="timelineCollapsed"
+          :active-item="activeAnalysis"
+          :can-edit="canEdit"
+          :trace-view="traceView"
+          @update:trace-view="traceView = $event"
+          @select-item="selectItem($event)"
+          @close-analysis="activeAnalysis = null"
+          @rerun="onRerun"
+        />
 
-      <section v-if="showJournal" class="journal" data-testid="journal">
-        <div v-for="e in journal" :key="e.id" class="journal-row" data-testid="journal-event">
-          <span class="muted">{{ formatTime(e.at) }}</span>
-          <strong v-if="e.actor_kind === 'agent'" data-testid="journal-agent">agent {{ e.agent_name }} on behalf of {{ e.actor_email }}</strong>
-          <strong v-else>{{ e.actor_email }}</strong>
-          <span>{{ describeEvent(e, nameOf) }}</span>
-        </div>
-        <p v-if="!journal.length" class="muted">Nothing recorded yet.</p>
-      </section>
-
-      <footer class="status-bar" data-testid="workspace-status">
-        <span>{{ graphStore.nodes.length }} nodes</span>
-        <span>{{ graphStore.edges.length }} edges</span>
-        <span>
-          {{ store.canvasItems.length }} {{ store.canvasItems.length === 1 ? 'source' : 'sources' }}<template v-if="store.restrictedItems.length">
-            + {{ store.restrictedItems.length }} restricted</template>
-        </span>
-        <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} suggestions</span>
-        <button class="link-btn journal-btn" data-testid="journal-toggle" @click="showJournal = !showJournal">
-          Journal ({{ store.events.length }}) {{ showJournal ? '▾' : '▴' }}
-        </button>
-      </footer>
+        <footer class="status-bar" data-testid="workspace-status">
+          <span>{{ graphStore.nodes.length }} nodes</span>
+          <span>{{ graphStore.edges.length }} edges</span>
+          <span>
+            {{ store.canvasItems.length }} {{ store.canvasItems.length === 1 ? 'source' : 'sources' }}<template v-if="store.restrictedItems.length"> + {{ store.restrictedItems.length }} restricted</template>
+          </span>
+          <span v-if="store.groups.length" data-testid="status-groups">{{ store.groups.length }} {{ store.groups.length === 1 ? 'group' : 'groups' }}</span>
+          <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} suggestions</span>
+          <button class="link-btn journal-btn" data-testid="journal-toggle" @click="openJournal">Journal ({{ store.events.length }})</button>
+        </footer>
+      </template>
     </template>
 
-    <AddItemsPopover :open="showAdd" :investigation-id="id" @close="showAdd = false" @upload="showAdd = false; showWizard = true" /><!-- F3 -->
-    <FileImportWizard v-if="showWizard" :investigation-id="id" @close="showWizard = false" @done="onWizardDone" />
+    <AddItemsPopover :open="showAdd" :investigation-id="id" @close="showAdd = false" @upload="showAdd = false; openUpload()" /><!-- F3 -->
+    <FileImportWizard v-if="showWizard" :investigation-id="id" :initial-role="wizardRole" @close="showWizard = false" @done="onWizardDone" />
+    <CaseSettingsDrawer :open="showSettings" @close="showSettings = false" @share="showShare = true" />
+    <ShareDialog :open="showShare" @close="showShare = false" />
+    <EntityPage v-if="entityPage" :node="entityPage" :can-edit="canEdit" @close="entityPage = null" @select-item="(i) => { entityPage = null; selectItem(i); }" />
+    <ClusterNodeModal v-if="selectedClusterId" :cluster-id="selectedClusterId" @close="selectedClusterId = null" />
 
     <div v-if="pickerOrigins" class="modal-overlay" @click.self="pick(null)">
       <div class="modal picker" data-testid="expand-context-picker">
@@ -615,65 +480,16 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   min-height: 0;
 }
 
-.back,
 .muted {
   font-size: 12px;
   color: var(--text-muted);
-}
-
-.tabs {
-  display: flex;
-  gap: 4px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border-color);
-  overflow-x: auto;
-}
-
-.tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 12px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  font: inherit;
-  font-size: 14px;
-  white-space: nowrap;
-  cursor: pointer;
-  color: var(--text-color);
-}
-
-.tab.active {
-  font-weight: 600;
-  border-bottom-color: var(--color-primary);
-}
-
-.tab.add {
-  color: var(--color-primary);
-  font-weight: 600;
-}
-
-.dots {
-  display: inline-flex;
-  gap: 2px;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
 }
 
 .ws-body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 290px 1fr 300px;
-}
-
-.ws-body.tracing {
-  grid-template-columns: 270px 1fr 280px;
+  grid-template-columns: 290px 1fr 320px;
 }
 
 .center {
@@ -681,65 +497,6 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-}
-
-.trace-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--color-surface);
-  font-size: 13px;
-}
-
-.trace-toggle {
-  display: flex;
-  gap: 4px;
-  padding: 3px;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-muted);
-}
-
-.trace-toggle button {
-  padding: 4px 12px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  font: inherit;
-  cursor: pointer;
-}
-
-.trace-toggle button.on {
-  background: var(--color-secondary);
-  color: #fff;
-  font-weight: 600;
-}
-
-.chip-fill {
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-}
-
-.chip-fill.seed {
-  background: #eff6ff;
-  color: #1e3a8a;
-}
-
-.chip-fill.exits {
-  background: #f0fdfa;
-  color: #115e59;
-  font-weight: 600;
-}
-
-.chip-fill.retained {
-  background: #fff7ed;
-  color: #9a3412;
-}
-
-.trace-sub {
-  flex-basis: 100%;
 }
 
 .canvas-area {
@@ -750,6 +507,13 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   flex-direction: column;
   min-width: 0;
   background: var(--bg-color, #fafafa);
+}
+
+.table-panel {
+  max-height: 40%;
+  min-height: 160px;
+  overflow: auto;
+  border-top: 1px solid var(--border-color);
 }
 
 .overlay {
@@ -829,144 +593,6 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   border-radius: 50%;
 }
 
-.layout-panel {
-  position: absolute;
-  bottom: 56px;
-  left: 12px;
-  z-index: 6;
-}
-
-.canvas-actions {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  z-index: 4;
-  display: flex;
-  gap: 8px;
-}
-
-.canvas-actions .on {
-  border-color: #c2410c;
-  color: #c2410c;
-}
-
-.inspector {
-  padding: 14px;
-  overflow-y: auto;
-  border-left: 1px solid var(--border-color);
-  background: var(--color-surface);
-}
-
-.entity {
-  margin: 2px 0 8px;
-  font-size: 16px;
-  word-break: break-all;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.chip {
-  padding: 2px 8px;
-  border: 1.5px solid;
-  border-radius: var(--radius-pill);
-  font-size: 12px;
-}
-
-.chip.linked {
-  border-color: transparent;
-  background: var(--color-primary-subtle);
-  color: var(--color-primary);
-}
-
-.chip.plain {
-  border-color: var(--border-color);
-  color: var(--text-color);
-}
-
-.suggestions {
-  margin-top: 10px;
-  padding: 8px;
-  border: 1px dashed #b45309;
-  border-radius: var(--radius-sm);
-  background: #fffbeb;
-  font-size: 13px;
-}
-
-.suggestion {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px 0;
-}
-
-.suggestion .row {
-  display: flex;
-  gap: 10px;
-}
-
-.inspector-tabs {
-  display: flex;
-  gap: 12px;
-  margin: 14px 0 8px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.inspector-tabs button {
-  padding: 6px 0;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.inspector-tabs button.active {
-  font-weight: 600;
-  border-bottom-color: var(--color-primary);
-}
-
-.props {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 12px;
-  margin: 0;
-  font-size: 13px;
-}
-
-.props dt {
-  color: var(--text-muted);
-}
-
-.props dd {
-  margin: 0;
-  word-break: break-word;
-}
-
-.mono {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  white-space: pre-wrap;
-}
-
-.conflict {
-  color: var(--color-warning);
-  font-size: 12px;
-}
-
-.origin-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0;
-  font-size: 13px;
-  border-bottom: 1px solid var(--border-color);
-}
-
 .roles-title {
   margin-top: 10px;
 }
@@ -977,39 +603,32 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   border-radius: 50%;
 }
 
-.role-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  font-size: 13px;
+.side-panel {
+  position: absolute;
+  top: 12px;
+  bottom: 60px;
+  z-index: 7;
+  width: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.12));
 }
 
-.role-row select {
-  flex: 1;
+.side-panel.left {
+  left: 12px;
 }
 
-.action-error {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--color-error);
+.side-panel.right {
+  right: 12px;
 }
 
-.notes {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.note {
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.note p {
-  margin: 0 0 2px;
-  white-space: pre-wrap;
+.layout-panel {
+  position: absolute;
+  bottom: 56px;
+  left: 12px;
+  z-index: 7;
 }
 
 .link-btn {
@@ -1020,29 +639,6 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
   font-size: 12px;
   color: var(--color-primary);
   cursor: pointer;
-}
-
-.link-btn.ok {
-  color: #15803d;
-}
-
-.link-btn.danger {
-  color: var(--color-error);
-}
-
-.journal {
-  max-height: 200px;
-  overflow-y: auto;
-  padding: 8px 16px;
-  border-top: 1px solid var(--border-color);
-  background: var(--color-surface);
-  font-size: 13px;
-}
-
-.journal-row {
-  display: flex;
-  gap: 10px;
-  padding: 3px 0;
 }
 
 .journal-btn {

@@ -17,6 +17,8 @@ import re
 import unicodedata
 from typing import Any, Optional
 
+from graphlagoon.services.case_graph import _normalize
+
 THRESHOLD = 0.85
 _STOPWORDS = frozenset({"DE", "DA", "DO", "DOS", "DAS", "E"})
 _MASK = re.compile(r"[*•xX]")
@@ -150,6 +152,21 @@ def suggest(nodes: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+# How a property value is normalized before comparing, by attribute name (twin of the TS map).
+ATTRIBUTE_NORMALIZERS = {
+    "telefone": "phone", "phone": "phone", "celular": "phone",
+    "email": "email", "e-mail": "email",
+    "device_id": "device_id", "dispositivo": "device_id", "device": "device_id",
+    "ip": "ip",
+    "endereco": "address", "address": "address", "logradouro": "address",
+    "cartao": "card", "card": "card",
+    "terminal": "terminal_id", "terminal_id": "terminal_id",
+    "cpf": "cpf_cnpj", "cnpj": "cpf_cnpj", "cpf_cnpj": "cpf_cnpj", "documento": "cpf_cnpj",
+    "conta": "account", "account": "account",
+    "chave_pix": "pix_key", "pix_key": "pix_key",
+}
+
+
 def shared_attribute_links(
     graph: dict,
     attributes: list[str],
@@ -187,9 +204,9 @@ def shared_attribute_links(
             values: set[str] = set()
             props = n.get("properties") or {}
             key = next((k for k in props if k.lower() == lower), None)
-            v = props.get(key) if key is not None else None
-            if v is not None and str(v).strip() != "":
-                values.add(str(v).strip().lower())
+            normalized = _normalize(props.get(key) if key is not None else None, ATTRIBUTE_NORMALIZERS.get(lower, "lower"))
+            if normalized is not None:
+                values.add(normalized)
             for m in neighbours.get(n["uid"], []):
                 if m["type"].lower() == lower:
                     values.add(m["uid"])

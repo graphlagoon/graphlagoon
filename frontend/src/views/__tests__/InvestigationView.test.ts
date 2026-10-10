@@ -4,9 +4,11 @@ import { flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import InvestigationView from '@/views/InvestigationView.vue'
 import { useGraphStore } from '@/stores/graph'
+import { useInvestigationStore } from '@/stores/investigation'
 import { useContextMenu } from '@/composables/useContextMenu'
 import fixture from '@/__tests__/fixtures/trace/golpe-pix.json'
 
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock('@/services/api', () => ({
   api: {
     getInvestigation: vi.fn(),
@@ -19,6 +21,7 @@ vi.mock('@/services/api', () => ({
     createInvestigationAnnotation: vi.fn(),
     setInvestigationAnnotationStatus: vi.fn(),
     createInvestigationItem: vi.fn(),
+    pinInvestigationItem: vi.fn(),
     lookupEnrichment: vi.fn(),
     postInvestigationEvent: vi.fn(async () => ({})),
   },
@@ -47,11 +50,13 @@ const pix = () => ({
   },
   identity_keys: [], edge_semantics: null,
 })
+let created = 0
 
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {} } as any)
+  created = 0
+  vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: {}, shared_with: [], tags: [] } as any)
   vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1'), item('s2', 'c2')] as any)
   vi.mocked(api.getInvestigationAnnotations).mockResolvedValue([])
   vi.mocked(api.getInvestigationItemSnapshot).mockImplementation(async (_i, sid) =>
@@ -60,14 +65,25 @@ beforeEach(() => {
   vi.mocked(api.getGraphContext).mockImplementation(async (id) => ({ id, title: id, identity_keys: [] }) as any)
   vi.mocked(api.getInvestigationEvents).mockResolvedValue([])
   vi.mocked(api.getInvestigationBrief).mockResolvedValue({ item: null, text: '' })
+  vi.mocked(api.createInvestigationItem).mockImplementation(async (_i, body) =>
+    ({ id: `n${++created}`, tags: [], ...body, status: 'confirmed', author_kind: 'human', author_email: 'me@x.com', pinned: [], current_version: 1, accessible: true, position: 0, provenance: body.provenance ?? {} }) as any,
+  )
 })
 
 const stubs = {
   RouterLink: { template: '<a><slot /></a>' },
   GraphCanvas3D: true,
   LayoutPanel: true,
-  AddToInvestigationModal: true,
+  AddItemsPopover: true,
   FileImportWizard: true,
+  CaseSettingsDrawer: true,
+  ShareDialog: true,
+}
+
+const pixCase = () => {
+  vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1')] as any)
+  vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValue(pix() as any)
+  vi.mocked(api.getGraphContext).mockImplementation(async (id) => ({ id, title: id, identity_keys: [], edge_semantics: fixture.edge_semantics }) as any)
 }
 
 describe('InvestigationView', () => {
@@ -97,9 +113,6 @@ describe('InvestigationView', () => {
       .mockResolvedValue([
         { id: 'r1', kind: 'role', targets: ['a@c1'], value: { role: 'vítima' }, status: 'confirmed', author_kind: 'human', author_email: 'me@x.com' },
       ] as any)
-    vi.mocked(api.createInvestigationItem).mockImplementation(async (_i, body) =>
-      ({ id: 'n1', ...body, status: 'confirmed', author_kind: 'human', author_email: 'me@x.com', pinned: [], current_version: 1, accessible: true, provenance: {} }) as any,
-    )
     vi.mocked(api.setInvestigationAnnotationStatus).mockResolvedValue({ id: 's9', status: 'confirmed' } as any)
     const { getByTestId, findAllByText } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
@@ -122,7 +135,7 @@ describe('InvestigationView', () => {
     expect(api.getInvestigationEvents).toHaveBeenCalled()
   })
 
-  it('confirming an agent suggestion calls the confirm route', async () => {
+  it('confirming an agent suggestion calls the confirm route; the suggestions tab confirms in bulk', async () => {
     vi.mocked(api.getInvestigationAnnotations).mockResolvedValue([
       { id: 's9', kind: 'role', targets: ['a@c1'], value: { role: 'mula' }, status: 'suggested', author_kind: 'agent', author_email: 'me@x.com' },
     ] as any)
@@ -130,9 +143,8 @@ describe('InvestigationView', () => {
     const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
     expect(getByTestId('status-suggestions').textContent).toContain('1 suggestions')
-    useGraphStore().selectNode('a@c1')
-    await flushPromises()
-    await fireEvent.click(getByTestId('suggestion-confirm-s9'))
+    await fireEvent.click(getByTestId('timeline-tab-suggestions'))
+    await fireEvent.click(getByTestId('suggestions-confirm-role:agent'))
     await flushPromises()
     expect(api.setInvestigationAnnotationStatus).toHaveBeenCalledWith('inv', 's9', 'confirmed')
   })
@@ -167,12 +179,8 @@ describe('InvestigationView', () => {
     expect(graph.edges.filter((e) => e.dst === 'Dispositivo:d1@c1').map((e) => e.src).sort()).toEqual(['a@c1', 'b@c1'])
   })
 
-  it('follow the money: the menu action opens T5 with the traced subgraph by layer and its exits', async () => {
-    vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1')] as any)
-    vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValue(pix() as any)
-    vi.mocked(api.getGraphContext).mockImplementation(async (id) =>
-      ({ id, title: id, identity_keys: [], edge_semantics: fixture.edge_semantics }) as any,
-    )
+  it('follow the money: the menu action saves a trace item, shows its exits in the strip and lays the canvas by layer', async () => {
+    pixCase()
     const { getByTestId, queryByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
     const graph = useGraphStore()
@@ -182,23 +190,29 @@ describe('InvestigationView', () => {
     await action.handler({ type: 'node', id: '0001-9@c1', label: '0001-9' })
     await flushPromises()
 
+    expect(api.createInvestigationItem).toHaveBeenCalledWith('inv', expect.objectContaining({ kind: 'table', subkind: 'result', provenance: expect.objectContaining({ tool: 'trace' }) }))
     expect(getByTestId('trace-exits').textContent).toContain('Saque ATM')
     expect(getByTestId('trace-coverage').textContent).toContain('(91%)')
     expect(graph.layoutAlgorithm).toBe('trace-layers')
     expect(graph.traceLayers?.labels).toEqual(['Seed', 'Layer 1', 'Layer 2', 'Exits'])
     expect(graph.nodes).toHaveLength(8) // the untraced external bank is left out
-    expect(queryByTestId('workspace-inspector')).toBeNull()
+    expect(getByTestId('inspector-item-title').textContent).toContain('Trace FIFO')
 
-    await fireEvent.click(getByTestId('tab-unified'))
+    await fireEvent.click(getByTestId('trace-view-graph'))
     await flushPromises()
     expect(graph.layoutAlgorithm).toBe('force')
     expect(graph.nodes).toHaveLength(9)
-    expect(getByTestId('tab-trace')).toBeTruthy()
+    expect(queryByTestId('trace-exits')).toBeTruthy()
+
+    vi.mocked(api.pinInvestigationItem).mockResolvedValue({ version: 1, sha256: 'ab'.repeat(32) } as any)
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1')] as any)
+    await fireEvent.click(getByTestId('trace-save-evidence'))
+    await flushPromises()
+    expect(api.pinInvestigationItem).toHaveBeenCalledWith('inv', 'n1', {})
   })
 
-  it('path to: the next node clicked is the target and the path is selected', async () => {
-    vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1')] as any)
-    vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValue(pix() as any)
+  it('paths: the popover takes source and target from clicks, the result item highlights the path', async () => {
+    pixCase()
     const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
     const graph = useGraphStore()
@@ -207,25 +221,29 @@ describe('InvestigationView', () => {
     expect(action.visible?.({ type: 'edge', id: 'x', label: '' })).toBe(false)
     await action.handler({ type: 'node', id: '0001-9@c1', label: '0001-9' })
     await flushPromises()
-    expect(getByTestId('path-pick').textContent).toContain('vítima')
+    expect(getByTestId('path-source').textContent).toContain('vítima')
+    expect(getByTestId('path-pick-target').textContent).toContain('click a node')
 
     graph.selectNode('saque-atm@c1')
     await flushPromises()
+    expect(getByTestId('path-target').textContent).toContain('Saque ATM')
+    await fireEvent.click(getByTestId('path-run'))
+    await flushPromises()
+    expect(api.createInvestigationItem).toHaveBeenCalledWith('inv', expect.objectContaining({ provenance: expect.objectContaining({ tool: 'paths', params: expect.objectContaining({ mode: 'shortest' }) }) }))
     expect([...graph.selectedNodeIds]).toEqual(['0001-9@c1', '4471-0@c1', '5520-3@c1', 'saque-atm@c1'])
     expect(graph.selectedEdgeIds.size).toBe(3)
     expect(getByTestId('path-result').textContent).toContain('3 hops')
   })
 
-  it('typology badges: a badge cites CC 4.001, highlights its entities, and accepting it writes a typology annotation', async () => {
-    vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1')] as any)
-    vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValue(pix() as any)
-    vi.mocked(api.getGraphContext).mockImplementation(async (id) =>
-      ({ id, title: id, identity_keys: [], edge_semantics: fixture.edge_semantics }) as any,
-    )
+  it('typologies: the popover runs the badges as an item; a badge cites CC 4.001, highlights its entities, accepting writes a typology annotation', async () => {
+    pixCase()
     vi.mocked(api.createInvestigationAnnotation).mockResolvedValue({ id: 't1' } as any)
     const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
     await fireEvent.click(getByTestId('workspace-typologies-btn'))
+    await fireEvent.click(getByTestId('typologies-run'))
+    await flushPromises()
+    expect(api.createInvestigationItem).toHaveBeenCalledWith('inv', expect.objectContaining({ provenance: expect.objectContaining({ tool: 'typologies' }) }))
     const badge = getByTestId('typology-passagem')
     expect(badge.textContent).toContain('CC 4.001 IV-k, IV-ad')
 
@@ -246,5 +264,21 @@ describe('InvestigationView', () => {
     await fireEvent.click(getByTestId('typology-bipartite'))
     expect(graph.layoutAlgorithm).toBe('hive')
     expect(graph.layoutModeConfig.hive.maxAxes).toBe(1)
+  })
+
+  it('groups: a closed group from the selection collapses into a cluster node and reloading keeps it', async () => {
+    vi.mocked(api.getInvestigationAnnotations).mockResolvedValue([
+      { id: 'g1', kind: 'group', targets: ['a@c1', 'b@c1'], value: { name: 'Dupla', color: 1 }, status: 'confirmed', author_kind: 'human', author_email: 'me@x.com' },
+    ] as any)
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: { groups_closed: ['g1'] }, shared_with: [], tags: [] } as any)
+    const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    const graph = useGraphStore()
+    const store = useInvestigationStore()
+    expect(store.groups.map((g) => g.name)).toEqual(['Dupla'])
+    expect(getByTestId('status-groups').textContent).toContain('1 group')
+    // enhancedNodes: the two members collapse into one cluster node beside x@c2
+    expect(graph.enhancedNodes.map((n) => n.node_id).sort()).toEqual(['group:g1', 'x@c2'])
+    expect(getByTestId('chip-groups').textContent).toContain('grupo')
   })
 })
