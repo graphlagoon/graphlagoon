@@ -37,6 +37,7 @@ import { recordPerf } from '@/utils/perfMetrics';
 import { isSqlScript } from '@/utils/sqlScript';
 import { snapshotToGraph, type NodeOrigin } from '@/utils/unifyGraph';
 import { edgeValue, type EdgeValue } from '@/utils/edgeSemantics';
+import { aggregateParallelEdges } from '@/utils/parallelEdges';
 import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
 import { useToast } from '@/composables/useToast';
 import {
@@ -510,6 +511,8 @@ export const useGraphStore = defineStore('graph', () => {
     nodeSize: 8,              // Base node size
     edgeWidth: 1,             // Base edge width
     enableMultiEdgeCurvature: true, // Enable curved edges for multi-edges (2D & 3D)
+    sumParallelEdges: false,  // Draw one edge per (src, dst, type) with count and amount sum (F3.2)
+    edgeWidthByAmount: false, // Edge width proportional to its amount (F3.2)
     // 3D specific
     showNodeLabels3D: true,   // Show node labels in 3D
     showEdgeLabels3D: true,   // Show edge labels in 3D
@@ -961,7 +964,8 @@ export const useGraphStore = defineStore('graph', () => {
       });
     });
 
-    return result;
+    // Display only: the store's edges stay one per transaction.
+    return aesthetics.value.sumParallelEdges ? aggregateParallelEdges(result, edgeValueOf) : result;
   });
 
   // Multi-edge detection for enhanced edges (includes cluster-created multi-edges)

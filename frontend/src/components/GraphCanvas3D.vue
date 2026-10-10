@@ -10,7 +10,8 @@ import type { Node, Edge } from '@/types/graph';
 import type { GraphNode, GraphLink, GraphData } from '@/types/graph3d';
 import { formatNodeLabel, formatEdgeLabel } from '@/utils/labelFormatter';
 import { buildNodeTooltip, buildEdgeTooltip, EDGE_TYPE_CHIP, type TooltipContent } from '@/utils/tooltipContent';
-import { formatEdgeValue } from '@/utils/edgeSemantics';
+import { formatAmount, formatEdgeValue } from '@/utils/edgeSemantics';
+import { drawnAmount } from '@/utils/parallelEdges';
 import { numericValueMap } from '@/types/metrics';
 import {
   getMultiEdgeCurvature3D,
@@ -235,6 +236,10 @@ const filteredEdges = computed(() => graphStore.enhancedEdges);
 // Store original node/edge data for tooltips
 const nodeDataMap = ref<Map<string, Node>>(new Map());
 const edgeDataMap = ref<Map<string, Edge>>(new Map());
+/** Summed parallel groups by their drawn edge id (F3.2). */
+const aggregatedEdges = computed(
+  () => new Map(filteredEdges.value.flatMap((e) => (e.__agg ? [[e.edge_id, e.__agg] as const] : []))),
+);
 
 // ---------------------------------------------------------------------------
 // Composables
@@ -276,6 +281,19 @@ const axisRotation = useAxisConstrainedRotation(
 // ---------------------------------------------------------------------------
 // Appearance context — collected once per update pass
 // ---------------------------------------------------------------------------
+
+/** Amount per drawn edge for width by amount (F3.2): a summed group counts its total. */
+function collectEdgeAmounts(): { values: Map<string, number>; max: number } {
+  const values = new Map<string, number>();
+  let max = 0;
+  for (const e of filteredEdges.value) {
+    const amount = drawnAmount(e, graphStore.edgeValueOf);
+    if (amount === null) continue;
+    values.set(e.edge_id, amount);
+    max = Math.max(max, Math.abs(amount));
+  }
+  return { values, max };
+}
 
 function collectAppearanceContext(): AppearanceContext {
   const searchMatched = graphStore.searchMatchedNodeIds;
@@ -345,6 +363,7 @@ function collectAppearanceContext(): AppearanceContext {
       ? { values: numericValueMap(edgeWeightMetric), min: edgeWeightMetric.min, max: edgeWeightMetric.max }
       : null,
     edgeWeightMapping: metricsStore.visualMapping.edgeWeight,
+    edgeAmounts: graphStore.aesthetics.edgeWidthByAmount ? collectEdgeAmounts() : null,
 
     getNodeTypeColor: (type: string) => nodeColorMap.get(type) || '#888888',
     getEdgeTypeColor: (type: string) => edgeColorMap.get(type) || '#888888',
@@ -700,8 +719,15 @@ function linkTooltipFor(link: GraphLink): TooltipContent {
     graphStore.textFormatDefaults,
     labelOptions,
   );
-  // Amount and time from the context's edge semantics (F3.1).
-  const value = formatEdgeValue(graphStore.edgeValueOf(original), graphStore.edgeCurrency);
+  // Amount and time from the context's edge semantics (F3.1); a summed group (F3.2) shows its totals.
+  const agg = aggregatedEdges.value.get(link.id);
+  const value = agg
+    ? [
+        `${agg.count} edges`,
+        agg.sum !== null ? `Σ ${formatAmount(agg.sum, graphStore.edgeCurrency)}` : '',
+        agg.first !== null ? `${new Date(agg.first).toLocaleString()} – ${new Date(agg.last!).toLocaleString()}` : '',
+      ].filter(Boolean).join(' · ')
+    : formatEdgeValue(graphStore.edgeValueOf(original), graphStore.edgeCurrency);
   return value ? { ...tip, body: `${tip.body}\n${value}` } : tip;
 }
 
@@ -1632,6 +1658,12 @@ watch(
     }
   },
   { deep: true }
+);
+
+// Width by amount (F3.2): widths only, no rebuild.
+watch(
+  () => graphStore.aesthetics.edgeWidthByAmount,
+  () => { updateVisuals(); }
 );
 
 // Multi-edge curvature toggle — requires graph rebuild

@@ -206,6 +206,8 @@ function resetAesthetics() {
     nodeSize: 8,
     edgeWidth: 1,
     enableMultiEdgeCurvature: false,
+    sumParallelEdges: false,
+    edgeWidthByAmount: false,
     showNodeLabels3D: true,
     showEdgeLabels3D: true,
     nodeLabelSize3D: 10,
@@ -311,6 +313,32 @@ function resetAesthetics() {
           Curve multi-edges
         </label>
         <span class="setting-hint">Curved lines for multiple edges between same nodes (includes clusters)</span>
+      </div>
+
+      <div class="setting-item">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            data-testid="sum-parallel-edges"
+            :checked="aesthetics.sumParallelEdges"
+            @change="updateSetting('sumParallelEdges', ($event.target as HTMLInputElement).checked)"
+          />
+          Sum parallel edges
+        </label>
+        <span class="setting-hint">One edge per source, target and type, with count, amount sum and first/last time (display only)</span>
+      </div>
+
+      <div class="setting-item">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            data-testid="edge-width-by-amount"
+            :checked="aesthetics.edgeWidthByAmount"
+            @change="updateSetting('edgeWidthByAmount', ($event.target as HTMLInputElement).checked)"
+          />
+          Width by amount
+        </label>
+        <span class="setting-hint">Edge width proportional to its amount (the context's Amount and Time)</span>
       </div>
 
     </div>

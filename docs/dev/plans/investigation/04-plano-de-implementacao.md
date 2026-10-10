@@ -55,7 +55,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 
 **F3 · Seguir o dinheiro**
 - [x] F3.1 · Semântica de valor e horário nas arestas
-- [ ] F3.2 · Soma de arestas paralelas e largura por valor
+- [x] F3.2 · Soma de arestas paralelas e largura por valor
 - [ ] F3.3 · Worker de rastreio temporal
 - [ ] F3.4 · Tela de rastreio (T5): parâmetros, camadas, Sankey, saídas
 - [ ] F3.5 · Linha do tempo em raias com seleção de janela
@@ -654,9 +654,9 @@ trabalho de análise e documentação; a pessoa decide.
 - **Depende de:** G1, F3.1.
 - **Arquivos:** `src/utils/parallelEdges.ts` (novo) e `utils/graphAppearance.ts`.
 - **Aceite:**
-  - [ ] Agregação por (origem, destino, tipo) com soma, contagem e primeira e última
+  - [x] Agregação por (origem, destino, tipo) com soma, contagem e primeira e última
     data, só na exibição.
-  - [ ] A largura da aresta é proporcional ao valor.
+  - [x] A largura da aresta é proporcional ao valor.
 - **Testes:** vitest.
 
 ### F3.3 · Worker de rastreio temporal

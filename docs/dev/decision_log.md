@@ -11602,3 +11602,43 @@ contexts), unifyGraph, fileMapping e modal; `vue-tsc` limpo.
 **Admin-Area Impact:** no admin-area impact (campo novo na rota de update do context).
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 21:45] - Feature Implemented: F3.2 · Soma de arestas paralelas e largura por valor
+
+**Feature:** `utils/parallelEdges.ts` agrega arestas paralelas por (origem, destino,
+tipo) com contagem, soma e primeira/última data; largura proporcional ao valor em
+`utils/graphAppearance.ts`; dois interruptores no painel Aesthetics.
+
+**Design Decisions:**
+1. Só exibição: a agregação roda no fim de `enhancedEdges` (depois do remapeamento de
+   clusters, então somar também junta arestas que um cluster fechado tornou paralelas)
+   quando `aesthetics.sumParallelEdges`; `edges` da store, tabela, exportações e
+   métricas continuam vendo uma aresta por transação.
+2. A aresta desenhada do grupo é a **primeira** do grupo (id real) com `__agg
+   {count, sum, first, last, edgeIds}`: seleção, inspector e menu continuam
+   funcionando sem ids sintéticos. `shortcut:` clicar seleciona só essa aresta e o
+   filtro da tabela usa o id dela; selecionar o grupo inteiro quando a T5 pedir.
+3. Largura: `amountWidth = max(0,3; 8·|valor|/max|valor|)` (proporcional, com piso para
+   não sumir), via `AppearanceContext.edgeAmounts` montado no canvas só com
+   `aesthetics.edgeWidthByAmount`; a soma do grupo vale para a aresta agregada. Uma
+   métrica de peso escolhida no painel de métricas vence. Trocar o interruptor só
+   chama `updateVisuals` (sem reconstruir o grafo).
+4. Tooltip da aresta agregada: `N edges · Σ R$ … · primeira – última`.
+5. Interruptores sempre visíveis e desligados por padrão; vão no estado salvo da
+   exploração junto com o resto de `aesthetics`.
+
+**Files:** `frontend/src/utils/parallelEdges.ts` (novo), `utils/graphAppearance.ts`,
+`types/graph.ts`, `stores/graph.ts`, `components/GraphCanvas3D.vue`,
+`components/AestheticsPanel.vue`, `utils/__tests__/parallelEdges.test.ts` (novo).
+
+**Testing:** vitest `parallelEdges.test.ts` (grupos, sentido oposto e outro tipo
+separados, soma/contagem/datas, entrada intacta, largura proporcional e métrica
+vencendo), `graphAppearance.test.ts`, testes da store do grafo (filtros, clusters) e
+do AestheticsPanel; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Amount and time: os dois interruptores).
+**Admin-Area Impact:** no admin-area impact.
+
+**Author:** Claude (AI Assistant)
