@@ -21,6 +21,19 @@ export interface Edge {
   /** Amount and time (epoch ms) tagged from the edge's own context semantics in a mixed-context case graph (F3.1). */
   __amount?: number;
   __t?: number;
+  /** Set on the one drawn edge standing for its parallel group when they are summed (F3.2). */
+  __agg?: ParallelAggregate;
+}
+
+/** A (src, dst, type) group of parallel edges, summed for display (F3.2). */
+export interface ParallelAggregate {
+  count: number;
+  /** Sum of the amounts; null when none has one. */
+  sum: number | null;
+  /** First and last time (epoch ms). */
+  first: number | null;
+  last: number | null;
+  edgeIds: string[];
 }
 
 export interface QueryMetadata {

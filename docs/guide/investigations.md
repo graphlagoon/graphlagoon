@@ -122,6 +122,15 @@ the SIMBA preset sets `valor` and `data`). Each edge then shows its amount and
 time in the hover tooltip, and in a case graph every edge keeps its own
 context's semantics, so sources that name the amount differently still add up.
 
+Two switches in the **Aesthetics** panel (Edges) use them, in any graph:
+
+- **Sum parallel edges** draws one edge per source, target and type; its
+  tooltip shows how many edges it stands for, the amount sum and the first and
+  last time. Only the drawing changes: the data table, exports and analyses
+  still see every edge.
+- **Width by amount** makes each edge's width proportional to its amount (a
+  summed edge, to its total). A weight metric chosen in the Metrics panel wins.
+
 ## Roles, notes and the journal
 
 - **Role.** The inspector's *Role* selector marks an entity as **Victim**

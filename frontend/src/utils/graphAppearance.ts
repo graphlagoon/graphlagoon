@@ -193,6 +193,8 @@ export interface AppearanceContext {
   nodeColorMapping: { minColor: string; maxColor: string; scale: ScaleType };
   edgeWeightMetric: { values: Map<string, number>; min: number; max: number } | null;
   edgeWeightMapping: { minWeight: number; maxWeight: number; scale: ScaleType };
+  /** Width by amount (F3.2): each drawn edge's amount (a summed group's total) and the largest |amount|. */
+  edgeAmounts?: { values: Map<string, number>; max: number } | null;
 
   // Color lookup
   getNodeTypeColor: (type: string) => string;
@@ -417,7 +419,22 @@ export function computeLinkAppearance(
     }
   }
 
+  // A chosen weight metric wins over width by amount.
+  if (width === null && ctx.edgeAmounts) {
+    const amount = ctx.edgeAmounts.values.get(edgeId);
+    if (amount !== undefined) width = amountWidth(amount, ctx.edgeAmounts.max);
+  }
+
   return { color, hidden, width };
+}
+
+export const AMOUNT_MAX_WIDTH = 8;
+const AMOUNT_MIN_WIDTH = 0.3;
+
+/** Width proportional to the amount: the largest |amount| gets AMOUNT_MAX_WIDTH; a floor keeps tiny ones visible. */
+export function amountWidth(amount: number, maxAmount: number): number {
+  if (maxAmount <= 0) return AMOUNT_MIN_WIDTH;
+  return Math.max(AMOUNT_MIN_WIDTH, (AMOUNT_MAX_WIDTH * Math.abs(amount)) / maxAmount);
 }
 
 export interface IconTreatmentResult {
