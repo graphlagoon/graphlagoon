@@ -82,11 +82,10 @@ def test_accepted_role_proposal_matches_the_manual_action(ctx):
     proposer = agent(["read", "propose"])
     url = case()
 
-    # The agent cannot set the role directly, nor propose without the scope.
+    # The agent cannot set the role directly; it must propose. Scopes are no
+    # longer enforced (F0 of plan v2): the token is the person's identity.
     direct = client.patch(f"{url}/state", json={"roles": {"acct:5520-3": "mule"}}, headers=agent(["read", "write"]))
     assert direct.json()["detail"]["error"]["code"] == "AGENT_MUST_PROPOSE"
-    no_scope = client.post(f"{url}/proposals", json=ROLE, headers=agent(["read", "write"]))
-    assert no_scope.status_code == 403
 
     r = client.post(f"{url}/proposals", json={**ROLE, "rationale": "saque em 31 min"}, headers=proposer)
     assert r.status_code == 201, r.text

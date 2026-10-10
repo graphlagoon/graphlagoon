@@ -195,7 +195,7 @@ describe('ApiService', () => {
       const data = [{ id: 'exp-1' }]
       vi.mocked(mockClient.get).mockResolvedValue({ data })
       const result = await api.getAllExplorations()
-      expect(mockClient.get).toHaveBeenCalledWith('/api/explorations')
+      expect(mockClient.get).toHaveBeenCalledWith('/api/explorations', { params: {} })
       expect(result).toEqual(data)
     })
 
