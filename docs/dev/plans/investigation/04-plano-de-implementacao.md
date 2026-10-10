@@ -59,7 +59,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 - [x] F3.3 · Worker de rastreio temporal
 - [x] F3.4 · Tela de rastreio (T5): parâmetros, camadas, Sankey, saídas
 - [x] F3.5 · Linha do tempo em raias com seleção de janela
-- [ ] F3.6 · Caminhos
+- [x] F3.6 · Caminhos
 - [ ] F3.7 · Componentes conexos no registry de algoritmos
 - [ ] F3.8 · Rastreio e caminhos no servidor (Python) com paridade e ferramentas MCP
 
@@ -707,8 +707,8 @@ trabalho de análise e documentação; a pessoa decide.
 
 - **Arquivos:** `src/workers/pathWorker.ts` (novo) e um item de menu "Caminho até…".
 - **Aceite:**
-  - [ ] Caminho mais curto (BFS), ponderado (Dijkstra), k mais curtos (Yen, k ≤ 10).
-  - [ ] Caminho que respeita o tempo (chegada mais cedo), conforme [03 §6.3](03-arquitetura.md#63-caminhos).
+  - [x] Caminho mais curto (BFS), ponderado (Dijkstra), k mais curtos (Yen, k ≤ 10).
+  - [x] Caminho que respeita o tempo (chegada mais cedo), conforme [03 §6.3](03-arquitetura.md#63-caminhos).
 - **Testes:** vitest com grafos pequenos de resposta conhecida.
 
 ### F3.7 · Componentes conexos

@@ -164,6 +164,23 @@ edges (forward) or incoming edges (backward) with an amount and a time. The
 
 **Save as evidence** stays disabled until frozen evidence ships.
 
+### Paths
+
+Right-click a node and pick **Path to…**, then click the target node. The path is
+selected (highlighted) in the canvas and named in the bar on top, which picks the
+method:
+
+- **Fewest hops (BFS)**;
+- **Lightest (Dijkstra)**, weighting each edge 1 per hop or 1 / amount (big
+  transfers first; edges without an amount are skipped);
+- **k shortest (Yen)**, up to 10 paths, browsed with ‹ ›;
+- **Earliest arrival**: only transfers that happen after the money reached the
+  account, arriving as early as possible.
+
+**follow direction** off walks edges both ways (earliest arrival always follows
+direction). Ties are broken by node and edge id, so the same graph gives the same
+path.
+
 ## Roles, notes and the journal
 
 - **Role.** The inspector's *Role* selector marks an entity as **Victim**

@@ -11768,3 +11768,43 @@ vítima das colunas), testes do T5 e do workspace; E2E do rastreio segue verde;
 
 **Author:** Claude (AI Assistant)
 
+
+---
+
+## [2026-10-11 00:20] - Feature Implemented: F3.6 · Caminhos
+
+**Feature:** núcleo puro `utils/paths.ts` (BFS, Dijkstra, Yen com k ≤ 10, chegada mais
+cedo de 03 §6.3) com `workers/pathWorker.ts` fino; item "Path to…" no menu de nó do
+workspace: o próximo nó clicado é o alvo, o caminho fica selecionado no canvas e uma
+barra (`PathBar.vue`) escolhe o método e pagina os k caminhos.
+
+**Design Decisions:**
+1. Sem graphology: o núcleo vai para Python (F3.8) e precisa de desempate próprio.
+   Desempate: arestas paralelas viram um arco (menor peso, depois menor id); vizinhos
+   por id; Dijkstra assenta por (distância, id) e guarda o primeiro predecessor; Yen
+   ordena candidatos por (custo, sequência de nós); custo somado da origem em ordem.
+2. Caminhos são sequências de nós (paralelas colapsadas), para o k mais curtos não
+   repetir o mesmo trajeto por transações paralelas.
+3. Peso: 1 por salto (padrão) ou 1/valor; com 1/valor, arestas sem valor ficam fora.
+   "follow direction" desligado anda nos dois sentidos; chegada mais cedo sempre segue
+   direção e tempo.
+4. Chegada mais cedo: passagem única por (t, id), `arrival[u] ≤ t`; Δ só vale em nós
+   intermediários (a origem tem o dinheiro desde t0, que pode ser "qualquer"). Rótulo
+   único por nó, como em §6.3: uma chegada mais tarde que caberia no Δ não é tentada.
+5. Destaque = seleção (nós e arestas do caminho). Fora (MVP): t0 e Δ na UI (ficam no
+   núcleo), escolha do alvo por busca, salvar o caminho no diário.
+
+**Files:** `frontend/src/utils/paths.ts`, `workers/pathWorker.ts`,
+`components/investigation/PathBar.vue`, fixture `src/__tests__/fixtures/paths/small.json`
+(compartilhada com a F3.8), `utils/__tests__/paths.test.ts` (novos);
+`views/InvestigationView.vue`, `views/__tests__/InvestigationView.test.ts`.
+
+**Testing:** vitest `paths.test.ts` (13 casos da fixture: BFS, sentido, não dirigido,
+Dijkstra por salto e 1/valor, Yen k=3/k=4, k > 10, chegada mais cedo com t0 e Δ; mesma
+resposta com as arestas em outra ordem) e `InvestigationView.test.ts` (menu → clique no
+alvo → caminho vítima → 4471-0 → 5520-3 → Saque ATM selecionado); `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Paths).
+**Admin-Area Impact:** no admin-area impact.
+
+**Author:** Claude (AI Assistant)
