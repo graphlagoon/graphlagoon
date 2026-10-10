@@ -5,7 +5,8 @@ Accepting applies the change through the **same** service the UI action calls
 typology), so it is journaled exactly like the manual action, and then records
 ``proposal.accepted`` with who proposed and who accepted. Rejecting needs a
 reason. A match proposal decides an existing match through
-``investigation_matches.decide_match`` (F2.8); hypothesis proposals wait for F4.2.
+``investigation_matches.decide_match`` (F2.8); a hypothesis proposal adds or
+updates one through ``investigation_hypotheses`` (F4.2), like the dossier does.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from graphlagoon.services.investigations import (
 _PROPOSALS = "investigation_proposals"
 # Status a proposal may set; "decidido" only comes from the decision (F4.5).
 CASE_STATUSES = ("selecao", "analise", "arquivado")
-SUPPORTED_KINDS = ("role", "status", "typology", "match")
+SUPPORTED_KINDS = ("role", "status", "typology", "match", "hypothesis", "hypothesis_status")
 
 
 def _invalid(message: str) -> InvestigationError:
@@ -67,6 +68,32 @@ def validate(kind: str, payload: dict) -> dict:
         if not isinstance(reason, str) or not reason.strip():
             raise _invalid('A match proposal needs "reason_text" (it goes to the journal)')
         return {"match_id": match_id, "status": payload["status"], "reason_text": reason.strip()}
+    if kind in ("hypothesis", "hypothesis_status"):
+        from graphlagoon.services.investigation_hypotheses import EVIDENCE_FIELDS, STATUSES
+
+        out: dict = {}
+        if kind == "hypothesis":
+            text = payload.get("text")
+            if not isinstance(text, str) or not text.strip() or len(text) > 1000:
+                raise _invalid('A hypothesis proposal needs "text" (≤ 1000 characters)')
+            out["text"] = text.strip()
+        else:
+            if not isinstance(payload.get("hypothesis_id"), str):
+                raise _invalid('A hypothesis_status proposal needs "hypothesis_id" (H1, H2, …)')
+            out["hypothesis_id"] = payload["hypothesis_id"]
+        status = payload.get("status", "aberta" if kind == "hypothesis" else None)
+        if status not in STATUSES:
+            raise _invalid(f'"status" must be one of {", ".join(STATUSES)}')
+        out["status"] = status
+        for field in EVIDENCE_FIELDS:
+            ids = payload.get(field)
+            if ids is not None:
+                if not isinstance(ids, list):
+                    raise _invalid(f'"{field}" is a list of evidence ids')
+                out[field] = [str(i) for i in ids]
+        if isinstance(payload.get("note"), str):
+            out["note"] = payload["note"][:2000]
+        return out
     raise InvestigationError(
         422,
         "PROPOSAL_KIND_UNSUPPORTED",
@@ -237,6 +264,17 @@ async def accept_proposal(
             UUID(payload["match_id"]),
             payload["status"],
             payload["reason_text"],
+        )
+    elif kind == "hypothesis":  # the same calls the dossier (T7) makes
+        from graphlagoon.services import investigation_hypotheses as hypotheses
+
+        await hypotheses.add_hypothesis(investigation_id, user_email, **payload)
+    elif kind == "hypothesis_status":
+        from graphlagoon.services import investigation_hypotheses as hypotheses
+
+        changes = {k: v for k, v in payload.items() if k != "hypothesis_id"}
+        await hypotheses.update_hypothesis(
+            investigation_id, user_email, payload["hypothesis_id"], changes
         )
     else:  # status | typology: the same PATCH the case header uses
         await cases.update_investigation(investigation_id, user_email, payload)

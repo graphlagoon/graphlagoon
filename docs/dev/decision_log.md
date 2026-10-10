@@ -11945,3 +11945,61 @@ rastreio clica "Save as evidence"; `vue-tsc` limpo.
 permissão novos.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 02:30] - Feature Implemented: F4.2 · Hipóteses e tela do dossiê (T7)
+
+**Feature:** hipóteses em `state.hypotheses` (`POST …/hypotheses`,
+`PATCH …/hypotheses/{hid}`, eventos `hypothesis.created`/`hypothesis.updated`); tela
+`/investigations/:id/dossier` (`InvestigationDossierView.vue`, link "Dossier" no
+cabeçalho do workspace) com resumo, indicadores, hipóteses com evidências a favor e
+contra, evidências congeladas (E1, E2, …), diário e o painel de decisão como
+placeholder; propostas `hypothesis` e `hypothesis_status` ligadas (eram 422 desde a
+FA.3); ferramenta MCP `get_dossier`; prompt `montar_dossie` reescrito.
+
+**Design Decisions:**
+1. Hipótese = `{id: "H1", text, status: aberta|sustentada|refutada, evidence_for,
+   evidence_against, note, created_by, created_at}`; ids sequenciais, sem apagar (errada
+   é refutada). Listas de evidência validadas contra o caso (`EVIDENCE_NOT_IN_CASE`) e
+   substituídas no PATCH.
+2. Agente propõe (Q9): as rotas devolvem `AGENT_MUST_PROPOSE` e ficam no registry como
+   isentas com motivo; aceitar chama `investigation_hypotheses` (o mesmo serviço da
+   tela). `hypothesis_status` também aceita as listas de evidência.
+3. `PATCH /investigations/{id}` com `state` agora preserva `roles` e `hypotheses`: antes,
+   um token de agente (ou a UI) podia sobrescrevê-los sem diário nem proposta.
+4. Indicadores sem carregar o grafo: fontes (e restritas), evidências, hipóteses por
+   status, notas, eventos, propostas pendentes; papéis por contagem no resumo. Prazo
+   pelo `deadlineOf` existente (F4.4 leva ao servidor).
+5. Fora (MVP): resumo redigido a partir das evidências (fica a descrição do caso),
+   miniaturas das evidências, selos CC 4.001 (F4.3), decisão e exportações (F4.5,
+   F4.6), recurso MCP `dossier.md`.
+6. Seed: cada caso ganha uma evidência `table` e uma hipótese que a cita.
+
+**Files:** `api/graphlagoon/services/investigation_hypotheses.py`,
+`frontend/src/views/InvestigationDossierView.vue`,
+`frontend/src/views/__tests__/InvestigationDossierView.test.ts` (novos);
+`services/investigation_proposals.py`, `services/investigations.py`,
+`routers/investigations.py`, `routers/admin_registry.py`, `mcp/server.py`,
+`mcp/registry.py`, `models/schemas.py`, `dev/seed.py`, `tests/test_proposals.py`,
+`tests/test_mcp_server.py`, `tests/test_dev_seed.py`; `router/index.ts`,
+`views/InvestigationView.vue`, `stores/investigation.ts`, `services/api.ts`,
+`types/investigation.ts`, `utils/investigationStatus.ts`,
+`utils/investigationEvents.ts`, `e2e/helpers/api-mocks.ts`,
+`e2e/tests/investigations.spec.ts`.
+
+**Testing:** pytest `test_proposals.py` (agente direto → `AGENT_MUST_PROPOSE`; `state`
+não contrabandeia hipóteses; proposta aceita = ação manual; evidência de outro caso →
+422; `hypothesis_status` aceito muda o status e mantém as evidências; status inválido
+422), `test_mcp_server.py` (`get_dossier` com E1 e proposta pendente; prompt cita
+`get_dossier`), `test_dev_seed.py`; vitest `InvestigationDossierView.test.ts` (resumo,
+indicadores, a favor/contra, hash curto, carimbo, diário; adicionar, mudar status,
+vincular evidência); E2E dossiê (evidência, hipótese, vínculo, status, diário);
+`vue-tsc` limpo. Testes de seed e propostas agora usam armazenamento em `tmp_path`.
+
+**Public Docs:** `docs/guide/investigations.md` (Dossier, proposals),
+`docs/guide/agents-mcp.md` (`get_dossier`, propostas de hipótese, prompts).
+**Admin-Area Impact:** rotas de hipótese em `AUDIT_EXEMPT_ROUTES` (vão ao diário); sem
+tabela (vive no `state`), setting ou permissão novos.
+
+**Author:** Claude (AI Assistant)

@@ -22,6 +22,8 @@ from graphlagoon.models.schemas import (
     EvidenceResponse,
     FileContextCreate,
     FileMappingUpdate,
+    HypothesisCreate,
+    HypothesisUpdate,
     InvestigationCreate,
     InvestigationEventCreate,
     InvestigationEventResponse,
@@ -48,6 +50,7 @@ from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
 from graphlagoon.services import investigation_evidence as evidence
 from graphlagoon.services import investigation_files as files
+from graphlagoon.services import investigation_hypotheses as hypotheses
 from graphlagoon.services import investigation_matches as matches
 from graphlagoon.services import investigation_proposals as proposals
 from graphlagoon.services import investigation_storage as storage
@@ -423,6 +426,46 @@ async def get_evidence(investigation_id: UUID, evidence_id: UUID, request: Reque
     try:
         return await evidence.get_evidence(
             investigation_id, get_current_user(request), evidence_id
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+# Hypotheses (F4.2) live in state.hypotheses; journaled. Agents propose them
+# (kinds hypothesis and hypothesis_status); accepting calls the same service.
+
+
+@router.post(
+    "/{investigation_id}/hypotheses",
+    response_model=InvestigationResponse,
+    status_code=201,
+)
+async def create_hypothesis(
+    investigation_id: UUID, data: HypothesisCreate, request: Request
+):
+    _agent_must_propose("hypothesis")
+    try:
+        return await hypotheses.add_hypothesis(
+            investigation_id, get_current_user(request), **data.model_dump()
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.patch(
+    "/{investigation_id}/hypotheses/{hypothesis_id}",
+    response_model=InvestigationResponse,
+)
+async def update_hypothesis(
+    investigation_id: UUID, hypothesis_id: str, data: HypothesisUpdate, request: Request
+):
+    _agent_must_propose("hypothesis")
+    try:
+        return await hypotheses.update_hypothesis(
+            investigation_id,
+            get_current_user(request),
+            hypothesis_id,
+            data.model_dump(exclude_unset=True),
         )
     except service.InvestigationError as exc:
         raise _http(exc)

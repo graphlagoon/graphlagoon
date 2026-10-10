@@ -75,6 +75,12 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
         "title/description are edited in the UI; status and typology go "
         "through `propose`"
     ),
+    ("POST", f"{_CASE}/hypotheses"): (
+        "agents `propose` kind hypothesis; a person accepts (Q9)"
+    ),
+    ("PATCH", f"{_CASE}/hypotheses/{{hypothesis_id}}"): (
+        "agents `propose` kind hypothesis_status; a person accepts (Q9)"
+    ),
     ("PATCH", f"{_CASE}/state"): (
         "roles go through `propose`; pins are a UI view preference"
     ),

@@ -47,7 +47,11 @@ PARAMS = dict(users=8, contexts=12, explorations=20, graphs=2, seed=1, no_graphs
 
 
 @pytest.fixture
-def env(monkeypatch):
+def env(monkeypatch, tmp_path):
+    from graphlagoon.services import investigation_storage
+    from graphlagoon.services.blob_storage import LocalBlobStore
+
+    monkeypatch.setattr(investigation_storage, "_store", LocalBlobStore(str(tmp_path)))
     monkeypatch.setenv("GRAPH_LAGOON_SUPERUSER_EMAILS", ADMIN_EMAIL)
     monkeypatch.setenv("GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS", "example.com")
     monkeypatch.setenv("GRAPH_LAGOON_DEV_MODE", "true")
@@ -171,6 +175,9 @@ class TestSeed:
         for inv in store.investigations.values():
             sources = store.list_investigation_children("investigation_sources", inv.id)
             assert len({s.context_id for s in sources}) >= 2
+            # Dossier (F4.2): a frozen evidence cited by a hypothesis.
+            [ev] = store.list_investigation_children("investigation_evidence", inv.id)
+            assert inv.state["hypotheses"][0]["evidence_for"] == [str(ev.id)]
         group_names = {g.name for g in store.groups.values()}
         assert {"analysts", "restricted-demo"} <= group_names
         assert "permission.update" in actions

@@ -11,6 +11,7 @@ import type {
   InvestigationProposal,
   InvestigationEvent,
   InvestigationEvidence,
+  Hypothesis,
   InvestigationNote,
   InvestigationRole,
   InvestigationSource,
@@ -783,6 +784,24 @@ class ApiService {
     body: Pick<InvestigationEvidence, 'title' | 'kind' | 'params'> & { snapshot: unknown },
   ): Promise<InvestigationEvidence> {
     const response = await this.client.post(`/api/investigations/${id}/evidence`, body);
+    return response.data;
+  }
+
+  // Hypotheses (F4.2): stored in the case state; both return the updated case.
+  async createInvestigationHypothesis(
+    id: string,
+    body: Pick<Hypothesis, 'text'> & Partial<Pick<Hypothesis, 'status' | 'evidence_for' | 'evidence_against' | 'note'>>,
+  ): Promise<Investigation> {
+    const response = await this.client.post(`/api/investigations/${id}/hypotheses`, body);
+    return response.data;
+  }
+
+  async updateInvestigationHypothesis(
+    id: string,
+    hypothesisId: string,
+    patch: Partial<Pick<Hypothesis, 'text' | 'status' | 'evidence_for' | 'evidence_against' | 'note'>>,
+  ): Promise<Investigation> {
+    const response = await this.client.patch(`/api/investigations/${id}/hypotheses/${hypothesisId}`, patch);
     return response.data;
   }
 

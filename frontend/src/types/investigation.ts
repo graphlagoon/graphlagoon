@@ -90,6 +90,20 @@ export interface InvestigationNote {
   updated_at?: string | null;
 }
 
+export type HypothesisStatus = 'aberta' | 'sustentada' | 'refutada';
+
+/** A hypothesis of the case (`state.hypotheses`, F4.2); the lists hold evidence ids. */
+export interface Hypothesis {
+  id: string;
+  text: string;
+  status: HypothesisStatus;
+  evidence_for: string[];
+  evidence_against: string[];
+  note?: string | null;
+  created_by?: string;
+  created_at?: string;
+}
+
 export type EvidenceKind = 'graph_state' | 'trace' | 'table' | 'file';
 
 /** Frozen evidence (F4.1): immutable; the sha256 covers snapshot, params and author. */
