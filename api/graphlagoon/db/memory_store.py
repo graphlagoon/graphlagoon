@@ -329,6 +329,9 @@ class MemoryAgentToken:
     created_at: datetime = field(default_factory=datetime.now)
     revoked_at: Optional[datetime] = None
 
+    scope: str = "user"
+    investigation_ids: List[str] = field(default_factory=list)
+    unmasked: bool = False
 
 # Child tables of an investigation: table name -> dataclass. Each lives in the
 # store attribute of the same name, keyed by id; generic CRUD below serves all.

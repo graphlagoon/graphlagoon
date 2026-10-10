@@ -57,14 +57,26 @@ async def create_agent_token(
             f"Agent tokens may last at most {max_days} days.",
         )
     token, raw = await service.create_token(
-        user_email, data.name.strip(), data.scopes, data.expires_in_days
+        user_email,
+        data.name.strip(),
+        data.scopes,
+        data.expires_in_days,
+        scope=data.scope,
+        investigation_ids=data.investigation_ids,
+        unmasked=data.unmasked,
     )
     await audit.record(
         user_email,
         AuditAction.AGENT_TOKEN_CREATE,
         resource_type="agent_token",
         resource_id=token["id"],
-        metadata={"name": token["name"], "scopes": token["scopes"]},
+        metadata={
+            "name": token["name"],
+            "scopes": token["scopes"],
+            "scope": token["scope"],
+            "investigation_ids": token["investigation_ids"],
+            "unmasked": token["unmasked"],
+        },
     )
     return {**token, "token": raw}
 

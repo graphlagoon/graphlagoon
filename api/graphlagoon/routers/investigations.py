@@ -62,16 +62,13 @@ from graphlagoon.services.paths import run_case_paths
 from graphlagoon.services.trace import run_case_trace
 from graphlagoon.services.typologies import run_case_typologies
 from graphlagoon.services.audit import AuditAction
-from graphlagoon.utils.authz import (
-    forbid_agents,
-    require_agent_scope,
-    require_permission,
-)
+from graphlagoon.services.masking import TEXT_EXTENSIONS, agent_view
+from graphlagoon.utils.authz import agent_forbidden, forbid_agents, require_permission
 
 router = APIRouter(prefix="/api/investigations", tags=["investigations"])
 
-# Human-only routes (03 §8.7) carry forbid_agents; every other route takes the
-# agent's scope from utils.authz.agent_guard (GET → read, writes → write).
+# Human-only routes (05 §6) carry forbid_agents; the middleware allowlists
+# the rest for agent tokens and reads come back through agent_view (masked).
 
 
 def _agent_must_propose(what: str) -> None:
@@ -95,6 +92,20 @@ def _http(exc: service.InvestigationError) -> HTTPException:
         status_code=exc.status_code,
         detail={"error": {"code": exc.code, "message": exc.message, "details": {}}},
     )
+
+
+def _agent_bytes(data: bytes, name: str) -> bytes:
+    """Raw content as an agent may see it: text files masked, binary refused
+    (05 §6: binary never reaches the agent)."""
+    if not get_current_actor():
+        return data
+    if name.rsplit(".", 1)[-1].lower() not in TEXT_EXTENSIONS:
+        raise agent_forbidden("Agents read binary files only through their text.")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1")  # SIMBA layouts are Latin-1
+    return agent_view(text).encode("utf-8")
 
 
 async def _record(user_email: str, action: str, investigation_id: UUID, **meta):
@@ -153,6 +164,8 @@ async def update_investigation(
     changes = data.model_dump(exclude_unset=True)
     if {"status", "typology"} & changes.keys():
         _agent_must_propose("status and typology")
+    if "assignee_email" in changes and get_current_actor():
+        raise agent_forbidden("Assigning a case is reserved to people.")
     try:
         inv = await service.update_investigation(investigation_id, user_email, changes)
     except service.InvestigationError as exc:
@@ -341,8 +354,10 @@ async def get_source_snapshot(
     investigation_id: UUID, source_id: UUID, request: Request
 ):
     try:
-        return await service.source_snapshot(
-            investigation_id, get_current_user(request), source_id
+        return agent_view(
+            await service.source_snapshot(
+                investigation_id, get_current_user(request), source_id
+            )
         )
     except service.InvestigationError as exc:
         raise _http(exc)
@@ -362,8 +377,10 @@ async def list_events(
     limit: int = Query(100, ge=1, le=500),
 ):
     try:
-        return await service.list_events(
-            investigation_id, get_current_user(request), after, limit
+        return agent_view(
+            await service.list_events(
+                investigation_id, get_current_user(request), after, limit
+            )
         )
     except service.InvestigationError as exc:
         raise _http(exc)
@@ -487,8 +504,10 @@ async def create_evidence(investigation_id: UUID, data: EvidenceCreate, request:
 )
 async def get_evidence(investigation_id: UUID, evidence_id: UUID, request: Request):
     try:
-        return await evidence.get_evidence(
-            investigation_id, get_current_user(request), evidence_id
+        return agent_view(
+            await evidence.get_evidence(
+                investigation_id, get_current_user(request), evidence_id
+            )
         )
     except service.InvestigationError as exc:
         raise _http(exc)
@@ -556,6 +575,7 @@ async def _receive_artifact(
             raise _http(service.InvestigationError(422, "INVALID_BODY", str(exc)))
         data = body.text.encode("utf-8")
 
+    investigation_id: UUID,
         async def chunks():
             yield data
 
@@ -565,6 +585,12 @@ async def _receive_artifact(
             "note": body.note,
             "source_evidence_ids": body.source_evidence_ids,
         }
+    try:
+        await service.ensure_case_access(
+            investigation_id, get_current_user(request), "write"
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
     else:
         chunks = request.stream
         meta = {"name": name, "kind": kind, "note": note, "source_evidence_ids": evidence}
@@ -605,7 +631,7 @@ async def create_artifact(
     source_evidence_ids: list[str] = Query(default_factory=list),
 ):
     received, meta = await _receive_artifact(
-        request, name, kind, note, source_evidence_ids
+        investigation_id, request, name, kind, note, source_evidence_ids
     )
     try:
         return await artifacts.create_artifact(
@@ -629,7 +655,7 @@ async def add_artifact_version(
     source_evidence_ids: list[str] = Query(default_factory=list),
 ):
     received, meta = await _receive_artifact(
-        request, name, None, note, source_evidence_ids
+        investigation_id, request, name, None, note, source_evidence_ids
     )
     meta.pop("kind")
     try:
@@ -670,6 +696,7 @@ async def get_artifact_content(
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "sandbox",
             "X-Content-SHA256": meta["sha256"],
+    data = _agent_bytes(data, meta["name"])
         },
     )
 
@@ -736,6 +763,10 @@ async def upload_file(
         raise _http(exc)
     await _record(
         user_email,
+    try:
+        await service.ensure_case_access(investigation_id, user_email, "write")
+    except service.InvestigationError as exc:
+        raise _http(exc)
         AuditAction.INVESTIGATION_FILE_UPLOAD,
         investigation_id,
         file_id=str(row["id"]),
@@ -776,6 +807,7 @@ async def get_file_content(investigation_id: UUID, file_id: UUID, request: Reque
 
 
 @router.patch(
+    data = _agent_bytes(data, meta["filename"])
     "/{investigation_id}/files/{file_id}", response_model=InvestigationFileResponse
 )
 async def set_file_mapping(
@@ -830,7 +862,6 @@ async def list_proposals(
     "/{investigation_id}/proposals",
     response_model=ProposalResponse,
     status_code=201,
-    dependencies=[Depends(require_agent_scope("propose"))],
 )
 async def create_proposal(
     investigation_id: UUID, data: ProposalCreate, request: Request
@@ -931,7 +962,6 @@ async def decide_match(
 
 @router.post(
     "/{investigation_id}/analysis/trace",
-    dependencies=[Depends(require_agent_scope("analyze"))],
 )
 async def analysis_trace(investigation_id: UUID, data: TraceRequest, request: Request):
     try:
@@ -942,7 +972,6 @@ async def analysis_trace(investigation_id: UUID, data: TraceRequest, request: Re
 
 @router.post(
     "/{investigation_id}/analysis/paths",
-    dependencies=[Depends(require_agent_scope("analyze"))],
 )
 async def analysis_paths(investigation_id: UUID, data: PathsRequest, request: Request):
     try:
@@ -953,7 +982,6 @@ async def analysis_paths(investigation_id: UUID, data: PathsRequest, request: Re
 
 @router.post(
     "/{investigation_id}/analysis/typologies",
-    dependencies=[Depends(require_agent_scope("analyze"))],
 )
 async def analysis_typologies(
     investigation_id: UUID, data: TypologiesRequest, request: Request

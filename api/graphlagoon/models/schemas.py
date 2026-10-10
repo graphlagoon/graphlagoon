@@ -2185,6 +2185,19 @@ class AgentTokenResponse(BaseModel):
     revoked_at: Optional[datetime] = None
     active: bool
 
+    # "user": every case the owner reads; "case": only investigation_ids
+    scope: Literal["user", "case"] = "user"
+    investigation_ids: list[UUID] = Field(default_factory=list)
+    unmasked: bool = False  # honoured only with settings.agents_allow_unmasked_data
+
+    @model_validator(mode="after")
+    def _case_scope_needs_ids(self):
+        if self.scope == "case" and not self.investigation_ids:
+            raise ValueError("a case-scoped token needs at least one investigation_id")
+        return self
 
 class AgentTokenCreated(AgentTokenResponse):
     token: str  # shown once; only its sha256 is stored
+    scope: str = "user"
+    investigation_ids: list[str] = Field(default_factory=list)
+    unmasked: bool = False

@@ -81,7 +81,7 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", "/api/agent-tokens/{token_id}"): f"{HUMAN_ONLY} token management",
     ("PATCH", _CASE): (
         "title/description are edited in the UI; status and typology go "
-        "through `propose`"
+        "through `propose`; assigning is a person's (handler raises AGENT_FORBIDDEN)"
     ),
     ("POST", f"{_CASE}/hypotheses"): (
         "agents `propose` kind hypothesis; a person accepts (Q9)"

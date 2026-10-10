@@ -1,5 +1,6 @@
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     String,
     Text,
@@ -532,7 +533,12 @@ class AgentToken(Base):
     owner_email = Column(String(255), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     token_hash = Column(String(64), nullable=False, unique=True)
-    scopes = Column(JSON, nullable=False, default=[])
+    scopes = Column(JSON, nullable=False, default=[])  # kept, no longer enforced (F0)
+    # "user" (every case the owner reads) or "case" (only investigation_ids)
+    scope = Column(String(10), nullable=False, default="user")
+    investigation_ids = Column(JSON, nullable=False, default=[])
+    # Honoured only when settings.agents_allow_unmasked_data is on
+    unmasked = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)

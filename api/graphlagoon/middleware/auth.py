@@ -6,6 +6,7 @@ from collections import deque
 from collections.abc import Awaitable
 from contextvars import ContextVar
 import inspect
+import re
 import time
 
 from graphlagoon.config import get_settings
@@ -53,8 +54,8 @@ def get_user_provider() -> Optional[UserProvider]:
 
 
 # The actor of the current request: None for a person, or
-# {"kind": "agent", "token_id", "name", "scopes", "owner_email"} for an agent
-# token. A ContextVar so services (journal, audit) can attribute writes
+# {"kind": "agent", "token_id", "name", "scopes", "owner_email", "scope",
+# "investigation_ids", "unmasked"} for an agent token. A ContextVar so services (journal, audit) can attribute writes
 # without threading the request through every call.
 _current_actor: ContextVar[Optional[dict]] = ContextVar(
     "graphlagoon_actor", default=None
@@ -106,6 +107,32 @@ def _bearer_agent_token(request: Request) -> Optional[str]:
 EMAIL_HEADERS = [
     "x-forwarded-email",  # Used by Databricks proxy
 ]
+
+
+# Where an agent token may go (05 §6): the case routes, explorations, the
+# graph queries of a context, /config and MCP. Everything else is 403.
+_UUID = r"[0-9a-fA-F-]{36}"
+AGENT_ALLOWED_PATHS = re.compile(
+    r"^(/api/investigations(/|$)"
+    r"|/api/explorations(/|$)"
+    r"|/api/graph-contexts/" + _UUID + r"/(subgraph|expand|query|cypher|nodes/batch"
+    r"|schema-drift|explorations|enrichment)(/|$)"
+    r"|/api/config$"
+    r"|/mcp$)"
+)
+_CASE_PATH = re.compile(r"^/api/investigations(?:/(" + _UUID + r"))?(?:/|$)")
+
+
+def agent_path_allowed(path: str, actor: Optional[dict] = None) -> bool:
+    """Whether an agent token may reach ``path`` (mount prefixes stripped);
+    a case-scoped token only reaches the cases it names."""
+    if not AGENT_ALLOWED_PATHS.match(path):
+        return False
+    if actor and actor.get("scope") == "case":
+        m = _CASE_PATH.match(path)
+        if m and m.group(1) and m.group(1).lower() not in actor.get("investigation_ids", []):
+            return False
+    return True
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -205,6 +232,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         actor, error = await authenticate_agent(raw_token)
         if error is not None:
             return error
+        path = request.url.path
+        for prefix in (request.scope.get("root_path", ""), "/graphlagoon"):
+            if prefix and path.startswith(prefix + "/"):
+                path = path[len(prefix):]
+        if not agent_path_allowed(path, actor) or (
+            actor["scope"] == "case"
+            and request.method != "GET"
+            and path.rstrip("/") == "/api/investigations"
+        ):
+            return _error(
+                403, "AGENT_FORBIDDEN", "Agent tokens may not use this route."
+            )
         request.state.user_email = actor["owner_email"]
         request.state.actor = actor
         _current_actor.set(actor)
@@ -237,6 +276,9 @@ async def authenticate_agent(raw_token: str):
         "name": token["name"],
         "scopes": token["scopes"],
         "owner_email": token["owner_email"],
+        "scope": token["scope"],
+        "investigation_ids": token["investigation_ids"],
+        "unmasked": bool(token["unmasked"]) and settings.agents_allow_unmasked_data,
     }
     return actor, None
 

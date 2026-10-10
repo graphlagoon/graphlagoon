@@ -107,6 +107,13 @@ A token carries one or more scopes; a tool outside them answers
 | `write` | `create_investigation`, `add_source`, `add_note`, `pin_evidence` (a trace re-run on the server with its method stamp, the unified graph or a subset of it, or a table it provides), `upload_artifact` (always a **draft**, up to `GRAPH_LAGOON_ARTIFACT_MAX_BYTES`), `upload_file`, `create_file_graph` (a graph file into a source, with a preset or mapping), `set_file_mapping` (how an enrichment file joins nodes) |
 | `propose` | `propose` with `kind`: `role` (`entity`, `role`), `status`, `typology`, `match` (`match_id`, `status`, `reason_text`), `hypothesis` (`text` and the evidence for and against) or `hypothesis_status` (`hypothesis_id`, `status`) |
 
+Scopes apply to the MCP tools. Over the REST API an agent token acts with
+its owner's access on the case routes (`/api/investigations/*`),
+explorations, a context's graph queries and `/config`; every other route
+(administration, contexts, tokens, sharing of contexts or explorations)
+answers `AGENT_FORBIDDEN`. A token created with `scope: "case"` and
+`investigation_ids` reaches only those cases, over REST and MCP alike.
+
 The server also exposes two resources per case,
 `investigation://{id}/summary` and `investigation://{id}/events` (the first
 500 journal events).
@@ -117,9 +124,12 @@ By default agents see CPF, CNPJ and account numbers **masked**
 (`***.456.789-**`, `**.345.678/****-**`, accounts down to their last two
 digits); entity ids that contain them are masked too, and the server maps
 them back when the agent refers to an entity or an edge. An administrator
-can lift this with `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA`: sending
+can lift this with `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA`, and even then
+only tokens created with `unmasked: true` see the real values: sending
 customer data to an LLM provider is a personal-data transfer, so decide that
-with your DPO.
+with your DPO. The same masking applies when an agent reads snapshots,
+events, evidence or text files over the REST API; binary files answer 403
+to an agent.
 
 Case data comes wrapped in `untrusted_data`: values from graphs and files may
 contain text written to manipulate an agent, and the server tells the agent
