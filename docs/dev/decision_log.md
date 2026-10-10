@@ -11642,3 +11642,46 @@ do AestheticsPanel; `vue-tsc` limpo.
 **Admin-Area Impact:** no admin-area impact.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-10 22:30] - Feature Implemented: F3.3 · Worker de rastreio temporal
+
+**Feature:** núcleo puro `utils/trace.ts` (`traceForward`, `toTraceEdges`) com as
+quatro regras de 03 §6.1 (FIFO, proporcional, LIBR, contaminação total), Δ, paradas
+por tipo e por nó, camadas, valor mínimo e janela; `workers/traceWorker.ts` só o
+embrulha (mensagens `RUN` → `RESULT`/`ERROR`, como o `erWorker`).
+
+**Design Decisions (leituras do §6.1 que reproduzem os números da T5):**
+1. Janela: arestas antes de `t0` também rodam e formam o saldo de abertura (os 300 já
+   em 8812-7 às 13:30, antes da janela 14:02 do carimbo); sem isso o FIFO daria 1.850
+   para a Exchange. Semente só conta dentro da janela; arestas depois de `t1` saem.
+2. `hop(u)` = `layer(u)`, o menor salto em que valor rastreado chegou a u (0 para conta
+   nunca alcançada); por isso o lote não guarda hop.
+3. Lote vence (a) só quando a conta paga; o saldo que sobra no fim é "retido" seja
+   qual for a idade.
+4. Arestas de fronteira e de saída não criam lote no destino; `exits` só recebe
+   valor rastreado > 0.
+5. `edgeTrace` guarda x antes do corte (c); o cortado vai para `discarded.belowMin`,
+   o vencido para `discarded.expired`, então a invariante fecha com os quatro termos.
+6. Contaminação total drena o saldo como o FIFO, mas reporta x = a se T > 0.
+7. Determinismo para o porte Python (F3.8): ordem por `t` e depois `id` por code
+   unit; arredondamento só na saída (centavos meio-para-cima, cobertura com 4 casas).
+8. A fixture traz os parâmetros-base e oito casos com o resultado completo
+   esperado (`cases[].expected`), para a paridade da F3.8.
+9. Fora: rastreio para trás (o plano não exige na F3) e parâmetros padrão (vêm com a
+   tela na F3.4).
+
+**Files:** `frontend/src/utils/trace.ts`, `frontend/src/workers/traceWorker.ts`,
+`frontend/src/__tests__/fixtures/trace/golpe-pix.json`,
+`frontend/src/utils/__tests__/trace.test.ts` (novos).
+
+**Testing:** vitest `trace.test.ts` (casos da fixture; FIFO 2.000/1.550/880 = 4.430,
+91%, retidos 70/350/20; proporcional 1.597,73 e 302,27; LIBR = FIFO; Δ = 40 min corta
+só a das 15:05; paradas, H = 1, m = 900; invariante; caso 1.000/800/500/400 com
+FIFO 200, LIBR 0, total 400; desempate estável); `vue-tsc` limpo.
+
+**Public Docs:** no public docs impact (sem UI ainda; entra na F3.4).
+**Admin-Area Impact:** no admin-area impact.
+
+**Author:** Claude (AI Assistant)
