@@ -65,6 +65,15 @@ const indicators = computed(() => {
   ];
 });
 
+/** Accepted typology badges (F4.3), with the CC 4.001 item they cite. */
+const badges = computed(() => [
+  ...new Set(
+    store.events
+      .filter((e) => e.kind === 'typology.accepted')
+      .map((e) => `${(e.payload as Record<string, string>).normRef} · ${(e.payload as Record<string, string>).label}`),
+  ),
+]);
+
 const journal = computed(() => (showAllEvents.value ? store.events : store.events.slice(-JOURNAL_ROWS)));
 
 function shortHash(sha: string) {
@@ -142,6 +151,7 @@ function unlink(h: Hypothesis, side: Side, evidenceId: string) {
             <p class="description">{{ inv.description || 'No description yet.' }}</p>
             <div class="chips">
               <span v-if="inv.typology" class="chip seal">{{ inv.typology }}</span>
+              <span v-for="b in badges" :key="b" class="chip seal" data-testid="dossier-badge">{{ b }}</span>
               <span v-if="inv.origin" class="chip">origin · {{ inv.origin }}</span>
               <span v-for="r in roleCounts" :key="r" class="chip">{{ r }}</span>
             </div>

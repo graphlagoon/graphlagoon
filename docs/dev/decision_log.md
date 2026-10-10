@@ -12003,3 +12003,62 @@ vincular evidência); E2E dossiê (evidência, hipótese, vínculo, status, diá
 tabela (vive no `state`), setting ou permissão novos.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 03:20] - Feature Implemented: F4.3 · Selos de tipologia (CC 4.001) e anel de lojistas (T9)
+
+**Feature:** registry `utils/typologies.ts` com 7 tipologias de 03 §6.4 (`passagem`,
+`concentracao_entradas`, `dispersao_saidas`, `fracionamento`, `ciclo_temporal`,
+`hub_atributo`, `dormente_reativada`), cada uma com `normRef` da CC 4.001; espelho
+`services/typologies.py` com paridade pela fixture comum
+`fixtures/typologies/small.json`; `POST …/analysis/typologies` e ferramenta MCP
+`run_typologies` (escopo `analyze`); painel `TypologyBadgesPanel.vue` (botão "Typology
+badges" no canvas troca a coluna esquerda): clicar destaca as entidades, "Accept" grava
+`typology.accepted`, "Bipartite layout" = hive com `maxAxes: 1` (tipo mais comum × o
+resto); o dossiê mostra os selos aceitos.
+
+**Design Decisions:**
+1. Grafo de entrada neutro `{nodes: [id, type], edges: [id, src, dst, amount, t]}`:
+   o browser monta do grafo unificado (`edgeValue`), o servidor do `case_graph`.
+   Aresta de dinheiro = valor > 0; janela desliza a partir de cada aresta com horário
+   (ordem tempo, id); aresta com valor e sem horário conta em toda janela.
+2. `passagem` em FIFO: cada entrada consome o que resta das saídas na janela
+   [t, t + Δ]; passa se cobriu ≥ 90% (sem contar a mesma saída duas vezes).
+3. `hub_atributo` sem lista de tipos: elemento compartilhado = vizinho por aresta
+   **sem valor**, ≥ 3 entidades do mesmo tipo (diferente do hub) sem aresta entre si.
+4. `ciclo_temporal`: DFS em ordem de tempo até 6 saltos, retorno ≥ 50% da 1ª aresta,
+   cada ciclo uma vez; teto de 200 mil passos (shortcut).
+5. `fracionamento`: 7 dias corridos no lugar de 5 úteis (shortcut); "≥ 0,9 L" = uma
+   transação logo abaixo do limite já sugere.
+6. Explicações com números `toFixed(2)`/`:.2f` para a paridade incluir o texto. O
+   run não vai ao diário (só leitura, auditado no MCP como `AGENT_READ`); o aceite
+   sim. Agente não aceita selo: cita em nota/hipótese ou propõe `typology`.
+7. Fora (MVP): `pos_incompativel` (IV-v a IV-z, falta dado de POS do adquirente),
+   painel da comunidade do T9 à direita, layout bipartido em colunas paralelas (o
+   hive de 2 eixos as põe em oposição), worker para o cálculo.
+
+**Files:** `frontend/src/utils/typologies.ts`,
+`frontend/src/components/investigation/TypologyBadgesPanel.vue`,
+`frontend/src/__tests__/fixtures/typologies/small.json`,
+`frontend/src/utils/__tests__/typologies.test.ts`,
+`api/graphlagoon/services/typologies.py`, `api/tests/test_typologies.py` (novos);
+`views/InvestigationView.vue`, `views/InvestigationDossierView.vue`,
+`utils/investigationEvents.ts`, `e2e/helpers/api-mocks.ts` (POST de evento),
+`e2e/tests/investigations.spec.ts`, testes da view; `mcp/server.py` (tool + prompt
+`revisar_lojista`), `mcp/registry.py`, `routers/investigations.py`,
+`routers/admin_registry.py`, `models/schemas.py`, `tests/test_mcp_server.py`.
+
+**Testing:** vitest `typologies.test.ts` (fixture com um caso por tipologia, CC 4.001
+em todos, ordem de entrada, padrões, ciclo fora de ordem não conta),
+`InvestigationView.test.ts` (selo destaca, aceite grava `typology.accepted`, preset
+hive); pytest `test_typologies.py` (mesma fixture), `test_mcp_server.py`
+(`run_typologies` acha `4471-0` em passagem; tipologia desconhecida 422), registries
+de agentes e admin; E2E anel de 9 lojistas (III-f, aceite no diário); `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Typology badges),
+`docs/guide/agents-mcp.md` (`run_typologies`, prompt).
+**Admin-Area Impact:** rota de análise em `AUDIT_EXEMPT_ROUTES`; sem tabela, setting
+ou permissão novos.
+
+**Author:** Claude (AI Assistant)

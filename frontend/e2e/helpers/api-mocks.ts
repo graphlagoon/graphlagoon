@@ -1214,6 +1214,11 @@ export async function seedInvestigations(
       const { snapshot: _s, ...out } = row;
       return route.fulfill(json(out, 201));
     }
+    if (sub === 'events' && method === 'POST') {
+      const body = req.postDataJSON();
+      journal(id, body.kind, body.payload);
+      return route.fulfill(json(events.get(id)!.at(-1), 201));
+    }
     return route.fulfill(json(events.get(id) ?? []));
   });
   // Hypotheses (F4.2): kept in the case state, like the server.

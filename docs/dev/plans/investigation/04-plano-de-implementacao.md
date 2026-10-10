@@ -66,7 +66,7 @@ Marque `[x]` no mesmo commit que conclui a tarefa.
 **F4 · Dossiê e compliance**
 - [x] F4.1 · Evidências congeladas
 - [x] F4.2 · Hipóteses e tela do dossiê (T7)
-- [ ] F4.3 · Selos de tipologia (CC 4.001) e anel de lojistas (T9)
+- [x] F4.3 · Selos de tipologia (CC 4.001) e anel de lojistas (T9)
 - [ ] F4.4 · Status e prazos (45 + 45 dias) na fila
 - [ ] F4.5 · Decisão, congelamento e retenção
 - [ ] F4.6 · Exportações (laudo, pacote, SIMBA, resumo Siscoaf)
@@ -764,10 +764,11 @@ trabalho de análise e documentação; a pessoa decide.
   - `components/investigation/TypologyBadgesPanel.vue`;
   - preset de layout bipartido (hive com 2 eixos).
 - **Aceite:**
-  - [ ] Cada selo cita o item da CC 4.001.
-  - [ ] Os selos sugerem; aceitar um selo grava evento.
-  - [ ] A tela segue `screens/T9-Anel.png`.
-  - [ ] Existe implementação Python espelhada (`services/typologies.py`) para a
+  - [x] Cada selo cita o item da CC 4.001.
+  - [x] Os selos sugerem; aceitar um selo grava evento.
+  - [x] A tela segue `screens/T9-Anel.png` (selos à esquerda e layout bipartido; o
+    painel da comunidade à direita ficou fora do MVP).
+  - [x] Existe implementação Python espelhada (`services/typologies.py`) para a
     ferramenta MCP `run_typologies`, com paridade por fixtures comuns.
 - **Testes:** vitest de cada tipologia com grafos pequenos.
 

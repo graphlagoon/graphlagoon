@@ -2144,6 +2144,14 @@ class PathsRequest(BaseModel):
     max_dwell_hours: Optional[float] = Field(None, ge=0)  # earliest: Δ at intermediate nodes
 
 
+class TypologiesRequest(BaseModel):
+    """Typology badges (F4.3, 03 §6.4): all of them unless ``typologies`` lists
+    ids; ``params`` overrides defaults per id ({"fracionamento": {"limit": 10000}})."""
+
+    typologies: Optional[list[str]] = None
+    params: dict[str, dict[str, float]] = Field(default_factory=dict)
+
+
 # ---------------------------------------------------------------------------
 # Agent tokens (03-arquitetura §8.2)
 # ---------------------------------------------------------------------------

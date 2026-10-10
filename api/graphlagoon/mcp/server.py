@@ -602,6 +602,31 @@ def build_server():
         result = await _call(run_case_paths(investigation_id, user, req, graph))
         return _out(result, graph["secrets"])
 
+    @server.tool()
+    async def run_typologies(
+        ctx: Context,
+        investigation_id: UUID,
+        typologies: Optional[list[str]] = None,
+        params: Optional[dict[str, dict[str, float]]] = None,
+    ) -> dict:
+        """Typology badges (03 §6.4) on the unified graph, each citing its CC BCB
+        4.001 item: passagem, concentracao_entradas, dispersao_saidas,
+        fracionamento, ciclo_temporal, hub_atributo, dormente_reativada (all
+        unless ``typologies`` lists ids). ``params`` overrides the defaults per id,
+        e.g. {"fracionamento": {"limit": 10000}}. Returns per typology its
+        normRef, params and hits (nodeId, evidenceEdgeIds, explanation). Badges
+        only suggest: cite them in notes or hypotheses; a person accepts them in
+        the workspace."""
+        from graphlagoon.services.typologies import run_case_typologies
+
+        user = _agent(ctx, "analyze")
+        graph = await _call(case_graph(investigation_id, user))
+        result = await _call(
+            run_case_typologies(investigation_id, user, typologies, params, graph)
+        )
+        await _audit_read(user, "run_typologies", investigation_id)
+        return _out(result, graph["secrets"])
+
     # -- write (attributed to the agent) ------------------------------------
 
     @server.tool()
@@ -941,8 +966,9 @@ def build_server():
             "a merchant review (revisar lojista): is it part of a ring of front companies",
             "Read the case and the unified graph; find the merchant, its terminals, its "
             "settlement account and its partners (QSA).",
-            "Look for partners, terminals, settlement accounts, addresses or phones "
-            "shared with other merchants, especially ones already offboarded.",
+            "Run `run_typologies` (hub_atributo finds partners, terminals, settlement "
+            "accounts, addresses or phones shared by unrelated merchants; each badge "
+            "cites its CC 4.001 item) and check the merchants already offboarded.",
             "Note each shared element and why it matters (`add_note`).",
             "Upload a Markdown review with the merchants involved and the evidence "
             "(`upload_artifact`).",

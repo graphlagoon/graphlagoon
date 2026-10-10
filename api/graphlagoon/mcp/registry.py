@@ -44,6 +44,7 @@ AGENT_TOOL_ROUTES: dict[tuple[str, str], str] = {
     ("POST", f"{_CASE}/matches"): "suggest_matches",
     ("POST", f"{_CASE}/analysis/trace"): "trace_money",
     ("POST", f"{_CASE}/analysis/paths"): "find_paths",
+    ("POST", f"{_CASE}/analysis/typologies"): "run_typologies",
     (
         "POST",
         "/api/graph-contexts/{context_id}/enrichment/{name}/lookup",

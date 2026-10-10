@@ -221,6 +221,9 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/investigations/{investigation_id}/analysis/paths"): (
         "read-only analysis; journaled as path.run when the case is writable"
     ),
+    ("POST", "/api/investigations/{investigation_id}/analysis/typologies"): (
+        "read-only analysis; accepting a badge is journaled as typology.accepted"
+    ),
     **{
         route: "recorded in the case's immutable, hash-chained journal"
         for route in (

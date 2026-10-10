@@ -45,6 +45,7 @@ from graphlagoon.models.schemas import (
     ProposalReject,
     ProposalResponse,
     TraceRequest,
+    TypologiesRequest,
 )
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
@@ -57,6 +58,7 @@ from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import investigations as service
 from graphlagoon.services.paths import run_case_paths
 from graphlagoon.services.trace import run_case_trace
+from graphlagoon.services.typologies import run_case_typologies
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.utils.authz import (
     forbid_agents,
@@ -884,5 +886,21 @@ async def analysis_trace(investigation_id: UUID, data: TraceRequest, request: Re
 async def analysis_paths(investigation_id: UUID, data: PathsRequest, request: Request):
     try:
         return await run_case_paths(investigation_id, get_current_user(request), data)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/analysis/typologies",
+    dependencies=[Depends(require_agent_scope("analyze"))],
+)
+async def analysis_typologies(
+    investigation_id: UUID, data: TypologiesRequest, request: Request
+):
+    """Typology badges (F4.3): suggestions only; accepting one is a journal event."""
+    try:
+        return await run_case_typologies(
+            investigation_id, get_current_user(request), data.typologies, data.params
+        )
     except service.InvestigationError as exc:
         raise _http(exc)
