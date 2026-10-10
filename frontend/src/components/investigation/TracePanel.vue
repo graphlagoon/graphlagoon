@@ -1,11 +1,41 @@
 <script setup lang="ts">
 /** Parameters of the money trace (T5, left column): seed, direction, Δ, layers, window, rule, stops. */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { ALLOCATIONS, useTraceStore } from '@/stores/trace';
+import { useInvestigationStore } from '@/stores/investigation';
+import { useToast } from '@/composables/useToast';
 import { formatAmount } from '@/utils/edgeSemantics';
-import { formatTraceTime } from '@/utils/traceView';
+import { getErrorMessage } from '@/utils/errorMessage';
+import { formatTraceTime, methodStamp } from '@/utils/traceView';
 
 const trace = useTraceStore();
+const investigation = useInvestigationStore();
+const toast = useToast();
+const saving = ref(false);
+const canSave = computed(
+  () => !!trace.result && !!investigation.current?.has_write_access && investigation.current.status !== 'decidido',
+);
+
+/** Freezes the run (F4.1): the whole result as the snapshot, its method stamp as the params. */
+async function saveEvidence() {
+  const r = trace.result;
+  if (!r) return;
+  saving.value = true;
+  try {
+    const label = ALLOCATIONS[r.method.direction].find((a) => a.id === r.method.allocation)?.label ?? r.method.allocation;
+    const row = await investigation.pinEvidence({
+      title: `Trace ${label}, ${r.method.maxHops} layers · ${trace.seedLabel}`,
+      kind: 'trace',
+      params: { ...r.method, engine: 'browser' },
+      snapshot: { ...r, stamp: methodStamp(r.method) },
+    });
+    if (row) toast.success(`Evidence saved · hash ${row.sha256.slice(0, 8)}`);
+  } catch (e) {
+    toast.error(getErrorMessage(e, 'Failed to save evidence'));
+  } finally {
+    saving.value = false;
+  }
+}
 
 const seedEdges = computed(() => trace.edges.filter((e) => trace.seedEdgeIds.includes(e.id)));
 const seedTotal = computed(() => seedEdges.value.reduce((s, e) => s + e.amount, 0));
@@ -117,9 +147,15 @@ function toggleStop(type: string, on: boolean) {
       <button class="btn btn-primary" :disabled="trace.running" data-testid="trace-run" @click="trace.run()">
         {{ trace.running ? 'Tracing…' : 'Trace again' }}
       </button>
-      <span title="Saving a trace as evidence arrives with frozen evidence (F4.1)">
-        <button class="btn btn-outline" disabled data-testid="trace-save-evidence">Save as evidence</button>
-      </span>
+      <button
+        class="btn btn-outline"
+        :disabled="!canSave || saving || trace.running"
+        title="Freeze this run with its method stamp (immutable, with a sha256)"
+        data-testid="trace-save-evidence"
+        @click="saveEvidence"
+      >
+        {{ saving ? 'Saving…' : 'Save as evidence' }}
+      </button>
     </div>
   </aside>
 </template>

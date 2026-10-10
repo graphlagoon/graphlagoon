@@ -1891,6 +1891,31 @@ class InvestigationNoteResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+# Frozen evidence (03-arquitetura §3.5, F4.1)
+EvidenceKind = Literal["graph_state", "trace", "table", "file"]
+
+
+class EvidenceCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    kind: EvidenceKind
+    params: dict[str, Any] = Field(default_factory=dict)
+    snapshot: Any = None
+
+
+class EvidenceResponse(BaseModel):
+    id: UUID
+    title: str
+    kind: str
+    sha256: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    created_by: str
+    created_at: Optional[datetime] = None
+
+
+class EvidenceContentResponse(EvidenceResponse):
+    snapshot: Any = None
+
+
 # Case space (03-arquitetura §8.5)
 ArtifactKind = Literal["slides", "doc", "report", "image", "data", "other"]
 

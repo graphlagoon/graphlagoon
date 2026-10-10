@@ -17,6 +17,9 @@ from graphlagoon.middleware.auth import get_current_actor, get_current_user
 from graphlagoon.models.schemas import (
     ArtifactResponse,
     ArtifactTextUpload,
+    EvidenceContentResponse,
+    EvidenceCreate,
+    EvidenceResponse,
     FileContextCreate,
     FileMappingUpdate,
     InvestigationCreate,
@@ -43,6 +46,7 @@ from graphlagoon.models.schemas import (
 )
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
+from graphlagoon.services import investigation_evidence as evidence
 from graphlagoon.services import investigation_files as files
 from graphlagoon.services import investigation_matches as matches
 from graphlagoon.services import investigation_proposals as proposals
@@ -380,6 +384,48 @@ async def delete_note(investigation_id: UUID, note_id: UUID, request: Request):
     except service.InvestigationError as exc:
         raise _http(exc)
     return {"status": "deleted"}
+
+
+# Frozen evidence (F4.1, 03 §3.5): write once, no update or delete; recorded
+# in the case journal (AUDIT_EXEMPT_ROUTES). Agents pin directly (Q9).
+
+
+@router.get("/{investigation_id}/evidence", response_model=list[EvidenceResponse])
+async def list_evidence(investigation_id: UUID, request: Request):
+    try:
+        return await evidence.list_evidence(investigation_id, get_current_user(request))
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/evidence", response_model=EvidenceResponse, status_code=201
+)
+async def create_evidence(investigation_id: UUID, data: EvidenceCreate, request: Request):
+    try:
+        return await evidence.create_evidence(
+            investigation_id,
+            get_current_user(request),
+            data.title,
+            data.kind,
+            data.params,
+            data.snapshot,
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.get(
+    "/{investigation_id}/evidence/{evidence_id}",
+    response_model=EvidenceContentResponse,
+)
+async def get_evidence(investigation_id: UUID, evidence_id: UUID, request: Request):
+    try:
+        return await evidence.get_evidence(
+            investigation_id, get_current_user(request), evidence_id
+        )
+    except service.InvestigationError as exc:
+        raise _http(exc)
 
 
 # Case space (FA.2, 03 §8.5). A binary goes as the raw request body (streamed to

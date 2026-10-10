@@ -11897,3 +11897,51 @@ rota dá os números FIFO e o carimbo; `trace_money` proporcional 1.597,73 por
 diário); sem tabela, setting ou permissão novos.
 
 **Author:** Claude (AI Assistant)
+
+---
+
+## [2026-10-11 01:40] - Feature Implemented: F4.1 · Evidências congeladas
+
+**Feature:** `POST/GET …/evidence` e `GET …/evidence/{eid}` (snapshot gz + sha256 no
+armazenamento do caso, `evidence/{eid}.json.gz`); "Save as evidence" do T5 habilitado
+(resultado inteiro + carimbo, `engine: "browser"`); "Pin evidence" no T2 congela o que a
+aba mostra (nós, arestas, papéis e seleção); ferramentas MCP `pin_evidence`,
+`list_evidence`, `get_evidence`; prompt `investigar_golpe_pix` cita `pin_evidence`.
+
+**Design Decisions:**
+1. O blob é o JSON canônico de título, tipo, parâmetros, snapshot, autor e hora, gz com
+   mtime=0: o sha256 cobre tudo e é função pura do conteúdo. A leitura confere o hash
+   (`EVIDENCE_HASH_MISMATCH`).
+2. Imutável: sem PUT/PATCH/DELETE (405); o blob é escrito com `save_new` (recusa chave
+   existente). Caso decidido recusa (409). Teto = `artifact_max_bytes` (gz).
+3. `pin_evidence` do agente: `trace` reexecuta o rastreio no servidor com os argumentos
+   de `trace_money` (o agente não pode forjar o resultado; params = `method`);
+   `graph_state` congela o grafo unificado ou `params.node_ids`; `table`/`file` exigem
+   `snapshot`. Direto, sem proposta (README Q9).
+4. Evento `evidence.created` leva id, título, tipo e hash (parâmetros ficam na linha,
+   sem o limite de 16 KB). Sem permissão nova (como notas); journal em vez de auditoria.
+5. Fora (MVP): miniatura da evidência, evidência a partir de linha de enriquecimento
+   ou arquivo na UI (a API aceita `table`/`file`).
+
+**Files:** `api/graphlagoon/services/investigation_evidence.py`,
+`api/tests/test_investigation_evidence.py` (novos); `services/investigation_storage.py`,
+`routers/investigations.py`, `routers/admin_registry.py`, `mcp/server.py`,
+`mcp/registry.py`, `models/schemas.py`, `tests/test_mcp_server.py`;
+`frontend/src/components/investigation/TracePanel.vue`, `views/InvestigationView.vue`,
+`stores/investigation.ts`, `services/api.ts`, `types/investigation.ts`,
+`utils/investigationEvents.ts`, `e2e/helpers/api-mocks.ts`, testes do T5 e E2E.
+
+**Testing:** `test_investigation_evidence.py` (hash do gz = sha256 da linha; o gz guarda
+snapshot, params e autor; leitor não grava; PUT/PATCH/DELETE 405; `save_new` recusa;
+blob adulterado → `EVIDENCE_HASH_MISMATCH`), `test_mcp_server.py` (`pin_evidence` kind
+trace dá o mesmo `method` do `trace_money` e o snapshot 1.597,73), registries de agentes
+e admin; vitest `TraceScreen.test.ts` (salvar manda kind trace, método e saídas); E2E do
+rastreio clica "Save as evidence"; `vue-tsc` limpo.
+
+**Public Docs:** `docs/guide/investigations.md` (Frozen evidence),
+`docs/guide/agents-mcp.md` (escopos read/write).
+**Admin-Area Impact:** `POST …/evidence` em `AUDIT_EXEMPT_ROUTES` (vai ao diário); tabela
+`investigation_evidence` já estava em `CLEARABLE_TABLES` desde a F1.1; sem setting ou
+permissão novos.
+
+**Author:** Claude (AI Assistant)

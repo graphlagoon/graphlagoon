@@ -10,6 +10,7 @@ import type {
   FileRole,
   InvestigationProposal,
   InvestigationEvent,
+  InvestigationEvidence,
   InvestigationNote,
   InvestigationRole,
   InvestigationSource,
@@ -764,6 +765,25 @@ class ApiService {
 
   async deleteInvestigationNote(id: string, noteId: string): Promise<void> {
     await this.client.delete(`/api/investigations/${id}/notes/${noteId}`);
+  }
+
+  // Frozen evidence (F4.1): write once, no update or delete.
+  async getInvestigationEvidence(id: string): Promise<InvestigationEvidence[]> {
+    const response = await this.client.get(`/api/investigations/${id}/evidence`);
+    return response.data;
+  }
+
+  async getInvestigationEvidenceItem(id: string, evidenceId: string): Promise<InvestigationEvidence> {
+    const response = await this.client.get(`/api/investigations/${id}/evidence/${evidenceId}`);
+    return response.data;
+  }
+
+  async createInvestigationEvidence(
+    id: string,
+    body: Pick<InvestigationEvidence, 'title' | 'kind' | 'params'> & { snapshot: unknown },
+  ): Promise<InvestigationEvidence> {
+    const response = await this.client.post(`/api/investigations/${id}/evidence`, body);
+    return response.data;
   }
 
   // Case space (FA.2): the file goes as the raw body (streamed by the server).

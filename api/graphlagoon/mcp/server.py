@@ -23,6 +23,7 @@ from graphlagoon.config import get_settings
 from graphlagoon.middleware import auth
 from graphlagoon.services import audit
 from graphlagoon.services import investigation_artifacts as artifacts
+from graphlagoon.services import investigation_evidence as evidence
 from graphlagoon.services import investigation_files as files
 from graphlagoon.services import investigation_matches as matches
 from graphlagoon.services import investigation_proposals as proposals
@@ -148,6 +149,26 @@ async def _audit_read(user_email: str, tool: str, investigation_id=None) -> None
         resource_id=investigation_id,
         metadata={"tool": tool},
     )
+
+
+def _trace_request(graph: dict, **args):
+    """trace_money arguments → TraceRequest, with masked ids mapped back."""
+    from graphlagoon.models.schemas import TraceRequest
+
+    def resolve(ids, kind="node"):
+        return [resolve_uid(graph, i, kind) for i in ids or []]
+
+    try:
+        return TraceRequest(
+            **{
+                **args,
+                "seed_edge_ids": resolve(args.get("seed_edge_ids"), "edge"),
+                "seed_node": resolve([args["seed_node"]])[0] if args.get("seed_node") else None,
+                "stop_nodes": resolve(args.get("stop_nodes")),
+            }
+        )
+    except ValueError as exc:
+        raise _tool_error("INVALID_BODY", str(exc)) from exc
 
 
 def build_server():
@@ -343,6 +364,25 @@ def build_server():
         return _out(notes, graph["secrets"])
 
     @server.tool()
+    async def list_evidence(ctx: Context, investigation_id: UUID) -> dict:
+        """Frozen evidence of the case, oldest first (E1, E2, … in the dossier):
+        title, kind, sha256 and the parameters it was made with."""
+        user = _agent(ctx, "read")
+        rows = await _call(evidence.list_evidence(investigation_id, user))
+        graph = await _call(case_graph(investigation_id, user))
+        await _audit_read(user, "list_evidence", investigation_id)
+        return _out(rows, graph["secrets"])
+
+    @server.tool()
+    async def get_evidence(ctx: Context, investigation_id: UUID, evidence_id: UUID) -> dict:
+        """One frozen evidence with its snapshot (the hash is checked on read)."""
+        user = _agent(ctx, "read")
+        row = await _call(evidence.get_evidence(investigation_id, user, evidence_id))
+        graph = await _call(case_graph(investigation_id, user))
+        await _audit_read(user, "get_evidence", investigation_id)
+        return _out(row, graph["secrets"])
+
+    @server.tool()
     async def list_artifacts(ctx: Context, investigation_id: UUID) -> dict:
         """Artifacts in the case space with their versions and approval status."""
         user = _agent(ctx, "read")
@@ -462,30 +502,23 @@ def build_server():
         edgeTrace, per-node layer/tracedIn/tracedOut/retained, exits, frontier,
         coverage and ``method`` (every parameter: cite it, and keep it as the
         evidence stamp). Journaled as trace.run."""
-        from graphlagoon.models.schemas import TraceRequest
         from graphlagoon.services.trace import run_case_trace
 
         user = _agent(ctx, "analyze")
         graph = await _call(case_graph(investigation_id, user))
-
-        def resolve(ids, kind="node"):
-            return [resolve_uid(graph, i, kind) for i in ids or []]
-
-        try:
-            req = TraceRequest(
-                seed_edge_ids=resolve(seed_edge_ids, "edge"),
-                seed_node=resolve([seed_node])[0] if seed_node else None,
-                direction=direction,
-                allocation=allocation,
-                max_hops=max_hops,
-                max_dwell_hours=max_dwell_hours,
-                min_amount=min_amount,
-                window=window,
-                stop_types=stop_types,
-                stop_nodes=resolve(stop_nodes),
-            )
-        except ValueError as exc:
-            raise _tool_error("INVALID_BODY", str(exc)) from exc
+        req = _trace_request(
+            graph,
+            seed_edge_ids=seed_edge_ids,
+            seed_node=seed_node,
+            direction=direction,
+            allocation=allocation,
+            max_hops=max_hops,
+            max_dwell_hours=max_dwell_hours,
+            min_amount=min_amount,
+            window=window,
+            stop_types=stop_types,
+            stop_nodes=stop_nodes,
+        )
         result = await _call(run_case_trace(investigation_id, user, req, graph))
         return _out(result, graph["secrets"])
 
@@ -613,6 +646,51 @@ def build_server():
             service.create_note(investigation_id, user, data.anchor.model_dump(), data.body)
         )
         return _out(note)
+
+    @server.tool()
+    async def pin_evidence(
+        ctx: Context,
+        investigation_id: UUID,
+        title: str,
+        kind: str,
+        params: Optional[dict[str, Any]] = None,
+        snapshot: Optional[Any] = None,
+    ) -> dict:
+        """Freeze an evidence (immutable, gz + sha256, journaled). kind "trace":
+        ``params`` are the trace_money arguments; the server runs the trace and
+        freezes the result with its ``method`` stamp. kind "graph_state": the
+        unified graph, or only ``params.node_ids`` and the edges between them.
+        kind "table" or "file": you give the ``snapshot`` (rows, or a file
+        reference). Cite the evidence title in notes and artifacts."""
+        user = _agent(ctx, "write")
+        params = dict(params or {})
+        if kind in ("trace", "graph_state"):
+            graph = await _call(case_graph(investigation_id, user))
+            if kind == "trace":
+                from graphlagoon.services.trace import run_case_trace
+
+                req = _trace_request(graph, **params)
+                result = await _call(run_case_trace(investigation_id, user, req, graph))
+                params, snapshot = result["method"], result
+            else:
+                ids = {resolve_uid(graph, i) for i in params.get("node_ids") or []}
+                nodes = [n for n in graph["nodes"] if not ids or n["uid"] in ids]
+                keep = {n["uid"] for n in nodes}
+                edges = [e for e in graph["edges"] if e["src"] in keep and e["dst"] in keep]
+                params = {
+                    "view": "unified",
+                    "node_ids": sorted(ids),
+                    "nodes": len(nodes),
+                    "edges": len(edges),
+                    "restricted_sources": graph["restricted_sources"],
+                }
+                snapshot = {"nodes": nodes, "edges": edges}
+        elif snapshot is None:
+            raise _tool_error("INVALID_BODY", f'kind "{kind}" needs a snapshot')
+        row = await _call(
+            evidence.create_evidence(investigation_id, user, title, kind, params, snapshot)
+        )
+        return _out(row)
 
     @server.tool()
     async def upload_artifact(
@@ -788,8 +866,7 @@ def build_server():
         return json.dumps(await list_events(ctx, UUID(investigation_id), None, 500))
 
     # -- prompts (02-design flows A, B and D) ---------------------------------
-    # shortcut: the scripts name only today's tools; add pin_evidence and
-    # get_dossier when F4 creates them.
+    # shortcut: the scripts name only today's tools; add get_dossier with F4.2.
 
     @server.prompt(title="Investigar golpe Pix")
     def investigar_golpe_pix(investigation_id: str) -> str:
@@ -804,7 +881,8 @@ def build_server():
             "run proportional too and report both. Read the exits, the accounts that "
             "retain value and the coverage; `find_paths` shows how the money reached "
             "an exit. Write each hop as a note anchored to the account (`add_note`) "
-            "and cite the trace `method` (rule, Δ, hops, window).",
+            "and cite the trace `method` (rule, Δ, hops, window). Freeze the trace you "
+            "rely on as evidence (`pin_evidence` kind trace, the same arguments).",
             "Look for accounts that receive and forward within hours (mules) and for "
             "people shared across sources (same CPF or device); `lookup_enrichment` "
             "reads the context's side tables (devices, KYC) for an entity.",

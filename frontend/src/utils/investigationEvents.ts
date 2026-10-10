@@ -36,6 +36,7 @@ export function describeEvent(e: InvestigationEvent): string {
     case 'note.created': return `noted on ${p.anchor?.id ?? 'the case'}: “${p.body}”`;
     case 'note.updated': return 'edited a note';
     case 'note.deleted': return 'deleted a note';
+    case 'evidence.created': return `froze evidence “${p.title}” (${p.kind}) · hash ${String(p.sha256 ?? '').slice(0, 8)}`;
     case 'artifact.created': return `uploaded “${p.name}” v1`;
     case 'artifact.version_added': return `uploaded “${p.name}” v${p.version}`;
     case 'artifact.approved': return `approved “${p.name}” v${p.version}`;

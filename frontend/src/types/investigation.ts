@@ -90,6 +90,22 @@ export interface InvestigationNote {
   updated_at?: string | null;
 }
 
+export type EvidenceKind = 'graph_state' | 'trace' | 'table' | 'file';
+
+/** Frozen evidence (F4.1): immutable; the sha256 covers snapshot, params and author. */
+export interface InvestigationEvidence {
+  id: string;
+  title: string;
+  kind: EvidenceKind;
+  sha256: string;
+  /** How it was made: the trace `method` stamp, or the graph view. */
+  params: Record<string, unknown>;
+  created_by: string;
+  created_at?: string | null;
+  /** Only on `GET …/evidence/{eid}`. */
+  snapshot?: unknown;
+}
+
 /** Who wrote an artifact version or a proposal (03 §2.2 `actor`). */
 export interface InvestigationActor {
   kind: 'human' | 'agent';

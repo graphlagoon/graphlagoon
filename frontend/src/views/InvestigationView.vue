@@ -291,6 +291,25 @@ function addNote() {
   }, 'Failed to add note');
 }
 
+/** Freezes what the current tab shows (F4.1): nodes, edges, roles and the selection. */
+function pinGraphEvidence() {
+  const tab = activeTab.value === UNIFIED ? 'Unified view' : sourceTitle(activeTab.value);
+  const nodes = graphStore.nodes.map((n) => ({ node_id: n.node_id, node_type: n.node_type, properties: n.properties ?? {} }));
+  const edges = graphStore.edges.map((e) => ({
+    edge_id: e.edge_id, src: e.src, dst: e.dst, relationship_type: e.relationship_type, properties: e.properties ?? {},
+  }));
+  const ids = new Set(nodes.map((n) => n.node_id));
+  store
+    .pinEvidence({
+      title: `Graph · ${tab} · ${nodes.length} nodes`,
+      kind: 'graph_state',
+      params: { tab: activeTab.value, tab_title: tab, nodes: nodes.length, edges: edges.length, selected: selected.value?.node_id ?? null },
+      snapshot: { nodes, edges, roles: Object.fromEntries(Object.entries(store.roles).filter(([k]) => ids.has(k))) },
+    })
+    .then((row) => row && toast.success(`Evidence pinned · hash ${row.sha256.slice(0, 8)}`))
+    .catch((e) => toast.error(getErrorMessage(e, 'Failed to pin evidence')));
+}
+
 const formatTime = (iso: string) => new Date(iso).toLocaleString();
 </script>
 
@@ -440,6 +459,15 @@ const formatTime = (iso: string) => new Date(iso).toLocaleString();
           <div v-if="view === 'graph'" class="canvas-actions">
             <button class="btn btn-outline btn-sm" data-testid="workspace-layout-btn" @click="showLayout = !showLayout">
               Layout
+            </button>
+            <button
+              v-if="canEdit && graphStore.nodes.length"
+              class="btn btn-outline btn-sm"
+              title="Freeze what this tab shows as evidence (immutable, with a sha256)"
+              data-testid="pin-evidence"
+              @click="pinGraphEvidence"
+            >
+              Pin evidence
             </button>
           </div>
         </section>
