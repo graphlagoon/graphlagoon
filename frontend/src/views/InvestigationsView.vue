@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** The case queue (T1). */
+/** The case queue (05 §2): title + short id, type, status, deadline, assignee, updated, suggestions; counters are filters. */
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useInvestigationStore } from '@/stores/investigation';
@@ -7,7 +7,8 @@ import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { KIND_PRESET_LABELS, PHASE_DAYS, STATUS_LABELS, URGENT_DAYS, caseNumber, deadlineOf } from '@/utils/investigationStatus';
+import { KIND_PRESET_LABELS, STATUS_LABELS, URGENT_DAYS, caseNumber, deadlineElapsed, deadlineOf, deadlineText } from '@/utils/investigationStatus';
+import { formatDate, plural } from '@/utils/format';
 import type { Investigation, InvestigationStatus, KindPreset } from '@/types/investigation';
 
 const router = useRouter();
@@ -17,11 +18,11 @@ const toast = useToast();
 const { can } = usePermissions();
 
 const search = ref('');
-type StatusFilter = 'open' | 'all' | 'urgent' | InvestigationStatus;
+type StatusFilter = 'open' | 'all' | 'urgent' | 'suggested' | InvestigationStatus;
 const statusFilter = ref<StatusFilter>('open');
 const presetFilter = ref('');
 const assigneeFilter = ref('');
-type SortKey = 'title' | 'kind_preset' | 'item_count' | 'status' | 'assignee' | 'deadline' | 'updated_at';
+type SortKey = 'title' | 'kind_preset' | 'item_count' | 'suggested_count' | 'status' | 'assignee' | 'deadline' | 'updated_at';
 const sortKey = ref<SortKey>('updated_at');
 const sortDir = ref<1 | -1>(-1);
 
@@ -43,6 +44,7 @@ const SORTERS: Record<SortKey, (inv: Investigation) => string | number> = {
   title: (i) => i.title.toLowerCase(),
   kind_preset: (i) => presetLabel(i.kind_preset).toLowerCase(),
   item_count: (i) => i.item_count ?? 0,
+  suggested_count: (i) => i.suggested_count ?? 0,
   status: (i) => ['open', 'analysis', 'decided', 'archived'].indexOf(i.status),
   assignee: (i) => responsible(i).toLowerCase(),
   deadline: (i) => deadlineOf(i)?.daysLeft ?? Number.POSITIVE_INFINITY,
@@ -55,7 +57,8 @@ const filtered = computed(() => {
     const f = statusFilter.value;
     if (f === 'open' && (inv.status === 'decided' || inv.status === 'archived')) return false;
     if (f === 'urgent' && !isUrgent(inv)) return false;
-    if (f !== 'open' && f !== 'all' && f !== 'urgent' && inv.status !== f) return false;
+    if (f === 'suggested' && !inv.suggested_count) return false;
+    if (f !== 'open' && f !== 'all' && f !== 'urgent' && f !== 'suggested' && inv.status !== f) return false;
     if (presetFilter.value && inv.kind_preset !== presetFilter.value) return false;
     if (assigneeFilter.value && responsible(inv) !== assigneeFilter.value) return false;
     if (!q) return true;
@@ -77,7 +80,7 @@ function sortBy(key: SortKey) {
   if (sortKey.value === key) sortDir.value = sortDir.value === 1 ? -1 : 1;
   else {
     sortKey.value = key;
-    sortDir.value = key === 'updated_at' || key === 'item_count' ? -1 : 1;
+    sortDir.value = key === 'updated_at' || key === 'item_count' || key === 'suggested_count' ? -1 : 1;
   }
 }
 
@@ -99,25 +102,19 @@ const counters = computed(() => {
   };
 });
 
-/** "shared" when the case is someone else's; "read-only" when it cannot be changed. */
+/** "compartilhado" when the case is someone else's; "só leitura" when it cannot be changed. */
 function accessMark(inv: Investigation): string | null {
   if (inv.owner_email === authStore.email) return null;
-  return inv.has_write_access ? 'shared with you' : 'read-only';
-}
-
-/** Share of the phase already used, for the deadline bar. */
-function elapsed(inv: Investigation) {
-  const d = deadlineOf(inv);
-  return d ? Math.min(100, Math.max(0, ((PHASE_DAYS - d.daysLeft) / PHASE_DAYS) * 100)) : 0;
+  return inv.has_write_access ? 'compartilhado com você' : 'só leitura';
 }
 
 function who(email?: string | null) {
   if (!email) return '—';
-  return email === authStore.email ? 'you' : email;
+  return email === authStore.email ? 'você' : email;
 }
 
 function updated(inv: Investigation) {
-  return inv.updated_at ? new Date(inv.updated_at).toLocaleDateString() : '—';
+  return inv.updated_at ? formatDate(inv.updated_at, { time: false }) : '—';
 }
 
 // New investigation
@@ -143,7 +140,7 @@ async function create() {
     showCreate.value = false;
     router.push(`/investigations/${inv.id}`);
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Failed to create investigation'));
+    toast.error(getErrorMessage(e, 'Não foi possível criar o caso'));
   } finally {
     creating.value = false;
   }
@@ -153,49 +150,50 @@ async function create() {
 <template>
   <div class="container">
     <div class="page-header">
-      <h1>Investigations</h1>
+      <h1>Investigações</h1>
       <button
         v-if="can('investigation.create')"
         class="btn btn-primary"
         data-testid="new-investigation-btn"
         @click="openCreate"
       >
-        + New investigation
+        + Novo caso
       </button>
     </div>
 
     <div class="card filter-card">
       <div class="filter-row">
         <div class="form-group search-group">
-          <label for="inv-search">Search</label>
+          <label for="inv-search">Buscar</label>
           <input
             id="inv-search"
             v-model="search"
             class="form-control"
-            placeholder="case, type, tag, assignee…"
+            placeholder="caso, tipo, tag, responsável…"
             data-testid="investigations-search"
           />
         </div>
         <div class="form-group">
           <label for="inv-status">Status</label>
           <select id="inv-status" v-model="statusFilter" class="form-control" data-testid="investigations-status">
-            <option value="open">Open</option>
-            <option value="all">All</option>
-            <option value="urgent">Deadline under {{ URGENT_DAYS }} days</option>
+            <option value="open">Em andamento</option>
+            <option value="all">Todos</option>
+            <option value="urgent">Prazo em menos de {{ URGENT_DAYS }} dias</option>
+            <option value="suggested">Com sugestões</option>
             <option v-for="(label, key) in STATUS_LABELS" :key="key" :value="key">{{ label }}</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="inv-preset">Type</label>
+          <label for="inv-preset">Tipo</label>
           <select id="inv-preset" v-model="presetFilter" class="form-control" data-testid="investigations-preset">
-            <option value="">All</option>
+            <option value="">Todos</option>
             <option v-for="t in presets" :key="t" :value="t">{{ presetLabel(t) }}</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="inv-assignee">Assignee</label>
+          <label for="inv-assignee">Responsável</label>
           <select id="inv-assignee" v-model="assigneeFilter" class="form-control" data-testid="investigations-assignee">
-            <option value="">Anyone</option>
+            <option value="">Qualquer um</option>
             <option v-for="a in assignees" :key="a" :value="a">{{ who(a) }}</option>
           </select>
         </div>
@@ -204,10 +202,10 @@ async function create() {
 
     <div class="counters">
       <button class="card counter" :class="{ on: statusFilter === 'analysis' }" data-testid="counter-analysis" @click="toggleCounter('analysis')">
-        <strong>{{ counters.analysis }}</strong><span>in analysis</span>
+        <strong>{{ counters.analysis }}</strong><span>em análise</span>
       </button>
       <button class="card counter" :class="{ on: statusFilter === 'open' }" data-testid="counter-open" @click="toggleCounter('open')">
-        <strong>{{ counters.open }}</strong><span>open</span>
+        <strong>{{ counters.open }}</strong><span>abertos</span>
       </button>
       <button
         class="card counter"
@@ -215,34 +213,35 @@ async function create() {
         data-testid="counter-urgent"
         @click="toggleCounter('urgent')"
       >
-        <strong>{{ counters.urgent }}</strong><span>deadline in under 7 days</span>
+        <strong>{{ counters.urgent }}</strong><span>prazo em menos de {{ URGENT_DAYS }} dias</span>
       </button>
       <button class="card counter" :class="{ on: statusFilter === 'decided' }" data-testid="counter-decided" @click="toggleCounter('decided')">
-        <strong>{{ counters.decided }}</strong><span>decided</span>
+        <strong>{{ counters.decided }}</strong><span>decididos</span>
       </button>
-      <div class="card counter" :class="{ warn: counters.suggested > 0 }" data-testid="counter-suggested">
-        <strong>{{ counters.suggested }}</strong><span>suggestions to review</span>
-      </div>
+      <button class="card counter" :class="{ warn: counters.suggested > 0, on: statusFilter === 'suggested' }" data-testid="counter-suggested" @click="toggleCounter('suggested')">
+        <strong>{{ counters.suggested }}</strong><span>sugestões para revisar</span>
+      </button>
     </div>
 
     <div v-if="store.loading" class="loading"></div>
     <div v-else-if="store.error" class="error-message">{{ store.error }}</div>
     <div v-else-if="store.investigations.length === 0" class="empty-state card" data-testid="investigations-empty">
-      <h3>No investigations</h3>
-      <p v-if="can('investigation.create')">Create a case, then add explorations from any context to it.</p>
-      <p v-else>Cases shared with you or assigned to you appear here.</p>
+      <h3>Nenhum caso</h3>
+      <p v-if="can('investigation.create')">Crie um caso e adicione a ele explorações, consultas e arquivos de qualquer context.</p>
+      <p v-else>Os casos compartilhados com você ou sob sua responsabilidade aparecem aqui.</p>
     </div>
     <div v-else class="card table-card">
       <table class="queue" data-testid="investigations-table">
         <thead>
           <tr>
-            <th><button class="sort" data-testid="sort-title" @click="sortBy('title')">Case{{ sortMark('title') }}</button></th>
-            <th><button class="sort" @click="sortBy('kind_preset')">Type{{ sortMark('kind_preset') }}</button></th>
+            <th><button class="sort" data-testid="sort-title" @click="sortBy('title')">Caso{{ sortMark('title') }}</button></th>
+            <th><button class="sort" @click="sortBy('kind_preset')">Tipo{{ sortMark('kind_preset') }}</button></th>
             <th><button class="sort" @click="sortBy('item_count')">Material{{ sortMark('item_count') }}</button></th>
+            <th><button class="sort" data-testid="sort-suggested" @click="sortBy('suggested_count')">Sugestões{{ sortMark('suggested_count') }}</button></th>
             <th><button class="sort" @click="sortBy('status')">Status{{ sortMark('status') }}</button></th>
-            <th><button class="sort" @click="sortBy('assignee')">Assignee{{ sortMark('assignee') }}</button></th>
-            <th><button class="sort" data-testid="sort-deadline" @click="sortBy('deadline')">Deadline{{ sortMark('deadline') }}</button></th>
-            <th><button class="sort" @click="sortBy('updated_at')">Updated{{ sortMark('updated_at') }}</button></th>
+            <th><button class="sort" @click="sortBy('assignee')">Responsável{{ sortMark('assignee') }}</button></th>
+            <th><button class="sort" data-testid="sort-deadline" @click="sortBy('deadline')">Prazo{{ sortMark('deadline') }}</button></th>
+            <th><button class="sort" @click="sortBy('updated_at')">Atualizado{{ sortMark('updated_at') }}</button></th>
           </tr>
         </thead>
         <tbody>
@@ -253,19 +252,20 @@ async function create() {
               <div class="muted">{{ caseNumber(inv.id) }}<template v-if="inv.tags?.length"> · {{ inv.tags.join(', ') }}</template></div>
             </td>
             <td><span class="pill">{{ presetLabel(inv.kind_preset) }}</span></td>
+            <td>{{ plural(inv.item_count ?? 0, 'item', 'itens') }}</td>
             <td>
-              {{ inv.item_count ?? 0 }} item{{ inv.item_count === 1 ? '' : 's' }}
-              <span v-if="inv.suggested_count" class="pill suggested" data-testid="row-suggested">{{ inv.suggested_count }} suggested</span>
+              <span v-if="inv.suggested_count" class="pill suggested" data-testid="row-suggested">{{ plural(inv.suggested_count, 'sugestão', 'sugestões') }}</span>
+              <span v-else class="muted">—</span>
             </td>
             <td><span class="status" :class="`status-${inv.status}`">{{ STATUS_LABELS[inv.status] ?? inv.status }}</span></td>
             <td>{{ who(responsible(inv)) }}</td>
             <td>
               <template v-if="deadlineOf(inv)">
-                <span :class="{ late: deadlineOf(inv)!.daysLeft < URGENT_DAYS }" data-testid="deadline">
-                  {{ deadlineOf(inv)!.phase }} · {{ deadlineOf(inv)!.daysLeft }} d left
+                <span :class="{ late: deadlineOf(inv)!.daysLeft < URGENT_DAYS }" :title="`vence em ${formatDate(deadlineOf(inv)!.dueAt, { time: false })}`" data-testid="deadline">
+                  {{ deadlineText(deadlineOf(inv)!) }}
                 </span>
                 <div class="bar" :class="{ late: deadlineOf(inv)!.daysLeft < URGENT_DAYS }">
-                  <span :style="{ width: `${elapsed(inv)}%` }"></span>
+                  <span :style="{ width: `${deadlineElapsed(deadlineOf(inv)!)}%` }"></span>
                 </div>
               </template>
               <span v-else class="muted">—</span>
@@ -274,39 +274,39 @@ async function create() {
           </tr>
         </tbody>
       </table>
-      <p v-if="filtered.length === 0" class="muted no-match">No case matches the filters.</p>
+      <p v-if="filtered.length === 0" class="muted no-match">Nenhum caso corresponde aos filtros.</p>
     </div>
 
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
       <div class="modal">
         <div class="modal-header">
-          <h2>New investigation</h2>
-          <button class="modal-close" aria-label="Close" @click="showCreate = false">&times;</button>
+          <h2>Novo caso</h2>
+          <button class="modal-close" aria-label="Fechar" @click="showCreate = false">&times;</button>
         </div>
         <form @submit.prevent="create">
           <div class="form-group">
-            <label for="new-inv-title">Title</label>
+            <label for="new-inv-title">Título</label>
             <input id="new-inv-title" v-model="form.title" class="form-control" data-testid="new-investigation-title" required />
           </div>
           <div class="form-group">
-            <label for="new-inv-preset">Type</label>
+            <label for="new-inv-preset">Tipo</label>
             <select id="new-inv-preset" v-model="form.kind_preset" class="form-control" data-testid="new-investigation-preset">
               <option v-for="(label, key) in KIND_PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
             </select>
           </div>
           <div class="form-group">
-            <label for="new-inv-assignee">Assignee e-mail</label>
-            <input id="new-inv-assignee" v-model="form.assignee_email" type="email" class="form-control" placeholder="you, if empty" />
+            <label for="new-inv-assignee">E-mail do responsável</label>
+            <input id="new-inv-assignee" v-model="form.assignee_email" type="email" class="form-control" placeholder="você, se vazio" />
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline" @click="showCreate = false">Cancel</button>
+            <button type="button" class="btn btn-outline" @click="showCreate = false">Cancelar</button>
             <button
               type="submit"
               class="btn btn-primary"
               data-testid="new-investigation-submit"
               :disabled="creating || !form.title.trim()"
             >
-              Create
+              Criar
             </button>
           </div>
         </form>
@@ -377,8 +377,8 @@ async function create() {
 }
 
 .counter.warn {
-  border-color: #c2410c;
-  color: #c2410c;
+  border-color: var(--color-deadline-warn);
+  color: var(--color-deadline-warn);
 }
 
 .table-card {
@@ -448,7 +448,7 @@ async function create() {
 }
 
 .late {
-  color: #c2410c;
+  color: var(--color-deadline-warn);
   font-weight: 600;
 }
 
@@ -464,20 +464,19 @@ async function create() {
 .bar span {
   display: block;
   height: 100%;
-  background: #0f766e;
+  background: var(--color-primary);
 }
 
 .bar.late span {
-  background: #c2410c;
+  background: var(--color-deadline-warn);
 }
 
 .no-match {
   padding: 12px 14px;
 }
 .pill.suggested {
-  margin-left: 6px;
-  background: #fffbeb;
-  border: 1px solid #b45309;
-  color: #b45309;
+  background: var(--color-suggested-bg);
+  border: 1px solid var(--color-suggested-fg);
+  color: var(--color-suggested-fg);
 }
 </style>

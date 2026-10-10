@@ -331,6 +331,8 @@ class InMemoryStore:
         self.org_vocabularies: Dict[str, MemoryOrgVocabulary] = {}
         self.org_library: Dict[str, MemoryOrgLibrary] = {}
         self.agent_tokens: Dict[UUID, MemoryAgentToken] = {}
+        # token id -> monotonic timestamps of its requests in the last minute (rate limit)
+        self.agent_request_times: Dict[UUID, Deque[float]] = {}
         # Audit trail, newest last. Bounded so a long-running dev server
         # cannot grow without limit; the admin area reads it newest first.
         self.usage_logs: Deque[MemoryUsageLog] = deque(maxlen=USAGE_LOG_MAX_ENTRIES)
@@ -926,6 +928,7 @@ class InMemoryStore:
         for table in INVESTIGATION_CHILDREN:
             getattr(self, table).clear()
         self.agent_tokens.clear()
+        self.agent_request_times.clear()
         self.org_vocabularies.clear()
         self.org_library.clear()
         if not keep_usage_logs:

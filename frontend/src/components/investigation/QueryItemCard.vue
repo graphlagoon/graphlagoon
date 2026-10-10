@@ -14,6 +14,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import { queryParameterNames } from '@/composables/useAddToCase';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { formatRelative } from '@/utils/format';
 import type { CaseItem, CaseItemVersion, TableDiff } from '@/types/investigation';
 
 const props = defineProps<{ item: CaseItem; canEdit: boolean }>();
@@ -93,7 +94,7 @@ async function loadHistory() {
 }
 onMounted(loadHistory);
 const runOf = (v: CaseItemVersion) => v.run as { row_count?: number; duration_ms?: number; statement_id?: string; run_by?: string; author_kind?: string } | null | undefined;
-const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR') : '');
+const when = (iso?: string | null) => formatRelative(iso);
 function togglePick(version: number) {
   picked.value = picked.value.includes(version) ? picked.value.filter((v) => v !== version) : [...picked.value, version].slice(-2);
 }
@@ -117,9 +118,9 @@ async function pinRun(version: number) {
 }
 
 // --- dossier flag and promotion --------------------------------------------------
-const inDossier = computed(() => props.item.tags.includes('dossier'));
+const inDossier = computed(() => props.item.tags.includes('dossie'));
 async function toggleDossier() {
-  const tags = inDossier.value ? props.item.tags.filter((t) => t !== 'dossier') : [...props.item.tags, 'dossier'];
+  const tags = inDossier.value ? props.item.tags.filter((t) => t !== 'dossie') : [...props.item.tags, 'dossie'];
   try {
     await store.updateItem(props.item.id, { tags });
   } catch (e) {

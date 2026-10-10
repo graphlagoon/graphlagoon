@@ -8,6 +8,7 @@ import { computed } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useCaseFilters } from '@/stores/caseFilters';
 import { caseNodeLabel, hiddenRawDocumentKeys, shortId } from '@/utils/caseLabels';
+import { formatDate } from '@/utils/format';
 import { describeEvent } from '@/utils/investigationEvents';
 import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { baseSourceId, nodeSourceIds, type UnifiedNode } from '@/utils/unifyGraph';
@@ -49,7 +50,7 @@ const nameOf = (nid: string) => {
   const n = store.unified.nodes.find((x) => x.node_id === nid);
   return n ? caseNodeLabel(n, { templates: store.labelTemplates }) : shortId(nid);
 };
-const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '');
+const fmt = (iso?: string | null) => formatDate(iso);
 </script>
 
 <template>

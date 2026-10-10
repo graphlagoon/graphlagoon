@@ -39,12 +39,12 @@ test.describe('Investigations', () => {
 
     const row = page.getByTestId('investigation-row-inv-1');
     await expect(row).toContainText('Golpe Pix · falsa central');
-    await expect(row).toContainText('In analysis');
-    await expect(row).toContainText('Pix with MED');
+    await expect(row).toContainText('Em análise');
+    await expect(row).toContainText('Pix com MED');
     await expect(row).toContainText('ana@test.com');
-    await expect(row).toContainText('2 items');
-    await expect(row).toContainText('1 suggested');
-    await expect(row).toContainText('analysis · 6 d left');
+    await expect(row).toContainText('2 itens');
+    await expect(row).toContainText('1 sugestão');
+    await expect(row).toContainText('análise · 6 d');
     await expect(page.getByTestId('counter-urgent')).toContainText('1');
     await expect(page.getByTestId('counter-suggested')).toContainText('1');
   });
@@ -122,9 +122,9 @@ test.describe('Investigations', () => {
 
     // status: open → analysis (the select only offers the allowed transitions)
     const status = page.getByTestId('case-status');
-    await expect(status.locator('option')).toHaveText(['Open', 'In analysis', 'Archived']);
+    await expect(status.locator('option')).toHaveText(['Aberto', 'Em análise', 'Arquivado']);
     await status.selectOption('analysis');
-    await expect(page.getByTestId('workspace-deadline')).toContainText('analysis · 90 d left');
+    await expect(page.getByTestId('workspace-deadline')).toContainText('análise · 90 d');
 
     // decide
     await page.getByTestId('case-decide').click();
@@ -401,8 +401,8 @@ test.describe('Investigations', () => {
     await page.getByTestId('hypothesis-link-evidence_for-H1').selectOption('item-1');
     await expect(page.getByTestId('hypothesis-evidence_for-H1')).toContainText('E1 Rastreio FIFO');
     await page.getByTestId('hypothesis-status-H1').selectOption('supported');
-    await expect(page.getByTestId('dossier-indicators')).toContainText('1 supported');
-    await expect(page.getByTestId('dossier-journal')).toContainText('set hypothesis → supported');
+    await expect(page.getByTestId('dossier-indicators')).toContainText('1 sustentada');
+    await expect(page.getByTestId('dossier-journal')).toContainText('set hypothesis → sustentada');
   });
 
   test('decision freezes the dossier; exports download', async ({ authenticatedPage: page }) => {
@@ -412,7 +412,7 @@ test.describe('Investigations', () => {
     await page.getByTestId('decision-action-dict').check();
     await page.getByTestId('decision-rationale').fill('Conta de passagem (E1).');
     await page.getByTestId('decision-record').click();
-    await expect(page.getByTestId('decision-outcome')).toContainText('Communicate to COAF');
+    await expect(page.getByTestId('decision-outcome')).toContainText('Comunicar ao COAF');
     await expect(page.getByTestId('decision-hash')).toContainText('ffff…beef');
     await expect(page.getByTestId('decision-form')).toHaveCount(0);
     await expect(page.getByTestId('hypothesis-input')).toHaveCount(0);

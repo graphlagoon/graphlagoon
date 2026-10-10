@@ -100,6 +100,24 @@ describe('CaseHeader', () => {
     expect(push).toHaveBeenCalledWith('/investigations')
   })
 
+  it('archiving without a decision asks for a reason and sends it with the status (05 §7)', async () => {
+    vi.mocked(api.updateInvestigation).mockImplementation(async (_id, patch) => ({ ...CASE, ...patch }) as any)
+    const { getByTestId, queryByTestId } = mount({ status: 'analysis', deadline: { phase: 'analysis', due_at: now, days_left: 80, total_days: 90 } })
+    expect(getByTestId('workspace-deadline').textContent).toContain('análise · 80 d')
+    expect(getByTestId('workspace-deadline').classList).not.toContain('urgent')
+
+    await fireEvent.update(getByTestId('case-status'), 'archived')
+    expect(api.updateInvestigation).not.toHaveBeenCalled()
+    expect((getByTestId('case-status') as HTMLSelectElement).value).toBe('analysis')
+    expect((getByTestId('archive-reason-confirm') as HTMLButtonElement).disabled).toBe(true)
+    await fireEvent.update(getByTestId('archive-reason-input'), ' duplicado do #0411 ')
+    await fireEvent.click(getByTestId('archive-reason-confirm'))
+    await flushPromises()
+    expect(api.updateInvestigation).toHaveBeenCalledWith(CASE.id, { status: 'archived', archive_reason: 'duplicado do #0411' })
+    expect(queryByTestId('archive-reason')).toBeNull()
+    expect((getByTestId('case-status') as HTMLSelectElement).value).toBe('archived')
+  })
+
   it('is read-only without write access', () => {
     const { getByTestId, queryByTestId } = mount({ has_write_access: false, can_manage: false })
     expect(getByTestId('investigation-title').classList).not.toContain('editable')

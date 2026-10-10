@@ -19,6 +19,7 @@ import { useAddToCase, classifyPaste } from '@/composables/useAddToCase';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { formatDate } from '@/utils/format';
 import type { Exploration, GraphContext } from '@/types/graph';
 import type { CaseItem } from '@/types/investigation';
 
@@ -128,7 +129,7 @@ const contextOf = (id: string): GraphContext | undefined => contextsStore.contex
 const rows = computed(() => [...explorations.value].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? '')));
 const isEmpty = (exp: Exploration) => exp.node_count === 0;
 const nodesText = (exp: Exploration) => (exp.node_count === null || exp.node_count === undefined ? 'grafo salvo' : `${exp.node_count} nós`);
-const when = (iso: string) => new Date(iso).toLocaleDateString();
+const when = (iso: string) => formatDate(iso, { time: false });
 const toAdd = computed(() => checked.value.filter((id) => !inCase.value.has(id)));
 const newContextIds = computed(
   () => new Set(toAdd.value.map((id) => explorations.value.find((e) => e.id === id)?.graph_context_id).filter(Boolean) as string[]),

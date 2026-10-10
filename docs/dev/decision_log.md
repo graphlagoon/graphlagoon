@@ -12606,3 +12606,49 @@ caso é hook (F3 entrega o `QueryConsolePanel` no caso); câmera não entra na v
 org_vocabularies ficam para a UI da F5 (defaults vivem em `cases.py`/`casePresets.ts`); cartão
 mascarado só casa com cartão mascarado. **Public docs:** `docs/guide/investigations.md` (chips,
 barra de análise, grupos/Vínculos, ⚙, dossiê como modo). **No admin-area impact.**
+
+## [2026-10-10 21:30] - Feature Implemented: F6 · Compliance e acabamento
+
+Compliance no fluxo (05 §7) e acabamento (§3 "Legibilidade", §9). **Decisões:** (1) prazos: dias
+por fase vêm de `settings.investigation_deadline_days` (JSON por `kind_preset`, default
+`{"pix_med": {"selection": 45, "analysis": 45}}`), override por caso em `deadline_days` (aceita
+`open` como sinônimo de `selection`, como a drawer da F1 grava); `deadline_of` conta de `alert_at`
+→ `occurred_at` → `created_at` e devolve `total_days` para a barra; tipo sem entrada = sem prazo;
+(2) `archived` só a partir de `decided`, ou com `archive_reason` obrigatório (422
+`ARCHIVE_REASON_REQUIRED`), evento `case.archived_without_decision`, só pessoas; o select do header
+abre o campo de motivo inline; (3) `frozen_hash` (já canônico: JSON ordenado de caso+decisão,
+versões fixadas e diário até a decisão) agora é recomputado em todo export como
+`integrity: {frozen_hash, verified}`; pacote ganha `dossier` (última execução das tabelas com tag
+`dossie`), CSV ganha seção `dossier` (via `csv_safe`), SIMBA/Siscoaf carregam a verificação;
+`QueryItemCard` gravava a tag `dossier` (bug): agora `dossie`, como store e dossiê; (4) retenção:
+`delete_investigation` apaga as linhas e depois `delete_prefix("{id}/")` no `investigation_storage`
+(versões e extrações de texto); (5) rate limit por token num store compartilhado: `usage_logs`
+(uma linha `agent.request` por requisição, contagem na janela de 60 s) em Postgres, dict no
+`InMemoryStore` em memória; `auth._agent_request_times` vira proxy só com `clear()` porque as
+fixtures das suítes da F5 ainda o chamam (shortcut: remover quando as fixtures mudarem); (6) tokens:
+`--color-primary: #0f766e` (`#14b8a6` só em `--color-primary-accent` para bordas/foco),
+`--color-suggested-bg/fg`, `--color-agent`, `--color-deadline-warn: #9a3412`; `utils/format.ts`
+(`formatDate` dd/mm/aaaa HH:mm, `formatMoney` R$ 1.234,56, `formatRelative` "há 2 h", `plural`)
+substitui `toLocaleString` nos componentes do caso; `utils/investigationStatus.ts` em pt-BR
+(status, presets, decisão, hipótese, kinds de item e anotação, fases, `caseTitle`,
+`deadlineText/Elapsed`); strings dos componentes que possuo em pt-BR; (7) journal: filtro por
+tipo de evento (família antes do ponto) e "Desde a minha última visita" (localStorage
+`gl:case:{id}:lastVisit`, linhas novas marcadas, divisor); (8) fila: coluna "Sugestões" ordenável,
+contador de sugestões vira filtro, marcador compartilhado/só leitura mantido.
+**Não feito:** sentenças do `describeEvent` seguem em inglês (fora dos enums); teste do caminho
+Postgres do rate limit (sem aiosqlite); `SwimlaneTimeline` só troca o locale para `pt-BR`.
+**Arquivos:** api `config.py`, `routers/admin_registry.py`, `services/{cases,investigation_exports}.py`,
+`middleware/auth.py`, `db/memory_store.py` (atributo), `models/schemas.py` (`archive_reason`),
+`dev/seed_investigations.py` (motivo ao arquivar); frontend `utils/{format,investigationStatus}.ts`,
+`assets/main.css`, `components/investigation/{CaseHeader,CaseTimeline,CaseDossier,CaseItemsPanel,
+SelectionInspector,QueryItemCard,AddItemsPopover,EntityPage,PathBar,CaseFilterChips,
+SwimlaneTimeline}.vue`, `views/InvestigationsView.vue`, `types/investigation.ts`,
+`e2e/tests/investigations.spec.ts` (só textos). **Testes:** pytest `test_cases.py` (prazos com
+relógio injetável e settings, regra de arquivamento, delete apaga blobs em storage temporário,
+retenção, rate limit no store), novo `test_investigation_exports.py` (fixadas + dossiê,
+reprodutibilidade e adulteração de evento/versão, CSV seguro), `test_admin_registry.py`,
+`test_agent_registry.py` e suítes de agentes/casos verdes; vitest `format`, `investigationStatus`,
+`CaseTimeline` (novos), `CaseHeader`, `InvestigationsView`, `CaseDossier` e demais de
+`components/investigation` verdes; `vue-tsc` limpo. **Docs:** `investigations.md` (Deadlines,
+Decision/archive/retention, Exports), `configuration.md` (novo setting, rate limit). **Admin
+area:** `investigation_deadline_days` classificado `public`.

@@ -34,11 +34,11 @@ describe('InvestigationsView', () => {
     window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
     const { getByTestId, queryByTestId } = await renderView()
     const row = getByTestId('investigation-row-aaaaaaaa-1')
-    expect(row.textContent).toContain('In analysis')
+    expect(row.textContent).toContain('Em análise')
     expect(row.textContent).toContain('ana@x.com')
-    expect(row.textContent).toContain('2 items')
-    expect(row.textContent).toContain('1 suggested')
-    expect(row.textContent).toContain('analysis · 45 d left')
+    expect(row.textContent).toContain('2 itens')
+    expect(row.textContent).toContain('1 sugestão')
+    expect(row.textContent).toContain('análise · 45 d')
     // F4.4: the server's deadline; under 7 days it turns orange and counts as urgent.
     const urgent = getByTestId('investigation-row-cccccccc-3')
     expect(urgent.querySelector('[data-testid="deadline"]')!.classList).toContain('late')
@@ -53,7 +53,7 @@ describe('InvestigationsView', () => {
     localStorage.setItem('userEmail', 'me@x.com')
     const { getByTestId, queryByTestId, container } = await renderView()
     const ids = () => [...container.querySelectorAll('tbody tr')].map((r) => r.getAttribute('data-testid'))
-    expect(getByTestId('investigation-row-dddddddd-4').querySelector('[data-testid="access-mark"]')!.textContent).toContain('read-only')
+    expect(getByTestId('investigation-row-dddddddd-4').querySelector('[data-testid="access-mark"]')!.textContent).toContain('só leitura')
     expect(getByTestId('investigation-row-aaaaaaaa-1').querySelector('[data-testid="access-mark"]')).toBeNull()
 
     await fireEvent.update(getByTestId('investigations-preset'), 'lavagem')
@@ -75,6 +75,24 @@ describe('InvestigationsView', () => {
     await fireEvent.click(getByTestId('counter-decided'))
     expect(ids()).toEqual([])
     expect(queryByTestId('investigation-row-bbbbbbbb-2')).toBeNull()
+    // F6: the suggestions counter filters too, and the column sorts.
+    await fireEvent.click(getByTestId('counter-suggested'))
+    expect(ids()).toEqual(['investigation-row-aaaaaaaa-1'])
+    await fireEvent.click(getByTestId('counter-suggested'))
+    await fireEvent.click(getByTestId('sort-suggested'))
+    expect(ids()[0]).toBe('investigation-row-aaaaaaaa-1')
+  })
+
+  it('shows the deadline bar from the server phases and pt-BR dates', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
+    vi.mocked(api.getInvestigations).mockResolvedValue([
+      { ...CASES[1], updated_at: '2026-10-09T15:04:00', deadline: { phase: 'open', due_at: '2026-10-15T00:00:00', days_left: 6, total_days: 45 } },
+    ] as any)
+    const { getByTestId } = await renderView()
+    const row = getByTestId('investigation-row-cccccccc-3')
+    expect(row.textContent).toContain('seleção · 6 d')
+    expect(row.textContent).toContain('09/10/2026')
+    expect((row.querySelector('.bar span') as HTMLElement).style.width).toBe(`${((45 - 6) / 45) * 100}%`)
   })
 
   it('hides "New investigation" without investigation.create', async () => {

@@ -1,7 +1,8 @@
 """Case exports (05 §7): ``GET …/export?format=``.
 
-- ``json``: the package (case, decision, frozen hash and whether it still
-  verifies, items with their pinned versions = the evidence, annotations,
+- ``json``: the package (case, decision, ``integrity`` = the frozen hash
+  recomputed and whether it still verifies, items with their pinned versions =
+  the evidence, the tables and query runs flagged for the dossier, annotations,
   journal);
 - ``csv``: the same record flattened, one row per item, through the M4-safe
   writer (``utils.csv_safe``);
@@ -33,6 +34,7 @@ from graphlagoon.services.file_mapping_presets import SIMBA_V31
 from graphlagoon.utils.csv_safe import to_csv
 
 FORMATS = ("json", "csv", "simba", "siscoaf")
+DOSSIER_TAG = "dossie"  # the frontend's "usar no dossiê" flag on an item
 
 
 @dataclass
@@ -65,6 +67,13 @@ async def package(investigation_id: UUID, user_email: str) -> dict:
         for i in items
         for v in i["pinned"]
     ]
+    # "Usar no dossiê": the latest run/version of the tables flagged for the report.
+    dossier = [
+        {"item_id": i["id"], "title": i["title"], "kind": i["kind"], "subkind": i["subkind"], **i["latest"]}
+        for i in items
+        if DOSSIER_TAG in i["tags"] and i["latest"]
+    ]
+    verified = await service.verify_frozen_hash(investigation_id, user_email)
     trace_methods = [
         {"item_id": i["id"], "title": i["title"], "method": (i["provenance"] or {}).get("params")}
         for i in items
@@ -85,12 +94,15 @@ async def package(investigation_id: UUID, user_email: str) -> dict:
                 )
             },
             "frozen_hash": case["frozen_hash"],
-            "frozen_hash_valid": await service.verify_frozen_hash(investigation_id, user_email),
+            "frozen_hash_valid": verified,
+            # None while undecided: there is nothing to verify yet.
+            "integrity": {"frozen_hash": case["frozen_hash"], "verified": verified},
             "roles": roles,
             "hypotheses": [a for a in annotations if a["kind"] == "hypothesis"],
             "annotations": annotations,
             "items": items,
             "evidence": evidence,
+            "dossier": dossier,
             "trace_methods": trace_methods,
             "events": events,
         }
@@ -116,6 +128,10 @@ def package_csv(p: dict) -> str:
     rows += [
         ["evidence", e["item_id"], e["title"], f"v{e['version']}", e["sha256"], e.get("pin_label") or "", e.get("pinned_by"), e.get("pinned_at")]
         for e in p["evidence"]
+    ]
+    rows += [
+        ["dossier", d["item_id"], d["title"], f"v{d['version']}", d["sha256"], _canon(d.get("run") or {}), d.get("created_by"), d.get("created_at")]
+        for d in p["dossier"]
     ]
     rows += [
         ["annotation", a["id"], "", a["kind"], "", _canon({"targets": a["targets"], "value": a["value"], "status": a["status"]}),
@@ -273,7 +289,9 @@ async def simba_zip(investigation_id: UUID, user_email: str, p: dict) -> bytes:
         "skipped_without_account": skipped,
         "restricted_sources": graph["restricted_sources"],
         "sha256": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
+        "frozen_hash_verified": p["integrity"]["verified"],
         "evidence": [{k: e[k] for k in ("title", "version", "sha256")} for e in p["evidence"]],
+        "dossier": [{k: d[k] for k in ("title", "version", "sha256")} for d in p["dossier"]],
         "trace_methods": p["trace_methods"],
     }
     files["MANIFEST.json"] = _dumps(manifest)
@@ -336,9 +354,14 @@ async def siscoaf_summary(investigation_id: UUID, user_email: str, p: dict) -> d
             {"label": f"E{i}", "title": e["title"], "kind": e["kind"], "version": e["version"], "sha256": e["sha256"]}
             for i, e in enumerate(p["evidence"], 1)
         ],
+        "tables": [
+            {"title": d["title"], "version": d["version"], "sha256": d["sha256"], "rows": (d.get("run") or {}).get("row_count")}
+            for d in p["dossier"]
+        ],
         "trace_methods": p["trace_methods"],
         "frozen_hash": p["frozen_hash"],
         "frozen_hash_valid": p["frozen_hash_valid"],
+        "integrity": p["integrity"],
         "restricted_sources": graph["restricted_sources"],
         "exported_at": p["exported_at"],
         "exported_by": p["exported_by"],

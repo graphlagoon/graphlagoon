@@ -438,7 +438,7 @@ and masking: [AI Agents (MCP)](./agents-mcp.md).
 | `GRAPH_LAGOON_AGENTS_ENABLED` | `false` | Off: the token routes return 404 and agent tokens are rejected. |
 | `GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS` | `90` | Maximum validity of a token. |
 | `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA` | `false` | Let agents read CPF, CNPJ and account numbers unmasked. |
-| `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per token (per server process). |
+| `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per token, counted in a store every worker shares: the `usage_logs` table (one `agent.request` line per request) with a database, the in-memory store otherwise. |
 
 ## Investigation storage
 
@@ -454,6 +454,7 @@ while their sha256 is computed.
 | `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` | `209715200` | Maximum size of one file uploaded to a case (200 MB); larger uploads get 413. |
 | `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Ceiling of edges in a case's working graph in the browser: a graph built from a case file keeps only this many edges. |
 | `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a decided case is retained: it cannot be deleted before then, except by a superuser with a reason. |
+| `GRAPH_LAGOON_INVESTIGATION_DEADLINE_DAYS` | `{"pix_med": {"selection": 45, "analysis": 45}}` | Deadline phases per case type, in days from the alert (JSON `{preset: {selection, analysis}}`). A type without an entry has no deadline; a case may override the days in its settings. |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` | `500` | Node keys per enrichment lookup (a context's enrichment tables). |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` | `5000` | Rows one enrichment lookup returns; more are cut and flagged `truncated`. |
 

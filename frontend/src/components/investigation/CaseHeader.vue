@@ -16,8 +16,11 @@ import {
   STATUS_TRANSITIONS,
   URGENT_DAYS,
   caseNumber,
+  deadlineElapsed,
   deadlineOf,
+  deadlineText,
 } from '@/utils/investigationStatus';
+import { formatDate } from '@/utils/format';
 import type { InvestigationStatus, KindPreset, UpdateInvestigationRequest } from '@/types/investigation';
 import ShareDialog from '@/components/investigation/ShareDialog.vue';
 
@@ -50,6 +53,9 @@ const showShare = ref(false);
 const showMenu = ref(false);
 const confirmDelete = ref(false);
 const busy = ref(false);
+/** Open while archiving a case that has no decision: the reason is required (05 §7). */
+const archiveReason = ref<string | null>(null);
+const reasonInput = ref<HTMLTextAreaElement | null>(null);
 
 async function save(patch: UpdateInvestigationRequest, fallback: string) {
   busy.value = true;
@@ -77,7 +83,7 @@ async function commit() {
   const before = inv.value[field] ?? '';
   if (value === before) return;
   if (field === 'title' && !value) return;
-  await save({ [field]: value || null } as UpdateInvestigationRequest, `Failed to update the ${field}`);
+  await save({ [field]: value || null } as UpdateInvestigationRequest, 'Não foi possível salvar a alteração');
 }
 
 function cancel() {
@@ -85,9 +91,23 @@ function cancel() {
 }
 
 function onStatus(event: Event) {
-  const status = (event.target as HTMLSelectElement).value as InvestigationStatus;
+  const select = event.target as HTMLSelectElement;
+  const status = select.value as InvestigationStatus;
   if (status === inv.value.status || status === 'decided') return;
-  void save({ status }, 'Failed to change the status');
+  if (status === 'archived' && inv.value.status !== 'decided') {
+    select.value = inv.value.status; // the case moves only after the reason is given
+    archiveReason.value = '';
+    void nextTick(() => reasonInput.value?.focus());
+    return;
+  }
+  void save({ status }, 'Não foi possível mudar o status');
+}
+
+async function archiveWithoutDecision() {
+  const reason = (archiveReason.value ?? '').trim();
+  if (!reason) return;
+  await save({ status: 'archived', archive_reason: reason }, 'Não foi possível arquivar o caso');
+  archiveReason.value = null;
 }
 
 async function reopen() {
@@ -95,9 +115,9 @@ async function reopen() {
   busy.value = true;
   try {
     await store.reopenInvestigation();
-    toast.success('Case reopened: the decision stays in the journal');
+    toast.success('Caso reaberto: a decisão fica no diário');
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Failed to reopen the case'));
+    toast.error(getErrorMessage(e, 'Não foi possível reabrir o caso'));
   } finally {
     busy.value = false;
   }
@@ -107,10 +127,10 @@ async function remove() {
   busy.value = true;
   try {
     await store.deleteInvestigation();
-    toast.success('Case deleted');
+    toast.success('Caso excluído');
     router.push('/investigations');
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Failed to delete the case'));
+    toast.error(getErrorMessage(e, 'Não foi possível excluir o caso'));
   } finally {
     busy.value = false;
     confirmDelete.value = false;
@@ -120,7 +140,7 @@ async function remove() {
 
 function onPreset(event: Event) {
   const kind_preset = (event.target as HTMLSelectElement).value as KindPreset;
-  if (kind_preset !== inv.value.kind_preset) void save({ kind_preset }, 'Failed to change the case type');
+  if (kind_preset !== inv.value.kind_preset) void save({ kind_preset }, 'Não foi possível mudar o tipo do caso');
 }
 
 function toggleMenu() {
@@ -132,7 +152,7 @@ function toggleMenu() {
 <template>
   <header v-if="store.current" class="case-header" data-testid="case-header">
     <div class="row">
-      <RouterLink to="/investigations" class="back">← Queue</RouterLink>
+      <RouterLink to="/investigations" class="back">← Fila</RouterLink>
       <span class="number" :title="inv.id">{{ caseNumber(inv.id) }}</span>
 
       <input
@@ -148,7 +168,7 @@ function toggleMenu() {
       <h1
         v-else
         :class="{ editable: canEdit }"
-        :title="canEdit ? 'Click to rename' : undefined"
+        :title="canEdit ? 'Clique para renomear' : undefined"
         data-testid="investigation-title"
         @click="edit('title')"
       >
@@ -169,14 +189,30 @@ function toggleMenu() {
 
       <span
         v-if="deadline"
-        class="badge"
+        class="badge deadline"
         :class="{ urgent: deadline.daysLeft < URGENT_DAYS }"
+        :title="`Prazo da fase: ${formatDate(deadline.dueAt, { time: false })} (${deadline.totalDays} dias desde o alerta)`"
         data-testid="workspace-deadline"
       >
-        ⏱ {{ deadline.phase }} · {{ deadline.daysLeft }} d left
+        ⏱ {{ deadlineText(deadline) }}
+        <span class="bar"><span :style="{ width: `${deadlineElapsed(deadline)}%` }"></span></span>
       </span>
 
-      <span v-if="suggested" class="badge suggested" data-testid="suggested-badge">● {{ suggested }} {{ suggested === 1 ? 'suggestion' : 'suggestions' }}</span>
+      <span v-if="archiveReason !== null" class="archive-reason" data-testid="archive-reason">
+        <textarea
+          ref="reasonInput"
+          v-model="archiveReason"
+          rows="2"
+          class="form-control"
+          placeholder="Motivo para arquivar sem decisão (obrigatório)"
+          data-testid="archive-reason-input"
+          @keydown.esc.prevent="archiveReason = null"
+        ></textarea>
+        <button class="btn btn-primary btn-sm" :disabled="busy || !archiveReason.trim()" data-testid="archive-reason-confirm" @click="archiveWithoutDecision">Arquivar sem decisão</button>
+        <button class="btn btn-outline btn-sm" @click="archiveReason = null">Cancelar</button>
+      </span>
+
+      <span v-if="suggested" class="badge suggested" data-testid="suggested-badge">● {{ suggested }} {{ suggested === 1 ? 'sugestão' : 'sugestões' }}</span>
 
       <span class="actions">
         <RouterLink
@@ -184,7 +220,7 @@ function toggleMenu() {
           class="btn btn-outline btn-sm"
           data-testid="dossier-link"
         >
-          {{ props.mode === 'dossie' ? 'Canvas' : 'Dossier' }}
+          {{ props.mode === 'dossie' ? 'Canvas' : 'Dossiê' }}
         </RouterLink>
         <button
           v-if="canEdit"
@@ -192,23 +228,23 @@ function toggleMenu() {
           data-testid="case-decide"
           @click="emit('decide')"
         >
-          Decide
+          Decidir
         </button>
-        <button class="btn btn-outline btn-sm" title="Case settings" aria-label="Case settings" data-testid="case-settings-btn" @click="emit('settings')">⚙</button>
+        <button class="btn btn-outline btn-sm" title="Preferências do caso" aria-label="Preferências do caso" data-testid="case-settings-btn" @click="emit('settings')">⚙</button>
         <button
           v-if="inv.can_manage"
           class="btn btn-outline btn-sm"
           data-testid="case-share"
           @click="showShare = true"
         >
-          Share<template v-if="inv.shared_with.length"> · {{ inv.shared_with.length }}</template>
+          Compartilhar<template v-if="inv.shared_with.length"> · {{ inv.shared_with.length }}</template>
         </button>
         <span class="menu-wrap">
-          <button class="btn btn-outline btn-sm" aria-label="More actions" data-testid="case-menu" @click="toggleMenu">
+          <button class="btn btn-outline btn-sm" aria-label="Mais ações" data-testid="case-menu" @click="toggleMenu">
             …
           </button>
           <div v-if="showMenu" class="menu" data-testid="case-menu-list">
-            <RouterLink to="/settings/agents" class="menu-item" data-testid="agents-link">Agent tokens…</RouterLink>
+            <RouterLink to="/settings/agents" class="menu-item" data-testid="agents-link">Tokens de agente…</RouterLink>
             <button
               v-if="inv.status === 'decided' && inv.has_write_access"
               class="menu-item"
@@ -216,16 +252,16 @@ function toggleMenu() {
               data-testid="case-reopen"
               @click="reopen"
             >
-              Reopen (back to analysis)
+              Reabrir (volta para análise)
             </button>
             <template v-if="inv.can_manage">
               <button v-if="!confirmDelete" class="menu-item danger" data-testid="case-delete" @click="confirmDelete = true">
-                Delete case…
+                Excluir caso…
               </button>
               <div v-else class="confirm" data-testid="case-delete-confirm">
-                <span>Delete “{{ inv.title }}” and everything in it?</span>
-                <button class="btn btn-danger btn-sm" :disabled="busy" data-testid="case-delete-yes" @click="remove">Delete</button>
-                <button class="btn btn-outline btn-sm" @click="confirmDelete = false">Keep</button>
+                <span>Excluir “{{ inv.title }}” e tudo que há nele?</span>
+                <button class="btn btn-danger btn-sm" :disabled="busy" data-testid="case-delete-yes" @click="remove">Excluir</button>
+                <button class="btn btn-outline btn-sm" @click="confirmDelete = false">Manter</button>
               </div>
             </template>
           </div>
@@ -235,13 +271,13 @@ function toggleMenu() {
 
     <div class="row meta">
       <span class="field">
-        <span class="muted">Type</span>
+        <span class="muted">Tipo</span>
         <select class="chip" :value="inv.kind_preset" :disabled="!canEdit" data-testid="case-preset" @change="onPreset">
           <option v-for="(label, key) in KIND_PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
         </select>
       </span>
       <span class="field">
-        <span class="muted">Assignee</span>
+        <span class="muted">Responsável</span>
         <input
           v-if="editing === 'assignee_email'"
           ref="fieldInput"
@@ -249,7 +285,7 @@ function toggleMenu() {
           type="email"
           class="form-control meta-input"
           data-testid="case-assignee-input"
-          placeholder="person@company.com"
+          placeholder="pessoa@empresa.com"
           @keydown.enter.prevent="commit"
           @keydown.esc.prevent="cancel"
           @blur="commit"
@@ -267,13 +303,13 @@ function toggleMenu() {
           rows="2"
           class="form-control meta-input"
           data-testid="case-description-input"
-          placeholder="What this case is about"
+          placeholder="Do que trata este caso"
           @keydown.esc.prevent="cancel"
           @keydown.enter.exact.prevent="commit"
           @blur="commit"
         ></textarea>
         <button v-else class="chip plain" :disabled="!canEdit" data-testid="case-description" @click="edit('description')">
-          {{ inv.description || (canEdit ? 'Add a description…' : '') }}
+          {{ inv.description || (canEdit ? 'Adicionar descrição…' : '') }}
         </button>
       </span>
     </div>
@@ -363,10 +399,48 @@ h1.editable:hover {
   color: var(--color-primary);
 }
 
+.badge.deadline {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+}
+
 .badge.urgent {
-  background: #c2410c;
+  background: var(--color-deadline-warn);
   color: #fff;
   font-weight: 600;
+}
+
+.bar {
+  display: block;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 45%);
+  overflow: hidden;
+}
+
+.badge:not(.urgent) .bar {
+  background: var(--color-primary-accent-subtle);
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  background: currentcolor;
+}
+
+.archive-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.archive-reason textarea {
+  min-width: 260px;
+  font-size: 12px;
+  padding: 2px 6px;
 }
 
 .actions {
@@ -465,8 +539,8 @@ h1.editable:hover {
   min-width: 200px;
 }
 .badge.suggested {
-  background: #fffbeb;
-  border: 1px solid #b45309;
-  color: #b45309;
+  background: var(--color-suggested-bg);
+  border: 1px solid var(--color-suggested-fg);
+  color: var(--color-suggested-fg);
 }
 </style>

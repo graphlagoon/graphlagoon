@@ -80,7 +80,14 @@ def test_english_enums_transitions_and_reopen(client):
     r = client.patch(url, json={"status": "decided"}, headers=h(OWNER))
     assert r.status_code == 422  # only the decision route reaches "decided"
     assert client.patch(url, json={"status": "analysis"}, headers=h(OWNER)).json()["status"] == "analysis"
-    assert client.patch(url, json={"status": "archived"}, headers=h(OWNER)).json()["status"] == "archived"
+    # 05 §7: without a decision, archiving needs an explicit reason (journaled).
+    r = client.patch(url, json={"status": "archived"}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "ARCHIVE_REASON_REQUIRED"
+    r = client.patch(url, json={"status": "archived", "archive_reason": "duplicado do #0411"}, headers=h(OWNER))
+    assert r.status_code == 200 and r.json()["status"] == "archived"
+    events = client.get(f"{url}/events", headers=h(OWNER)).json()
+    assert [e["kind"] for e in events][-2:] == ["case.archived_without_decision", "case.updated"]
+    assert events[-2]["payload"] == {"reason": "duplicado do #0411"}
     r = client.patch(url, json={"status": "open"}, headers=h(OWNER))
     assert r.status_code == 409 and r.json()["detail"]["error"]["code"] == "INVALID_STATUS_TRANSITION"
     assert client.patch(url, json={"status": "analysis"}, headers=h(OWNER)).status_code == 200
@@ -100,16 +107,36 @@ def test_deadline_only_for_presets_with_phases(client, monkeypatch):
     alert = datetime(2026, 1, 1)
     monkeypatch.setattr(service, "_clock", lambda: alert + timedelta(days=10))
     pix = _case(client, kind_preset="pix_med", alert_at=alert.isoformat())
-    assert pix["deadline"]["phase"] == "open" and pix["deadline"]["days_left"] == 35
+    assert pix["deadline"] == {"phase": "open", "due_at": "2026-02-15T00:00:00", "days_left": 35, "total_days": 45}
     url = f"/api/investigations/{pix['id']}"
     analysis = client.patch(url, json={"status": "analysis"}, headers=h(OWNER)).json()
-    assert analysis["deadline"]["days_left"] == 80  # 45 + 45 from the alert
+    assert (analysis["deadline"]["days_left"], analysis["deadline"]["total_days"]) == (80, 90)  # 45 + 45
     custom = client.patch(url, json={"deadline_days": {"open": 10, "analysis": 5}}, headers=h(OWNER)).json()
     assert custom["deadline"]["days_left"] == 5
     credito = _case(client, kind_preset="credito")
     assert credito["deadline"] is None
-    custom = _case(client, kind_preset="credito", alert_at=alert.isoformat(), deadline_days={"open": 30})
+    custom = _case(client, kind_preset="credito", alert_at=alert.isoformat(), deadline_days={"selection": 30})
     assert custom["deadline"]["days_left"] == 20
+    # alert_at, else occurred_at, else created_at
+    occurred = _case(client, kind_preset="pix_med", occurred_at=(alert - timedelta(days=5)).isoformat())
+    assert occurred["deadline"]["days_left"] == 30
+
+
+def test_deadline_days_come_from_settings(client, monkeypatch):
+    monkeypatch.setenv(
+        "GRAPH_LAGOON_INVESTIGATION_DEADLINE_DAYS",
+        '{"pix_med": {"selection": 10, "analysis": 5}, "credito": {"selection": 30}}',
+    )
+    get_settings.cache_clear()
+    alert = datetime(2026, 1, 1)
+    monkeypatch.setattr(service, "_clock", lambda: alert + timedelta(days=2))
+    pix = _case(client, kind_preset="pix_med", alert_at=alert.isoformat())
+    assert (pix["deadline"]["days_left"], pix["deadline"]["total_days"]) == (8, 10)
+    credito = _case(client, kind_preset="credito", alert_at=alert.isoformat())
+    assert credito["deadline"]["days_left"] == 28
+    assert _case(client, kind_preset="lavagem", alert_at=alert.isoformat())["deadline"] is None
+    queue = {i["id"]: i for i in client.get("/api/investigations", headers=h(OWNER)).json()}
+    assert queue[credito["id"]]["deadline"]["total_days"] == 30
 
 
 def test_share_roles_assignee_and_access(client):
@@ -209,12 +236,59 @@ def test_decision_hash_is_reproducible_and_the_export_verifies_it(client):
     assert {"investigation.decide", "investigation.export"} <= set(actions)
 
 
-def test_superuser_deletes_a_retained_case_with_a_reason(client):
+def _blobs(tmp_path, inv_id):
+    root = tmp_path / inv_id
+    return sorted(p.name for p in root.rglob("*") if p.is_file()) if root.exists() else []
+
+
+def test_delete_removes_the_case_blobs(client, tmp_path):
     inv = _case(client)
     url = f"/api/investigations/{inv['id']}"
+    r = client.post(
+        f"{url}/items",
+        json={"kind": "document", "subkind": "markdown", "title": "KYC", "content": "# KYC\nrenda 1800"},
+        headers=h(OWNER),
+    )
+    assert r.status_code == 201, r.text
+    names = _blobs(tmp_path, inv["id"])
+    assert len(names) == 2 and any(n.endswith(".txt") for n in names)  # version bytes + text extraction
+    assert client.delete(url, headers=h(OWNER)).status_code == 200
+    assert _blobs(tmp_path, inv["id"]) == [] and not (tmp_path / inv["id"]).exists()
+    assert client.get(url, headers=h(OWNER)).status_code == 404
+
+
+def test_superuser_deletes_a_retained_case_with_a_reason(client, tmp_path, monkeypatch):
+    inv = _case(client)
+    url = f"/api/investigations/{inv['id']}"
+    client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": "x"}, headers=h(OWNER))
     client.post(f"{url}/decision", json=DECISION, headers=h(OWNER))
     assert client.delete(url, headers=h(SUPERUSER)).status_code == 409
+    assert client.delete(f"{url}?reason=audit", headers=h(OWNER)).status_code == 409  # owner is not enough
+    assert _blobs(tmp_path, inv["id"]), "the retained case keeps its blobs"
+    # Past the retention period anyone who manages the case may delete it.
+    years = get_settings().investigation_retention_years
+    monkeypatch.setattr(service, "_clock", lambda: datetime.now() + timedelta(days=366 * years))
+    assert service.under_retention(InMemoryStore.get_instance().get_investigation(UUID(inv["id"]))) is False
+    monkeypatch.setattr(service, "_clock", datetime.now)
     assert client.delete(f"{url}?reason=audit", headers=h(SUPERUSER)).status_code == 200
+    assert _blobs(tmp_path, inv["id"]) == []
+    assert InMemoryStore.get_instance().usage_logs[-1].log_metadata["reason"] == "audit"
+
+
+def test_agent_rate_limit_counts_in_the_shared_store(client, monkeypatch):
+    monkeypatch.setenv("GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE", "2")
+    get_settings.cache_clear()
+    inv = _case(client)
+    url = f"/api/investigations/{inv['id']}"
+    created = client.post("/api/agent-tokens", json={"name": "claude"}, headers=h(OWNER)).json()
+    agent = {"Authorization": f"Bearer {created['token']}"}
+    assert [client.get(url, headers=agent).status_code for _ in range(3)] == [200, 200, 429]
+    windows = InMemoryStore.get_instance().agent_request_times
+    assert list(windows) == [UUID(created["id"])] and len(windows[UUID(created["id"])]) == 2
+    # The window is the store's, not a per-process dict: a fresh store starts clean.
+    InMemoryStore.reset()
+    assert InMemoryStore.get_instance().agent_request_times == {}
+    assert not hasattr(auth, "_agent_request_times") or not isinstance(auth._agent_request_times, dict)
 
 
 # ---------------------------------------------------------------------------

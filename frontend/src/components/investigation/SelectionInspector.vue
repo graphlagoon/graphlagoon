@@ -13,6 +13,8 @@ import { useAuthStore } from '@/stores/auth';
 import { useCaseFilters } from '@/stores/caseFilters';
 import { useToast } from '@/composables/useToast';
 import { caseNodeLabel, hiddenRawDocumentKeys, shortId } from '@/utils/caseLabels';
+import { formatDate } from '@/utils/format';
+import { itemKindLabel } from '@/utils/investigationStatus';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { GROUP_COLORS } from '@/utils/casePresets';
@@ -249,7 +251,7 @@ async function openAsTable() {
   }, 'Failed to read the item');
 }
 
-const formatTime = (iso: string) => new Date(iso).toLocaleString();
+const formatTime = (iso: string) => formatDate(iso);
 const props2 = (row: Record<string, unknown>) => Object.keys(row);
 </script>
 
@@ -391,7 +393,7 @@ const props2 = (row: Record<string, unknown>) => Object.keys(row);
       </dl>
       <div v-else-if="inspectorTab === 'items'" class="notes" data-testid="inspector-items">
         <button v-for="i in citingItems" :key="i.id" class="item-link" @click="emit('select-item', i)">
-          <span class="muted">{{ i.kind }}/{{ i.subkind }}</span> {{ i.title }}
+          <span class="muted">{{ itemKindLabel(i.kind) }}/{{ i.subkind }}</span> {{ i.title }}
         </button>
         <p v-if="!citingItems.length" class="muted">No item cites this entity yet.</p>
       </div>
@@ -423,7 +425,7 @@ const props2 = (row: Record<string, unknown>) => Object.keys(row);
 
     <!-- item -->
     <template v-else-if="item">
-      <div class="muted">{{ item.kind }} / {{ item.subkind }}<template v-if="item.provenance?.tool"> · {{ item.provenance.tool }}</template></div>
+      <div class="muted">{{ itemKindLabel(item.kind) }} / {{ item.subkind }}<template v-if="item.provenance?.tool"> · {{ item.provenance.tool }}</template></div>
       <h3 class="entity" data-testid="inspector-item-title">{{ item.title }}</h3>
       <p v-if="item.description" class="muted">{{ item.description }}</p>
       <div v-if="item.status === 'suggested'" class="suggestions" data-testid="item-suggested">
@@ -535,9 +537,9 @@ const props2 = (row: Record<string, unknown>) => Object.keys(row);
 .suggestions {
   margin-top: 10px;
   padding: 8px;
-  border: 1px dashed #b45309;
+  border: 1px dashed var(--color-suggested-fg);
   border-radius: var(--radius-sm);
-  background: #fffbeb;
+  background: var(--color-suggested-bg);
 }
 
 .suggestion {
