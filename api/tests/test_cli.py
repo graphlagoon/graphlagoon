@@ -62,8 +62,8 @@ async def test_bridge_forwards_tools_to_remote_mcp(env, databricks):  # noqa: F8
             )
             async with Client(_Stdio()) as client:
                 tools = {t.name for t in (await client.list_tools()).tools}
-                assert {"create_investigation", "annotate", "add_item"} <= tools
-                result = await client.call_tool("create_investigation", {"title": "Via ponte"})
+                assert {"create_case", "annotate", "add_item"} <= tools
+                result = await client.call_tool("create_case", {"title": "Via ponte"})
                 assert not result.is_error, result.content
                 case = json.loads(result.content[0].text)["untrusted_data"]
                 assert case["title"] == "Via ponte"
