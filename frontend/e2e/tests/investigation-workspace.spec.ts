@@ -132,7 +132,7 @@ test.describe('F4 · analysis workspace', () => {
     await page.getByTestId('dossier-link').click();
     await expect(page).toHaveURL(/mode=dossie/);
     await expect(page.getByTestId('dossier-summary')).toContainText('Cluster sintético · 3');
-    await expect(page.getByTestId('dossier-summary')).toContainText('Synthetic fraud');
+    await expect(page.getByTestId('dossier-summary')).toContainText('Fraude sintética');
   });
 
   test('groups by property, bulk roles and a saved view survive a reload', async ({ authenticatedPage: page }) => {

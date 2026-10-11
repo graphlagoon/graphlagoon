@@ -101,7 +101,7 @@ test.describe('Investigations', () => {
     await page.getByTestId('share-submit').click();
     await expect(page.getByTestId('share-row-ana@test.com')).toContainText('can write');
     await page.getByTestId('share-dialog').getByRole('button', { name: 'Done' }).click();
-    await expect(page.getByTestId('case-share')).toContainText('Share · 1');
+    await expect(page.getByTestId('case-share')).toContainText('Compartilhar · 1');
 
     // add from "my recent explorations": a live reference item
     await page.getByTestId('items-empty-add').click();
