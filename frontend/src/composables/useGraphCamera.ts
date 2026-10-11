@@ -10,6 +10,7 @@ import { useGraphStore } from '@/stores/graph';
 import type { GraphNode } from '@/types/graph3d';
 
 const ORTHO_FRUSTUM_SIZE = 2000;
+const ORTHO_MAX_FIT_ZOOM = 6;
 
 export function useGraphCamera(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -224,7 +225,9 @@ export function useGraphCamera(
       if (maxSize <= 0) return;
 
       const padding = 1.3;
-      camera.zoom = ORTHO_FRUSTUM_SIZE / (maxSize * padding);
+      // Small graphs (a handful of case nodes) would otherwise be blown up
+      // until each node fills the screen; cap the magnification instead.
+      camera.zoom = Math.min(ORTHO_FRUSTUM_SIZE / (maxSize * padding), ORTHO_MAX_FIT_ZOOM);
       camera.updateProjectionMatrix();
 
       const cx = (bbox.x[0] + bbox.x[1]) / 2;
