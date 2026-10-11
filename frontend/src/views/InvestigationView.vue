@@ -181,9 +181,20 @@ async function loadWorkspace() {
 
 const CASE_NODE_SIZE = 5;
 
-/** Frames the graph once the canvas has built the new scene. */
+/** Frames the graph once the layout has settled: case nodes arrive without
+ * coordinates, so fitting right after the load frames a single point. */
 function zoomToFitSoon() {
-  requestAnimationFrame(() => requestAnimationFrame(() => canvasRef.value?.zoomToFit?.()));
+  const fit = () => canvasRef.value?.zoomToFit?.();
+  const started = Date.now();
+  const tick = () => {
+    const running = canvasRef.value?.isLayoutRunning ?? false;
+    if (!running || Date.now() - started > 4000) {
+      requestAnimationFrame(fit);
+      return;
+    }
+    setTimeout(tick, 100);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(tick));
 }
 
 watch(
