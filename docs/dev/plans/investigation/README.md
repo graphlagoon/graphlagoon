@@ -1,18 +1,7 @@
 # Investigações: pacote de execução
 
-> Status: design aprovado como proposta em 2026-10-09; **G1–G4 e F1–F4 concluídas**
-> (com a FA) no branch `feature/investigations`. Portões G1–G4 (G4 por decisão, sem
-> medição); **F1** fundação (casos, fontes de vários contexts, grafo unificado, papéis,
-> notas, diário, área admin, seed e [guia público](../../../guide/investigations.md));
-> **FA** AI-first (tokens de agente, espaço do caso no Volume, propostas, servidor MCP
-> com prompts, ponte stdio, registry de cobertura e
-> [guia de agentes](../../../guide/agents-mcp.md)); **F2** enriquecimento, arquivos
-> (SIMBA, QSA, CSV) e resolução de entidades; **F3** seguir o dinheiro (rastreio, Sankey,
-> raias, caminhos, também no servidor); **F4** evidências, hipóteses e dossiê,
-> tipologias CC 4.001, prazos, decisão com congelamento e retenção, e exportações
-> (laudo, pacote, CSV, SIMBA, resumo Siscoaf). **F5 (opcional) não foi iniciada.** O
-> progresso tarefa a tarefa está nos checkboxes de
-> [04-plano-de-implementacao.md](04-plano-de-implementacao.md#progresso) e no decision log.
+> Status: **plano v1 (G1–F4.6) e plano v2 (F0–F6) concluídos** em `feature/investigations`,
+> 2026-10-11. O que vale agora é o [05-plano-v2.md](05-plano-v2.md); o 04 é histórico.
 >
 > Este pacote basta sozinho para um agente implementar a funcionalidade. Os
 > artefatos no claude.ai (canvas e documentos) são cópias para humanos e são
@@ -171,7 +160,7 @@ Use a skill skill_feature_creation e execute o plano de investigações de ponta
 
 1. Leia docs/dev/plans/investigation/README.md (Definition of Done e decisões em aberto). Leia também 03-arquitetura.md e 02-design.md quando a tarefa pedir.
 2. Trabalhe no branch feature/investigations: se não existir, crie-o a partir do branch que contém este pacote. Faça push depois de cada tarefa. Na primeira tarefa, abra um PR draft para main com gh e mantenha a descrição com o progresso.
-3. Repita até não restar tarefa G1–G4, F1.x, FA.x, F2.x, F3.x ou F4.x desmarcada em 04-plano-de-implementacao.md, na ordem do arquivo: pegue a próxima não marcada cujas dependências estejam feitas; implemente; rode os testes do Definition of Done e corrija até ficarem verdes; registre no decision log; marque [x]; faça commit e push.
+3. Repita até não restar fase desmarcada na seção 10 de 05-plano-v2.md (ou tarefa de um plano posterior), na ordem do arquivo: pegue a próxima não marcada cujas dependências estejam feitas; implemente; rode os testes do Definition of Done e corrija até ficarem verdes; registre no decision log; marque [x]; faça commit e push.
 4. Decisões em aberto: use os padrões do README e registre cada suposição no decision log. Nunca pare para perguntar.
 5. Bloqueio real (teste que não passa depois de 3 tentativas diferentes, dependência externa indisponível): registre no decision log, troque o [ ] da tarefa por [~] com uma linha explicando, e siga para a próxima que não dependa dela.
 6. Proibido: force push, merge ou push em main, apagar dados ou arquivos fora do escopo da tarefa, mexer nas tarefas F5.
