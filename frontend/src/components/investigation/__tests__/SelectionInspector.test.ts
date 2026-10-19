@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   getInvestigationItems: vi.fn(async () => [ITEM]),
   getInvestigationEvents: vi.fn(async () => []),
   updateInvestigation: vi.fn(async (_id: string, patch: any) => ({ ...CASE, ...patch })),
+  getInvestigationItemContent: vi.fn(async (): Promise<ArrayBuffer> => new ArrayBuffer(0)),
 }))
 const CASE = { id: 'inv-1', status: 'analysis', has_write_access: true, settings: {}, state: {}, kind_preset: 'fraude_sintetica', shared_with: [], tags: [] }
 const ITEM = { id: 'it-1', kind: 'table', subkind: 'result', title: 'Rastreio FIFO', tags: [], status: 'suggested', author_kind: 'agent', author_email: 'me', provenance: { tool: 'trace', params: { maxHops: 3 } }, current_version: 1, pinned: [], accessible: true, position: 0, latest: { version: 1, sha256: 'c'.repeat(64) } }
@@ -108,6 +109,24 @@ describe('SelectionInspector (05 §3, three states)', () => {
     expect(api.updateInvestigationItem).toHaveBeenCalledWith('inv-1', 'it-1', { tags: ['dossie'] })
     await fireEvent.click(getByTestId('item-show-analysis'))
     expect(emitted('activate')).toBeTruthy()
+  })
+
+  it('item: previews a CSV version as a table and downloads it under its file name', async () => {
+    const csv = { ...ITEM, id: 'it-csv', subkind: 'csv', title: 'Extrato SIMBA', status: 'confirmed', provenance: { filename: 'CASO17_EXTRATO.TXT' }, latest: { version: 1, sha256: 'd'.repeat(64), content_type: 'text/csv', size_bytes: 40 } }
+    api.getInvestigationItemContent.mockResolvedValue(new TextEncoder().encode('CONTA\tVALOR\n109738-0\t3431900\n').buffer)
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const { getByTestId } = mount({ activeItem: csv })
+    await fireEvent.click(getByTestId('item-preview-open'))
+    await flushPromises()
+    const preview = getByTestId('item-preview')
+    expect(preview.dataset.kind).toBe('table')
+    expect(preview.textContent).toContain('VALOR')
+    expect(preview.textContent).toContain('3431900')
+    await fireEvent.click(getByTestId('item-download'))
+    await flushPromises()
+    expect(api.getInvestigationItemContent).toHaveBeenCalledTimes(1) // bytes reused
+    expect((click.mock.instances[0] as unknown as HTMLAnchorElement).download).toBe('CASO17_EXTRATO.TXT')
+    click.mockRestore()
   })
 
   it('decision mode shows the guided panel in place', async () => {

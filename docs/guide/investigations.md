@@ -152,6 +152,14 @@ immutable versions with a sha256, and a **pin** that freezes one version as
 evidence. Graph items carry an **on canvas** checkbox: unchecking one removes
 its nodes without resetting the layout.
 
+**Viewing and downloading.** Selecting an item shows its card in the
+inspector, with **Visualizar** and **Baixar** for its latest version. Tables
+(CSV, TAB-separated files such as SIMBA, query results) open as a table with
+the first 200 rows; markdown, text and JSON open as text; images and PDFs
+display inline; HTML renders in a sandboxed frame with scripts off. Anything
+else, and files over 20 MB, can only be downloaded. The download keeps the
+uploaded file name, and every read is audited (`investigation.item_read`).
+
 **Upload** (needs `investigation.upload` and edit access) opens the file
 assistant: pick the files of a layout (a SIMBA delivery is several
 TAB-separated files), choose **Graph** (the table is mapped onto the canvas
@@ -598,8 +606,7 @@ This is an MVP. What it does not do yet, so you can plan around it:
   views and groups from the selection arrive with the next phases.
 - **Exports:** the laudo is the browser's *Save as PDF*, not a server PDF,
   and it has no digital signature; there is no Siscoaf, DICT or SPA
-  connection; the whole case is exported, never a subset; case files have
-  no download button.
+  connection; the whole case is exported, never a subset.
 - **Uploads** go in one request (no chunked upload), so a proxy limit below
   `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` wins.
 - **Agent rate limit** is counted per server process (N workers allow N× the

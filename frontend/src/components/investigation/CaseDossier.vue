@@ -16,6 +16,7 @@ import { formatDate } from '@/utils/format';
 import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { methodStamp } from '@/utils/traceView';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { buildPreview } from '@/utils/itemPreview';
 import DecisionPanel from '@/components/investigation/DecisionPanel.vue';
 import type { TraceResult } from '@/utils/trace';
 import type { CaseAnnotation, CaseItem, HypothesisStatus, InvestigationExportFormat } from '@/types/investigation';
@@ -80,16 +81,15 @@ const journal = computed(() => (showAllEvents.value ? store.events : store.event
 
 /** Tables flagged "usar no dossiê" (tag `dossie`): the latest or pinned version, first rows. */
 const dossierTables = computed(() => store.items.filter((i) => !i.deleted_at && i.tags.includes('dossie') && i.current_version > 0));
-const tableRows = ref<Record<string, { columns: string[]; rows: Record<string, unknown>[] }>>({});
+const tableRows = ref<Record<string, { columns: string[]; rows: unknown[][] }>>({});
 watch(
   dossierTables,
   async (tables) => {
     for (const t of tables) {
-      if (tableRows.value[t.id]) continue;
+      if (tableRows.value[t.id] || !store.current) continue;
       try {
-        const json = (await store.loadItemJson<Record<string, unknown>>(t)) ?? {};
-        const rows = (Array.isArray(json) ? json : (json.rows as Record<string, unknown>[] | undefined) ?? []) as Record<string, unknown>[];
-        const columns = (json as { columns?: string[] }).columns ?? (rows[0] ? Object.keys(rows[0]) : []);
+        const preview = buildPreview(await api.getInvestigationItemContent(store.current.id, t.id), t.latest?.content_type);
+        const { columns, rows } = preview.kind === 'table' ? preview : { columns: [], rows: [] };
         tableRows.value = { ...tableRows.value, [t.id]: { columns, rows: rows.slice(0, 20) } };
       } catch {
         tableRows.value = { ...tableRows.value, [t.id]: { columns: [], rows: [] } };
@@ -300,7 +300,7 @@ const unflag = (t: CaseItem) => act(() => store.setInDossier(t, false), 'Não fo
               </div>
               <table v-if="tableRows[t.id]?.rows.length" class="data">
                 <thead><tr><th v-for="c in tableRows[t.id].columns" :key="c">{{ c }}</th></tr></thead>
-                <tbody><tr v-for="(r, i) in tableRows[t.id].rows" :key="i"><td v-for="c in tableRows[t.id].columns" :key="c">{{ r[c] }}</td></tr></tbody>
+                <tbody><tr v-for="(r, i) in tableRows[t.id].rows" :key="i"><td v-for="(_, j) in tableRows[t.id].columns" :key="j">{{ r[j] }}</td></tr></tbody>
               </table>
               <p v-else class="muted">{{ tableRows[t.id] ? 'Nenhuma linha tabular nesta versão.' : 'Carregando…' }}</p>
             </article>

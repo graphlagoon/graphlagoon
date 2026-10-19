@@ -12693,3 +12693,26 @@ já atendem (sem mudança em `CaseItemsPanel`/`SelectionInspector`). **Public do
 reescrito; `investigations.md` (seção Agents, Admin area); `docs/dev/plans/investigation/agent-capabilities.md`
 reescrito por §6. **Admin area:** abas Library e Vocabularies; ações de auditoria `library.write|delete`,
 `vocabulary.write|delete`; `test_admin.py` lista de rotas atualizada.
+
+## [2026-10-19 14:50] - Fix: visualizar e baixar qualquer item do caso
+
+**O quê:** o inspetor mostrava "No rows in this version." para toda tabela CSV/TXT (os 56 extratos SIMBA do seed), porque
+"Abrir como tabela" lia o item só como JSON (`store.loadItemJson`) e o `JSON.parse` de um CSV falha em silêncio. Resultados
+de consulta (`{columns, rows: [[…]]}`) também saíam errados: o inspetor tomava índices como colunas e o dossiê lia `r[c]`
+de uma linha-array (células vazias). Agora `utils/itemPreview.ts` (`buildPreview`) decide pelo `content_type` o que o
+browser mostra: tabela (JSON `{columns, rows}`, array de registros, CSV/TSV e `text/plain` separado por TAB, reusando
+`parseTableContent`), texto (markdown, plain, JSON não tabular), imagem, PDF, HTML ou `none`. `ItemPreview.vue` dá
+**Visualizar** e **Baixar** para qualquer item com versão; o dossiê usa o mesmo `buildPreview`.
+**Decisões:** (1) segurança: o backend serve dado do caso como opaco (XSS); no browser, HTML só em `<iframe sandbox="">`
+(sem script, origem única), markdown como texto (sem render de HTML), imagem/PDF por blob URL; (2) visualização sob
+demanda (botão), não ao selecionar, porque cada leitura do conteúdo é auditada (`investigation.item_read`); (3) teto de
+200 linhas e 200 mil caracteres na tela e 20 MB para buscar os bytes; acima disso, só baixar; (4) texto que não é UTF-8
+num tipo `text/*` cai para Windows-1252 (exportações bancárias); (5) o download reusa os bytes já lidos e o nome do upload
+(`provenance.filename`), senão título + extensão do tipo. **Arquivos:** novos `frontend/src/utils/itemPreview.ts`,
+`components/investigation/ItemPreview.vue`, `utils/__tests__/itemPreview.test.ts`; alterados
+`components/investigation/{SelectionInspector,CaseDossier}.vue`, `__tests__/SelectionInspector.test.ts`,
+`docs/guide/investigations.md`. **Testes:** vitest completo (184 arquivos, 2622 testes) verde, incluindo `itemPreview` e o
+caso novo do inspetor (CSV → tabela, download com o nome do upload, bytes lidos uma vez); `vue-tsc` limpo; E2E
+`investigations`, `investigation-workspace` e `user-journeys` (24) verdes; conferido no app local (extrato SIMBA do
+CASO17 abre com 21 linhas). **Public docs:** `investigations.md` ganha "Viewing and downloading" em *Case files* e perde
+o "case files have no download button" dos limites. **Admin area:** No admin-area impact (rota e auditoria já existiam).
