@@ -4,9 +4,9 @@
  * template, provenance rings, role and tags, data, items that cite it, notes,
  * enrichment), a multi-selection (composition and bulk role · tag · group · same-as
  * · note · save selection · compare · use as parameter), or an item (card, versions,
- * confirm/reject, pin, open as table, use in the dossier).
+ * confirm/reject, pin, preview or download any version, use in the dossier).
  */
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
@@ -21,6 +21,7 @@ import { GROUP_COLORS } from '@/utils/casePresets';
 import { baseSourceId, nodeSourceIds, type UnifiedNode } from '@/utils/unifyGraph';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import DecisionPanel from '@/components/investigation/DecisionPanel.vue';
+import ItemPreview from '@/components/investigation/ItemPreview.vue';
 import type { CaseAnnotation, CaseItem } from '@/types/investigation';
 
 const props = defineProps<{ activeItem: CaseItem | null; canEdit: boolean; decideMode: boolean }>();
@@ -239,20 +240,7 @@ const item = computed(() => props.activeItem);
 const itemPinned = computed(() => !!item.value && item.value.pinned.some((v) => v.version === item.value!.current_version));
 const inDossier = computed(() => !!item.value?.tags.includes('dossie'));
 const isAnalysis = computed(() => !!item.value && store.analyses.some((a) => a.id === item.value!.id));
-const tableRows = ref<Record<string, unknown>[] | null>(null);
-watch(item, () => (tableRows.value = null));
-
-async function openAsTable() {
-  if (!item.value) return;
-  await run(async () => {
-    const json = (await store.loadItemJson<Record<string, unknown>>(item.value!)) ?? {};
-    const rows = Array.isArray(json) ? json : (json.rows as Record<string, unknown>[] | undefined) ?? (json.data as Record<string, unknown>[] | undefined) ?? [];
-    tableRows.value = rows.slice(0, 100);
-  }, 'Failed to read the item');
-}
-
 const formatTime = (iso: string) => formatDate(iso);
-const props2 = (row: Record<string, unknown>) => Object.keys(row);
 </script>
 
 <template>
@@ -453,18 +441,11 @@ const props2 = (row: Record<string, unknown>) => Object.keys(row);
         <button v-if="canEdit && item.current_version" class="btn btn-outline btn-sm" :disabled="itemPinned" data-testid="item-pin" @click="run(async () => { const v = await store.pinItem(item!.id); if (v) toast.success(`Pinned · hash ${v.sha256.slice(0, 8)}`); }, 'Failed to pin')">
           {{ itemPinned ? '📌 Pinned' : 'Fixar' }}
         </button>
-        <button v-if="item.kind === 'table' || item.subkind === 'result'" class="btn btn-outline btn-sm" data-testid="item-open-table" @click="openAsTable">Abrir como tabela</button>
         <button v-if="canEdit" class="btn btn-outline btn-sm" :class="{ on: inDossier }" data-testid="item-dossier" @click="run(() => store.setInDossier(item!, !inDossier), 'Failed to update')">
           {{ inDossier ? '✓ No dossiê' : 'Usar no dossiê' }}
         </button>
       </div>
-      <div v-if="tableRows" class="compare" data-testid="item-table">
-        <table v-if="tableRows.length">
-          <thead><tr><th v-for="c in props2(tableRows[0])" :key="c">{{ c }}</th></tr></thead>
-          <tbody><tr v-for="(r, i) in tableRows" :key="i"><td v-for="c in props2(tableRows[0])" :key="c">{{ r[c] }}</td></tr></tbody>
-        </table>
-        <p v-else class="muted">No rows in this version.</p>
-      </div>
+      <ItemPreview v-if="item.current_version && store.current" :key="`${item.id}:${item.current_version}`" :item="item" :investigation-id="store.current.id" />
     </template>
 
     <p v-else class="muted">Select a node to see its data and where it came from, shift-click for a selection, or pick an item of the material.</p>
