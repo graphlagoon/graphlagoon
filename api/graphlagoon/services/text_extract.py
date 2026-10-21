@@ -16,7 +16,7 @@ def decode(data: bytes) -> str:
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
-        return data.decode("latin-1")  # SIMBA layouts are Latin-1
+        return data.decode("latin-1")  # legacy bank and registry layouts are often Latin-1
 
 
 def is_text(name: str, content_type: Optional[str]) -> bool:

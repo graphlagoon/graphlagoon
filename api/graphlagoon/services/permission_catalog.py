@@ -62,7 +62,7 @@ PERMISSIONS: tuple[Permission, ...] = (
         id="investigation.upload",
         label="Upload investigation files",
         description=(
-            "Upload files (bank statements, QSA, CSV) to investigation cases. "
+            "Upload files (statements, registries, CSV) to investigation cases. "
             "Reading files already in a case stays open to its readers."
         ),
     ),
@@ -70,7 +70,8 @@ PERMISSIONS: tuple[Permission, ...] = (
         id="investigation.decide",
         label="Decide investigations",
         description=(
-            "Record the decision of a case (communicate or archive), which "
+            "Record a decision on a case (one of its type's outcomes) or review "
+            "another person's (four eyes); an outcome that closes the case "
             "freezes it with a hash. Analysing and writing in a case stays open "
             "to its editors."
         ),

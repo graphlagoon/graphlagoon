@@ -1,6 +1,5 @@
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     Column,
     String,
     Text,
@@ -303,25 +302,30 @@ class Investigation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    # credito | garantia | pix_med | lavagem | lojista | fraude_sintetica | livre
-    kind_preset = Column(String(30), nullable=False, default="livre", server_default="livre")
-    # open | analysis | decided | archived
+    # slug of an admin-defined case type (case_types), or the built-in "general"
+    case_type = Column(String(50), nullable=False, default="general", server_default="general", index=True)
+    # values of the case type's fields: {field id: value}
+    fields = Column(JSON, nullable=False, default={})
+    # the alert or ticket that opened the case (idempotent creation)
+    external_ref = Column(String(255), nullable=True, index=True)
+    # open | analysis | closed (closed only by a decision that closes the case)
     status = Column(String(20), nullable=False, default="open", server_default="open")
+    # one of the case type's stages (a free label), or null
+    stage = Column(String(100), nullable=True)
     owner_email = Column(String(255), nullable=False, index=True)
     assignee_email = Column(String(255), nullable=True)
     occurred_at = Column(DateTime, nullable=True)
     alert_at = Column(DateTime, nullable=True)
-    # {open: days, analysis: days}: overrides the preset's phases (05 §7)
-    deadline_days = Column(JSON, nullable=True)
+    # {open: hours, analysis: hours}: copied from the case type, editable per case
+    sla_hours = Column(JSON, nullable=True)
     tags = Column(JSON, nullable=False, default=[])
     # identity_keys, edge_semantics, enrichment_tables, agent_suggest_kinds,
     # label_templates, vocabularies
     settings = Column(JSON, nullable=False, default={})
     # view only: layout, pins, views, groups_closed
     state = Column(JSON, nullable=False, default={})
-    decision = Column(JSON, nullable=True)
-    frozen_hash = Column(String(64), nullable=True)
-    frozen_at = Column(DateTime, nullable=True)
+    # every decision, oldest first, each with its own hash (06 §1); reassign, never mutate in place
+    decisions = Column(JSON, nullable=False, default=[])
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -333,7 +337,7 @@ class Investigation(Base):
 
 
 class InvestigationShare(Base):
-    """Nominal e-mail only — wildcards are refused (tipping-off, LC 105)."""
+    """Nominal e-mail only — wildcards are refused (need-to-know)."""
 
     __tablename__ = "investigation_shares"
     __table_args__ = (
@@ -377,6 +381,7 @@ class CaseItem(Base):
     query = Column(JSON, nullable=True)  # {text, language, parameters[], output}
     mapping = Column(JSON, nullable=True)  # {as: graph|enrichment, spec}; of the case, never a context
     anchor = Column(JSON, nullable=True)  # {entity_ids[], edge_ids[], item_id}
+    state = Column(JSON, nullable=True)  # view only, never a version: {chart: {type, x, series[]}}
     current_version = Column(Integer, nullable=False, default=0)
     position = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, server_default=func.now())
@@ -417,7 +422,7 @@ class CaseItemVersion(Base):
 
 
 class CaseAnnotation(Base):
-    """role | tag | group | same_as | hypothesis | hypothesis_status | typology |
+    """role | tag | group | same_as | hypothesis | hypothesis_status |
     status_change over entities or items; an agent's may arrive ``suggested``."""
 
     __tablename__ = "case_annotations"
@@ -437,8 +442,25 @@ class CaseAnnotation(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class CaseEntity(Base):
+    """06 P7: an entity on the case's unified graph, by its uid (stable across
+    cases for keyed entities: ``Account:12345``). Rewritten when the case's graph
+    inputs change (``stamp``); read by "seen in other cases"."""
+
+    __tablename__ = "case_entities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = _investigation_fk()
+    uid = Column(String(512), nullable=False, index=True)
+    entity = Column(String(100), nullable=True)
+    node_type = Column(String(100), nullable=True)
+    label = Column(String(255), nullable=True)
+    stamp = Column(String(64), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now())
+
+
 class InvestigationEvent(Base):
-    """Append-only case journal; ``frozen_hash`` covers it at the decision."""
+    """Append-only case journal; each decision's hash covers it up to that decision."""
 
     __tablename__ = "investigation_events"
 
@@ -466,21 +488,21 @@ class AgentToken(Base):
     # "user" (every case the owner reads) or "case" (only investigation_ids)
     scope = Column(String(10), nullable=False, default="user")
     investigation_ids = Column(JSON, nullable=False, default=[])
-    # Honoured only when settings.agents_allow_unmasked_data is on
-    unmasked = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
     last_used_at = Column(DateTime, nullable=True)  # bumped at most once a minute
 
 
-class OrgVocabulary(Base):
-    """Org-wide suggestions for roles, tags and typology presets (never imposed)."""
+class CaseType(Base):
+    """An admin-defined kind of case (06 §1): vocabulary, decision catalog,
+    fields, SLA, notice. ``spec`` is ``schemas.CaseTypeSpec``; "general" is
+    built in and never stored."""
 
-    __tablename__ = "org_vocabularies"
+    __tablename__ = "case_types"
 
-    kind = Column(String(30), primary_key=True)  # role | tag | typology_preset
-    values = Column(JSON, nullable=False, default=[])
+    slug = Column(String(50), primary_key=True)
+    spec = Column(JSON, nullable=False, default={})
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 

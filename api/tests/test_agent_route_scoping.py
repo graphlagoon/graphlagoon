@@ -39,7 +39,12 @@ from graphlagoon.middleware import auth  # noqa: E402
 
 SUPERUSER = "admin@example.com"
 # Tags of the routers an agent may use at all (05 §6).
-AGENT_TAGS = {"investigations", "explorations", "graph", "config", "graph-contexts"}
+# The case routes carry one tag per group (cases, case items, annotations & tasks,
+# decisions, graph & analysis) for the OpenAPI reference.
+AGENT_TAGS = {
+    "cases", "case items", "annotations & tasks", "decisions", "graph & analysis",
+    "explorations", "graph", "config", "graph-contexts", "org",
+}
 
 
 @pytest.fixture
@@ -97,10 +102,10 @@ def test_every_route_outside_the_allowlist_is_403_for_an_agent(app):
                 leaks.append((method, route.path, r.status_code))
     assert not leaks, f"routes reachable with an agent token: {leaks}"
     assert forbidden, "nothing outside the allowlist?"
-    # The allowlist stays the plan's: cases, explorations, graph queries, config.
+    # The allowlist stays the plan's: cases, explorations, graph queries, config, org reads.
     assert {t for *_, tags in allowed for t in tags} <= AGENT_TAGS
     assert all(
-        path.startswith(("/api/investigations", "/api/explorations", "/api/config"))
+        path.startswith(("/api/investigations", "/api/explorations", "/api/config", "/api/org/"))
         or "/api/graph-contexts/{context_id}/" in path
         for _, path, _ in allowed
     )
@@ -130,3 +135,18 @@ def test_case_token_is_403_on_another_case_and_on_creating_cases(app):
     assert client.get(f"/api/investigations/{mine}", headers=agent).status_code == 200
     assert client.post("/api/investigations", json={"title": "C"}, headers=agent).status_code == 403
     assert client.get("/api/investigations", headers=agent).status_code == 200
+
+
+def test_a_token_reads_the_org_over_rest_and_the_org_routes_stay_read_only(app):
+    """/api/org is on the allowlist as a prefix: the REST twins of get_case_type and
+    get_playbook, so an integration can read a type's required fields. It must
+    stay read-only; the org's writes live under /api/admin (superusers, no agents)."""
+    client = TestClient(app)
+    human = {"X-Forwarded-Email": SUPERUSER}
+    token = client.post("/api/agent-tokens", json={"name": "alerts"}, headers=human).json()["token"]
+    agent = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/org/case-types/general", headers=agent).json()["slug"] == "general"
+    assert client.get("/api/org/library", headers=agent).status_code == 200
+    assert client.get("/api/org/authoring", headers=agent).status_code == 200
+    org = [(m, r.path) for r in _routes(app.routes) if r.path.startswith("/api/org") for m in r.methods]
+    assert org and all(m in ("GET", "HEAD") for m, _ in org), org

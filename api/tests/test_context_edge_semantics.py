@@ -30,7 +30,6 @@ from pydantic import ValidationError  # noqa: E402
 from graphlagoon.db.memory_store import InMemoryStore  # noqa: E402
 from graphlagoon.models.schemas import GraphContextUpdate  # noqa: E402
 from graphlagoon.services.file_mapping import MappingError, validate  # noqa: E402
-from graphlagoon.services.file_mapping_presets import PRESETS  # noqa: E402
 
 OWNER = "owner@example.com"
 SEM = {"amount_prop": "valor", "amount_unit": "cents", "time_prop": "data", "currency": "BRL",
@@ -46,12 +45,13 @@ class TestValidation:
     def test_defaults_and_blank_props(self):
         sem = GraphContextUpdate(edge_semantics={"amount_prop": " ", "time_prop": "t"}).edge_semantics
         assert sem.model_dump() == {
-            "amount_prop": None, "amount_unit": "units", "time_prop": "t", "currency": "BRL",
+            "amount_prop": None, "amount_unit": "units", "time_prop": "t", "currency": None,
             "timestamp_prop": None, "weight_prop": None,
         }
 
     def test_file_mapping_checks_the_same_shape(self):
-        spec = {**PRESETS["simba_v31"], "edge_semantics": {"amount_prop": "valor", "currency": "R$"}}
+        spec = {"version": 1, "name": "x", "inputs": {"t": {"match": "*.csv", "delimiter": ";", "header": True}},
+                "nodes": [], "edges": [], "edge_semantics": {"amount_prop": "amount", "currency": "$"}}
         with pytest.raises(MappingError, match="edge_semantics"):
             validate(spec)
 
@@ -71,7 +71,7 @@ def client():
 
 def test_save_and_reload(client):
     ctx = InMemoryStore.get_instance().create_graph_context(
-        title="pix", edge_table_name="e", node_table_name="n", owner_email=OWNER
+        title="payments", edge_table_name="e", node_table_name="n", owner_email=OWNER
     )
     h = {"X-Forwarded-Email": OWNER}
     url = f"/api/graph-contexts/{ctx.id}"

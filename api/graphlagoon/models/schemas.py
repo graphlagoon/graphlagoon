@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from typing import Optional, Any, Literal, TypeAlias, Union
 from uuid import UUID
 from datetime import datetime
@@ -429,7 +429,7 @@ class PropRef(BaseModel):
 
 
 IdentityNormalize = Literal[
-    "cpf_cnpj", "account", "phone", "email", "device_id", "ip", "pix_key", "card", "terminal_id", "address", "regex", "lower", "none",
+    "digits", "account", "phone", "email", "device_id", "ip", "card", "terminal_id", "address", "regex", "lower", "none",
 ]
 
 
@@ -443,10 +443,14 @@ class IdentityKey(BaseModel):
 
     @model_validator(mode="after")
     def _strip(self) -> "IdentityKey":
+        from graphlagoon.utils.safe_regex import unsafe_reason
+
         self.node_type = self.node_type.strip()
         self.entity = self.entity.strip()
         if not self.node_type or not self.entity:
             raise ValueError("node_type and entity must not be blank")
+        if self.normalize == "regex" and self.pattern and (why := unsafe_reason(self.pattern)):
+            raise ValueError(f"pattern: {why}")
         return self
 
 
@@ -506,7 +510,7 @@ class EdgeSemantics(BaseModel):
     amount_prop: Optional[str] = Field(default=None, max_length=200)
     amount_unit: Literal["units", "cents"] = "units"
     time_prop: Optional[str] = Field(default=None, max_length=200)
-    currency: str = Field(default="BRL", pattern=r"^[A-Z]{3}$")
+    currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$")
     # Generic relations (05 §4b): a weight stands in for the amount, a timestamp for the time.
     weight_prop: Optional[str] = Field(default=None, max_length=200)
     timestamp_prop: Optional[str] = Field(default=None, max_length=200)
@@ -1772,45 +1776,227 @@ class PermissionInspection(BaseModel):
 # Investigations (docs/dev/plans/investigation/03-arquitetura.md §3.1)
 # ---------------------------------------------------------------------------
 
-InvestigationStatus = Literal["selecao", "analise", "decidido", "arquivado"]
-
-
-KindPreset = Literal["credito", "garantia", "pix_med", "lavagem", "lojista", "fraude_sintetica", "livre"]
-CaseStatus = Literal["open", "analysis", "decided", "archived"]
+CaseStatus = Literal["open", "analysis", "closed"]
 WriteStatus = Literal["suggested", "confirmed", "rejected"]
 AuthorKind = Literal["human", "agent"]
 
 
+CASE_TYPE_SLUG = r"^[a-z][a-z0-9_]{0,49}$"
+_ID = r"^[a-z][a-z0-9_]{0,59}$"
+
+
+class CaseTypeOutcome(BaseModel):
+    """A result the decision can record (06 §1)."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=_ID)
+    label: str = Field(min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=500)
+    closes_case: bool = True
+    # Four eyes: the decision waits for another person to approve it.
+    requires_review: bool = False
+
+
+class CaseTypeAction(BaseModel):
+    """What a decision may set in motion; each chosen action becomes a task."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=_ID)
+    label: str = Field(min_length=1, max_length=120)
+    due_hours: Optional[int] = Field(default=None, ge=1, le=24 * 366)
+
+
+class CaseTypeField(BaseModel):
+    """A structured field of the case, filterable in the queue."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(pattern=_ID)
+    label: str = Field(min_length=1, max_length=120)
+    type: Literal["text", "number", "money", "date", "enum"] = "text"
+    options: list[str] = Field(default_factory=list, max_length=100)
+    required: bool = False
+    in_queue: bool = False
+
+    @model_validator(mode="after")
+    def _enum_needs_options(self):
+        if self.type == "enum" and not self.options:
+            raise ValueError(f"enum field '{self.id}' needs options")
+        return self
+
+
+class CaseTypeVocabularies(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    roles: list[str] = Field(default_factory=list, max_length=200)
+    tags: list[str] = Field(default_factory=list, max_length=200)
+    link_attributes: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CaseTypeSla(BaseModel):
+    """Hours of each phase, counted from the alert (else the occurrence, else the creation)."""
+
+    model_config = ConfigDict(extra="forbid")
+    open: Optional[int] = Field(default=None, ge=1, le=24 * 3660)
+    analysis: Optional[int] = Field(default=None, ge=1, le=24 * 3660)
+
+
+class CaseTypeStarterQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=255)
+    language: Literal["sql", "cypher"] = "sql"
+    query: str = Field(min_length=1, max_length=20_000)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    parameters: list[TemplateParameter] = Field(default_factory=list, max_length=20)
+
+
+class CaseTypeTraceDefaults(BaseModel):
+    """What "Follow the money" starts with on a case of this type (06 §3c)."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_hops: Optional[int] = Field(default=None, ge=1, le=20)
+    max_dwell_hours: Optional[float] = Field(default=None, ge=0)
+    min_amount: Optional[float] = Field(default=None, ge=0)
+    allocation: Optional[Literal["fifo", "lifo", "proportional", "libr", "total"]] = None
+    stop_types: Optional[list[str]] = Field(default=None, max_length=50)
+
+
+class CaseTypeAnalysisDefaults(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    trace: CaseTypeTraceDefaults = Field(default_factory=CaseTypeTraceDefaults)
+
+
+class CaseTypeSpec(BaseModel):
+    """An admin-defined kind of case (06 §1): its vocabulary, its decisions and
+    actions, its fields, deadlines and what the agent reads first. Data, not code."""
+
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    vocabularies: CaseTypeVocabularies = Field(default_factory=CaseTypeVocabularies)
+    # An entity may hold several confirmed roles (a company is borrower and guarantor).
+    roles_multi: bool = False
+    outcomes: list[CaseTypeOutcome] = Field(default_factory=list, max_length=50)
+    actions: list[CaseTypeAction] = Field(default_factory=list, max_length=50)
+    stages: list[str] = Field(default_factory=list, max_length=30)
+    fields: list[CaseTypeField] = Field(default_factory=list, max_length=40)
+    sla_hours: CaseTypeSla = Field(default_factory=CaseTypeSla)
+    retention_years: Optional[int] = Field(default=None, ge=0, le=100)
+    # Shown where the case is shared and decided (a confidentiality or tipping-off notice).
+    notice: Optional[str] = Field(default=None, max_length=2000)
+    agent_suggest_kinds: Optional[list[str]] = None
+    playbook: Optional[str] = Field(default=None, max_length=100)
+    # Copied into every new case as query items; the analysis bar lists them as detectors.
+    starter_queries: list[CaseTypeStarterQuery] = Field(default_factory=list, max_length=20)
+    # Slugs of org library docs of kind "template" the case offers first.
+    report_templates: list[str] = Field(default_factory=list, max_length=20)
+    analysis_defaults: CaseTypeAnalysisDefaults = Field(default_factory=CaseTypeAnalysisDefaults)
+
+    @model_validator(mode="after")
+    def _unique_ids_and_a_way_to_close(self):
+        for name in ("outcomes", "actions", "fields"):
+            ids = [x.id for x in getattr(self, name)]
+            if len(ids) != len(set(ids)):
+                raise ValueError(f"{name} ids must be unique")
+        if self.outcomes and not any(o.closes_case for o in self.outcomes):
+            raise ValueError("at least one outcome must close the case")
+        return self
+
+
+class CaseTypeResponse(CaseTypeSpec):
+    slug: str
+    builtin: bool = False
+    updated_at: Optional[datetime] = None
+
+
+class CaseSettings(BaseModel):
+    """The typed part of a case's ``settings`` (the drawer of 05 §1, 06 §1):
+    what the server runs is validated (identity keys' regexes included); other
+    keys pass as they are."""
+
+    model_config = ConfigDict(extra="allow")
+
+    identity_keys: Optional[list[IdentityKey]] = Field(default=None, max_length=50)
+    edge_semantics: Optional[dict[str, EdgeSemantics]] = Field(default=None, max_length=200)
+    agent_suggest_kinds: Optional[list[str]] = Field(default=None, max_length=50)
+    vocabularies: Optional[dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _unique_keys(self) -> "CaseSettings":
+        if self.identity_keys:
+            _validate_identity_keys(self.identity_keys)
+        return self
+
+
+def _case_settings(value: dict[str, Any]) -> dict[str, Any]:
+    """``settings`` checked by ``CaseSettings``, kept as the dict the case stores
+    (only the keys sent; an identity key whole, as the browser reads it)."""
+    settings = CaseSettings.model_validate(value)
+    out = settings.model_dump(mode="json", exclude_unset=True)
+    if settings.identity_keys is not None:
+        out["identity_keys"] = [k.model_dump(mode="json") for k in settings.identity_keys]
+    if settings.edge_semantics is not None:
+        # The keys sent, normalized: a key left out falls back to the context's.
+        sent = value["edge_semantics"]
+        out["edge_semantics"] = {
+            t: {k: v for k, v in sem.model_dump(mode="json").items() if k in (sent.get(t) or {})}
+            for t, sem in settings.edge_semantics.items()
+        }
+    return out
+
+
 class InvestigationCreate(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{
+        "title": "Chargeback CB-4471-0912",
+        "case_type": "chargeback_dispute",
+        "fields": {"reason_code": "10.4", "amount": 1240.5, "network": "Visa"},
+        "external_ref": "CB-4471-0912",
+        "alert_at": "2026-10-19T09:30:00",
+        "description": "Opened by the disputes queue; the same external_ref again returns this case.",
+    }]})
+
     title: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
-    kind_preset: KindPreset = "livre"
+    case_type: str = Field(default="general", pattern=CASE_TYPE_SLUG)
+    fields: dict[str, Any] = Field(default_factory=dict)
+    # The id of the alert or ticket that opened the case: the same one again
+    # returns the case the caller already reads (an agent may retry safely).
+    external_ref: Optional[str] = Field(default=None, min_length=1, max_length=255)
     assignee_email: Optional[str] = Field(default=None, max_length=255)
     occurred_at: Optional[datetime] = None
     alert_at: Optional[datetime] = None
-    # {open: days, analysis: days}; overrides the preset's phases
-    deadline_days: Optional[dict[str, int]] = None
+    # {open: hours, analysis: hours}; overrides the case type's
+    sla_hours: Optional[dict[str, int]] = None
     tags: list[str] = Field(default_factory=list, max_length=50)
     settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("settings")
+    @classmethod
+    def _settings(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _case_settings(value)
 
 
 class InvestigationUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
-    kind_preset: Optional[KindPreset] = None
-    # "decided" is reached only through the decision route; the service checks
-    # the transition (05 §3) and answers 409 otherwise.
-    status: Optional[Literal["open", "analysis", "archived"]] = None
+    case_type: Optional[str] = Field(default=None, pattern=CASE_TYPE_SLUG)
+    # Merged into the case's fields; a null value removes one.
+    fields: Optional[dict[str, Any]] = None
+    # "closed" is reached only through a decision that closes the case (06 §1)
+    # and left only through reopen; PATCH moves between open and analysis.
+    status: Optional[Literal["open", "analysis"]] = None
+    # One of the case type's stages (free labels, no rules), or null.
+    stage: Optional[str] = Field(default=None, max_length=100)
     assignee_email: Optional[str] = Field(default=None, max_length=255)
     occurred_at: Optional[datetime] = None
     alert_at: Optional[datetime] = None
-    deadline_days: Optional[dict[str, int]] = None
+    sla_hours: Optional[dict[str, int]] = None
     tags: Optional[list[str]] = Field(default=None, max_length=50)
     settings: Optional[dict[str, Any]] = None
     state: Optional[dict[str, Any]] = None
-    # Required to archive a case that has no decision (05 §7); journaled as
-    # ``case.archived_without_decision``. Ignored for any other change.
-    archive_reason: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("settings")
+    @classmethod
+    def _settings(cls, value: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        return None if value is None else _case_settings(value)
 
 
 class InvestigationShareRequest(BaseModel):
@@ -1827,15 +2013,21 @@ class InvestigationResponse(BaseModel):
     id: UUID
     title: str
     description: Optional[str] = None
-    kind_preset: str = "livre"
+    case_type: str = "general"
+    fields: dict[str, Any] = Field(default_factory=dict)
+    external_ref: Optional[str] = None
     status: str
     owner_email: str
     assignee_email: Optional[str] = None
     occurred_at: Optional[datetime] = None
     alert_at: Optional[datetime] = None
-    deadline_days: Optional[dict[str, int]] = None
-    # {phase: open|analysis, due_at, days_left}; None without phases or once decided/archived
+    sla_hours: Optional[dict[str, int]] = None
+    # {phase, due_at, hours_left, days_left, total_hours, urgent, overdue}; None
+    # without an SLA or once closed
     deadline: Optional[dict[str, Any]] = None
+    stage: Optional[str] = None
+    # Every decision, oldest first (06 §1): append-only, each with its own hash.
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     settings: dict[str, Any] = Field(default_factory=dict)
     state: dict[str, Any] = Field(default_factory=dict)
@@ -1850,6 +2042,17 @@ class InvestigationResponse(BaseModel):
     # Only on the list (the queue); None on single-case responses.
     item_count: Optional[int] = None
     suggested_count: Optional[int] = None
+
+
+class InvestigationPage(BaseModel):
+    """A page of the queue: ``total`` matches the filters, ``counts`` are over
+    every case the caller reads (the counter cards)."""
+
+    items: list[InvestigationResponse]
+    total: int
+    limit: int
+    offset: int
+    counts: dict[str, int] = Field(default_factory=dict)
 
 
 class InvestigationEventCreate(BaseModel):
@@ -1868,14 +2071,63 @@ class InvestigationEventResponse(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class InvestigationDecisionCreate(BaseModel):
-    """05 §7: communicate to COAF or archive, the actions taken with it, why."""
+class DecisionEvidence(BaseModel):
+    item_id: UUID
+    version: int = Field(ge=1)
 
-    outcome: Literal["comunicar", "arquivar", "medida", "parecer"]
-    actions: list[Literal["dict", "spa", "bloqueio_cautelar"]] = Field(default_factory=list)
+
+class DecisionTask(BaseModel):
+    """A follow-up the decision sets in motion: one of the type's ``actions``
+    (its label is the title) or a free one with a ``title``."""
+
+    action: Optional[str] = Field(default=None, max_length=60)
+    title: Optional[str] = Field(default=None, max_length=255)
+    assignee: Optional[str] = Field(default=None, max_length=255)
+    assignee_kind: Literal["human", "agent"] = "human"
+    agent_name: Optional[str] = Field(default=None, max_length=100)
+    due_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def _action_or_title(self):
+        if not self.action and not (self.title or "").strip():
+            raise ValueError("a task names a catalog action or has a title")
+        return self
+
+
+class InvestigationDecisionCreate(BaseModel):
+    """06 §1: one of the case type's outcomes (or a free one when the type has
+    none), on the whole case or on some entities, with its rationale, the pinned
+    evidence it rests on and the follow-up tasks it sets in motion."""
+
+    model_config = ConfigDict(json_schema_extra={"examples": [
+        {
+            "outcome": "offboard",
+            "targets": ["Merchant:M0009876"],
+            "tasks": [{"action": "hold_settlements"}, {"title": "Report to the card network", "assignee_kind": "agent", "agent_name": "claude"}],
+            "rationale": "Bust-out pattern: volume x8 in two weeks, then chargebacks (E1, E2).",
+            "reviewer_email": "risk.lead@example.com",
+        },
+        {"outcome_label": "Close as a false positive", "closes_case": True, "rationale": "Same customer, two devices (E1)."},
+    ]})
+
+    outcome: Optional[str] = Field(default=None, max_length=60)
+    # A type without outcomes (General): the decision names itself and says whether it closes the case.
+    outcome_label: Optional[str] = Field(default=None, max_length=255)
+    closes_case: Optional[bool] = None
+    targets: list[str] = Field(default_factory=list, max_length=500)
+    tasks: list[DecisionTask] = Field(default_factory=list, max_length=50)
     rationale: str = Field(min_length=1, max_length=10000)
-    # Second pair of eyes named on the decision panel (05 §7); informative.
+    # The pinned versions it rests on; every pinned version when omitted.
+    evidence: Optional[list[DecisionEvidence]] = Field(default=None, max_length=500)
+    # The four-eyes reviewer; anyone else with write access when omitted.
     reviewer_email: Optional[str] = Field(default=None, max_length=255)
+    # The agent's draft (a decision_proposal annotation) this decision takes up.
+    proposal_id: Optional[UUID] = None
+
+
+class DecisionReview(BaseModel):
+    approve: bool
+    note: Optional[str] = Field(default=None, max_length=2000)
 
 
 # Case items (05 §1)
@@ -1892,6 +2144,78 @@ class CaseQuerySpec(BaseModel):
     output: Literal["table", "graph"] = "table"
 
 
+class CaseViewFilters(BaseModel):
+    """The canvas filter chips of a saved view: item ids, roles, tags, group
+    annotation ids, node types and a time window [start, end] in epoch ms."""
+
+    model_config = ConfigDict(extra="forbid")
+    sources: list[str] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    groups: list[str] = Field(default_factory=list)
+    types: list[str] = Field(default_factory=list)
+    window: Optional[list[float]] = Field(default=None, min_length=2, max_length=2)
+
+
+class CaseViewContent(BaseModel):
+    """``graph/view`` content (06 P8, A5): how the canvas looks, never data."""
+
+    model_config = ConfigDict(extra="forbid")
+    filters: CaseViewFilters = Field(default_factory=CaseViewFilters)
+    layout: str = Field(default="force", max_length=40)
+    groups_closed: list[str] = Field(default_factory=list)
+
+
+class GraphContentNode(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: Union[str, int]
+    type: Optional[str] = None
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphContentEdge(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: Optional[Union[str, int]] = None
+    source: Union[str, int]
+    target: Union[str, int]
+    type: Optional[str] = None
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphSelectionContent(BaseModel):
+    """``graph/selection`` content (06 P8, A5): nodes and the edges among them;
+    ``unified: true`` when the ids are the case's unified ids."""
+
+    model_config = ConfigDict(extra="allow")
+    nodes: list[GraphContentNode] = Field(min_length=1)
+    edges: list[GraphContentEdge] = Field(default_factory=list)
+    unified: bool = False
+
+    @model_validator(mode="after")
+    def _edges_join_nodes(self):
+        ids = {str(n.id) for n in self.nodes}
+        loose = [e for e in self.edges if str(e.source) not in ids or str(e.target) not in ids]
+        if loose:
+            raise ValueError(f"edge {loose[0].id or loose[0].source} joins a node that is not in the selection")
+        return self
+
+
+class TableChartSpec(BaseModel):
+    """A table seen as a chart (06 §2b AQ2): ``x`` and ``series`` name its columns."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["line", "bar"] = "line"
+    x: str = Field(min_length=1, max_length=200)
+    series: list[str] = Field(min_length=1, max_length=8)
+
+
+class ItemState(BaseModel):
+    """How an item is shown (view only, never a version)."""
+
+    model_config = ConfigDict(extra="forbid")
+    chart: Optional[TableChartSpec] = None
+
+
 class ItemCreate(BaseModel):
     kind: ItemKind
     subkind: str = Field(min_length=1, max_length=30)
@@ -1904,6 +2228,7 @@ class ItemCreate(BaseModel):
     query: Optional[CaseQuerySpec] = None
     mapping: Optional[dict[str, Any]] = None
     anchor: Optional[dict[str, Any]] = None
+    state: Optional[ItemState] = None
     # Version 1: text (markdown, notes, csv) or JSON (snapshots, results)
     content: Optional[str] = Field(default=None, max_length=4_000_000)
     content_json: Optional[Any] = None
@@ -1916,6 +2241,7 @@ class ItemUpdate(BaseModel):
     mapping: Optional[dict[str, Any]] = None
     query: Optional[CaseQuerySpec] = None
     anchor: Optional[dict[str, Any]] = None
+    state: Optional[ItemState] = None
     position: Optional[int] = Field(default=None, ge=0)
 
 
@@ -1958,6 +2284,7 @@ class ItemResponse(BaseModel):
     query: Optional[dict[str, Any]] = None
     mapping: Optional[dict[str, Any]] = None
     anchor: Optional[dict[str, Any]] = None
+    state: Optional[dict[str, Any]] = None
     current_version: int = 0
     position: int = 0
     created_at: Optional[datetime] = None
@@ -2032,11 +2359,17 @@ class BriefResponse(BaseModel):
 
 # Annotations (05 §1)
 AnnotationKind = Literal[
-    "role", "tag", "group", "same_as", "hypothesis", "hypothesis_status", "typology", "status_change"
+    "role", "tag", "group", "same_as", "hypothesis", "hypothesis_status", "status_change", "task",
+    "decision_proposal",
 ]
 
 
 class AnnotationCreate(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [
+        {"kind": "role", "targets": ["Account:4471-0"], "value": {"role": "mule"}, "reason": "forwards within minutes"},
+        {"kind": "task", "targets": [], "value": {"title": "Pull 90 days of statements", "assignee_kind": "agent", "agent_name": "claude", "due_at": "2026-10-21T18:00:00"}},
+    ]})
+
     kind: AnnotationKind
     targets: list[str] = Field(default_factory=list, max_length=5000)
     value: dict[str, Any] = Field(default_factory=dict)
@@ -2064,6 +2397,51 @@ class AnnotationResponse(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class ReportCreate(BaseModel):
+    """``POST …/reports``: render an org library template into a markdown document."""
+
+    model_config = ConfigDict(json_schema_extra={"examples": [{"template": "offboarding-memo"}]})
+
+    template: str = Field(min_length=1, max_length=100)
+    title: Optional[str] = Field(default=None, max_length=255)
+
+
+class EntityCaseDecision(BaseModel):
+    id: str
+    outcome_label: str
+    decided_at: str
+    review: Optional[str] = None
+    closes_case: bool = False
+
+
+class EntityCase(BaseModel):
+    """A case where an entity is present or of interest (06 P7)."""
+
+    investigation_id: UUID
+    title: str
+    status: str
+    case_type: str
+    case_type_label: str
+    updated_at: Optional[datetime] = None
+    present: bool
+    label: Optional[str] = None
+    node_type: Optional[str] = None
+    roles: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    groups: list[str] = Field(default_factory=list)
+    tasks: list[str] = Field(default_factory=list)
+    decisions: list[EntityCaseDecision] = Field(default_factory=list)
+
+
+class TaskResponse(AnnotationResponse):
+    """A task with its case (``GET /api/investigations/tasks``)."""
+
+    investigation_id: UUID
+    case_title: str
+    case_status: str
+    overdue: bool = False
+
+
 class FileEnrichmentInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     delimiter: str = Field(default=",", min_length=1, max_length=1)
@@ -2076,7 +2454,7 @@ class FileEnrichmentSpec(BaseModel):
     """How a ``table`` item with ``mapping.as = enrichment`` joins the case's
     nodes: rows keyed by ``key_column``; a node of ``match_node_types`` matches
     by its id or a property, reduced to its first ``key_digits`` digits when set
-    (CNPJ → CNPJ básico for the QSA)."""
+    (a company id against its group prefix in a registry)."""
 
     model_config = ConfigDict(extra="forbid")
     version: Literal[1] = 1
@@ -2117,10 +2495,10 @@ class TraceRequest(BaseModel):
     allocation: Optional[Literal["fifo", "lifo", "proportional", "libr", "total"]] = None
     max_hops: int = Field(3, ge=1, le=20)
     max_dwell_hours: Optional[float] = Field(24, ge=0)  # null or 0 = no limit
-    min_amount: float = Field(50, ge=0)
+    min_amount: float = Field(0, ge=0)
     # [start, end]; default seed → +Δ (backward −Δ → seed).
     window: Optional[list[TimeValue]] = Field(None, min_length=2, max_length=2)
-    stop_types: Optional[list[str]] = None  # default: cash-out/crypto/bet/external types
+    stop_types: Optional[list[str]] = None  # node types where the flow stops; default: the types where value only ends
     stop_nodes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -2143,12 +2521,12 @@ class PathsRequest(BaseModel):
     max_dwell_hours: Optional[float] = Field(None, ge=0)  # earliest: Δ at intermediate nodes
 
 
-class TypologiesRequest(BaseModel):
-    """Typology badges (F4.3, 03 §6.4): all of them unless ``typologies`` lists
-    ids; ``params`` overrides defaults per id ({"fracionamento": {"limit": 10000}})."""
+class EntityResolutionRequest(BaseModel):
+    """Blocking attributes and name properties of ``/analysis/er``; the
+    defaults of ``services/entity_resolution.py`` when omitted."""
 
-    typologies: Optional[list[str]] = None
-    params: dict[str, dict[str, float]] = Field(default_factory=dict)
+    block_on: Optional[list[str]] = Field(default=None, max_length=20)
+    name_keys: Optional[list[str]] = Field(default=None, max_length=20)
 
 
 # ---------------------------------------------------------------------------
@@ -2161,7 +2539,6 @@ class AgentTokenCreate(BaseModel):
     # "user": every case the owner reads; "case": only investigation_ids
     scope: Literal["user", "case"] = "user"
     investigation_ids: list[UUID] = Field(default_factory=list)
-    unmasked: bool = False  # honoured only with settings.agents_allow_unmasked_data
 
     @model_validator(mode="after")
     def _case_scope_needs_ids(self):
@@ -2176,7 +2553,6 @@ class AgentTokenResponse(BaseModel):
     name: str
     scope: str = "user"
     investigation_ids: list[str] = Field(default_factory=list)
-    unmasked: bool = False
     created_at: datetime
     expires_at: datetime
     revoked_at: Optional[datetime] = None
@@ -2189,7 +2565,7 @@ class AgentTokenCreated(AgentTokenResponse):
 
 
 # ---------------------------------------------------------------------------
-# Org library and vocabularies (05 §6): superusers write, everyone reads
+# Org library (05 §6): superusers write, everyone reads
 # ---------------------------------------------------------------------------
 
 class OrgLibraryDoc(BaseModel):
@@ -2204,29 +2580,12 @@ class OrgLibraryDoc(BaseModel):
 class OrgLibraryDocCreate(BaseModel):
     slug: str = Field(min_length=1, max_length=100, pattern=r"^[a-z0-9_-]+$")
     title: str = Field(min_length=1, max_length=255)
-    kind: Literal["playbook", "template"] = "playbook"
+    # template: a report with {{placeholders}}; mapping: a file mapping as JSON ({as, spec}).
+    kind: Literal["playbook", "template", "mapping"] = "playbook"
     body: str = Field(max_length=200_000)
 
 
 class OrgLibraryDocUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
-    kind: Literal["playbook", "template"] = "playbook"
+    kind: Literal["playbook", "template", "mapping"] = "playbook"
     body: str = Field(max_length=200_000)
-
-
-class OrgVocabularyValue(BaseModel):
-    value: str = Field(min_length=1, max_length=120)
-    label: Optional[str] = Field(default=None, max_length=255)
-    presets: list[str] = Field(default_factory=list)  # kind_presets it suits; empty = all
-    norm_ref: Optional[str] = Field(default=None, max_length=120)
-
-
-class OrgVocabulary(BaseModel):
-    kind: str
-    values: list[OrgVocabularyValue]
-    updated_at: Optional[datetime] = None
-    seeded: bool = False
-
-
-class OrgVocabularyUpdate(BaseModel):
-    values: list[OrgVocabularyValue] = Field(max_length=500)

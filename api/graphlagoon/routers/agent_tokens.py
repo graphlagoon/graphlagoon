@@ -62,7 +62,6 @@ async def create_agent_token(
         data.expires_in_days,
         scope=data.scope,
         investigation_ids=data.investigation_ids,
-        unmasked=data.unmasked,
     )
     await audit.record(
         user_email,
@@ -73,7 +72,6 @@ async def create_agent_token(
             "name": token["name"],
             "scope": token["scope"],
             "investigation_ids": token["investigation_ids"],
-            "unmasked": token["unmasked"],
         },
     )
     return {**token, "token": raw}

@@ -1,4 +1,4 @@
-"""Agent tokens, case scoping, masking and the agent actor in the journal
+"""Agent tokens, case scoping and the agent actor in the journal
 (FA.1, F0 of 05-plano-v2), memory store."""
 
 import sys
@@ -164,7 +164,7 @@ def test_case_scoped_token_reaches_only_its_cases(client):
     assert r.json()["detail"]["error"]["code"] == "AGENT_FORBIDDEN"
     r = client.get(f"/api/investigations/{b['id']}/items", headers=agent)
     assert r.status_code == 403
-    listed = client.get("/api/investigations", headers=agent).json()
+    listed = client.get("/api/investigations", headers=agent).json()["items"]
     assert [i["id"] for i in listed] == [a["id"]]
     r = client.post("/api/investigations", json={"title": "C"}, headers=agent)
     assert r.status_code == 403
@@ -208,11 +208,11 @@ def test_agent_outside_the_allowlist_and_on_shares_is_403(client):
     assert r.status_code == 200, r.text
 
 
-CPF = "123.456.789-01"
+DOC = "078-05-1120"
 SNAPSHOT = {
     "nodes": [
-        {"id": "p1", "type": "Pessoa", "properties": {"nome": "Ana", "cpf": CPF}},
-        {"id": "c1", "type": "Conta", "properties": {"conta": "0341-1234-567890"}},
+        {"id": "p1", "type": "Person", "properties": {"name": "Ana", "national_id": DOC}},
+        {"id": "c1", "type": "Account", "properties": {"account": "0341-1234-567890"}},
     ],
     "edges": [],
 }
@@ -228,9 +228,9 @@ def case_with_source(client, env, tmp_path):
     env.setattr(investigation_storage, "_store", LocalBlobStore(str(tmp_path)))
     env.setattr(snapshot, "get_snapshot_service", lambda: _Snapshots())
     store = InMemoryStore.get_instance()
-    context = store.create_graph_context("Pix", "e", "n", OWNER)
+    context = store.create_graph_context("Bank", "e", "n", OWNER)
     exploration = store.create_exploration(
-        context.id, "Contas", OWNER, {"has_snapshot": True}
+        context.id, "Accounts", OWNER, {"has_snapshot": True}
     )
     case = client.post("/api/investigations", json={"title": "A"}, headers=h(OWNER)).json()
     url = f"/api/investigations/{case['id']}"
@@ -243,43 +243,28 @@ def case_with_source(client, env, tmp_path):
     return url, r.json()["id"], exploration
 
 
-def test_rest_reads_are_masked_for_agents(client, env, case_with_source):
+def test_agents_read_what_the_person_reads_but_never_the_bytes(client, env, case_with_source):
     url, item_id, exploration = case_with_source
     agent = bearer(mint(client)["token"])
-    person = client.get(f"{url}/items/{item_id}/snapshot", headers=h(OWNER)).text
-    assert CPF in person and "1234-567890" in person
-    masked = client.get(f"{url}/items/{item_id}/snapshot", headers=agent)
-    assert masked.status_code == 200, masked.text
-    assert CPF not in masked.text and "1234-567890" not in masked.text
-    assert "***.456.789-**" in masked.text
-    assert CPF not in client.get(f"{url}/graph", headers=agent).text
-    masked = client.get(f"/api/explorations/{exploration.id}/snapshot", headers=agent)
-    assert masked.status_code == 200 and CPF not in masked.text
+    person = client.get(f"{url}/items/{item_id}/snapshot", headers=h(OWNER))
+    got = client.get(f"{url}/items/{item_id}/snapshot", headers=agent)
+    assert got.status_code == 200 and got.json() == person.json() and DOC in got.text
+    assert client.get(f"{url}/graph", headers=agent).json() == client.get(f"{url}/graph", headers=h(OWNER)).json()
+    assert client.get(f"/api/explorations/{exploration.id}/snapshot", headers=agent).status_code == 200
 
-    # items: text comes back masked, bytes never reach the agent
+    # items: the agent reads the text extraction; bytes never reach it
     up = client.post(
-        f"{url}/items?filename=qsa.csv&kind=table&subkind=csv",
-        content=f"cpf\n{CPF}".encode(),
+        f"{url}/items?filename=ids.csv&kind=table&subkind=csv",
+        content=f"national_id\n{DOC}".encode(),
         headers={**agent, "Content-Type": "application/octet-stream"},
     )
     assert up.status_code == 201, up.text
     got = client.get(f"{url}/items/{up.json()['id']}/text", headers=agent)
-    assert got.status_code == 200 and CPF not in got.text and "456.789" in got.text
-    assert CPF in client.get(f"{url}/items/{up.json()['id']}/content", headers=h(OWNER)).text
+    assert got.status_code == 200 and DOC in got.json()["text"]
     r = client.get(f"{url}/items/{up.json()['id']}/content", headers=agent)
     assert r.status_code == 403
     assert r.json()["detail"]["error"]["code"] == "AGENT_FORBIDDEN"
-    # events carry what the agent did, masked for it
-    events = client.get(f"{url}/events", headers=agent)
-    assert events.status_code == 200 and CPF not in events.text
-
-    # unmasked needs both the org setting and the token flag
-    unmasked = bearer(mint(client, unmasked=True)["token"])
-    assert CPF not in client.get(f"{url}/items/{item_id}/snapshot", headers=unmasked).text
-    env.setenv("GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA", "true")
-    get_settings.cache_clear()
-    assert CPF in client.get(f"{url}/items/{item_id}/snapshot", headers=unmasked).text
-    assert CPF not in client.get(f"{url}/items/{item_id}/snapshot", headers=agent).text
+    assert DOC in client.get(f"{url}/items/{up.json()['id']}/content", headers=h(OWNER)).text
 
 
 def test_upload_checks_access_before_reading_the_body(client, case_with_source):
@@ -347,27 +332,18 @@ def test_agents_disabled_hides_token_routes_and_rejects_tokens(client, env):
     assert r.status_code == 401
 
 
-def test_unmasked_needs_org_policy_and_token_flag_and_use_is_recorded(client, env, case_with_source):
-    """``unmasked`` = org allows ∧ token marked; REST text reads follow it. Each
-    use bumps ``last_used_at`` (at most once a minute)."""
+def test_token_use_is_recorded_and_a_case_token_stays_in_its_cases(client, env, case_with_source):
+    """Each use bumps ``last_used_at`` (at most once a minute); a case token
+    that names another case gets 403 here."""
     url, _, _ = case_with_source
-    doc = client.post(f"{url}/items", json={"kind": "document", "subkind": "markdown", "title": "d", "content": f"CPF {CPF}"},
+    doc = client.post(f"{url}/items", json={"kind": "document", "subkind": "markdown", "title": "d", "content": f"ID {DOC}"},
                       headers=h(OWNER)).json()
     plain = mint(client)
-    marked = mint(client, unmasked=True)
-    assert plain["last_used_at"] is None and marked["unmasked"] is True
-    for token in (plain, marked):  # org policy off: the flag changes nothing
-        r = client.get(f"{url}/items/{doc['id']}/text", headers=bearer(token["token"]))
-        assert r.status_code == 200 and r.json()["text"] == "CPF ***.456.789-**"
-    env.setenv("GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA", "true")
-    get_settings.cache_clear()
-    r = client.get(f"{url}/items/{doc['id']}/text", headers=bearer(marked["token"]))
-    assert r.json()["text"] == f"CPF {CPF}"
+    assert plain["last_used_at"] is None and "unmasked" not in plain
     r = client.get(f"{url}/items/{doc['id']}/text", headers=bearer(plain["token"]))
-    assert r.json()["text"] == "CPF ***.456.789-**"  # still masked: the token is not marked
+    assert r.status_code == 200 and r.json()["text"] == f"ID {DOC}"
     listed = {t["id"]: t for t in client.get("/api/agent-tokens", headers=h(OWNER)).json()}
-    assert listed[plain["id"]]["last_used_at"] is not None and listed[marked["id"]]["last_used_at"] is not None
-    # a case token that names this case also works, one that names another does not
+    assert listed[plain["id"]]["last_used_at"] is not None
     other = client.post("/api/investigations", json={"title": "other"}, headers=h(OWNER)).json()
     scoped = mint(client, scope="case", investigation_ids=[other["id"]])
     assert client.get(f"{url}/items/{doc['id']}/text", headers=bearer(scoped["token"])).status_code == 403

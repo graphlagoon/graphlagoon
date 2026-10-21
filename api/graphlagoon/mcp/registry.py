@@ -25,6 +25,7 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "update_case": [("PATCH", _CASE)],
     "get_brief": [("GET", f"{_CASE}/brief")],
     "write_brief": [("PUT", f"{_CASE}/brief")],
+    "render_report": [("POST", f"{_CASE}/reports"), ("GET", "/api/org/library")],
     "list_items": [("GET", f"{_CASE}/items")],
     "read_item": [("GET", _ITEM), ("GET", f"{_ITEM}/versions"), ("GET", f"{_ITEM}/text")],
     "update_item": [("PATCH", _ITEM)],
@@ -42,6 +43,11 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "promote_tables": [("POST", f"{_CASE}/items/promote")],
     "pin_evidence": [("POST", f"{_ITEM}/pin")],
     "list_annotations": [("GET", f"{_CASE}/annotations")],
+    "propose_decision": [("POST", f"{_CASE}/annotations")],
+    "find_entity_cases": [("GET", "/api/investigations/entities/cases")],
+    "list_tasks": [("GET", "/api/investigations/tasks"), ("GET", f"{_CASE}/annotations")],
+    "add_task": [("POST", f"{_CASE}/annotations")],
+    "update_task": [("PATCH", _ANNOTATION)],
     "annotate": [("POST", f"{_CASE}/annotations")],
     "group": [("POST", f"{_CASE}/annotations"), ("PATCH", _ANNOTATION)],
     "get_graph": [("GET", f"{_CASE}/graph"), ("GET", f"{_ITEM}/snapshot")],
@@ -51,14 +57,13 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "run_analysis": [
         ("POST", f"{_CASE}/analysis/trace"),
         ("POST", f"{_CASE}/analysis/paths"),
-        ("POST", f"{_CASE}/analysis/typologies"),
         ("POST", f"{_CASE}/analysis/er"),
         ("POST", f"{_CASE}/events"),  # links and communities journal like the browser's analyses
     ],
     "list_events": [("GET", f"{_CASE}/events")],
     "changes_since": [("GET", f"{_CASE}/events"), ("GET", f"{_CASE}/items"), ("GET", f"{_CASE}/annotations")],
     "get_playbook": [("GET", "/api/org/library"), ("GET", "/api/org/library/{slug}")],
-    "list_vocabulary": [("GET", "/api/org/vocabularies"), ("GET", "/api/org/vocabularies/{kind}")],
+    "get_case_type": [("GET", "/api/org/case-types"), ("GET", "/api/org/case-types/{slug}")],
 }
 
 # (method, path) → the tools that mirror it.
@@ -72,10 +77,11 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", _CASE): f"{HUMAN_ONLY} deleting a case (05 §6)",
     ("POST", f"{_CASE}/share"): f"{HUMAN_ONLY} sharing a case with new people (05 §6)",
     ("DELETE", f"{_CASE}/share/{{email}}"): f"{HUMAN_ONLY} sharing a case (05 §6)",
-    ("POST", f"{_CASE}/decision"): f"{HUMAN_ONLY} the decision is a person's (05 §6, LGPD art. 20)",
+    ("POST", f"{_CASE}/decisions"): f"{HUMAN_ONLY} a decision is a person's (05 §6, 06 §1)",
+    ("POST", f"{_CASE}/decisions/{{decision_id}}/review"): f"{HUMAN_ONLY} four eyes are a second person's (06 §1)",
     ("POST", f"{_CASE}/reopen"): f"{HUMAN_ONLY} reopening a decided case (05 §3)",
     ("GET", f"{_CASE}/export"): (
-        f"{HUMAN_ONLY} exports leave the app unmasked and prepare the communication; "
+        f"{HUMAN_ONLY} what leaves the app is a person's call; "
         "agents read the case through get_brief, list_items and read_item"
     ),
     ("POST", f"{_ITEM}/confirm"): f"{HUMAN_ONLY} a person confirms suggestions (05 §6)",
@@ -85,10 +91,15 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/api/agent-tokens"): f"{HUMAN_ONLY} token management",
     ("POST", "/api/agent-tokens"): f"{HUMAN_ONLY} an agent never mints tokens",
     ("DELETE", "/api/agent-tokens/{token_id}"): f"{HUMAN_ONLY} token management",
-    ("DELETE", _ITEM): "deleting is left to people in the UI (agents add and version, never remove)",
-    ("DELETE", _ANNOTATION): "deleting is left to people in the UI (agents add, never remove)",
+    ("DELETE", _ITEM): f"{HUMAN_ONLY} deleting material (agents add and version, never remove)",
+    ("DELETE", _ANNOTATION): f"{HUMAN_ONLY} deleting annotations (agents add, never remove)",
+    ("GET", "/api/org/authoring"): (
+        "authoring help for people writing case types and library docs; agents read the same "
+        "through get_case_type, get_playbook and the tool descriptions"
+    ),
     ("GET", f"{_ITEM}/content"): (
-        "binary never reaches the agent (05 §6); read_item and case://…/items/{id} return the text extraction"
+        "binary never reaches the agent (05 §6) through REST; read_item returns the text extraction, "
+        "and images up to agent_image_max_bytes as MCP image content (06 P8)"
     ),
 }
 

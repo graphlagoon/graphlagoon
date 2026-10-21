@@ -1,9 +1,9 @@
-"""Temporal money trace on the server (investigations F3.8, 03 §6.1).
+"""Temporal flow trace on the server (investigations F3.8, 03 §6.1).
 
 Port of ``frontend/src/utils/trace.ts`` (and of ``edgeValue`` in
 ``utils/edgeSemantics.ts``): same rules, same tie-breaking, same rounding, so
 ``tests/test_trace.py`` checks it against the very fixture the vitest suite uses
-(``frontend/src/__tests__/fixtures/trace/golpe-pix.json``). Params and results
+(``frontend/src/__tests__/fixtures/trace/flow-chain.json``). Params and results
 keep the TS keys (``maxHops``, ``edgeTrace``…) so a server run and a browser run
 stamp the same method (F4.1 evidence). The readings of §6.1 are in the TS module
 header and the F3.3 decision log entry.
@@ -14,7 +14,6 @@ header and the F3.3 decision log entry.
 from __future__ import annotations
 
 import math
-import re
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
@@ -23,10 +22,6 @@ ALLOCATIONS = ("fifo", "lifo", "proportional", "libr", "total")
 # FIFO and LIBR lose their meaning on reversed edges (F3.4 decision log).
 BACKWARD_ALLOCATIONS = ("lifo", "proportional", "total")
 HOUR_MS = 3_600_000
-# Node types checked as stops by default (frontend stores/trace.ts DEFAULT_STOP_TYPE).
-DEFAULT_STOP_TYPE = re.compile(
-    r"saque|withdraw|atm|cash|exchange|cripto|crypto|aposta|bet|externo|external", re.I
-)
 
 _INF = math.inf
 
@@ -37,16 +32,15 @@ _INF = math.inf
 
 
 def parse_amount(raw: Any, unit: str = "units") -> Optional[float]:
-    """``12.34``, ``"12.34"``, ``"1.234,56"`` (Brazilian) → number; else None."""
+    """``12.34`` or ``"12.34"`` → number; else None. A comma is never read:
+    locale-formatted text goes through a file mapping's ``decimal_comma``."""
     if isinstance(raw, bool):
         return None
     if isinstance(raw, (int, float)):
         n = float(raw)
     elif isinstance(raw, str) and raw.strip():
         s = raw.strip()
-        if "," in s:
-            s = s.replace(".", "").replace(",", ".", 1)
-        if "_" in s:  # Python's float() takes 1_000, JS Number() does not
+        if "_" in s or "," in s:  # Python's float() takes 1_000, JS Number() does not
             return None
         try:
             n = float(s)
@@ -59,11 +53,9 @@ def parse_amount(raw: Any, unit: str = "units") -> Optional[float]:
     return n / 100 if unit == "cents" else n
 
 
-_BR_DATE = re.compile(r"^(\d{2})/(\d{2})/(\d{4})(?:[ T](.*))?$")
-
-
 def parse_time(raw: Any) -> Optional[int]:
-    """ISO date/datetime, ``dd/mm/yyyy[ hh:mm[:ss]]``, epoch s or ms → epoch ms."""
+    """ISO date/datetime, epoch s or ms → epoch ms (other layouts go through a
+    file mapping's ``date:`` converter)."""
     if isinstance(raw, bool):
         return None
     if isinstance(raw, (int, float)):
@@ -75,11 +67,9 @@ def parse_time(raw: Any) -> Optional[int]:
     s = raw.strip()
     if s.isdigit():
         return parse_time(int(s))
-    br = _BR_DATE.match(s)
-    iso = f"{br[3]}-{br[2]}-{br[1]}T{br[4] or '00:00'}" if br else s
     try:
         # A bare date or a datetime without offset is local time, as in the browser.
-        return round(datetime.fromisoformat(iso).timestamp() * 1000)
+        return round(datetime.fromisoformat(s).timestamp() * 1000)
     except ValueError:
         return None
 
@@ -291,9 +281,19 @@ def run_trace(edges: list[dict], node_types: dict, seed_edge_ids: list[str], par
 # ---------------------------------------------------------------------------
 
 
-def trace_params(req: Any, edges: list[dict], seed_ids: list[str], types: set) -> dict:
-    """TS-shaped params from a ``TraceRequest``, with the T5 defaults: window
-    seed → +Δ (backward −Δ → seed) and the cash-out/crypto/bet types as stops."""
+def end_types(edges: list[dict], node_types: dict, direction: str = "forward") -> list[str]:
+    """Node types where value only ends (forward: they receive, none of them
+    sends; backward: they send, none receives): the default stops when the
+    request names none. Twin of ``endTypes`` in ``composables/useCaseAnalyses.ts``."""
+    into, out = ("dst", "src") if direction == "forward" else ("src", "dst")
+    reached = {node_types.get(e[into]) for e in edges}
+    leaving = {node_types.get(e[out]) for e in edges}
+    return sorted(t for t in reached - leaving if t)
+
+
+def trace_params(req: Any, edges: list[dict], seed_ids: list[str], node_types: dict) -> dict:
+    """TS-shaped params from a ``TraceRequest``, with the defaults: window
+    seed → +Δ (backward −Δ → seed) and the types where value only ends as stops."""
     direction = req.direction
     span = (req.max_dwell_hours or 24) * HOUR_MS
     window = None
@@ -308,9 +308,7 @@ def trace_params(req: Any, edges: list[dict], seed_ids: list[str], types: set) -
             if direction == "forward"
             else [min(times) - span, max(times)]
         )
-    stop_types = req.stop_types
-    if stop_types is None:
-        stop_types = sorted(t for t in types if t and DEFAULT_STOP_TYPE.search(t))
+    stop_types = req.stop_types if req.stop_types is not None else end_types(edges, node_types, direction)
     return {
         "direction": direction,
         "maxHops": req.max_hops,
@@ -323,6 +321,20 @@ def trace_params(req: Any, edges: list[dict], seed_ids: list[str], types: set) -
     }
 
 
+async def _type_defaults(investigation_id: UUID, user_email: str, req: Any) -> Any:
+    """The case type's ``analysis_defaults.trace`` for what the request left unset."""
+    from graphlagoon.services import case_types
+    from graphlagoon.services import cases as service
+
+    if not hasattr(req, "model_fields_set"):
+        return req
+    case = await service.get_investigation(investigation_id, user_email)
+    kind = await case_types.get_case_type(case["case_type"]) or {}
+    defaults = ((kind.get("analysis_defaults") or {}).get("trace") or {})
+    update = {k: v for k, v in defaults.items() if v is not None and k not in req.model_fields_set}
+    return req.model_copy(update=update) if update else req
+
+
 async def run_case_trace(
     investigation_id: UUID, user_email: str, req: Any, graph: Optional[dict] = None
 ) -> dict:
@@ -331,6 +343,7 @@ async def run_case_trace(
     from graphlagoon.services import cases as service
     from graphlagoon.services.case_graph import case_graph, journal_analysis
 
+    req = await _type_defaults(investigation_id, user_email, req)
     if graph is None:
         graph = await case_graph(investigation_id, user_email)
     edges = to_trace_edges(graph["edges"])
@@ -349,7 +362,7 @@ async def run_case_trace(
             "edge_semantics)",
         )
     try:
-        params = trace_params(req, edges, seed_ids, set(types.values()))
+        params = trace_params(req, edges, seed_ids, types)
     except ValueError as exc:
         raise service.InvestigationError(422, "INVALID_BODY", str(exc)) from exc
     result = run_trace(edges, types, seed_ids, params)

@@ -292,7 +292,7 @@ def test_investigation_decide_and_share_are_gated(client, store):
     ).json()
     url = f"/api/investigations/{case['id']}"
     denied = client.post(
-        f"{url}/decision", json={"outcome": "arquivar", "rationale": "x"}, headers=_headers(OUTSIDER)
+        f"{url}/decisions", json={"outcome_label": "No action", "rationale": "x"}, headers=_headers(OUTSIDER)
     )
     assert denied.status_code == 403
     assert denied.json()["detail"]["error"]["details"]["permission"] == "investigation.decide"

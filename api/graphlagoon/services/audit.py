@@ -54,14 +54,15 @@ class AuditAction:
     INVESTIGATION_ITEM_READ = "investigation.item_read"
     INVESTIGATION_TRANSFER = "investigation.transfer"
     INVESTIGATION_DECIDE = "investigation.decide"
+    INVESTIGATION_DECISION_REVIEW = "investigation.decision_review"
     INVESTIGATION_REOPEN = "investigation.reopen"
     INVESTIGATION_EXPORT = "investigation.export"
     AGENT_TOKEN_CREATE = "agent_token.create"
     AGENT_TOKEN_REVOKE = "agent_token.revoke"
     LIBRARY_WRITE = "library.write"
     LIBRARY_DELETE = "library.delete"
-    VOCABULARY_WRITE = "vocabulary.write"
-    VOCABULARY_DELETE = "vocabulary.delete"
+    CASE_TYPE_WRITE = "case_type.write"
+    CASE_TYPE_DELETE = "case_type.delete"
     ENRICHMENT_READ = "enrichment.read"
     AGENT_READ = "agent.read"  # every MCP read tool call (03 §8.6)
 

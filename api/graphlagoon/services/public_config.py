@@ -50,7 +50,6 @@ async def build_public_config(
         "allow_raw_sql_scripts": settings.allow_raw_sql_scripts,
         # Personal agent tokens (Bearer glt_…) and their admin list.
         "agents_enabled": settings.agents_enabled,
-        "agents_allow_unmasked_data": settings.agents_allow_unmasked_data,
         "investigation_file_max_bytes": settings.investigation_file_max_bytes,
         "investigation_max_working_edges": settings.investigation_max_working_edges,
         "investigation_retention_years": settings.investigation_retention_years,

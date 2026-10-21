@@ -1,14 +1,14 @@
-"""Server money trace (F3.8): parity with the vitest suite on the same fixture."""
+"""Server flow trace (F3.8): parity with the vitest suite on the same fixture."""
 
 import json
 from datetime import datetime
 from pathlib import Path
 
-from graphlagoon.services.trace import edge_value, run_trace, to_trace_edges, trace_forward
+from graphlagoon.services.trace import edge_value, end_types, run_trace, to_trace_edges, trace_forward
 
 FIXTURE = json.loads(
     (
-        Path(__file__).parents[2] / "frontend/src/__tests__/fixtures/trace/golpe-pix.json"
+        Path(__file__).parents[2] / "frontend/src/__tests__/fixtures/trace/flow-chain.json"
     ).read_text()
 )
 SEMANTICS = FIXTURE["edge_semantics"]
@@ -30,6 +30,12 @@ def test_every_fixture_case_matches_the_typescript_core():
         assert result == case["expected"], case["name"]
         assert method["seedEdgeIds"] == ["e2"]
         assert method["allocation"] == case["params"].get("allocation", "fifo")
+
+
+def test_the_default_stops_are_the_types_where_value_only_ends():
+    # The fixture's own stops, without a word of a domain: these types only receive.
+    assert end_types(EDGES, TYPES, "forward") == ["Betting", "CashWithdrawal", "Exchange"]
+    assert end_types(EDGES, TYPES, "backward") == ["ExternalBank"]
 
 
 def test_input_order_does_not_change_the_result():

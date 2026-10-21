@@ -7,7 +7,9 @@ interpreter, change the other and the fixtures together.
 
 Semantics (shared with the TS twin):
 - inputs pick the first file (by name) whose name matches the glob; cells are
-  trimmed; ``header: false`` names the columns with ``columns``;
+  trimmed; ``header: false`` names the columns with ``columns``; ``widths``
+  (instead of ``delimiter``) reads fixed-width lines: cell i is the next
+  ``widths[i]`` characters (the last one may be short);
 - a row is ``{"alias.COL": value}``; joins are left joins between inputs;
 - each scope (an input or a join) is walked row by row: nodes, then edges.
   A conversion error discards the whole row, with the reason in the report;
@@ -21,20 +23,21 @@ Semantics (shared with the TS twin):
 
 from __future__ import annotations
 
+import codecs
 import re
 from typing import Any, Optional
 
 from graphlagoon.services.case_graph import _normalize
 
-CONVERTERS = ("cents", "decimal_br", "trim", "upper", "digits")
-NORMALIZERS = ("cpf_cnpj", "account", "phone", "email", "device_id", "ip", "pix_key", "card", "terminal_id", "address", "lower", "none")
+CONVERTERS = ("cents", "decimal_comma", "trim", "upper", "digits")
+NORMALIZERS = ("digits", "account", "phone", "email", "device_id", "ip", "card", "terminal_id", "address", "lower", "none")
 WHEN_OPS = ("eq", "ne", "in", "empty", "not_empty")
 MAX_DISCARDED = 20
 
 _REF = re.compile(r"^[A-Za-z_]\w*\.[^.\s{}]+$")
 _PLACEHOLDER = re.compile(r"\{([^}]+)\}")
 _CENTS = re.compile(r"^-?\d+$")
-_DECIMAL_BR = re.compile(r"^-?(\d{1,3}(\.\d{3})*|\d+)(,\d+)?$")
+_DECIMAL_COMMA = re.compile(r"^-?(\d{1,3}(\.\d{3})*|\d+)(,\d+)?$")
 
 
 class MappingError(ValueError):
@@ -155,11 +158,24 @@ def validate(spec: Any) -> set:
         _keys(
             inp,
             where,
-            {"match", "delimiter", "encoding", "header", "columns"},
+            {"match", "delimiter", "widths", "encoding", "header", "columns"},
             ("match",),
         )
         if inp.get("header", True) is False and not inp.get("columns"):
             raise MappingError(f"{where}: header false needs columns")
+        if inp.get("encoding") is not None:
+            try:
+                codecs.lookup(str(inp["encoding"]))
+            except LookupError:
+                raise MappingError(f"{where}: unknown encoding '{inp['encoding']}' (utf-8, latin-1, cp1252…)") from None
+        widths = inp.get("widths")
+        if widths is not None:
+            if "delimiter" in inp:
+                raise MappingError(f"{where}: give delimiter or widths, not both")
+            if not isinstance(widths, list) or not widths or not all(isinstance(w, int) and not isinstance(w, bool) and w > 0 for w in widths):
+                raise MappingError(f"{where}: widths is a list of positive integers")
+            if inp.get("header", True) is False and len(inp["columns"]) != len(widths):
+                raise MappingError(f"{where}: one width per column")
     tables = spec.get("tables") or {}
     if not isinstance(tables, dict) or not all(
         isinstance(t, dict) for t in tables.values()
@@ -281,6 +297,18 @@ def parse_line(line: str, delimiter: str) -> list[str]:
         i = end + len(delimiter)
 
 
+def split_cells(inp: dict, line: str) -> list[str]:
+    """The cells of one line: by ``widths`` (fixed-width) or by the delimiter."""
+    widths = inp.get("widths")
+    if not widths:
+        return parse_line(line, inp.get("delimiter", ","))
+    cells, start = [], 0
+    for w in widths:
+        cells.append(line[start:start + w].strip())
+        start += w
+    return cells
+
+
 def _lines(text: str) -> list[str]:
     return [line for line in re.split(r"\r?\n", text.lstrip("\ufeff")) if line != ""]
 
@@ -298,12 +326,11 @@ def _match_file(inp: dict, names: list[str]) -> Optional[str]:
 
 
 def _columns(inp: dict, lines: list[str]) -> tuple[list[str], list[str]]:
-    delimiter = inp.get("delimiter", ",")
     if inp.get("header", True) is False:
         return list(inp["columns"]), lines
     if not lines:
         return [], []
-    return parse_line(lines[0], delimiter), lines[1:]
+    return split_cells(inp, lines[0]), lines[1:]
 
 
 def decode(data: bytes, encoding: Optional[str]) -> str:
@@ -331,9 +358,9 @@ def _convert(value: Any, conv: str) -> Any:
         if not _CENTS.match(s):
             raise _RowError(f'invalid cents: "{s}"')
         return int(s) / 100
-    if conv == "decimal_br":
-        if not _DECIMAL_BR.match(s):
-            raise _RowError(f'invalid decimal_br: "{s}"')
+    if conv == "decimal_comma":
+        if not _DECIMAL_COMMA.match(s):
+            raise _RowError(f'invalid decimal_comma: "{s}"')
         return float(s.replace(".", "").replace(",", "."))
     fmt = conv[len("date:") :]
     if len(s) != len(fmt):
@@ -432,10 +459,9 @@ def interpret(spec: dict, files: dict[str, str]) -> dict:
             rows_of[alias] = []
             continue
         columns, data = _columns(inp, _lines(files[name]))
-        delimiter = inp.get("delimiter", ",")
         rows = []
         for line in data:
-            cells = parse_line(line, delimiter)
+            cells = split_cells(inp, line)
             rows.append(
                 {
                     f"{alias}.{c}": cells[i] if i < len(cells) else ""
@@ -556,7 +582,7 @@ def interpret(spec: dict, files: dict[str, str]) -> dict:
             report["without_counterpart"] += orphans
 
     report["unknown_nodes"] = sum(
-        1 for n in nodes.values() if n["node_type"] == "Desconhecido"
+        1 for n in nodes.values() if n["node_type"] == "Unknown"
     )
     return {
         "graph": {
@@ -581,8 +607,10 @@ def suggest_presets(files: dict[str, str], presets: dict[str, dict]) -> list[str
             if not lines:
                 ok = False
                 break
-            first = parse_line(lines[0], inp.get("delimiter", ","))
-            if inp.get("header", True) is False:
+            first = split_cells(inp, lines[0])
+            if inp.get("header", True) is False and inp.get("widths"):
+                ok = len(lines[0]) > sum(inp["widths"][:-1])  # long enough to reach the last column
+            elif inp.get("header", True) is False:
                 ok = len(first) == len(inp["columns"])
             else:
                 need = {r.split(".", 1)[1] for r in refs if r.split(".", 1)[0] == alias}

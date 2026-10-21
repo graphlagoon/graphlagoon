@@ -18,9 +18,23 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from graphlagoon.services import case_items
-from graphlagoon.services.cases import InvestigationError, _session, author_fields, ensure_not_decided, load_case
+from graphlagoon.services.cases import InvestigationError, _session, author_fields, ensure_not_closed, load_case
 
-_PARAM = re.compile(r"(?<![:\w]):([A-Za-z_]\w*)")
+# ``:name`` outside string literals (a quoted ``':x'`` stays text). In Cypher a
+# colon after ``(``, ``[`` or ``|`` starts a label or a relationship type
+# (``(:Person)``, ``-[:KNOWS|OWNS]->``), not a parameter. Mirrored by
+# ``queryParameterNames`` in the frontend (useAddToCase.ts).
+_STRING = r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"|`[^`]*`"
+_PARAM = {
+    "sql": re.compile(_STRING + r"|(?<![:\w]):([A-Za-z_]\w*)"),
+    "cypher": re.compile(_STRING + r"|(?<![:\w(\[|]):([A-Za-z_]\w*)"),
+}
+
+
+def parameter_names(text: str, language: str = "sql") -> list[str]:
+    """The ``:name`` placeholders of a query, in order of first use."""
+    found = (m[1] for m in _PARAM.get(language, _PARAM["sql"]).finditer(text) if m[1])
+    return list(dict.fromkeys(found))
 
 
 def _sql_literal(value: Any) -> str:
@@ -35,14 +49,14 @@ def _sql_literal(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def substitute(text: str, declared: list[dict], given: dict) -> tuple[str, dict]:
+def substitute(text: str, declared: list[dict], given: dict, language: str = "sql") -> tuple[str, dict]:
     """``:name`` → the value given (or the parameter's default), validated like
     a query template's parameters (required, select options). Values are
     spliced as SQL/Cypher literals; lists become ``'a', 'b'`` for ``IN (:ids)``.
     Returns the text and the parameters actually used."""
     by_id = {p["id"]: p for p in declared}
     used: dict = {}
-    for name in sorted(set(_PARAM.findall(text))):
+    for name in sorted(parameter_names(text, language)):
         spec = by_id.get(name)
         value = given.get(name, spec.get("default") if spec else None)
         if value in (None, "", []):
@@ -57,7 +71,8 @@ def substitute(text: str, declared: list[dict], given: dict) -> tuple[str, dict]
     unknown = sorted(set(given) - set(used))
     if unknown:
         raise InvestigationError(422, "QUERY_PARAMETER_UNKNOWN", f"The query has no parameter {unknown}")
-    text = _PARAM.sub(lambda m: _sql_literal(used[m[1]]), text)
+    pattern = _PARAM.get(language, _PARAM["sql"])
+    text = pattern.sub(lambda m: m[0] if m[1] is None else _sql_literal(used[m[1]]), text)
     return text, used
 
 
@@ -97,14 +112,14 @@ async def run_query(
 
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        ensure_not_decided(inv)
+        ensure_not_closed(inv)
         item = await case_items.item_row(session, investigation_id, item_id)
     if item.kind != "query" or not item.query:
         raise InvestigationError(422, "NOT_A_QUERY", "Only query items run")
     if item.context_id is None:
         raise InvestigationError(422, "QUERY_CONTEXT_MISSING", "The query needs a graph context to run against")
     spec = item.query
-    text, used = substitute(spec["text"], spec.get("parameters") or [], parameters or {})
+    text, used = substitute(spec["text"], spec.get("parameters") or [], parameters or {}, spec.get("language") or "sql")
     started = datetime.now()
     t0 = time.perf_counter()
     try:

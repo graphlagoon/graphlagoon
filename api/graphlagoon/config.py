@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     # General settings
     dev_mode: bool = Field(default=True, description="Enable development mode")
     port: int = Field(default=8000, description="Server port")
+    api_docs_enabled: Optional[bool] = Field(
+        default=None,
+        description="Serve the OpenAPI spec and Swagger UI ({prefix}/docs, {prefix}/openapi.json, "
+        "{prefix}/redoc), behind the same login as the API. Unset: on in dev mode, off otherwise.",
+    )
     show_error_details: bool = Field(
         default=True,
         description="Show detailed error info (traceback, exception type) in API error responses",
@@ -171,12 +176,13 @@ class Settings(BaseSettings):
     agent_token_max_days: int = Field(
         default=90, description="Maximum validity, in days, of an agent token"
     )
-    agents_allow_unmasked_data: bool = Field(
-        default=False,
-        description="Let agents read CPF, CNPJ and account numbers unmasked",
-    )
     agent_rate_limit_per_minute: int = Field(
         default=120, description="Requests per minute allowed for each agent token"
+    )
+    agent_image_max_bytes: int = Field(
+        default=2_000_000,
+        description="PNG/JPEG/GIF/WebP items up to this size reach an agent as MCP image "
+        "content in read_item (multimodal models read them); 0 = never.",
     )
 
     # Case storage (03-arquitetura §2.3): files, frozen sources, artifacts
@@ -187,13 +193,10 @@ class Settings(BaseSettings):
         "when that is set; otherwise files go to "
         "{exploration_snapshots_dir}/investigations.",
     )
-    artifact_max_bytes: int = Field(
-        default=100 * 1024 * 1024,
-        description="Maximum size of one artifact version in the case space, in bytes",
-    )
     investigation_file_max_bytes: int = Field(
         default=200 * 1024 * 1024,
-        description="Maximum size of one file uploaded to an investigation, in bytes",
+        description="Maximum size of one file uploaded to an investigation, and of an "
+        "item's inline JSON body, in bytes",
     )
     investigation_max_working_edges: int = Field(
         default=50_000,
@@ -202,15 +205,8 @@ class Settings(BaseSettings):
     )
     investigation_retention_years: int = Field(
         default=10,
-        description="Years a decided investigation is retained (not deletable "
+        description="Years a case closed by a decision is retained (not deletable "
         "without a superuser's reason) after its decision",
-    )
-    investigation_deadline_days: dict[str, dict[str, int]] = Field(
-        default={"pix_med": {"selection": 45, "analysis": 45}},
-        description="Deadline phases per case type (kind_preset), in days from "
-        "the alert (JSON: {preset: {selection, analysis}}). Pix/MED: 45 + 45 "
-        "(Circ. 3.978). A case without an entry has no deadline unless it sets "
-        "deadline_days itself.",
     )
     enrichment_max_keys: int = Field(
         default=500, description="Maximum node keys in one enrichment lookup"
@@ -394,6 +390,11 @@ class Settings(BaseSettings):
         if self.databricks_volume_path:
             return f"{self.databricks_volume_path.rstrip('/')}/style-presets"
         return None
+
+    @property
+    def api_docs_effective(self) -> bool:
+        """Whether the app serves its OpenAPI spec and Swagger UI."""
+        return self.dev_mode if self.api_docs_enabled is None else self.api_docs_enabled
 
     @property
     def investigations_volume_path_effective(self) -> Optional[str]:

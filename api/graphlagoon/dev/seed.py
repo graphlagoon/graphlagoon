@@ -117,7 +117,7 @@ TAG_VOCAB = [
     "fraud",
     "supply",
     "social",
-    "qsa",
+    "registry",
     "demo",
     "risk",
     "kyc",
@@ -362,10 +362,10 @@ class SeedClient:
 
 
 CASES = [
-    ("Golpe Pix · falsa central", "Golpe Pix", "notificacao_med"),
-    ("Lojistas de fachada · região sul", "Lojista de fachada", "monitoramento"),
-    ("Contas laranja · abertura em lote", "Conta laranja", "monitoramento"),
-    ("Ofício judicial 2026/118", "Lavagem", "oficio"),
+    ("Account takeover · call-center scam", "account takeover", "alert"),
+    ("Front merchants · south region", "merchant review", "monitoring"),
+    ("Mule accounts · batch openings", "mule accounts", "monitoring"),
+    ("Court order 2026/118", "money laundering", "court order"),
 ]
 
 
@@ -384,7 +384,7 @@ async def seed_investigations(
             by_owner.setdefault(owner, {}).setdefault(exploration_ctx[exp_id], exp_id)
     owners = [o for o, per_ctx in by_owner.items() if len(per_ctx) >= 2]
     created = 0
-    for (title, typology, origin), owner in zip(CASES, owners):
+    for (title, topic, origin), owner in zip(CASES, owners):
         case = (
             await client.request(
                 "POST",
@@ -392,7 +392,7 @@ async def seed_investigations(
                 owner,
                 json={
                     "title": title,
-                    "tags": [typology, origin],
+                    "tags": [topic, origin],
                     "description": "Seeded case",
                 },
             )
@@ -734,6 +734,12 @@ async def run_seed(
             client, roster, exploration_ids, exploration_ctx, rng
         )
         log(f"investigations: {stats.investigations}")
+        try:  # the admin area's Case types tab shows the dev org's (superuser only)
+            from graphlagoon.dev.seed_investigations import seed_case_types
+
+            log(f"case types: {await seed_case_types(client)}")
+        except SeedError:
+            log(f"case types: skipped ({ADMIN_EMAIL} is not a superuser)")
         inactive = [u for u in roster if u.profile == "inactive"]
         transfer_targets = rng.sample(seeded, k=min(len(seeded), 3))
         for ctx in transfer_targets:

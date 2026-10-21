@@ -1,5 +1,5 @@
 """Investigations v2 (05-plano-v2 §1): one case, items with versions, annotations,
-an append-only journal, agent tokens, org vocabularies and library. Replaces the
+an append-only journal, agent tokens, case types (06) and the org library. Replaces the
 never-published 016–019 migrations of the first plan.
 
 Revision ID: 016
@@ -35,9 +35,10 @@ TABLES = (
     "case_items",
     "case_item_versions",
     "case_annotations",
+    "case_entities",
     "investigation_events",
     "agent_tokens",
-    "org_vocabularies",
+    "case_types",
     "org_library",
 )
 
@@ -93,21 +94,22 @@ def upgrade() -> None:
             _id(),
             sa.Column("title", sa.String(255), nullable=False),
             sa.Column("description", sa.Text(), nullable=True),
-            # credito | garantia | pix_med | lavagem | lojista | fraude_sintetica | livre
-            sa.Column("kind_preset", sa.String(30), nullable=False, server_default="livre"),
-            # open | analysis | decided | archived
+            # slug of a case type (case_types) or the built-in "general"
+            sa.Column("case_type", sa.String(50), nullable=False, server_default="general", index=True),
+            _json("fields"),
+            sa.Column("external_ref", sa.String(255), nullable=True, index=True),
+            # open | analysis | closed
             sa.Column("status", sa.String(20), nullable=False, server_default="open"),
             sa.Column("owner_email", sa.String(255), nullable=False, index=True),
             sa.Column("assignee_email", sa.String(255), nullable=True),
             sa.Column("occurred_at", sa.DateTime(), nullable=True),
             sa.Column("alert_at", sa.DateTime(), nullable=True),
-            _json("deadline_days", "null", nullable=True),
+            _json("sla_hours", "null", nullable=True),
             _json("tags", "[]"),
             _json("settings"),
             _json("state"),
-            _json("decision", "null", nullable=True),
-            sa.Column("frozen_hash", sa.String(64), nullable=True),
-            sa.Column("frozen_at", sa.DateTime(), nullable=True),
+            sa.Column("stage", sa.String(100), nullable=True),
+            _json("decisions", "[]"),
             _now("created_at"),
             _now("updated_at"),
         )
@@ -146,6 +148,7 @@ def upgrade() -> None:
             _json("query", "null", nullable=True),
             _json("mapping", "null", nullable=True),
             _json("anchor", "null", nullable=True),
+            _json("state", "null", nullable=True),
             sa.Column("current_version", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
             _now("created_at"),
@@ -184,7 +187,7 @@ def upgrade() -> None:
             "case_annotations",
             _id(),
             _case_fk(),
-            # role | tag | group | same_as | hypothesis | hypothesis_status | typology | status_change
+            # role | tag | group | same_as | hypothesis | hypothesis_status | status_change
             sa.Column("kind", sa.String(30), nullable=False),
             _json("targets", "[]"),
             _json("value"),
@@ -194,6 +197,18 @@ def upgrade() -> None:
             sa.Column("confirmed_by", sa.String(255), nullable=True),
             sa.Column("confirmed_at", sa.DateTime(), nullable=True),
             _now("created_at"),
+        )
+    if "case_entities" not in existing:
+        op.create_table(
+            "case_entities",
+            _id(),
+            _case_fk(),
+            sa.Column("uid", sa.String(512), nullable=False, index=True),
+            sa.Column("entity", sa.String(100), nullable=True),
+            sa.Column("node_type", sa.String(100), nullable=True),
+            sa.Column("label", sa.String(255), nullable=True),
+            sa.Column("stamp", sa.String(64), nullable=False),
+            _now("updated_at"),
         )
     if "investigation_events" not in existing:
         op.create_table(
@@ -217,17 +232,16 @@ def upgrade() -> None:
             sa.Column("token_hash", sa.String(64), nullable=False, unique=True),
             sa.Column("scope", sa.String(10), nullable=False, server_default="user"),
             _json("investigation_ids", "[]"),
-            sa.Column("unmasked", sa.Boolean(), nullable=False, server_default=sa.false()),
             _now("created_at"),
             sa.Column("expires_at", sa.DateTime(), nullable=False),
             sa.Column("revoked_at", sa.DateTime(), nullable=True),
             sa.Column("last_used_at", sa.DateTime(), nullable=True),
         )
-    if "org_vocabularies" not in existing:
+    if "case_types" not in existing:
         op.create_table(
-            "org_vocabularies",
-            sa.Column("kind", sa.String(30), primary_key=True),  # role | tag | typology_preset
-            _json("values", "[]"),
+            "case_types",
+            sa.Column("slug", sa.String(50), primary_key=True),
+            _json("spec"),
             _now("updated_at"),
         )
     if "org_library" not in existing:

@@ -33,13 +33,13 @@ from graphlagoon.models.schemas import GraphContextUpdate  # noqa: E402
 OWNER = "owner@example.com"
 KEYS = [
     {
-        "node_type": "Pessoa",
-        "entity": "Pessoa",
-        "source": {"kind": "prop", "name": "titular_cpf"},
-        "normalize": "cpf_cnpj",
+        "node_type": "Holder",
+        "entity": "Person",
+        "source": {"kind": "prop", "name": "national_id"},
+        "normalize": "digits",
         "pattern": None,
     },
-    {"node_type": "Conta", "entity": "Conta", "source": "node_id", "normalize": "account", "pattern": None},
+    {"node_type": "Account", "entity": "Account", "source": "node_id", "normalize": "account", "pattern": None},
 ]
 
 
@@ -80,7 +80,7 @@ def client():
 
 def test_save_and_reload(client):
     ctx = InMemoryStore.get_instance().create_graph_context(
-        title="pix", edge_table_name="e", node_table_name="n", owner_email=OWNER
+        title="payments", edge_table_name="e", node_table_name="n", owner_email=OWNER
     )
     h = {"X-Forwarded-Email": OWNER}
     url = f"/api/graph-contexts/{ctx.id}"
@@ -89,5 +89,5 @@ def test_save_and_reload(client):
     assert resp.status_code == 200, resp.text
     assert client.get(url, headers=h).json()["identity_keys"] == KEYS
     # Another field's update leaves the keys alone.
-    client.put(url, json={"title": "pix 2"}, headers=h)
+    client.put(url, json={"title": "payments 2"}, headers=h)
     assert client.get(url, headers=h).json()["identity_keys"] == KEYS

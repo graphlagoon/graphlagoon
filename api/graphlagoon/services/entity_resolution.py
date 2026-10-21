@@ -1,13 +1,14 @@
 """Entity resolution (03-arquitetura §6.2): match suggestions between entities of
-the unified case graph. Server port of ``frontend/src/utils/entityResolution.ts``;
-both are checked against ``frontend/src/__tests__/fixtures/er/matches.json``.
+the unified case graph, on the server only (``/analysis/er`` and the MCP
+``run_analysis`` kind ``er``).
 
-Only pair (b) is a suggestion: the 6 central CPF digits equal and at least one
-side masked. A full document is already an identity key (§2.1), and nothing
-here ever merges: a person accepts each match.
-
-shortcut: no shared-attribute edges (phone, e-mail, address; §6.2 c) and only
-node properties (enrichment rows are not entities until promoted).
+Blocking: two entities are candidates when they share the normalized value of
+a blocking attribute (``block_on``: e-mail, phone, document number, date of
+birth, …; any property name works). Score: ``0.5·name + 0.3 + 0.2·corroborated``
+where ``name`` is the Jaro-Winkler similarity of the normalized names and
+``corroborated`` is 1 when a second blocking attribute also agrees; a pair needs
+``THRESHOLD``. An identity key already merges exact matches (§2.1), and nothing
+here ever merges: a person accepts each match (a suggested ``same_as``).
 """
 
 from __future__ import annotations
@@ -20,17 +21,14 @@ from typing import Any, Optional
 from graphlagoon.services.case_graph import _normalize
 
 THRESHOLD = 0.85
-_STOPWORDS = frozenset({"DE", "DA", "DO", "DOS", "DAS", "E"})
-_MASK = re.compile(r"[*•xX]")
+# Properties read as the entity's name and blocked on when the caller names none.
+NAME_KEYS = ("name", "full_name", "display_name", "legal_name", "title", "label")
+DEFAULT_BLOCK_ON = ("email", "phone", "document", "document_number", "national_id", "tax_id", "date_of_birth", "dob")
 
 
 def _round4(x: float) -> float:
-    """Half-up, the same float ops as the TS ``round4`` (``round`` is half-even)."""
+    """Half-up, the same float ops as a TS ``round4`` would (``round`` is half-even)."""
     return math.floor(x * 1e4 + 0.5) / 1e4
-
-
-def _key(name: str) -> str:
-    return strip_accents(name).lower()
 
 
 def strip_accents(text: str) -> str:
@@ -40,21 +38,8 @@ def strip_accents(text: str) -> str:
 
 
 def normalize_name(value: Any) -> str:
-    text = strip_accents(str(value or "")).upper()
-    words = re.sub(r"[^A-Z0-9]+", " ", text).split()
-    return " ".join(w for w in words if w not in _STOPWORDS)
-
-
-def middle_six(value: Any) -> Optional[tuple[str, bool]]:
-    """(the 6 central CPF digits, masked?) or None. A CNPJ (has "/" or 14 digits)
-    is out: the masked CNPJ shows other digits."""
-    raw = str(value or "")
-    if "/" in raw:
-        return None
-    digits = re.sub(r"\D", "", raw)
-    if _MASK.search(raw):
-        return (digits, True) if len(digits) == 6 else None
-    return (digits[3:9], False) if len(digits) == 11 else None
+    """Accentless uppercase words of letters and digits."""
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", strip_accents(str(value or "")).upper()).split())
 
 
 def jaro_winkler(a: str, b: str) -> float:
@@ -85,60 +70,58 @@ def jaro_winkler(a: str, b: str) -> float:
     return jaro + prefix * 0.1 * (1 - jaro)
 
 
-def _prop(props: dict, test) -> Any:
-    for k, v in props.items():
-        if v not in (None, "") and test(_key(k)):
-            return v
-    return None
+def _value(props: dict, name: str) -> Any:
+    """The property ``name`` (case-insensitive), or None when missing or empty."""
+    key = next((k for k in props if k.lower() == name.lower()), None)
+    value = props.get(key) if key is not None else None
+    return None if value in (None, "") else value
 
 
-def _features(node: dict) -> Optional[dict]:
-    props = node.get("properties") or {}
-    doc = _prop(props, lambda k: "cpf" in k or k in ("documento", "document", "doc"))
-    six = middle_six(doc)
-    if six is None:
-        return None
-    name = _prop(props, lambda k: "nome" in k or k in ("name", "razao_social"))
-    cep = re.sub(r"\D", "", str(_prop(props, lambda k: "cep" in k or "zip" in k) or ""))
-    return {
-        "uid": node["uid"],
-        "six": six[0],
-        "masked": six[1],
-        "name": normalize_name(name),
-        "cep5": cep[:5] if len(cep) >= 5 else None,
-    }
-
-
-def suggest(nodes: list[dict]) -> list[dict]:
+def suggest(nodes: list[dict], block_on: Optional[list[str]] = None, name_keys: Optional[list[str]] = None) -> list[dict]:
     """``nodes``: ``{uid, properties}``. Suggestions ``{left, right, score,
     reasons}`` with ``score ≥ THRESHOLD``, best first."""
-    blocks: dict[str, list[dict]] = {}
+    attributes = [a for a in (block_on or DEFAULT_BLOCK_ON) if a]
+    names = list(name_keys or NAME_KEYS)
+    features: dict[str, dict] = {}
+    blocks: dict[str, list[str]] = {}
     for node in nodes:
-        f = _features(node)
-        if f is not None:
-            blocks.setdefault(f["six"], []).append(f)
+        props = node.get("properties") or {}
+        name = normalize_name(next((v for v in (_value(props, k) for k in names) if v is not None), ""))
+        if not name:
+            continue
+        values = {}
+        for attribute in attributes:
+            normalized = _normalize(_value(props, attribute), ATTRIBUTE_NORMALIZERS.get(attribute.lower(), "lower"))
+            if normalized is not None:
+                values[attribute] = normalized
+                blocks.setdefault(f"{attribute}\0{normalized}", []).append(node["uid"])
+        if values:
+            features[node["uid"]] = {"name": name, "values": values}
+    seen: set[tuple[str, str]] = set()
     out = []
-    for block in blocks.values():
-        for i, a in enumerate(block):
-            for b in block[i + 1 :]:
-                if a["uid"] == b["uid"] or not (a["masked"] or b["masked"]):
+    for members in blocks.values():
+        for i, left in enumerate(members):
+            for right in members[i + 1 :]:
+                pair = tuple(sorted((left, right)))
+                if left == right or pair in seen:
                     continue
+                seen.add(pair)
+                a, b = features[pair[0]], features[pair[1]]
+                agreed = sorted(k for k, v in a["values"].items() if b["values"].get(k) == v)
                 jw = _round4(jaro_winkler(a["name"], b["name"]))
-                same_cep = 1 if a["cep5"] and a["cep5"] == b["cep5"] else 0
-                score = _round4(0.5 * jw + 0.3 + 0.2 * same_cep)
+                corroborated = 1 if len(agreed) >= 2 else 0
+                score = _round4(0.5 * jw + 0.3 + 0.2 * corroborated)
                 if score < THRESHOLD:
                     continue
                 out.append(
                     {
-                        "left": {"uid": a["uid"]},
-                        "right": {"uid": b["uid"]},
+                        "left": {"uid": pair[0]},
+                        "right": {"uid": pair[1]},
                         "score": score,
                         "reasons": [
-                            {"term": "name", "weight": 0.5, "value": jw,
-                             "left": a["name"], "right": b["name"]},
-                            {"term": "cpf_middle6", "weight": 0.3, "value": 1,
-                             "masked": True},
-                            {"term": "cep5", "weight": 0.2, "value": same_cep},
+                            {"term": "name", "weight": 0.5, "value": jw, "left": a["name"], "right": b["name"]},
+                            {"term": "shared", "weight": 0.3, "value": 1, "attributes": agreed},
+                            {"term": "corroborated", "weight": 0.2, "value": corroborated},
                         ],
                     }
                 )
@@ -147,23 +130,23 @@ def suggest(nodes: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Shared attributes (05 §4b): Vínculos. Twin of ``sharedAttributeLinks`` in
-# ``utils/entityResolution.ts`` (fixture ``er/shared-attributes.json``).
+# Shared attributes (05 §4b): links. Twin of ``sharedAttributeLinks`` in
+# ``utils/sharedLinks.ts`` (fixture ``er/shared-attributes.json``).
 # ---------------------------------------------------------------------------
 
 
-# How a property value is normalized before comparing, by attribute name (twin of the TS map).
+# How a property value is normalized before comparing, by attribute name (twin of
+# the TS map); anything else is lowercased, and ``normalize`` overrides per call.
 ATTRIBUTE_NORMALIZERS = {
-    "telefone": "phone", "phone": "phone", "celular": "phone",
+    "phone": "phone", "mobile": "phone", "telephone": "phone",
     "email": "email", "e-mail": "email",
-    "device_id": "device_id", "dispositivo": "device_id", "device": "device_id",
-    "ip": "ip",
-    "endereco": "address", "address": "address", "logradouro": "address",
-    "cartao": "card", "card": "card",
-    "terminal": "terminal_id", "terminal_id": "terminal_id",
-    "cpf": "cpf_cnpj", "cnpj": "cpf_cnpj", "cpf_cnpj": "cpf_cnpj", "documento": "cpf_cnpj",
-    "conta": "account", "account": "account",
-    "chave_pix": "pix_key", "pix_key": "pix_key",
+    "device_id": "device_id", "device": "device_id",
+    "ip": "ip", "ip_address": "ip",
+    "address": "address", "street": "address",
+    "card": "card", "card_number": "card",
+    "terminal": "terminal_id", "terminal_id": "terminal_id", "serial_number": "terminal_id",
+    "account": "account", "account_number": "account",
+    "document": "digits", "document_number": "digits", "national_id": "digits", "tax_id": "digits", "ssn": "digits",
 }
 
 
@@ -173,11 +156,14 @@ def shared_attribute_links(
     min_shared: int = 1,
     max_entities: Optional[int] = None,
     entity_types: Optional[list[str]] = None,
+    normalize: Optional[dict[str, str]] = None,
 ) -> dict:
     """``graph``: ``{nodes: [{uid, type, properties}], edges: [{src, dst}]}``.
     Links entities sharing attribute values read from their properties or from
     attribute nodes they connect to; returns ``{edges, pairs}`` with
-    ``compartilha_<attr>`` edges between unified ids."""
+    ``shares_<attr>`` edges between unified ids. ``normalize`` names the
+    normalizer of an attribute (``{"telefone": "phone"}``)."""
+    how = {k.lower(): v for k, v in (normalize or {}).items()}
     attributes = [a for a in attributes if a]
     min_shared = max(1, min_shared)
     attr_types = {a.lower() for a in attributes}
@@ -204,7 +190,9 @@ def shared_attribute_links(
             values: set[str] = set()
             props = n.get("properties") or {}
             key = next((k for k in props if k.lower() == lower), None)
-            normalized = _normalize(props.get(key) if key is not None else None, ATTRIBUTE_NORMALIZERS.get(lower, "lower"))
+            normalized = _normalize(
+                props.get(key) if key is not None else None, how.get(lower) or ATTRIBUTE_NORMALIZERS.get(lower, "lower")
+            )
             if normalized is not None:
                 values.add(normalized)
             for m in neighbours.get(n["uid"], []):
@@ -234,7 +222,7 @@ def shared_attribute_links(
                     "id": f"link:{attribute}:{left}:{right}",
                     "src": left,
                     "dst": right,
-                    "type": f"compartilha_{attribute}",
+                    "type": f"shares_{attribute}",
                     "properties": {"attribute": attribute, "value": value, "shared_by": count},
                 }
             )

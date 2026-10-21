@@ -173,18 +173,19 @@ class MemoryInvestigation:
     title: str
     owner_email: str
     description: Optional[str] = None
-    kind_preset: str = "livre"
+    case_type: str = "general"
+    fields: Dict[str, Any] = field(default_factory=dict)
+    external_ref: Optional[str] = None
     status: str = "open"
     assignee_email: Optional[str] = None
     occurred_at: Optional[datetime] = None
     alert_at: Optional[datetime] = None
-    deadline_days: Optional[Dict[str, Any]] = None
+    sla_hours: Optional[Dict[str, Any]] = None
     tags: List[Any] = field(default_factory=list)
     settings: Dict[str, Any] = field(default_factory=dict)
     state: Dict[str, Any] = field(default_factory=dict)
-    decision: Optional[Dict[str, Any]] = None
-    frozen_hash: Optional[str] = None
-    frozen_at: Optional[datetime] = None
+    stage: Optional[str] = None
+    decisions: List[Any] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     shares: List[MemoryInvestigationShare] = field(default_factory=list)
@@ -209,6 +210,7 @@ class MemoryCaseItem:
     query: Optional[Dict[str, Any]] = None
     mapping: Optional[Dict[str, Any]] = None
     anchor: Optional[Dict[str, Any]] = None
+    state: Optional[Dict[str, Any]] = None
     current_version: int = 0
     position: int = 0
     created_at: datetime = field(default_factory=datetime.now)
@@ -254,6 +256,18 @@ class MemoryCaseAnnotation:
 
 
 @dataclass
+class MemoryCaseEntity:
+    id: UUID
+    investigation_id: UUID
+    uid: str = ""
+    stamp: str = ""
+    entity: Optional[str] = None
+    node_type: Optional[str] = None
+    label: Optional[str] = None
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
 class MemoryInvestigationEvent:
     id: UUID
     investigation_id: UUID
@@ -275,16 +289,15 @@ class MemoryAgentToken:
     expires_at: datetime
     scope: str = "user"
     investigation_ids: List[str] = field(default_factory=list)
-    unmasked: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     revoked_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None
 
 
 @dataclass
-class MemoryOrgVocabulary:
-    kind: str
-    values: List[Any] = field(default_factory=list)
+class MemoryCaseType:
+    slug: str
+    spec: Dict[str, Any] = field(default_factory=dict)
     updated_at: datetime = field(default_factory=datetime.now)
 
 
@@ -303,6 +316,7 @@ INVESTIGATION_CHILDREN: Dict[str, type] = {
     "case_items": MemoryCaseItem,
     "case_item_versions": MemoryCaseItemVersion,
     "case_annotations": MemoryCaseAnnotation,
+    "case_entities": MemoryCaseEntity,
     "investigation_events": MemoryInvestigationEvent,
 }
 
@@ -328,8 +342,9 @@ class InMemoryStore:
         self.case_items: Dict[UUID, MemoryCaseItem] = {}
         self.case_item_versions: Dict[UUID, MemoryCaseItemVersion] = {}
         self.case_annotations: Dict[UUID, MemoryCaseAnnotation] = {}
+        self.case_entities: Dict[UUID, MemoryCaseEntity] = {}
         self.investigation_events: Dict[UUID, MemoryInvestigationEvent] = {}
-        self.org_vocabularies: Dict[str, MemoryOrgVocabulary] = {}
+        self.case_types: Dict[str, MemoryCaseType] = {}
         self.org_library: Dict[str, MemoryOrgLibrary] = {}
         self.agent_tokens: Dict[UUID, MemoryAgentToken] = {}
         # token id -> monotonic timestamps of its requests in the last minute (rate limit)
@@ -930,7 +945,7 @@ class InMemoryStore:
             getattr(self, table).clear()
         self.agent_tokens.clear()
         self.agent_request_times.clear()
-        self.org_vocabularies.clear()
+        self.case_types.clear()
         self.org_library.clear()
         if not keep_usage_logs:
             self.usage_logs.clear()

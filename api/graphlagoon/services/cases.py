@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 from graphlagoon.db.database import get_session_maker, is_database_available
 from graphlagoon.db.memory_store import get_memory_store
 from graphlagoon.middleware.auth import get_current_actor
+from graphlagoon.services import case_types
 from graphlagoon.utils.authz import can_manage, is_superuser
 from graphlagoon.utils.sharing import validate_owner_email
 
@@ -82,15 +83,14 @@ def can_manage_case(inv: Any, user_email: str) -> bool:
 
 
 def nominal_email(email: str) -> str:
-    """A single named e-mail; wildcards are refused (tipping-off prohibition)."""
+    """A single named e-mail; wildcards are refused (need-to-know)."""
     candidate = (email or "").strip()
     if "*" in candidate:
         raise InvestigationError(
             422,
             "WILDCARD_SHARE_REFUSED",
             "Investigations can only be shared with named e-mails. Wildcards "
-            '("*", "*@domain") are refused: the tipping-off prohibition '
-            "(Lei 9.613/98 art. 11, LC 105/01) requires need-to-know access.",
+            '("*", "*@domain") are refused: a case is need-to-know.',
         )
     ok, message = validate_owner_email(candidate)
     if not ok:
@@ -102,7 +102,7 @@ def nominal_email(email: str) -> str:
 # Authorship (05 §6)
 # ---------------------------------------------------------------------------
 
-DEFAULT_SUGGEST_KINDS = ("role", "tag", "hypothesis_status", "same_as", "status_change", "typology")
+DEFAULT_SUGGEST_KINDS = ("role", "tag", "hypothesis_status", "same_as", "status_change", "task")
 
 
 def author_fields(user_email: str) -> dict:
@@ -126,43 +126,20 @@ def write_status(inv: Any, kind: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Status, deadlines (05 §3, §7): phases per preset in settings, override per case
+# Status, deadlines (05 §3, 06 §1): SLA hours per phase, from the case type
 # ---------------------------------------------------------------------------
 
-KIND_PRESETS = ("credito", "garantia", "pix_med", "lavagem", "lojista", "fraude_sintetica", "livre")
+STATUSES = ("open", "analysis", "closed")
 
-# Vocabularies a preset suggests (05 §4b); never imposed, editable in the case's settings.
-# Twin of ``frontend/src/utils/casePresets.ts``.
-PRESET_DEFAULTS: dict[str, dict] = {
-    "credito": {"roles": ["controlador", "coligada", "garantidor", "devedor"], "link_attributes": ["endereco", "telefone", "email"]},
-    "garantia": {"roles": ["devedor", "adquirente", "cessionário", "bem"], "link_attributes": ["endereco", "email"]},
-    "pix_med": {"roles": ["vítima", "mula", "beneficiário final", "ponto de saque"], "link_attributes": ["telefone", "device_id"]},
-    "lavagem": {"roles": ["origem", "passagem", "destino", "laranja"], "link_attributes": ["endereco", "telefone"]},
-    "lojista": {"roles": ["lojista", "sócio", "adquirente", "terminal"], "link_attributes": ["terminal", "endereco", "telefone"]},
-    "fraude_sintetica": {
-        "roles": ["identidade real", "identidade sintética", "mula", "ponto de cash-out"],
-        "link_attributes": ["telefone", "email", "device_id", "endereco"],
-    },
-    "livre": {"roles": [], "link_attributes": []},
-}
-
-
-def preset_defaults(kind_preset: Optional[str]) -> dict:
-    """``settings`` a new case starts with: the preset's vocabularies."""
-    return {"vocabularies": dict(PRESET_DEFAULTS.get(kind_preset or "livre", PRESET_DEFAULTS["livre"]))}
-STATUSES = ("open", "analysis", "decided", "archived")
-# Phase names: "selection" runs while the case is open, "analysis" after. A
-# per-case ``deadline_days`` may still spell the first phase "open" (F1).
-PHASES = {"open": ("selection", "open"), "analysis": ("analysis",)}
-
-# Allowed status changes through PATCH. "decided" comes only from the decision
-# route and leaves only through reopen (→ analysis) or archiving.
+# Allowed status changes through PATCH. "closed" comes only from a decision that
+# closes the case (06 §1) and leaves only through reopen (→ analysis).
 STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
-    "open": frozenset({"analysis", "archived"}),
-    "analysis": frozenset({"open", "archived"}),
-    "decided": frozenset({"archived"}),
-    "archived": frozenset({"analysis"}),
+    "open": frozenset({"analysis"}),
+    "analysis": frozenset({"open"}),
+    "closed": frozenset(),
 }
+# Under this share of its SLA left, a case is urgent in the queue.
+URGENT_SHARE = 0.2
 
 
 def _clock() -> datetime:
@@ -179,38 +156,31 @@ def check_transition(inv: Any, new_status: str) -> None:
         )
 
 
-def phase_days(inv: Any) -> dict[str, int]:
-    """Days of each phase: the case's own ``deadline_days``, else the preset's
-    entry in ``settings.investigation_deadline_days``; empty = no deadline."""
-    from graphlagoon.config import get_settings
-
-    phases = inv.deadline_days or get_settings().investigation_deadline_days.get(inv.kind_preset or "") or {}
-    return {k: int(v) for k, v in phases.items() if v}
-
-
 def deadline_of(inv: Any, now: Optional[datetime] = None) -> Optional[dict]:
-    """``{phase, due_at, days_left, total_days}`` of an open case whose preset
-    (or ``deadline_days`` override) has phases; None otherwise. Both phases
-    count from ``alert_at`` (else ``occurred_at``, else creation): analysis is
-    due selection + analysis days after it."""
-    phases = phase_days(inv)
+    """``{phase, due_at, hours_left, days_left, total_hours, urgent, overdue}``
+    of an open case with SLA hours; None otherwise. Both phases count from
+    ``alert_at`` (else ``occurred_at``, else creation): analysis is due
+    open + analysis hours after it."""
+    sla = {k: int(v) for k, v in (inv.sla_hours or {}).items() if v}
     start = inv.alert_at or inv.occurred_at or inv.created_at
-    if not phases or inv.status not in ("open", "analysis") or start is None:
+    if not sla or inv.status not in ("open", "analysis") or start is None:
         return None
-    days = next((phases[k] for k in PHASES["open"] if k in phases), 0)
-    if inv.status == "analysis":
-        days += phases.get("analysis", 0)
-    if not days:
+    hours = sla.get("open", 0) + (sla.get("analysis", 0) if inv.status == "analysis" else 0)
+    if not hours:
         return None
     now = now or _clock()
     if (start.tzinfo is None) != (now.tzinfo is None):  # naive DB times vs an aware clock
         start, now = start.replace(tzinfo=None), now.replace(tzinfo=None)
-    due = start + timedelta(days=days)
+    due = start + timedelta(hours=hours)
+    left = (due - now) / timedelta(hours=1)
     return {
         "phase": inv.status,
         "due_at": due,
-        "days_left": math.ceil((due - now) / timedelta(days=1)),
-        "total_days": days,
+        "hours_left": math.floor(left),
+        "days_left": math.ceil(left / 24),
+        "total_hours": hours,
+        "urgent": left <= hours * URGENT_SHARE,
+        "overdue": left < 0,
     }
 
 
@@ -219,20 +189,24 @@ def serialize(inv: Any, user_email: str) -> dict:
         "id": inv.id,
         "title": inv.title,
         "description": inv.description,
-        "kind_preset": inv.kind_preset,
+        "case_type": inv.case_type,
+        "fields": inv.fields or {},
+        "external_ref": inv.external_ref,
         "status": inv.status,
         "owner_email": inv.owner_email,
         "assignee_email": inv.assignee_email,
         "occurred_at": inv.occurred_at,
         "alert_at": inv.alert_at,
-        "deadline_days": inv.deadline_days,
+        "sla_hours": inv.sla_hours,
         "deadline": deadline_of(inv),
         "tags": inv.tags or [],
         "settings": inv.settings or {},
         "state": inv.state or {},
-        "decision": inv.decision,
-        "frozen_hash": inv.frozen_hash,
-        "frozen_at": inv.frozen_at,
+        "stage": inv.stage,
+        "decisions": list(inv.decisions or []),
+        # The decision that closed the case: its hash and when (06 §1).
+        "frozen_hash": (closing := closing_decision(inv) if inv.status == "closed" else None) and closing["hash"],
+        "frozen_at": closing and closing["closed_at"],
         "created_at": inv.created_at,
         "updated_at": inv.updated_at,
         "shared_with": [{"email": s.email, "role": s.role} for s in inv.shares],
@@ -249,6 +223,7 @@ _MODELS = {
     "case_items": "CaseItem",
     "case_item_versions": "CaseItemVersion",
     "case_annotations": "CaseAnnotation",
+    "case_entities": "CaseEntity",
     "investigation_events": "InvestigationEvent",
 }
 
@@ -367,27 +342,38 @@ async def ensure_case_access(investigation_id: UUID, user_email: str, need: str 
         await load_case(session, investigation_id, user_email, need)
 
 
-def under_retention(inv: Any) -> bool:
-    """A decided case is kept ``investigation_retention_years`` from its freeze."""
+def closing_decision(inv: Any) -> Optional[dict]:
+    """The approved decision that closed the case last, or None."""
+    return next(
+        (d for d in reversed(inv.decisions or []) if d.get("closes_case") and d.get("closed_at")),
+        None,
+    )
+
+
+async def under_retention(inv: Any) -> bool:
+    """A case closed by a decision is kept its type's ``retention_years`` (else
+    ``investigation_retention_years``) from the last closing decision."""
     from graphlagoon.config import get_settings
 
-    if inv.decision is None:
+    closing = closing_decision(inv)
+    if closing is None:
         return False
-    if inv.frozen_at is None:
-        return True
-    years = get_settings().investigation_retention_years
-    return _clock() < inv.frozen_at.replace(tzinfo=None) + timedelta(days=365.25 * years)
+    kind = await case_types.get_case_type(inv.case_type) or {}
+    years = kind.get("retention_years")
+    years = get_settings().investigation_retention_years if years is None else years
+    closed_at = datetime.fromisoformat(closing["closed_at"]).replace(tzinfo=None)
+    return _clock() < closed_at + timedelta(days=365.25 * years)
 
 
-def ensure_not_decided(inv: Any) -> None:
-    if inv.decision is not None:
+def ensure_not_closed(inv: Any) -> None:
+    if inv.status == "closed":
         raise InvestigationError(
-            409, "INVESTIGATION_DECIDED", "This investigation has a recorded decision and is read-only"
+            409, "CASE_CLOSED", "This case was closed by a decision and is read-only; reopen it to change it"
         )
 
 
 # ---------------------------------------------------------------------------
-# Journal: append-only (no chained hash; frozen_hash covers it at the decision)
+# Journal: append-only (no chained hash; each decision hashes the prefix up to itself)
 # ---------------------------------------------------------------------------
 
 _EVENTS = "investigation_events"
@@ -458,7 +444,7 @@ async def post_client_event(investigation_id: UUID, user_email: str, kind: str, 
         raise InvestigationError(422, "EVENT_PAYLOAD_TOO_LARGE", "Event payload is limited to 16 KB")
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        ensure_not_decided(inv)
+        ensure_not_closed(inv)
         event = await append_event(session, investigation_id, user_email, kind, payload)
         await commit(session)
         return serialize_event(event)
@@ -498,67 +484,147 @@ async def _counts(session, ids: list) -> dict:
     return {i: (items[i], suggested[i]) for i in ids}
 
 
+QUEUE_SORTS = ("updated_at", "created_at", "title", "deadline")
+
+
+def _field_filter(value: Any, expr: str) -> bool:
+    """``eq:x`` (the default), ``gte:x``, ``lte:x`` or ``contains:x`` against one field value."""
+    op, _, arg = expr.partition(":") if expr.split(":", 1)[0] in ("eq", "gte", "lte", "contains") else ("eq", "", expr)
+    if value is None:
+        return False
+    if op == "contains":
+        return arg.lower() in str(value).lower()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            target: Any = float(arg)
+        except ValueError:
+            return False
+    else:
+        value, target = str(value), arg
+    return {"eq": value == target, "gte": value >= target, "lte": value <= target}[op]
+
+
+def _sort_key(sort: str):
+    key = sort.lstrip("-")
+    if key.startswith("field."):
+        fid = key[len("field."):]
+        return lambda inv: (inv.fields or {}).get(fid)
+    if key == "deadline":
+        return lambda inv: d["due_at"].replace(tzinfo=None) if (d := deadline_of(inv)) else None
+    if key == "title":
+        return lambda inv: (inv.title or "").lower()
+    if key not in QUEUE_SORTS:
+        raise InvestigationError(422, "INVALID_SORT", f"sort is one of {', '.join(QUEUE_SORTS)} or field.<id>, with - for descending")
+    return lambda inv: getattr(inv, key) or datetime.min
+
+
+async def _readable_cases(session, user_email: str, exploration_id: Optional[UUID]) -> list:
+    if session is None:
+        store = get_memory_store()
+        with_exp = {
+            i.investigation_id
+            for i in store.case_items.values()
+            if i.exploration_id == exploration_id and i.deleted_at is None
+        }
+        return [
+            inv
+            for inv in store.investigations.values()
+            if can_read_case(inv, user_email) and (exploration_id is None or inv.id in with_exp)
+        ]
+    from sqlalchemy import or_, select
+    from sqlalchemy.orm import selectinload
+
+    from graphlagoon.db.models import CaseItem, Investigation, InvestigationShare
+
+    query = select(Investigation).options(selectinload(Investigation.shares))
+    if not is_superuser(user_email):
+        query = query.where(
+            or_(
+                Investigation.owner_email == user_email,
+                Investigation.assignee_email == user_email,
+                Investigation.id.in_(
+                    select(InvestigationShare.investigation_id).where(InvestigationShare.email == user_email)
+                ),
+            )
+        )
+    if exploration_id is not None:
+        query = query.where(
+            Investigation.id.in_(
+                select(CaseItem.investigation_id).where(
+                    CaseItem.exploration_id == exploration_id, CaseItem.deleted_at.is_(None)
+                )
+            )
+        )
+    rows = (await session.execute(query)).scalars().all()
+    return [inv for inv in rows if can_read_case(inv, user_email)]  # case-scoped tokens
+
+
 async def list_investigations(
     user_email: str,
     status: Optional[str] = None,
     assignee: Optional[str] = None,
-    kind_preset: Optional[str] = None,
+    case_type: Optional[str] = None,
     exploration_id: Optional[UUID] = None,
-) -> list[dict]:
-    """``exploration_id``: only cases that have that exploration as a graph item."""
-    filters = {"status": status, "assignee_email": assignee, "kind_preset": kind_preset}
-    filters = {k: v for k, v in filters.items() if v is not None}
+    external_ref: Optional[str] = None,
+    q: Optional[str] = None,
+    deadline: Optional[str] = None,
+    suggested: Optional[bool] = None,
+    fields: Optional[dict[str, str]] = None,
+    sort: str = "-updated_at",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """A page of the queue (06 §2b): filters, then sort, then ``limit``/``offset``.
+    ``exploration_id``: only cases with that exploration as a graph item;
+    ``deadline``: ``urgent`` (incl. overdue) or ``overdue``; ``fields``: ``{id:
+    "gte:100000"}``; ``status`` may list several (``open,analysis``). ``counts``
+    are over every case the caller reads.
+
+    shortcut: the filters run in Python over the readable cases (the browser
+    gets one page); push them to SQL when an org reaches tens of thousands."""
+    key = _sort_key(sort)
     async with _session() as session:
-        if session is None:
-            store = get_memory_store()
-            with_exp = {
-                i.investigation_id
-                for i in store.case_items.values()
-                if i.exploration_id == exploration_id and i.deleted_at is None
-            }
-            rows = [
-                inv
-                for inv in store.list_investigations()
-                if can_read_case(inv, user_email)
-                and all(getattr(inv, k) == v for k, v in filters.items())
-                and (exploration_id is None or inv.id in with_exp)
-            ]
-        else:
-            from sqlalchemy import or_, select
-            from sqlalchemy.orm import selectinload
+        rows = await _readable_cases(session, user_email, exploration_id)
+        all_counts = await _counts(session, [inv.id for inv in rows])
+        deadlines = {inv.id: deadline_of(inv) for inv in rows}
+        counts = {s: sum(inv.status == s for inv in rows) for s in STATUSES}
+        counts.update(
+            total=len(rows),
+            urgent=sum(bool(d and d["urgent"]) for d in deadlines.values()),
+            overdue=sum(bool(d and d["overdue"]) for d in deadlines.values()),
+            suggested=sum(all_counts[inv.id][1] > 0 for inv in rows),
+        )
+        needle = (q or "").strip().lower()
+        statuses = {x for x in (status or "").split(",") if x}
 
-            from graphlagoon.db.models import CaseItem, Investigation, InvestigationShare
+        def keep(inv: Any) -> bool:
+            d = deadlines[inv.id]
+            return (
+                (not statuses or inv.status in statuses)
+                and (assignee is None or inv.assignee_email == assignee)
+                and (case_type is None or inv.case_type == case_type)
+                and (external_ref is None or inv.external_ref == external_ref)
+                and (not needle or needle in (inv.title or "").lower() or needle in (inv.description or "").lower())
+                and (deadline is None or bool(d and (d["overdue"] if deadline == "overdue" else d["urgent"])))
+                and (suggested is None or (all_counts[inv.id][1] > 0) == suggested)
+                and all(_field_filter((inv.fields or {}).get(fid), expr) for fid, expr in (fields or {}).items())
+            )
 
-            query = select(Investigation).options(selectinload(Investigation.shares))
-            if not is_superuser(user_email):
-                query = query.where(
-                    or_(
-                        Investigation.owner_email == user_email,
-                        Investigation.assignee_email == user_email,
-                        Investigation.id.in_(
-                            select(InvestigationShare.investigation_id).where(
-                                InvestigationShare.email == user_email
-                            )
-                        ),
-                    )
-                )
-            for key, value in filters.items():
-                query = query.where(getattr(Investigation, key) == value)
-            if exploration_id is not None:
-                query = query.where(
-                    Investigation.id.in_(
-                        select(CaseItem.investigation_id).where(
-                            CaseItem.exploration_id == exploration_id, CaseItem.deleted_at.is_(None)
-                        )
-                    )
-                )
-            rows = (await session.execute(query.order_by(Investigation.updated_at.desc()))).scalars().all()
-            rows = [inv for inv in rows if can_read_case(inv, user_email)]  # case-scoped tokens
-        counts = await _counts(session, [inv.id for inv in rows])
-        return [
-            {**serialize(inv, user_email), "item_count": counts[inv.id][0], "suggested_count": counts[inv.id][1]}
-            for inv in rows
-        ]
+        matched = [inv for inv in rows if keep(inv)]
+        # A case without the sort value (no such field, no deadline) goes last whichever the direction.
+        present = [inv for inv in matched if key(inv) is not None]
+        matched = sorted(present, key=key, reverse=sort.startswith("-")) + [inv for inv in matched if key(inv) is None]
+        page = matched[offset : offset + limit]
+        return {
+            "items": [
+                {**serialize(inv, user_email), "item_count": all_counts[inv.id][0], "suggested_count": all_counts[inv.id][1]}
+                for inv in page
+            ],
+            "total": len(matched),
+            "limit": limit,
+            "offset": offset,
+            "counts": counts,
+        }
 
 
 async def _assignee_share(session, inv: Any, email: Optional[str]) -> None:
@@ -578,11 +644,52 @@ async def _assignee_share(session, inv: Any, email: Optional[str]) -> None:
     await session.flush()
 
 
-async def create_investigation(user_email: str, data: dict) -> dict:
+async def _ensure_may_assign(user_email: str, assignee: Optional[str]) -> None:
+    """Assigning shares the case as editor (``_assignee_share``), so it takes the
+    ``investigation.share`` permission, as sharing does; assigning yourself does not."""
+    from graphlagoon.services.permissions import check_permission
+
+    if not assignee or assignee.lower() == (user_email or "").lower():
+        return
+    if not (await check_permission(user_email, "investigation.share")).allowed:
+        raise InvestigationError(
+            403, "PERMISSION_DENIED",
+            'Assigning a case shares it with the assignee: you need the "Share investigations" permission',
+        )
+
+
+async def _by_external_ref(session, user_email: str, external_ref: str) -> Optional[Any]:
+    """The case opened for ``external_ref`` that the caller reads (idempotent creation)."""
+    for inv in await _readable_cases(session, user_email, None):
+        if inv.external_ref == external_ref:
+            return inv
+    return None
+
+
+async def create_investigation(user_email: str, data: dict) -> tuple[dict, bool]:
+    """(the case, created?): a repeated ``external_ref`` returns the case the
+    caller already reads instead of opening a second one."""
+    actor = get_current_actor()
+    if actor and actor.get("scope") == "case":
+        # It could never read the case it opened (it is outside its investigation_ids).
+        raise InvestigationError(403, "CASE_SCOPED_TOKEN", "A case-scoped token cannot open new cases")
+    if actor and (data.get("assignee_email") or data.get("settings")):
+        # Assigning shares the case; the settings say what an agent writes as a suggestion.
+        raise InvestigationError(403, "AGENT_FORBIDDEN", "Assigning a case and its settings are reserved to people")
     if data.get("assignee_email"):
         data["assignee_email"] = nominal_email(data["assignee_email"])
-    data["settings"] = {**preset_defaults(data.get("kind_preset")), **(data.get("settings") or {})}
+        await _ensure_may_assign(user_email, data["assignee_email"])
+    kind = await case_types.require_case_type(data.get("case_type"))
+    defaults = case_types.case_defaults(kind)
+    data["case_type"] = kind["slug"]
+    data["fields"] = case_types.clean_fields(kind, data.get("fields") or {})
+    data["settings"] = {**defaults["settings"], **(data.get("settings") or {})}
+    data["sla_hours"] = data.get("sla_hours") or defaults["sla_hours"]
     async with _session() as session:
+        if data.get("external_ref"):
+            existing = await _by_external_ref(session, user_email, data["external_ref"])
+            if existing is not None:
+                return serialize(existing, user_email), False
         if session is None:
             inv = get_memory_store().create_investigation(owner_email=user_email, **data)
         else:
@@ -596,7 +703,25 @@ async def create_investigation(user_email: str, data: dict) -> dict:
         if session is not None:
             await session.commit()
             await _refresh(session, inv)
-        return serialize(inv, user_email)
+    await _starter_queries(inv.id, user_email, kind)
+    return await get_investigation(inv.id, user_email), True
+
+
+async def _starter_queries(investigation_id: UUID, user_email: str, kind: dict) -> None:
+    """The case type's starter queries become query items of the new case (06 §1);
+    from there they are the case's own: edit them, run them, delete them."""
+    from graphlagoon.services import case_items
+
+    for q in kind.get("starter_queries") or []:
+        await case_items.create_item(investigation_id, user_email, {
+            "kind": "query",
+            "subkind": q.get("language") or "sql",
+            "title": q["title"],
+            "description": q.get("description"),
+            "query": {"text": q["query"], "language": q.get("language") or "sql",
+                      "parameters": q.get("parameters") or [], "output": "table"},
+            "provenance": {"tool": "case_type", "case_type": kind["slug"]},
+        })
 
 
 async def get_investigation(investigation_id: UUID, user_email: str) -> dict:
@@ -604,35 +729,43 @@ async def get_investigation(investigation_id: UUID, user_email: str) -> dict:
         return serialize(await load_case(session, investigation_id, user_email), user_email)
 
 
+# What an agent's PATCH never changes (05 §6, 06 §1): who works the case, its
+# type (decision catalog, four eyes, retention), what it writes as suggestions
+# and the deadlines.
+_PEOPLE_ONLY_CHANGES = {"assignee_email", "case_type", "settings", "sla_hours"}
+
 # Columns that are NOT NULL: an explicit null in a PATCH means "leave as is".
-_REQUIRED_FIELDS = ("title", "status", "kind_preset", "tags", "settings", "state")
+_REQUIRED_FIELDS = ("title", "status", "case_type", "fields", "tags", "settings", "state")
 
 
 async def update_investigation(investigation_id: UUID, user_email: str, changes: dict) -> dict:
     changes = {k: v for k, v in changes.items() if v is not None or k not in _REQUIRED_FIELDS}
-    archive_reason = (changes.pop("archive_reason", None) or "").strip()
     if changes.get("assignee_email"):
         changes["assignee_email"] = nominal_email(changes["assignee_email"])
+    if get_current_actor() and _PEOPLE_ONLY_CHANGES & set(changes):
+        raise InvestigationError(
+            403, "AGENT_FORBIDDEN",
+            f"{', '.join(sorted(_PEOPLE_ONLY_CHANGES & set(changes)))}: reserved to people",
+        )
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
         if "assignee_email" in changes and not can_manage_case(inv, user_email):
             raise InvestigationError(403, "FORBIDDEN", "Only who can share the case assigns it")
-        # A decided case is read-only, except for closing it (status is outside the frozen hash).
-        if set(changes) != {"status"} or changes["status"] != "archived":
-            ensure_not_decided(inv)
-        if changes.get("status") == "archived" and inv.status not in ("decided", "archived"):
-            # 05 §7: archived only after a decision, or explicitly without one, with a reason.
-            if not archive_reason:
-                raise InvestigationError(
-                    422,
-                    "ARCHIVE_REASON_REQUIRED",
-                    "A case without a decision is archived only with a reason (archive_reason).",
-                )
-            if get_current_actor():
-                raise InvestigationError(403, "AGENT_FORBIDDEN", "Archiving without a decision is reserved to people.")
-            await append_event(
-                session, investigation_id, user_email, "case.archived_without_decision", {"reason": archive_reason}
+        if changes.get("assignee_email") != inv.assignee_email:
+            await _ensure_may_assign(user_email, changes.get("assignee_email"))
+        if changes.get("case_type") not in (None, inv.case_type) and inv.decisions:
+            # The type holds the decision catalog (which outcome needs a second
+            # person) and the retention: after a decision it no longer moves.
+            raise InvestigationError(
+                409, "CASE_TYPE_LOCKED", "The case already has a decision; its type no longer changes"
             )
+        if "case_type" in changes or "fields" in changes:
+            await _apply_case_type(inv, changes)
+        ensure_not_closed(inv)
+        if changes.get("stage") is not None:
+            stages = (await case_types.require_case_type(changes.get("case_type") or inv.case_type))["stages"]
+            if changes["stage"] not in stages:
+                raise InvestigationError(422, "UNKNOWN_STAGE", f"The case type's stages are: {', '.join(stages) or 'none'}")
         if "status" in changes:
             if get_current_actor() and write_status(inv, "status_change") == "suggested":
                 # The agent suggests the change in place (05 §6); the case does not move.
@@ -667,21 +800,31 @@ async def update_investigation(investigation_id: UUID, user_email: str, changes:
         return serialize(inv, user_email)
 
 
+async def _apply_case_type(inv: Any, changes: dict) -> None:
+    """A type change re-seeds the vocabularies, suggest kinds and SLA from the
+    new type (unless the same PATCH sets them) and re-checks the fields."""
+    moved = changes.get("case_type") not in (None, inv.case_type)
+    kind = await case_types.require_case_type(changes.get("case_type") or inv.case_type)
+    if moved:
+        defaults = case_types.case_defaults(kind)
+        changes.setdefault("settings", {**(inv.settings or {}), **defaults["settings"]})
+        changes.setdefault("sla_hours", defaults["sla_hours"])
+    changes["fields"] = case_types.clean_fields(kind, changes.get("fields") or {}, inv.fields)
+
+
 async def reopen_investigation(investigation_id: UUID, user_email: str) -> dict:
-    """decided → analysis, people only (the route forbids agents). The decision
-    and its hash leave the case but stay in the journal (``case.reopened``)."""
+    """closed → analysis, people only (the route forbids agents). The decisions
+    stay; ``case.reopened`` names the one that had closed the case."""
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        if inv.status != "decided":
-            raise InvestigationError(409, "INVALID_STATUS_TRANSITION", "Only a decided case can be reopened")
+        if inv.status != "closed":
+            raise InvestigationError(409, "INVALID_STATUS_TRANSITION", "Only a closed case can be reopened")
+        closing = closing_decision(inv) or {}
         await append_event(
-            session,
-            investigation_id,
-            user_email,
-            "case.reopened",
-            {"previous_frozen_hash": inv.frozen_hash, "previous_decision": inv.decision, "to": "analysis"},
+            session, investigation_id, user_email, "case.reopened",
+            {"decision_id": closing.get("id"), "hash": closing.get("hash"), "to": "analysis"},
         )
-        await _save_case(session, inv, status="analysis", decision=None, frozen_hash=None, frozen_at=None)
+        await _save_case(session, inv, status="analysis")
         return serialize(inv, user_email)
 
 
@@ -690,11 +833,11 @@ async def delete_investigation(investigation_id: UUID, user_email: str, reason: 
     (409) unless a superuser gives a reason."""
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "manage")
-        if under_retention(inv) and not (is_superuser(user_email) and (reason or "").strip()):
+        if await under_retention(inv) and not (is_superuser(user_email) and (reason or "").strip()):
             raise InvestigationError(
                 409,
                 "INVESTIGATION_RETAINED",
-                "A decided investigation is retained and cannot be deleted. Superusers may delete it with ?reason=.",
+                "A case closed by a decision is retained and cannot be deleted. Superusers may delete it with ?reason=.",
             )
         meta = {"title": inv.title, "owner": inv.owner_email}
         if reason:
@@ -767,96 +910,218 @@ async def transfer_owner(investigation_id: UUID, admin_email: str, new_owner: st
 
 
 # ---------------------------------------------------------------------------
-# Decision (05 §7): human only; frozen_hash over the journal and the pinned
-# versions, verified on export; every mutation afterwards answers 409.
+# Decisions (06 §1): human only and append-only. A case has as many as it needs;
+# each carries the hash of the journal up to its own ``decision.recorded``
+# event (pins, edits, earlier decisions and the tasks it created are all in
+# there). Only an outcome that closes the case freezes it; with four eyes the
+# case closes when another person approves.
 # ---------------------------------------------------------------------------
 
 
-async def frozen_document(session, inv: Any) -> dict:
-    """The canonical record ``frozen_hash`` covers: the case and its decision,
-    the pinned versions (evidence) and the journal up to ``decision.recorded``.
-    Later journal lines (a share, a transfer) stay out, so the hash can be
-    recomputed at any time; owner and status are out for the same reason."""
-    events = await _list_events(session, inv.id)
-    cut = next((i for i, e in enumerate(events) if e.kind == "decision.recorded"), len(events) - 1)
-    versions = await list_rows(session, "case_item_versions", inv.id)
+def _event_doc(e: Any) -> dict:
     return {
-        "investigation": {
-            "id": str(inv.id),
-            "title": inv.title,
-            "description": inv.description,
-            "kind_preset": inv.kind_preset,
-            "decision": inv.decision,
-        },
-        "pinned": sorted(
-            (
-                {
-                    "item_id": str(v.item_id),
-                    "version": v.version,
-                    "sha256": v.sha256,
-                    "pin_label": v.pin_label,
-                    "pinned_by": v.pinned_by,
-                }
-                for v in versions
-                if v.pinned_at is not None
-            ),
-            key=lambda v: (v["item_id"], v["version"]),
-        ),
-        "events": [
-            {
-                "id": str(e.id),
-                "kind": e.kind,
-                "actor_email": e.actor_email,
-                "at": e.created_at.isoformat(),
-                "payload": e.payload or {},
-            }
-            for e in events[: cut + 1]
-        ],
+        "id": str(e.id),
+        "kind": e.kind,
+        "actor_email": e.actor_email,
+        "at": e.created_at.isoformat(),
+        "payload": e.payload or {},
     }
 
 
-async def compute_frozen_hash(session, inv: Any) -> str:
-    return hashlib.sha256(canonical(await frozen_document(session, inv)).encode("utf-8")).hexdigest()
+async def decision_hash(session, inv: Any, decision_id: str) -> Optional[str]:
+    """sha256 of the canonical journal up to and including the decision's
+    ``decision.recorded`` event; None when there is no such event."""
+    events = await _list_events(session, inv.id)
+    cut = next(
+        (i for i, e in enumerate(events) if e.kind == "decision.recorded" and (e.payload or {}).get("id") == decision_id),
+        None,
+    )
+    if cut is None:
+        return None
+    doc = {"investigation_id": str(inv.id), "events": [_event_doc(e) for e in events[: cut + 1]]}
+    return hashlib.sha256(canonical(doc).encode("utf-8")).hexdigest()
 
 
-async def verify_frozen_hash(investigation_id: UUID, user_email: str) -> Optional[bool]:
-    """True if the stored ``frozen_hash`` still matches the case; None if undecided."""
+async def verify_decisions(investigation_id: UUID, user_email: str) -> list[dict]:
+    """``[{id, hash, verified}]``: each decision's hash recomputed from the journal,
+    and the versions it rests on still hold the bytes it saw (their sha256)."""
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email)
-        if inv.frozen_hash is None:
-            return None
-        return await compute_frozen_hash(session, inv) == inv.frozen_hash
+        stored = {(str(v.item_id), v.version): v.sha256 for v in await list_rows(session, "case_item_versions", investigation_id)}
+        return [
+            {
+                "id": d["id"],
+                "hash": d["hash"],
+                "verified": await decision_hash(session, inv, d["id"]) == d["hash"]
+                and all(stored.get((e["item_id"], e["version"])) == e["sha256"] for e in d.get("evidence") or []),
+            }
+            for d in inv.decisions or []
+        ]
 
 
-async def record_decision(
-    investigation_id: UUID,
-    user_email: str,
-    outcome: str,
-    actions: list[str],
-    rationale: str,
-    reviewer_email: Optional[str] = None,
-) -> dict:
-    """Records the decision (the route forbids agents and validates outcome and
-    actions) and stores the case's ``frozen_hash``."""
-    rationale = (rationale or "").strip()
+async def _pinned_evidence(session, investigation_id: UUID, wanted: Optional[list[dict]]) -> list[dict]:
+    """The pinned versions a decision rests on: the given ones (each must be
+    pinned) or, when omitted, every pinned version."""
+    pinned = {
+        (str(v.item_id), v.version): v.sha256
+        for v in await list_rows(session, "case_item_versions", investigation_id)
+        if v.pinned_at is not None
+    }
+    if wanted is None:
+        keys = sorted(pinned)
+    else:
+        keys = [(str(w["item_id"]), int(w["version"])) for w in wanted]
+        missing = [k for k in keys if k not in pinned]
+        if missing:
+            raise InvestigationError(422, "EVIDENCE_NOT_PINNED", f"Pin these versions first: {missing}")
+    return [{"item_id": k[0], "version": k[1], "sha256": pinned[k]} for k in keys]
+
+
+def _outcome(kind: dict, data: dict) -> tuple[Optional[str], str, bool, bool]:
+    """(outcome id, label, closes_case, requires_review) from the type's catalog,
+    or the free outcome of a type that has none."""
+    if kind["outcomes"]:
+        outcome = next((o for o in kind["outcomes"] if o["id"] == data.get("outcome")), None)
+        if outcome is None:
+            ids = ", ".join(o["id"] for o in kind["outcomes"])
+            raise InvestigationError(422, "UNKNOWN_OUTCOME", f"The {kind['label']} type decides one of: {ids}")
+        return outcome["id"], outcome["label"], outcome["closes_case"], outcome["requires_review"]
+    label = (data.get("outcome_label") or "").strip()
+    if not label:
+        raise InvestigationError(422, "OUTCOME_REQUIRED", "This case type has no outcomes: name the decision (outcome_label)")
+    return None, label, bool(data.get("closes_case")), False
+
+
+async def record_decision(investigation_id: UUID, user_email: str, data: dict) -> dict:
+    """Appends a decision (the route forbids agents). ``data``: outcome or
+    outcome_label + closes_case, targets, tasks, rationale, evidence, reviewer_email."""
+    rationale = (data.get("rationale") or "").strip()
     if not rationale:
         raise InvestigationError(422, "RATIONALE_REQUIRED", "A decision needs its rationale")
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        ensure_not_decided(inv)
+        ensure_not_closed(inv)
+        kind = await case_types.require_case_type(inv.case_type)
+        outcome, label, closes, review = _outcome(kind, data)
+        if any(d.get("review") == "pending" for d in inv.decisions or []):
+            raise InvestigationError(409, "REVIEW_PENDING", "A decision waits for its review; approve or reject it first")
+        reviewer = nominal_email(data["reviewer_email"]) if data.get("reviewer_email") else None
+        if reviewer == user_email:
+            raise InvestigationError(422, "FOUR_EYES", "The reviewer is another person")
+        if reviewer and not can_write_case(inv, reviewer):
+            # Else the decision would wait forever for someone who cannot open the case.
+            raise InvestigationError(
+                422, "REVIEWER_NO_ACCESS", f"{reviewer} cannot edit this case: share it with them as an editor first"
+            )
         now = _clock()
-        decision = {
+        decision_id = str(uuid4())
+        proposal = await _proposal(session, investigation_id, data.get("proposal_id"))
+        targets = list(dict.fromkeys(data.get("targets") or []))
+        task_ids = await _decision_tasks(session, inv, kind, decision_id, data.get("tasks") or [], targets, user_email, now)
+        entry = {
+            "id": decision_id,
             "outcome": outcome,
-            "actions": list(dict.fromkeys(actions)),
+            "outcome_label": label,
+            "closes_case": closes,
+            "targets": targets,
+            "task_ids": task_ids,
             "rationale": rationale,
-            "reviewer_email": nominal_email(reviewer_email) if reviewer_email else None,
+            "evidence": await _pinned_evidence(session, investigation_id, data.get("evidence")),
+            "reviewer_email": reviewer,
             "decided_by": user_email,
             "decided_at": now.isoformat(),
         }
-        await append_event(session, investigation_id, user_email, "decision.recorded", decision)
-        inv.decision = decision  # the hash covers the decision itself
-        frozen_hash = await compute_frozen_hash(session, inv)
-        await _save_case(
-            session, inv, decision=decision, status="decided", frozen_hash=frozen_hash, frozen_at=now
-        )
+        if proposal is not None:
+            entry["proposal_id"] = str(proposal.id)
+            entry["proposed_by"] = {"author_kind": proposal.author_kind, "author_email": proposal.author_email}
+            await update_row(session, "case_annotations", proposal, status="confirmed", confirmed_by=user_email, confirmed_at=now)
+            await append_event(session, investigation_id, user_email, "decision_proposal.confirmed",
+                               {"annotation_id": str(proposal.id), "decision_id": decision_id})
+        await append_event(session, investigation_id, user_email, "decision.recorded", entry)
+        entry["hash"] = await decision_hash(session, inv, decision_id)
+        entry["review"] = "pending" if review else None
+        entry["closed_at"] = None
+        status = inv.status
+        if closes and not review:
+            entry["closed_at"] = now.isoformat()
+            status = "closed"
+            await append_event(session, investigation_id, user_email, "case.closed", {"decision_id": decision_id})
+        await _save_case(session, inv, decisions=[*(inv.decisions or []), entry], status=status)
         return serialize(inv, user_email)
+
+
+async def _proposal(session, investigation_id: UUID, proposal_id: Any) -> Optional[Any]:
+    """The pending decision_proposal a decision takes up, or None."""
+    if not proposal_id:
+        return None
+    row = await get_row(session, "case_annotations", UUID(str(proposal_id)))
+    if row is None or row.investigation_id != investigation_id or row.kind != "decision_proposal":
+        raise InvestigationError(404, "PROPOSAL_NOT_FOUND", f"No decision proposal '{proposal_id}' in this case")
+    if row.status != "suggested":
+        raise InvestigationError(409, "NOT_SUGGESTED", "This proposal was already taken up or rejected")
+    return row
+
+
+async def review_decision(
+    investigation_id: UUID, user_email: str, decision_id: str, approve: bool, note: Optional[str] = None
+) -> dict:
+    """Four eyes: another person approves (a closing outcome then closes the
+    case) or rejects a pending decision; only the named reviewer, when there is
+    one. The author may withdraw (reject) their own, never approve it."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        decisions = [dict(d) for d in inv.decisions or []]
+        entry = next((d for d in decisions if d["id"] == decision_id), None)
+        if entry is None:
+            raise InvestigationError(404, "DECISION_NOT_FOUND", f"No decision '{decision_id}' in this case")
+        if entry.get("review") != "pending":
+            raise InvestigationError(409, "NOT_PENDING", "This decision is not waiting for a review")
+        withdrawn = user_email == entry["decided_by"] and not approve
+        if user_email == entry["decided_by"] and approve:
+            raise InvestigationError(403, "FOUR_EYES", "Another person reviews a decision")
+        if not withdrawn and entry.get("reviewer_email") and user_email != entry["reviewer_email"]:
+            raise InvestigationError(403, "NOT_THE_REVIEWER", f"{entry['reviewer_email']} reviews this decision")
+        now = _clock()
+        entry.update(review="approved" if approve else "rejected", reviewed_by=user_email,
+                     reviewed_at=now.isoformat(), review_note=(note or "").strip() or None)
+        await append_event(session, investigation_id, user_email, f"decision.{entry['review']}",
+                           {"decision_id": decision_id, "note": entry["review_note"]})
+        status = inv.status
+        if approve and entry["closes_case"]:
+            entry["closed_at"] = now.isoformat()
+            status = "closed"
+            await append_event(session, investigation_id, user_email, "case.closed", {"decision_id": decision_id})
+        await _save_case(session, inv, decisions=decisions, status=status)
+        return serialize(inv, user_email)
+
+
+async def _decision_tasks(session, inv: Any, kind: dict, decision_id: str, tasks: list[dict],
+                          targets: list[str], user_email: str, now: datetime) -> list[str]:
+    """The follow-up tasks of a decision (06 §1): one of the type's actions (its
+    label is the title, ``due_hours`` the deadline) or a free one, on the
+    decision's targets. Created before the decision's event so its hash covers them."""
+    from graphlagoon.services import case_annotations
+
+    actions = {a["id"]: a for a in kind["actions"]}
+    for t in tasks:
+        if t.get("action") and t["action"] not in actions:
+            raise InvestigationError(422, "UNKNOWN_ACTION", f"No action '{t['action']}' in the {kind['label']} type")
+    ids = []
+    for t in tasks:
+        action = actions.get(t.get("action") or "")
+        due = t.get("due_at") or (
+            (now + timedelta(hours=action["due_hours"])).isoformat() if action and action.get("due_hours") else None
+        )
+        value = {
+            "title": (t.get("title") or "").strip() or action["label"],
+            "state": "open",
+            "assignee_kind": t.get("assignee_kind") or "human",
+            "assignee": t.get("assignee"),
+            "agent_name": t.get("agent_name"),
+            "due_at": due,
+            "action": t.get("action"),
+            "decision_id": decision_id,
+        }
+        row = await case_annotations.add_task(session, inv, user_email, targets, value)
+        ids.append(str(row.id))
+    return ids

@@ -55,7 +55,7 @@ def get_user_provider() -> Optional[UserProvider]:
 
 # The actor of the current request: None for a person, or
 # {"kind": "agent", "token_id", "name", "owner_email", "scope",
-# "investigation_ids", "unmasked"} for an agent token. A ContextVar so services (journal, audit) can attribute writes
+# "investigation_ids"} for an agent token. A ContextVar so services (journal, audit) can attribute writes
 # without threading the request through every call.
 _current_actor: ContextVar[Optional[dict]] = ContextVar(
     "graphlagoon_actor", default=None
@@ -166,9 +166,17 @@ AGENT_ALLOWED_PATHS = re.compile(
     r"|/api/graph-contexts/" + _UUID + r"/(subgraph|expand|query|cypher|nodes/batch"
     r"|schema-drift|explorations|enrichment)(/|$)"
     r"|/api/config$"
+    # The org's case types, library and authoring catalog: read-only, the REST
+    # twins of get_case_type / get_playbook (an integration reads a type's
+    # required fields before opening a case).
+    r"|/api/org/"
     r"|/mcp$)"
 )
 _CASE_PATH = re.compile(r"^/api/investigations(?:/(" + _UUID + r"))?(?:/|$)")
+# A case-scoped token stays inside its cases: no explorations or context queries
+# outside a case (the MCP tools that touch a context all take the case), only
+# the org's reads, /config and MCP besides.
+_CASE_SCOPE_EXTRA_PATHS = re.compile(r"^(/api/config$|/api/org/|/mcp$)")
 
 
 def agent_path_allowed(path: str, actor: Optional[dict] = None) -> bool:
@@ -178,7 +186,9 @@ def agent_path_allowed(path: str, actor: Optional[dict] = None) -> bool:
         return False
     if actor and actor.get("scope") == "case":
         m = _CASE_PATH.match(path)
-        if m and m.group(1) and m.group(1).lower() not in actor.get("investigation_ids", []):
+        if m is None:
+            return bool(_CASE_SCOPE_EXTRA_PATHS.match(path))
+        if m.group(1) and m.group(1).lower() not in actor.get("investigation_ids", []):
             return False
     return True
 
@@ -197,8 +207,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
     admin router relies on the identity resolved here (guarded by a test).
     """
 
-    # Paths that don't require authentication
-    PUBLIC_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/favicon.ico"}
+    # Paths that don't require authentication. The API docs (/docs, /openapi.json,
+    # /redoc) are not among them: when ``api_docs_enabled`` serves them, they sit
+    # behind the same login as the API, standalone or mounted under a prefix.
+    PUBLIC_PATHS = {"/health", "/favicon.ico"}
     # Prefixes that don't require authentication (for static files)
     PUBLIC_PREFIXES = ("/static/",)
 
@@ -311,6 +323,16 @@ async def authenticate_agent(raw_token: str):
             "INVALID_AGENT_TOKEN",
             "The agent token is invalid, expired or revoked.",
         )
+    from graphlagoon.services.permissions import check_permission
+
+    # Minting needs investigation.agent; using needs it still (a person who
+    # changed teams keeps the SSO login, not the agent).
+    if not (await check_permission(token["owner_email"], "investigation.agent")).allowed:
+        return None, _error(
+            403,
+            "AGENT_PERMISSION_REVOKED",
+            "The token's owner no longer has the permission to use agents.",
+        )
     if await _agent_rate_limited(token["id"], token["owner_email"], settings.agent_rate_limit_per_minute):
         return None, _error(
             429,
@@ -325,7 +347,6 @@ async def authenticate_agent(raw_token: str):
         "owner_email": token["owner_email"],
         "scope": token["scope"],
         "investigation_ids": token["investigation_ids"],
-        "unmasked": bool(token["unmasked"]) and settings.agents_allow_unmasked_data,
     }
     return actor, None
 
