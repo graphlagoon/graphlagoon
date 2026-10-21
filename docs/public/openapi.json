@@ -1860,6 +1860,100 @@
         }
       }
     },
+    "/graphlagoon/api/explorations/{exploration_id}/overlay": {
+      "get": {
+        "tags": [
+          "explorations"
+        ],
+        "summary": "Get Exploration Overlay",
+        "description": "The user's layer of an exploration: who may read the exploration reads it.\n404 when there is none.",
+        "operationId": "explorations_get_exploration_overlay",
+        "parameters": [
+          {
+            "name": "exploration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Exploration Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "explorations"
+        ],
+        "summary": "Put Exploration Overlay",
+        "description": "Replaces the user's layer of an exploration the caller can write; an empty\nlayer removes it. The snapshot and the context are never touched.",
+        "operationId": "explorations_put_exploration_overlay",
+        "parameters": [
+          {
+            "name": "exploration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Exploration Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphOverlay"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplorationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/explorations/{exploration_id}/share": {
       "post": {
         "tags": [
@@ -9523,6 +9617,62 @@
         ],
         "title": "EndpointSchema"
       },
+      "EnrichmentEdgeKey": {
+        "properties": {
+          "by": {
+            "type": "string",
+            "enum": [
+              "edge_id",
+              "endpoints"
+            ],
+            "title": "By",
+            "default": "edge_id"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "target_column": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Column"
+          },
+          "type_column": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Column"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "EnrichmentEdgeKey",
+        "description": "How an enrichment file's rows find edges: by the edge id (``key_column``)\nor by its two endpoints (node ids, normalized like the key) and, optionally,\nits relationship type. Endpoint rows match either direction."
+      },
       "EnrichmentLookupRequest": {
         "properties": {
           "keys": {
@@ -9971,6 +10121,11 @@
             "title": "Has Snapshot",
             "default": false
           },
+          "has_overlay": {
+            "type": "boolean",
+            "title": "Has Overlay",
+            "default": false
+          },
           "filters": {
             "$ref": "#/components/schemas/FilterState"
           },
@@ -10403,6 +10558,185 @@
         ],
         "title": "ExtraColumnDefinition",
         "description": "Definition for an extra column to generate."
+      },
+      "FileEnrichmentInput": {
+        "properties": {
+          "delimiter": {
+            "type": "string",
+            "maxLength": 1,
+            "minLength": 1,
+            "title": "Delimiter",
+            "default": ","
+          },
+          "header": {
+            "type": "boolean",
+            "title": "Header",
+            "default": true
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Columns"
+          },
+          "encoding": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoding"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FileEnrichmentInput"
+      },
+      "FileEnrichmentSpec": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Version",
+            "default": 1
+          },
+          "kind": {
+            "type": "string",
+            "const": "enrichment",
+            "title": "Kind",
+            "default": "enrichment"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "input": {
+            "$ref": "#/components/schemas/FileEnrichmentInput"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "nodes",
+              "edges"
+            ],
+            "title": "Target",
+            "default": "nodes"
+          },
+          "key_column": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Column"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Columns"
+          },
+          "match_node_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Match Node Types"
+          },
+          "match_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "node_id"
+              },
+              {
+                "$ref": "#/components/schemas/PropRef"
+              }
+            ],
+            "title": "Match Source",
+            "default": "node_id"
+          },
+          "match_edge_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Match Edge Types"
+          },
+          "edge_key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrichmentEdgeKey"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "normalize": {
+            "type": "string",
+            "enum": [
+              "digits",
+              "account",
+              "phone",
+              "email",
+              "device_id",
+              "ip",
+              "card",
+              "terminal_id",
+              "address",
+              "regex",
+              "lower",
+              "none"
+            ],
+            "title": "Normalize",
+            "default": "none"
+          },
+          "key_digits": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 20.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Digits"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "columns"
+        ],
+        "title": "FileEnrichmentSpec",
+        "description": "How a file's rows add properties to the nodes (or edges) of a graph: in a\ncase, a ``table`` item with ``mapping.as = enrichment``; in an exploration, an\nentry of its overlay. Rows are keyed by ``key_column`` (normalized with\n``normalize``, then cut to the first ``key_digits`` digits when set); a node of\n``match_node_types`` (empty or ``*`` = every type) matches by its id or a\nproperty. A value already on the node wins unless ``overwrite``; the losing\nvalue is recorded as a conflict. Edges match by ``edge_key``."
       },
       "FilterState": {
         "properties": {
@@ -11127,6 +11461,48 @@
         ],
         "title": "GraphJobSubmitResponse",
         "description": "Response to submitting a cancellable graph/cypher query job."
+      },
+      "GraphOverlay": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Version",
+            "default": 1
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SnapshotNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/SnapshotEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          },
+          "enrichments": {
+            "items": {
+              "$ref": "#/components/schemas/OverlayEnrichment"
+            },
+            "type": "array",
+            "title": "Enrichments"
+          },
+          "imports": {
+            "items": {
+              "$ref": "#/components/schemas/OverlayImport"
+            },
+            "type": "array",
+            "title": "Imports"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "GraphOverlay",
+        "description": "The user's layer of an exploration (BYOD-2): nodes, edges and enrichment files on top\nof the context's answer. Saved beside the snapshot, never inside it."
       },
       "GraphQueryRequest": {
         "properties": {
@@ -13329,6 +13705,114 @@
           "body"
         ],
         "title": "OrgLibraryDocUpdate"
+      },
+      "OverlayEnrichment": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Filename",
+            "default": ""
+          },
+          "spec": {
+            "$ref": "#/components/schemas/FileEnrichmentSpec"
+          },
+          "rows": {
+            "additionalProperties": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Rows"
+          },
+          "row_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Row Count",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "spec"
+        ],
+        "title": "OverlayEnrichment",
+        "description": "An enrichment file in an exploration's layer: its spec and parsed rows (first per key)."
+      },
+      "OverlayImport": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Filename",
+            "default": ""
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Title",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "mapping",
+              "json"
+            ],
+            "title": "Kind",
+            "default": "mapping"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Node Ids"
+          },
+          "edge_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Edge Ids"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "OverlayImport",
+        "description": "Nodes and edges that came in together (a mapped file, pasted JSON), removable as one."
       },
       "PathsRequest": {
         "properties": {

@@ -32,6 +32,7 @@ the default: **until an admin writes a rule, nothing changes for anyone.**
 |---|---|
 | `context.create` | Creating graph contexts; browsing the warehouse catalog (listing catalogs/schemas/tables, table schema and preview, type discovery); and the **wide** query tier — see [Query scope](#query-scope) below. |
 | `exploration.save` | Saving or updating explorations. Exploring and querying stay open — this only gates persisting the result. |
+| `exploration.edit_graph` | Adding your own data to an exploration you can write: enriching nodes or edges from a file, adding nodes and edges from a file or JSON, drawing them by hand ([Bring your own data](./bring-your-own-data.md#in-an-exploration-your-layer)). Without it the **Your data** button and the drawing actions are hidden; a layer someone saved still shows. |
 | `investigation.create` | Opening new [investigation](./investigations.md) cases (also by an agent acting for you). Working on a case someone shared with you or assigned to you stays open. |
 | `investigation.upload` | Uploading files (statements, registries, any CSV or fixed-width file) to an [investigation](./investigations.md#case-files), by hand or through an agent's `import_file`. Reading material already in a case stays open to its readers. |
 | `investigation.decide` | Recording and reviewing [decisions](./investigations.md#decisions) of a case (a closing one freezes it). Analysing, writing and proposing in the case stay open to its editors. |

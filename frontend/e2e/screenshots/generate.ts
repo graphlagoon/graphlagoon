@@ -463,6 +463,25 @@ const SCENES: Scene[] = [
     },
   },
   {
+    // "Your data" on an exploration (BYOD-2): a risk list keyed by person id,
+    // with the preview of what it will set.
+    guide: 'bring-your-own-data',
+    scene: 'enrich',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await page.getByTestId('toolbar-your-data').click();
+      const rows = Array.from({ length: 12 }, (_, i) => `person-${i};${['high', 'medium', 'low'][i % 3]};${['retail', 'private'][i % 2]};${2015 + (i % 9)}`);
+      await page.getByTestId('your-data-enrich-file').setInputFiles({
+        name: 'risk-review-2026.csv',
+        mimeType: 'text/csv',
+        buffer: Buffer.from(['person_id;risk;segment;customer_since', ...rows].join('\n')),
+      });
+      await expect(page.getByTestId('your-data-enrich-preview')).toBeVisible();
+      await page.waitForTimeout(300);
+    },
+  },
+  {
     guide: 'style-presets',
     scene: 'modal',
     path: GRAPH_URL,

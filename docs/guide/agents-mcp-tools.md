@@ -229,7 +229,7 @@ Human twin: `POST /api/investigations/{investigation_id}/items`
 
 ### import_file
 
-Import a delimited or fixed-width text file as a table/csv item, with the text inline (up to about 4 MB; convert other formats to CSV first). ``mapping`` {as: "graph", spec} puts it on the canvas: spec is a file mapping {"version": 1, "inputs": {"t": {"match": "*.csv", "delimiter": ";" | "widths": [8, 10, …], "header": true}}, "nodes": [{"key", "type", "from": "t", "id": "t.col" | {"col", "normalize"}, "props"}], "edges": [{"from": "t", "type", "endpoints": {"self", "other"}, "props"}]}; the org's saved mappings are library docs of kind "mapping" (get_playbook lists and reads them; the body is the mapping JSON). {as: "enrichment", spec: {name, key_column, columns, match_node_types}} makes it a side table. Bigger files: POST the bytes to /api/investigations/{id}/items?kind=table &subkind=csv&filename=… with the same Bearer token, then update_item. Needs the investigation.upload permission of the person you act for.
+Import a delimited or fixed-width text file as a table/csv item, with the text inline (up to about 4 MB; convert other formats to CSV first). ``mapping`` {as: "graph", spec} puts it on the canvas: spec is a file mapping {"version": 1, "inputs": {"t": {"match": "*.csv", "delimiter": ";" | "widths": [8, 10, …], "header": true}}, "nodes": [{"key", "type", "from": "t", "id": "t.col" | {"col", "normalize"}, "props"}], "edges": [{"from": "t", "type", "endpoints": {"self", "other"}, "props"}]}; the org's saved mappings are library docs of kind "mapping" (get_playbook lists and reads them; the body is the mapping JSON). {as: "enrichment", spec: {name, input: {delimiter, header}, key_column, columns, normalize?, match_node_types? (default every type), target?: "nodes" | "edges"}} adds its columns as properties of the nodes (or edges) already on the canvas whose key matches; values already there win unless overwrite. Bigger files: POST the bytes to /api/investigations/{id}/items?kind=table &subkind=csv&filename=… with the same Bearer token, then update_item. Needs the investigation.upload permission of the person you act for.
 
 Human twin: `POST /api/investigations/{investigation_id}/items`
 
@@ -261,7 +261,7 @@ Generic add: any kind/subkind, or a new version of ``item_id`` (text or content_
 
 - graph: exploration_ref (exploration_id); snapshot/derived (content_json
 
-{nodes: [{id, type, properties}], edges: [{id, source, target, type, properties}]}); selection (the same shape, every edge between listed nodes; "unified": true when the ids are the case's unified ids from get_graph); view (how the canvas looks, no data: {"filters": {"sources": [item ids], "roles": [], "tags": [], "groups": [group annotation ids], "types": [node types], "window": [start_ms, end_ms] | null}, "layout": "force" | "hierarchical" | …, "groups_closed": [group ids]}). A wrong shape is INVALID_CONTENT.
+{nodes: [{id, type, properties}], edges: [{id, source, target, type, properties}]}); selection (the same shape, every edge between listed nodes; "unified": true when the ids are the case's unified ids from get_graph); view (how the canvas looks, no data: {"filters": {"sources": [item ids], "roles": [], "tags": [], "groups": [group annotation ids], "types": [node types], "window": [start_ms, end_ms] | null}, "layout": "force" | "hierarchical" | …, "groups_closed": [group ids]}); sketch (nodes and edges drawn by hand, one "Manual additions" item per case: {"unified": true, nodes, edges}; nodes need a type, edges an id and a type, and both ends in the sketch; a node already on the canvas is a stub {id: its unified id, type, properties: {}}). A wrong shape is INVALID_CONTENT.
 
 - table: csv text with mapping {as: graph | enrichment, spec}; result or
 
@@ -338,7 +338,7 @@ Human twin: `POST /api/investigations/{investigation_id}/items/compare`
 
 ### promote_tables
 
-Promote tables (or the latest run of queries) to the graph (as_="graph": source_column, target_column, source_type, target_type, edge_type, normalize, amount_prop, time_prop) or to enrichment (as_="enrichment": key_column, match_node_types, match_source).
+Promote tables (or the latest run of queries) to the graph (as_="graph": source_column, target_column, source_type, target_type, edge_type, normalize, amount_prop, time_prop) or to enrichment (as_="enrichment": the rows add properties to the nodes, or with target="edges" the edges, already on the canvas: key_column, match_node_types (default every type), match_source, normalize, key_digits, overwrite, edge_key {by: edge_id | endpoints, source_column, target_column, type_column}).
 
 Human twin: `POST /api/investigations/{investigation_id}/items/promote`
 
