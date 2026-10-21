@@ -170,6 +170,7 @@ class TestCheckPermission:
         )
         assert asyncio.run(effective_permissions("ana@corp.com")) == [
             "context.create",
+            "exploration.edit_graph",
             "exploration.save",
             "investigation.agent",
             "investigation.create",
@@ -179,6 +180,7 @@ class TestCheckPermission:
         ]
         assert asyncio.run(effective_permissions("bob@corp.com")) == [
             "context.create",
+            "exploration.edit_graph",
             "investigation.agent",
             "investigation.create",
             "investigation.decide",

@@ -20,6 +20,7 @@ from graphlagoon.models.schemas import (
     ExplorationUpdate,
     ExplorationResponse,
     ExplorationState,
+    GraphOverlay,
     GraphSnapshot,
     ShareRequest,
 )
@@ -51,8 +52,10 @@ router = APIRouter(tags=["explorations"])
 # ---------------------------------------------------------------------------
 
 
-async def _persist_snapshot(exploration_id: UUID, snapshot: GraphSnapshot) -> None:
-    """Compress and save a snapshot file.
+async def _persist_snapshot(
+    exploration_id: UUID, snapshot: Union[GraphSnapshot, GraphOverlay], kind: str = "snapshot"
+) -> None:
+    """Compress and save a snapshot file (or, with ``kind="overlay"``, the user's layer).
 
     Raises:
         HTTPException 400: misconfiguration (missing volume path).
@@ -68,7 +71,8 @@ async def _persist_snapshot(exploration_id: UUID, snapshot: GraphSnapshot) -> No
 
     try:
         svc = get_snapshot_service()
-        await svc.save(exploration_id, compress_snapshot(snapshot.model_dump()))
+        data = compress_snapshot(snapshot.model_dump())
+        await (svc.save(exploration_id, data) if kind == "snapshot" else svc.save(exploration_id, data, kind=kind))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -90,20 +94,20 @@ async def _persist_snapshot(exploration_id: UUID, snapshot: GraphSnapshot) -> No
 
 
 async def _delete_snapshot_if_exists(state: dict, exploration_id: UUID) -> None:
-    """Delete snapshot file when exploration is deleted. Logs but never raises."""
-    if not state.get("has_snapshot"):
-        return
-    try:
-        from graphlagoon.services.snapshot import get_snapshot_service
+    """Delete the snapshot file (and the user's layer) when the exploration is
+    deleted. Logs but never raises."""
+    from graphlagoon.services.snapshot import get_snapshot_service
 
-        svc = get_snapshot_service()
-        await svc.delete(exploration_id)
-    except Exception as exc:
-        logger.warning(
-            "Could not delete snapshot for exploration %s: %s",
-            exploration_id,
-            exc,
-        )
+    if state.get("has_snapshot"):
+        try:
+            await get_snapshot_service().delete(exploration_id)
+        except Exception as exc:
+            logger.warning("Could not delete snapshot for exploration %s: %s", exploration_id, exc)
+    if state.get("has_overlay"):
+        try:
+            await get_snapshot_service().delete(exploration_id, kind="overlay")
+        except Exception as exc:
+            logger.warning("Could not delete the layer of exploration %s: %s", exploration_id, exc)
 
 
 def exploration_to_response(
@@ -400,6 +404,8 @@ async def create_exploration(
     state_dict = data.state.model_dump()
     if data.snapshot is not None:
         state_dict["has_snapshot"] = True
+    # The user's layer is written by its own route, after the exploration exists.
+    state_dict["has_overlay"] = False
 
     if is_database_available():
         from sqlalchemy import select
@@ -565,6 +571,8 @@ async def update_exploration(
                 new_state = data.state.model_dump()
                 if data.snapshot is not None:
                     new_state["has_snapshot"] = True
+                # Only PUT .../overlay sets the layer flag; a state from the client keeps it.
+                new_state["has_overlay"] = bool((exploration.state or {}).get("has_overlay"))
                 exploration.state = new_state
             elif data.snapshot is not None:
                 # snapshot-only update: patch has_snapshot in existing state
@@ -613,6 +621,8 @@ async def update_exploration(
             new_state = data.state.model_dump()
             if data.snapshot is not None:
                 new_state["has_snapshot"] = True
+            # Only PUT .../overlay sets the layer flag; a state from the client keeps it.
+            new_state["has_overlay"] = bool((exploration.state or {}).get("has_overlay"))
             updates["state"] = new_state
         elif data.snapshot is not None:
             # snapshot-only update: patch has_snapshot in existing state
@@ -689,16 +699,8 @@ async def delete_exploration(exploration_id: UUID, request: Request):
     return {"status": "deleted"}
 
 
-@router.get("/api/explorations/{exploration_id}/snapshot")
-async def get_exploration_snapshot(exploration_id: UUID, request: Request):
-    """Return the graph snapshot (nodes + edges) for an exploration.
-
-    Returns 404 if the exploration has no snapshot or the file is missing.
-    Access control mirrors get_exploration.
-    """
-    user_email = get_current_user(request)
-
-    # Resolve the exploration and check access (reuses existing logic)
+async def _readable_state(exploration_id: UUID, user_email: str) -> dict:
+    """The state of an exploration the caller may read (as ``get_exploration``)."""
     if is_database_available():
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
@@ -719,18 +721,26 @@ async def get_exploration_snapshot(exploration_id: UUID, request: Request):
                 await check_context_access_db(
                     session, exploration.graph_context_id, user_email
                 )
+            return exploration.state or {}
+    store = get_memory_store()
+    exploration = store.get_exploration(exploration_id)
+    if exploration is None:
+        raise HTTPException(status_code=404, detail="Exploration not found")
 
-            state = exploration.state or {}
-    else:
-        store = get_memory_store()
-        exploration = store.get_exploration(exploration_id)
-        if exploration is None:
-            raise HTTPException(status_code=404, detail="Exploration not found")
+    if not can_read(exploration.owner_email, exploration.shares, user_email):
+        check_context_access_memory(exploration.graph_context_id, user_email)
+    return exploration.state or {}
 
-        if not can_read(exploration.owner_email, exploration.shares, user_email):
-            check_context_access_memory(exploration.graph_context_id, user_email)
 
-        state = exploration.state or {}
+@router.get("/api/explorations/{exploration_id}/snapshot")
+async def get_exploration_snapshot(exploration_id: UUID, request: Request):
+    """Return the graph snapshot (nodes + edges) for an exploration.
+
+    Returns 404 if the exploration has no snapshot or the file is missing.
+    Access control mirrors get_exploration.
+    """
+    user_email = get_current_user(request)
+    state = await _readable_state(exploration_id, user_email)
 
     if not state.get("has_snapshot"):
         raise HTTPException(status_code=404, detail="This exploration has no snapshot")
@@ -750,6 +760,112 @@ async def get_exploration_snapshot(exploration_id: UUID, request: Request):
         )
 
     return decompress_snapshot(data)
+
+
+# ---------------------------------------------------------------------------
+# The user's layer (BYOD-2): nodes, edges and enrichment files on top of the
+# context's answer, in a file beside the snapshot. The context never sees it.
+# ---------------------------------------------------------------------------
+
+
+async def enforce_overlay_body_limit(request: Request) -> None:
+    """Rejects an oversized layer from Content-Length, before the JSON is parsed."""
+    limit = get_settings().exploration_overlay_max_bytes
+    try:
+        length = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        return
+    if length > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"The layer is {length} bytes; an exploration keeps at most {limit}. "
+            "Keep only the columns you need, or split the file across explorations.",
+        )
+
+
+@router.get("/api/explorations/{exploration_id}/overlay")
+async def get_exploration_overlay(exploration_id: UUID, request: Request):
+    """The user's layer of an exploration: who may read the exploration reads it.
+    404 when there is none."""
+    user_email = get_current_user(request)
+    state = await _readable_state(exploration_id, user_email)
+    if not state.get("has_overlay"):
+        raise HTTPException(status_code=404, detail="This exploration has no layer of its own")
+
+    from graphlagoon.services.snapshot import get_snapshot_service, decompress_snapshot
+
+    data = await get_snapshot_service().load(exploration_id, kind="overlay")
+    if data is None:
+        raise HTTPException(status_code=404, detail="The layer file is missing (it may have been deleted)")
+    return decompress_snapshot(data)
+
+
+@router.put(
+    "/api/explorations/{exploration_id}/overlay",
+    response_model=ExplorationResponse,
+    dependencies=[Depends(enforce_overlay_body_limit)],
+)
+async def put_exploration_overlay(
+    exploration_id: UUID,
+    overlay: GraphOverlay,
+    request: Request,
+    user_email: str = Depends(require_permission("exploration.edit_graph")),
+):
+    """Replaces the user's layer of an exploration the caller can write; an empty
+    layer removes it. The snapshot and the context are never touched."""
+    import json as _json
+
+    limit = get_settings().exploration_overlay_max_bytes
+    size = len(_json.dumps(overlay.model_dump(), separators=(",", ":")))
+    if size > limit:
+        # Content-Length can be absent (chunked); the parsed size is the real check.
+        raise HTTPException(status_code=413, detail=f"The layer is {size} bytes; an exploration keeps at most {limit}.")
+    empty = overlay.is_empty()
+
+    async def write_file(state: dict) -> None:
+        if empty:
+            if state.get("has_overlay"):
+                from graphlagoon.services.snapshot import get_snapshot_service
+
+                try:
+                    await get_snapshot_service().delete(exploration_id, kind="overlay")
+                except Exception as exc:  # the flag goes off; a stray file is harmless
+                    logger.warning("Could not delete the layer of exploration %s: %s", exploration_id, exc)
+        else:
+            await _persist_snapshot(exploration_id, overlay, kind="overlay")
+
+    if is_database_available():
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from graphlagoon.db.models import Exploration
+
+        session_maker = get_session_maker()
+        async with session_maker() as session:
+            result = await session.execute(
+                select(Exploration).options(selectinload(Exploration.shares)).where(Exploration.id == exploration_id)
+            )
+            exploration = result.scalar_one_or_none()
+            if exploration is None:
+                raise HTTPException(status_code=404, detail="Exploration not found")
+            if not can_write(exploration.owner_email, exploration.shares, user_email):
+                raise HTTPException(status_code=403, detail="No write access to this exploration")
+            # The file first: a failed write leaves the flag as it was.
+            await write_file(exploration.state or {})
+            exploration.state = {**(exploration.state or {}), "has_overlay": not empty}
+            await session.commit()
+            await session.refresh(exploration)
+            await session.refresh(exploration, ["shares"])
+            return exploration_to_response(exploration, user_email)
+
+    store = get_memory_store()
+    exploration = store.get_exploration(exploration_id)
+    if exploration is None:
+        raise HTTPException(status_code=404, detail="Exploration not found")
+    if not can_write(exploration.owner_email, exploration.shares, user_email):
+        raise HTTPException(status_code=403, detail="No write access to this exploration")
+    await write_file(exploration.state or {})
+    exploration = store.update_exploration(exploration_id, state={**(exploration.state or {}), "has_overlay": not empty})
+    return exploration_to_response(exploration, user_email)
 
 
 @router.post("/api/explorations/{exploration_id}/share", dependencies=[Depends(forbid_agents)])

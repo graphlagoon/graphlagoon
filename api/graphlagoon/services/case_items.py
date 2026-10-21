@@ -42,7 +42,7 @@ ITEMS = "case_items"
 VERSIONS = "case_item_versions"
 
 SUBKINDS: dict[str, tuple[str, ...]] = {
-    "graph": ("exploration_ref", "snapshot", "selection", "derived", "view"),
+    "graph": ("exploration_ref", "snapshot", "selection", "derived", "view", "sketch"),
     "table": ("result", "csv", "enrichment", "metrics"),
     "query": ("sql", "cypher"),
     "document": ("upload", "markdown", "link", "brief"),
@@ -111,21 +111,21 @@ def validate_mapping(mapping: Optional[dict]) -> Optional[dict]:
 
 
 def validate_graph_content(subkind: str, content: Optional[bytes]) -> None:
-    """``graph/view`` and ``graph/selection`` have a documented shape (06 P8, A5):
-    a wrong one is a 422 here, not a blank canvas later."""
-    if subkind not in ("view", "selection") or content is None:
+    """``graph/view``, ``graph/selection`` and ``graph/sketch`` have a documented
+    shape (06 P8, A5, BYOD-2): a wrong one is a 422 here, not a blank canvas later."""
+    if subkind not in ("view", "selection", "sketch") or content is None:
         return
     import json
 
     from pydantic import ValidationError
 
-    from graphlagoon.models.schemas import CaseViewContent, GraphSelectionContent
+    from graphlagoon.models.schemas import CaseViewContent, GraphSelectionContent, GraphSketchContent
 
     try:
         payload = json.loads(content)
     except ValueError:
         raise InvestigationError(422, "INVALID_CONTENT", f"graph/{subkind} content is JSON")
-    model = CaseViewContent if subkind == "view" else GraphSelectionContent
+    model = {"view": CaseViewContent, "selection": GraphSelectionContent, "sketch": GraphSketchContent}[subkind]
     try:
         model.model_validate(payload)
     except ValidationError as exc:

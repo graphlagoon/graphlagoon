@@ -198,6 +198,11 @@ class Settings(BaseSettings):
         description="Maximum size of one file uploaded to an investigation, and of an "
         "item's inline JSON body, in bytes",
     )
+    exploration_overlay_max_bytes: int = Field(
+        default=5 * 1024 * 1024,
+        description="Maximum size of the user's layer of one exploration (its own nodes, "
+        "edges and enrichment rows, as JSON), in bytes",
+    )
     investigation_max_working_edges: int = Field(
         default=50_000,
         description="Ceiling of edges in an investigation's working graph in the "

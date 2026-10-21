@@ -480,6 +480,10 @@ class InMemoryStore:
         snapshot_ids = [
             eid for eid in to_delete if self.explorations[eid].state.get("has_snapshot")
         ]
+        # The user's layer (BYOD-2) lives in a file of its own beside the snapshot.
+        overlay_ids = [
+            eid for eid in to_delete if self.explorations[eid].state.get("has_overlay")
+        ]
 
         for eid in to_delete:
             del self.explorations[eid]
@@ -488,7 +492,7 @@ class InMemoryStore:
         del self.graph_contexts[context_id]
 
         # Best-effort snapshot file cleanup (fire-and-forget via asyncio)
-        if snapshot_ids:
+        if snapshot_ids or overlay_ids:
             import asyncio
             import logging
 
@@ -504,6 +508,11 @@ class InMemoryStore:
                             await svc.delete(eid)
                         except Exception as exc:
                             _log.warning("Could not delete snapshot %s: %s", eid, exc)
+                    for eid in overlay_ids:
+                        try:
+                            await svc.delete(eid, kind="overlay")
+                        except Exception as exc:
+                            _log.warning("Could not delete the layer of %s: %s", eid, exc)
                 except Exception as exc:
                     _log.warning("Snapshot cleanup failed: %s", exc)
 

@@ -845,6 +845,45 @@ class GraphSnapshot(BaseModel):
     snapshot_version: int = 1
 
 
+class OverlayEnrichment(BaseModel):
+    """An enrichment file in an exploration's layer: its spec and parsed rows (first per key)."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=64)
+    filename: str = Field(default="", max_length=255)
+    spec: "FileEnrichmentSpec"
+    rows: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    row_count: int = Field(default=0, ge=0)
+
+
+class OverlayImport(BaseModel):
+    """Nodes and edges that came in together (a mapped file, pasted JSON), removable as one."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=64)
+    filename: str = Field(default="", max_length=255)
+    title: str = Field(default="", max_length=255)
+    kind: Literal["mapping", "json"] = "mapping"
+    node_ids: list[str] = Field(default_factory=list)
+    edge_ids: list[str] = Field(default_factory=list)
+    report: Optional[dict] = None
+
+
+class GraphOverlay(BaseModel):
+    """The user's layer of an exploration (BYOD-2): nodes, edges and enrichment files on top
+    of the context's answer. Saved beside the snapshot, never inside it."""
+
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1] = 1
+    nodes: list[SnapshotNode] = Field(default_factory=list)
+    edges: list[SnapshotEdge] = Field(default_factory=list)
+    enrichments: list[OverlayEnrichment] = Field(default_factory=list)
+    imports: list[OverlayImport] = Field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return not (self.nodes or self.edges or self.enrichments)
+
+
 class ExplorationState(BaseModel):
     # extra="allow" so frontend-only fields survive the model_dump()
     # round-trip in the explorations router instead of being silently
@@ -855,6 +894,8 @@ class ExplorationState(BaseModel):
     nodes: list[NodeState] = Field(default_factory=list)
     edges: list[EdgeState] = Field(default_factory=list)
     has_snapshot: bool = False
+    # The user's layer (BYOD-2) is saved beside the snapshot; set by the server only.
+    has_overlay: bool = False
     filters: FilterState = Field(default_factory=FilterState)
     viewport: ViewportState = Field(default_factory=ViewportState)
     layout_algorithm: str = "force-atlas-2"
@@ -2182,6 +2223,31 @@ class GraphContentEdge(BaseModel):
     properties: dict[str, Any] = Field(default_factory=dict)
 
 
+class GraphSketchContent(BaseModel):
+    """``graph/sketch`` content (BYOD-2): nodes and edges drawn by hand in a case. Ids
+    are the case's unified ids (``unified: true``). A node already on the canvas is
+    present as a stub (its id and type, no properties) so an edge can reach it; it
+    then counts this item among its sources."""
+
+    model_config = ConfigDict(extra="forbid")
+    unified: Literal[True] = True
+    nodes: list[GraphContentNode] = Field(default_factory=list, max_length=5000)
+    edges: list[GraphContentEdge] = Field(default_factory=list, max_length=20000)
+
+    @model_validator(mode="after")
+    def _typed_and_joined(self):
+        untyped = next((n for n in self.nodes if not (n.type or "").strip()), None)
+        if untyped is not None:
+            raise ValueError(f"node {untyped.id} needs a type")
+        ids = {str(n.id) for n in self.nodes}
+        for e in self.edges:
+            if e.id is None or not (e.type or "").strip():
+                raise ValueError(f"edge {e.id or e.source} needs an id and a type")
+            if str(e.source) not in ids or str(e.target) not in ids:
+                raise ValueError(f"edge {e.id} joins a node that is not in the sketch")
+        return self
+
+
 class GraphSelectionContent(BaseModel):
     """``graph/selection`` content (06 P8, A5): nodes and the edges among them;
     ``unified: true`` when the ids are the case's unified ids."""
@@ -2450,31 +2516,72 @@ class FileEnrichmentInput(BaseModel):
     encoding: Optional[str] = Field(default=None, max_length=20)
 
 
+class EnrichmentEdgeKey(BaseModel):
+    """How an enrichment file's rows find edges: by the edge id (``key_column``)
+    or by its two endpoints (node ids, normalized like the key) and, optionally,
+    its relationship type. Endpoint rows match either direction."""
+
+    model_config = ConfigDict(extra="forbid")
+    by: Literal["edge_id", "endpoints"] = "edge_id"
+    source_column: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    target_column: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    type_column: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def _endpoints_named(self) -> "EnrichmentEdgeKey":
+        if self.by == "endpoints" and not (self.source_column and self.target_column):
+            raise ValueError("edge_key by endpoints needs source_column and target_column")
+        return self
+
+
 class FileEnrichmentSpec(BaseModel):
-    """How a ``table`` item with ``mapping.as = enrichment`` joins the case's
-    nodes: rows keyed by ``key_column``; a node of ``match_node_types`` matches
-    by its id or a property, reduced to its first ``key_digits`` digits when set
-    (a company id against its group prefix in a registry)."""
+    """How a file's rows add properties to the nodes (or edges) of a graph: in a
+    case, a ``table`` item with ``mapping.as = enrichment``; in an exploration, an
+    entry of its overlay. Rows are keyed by ``key_column`` (normalized with
+    ``normalize``, then cut to the first ``key_digits`` digits when set); a node of
+    ``match_node_types`` (empty or ``*`` = every type) matches by its id or a
+    property. A value already on the node wins unless ``overwrite``; the losing
+    value is recorded as a conflict. Edges match by ``edge_key``."""
 
     model_config = ConfigDict(extra="forbid")
     version: Literal[1] = 1
     kind: Literal["enrichment"] = "enrichment"
     name: str = Field(min_length=1, max_length=100)
     input: FileEnrichmentInput = Field(default_factory=FileEnrichmentInput)
-    key_column: str = Field(min_length=1, max_length=200)
+    target: Literal["nodes", "edges"] = "nodes"
+    key_column: Optional[str] = Field(default=None, min_length=1, max_length=200)
     columns: list[str] = Field(min_length=1, max_length=50)
-    match_node_types: list[str] = Field(min_length=1, max_length=20)
+    match_node_types: list[str] = Field(default_factory=lambda: ["*"], max_length=20)
     match_source: Union[Literal["node_id"], PropRef] = "node_id"
+    match_edge_types: list[str] = Field(default_factory=lambda: ["*"], max_length=20)
+    edge_key: Optional[EnrichmentEdgeKey] = None
+    normalize: IdentityNormalize = "none"
     key_digits: Optional[int] = Field(default=None, ge=1, le=20)
+    overwrite: bool = False
 
     @model_validator(mode="after")
     def _columns_known(self) -> "FileEnrichmentSpec":
+        by_endpoints = self.target == "edges" and self.edge_key is not None and self.edge_key.by == "endpoints"
+        if not by_endpoints and not self.key_column:
+            raise ValueError("key_column is required")
+        if self.normalize == "regex":
+            raise ValueError("normalize 'regex' needs a pattern; use an identity key instead")
+        keys = (
+            [self.edge_key.source_column, self.edge_key.target_column, self.edge_key.type_column]
+            if by_endpoints
+            else [self.key_column]
+        )
         if not self.input.header:
             known = set(self.input.columns)
-            missing = [c for c in [self.key_column, *self.columns] if c not in known]
+            missing = [c for c in [*keys, *self.columns] if c and c not in known]
             if missing:
                 raise ValueError(f"column '{missing[0]}' is not in input.columns")
         return self
+
+
+# The exploration layer (defined with the exploration schemas) embeds this spec.
+OverlayEnrichment.model_rebuild()
+GraphOverlay.model_rebuild()
 
 
 # ---------------------------------------------------------------------------

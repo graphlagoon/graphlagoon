@@ -738,6 +738,65 @@
   ],
   "enrichment_schema": {
    "$defs": {
+    "EnrichmentEdgeKey": {
+     "additionalProperties": false,
+     "description": "How an enrichment file's rows find edges: by the edge id (``key_column``)\nor by its two endpoints (node ids, normalized like the key) and, optionally,\nits relationship type. Endpoint rows match either direction.",
+     "properties": {
+      "by": {
+       "default": "edge_id",
+       "enum": [
+        "edge_id",
+        "endpoints"
+       ],
+       "title": "By",
+       "type": "string"
+      },
+      "source_column": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Source Column"
+      },
+      "target_column": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Target Column"
+      },
+      "type_column": {
+       "anyOf": [
+        {
+         "maxLength": 200,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Type Column"
+      }
+     },
+     "title": "EnrichmentEdgeKey",
+     "type": "object"
+    },
     "FileEnrichmentInput": {
      "additionalProperties": false,
      "properties": {
@@ -801,7 +860,7 @@
     }
    },
    "additionalProperties": false,
-   "description": "How a ``table`` item with ``mapping.as = enrichment`` joins the case's\nnodes: rows keyed by ``key_column``; a node of ``match_node_types`` matches\nby its id or a property, reduced to its first ``key_digits`` digits when set\n(a company id against its group prefix in a registry).",
+   "description": "How a file's rows add properties to the nodes (or edges) of a graph: in a\ncase, a ``table`` item with ``mapping.as = enrichment``; in an exploration, an\nentry of its overlay. Rows are keyed by ``key_column`` (normalized with\n``normalize``, then cut to the first ``key_digits`` digits when set); a node of\n``match_node_types`` (empty or ``*`` = every type) matches by its id or a\nproperty. A value already on the node wins unless ``overwrite``; the losing\nvalue is recorded as a conflict. Edges match by ``edge_key``.",
    "properties": {
     "version": {
      "const": 1,
@@ -824,11 +883,28 @@
     "input": {
      "$ref": "#/$defs/FileEnrichmentInput"
     },
-    "key_column": {
-     "maxLength": 200,
-     "minLength": 1,
-     "title": "Key Column",
+    "target": {
+     "default": "nodes",
+     "enum": [
+      "nodes",
+      "edges"
+     ],
+     "title": "Target",
      "type": "string"
+    },
+    "key_column": {
+     "anyOf": [
+      {
+       "maxLength": 200,
+       "minLength": 1,
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Key Column"
     },
     "columns": {
      "items": {
@@ -844,7 +920,6 @@
       "type": "string"
      },
      "maxItems": 20,
-     "minItems": 1,
      "title": "Match Node Types",
      "type": "array"
     },
@@ -861,6 +936,44 @@
      "default": "node_id",
      "title": "Match Source"
     },
+    "match_edge_types": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 20,
+     "title": "Match Edge Types",
+     "type": "array"
+    },
+    "edge_key": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/EnrichmentEdgeKey"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "normalize": {
+     "default": "none",
+     "enum": [
+      "digits",
+      "account",
+      "phone",
+      "email",
+      "device_id",
+      "ip",
+      "card",
+      "terminal_id",
+      "address",
+      "regex",
+      "lower",
+      "none"
+     ],
+     "title": "Normalize",
+     "type": "string"
+    },
     "key_digits": {
      "anyOf": [
       {
@@ -874,13 +987,16 @@
      ],
      "default": null,
      "title": "Key Digits"
+    },
+    "overwrite": {
+     "default": false,
+     "title": "Overwrite",
+     "type": "boolean"
     }
    },
    "required": [
     "name",
-    "key_column",
-    "columns",
-    "match_node_types"
+    "columns"
    ],
    "title": "FileEnrichmentSpec",
    "type": "object"
@@ -1022,7 +1138,7 @@
   },
   {
    "name": "promote_tables",
-   "summary": "Promote tables (or the latest run of queries) to the graph (as_=\"graph\": source_column, target_column, source_type, target_type, edge_type, normalize, amount_prop, time_prop) or to enrichment (as_=\"enrichment\": key_column, match_node_types, match_source)."
+   "summary": "Promote tables (or the latest run of queries) to the graph (as_=\"graph\": source_column, target_column, source_type, target_type, edge_type, normalize, amount_prop, time_prop) or to enrichment (as_=\"enrichment\": the rows add properties to the nodes, or with target=\"edges\" the edges, already on the canvas: key_column, match_node_types (default every type), match_source, normalize, key_digits, overwrite, edge_key {by: edge_id | endpoints, source_column, target_column, type_column})."
   },
   {
    "name": "propose_decision",

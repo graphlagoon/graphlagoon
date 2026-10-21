@@ -226,6 +226,7 @@ class TestPermissions:
         ).json()
         assert [p["id"] for p in payload["items"]] == [
             "context.create",
+            "exploration.edit_graph",
             "exploration.save",
             "investigation.agent",
             "investigation.create",
