@@ -12,25 +12,75 @@ from __future__ import annotations
 
 import re
 
-# Unquoted-identifier grammar: what Unity Catalog itself accepts for unquoted
-# names. Deliberately strict — names needing backtick-quoting in DDL are not
-# addressable through the app, which is the safe default for user-shaped input.
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_]+$")
+# Bare grammar: what SQL accepts with no quoting at all. A stored dotted
+# table name is spliced into transpiled SQL as written, so each of its parts
+# must either match this or be written in backticks.
+_BARE_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+# A name the app quotes itself: letters (accented ones too), digits,
+# underscores and hyphens — Unity Catalog accepts `my-catalog`, and a catalog
+# like that is only reachable in backticks. Still nothing that could close a
+# backtick or a string literal (``WHERE table_catalog = '...'``).
+_NAME_RE = re.compile(r"^[\w-]+$")
+
+
+def _unquote(name: str) -> str:
+    """A name written in backticks, without them; anything else unchanged."""
+    if len(name) >= 2 and name[0] == "`" and name[-1] == "`":
+        return name[1:-1]
+    return name
 
 
 def validate_identifier_part(name: str) -> str:
-    """Return ``name`` if it is a safe bare SQL identifier, else raise.
+    """Return ``name`` without its backticks if it is a safe identifier, else raise.
+
+    Accepts a bare name (``users``, ``my-catalog``) or one written in
+    backticks (```my-catalog```), as Databricks users type them. Callers
+    quote the result with ``quote_identifier`` before interpolating it.
 
     Raises:
-        ValueError: when the name is empty or contains anything beyond
-            ``[A-Za-z0-9_]`` (callers map this to a 400 INVALID_IDENTIFIER).
+        ValueError: when the name is empty or holds anything beyond letters,
+            digits, underscores and hyphens (callers map this to a 400
+            INVALID_IDENTIFIER).
     """
-    if not name or not _IDENTIFIER_RE.match(name):
+    inner = _unquote(name or "")
+    if not inner or not _NAME_RE.match(inner):
         raise ValueError(
             f"Invalid SQL identifier: {name!r} "
-            "(only letters, digits and underscores are allowed)"
+            "(only letters, digits, underscores and hyphens are allowed)"
         )
-    return name
+    return inner
+
+
+def split_qualified(name: str) -> list[str]:
+    """Split a stored dotted name into its parts, without backticks.
+
+    ```my-cat`.db.t`` → ``["my-cat", "db", "t"]``. A part that needs quoting
+    must carry its backticks (``my-cat.db.t`` is refused): the stored name is
+    also used as written by the Cypher transpiler and the CTE pre-filter.
+
+    Raises:
+        ValueError: when a part is empty or fails the rules above.
+    """
+    parts = []
+    for part in (name or "").split("."):
+        if _BARE_RE.match(part):
+            parts.append(part)
+        elif part and _NAME_RE.match(part):
+            raise ValueError(
+                f"Invalid table name: {name!r} — write {part!r} in backticks "
+                f"(`{part}`)"
+            )
+        else:
+            # Quoted (```my-cat```), or invalid either way.
+            parts.append(validate_identifier_part(part))
+    return parts
+
+
+def dotted_name(*parts: str) -> str:
+    """Join name parts into a storable dotted name, backticking only the parts
+    that need it: ``("my-cat", "db", "t")`` → ```my-cat`.db.t``."""
+    return ".".join(p if _BARE_RE.match(p) else quote_identifier(p) for p in parts)
 
 
 def escape_identifier(name: str) -> str:
@@ -68,11 +118,13 @@ def qualified_from_dotted(name: str) -> str:
     For fully-qualified names arriving as a single string (request bodies,
     stored context configuration).
 
+    Parts may be written in backticks (```my-cat`.db.t``).
+
     Raises:
         ValueError: when the name does not split into 2–3 parts or any part
-            fails ``validate_identifier_part``.
+            fails ``split_qualified``.
     """
-    parts = name.split(".")
+    parts = split_qualified(name)
     if len(parts) not in (2, 3):
         raise ValueError(
             f"Invalid qualified table name: {name!r} "

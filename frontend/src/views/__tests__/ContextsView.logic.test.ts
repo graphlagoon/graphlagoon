@@ -92,4 +92,8 @@ describe('parseTableName', () => {
   it('returns null for empty string', () => {
     expect(parseTableName('')).toBeNull()
   })
+
+  it('strips the backticks of a quoted part', () => {
+    expect(parseTableName('`my-cat`.graphs.edges')).toEqual({ catalog: 'my-cat', database: 'graphs', table: 'edges' })
+  })
 })

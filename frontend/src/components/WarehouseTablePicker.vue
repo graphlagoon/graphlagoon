@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ChevronRight, Search, X, AlertTriangle } from 'lucide-vue-next';
+import { unquotePart } from '@/utils/contextForm';
 
 /**
  * Picks the edge table and the node table together.
@@ -53,7 +54,7 @@ interface TableEntry {
 }
 
 function parse(full: string) {
-  const parts = full.split('.');
+  const parts = full.split('.').map(unquotePart);
   if (parts.length >= 3) {
     return { catalog: parts[0], schema: parts.slice(1, -1).join('.'), name: parts[parts.length - 1] };
   }

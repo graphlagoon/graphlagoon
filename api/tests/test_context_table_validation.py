@@ -96,6 +96,21 @@ class TestValidateContextTables:
         assert exc_info.value.code == "CONTEXT_TABLE_INVALID"
 
     @pytest.mark.asyncio
+    async def test_unquoted_hyphen_says_to_use_backticks(self):
+        with pytest.raises(ContextValidationError) as exc_info:
+            await validate_context_tables(
+                FakeWarehouse({}), None, "my-cat.db.edges", None, None
+            )
+        assert exc_info.value.code == "CONTEXT_TABLE_INVALID"
+        assert "`my-cat`" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_backticked_catalog_passes(self):
+        await validate_context_tables(
+            FakeWarehouse({}), "`my-cat`.db.nodes", "`catalogo`.db.edges", None, None
+        )
+
+    @pytest.mark.asyncio
     async def test_clean_tables_pass(self):
         warehouse = FakeWarehouse({"nodes": CLEAN_NODE_COLS, "edges": CLEAN_EDGE_COLS})
         await validate_context_tables(

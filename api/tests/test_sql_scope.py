@@ -128,6 +128,40 @@ class TestAuthorTier:
         )
 
 
+class TestBacktickedNames:
+    """A context stored as `catalogo`.schema.tabela must match the query that
+    names it, quoted or not — sqlglot reports the parts without backticks."""
+
+    def test_normalization_strips_backticks(self):
+        assert normalize_table_name("`Catalogo`.schema.tabela", *DEFAULTS) == (
+            "catalogo",
+            "schema",
+            "tabela",
+        )
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM `my-cat`.graphs.edges",
+            "SELECT * FROM `my-cat`.`graphs`.`edges`",
+        ],
+    )
+    def test_reader_reads_own_quoted_tables(self, sql):
+        context = make_context(edge="`my-cat`.graphs.edges", node=None)
+        assert _scope(sql, is_author=False, context=context) is None
+
+    def test_author_allowlist_with_backticks(self):
+        problem = check_scope(
+            "SELECT * FROM `my-cat`.graphs.other",
+            make_context(),
+            is_author=True,
+            allowed_pairs=[("`my-cat`", "graphs")],
+            default_catalog=DEFAULTS[0],
+            default_schema=DEFAULTS[1],
+        )
+        assert problem is None
+
+
 class TestFailClosed:
     def test_unparseable_is_refused_for_both_tiers(self):
         # Defensive: in the routers the SELECT-only validator runs first, so

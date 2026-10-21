@@ -17,7 +17,7 @@ from dataclasses import dataclass, asdict
 from typing import Any, Literal, Optional
 
 from graphlagoon.services.graph_operations import merge_column_config
-from graphlagoon.services.sql_identifiers import validate_identifier_part
+from graphlagoon.services.sql_identifiers import split_qualified
 
 Severity = Literal["ok", "info", "warning", "error"]
 _SEVERITY_ORDER: dict[str, int] = {"ok": 0, "info": 1, "warning": 2, "error": 3}
@@ -57,17 +57,16 @@ def parse_qualified_table(name: str) -> Optional[tuple[str, str, str]]:
 
     Backend port of the frontend-only ``parseTableName`` in ContextsView.vue. A
     two-part name implies the ``spark_catalog`` default, matching the frontend rule.
+    Parts come back without backticks (```my-cat`.db.t`` → ``my-cat``).
     Returns ``None`` for anything else (0, 1, or 4+ parts) — and for any part
-    that is not a bare SQL identifier, since these names are later interpolated
+    that ``split_qualified`` refuses, since these names are later interpolated
     into subgraph/expand SQL for every reader of the context (the stored
     variant of finding A4).
     """
     if not name:
         return None
-    parts = name.split(".")
     try:
-        for part in parts:
-            validate_identifier_part(part)
+        parts = split_qualified(name)
     except ValueError:
         return None
     if len(parts) == 2:
@@ -617,10 +616,16 @@ async def validate_context_tables(
         if table_name is None:
             continue
         if parse_qualified_table(table_name) is None:
+            try:
+                split_qualified(table_name)
+                reason = ""
+            except ValueError as e:
+                reason = f" {e}."
             raise ContextValidationError(
                 "CONTEXT_TABLE_INVALID",
                 f"'{table_name}' is not a valid table name (expected "
-                "'database.table' or 'catalog.database.table').",
+                "'database.table' or 'catalog.database.table'; write a part "
+                f"that is not letters, digits and underscores in backticks).{reason}",
                 {"table": table_name},
             )
 

@@ -26,14 +26,18 @@ export function parseTag(tag: string): { name: string; value: string } | null {
   return null;
 }
 
+/** A name part without the backticks Databricks names may carry (`` `my-cat` `` → `my-cat`). */
+export const unquotePart = (part: string) => (part.length >= 2 && part.startsWith('`') && part.endsWith('`') ? part.slice(1, -1) : part);
+
 /**
  * Parse a fully-qualified table name: `database.table` or `catalog.database.table`.
- * A 2-part name implies the `spark_catalog` default.
+ * A 2-part name implies the `spark_catalog` default. Parts come back without backticks
+ * (`` `my-cat`.db.t `` → `my-cat`); a quoted part cannot hold a period, so splitting on it is exact.
  */
 export function parseTableName(
   fullName: string,
 ): { catalog: string; database: string; table: string } | null {
-  const parts = fullName.split('.');
+  const parts = fullName.split('.').map(unquotePart);
   if (parts.length === 2) {
     return { catalog: 'spark_catalog', database: parts[0], table: parts[1] };
   } else if (parts.length === 3) {

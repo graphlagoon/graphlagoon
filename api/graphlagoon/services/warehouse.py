@@ -8,6 +8,7 @@ import httpx
 
 from graphlagoon.config import Settings
 from graphlagoon.services.sql_identifiers import (
+    dotted_name,
     qualified_from_dotted,
     qualified_name,
     quote_identifier,
@@ -456,7 +457,7 @@ class WarehouseClient:
                 s = row[0]
                 table_name = row[1]
                 if s and table_name:
-                    full_name = f"{catalog}.{s}.{table_name}"
+                    full_name = dotted_name(catalog, s, table_name)
                     tables.append(full_name)
                     if "edge" in table_name:
                         edge_tables.append(full_name)
@@ -487,7 +488,7 @@ class WarehouseClient:
                 s = row[0] if len(row) > 0 else schema
                 table_name = row[1] if len(row) > 1 else row[0]
                 if table_name:
-                    full_name = f"{catalog}.{s}.{table_name}"
+                    full_name = dotted_name(catalog, s, table_name)
                     tables.append(full_name)
                     if "edge" in table_name:
                         edge_tables.append(full_name)
