@@ -80,14 +80,13 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "group_cache_ttl_seconds": "public",
     "agents_enabled": "public",
     "agent_token_max_days": "public",
-    "agents_allow_unmasked_data": "public",
     "agent_rate_limit_per_minute": "public",
+    "agent_image_max_bytes": "public",
+    "api_docs_enabled": "public",
     "investigations_volume_path": "public",
-    "artifact_max_bytes": "public",
     "investigation_file_max_bytes": "public",
     "investigation_max_working_edges": "public",
     "investigation_retention_years": "public",
-    "investigation_deadline_days": "public",
     "enrichment_max_keys": "public",
     "enrichment_max_rows": "public",
 }
@@ -98,6 +97,7 @@ CLEARABLE_TABLES: tuple[str, ...] = (
     "case_item_versions",
     "case_items",
     "case_annotations",
+    "case_entities",
     "investigation_events",
     "investigation_shares",
     "investigations",
@@ -108,7 +108,7 @@ CLEARABLE_TABLES: tuple[str, ...] = (
     "graph_contexts",
     "agent_tokens",
     "org_library",
-    "org_vocabularies",
+    "case_types",
     "permission_rules",
     "group_members",
     "permission_modes",
@@ -149,8 +149,8 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/admin/library"),
         ("PUT", "/api/admin/library/{slug}"),
         ("DELETE", "/api/admin/library/{slug}"),
-        ("PUT", "/api/admin/vocabularies/{kind}"),
-        ("DELETE", "/api/admin/vocabularies/{kind}"),
+        ("PUT", "/api/admin/case-types/{slug}"),
+        ("DELETE", "/api/admin/case-types/{slug}"),
         ("POST", "/api/investigations"),
         ("PATCH", "/api/investigations/{investigation_id}"),
         ("DELETE", "/api/investigations/{investigation_id}"),
@@ -158,8 +158,10 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("DELETE", "/api/investigations/{investigation_id}/share/{email}"),
         ("POST", "/api/investigations/{investigation_id}/items"),
         ("POST", "/api/investigations/{investigation_id}/items/join"),
+        ("POST", "/api/investigations/{investigation_id}/reports"),
         ("DELETE", "/api/investigations/{investigation_id}/items/{item_id}"),
-        ("POST", "/api/investigations/{investigation_id}/decision"),
+        ("POST", "/api/investigations/{investigation_id}/decisions"),
+        ("POST", "/api/investigations/{investigation_id}/decisions/{decision_id}/review"),
         ("POST", "/api/investigations/{investigation_id}/reopen"),
         ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"),
     }
@@ -227,9 +229,6 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/investigations/{investigation_id}/analysis/paths"): (
         "read-only analysis; journaled as path.run when the case is writable"
     ),
-    ("POST", "/api/investigations/{investigation_id}/analysis/typologies"): (
-        "read-only analysis; a person confirms a badge as a typology annotation"
-    ),
     ("POST", "/api/investigations/{investigation_id}/items/compare"): (
         "read-only diff of two tables (or two runs); nothing is written"
     ),
@@ -237,7 +236,7 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
         "sets mapping on items (journaled item.updated); a materialized run is a new item the journal records"
     ),
     **{
-        route: "recorded in the case's append-only journal (frozen_hash covers it)"
+        route: "recorded in the case's append-only journal (each decision's hash covers it)"
         for route in (
             ("POST", "/api/investigations/{investigation_id}/events"),
             ("PATCH", "/api/investigations/{investigation_id}/items/{item_id}"),

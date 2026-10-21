@@ -68,75 +68,63 @@ def client(monkeypatch, tmp_path):
 
 
 def _case(client, **body):
-    r = client.post("/api/investigations", json={"title": "Caso", **body}, headers=h(OWNER))
+    r = client.post("/api/investigations", json={"title": "Case", **body}, headers=h(OWNER))
     assert r.status_code == 201, r.text
     return r.json()
 
 
 def test_english_enums_transitions_and_reopen(client):
     inv = _case(client)
-    assert (inv["status"], inv["kind_preset"], inv["deadline"]) == ("open", "livre", None)
+    assert (inv["status"], inv["case_type"], inv["deadline"], inv["decisions"]) == ("open", "general", None, [])
     url = f"/api/investigations/{inv['id']}"
-    r = client.patch(url, json={"status": "decided"}, headers=h(OWNER))
-    assert r.status_code == 422  # only the decision route reaches "decided"
+    for status in ("closed", "decided", "archived"):
+        assert client.patch(url, json={"status": status}, headers=h(OWNER)).status_code == 422  # only a decision closes
     assert client.patch(url, json={"status": "analysis"}, headers=h(OWNER)).json()["status"] == "analysis"
-    # 05 §7: without a decision, archiving needs an explicit reason (journaled).
-    r = client.patch(url, json={"status": "archived"}, headers=h(OWNER))
-    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "ARCHIVE_REASON_REQUIRED"
-    r = client.patch(url, json={"status": "archived", "archive_reason": "duplicado do #0411"}, headers=h(OWNER))
-    assert r.status_code == 200 and r.json()["status"] == "archived"
-    events = client.get(f"{url}/events", headers=h(OWNER)).json()
-    assert [e["kind"] for e in events][-2:] == ["case.archived_without_decision", "case.updated"]
-    assert events[-2]["payload"] == {"reason": "duplicado do #0411"}
-    r = client.patch(url, json={"status": "open"}, headers=h(OWNER))
-    assert r.status_code == 409 and r.json()["detail"]["error"]["code"] == "INVALID_STATUS_TRANSITION"
-    assert client.patch(url, json={"status": "analysis"}, headers=h(OWNER)).status_code == 200
-    assert client.post(f"{url}/reopen", headers=h(OWNER)).status_code == 409  # not decided
-    decided = client.post(
-        f"{url}/decision", json={"outcome": "arquivar", "rationale": "nada"}, headers=h(OWNER)
+    assert client.patch(url, json={"status": "open"}, headers=h(OWNER)).json()["status"] == "open"
+    r = client.patch(url, json={"stage": "waiting"}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "UNKNOWN_STAGE"  # general has no stages
+    assert client.post(f"{url}/reopen", headers=h(OWNER)).status_code == 409  # not closed
+    # general has no catalog: the decision is named and says whether it closes the case.
+    r = client.post(f"{url}/decisions", json={"rationale": "nothing"}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "OUTCOME_REQUIRED"
+    closed = client.post(
+        f"{url}/decisions", json={"outcome_label": "Duplicate of #0411", "closes_case": True, "rationale": "same alert"},
+        headers=h(OWNER),
     ).json()
-    assert decided["status"] == "decided" and decided["frozen_hash"]
+    first = closed["decisions"][0]
+    assert closed["status"] == "closed" and closed["frozen_hash"] == first["hash"] and first["closed_at"]
+    assert (first["outcome"], first["outcome_label"], first["review"]) == (None, "Duplicate of #0411", None)
+    r = client.patch(url, json={"status": "analysis"}, headers=h(OWNER))
+    assert r.status_code == 409 and r.json()["detail"]["error"]["code"] == "CASE_CLOSED"
     reopened = client.post(f"{url}/reopen", headers=h(OWNER)).json()
-    assert (reopened["status"], reopened["decision"], reopened["frozen_hash"]) == ("analysis", None, None)
-    kinds = [e["kind"] for e in client.get(f"{url}/events", headers=h(OWNER)).json()]
-    assert kinds[-3:] == ["case.updated", "decision.recorded", "case.reopened"]
-    assert "hash" not in client.get(f"{url}/events", headers=h(OWNER)).json()[0]
+    assert reopened["status"] == "analysis" and reopened["decisions"] == closed["decisions"]  # decisions stay
+    assert reopened["frozen_hash"] is None
+    events = client.get(f"{url}/events", headers=h(OWNER)).json()
+    assert [e["kind"] for e in events][-3:] == ["decision.recorded", "case.closed", "case.reopened"]
+    assert events[-1]["payload"] == {"decision_id": first["id"], "hash": first["hash"], "to": "analysis"}
+    assert "hash" not in events[0]
 
 
-def test_deadline_only_for_presets_with_phases(client, monkeypatch):
+def test_deadline_follows_the_sla_hours(client, monkeypatch):
     alert = datetime(2026, 1, 1)
     monkeypatch.setattr(service, "_clock", lambda: alert + timedelta(days=10))
-    pix = _case(client, kind_preset="pix_med", alert_at=alert.isoformat())
-    assert pix["deadline"] == {"phase": "open", "due_at": "2026-02-15T00:00:00", "days_left": 35, "total_days": 45}
-    url = f"/api/investigations/{pix['id']}"
+    sla = {"open": 45 * 24, "analysis": 45 * 24}
+    inv = _case(client, sla_hours=sla, alert_at=alert.isoformat())
+    assert inv["deadline"] == {"phase": "open", "due_at": "2026-02-15T00:00:00", "hours_left": 840, "days_left": 35,
+                               "total_hours": 1080, "urgent": False, "overdue": False}
+    url = f"/api/investigations/{inv['id']}"
     analysis = client.patch(url, json={"status": "analysis"}, headers=h(OWNER)).json()
-    assert (analysis["deadline"]["days_left"], analysis["deadline"]["total_days"]) == (80, 90)  # 45 + 45
-    custom = client.patch(url, json={"deadline_days": {"open": 10, "analysis": 5}}, headers=h(OWNER)).json()
-    assert custom["deadline"]["days_left"] == 5
-    credito = _case(client, kind_preset="credito")
-    assert credito["deadline"] is None
-    custom = _case(client, kind_preset="credito", alert_at=alert.isoformat(), deadline_days={"selection": 30})
-    assert custom["deadline"]["days_left"] == 20
+    assert (analysis["deadline"]["days_left"], analysis["deadline"]["total_hours"]) == (80, 2160)  # 45 + 45 days
+    custom = client.patch(url, json={"sla_hours": {"open": 240, "analysis": 120}}, headers=h(OWNER)).json()
+    assert (custom["deadline"]["days_left"], custom["deadline"]["urgent"]) == (5, False)
+    tight = client.patch(url, json={"sla_hours": {"open": 240, "analysis": 24}}, headers=h(OWNER)).json()
+    assert (tight["deadline"]["hours_left"], tight["deadline"]["urgent"]) == (24, True)  # under 20% of 264 h
+    assert _case(client)["deadline"] is None  # general: no SLA
     # alert_at, else occurred_at, else created_at
-    occurred = _case(client, kind_preset="pix_med", occurred_at=(alert - timedelta(days=5)).isoformat())
+    occurred = _case(client, sla_hours=sla, occurred_at=(alert - timedelta(days=5)).isoformat())
     assert occurred["deadline"]["days_left"] == 30
-
-
-def test_deadline_days_come_from_settings(client, monkeypatch):
-    monkeypatch.setenv(
-        "GRAPH_LAGOON_INVESTIGATION_DEADLINE_DAYS",
-        '{"pix_med": {"selection": 10, "analysis": 5}, "credito": {"selection": 30}}',
-    )
-    get_settings.cache_clear()
-    alert = datetime(2026, 1, 1)
-    monkeypatch.setattr(service, "_clock", lambda: alert + timedelta(days=2))
-    pix = _case(client, kind_preset="pix_med", alert_at=alert.isoformat())
-    assert (pix["deadline"]["days_left"], pix["deadline"]["total_days"]) == (8, 10)
-    credito = _case(client, kind_preset="credito", alert_at=alert.isoformat())
-    assert credito["deadline"]["days_left"] == 28
-    assert _case(client, kind_preset="lavagem", alert_at=alert.isoformat())["deadline"] is None
-    queue = {i["id"]: i for i in client.get("/api/investigations", headers=h(OWNER)).json()}
-    assert queue[credito["id"]]["deadline"]["total_days"] == 30
+    queue = {i["id"]: i for i in client.get("/api/investigations", headers=h(OWNER)).json()["items"]}
+    assert queue[occurred["id"]]["deadline"]["total_hours"] == 1080
 
 
 def test_share_roles_assignee_and_access(client):
@@ -154,7 +142,7 @@ def test_share_roles_assignee_and_access(client):
     assert client.get(url, headers=h("nobody@example.com")).status_code == 404
     assert client.delete(f"{url}/share/{READER}", headers=h(OWNER)).status_code == 200
     assert client.get(url, headers=h(READER)).status_code == 404
-    listed = client.get("/api/investigations", headers=h(EDITOR)).json()
+    listed = client.get("/api/investigations", headers=h(EDITOR)).json()["items"]
     assert [i["id"] for i in listed] == [inv["id"]] and listed[0]["item_count"] == 0
 
 
@@ -172,20 +160,23 @@ def test_agent_status_change_becomes_a_suggestion(client):
     r = client.post(f"{url}/annotations/{suggestion['id']}/confirm", headers=h(OWNER))
     assert r.status_code == 200 and r.json()["confirmed_by"] == OWNER
     assert client.get(url, headers=h(OWNER)).json()["status"] == "analysis"
-    assert client.get("/api/investigations", headers=h(OWNER)).json()[0]["suggested_count"] == 0
+    assert client.get("/api/investigations", headers=h(OWNER)).json()["items"][0]["suggested_count"] == 0
     # A kind outside agent_suggest_kinds applies directly.
     client.patch(url, json={"settings": {"agent_suggest_kinds": []}}, headers=h(OWNER))
     assert client.patch(url, json={"status": "open"}, headers=agent).json()["status"] == "open"
 
 
-DECISION = {"outcome": "comunicar", "actions": ["dict", "spa"], "rationale": "Conta de passagem."}
+DECISION = {"outcome_label": "Report to the FIU", "closes_case": True, "rationale": "Pass-through account."}
 
 
-def _hash_now(url):
+def _store_case(url):
+    return InMemoryStore.get_instance().get_investigation(UUID(url.rsplit("/", 1)[1]))
+
+
+def _hash_now(url, decision_id):
     import asyncio
 
-    inv = InMemoryStore.get_instance().get_investigation(UUID(url.rsplit("/", 1)[1]))
-    return asyncio.run(service.compute_frozen_hash(None, inv))
+    return asyncio.run(service.decision_hash(None, _store_case(url), decision_id))
 
 
 def test_decision_hash_is_reproducible_and_the_export_verifies_it(client):
@@ -194,46 +185,143 @@ def test_decision_hash_is_reproducible_and_the_export_verifies_it(client):
     client.post(f"{url}/share", json={"email": READER}, headers=h(OWNER))
     item = client.post(
         f"{url}/items",
-        json={"kind": "document", "subkind": "markdown", "title": "KYC", "content": "# KYC\nrenda 1800"},
+        json={"kind": "document", "subkind": "markdown", "title": "KYC", "content": "# KYC\nincome 1800"},
         headers=h(OWNER),
     ).json()
     pin = client.post(f"{url}/items/{item['id']}/pin", json={"label": "E1"}, headers=h(OWNER))
     assert pin.status_code == 200 and pin.json()["pinned_by"] == OWNER
-    assert client.post(f"{url}/decision", json=DECISION, headers=h(READER)).status_code == 403
-    assert client.post(f"{url}/decision", json={**DECISION, "rationale": " "}, headers=h(OWNER)).status_code == 422
+    assert client.post(f"{url}/decisions", json=DECISION, headers=h(READER)).status_code == 403
+    assert client.post(f"{url}/decisions", json={**DECISION, "rationale": " "}, headers=h(OWNER)).status_code == 422
+    r = client.post(f"{url}/decisions", json={**DECISION, "evidence": [{"item_id": item["id"], "version": 9}]}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "EVIDENCE_NOT_PINNED"
 
-    r = client.post(f"{url}/decision", json=DECISION, headers=h(OWNER))
+    r = client.post(f"{url}/decisions", json=DECISION, headers=h(OWNER))
     assert r.status_code == 200, r.text
     decided = r.json()
-    assert decided["status"] == "decided" and decided["decision"]["actions"] == ["dict", "spa"]
-    assert _hash_now(url) == decided["frozen_hash"]
+    decision = decided["decisions"][0]
+    assert decided["status"] == "closed" and decision["evidence"] == [
+        {"item_id": item["id"], "version": 1, "sha256": pin.json()["sha256"]}
+    ]
+    assert _hash_now(url, decision["id"]) == decision["hash"] == decided["frozen_hash"]
     # A later share stays outside the hash; tampering with a pinned version is detected.
     assert client.post(f"{url}/share", json={"email": "x@example.com"}, headers=h(OWNER)).status_code == 200
-    assert _hash_now(url) == decided["frozen_hash"]
+    assert _hash_now(url, decision["id"]) == decision["hash"]
     export = client.get(f"{url}/export?format=json", headers=h(OWNER))
     assert export.status_code == 200 and export.headers["X-Content-SHA256"]
     package = export.json()
-    assert package["frozen_hash_valid"] is True and package["evidence"][0]["pin_label"] == "E1"
-    version = next(iter(InMemoryStore.get_instance().case_item_versions.values()))
-    version.sha256 = "0" * 64
-    assert client.get(f"{url}/export?format=json", headers=h(OWNER)).json()["frozen_hash_valid"] is False
+    assert package["integrity"] == {"decisions": [{"id": decision["id"], "hash": decision["hash"], "verified": True}], "verified": True}
+    assert package["evidence"][0]["pin_label"] == "E1"
+    events = InMemoryStore.get_instance().investigation_events
+    pin_event = next(e for e in events.values() if e.kind == "item.pinned") if isinstance(events, dict) else next(e for e in events if e.kind == "item.pinned")
+    pin_event.payload = {**pin_event.payload, "sha256": "0" * 64}
+    assert client.get(f"{url}/export?format=json", headers=h(OWNER)).json()["integrity"]["verified"] is False
     assert client.get(f"{url}/export?format=csv", headers=h(OWNER)).status_code == 200
-    assert client.get(f"{url}/export?format=siscoaf", headers=h(OWNER)).json()["ready_to_communicate"]
 
-    # Read-only afterwards, except archiving; retained from deletion.
+    # Read-only afterwards; retained from deletion.
     for method, path, body in (
         ("patch", url, {"title": "y"}),
+        ("patch", url, {"status": "analysis"}),
         ("post", f"{url}/items", {"kind": "note", "subkind": "free", "content": "x"}),
         ("post", f"{url}/annotations", {"kind": "tag", "targets": ["a"], "value": {"tag": "t"}}),
         ("post", f"{url}/items/{item['id']}/pin", {}),
-        ("post", f"{url}/decision", DECISION),
+        ("post", f"{url}/decisions", DECISION),
         ("delete", url, None),
     ):
         r = getattr(client, method)(path, headers=h(OWNER), **({"json": body} if body is not None else {}))
         assert r.status_code == 409, (method, path, r.text)
-    assert client.patch(url, json={"status": "archived"}, headers=h(OWNER)).status_code == 200
     actions = [e.action for e in InMemoryStore.get_instance().usage_logs]
     assert {"investigation.decide", "investigation.export"} <= set(actions)
+
+
+MERCHANT = {
+    "label": "Merchant review",
+    "outcomes": [
+        {"id": "offboard", "label": "Offboard", "closes_case": True, "requires_review": True},
+        {"id": "monitor", "label": "Keep with monitoring", "closes_case": True, "requires_review": False},
+        {"id": "block_terminal", "label": "Block terminal", "closes_case": False, "requires_review": False},
+    ],
+    "actions": [{"id": "hold_settlement", "label": "Hold settlement", "due_hours": 2}],
+    "stages": ["Waiting for documents"],
+}
+
+
+def test_many_decisions_targets_four_eyes_and_reopen(client):
+    """06 §1: a non-closing decision first, a closing one with four eyes, reopen
+    and decide again; every hash stays valid."""
+    assert client.put("/api/admin/case-types/merchant_review", json=MERCHANT, headers=h(SUPERUSER)).status_code == 200
+    inv = _case(client, case_type="merchant_review")
+    url = f"/api/investigations/{inv['id']}"
+    for email in (EDITOR, READER):
+        client.post(f"{url}/share", json={"email": email, "role": "editor"}, headers=h(OWNER))
+    assert client.patch(url, json={"stage": "Waiting for documents"}, headers=h(OWNER)).json()["stage"] == "Waiting for documents"
+    r = client.post(f"{url}/decisions", json={"outcome": "nope", "rationale": "x"}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "UNKNOWN_OUTCOME"
+    r = client.post(f"{url}/decisions", json={"outcome": "block_terminal", "rationale": "x", "tasks": [{"action": "fly"}]}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "UNKNOWN_ACTION"
+
+    first = client.post(
+        f"{url}/decisions",
+        json={"outcome": "block_terminal", "targets": ["entity:t-1", "entity:t-1", "entity:t-2"], "rationale": "shared terminal",
+              "outcome_label": "ignored", "closes_case": True},
+        headers=h(OWNER),
+    ).json()
+    d1 = first["decisions"][0]
+    assert first["status"] == "open" and (d1["outcome_label"], d1["closes_case"]) == ("Block terminal", False)
+    assert d1["targets"] == ["entity:t-1", "entity:t-2"]
+
+    for reviewer, code in ((OWNER, "FOUR_EYES"), ("stranger@example.com", "REVIEWER_NO_ACCESS")):
+        r = client.post(f"{url}/decisions", json={"outcome": "offboard", "rationale": "x", "reviewer_email": reviewer}, headers=h(OWNER))
+        assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == code
+    # The author may withdraw a pending decision, never approve it.
+    withdrawn = client.post(f"{url}/decisions", json={"outcome": "offboard", "rationale": "x", "reviewer_email": EDITOR}, headers=h(OWNER)).json()
+    wid = withdrawn["decisions"][-1]["id"]
+    r = client.post(f"{url}/decisions/{wid}/review", json={"approve": False, "note": "wrong outcome"}, headers=h(OWNER))
+    assert r.status_code == 200 and r.json()["decisions"][-1]["review"] == "rejected"
+    pending = client.post(
+        f"{url}/decisions", json={"outcome": "offboard", "rationale": "bust-out", "reviewer_email": EDITOR}, headers=h(OWNER)
+    ).json()
+    d2 = pending["decisions"][-1]  # after the withdrawn one
+    assert pending["status"] == "open" and d2["review"] == "pending" and d2["closed_at"] is None
+    r = client.post(f"{url}/decisions", json={"outcome": "monitor", "rationale": "x"}, headers=h(OWNER))
+    assert r.status_code == 409 and r.json()["detail"]["error"]["code"] == "REVIEW_PENDING"
+    review = f"{url}/decisions/{d2['id']}/review"
+    r = client.post(review, json={"approve": True}, headers=h(OWNER))
+    assert r.status_code == 403 and r.json()["detail"]["error"]["code"] == "FOUR_EYES"
+    r = client.post(review, json={"approve": True}, headers=h(READER))
+    assert r.status_code == 403 and r.json()["detail"]["error"]["code"] == "NOT_THE_REVIEWER"
+    approved = client.post(review, json={"approve": True, "note": "ok"}, headers=h(EDITOR)).json()
+    assert approved["status"] == "closed" and approved["decisions"][-1]["review"] == "approved"
+    assert approved["frozen_hash"] == d2["hash"]
+    assert client.post(review, json={"approve": True}, headers=h(EDITOR)).json()["detail"]["error"]["code"] == "NOT_PENDING"
+
+    client.post(f"{url}/reopen", headers=h(OWNER))
+    again = client.post(f"{url}/decisions", json={"outcome": "monitor", "rationale": "documents arrived"}, headers=h(OWNER)).json()
+    assert again["status"] == "closed" and len(again["decisions"]) == 4
+    checks = client.get(f"{url}/export?format=json", headers=h(OWNER)).json()["integrity"]
+    assert checks["verified"] is True and [c["verified"] for c in checks["decisions"]] == [True] * 4
+    assert len({c["hash"] for c in checks["decisions"]}) == 4
+    kinds = [e["kind"] for e in client.get(f"{url}/events", headers=h(OWNER)).json()]
+    assert {"decision.approved", "case.closed", "case.reopened"} <= set(kinds)
+
+    # A rejected review leaves the case open.
+    other = _case(client, case_type="merchant_review")
+    ourl = f"/api/investigations/{other['id']}"
+    d = client.post(f"{ourl}/decisions", json={"outcome": "offboard", "rationale": "x"}, headers=h(OWNER)).json()["decisions"][0]
+    client.post(f"{ourl}/share", json={"email": EDITOR, "role": "editor"}, headers=h(OWNER))
+    rejected = client.post(f"{ourl}/decisions/{d['id']}/review", json={"approve": False}, headers=h(EDITOR)).json()
+    assert rejected["status"] == "open" and rejected["decisions"][0]["review"] == "rejected"
+
+
+def test_agents_cannot_decide_review_or_reopen(client):
+    inv = _case(client)
+    url = f"/api/investigations/{inv['id']}"
+    created = client.post("/api/agent-tokens", json={"name": "claude"}, headers=h(OWNER)).json()
+    agent = {"Authorization": f"Bearer {created['token']}"}
+    assert client.post(f"{url}/decisions", json=DECISION, headers=agent).status_code == 403
+    d = client.post(f"{url}/decisions", json={**DECISION, "closes_case": False}, headers=h(OWNER)).json()["decisions"][0]
+    assert client.post(f"{url}/decisions/{d['id']}/review", json={"approve": True}, headers=agent).status_code == 403
+    client.post(f"{url}/decisions", json=DECISION, headers=h(OWNER))
+    assert client.post(f"{url}/reopen", headers=agent).status_code == 403
 
 
 def _blobs(tmp_path, inv_id):
@@ -261,14 +349,16 @@ def test_superuser_deletes_a_retained_case_with_a_reason(client, tmp_path, monke
     inv = _case(client)
     url = f"/api/investigations/{inv['id']}"
     client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": "x"}, headers=h(OWNER))
-    client.post(f"{url}/decision", json=DECISION, headers=h(OWNER))
+    assert client.post(f"{url}/decisions", json=DECISION, headers=h(OWNER)).json()["status"] == "closed"
     assert client.delete(url, headers=h(SUPERUSER)).status_code == 409
     assert client.delete(f"{url}?reason=audit", headers=h(OWNER)).status_code == 409  # owner is not enough
     assert _blobs(tmp_path, inv["id"]), "the retained case keeps its blobs"
     # Past the retention period anyone who manages the case may delete it.
     years = get_settings().investigation_retention_years
     monkeypatch.setattr(service, "_clock", lambda: datetime.now() + timedelta(days=366 * years))
-    assert service.under_retention(InMemoryStore.get_instance().get_investigation(UUID(inv["id"]))) is False
+    import asyncio
+
+    assert asyncio.run(service.under_retention(InMemoryStore.get_instance().get_investigation(UUID(inv["id"])))) is False
     monkeypatch.setattr(service, "_clock", datetime.now)
     assert client.delete(f"{url}?reason=audit", headers=h(SUPERUSER)).status_code == 200
     assert _blobs(tmp_path, inv["id"]) == []
@@ -302,6 +392,7 @@ CHILD_FIELDS = {
         "content_type": "text/plain", "created_by": OWNER,
     },
     "case_annotations": {"kind": "role", "author_email": OWNER},
+    "case_entities": {"uid": "Account:1", "stamp": "s"},
     "investigation_events": {"actor_email": OWNER, "kind": "case.created"},
 }
 
@@ -401,22 +492,19 @@ def test_016_runs_on_sqlite_and_replaces_the_old_chain():
         assert set(migration.TABLES) <= set(sa.inspect(conn).get_table_names())
 
 
-def test_preset_defaults_and_settings_patch(client):
-    """A preset only fills defaults (05 §4b); the settings PATCH keeps identity keys,
+def test_type_defaults_and_settings_patch(client):
+    """The case type only fills defaults (06 §1); the settings PATCH keeps identity keys,
     edge semantics by type, vocabularies and label templates as given."""
-    inv = _case(client, kind_preset="fraude_sintetica")
-    vocab = inv["settings"]["vocabularies"]
-    assert vocab["roles"] == ["identidade real", "identidade sintética", "mula", "ponto de cash-out"]
-    assert vocab["link_attributes"] == ["telefone", "email", "device_id", "endereco"]
-    assert _case(client)["settings"]["vocabularies"] == {"roles": [], "link_attributes": []}
+    inv = _case(client)
+    assert inv["settings"]["vocabularies"] == {"roles": [], "tags": [], "link_attributes": []}
     assert _case(client, settings={"vocabularies": {"roles": ["x"]}})["settings"]["vocabularies"] == {"roles": ["x"]}
 
     url = f"/api/investigations/{inv['id']}"
     settings = {
-        "identity_keys": [{"node_type": "Login", "entity": "Sessao", "source": {"kind": "prop", "name": "ua"}, "normalize": "regex", "pattern": "sid=(\\w+)"}],
-        "edge_semantics": {"USA": {"weight_prop": "vezes", "timestamp_prop": "quando"}, "*": {"amount_prop": "valor", "time_prop": "data"}},
-        "vocabularies": {"roles": ["mula"], "tags": ["kyc"], "link_attributes": ["telefone"]},
-        "label_templates": {"Pessoa": "{nome} · {cpf_mascarado}"},
+        "identity_keys": [{"node_type": "Login", "entity": "Session", "source": {"kind": "prop", "name": "ua"}, "normalize": "regex", "pattern": "sid=(\\w+)"}],
+        "edge_semantics": {"USES": {"weight_prop": "times", "timestamp_prop": "at"}, "*": {"amount_prop": "amount", "time_prop": "date"}},
+        "vocabularies": {"roles": ["mule"], "tags": ["kyc"], "link_attributes": ["phone"]},
+        "label_templates": {"Person": "{name} · {document}"},
         "agent_suggest_kinds": ["role"],
     }
     r = client.patch(url, json={"settings": settings}, headers=h(OWNER))
@@ -424,7 +512,8 @@ def test_preset_defaults_and_settings_patch(client):
     assert client.get(url, headers=h(OWNER)).json()["settings"] == settings
     events = client.get(f"{url}/events", headers=h(OWNER)).json()
     assert events[-1]["kind"] == "case.updated" and "settings" in events[-1]["payload"]
-    # The guided decision names a reviewer and allows a measure/opinion outcome (05 §7).
-    r = client.post(f"{url}/decision", json={"outcome": "medida", "rationale": "bloqueio", "reviewer_email": "rev@example.com"}, headers=h(OWNER))
+    # A decision may name its reviewer (an editor of the case) and need not close it.
+    client.post(f"{url}/share", json={"email": "rev@example.com", "role": "editor"}, headers=h(OWNER))
+    r = client.post(f"{url}/decisions", json={"outcome_label": "Block", "rationale": "x", "reviewer_email": " rev@example.com "}, headers=h(OWNER))
     assert r.status_code == 200, r.text
-    assert r.json()["decision"]["reviewer_email"] == "rev@example.com"
+    assert (r.json()["status"], r.json()["decisions"][0]["reviewer_email"]) == ("open", "rev@example.com")

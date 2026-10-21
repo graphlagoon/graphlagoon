@@ -12,7 +12,6 @@ from graphlagoon.services.file_mapping import (
     suggest_presets,
     validate,
 )
-from graphlagoon.services.file_mapping_presets import PRESETS, QSA_RECEITA, SIMBA_V31
 
 ROOT = (
     Path(__file__).resolve().parents[2]
@@ -35,16 +34,29 @@ def test_golden_fixture(name):
     assert interpret(spec, files) == expected
 
 
-def test_presets_equal_fixture_specs_and_are_suggested():
-    assert SIMBA_V31 == _load("simba-mini")[1]
-    assert QSA_RECEITA == _load("qsa-mini")[1]
-    assert suggest_presets(_load("simba-mini")[0], PRESETS) == ["simba_v31"]
-    assert suggest_presets(_load("qsa-mini")[0], PRESETS) == ["qsa_receita"]
-    assert suggest_presets(_load("generico")[0], PRESETS) == []
+def test_a_spec_is_suggested_when_its_inputs_match_the_files():
+    specs = {name: _load(name)[1] for name in ("bank-statements", "company-registry")}
+    assert suggest_presets(_load("bank-statements")[0], specs) == ["bank-statements"]
+    assert suggest_presets(_load("generic")[0], specs) == []
+
+
+def test_fixed_width_inputs_are_checked():
+    spec = _load("fixed-width")[1]
+    inp = spec["inputs"]["s"]
+    for bad, message in (
+        ({**inp, "delimiter": ";"}, "not both"),
+        ({**inp, "widths": [8, 0]}, "positive integers"),
+        ({**inp, "widths": [8, 10]}, "one width per column"),
+    ):
+        with pytest.raises(MappingError, match=message):
+            validate({**spec, "inputs": {"s": bad}})
+    # A fixed-width layout without a header is suggested when its lines reach the last column.
+    assert suggest_presets(_load("fixed-width")[0], {"settlement": spec}) == ["settlement"]
+    assert suggest_presets({"SETTLEMENT_1.TXT": "M0001234\n"}, {"settlement": spec}) == []
 
 
 def test_unknown_operator_is_an_error():
-    spec = _load("generico")[1]
+    spec = _load("generic")[1]
     spec["nodes"][0]["id"] = {"col": "t.origem", "convert": "rot13"}
     with pytest.raises(MappingError, match="unknown convert"):
         validate(spec)

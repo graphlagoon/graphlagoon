@@ -92,6 +92,10 @@ def test_every_tool_declares_an_existing_human_twin_and_vice_versa():
         assert declared == human_equivalent(name), f"{name} must stamp meta.human_equivalent from the registry"
         for route in TOOL_ROUTES[name]:
             assert route in ALL_ROUTES, f"{name} names a route that does not exist: {route}"
+        # Agents never decide; propose_decision only drafts one for a person (06 P8, A4).
+        if name == "propose_decision":
+            assert TOOL_ROUTES[name] == [("POST", "/api/investigations/{investigation_id}/annotations")]
+            continue
         assert not re.search(r"delete|share|approve|accept|reject|decide|decision|token|export|reopen", name)
     assert all(tools for tools in AGENT_TOOL_ROUTES.values())
 

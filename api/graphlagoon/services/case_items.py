@@ -13,10 +13,12 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import re
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
+from graphlagoon.middleware.auth import get_current_actor
 from graphlagoon.services import investigation_storage as storage
 from graphlagoon.services import text_extract
 from graphlagoon.services.cases import (
@@ -28,7 +30,7 @@ from graphlagoon.services.cases import (
     canonical,
     commit,
     delete_row,
-    ensure_not_decided,
+    ensure_not_closed,
     get_row,
     list_rows,
     load_case,
@@ -95,7 +97,10 @@ def validate_mapping(mapping: Optional[dict]) -> Optional[dict]:
             file_mapping.validate(spec)
         except file_mapping.MappingError as exc:
             raise InvestigationError(422, "INVALID_MAPPING", str(exc))
-        extra = [str(i) for i in mapping.get("extra_item_ids") or []]
+        try:
+            extra = [str(UUID(str(i))) for i in mapping.get("extra_item_ids") or []]
+        except ValueError:
+            raise InvestigationError(422, "INVALID_MAPPING", "extra_item_ids are the ids of the case's items") from None
         return {"as": "graph", "spec": spec, "extra_item_ids": extra}
     if how == "enrichment":
         try:
@@ -103,6 +108,30 @@ def validate_mapping(mapping: Optional[dict]) -> Optional[dict]:
         except ValidationError as exc:
             raise InvestigationError(422, "INVALID_MAPPING", str(exc.errors()[0]["msg"]))
     raise InvestigationError(422, "INVALID_MAPPING", 'mapping.as must be "graph" or "enrichment"')
+
+
+def validate_graph_content(subkind: str, content: Optional[bytes]) -> None:
+    """``graph/view`` and ``graph/selection`` have a documented shape (06 P8, A5):
+    a wrong one is a 422 here, not a blank canvas later."""
+    if subkind not in ("view", "selection") or content is None:
+        return
+    import json
+
+    from pydantic import ValidationError
+
+    from graphlagoon.models.schemas import CaseViewContent, GraphSelectionContent
+
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        raise InvestigationError(422, "INVALID_CONTENT", f"graph/{subkind} content is JSON")
+    model = CaseViewContent if subkind == "view" else GraphSelectionContent
+    try:
+        model.model_validate(payload)
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        where = ".".join(str(p) for p in err["loc"]) or "content"
+        raise InvestigationError(422, "INVALID_CONTENT", f"graph/{subkind} {where}: {err['msg']}")
 
 
 def validate_query(query: Optional[dict]) -> Optional[dict]:
@@ -156,6 +185,7 @@ def serialize_item(item: Any, versions: list, accessible: bool = True) -> dict:
         "query": item.query,
         "mapping": item.mapping,
         "anchor": item.anchor,
+        "state": getattr(item, "state", None),
         "current_version": item.current_version,
         "position": item.position,
         "created_at": item.created_at,
@@ -188,6 +218,63 @@ async def _context_readable(context_id: Optional[UUID], user_email: str) -> bool
         return False
 
 
+_MEDIA_TYPE = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$")
+_CHARSET = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,39}$")
+
+
+def normalize_content_type(value: Optional[str]) -> Optional[str]:
+    """One media type as the client declared it (``text/csv; charset=latin-1``),
+    lowercased; anything that is not a single well-formed type (``text/plain,
+    text/html``, parameters other than a charset) is None, so the file name or
+    ``application/octet-stream`` decides. What is stored is what the content
+    route serves."""
+    if not value:
+        return None
+    main, _, params = value.strip().lower().partition(";")
+    main = main.strip()
+    if not _MEDIA_TYPE.match(main):
+        return None
+    params = params.strip()
+    if not params:
+        return main
+    key, _, charset = params.partition("=")
+    charset = charset.strip().strip('"')
+    if key.strip() == "charset" and main.startswith("text/") and _CHARSET.match(charset):
+        return f"{main}; charset={charset}"
+    return main
+
+
+def source_contexts(item: Any) -> set[UUID]:
+    """The graph contexts an item's content comes from: its own ``context_id``
+    plus, for a table derived from others (join, promote, a mapping over extra
+    files), the ``provenance.context_ids`` its sources had."""
+    out = {item.context_id} if item.context_id else set()
+    for c in (item.provenance or {}).get("context_ids") or []:
+        try:
+            out.add(UUID(str(c)))
+        except ValueError:
+            continue
+    return out
+
+
+async def sources_readable(item: Any, user_email: str, cache: Optional[dict] = None) -> bool:
+    """Whether the caller reads every context the item's content comes from. A
+    case reader without one of them sees the item listed (``accessible:
+    false``), never its content."""
+    cache = {} if cache is None else cache
+    for context_id in source_contexts(item):
+        if context_id not in cache:
+            cache[context_id] = await _context_readable(context_id, user_email)
+        if not cache[context_id]:
+            return False
+    return True
+
+
+async def ensure_sources_readable(item: Any, user_email: str) -> None:
+    if not await sources_readable(item, user_email):
+        raise InvestigationError(403, "SOURCE_RESTRICTED", "You don't have access to this item's context")
+
+
 async def item_row(session, investigation_id: UUID, item_id: UUID, *, deleted_ok: bool = False) -> Any:
     item = await get_row(session, ITEMS, item_id)
     if item is None or item.investigation_id != investigation_id or (item.deleted_at and not deleted_ok):
@@ -201,8 +288,7 @@ async def _serialize(session, item: Any, user_email: str, versions: Optional[lis
             [v for v in await list_rows(session, VERSIONS, item.investigation_id) if v.item_id == item.id],
             key=lambda v: v.version,
         )
-    accessible = await _context_readable(item.context_id, user_email) if item.kind == "graph" else True
-    return serialize_item(item, versions, accessible)
+    return serialize_item(item, versions, await sources_readable(item, user_email))
 
 
 async def list_items(
@@ -223,12 +309,7 @@ async def list_items(
                 continue
             if status and item.status != status:
                 continue
-            accessible = True
-            if item.kind == "graph" and item.context_id is not None:
-                if item.context_id not in readable:
-                    readable[item.context_id] = await _context_readable(item.context_id, user_email)
-                accessible = readable[item.context_id]
-            out.append(serialize_item(item, versions.get(item.id, []), accessible))
+            out.append(serialize_item(item, versions.get(item.id, []), await sources_readable(item, user_email, readable)))
         return out
 
 
@@ -263,7 +344,7 @@ async def _write_version(
     size = received.size_bytes if received else len(data)
     key = storage.version_key(inv.id, item.id, sha)
     name = _name_of(item)
-    content_type = content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+    content_type = normalize_content_type(content_type) or mimetypes.guess_type(name)[0] or "application/octet-stream"
     try:
         if received is not None:
             await storage.put(key, received)
@@ -328,22 +409,29 @@ async def create_item(
     content: Optional[bytes] = None,
     content_type: Optional[str] = None,
     received: Optional[storage.Received] = None,
+    status: Optional[str] = None,
+    allow_closed: bool = False,
 ) -> dict:
     """Creates the item and, when there is content, its version 1. ``data`` is
-    an ``ItemCreate`` dump; uploads come spooled in ``received``."""
+    an ``ItemCreate`` dump; uploads come spooled in ``received``. ``status``
+    overrides the author's default; ``allow_closed`` lets a closed case take it
+    (a rendered report)."""
     kind, subkind = data["kind"], data["subkind"]
     check_kind(kind, subkind)
     provenance = dict(data.get("provenance") or {})
     if received is not None:
         provenance["filename"] = check_filename(data.get("filename") or data.get("title"))
     mapping = validate_mapping(data.get("mapping"))
+    if kind == "graph":
+        validate_graph_content(subkind, content)
     query = validate_query(data.get("query")) if kind == "query" else None
     if kind == "query" and query is None:
         raise _invalid("A query item needs its query")
     try:
         async with _session() as session:
             inv = await load_case(session, investigation_id, user_email, "write")
-            ensure_not_decided(inv)
+            if not allow_closed:
+                ensure_not_closed(inv)
             context_id = data.get("context_id")
             exploration_id = data.get("exploration_id")
             title = (data.get("title") or "").strip()
@@ -379,13 +467,14 @@ async def create_item(
                 title=title[:255],
                 description=data.get("description"),
                 tags=data.get("tags") or [],
-                status=write_status(inv, kind),
+                status=status or write_status(inv, kind),
                 provenance=provenance,
                 exploration_id=exploration_id if subkind == "exploration_ref" else None,
                 context_id=context_id,
                 query=query,
                 mapping=mapping,
                 anchor=data.get("anchor"),
+                state=data.get("state"),
                 position=len(siblings),
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
@@ -445,13 +534,15 @@ async def add_version(
     try:
         async with _session() as session:
             inv = await load_case(session, investigation_id, user_email, "write")
-            ensure_not_decided(inv)
+            ensure_not_closed(inv)
             item = await item_row(session, investigation_id, item_id)
             if item.subkind == "exploration_ref":
                 raise _invalid("A live exploration reference has no versions; pin it instead")
             if content is None:
                 with open(received.path, "rb") as f:
                     content = f.read()
+            if item.kind == "graph":
+                validate_graph_content(item.subkind, content)
             await _write_version(
                 session, inv, item, user_email, content,
                 content_type or DEFAULT_CONTENT_TYPES.get(f"{item.kind}/{item.subkind}"), run=run, received=received,
@@ -464,7 +555,7 @@ async def add_version(
             received.discard()
 
 
-_EDITABLE = ("title", "description", "tags", "mapping", "query", "anchor", "position")
+_EDITABLE = ("title", "description", "tags", "mapping", "query", "anchor", "state", "position")
 
 
 async def update_item(investigation_id: UUID, user_email: str, item_id: UUID, changes: dict) -> dict:
@@ -479,12 +570,19 @@ async def update_item(investigation_id: UUID, user_email: str, item_id: UUID, ch
             raise _invalid("Give the item a title")
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        ensure_not_decided(inv)
+        ensure_not_closed(inv)
         item = await item_row(session, investigation_id, item_id)
+        if get_current_actor() and item.author_kind != "agent" and {"mapping", "query"} & set(changes):
+            # What a person's table maps or a person's query runs is the person's.
+            raise InvestigationError(
+                403, "ITEM_NOT_YOURS", "An agent changes the mapping or query only of items agents wrote; add its own instead"
+            )
         if item.kind != "query" and "query" in changes:
             changes.pop("query")
         if item.kind != "table" and "mapping" in changes:
             changes.pop("mapping")
+        if item.kind != "table" and (changes.get("state") or {}).get("chart"):
+            raise _invalid("Only a table is seen as a chart")
         await update_row(session, ITEMS, item, **changes)
         await append_event(
             session,
@@ -501,7 +599,7 @@ async def delete_item(investigation_id: UUID, user_email: str, item_id: UUID) ->
     """Soft delete: the versions (and the journal) stay; the item leaves the material list."""
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        ensure_not_decided(inv)
+        ensure_not_closed(inv)
         item = await item_row(session, investigation_id, item_id)
         await update_row(session, ITEMS, item, deleted_at=datetime.now())
         await append_event(
@@ -537,6 +635,7 @@ async def get_content(
     async with _session() as session:
         await load_case(session, investigation_id, user_email)
         item = await item_row(session, investigation_id, item_id, deleted_ok=True)
+        await ensure_sources_readable(item, user_email)
         row = await version_row(session, investigation_id, item, version)
         data = await storage.load(row.blob_key)
         if data is None:
@@ -553,6 +652,7 @@ async def get_text(
     async with _session() as session:
         await load_case(session, investigation_id, user_email)
         item = await item_row(session, investigation_id, item_id, deleted_ok=True)
+        await ensure_sources_readable(item, user_email)
         row = await version_row(session, investigation_id, item, version)
         if row.text_blob_key is None:
             return None, serialize_version(row)
@@ -567,8 +667,10 @@ async def pin_version(
     exploration reference is frozen first: its snapshot becomes version n."""
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        ensure_not_decided(inv)
+        ensure_not_closed(inv)
         item = await item_row(session, investigation_id, item_id)
+        # Pinning a live exploration freezes (reads) it: only someone who reads its source.
+        await ensure_sources_readable(item, user_email)
         if item.subkind == "exploration_ref" and version is None:
             from graphlagoon.services.case_graph import item_snapshot
 
@@ -595,7 +697,7 @@ async def set_status(investigation_id: UUID, user_email: str, item_id: UUID, sta
     """confirm | reject a suggested item (people only; the route forbids agents)."""
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
-        ensure_not_decided(inv)
+        ensure_not_closed(inv)
         item = await item_row(session, investigation_id, item_id)
         if item.status != "suggested":
             raise InvestigationError(409, "NOT_SUGGESTED", "Only a suggested item is confirmed or rejected")
@@ -659,6 +761,7 @@ async def search(investigation_id: UUID, user_email: str, q: str, limit: int = 5
     async with _session() as session:
         await load_case(session, investigation_id, user_email)
         versions = await _versions_by_item(session, investigation_id)
+        readable: dict = {}  # restricted sources: found by title, never by their text
         hits = []
         for item in await list_rows(session, ITEMS, investigation_id):
             if item.deleted_at:
@@ -669,13 +772,13 @@ async def search(investigation_id: UUID, user_email: str, q: str, limit: int = 5
             where = "title" if any(needle in f.lower() for f in fields) else None
             snippet = None
             latest = versions.get(item.id, [])[-1:] or [None]
-            if where is None and latest[0] is not None and latest[0].text_blob_key:
+            if where is None and latest[0] is not None and latest[0].text_blob_key and await sources_readable(item, user_email, readable):
                 data = await storage.load(latest[0].text_blob_key)
                 text = data.decode("utf-8") if data else ""
                 at = text.lower().find(needle)
                 if at >= 0:
                     start, end = max(0, at - 60), min(len(text), at + 100)
-                    while start > 0 and not text[start - 1].isspace():  # whole tokens: never half a CPF
+                    while start > 0 and not text[start - 1].isspace():  # whole tokens: never half an identifier
                         start -= 1
                     while end < len(text) and not text[end].isspace():
                         end += 1

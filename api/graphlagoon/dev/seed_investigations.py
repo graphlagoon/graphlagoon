@@ -1,27 +1,28 @@
-"""Dev seed for investigations (05-plano-v2): realistic cases on a *running* API.
+"""Dev seed for investigations (06-plataforma-generica): realistic cases on a *running* API.
 
     uv run python -m graphlagoon.dev.seed_investigations --api http://localhost:8000 \\
         [--cases 8] [--seed 42] [--reset]
 
-Works with nothing but the API (memory mode, no warehouse). Four scenarios,
-each a case of items and annotations (05 §1), then generated Pix/MED cases:
+Works with nothing but the API (memory mode, no warehouse). Four scenarios from
+different domains, each a case of items and annotations (05 §1), then
+generated cases:
 
-1. **Crédito de grupo econômico** (`credito`): QSA-like CSV mapped to a graph of
-   companies and partners, a guarantees CSV as enrichment, a saved SQL query,
-   a group, a brief written by the agent.
-2. **Fuga de garantia** (`garantia`): alienations CSV mapped to a time-stamped
-   graph, hypotheses, an agent's role and same_as suggestions, a decision.
-3. **Golpe Pix com MED** (`pix_med`): the T5 design scenario
-   (``trace/golpe-pix.json`` written as SIMBA) uploaded as table items with the
-   ``simba_v31`` mapping, the QSA fixture as enrichment, a server trace saved
-   and pinned ("Rastreio #1"), a suggested CC 4.001 badge, agent roles.
-4. **Fraude sintética** (`fraude_sintetica`): people sharing phones, e-mails,
-   devices, IPs, cards, terminals and addresses, grouped as a synthetic cluster.
+1. **Mule network** (flow trace): the T5 design graph
+   (``trace/flow-chain.json``) as a graph snapshot, a server trace saved and
+   pinned ("Trace #1"), agent roles and a brief.
+2. **Fraud ring** (shared devices): sign-ups CSV mapped to people and the
+   phones, e-mails, devices, IPs, cards and addresses they use; a group and the
+   agent's role suggestions.
+3. **Credit review** (economic group): companies and partners CSV as a graph,
+   a guarantees CSV as enrichment, a saved SQL query, a group, the agent's
+   same_as suggestion and brief.
+4. **Insider data access**: access log CSV (who read what, when, how much),
+   hypotheses and notes.
 
 Agent writes use an agent token (``GRAPH_LAGOON_AGENTS_ENABLED=true``;
 without it the owner writes them). Seeded cases carry ``[seed:investigations]``
 in the description. A rerun adds more; ``--reset`` first deletes the seeded
-cases (superuser, ``?reason=`` for decided ones).
+cases (superuser, ``?reason=`` for retained ones).
 """
 
 from __future__ import annotations
@@ -39,37 +40,270 @@ from pathlib import Path
 from typing import Any, Optional
 
 from graphlagoon.dev.seed import ADMIN_EMAIL, SEED_DOMAIN, SeedClient, SeedError, wait_for_health
-from graphlagoon.services.file_mapping_presets import PRESETS
-from graphlagoon.services.investigation_exports import (
-    EXTRATO_COLS,
-    OD_COLS,
-    TITULARES_COLS,
-    _tsv,
-    simba_tables,
-)
 
 MARKER = "[seed:investigations]"
-FIXTURES = Path(__file__).resolve().parents[3] / "frontend/src/__tests__/fixtures/fileMapping"
-GOLPE_PIX = FIXTURES.parent / "trace/golpe-pix.json"
+FLOW_CHAIN = Path(__file__).resolve().parents[3] / "frontend/src/__tests__/fixtures/trace/flow-chain.json"
+# The Brazilian example of the dev seed (06 P5): bank statements in the SIMBA layout.
+BANK_STATEMENTS = Path(__file__).resolve().parents[3] / "frontend/src/__tests__/fixtures/fileMapping/bank-statements"
 ANALYSTS = [
     f"{name}@{SEED_DOMAIN}"
     for name in ("ana.ribeiro", "bruno.tavares", "carla.mendes", "diego.farias", "elisa.moura", "fabio.nunes")
 ]
 # Rotates per agent token below this, under the API's 120 requests/minute.
 AGENT_TOKEN_BUDGET = 100
-FIRST = ["MARIA", "JOSE", "ANA", "JOAO", "FRANCISCA", "ANTONIO", "ADRIANA", "CARLOS",
-         "PAULO", "LUCIANA", "MARCOS", "JULIANA", "RAFAEL", "PATRICIA", "FERNANDO", "ALINE"]
-LAST = ["SILVA", "SANTOS", "OLIVEIRA", "SOUZA", "RODRIGUES", "FERREIRA", "ALVES", "PEREIRA",
-        "LIMA", "GOMES", "COSTA", "RIBEIRO", "MARTINS", "CARVALHO", "ARAUJO", "BARBOSA"]
+FIRST = ["Maria", "James", "Ana", "Chen", "Fatima", "Lukas", "Priya", "Carlos",
+         "Sofia", "Kenji", "Amara", "Noah", "Elena", "Omar", "Grace", "Mateo"]
+LAST = ["Silva", "Smith", "Okafor", "Muller", "Garcia", "Kowalski", "Nguyen", "Rossi",
+        "Haddad", "Johansson", "Tanaka", "Dubois", "Patel", "Novak", "Moreau", "Reyes"]
 
-# Generated Pix/MED cases after the four scenarios: (title, final status).
+# Case types of the dev org (06 §1): data an admin would write in the admin area.
+CASE_TYPES: dict[str, dict] = {
+    "fraud_ring": {
+        "label": "Fraud ring",
+        "description": "People, accounts and devices acting together: mules, synthetic identities, account takeover.",
+        "vocabularies": {
+            "roles": ["victim", "mule", "ring member", "organizer", "cash-out point", "real customer"],
+            "tags": ["account takeover", "synthetic identity", "card testing", "needs KYC"],
+            "link_attributes": ["phone", "email", "device_id", "ip", "card", "address"],
+        },
+        "outcomes": [
+            {"id": "report_authorities", "label": "Report to the authorities", "closes_case": True, "requires_review": True},
+            {"id": "close_no_action", "label": "Close with no action", "closes_case": True},
+            {"id": "monitor", "label": "Keep monitoring", "closes_case": False},
+        ],
+        "actions": [
+            {"id": "block_accounts", "label": "Block the accounts", "due_hours": 2},
+            {"id": "notify_partner", "label": "Notify the partner institution", "due_hours": 24},
+            {"id": "file_report", "label": "File the report", "due_hours": 720},
+        ],
+        "stages": ["Awaiting the customer", "Escalated"],
+        "fields": [
+            {"id": "alert_id", "label": "Alert", "type": "text", "in_queue": True},
+            {"id": "amount_at_risk", "label": "Amount at risk", "type": "money", "in_queue": True},
+            {"id": "channel", "label": "Channel", "type": "enum", "options": ["card", "transfer", "wallet", "other"]},
+        ],
+        "sla_hours": {"open": 240, "analysis": 480},
+        "notice": "Do not tell the people under investigation that a case exists.",
+        "playbook": "triage",
+    },
+    "credit_review": {
+        "label": "Credit review",
+        "description": "A limit request for a company or an economic group: who controls whom, where the guarantees are.",
+        "vocabularies": {
+            "roles": ["borrower", "guarantor", "controller", "related party"],
+            "tags": ["economic group", "outside the group"],
+            "link_attributes": ["address", "phone", "email"],
+        },
+        "roles_multi": True,
+        "outcomes": [
+            {"id": "approve", "label": "Approve", "closes_case": True, "requires_review": True},
+            {"id": "approve_with_conditions", "label": "Approve with conditions", "closes_case": True},
+            {"id": "reject", "label": "Reject", "closes_case": True, "requires_review": True},
+            {"id": "request_documents", "label": "Ask for documents", "closes_case": False},
+        ],
+        "actions": [
+            {"id": "request_guarantee", "label": "Request a guarantee", "due_hours": 72},
+            {"id": "schedule_review", "label": "Schedule a review", "due_hours": 2160},
+        ],
+        "fields": [
+            {"id": "requested_limit", "label": "Requested limit", "type": "money", "required": True, "in_queue": True},
+            {"id": "rating", "label": "Rating", "type": "enum", "options": ["A", "B", "C", "D"], "in_queue": True},
+        ],
+        "sla_hours": {"open": 72, "analysis": 168},
+        "playbook": "assemble_brief",
+    },
+    "insider_data_leak": {
+        "label": "Insider data access",
+        "description": "An employee or contractor reading or taking data beyond their need.",
+        "vocabularies": {"roles": ["insider", "accomplice", "recipient", "affected system"], "tags": ["exfiltration", "policy breach"]},
+        "outcomes": [
+            {"id": "disciplinary", "label": "Disciplinary action", "closes_case": True},
+            {"id": "refer_to_legal", "label": "Refer to legal", "closes_case": True, "requires_review": True},
+            {"id": "unfounded", "label": "Unfounded", "closes_case": True},
+            {"id": "contain", "label": "Contain while investigating", "closes_case": False},
+        ],
+        "actions": [
+            {"id": "revoke_access", "label": "Revoke access", "due_hours": 1},
+            {"id": "preserve_evidence", "label": "Preserve the evidence", "due_hours": 24},
+            {"id": "notify_dpo", "label": "Notify the data protection officer", "due_hours": 72},
+        ],
+        "fields": [{"id": "systems", "label": "Systems", "type": "text", "in_queue": True}],
+        "sla_hours": {"open": 24, "analysis": 336},
+        "notice": "Need-to-know: security, HR and legal only.",
+    },
+    "merchant_review": {
+        "label": "Merchant review",
+        "description": "Acquiring: a merchant, its partners, terminals and sales agent under review.",
+        "vocabularies": {
+            "roles": ["suspect merchant", "front partner", "lent terminal", "colluding sales agent", "beneficiary merchant"],
+            "tags": ["bust-out", "transaction laundering", "MCC mismatch", "card testing"],
+            "link_attributes": ["settlement_account", "phone", "email", "partner", "serial_number", "ip", "address"],
+        },
+        "roles_multi": True,
+        "outcomes": [
+            {"id": "terminate", "label": "Terminate the merchant", "closes_case": True, "requires_review": True},
+            {"id": "keep_monitoring", "label": "Keep with monitoring", "closes_case": True},
+            {"id": "block_terminal", "label": "Block a terminal", "closes_case": False},
+            {"id": "report_authorities", "label": "Report to the authorities", "closes_case": True, "requires_review": True},
+        ],
+        "actions": [
+            {"id": "hold_settlements", "label": "Hold the settlements", "due_hours": 2},
+            {"id": "block_capture", "label": "Block capture", "due_hours": 2},
+            {"id": "internal_blocklist", "label": "Add to the internal blocklist"},
+            {"id": "report_match", "label": "Report to the card network list", "due_hours": 120},
+            {"id": "notify_merchant", "label": "Notify the merchant"},
+        ],
+        "stages": ["Awaiting documents", "Escalated to legal"],
+        "fields": [
+            {"id": "merchant_id", "label": "Merchant", "type": "text", "required": True, "in_queue": True},
+            {"id": "mcc", "label": "MCC", "type": "enum", "options": ["4829", "5411", "5812", "5999", "7995"]},
+            {"id": "tpv_90d", "label": "TPV 90 days", "type": "money", "in_queue": True},
+            {"id": "amount_at_risk", "label": "Amount at risk", "type": "money", "in_queue": True},
+        ],
+        "sla_hours": {"open": 24, "analysis": 120},
+    },
+    "chargeback_dispute": {
+        "label": "Chargeback dispute",
+        "description": "One dispute from a card network: accept it or represent with evidence before the network's deadline.",
+        "outcomes": [
+            {"id": "accept", "label": "Accept", "closes_case": True},
+            {"id": "represent", "label": "Represent", "closes_case": False},
+            {"id": "pre_arbitration", "label": "Pre-arbitration", "closes_case": False},
+            {"id": "won", "label": "Won", "closes_case": True},
+            {"id": "lost", "label": "Lost", "closes_case": True},
+        ],
+        "actions": [
+            {"id": "attach_delivery_proof", "label": "Attach the proof of delivery"},
+            {"id": "ask_merchant_invoice", "label": "Ask the merchant for the invoice", "due_hours": 48},
+        ],
+        "fields": [
+            {"id": "reason_code", "label": "Reason code", "type": "enum", "options": ["10.4", "13.1", "4837", "4853"], "required": True, "in_queue": True},
+            {"id": "amount", "label": "Amount", "type": "money", "required": True, "in_queue": True},
+            {"id": "network", "label": "Network", "type": "enum", "options": ["Visa", "Mastercard", "Amex", "Discover"], "in_queue": True},
+            {"id": "network_deadline", "label": "Network deadline", "type": "date", "in_queue": True},
+        ],
+        "sla_hours": {"open": 168, "analysis": 336},
+    },
+    "vendor_due_diligence": {
+        "label": "Vendor due diligence",
+        "description": "Before or while paying a supplier: who owns it, who it is related to.",
+        "vocabularies": {"roles": ["vendor", "beneficial owner", "related party", "sanctioned party"], "link_attributes": ["address", "phone", "bank_account"]},
+        "outcomes": [
+            {"id": "approve", "label": "Approve", "closes_case": True},
+            {"id": "approve_with_conditions", "label": "Approve with conditions", "closes_case": True},
+            {"id": "reject", "label": "Reject", "closes_case": True, "requires_review": True},
+        ],
+        "actions": [
+            {"id": "request_documents", "label": "Request documents", "due_hours": 120},
+            {"id": "schedule_review", "label": "Schedule a review"},
+        ],
+        "fields": [
+            {"id": "vendor_id", "label": "Vendor", "type": "text", "in_queue": True},
+            {"id": "country", "label": "Country", "type": "text"},
+        ],
+        "sla_hours": {"open": 360, "analysis": 360},
+    },
+    "security_incident": {
+        "label": "Security incident",
+        "description": "Phishing, a compromised host or account: contain, then resolve.",
+        "vocabularies": {"roles": ["attacker infrastructure", "compromised host", "affected user"]},
+        "outcomes": [
+            {"id": "contained", "label": "Contained", "closes_case": False},
+            {"id": "resolved", "label": "Resolved", "closes_case": True},
+            {"id": "false_positive", "label": "False positive", "closes_case": True},
+        ],
+        "actions": [
+            {"id": "isolate_host", "label": "Isolate the host", "due_hours": 1},
+            {"id": "reset_credentials", "label": "Reset the credentials", "due_hours": 4},
+            {"id": "notify_customers", "label": "Notify the customers", "due_hours": 72},
+        ],
+        "fields": [
+            {"id": "severity", "label": "Severity", "type": "enum", "options": ["low", "medium", "high", "critical"], "required": True, "in_queue": True},
+        ],
+        "sla_hours": {"open": 4, "analysis": 168},
+    },
+}
+
+# 06 P5: a Brazilian Pix scam case is data the org writes, never code. The type,
+# the SIMBA statements mapping and the Siscoaf report are dev-seed examples only.
+PIX_SCAM = {
+    "label": "Golpe Pix (exemplo BR)",
+    "description": "Exemplo de dado da org: golpe com Pix, MED e comunicação ao COAF. Nada disto existe no código.",
+    "vocabularies": {
+        "roles": ["vítima", "conta de passagem", "beneficiário final", "laranja"],
+        "tags": ["falsa central", "MED", "engenharia social"],
+        "link_attributes": ["phone", "document", "account"],
+    },
+    "outcomes": [
+        {"id": "comunicar_coaf", "label": "Comunicar ao COAF (Siscoaf)", "closes_case": True, "requires_review": True},
+        {"id": "arquivar", "label": "Arquivar com fundamentação", "closes_case": True},
+        {"id": "bloqueio_cautelar", "label": "Bloqueio cautelar", "closes_case": False},
+    ],
+    "actions": [
+        {"id": "marcar_dict", "label": "Marcar as contas no DICT", "due_hours": 24},
+        {"id": "devolucao_med", "label": "Pedir a devolução pelo MED", "due_hours": 168},
+    ],
+    "fields": [
+        {"id": "valor_golpe", "label": "Valor do golpe", "type": "money", "required": True, "in_queue": True},
+        {"id": "protocolo_med", "label": "Protocolo MED", "type": "text", "in_queue": True},
+    ],
+    "sla_hours": {"open": 24, "analysis": 45 * 24},
+    "notice": "Sigilo (Lei 9.613/98, art. 11): o titular não é avisado da comunicação.",
+    "report_templates": ["siscoaf-cos"],
+    "starter_queries": [
+        {"title": "Pix recebidos pelas contas do caso (30 dias)", "language": "sql",
+         "query": "SELECT conta, count(*) AS n, sum(valor) AS total FROM pix.recebidos WHERE conta IN (:contas) "
+                  "AND dt >= current_date - 30 GROUP BY conta",
+         "parameters": [{"id": "contas", "label": "Contas"}]},
+    ],
+    "analysis_defaults": {"trace": {"max_hops": 4, "max_dwell_hours": 48}},
+}
+LIBRARY = {
+    "siscoaf-cos": ("Comunicação de operação suspeita (Siscoaf)", "template", """# Comunicação de operação suspeita · {{case.number}}
+
+**Caso:** {{case.title}} · **tipo:** {{case.type}} · **valor do golpe:** {{fields.valor_golpe}} · **MED:** {{fields.protocolo_med}}
+
+## Descrição da operação
+{{case.description}}
+
+## Envolvidos
+{{roles}}
+
+## Fundamentação
+{{decision.outcome}} — {{decision.rationale}}
+
+## Evidências (versões fixadas)
+{{evidence}}
+
+Responsável: {{user}} · {{today}}
+"""),
+}
+
+
+async def seed_library(client: "SeedClient") -> None:
+    """Org library docs the dev types use: the Siscoaf template and the SIMBA mapping."""
+    for slug, (title, kind, body) in LIBRARY.items():
+        await client.request("PUT", f"/api/admin/library/{slug}", ADMIN_EMAIL, json={"title": title, "kind": kind, "body": body})
+    spec = json.loads((BANK_STATEMENTS / "spec.json").read_text(encoding="utf-8"))
+    await client.request("PUT", "/api/admin/library/simba-bank-statements", ADMIN_EMAIL, json={
+        "title": "Extratos bancários (SIMBA)", "kind": "mapping", "body": json.dumps({"as": "graph", "spec": spec}),
+    })
+
+
+# Generated cases after the scenarios: (title, narrative, final status, case type, fields).
 EXTRA_CASES = [
-    ("Conta laranja · universitários aliciados por anúncio", "decided:arquivar"),
-    ("Bets · recargas fracionadas em casa de apostas", "archived"),
-    ("Golpe Pix · falso leilão de veículos", "decided:comunicar"),
-    ("Golpe Pix · falso parente no WhatsApp", "analysis"),
-    ("Golpe Pix · boleto falso de financiamento", "open"),
-    ("Golpe Pix · notificação MED em lote (12 vítimas)", "analysis"),
+    ("Chargeback spike · merchant 4471", "Disputes tripled in two weeks on one merchant's card-not-present sales.", "analysis",
+     "merchant_review", {"merchant_id": "M-4471", "mcc": "5999", "tpv_90d": 1_200_000, "amount_at_risk": 84_000}),
+    ("Vendor due diligence · Northwind Supplies", "New supplier shares an address and a phone with two dormant vendors.", "open",
+     "vendor_due_diligence", {"vendor_id": "V-2291", "country": "Portugal"}),
+    ("Phishing campaign · payroll portal", "Employees report a fake payroll login page; accounts changed bank details.", "analysis",
+     "security_incident", {"severity": "high"}),
+    ("Duplicate supplier invoices · Q3", "Same invoice numbers paid twice through two vendor records.", "closed:reject",
+     "vendor_due_diligence", {"vendor_id": "V-1187", "country": "Mexico"}),
+    ("Loan stacking · three lenders in a week", "Applicant took three loans with the same phone and device in five days.", "open",
+     "credit_review", {"requested_limit": 15_000, "rating": "D"}),
+    ("Referral abuse · promo codes", "A cluster of new accounts redeems the same referral codes from few devices.", "reopened:close_no_action",
+     "fraud_ring", {"channel": "wallet", "amount_at_risk": 3_400}),
 ]
 
 
@@ -86,248 +320,12 @@ class InvStats:
     agent: bool = False
     flagship: Optional[str] = None
     flagship_trace: Optional[str] = None
+    decisions: int = 0
+    case_types: bool = False  # written by the superuser; else every case is "general"
 
 
-@dataclass
-class CaseGraph:
-    """Unified node ids (``Pessoa:<cpf>``, ``Conta:<b-a-c>``) of one file graph."""
-
-    names: dict[str, str] = field(default_factory=dict)
-    victims: list[str] = field(default_factory=list)
-    mules: list[str] = field(default_factory=list)
-    exits: list[str] = field(default_factory=list)
-    discarded: list[str] = field(default_factory=list)
-    pairs: list[tuple[str, str, float]] = field(default_factory=list)  # match candidates
-    hops: int = 5  # trace layers from victims[0] to the exits
-
-
-
-def _cpf(rng: random.Random) -> str:
-    return str(rng.randint(10**10, 10**11 - 1))
-
-
-def _account_uid(banco: str, agencia: str, conta: str) -> str:
-    return "Conta:" + "-".join(p.lstrip("0") or "0" for p in (banco, agencia, conta))
-
-
-class Bundle:
-    """A money graph written as SIMBA v3.1 files by the F4.6 export
-    (``simba_tables``). Every transfer has one reported account (``Conta``) end
-    and one counterpart (``Pessoa`` by CPF/CNPJ, or agency 9999 =
-    ``Desconhecido``), so flows alternate account → holder → account.
-    shortcut: SIMBA dates have no time of day; OD codes follow the clock so the
-    trace (ordered by date, then edge id) keeps the intraday order, and the time
-    goes in DESCRICAO."""
-
-    def __init__(self) -> None:
-        self.nodes: dict[str, dict] = {}
-        self.moves: list[tuple[datetime, str, str, float, str]] = []
-        self.holders: list[tuple[str, str]] = []
-
-    def pessoa(self, doc: str, nome: str, renda: Optional[float] = None) -> str:
-        uid = f"Pessoa:{doc}"
-        self.nodes[uid] = {"uid": uid, "type": "Pessoa", "entity": "Pessoa",
-                           "properties": {"cpf_cnpj": doc, "nome": nome, "renda": renda}}
-        return uid
-
-    def conta(self, banco: str, agencia: str, conta: str, holder: Optional[str] = None) -> str:
-        uid = _account_uid(banco, agencia, conta)
-        self.nodes[uid] = {"uid": uid, "type": "Conta", "entity": "Conta",
-                           "properties": {"banco": banco, "agencia": agencia, "conta": conta}}
-        if holder:
-            self.holders.append((holder, uid))
-        return uid
-
-    def unknown(self, observacao: str) -> str:
-        """A one-transaction counterpart; its uid on the server is ``desconhecido:<OD>@<context>``."""
-        key = f"?{len(self.nodes)}"
-        self.nodes[key] = {"uid": key, "type": "Desconhecido", "entity": None,
-                           "properties": {"observacao": observacao}}
-        return key
-
-    def move(self, when: datetime, src: str, dst: str, amount: float, kind: str = "PIX") -> None:
-        self.moves.append((when, src, dst, round(amount, 2), kind))
-
-    def files(self, prefix: str) -> tuple[dict[str, bytes], dict[str, str]]:
-        """SIMBA files and the OD code of each ``unknown`` counterpart."""
-        edges, codes = [], {}
-        for k, (when, src, dst, amount, kind) in enumerate(sorted(self.moves, key=lambda m: m[0]), 1):
-            code = f"OD{k:03d}"
-            side = "ENVIADO" if self.nodes[src]["type"] == "Conta" else "RECEBIDO"
-            edges.append({"id": code, "src": src, "dst": dst, "amount": amount,
-                          "t": int(when.timestamp() * 1000),
-                          "type": "SAQUE" if kind == "SAQUE" else "TRANSF_INTERBANCARIA",
-                          "properties": {"descricao": f"{kind if kind == 'SAQUE' else f'{kind} {side}'} {when:%H:%M}"}})
-            codes.update({u: code for u in (src, dst) if u.startswith("?")})
-        edges += [{"id": f"T{k}", "src": h, "dst": c, "amount": None, "type": "TITULAR"}
-                  for k, (h, c) in enumerate(self.holders)]
-        extrato, od, titulares, _ = simba_tables({"nodes": list(self.nodes.values()), "edges": edges})
-        return {
-            f"{prefix}_EXTRATO.TXT": _tsv(EXTRATO_COLS, extrato),
-            f"{prefix}_ORIGEM_DESTINO.TXT": _tsv(OD_COLS, od),
-            f"{prefix}_TITULARES.TXT": _tsv(TITULARES_COLS, titulares),
-        }, codes
-
-
-# The T5 design scenario (frontend fixture trace/golpe-pix.json) as SIMBA:
-# fixture node → reported account (+ holder), counterpart person/company, or 9999.
-GOLPE_PIX_NODES = {
-    "externo": ("unknown", "TED DE NAO-CORRENTISTA"),
-    "0001-9": ("conta", ("104", "0001", "0001-9"), ("31415926535", "MARIA APARECIDA SOUZA")),
-    "4471-0": ("pessoa", "27182818284", "RAFAEL COSTA LIMA"),
-    "5520-3": ("conta", ("260", "0412", "5520-3"), ("16180339887", "JULIANA ALVES PEREIRA")),
-    # The qsa-mini partner (masked CPF ***456789**): the entity-resolution hit.
-    "8812-7": ("conta", ("077", "0001", "8812-7"), ("12345678901", "ANA SILVA")),
-    "3090-1": ("conta", ("336", "0001", "3090-1"), ("14142135623", "MARCOS GOMES RIBEIRO")),
-    "saque-atm": ("unknown", "SAQUE ATM"),
-    "exchange-gama": ("pessoa", "12345678000190", "EXCHANGE GAMA LTDA"),
-    "bet-delta": ("pessoa", "98765432000110", "BET DELTA APOSTAS LTDA"),
-}
-
-
-def golpe_pix_bundle(qsa_context: Optional[str]) -> tuple[dict[str, bytes], CaseGraph, list]:
-    """SIMBA files of the golpe-pix trace fixture: victim → 4471-0 → three
-    mule accounts → Saque ATM / Exchange Gama / Bet Delta (FIFO 91% at 3 hops).
-    Returns (files, graph, [(graph list, OD code, label)])."""
-    fixture = json.loads(GOLPE_PIX.read_text(encoding="utf-8"))
-    b, uid, names = Bundle(), {}, {}
-    for n in fixture["nodes"]:
-        kind, *spec = GOLPE_PIX_NODES[n["node_id"]]
-        if kind == "conta":
-            (banco, agencia, conta), (doc, nome) = spec
-            uid[n["node_id"]] = b.conta(banco, agencia, conta, holder=b.pessoa(doc, nome))
-            names[f"Pessoa:{doc}"] = nome
-        else:
-            uid[n["node_id"]] = b.pessoa(*spec) if kind == "pessoa" else b.unknown(*spec)
-        label = spec[-1] if kind == "pessoa" else f"Conta {n['node_id']}"
-        names[uid[n["node_id"]]] = (n.get("properties") or {}).get("nome") or label
-    for e in fixture["edges"]:
-        p = e["properties"]
-        when = datetime.fromisoformat(p["data_hora"]).replace(tzinfo=None)  # wall clock, as SIMBA has it
-        b.move(when, uid[e["src"]], uid[e["dst"]], p["valor"], e["relationship_type"])
-    files, codes = b.files("CASO1")
-    ana, rafael, victim = "Pessoa:12345678901", uid["4471-0"], "Pessoa:31415926535"
-    g = CaseGraph(
-        names=names,
-        victims=[uid["0001-9"], victim],
-        mules=[uid["8812-7"], ana, rafael, uid["3090-1"], uid["5520-3"]],
-        exits=[uid["exchange-gama"], uid["bet-delta"]],
-        hops=fixture["params"]["maxHops"],
-    )
-    if qsa_context:
-        socio = f"socio:ANA SILVA|***456789**@{qsa_context}"
-        g.names[socio] = "ANA SILVA"
-        g.pairs.append((ana, socio, 0.8))
-    g.pairs += [(victim, rafael, 0.62), (rafael, ana, 0.66), (victim, ana, 0.58)]
-    return files, g, [("exits", codes[uid["saque-atm"]], names[uid["saque-atm"]]),
-                      ("discarded", codes[uid["externo"]], names[uid["externo"]])]
-
-
-EXIT_KINDS = {
-    "exchange": "EXCHANGE {} LTDA",
-    "bet": "BET {} APOSTAS LTDA",
-    "pj": "{} COMERCIO E SERVICOS LTDA",
-}
-
-
-def simba_bundle(rng: random.Random, prefix: str) -> tuple[dict[str, bytes], CaseGraph, list]:
-    """SIMBA v3.1 files for victims → laranja account(s) → 3–4 layers of mules
-    (fan-out/fan-in, minutes to hours in each) → 2–4 exits (saque, exchange,
-    bet, PJ), within a day and a half so a forward trace from the first victim
-    (Δ 24h) reaches them. Returns (files, graph, [(graph list, OD code, label)])."""
-    b = Bundle()
-    clock = datetime(2026, rng.randint(3, 8), rng.randint(1, 28), rng.randint(8, 11), rng.randint(0, 59))
-
-    def person():
-        return _cpf(rng), f"{rng.choice(FIRST)} {rng.choice(LAST)} {rng.choice(LAST)}"
-
-    def account(holder: str) -> str:
-        return b.conta(rng.choice(["077", "260", "290", "323", "380"]), f"{rng.randint(1, 9999):04d}",
-                       f"{rng.randint(10**5, 10**6 - 1)}-{rng.randint(0, 9)}", holder=holder)
-
-    victims = [b.pessoa(*person()) for _ in range(rng.randint(4, 8))]
-    laranja = person()
-    saida = (_cpf(rng), f"{laranja[1].split()[0]} {laranja[1].split()[-1]}")  # a near-duplicate name
-    laranja_uid = b.pessoa(*laranja, renda=1412.0)
-    depth = rng.choice((3, 4))
-    layers = [[account(laranja_uid)] + [account(b.pessoa(*person())) for _ in range(rng.randint(0, 1))]]
-    mules = [b.pessoa(*person()), b.pessoa(*saida)] + [b.pessoa(*person()) for _ in range(rng.randint(0, 2))]
-    layers.append(mules)
-    layers.append([account(mules[0])] + [account(b.pessoa(*person())) for _ in range(rng.randint(1, 3))])
-    if depth == 4:
-        layers.append([b.pessoa(*person()) for _ in range(rng.randint(2, 4))])
-    # Exits: companies by CNPJ, reported accounts of them after a person layer.
-    exits = []
-    for kind in rng.sample(list(EXIT_KINDS), k=rng.randint(1, 3)):
-        pj = b.pessoa(str(rng.randint(10**13, 10**14 - 1)), EXIT_KINDS[kind].format(rng.choice(LAST)))
-        exits.append(pj if depth == 3 else account(pj))
-    late = []
-
-    def saque(when: datetime, src: str, amount: float) -> None:
-        late.append(("exits", b.unknown("SAQUE EM ESPECIE"), "Saque em espécie"))
-        b.move(when, src, late[-1][1], amount, "SAQUE")
-
-    # Money: victims first (victims[0] earliest and largest, so FIFO spreads it), then
-    # each node forwards ~95% of what it got, minutes to hours after its last credit.
-    got: dict[str, list] = {}  # node → [cents, last arrival]
-    for k, v in enumerate(victims):
-        clock += timedelta(minutes=rng.randint(3, 50))
-        cents = rng.randint(800, 9000) * 100 if k else rng.randint(15000, 40000) * 100  # the MED notifier
-        dst = layers[0][k % len(layers[0])]
-        b.move(clock, v, dst, cents / 100)
-        got.setdefault(dst, [0, clock])[0] += cents
-        got[dst][1] = clock
-    for i, layer in enumerate(layers):
-        targets = layers[i + 1] if i + 1 < len(layers) else exits
-        fan = len(targets) if i == 0 else rng.randint(1, 3)  # the laranja spreads to every mule
-        plan = {n: rng.sample(targets, k=min(len(targets), fan)) for n in layer if n in got}
-        for t in targets:  # fan-in: every next node gets something
-            if not any(t in ts for ts in plan.values()):
-                plan[rng.choice(list(plan))].append(t)
-        for n, ts in plan.items():
-            cents, when = got[n]
-            out = cents * rng.randint(93, 99) // 100
-            if i == 2:  # the second account layer cashes part out
-                when += timedelta(minutes=rng.randint(5, 180))
-                cash = out * rng.randint(20, 40) // 100
-                saque(when, n, cash / 100)
-                out -= cash
-            for k, t in enumerate(ts):
-                when += timedelta(minutes=rng.randint(5, 240) if k == 0 else rng.randint(1, 20))
-                part = out // (len(ts) - k) if k < len(ts) - 1 else out
-                out -= part
-                b.move(when, n, t, part / 100)
-                if t in got:
-                    got[t][0] += part
-                    got[t][1] = max(got[t][1], when)
-                else:
-                    got[t] = [part, when]
-    supplier = person()  # an ordinary payment at night: the "descartado" entity
-    supplier_uid = b.pessoa(*supplier)
-    b.move(clock.replace(hour=22, minute=rng.randint(0, 59)), supplier_uid, layers[0][0], rng.randint(50, 300))
-    files, codes = b.files(prefix)
-    mula, saida_uid = mules[0], f"Pessoa:{saida[0]}"
-    g = CaseGraph(
-        names={u: n["properties"]["nome"] for u, n in b.nodes.items() if n["type"] == "Pessoa"},
-        victims=victims,
-        mules=[layers[0][0], laranja_uid, *layers[0][1:], *mules, *(layers[3] if depth == 4 else []), *layers[2]],
-        exits=list(exits),
-        discarded=[supplier_uid],
-        hops=depth + 1,
-    )
-    g.pairs = [
-        (laranja_uid, saida_uid, 0.86),
-        (victims[0], victims[1], 0.71),
-        (mula, laranja_uid, 0.74),
-        (saida_uid, mula, 0.68),
-    ]
-    return files, g, [(name, codes[key], label) for name, key, label in late]
-
-
-
-# ---------------------------------------------------------------------------
-# CSV scenarios: a generic graph mapping (03 §4) per layout
-# ---------------------------------------------------------------------------
+def _name(rng: random.Random) -> str:
+    return f"{rng.choice(FIRST)} {rng.choice(LAST)}"
 
 
 def _csv(header: list[str], rows: list[list[Any]]) -> bytes:
@@ -348,119 +346,121 @@ def _spec(name: str, nodes: list[dict], edges: list[dict], semantics: Optional[d
     return spec
 
 
-def credito_bundle(rng: random.Random) -> tuple[bytes, dict, bytes, dict, list[str]]:
-    """Companies of a group with shared partners, and a guarantees table by CNPJ."""
-    cnpjs = [f"{rng.randint(10**7, 10**8 - 1):08d}0001{rng.randint(10, 99)}" for _ in range(6)]
-    partners = [(_cpf(rng), f"{rng.choice(FIRST)} {rng.choice(LAST)} {rng.choice(LAST)}") for _ in range(4)]
-    names = ["ALFA PARTICIPACOES LTDA", "ALFA COMERCIO LTDA", "ALFA LOGISTICA LTDA",
-             "BETA AGRO LTDA", "GAMA SERVICOS LTDA", "DELTA IMOVEIS LTDA"]
-    ufs = ["SP", "SP", "SP", "MT", "SP", "RJ"]
-    rows = []
-    for i, cnpj in enumerate(cnpjs):
-        for cpf, nome in rng.sample(partners, k=2 if i < 4 else 1):
-            rows.append([cnpj, names[i], ufs[i], cpf, nome, rng.choice(["05", "22", "49"])])
-    empresas = _csv(["cnpj", "razao_social", "uf", "socio_cpf", "socio_nome", "qualificacao"], rows)
-    spec = _spec(
-        "Grupo econômico (QSA)",
-        [
-            {"key": "empresa", "type": "Empresa", "from": "t", "id": {"col": "t.cnpj", "normalize": "cpf_cnpj"},
-             "props": {"razao_social": "t.razao_social", "uf": "t.uf", "cnpj": "t.cnpj"}},
-            {"key": "socio", "type": "Pessoa", "from": "t", "id": {"col": "t.socio_cpf", "normalize": "cpf_cnpj"},
-             "props": {"nome": "t.socio_nome", "cpf": "t.socio_cpf"}},
-        ],
-        [{"from": "t", "type": "SOCIO_DE", "direction": "in", "endpoints": {"self": "empresa", "other": "socio"},
-          "props": {"qualificacao": "t.qualificacao"}}],
-    )
-    garantias = _csv(
-        ["cnpj", "garantia", "valor", "vencimento"],
-        [[c, rng.choice(["imóvel", "recebíveis", "aval", "alienação fiduciária"]), rng.randint(50, 900) * 1000,
-          f"2026-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}"] for c in cnpjs],
-    )
-    enrichment = {"name": "Garantias", "input": {"delimiter": ";"}, "key_column": "cnpj",
-                  "columns": ["garantia", "valor", "vencimento"], "match_node_types": ["Empresa"],
-                  "match_source": {"kind": "prop", "name": "cnpj"}}
-    return empresas, spec, garantias, enrichment, [f"Empresa:{c}" for c in cnpjs]
+# ---------------------------------------------------------------------------
+# Scenario data
+# ---------------------------------------------------------------------------
 
 
-def garantia_bundle(rng: random.Random) -> tuple[bytes, dict, dict[str, list[str]]]:
-    """A debtor alienating assets to acquirers after the contract date."""
-    devedor = (_cpf(rng), f"{rng.choice(FIRST)} {rng.choice(LAST)} {rng.choice(LAST)}")
-    acquirers = [(_cpf(rng), f"{rng.choice(FIRST)} {rng.choice(LAST)} {rng.choice(LAST)}") for _ in range(4)]
-    bens = [("ABC1D23", "Veículo Hilux 2022"), ("MAT-44871", "Imóvel rural 120 ha"),
-            ("XYZ9F87", "Caminhão Volvo FH"), ("MAT-10233", "Galpão industrial")]
-    start = datetime(2026, 2, 1, 9, 0)
-    rows = []
-    for i, (bem_id, bem) in enumerate(bens):
-        cpf, nome = acquirers[i]
-        when = start + timedelta(days=rng.randint(5, 80), hours=rng.randint(0, 9))
-        rows.append([devedor[0], devedor[1], bem_id, bem, cpf, nome, when.isoformat(timespec="minutes"),
-                     f"{rng.randint(80, 900) * 1000}"])
-    # A second-hand transfer between acquirers, to give paths length 2.
-    rows.append([acquirers[0][0], acquirers[0][1], bens[0][0], bens[0][1], acquirers[3][0], acquirers[3][1],
-                 (start + timedelta(days=95)).isoformat(timespec="minutes"), "150000"])
-    data = _csv(["devedor_cpf", "devedor", "bem_id", "bem", "adquirente_cpf", "adquirente", "data", "valor"], rows)
-    spec = _spec(
-        "Alienações",
-        [
-            {"key": "devedor", "type": "Pessoa", "from": "t", "id": {"col": "t.devedor_cpf", "normalize": "cpf_cnpj"},
-             "props": {"nome": "t.devedor", "cpf": "t.devedor_cpf"}},
-            {"key": "adquirente", "type": "Pessoa", "from": "t", "id": {"col": "t.adquirente_cpf", "normalize": "cpf_cnpj"},
-             "props": {"nome": "t.adquirente", "cpf": "t.adquirente_cpf"}},
-            {"key": "bem", "type": "Bem", "from": "t", "id": "t.bem_id", "props": {"descricao": "t.bem"}},
-        ],
-        [
-            {"from": "t", "type": "ALIENOU", "endpoints": {"self": "devedor", "other": "adquirente"},
-             "props": {"valor": {"col": "t.valor", "convert": "decimal_br"}, "data": "t.data", "bem": "t.bem"}},
-            {"from": "t", "type": "POSSUIA", "endpoints": {"self": "devedor", "other": "bem"}},
-        ],
-        {"amount_prop": "valor", "time_prop": "data"},
-    )
-    return data, spec, {"devedor": [f"Pessoa:{devedor[0]}"], "adquirentes": [f"Pessoa:{c}" for c, _ in acquirers]}
+SIGNUP_ATTRS = {  # column → (node type, normalizer)
+    "phone": ("Phone", "phone"),
+    "email": ("Email", "email"),
+    "device_id": ("Device", "device_id"),
+    "ip": ("IP", "ip"),
+    "card": ("Card", "card"),
+    "address": ("Address", "address"),
+}
 
 
-SYNTH_ATTRS = ("telefone", "email", "device_id", "ip", "cartao", "terminal", "endereco")
-
-
-def sintetica_bundle(rng: random.Random) -> tuple[bytes, dict, list[str]]:
-    """Registrations where a cluster of identities shares phones, e-mails,
-    devices, IPs, cards, terminals and addresses (05 §4b)."""
+def signups_bundle(rng: random.Random, size: int = 10, ring: int = 5,
+                   shared_out: Optional[dict] = None) -> tuple[bytes, dict, list[str]]:
+    """Sign-ups where a ring of identities shares phones, e-mails, devices, IPs,
+    cards and addresses (05 §4b). Returns (csv, spec, ring customer node ids);
+    ``shared_out`` receives the ring's shared values."""
     shared = {
-        "telefone": f"+55 11 9{rng.randint(10**7, 10**8 - 1)}",
-        "email": f"contato{rng.randint(10, 99)}@mail-temp.com",
+        "phone": f"+1 415 555 {rng.randint(1000, 9999)}",
+        "email": f"promo{rng.randint(10, 99)}@mail-temp.example",
         "device_id": f"dev-{rng.randint(10**5, 10**6 - 1)}",
-        "ip": f"177.{rng.randint(10, 250)}.{rng.randint(1, 250)}.{rng.randint(1, 250)}",
-        "cartao": f"5311 **** **** {rng.randint(1000, 9999)}",
-        "terminal": f"T-{rng.randint(1000, 9999)}",
-        "endereco": "Rua das Acácias, 120 ap 31 - São Paulo",
+        "ip": f"203.0.113.{rng.randint(1, 250)}",
+        "card": f"4532 **** **** {rng.randint(1000, 9999)}",
+        "address": f"{rng.randint(10, 99)} Harbor Street, Apt. 4 – Springfield",
     }
-    rows, cluster = [], []
-    for i in range(10):
-        cpf, nome = _cpf(rng), f"{rng.choice(FIRST)} {rng.choice(LAST)} {rng.choice(LAST)}"
-        synthetic = i < 5
-        if synthetic:
-            cluster.append(f"Pessoa:{cpf}")
-        row = {k: (shared[k] if synthetic and k in rng.sample(SYNTH_ATTRS, 4) else None) for k in SYNTH_ATTRS}
+    if shared_out is not None:
+        shared_out.update(shared)
+    rows, members = [], []
+    for i in range(size):
+        customer, name = f"C{rng.randint(10**5, 10**6 - 1)}", _name(rng)
         own = {
-            "telefone": f"+55 21 9{rng.randint(10**7, 10**8 - 1)}",
-            "email": f"{nome.split()[0].lower()}.{rng.randint(1, 99)}@example.com",
+            "phone": f"+44 20 7946 {rng.randint(1000, 9999)}",
+            "email": f"{name.split()[0].lower()}.{rng.randint(1, 99)}@example.com",
             "device_id": f"dev-{rng.randint(10**5, 10**6 - 1)}",
-            "ip": f"201.{rng.randint(10, 250)}.{rng.randint(1, 250)}.{rng.randint(1, 250)}",
-            "cartao": f"4532 **** **** {rng.randint(1000, 9999)}",
-            "terminal": f"T-{rng.randint(1000, 9999)}",
-            "endereco": f"Av. Brasil, {rng.randint(10, 9000)} - Rio de Janeiro",
+            "ip": f"198.51.100.{rng.randint(1, 250)}",
+            "card": f"5311 **** **** {rng.randint(1000, 9999)}",
+            "address": f"{rng.randint(1, 900)} Oak Avenue – Riverside",
         }
-        rows.append([cpf, nome, *(row[k] or own[k] for k in SYNTH_ATTRS)])
-    data = _csv(["cpf", "nome", *SYNTH_ATTRS], rows)
-    types = {"telefone": ("Telefone", "phone"), "email": ("Email", "email"), "device_id": ("Dispositivo", "lower"),
-             "ip": ("IP", "none"), "cartao": ("Cartao", "none"), "terminal": ("Terminal", "none"), "endereco": ("Endereco", "lower")}
-    nodes = [{"key": "pessoa", "type": "Pessoa", "from": "t", "id": {"col": "t.cpf", "normalize": "cpf_cnpj"},
-              "props": {"nome": "t.nome", "cpf": "t.cpf"}}]
+        reused = set(rng.sample(list(SIGNUP_ATTRS), 4)) if i < ring else set()
+        if i < ring:
+            members.append(customer.lower())
+        rows.append([customer, name, *(shared[k] if k in reused else own[k] for k in SIGNUP_ATTRS)])
+    data = _csv(["customer_id", "name", *SIGNUP_ATTRS], rows)
+    nodes = [{"key": "customer", "type": "Customer", "from": "t", "id": {"col": "t.customer_id", "normalize": "lower"},
+              "props": {"name": "t.name"}}]
     edges = []
-    for col, (node_type, norm) in types.items():
-        nodes.append({"key": col, "type": node_type, "from": "t", "id": {"col": f"t.{col}", "normalize": norm},
-                      "props": {"valor": f"t.{col}"}})
-        edges.append({"from": "t", "type": f"USA_{node_type.upper()}", "endpoints": {"self": "pessoa", "other": col}})
-    return data, _spec("Cadastros", nodes, edges), cluster
+    for col, (node_type, how) in SIGNUP_ATTRS.items():
+        nodes.append({"key": col, "type": node_type, "from": "t", "id": {"col": f"t.{col}", "normalize": how},
+                      "props": {"value": f"t.{col}"}})
+        edges.append({"from": "t", "type": f"USES_{node_type.upper()}", "endpoints": {"self": "customer", "other": col}})
+    return data, _spec("Sign-ups", nodes, edges), members
+
+
+def group_bundle(rng: random.Random) -> tuple[bytes, dict, bytes, dict]:
+    """Companies of a group with shared partners, and a guarantees table by registry id."""
+    partners = [_name(rng) for _ in range(4)]
+    companies = [(f"R-{rng.randint(10**5, 10**6 - 1)}", name) for name in
+                 ("Alpha Holdings", "Alpha Logistics", "Alpha Foods", "Beta Trading", "Gamma Retail", "Alpha Energy")]
+    rows = []
+    for i, (reg, name) in enumerate(companies):
+        for p in rng.sample(partners, 2 if i < 4 else 1):
+            rows.append([reg, name, p, rng.choice(["director", "shareholder"]), rng.randint(10, 60)])
+    data = _csv(["registry_id", "company", "partner", "role", "share_pct"], rows)
+    spec = _spec(
+        "Companies and partners",
+        [
+            {"key": "company", "type": "Company", "from": "t", "id": "t.registry_id",
+             "props": {"name": "t.company", "registry_id": "t.registry_id"}},
+            {"key": "partner", "type": "Person", "from": "t", "id": {"col": "t.partner", "normalize": "lower"},
+             "props": {"name": "t.partner"}},
+        ],
+        [{"from": "t", "type": "PARTNER_OF", "endpoints": {"self": "partner", "other": "company"},
+          "props": {"role": "t.role", "share_pct": "t.share_pct"}}],
+    )
+    guarantees = _csv(["registry_id", "guarantee", "value", "due"],
+                      [[reg, rng.choice(["receivables", "property", "vehicle fleet"]), rng.randint(50, 900) * 1000,
+                        f"2027-0{rng.randint(1, 9)}-15"] for reg, _ in companies[:4]])
+    enrichment = {"name": "guarantees", "key_column": "registry_id",
+                  "columns": ["guarantee", "value", "due"], "match_node_types": ["Company"],
+                  "match_source": {"kind": "prop", "name": "registry_id"}}
+    return data, spec, guarantees, enrichment
+
+
+def access_bundle(rng: random.Random) -> tuple[bytes, dict, str]:
+    """An employee reading a finance share far above peers, at night."""
+    systems = ["finance-share", "hr-portal", "crm", "payroll-db", "source-repo"]
+    people = [_name(rng) for _ in range(6)]
+    insider = people[0]
+    start = datetime(2026, 9, 1, 8, 0)
+    rows = []
+    for day in range(10):
+        for p in people:
+            for _ in range(rng.randint(1, 3)):
+                when = start + timedelta(days=day, hours=rng.randint(0, 9), minutes=rng.randint(0, 59))
+                rows.append([p, rng.choice(systems[1:]), when.isoformat(timespec="minutes"), rng.randint(1, 40)])
+        if day >= 6:  # the last days: the insider pulls the finance share at night
+            for h in (22, 23):
+                when = start + timedelta(days=day, hours=h, minutes=rng.randint(0, 59))
+                rows.append([insider, "finance-share", when.isoformat(timespec="minutes"), rng.randint(800, 2400)])
+    data = _csv(["employee", "system", "at", "megabytes"], rows)
+    spec = _spec(
+        "Access log",
+        [
+            {"key": "who", "type": "Employee", "from": "t", "id": {"col": "t.employee", "normalize": "lower"},
+             "props": {"name": "t.employee"}},
+            {"key": "what", "type": "System", "from": "t", "id": "t.system", "props": {"name": "t.system"}},
+        ],
+        [{"from": "t", "type": "ACCESSED", "endpoints": {"self": "who", "other": "what"},
+          "props": {"at": "t.at", "megabytes": "t.megabytes"}}],
+        {"amount_prop": "megabytes", "time_prop": "at"},
+    )
+    return data, spec, insider.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +481,7 @@ class Agent:
         if self.enabled and (self.token is None or self.used >= AGENT_TOKEN_BUDGET):
             try:
                 created = await self.client.request(
-                    "POST", "/api/agent-tokens", self.owner, json={"name": "Agente de análise (seed)"}
+                    "POST", "/api/agent-tokens", self.owner, json={"name": "Analysis agent (seed)"}
                 )
                 self.token, self.used = created.json()["token"], 0
             except SeedError:
@@ -498,31 +498,25 @@ class Agent:
         return response
 
 
-def _fixture(*parts: str) -> Optional[bytes]:
-    path = FIXTURES.joinpath(*parts)
-    return path.read_bytes() if path.is_file() else None
+def owner_client(client: SeedClient, owner: str):
+    class _Owner:
+        async def request(self, method, path, json=None, **kwargs):
+            return await client.request(method, path, owner, json=json, **kwargs)
+
+    return _Owner()
 
 
-async def upload(client: SeedClient, url: str, owner: str, name: str, data: bytes, title: Optional[str] = None,
-                 kind: str = "table", subkind: str = "csv") -> dict:
-    row = await client.request(
+async def upload(client: SeedClient, url: str, owner: str, name: str, data: bytes, stats: InvStats,
+                 title: Optional[str] = None, mapping: Optional[dict] = None) -> dict:
+    row = (await client.request(
         "POST", f"{url}/items", owner, content=data,
-        params={"filename": name, "kind": kind, "subkind": subkind, "title": title or name},
-    )
-    return row.json()
-
-
-async def upload_graph(client: SeedClient, url: str, owner: str, files: dict[str, bytes], spec: dict, title: str) -> dict:
-    """Uploads ``files`` as table items; the first one carries the graph mapping
-    (the others are its extra inputs) and becomes the canvas source."""
-    rows = [await upload(client, url, owner, name, data) for name, data in files.items()]
-    main = next((r for r, name in zip(rows, files) if name.endswith("_EXTRATO.TXT")), rows[0])
-    extra = [r["id"] for r in rows if r["id"] != main["id"]]
-    patched = await client.request(
-        "PATCH", f"{url}/items/{main['id']}", owner,
-        json={"title": title, "mapping": {"as": "graph", "spec": spec, "extra_item_ids": extra}},
-    )
-    return patched.json()
+        params={"filename": name, "kind": "table", "subkind": "csv", "title": title or name},
+    )).json()
+    stats.items["table"] += 1
+    stats.versions += 1
+    if mapping:
+        row = (await client.request("PATCH", f"{url}/items/{row['id']}", owner, json={"mapping": mapping})).json()
+    return row
 
 
 async def annotate(who, url: str, stats: InvStats, kind: str, targets: list, value: dict, reason: Optional[str] = None) -> dict:
@@ -545,26 +539,67 @@ async def pin(who, url: str, stats: InvStats, item_id: str, label: str) -> dict:
     return row
 
 
-async def finish(client: SeedClient, url: str, owner: str, final: str, stats: InvStats, rationale: str) -> None:
-    """Moves the case to ``final`` ("open", "analysis", "archived", "decided:<outcome>")."""
+async def brief(who, url: str, stats: InvStats, text: str) -> None:
+    await who.request("PUT", f"{url}/brief", json={"text": text})
+    stats.items["document"] += 1
+    stats.versions += 1
+
+
+async def decide(client: SeedClient, url: str, owner: str, stats: InvStats, outcome: str, rationale: str,
+                 **extra) -> dict:
+    """Records a decision as ``owner``; with four eyes another analyst approves
+    it when ``approve`` is given (the case then closes if the outcome does)."""
+    approver = extra.pop("approve", None)
+    case = (await client.request("POST", f"{url}/decisions", owner,
+                                 json={"outcome": outcome, "rationale": rationale, **extra})).json()
+    stats.decisions += 1
+    last = case["decisions"][-1]
+    stats.annotations["task"] += len(last["task_ids"])
+    if approver and last["review"] == "pending":
+        # Four eyes needs a second person who can edit the case: share it with them first.
+        await client.request("POST", f"{url}/share", owner, json={"email": approver, "role": "editor"})
+        case = (await client.request("POST", f"{url}/decisions/{last['id']}/review", approver,
+                                     json={"approve": True, "note": "Checked the evidence."})).json()
+    return case
+
+
+async def finish(client: SeedClient, url: str, owner: str, final: str, stats: InvStats) -> None:
+    """Moves the case to ``final``: "open", "analysis", "closed:<outcome>" (a
+    decision that closes it) or "reopened:<outcome>" (closed, then reopened)."""
     status, _, outcome = final.partition(":")
-    if status in ("analysis", "archived", "decided"):
+    if status != "open":
         await client.request("PATCH", url, owner, json={"status": "analysis"})
-    if status == "decided":
-        actions = ["dict", "spa"] if outcome == "comunicar" else []
-        await client.request("POST", f"{url}/decision", owner,
-                             json={"outcome": outcome, "actions": actions, "rationale": rationale})
-    elif status == "archived":  # no decision: the rule (05 §7) wants a reason
-        await client.request(
-            "PATCH", url, owner,
-            json={"status": "archived", "archive_reason": "Arquivado na triagem: sem indícios após a análise inicial."},
-        )
-    stats.statuses[status] += 1
+    if outcome and stats.case_types:
+        reviewer = next(a for a in ANALYSTS if a != owner)
+        await decide(client, url, owner, stats, outcome, "The evidence pinned in the case supports it.", approve=reviewer)
+        if status == "reopened":
+            await client.request("POST", f"{url}/reopen", owner)
+    landed = "analysis" if status == "reopened" or (outcome and not stats.case_types) else status
+    stats.statuses[landed] += 1
+
+
+async def seed_case_types(client: SeedClient) -> int:
+    """Writes the dev org's library docs and case types as the superuser (idempotent: PUT)."""
+    await seed_library(client)
+    for slug, spec in {**CASE_TYPES, "pix_scam": PIX_SCAM}.items():
+        await client.request("PUT", f"/api/admin/case-types/{slug}", ADMIN_EMAIL, json=spec)
+    return len(CASE_TYPES) + 1
+
+
+async def all_cases(client: SeedClient, email: str) -> list[dict]:
+    """Every case ``email`` reads, page by page."""
+    out, offset = [], 0
+    while True:
+        page = (await client.request("GET", "/api/investigations", email, params={"limit": 500, "offset": offset})).json()
+        out += page["items"]
+        offset += len(page["items"])
+        if not page["items"] or offset >= page["total"]:
+            return out
 
 
 async def reset_seeded(client: SeedClient, log) -> int:
     """Deletes the cases carrying MARKER."""
-    cases = (await client.request("GET", "/api/investigations", ADMIN_EMAIL)).json()
+    cases = await all_cases(client, ADMIN_EMAIL)
     deleted = 0
     for case in cases:
         if MARKER not in (case.get("description") or ""):
@@ -575,17 +610,14 @@ async def reset_seeded(client: SeedClient, log) -> int:
     return deleted
 
 
-# ---------------------------------------------------------------------------
-# Scenarios
-# ---------------------------------------------------------------------------
-
-
-async def new_case(client: SeedClient, owner: str, rng: random.Random, title: str, preset: str, narrative: str,
-                   stats: InvStats, **extra) -> tuple[dict, str]:
+async def new_case(client: SeedClient, owner: str, rng: random.Random, title: str, narrative: str,
+                   stats: InvStats, case_type: str = "general", **extra) -> tuple[dict, str]:
     others = [a for a in ANALYSTS if a != owner]
+    if not stats.case_types:
+        case_type, extra = "general", {k: v for k, v in extra.items() if k != "fields"}
     case = (await client.request(
         "POST", "/api/investigations", owner,
-        json={"title": title, "kind_preset": preset, "assignee_email": rng.choice(others),
+        json={"title": title, "case_type": case_type, "assignee_email": rng.choice(others),
               "description": f"{narrative}\n\n{MARKER}", **extra},
     )).json()
     url = f"/api/investigations/{case['id']}"
@@ -594,199 +626,253 @@ async def new_case(client: SeedClient, owner: str, rng: random.Random, title: st
     return case, url
 
 
-async def seed_credito(client, owner, agent, rng, stats, log) -> dict:
+async def graph_nodes(client: SeedClient, url: str, owner: str) -> dict[str, dict]:
+    """The case's unified nodes by uid."""
+    graph = (await client.request("GET", f"{url}/graph", owner)).json()
+    return {n["uid"]: n for n in graph["nodes"]}
+
+
+def uids_of(nodes: dict[str, dict], node_ids: list[str]) -> list[str]:
+    """The unified ids of nodes whose source id is in ``node_ids`` (``id@source`` without identity keys)."""
+    return [u for u in nodes if u.split("@")[0] in node_ids]
+
+
+# ---------------------------------------------------------------------------
+# Scenarios
+# ---------------------------------------------------------------------------
+
+
+async def seed_mule_network(client, owner, agent, rng, stats, log) -> dict:
+    fixture = json.loads(FLOW_CHAIN.read_text(encoding="utf-8"))
     case, url = await new_case(
-        client, owner, rng, "Crédito · grupo econômico Alfa", "credito",
-        "Pedido de limite consolidado para seis empresas com sócios em comum; conferir exposição e garantias.", stats,
-        tags=["crédito", "grupo econômico"],
+        client, owner, rng, "Mule network · phishing proceeds",
+        "A customer lost 4,870 to a fake bank call; follow the funds through the receiving accounts.", stats,
+        case_type="fraud_ring", fields={"alert_id": "ALRT-2026-0412", "amount_at_risk": 4870, "channel": "transfer"},
+        occurred_at=datetime(2026, 9, 9, 14, 2).isoformat(), tags=["flow trace"],
     )
-    empresas, spec, garantias, enrichment, companies = credito_bundle(rng)
-    rows = [await upload(client, url, owner, "empresas.csv", empresas, "QSA do grupo")]
-    await client.request("PATCH", f"{url}/items/{rows[0]['id']}", owner, json={"mapping": {"as": "graph", "spec": spec}})
-    gar = await upload(client, url, owner, "garantias.csv", garantias, "Garantias por CNPJ")
-    await client.request("PATCH", f"{url}/items/{gar['id']}", owner, json={"mapping": {"as": "enrichment", "spec": enrichment}})
-    stats.items["table"] += 2
-    stats.versions += 2
-    await add_item(
-        owner_client(client, owner), url, stats, kind="query", subkind="sql", title="Faturamento por CNPJ (12 meses)",
-        description="Roda no Databricks quando o context de faturamento estiver ligado ao caso.",
-        query={"text": "SELECT cnpj, sum(valor) AS faturamento FROM fin.faturamento WHERE cnpj IN (:cnpjs) AND dt >= :de GROUP BY cnpj",
-               "language": "sql", "output": "table",
-               "parameters": [{"id": "cnpjs", "label": "CNPJs", "required": True}, {"id": "de", "label": "Desde", "default": "2025-01-01"}]},
-    )
-    await annotate(owner_client(client, owner), url, stats, "group", companies[:3], {"name": "Grupo Alfa", "color": 2})
-    await annotate(owner_client(client, owner), url, stats, "tag", companies[3:4], {"tag": "fora do grupo"})
-    await add_item(owner_client(client, owner), url, stats, kind="note", subkind="free", title="Pendências",
-                   content="Pedir balanço auditado da Alfa Participações; conferir se a garantia rural está registrada.")
-    await agent.request("PUT", f"{url}/brief", json={"text": (
-        "# Exposição consolidada\n\nSeis empresas, três sócios em comum (QSA). Garantias cobrem ~60% do limite pedido; "
-        "a Alfa Logística repete o sócio-administrador da holding.\n\n_Rascunho do agente; revisar antes de decidir._")})
-    stats.items["document"] += 1
-    stats.versions += 1
-    await finish(client, url, owner, "analysis", stats, "")
-    return case
-
-
-def owner_client(client: SeedClient, owner: str):
-    class _Owner:
-        async def request(self, method, path, json=None, **kwargs):
-            return await client.request(method, path, owner, json=json, **kwargs)
-
-    return _Owner()
-
-
-async def seed_garantia(client, owner, agent, rng, stats, log) -> dict:
-    case, url = await new_case(
-        client, owner, rng, "Fuga de garantia · contrato 2026/0042", "garantia",
-        "Devedor alienou bens dados em garantia depois do vencimento; identificar cessionários e caminhos.", stats,
-        occurred_at=datetime(2026, 2, 1).isoformat(), tags=["garantia", "alienação"],
-    )
-    data, spec, who = garantia_bundle(rng)
-    row = await upload(client, url, owner, "alienacoes.csv", data, "Alienações do devedor (90 dias)")
-    await client.request("PATCH", f"{url}/items/{row['id']}", owner, json={"mapping": {"as": "graph", "spec": spec}})
-    stats.items["table"] += 1
-    stats.versions += 1
     me = owner_client(client, owner)
-    hyp = await annotate(me, url, stats, "hypothesis", [], {"text": "Os bens foram transferidos a interpostas pessoas após o vencimento"})
-    await annotate(me, url, stats, "hypothesis_status", [hyp["id"]], {"status": "supported"}, "datas das alienações")
-    await annotate(me, url, stats, "role", who["devedor"], {"role": "devedor"})
-    for uid in who["adquirentes"]:
-        await annotate(agent, url, stats, "role", [uid], {"role": "cessionário"}, "adquiriu bem do devedor após o vencimento")
-    await annotate(agent, url, stats, "same_as", who["adquirentes"][:2], {"score": 0.72}, "mesmo endereço no cadastro")
-    paths = (await client.request("POST", f"{url}/analysis/paths", owner,
-                                  json={"source": who["devedor"][0], "target": who["adquirentes"][3], "mode": "k-shortest", "k": 3})).json()
-    path_item = await add_item(me, url, stats, kind="table", subkind="result", title="Caminhos devedor → adquirente",
-                               content_json=paths, provenance={"tool": "paths", "params": paths["method"]})
-    await add_item(me, url, stats, kind="note", subkind="anchored", title="Nota no caminho",
-                   content="O caminho de dois saltos passa pelo primeiro adquirente: pedir contrato de compra e venda.",
-                   anchor={"entity_ids": who["adquirentes"][:1], "item_id": path_item["id"]})
-    await pin(me, url, stats, path_item["id"], "Caminhos no prazo")
-    await finish(client, url, owner, "decided:comunicar", stats,
-                 "Alienações sucessivas após o vencimento, sem contrapartida financeira; medida cautelar e comunicação.")
-    return case
-
-
-async def seed_pix_med(client, owner, agent, rng, stats, log) -> dict:
-    case, url = await new_case(
-        client, owner, rng, "Golpe Pix · falsa central de atendimento", "pix_med",
-        "Vítima transferiu R$ 4.870 após ligação de falsa central; MED aberto; rastrear até as saídas.", stats,
-        alert_at=(datetime.now() - timedelta(days=14)).isoformat(), tags=["golpe pix", "MED"],
+    snapshot = await add_item(
+        me, url, stats, kind="graph", subkind="snapshot", title="Transfers around the victim account",
+        description="Exported from the transaction monitoring system.",
+        content_json={"nodes": fixture["nodes"], "edges": fixture["edges"], "edge_semantics": fixture["edge_semantics"]},
     )
-    files, graph, late = golpe_pix_bundle(None)
-    source = await upload_graph(client, url, owner, files, PRESETS["simba_v31"], "Extrato SIMBA · CASO1")
-    for name, code, label in late:  # saques and other 9999 counterparts: one node per transaction
-        node = f"desconhecido:{code}@{source['id']}"
-        getattr(graph, name).append(node)
-        graph.names[node] = label
-    stats.items["table"] += len(files)
-    stats.versions += len(files)
-    qsa = _fixture("qsa-mini", "qsa-mini.csv")
-    if qsa:
-        row = await upload(client, url, owner, "qsa-mini.csv", qsa, "QSA Receita (mini)")
-        await client.request("PATCH", f"{url}/items/{row['id']}", owner, json={"mapping": {"as": "enrichment", "spec": {
-            "name": "QSA", "input": {"delimiter": ";", "header": False, "encoding": "latin-1",
-                                      "columns": ["CNPJ_BASICO", "IDENTIFICADOR_SOCIO", "NOME_SOCIO", "CNPJ_CPF_SOCIO", "QUALIFICACAO_SOCIO",
-                                                  "DATA_ENTRADA_SOCIEDADE", "PAIS", "REPRESENTANTE_LEGAL", "NOME_REPRESENTANTE",
-                                                  "QUALIFICACAO_REPRESENTANTE", "FAIXA_ETARIA"]},
-            "key_column": "CNPJ_BASICO", "columns": ["NOME_SOCIO", "CNPJ_CPF_SOCIO", "QUALIFICACAO_SOCIO"],
-            "match_node_types": ["Pessoa"], "match_source": {"kind": "prop", "name": "cpf_cnpj"}, "key_digits": 8}}})
-        stats.items["table"] += 1
-        stats.versions += 1
-    me = owner_client(client, owner)
-    # Follow the money on the server (FIFO, the T5 numbers) and keep the run as evidence.
+    source = snapshot["id"]
+    uid = lambda node_id: f"{node_id}@{source}"  # noqa: E731 - no identity keys: per-source ids
+    # Follow the funds on the server (FIFO, the T5 numbers) and keep the run as evidence.
     trace = (await client.request(
         "POST", f"{url}/analysis/trace", owner,
-        json={"seed_node": graph.victims[0], "direction": "forward", "allocation": "fifo",
-              "max_hops": graph.hops, "max_dwell_hours": 24,
-              "stop_nodes": graph.exits},  # SIMBA node types never match the default stops
+        json={"seed_edge_ids": [f"{source}:{e}" for e in fixture["seed"]["edgeIds"]], "direction": "forward",
+              "allocation": "fifo", "max_hops": fixture["params"]["maxHops"], "max_dwell_hours": 24,
+              "min_amount": fixture["params"]["minAmount"], "stop_types": fixture["params"]["stopTypes"]},
     )).json()
-    trace_item = await add_item(me, url, stats, kind="table", subkind="result", title="Rastreio #1 · FIFO",
+    trace_item = await add_item(me, url, stats, kind="table", subkind="result", title="Trace #1 · FIFO",
                                 content_json=trace, provenance={"tool": "trace", "params": trace["method"]})
-    await pin(me, url, stats, trace_item["id"], "Rastreio FIFO")
+    await pin(me, url, stats, trace_item["id"], "FIFO trace")
     stats.flagship_trace = f"{trace_item['id']} coverage {trace['coverage']}"
-    typ = (await client.request("POST", f"{url}/analysis/typologies", owner, json={"typologies": ["passagem"]})).json()
-    [passagem] = typ["typologies"]
-    if passagem["hits"]:
-        await annotate(agent, url, stats, "typology", [h["nodeId"] for h in passagem["hits"]],
-                       {"typology": "passagem", "norm_ref": passagem["normRef"], "label": passagem["label"]},
-                       "recebe e repassa em minutos")
-    for uid in graph.victims:
-        await annotate(me, url, stats, "role", [uid], {"role": "vítima"})
-    for uid in graph.mules[:3]:
-        await annotate(agent, url, stats, "role", [uid], {"role": "mula"}, "repassa o valor recebido no mesmo dia")
-    for uid in graph.exits:
-        await annotate(me, url, stats, "role", [uid], {"role": "saída"})
-    await add_item(agent, url, stats, kind="document", subkind="markdown", title="KYC das contas de passagem",
-                   content="# KYC\n\nTitular 4471-0: renda declarada 1 salário mínimo; abertura há 40 dias.\n")
-    await agent.request("PUT", f"{url}/brief", json={"text": (
-        f"# Golpe Pix · falsa central\n\nO rastreio FIFO ({trace['coverage']:.0%} de cobertura) chega a saque em espécie, "
-        "exchange e casa de apostas em 3 camadas. Conta 4471-0 é de passagem (CC 4.001 IV-k, sugerido).")})
+    await annotate(me, url, stats, "role", [uid("0001-9")], {"role": "victim"})
+    for node in ("4471-0", "8812-7"):
+        await annotate(agent, url, stats, "role", [uid(node)], {"role": "mule"}, "receives and forwards within minutes")
+    hyp = await annotate(me, url, stats, "hypothesis", [], {"text": "4471-0 is a pass-through account"})
+    await annotate(agent, url, stats, "hypothesis_status", [hyp["id"]], {"status": "supported"}, "the FIFO trace")
+    await brief(agent, url, stats,
+                f"# Mule network\n\nThe FIFO trace ({trace['coverage']:.0%} coverage) reaches a cash withdrawal, an "
+                "exchange and a betting site in three layers, minutes apart. 4471-0 receives the victim's transfer "
+                "and splits it at once.\n\nOpen: who controls 8812-7, which also had an opening balance.")
+    await add_item(me, url, stats, kind="note", subkind="free", title="Next step",
+                   content="Ask the receiving bank for 90 days of statements on 4471-0 and 8812-7.")
+    await finish(client, url, owner, "analysis", stats)
+    if stats.case_types:  # a decision on two accounts that does not close the case
+        await decide(client, url, owner, stats, "monitor", "Keep the two receiving accounts under watch while the bank answers.",
+                     targets=[uid("4471-0"), uid("8812-7")],
+                     tasks=[{"action": "notify_partner"},
+                            {"title": "Trace the next layer when the bank answers", "assignee_kind": "agent",
+                             "agent_name": "Analysis agent (seed)"}])
+        # The agent proposes a follow-up of its own; a person confirms it in the case.
+        await annotate(agent, url, stats, "task", [uid("8812-7")],
+                       {"title": "Ask who opened 8812-7", "assignee": owner}, "8812-7 had an opening balance")
+    stats.flagship = case["id"]
+    return case
+
+
+async def seed_fraud_ring(client, owner, agent, rng, stats, log) -> dict:
+    case, url = await new_case(
+        client, owner, rng, "Fraud ring · shared devices at sign-up",
+        "New accounts opened in one week reuse phones, devices and cards; find the ring and the real customers.", stats,
+        case_type="fraud_ring", fields={"alert_id": "ALRT-2026-0388", "amount_at_risk": 18_200, "channel": "card"},
+        tags=["sign-up"],
+    )
+    shared: dict = {}
+    data, spec, ring = signups_bundle(rng, shared_out=shared)
+    await upload(client, url, owner, "signups.csv", data, stats, "Sign-ups of the week", {"as": "graph", "spec": spec})
+    me = owner_client(client, owner)
+    members = uids_of(await graph_nodes(client, url, owner), ring)
+    await annotate(me, url, stats, "group", members, {"name": "Device ring", "color": 3})
+    for member in members[:3]:
+        await annotate(agent, url, stats, "role", [member], {"role": "ring member"}, "shares 3+ attributes with the ring")
+    await annotate(me, url, stats, "tag", members[3:4], {"tag": "needs KYC"})
+    await annotate(me, url, stats, "hypothesis", [], {"text": "One operator controls the ring's five accounts"})
+    await add_item(me, url, stats, kind="note", subkind="free", title="Pending",
+                   content="Check whether the shared card was reported stolen.")
+    await finish(client, url, owner, "open", stats)
+    await seed_ring_follow_up(client, owner, rng, stats, shared)
+    return case
+
+
+async def seed_ring_follow_up(client, owner, rng, stats, shared: dict) -> dict:
+    """06 P7: a second fraud_ring case whose refund requests reuse the ring's phone,
+    device and card: selecting them shows "Seen in 1 other case"."""
+    case, url = await new_case(
+        client, owner, rng, "Fraud ring · refund requests",
+        "Refund requests from three new accounts; the phone and the device look familiar.", stats,
+        case_type="fraud_ring", fields={"alert_id": "ALRT-2026-0431", "amount_at_risk": 2_150, "channel": "card"},
+        tags=["refunds"],
+    )
+    cols = ["phone", "device_id", "card"]
+    rows = [[f"C{rng.randint(10**5, 10**6 - 1)}", _name(rng), *(shared[c] for c in cols)] for _ in range(3)]
+    nodes = [{"key": "customer", "type": "Customer", "from": "t", "id": {"col": "t.customer_id", "normalize": "lower"},
+              "props": {"name": "t.name"}}]
+    edges = []
+    for col in cols:
+        node_type, how = SIGNUP_ATTRS[col]
+        nodes.append({"key": col, "type": node_type, "from": "t", "id": {"col": f"t.{col}", "normalize": how},
+                      "props": {"value": f"t.{col}"}})
+        edges.append({"from": "t", "type": f"USES_{node_type.upper()}", "endpoints": {"self": "customer", "other": col}})
+    await upload(client, url, owner, "refunds.csv", _csv(["customer_id", "name", *cols], rows), stats,
+                 "Refund requests", {"as": "graph", "spec": _spec("Refund requests", nodes, edges)})
+    await finish(client, url, owner, "open", stats)
+    return case
+
+
+async def seed_credit_review(client, owner, agent, rng, stats, log) -> dict:
+    case, url = await new_case(
+        client, owner, rng, "Credit review · Alpha group",
+        "Consolidated limit request for six companies with partners in common; check the exposure and the guarantees.",
+        stats, case_type="credit_review", fields={"requested_limit": 2_500_000, "rating": "B"}, tags=["economic group"],
+    )
+    data, spec, guarantees, enrichment = group_bundle(rng)
+    await upload(client, url, owner, "companies.csv", data, stats, "Companies and partners", {"as": "graph", "spec": spec})
+    await upload(client, url, owner, "guarantees.csv", guarantees, stats, "Guarantees by company",
+                 {"as": "enrichment", "spec": enrichment})
+    me = owner_client(client, owner)
+    await add_item(
+        me, url, stats, kind="query", subkind="sql", title="Revenue by company (12 months)",
+        description="Runs on the warehouse once the revenue context is linked to the case.",
+        query={"text": "SELECT registry_id, sum(amount) AS revenue FROM fin.revenue WHERE registry_id IN (:ids) AND dt >= :since GROUP BY registry_id",
+               "language": "sql", "output": "table",
+               "parameters": [{"id": "ids", "label": "Registry ids", "required": True}, {"id": "since", "label": "Since", "default": "2025-01-01"}]},
+    )
+    nodes = await graph_nodes(client, url, owner)
+    group = [u for u, n in nodes.items() if n["type"] == "Company" and "Alpha" in (n["properties"].get("name") or "")]
+    await annotate(me, url, stats, "group", group, {"name": "Alpha group", "color": 2})
+    others = [u for u, n in nodes.items() if n["type"] == "Company" and u not in group]
+    await annotate(me, url, stats, "tag", others[:1], {"tag": "outside the group"})
+    people = [u for u, n in nodes.items() if n["type"] == "Person"]
+    if len(people) >= 2:
+        await annotate(agent, url, stats, "same_as", people[:2], {"score": 0.86}, "same director name in two filings")
+    await brief(agent, url, stats,
+                "# Alpha group\n\nFour of the six companies share two directors; Beta Trading and Gamma Retail have "
+                "one partner each in common with the group. Guarantees cover four companies.\n\nOpen: audited "
+                "statements for Alpha Holdings; whether the property guarantee is registered.")
+    await finish(client, url, owner, "analysis", stats)
+    if stats.case_types:  # documents first; the approval then waits for a second person
+        await decide(client, url, owner, stats, "request_documents", "Audited statements of Alpha Holdings are missing.")
+        await decide(client, url, owner, stats, "approve", "Exposure within limits once the guarantees are registered.",
+                     targets=group[:2])
+    return case
+
+
+async def seed_insider(client, owner, agent, rng, stats, log) -> dict:
+    case, url = await new_case(
+        client, owner, rng, "Insider data access · finance share",
+        "An employee read gigabytes from the finance share at night in the days before resigning.", stats,
+        case_type="insider_data_leak", fields={"systems": "finance-share"}, tags=["data access"],
+    )
+    data, spec, insider = access_bundle(rng)
+    await upload(client, url, owner, "access_log.csv", data, stats, "Access log · September",
+                 {"as": "graph", "spec": spec})
+    me = owner_client(client, owner)
+    who = uids_of(await graph_nodes(client, url, owner), [insider])
+    if who:
+        await annotate(agent, url, stats, "role", who[:1], {"role": "insider"}, "night reads far above peers")
+    await annotate(me, url, stats, "hypothesis", [], {"text": "The reads were copied to a personal device"})
+    await annotate(me, url, stats, "hypothesis", [], {"text": "The reads were a sanctioned year-end export"})
+    await add_item(me, url, stats, kind="note", subkind="free", title="Ask IT",
+                   content="USB and cloud-upload logs for the same nights.")
+    if stats.case_types:  # contain while investigating (does not close the case) …
+        await decide(client, url, owner, stats, "contain", "Access suspended while the logs are reviewed.", targets=who[:1],
+                     tasks=[{"action": "revoke_access"}, {"action": "preserve_evidence"}])
+    await finish(client, url, owner, "closed:disciplinary", stats)  # … then a decision that closes it
+    return case
+
+
+async def seed_pix_scam(client, owner, agent, rng, stats, log) -> dict:
+    """06 P5, scenario 1: the SIMBA statements come in through the org's mapping
+    template and the Siscoaf report is a template rendered over the case."""
+    if not stats.case_types:
+        return await seed_extra(client, owner, agent, rng, stats, log, 0)
+    case, url = await new_case(
+        client, owner, rng, "Golpe Pix · falsa central (exemplo BR)",
+        "Cliente transferiu 4.870 via Pix após ligação falsa do banco; extratos SIMBA da conta recebedora.", stats,
+        case_type="pix_scam", fields={"valor_golpe": 4870, "protocolo_med": "MED-2026-0912"},
+        occurred_at=datetime(2026, 9, 12, 10, 30).isoformat(),
+    )
+    files = sorted(p for p in BANK_STATEMENTS.iterdir() if p.suffix.upper() == ".TXT")
+    rows = [await upload(client, url, owner, p.name, p.read_bytes(), stats, p.name) for p in files]
+    mapping = json.loads((await client.request("GET", "/api/org/library/simba-bank-statements", owner)).json()["body"])
+    await client.request("PATCH", f"{url}/items/{rows[0]['id']}", owner,
+                         json={"mapping": {**mapping, "extra_item_ids": [r["id"] for r in rows[1:]]}})
+    me = owner_client(client, owner)
+    await pin(me, url, stats, rows[0]["id"], "Extratos SIMBA")
+    nodes = await graph_nodes(client, url, owner)
+    accounts = [u for u, n in nodes.items() if n["type"] == "Account"][:2]
+    for uid_ in accounts[:1]:
+        await annotate(me, url, stats, "role", [uid_], {"role": "conta de passagem"})
+    await client.request("PATCH", url, owner, json={"status": "analysis"})
+    report = (await client.request("POST", f"{url}/reports", owner, json={"template": "siscoaf-cos"})).json()
     stats.items["document"] += 1
     stats.versions += 1
-    await add_item(me, url, stats, kind="note", subkind="free", title="MED",
-                   content="MED aberto pela vítima em D+1; valor parcialmente bloqueado na conta 4471-0.")
-    await finish(client, url, owner, "analysis", stats, "")
+    await pin(me, url, stats, report["id"], "Rascunho COS")
     return case
 
 
-async def seed_sintetica(client, owner, agent, rng, stats, log) -> dict:
-    case, url = await new_case(
-        client, owner, rng, "Fraude sintética · cadastros com dispositivo e telefone em comum", "fraude_sintetica",
-        "Cinco identidades compartilham telefone, e-mail, dispositivo, IP, cartão, terminal ou endereço.", stats,
-        tags=["fraude sintética"],
-    )
-    data, spec, cluster = sintetica_bundle(rng)
-    row = await upload(client, url, owner, "cadastros.csv", data, "Cadastros (KYC)")
-    await client.request("PATCH", f"{url}/items/{row['id']}", owner, json={"mapping": {"as": "graph", "spec": spec}})
-    stats.items["table"] += 1
-    stats.versions += 1
-    me = owner_client(client, owner)
-    await annotate(me, url, stats, "group", cluster, {"name": "Cluster sintético", "color": 5})
-    for uid in cluster[:2]:
-        await annotate(agent, url, stats, "role", [uid], {"role": "identidade sintética"}, "compartilha 3+ atributos com o cluster")
-    await annotate(me, url, stats, "role", cluster[2:3], {"role": "identidade real"})
-    await annotate(me, url, stats, "tag", cluster, {"tag": "vínculo por atributo"})
-    await add_item(me, url, stats, kind="note", subkind="free", title="Próximos passos",
-                   content="Rodar Vínculos por telefone + dispositivo quando a F4 chegar; conferir o terminal compartilhado.")
-    await finish(client, url, owner, "open", stats, "")
+async def seed_extra(client, owner, agent, rng, stats, log, i: int) -> dict:
+    title, narrative, final, case_type, fields = EXTRA_CASES[i % len(EXTRA_CASES)]
+    if i >= len(EXTRA_CASES):
+        title = f"{title} #{i // len(EXTRA_CASES) + 1}"
+    case, url = await new_case(client, owner, rng, title, narrative, stats, case_type=case_type, fields=fields,
+                               tags=["generated"])
+    data, spec, ring = signups_bundle(rng, size=6, ring=3)
+    await upload(client, url, owner, "records.csv", data, stats, "Records", {"as": "graph", "spec": spec})
+    members = uids_of(await graph_nodes(client, url, owner), ring)
+    await annotate(agent, url, stats, "role", members[:1], {"role": "suspect"}, "shares attributes with two others")
+    await annotate(owner_client(client, owner), url, stats, "hypothesis", [], {"text": "The three records belong to one person"})
+    await finish(client, url, owner, final, stats)
     return case
 
 
-async def seed_extra(client, owner, agent, rng, stats, log, index: int) -> dict:
-    title, final = EXTRA_CASES[index % len(EXTRA_CASES)]
-    if index >= len(EXTRA_CASES):
-        title = f"{title} #{index // len(EXTRA_CASES) + 1}"
-    case, url = await new_case(
-        client, owner, rng, title, "pix_med",
-        "Vítimas relatam transferências Pix induzidas por engenharia social; os valores caem numa conta recém-aberta e saem no mesmo dia.",
-        stats, alert_at=(datetime.now() - timedelta(days=rng.randint(1, 60))).isoformat(), tags=["golpe pix"],
-    )
-    files, graph, late = simba_bundle(rng, f"CASO{index + 2}")
-    source = await upload_graph(client, url, owner, files, PRESETS["simba_v31"], f"Extrato SIMBA · CASO{index + 2}")
-    for name, code, label in late:
-        getattr(graph, name).append(f"desconhecido:{code}@{source['id']}")
-    stats.items["table"] += len(files)
-    stats.versions += len(files)
-    me = owner_client(client, owner)
-    for uid in graph.victims[:2]:
-        await annotate(me, url, stats, "role", [uid], {"role": "vítima"})
-    for uid in graph.mules[:2]:
-        await annotate(agent, url, stats, "role", [uid], {"role": "mula"}, "recebe e repassa")
-    hyp = await annotate(me, url, stats, "hypothesis", [], {"text": f"A conta {graph.mules[0].split(':')[-1]} funciona como conta de passagem"})
-    await annotate(agent, url, stats, "hypothesis_status", [hyp["id"]], {"status": "supported"}, "rastreio")
-    await add_item(me, url, stats, kind="note", subkind="free", title="Nota",
-                   content=rng.choice(["Pedir ao banco destinatário o extrato dos últimos 90 dias.",
-                                       "Mesmo IP de abertura em três contas do caso.",
-                                       "Saque em espécie no mesmo dia do crédito, em agência de outra cidade."]))
-    await finish(client, url, owner, final, stats, "Conta de passagem identificada no rastreio; comunicar." if "comunicar" in final else "Sem indícios suficientes.")
-    return case
+async def seed_chargebacks(client: SeedClient, rng: random.Random, stats: InvStats, count: int) -> None:
+    """Small disputes in volume (06 §2b AQ8): one create each, opened over the
+    last three weeks so the queue has urgent and overdue ones."""
+    networks = CASE_TYPES["chargeback_dispute"]["fields"][2]["options"]
+    codes = CASE_TYPES["chargeback_dispute"]["fields"][0]["options"]
+    for k in range(count):
+        ref = f"CB-{rng.randint(10**6, 10**7 - 1)}"
+        opened = datetime.now() - timedelta(hours=rng.randint(1, 21 * 24))
+        await client.request("POST", "/api/investigations", ANALYSTS[k % len(ANALYSTS)], json={
+            "title": f"Chargeback {ref}", "case_type": "chargeback_dispute", "external_ref": ref,
+            "description": f"Dispute received from the network.\n\n{MARKER}", "alert_at": opened.isoformat(),
+            "fields": {"reason_code": rng.choice(codes), "amount": round(rng.uniform(15, 2400), 2),
+                       "network": rng.choice(networks), "network_deadline": (opened + timedelta(days=30)).date().isoformat()},
+        })
+        stats.cases += 1
+        stats.statuses["open"] += 1
 
 
-SCENARIOS = (seed_credito, seed_garantia, seed_pix_med, seed_sintetica)
+SCENARIOS = (seed_mule_network, seed_fraud_ring, seed_credit_review, seed_insider, seed_pix_scam)
 
 
 async def run_seed_investigations(api: str, *, cases: int = 8, seed: int = 42, reset: bool = False,
-                                  ui: str = "http://localhost:3000", log=print) -> InvStats:
+                                  chargebacks: int = 0, ui: str = "http://localhost:3000", log=print) -> InvStats:
     rng = random.Random(seed)
     stats = InvStats()
     client = SeedClient(api)
@@ -802,6 +888,11 @@ async def run_seed_investigations(api: str, *, cases: int = 8, seed: int = 42, r
                 raise SeedError(f"--reset needs {ADMIN_EMAIL} in GRAPH_LAGOON_SUPERUSER_EMAILS.")
             stats.deleted = await reset_seeded(client, log)
             log(f"reset: {stats.deleted} seeded case(s) deleted")
+        if config.get("is_superuser"):
+            log(f"case types: {await seed_case_types(client)} written")
+            stats.case_types = True
+        else:
+            log(f"warning: {ADMIN_EMAIL} is not a superuser; the case types are not written and cases use 'general'.")
         agents: dict[str, Agent] = {}
         for i in range(cases):
             owner = ANALYSTS[i % len(ANALYSTS)]
@@ -811,15 +902,17 @@ async def run_seed_investigations(api: str, *, cases: int = 8, seed: int = 42, r
             else:
                 case = await seed_extra(client, owner, agent, rng, stats, log, i - len(SCENARIOS))
             log(f"  [{i + 1}/{cases}] {case['title']}")
-            if case["kind_preset"] == "pix_med" and stats.flagship is None:
-                stats.flagship = f"{ui.rstrip('/')}/investigations/{case['id']}"
+        if chargebacks and stats.case_types:
+            await seed_chargebacks(client, rng, stats, chargebacks)
+            log(f"  + {chargebacks} chargeback disputes")
         log("")
         log(f"cases: {stats.cases} · " + ", ".join(f"{k}: {v}" for k, v in sorted(stats.statuses.items())))
         log("items: " + ", ".join(f"{k}: {v}" for k, v in sorted(stats.items.items())) + f" · {stats.versions} versions, {stats.pinned} pinned")
         log("annotations: " + ", ".join(f"{k}: {v}" for k, v in sorted(stats.annotations.items())) + f" · {stats.suggested} suggested")
+        log(f"decisions: {stats.decisions}")
         log(f"authored by {'agent tokens' if stats.agent else 'owners'}")
         if stats.flagship:
-            log(f"Pix/MED case (Follow the money): {stats.flagship}")
+            log(f"Mule network (flow trace): {ui.rstrip('/')}/investigations/{stats.flagship}")
             log(f"  trace {stats.flagship_trace}")
         log(f"log in as {ANALYSTS[0]} (owner) or {ADMIN_EMAIL} (superuser, sees all)")
         return stats
@@ -833,6 +926,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cases", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--reset", action="store_true", help="delete previously seeded cases first (superuser)")
+    parser.add_argument("--chargebacks", type=int, default=300, help="small chargeback disputes for the paged queue")
     parser.add_argument("--ui", default="http://localhost:3000", help="frontend base for the printed links")
     parser.add_argument("--wait", type=float, default=60.0, help="seconds to wait for the API")
     return parser
@@ -843,7 +937,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per request otherwise
     try:
         base = asyncio.run(wait_for_health(args.api, args.wait))
-        asyncio.run(run_seed_investigations(base, cases=args.cases, seed=args.seed, reset=args.reset, ui=args.ui))
+        asyncio.run(run_seed_investigations(base, cases=args.cases, seed=args.seed, reset=args.reset,
+                                            chargebacks=args.chargebacks, ui=args.ui))
     except SeedError as exc:
         print(f"seed failed: {exc}", file=sys.stderr)
         return 1

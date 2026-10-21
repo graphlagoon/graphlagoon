@@ -49,13 +49,13 @@ Usage with dynamic header provider (token refresh):
     from fastapi import FastAPI
     from graphlagoon import create_mountable_app, HeaderProvider
 
-    # Provider retorna o token (str), não o dict de headers
+    # The provider returns the token (str), not the headers dict
     async def get_fresh_token() -> str:
         return await my_token_service.get_token()
 
     app = FastAPI()
     app.mount("/graphlagoon", create_mountable_app(
-        header_provider=get_fresh_token,  # Token é convertido para Authorization: Bearer
+        header_provider=get_fresh_token,  # The token becomes Authorization: Bearer
         databricks_catalog="my_catalog",
         databricks_schema="my_schema",
     ))

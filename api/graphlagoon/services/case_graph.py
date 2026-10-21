@@ -11,6 +11,7 @@ property; ``node_type`` for a type clash) only when there are any.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Optional
 from uuid import UUID
@@ -18,15 +19,11 @@ from uuid import UUID
 from graphlagoon.services import cases as service
 from graphlagoon.services.trace import edge_value, semantics_for
 
+logger = logging.getLogger(__name__)
 
-_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
-_ADDRESS_WORDS = {
-    "r": "rua", "av": "avenida", "al": "alameda", "tv": "travessa", "apto": "ap", "apartamento": "ap",
-    "bl": "bloco", "cj": "conj", "conjunto": "conj",
-    "n": "", "no": "", "numero": "", "de": "", "da": "", "do": "", "das": "", "dos": "",
-}
+
 # Normalizers that make a node id an entity key (03 §2.1, 05 §4b); the rest only clean it.
-KEY_NORMALIZERS = ("cpf_cnpj", "account", "phone", "email", "device_id", "ip", "pix_key", "card", "terminal_id", "address")
+KEY_NORMALIZERS = ("digits", "account", "phone", "email", "device_id", "ip", "card", "terminal_id", "address")
 
 
 def _strip_accents(text: str) -> str:
@@ -35,20 +32,10 @@ def _strip_accents(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
 
 
-def _cpf_cnpj(raw: str) -> Optional[str]:
-    if re.search(r"[*xX]", raw):  # a masked document is never a key
+def _digits(raw: str) -> Optional[str]:
+    if "*" in raw:  # a redacted value (***-**-1120) is never a key
         return None
-    digits = re.sub(r"\D", "", raw)
-    if not digits or len(digits) > 14:
-        return None
-    return digits.zfill(11 if len(digits) <= 11 else 14)
-
-
-def _phone(raw: str) -> Optional[str]:
-    digits = re.sub(r"\D", "", raw)
-    if len(digits) > 11 and digits.startswith("55"):
-        digits = digits[2:]
-    return digits or None
+    return re.sub(r"\D", "", raw) or None
 
 
 def _normalize(value: Any, how: str, pattern: Optional[str] = None) -> Optional[str]:
@@ -59,13 +46,13 @@ def _normalize(value: Any, how: str, pattern: Optional[str] = None) -> Optional[
     raw = str(value).strip()
     if not raw:
         return None
-    if how == "cpf_cnpj":
-        return _cpf_cnpj(raw)
+    if how == "digits":
+        return _digits(raw)
     if how == "account":
         parts = [p.lstrip("0") or "0" for p in re.split(r"\D+", raw) if p]
         return "-".join(parts) or None
     if how == "phone":
-        return _phone(raw)
+        return re.sub(r"\D", "", raw) or None
     if how == "device_id":
         return re.sub(r"[^a-z0-9]", "", raw.lower()) or None
     if how == "ip":
@@ -76,18 +63,6 @@ def _normalize(value: Any, how: str, pattern: Optional[str] = None) -> Optional[
             octets = [int(o) for o in s.split(".")]
             return None if any(o > 255 for o in octets) else ".".join(str(o) for o in octets)
         return s.lower()
-    if how == "pix_key":
-        if "@" in raw:
-            return f"email:{raw.lower()}"
-        if _UUID.match(raw):
-            return f"evp:{raw.lower()}"
-        if raw.startswith("+"):
-            phone = _phone(raw)
-            return f"phone:{phone}" if phone else None
-        doc = _cpf_cnpj(raw)
-        if not doc:
-            return None
-        return f"cpf:{doc}" if len(doc) == 11 else f"cnpj:{doc}"
     if how == "card":
         s = re.sub(r"[\s-]", "", raw)
         first = re.match(r"^\d+", s)
@@ -99,16 +74,13 @@ def _normalize(value: Any, how: str, pattern: Optional[str] = None) -> Optional[
         s = re.sub(r"[^A-Z0-9]", "", raw.upper())
         return re.sub(r"(^|\D)0+(?=\d)", r"\1", s) or None
     if how == "address":
-        words = re.sub(r"[^a-z0-9]+", " ", _strip_accents(raw).lower()).split()
-        words = [w for w in (_ADDRESS_WORDS.get(w, w) for w in words) if w]
-        return " ".join(words) or None
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", _strip_accents(raw).lower()).split()) or None
     if how == "regex":
         if not pattern:
             return None
-        try:
-            m = re.search(pattern, raw)
-        except re.error:
-            return None
+        from graphlagoon.utils.safe_regex import search
+
+        m = search(pattern, raw)  # vetted pattern, bounded id: never backtracks for minutes
         if not m:
             return None
         value = (m.group(1) if m.lastindex else m.group(0)).strip().lower()
@@ -212,10 +184,9 @@ def unify(
     for the same node type; ``aliases``: accepted matches as ``(keep, drop)``;
     ``edge_overrides``: the case's edge semantics by relationship type (``*`` = any).
     A ``unified`` source (a derived item) carries unified ids already.
-    Returns nodes, edges and the account values to mask."""
+    Returns nodes and edges."""
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
-    secrets: set[str] = set()
     for source_id, context_id, keys, snapshot, semantics, *rest in parts:
         unified = bool(rest and rest[0])
         by_type = {k.get("node_type"): k for k in [*(keys or []), *(overrides or [])]}
@@ -230,10 +201,6 @@ def unify(
                 normalized = _normalize(raw, key.get("normalize", "none"), key.get("pattern"))
                 if normalized is not None:
                     keyed = f"{key['entity']}:{normalized}"
-                    if key.get("normalize") == "account":
-                        secrets.update(
-                            s for s in (normalized, str(raw)) if len(re.sub(r"\D", "", s)) >= 5
-                        )
             uid = node_id if unified else (keyed or f"{node_id}@{context_id}")
             uid_of[node_id] = uid
             origin = {"source_id": source_id, "node_id": node_id}
@@ -255,7 +222,7 @@ def unify(
                         "t": t,
                     }
                 )
-    graph = {"nodes": list(nodes.values()), "edges": edges, "secrets": frozenset(secrets)}
+    graph = {"nodes": list(nodes.values()), "edges": edges}
     return apply_aliases(graph, aliases or [])
 
 
@@ -344,7 +311,7 @@ def _as_snapshot(payload: Any) -> Optional[dict]:
 
 
 def is_unified_payload(payload: Any) -> bool:
-    """A derived item (Vínculos, a saved selection) stores unified ids: ``{"unified": true}``."""
+    """A derived item (links, a saved selection) stores unified ids: ``{"unified": true}``."""
     return isinstance(payload, dict) and bool(payload.get("unified"))
 
 
@@ -359,13 +326,28 @@ async def _latest_json(session, investigation_id: UUID, item: Any) -> Any:
     return json.loads(data) if data else None
 
 
-async def _mapped_table(session, investigation_id: UUID, item: Any) -> tuple[dict, dict]:
+async def _extras_readable(session, investigation_id: UUID, item: Any, user_email: str, cache: dict) -> bool:
+    """A mapped table also reads the files of ``mapping.extra_item_ids``."""
+    from graphlagoon.services.case_items import item_row, sources_readable
+
+    extras = ((item.mapping or {}).get("extra_item_ids") or []) if item.kind == "table" else []
+    for extra in extras:
+        try:
+            row = await item_row(session, investigation_id, UUID(str(extra)), deleted_ok=True)
+        except (ValueError, service.InvestigationError):
+            continue
+        if not await sources_readable(row, user_email, cache):
+            return False
+    return True
+
+
+async def _mapped_table(session, investigation_id: UUID, item: Any, user_email: str) -> tuple[dict, dict]:
     """Interprets a ``table`` item (plus ``mapping.extra_item_ids``) through its
     file-mapping spec; returns (snapshot, report)."""
     from graphlagoon.config import get_settings
     from graphlagoon.services import file_mapping
     from graphlagoon.services import investigation_storage as storage
-    from graphlagoon.services.case_items import item_row, version_row
+    from graphlagoon.services.case_items import ensure_sources_readable, item_row, version_row
     from graphlagoon.services.datasource.file import to_snapshot
 
     spec = item.mapping["spec"]
@@ -376,6 +358,8 @@ async def _mapped_table(session, investigation_id: UUID, item: Any) -> tuple[dic
     for r in rows:
         if not r.current_version:
             continue
+        # An extra file from a source the caller cannot read keeps the whole mapping out.
+        await ensure_sources_readable(r, user_email)
         name = (r.provenance or {}).get("filename") or r.title
         version = await version_row(session, investigation_id, r, None)
         data = await storage.load(version.blob_key)
@@ -420,7 +404,7 @@ async def item_snapshot(session, inv: Any, item: Any, user_email: str) -> dict:
             {"id": str(exploration.id), "title": exploration.title, "state": exploration.state or {}} if exploration else None
         )
     elif item.kind == "table":
-        out["snapshot"], out["report"] = await _mapped_table(session, inv.id, item)
+        out["snapshot"], out["report"] = await _mapped_table(session, inv.id, item, user_email)
         spec = item.mapping["spec"]
         keys = keys or derived_identity_keys(spec)
         semantics = semantics or EdgeSemantics.model_validate(spec.get("edge_semantics") or {}).model_dump()
@@ -436,29 +420,76 @@ async def item_snapshot(session, inv: Any, item: Any, user_email: str) -> dict:
     return out
 
 
+def _sane_snapshot(snapshot: Any) -> dict:
+    """A snapshot ``unify`` can read: nodes and edges are lists of objects (an
+    item's JSON is whatever was uploaded)."""
+    if snapshot is None:
+        return {}
+    if not isinstance(snapshot, dict):
+        raise ValueError("the content is not a graph snapshot")
+    nodes, edges = snapshot.get("nodes") or [], snapshot.get("edges") or []
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise ValueError("nodes and edges must be lists")
+    keep = lambda rows: [r for r in rows if isinstance(r, dict) and isinstance(r.get("properties") or {}, dict)]  # noqa: E731
+    return {**snapshot, "nodes": keep(nodes), "edges": keep(edges)}
+
+
+def _error_text(exc: Exception) -> str:
+    return exc.message if isinstance(exc, service.InvestigationError) else (str(exc) or type(exc).__name__)[:300]
+
+
+def _unreadable(item: Any, exc: Exception) -> "service.InvestigationError":
+    if isinstance(exc, service.InvestigationError):
+        return exc
+    return service.InvestigationError(422, "ITEM_UNREADABLE", f"“{item.title}” cannot be read as a graph: {_error_text(exc)}")
+
+
+async def item_snapshot_or_error(session, inv: Any, item: Any, user_email: str) -> dict:
+    """``item_snapshot`` for one item, as 422 ``ITEM_UNREADABLE`` when its content is not readable."""
+    try:
+        out = await item_snapshot(session, inv, item, user_email)
+        out["snapshot"] = _sane_snapshot(out["snapshot"]) if out["snapshot"] is not None else None
+        return out
+    except (service.InvestigationError, ValueError, LookupError, TypeError, AttributeError) as exc:
+        raise _unreadable(item, exc) from exc
+
+
 async def case_graph(investigation_id: UUID, user_email: str, item_id: Optional[str] = None) -> dict:
     """The unified graph of the case's graph items the caller may read
     (restricted ones are counted, never read), or a single item when
     ``item_id`` is given. The case's identity keys (``settings.identity_keys``)
-    and its confirmed ``same_as`` annotations apply, as in the browser."""
+    and its confirmed ``same_as`` annotations apply, as in the browser. The full
+    graph, seen by someone who reads every source, refreshes the case's entity
+    presence (``case_entities``, 06 P7)."""
+    from graphlagoon.services import case_entities
     from graphlagoon.services.case_annotations import aliases_of
-    from graphlagoon.services.case_items import ITEMS, _context_readable
+    from graphlagoon.services.case_items import ITEMS, sources_readable
 
-    parts, restricted = [], 0
+    parts, restricted, broken = [], 0, []
     async with service._session() as session:
         inv = await service.load_case(session, investigation_id, user_email)
         overrides = (inv.settings or {}).get("identity_keys") or []
         readable: dict = {}
-        for item in sorted(await service.list_rows(session, ITEMS, investigation_id), key=lambda i: (i.position, i.created_at)):
+        all_items = await service.list_rows(session, ITEMS, investigation_id)
+        for item in sorted(all_items, key=lambda i: (i.position, i.created_at)):
             if not is_graph_item(item) or (item_id is not None and str(item.id) != item_id):
                 continue
-            if item.context_id is not None:
-                if item.context_id not in readable:
-                    readable[item.context_id] = await _context_readable(item.context_id, user_email)
-                if not readable[item.context_id]:
-                    restricted += 1
-                    continue
-            part = await item_snapshot(session, inv, item, user_email)
+            if not await sources_readable(item, user_email, readable) or not await _extras_readable(
+                session, investigation_id, item, user_email, readable
+            ):
+                restricted += 1
+                continue
+            try:
+                part = await item_snapshot(session, inv, item, user_email)
+                snapshot = _sane_snapshot(part["snapshot"])
+            except (service.InvestigationError, ValueError, LookupError, TypeError, AttributeError) as exc:
+                # One unreadable item (bad JSON, a broken mapping) never takes the case's graph down.
+                if item_id is not None:
+                    raise _unreadable(item, exc) from exc
+                logger.warning("case %s: item %s left out of the graph: %s", investigation_id, item.id, exc)
+                broken.append({"item_id": str(item.id), "title": item.title, "error": _error_text(exc)})
+                continue
+            part["snapshot"] = snapshot
             parts.append(
                 (
                     str(item.id),
@@ -472,6 +503,9 @@ async def case_graph(investigation_id: UUID, user_email: str, item_id: Optional[
         aliases = await aliases_of(session, investigation_id)
     graph = unify(parts, overrides, aliases, (inv.settings or {}).get("edge_semantics"))
     graph["restricted_sources"] = restricted
+    graph["broken_sources"] = broken
+    if item_id is None and not restricted and not broken:
+        await case_entities.store(investigation_id, graph, case_entities.stamp_of(all_items, inv.settings, aliases))
     return graph
 
 

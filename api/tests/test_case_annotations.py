@@ -78,7 +78,6 @@ def test_roles_replace_and_validation(env):
         {"kind": "role", "targets": ["a"], "value": {}},
         {"kind": "same_as", "targets": ["a", "a"]},
         {"kind": "hypothesis", "value": {"text": ""}},
-        {"kind": "typology", "targets": ["a"], "value": {}},
         {"kind": "nope"},
     ):
         r = client.post(f"{url}/annotations", json=body, headers=h(OWNER))
@@ -131,8 +130,6 @@ def test_agent_suggestions_follow_the_case_settings(env):
     client.patch(url, json={"settings": {"agent_suggest_kinds": ["group"]}}, headers=h(OWNER))
     assert _post(client, url, agent, kind="group", targets=["Pessoa:3"], value={"name": "B"})["status"] == "suggested"
     assert _post(client, url, agent, kind="role", targets=["Pessoa:3"], value={"role": "x"})["status"] == "confirmed"
-    typology = _post(client, url, h(OWNER), kind="typology", targets=["Pessoa:1"], value={"typology": "passagem", "norm_ref": "CC 4.001 IV-k"})
-    assert typology["status"] == "confirmed"
     events = client.get(f"{url}/events", headers=h(OWNER)).json()
-    assert {e["kind"] for e in events} >= {"role.suggested", "role.confirmed", "role.rejected", "group.set", "typology.set"}
+    assert {e["kind"] for e in events} >= {"role.suggested", "role.confirmed", "role.rejected", "group.set"}
     assert all(e["actor_kind"] == "agent" for e in events if e["kind"] == "role.suggested")

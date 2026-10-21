@@ -278,7 +278,7 @@ def create_frontend_router(
         # Starlette's modern signature (request first). The legacy
         # (name, context) form crashes on current Starlette with
         # "unhashable type: 'dict'" — the context dict lands in
-        # jinja's get_template. Pre-existing bug, unmasked by the
+        # jinja's get_template. Pre-existing bug, surfaced by the
         # permissions smoke test (make dev serves the SPA via Vite,
         # so this path went unexercised).
         return templates.TemplateResponse(
@@ -400,6 +400,84 @@ def _prepare_precomputed_graph_storage(settings, *, verbose: bool) -> None:
             "GRAPH_LAGOON_DATABRICKS_VOLUME_PATH) to a Unity Catalog Volume.",
             settings.precomputed_graphs_dir,
         )
+
+
+# ---------------------------------------------------------------------------
+# API docs (OpenAPI + Swagger UI): behind a setting and the same login as the API
+# ---------------------------------------------------------------------------
+
+
+def _package_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("graphlagoon")
+    except PackageNotFoundError:
+        return "0.0.0-dev"
+
+
+def _operation_id(route) -> str:
+    """``cases_create_investigation`` instead of FastAPI's path-derived id, so a
+    client generated from the spec (or a Postman import) reads well."""
+    import re
+
+    tag = re.sub(r"[^a-z0-9]+", "_", route.tags[0].lower()).strip("_") if route.tags else ""
+    return f"{tag}_{route.name}" if tag else route.name
+
+
+def _docs_urls(settings: Settings) -> dict:
+    """FastAPI's docs URLs, or ``None`` for each when ``api_docs_enabled`` is off.
+    Mounted under a prefix they answer at ``{prefix}/docs`` and the UI fetches
+    ``{prefix}/openapi.json`` (FastAPI reads the mount's ``root_path``)."""
+    if settings.api_docs_effective:
+        return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+SECURITY_SCHEMES = {
+    "agentToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A personal agent token (`glt_…`, Agents page of the account menu). It acts with the "
+        "access of the person who created it; a case-scoped token reaches only its cases.",
+    },
+    "forwardedEmail": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Forwarded-Email",
+        "description": "Set by the authenticating proxy (Databricks Apps, an SSO gateway). Clients never send "
+        "it themselves outside dev mode.",
+    },
+}
+
+
+def install_openapi(app: FastAPI) -> None:
+    """Adds the two ways in (``securitySchemes``, so Swagger's Authorize sends a
+    token) and marks the routes agents may not use, from ``mcp/registry`` (one
+    source with the 403 the middleware answers)."""
+    from graphlagoon.mcp.registry import AGENT_EXEMPT_ROUTES, HUMAN_ONLY
+
+    generate = app.openapi
+
+    def openapi() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = generate()
+        schema.setdefault("components", {}).setdefault("securitySchemes", {}).update(SECURITY_SCHEMES)
+        schema["security"] = [{"agentToken": []}, {"forwardedEmail": []}]
+        human_only = {(m.lower(), p): why for (m, p), why in AGENT_EXEMPT_ROUTES.items() if why.startswith(HUMAN_ONLY)}
+        for path, ops in schema.get("paths", {}).items():
+            # create_app serves the API under /graphlagoon; the registry names the bare routes.
+            bare = path[len("/graphlagoon"):] if path.startswith("/graphlagoon/") else path
+            for method, op in ops.items():
+                why = human_only.get((method, bare))
+                if why is None:
+                    continue
+                note = f"**People only**: an agent token gets 403 `AGENT_FORBIDDEN` ({why[len(HUMAN_ONLY):].strip()})."
+                op["description"] = f"{op.get('description', '').strip()}\n\n{note}".strip()
+        return schema
+
+    app.openapi = openapi  # type: ignore[method-assign]
 
 
 def create_mountable_app(
@@ -574,14 +652,19 @@ def create_mountable_app(
         await close_database()
 
     app = FastAPI(
-        description="Graph visualization and exploration tool",
+        title="Graph Lagoon Studio",
+        description="Graph visualization, exploration and investigations",
+        version=_package_version(),
+        generate_unique_id_function=_operation_id,
         lifespan=mountable_lifespan,
+        **_docs_urls(settings),
         # Faster JSON serialization for large graph payloads (Fase 1)
         default_response_class=ORJSONResponse,
     )
 
     # Add exception handlers for better error visibility
     add_exception_handlers(app, show_error_details=settings.show_error_details)
+    install_openapi(app)
 
     # Compress large responses (graph payloads). Benefit shows on real
     # networks; negligible on loopback. minimum_size skips tiny responses.
@@ -749,15 +832,18 @@ def create_app(
 
     app = FastAPI(
         title="Graph Lagoon Studio",
-        description="Graph visualization and exploration tool",
-        version="0.1.0",
+        description="Graph visualization, exploration and investigations",
+        version=_package_version(),
+        generate_unique_id_function=_operation_id,
         lifespan=lifespan,
+        **_docs_urls(settings),
         # Faster JSON serialization for large graph payloads (Fase 1)
         default_response_class=ORJSONResponse,
     )
 
     # Add exception handlers for better error visibility
     add_exception_handlers(app, show_error_details=settings.show_error_details)
+    install_openapi(app)
 
     # Compress large responses (graph payloads). Benefit shows on real
     # networks; negligible on loopback. minimum_size skips tiny responses.

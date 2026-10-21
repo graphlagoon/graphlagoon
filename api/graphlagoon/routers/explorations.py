@@ -40,7 +40,6 @@ from graphlagoon.utils.authz import (
 )
 from graphlagoon.config import get_settings
 from graphlagoon.utils.context_access import get_context_with_access
-from graphlagoon.services.masking import agent_view
 
 logger = logging.getLogger(__name__)
 
@@ -750,7 +749,7 @@ async def get_exploration_snapshot(exploration_id: UUID, request: Request):
             detail="Snapshot file not found (may have been deleted)",
         )
 
-    return agent_view(decompress_snapshot(data))
+    return decompress_snapshot(data)
 
 
 @router.post("/api/explorations/{exploration_id}/share", dependencies=[Depends(forbid_agents)])

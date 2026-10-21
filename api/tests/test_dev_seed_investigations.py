@@ -73,36 +73,63 @@ def in_process(monkeypatch, tmp_path):
 async def test_seeds_the_four_scenarios_on_items_and_annotations_then_resets(in_process):
     store = in_process
     quiet = lambda *_: None  # noqa: E731
-    stats = await run_seed_investigations("http://testserver", cases=6, log=quiet)
+    stats = await run_seed_investigations("http://testserver", cases=6, chargebacks=3, log=quiet)
 
-    seeded = [i for i in store.investigations.values() if MARKER in (i.description or "")]
-    assert len(seeded) == 6 and stats.agent
-    assert {i.kind_preset for i in seeded} >= {"credito", "garantia", "pix_med", "fraude_sintetica"}
-    assert {i.status for i in seeded} == {"open", "analysis", "decided", "archived"}
-    assert {i.decision["outcome"] for i in seeded if i.decision} == {"comunicar", "arquivar"}
+    seeded = [i for i in store.investigations.values() if MARKER in (i.description or "") and i.case_type != "chargeback_dispute"]
+    assert len(seeded) == 7 and stats.agent and stats.case_types  # the fraud ring brings its follow-up case
+    # The dev org's case types are data written by the superuser; every scenario uses one.
+    assert {"fraud_ring", "credit_review", "insider_data_leak", "merchant_review", "chargeback_dispute"} <= set(store.case_types)
+    assert {i.case_type for i in seeded} >= {"fraud_ring", "credit_review", "insider_data_leak", "merchant_review"}
+    credit_case = next(i for i in seeded if i.case_type == "credit_review" and i.title.startswith("Credit review"))
+    assert credit_case.fields == {"requested_limit": 2_500_000.0, "rating": "B"} and credit_case.sla_hours == {"open": 72, "analysis": 168}
+    disputes = [i for i in store.investigations.values() if i.case_type == "chargeback_dispute"]
+    assert len(disputes) == 3 and all(i.external_ref and i.fields["reason_code"] for i in disputes)
+    assert {i.status for i in seeded} == {"open", "analysis", "closed"}
+    # Decisions: a partial one with targets, one waiting for its four-eyes review, closed and reopened cases.
+    decisions = [d for i in seeded for d in i.decisions or []]
+    assert stats.decisions == len(decisions) >= 3 and any(d["targets"] for d in decisions)
+    assert any(d["review"] == "pending" for d in decisions)
+    # The Brazilian example is data: SIMBA statements through the org's mapping, the Siscoaf report from a template.
+    pix = next(i for i in seeded if i.case_type == "pix_scam")
+    assert {d.slug for d in store.org_library.values()} >= {"siscoaf-cos", "simba-bank-statements"}
+    pix_items = [i for i in store.case_items.values() if i.investigation_id == pix.id]
+    assert any((i.provenance or {}).get("template") == "siscoaf-cos" for i in pix_items)
+    assert any(i.kind == "query" and (i.provenance or {}).get("tool") == "case_type" for i in pix_items)
+    assert {n["type"] for n in (await case_graph(pix.id, pix.owner_email))["nodes"]} >= {"Account", "Person"}
+    # 06 P7: the follow-up of the fraud ring shares its device: seen in the other case.
+    from graphlagoon.services.case_entities import find_cases
+
+    follow = next(i for i in store.investigations.values() if i.title.startswith("Fraud ring · refund"))
+    device = next(n["uid"] for n in (await case_graph(follow.id, follow.owner_email))["nodes"] if n["type"] == "Device")
+    first = next(i for i in seeded if i.title.startswith("Fraud ring · shared"))
+    assert {c["title"] for c in await find_cases(device, follow.owner_email)} == {follow.title, first.title}
+    tasks = [a for a in store.case_annotations.values() if a.kind == "task"]
+    assert len(tasks) >= 5 and {t.value["decision_id"] for t in tasks if t.value.get("decision_id")}
+    assert any(t.value["assignee_kind"] == "agent" for t in tasks) and any(t.status == "suggested" for t in tasks)
+    assert all(i.status == "closed" for i in seeded if any(d["closed_at"] for d in i.decisions or []) and i.title.startswith("Insider"))
     assert not store.graph_contexts and not store.explorations  # no context per upload (05 §1)
     items = list(store.case_items.values())
-    assert {i.kind for i in items} == {"table", "query", "document", "note"}
-    assert stats.items["table"] >= 8 and stats.pinned >= 2 and stats.suggested >= 5
+    assert {i.kind for i in items} == {"graph", "table", "query", "document", "note"}
+    assert stats.items["table"] >= 6 and stats.pinned >= 1 and stats.suggested >= 5
     assert {i.author_kind for i in items} == {"human", "agent"}
     annotations = list(store.case_annotations.values())
-    assert {a.kind for a in annotations} >= {"role", "group", "tag", "hypothesis", "hypothesis_status", "same_as", "typology"}
+    assert {a.kind for a in annotations} >= {"role", "group", "tag", "hypothesis", "hypothesis_status", "same_as"}
     assert any(a.status == "suggested" and a.author_kind == "agent" for a in annotations)
 
-    # Every scenario puts a graph on the canvas from a mapped table, no context involved.
+    # Every case puts a graph on the canvas from its own material, no context involved.
     for inv in seeded:
         graph = await case_graph(inv.id, inv.owner_email)
         assert graph["nodes"], inv.title
-    synthetic = next(i for i in seeded if i.kind_preset == "fraude_sintetica")
-    types = {n["type"] for n in (await case_graph(synthetic.id, synthetic.owner_email))["nodes"]}
-    assert types >= {"Pessoa", "Telefone", "Email", "Dispositivo", "IP", "Cartao", "Terminal", "Endereco"}
-    credito = next(i for i in seeded if i.kind_preset == "credito")
-    kinds = {(i.kind, i.subkind) for i in items if i.investigation_id == credito.id}
+    ring = next(i for i in seeded if i.title.startswith("Fraud ring"))
+    types = {n["type"] for n in (await case_graph(ring.id, ring.owner_email))["nodes"]}
+    assert types >= {"Customer", "Phone", "Email", "Device", "IP", "Card", "Address"}
+    credit = next(i for i in seeded if i.title.startswith("Credit review"))
+    kinds = {(i.kind, i.subkind) for i in items if i.investigation_id == credit.id}
     assert {("query", "sql"), ("document", "brief"), ("table", "csv")} <= kinds
 
-    # The flagship Pix/MED case: the T5 golpe-pix scenario as SIMBA, trace saved and pinned.
-    flagship = next(i for i in seeded if i.title.startswith("Golpe Pix · falsa central"))
-    assert stats.flagship.endswith(str(flagship.id))
+    # The flagship mule network: the T5 flow-chain graph, trace saved and pinned with the fixture's numbers.
+    flagship = next(i for i in seeded if i.title.startswith("Mule network"))
+    assert stats.flagship == str(flagship.id)
     trace_item = next(i for i in items if i.investigation_id == flagship.id and (i.provenance or {}).get("tool") == "trace")
     data, version, _ = await case_items.get_content(flagship.id, flagship.owner_email, trace_item.id)
     trace = json.loads(data)
@@ -111,5 +138,17 @@ async def test_seeds_the_four_scenarios_on_items_and_annotations_then_resets(in_
     assert brief["item"]["author_kind"] == "agent" and "FIFO" in brief["text"]
 
     again = await run_seed_investigations("http://testserver", cases=2, reset=True, log=quiet)
-    assert again.deleted == 6
-    assert len([i for i in store.investigations.values() if MARKER in (i.description or "")]) == 2
+    assert again.deleted == 10  # 7 cases (the ring brings its follow-up) + 3 disputes
+    assert len([i for i in store.investigations.values() if MARKER in (i.description or "")]) == 3  # + the ring follow-up
+
+
+@pytest.mark.asyncio
+async def test_twenty_cases_as_documented_seed_without_errors(in_process):
+    """`--cases 20` (the README's usage) reaches the extras whose closing outcomes
+    need four eyes: the approver gets edit access before reviewing."""
+    store = in_process
+    stats = await run_seed_investigations("http://testserver", cases=20, chargebacks=0, log=lambda *_: None)
+    seeded = [i for i in store.investigations.values() if MARKER in (i.description or "")]
+    assert stats.cases == len(seeded) == 21  # + the fraud ring's follow-up case
+    approved = [d for i in seeded for d in i.decisions or [] if d.get("review") == "approved"]
+    assert approved and all(d.get("reviewed_by") != d["decided_by"] for d in approved)

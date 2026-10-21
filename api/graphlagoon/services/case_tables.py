@@ -62,11 +62,20 @@ def to_delimited(columns: list[str], rows: list[list[Any]], delimiter: str = "\t
     return "\n".join(delimiter.join(cell(v) for v in row) for row in [columns, *rows])
 
 
-async def load_table(session, investigation_id: UUID, item: Any, version: Optional[int] = None) -> tuple[list[str], list[list[Any]]]:
+def _contexts(contexts: set) -> dict:
+    """A derived table keeps its sources' contexts, so a case reader without
+    one of them is kept out of it as out of the sources (``source_contexts``)."""
+    return {"context_ids": sorted(str(c) for c in contexts)} if contexts else {}
+
+
+async def load_table(
+    session, investigation_id: UUID, item: Any, user_email: str, version: Optional[int] = None
+) -> tuple[list[str], list[list[Any]]]:
     if item.kind not in ("table", "query"):
         raise _invalid(f"“{item.title}” is not a table")
     if not item.current_version:
         raise _invalid(f"“{item.title}” has no content yet" + (" (run it first)" if item.kind == "query" else ""))
+    await case_items.ensure_sources_readable(item, user_email)
     row = await case_items.version_row(session, investigation_id, item, version)
     data = await storage.load(row.blob_key)
     if data is None:
@@ -135,11 +144,12 @@ async def join_tables(
         raise _invalid("Pick at least two tables to join")
     async with _session() as session:
         await load_case(session, investigation_id, user_email, "write")
-        tables = []
+        tables, contexts = [], set()
         for item_id in item_ids:
             item = await case_items.item_row(session, investigation_id, item_id)
-            cols, rows = await load_table(session, investigation_id, item)
+            cols, rows = await load_table(session, investigation_id, item, user_email)
             tables.append((item.title, cols, rows))
+            contexts |= case_items.source_contexts(item)
     key = key_column or common_key([t[1] for t in tables])
     if not key:
         raise _invalid("The tables share no column; give the key column")
@@ -153,7 +163,12 @@ async def join_tables(
             "kind": "table",
             "subkind": "result",
             "title": title or f"{' + '.join(t[0] for t in tables)} por {key}",
-            "provenance": {"tool": "join", "parent_item_ids": [str(i) for i in item_ids], "key_column": key},
+            "provenance": {
+                "tool": "join",
+                "parent_item_ids": [str(i) for i in item_ids],
+                "key_column": key,
+                **_contexts(contexts),
+            },
         },
         data,
         content_type,
@@ -210,7 +225,7 @@ async def compare_tables(
         sides = []
         for side in (left, right):
             item = await case_items.item_row(session, investigation_id, UUID(str(side["item_id"])))
-            sides.append((item, await load_table(session, investigation_id, item, side.get("version"))))
+            sides.append((item, await load_table(session, investigation_id, item, user_email, side.get("version"))))
     key = key_column or common_key([t[0] for _, t in sides]) or sides[0][1][0][0]
     out = diff_rows(sides[0][1], sides[1][1], key)
     out["left"] = {"item_id": str(sides[0][0].id), "title": sides[0][0].title, "version": left.get("version") or sides[0][0].current_version}
@@ -247,11 +262,11 @@ def graph_mapping(title: str, columns: list[str], options: dict) -> dict:
         "name": title,
         "inputs": {"t": {"match": "*", "delimiter": "\t", "header": True}},
         "nodes": [
-            {"key": "src", "type": options.get("source_type") or "Entidade", "from": "t", "id": ident(src)},
-            {"key": "dst", "type": options.get("target_type") or options.get("source_type") or "Entidade", "from": "t", "id": ident(dst)},
+            {"key": "src", "type": options.get("source_type") or "Entity", "from": "t", "id": ident(src)},
+            {"key": "dst", "type": options.get("target_type") or options.get("source_type") or "Entity", "from": "t", "id": ident(dst)},
         ],
         "edges": [
-            {"from": "t", "type": options.get("edge_type") or "relacionado", "endpoints": {"self": "src", "other": "dst"}, "props": props}
+            {"from": "t", "type": options.get("edge_type") or "related", "endpoints": {"self": "src", "other": "dst"}, "props": props}
         ],
     }
     semantics = {k: options[k] for k in ("amount_prop", "time_prop") if options.get(k)}
@@ -270,7 +285,7 @@ async def promote(investigation_id: UUID, user_email: str, item_ids: list[UUID],
         async with _session() as session:
             await load_case(session, investigation_id, user_email, "write")
             item = await case_items.item_row(session, investigation_id, item_id)
-            columns, rows = await load_table(session, investigation_id, item)
+            columns, rows = await load_table(session, investigation_id, item, user_email)
             run_version = await case_items.version_row(session, investigation_id, item, None) if item.kind == "query" else None
         target_id = item.id
         if item.kind == "query":
@@ -282,7 +297,12 @@ async def promote(investigation_id: UUID, user_email: str, item_ids: list[UUID],
                     "kind": "table",
                     "subkind": "result",
                     "title": f"{item.title} · run {run_version.version}",
-                    "provenance": {"query_item_id": str(item.id), "run_id": str(run_version.id), "tool": "promote"},
+                    "provenance": {
+                        "query_item_id": str(item.id),
+                        "run_id": str(run_version.id),
+                        "tool": "promote",
+                        **_contexts(case_items.source_contexts(item)),
+                    },
                 },
                 data,
                 content_type,

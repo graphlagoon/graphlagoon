@@ -41,33 +41,33 @@ from graphlagoon.services import investigation_storage, snapshot  # noqa: E402
 from graphlagoon.services.blob_storage import LocalBlobStore  # noqa: E402
 
 OWNER = "owner@example.com"
-CPF = "123.456.789-01"
+DOC = "123.456.789-01"
 CSV = (
-    "origem;destino;valor;data\n"
-    f"{CPF};987.654.321-00;1500,00;01/03/2026 10:00\n"
-    "987.654.321-00;111.222.333-44;1400,00;01/03/2026 11:30\n"
+    "source;target;amount;at\n"
+    f"{DOC};987.654.321-00;1500,00;2026-03-01T10:00\n"
+    "987.654.321-00;111.222.333-44;1400,00;2026-03-01T11:30\n"
 ).encode("utf-8")
 MAPPING = {
     "version": 1,
-    "name": "pix csv",
+    "name": "transfers csv",
     "inputs": {"t": {"match": "*.csv", "delimiter": ";", "header": True}},
     "nodes": [
-        {"key": "origem", "type": "Pessoa", "from": "t", "id": {"col": "t.origem", "normalize": "cpf_cnpj"}},
-        {"key": "destino", "type": "Pessoa", "from": "t", "id": {"col": "t.destino", "normalize": "cpf_cnpj"}},
+        {"key": "source", "type": "Person", "from": "t", "id": {"col": "t.source", "normalize": "digits"}},
+        {"key": "target", "type": "Person", "from": "t", "id": {"col": "t.target", "normalize": "digits"}},
     ],
     "edges": [
         {
             "from": "t",
-            "type": "PIX",
-            "endpoints": {"self": "origem", "other": "destino"},
-            "props": {"valor": {"col": "t.valor", "convert": "decimal_br"}, "data": "t.data"},
+            "type": "TRANSFER",
+            "endpoints": {"self": "source", "other": "target"},
+            "props": {"amount": {"col": "t.amount", "convert": "decimal_comma"}, "at": "t.at"},
         }
     ],
-    "edge_semantics": {"amount_prop": "valor", "time_prop": "data"},
+    "edge_semantics": {"amount_prop": "amount", "time_prop": "at"},
 }
 SNAPSHOT = {
-    "nodes": [{"id": "p1", "type": "Pessoa", "properties": {"cpf": CPF}}, {"id": "c1", "type": "Conta", "properties": {}}],
-    "edges": [{"id": "e1", "source": "p1", "target": "c1", "type": "TITULAR", "properties": {}}],
+    "nodes": [{"id": "p1", "type": "Person", "properties": {"national_id": DOC}}, {"id": "c1", "type": "Account", "properties": {}}],
+    "edges": [{"id": "e1", "source": "p1", "target": "c1", "type": "HOLDS", "properties": {}}],
 }
 
 
@@ -127,13 +127,13 @@ def test_csv_upload_with_mapping_reaches_the_canvas_without_a_context(env):
     r = client.patch(f"{url}/items/{item['id']}", json={"mapping": {"as": "graph", "spec": MAPPING}}, headers=h(OWNER))
     assert r.status_code == 200, r.text
     graph = client.get(f"{url}/graph", headers=h(OWNER)).json()
-    assert {n["uid"] for n in graph["nodes"]} == {"Pessoa:12345678901", "Pessoa:98765432100", "Pessoa:11122233344"}
+    assert {n["uid"] for n in graph["nodes"]} == {"Person:12345678901", "Person:98765432100", "Person:11122233344"}
     assert graph["edges"][0]["amount"] == 1500.0 and graph["edges"][0]["t"] is not None
     assert set(store.graph_contexts) == contexts_before and len(store.explorations) == 1  # the fixture's
     part = client.get(f"{url}/items/{item['id']}/snapshot", headers=h(OWNER)).json()
-    assert part["identity_keys"][0]["normalize"] == "cpf_cnpj" and part["report"]["rows_read"] == 2
+    assert part["identity_keys"][0]["normalize"] == "digits" and part["report"]["rows_read"] == 2
     # The queue counts it; the item lists with its canvas flag.
-    assert client.get("/api/investigations", headers=h(OWNER)).json()[0]["item_count"] == 1
+    assert client.get("/api/investigations", headers=h(OWNER)).json()["items"][0]["item_count"] == 1
     [listed] = client.get(f"{url}/items?kind=table", headers=h(OWNER)).json()
     assert listed["mapping"]["as"] == "graph"
 
@@ -142,29 +142,29 @@ def test_versions_are_content_addressed_and_text_is_extracted(env):
     client, url, store, _, root = env
     r = client.post(
         f"{url}/items",
-        json={"kind": "document", "subkind": "markdown", "title": "Resumo", "content": f"# Resumo\nTitular {CPF}"},
+        json={"kind": "document", "subkind": "markdown", "title": "Summary", "content": f"# Summary\nHolder {DOC}"},
         headers=h(OWNER),
     )
     assert r.status_code == 201, r.text
     item = r.json()
     v1 = item["latest"]
-    r = client.post(f"{url}/items/{item['id']}/versions", json={"content": "# Resumo v2"}, headers=h(OWNER))
+    r = client.post(f"{url}/items/{item['id']}/versions", json={"content": "# Summary v2"}, headers=h(OWNER))
     assert r.status_code == 201 and r.json()["current_version"] == 2
     # Same bytes again: a new version row, the same blob (never overwritten).
-    r = client.post(f"{url}/items/{item['id']}/versions", json={"content": f"# Resumo\nTitular {CPF}"}, headers=h(OWNER))
+    r = client.post(f"{url}/items/{item['id']}/versions", json={"content": f"# Summary\nHolder {DOC}"}, headers=h(OWNER))
     versions = client.get(f"{url}/items/{item['id']}/versions", headers=h(OWNER)).json()
     assert [v["version"] for v in versions] == [1, 2, 3] and versions[2]["sha256"] == v1["sha256"]
     blobs = list((root / item["id"] if (root / item["id"]).exists() else root).rglob("*"))
     assert len([b for b in blobs if b.is_file() and not b.name.endswith(".txt")]) == 2
-    assert client.get(f"{url}/items/{item['id']}/content?version=2", headers=h(OWNER)).text == "# Resumo v2"
-    assert client.get(f"{url}/items/{item['id']}/content", headers=h(OWNER)).text.startswith("# Resumo\n")
+    assert client.get(f"{url}/items/{item['id']}/content?version=2", headers=h(OWNER)).text == "# Summary v2"
+    assert client.get(f"{url}/items/{item['id']}/content", headers=h(OWNER)).text.startswith("# Summary\n")
     text = client.get(f"{url}/items/{item['id']}/text", headers=h(OWNER)).json()
-    assert CPF in text["text"] and text["version"]["version"] == 3
+    assert DOC in text["text"] and text["version"]["version"] == 3
 
     # A PDF without pypdf installed has no text (graceful); binary stays binary.
     pdf = client.post(
-        f"{url}/items", content=b"%PDF-1.4 " + CPF.encode(),
-        params={"filename": "extrato.pdf", "kind": "document", "subkind": "upload"},
+        f"{url}/items", content=b"%PDF-1.4 " + DOC.encode(),
+        params={"filename": "statement.pdf", "kind": "document", "subkind": "upload"},
         headers={**h(OWNER), "Content-Type": "application/pdf"},
     ).json()
     assert client.get(f"{url}/items/{pdf['id']}/text", headers=h(OWNER)).json()["text"] is None
@@ -172,15 +172,14 @@ def test_versions_are_content_addressed_and_text_is_extracted(env):
     assert got.headers["content-type"].startswith("application/octet-stream") and "attachment" in got.headers["content-disposition"]
 
     # Search: title match and text match with a snippet.
-    hits = client.get(f"{url}/search?q=titular", headers=h(OWNER)).json()
-    assert [(x["title"], x["match"]) for x in hits] == [("Resumo", "text")] and "Titular" in hits[0]["snippet"]
-    assert [x["match"] for x in client.get(f"{url}/search?q=resumo", headers=h(OWNER)).json()] == ["title"]
+    hits = client.get(f"{url}/search?q=holder", headers=h(OWNER)).json()
+    assert [(x["title"], x["match"]) for x in hits] == [("Summary", "text")] and "Holder" in hits[0]["snippet"]
+    assert [x["match"] for x in client.get(f"{url}/search?q=summary", headers=h(OWNER)).json()] == ["title"]
 
-    # Agents: text masked, bytes refused.
+    # Agents: the same text, bytes refused.
     token = client.post("/api/agent-tokens", json={"name": "claude"}, headers=h(OWNER)).json()["token"]
     agent = {"Authorization": f"Bearer {token}"}
-    masked = client.get(f"{url}/items/{item['id']}/text", headers=agent).json()["text"]
-    assert CPF not in masked and "456.789" in masked
+    assert client.get(f"{url}/items/{item['id']}/text", headers=agent).json()["text"] == text["text"]
     r = client.get(f"{url}/items/{item['id']}/content", headers=agent)
     assert r.status_code == 403 and r.json()["detail"]["error"]["code"] == "AGENT_FORBIDDEN"
     # Soft delete: gone from the list, still in the journal.
@@ -203,7 +202,7 @@ def test_exploration_ref_pin_freezes_and_pins_are_immutable(env):
     assert len(graph["nodes"]) == 2 and graph["nodes"][0]["sources"][0]["source_id"] == item["id"]
     part = client.get(f"{url}/items/{item['id']}/snapshot", headers=h(OWNER)).json()
     assert part["snapshot"] == SNAPSHOT and part["exploration"]["title"] == "Contas"
-    assert client.get("/api/investigations", params={"exploration_id": str(exp.id)}, headers=h(OWNER)).json()
+    assert client.get("/api/investigations", params={"exploration_id": str(exp.id)}, headers=h(OWNER)).json()["items"]
 
     pin = client.post(f"{url}/items/{item['id']}/pin", json={"label": "estado em 10/03"}, headers=h(OWNER))
     assert pin.status_code == 200, pin.text
@@ -235,7 +234,7 @@ def test_agent_items_carry_authorship_and_the_brief_is_one_item(env):
     client.patch(url, json={"settings": {"agent_suggest_kinds": ["note"]}}, headers=h(OWNER))
     suggested = client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": "x"}, headers=agent).json()
     assert suggested["status"] == "suggested"
-    assert client.get("/api/investigations", headers=h(OWNER)).json()[0]["suggested_count"] == 1
+    assert client.get("/api/investigations", headers=h(OWNER)).json()["items"][0]["suggested_count"] == 1
     assert client.post(f"{url}/items/{suggested['id']}/reject", headers=h(OWNER)).json()["status"] == "rejected"
 
     assert client.get(f"{url}/brief", headers=h(OWNER)).json() == {"item": None, "text": ""}

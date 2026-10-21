@@ -33,7 +33,6 @@ def serialize(token: Any) -> dict:
         "name": token.name,
         "scope": token.scope,
         "investigation_ids": [str(i) for i in (token.investigation_ids or [])],
-        "unmasked": bool(token.unmasked),
         "created_at": token.created_at,
         "expires_at": token.expires_at,
         "revoked_at": token.revoked_at,
@@ -60,7 +59,6 @@ async def create_token(
     expires_in_days: int,
     scope: str = "user",
     investigation_ids: Optional[list] = None,
-    unmasked: bool = False,
 ) -> tuple[dict, str]:
     """Returns the stored token and the raw secret (shown to the caller once)."""
     raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
@@ -71,7 +69,6 @@ async def create_token(
         "token_hash": hash_token(raw),
         "scope": scope,
         "investigation_ids": [str(i) for i in (investigation_ids or [])],
-        "unmasked": unmasked,
         "created_at": datetime.now(),
         "expires_at": datetime.now() + timedelta(days=expires_in_days),
     }

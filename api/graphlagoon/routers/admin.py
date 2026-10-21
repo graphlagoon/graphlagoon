@@ -14,6 +14,7 @@ configuration by design (see docs/dev/admin-area.md).
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
@@ -38,14 +39,14 @@ from graphlagoon.models.schemas import (
     OrgLibraryDoc,
     OrgLibraryDocCreate,
     OrgLibraryDocUpdate,
-    OrgVocabulary,
-    OrgVocabularyUpdate,
     TransferOwnershipRequest,
     TransferOwnershipResponse,
 )
+from graphlagoon.models.schemas import CASE_TYPE_SLUG, CaseTypeResponse, CaseTypeSpec
+from graphlagoon.services.cases import InvestigationError
 from graphlagoon.routers.admin_registry import CONFIG_FIELD_KINDS
 from graphlagoon.routers.agent_tokens import require_agents_enabled
-from graphlagoon.services import audit, org_library, org_vocabularies
+from graphlagoon.services import audit, case_types, org_library
 from graphlagoon.services.audit import AuditAction
 from graphlagoon.services.environment import (
     alembic_version,
@@ -515,8 +516,8 @@ async def revoke_any_agent_token(
 
 
 # ---------------------------------------------------------------------------
-# Org library and vocabularies (05 §6): what agents read as org:// resources
-# and the settings drawer offers as suggestions. Everyone reads them through
+# Org library and case types (05 §6, 06 §1): what agents read as org://
+# resources and every case is built from. Everyone reads them through
 # routers/org.py; only superusers write, audited.
 # ---------------------------------------------------------------------------
 
@@ -531,7 +532,10 @@ async def create_library_doc(data: OrgLibraryDocCreate, admin_email: str = Depen
     existing = await org_library.get_doc(data.slug)
     if existing is not None and not existing["seeded"]:
         raise _error(409, "LIBRARY_SLUG_EXISTS", f"'{data.slug}' already exists; PUT it to change it")
-    doc = await org_library.put_doc(data.slug, data.title, data.body, data.kind)
+    try:
+        doc = await org_library.put_doc(data.slug, data.title, data.body, data.kind)
+    except ValueError as exc:
+        raise _error(422, "INVALID_LIBRARY_DOC", str(exc))
     await audit.record(admin_email, AuditAction.LIBRARY_WRITE, resource_type="org_library",
                        resource_id=None, metadata={"slug": data.slug, "kind": data.kind, "created": True})
     return doc
@@ -539,7 +543,10 @@ async def create_library_doc(data: OrgLibraryDocCreate, admin_email: str = Depen
 
 @router.put("/library/{slug}", response_model=OrgLibraryDoc)
 async def put_library_doc(slug: str, data: OrgLibraryDocUpdate, admin_email: str = Depends(require_superuser)):
-    doc = await org_library.put_doc(slug, data.title, data.body, data.kind)
+    try:
+        doc = await org_library.put_doc(slug, data.title, data.body, data.kind)
+    except ValueError as exc:
+        raise _error(422, "INVALID_LIBRARY_DOC", str(exc))
     await audit.record(admin_email, AuditAction.LIBRARY_WRITE, resource_type="org_library",
                        resource_id=None, metadata={"slug": slug, "kind": data.kind})
     return doc
@@ -555,39 +562,31 @@ async def delete_library_doc(slug: str, admin_email: str = Depends(require_super
     return {"status": "deleted", "seeded": slug in org_library.SEED}
 
 
-@router.get("/vocabularies", response_model=list[OrgVocabulary])
-async def list_vocabularies():
-    return await org_vocabularies.list_vocabularies()
-
-
-@router.get("/vocabularies/{kind}", response_model=OrgVocabulary)
-async def get_vocabulary(kind: str):
-    vocabulary = await org_vocabularies.get_vocabulary(kind)
-    if vocabulary is None:
-        raise _error(404, "VOCABULARY_NOT_FOUND", f"Vocabulary kinds: {', '.join(org_vocabularies.KINDS)}")
-    return vocabulary
-
-
-@router.put("/vocabularies/{kind}", response_model=OrgVocabulary)
-async def put_vocabulary(kind: str, data: OrgVocabularyUpdate, admin_email: str = Depends(require_superuser)):
+@router.put("/case-types/{slug}", response_model=CaseTypeResponse)
+async def put_case_type(slug: str, data: CaseTypeSpec, admin_email: str = Depends(require_superuser)):
+    """Creates or replaces a case type; existing cases keep the defaults they copied."""
+    if not re.fullmatch(CASE_TYPE_SLUG, slug):
+        raise _error(422, "INVALID_SLUG", "A case type slug is lowercase letters, digits and _, starting with a letter")
     try:
-        vocabulary = await org_vocabularies.put_vocabulary(kind, [v.model_dump() for v in data.values])
-    except ValueError as exc:
-        raise _error(422, "INVALID_VOCABULARY", str(exc))
-    await audit.record(admin_email, AuditAction.VOCABULARY_WRITE, resource_type="org_vocabulary",
-                       resource_id=None, metadata={"kind": kind, "count": len(vocabulary["values"])})
-    return vocabulary
+        case_type = await case_types.put_case_type(slug, data.model_dump())
+    except InvestigationError as exc:
+        raise _error(exc.status_code, exc.code, exc.message)
+    await audit.record(admin_email, AuditAction.CASE_TYPE_WRITE, resource_type="case_type", resource_id=None,
+                       metadata={"slug": slug, "label": case_type["label"], "outcomes": len(case_type["outcomes"]),
+                                 "fields": len(case_type["fields"])})
+    return case_type
 
 
-@router.delete("/vocabularies/{kind}", response_model=OrgVocabulary)
-async def reset_vocabulary(kind: str, admin_email: str = Depends(require_superuser)):
-    """Drops the override: the built-in suggestions show again."""
-    if kind not in org_vocabularies.KINDS:
-        raise _error(404, "VOCABULARY_NOT_FOUND", f"Vocabulary kinds: {', '.join(org_vocabularies.KINDS)}")
-    await org_vocabularies.delete_vocabulary(kind)
-    await audit.record(admin_email, AuditAction.VOCABULARY_DELETE, resource_type="org_vocabulary",
-                       resource_id=None, metadata={"kind": kind})
-    return await org_vocabularies.get_vocabulary(kind)
+@router.delete("/case-types/{slug}")
+async def delete_case_type(slug: str, admin_email: str = Depends(require_superuser)):
+    """409 while any case uses it; ``general`` is built in."""
+    try:
+        await case_types.delete_case_type(slug)
+    except InvestigationError as exc:
+        raise _error(exc.status_code, exc.code, exc.message)
+    await audit.record(admin_email, AuditAction.CASE_TYPE_DELETE, resource_type="case_type", resource_id=None,
+                       metadata={"slug": slug})
+    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------
