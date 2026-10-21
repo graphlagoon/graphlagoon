@@ -577,6 +577,7 @@ export interface ExplorationState {
   community?: Record<string, unknown>;     // Community detection state (optional for backwards compat)
   similarity?: Record<string, unknown>;    // Similarity system state (optional for backwards compat)
   has_snapshot?: boolean;                  // Whether a file-based graph snapshot exists
+  has_overlay?: boolean;                   // Whether the user's layer (BYOD-2) is saved beside it
 }
 
 export interface Exploration {

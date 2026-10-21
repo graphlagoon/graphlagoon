@@ -122,7 +122,8 @@ function detect() {
 function savedEnrichment(text: string): FileEnrichmentSpec | null {
   for (const s of Object.values(enrichmentTemplates.value)) {
     const header = new Set(parseLine(lines(text)[0] ?? '', s.input?.delimiter ?? ','));
-    if (header.has(s.key_column) && s.columns.every((c) => header.has(c))) return structuredClone(s);
+    const keys = s.edge_key?.by === 'endpoints' ? [s.edge_key.source_column, s.edge_key.target_column] : [s.key_column];
+    if (keys.every((k) => !k || header.has(k)) && s.columns.every((c) => header.has(c))) return structuredClone(s);
   }
   return null;
 }

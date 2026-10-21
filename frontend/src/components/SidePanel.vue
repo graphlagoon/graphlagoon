@@ -75,6 +75,9 @@ const allowedProperties = computed(() => {
   if (!selectedItem.value?.data.properties) return [];
   const kind = selectedItem.value.type;
   const itemProps = selectedItem.value.data.properties;
+  // Values the user's layer (BYOD-2) set: marked, so they never pass for the context's.
+  const data = selectedItem.value.data as { node_id?: string; edge_id?: string };
+  const fromLayer = graphStore.overlayKeysFor(kind, (kind === 'node' ? data.node_id : data.edge_id) ?? '');
   return Object.entries(itemProps)
     .filter(([key]) => graphStore.isPropertyVisible(kind, key))
     .map(([key, value]) => {
@@ -85,6 +88,7 @@ const allowedProperties = computed(() => {
         rawValue: value,
         isJson: jsonResult.isJson,
         parsedJson: jsonResult.isJson ? jsonResult.parsed : null,
+        fromLayer: fromLayer.has(key),
       };
     });
 });
@@ -227,7 +231,10 @@ const metricSplit = computed(() =>
           <!-- Plain value: key-value row -->
           <div v-else class="detail-row">
             <span class="label prop-label" :title="prop.key">{{ prop.key }}</span>
-            <span class="value prop-value-text" :title="String(prop.rawValue)">{{ prop.value }}</span>
+            <span class="value prop-value-text" :title="String(prop.rawValue)">
+              {{ prop.value }}
+              <span v-if="prop.fromLayer" class="layer-chip" title="From your data on this exploration, not from the context" data-testid="prop-from-layer">your data</span>
+            </span>
           </div>
         </template>
       </div>
@@ -404,4 +411,12 @@ const metricSplit = computed(() =>
   font-style: italic;
 }
 
+.layer-chip {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  background: color-mix(in srgb, #f59e0b 18%, transparent);
+  color: var(--text-muted);
+}
 </style>

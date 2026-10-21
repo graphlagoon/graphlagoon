@@ -127,6 +127,7 @@ async function saveExploration() {
   const result = await graphStore.saveExploration(saveTitle.value);
   if (result.success) {
     showSaveModal.value = false;
+    if (result.warning) toast.warning(result.warning, 6000);
     if (caseReturnId.value && graphStore.currentExploration?.id) {
       const caseId = caseReturnId.value;
       try {

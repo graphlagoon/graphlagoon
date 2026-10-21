@@ -1,10 +1,11 @@
 import { ref } from 'vue';
 import type { Component } from 'vue';
 import { useToast } from '@/composables/useToast';
-import { Briefcase, Copy } from 'lucide-vue-next';
+import { Briefcase, CirclePlus, Copy, Eraser, Spline } from 'lucide-vue-next';
 import { useCurrentCaseStore } from '@/stores/currentCase';
 import { useGraphStore } from '@/stores/graph';
 import { useAddToCase } from '@/composables/useAddToCase';
+import { useSketch } from '@/composables/useSketch';
 
 export type ContextMenuTargetType = 'node' | 'edge';
 
@@ -65,7 +66,51 @@ function createBuiltInActions(): ContextMenuAction[] {
         await useAddToCase().addSelection(nodeIds, graph.selectedEdgeIds);
       },
     },
+    // Drawing by hand (BYOD-2): into the exploration's layer or the case's "Manual additions".
+    {
+      id: 'sketch-add-linked-node',
+      label: 'Add a linked node…',
+      icon: CirclePlus,
+      visible: (t: ContextMenuTarget) => t.type === 'node' && sketchAllowed(),
+      handler: (t: ContextMenuTarget) => useSketch().openNodeDialog(t.id),
+    },
+    {
+      id: 'sketch-connect',
+      label: 'Connect to the selected node…',
+      icon: Spline,
+      visible: (t: ContextMenuTarget) => t.type === 'node' && sketchAllowed() && otherSelected(t) !== null,
+      handler: (t: ContextMenuTarget) => useSketch().openEdgeDialog(otherSelected(t)!, t.id),
+    },
+    {
+      id: 'sketch-remove',
+      label: 'Remove from your data',
+      icon: Eraser,
+      visible: (t: ContextMenuTarget) => {
+        if (!sketchAllowed()) return false;
+        const sketch = useSketch();
+        return t.type === 'node' ? sketch.isOwnNode(t.id) : sketch.isOwnEdge(t.id);
+      },
+      handler: async (t: ContextMenuTarget) => {
+        const failed = await (t.type === 'node' ? useSketch().remove([t.id]) : useSketch().remove([], [t.id]));
+        if (failed) error(`Removed here, but not saved: ${failed}`);
+      },
+    },
   ];
+}
+
+/** Whether drawing applies here (a writable exploration or case); false without pinia. */
+function sketchAllowed(): boolean {
+  try {
+    return useSketch().canSketch.value;
+  } catch {
+    return false; // no pinia (unit tests of the menu alone)
+  }
+}
+
+/** The one other selected node, when exactly one is selected besides `t` (an edge to draw). */
+function otherSelected(t: ContextMenuTarget): string | null {
+  const others = [...useGraphStore().selectedNodeIds].filter((id) => id !== t.id);
+  return others.length === 1 ? others[0] : null;
 }
 
 const actions = ref<ContextMenuAction[]>(createBuiltInActions());

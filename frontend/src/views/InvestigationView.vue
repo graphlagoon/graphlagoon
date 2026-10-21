@@ -216,6 +216,11 @@ watch(
 );
 
 watch(() => store.graphItems.map((s) => `${s.id}:${s.current_version}:${s.mapping?.as ?? ''}`).join(','), loadWorkspace);
+// Enrichment files (BYOD-2) add properties to the canvas: a new file or version is fetched, nothing reloads.
+watch(
+  () => store.items.filter((i) => i.kind === 'table' && i.mapping?.as === 'enrichment').map((i) => `${i.id}:${i.current_version}`).join(','),
+  () => void store.loadEnrichments(),
+);
 watch([() => store.unified, activeTrace, traceView, () => filters.window, () => store.labelTemplates], render);
 
 // Fills follow the confirmed roles (or the groups, when painting by group), without reloading the graph.

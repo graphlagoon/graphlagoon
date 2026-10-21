@@ -36,6 +36,26 @@ import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
 import { isSqlScript } from '@/utils/sqlScript';
 import { snapshotToGraph, type NodeOrigin } from '@/utils/unifyGraph';
+import {
+  afterPatch,
+  applyOverlay,
+  baseGraphOf,
+  beforePatch,
+  emptyOverlay,
+  emptyOverlayState,
+  isEmptyOverlay,
+  isOverlayAdded,
+  newOverlayId,
+  overlayKeysOf,
+  OVERLAY_RING_COLOR,
+  SKETCH_PREFIX,
+  type GraphOverlay,
+  type OverlayEdge,
+  type OverlayEnrichment,
+  type OverlayImport,
+  type OverlayNode,
+  type OverlayState,
+} from '@/utils/graphOverlay';
 import { edgeValue, type EdgeValue } from '@/utils/edgeSemantics';
 import { aggregateParallelEdges } from '@/utils/parallelEdges';
 import type { TraceColumns } from '@/utils/traceView';
@@ -375,6 +395,32 @@ export const useGraphStore = defineStore('graph', () => {
   // (deep reactivity is deliberately NOT relied upon — see patchNodeProperties).
   const pendingPropertyNodeIds = ref<Set<string>>(new Set());
   const nodePatchVersion = ref(0);
+
+  // The user's layer (BYOD-2): nodes, edges and enrichment files on top of the
+  // context's answer, saved beside the exploration (never in its snapshot) and
+  // re-applied after every load, query and expand. See utils/graphOverlay.ts.
+  const overlay = ref<GraphOverlay | null>(null);
+  let overlayState: OverlayState = emptyOverlayState();
+  /** Bumped whenever the layer changes what is drawn (rings, chips, the "Your data" list). */
+  const overlayVersion = ref(0);
+  /** Why the layer could not be loaded or saved; the graph still works without it. */
+  const overlayError = ref<string | null>(null);
+
+  /** `nodes`/`edges` with the layer on: every wholesale assignment goes through here. */
+  function withOverlay(n: Node[], e: Edge[]): [Node[], Edge[]] {
+    if (!overlay.value && !overlayState.active) return [n, e];
+    const out = applyOverlay(n, e, overlay.value, overlayState);
+    overlayState = out.state;
+    overlayVersion.value++;
+    return [out.nodes, out.edges];
+  }
+
+  function resetOverlay() {
+    overlay.value = null;
+    overlayState = emptyOverlayState();
+    overlayError.value = null;
+    overlayVersion.value++;
+  }
   const enriching = ref(false);
   // Set when a background enrichment batch fails. Non-blocking (the graph is
   // already rendered) but no longer silent — previously this was a bare
@@ -1072,6 +1118,8 @@ export const useGraphStore = defineStore('graph', () => {
     error.value = null;
 
     const t0 = performance.now();
+    // The layer belongs to the graph of one context: a switch drops it.
+    if (currentContext.value?.id !== contextId) resetOverlay();
     try {
       currentContext.value = await api.getGraphContext(contextId);
       recordPerf('load:context:fetch', performance.now() - t0);
@@ -1159,8 +1207,11 @@ export const useGraphStore = defineStore('graph', () => {
     const { clearPending = true, merge = false } = options;
 
     let patched = 0;
-    for (const node of nodes.value) {
-      if (!patch.has(node.node_id)) continue;
+    const targets = nodes.value.filter((node) => patch.has(node.node_id));
+    // The layer's values come off first and go back on after: a property the
+    // patch now sets wins over the layer, as a value already there always does.
+    beforePatch(targets, overlayState);
+    for (const node of targets) {
       const props = patch.get(node.node_id);
       // Replace the whole dict rather than mutating inside it, so the change is
       // visible to anything holding the node. `merge` builds a NEW object for
@@ -1169,6 +1220,7 @@ export const useGraphStore = defineStore('graph', () => {
       if (clearPending) pendingPropertyNodeIds.value.delete(node.node_id);
       patched++;
     }
+    afterPatch(targets, overlay.value, overlayState);
 
     if (patched > 0) nodePatchVersion.value++;
   }
@@ -1350,8 +1402,7 @@ export const useGraphStore = defineStore('graph', () => {
       // Success: request a fresh layout only now (not before the await), so a
       // failed request never leaves the flag set to contaminate a later update.
       freshLayoutRequested.value = true;
-      nodes.value = response.nodes;
-      edges.value = response.edges;
+      [nodes.value, edges.value] = withOverlay(response.nodes, response.edges);
       truncated.value = response.truncated === true;
       recordGraphLoad('subgraph', response, tFetched - t0, performance.now() - tFetched);
       recordChainRecompute('subgraph');
@@ -1425,8 +1476,7 @@ export const useGraphStore = defineStore('graph', () => {
       if (token !== precomputedToken) return payload;
 
       freshLayoutRequested.value = true;
-      nodes.value = payload.graph.nodes;
-      edges.value = payload.graph.edges;
+      [nodes.value, edges.value] = withOverlay(payload.graph.nodes, payload.graph.edges);
       truncated.value = payload.graph.truncated === true;
       currentPrecomputedGraph.value = payload;
       // Show where the graph came from, so the query panel is not blank.
@@ -1487,10 +1537,12 @@ export const useGraphStore = defineStore('graph', () => {
       );
     }
 
+    // A published graph is the context's: the user's layer stays with the exploration.
+    const base = baseGraph();
     return api.putPrecomputedGraph(currentContext.value.id, name, {
       graph: {
-        nodes: nodes.value,
-        edges: edges.value,
+        nodes: base.nodes,
+        edges: base.edges,
         truncated: truncated.value,
         properties_deferred: false,
       },
@@ -1548,8 +1600,8 @@ export const useGraphStore = defineStore('graph', () => {
       const newNodes = response.nodes.filter((n) => !existingNodeIds.has(n.node_id));
       const newEdges = response.edges.filter((e) => !existingEdgeIds.has(e.edge_id));
 
-      nodes.value = [...nodes.value, ...newNodes];
-      edges.value = [...edges.value, ...newEdges];
+      // The layer re-applies: new nodes get their enrichment, layer edges whose endpoint just arrived are drawn.
+      [nodes.value, edges.value] = withOverlay([...nodes.value, ...newNodes], [...edges.value, ...newEdges]);
     } catch (e: unknown) {
       queryError.value = extractErrorDetails(e, 'Failed to expand node');
     } finally {
@@ -1561,6 +1613,8 @@ export const useGraphStore = defineStore('graph', () => {
   function loadInvestigationGraph(mode: InvestigationGraphMode, newNodes: Node[], newEdges: Edge[]) {
     currentContext.value = null;
     currentExploration.value = null;
+    // A case shows explorations through its own items (their layers folded in by the server).
+    resetOverlay();
     investigationMode.value = mode;
     nodes.value = newNodes;
     edges.value = newEdges;
@@ -1644,8 +1698,7 @@ export const useGraphStore = defineStore('graph', () => {
 
     if (isPartial) {
       freshLayoutRequested.value = true;
-      nodes.value = response.nodes;
-      edges.value = response.edges;
+      [nodes.value, edges.value] = withOverlay(response.nodes, response.edges);
       partialNodeIds = new Set(response.nodes.map((n) => n.node_id));
       return;
     }
@@ -1661,8 +1714,7 @@ export const useGraphStore = defineStore('graph', () => {
       patchNodeProperties(patch);
     } else {
       freshLayoutRequested.value = true;
-      nodes.value = response.nodes;
-      edges.value = response.edges;
+      [nodes.value, edges.value] = withOverlay(response.nodes, response.edges);
     }
     partialNodeIds = null;
   }
@@ -2263,16 +2315,22 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  /** The context's graph without the user's layer (snapshots, published precomputed graphs). */
+  function baseGraph(): { nodes: Node[]; edges: Edge[] } {
+    return baseGraphOf(nodes.value, edges.value, overlayState);
+  }
+
   function buildGraphSnapshot() {
+    const base = baseGraph();
     return {
-      nodes: nodes.value.map((n) => ({
+      nodes: base.nodes.map((n) => ({
         id: n.node_id,
         type: n.node_type,
         properties: (n.properties ?? {}) as Record<string, unknown>,
         x: n.x,
         y: n.y,
       })),
-      edges: edges.value.map((e) => ({
+      edges: base.edges.map((e) => ({
         id: e.edge_id,
         source: e.src,
         target: e.dst,
@@ -2540,7 +2598,7 @@ export const useGraphStore = defineStore('graph', () => {
     return fingerprintExplorationState() !== saved;
   });
 
-  async function saveExploration(title: string): Promise<{ success: boolean; error?: string }> {
+  async function saveExploration(title: string): Promise<{ success: boolean; error?: string; warning?: string }> {
     if (!currentContext.value) return { success: false, error: 'No context selected' };
 
     // Require at least nodes OR a query to save
@@ -2575,7 +2633,9 @@ export const useGraphStore = defineStore('graph', () => {
         );
       }
       markExplorationSaved();
-      return { success: true };
+      // The layer is saved after the exploration exists (a new one gets it too).
+      const layerError = await persistOverlay();
+      return layerError ? { success: true, warning: `Saved without your data layer: ${layerError}` } : { success: true };
     } catch (e: unknown) {
       const errorMessage = getErrorMessage(e, 'Failed to save exploration');
       error.value = errorMessage;
@@ -2685,6 +2745,16 @@ export const useGraphStore = defineStore('graph', () => {
     try {
       const exploration = await api.getExploration(explorationId);
       currentExploration.value = exploration;
+      // The layer is loaded before the graph so every path below draws it.
+      overlay.value = null;
+      overlayError.value = null;
+      if (exploration.state.has_overlay) {
+        try {
+          overlay.value = await api.getExplorationOverlay(explorationId);
+        } catch (e) {
+          overlayError.value = getErrorMessage(e, 'Your data layer could not be loaded');
+        }
+      }
 
       // Restore state (ensure backwards compatibility with old explorations)
       const loadedFilters = exploration.state.filters;
@@ -2736,8 +2806,7 @@ export const useGraphStore = defineStore('graph', () => {
           const snapshot = await api.getExplorationSnapshot(explorationId);
           const tFetched = performance.now();
           const graph = snapshotToGraph(snapshot);
-          nodes.value = graph.nodes;
-          edges.value = graph.edges;
+          [nodes.value, edges.value] = withOverlay(graph.nodes, graph.edges);
           recordGraphLoad(
             'snapshot',
             { nodes: snapshot.nodes, edges: snapshot.edges },
@@ -2779,9 +2848,176 @@ export const useGraphStore = defineStore('graph', () => {
     }
   }
 
+  // --- The user's layer (BYOD-2) -------------------------------------------
+
+  /** Ids of the nodes the layer added (not in the context's answer): no expand, a ring. */
+  const overlayAddedNodeIds = computed(() => {
+    void overlayVersion.value;
+    return new Set(nodes.value.filter((n) => isOverlayAdded(n, overlayState)).map((n) => n.node_id));
+  });
+  const overlayAddedEdgeIds = computed(() => {
+    void overlayVersion.value;
+    return new Set(edges.value.filter((e) => isOverlayAdded(e, overlayState)).map((e) => e.edge_id));
+  });
+  /** Rings around nodes: a case's provenance, else the layer's own nodes. */
+  const nodeRings = computed<Map<string, string[]> | null>(() => {
+    if (investigationMode.value) return investigationMode.value.rings;
+    void overlayVersion.value;
+    const ids = overlay.value?.nodes.map((n) => n.id) ?? [];
+    return ids.length ? new Map(ids.map((id) => [id, [OVERLAY_RING_COLOR]])) : null;
+  });
+  /** Properties of this node (or edge) the layer set: the side panel marks them. */
+  function overlayKeysFor(kind: 'node' | 'edge', id: string): Set<string> {
+    void overlayVersion.value;
+    const target = kind === 'node' ? nodes.value.find((n) => n.node_id === id) : edges.value.find((e) => e.edge_id === id);
+    return target ? overlayKeysOf(target, overlayState) : new Set();
+  }
+  /** Whether the person may change the layer here: a case's canvas has its own items; a read-only exploration keeps it as is. */
+  const canEditOverlay = computed(
+    () => !investigationMode.value && !!currentContext.value && (currentExploration.value?.has_write_access ?? true),
+  );
+
+  /**
+   * Re-draws the layer on the current graph. Only properties changed: patched in place (no
+   * layout reset, communities kept); nodes or edges came or went: one assignment.
+   */
+  function refreshOverlay() {
+    const [n, e] = withOverlay(nodes.value, edges.value);
+    const same =
+      n.length === nodes.value.length &&
+      e.length === edges.value.length &&
+      n.every((x, i) => toRaw(x) === toRaw(nodes.value[i])) &&
+      e.every((x, i) => toRaw(x) === toRaw(edges.value[i]));
+    if (!same) {
+      nodes.value = n;
+      edges.value = e;
+    }
+    nodePatchVersion.value++;
+  }
+
+  /**
+   * Saves the layer of the open exploration when the person can write it (an unsaved graph
+   * keeps it in memory until "Save exploration"). Returns the error, if any.
+   */
+  async function persistOverlay(): Promise<string | null> {
+    const exp = currentExploration.value;
+    if (!exp?.has_write_access) return null;
+    if (isEmptyOverlay(overlay.value) && !exp.state?.has_overlay) return null;
+    try {
+      currentExploration.value = await api.putExplorationOverlay(exp.id, overlay.value ?? emptyOverlay());
+      overlayError.value = null;
+      return null;
+    } catch (e) {
+      overlayError.value = getErrorMessage(e, 'Your data layer was not saved');
+      return overlayError.value;
+    }
+  }
+
+  async function changeOverlay(change: (o: GraphOverlay) => void): Promise<string | null> {
+    // A JSON round trip, not structuredClone: what callers hand in may hold Vue proxies
+    // (a spec edited in a form), which structuredClone refuses. The layer is plain JSON.
+    const next = JSON.parse(JSON.stringify(toRaw(overlay.value) ?? emptyOverlay())) as GraphOverlay;
+    change(next);
+    overlay.value = JSON.parse(JSON.stringify(next)) as GraphOverlay;
+    refreshOverlay();
+    return persistOverlay();
+  }
+
+  /** Adds (or replaces, same id) an enrichment file. */
+  function setOverlayEnrichment(entry: OverlayEnrichment) {
+    return changeOverlay((o) => {
+      o.enrichments = [...o.enrichments.filter((f) => f.id !== entry.id), entry];
+    });
+  }
+
+  function removeOverlayEnrichment(id: string) {
+    return changeOverlay((o) => {
+      o.enrichments = o.enrichments.filter((f) => f.id !== id);
+    });
+  }
+
+  /**
+   * Adds the nodes and edges of a file or pasted JSON as one import. A node whose id is
+   * already on the canvas merges into it (missing properties only); edges are namespaced.
+   */
+  function addOverlayImport(entry: Omit<OverlayImport, 'node_ids' | 'edge_ids'>, add: { nodes: OverlayNode[]; edges: OverlayEdge[] }) {
+    return changeOverlay((o) => {
+      const nodeIds = new Set(o.nodes.map((n) => n.id));
+      for (const n of add.nodes) if (!nodeIds.has(n.id)) o.nodes.push(n);
+      const edgeIds = new Set(o.edges.map((e) => e.id));
+      for (const e of add.edges) if (!edgeIds.has(e.id)) o.edges.push(e);
+      o.imports = [
+        ...o.imports.filter((i) => i.id !== entry.id),
+        { ...entry, node_ids: add.nodes.map((n) => n.id), edge_ids: add.edges.map((e) => e.id) },
+      ];
+    });
+  }
+
+  /** Removes an import: its edges, and its nodes no other import or sketch edge uses. */
+  function removeOverlayImport(id: string) {
+    return changeOverlay((o) => {
+      const gone = o.imports.find((i) => i.id === id);
+      if (!gone) return;
+      o.imports = o.imports.filter((i) => i.id !== id);
+      const keptNodes = new Set(o.imports.flatMap((i) => i.node_ids));
+      const goneEdges = new Set(gone.edge_ids);
+      o.edges = o.edges.filter((e) => !goneEdges.has(e.id));
+      const used = new Set(o.edges.flatMap((e) => [e.source, e.target]));
+      const goneNodes = new Set(gone.node_ids.filter((n) => !keptNodes.has(n) && !used.has(n)));
+      o.nodes = o.nodes.filter((n) => !goneNodes.has(n.id));
+    });
+  }
+
+  /**
+   * A node drawn by hand. `linkTo` also draws an edge from it to that node (or from that
+   * node to it, with `incoming`). Returns the new node's id.
+   */
+  async function addSketchNode(input: {
+    type: string;
+    label?: string;
+    properties?: Record<string, unknown>;
+    linkTo?: string;
+    edgeType?: string;
+    incoming?: boolean;
+  }): Promise<{ id: string; error: string | null }> {
+    const id = `${SKETCH_PREFIX}${newOverlayId()}`;
+    const properties = { ...(input.properties ?? {}), ...(input.label ? { label: input.label } : {}) };
+    const error = await changeOverlay((o) => {
+      o.nodes.push({ id, type: input.type, properties });
+      if (input.linkTo) {
+        const [source, target] = input.incoming ? [input.linkTo, id] : [id, input.linkTo];
+        o.edges.push({ id: `${SKETCH_PREFIX}${newOverlayId()}`, source, target, type: input.edgeType || 'related', properties: {} });
+      }
+    });
+    return { id, error };
+  }
+
+  /** An edge drawn by hand between two nodes on the canvas (any of them: the context's or the layer's). */
+  function addSketchEdge(source: string, target: string, type: string, properties: Record<string, unknown> = {}) {
+    return changeOverlay((o) => {
+      o.edges.push({ id: `${SKETCH_PREFIX}${newOverlayId()}`, source, target, type: type || 'related', properties });
+    });
+  }
+
+  /** Removes nodes and edges of the layer (and the layer's edges touching those nodes). */
+  function removeOverlayElements(nodeIds: string[], edgeIds: string[] = []) {
+    return changeOverlay((o) => {
+      const nodesGone = new Set(nodeIds);
+      const edgesGone = new Set(edgeIds);
+      o.nodes = o.nodes.filter((n) => !nodesGone.has(n.id));
+      o.edges = o.edges.filter((e) => !edgesGone.has(e.id) && !nodesGone.has(e.source) && !nodesGone.has(e.target));
+      const keptEdges = new Set(o.edges.map((e) => e.id));
+      const keptNodes = new Set(o.nodes.map((n) => n.id));
+      o.imports = o.imports
+        .map((i) => ({ ...i, node_ids: i.node_ids.filter((n) => keptNodes.has(n)), edge_ids: i.edge_ids.filter((e) => keptEdges.has(e)) }))
+        .filter((i) => i.node_ids.length || i.edge_ids.length);
+    });
+  }
+
   function clear() {
     nodes.value = [];
     edges.value = [];
+    resetOverlay();
     currentContext.value = null;
     currentExploration.value = null;
     investigationMode.value = null;
@@ -2831,6 +3067,24 @@ export const useGraphStore = defineStore('graph', () => {
     // State
     nodes,
     edges,
+    // The user's layer (BYOD-2)
+    overlay,
+    overlayVersion,
+    overlayError,
+    overlayAddedNodeIds,
+    overlayAddedEdgeIds,
+    nodeRings,
+    canEditOverlay,
+    overlayKeysFor,
+    baseGraph,
+    persistOverlay,
+    setOverlayEnrichment,
+    removeOverlayEnrichment,
+    addOverlayImport,
+    removeOverlayImport,
+    addSketchNode,
+    addSketchEdge,
+    removeOverlayElements,
     currentContext,
     currentExploration,
     isExplorationDirty,

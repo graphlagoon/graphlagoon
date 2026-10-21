@@ -1,5 +1,5 @@
 /** Investigations v2 (cases): see docs/dev/plans/investigation/05-plano-v2.md §1. */
-import type { EdgeSemantics, ExplorationState, GraphSnapshot, IdentityKey, TemplateParameter } from '@/types/graph';
+import type { EdgeSemantics, ExplorationState, GraphSnapshot, IdentityKey, IdentityNormalize, TemplateParameter } from '@/types/graph';
 import type { MappingReport } from '@/utils/fileMapping';
 
 /** 06 §1: a case closes only by a decision that closes it; reopening goes back to analysis. */
@@ -269,7 +269,7 @@ export interface UpdateInvestigationRequest {
 // ---------------------------------------------------------------------------
 
 export type ItemKind = 'graph' | 'table' | 'query' | 'document' | 'note';
-export type GraphSubkind = 'exploration_ref' | 'snapshot' | 'selection' | 'derived' | 'view';
+export type GraphSubkind = 'exploration_ref' | 'snapshot' | 'selection' | 'derived' | 'view' | 'sketch';
 export type TableSubkind = 'result' | 'csv' | 'enrichment' | 'metrics';
 export type QuerySubkind = 'sql' | 'cypher';
 export type DocumentSubkind = 'upload' | 'markdown' | 'link' | 'brief';
@@ -541,16 +541,35 @@ export interface InvestigationEvent {
   payload: Record<string, unknown>;
 }
 
-/** How a `table` item with `mapping.as = enrichment` joins the case's nodes (`FileEnrichmentSpec` on the server). */
+/** How an enrichment file's rows find edges (`EnrichmentEdgeKey` on the server). */
+export interface EnrichmentEdgeKey {
+  by: 'edge_id' | 'endpoints';
+  source_column?: string | null;
+  target_column?: string | null;
+  type_column?: string | null;
+}
+
+/**
+ * How a file's rows add properties to the nodes (or edges) of a graph: a `table` item with
+ * `mapping.as = enrichment` in a case, an overlay entry in an exploration (`FileEnrichmentSpec`
+ * on the server). Empty `match_node_types` or `*` = every type.
+ */
 export interface FileEnrichmentSpec {
   version?: 1;
   kind?: 'enrichment';
   name: string;
   input: { delimiter: string; header: boolean; columns?: string[]; encoding?: string | null };
-  key_column: string;
+  target?: 'nodes' | 'edges';
+  key_column?: string | null;
   columns: string[];
   match_node_types: string[];
   match_source: 'node_id' | { kind: 'prop'; name: string };
+  match_edge_types?: string[];
+  edge_key?: EnrichmentEdgeKey | null;
+  /** How keys are normalized on both sides (`digits`, `phone`, `email`, …). */
+  normalize?: IdentityNormalize;
   /** Node key → its first N digits (a company id → its group prefix, to match a related table). */
   key_digits?: number | null;
+  /** The file's value replaces one already on the node; otherwise it is recorded as a conflict. */
+  overwrite?: boolean;
 }

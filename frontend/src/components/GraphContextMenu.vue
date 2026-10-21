@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, computed, ref, watch, nextTick } from 'vue';
 import { useContextMenu } from '@/composables/useContextMenu';
+import SketchDialog from '@/components/SketchDialog.vue';
+import { sketchDialogOpen } from '@/composables/useSketch';
 
 const { visible, x, y, target, hide, getVisibleActions } = useContextMenu();
 
@@ -106,6 +108,8 @@ async function handleAction(actionId: string) {
       </button>
     </div>
   </Teleport>
+  <!-- Opened by the drawing actions (BYOD-2); lives with the menu that opens it. -->
+  <SketchDialog v-if="sketchDialogOpen" />
 </template>
 
 <style scoped>
