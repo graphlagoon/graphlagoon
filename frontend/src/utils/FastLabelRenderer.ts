@@ -536,7 +536,7 @@ const _resolvedCharCache = new Map<string, FontChar | null>();
 
 /**
  * Resolve glyph data for a character. The atlas only covers ASCII 32–126, so
- * unknown characters fall back to their de-accented base ('é' → 'e') and
+ * unknown characters fall back to their de-accented base (e-acute → 'e') and
  * finally to '?' — instead of silently vanishing. Control characters ('\n' is
  * handled by the line splitter before reaching here) resolve to '?' too.
  */

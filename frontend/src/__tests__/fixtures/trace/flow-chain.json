@@ -1,0 +1,707 @@
+{
+  "description": "Flow chain of the T5/T7 screens (03 §6.1): funds leave a victim account through three layers to a cash withdrawal, an exchange and a betting site. Run every case with `params` overridden by the case's `params`; the TS core (utils/trace.ts) and the Python port (F3.8) must return `expected`. Window = 09/09 14:02 -> 10/09 14:02 (-03:00), so the 13:30 edge is an opening balance.",
+  "edge_semantics": {
+    "amount_prop": "amount",
+    "time_prop": "at"
+  },
+  "nodes": [
+    {
+      "node_id": "external",
+      "node_type": "ExternalBank",
+      "properties": {
+        "name": "External bank"
+      }
+    },
+    {
+      "node_id": "0001-9",
+      "node_type": "Account",
+      "properties": {
+        "name": "Account 0001-9 (victim)"
+      }
+    },
+    {
+      "node_id": "4471-0",
+      "node_type": "Account"
+    },
+    {
+      "node_id": "5520-3",
+      "node_type": "Account"
+    },
+    {
+      "node_id": "8812-7",
+      "node_type": "Account"
+    },
+    {
+      "node_id": "3090-1",
+      "node_type": "Account"
+    },
+    {
+      "node_id": "atm-cash",
+      "node_type": "CashWithdrawal",
+      "properties": {
+        "name": "ATM withdrawal"
+      }
+    },
+    {
+      "node_id": "exchange-gama",
+      "node_type": "Exchange",
+      "properties": {
+        "name": "Gamma Exchange"
+      }
+    },
+    {
+      "node_id": "bet-delta",
+      "node_type": "Betting",
+      "properties": {
+        "name": "Delta Bet"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e1",
+      "src": "external",
+      "dst": "8812-7",
+      "relationship_type": "TRANSFER",
+      "properties": {
+        "amount": 300,
+        "at": "2026-09-09T13:30:00-03:00"
+      }
+    },
+    {
+      "edge_id": "e2",
+      "src": "0001-9",
+      "dst": "4471-0",
+      "relationship_type": "TRANSFER",
+      "properties": {
+        "amount": 4870,
+        "at": "2026-09-09T14:02:00-03:00"
+      }
+    },
+    {
+      "edge_id": "e3",
+      "src": "4471-0",
+      "dst": "5520-3",
+      "relationship_type": "TRANSFER",
+      "properties": {
+        "amount": 2000,
+        "at": "2026-09-09T14:09:00-03:00"
+      }
+    },
+    {
+      "edge_id": "e4",
+      "src": "4471-0",
+      "dst": "8812-7",
+      "relationship_type": "TRANSFER",
+      "properties": {
+        "amount": 1900,
+        "at": "2026-09-09T14:11:00-03:00"
+      }
+    },
+    {
+      "edge_id": "e5",
+      "src": "4471-0",
+      "dst": "3090-1",
+      "relationship_type": "TRANSFER",
+      "properties": {
+        "amount": 900,
+        "at": "2026-09-09T14:15:00-03:00"
+      }
+    },
+    {
+      "edge_id": "e6",
+      "src": "3090-1",
+      "dst": "bet-delta",
+      "relationship_type": "TRANSFER",
+      "properties": {
+        "amount": 880,
+        "at": "2026-09-09T14:31:00-03:00"
+      }
+    },
+    {
+      "edge_id": "e7",
+      "src": "5520-3",
+      "dst": "atm-cash",
+      "relationship_type": "SAQUE",
+      "properties": {
+        "amount": 2000,
+        "at": "2026-09-09T14:40:00-03:00"
+      }
+    },
+    {
+      "edge_id": "e8",
+      "src": "8812-7",
+      "dst": "exchange-gama",
+      "relationship_type": "TRANSFER",
+      "properties": {
+        "amount": 1850,
+        "at": "2026-09-09T15:05:00-03:00"
+      }
+    }
+  ],
+  "seed": {
+    "edgeIds": [
+      "e2"
+    ]
+  },
+  "params": {
+    "direction": "forward",
+    "maxHops": 3,
+    "maxDwellMs": 86400000,
+    "minAmount": 50,
+    "window": [
+      1788973320000,
+      1789059720000
+    ],
+    "allocation": "fifo",
+    "stopTypes": [
+      "CashWithdrawal",
+      "Exchange",
+      "Betting",
+      "ExternalBank"
+    ],
+    "stopNodes": []
+  },
+  "cases": [
+    {
+      "name": "fifo",
+      "params": {},
+      "expected": {
+        "edgeTrace": {
+          "e2": 4870,
+          "e3": 2000,
+          "e4": 1900,
+          "e5": 900,
+          "e6": 880,
+          "e7": 2000,
+          "e8": 1550
+        },
+        "nodes": {
+          "4471-0": {
+            "layer": 1,
+            "tracedIn": 4870,
+            "tracedOut": 4800,
+            "retained": 70
+          },
+          "5520-3": {
+            "layer": 2,
+            "tracedIn": 2000,
+            "tracedOut": 2000,
+            "retained": 0
+          },
+          "8812-7": {
+            "layer": 2,
+            "tracedIn": 1900,
+            "tracedOut": 1550,
+            "retained": 350
+          },
+          "3090-1": {
+            "layer": 2,
+            "tracedIn": 900,
+            "tracedOut": 880,
+            "retained": 20
+          },
+          "bet-delta": {
+            "layer": 3,
+            "tracedIn": 880,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "atm-cash": {
+            "layer": 3,
+            "tracedIn": 2000,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "exchange-gama": {
+            "layer": 3,
+            "tracedIn": 1550,
+            "tracedOut": 0,
+            "retained": 0
+          }
+        },
+        "exits": {
+          "bet-delta": 880,
+          "atm-cash": 2000,
+          "exchange-gama": 1550
+        },
+        "frontier": [],
+        "discarded": {
+          "belowMin": 0,
+          "expired": 0
+        },
+        "seedTotal": 4870,
+        "exitTotal": 4430,
+        "coverage": 0.9097
+      }
+    },
+    {
+      "name": "proportional",
+      "params": {
+        "allocation": "proportional"
+      },
+      "expected": {
+        "edgeTrace": {
+          "e2": 4870,
+          "e3": 2000,
+          "e4": 1900,
+          "e5": 900,
+          "e6": 880,
+          "e7": 2000,
+          "e8": 1597.73
+        },
+        "nodes": {
+          "4471-0": {
+            "layer": 1,
+            "tracedIn": 4870,
+            "tracedOut": 4800,
+            "retained": 70
+          },
+          "5520-3": {
+            "layer": 2,
+            "tracedIn": 2000,
+            "tracedOut": 2000,
+            "retained": 0
+          },
+          "8812-7": {
+            "layer": 2,
+            "tracedIn": 1900,
+            "tracedOut": 1597.73,
+            "retained": 302.27
+          },
+          "3090-1": {
+            "layer": 2,
+            "tracedIn": 900,
+            "tracedOut": 880,
+            "retained": 20
+          },
+          "bet-delta": {
+            "layer": 3,
+            "tracedIn": 880,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "atm-cash": {
+            "layer": 3,
+            "tracedIn": 2000,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "exchange-gama": {
+            "layer": 3,
+            "tracedIn": 1597.73,
+            "tracedOut": 0,
+            "retained": 0
+          }
+        },
+        "exits": {
+          "bet-delta": 880,
+          "atm-cash": 2000,
+          "exchange-gama": 1597.73
+        },
+        "frontier": [],
+        "discarded": {
+          "belowMin": 0,
+          "expired": 0
+        },
+        "seedTotal": 4870,
+        "exitTotal": 4477.73,
+        "coverage": 0.9195
+      }
+    },
+    {
+      "name": "libr",
+      "params": {
+        "allocation": "libr"
+      },
+      "expected": {
+        "edgeTrace": {
+          "e2": 4870,
+          "e3": 2000,
+          "e4": 1900,
+          "e5": 900,
+          "e6": 880,
+          "e7": 2000,
+          "e8": 1550
+        },
+        "nodes": {
+          "4471-0": {
+            "layer": 1,
+            "tracedIn": 4870,
+            "tracedOut": 4800,
+            "retained": 70
+          },
+          "5520-3": {
+            "layer": 2,
+            "tracedIn": 2000,
+            "tracedOut": 2000,
+            "retained": 0
+          },
+          "8812-7": {
+            "layer": 2,
+            "tracedIn": 1900,
+            "tracedOut": 1550,
+            "retained": 350
+          },
+          "3090-1": {
+            "layer": 2,
+            "tracedIn": 900,
+            "tracedOut": 880,
+            "retained": 20
+          },
+          "bet-delta": {
+            "layer": 3,
+            "tracedIn": 880,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "atm-cash": {
+            "layer": 3,
+            "tracedIn": 2000,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "exchange-gama": {
+            "layer": 3,
+            "tracedIn": 1550,
+            "tracedOut": 0,
+            "retained": 0
+          }
+        },
+        "exits": {
+          "bet-delta": 880,
+          "atm-cash": 2000,
+          "exchange-gama": 1550
+        },
+        "frontier": [],
+        "discarded": {
+          "belowMin": 0,
+          "expired": 0
+        },
+        "seedTotal": 4870,
+        "exitTotal": 4430,
+        "coverage": 0.9097
+      }
+    },
+    {
+      "name": "total",
+      "params": {
+        "allocation": "total"
+      },
+      "expected": {
+        "edgeTrace": {
+          "e2": 4870,
+          "e3": 2000,
+          "e4": 1900,
+          "e5": 900,
+          "e6": 880,
+          "e7": 2000,
+          "e8": 1850
+        },
+        "nodes": {
+          "4471-0": {
+            "layer": 1,
+            "tracedIn": 4870,
+            "tracedOut": 4800,
+            "retained": 70
+          },
+          "5520-3": {
+            "layer": 2,
+            "tracedIn": 2000,
+            "tracedOut": 2000,
+            "retained": 0
+          },
+          "8812-7": {
+            "layer": 2,
+            "tracedIn": 1900,
+            "tracedOut": 1850,
+            "retained": 350
+          },
+          "3090-1": {
+            "layer": 2,
+            "tracedIn": 900,
+            "tracedOut": 880,
+            "retained": 20
+          },
+          "bet-delta": {
+            "layer": 3,
+            "tracedIn": 880,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "atm-cash": {
+            "layer": 3,
+            "tracedIn": 2000,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "exchange-gama": {
+            "layer": 3,
+            "tracedIn": 1850,
+            "tracedOut": 0,
+            "retained": 0
+          }
+        },
+        "exits": {
+          "bet-delta": 880,
+          "atm-cash": 2000,
+          "exchange-gama": 1850
+        },
+        "frontier": [],
+        "discarded": {
+          "belowMin": 0,
+          "expired": 0
+        },
+        "seedTotal": 4870,
+        "exitTotal": 4730,
+        "coverage": 0.9713
+      }
+    },
+    {
+      "name": "fifo, Δ = 40 min",
+      "params": {
+        "maxDwellMs": 2400000
+      },
+      "expected": {
+        "edgeTrace": {
+          "e2": 4870,
+          "e3": 2000,
+          "e4": 1900,
+          "e5": 900,
+          "e6": 880,
+          "e7": 2000
+        },
+        "nodes": {
+          "4471-0": {
+            "layer": 1,
+            "tracedIn": 4870,
+            "tracedOut": 4800,
+            "retained": 70
+          },
+          "5520-3": {
+            "layer": 2,
+            "tracedIn": 2000,
+            "tracedOut": 2000,
+            "retained": 0
+          },
+          "8812-7": {
+            "layer": 2,
+            "tracedIn": 1900,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "3090-1": {
+            "layer": 2,
+            "tracedIn": 900,
+            "tracedOut": 880,
+            "retained": 20
+          },
+          "bet-delta": {
+            "layer": 3,
+            "tracedIn": 880,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "atm-cash": {
+            "layer": 3,
+            "tracedIn": 2000,
+            "tracedOut": 0,
+            "retained": 0
+          }
+        },
+        "exits": {
+          "bet-delta": 880,
+          "atm-cash": 2000
+        },
+        "frontier": [],
+        "discarded": {
+          "belowMin": 0,
+          "expired": 1900
+        },
+        "seedTotal": 4870,
+        "exitTotal": 2880,
+        "coverage": 0.5914
+      }
+    },
+    {
+      "name": "fifo, H = 1",
+      "params": {
+        "maxHops": 1
+      },
+      "expected": {
+        "edgeTrace": {
+          "e2": 4870,
+          "e3": 2000,
+          "e4": 1900,
+          "e5": 900
+        },
+        "nodes": {
+          "4471-0": {
+            "layer": 1,
+            "tracedIn": 4870,
+            "tracedOut": 4800,
+            "retained": 70
+          }
+        },
+        "exits": {},
+        "frontier": [
+          {
+            "edgeId": "e3",
+            "amount": 2000
+          },
+          {
+            "edgeId": "e4",
+            "amount": 1900
+          },
+          {
+            "edgeId": "e5",
+            "amount": 900
+          }
+        ],
+        "discarded": {
+          "belowMin": 0,
+          "expired": 0
+        },
+        "seedTotal": 4870,
+        "exitTotal": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "name": "fifo, m = 900",
+      "params": {
+        "minAmount": 900
+      },
+      "expected": {
+        "edgeTrace": {
+          "e2": 4870,
+          "e3": 2000,
+          "e4": 1900,
+          "e5": 900,
+          "e6": 880,
+          "e7": 2000,
+          "e8": 1550
+        },
+        "nodes": {
+          "4471-0": {
+            "layer": 1,
+            "tracedIn": 4870,
+            "tracedOut": 4800,
+            "retained": 70
+          },
+          "5520-3": {
+            "layer": 2,
+            "tracedIn": 2000,
+            "tracedOut": 2000,
+            "retained": 0
+          },
+          "8812-7": {
+            "layer": 2,
+            "tracedIn": 1900,
+            "tracedOut": 1550,
+            "retained": 350
+          },
+          "3090-1": {
+            "layer": 2,
+            "tracedIn": 900,
+            "tracedOut": 880,
+            "retained": 20
+          },
+          "atm-cash": {
+            "layer": 3,
+            "tracedIn": 2000,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "exchange-gama": {
+            "layer": 3,
+            "tracedIn": 1550,
+            "tracedOut": 0,
+            "retained": 0
+          }
+        },
+        "exits": {
+          "atm-cash": 2000,
+          "exchange-gama": 1550
+        },
+        "frontier": [],
+        "discarded": {
+          "belowMin": 880,
+          "expired": 0
+        },
+        "seedTotal": 4870,
+        "exitTotal": 3550,
+        "coverage": 0.729
+      }
+    },
+    {
+      "name": "fifo, stop at 8812-7",
+      "params": {
+        "stopNodes": [
+          "8812-7"
+        ]
+      },
+      "expected": {
+        "edgeTrace": {
+          "e2": 4870,
+          "e3": 2000,
+          "e4": 1900,
+          "e5": 900,
+          "e6": 880,
+          "e7": 2000
+        },
+        "nodes": {
+          "4471-0": {
+            "layer": 1,
+            "tracedIn": 4870,
+            "tracedOut": 4800,
+            "retained": 70
+          },
+          "5520-3": {
+            "layer": 2,
+            "tracedIn": 2000,
+            "tracedOut": 2000,
+            "retained": 0
+          },
+          "8812-7": {
+            "layer": 2,
+            "tracedIn": 1900,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "3090-1": {
+            "layer": 2,
+            "tracedIn": 900,
+            "tracedOut": 880,
+            "retained": 20
+          },
+          "bet-delta": {
+            "layer": 3,
+            "tracedIn": 880,
+            "tracedOut": 0,
+            "retained": 0
+          },
+          "atm-cash": {
+            "layer": 3,
+            "tracedIn": 2000,
+            "tracedOut": 0,
+            "retained": 0
+          }
+        },
+        "exits": {
+          "8812-7": 1900,
+          "bet-delta": 880,
+          "atm-cash": 2000
+        },
+        "frontier": [],
+        "discarded": {
+          "belowMin": 0,
+          "expired": 0
+        },
+        "seedTotal": 4870,
+        "exitTotal": 4780,
+        "coverage": 0.9815
+      }
+    }
+  ]
+}

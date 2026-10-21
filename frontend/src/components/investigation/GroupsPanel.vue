@@ -10,10 +10,9 @@ import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useToast } from '@/composables/useToast';
-import { GROUP_COLORS } from '@/utils/casePresets';
+import { GROUP_COLORS } from '@/utils/caseVocabulary';
 import { connectedComponents } from '@/utils/graphComponents';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { ROLE_LABELS } from '@/utils/graphAppearance';
 
 const props = defineProps<{ canEdit: boolean; paintByGroup: boolean }>();
 const emit = defineEmits<{ 'update:paintByGroup': [on: boolean] }>();
@@ -51,18 +50,18 @@ function partition(): Map<string, string[]> {
       if (v !== null && v !== undefined && String(v) !== '') add(`${property.value} = ${String(v)}`, n.node_id);
     }
   } else if (by.value === 'role') {
-    for (const [id, role] of Object.entries(store.roles)) add(ROLE_LABELS[role] ?? role, id);
+    for (const [id, role] of Object.entries(store.roles)) add(role, id);
   } else if (by.value === 'tag') {
     for (const [id, tags] of store.entityTags) for (const t of tags) add(t, id);
   } else if (by.value === 'community') {
-    for (const [id, c] of community.communityMap) add(community.communityLabels[c] ?? `Comunidade ${c + 1}`, id);
+    for (const [id, c] of community.communityMap) add(community.communityLabels[c] ?? `Community ${c + 1}`, id);
   } else if (by.value === 'component') {
     const comps = connectedComponents(
       nodes.map((n) => n.node_id),
       store.unified.edges.map((e) => [e.src, e.dst] as [string, string]),
       'weak',
     );
-    for (const [id, c] of comps) add(`Componente ${c + 1}`, id);
+    for (const [id, c] of comps) add(`Component ${c + 1}`, id);
   }
   // Singletons are not groups.
   for (const [k, v] of [...out]) if (v.length < 2) out.delete(k);
@@ -89,7 +88,7 @@ async function createFromRule() {
   try {
     let i = store.groups.length;
     for (const [label, ids] of parts) {
-      await store.addGroup(`${label} · ${ids.length} nós`, ids, { color: i++, by: by.value === 'property' ? `property:${property.value}` : by.value });
+      await store.addGroup(`${label} · ${ids.length} nodes`, ids, { color: i++, by: by.value === 'property' ? `property:${property.value}` : by.value });
     }
     toast.success(`${parts.size} ${parts.size === 1 ? 'group' : 'groups'} created`);
   } catch (e) {
@@ -103,7 +102,7 @@ async function createFromSelection() {
   if (selected.value.length < 2) return;
   busy.value = true;
   try {
-    await store.addGroup(name.value.trim() || `Grupo ${store.groups.length + 1}`, selected.value, { color: color.value, by: 'selection', closed: closed.value });
+    await store.addGroup(name.value.trim() || `Group ${store.groups.length + 1}`, selected.value, { color: color.value, by: 'selection', closed: closed.value });
     name.value = '';
     toast.success('Group created');
   } catch (e) {

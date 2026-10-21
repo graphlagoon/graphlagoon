@@ -1,17 +1,16 @@
 <script setup lang="ts">
 /**
- * Filter chips over the canvas (05 §3): fonte, papel, tag, grupo, tipo, janela
- * temporal and the audited 👁 toggle. Multi-value, visual only (the layout
+ * Filter chips over the canvas (05 §3): source, role, tag, group, type, time
+ * window and the audited 👁 toggle. Multi-value, visual only (the layout
  * stays). Saved views keep the chips, the layout and the closed groups (05 §5).
  */
 import { computed, ref } from 'vue';
-import { Eye, EyeOff, X } from 'lucide-vue-next';
+import { X } from 'lucide-vue-next';
 import { useCaseFilters, type ChipField } from '@/stores/caseFilters';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { ROLE_LABELS } from '@/utils/graphAppearance';
 import type { CaseItem, CaseViewContent } from '@/types/investigation';
 import { formatDate } from '@/utils/format';
 
@@ -37,27 +36,27 @@ interface Chip {
 const chips = computed<Chip[]>(() => [
   {
     id: 'sources',
-    label: 'fonte',
+    label: 'source',
     options: store.canvasItems.map((s) => ({ value: s.id, label: s.title, color: store.sourceColors[s.id] })),
     selected: filters.sources,
     toggle: (v) => filters.toggle('sources', v),
   },
   {
     id: 'roles',
-    label: 'papel',
-    options: [...new Set([...store.vocabulary.roles, ...Object.values(store.roles)])].map((r) => ({ value: r, label: ROLE_LABELS[r] ?? r })),
+    label: 'role',
+    options: [...new Set([...store.vocabulary.roles, ...Object.values(store.roles)])].map((r) => ({ value: r, label: r })),
     selected: filters.roles,
     toggle: (v) => filters.toggle('roles', v),
   },
   { id: 'tags', label: 'tag', options: store.tagsUsed.map((t) => ({ value: t, label: t })), selected: filters.tags, toggle: (v) => filters.toggle('tags', v) },
   {
     id: 'groups',
-    label: 'grupo',
+    label: 'group',
     options: store.groups.map((g) => ({ value: g.id, label: `${g.name} · ${g.targets.length}`, color: g.color })),
     selected: filters.groups,
     toggle: (v) => filters.toggle('groups', v),
   },
-  { id: 'types', label: 'tipo', options: graph.nodeTypes.map((t) => ({ value: t, label: t })), selected: filters.types, toggle: (v) => filters.toggleType(v) },
+  { id: 'types', label: 'type', options: graph.nodeTypes.map((t) => ({ value: t, label: t })), selected: filters.types, toggle: (v) => filters.toggleType(v) },
 ]);
 
 const windowLabel = computed(() => {
@@ -125,23 +124,13 @@ async function applyView(item: CaseItem) {
       ⏱ {{ windowLabel }} ✕
     </button>
 
-    <button
-      class="chip eye"
-      :class="{ on: filters.unmasked }"
-      :title="filters.unmasked ? 'Documents shown in clear (journaled); click to mask' : 'Documents masked; click to show in clear (journaled)'"
-      data-testid="chip-unmasked"
-      @click="filters.setUnmasked(!filters.unmasked)"
-    >
-      <component :is="filters.unmasked ? Eye : EyeOff" :size="13" /> {{ filters.unmasked ? 'em claro' : 'mascarado' }}
-    </button>
-
     <button v-if="filters.activeCount" class="chip clear" data-testid="chips-clear" title="Clear every filter" @click="filters.clear()">
       <X :size="13" /> {{ filters.activeCount }}
     </button>
 
     <span class="chip-wrap views">
       <button class="chip" :class="{ open: open === 'views' }" data-testid="chip-views" @click="open = open === 'views' ? null : 'views'">
-        visões<template v-if="store.views.length"> · {{ store.views.length }}</template> ▾
+        views<template v-if="store.views.length"> · {{ store.views.length }}</template> ▾
       </button>
       <div v-if="open === 'views'" class="menu" data-testid="views-menu">
         <button v-for="v in store.views" :key="v.id" class="opt link" :data-testid="`view-apply-${v.id}`" @click="applyView(v)">{{ v.title }}</button>

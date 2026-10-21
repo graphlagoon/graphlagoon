@@ -1,0 +1,201 @@
+{
+  "description": "Shared unify fixture (05 §8): utils/unifyGraph.ts and services/case_graph.py must produce exactly `expected` (canonical: nodes by uid, edges by id, keys sorted). Two contexts keyed on a national id (formatted vs numeric, `digits`) merge into one Person; the first value wins and the loser goes to `conflicts`; unkeyed nodes and a redacted value (`***`) stay `id@context`; edges are never merged across sources and dangling ones are dropped.",
+  "contexts": {
+    "c-bank": {
+      "identity_keys": [
+        {
+          "node_type": "Holder",
+          "entity": "Person",
+          "source": {
+            "kind": "prop",
+            "name": "national_id"
+          },
+          "normalize": "digits"
+        }
+      ]
+    },
+    "c-crm": {
+      "identity_keys": [
+        {
+          "node_type": "Customer",
+          "entity": "Person",
+          "source": {
+            "kind": "prop",
+            "name": "doc"
+          },
+          "normalize": "digits"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "s-bank",
+      "context_id": "c-bank",
+      "nodes": [
+        {
+          "id": "p1",
+          "type": "Holder",
+          "properties": {
+            "national_id": "123.456.789-01",
+            "name": "Ana R."
+          }
+        },
+        {
+          "id": "a1",
+          "type": "Account",
+          "properties": {}
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "p1",
+          "target": "a1",
+          "type": "HOLDS",
+          "properties": {}
+        }
+      ]
+    },
+    {
+      "id": "s-crm",
+      "context_id": "c-crm",
+      "nodes": [
+        {
+          "id": "9",
+          "type": "Customer",
+          "properties": {
+            "doc": 12345678901,
+            "name": "Ana Ribeiro",
+            "income": 1800
+          }
+        },
+        {
+          "id": "a1",
+          "type": "Account",
+          "properties": {}
+        },
+        {
+          "id": "m1",
+          "type": "Customer",
+          "properties": {
+            "doc": "***.418.207-**"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "9",
+          "target": "a1",
+          "type": "OWNS",
+          "properties": {}
+        },
+        {
+          "id": "dangling",
+          "source": "9",
+          "target": "nowhere",
+          "type": "X",
+          "properties": {}
+        }
+      ]
+    }
+  ],
+  "matches": [],
+  "overrides": {},
+  "expected": {
+    "edges": [
+      {
+        "dst": "a1@c-bank",
+        "id": "s-bank:e1",
+        "properties": {},
+        "source_id": "s-bank",
+        "src": "Person:12345678901",
+        "type": "HOLDS"
+      },
+      {
+        "dst": "a1@c-crm",
+        "id": "s-crm:e1",
+        "properties": {},
+        "source_id": "s-crm",
+        "src": "Person:12345678901",
+        "type": "OWNS"
+      }
+    ],
+    "nodes": [
+      {
+        "conflicts": {
+          "name": [
+            {
+              "source_id": "s-crm",
+              "value": "Ana Ribeiro"
+            }
+          ],
+          "node_type": [
+            {
+              "source_id": "s-crm",
+              "value": "Customer"
+            }
+          ]
+        },
+        "entity": "Person",
+        "properties": {
+          "doc": 12345678901,
+          "income": 1800,
+          "name": "Ana R.",
+          "national_id": "123.456.789-01"
+        },
+        "sources": [
+          {
+            "node_id": "p1",
+            "source_id": "s-bank"
+          },
+          {
+            "node_id": "9",
+            "source_id": "s-crm"
+          }
+        ],
+        "type": "Holder",
+        "uid": "Person:12345678901"
+      },
+      {
+        "entity": null,
+        "properties": {},
+        "sources": [
+          {
+            "node_id": "a1",
+            "source_id": "s-bank"
+          }
+        ],
+        "type": "Account",
+        "uid": "a1@c-bank"
+      },
+      {
+        "entity": null,
+        "properties": {},
+        "sources": [
+          {
+            "node_id": "a1",
+            "source_id": "s-crm"
+          }
+        ],
+        "type": "Account",
+        "uid": "a1@c-crm"
+      },
+      {
+        "entity": null,
+        "properties": {
+          "doc": "***.418.207-**"
+        },
+        "sources": [
+          {
+            "node_id": "m1",
+            "source_id": "s-crm"
+          }
+        ],
+        "type": "Customer",
+        "uid": "m1@c-crm"
+      }
+    ]
+  }
+}

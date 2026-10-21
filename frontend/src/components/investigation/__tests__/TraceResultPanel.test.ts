@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/vue'
 import { createPinia, setActivePinia } from 'pinia'
-import fixture from '@/__tests__/fixtures/trace/golpe-pix.json'
+import fixture from '@/__tests__/fixtures/trace/flow-chain.json'
 import TraceResultPanel from '@/components/investigation/TraceResultPanel.vue'
 import { useInvestigationStore } from '@/stores/investigation'
 import { useCaseAnalyses, ALLOCATIONS, type TraceContent } from '@/composables/useCaseAnalyses'
@@ -13,7 +13,7 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock('@/services/api', () => ({ api }))
 
-const amount = (v: number) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'BRL' }).format(v)
+const amount = (v: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(v)
 const t = (hhmm: string) => Date.parse(`2026-09-09T${hhmm}:00-03:00`)
 
 let pinia: ReturnType<typeof createPinia>
@@ -35,15 +35,15 @@ async function traced() {
 }
 
 describe('trace as an item (05 §3) and its renderer', () => {
-  it('README defaults from the seed; the run is a table/result item with the method as provenance', async () => {
+  it('defaults from the seed; the run is a table/result item with the method as provenance', async () => {
     const { params, content } = await traced()
-    expect(params).toMatchObject({ maxHops: 3, dwellHours: 24, minAmount: 50, allocation: 'fifo', seedEdgeIds: ['src:e2'] })
-    for (const type of ['Saque', 'Exchange', 'Aposta', 'BancoExterno']) expect(params.stopTypes).toContain(type)
-    expect(params.stopTypes).not.toContain('Conta')
+    expect(params).toMatchObject({ maxHops: 3, dwellHours: 24, minAmount: 0, allocation: 'fifo', seedEdgeIds: ['src:e2'] })
+    // The default stops are the types where value only ends: no domain word anywhere.
+    expect(params.stopTypes).toEqual(['Betting', 'CashWithdrawal', 'Exchange'])
     const [id, body] = api.createInvestigationItem.mock.calls[0]
     expect(id).toBe('inv-1')
     expect(body).toMatchObject({ kind: 'table', subkind: 'result', provenance: { tool: 'trace', engine: 'browser', params: { allocation: 'fifo', maxHops: 3, seedEdgeIds: ['src:e2'] } } })
-    expect(body.content_json.result.exits['saque-atm@ctx']).toBe(2000)
+    expect(body.content_json.result.exits['atm-cash@ctx']).toBe(2000)
     expect(content.stamp).toContain('FIFO')
     expect(content.proportionalExits).toBeTruthy()
   })
@@ -54,7 +54,7 @@ describe('trace as an item (05 §3) and its renderer', () => {
       props: { content, nameOf: analyses.nameOf, view: 'layers', focus: null, canEdit: true, pinned: false },
       global: { plugins: [pinia] },
     })
-    expect(getByTestId('trace-exit-saque-atm@ctx').textContent).toContain(amount(2000))
+    expect(getByTestId('trace-exit-atm-cash@ctx').textContent).toContain(amount(2000))
     const exchange = getByTestId('trace-exit-exchange-gama@ctx').textContent!
     expect(exchange).toContain(amount(1550))
     expect(exchange).toContain(`proportional would give ${amount(1597.73)}`)
@@ -65,7 +65,7 @@ describe('trace as an item (05 §3) and its renderer', () => {
       expect(retained).toContain(id)
       expect(retained).toContain(amount(v))
     }
-    expect(getByTestId('trace-method').textContent).toMatch(/forward · 3 layers · Δ 24 h · min .* · FIFO · stop: .*Saque.* · window .* · seed: src:e2/)
+    expect(getByTestId('trace-method').textContent).toMatch(/forward · 3 layers · Δ 24 h · min .* · FIFO · stop: .*CashWithdrawal.* · window .* · seed: src:e2/)
     expect(getByTestId('trace-coverage').textContent).toContain('(91%)')
     await fireEvent.click(getByTestId('trace-save-evidence'))
     expect(emitted('pin')).toBeTruthy()
@@ -83,7 +83,7 @@ describe('trace as an item (05 §3) and its renderer', () => {
 
   it('backward offers LIFO; re-running into the item adds a version instead of a new item', async () => {
     const { analyses, item } = await traced()
-    const back = analyses.defaultTraceParams({ type: 'node', id: 'saque-atm@ctx' }, 'backward')!
+    const back = analyses.defaultTraceParams({ type: 'node', id: 'atm-cash@ctx' }, 'backward')!
     expect(back.allocation).toBe('lifo')
     expect(ALLOCATIONS.backward.map((a) => a.id)).not.toContain('fifo')
     await analyses.runTrace(back, item.id)

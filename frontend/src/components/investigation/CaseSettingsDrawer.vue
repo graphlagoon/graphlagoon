@@ -1,21 +1,18 @@
 <script setup lang="ts">
 /**
- * ⚙ of the case (05 §2): name, type, deadlines, members, which agent writes stay
- * "suggested", vocabularies, identity keys, edge semantics by relationship type
- * and label templates. Everything lands in one `PATCH /api/investigations/{id}`.
+ * ⚙ of the case (05 §2): name, type, deadlines (SLA hours), members, which agent
+ * writes stay "suggested", vocabularies, identity keys, edge semantics by
+ * relationship type and label templates. Everything lands in one
+ * `PATCH /api/investigations/{id}`; another type refills the form with its defaults.
  */
 import { computed, reactive, ref, watch } from 'vue';
-import { api } from '@/services/api';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { KIND_PRESET_LABELS } from '@/utils/investigationStatus';
 import { NORMALIZER_LABELS } from '@/utils/identityKeys';
-import { DEFAULT_SUGGEST_KINDS, PRESET_DEFAULTS, SUGGEST_KINDS } from '@/utils/casePresets';
+import { DEFAULT_SUGGEST_KINDS, SUGGEST_KINDS } from '@/utils/caseVocabulary';
 import type { EdgeSemantics, IdentityKey, IdentityNormalize } from '@/types/graph';
-import type { KindPreset } from '@/types/investigation';
-import type { OrgVocabulary, OrgVocabularyKind } from '@/types/admin';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: []; share: [] }>();
@@ -25,7 +22,7 @@ const graph = useGraphStore();
 const toast = useToast();
 
 const inv = computed(() => store.current!);
-const canEdit = computed(() => inv.value.has_write_access && inv.value.status !== 'decided');
+const canEdit = computed(() => inv.value.has_write_access && inv.value.status !== 'closed');
 
 interface KeyRow { node_type: string; entity: string; prop: string; normalize: IdentityNormalize; pattern: string }
 interface SemRow { type: string; amount_prop: string; time_prop: string; weight_prop: string; timestamp_prop: string; amount_unit: 'units' | 'cents' }
@@ -34,11 +31,11 @@ interface LabelRow { node_type: string; template: string }
 const form = reactive({
   title: '',
   description: '',
-  kind_preset: 'livre' as KindPreset,
+  case_type: 'general',
   alert_at: '',
   occurred_at: '',
-  days_open: '' as string | number,
-  days_analysis: '' as string | number,
+  hours_open: '' as string | number,
+  hours_analysis: '' as string | number,
   suggest: [] as string[],
   roles: '',
   tags: '',
@@ -58,11 +55,11 @@ function load() {
   const v = (s.vocabularies ?? {}) as Record<string, string[]>;
   form.title = inv.value.title;
   form.description = inv.value.description ?? '';
-  form.kind_preset = inv.value.kind_preset;
+  form.case_type = inv.value.case_type;
   form.alert_at = toInput(inv.value.alert_at);
   form.occurred_at = toInput(inv.value.occurred_at);
-  form.days_open = inv.value.deadline_days?.open ?? '';
-  form.days_analysis = inv.value.deadline_days?.analysis ?? '';
+  form.hours_open = inv.value.sla_hours?.open ?? '';
+  form.hours_analysis = inv.value.sla_hours?.analysis ?? '';
   form.suggest = (s.agent_suggest_kinds as string[] | undefined) ?? [...DEFAULT_SUGGEST_KINDS];
   form.roles = list(v.roles ?? store.vocabulary.roles);
   form.tags = list(v.tags ?? store.vocabulary.tags);
@@ -77,34 +74,16 @@ function load() {
 }
 watch(() => props.open, (o) => o && load(), { immediate: true });
 
-// Org vocabularies (05 §6): suggestions for the preset, never imposed; one click adds.
-const orgVocab = ref<OrgVocabulary[]>([]);
-watch(() => props.open, async (o) => {
-  if (!o || orgVocab.value.length) return;
-  try {
-    orgVocab.value = await api.getOrgVocabularies();
-  } catch {
-    orgVocab.value = [];
-  }
-}, { immediate: true });
-const SUGGEST_FIELDS: Array<{ kind: OrgVocabularyKind; field: 'roles' | 'tags' | 'link_attributes' }> = [
-  { kind: 'role', field: 'roles' }, { kind: 'tag', field: 'tags' }, { kind: 'link_attribute', field: 'link_attributes' },
-];
-function orgSuggestions(kind: OrgVocabularyKind, field: 'roles' | 'tags' | 'link_attributes'): string[] {
-  const vocab = orgVocab.value.find((v) => v.kind === kind);
-  if (!vocab) return [];
-  const have = new Set(split(form[field]));
-  const fits = vocab.values.filter((v) => !v.presets.length || v.presets.includes(form.kind_preset));
-  return fits.map((v) => v.value).filter((v) => !have.has(v)).slice(0, 12);
-}
-function addSuggestion(field: 'roles' | 'tags' | 'link_attributes', value: string) {
-  form[field] = [...split(form[field]), value].join(', ');
-}
-
-function applyPreset() {
-  const d = PRESET_DEFAULTS[form.kind_preset];
-  form.roles = list(d.roles);
-  form.link_attributes = list(d.link_attributes);
+/** Another type: its vocabularies, suggest kinds and SLA replace the form's (still editable). */
+function applyType() {
+  const t = store.caseTypes.find((x) => x.slug === form.case_type);
+  if (!t) return;
+  form.roles = list(t.vocabularies.roles);
+  form.tags = list(t.vocabularies.tags);
+  form.link_attributes = list(t.vocabularies.link_attributes);
+  form.suggest = t.agent_suggest_kinds ? [...t.agent_suggest_kinds] : [...DEFAULT_SUGGEST_KINDS];
+  form.hours_open = t.sla_hours.open ?? '';
+  form.hours_analysis = t.sla_hours.analysis ?? '';
 }
 
 const nodeTypes = computed(() => graph.nodeTypes);
@@ -141,16 +120,16 @@ async function save() {
         ]),
     );
     const label_templates = Object.fromEntries(form.labels.filter((l) => l.node_type.trim() && l.template.trim()).map((l) => [l.node_type.trim(), l.template.trim()]));
-    const days: Record<string, number> = {};
-    if (form.days_open !== '' && form.days_open !== null) days.open = Number(form.days_open);
-    if (form.days_analysis !== '' && form.days_analysis !== null) days.analysis = Number(form.days_analysis);
+    const hours: Record<string, number> = {};
+    if (form.hours_open !== '' && form.hours_open !== null) hours.open = Number(form.hours_open);
+    if (form.hours_analysis !== '' && form.hours_analysis !== null) hours.analysis = Number(form.hours_analysis);
     await store.updateInvestigation({
       title: form.title.trim() || inv.value.title,
       description: form.description.trim() || null,
-      kind_preset: form.kind_preset,
+      ...(form.case_type !== inv.value.case_type ? { case_type: form.case_type } : {}),
       alert_at: form.alert_at ? new Date(form.alert_at).toISOString() : null,
       occurred_at: form.occurred_at ? new Date(form.occurred_at).toISOString() : null,
-      deadline_days: Object.keys(days).length ? days : null,
+      sla_hours: Object.keys(hours).length ? hours : null,
       settings: {
         ...(inv.value.settings ?? {}),
         agent_suggest_kinds: form.suggest,
@@ -182,8 +161,8 @@ async function save() {
           <h3>General</h3>
           <label>Name <input v-model="form.title" :disabled="!canEdit" data-testid="settings-title" /></label>
           <label>Type
-            <select v-model="form.kind_preset" :disabled="!canEdit" data-testid="settings-preset" @change="applyPreset">
-              <option v-for="(label, key) in KIND_PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
+            <select v-model="form.case_type" :disabled="!canEdit" data-testid="settings-type" @change="applyType">
+              <option v-for="t in store.caseTypes" :key="t.slug" :value="t.slug">{{ t.label }}</option>
             </select>
           </label>
           <label>Description <textarea v-model="form.description" rows="2" :disabled="!canEdit"></textarea></label>
@@ -193,10 +172,10 @@ async function save() {
           <div class="grid">
             <label>Alert at <input v-model="form.alert_at" type="date" :disabled="!canEdit" data-testid="settings-alert-at" /></label>
             <label>Occurred at <input v-model="form.occurred_at" type="date" :disabled="!canEdit" /></label>
-            <label>Days · open <input v-model="form.days_open" type="number" min="1" placeholder="preset" :disabled="!canEdit" /></label>
-            <label>Days · analysis <input v-model="form.days_analysis" type="number" min="1" placeholder="preset" :disabled="!canEdit" /></label>
+            <label>Hours · open <input v-model="form.hours_open" type="number" min="1" placeholder="no SLA" :disabled="!canEdit" data-testid="settings-hours-open" /></label>
+            <label>Hours · analysis <input v-model="form.hours_analysis" type="number" min="1" placeholder="no SLA" :disabled="!canEdit" data-testid="settings-hours-analysis" /></label>
           </div>
-          <p class="muted">Pix/MED counts 45 + 45 days from the alert; other types have a deadline only when you set the days.</p>
+          <p class="muted">Counted from the alert (else the occurrence, else the creation). The case type sets them; a case may change its own.</p>
         </section>
         <section>
           <h3>Members</h3>
@@ -214,16 +193,10 @@ async function save() {
           </div>
         </section>
         <section>
-          <h3>Vocabularies <span class="muted">the org's suggestions for this type; click to add</span></h3>
+          <h3>Vocabularies <span class="muted">from the case type; never imposed</span></h3>
           <label>Roles <input v-model="form.roles" :disabled="!canEdit" placeholder="comma separated" data-testid="settings-roles" /></label>
           <label>Tags <input v-model="form.tags" :disabled="!canEdit" placeholder="comma separated" /></label>
-          <label>Link attributes (Vínculos) <input v-model="form.link_attributes" :disabled="!canEdit" placeholder="telefone, email, device_id…" data-testid="settings-link-attributes" /></label>
-          <div v-for="f in SUGGEST_FIELDS" :key="f.kind" class="chips" :data-testid="`settings-org-${f.kind}`">
-            <template v-if="orgSuggestions(f.kind, f.field).length">
-              <span class="muted">{{ f.field.replace('_', ' ') }}:</span>
-              <button v-for="v in orgSuggestions(f.kind, f.field)" :key="v" type="button" class="chip" :disabled="!canEdit" @click="addSuggestion(f.field, v)">+ {{ v }}</button>
-            </template>
-          </div>
+          <label>Link attributes <input v-model="form.link_attributes" :disabled="!canEdit" placeholder="phone, email, device_id…" data-testid="settings-link-attributes" /></label>
         </section>
         <section>
           <h3>Identity keys <span class="muted">override a context's key for the same node type</span></h3>
@@ -264,12 +237,12 @@ async function save() {
           <datalist id="settings-edge-props"><option v-for="p in edgeProps" :key="p" :value="p"></option></datalist>
         </section>
         <section>
-          <h3>Label templates <span class="muted">{nome} · {cpf} (documents stay masked)</span></h3>
+          <h3>Label templates <span class="muted">{name} · {document}</span></h3>
           <table class="rows" data-testid="settings-labels">
             <tbody>
               <tr v-for="(l, i) in form.labels" :key="i">
                 <td><input v-model="l.node_type" list="settings-node-types" :disabled="!canEdit" placeholder="node type" /></td>
-                <td><input v-model="l.template" :disabled="!canEdit" placeholder="{nome} · {cpf}" /></td>
+                <td><input v-model="l.template" :disabled="!canEdit" placeholder="{name} · {document}" /></td>
                 <td><button type="button" class="link-btn danger" :disabled="!canEdit" @click="form.labels.splice(i, 1)">remove</button></td>
               </tr>
             </tbody>
@@ -365,27 +338,7 @@ textarea {
   gap: 4px 14px;
 }
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
 
-.chips:empty {
-  display: none;
-}
-
-.chip {
-  padding: 1px 8px;
-  border: 1px dashed var(--border-color);
-  border-radius: 999px;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: var(--color-primary);
-  cursor: pointer;
-}
 
 .checks label {
   flex-direction: row;

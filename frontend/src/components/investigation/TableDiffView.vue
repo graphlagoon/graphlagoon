@@ -10,15 +10,15 @@ const cell = (v: unknown) => (v === null || v === undefined ? '—' : String(v))
   <div class="diff" data-testid="table-diff">
     <p class="summary" data-testid="table-diff-summary">
       <strong>{{ diff.left.title }}</strong> v{{ diff.left.version }} × <strong>{{ diff.right.title }}</strong> v{{ diff.right.version }}
-      · chave <code>{{ diff.key_column }}</code>
-      · {{ diff.counts.same }} iguais · {{ diff.counts.changed }} alteradas · {{ diff.counts.only_left }} só à esquerda · {{ diff.counts.only_right }} só à direita
-      <span v-if="diff.truncated" class="muted"> · listas truncadas em 500</span>
+      · key <code>{{ diff.key_column }}</code>
+      · {{ diff.counts.same }} same · {{ diff.counts.changed }} changed · {{ diff.counts.only_left }} only on the left · {{ diff.counts.only_right }} only on the right
+      <span v-if="diff.truncated" class="muted"> · lists cut at 500</span>
     </p>
 
     <section v-if="diff.changed.length">
-      <h4>Alteradas</h4>
+      <h4>Changed</h4>
       <table class="t">
-        <thead><tr><th>{{ diff.key_column }}</th><th>coluna</th><th>antes</th><th>depois</th></tr></thead>
+        <thead><tr><th>{{ diff.key_column }}</th><th>column</th><th>before</th><th>after</th></tr></thead>
         <tbody>
           <template v-for="row in diff.changed" :key="row.key">
             <tr v-for="(f, col) in row.fields" :key="`${row.key}-${col}`">
@@ -31,7 +31,7 @@ const cell = (v: unknown) => (v === null || v === undefined ? '—' : String(v))
 
     <section v-for="side in (['only_left', 'only_right'] as const)" :key="side">
       <template v-if="diff[side].length">
-        <h4>Só em {{ side === 'only_left' ? diff.left.title : diff.right.title }}</h4>
+        <h4>Only in {{ side === 'only_left' ? diff.left.title : diff.right.title }}</h4>
         <table class="t">
           <thead><tr><th v-for="c in diff.columns[side === 'only_left' ? 'left' : 'right']" :key="c">{{ c }}</th></tr></thead>
           <tbody>

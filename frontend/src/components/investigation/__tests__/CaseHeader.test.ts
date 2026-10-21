@@ -29,7 +29,8 @@ const CASE = {
   title: 'Golpe Pix',
   description: null,
   status: 'open',
-  kind_preset: 'pix_med',
+  case_type: 'general',
+  fields: {},
   tags: [],
   settings: {},
   owner_email: 'me@x.com',
@@ -40,7 +41,7 @@ const CASE = {
   can_manage: true,
   created_at: now,
   updated_at: now,
-  deadline: { phase: 'open', due_at: now, days_left: 5 },
+  deadline: { phase: 'open', due_at: now, hours_left: 120, days_left: 5, total_hours: 1080, urgent: true, overdue: false },
 }
 
 const stubs = { RouterLink: { template: '<a><slot /></a>' } }
@@ -72,17 +73,18 @@ describe('CaseHeader', () => {
     expect(getByTestId('investigation-title').textContent).toContain('falsa central')
 
     const options = [...(getByTestId('case-status') as HTMLSelectElement).options].map((o) => o.value)
-    expect(options).toEqual(['open', 'analysis', 'archived']) // decided only through the decision
+    expect(options).toEqual(['open', 'analysis']) // closed only through a decision
     await fireEvent.update(getByTestId('case-status'), 'analysis')
     await flushPromises()
     expect(api.updateInvestigation).toHaveBeenLastCalledWith(CASE.id, { status: 'analysis' })
     expect(queryByTestId('case-reopen')).toBeNull()
   })
 
-  it('reopens a decided case from the menu and deletes after a confirmation', async () => {
-    vi.mocked(api.reopenInvestigation).mockResolvedValue({ ...CASE, status: 'analysis', decision: null } as any)
-    const { getByTestId, queryByTestId } = mount({ status: 'decided', decision: { outcome: 'arquivar' } })
-    expect(queryByTestId('case-decide')).toBeNull() // already decided
+  it('reopens a closed case from the menu and deletes after a confirmation', async () => {
+    const decisions = [{ id: 'd1', outcome_label: 'No action', closes_case: true, review: null }]
+    vi.mocked(api.reopenInvestigation).mockResolvedValue({ ...CASE, status: 'analysis', decisions } as any)
+    const { getByTestId, queryByTestId } = mount({ status: 'closed', decisions })
+    expect(queryByTestId('case-decide')).toBeNull() // closed
     expect((getByTestId('case-status') as HTMLSelectElement).disabled).toBe(true)
 
     await fireEvent.click(getByTestId('case-menu'))
@@ -100,22 +102,27 @@ describe('CaseHeader', () => {
     expect(push).toHaveBeenCalledWith('/investigations')
   })
 
-  it('archiving without a decision asks for a reason and sends it with the status (05 §7)', async () => {
-    vi.mocked(api.updateInvestigation).mockImplementation(async (_id, patch) => ({ ...CASE, ...patch }) as any)
-    const { getByTestId, queryByTestId } = mount({ status: 'analysis', deadline: { phase: 'analysis', due_at: now, days_left: 80, total_days: 90 } })
-    expect(getByTestId('workspace-deadline').textContent).toContain('análise · 80 d')
+  it('picks a stage of the case type; a decision waiting for review hides Decide', async () => {
+    vi.mocked(api.updateInvestigation).mockImplementation(async (_id, patch) => ({ ...CASE, case_type: 'merchant_review', ...patch }) as any)
+    const store = useInvestigationStore()
+    store.caseTypes = [{ slug: 'merchant_review', label: 'Merchant review', stages: ['Waiting for documents', 'Escalated'], outcomes: [], actions: [], fields: [] }] as any
+    const { getByTestId, queryByTestId } = mount({ case_type: 'merchant_review', status: 'analysis', deadline: { phase: 'analysis', due_at: now, hours_left: 1920, days_left: 80, total_hours: 2160, urgent: false, overdue: false } })
+    expect(getByTestId('workspace-deadline').textContent).toContain('analysis · 80 d')
     expect(getByTestId('workspace-deadline').classList).not.toContain('urgent')
-
-    await fireEvent.update(getByTestId('case-status'), 'archived')
-    expect(api.updateInvestigation).not.toHaveBeenCalled()
-    expect((getByTestId('case-status') as HTMLSelectElement).value).toBe('analysis')
-    expect((getByTestId('archive-reason-confirm') as HTMLButtonElement).disabled).toBe(true)
-    await fireEvent.update(getByTestId('archive-reason-input'), ' duplicado do #0411 ')
-    await fireEvent.click(getByTestId('archive-reason-confirm'))
+    expect([...(getByTestId('case-stage') as HTMLSelectElement).options].map((o) => o.value)).toEqual(['', 'Waiting for documents', 'Escalated'])
+    await fireEvent.update(getByTestId('case-stage'), 'Escalated')
     await flushPromises()
-    expect(api.updateInvestigation).toHaveBeenCalledWith(CASE.id, { status: 'archived', archive_reason: 'duplicado do #0411' })
-    expect(queryByTestId('archive-reason')).toBeNull()
-    expect((getByTestId('case-status') as HTMLSelectElement).value).toBe('archived')
+    expect(api.updateInvestigation).toHaveBeenLastCalledWith(CASE.id, { stage: 'Escalated' })
+    await fireEvent.update(getByTestId('case-stage'), '')
+    await flushPromises()
+    expect(api.updateInvestigation).toHaveBeenLastCalledWith(CASE.id, { stage: null })
+    expect(getByTestId('case-decide')).toBeTruthy()
+    expect(queryByTestId('review-pending')).toBeNull()
+
+    store.current = { ...store.current!, decisions: [{ id: 'd1', outcome_label: 'Offboard', closes_case: true, review: 'pending' }] } as any
+    await flushPromises()
+    expect(getByTestId('review-pending').textContent).toContain('waiting for review')
+    expect(queryByTestId('case-decide')).toBeNull()
   })
 
   it('is read-only without write access', () => {

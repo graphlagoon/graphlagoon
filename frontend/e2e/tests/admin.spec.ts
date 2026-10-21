@@ -1,5 +1,5 @@
 import { expect, superuserTest, test } from '../fixtures/test-fixtures';
-import { seedAdmin } from '../helpers/api-mocks';
+import { caseType, seedAdmin, seedCaseTypes } from '../helpers/api-mocks';
 import { MOCK_ADMIN_AUDIT } from '../fixtures/mock-data';
 
 /**
@@ -112,5 +112,75 @@ superuserTest.describe('Admin area (superuser)', () => {
     await button.click();
     await expect(page.getByTestId('admin-overview')).toBeVisible();
     expect(calls.clears).toEqual([{ confirm: 'CLEAR ALL' }]);
+  });
+
+  superuserTest('case types: the org defines its own, with outcomes, actions and fields (06 §1)', async ({ superuserPage: page }) => {
+    await seedAdmin(page);
+    const calls = await seedCaseTypes(page, [caseType('credit_review', { label: 'Credit review', outcomes: [{ id: 'approve', label: 'Approve', closes_case: true, requires_review: false }] })]);
+    await page.goto('/admin');
+    await page.getByTestId('admin-tab-case-types').click();
+    const table = page.getByTestId('admin-case-types-table');
+    await expect(table.getByTestId('admin-case-type-general')).toContainText('built in');
+    await expect(table.getByTestId('admin-case-type-credit_review')).toContainText('Credit review');
+
+    await page.getByTestId('admin-case-type-new').click();
+    const editor = page.getByTestId('case-type-editor');
+    await editor.getByTestId('ct-label').fill('Merchant review');
+    await editor.getByTestId('ct-roles').fill('suspect merchant, front partner');
+    await editor.getByTestId('ct-add-outcome').click();
+    await editor.getByTestId('ct-outcome-label-0').fill('Terminate the merchant');
+    await editor.getByTestId('ct-outcome-review-0').check();
+    await editor.getByTestId('ct-add-action').click();
+    await editor.getByTestId('ct-action-label-0').fill('Hold the settlements');
+    await editor.getByTestId('ct-add-field').click();
+    await editor.getByTestId('ct-field-label-0').fill('Amount at risk');
+    await editor.getByTestId('ct-field-type-0').selectOption('money');
+    await editor.getByTestId('ct-field-queue-0').check();
+    await editor.getByTestId('ct-sla-open').fill('24');
+    await editor.getByTestId('ct-save').click();
+
+    await expect(table.getByTestId('admin-case-type-merchant_review')).toContainText('Merchant review');
+    expect(calls.puts).toHaveLength(1);
+    expect(calls.puts[0]).toMatchObject({
+      slug: 'merchant_review',
+      body: {
+        label: 'Merchant review',
+        vocabularies: { roles: ['suspect merchant', 'front partner'] },
+        outcomes: [{ id: 'terminate_the_merchant', closes_case: true, requires_review: true }],
+        actions: [{ id: 'hold_the_settlements', label: 'Hold the settlements' }],
+        fields: [{ id: 'amount_at_risk', type: 'money', in_queue: true }],
+        sla_hours: { open: 24 },
+      },
+    });
+  });
+
+  superuserTest('case types: help, an AI prompt from the server catalog, and Import JSON fills the form (06)', async ({ superuserPage: page }) => {
+    await seedAdmin(page);
+    const calls = await seedCaseTypes(page, []);
+    await page.goto('/admin');
+    await page.getByTestId('admin-tab-case-types').click();
+    await page.getByTestId('admin-case-type-new').click();
+    const editor = page.getByTestId('case-type-editor');
+    await editor.getByTestId('help-ct-actions').click();
+    await expect(editor.getByTestId('help-ct-actions-text')).toContainText('becomes a task');
+    await editor.getByTestId('ct-ask-ai').click();
+    await expect(page.getByTestId('ct-skill-text')).toContainText('write a "case type"');
+    await expect(page.getByTestId('ct-skill-text')).toContainText('"starter_queries"'); // the server schema
+    await page.getByRole('button', { name: 'Close' }).click();
+
+    await editor.getByTestId('ct-import-json').click();
+    await editor.getByTestId('ct-import-text').fill(JSON.stringify({
+      label: 'Chargeback dispute',
+      outcomes: [{ id: 'accept', label: 'Accept', closes_case: true }, { id: 'represent', label: 'Represent', closes_case: false }],
+      fields: [{ id: 'reason_code', label: 'Reason code', type: 'enum', options: ['10.4', '13.1'], required: true, in_queue: true }],
+    }));
+    await editor.getByTestId('ct-import-apply').click();
+    await expect(editor.getByTestId('ct-label')).toHaveValue('Chargeback dispute');
+    await editor.getByTestId('ct-save').click();
+    await expect.poll(() => calls.puts.length).toBe(1);
+    expect(calls.puts[0]).toMatchObject({
+      slug: 'chargeback_dispute',
+      body: { outcomes: [{ id: 'accept' }, { id: 'represent', closes_case: false }], fields: [{ id: 'reason_code', options: ['10.4', '13.1'] }] },
+    });
   });
 });

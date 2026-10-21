@@ -22,7 +22,6 @@ export const useCaseFilters = defineStore('caseFilters', () => {
   const tags = ref<string[]>([]);
   const groups = ref<string[]>([]);
   const window = ref<[number, number] | null>(null);
-  const unmasked = ref(false);
 
   const lists = { sources, roles, tags, groups };
 
@@ -93,11 +92,5 @@ export const useCaseFilters = defineStore('caseFilters', () => {
     graph.applyFilters({ node_types: f?.types ?? [] });
   }
 
-  /** 👁: raw documents in labels and the inspector; each switch-on is journaled (05 §3). */
-  async function setUnmasked(on: boolean) {
-    unmasked.value = on;
-    if (on) await inv.postEvent('view.unmasked', { nodes: inv.unified.nodes.length }).catch(() => {});
-  }
-
-  return { sources, roles, tags, groups, window, unmasked, types, activeCount, hidden, toggle, toggleType, clear, snapshot, restore, setUnmasked };
+  return { sources, roles, tags, groups, window, types, activeCount, hidden, toggle, toggleType, clear, snapshot, restore };
 });

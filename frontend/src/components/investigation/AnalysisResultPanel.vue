@@ -1,21 +1,20 @@
 <script setup lang="ts">
 /**
- * Renders the active analysis item (05 §3 "Resultado = item") from the content of
- * its latest version: trace, paths, typologies, Vínculos or a metrics table.
+ * Renders the active analysis item (05 §3 "Result = item") from the content of
+ * its latest version: trace, paths, links or a metrics table.
  * Pinning freezes that version as evidence.
  */
 import { computed, ref, watch } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
-import { useCaseAnalyses, type LinksContent, type MetricsContent, type PathsContent, type TraceContent, type TypologiesContent } from '@/composables/useCaseAnalyses';
+import { useCaseAnalyses, type LinksContent, type MetricsContent, type PathsContent, type TraceContent } from '@/composables/useCaseAnalyses';
 import { getErrorMessage } from '@/utils/errorMessage';
 import TraceResultPanel, { type TraceView } from '@/components/investigation/TraceResultPanel.vue';
 import PathBar from '@/components/investigation/PathBar.vue';
-import TypologyBadgesPanel from '@/components/investigation/TypologyBadgesPanel.vue';
 import type { CaseItem } from '@/types/investigation';
 
-type Content = TraceContent | PathsContent | TypologiesContent | LinksContent | MetricsContent;
+type Content = TraceContent | PathsContent | LinksContent | MetricsContent;
 
 const props = defineProps<{ item: CaseItem; canEdit: boolean; traceView: TraceView; focus: [number, number] | null }>();
 const emit = defineEmits<{ close: []; rerun: [tool: string]; 'update:traceView': [view: TraceView] }>();
@@ -92,7 +91,6 @@ const metricsPreview = computed(() => (content.value?.tool === 'metrics' ? (cont
         @rerun="emit('rerun', 'trace')"
       />
       <PathBar v-else-if="content.tool === 'paths'" :content="content" :name-of="nameOf" />
-      <TypologyBadgesPanel v-else-if="content.tool === 'typologies'" :results="content.results" :can-edit="canEdit" />
       <div v-else-if="content.tool === 'links'" class="links" data-testid="links-result">
         <p>
           <strong>{{ content.pairs.length }}</strong> {{ content.pairs.length === 1 ? 'pair shares' : 'pairs share' }}

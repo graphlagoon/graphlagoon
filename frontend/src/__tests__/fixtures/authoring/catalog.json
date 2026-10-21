@@ -1,0 +1,1076 @@
+{
+ "case_type_schema": {
+  "$defs": {
+   "CaseTypeAction": {
+    "additionalProperties": false,
+    "description": "What a decision may set in motion; each chosen action becomes a task.",
+    "properties": {
+     "id": {
+      "pattern": "^[a-z][a-z0-9_]{0,59}$",
+      "title": "Id",
+      "type": "string"
+     },
+     "label": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+     },
+     "due_hours": {
+      "anyOf": [
+       {
+        "maximum": 8784,
+        "minimum": 1,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Due Hours"
+     }
+    },
+    "required": [
+     "id",
+     "label"
+    ],
+    "title": "CaseTypeAction",
+    "type": "object"
+   },
+   "CaseTypeAnalysisDefaults": {
+    "additionalProperties": false,
+    "properties": {
+     "trace": {
+      "$ref": "#/$defs/CaseTypeTraceDefaults"
+     }
+    },
+    "title": "CaseTypeAnalysisDefaults",
+    "type": "object"
+   },
+   "CaseTypeField": {
+    "additionalProperties": false,
+    "description": "A structured field of the case, filterable in the queue.",
+    "properties": {
+     "id": {
+      "pattern": "^[a-z][a-z0-9_]{0,59}$",
+      "title": "Id",
+      "type": "string"
+     },
+     "label": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+     },
+     "type": {
+      "default": "text",
+      "enum": [
+       "text",
+       "number",
+       "money",
+       "date",
+       "enum"
+      ],
+      "title": "Type",
+      "type": "string"
+     },
+     "options": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Options",
+      "type": "array"
+     },
+     "required": {
+      "default": false,
+      "title": "Required",
+      "type": "boolean"
+     },
+     "in_queue": {
+      "default": false,
+      "title": "In Queue",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "id",
+     "label"
+    ],
+    "title": "CaseTypeField",
+    "type": "object"
+   },
+   "CaseTypeOutcome": {
+    "additionalProperties": false,
+    "description": "A result the decision can record (06 \u00a71).",
+    "properties": {
+     "id": {
+      "pattern": "^[a-z][a-z0-9_]{0,59}$",
+      "title": "Id",
+      "type": "string"
+     },
+     "label": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+     },
+     "description": {
+      "anyOf": [
+       {
+        "maxLength": 500,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Description"
+     },
+     "closes_case": {
+      "default": true,
+      "title": "Closes Case",
+      "type": "boolean"
+     },
+     "requires_review": {
+      "default": false,
+      "title": "Requires Review",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "id",
+     "label"
+    ],
+    "title": "CaseTypeOutcome",
+    "type": "object"
+   },
+   "CaseTypeSla": {
+    "additionalProperties": false,
+    "description": "Hours of each phase, counted from the alert (else the occurrence, else the creation).",
+    "properties": {
+     "open": {
+      "anyOf": [
+       {
+        "maximum": 87840,
+        "minimum": 1,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Open"
+     },
+     "analysis": {
+      "anyOf": [
+       {
+        "maximum": 87840,
+        "minimum": 1,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Analysis"
+     }
+    },
+    "title": "CaseTypeSla",
+    "type": "object"
+   },
+   "CaseTypeStarterQuery": {
+    "additionalProperties": false,
+    "properties": {
+     "title": {
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+     },
+     "language": {
+      "default": "sql",
+      "enum": [
+       "sql",
+       "cypher"
+      ],
+      "title": "Language",
+      "type": "string"
+     },
+     "query": {
+      "maxLength": 20000,
+      "minLength": 1,
+      "title": "Query",
+      "type": "string"
+     },
+     "description": {
+      "anyOf": [
+       {
+        "maxLength": 1000,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Description"
+     },
+     "parameters": {
+      "items": {
+       "$ref": "#/$defs/TemplateParameter"
+      },
+      "maxItems": 20,
+      "title": "Parameters",
+      "type": "array"
+     }
+    },
+    "required": [
+     "title",
+     "query"
+    ],
+    "title": "CaseTypeStarterQuery",
+    "type": "object"
+   },
+   "CaseTypeTraceDefaults": {
+    "additionalProperties": false,
+    "description": "What \"Follow the money\" starts with on a case of this type (06 \u00a73c).",
+    "properties": {
+     "max_hops": {
+      "anyOf": [
+       {
+        "maximum": 20,
+        "minimum": 1,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Max Hops"
+     },
+     "max_dwell_hours": {
+      "anyOf": [
+       {
+        "minimum": 0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Max Dwell Hours"
+     },
+     "min_amount": {
+      "anyOf": [
+       {
+        "minimum": 0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Min Amount"
+     },
+     "allocation": {
+      "anyOf": [
+       {
+        "enum": [
+         "fifo",
+         "lifo",
+         "proportional",
+         "libr",
+         "total"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Allocation"
+     },
+     "stop_types": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "maxItems": 50,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Stop Types"
+     }
+    },
+    "title": "CaseTypeTraceDefaults",
+    "type": "object"
+   },
+   "CaseTypeVocabularies": {
+    "additionalProperties": false,
+    "properties": {
+     "roles": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 200,
+      "title": "Roles",
+      "type": "array"
+     },
+     "tags": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 200,
+      "title": "Tags",
+      "type": "array"
+     },
+     "link_attributes": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Link Attributes",
+      "type": "array"
+     }
+    },
+    "title": "CaseTypeVocabularies",
+    "type": "object"
+   },
+   "TemplateParameter": {
+    "description": "A parameter for a query template.",
+    "properties": {
+     "id": {
+      "title": "Id",
+      "type": "string"
+     },
+     "type": {
+      "default": "input",
+      "enum": [
+       "input",
+       "select"
+      ],
+      "title": "Type",
+      "type": "string"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     },
+     "description": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Description"
+     },
+     "placeholder": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Placeholder"
+     },
+     "default": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Default"
+     },
+     "options": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Options"
+     },
+     "required": {
+      "default": true,
+      "title": "Required",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "id",
+     "label"
+    ],
+    "title": "TemplateParameter",
+    "type": "object"
+   }
+  },
+  "additionalProperties": false,
+  "description": "An admin-defined kind of case (06 \u00a71): its vocabulary, its decisions and\nactions, its fields, deadlines and what the agent reads first. Data, not code.",
+  "properties": {
+   "label": {
+    "maxLength": 120,
+    "minLength": 1,
+    "title": "Label",
+    "type": "string"
+   },
+   "description": {
+    "anyOf": [
+     {
+      "maxLength": 2000,
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Description"
+   },
+   "vocabularies": {
+    "$ref": "#/$defs/CaseTypeVocabularies"
+   },
+   "roles_multi": {
+    "default": false,
+    "title": "Roles Multi",
+    "type": "boolean"
+   },
+   "outcomes": {
+    "items": {
+     "$ref": "#/$defs/CaseTypeOutcome"
+    },
+    "maxItems": 50,
+    "title": "Outcomes",
+    "type": "array"
+   },
+   "actions": {
+    "items": {
+     "$ref": "#/$defs/CaseTypeAction"
+    },
+    "maxItems": 50,
+    "title": "Actions",
+    "type": "array"
+   },
+   "stages": {
+    "items": {
+     "type": "string"
+    },
+    "maxItems": 30,
+    "title": "Stages",
+    "type": "array"
+   },
+   "fields": {
+    "items": {
+     "$ref": "#/$defs/CaseTypeField"
+    },
+    "maxItems": 40,
+    "title": "Fields",
+    "type": "array"
+   },
+   "sla_hours": {
+    "$ref": "#/$defs/CaseTypeSla"
+   },
+   "retention_years": {
+    "anyOf": [
+     {
+      "maximum": 100,
+      "minimum": 0,
+      "type": "integer"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Retention Years"
+   },
+   "notice": {
+    "anyOf": [
+     {
+      "maxLength": 2000,
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Notice"
+   },
+   "agent_suggest_kinds": {
+    "anyOf": [
+     {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Agent Suggest Kinds"
+   },
+   "playbook": {
+    "anyOf": [
+     {
+      "maxLength": 100,
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Playbook"
+   },
+   "starter_queries": {
+    "items": {
+     "$ref": "#/$defs/CaseTypeStarterQuery"
+    },
+    "maxItems": 20,
+    "title": "Starter Queries",
+    "type": "array"
+   },
+   "report_templates": {
+    "items": {
+     "type": "string"
+    },
+    "maxItems": 20,
+    "title": "Report Templates",
+    "type": "array"
+   },
+   "analysis_defaults": {
+    "$ref": "#/$defs/CaseTypeAnalysisDefaults"
+   }
+  },
+  "required": [
+   "label"
+  ],
+  "title": "CaseTypeSpec",
+  "type": "object"
+ },
+ "report_placeholders": [
+  {
+   "key": "case.title",
+   "description": "the case title"
+  },
+  {
+   "key": "case.number",
+   "description": "the short case number (#0412aa)"
+  },
+  {
+   "key": "case.id",
+   "description": "the case id"
+  },
+  {
+   "key": "case.type",
+   "description": "the case type's label"
+  },
+  {
+   "key": "case.status",
+   "description": "open, analysis or closed"
+  },
+  {
+   "key": "case.stage",
+   "description": "the case's stage, or \u2014"
+  },
+  {
+   "key": "case.owner",
+   "description": "the owner's e-mail"
+  },
+  {
+   "key": "case.assignee",
+   "description": "the assignee's e-mail, or \u2014"
+  },
+  {
+   "key": "case.description",
+   "description": "the case description"
+  },
+  {
+   "key": "case.external_ref",
+   "description": "the alert or ticket id that opened the case"
+  },
+  {
+   "key": "case.created_at",
+   "description": "when the case was opened"
+  },
+  {
+   "key": "case.occurred_at",
+   "description": "when the facts happened"
+  },
+  {
+   "key": "case.alert_at",
+   "description": "when the alert came in"
+  },
+  {
+   "key": "fields.<id>",
+   "description": "one field of the case type (money with two decimals)"
+  },
+  {
+   "key": "fields",
+   "description": "every field of the case type, a bullet list label: value"
+  },
+  {
+   "key": "today",
+   "description": "today's date"
+  },
+  {
+   "key": "now",
+   "description": "the date and time of the rendering"
+  },
+  {
+   "key": "user",
+   "description": "who renders the report"
+  },
+  {
+   "key": "brief",
+   "description": "the case brief (markdown)"
+  },
+  {
+   "key": "decisions",
+   "description": "every decision, a bullet list (D1 \u00b7 outcome on targets \u2014 who, when)"
+  },
+  {
+   "key": "decision.outcome",
+   "description": "the last decision's outcome label"
+  },
+  {
+   "key": "decision.rationale",
+   "description": "the last decision's rationale"
+  },
+  {
+   "key": "decision.decided_by",
+   "description": "who recorded the last decision"
+  },
+  {
+   "key": "decision.decided_at",
+   "description": "when the last decision was recorded"
+  },
+  {
+   "key": "decision.targets",
+   "description": "the entities the last decision is about, or 'the whole case'"
+  },
+  {
+   "key": "decision.hash",
+   "description": "the last decision's sha256"
+  },
+  {
+   "key": "decision.review",
+   "description": "the last decision's review state (pending, approved, rejected), or \u2014"
+  },
+  {
+   "key": "evidence",
+   "description": "the pinned versions, E1, E2\u2026 with their sha256, a bullet list"
+  },
+  {
+   "key": "hypotheses",
+   "description": "the confirmed hypotheses with their status, a bullet list"
+  },
+  {
+   "key": "roles",
+   "description": "the entities with a confirmed role (entity \u2014 role), a bullet list"
+  },
+  {
+   "key": "tasks",
+   "description": "the open tasks with assignee and due time, a bullet list"
+  }
+ ],
+ "mapping": {
+  "converters": [
+   "cents",
+   "decimal_comma",
+   "trim",
+   "upper",
+   "digits",
+   "date:<format>"
+  ],
+  "normalizers": [
+   "digits",
+   "account",
+   "phone",
+   "email",
+   "device_id",
+   "ip",
+   "card",
+   "terminal_id",
+   "address",
+   "lower",
+   "none"
+  ],
+  "when_ops": [
+   "eq",
+   "ne",
+   "in",
+   "empty",
+   "not_empty"
+  ],
+  "enrichment_schema": {
+   "$defs": {
+    "FileEnrichmentInput": {
+     "additionalProperties": false,
+     "properties": {
+      "delimiter": {
+       "default": ",",
+       "maxLength": 1,
+       "minLength": 1,
+       "title": "Delimiter",
+       "type": "string"
+      },
+      "header": {
+       "default": true,
+       "title": "Header",
+       "type": "boolean"
+      },
+      "columns": {
+       "items": {
+        "type": "string"
+       },
+       "maxItems": 200,
+       "title": "Columns",
+       "type": "array"
+      },
+      "encoding": {
+       "anyOf": [
+        {
+         "maxLength": 20,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Encoding"
+      }
+     },
+     "title": "FileEnrichmentInput",
+     "type": "object"
+    },
+    "PropRef": {
+     "properties": {
+      "kind": {
+       "const": "prop",
+       "default": "prop",
+       "title": "Kind",
+       "type": "string"
+      },
+      "name": {
+       "maxLength": 200,
+       "minLength": 1,
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     "required": [
+      "name"
+     ],
+     "title": "PropRef",
+     "type": "object"
+    }
+   },
+   "additionalProperties": false,
+   "description": "How a ``table`` item with ``mapping.as = enrichment`` joins the case's\nnodes: rows keyed by ``key_column``; a node of ``match_node_types`` matches\nby its id or a property, reduced to its first ``key_digits`` digits when set\n(a company id against its group prefix in a registry).",
+   "properties": {
+    "version": {
+     "const": 1,
+     "default": 1,
+     "title": "Version",
+     "type": "integer"
+    },
+    "kind": {
+     "const": "enrichment",
+     "default": "enrichment",
+     "title": "Kind",
+     "type": "string"
+    },
+    "name": {
+     "maxLength": 100,
+     "minLength": 1,
+     "title": "Name",
+     "type": "string"
+    },
+    "input": {
+     "$ref": "#/$defs/FileEnrichmentInput"
+    },
+    "key_column": {
+     "maxLength": 200,
+     "minLength": 1,
+     "title": "Key Column",
+     "type": "string"
+    },
+    "columns": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 50,
+     "minItems": 1,
+     "title": "Columns",
+     "type": "array"
+    },
+    "match_node_types": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 20,
+     "minItems": 1,
+     "title": "Match Node Types",
+     "type": "array"
+    },
+    "match_source": {
+     "anyOf": [
+      {
+       "const": "node_id",
+       "type": "string"
+      },
+      {
+       "$ref": "#/$defs/PropRef"
+      }
+     ],
+     "default": "node_id",
+     "title": "Match Source"
+    },
+    "key_digits": {
+     "anyOf": [
+      {
+       "maximum": 20,
+       "minimum": 1,
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Key Digits"
+    }
+   },
+   "required": [
+    "name",
+    "key_column",
+    "columns",
+    "match_node_types"
+   ],
+   "title": "FileEnrichmentSpec",
+   "type": "object"
+  }
+ },
+ "suggest_kinds": {
+  "all": [
+   "role",
+   "tag",
+   "group",
+   "same_as",
+   "hypothesis",
+   "hypothesis_status",
+   "status_change",
+   "task",
+   "graph",
+   "table",
+   "query",
+   "document",
+   "note"
+  ],
+  "default": [
+   "role",
+   "tag",
+   "hypothesis_status",
+   "same_as",
+   "status_change",
+   "task"
+  ]
+ },
+ "agent_tools": [
+  {
+   "name": "add_document",
+   "summary": "A document: markdown ``text`` (document/markdown) or a ``url`` (document/link)."
+  },
+  {
+   "name": "add_item",
+   "summary": "Generic add: any kind/subkind, or a new version of ``item_id`` (text or content_json)."
+  },
+  {
+   "name": "add_note",
+   "summary": "A markdown note, free or anchored on entities (unified ids)."
+  },
+  {
+   "name": "add_table",
+   "summary": "A table (table/result) from columns and rows, e.g."
+  },
+  {
+   "name": "add_task",
+   "summary": "A follow-up on the case: for a person (``assignee`` e-mail) or an agent (``assignee_kind=\"agent\"``, ``agent_name`` = the token name that should pick it up; empty = any agent)."
+  },
+  {
+   "name": "annotate",
+   "summary": "Annotate entities or items: role {\"role\"} on one entity (values from the case's settings.vocabularies.roles), tag {\"tag\"}, same_as on [keep, drop], hypothesis {\"text\", \"status\"?}, hypothesis_status {\"status\": open | supported | refuted} on a hypothesis id."
+  },
+  {
+   "name": "changes_since",
+   "summary": "What changed since an ISO 8601 timestamp (everything when omitted): journal events, items created or with a new version, annotations."
+  },
+  {
+   "name": "compare_tables",
+   "summary": "Diff by key of two tables, or of two runs of one query (same item, two versions): rows only on one side, rows whose shared columns changed, how many are the same."
+  },
+  {
+   "name": "create_case",
+   "summary": "Open a new case owned by the person you act for."
+  },
+  {
+   "name": "create_exploration",
+   "summary": "Start a new exploration in a readable context and attach it to the case as a live reference; returns ``url`` for the person to open (``/graph/{context}?exploration=\u2026&case=\u2026``)."
+  },
+  {
+   "name": "find_entity_cases",
+   "summary": "Where else this entity shows up: the cases you read where ``uid`` (an entity id from get_graph or search_entities, e.g."
+  },
+  {
+   "name": "get_brief",
+   "summary": "The case brief (markdown) and its item with versions."
+  },
+  {
+   "name": "get_case",
+   "summary": "Case summary: status and stage, its case type (label, outcomes, actions, fields, stages, notice, playbook), its fields, tags, settings (vocabularies, agent_suggest_kinds), deadline, the decisions so far (outcome, targets, review, hash), the confirmed roles and the counts of items, suggestions and entities."
+  },
+  {
+   "name": "get_case_type",
+   "summary": "The org's case types (slug, label, description) when ``slug`` is omitted; one type in full otherwise: vocabularies (roles, tags, link_attributes), outcomes and actions of its decisions, its fields (what create_case needs), stages, SLA hours, notice and playbook."
+  },
+  {
+   "name": "get_entity",
+   "summary": "One entity: properties, the items it came from, its confirmed role, the annotations and notes anchored on it, and its edges."
+  },
+  {
+   "name": "get_graph",
+   "summary": "The unified case graph (identity keys and confirmed same_as applied), or one graph item's with ``item_id``."
+  },
+  {
+   "name": "get_playbook",
+   "summary": "A doc of the org library by slug \u2014 a playbook (markdown steps), a report template (render_report uses it) or a saved file mapping (JSON) \u2014 or the list of slugs, titles and kinds when omitted."
+  },
+  {
+   "name": "group",
+   "summary": "Groups of entities (05 \u00a75)."
+  },
+  {
+   "name": "import_file",
+   "summary": "Import a delimited or fixed-width text file as a table/csv item, with the text inline (up to about 4 MB; convert other formats to CSV first)."
+  },
+  {
+   "name": "join_tables",
+   "summary": "Join two or more tables of the case by a key column (the first shared column when omitted) into a new table item whose provenance names its parents."
+  },
+  {
+   "name": "list_annotations",
+   "summary": "Annotations (role, tag, group, same_as, hypothesis, hypothesis_status, status_change, task, decision_proposal) with status, author and reason; ``target`` filters by entity or item id."
+  },
+  {
+   "name": "list_cases",
+   "summary": "A page of the cases you can read: ``items`` (id, title, status, case_type, fields, deadline, item and suggestion counts), ``total`` and ``counts``."
+  },
+  {
+   "name": "list_events",
+   "summary": "The case journal, oldest first; ``after`` is the last event id you saw."
+  },
+  {
+   "name": "list_items",
+   "summary": "The case material: items of kind graph | table | query | document | note with author, status (suggested | confirmed | rejected), latest version and pins."
+  },
+  {
+   "name": "list_tasks",
+   "summary": "Your work: tasks assigned to agents under this token's name (or to any agent) across the cases you read, oldest due first, each with its case."
+  },
+  {
+   "name": "lookup_enrichment",
+   "summary": "Rows of enrichment table ``table`` (a name from the item's context ``enrichment_tables``, e.g."
+  },
+  {
+   "name": "pin_evidence",
+   "summary": "Pin a version of an item as evidence (immutable; the current one by default; a live exploration is frozen first)."
+  },
+  {
+   "name": "promote_tables",
+   "summary": "Promote tables (or the latest run of queries) to the graph (as_=\"graph\": source_column, target_column, source_type, target_type, edge_type, normalize, amount_prop, time_prop) or to enrichment (as_=\"enrichment\": key_column, match_node_types, match_source)."
+  },
+  {
+   "name": "propose_decision",
+   "summary": "Propose the decision; a person records it (you never decide)."
+  },
+  {
+   "name": "read_item",
+   "summary": "One item with its versions and the text of a version (latest by default): markdown, csv, json, extracted PDF/DOCX text; ``text`` is null when the format has none."
+  },
+  {
+   "name": "render_report",
+   "summary": "Draft a report from an org template (a memo, a regulator narrative, a letter): the case's values fill its {{placeholders}} and the result is a markdown document a person approves (it arrives suggested)."
+  },
+  {
+   "name": "run_analysis",
+   "summary": "The analyses of the workspace on the unified graph."
+  },
+  {
+   "name": "run_query",
+   "summary": "Run a saved query item against its context; the result becomes a new version with ``run`` (statement id, duration, rows, parameters)."
+  },
+  {
+   "name": "save_query",
+   "summary": "Save a query of the case (sql | cypher) against a context you can read, with ``:name`` parameters declared like a template's."
+  },
+  {
+   "name": "search_case",
+   "summary": "Items whose title, description, tags, query or text contain ``q`` (case-insensitive), with a snippet when the hit is in the text."
+  },
+  {
+   "name": "search_entities",
+   "summary": "Entities whose id, type or properties contain ``query`` (case-insensitive)."
+  },
+  {
+   "name": "update_case",
+   "summary": "Edit title, description, tags or fields (merged; a null removes one), the stage (one of the type's stages), or move the status (open \u21c4 analysis)."
+  },
+  {
+   "name": "update_item",
+   "summary": "Edit an item's title, description or tags (content changes are new versions: add_item with item_id)."
+  },
+  {
+   "name": "update_task",
+   "summary": "Move a task you wrote or that is assigned to you (agent): ``state`` done | cancelled | open, a new ``title`` or ``due_at``; ``note`` says what was done (kept as the task's reason)."
+  },
+  {
+   "name": "write_brief",
+   "summary": "Write the case brief (markdown): a new version of the brief item, attributed to you."
+  }
+ ]
+}

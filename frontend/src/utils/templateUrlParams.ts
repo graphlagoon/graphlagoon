@@ -153,7 +153,7 @@ export function parseTemplateUrl(query: QueryLike): ParsedTemplateUrl {
       } else {
         // The name is compared by equality against saved templates and never
         // substituted into a query, so it is exempt from SAFE_VALUE_RE — a
-        // template legitimately named “João's report” must stay linkable.
+        // template legitimately named “O'Brien's report” must stay linkable.
         name = raw;
       }
       continue;

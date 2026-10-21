@@ -67,13 +67,13 @@ async function runAndAddResult() {
     else consoleStore.sqlQuery = substituted;
     await consoleStore.runQuery();
     if (consoleStore.error || !consoleStore.rawColumns.length) {
-      toast.error(consoleStore.error?.message ?? 'A consulta não devolveu linhas');
+      toast.error(consoleStore.error?.message ?? 'The query returned no rows');
       return;
     }
     await addToCase.addTable({
       columns: consoleStore.rawColumns,
       rows: consoleStore.rawRows,
-      title: `${props.template.name} · ${consoleStore.rawRows.length} linhas`,
+      title: `${props.template.name} · ${consoleStore.rawRows.length} rows`,
       description: substituted,
       provenance: { context_id: graphStore.currentContext?.id, tool: 'template', params: { template: props.template.name, values: values.value } },
     });
@@ -293,19 +293,19 @@ async function copyLink() {
             class="btn btn-outline"
             data-testid="template-save-case-query"
             :disabled="!currentCase.hasCase || caseBusy"
-            :title="currentCase.hasCase ? `Salvar como consulta do caso ${currentCase.title}` : 'Escolha um caso atual na barra superior'"
+            :title="currentCase.hasCase ? `Save as a query of case ${currentCase.title}` : 'Pick a current case in the top bar'"
             @click="saveAsCaseQuery"
           >
-            Salvar como consulta do caso
+            Save as case query
           </button>
           <button
             class="btn btn-outline"
             data-testid="template-add-result-to-case"
             :disabled="!currentCase.hasCase || !canExecute || caseBusy"
-            :title="currentCase.hasCase ? 'Executar como tabela e adicionar o resultado ao caso' : 'Escolha um caso atual na barra superior'"
+            :title="currentCase.hasCase ? 'Run as a table and add the result to the case' : 'Pick a current case in the top bar'"
             @click="runAndAddResult"
           >
-            Adicionar resultado ao caso
+            Add result to case
           </button>
           <button
             v-if="resultMode === 'graph'"

@@ -18,7 +18,7 @@ const api = vi.hoisted(() => ({
   updateInvestigation: vi.fn(async (_id: string, patch: any) => ({ ...CASE, ...patch })),
   getInvestigationItemContent: vi.fn(async (): Promise<ArrayBuffer> => new ArrayBuffer(0)),
 }))
-const CASE = { id: 'inv-1', status: 'analysis', has_write_access: true, settings: {}, state: {}, kind_preset: 'fraude_sintetica', shared_with: [], tags: [] }
+const CASE = { id: 'inv-1', status: 'analysis', has_write_access: true, settings: { vocabularies: { roles: ['real customer', 'synthetic identity', 'mule'], tags: [], link_attributes: [] } }, state: {}, case_type: 'fraud_ring', fields: {}, shared_with: [], tags: [] }
 const ITEM = { id: 'it-1', kind: 'table', subkind: 'result', title: 'Rastreio FIFO', tags: [], status: 'suggested', author_kind: 'agent', author_email: 'me', provenance: { tool: 'trace', params: { maxHops: 3 } }, current_version: 1, pinned: [], accessible: true, position: 0, latest: { version: 1, sha256: 'c'.repeat(64) } }
 vi.mock('@/services/api', () => ({ api }))
 
@@ -32,7 +32,7 @@ beforeEach(() => {
   inv.items = [ITEM] as any
   inv.contexts = { c1: { id: 'c1', title: 'KYC', identity_keys: [] } } as any
   inv.sourceGraphs = [
-    { id: 's1', contextId: 'c1', nodes: [node('a', 'Pessoa', { nome: 'Ana', cpf: '12345678901', cpf_mascarado: '***.456.789-**' }), node('b', 'Pessoa', { nome: 'Bia' }), node('c', 'Pessoa', { nome: 'Caio' })], edges: [], state: null, error: null },
+    { id: 's1', contextId: 'c1', nodes: [node('a', 'Person', { name: 'Ana', document: '12345678901' }), node('b', 'Person', { name: 'Bia' }), node('c', 'Person', { name: 'Caio' })], edges: [], state: null, error: null },
   ] as any
 })
 
@@ -40,13 +40,13 @@ const mount = (props: Partial<{ activeItem: any; canEdit: boolean; decideMode: b
   render(SelectionInspector, { props: { activeItem: null, canEdit: true, decideMode: false, ...props } })
 
 describe('SelectionInspector (05 §3, three states)', () => {
-  it('one entity: label, vocabulary roles of the preset, tags, hidden raw document', async () => {
+  it('one entity: label, vocabulary roles of the preset, tags, every property', async () => {
     useGraphStore().selectNode('a@c1')
     const { getByTestId, queryByText, emitted } = mount()
     await flushPromises()
     expect(getByTestId('inspector-title').textContent).toBe('Ana')
-    expect(getByTestId('inspector-role').textContent).toContain('identidade sintética')
-    expect(queryByText('12345678901')).toBeNull() // masked sibling present
+    expect(getByTestId('inspector-role').textContent).toContain('synthetic identity')
+    expect(queryByText('12345678901')).not.toBeNull() // what the person reads, as is
     await fireEvent.update(getByTestId('inspector-tag-input'), 'kyc')
     await fireEvent.keyDown(getByTestId('inspector-tag-input'), { key: 'Enter' })
     await flushPromises()
@@ -61,14 +61,14 @@ describe('SelectionInspector (05 §3, three states)', () => {
     const { getByTestId, queryByTestId } = mount()
     await flushPromises()
     expect(getByTestId('inspector-multi-title').textContent).toContain('3 entities')
-    expect(getByTestId('inspector-composition').textContent).toContain('3 Pessoa')
+    expect(getByTestId('inspector-composition').textContent).toContain('3 Person')
     expect(queryByTestId('bulk-same-as')).toBeNull() // only for exactly two
 
-    await fireEvent.update(getByTestId('bulk-role'), 'mula')
+    await fireEvent.update(getByTestId('bulk-role'), 'mule')
     await fireEvent.click(getByTestId('bulk-role-apply'))
     await flushPromises()
     expect(api.createInvestigationAnnotation).toHaveBeenCalledTimes(3)
-    expect(api.createInvestigationAnnotation).toHaveBeenCalledWith('inv-1', { kind: 'role', targets: ['c@c1'], value: { role: 'mula' } })
+    expect(api.createInvestigationAnnotation).toHaveBeenCalledWith('inv-1', { kind: 'role', targets: ['c@c1'], value: { role: 'mule' } })
 
     await fireEvent.update(getByTestId('bulk-tag'), 'cluster')
     await fireEvent.click(getByTestId('bulk-tag-apply'))
@@ -106,7 +106,7 @@ describe('SelectionInspector (05 §3, three states)', () => {
     expect(api.pinInvestigationItem).toHaveBeenCalledWith('inv-1', 'it-1', {})
     await fireEvent.click(getByTestId('item-dossier'))
     await flushPromises()
-    expect(api.updateInvestigationItem).toHaveBeenCalledWith('inv-1', 'it-1', { tags: ['dossie'] })
+    expect(api.updateInvestigationItem).toHaveBeenCalledWith('inv-1', 'it-1', { tags: ['dossier'] })
     await fireEvent.click(getByTestId('item-show-analysis'))
     expect(emitted('activate')).toBeTruthy()
   })

@@ -1,85 +1,85 @@
 {
-  "description": "Vínculos (05 §4b): p1, p2 and p3 share a phone node and a device property (DEV-1 / dev-1 / 'DEV-1 ' normalize alike); p4 shares only the carrier IP, which 4 entities share and the threshold excludes; p5 is alone. minShared 2 keeps the synthetic trio only.",
+  "description": "Links (05 §4b): Person 1, 2 and 3 share a phone node and a device property (DEV-1 / dev-1 / 'DEV-1 ' normalize alike); Person 4 shares only the carrier IP, which 4 entities share and maxEntities excludes; Person 5 is alone. minShared 2 keeps the trio only.",
   "graph": {
     "nodes": [
       {
-        "uid": "Pessoa:1",
-        "type": "Pessoa",
+        "uid": "Person:1",
+        "type": "Person",
         "properties": {
-          "nome": "Ana",
+          "name": "Ana",
           "device_id": "DEV-1",
-          "ip": "177.1.1.1"
+          "ip": "203.0.113.7"
         }
       },
       {
-        "uid": "Pessoa:2",
-        "type": "Pessoa",
+        "uid": "Person:2",
+        "type": "Person",
         "properties": {
-          "nome": "Bia",
+          "name": "Bia",
           "device_id": "dev-1",
-          "ip": "177.1.1.1"
+          "ip": "203.0.113.7"
         }
       },
       {
-        "uid": "Pessoa:3",
-        "type": "Pessoa",
+        "uid": "Person:3",
+        "type": "Person",
         "properties": {
-          "nome": "Caio",
+          "name": "Caio",
           "Device_Id": "DEV-1 ",
-          "ip": "177.1.1.1"
+          "ip": "203.0.113.7"
         }
       },
       {
-        "uid": "Pessoa:4",
-        "type": "Pessoa",
+        "uid": "Person:4",
+        "type": "Person",
         "properties": {
-          "nome": "Davi",
+          "name": "Davi",
           "device_id": "dev-9",
-          "ip": "177.1.1.1"
+          "ip": "203.0.113.7"
         }
       },
       {
-        "uid": "Pessoa:5",
-        "type": "Pessoa",
+        "uid": "Person:5",
+        "type": "Person",
         "properties": {
-          "nome": "Eva",
+          "name": "Eva",
           "device_id": null,
           "ip": ""
         }
       },
       {
-        "uid": "Telefone:11999990000",
-        "type": "Telefone",
+        "uid": "Phone:14155550100",
+        "type": "Phone",
         "properties": {}
       },
       {
-        "uid": "Telefone:11888880000",
-        "type": "Telefone",
+        "uid": "Phone:14155550199",
+        "type": "Phone",
         "properties": {}
       }
     ],
     "edges": [
       {
-        "src": "Pessoa:1",
-        "dst": "Telefone:11999990000"
+        "src": "Person:1",
+        "dst": "Phone:14155550100"
       },
       {
-        "src": "Pessoa:2",
-        "dst": "Telefone:11999990000"
+        "src": "Person:2",
+        "dst": "Phone:14155550100"
       },
       {
-        "src": "Telefone:11999990000",
-        "dst": "Pessoa:3"
+        "src": "Phone:14155550100",
+        "dst": "Person:3"
       },
       {
-        "src": "Pessoa:5",
-        "dst": "Telefone:11888880000"
+        "src": "Person:5",
+        "dst": "Phone:14155550199"
       }
     ]
   },
   "params": {
     "attributes": [
-      "telefone",
+      "phone",
       "device_id",
       "ip"
     ],
@@ -89,10 +89,10 @@
   "expected": {
     "edges": [
       {
-        "id": "link:device_id:Pessoa:1:Pessoa:2",
-        "src": "Pessoa:1",
-        "dst": "Pessoa:2",
-        "type": "compartilha_device_id",
+        "id": "link:device_id:Person:1:Person:2",
+        "src": "Person:1",
+        "dst": "Person:2",
+        "type": "shares_device_id",
         "properties": {
           "attribute": "device_id",
           "value": "dev1",
@@ -100,21 +100,21 @@
         }
       },
       {
-        "id": "link:telefone:Pessoa:1:Pessoa:2",
-        "src": "Pessoa:1",
-        "dst": "Pessoa:2",
-        "type": "compartilha_telefone",
+        "id": "link:phone:Person:1:Person:2",
+        "src": "Person:1",
+        "dst": "Person:2",
+        "type": "shares_phone",
         "properties": {
-          "attribute": "telefone",
-          "value": "Telefone:11999990000",
+          "attribute": "phone",
+          "value": "Phone:14155550100",
           "shared_by": 3
         }
       },
       {
-        "id": "link:device_id:Pessoa:1:Pessoa:3",
-        "src": "Pessoa:1",
-        "dst": "Pessoa:3",
-        "type": "compartilha_device_id",
+        "id": "link:device_id:Person:1:Person:3",
+        "src": "Person:1",
+        "dst": "Person:3",
+        "type": "shares_device_id",
         "properties": {
           "attribute": "device_id",
           "value": "dev1",
@@ -122,21 +122,21 @@
         }
       },
       {
-        "id": "link:telefone:Pessoa:1:Pessoa:3",
-        "src": "Pessoa:1",
-        "dst": "Pessoa:3",
-        "type": "compartilha_telefone",
+        "id": "link:phone:Person:1:Person:3",
+        "src": "Person:1",
+        "dst": "Person:3",
+        "type": "shares_phone",
         "properties": {
-          "attribute": "telefone",
-          "value": "Telefone:11999990000",
+          "attribute": "phone",
+          "value": "Phone:14155550100",
           "shared_by": 3
         }
       },
       {
-        "id": "link:device_id:Pessoa:2:Pessoa:3",
-        "src": "Pessoa:2",
-        "dst": "Pessoa:3",
-        "type": "compartilha_device_id",
+        "id": "link:device_id:Person:2:Person:3",
+        "src": "Person:2",
+        "dst": "Person:3",
+        "type": "shares_device_id",
         "properties": {
           "attribute": "device_id",
           "value": "dev1",
@@ -144,40 +144,40 @@
         }
       },
       {
-        "id": "link:telefone:Pessoa:2:Pessoa:3",
-        "src": "Pessoa:2",
-        "dst": "Pessoa:3",
-        "type": "compartilha_telefone",
+        "id": "link:phone:Person:2:Person:3",
+        "src": "Person:2",
+        "dst": "Person:3",
+        "type": "shares_phone",
         "properties": {
-          "attribute": "telefone",
-          "value": "Telefone:11999990000",
+          "attribute": "phone",
+          "value": "Phone:14155550100",
           "shared_by": 3
         }
       }
     ],
     "pairs": [
       {
-        "left": "Pessoa:1",
-        "right": "Pessoa:2",
+        "left": "Person:1",
+        "right": "Person:2",
         "shared": [
           "device_id",
-          "telefone"
+          "phone"
         ]
       },
       {
-        "left": "Pessoa:1",
-        "right": "Pessoa:3",
+        "left": "Person:1",
+        "right": "Person:3",
         "shared": [
           "device_id",
-          "telefone"
+          "phone"
         ]
       },
       {
-        "left": "Pessoa:2",
-        "right": "Pessoa:3",
+        "left": "Person:2",
+        "right": "Person:3",
         "shared": [
           "device_id",
-          "telefone"
+          "phone"
         ]
       }
     ]

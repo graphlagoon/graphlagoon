@@ -121,8 +121,8 @@ const slides = [
     description: 'Pull one part out of a composite value: ids with suffixes, emails, '
       + 'paths, codes. Negative indexes count from the end. |default: replaces empty results.',
     examples: [
-      { template: '{node_id|split:_:0}', result: '12321', note: 'From 12321_CNPJ_RAIZ — part before the first _' },
-      { template: 'Empresa {node_id|split:_:0}', result: 'Empresa 12321', note: 'Combine with literal text' },
+      { template: '{node_id|split:_:0}', result: '12321', note: 'From 12321_ROOT — part before the first _' },
+      { template: 'Company {node_id|split:_:0}', result: 'Company 12321', note: 'Combine with literal text' },
       { template: '{prop:path|split:/:-1}', result: 'file.txt', note: 'Last path segment (negative index)' },
       { template: '{prop:code|slice:0:5}', result: 'BR-SP', note: 'From BR-SP-00123 — substring by position' },
       { template: '{prop:nickname|default:anonymous}', result: 'anonymous', note: 'Fallback when the value is empty/missing' },
@@ -134,8 +134,8 @@ const slides = [
       + 'Patterns are slash-delimited (/re/), the only flag is i, \\/ is a literal slash, '
       + 'and a lone brace must be escaped as \\{ or \\} (balanced quantifiers like {2} are fine).',
     examples: [
-      { template: '{prop:email|match:/@(.+)$/:1}', result: 'empresa.com', note: 'Capture group 1 — the domain' },
-      { template: '{node_id|replace:/_CNPJ_RAIZ/: Empresa}', result: '12321 Empresa', note: 'Rewrite the suffix' },
+      { template: '{prop:email|match:/@(.+)$/:1}', result: 'example.com', note: 'Capture group 1 — the domain' },
+      { template: '{node_id|replace:/_ROOT/: Company}', result: '12321 Company', note: 'Rewrite the suffix' },
       { template: '{prop:code|match:/^(BR|US)/:1|upper}', result: 'BR', note: 'Alternation is safe inside /.../ — and chains' },
       { template: '{if:prop:code|matches:/^BR/i|Brasil|Outro}', result: 'Brasil', note: 'Regex conditional, case-insensitive' },
     ],
@@ -146,7 +146,7 @@ const slides = [
     examples: [
       { template: '{prop:count|number}', result: '1,234,567', note: 'Locale number format' },
       { template: '{prop:price|currency:USD}', result: '$1,234.56', note: 'US Dollar' },
-      { template: '{prop:price|currency:BRL}', result: 'R$ 1.234,56', note: 'Brazilian Real' },
+      { template: '{prop:price|currency:EUR}', result: '€1,234.56', note: 'Euro' },
       { template: '{prop:rate|percent}', result: '85.5%', note: 'Percentage (0.855 → 85.5%)' },
     ],
   },

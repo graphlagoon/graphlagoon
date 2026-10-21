@@ -368,30 +368,30 @@ describe('GraphContextFormModal', () => {
     })
 
     it('loads identity keys and saves an added one', async () => {
-      const pessoa = {
+      const person = {
         node_type: 'Person',
-        entity: 'Pessoa',
-        source: { kind: 'prop' as const, name: 'cpf' },
-        normalize: 'cpf_cnpj' as const,
+        entity: 'Customer',
+        source: { kind: 'prop' as const, name: 'national_id' },
+        normalize: 'digits' as const,
       }
-      const context = createGraphContext({ id: 'ctx-edit', identity_keys: [pessoa] })
+      const context = createGraphContext({ id: 'ctx-edit', identity_keys: [person] })
       vi.mocked(api.updateGraphContext).mockResolvedValue(context)
 
       const { getByTestId, getAllByTestId } = renderModal({ open: true, mode: 'edit', context })
       await flush()
-      expect(getByTestId('identity-key-chips').textContent).toContain('Pessoa')
+      expect(getByTestId('identity-key-chips').textContent).toContain('Customer')
 
       await fireEvent.click(getByTestId('identity-key-add'))
       await fireEvent.update(getAllByTestId('identity-key-node-type')[1], 'Account')
-      await fireEvent.update(getAllByTestId('identity-key-entity')[1], 'Conta')
+      await fireEvent.update(getAllByTestId('identity-key-entity')[1], 'BankAccount')
       await fireEvent.update(getAllByTestId('identity-key-normalize')[1], 'account')
       await fireEvent.click(getByTestId('create-context-submit'))
       await flush()
 
       const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
       expect(payload.identity_keys).toEqual([
-        pessoa,
-        { node_type: 'Account', entity: 'Conta', source: 'node_id', normalize: 'account' },
+        person,
+        { node_type: 'Account', entity: 'BankAccount', source: 'node_id', normalize: 'account' },
       ])
     })
 

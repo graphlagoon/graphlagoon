@@ -2,15 +2,16 @@
 /**
  * "Add file to the case" (05 §4): two steps. 1 · what it is (files, detected
  * layout, graph | enrichment | document); 2 · the mapping (MappingStep, reused by
- * "consulta → grafo"). Files are read in the browser for detection and preview
+ * "query → graph"). Files are read in the browser for detection and preview
  * (fileMapping.ts, the twin of the server interpreter); "Add to case" uploads them
  * (sha256 on the server) as items of the case, with the mapping on the main one.
+ * The org's saved mappings (library docs of kind `mapping`, 06 P5) are matched
+ * against the files; a superuser saves the current one for the org.
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { lines, matchFile, parseLine, suggestPresets, type MappingSpec } from '@/utils/fileMapping';
-import { FILE_MAPPING_PRESETS, QSA_ENRICHMENT } from '@/utils/fileMappingPresets';
 import { encodingFor, genericSpec, guessDelimiter } from '@/utils/fileImport';
 import MappingStep from '@/components/investigation/MappingStep.vue';
 import type { CaseItem, FileEnrichmentSpec } from '@/types/investigation';
@@ -31,6 +32,24 @@ const step = ref(1);
 const picked = ref<Picked[]>([]);
 const role = ref<FileRole>(props.initialRole ?? 'graph');
 const detected = ref<string | null>(null);
+/** Mapping specs the files are matched against, by slug (the org's saved mappings). */
+const templates = ref<Record<string, MappingSpec>>({});
+/** Saved enrichment mappings: used when their key and columns are in the file's header. */
+const enrichmentTemplates = ref<Record<string, FileEnrichmentSpec>>({});
+const isSuperuser = window.__GRAPH_LAGOON_CONFIG__?.is_superuser === true;
+
+onMounted(async () => {
+  try {
+    for (const doc of await api.getOrgLibrary('mapping')) {
+      const m = JSON.parse(doc.body) as { as?: string; spec?: unknown };
+      if (m.as === 'graph') templates.value[doc.slug] = { ...(m.spec as MappingSpec), name: (m.spec as MappingSpec).name ?? doc.title };
+      if (m.as === 'enrichment') enrichmentTemplates.value[doc.slug] = m.spec as FileEnrichmentSpec;
+    }
+    if (picked.value.length) detect();
+  } catch {
+    /* no library (older backend): the generic start still works */
+  }
+});
 const specText = ref('');
 const enrichment = ref<FileEnrichmentSpec | null>(null);
 const title = ref('');
@@ -66,7 +85,7 @@ const spec = computed<MappingSpec | null>(() => {
   }
 });
 
-/** Decoded with the encoding the spec gives each file (SIMBA is Latin-1). */
+/** Decoded with the encoding the spec gives each file (bank statement exports are often Latin-1). */
 const texts = computed<Record<string, string>>(() =>
   Object.fromEntries(picked.value.map((p) => [p.file.name, new TextDecoder(encodingFor(spec.value, p.file.name)).decode(p.buffer)])),
 );
@@ -87,17 +106,42 @@ async function onFiles(event: Event) {
   detect();
 }
 
-/** Picks the preset whose headers match, else a generic two-column start. */
+/** Picks the saved mapping whose inputs match the files, else a generic two-column start. */
 function detect() {
   const raw = Object.fromEntries(picked.value.map((p) => [p.file.name, new TextDecoder('latin1').decode(p.buffer)]));
-  const found = suggestPresets(raw, FILE_MAPPING_PRESETS);
+  const found = suggestPresets(raw, templates.value);
   detected.value = found[0] ?? null;
   const first = picked.value[0];
-  const base = detected.value ? FILE_MAPPING_PRESETS[detected.value] : first ? genericSpec(first.file.name, raw[first.file.name]) : null;
+  const base = detected.value ? templates.value[detected.value] : first ? genericSpec(first.file.name, raw[first.file.name]) : null;
   specText.value = base ? JSON.stringify(base, null, 2) : '';
-  if (!props.initialRole) role.value = detected.value === 'qsa_receita' ? 'enrichment' : 'graph';
-  enrichment.value = detected.value === 'qsa_receita' ? structuredClone(QSA_ENRICHMENT) : first ? genericEnrichment(first.file.name, raw[first.file.name]) : null;
+  if (!props.initialRole) role.value = 'graph';
+  enrichment.value = first ? savedEnrichment(raw[first.file.name]) ?? genericEnrichment(first.file.name, raw[first.file.name]) : null;
   title.value = picked.value.length > 1 ? `${detected.value ? base!.name : 'Files'} · ${first!.file.name.split('_')[0]}` : (first?.file.name ?? '');
+}
+
+function savedEnrichment(text: string): FileEnrichmentSpec | null {
+  for (const s of Object.values(enrichmentTemplates.value)) {
+    const header = new Set(parseLine(lines(text)[0] ?? '', s.input?.delimiter ?? ','));
+    if (header.has(s.key_column) && s.columns.every((c) => header.has(c))) return structuredClone(s);
+  }
+  return null;
+}
+
+// --- "Save for the org" (superusers): the mapping becomes a library doc ----------
+const saveSlug = ref('');
+const saved = ref<string | null>(null);
+async function saveForOrg() {
+  const slug = saveSlug.value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!slug) return;
+  error.value = null;
+  try {
+    const body = role.value === 'enrichment' ? { as: 'enrichment', spec: enrichment.value } : { as: 'graph', spec: spec.value };
+    const titleOf = role.value === 'enrichment' ? enrichment.value?.name : spec.value?.name;
+    await api.putAdminLibraryDoc(slug, { title: titleOf || slug, kind: 'mapping', body: JSON.stringify(body) });
+    saved.value = slug;
+  } catch (e) {
+    error.value = getErrorMessage(e, 'Failed to save the mapping for the org');
+  }
 }
 
 function genericEnrichment(name: string, text: string): FileEnrichmentSpec {
@@ -123,7 +167,7 @@ async function submit() {
     let graph: CaseItem | null = null;
     const nameOf = (i: CaseItem) => i.provenance.filename ?? i.title;
     if (role.value === 'graph') {
-      // The main file carries the mapping; the others are its extra inputs (a SIMBA layout).
+      // The main file carries the mapping; the others are its extra inputs (a multi-file layout).
       const first = Object.values(spec.value!.inputs)[0];
       const mainName = first ? matchFile(first, items.map(nameOf)) : null;
       items.sort((a, b) => Number(nameOf(b) === mainName) - Number(nameOf(a) === mainName));
@@ -161,7 +205,7 @@ watch(role, () => (error.value = null));
       <div class="wizard-body">
         <!-- 1 · What it is -->
         <section v-if="step === 1" class="what">
-          <p class="hint">Pick every file of the layout at once (a SIMBA delivery is 5 TAB-separated files).</p>
+          <p class="hint">Pick every file of the layout at once (a statement delivery can be several related files).</p>
           <input type="file" multiple data-testid="wizard-files" @change="onFiles" />
           <ul class="chips">
             <li v-for="p in picked" :key="p.file.name" class="chip">
@@ -170,7 +214,7 @@ watch(role, () => (error.value = null));
           </ul>
           <p v-if="picked.length" class="detected-line">
             <span v-if="detected" class="badge" data-testid="wizard-detected-hint">DETECTED</span>
-            {{ detected ? FILE_MAPPING_PRESETS[detected].name : 'No known layout: a generic mapping starts from the first columns.' }}
+            {{ detected ? templates[detected].name : 'No known layout: a generic mapping starts from the first columns.' }}
           </p>
           <div class="roles">
             <label class="role-opt">
@@ -194,7 +238,7 @@ watch(role, () => (error.value = null));
           :role="role"
           :texts="texts"
           :file-names="fileNames"
-          :detected="detected"
+          :detected="detected ? (templates[detected].name ?? detected) : null"
           v-model:spec-text="specText"
           v-model:enrichment="enrichment"
           v-model:title="title"
@@ -206,6 +250,13 @@ watch(role, () => (error.value = null));
           </ul>
         </section>
 
+        <p v-if="step === 2 && isSuperuser && role !== 'attachment'" class="save-org" data-testid="wizard-save-org">
+          <input v-model="saveSlug" class="form-control" placeholder="mapping-slug" aria-label="Slug of the saved mapping" data-testid="wizard-save-slug" />
+          <button type="button" class="btn btn-outline btn-sm" :disabled="!saveSlug.trim() || (role === 'graph' ? !mappingValid : !enrichment)" data-testid="wizard-save-org-btn" @click="saveForOrg">
+            Save this mapping for the org
+          </button>
+          <span v-if="saved" class="hint" data-testid="wizard-saved">saved as “{{ saved }}”: the next files with this layout start from it</span>
+        </p>
         <p v-if="error" class="error-message" data-testid="wizard-error">{{ error }}</p>
       </div>
 
@@ -275,6 +326,17 @@ watch(role, () => (error.value = null));
   padding: 2px 6px;
   font-size: 12px;
 }
+.save-org {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 0;
+}
+
+.save-org .form-control {
+  max-width: 220px;
+}
+
 .detected-line {
   margin: 0;
   font-size: 13px;

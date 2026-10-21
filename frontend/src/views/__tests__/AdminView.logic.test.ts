@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  errorText,
   canClearEnvironment,
   describeAudit,
   filterConfig,
@@ -131,7 +132,9 @@ describe('describeAudit', () => {
     expect(describeAudit(entry('investigation.update', { fields: ['status', 'title'] }))).toBe('changed status, title');
     expect(describeAudit(entry('investigation.delete', { title: 'Pix', owner: 'o', reason: 'dup' }))).toBe('"Pix" (owner o) — reason: dup');
     expect(describeAudit(entry('investigation.item_add', { kind: 'graph/exploration_ref', title: 'Pix', item_id: 'i1' }))).toBe('graph/exploration_ref "Pix"');
-    expect(describeAudit(entry('permission.update', { permission: 'context.create', mode: 'restricted', rules: 1 }))).toBe('context.create: restricted, 1 rule(s)');
+    expect(describeAudit(entry('permission.update', { permission: 'context.create', mode: 'restricted', rules: 1 }))).toBe('context.create: restricted, 1 rule(s)')
+    expect(describeAudit(entry('case_type.write', { slug: 'fraud_ring', label: 'Fraud ring', outcomes: 3, fields: 2 }))).toBe('"Fraud ring" (fraud_ring): 3 outcome(s), 2 field(s)')
+    expect(describeAudit(entry('case_type.delete', { slug: 'fraud_ring' }))).toBe('fraud_ring');
   });
 
   it('falls back to key=value for unknown actions', () => {
@@ -154,5 +157,17 @@ describe('flagEntries / canClearEnvironment', () => {
     expect(canClearEnvironment('CLEAR ALL', true)).toBe(true);
     expect(canClearEnvironment('clear all', true)).toBe(false);
     expect(canClearEnvironment('CLEAR ALL', false)).toBe(false);
+  });
+});
+
+describe('errorText', () => {
+  const axiosError = (detail: unknown) => Object.assign(new Error('Request failed with status code 422'), { response: { data: { detail } } });
+  it('names the field of each validation problem, and reads the error envelope', () => {
+    expect(errorText(axiosError([
+      { loc: ['body', 'outcomes', 0, 'id'], msg: "String should match pattern '^[a-z]'" },
+      { loc: ['body', 'label'], msg: 'Field required' },
+    ]), 'Save failed')).toBe("outcomes.0.id: String should match pattern '^[a-z]'; label: Field required");
+    expect(errorText(axiosError({ error: { code: 'INVALID_LIBRARY_DOC', message: 'a mapping doc is JSON' } }), 'x')).toBe('a mapping doc is JSON');
+    expect(errorText(new Error('offline'), 'x')).toBe('offline');
   });
 });

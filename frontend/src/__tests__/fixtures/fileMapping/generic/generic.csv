@@ -1,0 +1,6 @@
+source,target,amount,date,kind
+acct a,Acct B,"1.234,56",01/03/2026,FAST
+Acct B, acct c ,"900,00",02/03/2026,WIRE
+Acct C,,"50,00",03/03/2026,FAST
+Acct A,Acct D,abc,04/03/2026,FAST
+Acct D,Acct A,"10,00",05/03/2026,CHECK

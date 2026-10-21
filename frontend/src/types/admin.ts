@@ -104,7 +104,7 @@ export type AdminTab =
   | 'investigations'
   | 'agents'
   | 'library'
-  | 'vocabularies'
+  | 'case-types'
   | 'groups'
   | 'audit'
   | 'danger';
@@ -198,7 +198,6 @@ export interface AgentToken {
   /** "user" (every case the owner reads) or "case" (only investigation_ids). */
   scope?: 'user' | 'case';
   investigation_ids?: string[];
-  unmasked?: boolean;
   created_at: string;
   expires_at: string;
   revoked_at?: string | null;
@@ -207,31 +206,36 @@ export interface AgentToken {
   active: boolean;
 }
 
-// --- Org library and vocabularies (05 §6; superusers write, everyone reads) ---
+// --- Org library (05 §6; superusers write, everyone reads) ---
+
+/**
+ * `GET /api/org/authoring` (06): what writing case types and library docs needs.
+ * The admin area's help and its "Ask an AI" prompts are built from it, so they
+ * follow the code.
+ */
+export interface OrgAuthoring {
+  /** JSON Schema of `CaseTypeSpec` (pydantic). */
+  case_type_schema: Record<string, unknown>;
+  report_placeholders: { key: string; description: string }[];
+  mapping: {
+    converters: string[];
+    normalizers: string[];
+    when_ops: string[];
+    /** JSON Schema of an enrichment mapping's `spec`. */
+    enrichment_schema: Record<string, unknown>;
+  };
+  suggest_kinds: { all: string[]; default: string[] };
+  agent_tools: { name: string; summary: string }[];
+}
 
 export interface OrgLibraryDoc {
   slug: string;
   title: string;
-  kind: 'playbook' | 'template';
+  /** template: a report with {{placeholders}}; mapping: a file mapping as JSON ({as, spec}). */
+  kind: 'playbook' | 'template' | 'mapping';
   body: string;
   updated_at?: string | null;
   /** The built-in playbook, not edited yet (deleting a stored one restores it). */
   seeded: boolean;
 }
 
-export interface OrgVocabularyValue {
-  value: string;
-  label?: string | null;
-  /** kind_presets the value suits; empty = every preset. */
-  presets: string[];
-  norm_ref?: string | null;
-}
-
-export type OrgVocabularyKind = 'role' | 'tag' | 'typology' | 'link_attribute';
-
-export interface OrgVocabulary {
-  kind: OrgVocabularyKind;
-  values: OrgVocabularyValue[];
-  updated_at?: string | null;
-  seeded: boolean;
-}

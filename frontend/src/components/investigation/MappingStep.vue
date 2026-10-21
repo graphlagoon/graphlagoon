@@ -1,14 +1,13 @@
 <script setup lang="ts">
 /**
- * Mapping step (05 §4, kill list "5 passos → 2"): the detected preset with its
+ * Mapping step (05 §4, kill list "5 steps → 2"): the detected saved mapping with its
  * column table, the preview and the file quality for a graph; key column, columns
  * and node types for an enrichment; the identity keys the mapping yields. Reused by
- * the file wizard and by "consulta → grafo". The JSON editor is the "advanced" path.
+ * the file wizard and by "query → graph". The JSON editor is the "advanced" path.
  */
 import { computed, watch } from 'vue';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { interpretMapping, lines, parseLine, type MappingSpec } from '@/utils/fileMapping';
-import { FILE_MAPPING_PRESETS } from '@/utils/fileMappingPresets';
 import { derivedIdentityKeys, mappingRows } from '@/utils/fileImport';
 import type { FileEnrichmentSpec } from '@/types/investigation';
 
@@ -114,7 +113,7 @@ watch(valid, (v) => emit('update:valid', v), { immediate: true });
     <div class="map-main">
       <div class="detected">
         <span v-if="detected" class="badge" data-testid="wizard-detected">DETECTED</span>
-        <strong>{{ detected ? FILE_MAPPING_PRESETS[detected].name : 'No known layout' }}</strong>
+        <strong>{{ detected ?? 'No known layout' }}</strong>
         <span class="hint">{{ fileNames.length }} file{{ fileNames.length === 1 ? '' : 's' }}</span>
         <ul class="chips">
           <li v-for="f in fileNames" :key="f" class="chip mono">{{ f }}</li>
@@ -189,7 +188,7 @@ watch(valid, (v) => emit('update:valid', v), { immediate: true });
           <input v-model="matchProp" class="form-control" data-testid="wizard-match-prop" />
         </div>
         <div class="form-group">
-          <label>Compare only the first N digits of the node key (CNPJ → CNPJ básico: 8)</label>
+          <label>Compare only the first N digits of the node key (a company id against its group prefix: 8)</label>
           <input :value="enrichment.key_digits ?? ''" type="number" min="1" max="20" class="form-control" @input="patch({ key_digits: Number(($event.target as HTMLInputElement).value) || null })" />
         </div>
         <p class="hint">
@@ -205,7 +204,7 @@ watch(valid, (v) => emit('update:valid', v), { immediate: true });
         <h4>File quality</h4>
         <p v-if="report.edge_rows" class="note warn-note">
           <strong>{{ counterpartPct }}%</strong> of the transactions without an identified counterpart.
-          {{ report.unknown_nodes }} “Desconhecido” nodes, visible and filterable.
+          {{ report.unknown_nodes }} “Unknown” nodes, visible and filterable.
         </p>
         <p v-if="report.rows_discarded" class="note">
           {{ report.rows_discarded }} row{{ report.rows_discarded === 1 ? '' : 's' }} discarded and listed in the report:

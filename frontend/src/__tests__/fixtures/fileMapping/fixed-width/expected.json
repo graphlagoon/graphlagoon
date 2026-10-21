@@ -1,0 +1,132 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "M0001234",
+        "node_type": "Merchant",
+        "properties": {
+          "name": "ACME GROCERS"
+        }
+      },
+      {
+        "node_id": "T98811",
+        "node_type": "Terminal",
+        "properties": {}
+      },
+      {
+        "node_id": "45001",
+        "node_type": "Account",
+        "properties": {}
+      },
+      {
+        "node_id": "T98812",
+        "node_type": "Terminal",
+        "properties": {}
+      },
+      {
+        "node_id": "M0009876",
+        "node_type": "Merchant",
+        "properties": {
+          "name": "BETS4U LTD"
+        }
+      },
+      {
+        "node_id": "77007",
+        "node_type": "Account",
+        "properties": {}
+      },
+      {
+        "node_id": "T12345",
+        "node_type": "Terminal",
+        "properties": {}
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "0:s:1",
+        "src": "M0001234",
+        "dst": "T98811",
+        "relationship_type": "CAPTURED_AT",
+        "properties": {}
+      },
+      {
+        "edge_id": "1:s:1",
+        "src": "M0001234",
+        "dst": "45001",
+        "relationship_type": "SETTLED_TO",
+        "properties": {
+          "amount": 12345.0,
+          "date": "2026-09-15"
+        }
+      },
+      {
+        "edge_id": "0:s:2",
+        "src": "M0001234",
+        "dst": "T98812",
+        "relationship_type": "CAPTURED_AT",
+        "properties": {}
+      },
+      {
+        "edge_id": "1:s:2",
+        "src": "M0001234",
+        "dst": "45001",
+        "relationship_type": "SETTLED_TO",
+        "properties": {
+          "amount": 990.0,
+          "date": "2026-09-15"
+        }
+      },
+      {
+        "edge_id": "0:s:3",
+        "src": "M0009876",
+        "dst": "T98811",
+        "relationship_type": "CAPTURED_AT",
+        "properties": {}
+      },
+      {
+        "edge_id": "1:s:3",
+        "src": "M0009876",
+        "dst": "77007",
+        "relationship_type": "SETTLED_TO",
+        "properties": {
+          "amount": 2500000.0,
+          "date": "2026-09-16"
+        }
+      },
+      {
+        "edge_id": "0:s:4",
+        "src": "M0009876",
+        "dst": "T12345",
+        "relationship_type": "CAPTURED_AT",
+        "properties": {}
+      },
+      {
+        "edge_id": "1:s:4",
+        "src": "M0009876",
+        "dst": "77007",
+        "relationship_type": "SETTLED_TO",
+        "properties": {
+          "amount": 100.0,
+          "date": "2026-09-16"
+        }
+      }
+    ],
+    "truncated": false
+  },
+  "report": {
+    "rows_read": 5,
+    "rows_discarded": 1,
+    "discarded": [
+      {
+        "from": "s",
+        "row": 5,
+        "reason": "invalid date:yyyymmdd: \"202609XX\""
+      }
+    ],
+    "unknown_nodes": 0,
+    "edge_rows": 8,
+    "without_counterpart": 0,
+    "missing_inputs": [],
+    "missing_columns": []
+  }
+}

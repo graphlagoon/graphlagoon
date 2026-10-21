@@ -1,0 +1,23 @@
+{
+  "as": "graph",
+  "spec": {
+    "version": 1,
+    "name": "Card transactions",
+    "inputs": {
+      "t": { "match": "*.csv", "delimiter": ";", "header": true }
+    },
+    "nodes": [
+      { "key": "card", "type": "Card", "from": "t", "id": { "col": "t.card_token", "normalize": "card" } },
+      { "key": "merchant", "type": "Merchant", "from": "t", "id": { "col": "t.merchant_id", "convert": ["trim", "upper"] }, "props": { "name": "t.merchant_name", "mcc": "t.mcc" } },
+      { "key": "terminal", "type": "Terminal", "from": "t", "id": { "col": "t.terminal_id", "normalize": "terminal_id" }, "when": { "not_empty": "t.terminal_id" } }
+    ],
+    "edges": [
+      {
+        "from": "t", "type": "PAID", "endpoints": { "self": "card", "other": "merchant" },
+        "props": { "amount": { "col": "t.amount", "convert": "decimal_comma" }, "date": { "col": "t.date", "convert": "date:dd/mm/yyyy" } }
+      },
+      { "from": "t", "type": "CAPTURED_AT", "endpoints": { "self": "merchant", "other": "terminal" } }
+    ],
+    "edge_semantics": { "amount_prop": "amount", "time_prop": "date" }
+  }
+}

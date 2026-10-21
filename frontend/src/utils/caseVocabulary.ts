@@ -1,36 +1,20 @@
 /**
- * Case presets (05 §4b): vocabularies a `kind_preset` suggests, never imposes.
- * Twin of `services/cases.py::PRESET_DEFAULTS` (the server fills `settings.vocabularies`
- * at creation; this copy serves cases created before and the settings drawer).
+ * A case's vocabulary (05 §4b, 06 §1): the roles, tags and link attributes it
+ * offers, copied from its case type at creation and editable in the case's
+ * settings; nothing is imposed (anything typed is accepted).
  */
-import type { KindPreset } from '@/types/investigation';
 
 export interface CaseVocabulary {
   roles: string[];
   tags: string[];
-  /** Attributes Vínculos offers first: property names or attribute node types. */
+  /** Attributes the links analysis offers first: property names or attribute node types. */
   link_attributes: string[];
 }
 
-export const PRESET_DEFAULTS: Record<KindPreset, CaseVocabulary> = {
-  credito: { roles: ['controlador', 'coligada', 'garantidor', 'devedor'], tags: [], link_attributes: ['endereco', 'telefone', 'email'] },
-  garantia: { roles: ['devedor', 'adquirente', 'cessionário', 'bem'], tags: [], link_attributes: ['endereco', 'email'] },
-  pix_med: { roles: ['vítima', 'mula', 'beneficiário final', 'ponto de saque'], tags: [], link_attributes: ['telefone', 'device_id'] },
-  lavagem: { roles: ['origem', 'passagem', 'destino', 'laranja'], tags: [], link_attributes: ['endereco', 'telefone'] },
-  lojista: { roles: ['lojista', 'sócio', 'adquirente', 'terminal'], tags: [], link_attributes: ['terminal', 'endereco', 'telefone'] },
-  fraude_sintetica: {
-    roles: ['identidade real', 'identidade sintética', 'mula', 'ponto de cash-out'],
-    tags: [],
-    link_attributes: ['telefone', 'email', 'device_id', 'endereco'],
-  },
-  livre: { roles: [], tags: [], link_attributes: [] },
-};
-
-/** The case's vocabulary: its settings, else the preset's defaults. */
-export function vocabularyOf(settings: Record<string, unknown> | undefined, preset: KindPreset | undefined): CaseVocabulary {
+/** The case's vocabulary from its settings (empty lists when it has none). */
+export function vocabularyOf(settings: Record<string, unknown> | undefined): CaseVocabulary {
   const own = (settings?.vocabularies ?? {}) as Partial<CaseVocabulary>;
-  const base = PRESET_DEFAULTS[preset ?? 'livre'] ?? PRESET_DEFAULTS.livre;
-  return { roles: own.roles ?? base.roles, tags: own.tags ?? base.tags, link_attributes: own.link_attributes ?? base.link_attributes };
+  return { roles: own.roles ?? [], tags: own.tags ?? [], link_attributes: own.link_attributes ?? [] };
 }
 
 /** The 8 group colors (05 §5). */
@@ -43,5 +27,9 @@ export function groupColor(color: string | number | undefined, index = 0): strin
 }
 
 /** What the agent writes as "suggested" (05 §6); the rest applies directly. */
-export const SUGGEST_KINDS = ['role', 'tag', 'hypothesis_status', 'same_as', 'status_change', 'typology', 'group', 'note'] as const;
-export const DEFAULT_SUGGEST_KINDS = ['role', 'tag', 'hypothesis_status', 'same_as', 'status_change', 'typology'];
+// The server's `suggest_kinds` (GET /api/org/authoring); kept equal by caseVocabulary.test.ts.
+export const SUGGEST_KINDS = [
+  'role', 'tag', 'hypothesis_status', 'same_as', 'status_change', 'task',
+  'group', 'hypothesis', 'note', 'document', 'table', 'query', 'graph',
+] as const;
+export const DEFAULT_SUGGEST_KINDS = ['role', 'tag', 'hypothesis_status', 'same_as', 'status_change', 'task'];

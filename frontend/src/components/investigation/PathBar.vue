@@ -2,7 +2,7 @@
 /**
  * Renders a paths analysis item (F3.6, F4): the paths found between source and
  * target, one shown at a time; showing a path highlights it by selecting its
- * nodes and edges. Parameters live in the Caminhos popover (AnalysisBar).
+ * nodes and edges. Parameters live in the Paths popover (AnalysisBar).
  */
 import { computed, ref, watch } from 'vue';
 import { useGraphStore } from '@/stores/graph';
@@ -45,7 +45,7 @@ watch(
     <span v-if="!content.paths.length" data-testid="path-none">no path</span>
     <span v-else-if="current" data-testid="path-result">
       {{ current.nodes.map(nameOf).join(' → ') }} · {{ current.edges.length }} {{ current.edges.length === 1 ? 'hop' : 'hops' }}
-      <template v-if="content.params.mode === 'earliest'"> · chega {{ formatDate(current.cost) }}</template>
+      <template v-if="content.params.mode === 'earliest'"> · arrives {{ formatDate(current.cost) }}</template>
     </span>
     <span v-if="content.paths.length > 1" class="pager">
       <button :disabled="index === 0" @click="show(index - 1)">‹</button>

@@ -1,5 +1,5 @@
 <script lang="ts">
-/** A finished run, for a host that embeds the console (the case's "Consulta" tab, F3). */
+/** A finished run, for a host that embeds the console (the case's "Query" tab, F3). */
 export interface ConsoleResult {
   contextId: string;
   query: string;
@@ -187,7 +187,7 @@ async function run() {
   }
 }
 
-// --- Adicionar ao caso (05 §4): the result as a table, the text as a saved query ---
+// --- Add to case (05 §4): the result as a table, the text as a saved query ---
 const canAddToCase = computed(() => !!(props.caseId ?? currentCase.caseId));
 const caseLabel = computed(() => (props.caseId ? '' : currentCase.shortId));
 const addingResult = ref(false);
@@ -201,7 +201,7 @@ async function addResultToCase() {
     await addToCase.addTable({
       columns: consoleStore.rawColumns,
       rows: consoleStore.rawRows,
-      title: `Resultado · ${first.length > 50 ? `${first.slice(0, 47)}…` : first}`,
+      title: `Result · ${first.length > 50 ? `${first.slice(0, 47)}…` : first}`,
       description: activeQuery.value.trim(),
       provenance: { context_id: context.value?.id, tool: 'console', params: { mode: consoleStore.mode, query: activeQuery.value.trim() } },
     });
@@ -334,18 +334,18 @@ onMounted(() => {
         <span class="btn-sep"></span>
         <button
           class="action-btn"
-          :title="canAddToCase ? 'Adicionar o resultado como tabela do caso' : 'Escolha um caso atual na barra superior'"
+          :title="canAddToCase ? 'Add the result as a table of the case' : 'Pick a current case in the top bar'"
           :disabled="!showResults || !canAddToCase || addingResult"
           data-testid="query-console-add-result"
           @click="addResultToCase"
-        >Adicionar resultado{{ caseLabel ? ` ${caseLabel}` : '' }}</button>
+        >Add result{{ caseLabel ? ` ${caseLabel}` : '' }}</button>
         <button
           class="action-btn"
-          :title="canAddToCase ? 'Salvar como consulta do caso (reexecutável, com histórico)' : 'Escolha um caso atual na barra superior'"
+          :title="canAddToCase ? 'Save as a query of the case (re-runnable, with history)' : 'Pick a current case in the top bar'"
           :disabled="!canSave || !canAddToCase || savingQuery"
           data-testid="query-console-save-case-query"
           @click="saveAsCaseQuery"
-        >Salvar como consulta do caso</button>
+        >Save as case query</button>
         <span class="btn-sep"></span>
         <button class="action-btn" title="Export CSV (respects filters)" :disabled="!showResults" @click="exportCSV">CSV</button>
         <button class="action-btn" title="Copy result to clipboard (TSV)" :disabled="!showResults" @click="copyResult">

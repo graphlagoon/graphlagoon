@@ -4,10 +4,12 @@ import type { HypothesisStatus, InvestigationEvent, InvestigationStatus } from '
 
 const FIELD_LABELS: Record<string, string> = {
   assignee_email: 'assignee',
-  deadline_days: 'deadline',
+  sla_hours: 'deadline',
   alert_at: 'alert date',
   occurred_at: 'occurrence date',
-  kind_preset: 'case type',
+  case_type: 'case type',
+  stage: 'stage',
+  fields: 'fields',
 };
 
 const hyp = (s: string) => HYPOTHESIS_STATUS_LABELS[s as HypothesisStatus] ?? s;
@@ -26,13 +28,17 @@ function describeAnnotation(kind: string, p: Record<string, any>, nameOf: (id: s
     case 'same_as': return `${first} = ${targets[1] ? nameOf(targets[1]) : '?'}`;
     case 'hypothesis': return `hypothesis “${v.text}”${v.status && v.status !== 'open' ? ` (${hyp(v.status)})` : ''}`;
     case 'hypothesis_status': return `hypothesis → ${hyp(v.status)}`;
-    case 'typology': return `typology ${v.norm_ref ?? v.typology} on ${targets.length} ${targets.length === 1 ? 'entity' : 'entities'}`;
     case 'status_change': return `case status → ${status(v.to)}`;
+    case 'decision_proposal': return `a decision “${v.outcome_label ?? v.outcome ?? '?'}”${targets.length ? ` on ${targets.map(nameOf).join(', ')}` : ''}`;
+    case 'task': {
+      const who = v.assignee_kind === 'agent' ? `agent ${v.agent_name || '(any)'}` : v.assignee;
+      return `task “${v.title}”${who ? ` for ${who}` : ''}${v.state && v.state !== 'open' ? ` → ${v.state}` : ''}`;
+    }
     default: return kind;
   }
 }
 
-const ANNOTATION_KINDS = ['role', 'tag', 'group', 'same_as', 'hypothesis', 'hypothesis_status', 'typology', 'status_change'];
+const ANNOTATION_KINDS = ['role', 'tag', 'group', 'same_as', 'hypothesis', 'hypothesis_status', 'status_change', 'task', 'decision_proposal'];
 const ANNOTATION_VERBS: Record<string, string> = {
   set: 'set', suggested: 'suggested', confirmed: 'confirmed', rejected: 'rejected', updated: 'updated', removed: 'removed',
 };
@@ -54,7 +60,8 @@ export function describeEvent(e: InvestigationEvent, nameOf: (id: string) => str
       const fields = Object.keys(p).map((k) => FIELD_LABELS[k] ?? k);
       return `updated ${fields.join(', ') || 'the case'}${p.status ? ` → ${status(p.status)}` : ''}`;
     }
-    case 'case.reopened': return `reopened the case (previous decision hash ${short(p.previous_frozen_hash)}…)`;
+    case 'case.reopened': return `reopened the case${p.hash ? ` (closing decision hash ${short(p.hash)}…)` : ''}`;
+    case 'case.closed': return 'closed the case';
     case 'case.shared': return `shared with ${p.with} (${p.role ?? p.permission})`;
     case 'case.unshared': return `stopped sharing with ${p.with}`;
     case 'case.transferred': return `transferred the case from ${p.from} to ${p.to}`;
@@ -71,7 +78,12 @@ export function describeEvent(e: InvestigationEvent, nameOf: (id: string) => str
     case 'metric.saved': return `saved metric ${p.metric} as property ${p.property} on ${p.nodes} node(s) of “${p.exploration_title}”`;
     case 'trace.run': return `followed the money (${p.allocation ?? 'fifo'}, ${p.maxHops ?? '?'} layers): ${Math.round((p.coverage ?? 0) * 100)}% reached exits`;
     case 'path.run': return `searched paths ${nameOf(p.source)} → ${nameOf(p.target)} (${p.mode}): ${p.found} found`;
-    case 'decision.recorded': return `decided: ${p.outcome === 'comunicar' ? 'communicate to COAF' : 'archive'}${p.actions?.length ? ` (${p.actions.join(', ')})` : ''}`;
+    case 'decision.recorded': {
+      const on = p.targets?.length ? ` on ${p.targets.map(nameOf).join(', ')}` : '';
+      return `decided “${p.outcome_label ?? p.outcome ?? '?'}”${on}${p.closes_case ? ' (closes the case)' : ''}`;
+    }
+    case 'decision.approved': return `approved the decision${p.note ? ` — ${p.note}` : ''}`;
+    case 'decision.rejected': return `rejected the decision${p.note ? ` — ${p.note}` : ''}`;
     default: return e.kind;
   }
 }

@@ -48,7 +48,7 @@ describe('CaseFilterChips (05 §3)', () => {
     await fireEvent.click(getByTestId('chip-opt-sources-s1'))
     await flushPromises()
     expect([...graph.caseHiddenNodeIds!]).toEqual(['c@c2'])
-    expect(getByTestId('chip-sources').textContent).toContain('fonte: Pix')
+    expect(getByTestId('chip-sources').textContent).toContain('source: Pix')
 
     await fireEvent.click(getByTestId('chip-roles'))
     await fireEvent.click(getByTestId('chip-opt-roles-mula'))
@@ -87,11 +87,6 @@ describe('CaseFilterChips (05 §3)', () => {
     await fireEvent.click(getByTestId('chip-window'))
     await flushPromises()
     expect(graph.caseHiddenNodeIds).toBeNull()
-
-    await fireEvent.click(getByTestId('chip-unmasked'))
-    await flushPromises()
-    expect(filters.unmasked).toBe(true)
-    expect(api.postInvestigationEvent).toHaveBeenCalledWith('inv-1', 'view.unmasked', expect.anything())
   })
 
   it('saves the chips, the layout and the closed groups as a graph/view item and applies one back', async () => {

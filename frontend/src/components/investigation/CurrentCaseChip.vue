@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Top-bar chip `[● título · #id ▾]` (05 §2): the current case, app-wide.
- * Opens a quick switch (5 recent + search over the queue) and "Novo caso".
+ * Top-bar chip `[● title · #id ▾]` (05 §2): the current case, app-wide.
+ * Opens a quick switch (5 recent + search over the queue) and "New case".
  * Opening a case (`/investigations/:id`) or a graph with `?case=` makes it
  * current; a case that no longer exists or was unshared clears the chip.
  */
@@ -30,11 +30,11 @@ const creating = ref(false);
 
 const matches = computed(() => {
   const q = search.value.trim().toLowerCase();
-  const writable = all.value.filter((i) => i.status !== 'decided');
+  const writable = all.value.filter((i) => i.status !== 'closed');
   if (!q) return [];
   return writable.filter((i) => i.title.toLowerCase().includes(q) || i.id.startsWith(q)).slice(0, 8);
 });
-const label = computed(() => (store.hasCase ? `${store.title || 'Caso'} · ${store.shortId}` : 'Sem caso atual'));
+const label = computed(() => (store.hasCase ? `${store.title || 'Case'} · ${store.shortId}` : 'No current case'));
 
 async function toggle() {
   open.value = !open.value;
@@ -66,7 +66,7 @@ async function createCase() {
     open.value = false;
     await router.push(`/investigations/${inv.id}`);
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Falha ao criar o caso'));
+    toast.error(getErrorMessage(e, 'Failed to create the case'));
   } finally {
     creating.value = false;
   }
@@ -89,7 +89,7 @@ watch(
     <button
       class="case-chip"
       :class="{ empty: !store.hasCase }"
-      :title="store.hasCase ? `Caso atual: ${store.title}` : 'Nenhum caso atual: escolha um'"
+      :title="store.hasCase ? `Current case: ${store.title}` : 'No current case: pick one'"
       :aria-expanded="open"
       data-testid="current-case-chip"
       @click="toggle"
@@ -101,15 +101,15 @@ watch(
     </button>
 
     <div v-if="open" class="case-menu" data-testid="current-case-menu" @click.stop>
-      <input v-model="search" class="form-control" placeholder="Buscar caso…" aria-label="Buscar caso" data-testid="current-case-search" />
+      <input v-model="search" class="form-control" placeholder="Search cases…" aria-label="Search cases" data-testid="current-case-search" />
       <template v-if="search.trim()">
         <button v-for="inv in matches" :key="inv.id" class="menu-item" :data-testid="`current-case-pick-${inv.id}`" @click="pick(inv)">
           {{ inv.title }} <span class="muted">#{{ inv.id.slice(0, 4) }}</span>
         </button>
-        <p v-if="!matches.length && !loading" class="muted hint">Nenhum caso encontrado.</p>
+        <p v-if="!matches.length && !loading" class="muted hint">No case found.</p>
       </template>
       <template v-else>
-        <p class="section">Recentes</p>
+        <p class="section">Recent</p>
         <button
           v-for="inv in store.recentCases"
           :key="inv.id"
@@ -118,18 +118,18 @@ watch(
           :data-testid="`current-case-pick-${inv.id}`"
           @click="pick(inv)"
         >
-          {{ inv.title || 'Caso' }} <span class="muted">#{{ inv.id.slice(0, 4) }}</span>
+          {{ inv.title || 'Case' }} <span class="muted">#{{ inv.id.slice(0, 4) }}</span>
         </button>
-        <p v-if="!store.recentCases.length" class="muted hint">Abra um caso ou busque pelo título.</p>
+        <p v-if="!store.recentCases.length" class="muted hint">Open a case or search by title.</p>
       </template>
       <div v-if="can('investigation.create')" class="new-case">
-        <input v-model="newTitle" class="form-control" placeholder="Novo caso: título" data-testid="current-case-new-title" @keydown.enter="createCase" />
+        <input v-model="newTitle" class="form-control" placeholder="New case: title" data-testid="current-case-new-title" @keydown.enter="createCase" />
         <button class="btn btn-primary btn-sm" :disabled="!newTitle.trim() || creating" data-testid="current-case-new-submit" @click="createCase">
-          <Plus :size="12" /> Novo caso
+          <Plus :size="12" /> New case
         </button>
       </div>
       <button v-if="store.hasCase" class="menu-item muted" data-testid="current-case-clear" @click="store.setCurrentCase(null); open = false">
-        Sem caso atual
+        No current case
       </button>
     </div>
     <div v-if="open" class="backdrop" @click="open = false"></div>

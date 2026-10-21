@@ -15,7 +15,7 @@ export interface NodeOrigin {
 
 export interface UnifiedNode extends Node {
   __sources: NodeOrigin[];
-  /** Identity entity ("Pessoa") when the node was merged by key; absent for the fallback uid. */
+  /** Identity entity ("Person") when the node was merged by key; absent for the fallback uid. */
   __entity?: string;
   /** Values that lost to the first one, per property (`node_type` for a type clash). */
   __conflicts?: Record<string, { value: unknown; sourceId: string }[]>;
@@ -30,7 +30,7 @@ export interface UnifySource {
   contextId: string;
   nodes: Node[];
   edges: Edge[];
-  /** A derived item (Vínculos, selections): its node ids are already unified ids, kept as they are. */
+  /** A derived item (links analysis, selections): its node ids are already unified ids, kept as they are. */
   unified?: boolean;
 }
 
@@ -105,7 +105,7 @@ function mergeNode(
 }
 
 /**
- * Nodes merge by identity key (`"Pessoa:12345678901"`); a node without a usable key
+ * Nodes merge by identity key (`"Person:12345678901"`); a node without a usable key
  * stays per context (`"{node_id}@{contextId}"`, id first so the default label reads
  * the original id). Edges are never merged across sources; each carries its own
  * context's amount and time (`__amount`/`__t`). Case-level `overrides` replace a

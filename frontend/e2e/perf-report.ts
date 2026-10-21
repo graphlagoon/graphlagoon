@@ -21,6 +21,9 @@ import { chromium } from 'playwright';
 
 const BASE_URL = process.argv[2] || 'http://localhost:3000';
 const WAIT_MS = parseInt(process.env.PERF_WAIT_MS || '5000', 10);
+// Upper bound for the mocked graph to reach the force graph; large graphs (G4 ceiling
+// runs at 50k-200k edges) take far longer than the fixed WAIT_MS.
+const LOAD_TIMEOUT_MS = parseInt(process.env.PERF_LOAD_TIMEOUT_MS || '30000', 10);
 
 // Graph size for the mocked payload. The defaults are deliberately small (fast
 // smoke run); raise them to profile the load path at a realistic scale, e.g.
@@ -163,16 +166,44 @@ async function main() {
   // the context list, so the load path under measurement never runs and the
   // report comes back empty.
   const graphUrl = `${BASE_URL.replace(/\/$/, '')}/graph/${MOCK_CONTEXTS[0].id}`;
+  const tStart = Date.now();
   try {
-    await page.goto(graphUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.goto(graphUrl, { waitUntil: 'networkidle', timeout: LOAD_TIMEOUT_MS });
   } catch {
     console.error(`Failed to connect to ${graphUrl}. Is the dev server running? (make dev or make run-frontend)`);
     await browser.close();
     process.exit(1);
   }
 
-  // Wait for rendering + force layout to settle
+  // Wait until the full graph reached the force graph, then let rendering settle.
+  let loadedMs: number | null = null;
+  try {
+    await page.waitForFunction(
+      (n) =>
+        ((window as any).__PERF_METRICS__?.entries ?? []).some(
+          (e: any) => e.label === 'forcegraphUpdate' && e.extra?.nodeCount === n,
+        ),
+      NODE_COUNT,
+      { timeout: LOAD_TIMEOUT_MS, polling: 500 },
+    );
+    loadedMs = Date.now() - tStart;
+  } catch {
+    console.error(`Graph did not reach the force graph within ${LOAD_TIMEOUT_MS} ms.`);
+  }
   await page.waitForTimeout(WAIT_MS);
+
+  // Frames painted in 2 s after settling (headless without GPU: a lower bound).
+  // String form: tsx injects a `__name` helper into named inner functions, which the page lacks.
+  const fps: number = await page.evaluate(`new Promise((resolve) => {
+    let frames = 0;
+    const t0 = performance.now();
+    const tick = () => {
+      frames++;
+      if (performance.now() - t0 < 2000) requestAnimationFrame(tick);
+      else resolve((frames * 1000) / (performance.now() - t0));
+    };
+    requestAnimationFrame(tick);
+  })`);
 
   // Fail loudly rather than emitting an empty report that looks like a
   // successful zero-cost run.
@@ -232,6 +263,7 @@ async function main() {
     cdpMetrics[m.name] = m.value;
   }
   (report as any).cdpMetrics = cdpMetrics;
+  Object.assign(report as any, { loadedMs, fps, nodeCount: NODE_COUNT, edgeCount: EDGE_COUNT });
 
   // Output
   console.log(JSON.stringify(report, null, 2));

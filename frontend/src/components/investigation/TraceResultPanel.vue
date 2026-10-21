@@ -3,7 +3,7 @@
  * Renders a money-trace item (T5, F4): seed, coverage and retained chips, the
  * exits with their value per rule, the method stamp, and the Layers | Sankey |
  * Graph view switch (layers re-lay the canvas by trace layer). Parameters live in
- * the "Seguir o dinheiro" popover; "Fixar" pins the item's version as evidence.
+ * the "Follow the money" popover; "Pin as evidence" pins the item's version as evidence.
  */
 import { computed } from 'vue';
 import { formatAmount } from '@/utils/edgeSemantics';

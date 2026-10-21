@@ -62,7 +62,7 @@ export interface InvestigationGraphMode {
   origins: Map<string, NodeOrigin[]>;
   /** Provenance ring colors per node id. */
   rings: Map<string, string[]>;
-  /** Case label (template per type, masking); the canvas falls back to `caseNodeLabel`. */
+  /** Case label (template per type); the canvas falls back to `caseNodeLabel`. */
   labelOf?: (node: Node) => string;
   chooseOrigin: (origins: NodeOrigin[]) => Promise<NodeOrigin | null>;
   applyExpansion: (origin: NodeOrigin, response: GraphResponse) => void | Promise<void>;
@@ -353,7 +353,7 @@ export const useGraphStore = defineStore('graph', () => {
   const investigationMode = shallowRef<InvestigationGraphMode | null>(null);
   /** Amount/time of an edge (F3.1): the context's semantics, or the unify-time tags of a case graph. */
   const edgeSemantics = computed(() => currentContext.value?.edge_semantics ?? null);
-  const edgeCurrency = computed(() => edgeSemantics.value?.currency || 'BRL');
+  const edgeCurrency = computed(() => edgeSemantics.value?.currency || null);
   function edgeValueOf(edge: Edge): EdgeValue {
     return edgeValue(edge, edgeSemantics.value);
   }
@@ -2664,7 +2664,7 @@ export const useGraphStore = defineStore('graph', () => {
     currentExploration.value = await api.updateExploration(exp.id, { snapshot: buildGraphSnapshot() });
 
     const cases = (await api.getInvestigations({ exploration_id: exp.id })).filter(
-      (c) => c.has_write_access && c.status !== 'decided',
+      (c) => c.has_write_access && c.status !== 'closed',
     );
     const payload = {
       metric: metric.name,

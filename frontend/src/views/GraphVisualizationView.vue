@@ -61,6 +61,7 @@ import {
 } from '@/utils/templateUrlParams';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useTemplateExecution } from '@/composables/useTemplateExecution';
+import { uuidOrNull } from '@/utils/uuid';
 import {
   capabilitiesFor,
   resolveDatasourceType,
@@ -73,7 +74,7 @@ const props = defineProps<{
 const route = useRoute();
 const currentCaseStore = useCurrentCaseStore();
 /** `?case=<id>`: a new exploration started from the case popover (F3). */
-const caseReturnId = computed(() => (route.query.case as string | undefined) ?? null);
+const caseReturnId = computed(() => uuidOrNull(route.query.case));
 const toast = useToast();
 
 /**
@@ -765,8 +766,8 @@ watch(
   <div ref="graphContainerRef" class="graph-visualization" :class="{ fullscreen: isFullscreen }">
     <!-- Started from a case (?case=): the way back; saving attaches the exploration (05 §4). -->
     <div v-if="caseReturnId" class="case-breadcrumb" data-testid="case-breadcrumb">
-      <RouterLink :to="`/investigations/${caseReturnId}`" class="case-breadcrumb-link">← Caso {{ currentCaseStore.title || currentCaseStore.shortId }}</RouterLink>
-      <span class="case-breadcrumb-hint">Salvar a exploração anexa ao caso e volta.</span>
+      <RouterLink :to="`/investigations/${caseReturnId}`" class="case-breadcrumb-link">← Case {{ currentCaseStore.title || currentCaseStore.shortId }}</RouterLink>
+      <span class="case-breadcrumb-hint">Saving the exploration attaches it to the case and goes back.</span>
     </div>
     <div class="main-content">
       <FilterPanel v-if="showFilters" @close="showFilters = false; toolbarStore.setPanelActive('filters', false)" />

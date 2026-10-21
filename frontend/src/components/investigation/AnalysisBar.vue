@@ -2,25 +2,26 @@
 /**
  * Analysis bar of the canvas (05 §3): visible buttons, each with a parameter
  * popover (never only a context menu). Every run comes back as an item of the
- * case (useCaseAnalyses) and the parent activates it. Filtros / Tabela / Layout /
- * Fit / Avançado toggle the explorer's panels mounted in the case.
+ * case (useCaseAnalyses) and the parent activates it. Filters / Table / Layout /
+ * Fit / Advanced toggle the explorer's panels mounted in the case. "Detectors"
+ * lists the case type's starter queries (06 §3c): analyses that are data, opened
+ * in the inspector to run.
  */
 import { computed, ref, watch } from 'vue';
-import { Banknote, Filter, GitBranch, Layers, Link2, Maximize2, Route, Settings2, Sigma, Table2, Tags, Terminal, Users } from 'lucide-vue-next';
+import { Banknote, Filter, GitBranch, Layers, Link2, Maximize2, Radar, Route, Settings2, Sigma, Table2, Terminal, Users } from 'lucide-vue-next';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useCaseFilters } from '@/stores/caseFilters';
-import { useCaseAnalyses, ALLOCATIONS, TRACE_DEFAULTS, type TraceDirection, type TraceRunParams } from '@/composables/useCaseAnalyses';
+import { useCaseAnalyses, ALLOCATIONS, type TraceDirection, type TraceRunParams } from '@/composables/useCaseAnalyses';
 import { useToast } from '@/composables/useToast';
 import { formatAmount } from '@/utils/edgeSemantics';
 import { MAX_K, type PathMode, type PathParams } from '@/utils/paths';
-import { TYPOLOGIES } from '@/utils/typologies';
 import { formatTraceTime } from '@/utils/traceView';
 import GroupsPanel from '@/components/investigation/GroupsPanel.vue';
 import type { CaseItem } from '@/types/investigation';
 
 export type CasePanel = 'filters' | 'table' | 'metrics' | 'layout' | 'advanced';
-export type Popover = 'trace' | 'paths' | 'groups' | 'typologies' | 'links' | 'enrich' | 'metrics';
+export type Popover = 'trace' | 'paths' | 'groups' | 'links' | 'enrich' | 'metrics' | 'detectors';
 
 const props = defineProps<{
   canEdit: boolean;
@@ -36,6 +37,7 @@ const emit = defineEmits<{
   console: [];
   upload: [];
   activate: [item: CaseItem];
+  'select-item': [item: CaseItem];
   'update:paintByGroup': [on: boolean];
 }>();
 
@@ -50,6 +52,15 @@ function toggle(p: Popover) {
   open.value = open.value === p ? null : p;
 }
 
+/** The case type's starter queries, copied into the case as query items. */
+const detectors = computed(() =>
+  store.items.filter((i) => i.kind === 'query' && !i.deleted_at && i.provenance?.tool === 'case_type'),
+);
+function openDetector(item: CaseItem) {
+  open.value = null;
+  emit('select-item', item);
+}
+
 const rerunTarget = (tool: string) => (props.activeItem?.provenance?.tool === tool ? props.activeItem.id : null);
 
 async function finish(item: CaseItem | null, label: string) {
@@ -62,7 +73,7 @@ async function finish(item: CaseItem | null, label: string) {
   open.value = null;
 }
 
-// --- Seguir o dinheiro -------------------------------------------------------
+// --- Follow the money ----------------------------------------------------------
 const seedTarget = computed<{ type: 'node' | 'edge'; id: string } | null>(() => {
   if (graph.selectedNodeIds.size === 1) return { type: 'node', id: [...graph.selectedNodeIds][0] };
   if (graph.selectedEdgeIds.size === 1) return { type: 'edge', id: [...graph.selectedEdgeIds][0] };
@@ -110,7 +121,7 @@ async function traceFrom(target: { type: 'node' | 'edge'; id: string }, directio
   return true;
 }
 
-// --- Caminhos ----------------------------------------------------------------
+// --- Paths -------------------------------------------------------------------
 const pathSource = ref<string | null>(null);
 const pathTarget = ref<string | null>(null);
 const picking = ref<'source' | 'target' | null>(null);
@@ -151,16 +162,7 @@ function startPath(sourceId: string) {
 }
 defineExpose({ traceFrom, startPath, show: (p: Popover) => (open.value = p), close: () => (open.value = null) });
 
-// --- Tipologias --------------------------------------------------------------
-const typologyOn = ref<Record<string, boolean>>(Object.fromEntries(TYPOLOGIES.map((t) => [t.id, true])));
-const typologyParams = ref<Record<string, Record<string, number>>>(Object.fromEntries(TYPOLOGIES.map((t) => [t.id, { ...t.params }])));
-async function runTypologies() {
-  const ids = TYPOLOGIES.filter((t) => typologyOn.value[t.id]).map((t) => t.id);
-  const params = Object.fromEntries(ids.map((id) => [id, typologyParams.value[id]]));
-  await finish(await analyses.runTypologies(ids.length === TYPOLOGIES.length ? [] : ids, params, rerunTarget('typologies')), 'Typologies');
-}
-
-// --- Vínculos ----------------------------------------------------------------
+// --- Links -------------------------------------------------------------------
 const linkAttributes = computed(() => {
   const types = new Set(store.unified.nodes.map((n) => n.node_type));
   const props = new Set<string>();
@@ -182,11 +184,11 @@ async function runLinks() {
   if (!attributes.length) return;
   await finish(
     await analyses.runLinks({ attributes, minShared: minShared.value, maxEntities: maxEntities.value ?? undefined }, rerunTarget('links')),
-    'Vínculos',
+    'Links',
   );
 }
 
-// --- Métricas ----------------------------------------------------------------
+// --- Metrics -----------------------------------------------------------------
 async function saveMetrics() {
   await finish(await analyses.saveMetricsTable(), 'Metrics');
 }
@@ -202,23 +204,32 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
 <template>
   <div class="analysis-bar" data-testid="analysis-bar" @keydown.esc="open = null">
     <div class="buttons">
-      <button :class="btn('trace')" data-testid="analysis-trace" @click="toggle('trace')"><Banknote :size="14" /> Seguir o dinheiro</button>
-      <button :class="btn('paths')" data-testid="analysis-paths" @click="toggle('paths')"><Route :size="14" /> Caminhos</button>
-      <button :class="btn('groups')" data-testid="analysis-groups" @click="toggle('groups')"><Users :size="14" /> Grupos</button>
-      <button :class="btn('typologies')" data-testid="workspace-typologies-btn" @click="toggle('typologies')"><Tags :size="14" /> Tipologias</button>
-      <button :class="btn('links')" data-testid="analysis-links" @click="toggle('links')"><Link2 :size="14" /> Vínculos</button>
-      <button :class="btn('enrich')" data-testid="analysis-enrich" @click="toggle('enrich')"><GitBranch :size="14" /> Enriquecer</button>
-      <button :class="btn('metrics')" data-testid="analysis-metrics" @click="toggle('metrics')"><Sigma :size="14" /> Métricas</button>
+      <button :class="btn('trace')" data-testid="analysis-trace" @click="toggle('trace')"><Banknote :size="14" /> Follow the money</button>
+      <button :class="btn('paths')" data-testid="analysis-paths" @click="toggle('paths')"><Route :size="14" /> Paths</button>
+      <button :class="btn('groups')" data-testid="analysis-groups" @click="toggle('groups')"><Users :size="14" /> Groups</button>
+      <button :class="btn('links')" data-testid="analysis-links" @click="toggle('links')"><Link2 :size="14" /> Links</button>
+      <button :class="btn('enrich')" data-testid="analysis-enrich" @click="toggle('enrich')"><GitBranch :size="14" /> Enrich</button>
+      <button :class="btn('metrics')" data-testid="analysis-metrics" @click="toggle('metrics')"><Sigma :size="14" /> Metrics</button>
+      <button v-if="detectors.length" :class="btn('detectors')" data-testid="analysis-detectors" @click="toggle('detectors')"><Radar :size="14" /> Detectors · {{ detectors.length }}</button>
       <button class="btn btn-outline btn-sm" data-testid="analysis-console" title="Query console of the case" @click="emit('console')"><Terminal :size="14" /> Console</button>
       <span class="sep"></span>
-      <button class="btn btn-outline btn-sm" :class="{ on: panels.filters }" data-testid="workspace-filters-btn" @click="emit('toggle', 'filters')"><Filter :size="14" /> Filtros</button>
-      <button class="btn btn-outline btn-sm" :class="{ on: panels.table }" data-testid="workspace-table-btn" @click="emit('toggle', 'table')"><Table2 :size="14" /> Tabela</button>
+      <button class="btn btn-outline btn-sm" :class="{ on: panels.filters }" data-testid="workspace-filters-btn" @click="emit('toggle', 'filters')"><Filter :size="14" /> Filters</button>
+      <button class="btn btn-outline btn-sm" :class="{ on: panels.table }" data-testid="workspace-table-btn" @click="emit('toggle', 'table')"><Table2 :size="14" /> Table</button>
       <button class="btn btn-outline btn-sm" :class="{ on: panels.layout }" data-testid="workspace-layout-btn" @click="emit('toggle', 'layout')"><Layers :size="14" /> Layout</button>
       <button class="btn btn-outline btn-sm" title="Fit the graph in the view" aria-label="Fit to view" data-testid="workspace-fit-btn" @click="emit('fit')"><Maximize2 :size="14" /></button>
-      <button class="btn btn-outline btn-sm" :class="{ on: panels.advanced }" title="Cluster programs (JS)" data-testid="workspace-advanced-btn" @click="emit('toggle', 'advanced')"><Settings2 :size="14" /> Avançado</button>
+      <button class="btn btn-outline btn-sm" :class="{ on: panels.advanced }" title="Cluster programs (JS)" data-testid="workspace-advanced-btn" @click="emit('toggle', 'advanced')"><Settings2 :size="14" /> Advanced</button>
     </div>
 
-    <!-- Seguir o dinheiro -->
+    <!-- Detectors: the case type's starter queries -->
+    <div v-if="open === 'detectors'" class="popover" data-testid="popover-detectors">
+      <p class="muted">Queries of the {{ store.caseType?.label ?? 'case' }} type, copied into the case. Open one to run it; its result is a table of the case.</p>
+      <button v-for="d in detectors" :key="d.id" class="detector" :data-testid="`detector-${d.id}`" @click="openDetector(d)">
+        <strong>{{ d.title }}</strong>
+        <span class="muted">{{ d.subkind.toUpperCase() }}<template v-if="d.description"> · {{ d.description }}</template><template v-if="d.latest?.run"> · last run {{ d.latest.run.row_count ?? '?' }} rows</template></span>
+      </button>
+    </div>
+
+    <!-- Follow the money -->
     <div v-if="open === 'trace'" class="popover" data-testid="popover-trace">
       <template v-if="!store.hasAmounts">
         <p>No edge carries an amount and a time. Set the value and time columns of the relationship types in the case settings.</p>
@@ -266,12 +277,12 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
           <button class="btn btn-primary btn-sm" :disabled="!!analyses.running.value" data-testid="trace-run" @click="runTrace">
             {{ analyses.running.value === 'trace' ? 'Tracing…' : rerunTarget('trace') ? 'Trace again (new version)' : 'Trace' }}
           </button>
-          <span class="muted">defaults: {{ TRACE_DEFAULTS.maxHops }} layers · Δ {{ TRACE_DEFAULTS.dwellHours }} h · min {{ TRACE_DEFAULTS.minAmount }}</span>
+          <span class="muted" data-testid="trace-defaults">defaults{{ store.caseType?.analysis_defaults?.trace?.max_hops != null || store.caseType?.analysis_defaults?.trace?.max_dwell_hours != null ? ` of ${store.caseType!.label}` : '' }}: {{ analyses.traceDefaults.value.maxHops }} layers · Δ {{ analyses.traceDefaults.value.dwellHours ?? 'no limit' }}{{ analyses.traceDefaults.value.dwellHours != null ? ' h' : '' }} · min {{ analyses.traceDefaults.value.minAmount }}</span>
         </div>
       </template>
     </div>
 
-    <!-- Caminhos -->
+    <!-- Paths -->
     <div v-if="open === 'paths'" class="popover" data-testid="popover-paths">
       <div class="grid">
         <div class="field">
@@ -299,26 +310,12 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
       </div>
     </div>
 
-    <!-- Grupos -->
+    <!-- Groups -->
     <div v-if="open === 'groups'" class="popover wide" data-testid="popover-groups">
       <GroupsPanel :can-edit="canEdit" :paint-by-group="paintByGroup" @update:paint-by-group="emit('update:paintByGroup', $event)" />
     </div>
 
-    <!-- Tipologias -->
-    <div v-if="open === 'typologies'" class="popover wide" data-testid="popover-typologies">
-      <p class="muted">CC 4.001 patterns. Parameters are editable; the run is saved as an item and the badges suggest, you confirm.</p>
-      <div v-for="t in TYPOLOGIES" :key="t.id" class="typology-row" :data-testid="`typology-opt-${t.id}`">
-        <label class="option"><input v-model="typologyOn[t.id]" type="checkbox" /> <strong>{{ t.normRef }}</strong> {{ t.label }}</label>
-        <span class="params">
-          <label v-for="k in Object.keys(typologyParams[t.id])" :key="k" class="param">{{ k }} <input v-model.number="typologyParams[t.id][k]" type="number" step="any" /></label>
-        </span>
-      </div>
-      <div class="actions">
-        <button class="btn btn-primary btn-sm" :disabled="!!analyses.running.value" data-testid="typologies-run" @click="runTypologies">Run typologies</button>
-      </div>
-    </div>
-
-    <!-- Vínculos -->
+    <!-- Links -->
     <div v-if="open === 'links'" class="popover" data-testid="popover-links">
       <p class="muted">Link entities that share these attributes (a property or an attribute node they connect to). Too-common values (a carrier IP) are left out above the ceiling.</p>
       <div class="attrs">
@@ -336,7 +333,7 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
       </div>
     </div>
 
-    <!-- Enriquecer -->
+    <!-- Enrich -->
     <div v-if="open === 'enrich'" class="popover" data-testid="popover-enrich">
       <p class="muted">Enrichment joins a table to the canvas's entities by key; the data shows in the inspector's Enrichment section of each entity.</p>
       <ul v-if="enrichmentSources.length" class="list"><li v-for="s in enrichmentSources" :key="s">{{ s }}</li></ul>
@@ -346,7 +343,7 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
       </div>
     </div>
 
-    <!-- Métricas -->
+    <!-- Metrics -->
     <div v-if="open === 'metrics'" class="popover" data-testid="popover-metrics">
       <p class="muted">Compute node and edge metrics in the Metrics panel, map them to size and color, then keep them as a table of the case.</p>
       <div class="actions">
@@ -516,33 +513,6 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
   margin-top: 10px;
 }
 
-.typology-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.params {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-left: auto;
-}
-
-.param {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.param input {
-  width: 72px;
-  margin-left: 2px;
-  font-size: 11px;
-}
-
 .attrs {
   display: flex;
   flex-wrap: wrap;
@@ -553,5 +523,23 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
 .list {
   margin: 0 0 8px;
   padding-left: 18px;
+}
+.detector {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.detector + .detector {
+  margin-top: 6px;
 }
 </style>

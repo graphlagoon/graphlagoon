@@ -166,7 +166,7 @@ time**, referencing the actual types, properties and templates above:
 - Which node types do I interact with most, and what would I want one click
   away for them? (an external system? a search? an internal template?)
 - Do any properties hold ids/codes of external systems (ticket ids, DOIs,
-  CNPJs, SKUs) that map to a URL pattern? What is the exact URL pattern?
+  tax ids, SKUs) that map to a URL pattern? What is the exact URL pattern?
 - Should links open in a new tab (keep the graph) or the current tab?
 - Is there text I repeatedly copy out of the graph (ids, emails, composite
   strings)?

@@ -10,41 +10,46 @@ export interface EdgeValue {
   t: number | null;
 }
 
-/** `12.34`, `"12.34"`, `"1.234,56"` (Brazilian) → number; anything else → null. */
+/**
+ * `12.34` or `"12.34"` → number; anything else → null. A comma is never read:
+ * locale-formatted text goes through a file mapping's `decimal_comma`.
+ */
 export function parseAmount(raw: unknown, unit: EdgeSemantics['amount_unit'] = 'units'): number | null {
   let n: number;
   if (typeof raw === 'number') n = raw;
-  else if (typeof raw === 'string' && raw.trim()) {
-    const s = raw.trim();
-    n = Number(s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s);
-  } else return null;
+  else if (typeof raw === 'string' && raw.trim() && !raw.includes(',')) n = Number(raw.trim());
+  else return null;
   if (!Number.isFinite(n)) return null;
   return unit === 'cents' ? n / 100 : n;
 }
 
-/** ISO date/datetime, `dd/mm/yyyy[ hh:mm[:ss]]`, epoch seconds or ms → epoch ms; else null. */
+/** ISO date/datetime, epoch seconds or ms → epoch ms; else null (other layouts: a mapping's `date:`). */
 export function parseTime(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isFinite(raw)) return raw < 1e11 ? raw * 1000 : raw;
   if (typeof raw !== 'string' || !raw.trim()) return null;
   const s = raw.trim();
   if (/^\d+$/.test(s)) return parseTime(Number(s));
-  const br = /^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](.*))?$/.exec(s);
-  const iso = br ? `${br[3]}-${br[2]}-${br[1]}T${br[4] || '00:00'}` : s;
   // A bare date is local midnight (Date.parse would read it as UTC and shift the day).
-  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00` : iso);
+  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00` : s);
   return Number.isNaN(t) ? null : t;
 }
 
-/** `R$ 1.234,56 · 15/03/2024 14:05` in the viewer's locale; '' when the edge has neither. */
-export function formatEdgeValue({ amount, t }: EdgeValue, currency = 'BRL'): string {
+/** `$1,234.56 · 3/15/2024, 2:05 PM` in the viewer's locale; '' when the edge has neither. */
+export function formatEdgeValue({ amount, t }: EdgeValue, currency?: string | null): string {
   const parts: string[] = [];
   if (amount !== null) parts.push(formatAmount(amount, currency));
   if (t !== null) parts.push(new Date(t).toLocaleString());
   return parts.join(' · ');
 }
 
-export function formatAmount(amount: number, currency = 'BRL'): string {
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
+/** With the context's currency when it declares one; a plain number otherwise. */
+export function formatAmount(amount: number, currency?: string | null): string {
+  if (!currency) return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(amount);
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
+  } catch {
+    return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(amount)} ${currency}`;
+  }
 }
 
 /**

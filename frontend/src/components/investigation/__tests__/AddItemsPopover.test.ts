@@ -47,7 +47,7 @@ beforeEach(() => {
 })
 
 describe('AddItemsPopover', () => {
-  it('opens on "Minhas recentes": newest first, node counts, empty rows disabled, server-side search', async () => {
+  it('opens on "My recent": newest first, node counts, empty rows disabled, server-side search', async () => {
     const { getByTestId, queryByTestId, container } = render(AddItemsPopover, { props: { open: true, investigationId: 'inv-1' } })
     await flushPromises()
     expect(getByTestId('add-tab-recent').getAttribute('aria-selected')).toBe('true')
@@ -56,7 +56,7 @@ describe('AddItemsPopover', () => {
     expect(queryByTestId('add-scope-all')).toBeNull() // superusers only
     const rows = [...container.querySelectorAll('[data-testid^="add-exp-"]')].map((r) => r.getAttribute('data-testid'))
     expect(rows).toEqual(['add-exp-new', 'add-exp-empty', 'add-exp-old'])
-    expect(getByTestId('add-exp-new').textContent).toContain('40 nós')
+    expect(getByTestId('add-exp-new').textContent).toContain('40 nodes')
     expect((getByTestId('add-exp-empty').querySelector('input') as HTMLInputElement).disabled).toBe(true)
 
     await fireEvent.update(getByTestId('add-search'), 'trace')
@@ -65,7 +65,7 @@ describe('AddItemsPopover', () => {
     expect(api.getAllExplorations).toHaveBeenLastCalledWith({ q: 'trace', mine: true, limit: 50 })
   })
 
-  it('"Nova exploração" opens the graph page with ?case=; "Consulta" embeds the console against the chosen context', async () => {
+  it('"New exploration" opens the graph page with ?case=; "Query" embeds the console against the chosen context', async () => {
     const { getByTestId } = render(AddItemsPopover, { props: { open: true, investigationId: 'inv-1' } })
     await flushPromises()
     await fireEvent.click(getByTestId('add-tab-new'))
@@ -79,14 +79,14 @@ describe('AddItemsPopover', () => {
     expect(stub.getAttribute('data-case')).toBe('inv-1')
   })
 
-  it('"Colar / link" detects a URL, a TSV table and a note', async () => {
+  it('"Paste / link" detects a URL, a TSV table and a note', async () => {
     const { getByTestId } = render(AddItemsPopover, { props: { open: true, investigationId: 'inv-1' } })
     await flushPromises()
     await fireEvent.click(getByTestId('add-tab-paste'))
     await fireEvent.update(getByTestId('add-paste-input'), 'https://exemplo.gov.br/laudo.pdf')
     expect(getByTestId('add-paste-kind').textContent).toContain('link')
     await fireEvent.update(getByTestId('add-paste-input'), 'cpf\tvalor\n1\t10\n2\t20')
-    expect(getByTestId('add-paste-kind').textContent).toContain('tabela')
+    expect(getByTestId('add-paste-kind').textContent).toContain('table')
     await fireEvent.click(getByTestId('add-paste-submit'))
     await flushPromises()
     expect(api.createInvestigationItem).toHaveBeenCalledWith('inv-1', expect.objectContaining({

@@ -10,18 +10,17 @@ import { computed, ref } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
-import { useCaseFilters } from '@/stores/caseFilters';
 import { useToast } from '@/composables/useToast';
-import { caseNodeLabel, hiddenRawDocumentKeys, shortId } from '@/utils/caseLabels';
+import { caseNodeLabel, shortId } from '@/utils/caseLabels';
 import { formatDate } from '@/utils/format';
 import { itemKindLabel } from '@/utils/investigationStatus';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { ROLE_LABELS } from '@/utils/graphAppearance';
-import { GROUP_COLORS } from '@/utils/casePresets';
+import { GROUP_COLORS } from '@/utils/caseVocabulary';
 import { baseSourceId, nodeSourceIds, type UnifiedNode } from '@/utils/unifyGraph';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import DecisionPanel from '@/components/investigation/DecisionPanel.vue';
 import ItemPreview from '@/components/investigation/ItemPreview.vue';
+import SeenInOtherCases from '@/components/investigation/SeenInOtherCases.vue';
 import type { CaseAnnotation, CaseItem } from '@/types/investigation';
 
 const props = defineProps<{ activeItem: CaseItem | null; canEdit: boolean; decideMode: boolean }>();
@@ -39,7 +38,6 @@ const emit = defineEmits<{
 const store = useInvestigationStore();
 const graph = useGraphStore();
 const auth = useAuthStore();
-const filters = useCaseFilters();
 const toast = useToast();
 
 const actionError = ref<string | null>(null);
@@ -53,7 +51,7 @@ async function run(action: () => Promise<unknown>, fallback: string) {
 }
 
 const byId = computed(() => new Map(store.unified.nodes.map((n) => [n.node_id, n])));
-const label = (n: Pick<UnifiedNode, 'node_id' | 'node_type' | 'properties'>) => caseNodeLabel(n, { templates: store.labelTemplates, unmasked: filters.unmasked });
+const label = (n: Pick<UnifiedNode, 'node_id' | 'node_type' | 'properties'>) => caseNodeLabel(n, { templates: store.labelTemplates });
 const nameOf = (id: string) => {
   const n = byId.value.get(id);
   return n ? label(n) : shortId(id);
@@ -70,16 +68,12 @@ const noteDraft = ref('');
 const tagDraft = ref('');
 
 const selectedSources = computed(() => (selected.value ? nodeSourceIds(selected.value) : []));
-const selectedProps = computed(() => {
-  const p = selected.value?.properties ?? {};
-  const hidden = filters.unmasked ? new Set<string>() : hiddenRawDocumentKeys(p);
-  return Object.entries(p).filter(([k]) => !hidden.has(k));
-});
+const selectedProps = computed(() => Object.entries(selected.value?.properties ?? {}));
 const selectedRole = computed(() => (selected.value ? store.roles[selected.value.node_id] ?? '' : ''));
 const roleOptions = computed(() => {
   const used = new Set(Object.values(store.roles));
   for (const a of store.annotations) if (a.kind === 'role') used.add(String(a.value.role));
-  return [...new Set([...store.vocabulary.roles, ...Object.keys(ROLE_LABELS), ...used])];
+  return [...new Set([...store.vocabulary.roles, ...used])];
 });
 const selectedTags = computed(() => (selected.value ? store.entityTags.get(selected.value.node_id) ?? [] : []));
 const selectedGroups = computed(() => (selected.value ? store.groups.filter((g) => g.targets.includes(selected.value!.node_id)) : []));
@@ -149,7 +143,6 @@ const describeAnnotation = (a: CaseAnnotation) => {
   if (a.kind === 'tag') return `tag: ${v.tag}`;
   if (a.kind === 'group') return `group: ${v.name}`;
   if (a.kind === 'same_as') return `same as ${nameOf(a.targets.find((t) => t !== selected.value?.node_id) ?? '')}`;
-  if (a.kind === 'typology') return `typology ${v.norm_ref ?? v.typology}`;
   return a.kind;
 };
 
@@ -170,7 +163,7 @@ const multiIds = computed(() => multi.value.map((n) => n.node_id));
 const compareKeys = computed(() => {
   const keys = new Set<string>();
   for (const n of multi.value) for (const k of Object.keys(n.properties ?? {})) keys.add(k);
-  return [...keys].filter((k) => !hiddenRawDocumentKeys(Object.assign({}, ...multi.value.map((n) => n.properties ?? {}))).has(k) || filters.unmasked);
+  return [...keys];
 });
 
 function applyBulkRole() {
@@ -192,7 +185,7 @@ function applyBulkTag() {
 
 function createGroup() {
   run(async () => {
-    await store.addGroup(groupName.value.trim() || `Grupo ${store.groups.length + 1}`, multiIds.value, { color: groupColor.value, by: 'selection', closed: groupClosed.value });
+    await store.addGroup(groupName.value.trim() || `Group ${store.groups.length + 1}`, multiIds.value, { color: groupColor.value, by: 'selection', closed: groupClosed.value });
     groupName.value = '';
     toast.success('Group created');
   }, 'Failed to create the group');
@@ -213,7 +206,7 @@ function saveSelection() {
     const item = await store.addItem({
       kind: 'graph',
       subkind: 'selection',
-      title: `Seleção · ${ids.size} entidades`,
+      title: `Selection · ${ids.size} entities`,
       provenance: { tool: 'selection', params: { nodes: ids.size } },
       content_json: {
         unified: true,
@@ -232,13 +225,13 @@ function saveSelection() {
 function useAsParam() {
   emit('use-as-param', multiIds.value);
   navigator.clipboard?.writeText(multiIds.value.map((id) => shortId(id)).join(', ')).catch(() => {});
-  toast.success(`${multiIds.value.length} ids copied; pick "seleção atual" as a query parameter`);
+  toast.success(`${multiIds.value.length} ids copied; pick "current selection" as a query parameter`);
 }
 
 // --- item ------------------------------------------------------------------------
 const item = computed(() => props.activeItem);
 const itemPinned = computed(() => !!item.value && item.value.pinned.some((v) => v.version === item.value!.current_version));
-const inDossier = computed(() => !!item.value?.tags.includes('dossie'));
+const inDossier = computed(() => !!item.value?.tags.includes('dossier'));
 const isAnalysis = computed(() => !!item.value && store.analyses.some((a) => a.id === item.value!.id));
 const formatTime = (iso: string) => formatDate(iso);
 </script>
@@ -265,7 +258,7 @@ const formatTime = (iso: string) => formatDate(iso);
       <template v-if="canEdit">
         <div class="bulk">
           <span class="muted">Role</span>
-          <select v-model="bulkRole" data-testid="bulk-role"><option value="">— role —</option><option v-for="r in roleOptions" :key="r" :value="r">{{ ROLE_LABELS[r] ?? r }}</option></select>
+          <select v-model="bulkRole" data-testid="bulk-role"><option value="">— role —</option><option v-for="r in roleOptions" :key="r" :value="r">{{ r }}</option></select>
           <button class="btn btn-outline btn-sm" :disabled="!bulkRole" data-testid="bulk-role-apply" @click="applyBulkRole">Apply</button>
         </div>
         <div class="bulk">
@@ -281,12 +274,12 @@ const formatTime = (iso: string) => formatDate(iso);
             <button v-for="(c, i) in GROUP_COLORS" :key="c" class="swatch" :class="{ on: groupColor === i }" :style="{ background: c }" :aria-label="`Color ${i + 1}`" :data-testid="`bulk-group-color-${i}`" @click="groupColor = i"></button>
           </span>
           <label class="small"><input v-model="groupClosed" type="checkbox" data-testid="bulk-group-closed" /> close</label>
-          <button class="btn btn-primary btn-sm" data-testid="bulk-group-create" @click="createGroup">Agrupar</button>
+          <button class="btn btn-primary btn-sm" data-testid="bulk-group-create" @click="createGroup">Group</button>
         </div>
         <div v-if="multi.length === 2" class="bulk">
           <span class="muted">Same as</span>
           <input v-model="sameAsReason" placeholder="why (reason)" data-testid="bulk-same-as-reason" />
-          <button class="btn btn-outline btn-sm" data-testid="bulk-same-as" @click="sameAs">Mesmo que</button>
+          <button class="btn btn-outline btn-sm" data-testid="bulk-same-as" @click="sameAs">Mark the same</button>
         </div>
         <div class="bulk">
           <span class="muted">Note</span>
@@ -295,9 +288,9 @@ const formatTime = (iso: string) => formatDate(iso);
         </div>
       </template>
       <div class="row-actions">
-        <button v-if="canEdit" class="btn btn-outline btn-sm" data-testid="bulk-save-selection" @click="saveSelection">Salvar seleção</button>
-        <button class="btn btn-outline btn-sm" :class="{ on: compare }" data-testid="bulk-compare" @click="compare = !compare">Comparar</button>
-        <button class="btn btn-outline btn-sm" data-testid="bulk-use-param" @click="useAsParam">Usar como parâmetro</button>
+        <button v-if="canEdit" class="btn btn-outline btn-sm" data-testid="bulk-save-selection" @click="saveSelection">Save selection</button>
+        <button class="btn btn-outline btn-sm" :class="{ on: compare }" data-testid="bulk-compare" @click="compare = !compare">Compare</button>
+        <button class="btn btn-outline btn-sm" data-testid="bulk-use-param" @click="useAsParam">Use as parameter</button>
       </div>
       <div v-if="compare" class="compare" data-testid="bulk-compare-table">
         <table>
@@ -323,11 +316,12 @@ const formatTime = (iso: string) => formatDate(iso);
         <span v-for="g in selectedGroups" :key="g.id" class="chip plain" :style="{ borderColor: g.color }" :data-testid="`inspector-group-${g.id}`">{{ g.name }}</span>
         <span v-for="a in selectedAnnotations" :key="a.id" class="chip plain" :data-testid="`inspector-annotation-${a.id}`">{{ describeAnnotation(a) }}</span>
       </div>
+      <SeenInOtherCases :uid="selected.node_id" :current-id="store.current?.id ?? null" />
       <label class="role-row">
         <span class="muted">Role</span>
         <select :value="selectedRole" :disabled="!canEdit" data-testid="inspector-role" @change="onRoleChange">
           <option value="">— none —</option>
-          <option v-for="role in roleOptions" :key="role" :value="role">{{ ROLE_LABELS[role] ?? role }}</option>
+          <option v-for="role in roleOptions" :key="role" :value="role">{{ role }}</option>
         </select>
       </label>
       <div class="tags" data-testid="inspector-tags">
@@ -351,9 +345,9 @@ const formatTime = (iso: string) => formatDate(iso);
       </div>
       <div v-if="actionError" class="action-error">{{ actionError }}</div>
       <div class="row-actions">
-        <button class="link-btn" data-testid="inspector-trace" @click="emit('trace', { type: 'node', id: selected.node_id }, 'forward')">Seguir o dinheiro →</button>
-        <button class="link-btn" data-testid="inspector-path-from" @click="emit('path-from', selected.node_id)">Caminho até…</button>
-        <button class="link-btn" data-testid="inspector-open-entity" @click="emit('open-entity', selected)">Ficha completa</button>
+        <button class="link-btn" data-testid="inspector-trace" @click="emit('trace', { type: 'node', id: selected.node_id }, 'forward')">Follow the money →</button>
+        <button class="link-btn" data-testid="inspector-path-from" @click="emit('path-from', selected.node_id)">Path to…</button>
+        <button class="link-btn" data-testid="inspector-open-entity" @click="emit('open-entity', selected)">Full profile</button>
       </div>
       <div class="inspector-tabs">
         <button :class="{ active: inspectorTab === 'data' }" @click="inspectorTab = 'data'">Data</button>
@@ -437,12 +431,12 @@ const formatTime = (iso: string) => formatDate(iso);
       </dl>
       <div v-if="actionError" class="action-error">{{ actionError }}</div>
       <div class="row-actions">
-        <button v-if="isAnalysis" class="btn btn-outline btn-sm" data-testid="item-show-analysis" @click="emit('activate', item)">Ver análise</button>
+        <button v-if="isAnalysis" class="btn btn-outline btn-sm" data-testid="item-show-analysis" @click="emit('activate', item)">Show analysis</button>
         <button v-if="canEdit && item.current_version" class="btn btn-outline btn-sm" :disabled="itemPinned" data-testid="item-pin" @click="run(async () => { const v = await store.pinItem(item!.id); if (v) toast.success(`Pinned · hash ${v.sha256.slice(0, 8)}`); }, 'Failed to pin')">
-          {{ itemPinned ? '📌 Pinned' : 'Fixar' }}
+          {{ itemPinned ? '📌 Pinned' : 'Pin' }}
         </button>
         <button v-if="canEdit" class="btn btn-outline btn-sm" :class="{ on: inDossier }" data-testid="item-dossier" @click="run(() => store.setInDossier(item!, !inDossier), 'Failed to update')">
-          {{ inDossier ? '✓ No dossiê' : 'Usar no dossiê' }}
+          {{ inDossier ? '✓ In the dossier' : 'Use in the dossier' }}
         </button>
       </div>
       <ItemPreview v-if="item.current_version && store.current" :key="`${item.id}:${item.current_version}`" :item="item" :investigation-id="store.current.id" />

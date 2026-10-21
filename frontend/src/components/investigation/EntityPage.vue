@@ -6,32 +6,26 @@
  */
 import { computed } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
-import { useCaseFilters } from '@/stores/caseFilters';
-import { caseNodeLabel, hiddenRawDocumentKeys, shortId } from '@/utils/caseLabels';
+import { caseNodeLabel, shortId } from '@/utils/caseLabels';
 import { formatDate } from '@/utils/format';
 import { describeEvent } from '@/utils/investigationEvents';
-import { ROLE_LABELS } from '@/utils/graphAppearance';
 import { baseSourceId, nodeSourceIds, type UnifiedNode } from '@/utils/unifyGraph';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
+import SeenInOtherCases from '@/components/investigation/SeenInOtherCases.vue';
 import type { CaseItem } from '@/types/investigation';
 
 const props = defineProps<{ node: UnifiedNode; canEdit: boolean }>();
 const emit = defineEmits<{ close: []; 'select-item': [item: CaseItem] }>();
 
 const store = useInvestigationStore();
-const filters = useCaseFilters();
 
 const id = computed(() => props.node.node_id);
-const title = computed(() => caseNodeLabel(props.node, { templates: store.labelTemplates, unmasked: filters.unmasked }));
+const title = computed(() => caseNodeLabel(props.node, { templates: store.labelTemplates }));
 const sources = computed(() => nodeSourceIds(props.node).map((s) => ({ id: s, title: store.itemTitle(baseSourceId(s)), color: store.sourceColors[s] })));
 const role = computed(() => store.roles[id.value]);
 const tags = computed(() => store.entityTags.get(id.value) ?? []);
 const groups = computed(() => store.groups.filter((g) => g.targets.includes(id.value)));
-const properties = computed(() => {
-  const p = props.node.properties ?? {};
-  const hidden = filters.unmasked ? new Set<string>() : hiddenRawDocumentKeys(p);
-  return Object.entries(p).filter(([k]) => !hidden.has(k));
-});
+const properties = computed(() => Object.entries(props.node.properties ?? {}));
 const annotations = computed(() => store.annotations.filter((a) => a.targets.includes(id.value) && !['role', 'tag', 'group'].includes(a.kind)));
 const items = computed(() => {
   const srcs = new Set(nodeSourceIds(props.node));
@@ -62,10 +56,11 @@ const fmt = (iso?: string | null) => formatDate(iso);
           <h2 data-testid="entity-page-title">{{ title }}</h2>
           <div class="chips">
             <span v-for="s in sources" :key="s.id" class="chip" :style="{ borderColor: s.color, color: s.color }">{{ s.title }}</span>
-            <span v-if="role" class="chip plain">role: {{ ROLE_LABELS[role] ?? role }}</span>
+            <span v-if="role" class="chip plain">role: {{ role }}</span>
             <span v-for="t in tags" :key="t" class="chip plain">#{{ t }}</span>
             <span v-for="g in groups" :key="g.id" class="chip plain" :style="{ borderColor: g.color }">{{ g.name }}</span>
           </div>
+          <SeenInOtherCases :uid="node.node_id" :current-id="store.current?.id ?? null" />
         </div>
         <button class="modal-close" aria-label="Close" data-testid="entity-page-close" @click="emit('close')">&times;</button>
       </header>

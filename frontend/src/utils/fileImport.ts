@@ -7,6 +7,7 @@ import type { IdentityKey } from '@/types/graph';
 import { KEY_NORMALIZERS } from '@/utils/identityKeys';
 import {
   columnsOf,
+  splitCells,
   glob,
   lines,
   matchFile,
@@ -22,7 +23,7 @@ export interface MappingRow {
   example: string;
   becomes: string;
   conversion: string;
-  /** Rows the investigator should look at twice (e.g. "Desconhecido" nodes). */
+  /** Rows the investigator should look at twice (e.g. "Unknown" nodes). */
   highlight: boolean;
 }
 
@@ -53,7 +54,7 @@ export function firstRows(spec: MappingSpec, files: Record<string, string>): Rec
     const name = matchFile(inp, Object.keys(files));
     if (!name) continue;
     const [columns, data] = columnsOf(inp, lines(files[name]));
-    const cells = data.length ? parseLine(data[0], inp.delimiter ?? ',') : [];
+    const cells = data.length ? splitCells(inp, data[0]) : [];
     columns.forEach((c, i) => (out[`${alias}.${c}`] = cells[i] ?? ''));
   }
   return out;
@@ -82,7 +83,7 @@ export function mappingRows(spec: MappingSpec, files: Record<string, string>): M
   };
   const rows: MappingRow[] = [];
   for (const n of spec.nodes) {
-    rows.push(row(n.id, `${n.type} node${whenText(n.when)}`, n.type === 'Desconhecido'));
+    rows.push(row(n.id, `${n.type} node${whenText(n.when)}`, n.type === 'Unknown'));
     for (const [prop, e] of Object.entries(n.props ?? {})) rows.push(row(e, `${n.type}.${prop}`));
   }
   for (const e of spec.edges ?? []) {
@@ -116,7 +117,7 @@ export function derivedIdentityKeys(spec: MappingSpec): IdentityKey[] {
   return [...keys.values()];
 }
 
-/** The encoding of the first input whose glob matches the file name (SIMBA: latin-1). */
+/** The encoding of the first input whose glob matches the file name (bank statement exports are often latin-1). */
 export function encodingFor(spec: MappingSpec | null, filename: string): string {
   const inp = Object.values(spec?.inputs ?? {}).find((i) => glob(i.match, filename));
   return decoderLabel(inp?.encoding);

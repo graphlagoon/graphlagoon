@@ -1,5 +1,5 @@
 /**
- * F4 · analysis workspace (05 §4b, §5, §10): Vínculos by phone + device reveals a
+ * F4 · analysis workspace (05 §4b, §5, §10): links by phone + device reveal a
  * synthetic cluster, a group is made from that selection without any JS and shows
  * in the dossier; groups by property, bulk roles and saved views survive a reload.
  */
@@ -10,12 +10,13 @@ import { seedContexts, seedInvestigations } from '../helpers/api-mocks';
 const now = new Date().toISOString();
 const CASE = {
   id: 'inv-s',
-  title: 'Fraude sintética · cadastros em comum',
+  title: 'Synthetic identities · shared sign-ups',
   status: 'analysis',
-  kind_preset: 'fraude_sintetica',
+  case_type: 'general',
+  fields: {},
   tags: [],
   owner_email: 'e2e@test.com',
-  settings: {},
+  settings: { vocabularies: { roles: ['ring member', 'real customer'], tags: [], link_attributes: ['phone', 'email', 'device_id', 'address'] } },
   state: {},
   shared_with: [],
   has_write_access: true,
@@ -25,22 +26,22 @@ const CASE = {
   deadline: null,
 };
 const ITEM = {
-  id: 'src-1', kind: 'graph', subkind: 'exploration_ref', title: 'Cadastros (KYC)', tags: [], status: 'confirmed', author_kind: 'human',
+  id: 'src-1', kind: 'graph', subkind: 'exploration_ref', title: 'Sign-ups (KYC)', tags: [], status: 'confirmed', author_kind: 'human',
   author_email: 'e2e@test.com', provenance: {}, exploration_id: 'exp-1', context_id: 'ctx-s', current_version: 0, position: 0, accessible: true, pinned: [], created_at: now,
 };
 // Five identities: p1–p3 share a phone and a device (synthetic cluster), p4 only the device, p5 nothing.
 const people = [
-  ['p1', 'Ana Souza', '+55 11 99999-0000', 'DEV-1', 'SP'],
-  ['p2', 'Bia Lima', '11999990000', 'dev-1', 'SP'],
-  ['p3', 'Caio Melo', '+55 (11) 99999-0000', 'dev1', 'RJ'],
-  ['p4', 'Davi Reis', '+55 21 98888-0000', 'DEV-1', 'RJ'],
-  ['p5', 'Eva Cruz', '+55 31 97777-0000', 'dev-9', 'MG'],
+  ['p1', 'Ana Souza', '+1 415 555 0100', 'DEV-1', 'west'],
+  ['p2', 'Bia Lima', '14155550100', 'dev-1', 'west'],
+  ['p3', 'Caio Melo', '+1 (415) 555-0100', 'dev1', 'east'],
+  ['p4', 'Davi Reis', '+1 212 555 0199', 'DEV-1', 'east'],
+  ['p5', 'Eva Cruz', '+1 305 555 0142', 'dev-9', 'south'],
 ];
 const SNAPSHOT = {
-  exploration: { id: 'exp-1', title: 'Cadastros', state: {} },
+  exploration: { id: 'exp-1', title: 'Sign-ups', state: {} },
   snapshot: {
-    nodes: people.map(([id, nome, telefone, device_id, uf]) => ({ id, type: 'Pessoa', properties: { nome, telefone, device_id, uf } })),
-    edges: [{ id: 'e1', source: 'p1', target: 'p2', type: 'INDICOU', properties: {} }],
+    nodes: people.map(([id, name, phone, device_id, region]) => ({ id, type: 'Person', properties: { name, phone, device_id, region } })),
+    edges: [{ id: 'e1', source: 'p1', target: 'p2', type: 'REFERRED', properties: {} }],
   },
 };
 
@@ -97,16 +98,16 @@ async function openCase(page: Page) {
 }
 
 test.describe('F4 · analysis workspace', () => {
-  test('fraude sintética: Vínculos by phone + device reveals the cluster; a group from that selection reaches the dossier', async ({
+  test('synthetic identities: links by phone + device reveal the cluster; a group from that selection reaches the dossier', async ({
     authenticatedPage: page,
   }) => {
     await openCase(page);
     await expect(page.getByTestId('workspace-status')).toContainText('1 edges');
 
-    // Vínculos: the preset pre-selects telefone, email, device_id, endereco; two shared attributes keep only the trio.
+    // Links: the case vocabulary pre-selects phone, email, device_id, address; two shared attributes keep only the trio.
     await page.getByTestId('analysis-links').click();
     const popover = page.getByTestId('popover-links');
-    await expect(popover.getByTestId('link-attr-telefone')).toBeChecked();
+    await expect(popover.getByTestId('link-attr-phone')).toBeChecked();
     await expect(popover.getByTestId('link-attr-device_id')).toBeChecked();
     await popover.getByTestId('link-min-shared').fill('2');
     await popover.getByTestId('links-run').click();
@@ -114,11 +115,11 @@ test.describe('F4 · analysis workspace', () => {
     const result = page.getByTestId('links-result');
     await expect(result).toContainText('3 pairs share');
     await expect(page.getByTestId('link-pair')).toHaveCount(3);
-    // The derived item is material and a layer on the canvas: 1 + 6 compartilha_* edges.
+    // The derived item is material and a layer on the canvas: 1 + 6 shares_* edges.
     await expect(page.getByTestId('workspace-status')).toContainText('7 edges', { timeout: 15_000 });
-    await expect(page.locator('[data-testid^="item-item-"]').first()).toContainText('Vínculos por');
+    await expect(page.locator('[data-testid^="item-item-"]').first()).toContainText('Links by');
 
-    // Group from the selection, no JS: select the linked entities → Agrupar.
+    // Group from the selection, no JS: select the linked entities → Group.
     await page.getByTestId('links-select').click();
     await expect(page.getByTestId('inspector-multi-title')).toContainText('3 entities');
     await page.getByTestId('bulk-group-name').fill('Cluster sintético');
@@ -128,51 +129,50 @@ test.describe('F4 · analysis workspace', () => {
     await page.getByTestId('chip-groups').click();
     await expect(page.getByTestId('chip-menu-groups')).toContainText('Cluster sintético · 3');
 
-    // The dossier (same screen, mode=dossie) lists the group.
+    // The dossier (same screen, mode=dossier) lists the group.
     await page.getByTestId('dossier-link').click();
-    await expect(page).toHaveURL(/mode=dossie/);
+    await expect(page).toHaveURL(/mode=dossier/);
     await expect(page.getByTestId('dossier-summary')).toContainText('Cluster sintético · 3');
-    await expect(page.getByTestId('dossier-summary')).toContainText('Fraude sintética');
-  });
+      });
 
   test('groups by property, bulk roles and a saved view survive a reload', async ({ authenticatedPage: page }) => {
     await openCase(page);
 
-    // Grupos → by property uf: SP (2), RJ (2); MG is a singleton and not a group.
+    // Groups → by property region: west (2), east (2); south is a singleton and not a group.
     await page.getByTestId('analysis-groups').click();
     const groups = page.getByTestId('popover-groups');
     await groups.getByTestId('group-by').selectOption('property');
-    await groups.getByTestId('group-property').selectOption('uf');
+    await groups.getByTestId('group-property').selectOption('region');
     await expect(groups.getByTestId('group-preview')).toContainText('2 groups');
     await groups.getByTestId('group-create-rule').click();
     await expect(page.getByTestId('status-groups')).toContainText('2 groups');
     await expect(groups.locator('[data-testid^="group-select-"]')).toHaveCount(2);
 
-    // Select the SP group → bulk role → the role chip offers it.
+    // Select the west group → bulk role → the role chip offers it.
     await groups.locator('[data-testid^="group-select-"]').first().click();
     await expect(page.getByTestId('inspector-multi-title')).toContainText('2 entities');
-    await page.getByTestId('bulk-role').selectOption('identidade sintética');
+    await page.getByTestId('bulk-role').selectOption('ring member');
     await page.getByTestId('bulk-role-apply').click();
     await page.getByTestId('analysis-groups').click(); // close the popover
     await page.getByTestId('chip-roles').click();
-    await page.getByTestId('chip-opt-roles-identidade sintética').check();
-    await expect(page.getByTestId('chip-roles')).toContainText('papel: identidade sintética');
+    await page.getByTestId('chip-opt-roles-ring member').check();
+    await expect(page.getByTestId('chip-roles')).toContainText('role: ring member');
 
     // Save the chips as a view.
     await page.getByTestId('chip-views').click();
-    await page.getByTestId('view-name').fill('Sintéticas');
+    await page.getByTestId('view-name').fill('Synthetic');
     await page.getByTestId('view-save').click();
-    await expect(page.getByTestId('chip-views')).toContainText('visões · 1');
+    await expect(page.getByTestId('chip-views')).toContainText('views · 1');
 
     // Reload: groups, roles and the view come back from the server.
     await page.reload();
     await expect(page.getByTestId('workspace-status')).toContainText('5 nodes', { timeout: 15_000 });
     await expect(page.getByTestId('status-groups')).toContainText('2 groups');
-    await expect(page.getByTestId('chip-views')).toContainText('visões · 1');
+    await expect(page.getByTestId('chip-views')).toContainText('views · 1');
     await page.getByTestId('chip-views').click();
     await page.getByTestId('view-apply-item-1').click();
-    await expect(page.getByTestId('chip-roles')).toContainText('papel: identidade sintética');
+    await expect(page.getByTestId('chip-roles')).toContainText('role: ring member');
     await page.getByTestId('chip-groups').click();
-    await expect(page.getByTestId('chip-menu-groups')).toContainText('uf = SP · 2 nós · 2');
+    await expect(page.getByTestId('chip-menu-groups')).toContainText('region = west · 2 nodes · 2');
   });
 });

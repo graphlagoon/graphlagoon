@@ -7,7 +7,7 @@
  */
 import { test, superuserTest, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
-import { seedContexts, seedExplorations, seedInvestigations, mockSchemaDrift, seedPrecomputedGraphs, seedQueryTemplates } from '../helpers/api-mocks';
+import { seedContexts, seedEntityCases, seedExplorations, seedInvestigations, mockSchemaDrift, seedPrecomputedGraphs, seedQueryTemplates } from '../helpers/api-mocks';
 import { openUserMenu } from '../helpers/user-menu';
 
 test.describe('User Journeys', () => {
@@ -49,19 +49,19 @@ test.describe('User Journeys', () => {
       ...MOCK_CONTEXT,
       id,
       title,
-      identity_keys: [{ node_type: nodeType, entity: 'Pessoa', source: { kind: 'prop', name: 'cpf' }, normalize: 'cpf_cnpj' }],
+      identity_keys: [{ node_type: nodeType, entity: 'Person', source: { kind: 'prop', name: 'national_id' }, normalize: 'digits' }],
     });
-    const pix = { ...MOCK_EXPLORATION, id: 'exp-pix', title: 'Pix transfers', graph_context_id: 'ctx-pix' };
+    const bank = { ...MOCK_EXPLORATION, id: 'exp-bank', title: 'Bank transfers', graph_context_id: 'ctx-bank' };
     const kyc = { ...MOCK_EXPLORATION, id: 'exp-kyc', title: 'KYC clients', graph_context_id: 'ctx-kyc' };
-    await seedContexts(page, [ctx('ctx-pix', 'Pix', 'Titular'), ctx('ctx-kyc', 'Cadastro', 'Cliente')]);
-    await seedExplorations(page, [pix, kyc]);
+    await seedContexts(page, [ctx('ctx-bank', 'Bank', 'Holder'), ctx('ctx-kyc', 'KYC', 'Customer')]);
+    await seedExplorations(page, [bank, kyc]);
     const graphs: Record<string, unknown> = {
-      'exp-pix': {
+      'exp-bank': {
         exploration: { id: 'x', title: 'x', state: {} },
         snapshot: {
           nodes: [
-            { id: 'p1', type: 'Titular', properties: { cpf: '123.456.789-01' } },
-            { id: 'a1', type: 'Conta', properties: {} },
+            { id: 'p1', type: 'Holder', properties: { national_id: '123.456.789-01' } },
+            { id: 'a1', type: 'Account', properties: {} },
           ],
           edges: [{ id: 'e1', source: 'p1', target: 'a1', type: 'OWNS', properties: {} }],
         },
@@ -70,42 +70,58 @@ test.describe('User Journeys', () => {
         exploration: { id: 'x', title: 'x', state: {} },
         snapshot: {
           nodes: [
-            { id: 'c9', type: 'Cliente', properties: { cpf: '12345678901' } },
+            { id: 'c9', type: 'Customer', properties: { national_id: '12345678901' } },
             { id: 'd1', type: 'Device', properties: {} },
           ],
           edges: [{ id: 'e1', source: 'c9', target: 'd1', type: 'USES', properties: {} }],
         },
       },
     };
-    await seedInvestigations(page, [], {}, [pix, kyc], graphs);
+    await seedInvestigations(page, [], {}, [bank, kyc], graphs);
+    await seedEntityCases(page, {
+      'Person:12345678901': [{
+        investigation_id: 'inv-old', title: 'Account takeover · 2025', status: 'closed', case_type: 'fraud_ring', case_type_label: 'Fraud ring',
+        present: true, roles: ['victim'], tags: [], groups: [], tasks: [], decisions: [],
+      }],
+    });
 
     // Create the case from the queue
     await page.goto('/investigations');
     await page.getByTestId('new-investigation-btn').click();
-    await page.getByTestId('new-investigation-title').fill('Golpe Pix · falsa central');
+    await page.getByTestId('new-investigation-title').fill('Mule network · phishing proceeds');
     await page.getByTestId('new-investigation-submit').click();
     await page.waitForURL('**/investigations/inv-new');
-    await expect(page.getByTestId('investigation-title')).toHaveText('Golpe Pix · falsa central');
+    await expect(page.getByTestId('investigation-title')).toHaveText('Mule network · phishing proceeds');
 
     // Add one exploration from each context
     await page.getByTestId('items-empty-add').click();
     const modal = page.getByTestId('add-items-popover');
-    await modal.getByTestId('add-exp-exp-pix').locator('input').check();
+    await modal.getByTestId('add-exp-exp-bank').locator('input').check();
     await modal.getByTestId('add-exp-exp-kyc').locator('input').check();
     await modal.getByTestId('add-submit').click();
     await expect(modal).toHaveCount(0);
 
-    // The canvas merges the person shared by CPF: 4 nodes in, 3 out
+    // The canvas merges the person shared by a document id: 4 nodes in, 3 out
     const status = page.getByTestId('workspace-status');
     await expect(status).toContainText('3 nodes', { timeout: 15_000 });
     await expect(status).toContainText('2 edges');
     await expect(status).toContainText('2 sources');
-    await expect(page.getByTestId('item-item-1')).toContainText('Pix transfers');
+    await expect(page.getByTestId('item-item-1')).toContainText('Bank transfers');
     await expect(page.getByTestId('item-item-2')).toContainText('KYC clients');
+
+    // 06 P7: the merged person was seen in another case the user reads.
+    await page.getByTestId('workspace-table-btn').click();
+    await page.getByRole('row').filter({ hasText: 'Person:12345678901' }).first().click();
+    await expect(page.getByTestId('inspector-title')).toBeVisible();
+    await page.getByTestId('seen-chip').click();
+    await expect(page.getByTestId('seen-in-other-cases')).toContainText('Seen in 1 other case');
+    await expect(page.getByTestId('seen-case-inv-old')).toContainText('Account takeover · 2025');
+    await expect(page.getByTestId('seen-case-inv-old')).toContainText('role victim');
+    await page.getByTestId('workspace-table-btn').click();
 
     // The journal recorded the case and both items
     await page.getByTestId('journal-toggle').click();
-    await expect(page.getByTestId('journal')).toContainText('Pix transfers');
+    await expect(page.getByTestId('journal')).toContainText('Bank transfers');
     await expect(page.getByTestId('journal')).toContainText('KYC clients');
   });
 

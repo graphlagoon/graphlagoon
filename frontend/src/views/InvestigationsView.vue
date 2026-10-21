@@ -1,15 +1,22 @@
 <script setup lang="ts">
-/** The case queue (05 §2): title + short id, type, status, deadline, assignee, updated, suggestions; counters are filters. */
-import { ref, computed, onMounted } from 'vue';
+/**
+ * The case queue (05 §2, 06 §2b): a page of cases filtered, sorted and counted
+ * by the server. Counters are filters; the case type's `in_queue` fields are
+ * columns (and filters once a type is chosen).
+ */
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { KIND_PRESET_LABELS, STATUS_LABELS, URGENT_DAYS, caseNumber, deadlineElapsed, deadlineOf, deadlineText } from '@/utils/investigationStatus';
+import { STATUS_LABELS, caseNumber, deadlineElapsed, deadlineOf, deadlineText } from '@/utils/investigationStatus';
 import { formatDate, plural } from '@/utils/format';
-import type { Investigation, InvestigationStatus, KindPreset } from '@/types/investigation';
+import { fieldText } from '@/utils/caseFields';
+import type { CaseTypeField, Investigation, InvestigationStatus, QueueParams } from '@/types/investigation';
+
+const PAGE = 50;
 
 const router = useRouter();
 const store = useInvestigationStore();
@@ -18,99 +25,102 @@ const toast = useToast();
 const { can } = usePermissions();
 
 const search = ref('');
-type StatusFilter = 'open' | 'all' | 'urgent' | 'suggested' | InvestigationStatus;
-const statusFilter = ref<StatusFilter>('open');
-const presetFilter = ref('');
-const assigneeFilter = ref('');
-type SortKey = 'title' | 'kind_preset' | 'item_count' | 'suggested_count' | 'status' | 'assignee' | 'deadline' | 'updated_at';
+type StatusFilter = 'active' | 'all' | 'urgent' | 'suggested' | InvestigationStatus;
+const statusFilter = ref<StatusFilter>('active');
+const typeFilter = ref('');
+const assigneeFilter = ref<'' | 'me'>('');
+const fieldFilters = ref<Record<string, string | number>>({});
+type SortKey = 'title' | 'deadline' | 'updated_at' | `field.${string}`;
 const sortKey = ref<SortKey>('updated_at');
 const sortDir = ref<1 | -1>(-1);
+const offset = ref(0);
 
-onMounted(() => store.fetchInvestigations());
+const chosenType = computed(() => store.caseTypes.find((t) => t.slug === typeFilter.value) ?? null);
+/** Columns: the chosen type's queue fields; across types, none. */
+const queueFields = computed<CaseTypeField[]>(() => chosenType.value?.fields.filter((f) => f.in_queue) ?? []);
 
-const isUrgent = (inv: Investigation) => {
-  const d = deadlineOf(inv);
-  return d !== null && d.daysLeft < URGENT_DAYS;
-};
+/** A field filter as the server reads it (`gte:` for amounts and dates, `contains:` for text). */
+function fieldExpr(field: CaseTypeField, value: unknown): string {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  if (field.type === 'enum') return `eq:${text}`;
+  if (field.type === 'text') return `contains:${text}`;
+  return `gte:${text}`;
+}
+
+const params = computed<QueueParams>(() => {
+  const f = statusFilter.value;
+  const fields = Object.fromEntries(
+    queueFields.value.map((field) => [field.id, fieldExpr(field, fieldFilters.value[field.id] ?? '')]).filter(([, e]) => e),
+  );
+  return {
+    q: search.value.trim() || undefined,
+    status: f === 'active' ? 'open,analysis' : f === 'all' || f === 'urgent' || f === 'suggested' ? undefined : f,
+    deadline: f === 'urgent' ? 'urgent' : undefined,
+    suggested: f === 'suggested' ? true : undefined,
+    case_type: typeFilter.value || undefined,
+    assignee: assigneeFilter.value === 'me' ? authStore.email ?? undefined : undefined,
+    fields,
+    sort: `${sortDir.value === -1 ? '-' : ''}${sortKey.value}`,
+    limit: PAGE,
+    offset: offset.value,
+  };
+});
+
+let timer: ReturnType<typeof setTimeout> | undefined;
+function load() {
+  clearTimeout(timer);
+  timer = setTimeout(() => store.fetchInvestigations(params.value), 250);
+}
+// A new filter starts again at the first page.
+watch([search, statusFilter, typeFilter, assigneeFilter, fieldFilters, sortKey, sortDir], () => {
+  offset.value = 0;
+  load();
+}, { deep: true });
+watch(offset, load);
+watch(typeFilter, () => {
+  fieldFilters.value = {};
+  if (sortKey.value.startsWith('field.')) sortKey.value = 'updated_at';
+});
+
+onMounted(() => {
+  void store.fetchCaseTypes();
+  void store.fetchInvestigations(params.value);
+});
 
 /** Who the row belongs to for the "Assignee" column (assignee, else owner). */
 const responsible = (inv: Investigation) => inv.assignee_email ?? inv.owner_email;
-
-const presets = computed(() => [...new Set(store.investigations.map((i) => i.kind_preset))].sort());
-const presetLabel = (p: string) => KIND_PRESET_LABELS[p as KindPreset] ?? p;
-const assignees = computed(() => [...new Set(store.investigations.map(responsible))].sort());
-
-const SORTERS: Record<SortKey, (inv: Investigation) => string | number> = {
-  title: (i) => i.title.toLowerCase(),
-  kind_preset: (i) => presetLabel(i.kind_preset).toLowerCase(),
-  item_count: (i) => i.item_count ?? 0,
-  suggested_count: (i) => i.suggested_count ?? 0,
-  status: (i) => ['open', 'analysis', 'decided', 'archived'].indexOf(i.status),
-  assignee: (i) => responsible(i).toLowerCase(),
-  deadline: (i) => deadlineOf(i)?.daysLeft ?? Number.POSITIVE_INFINITY,
-  updated_at: (i) => i.updated_at ?? '',
-};
-
-const filtered = computed(() => {
-  const q = search.value.trim().toLowerCase();
-  const rows = store.investigations.filter((inv) => {
-    const f = statusFilter.value;
-    if (f === 'open' && (inv.status === 'decided' || inv.status === 'archived')) return false;
-    if (f === 'urgent' && !isUrgent(inv)) return false;
-    if (f === 'suggested' && !inv.suggested_count) return false;
-    if (f !== 'open' && f !== 'all' && f !== 'urgent' && f !== 'suggested' && inv.status !== f) return false;
-    if (presetFilter.value && inv.kind_preset !== presetFilter.value) return false;
-    if (assigneeFilter.value && responsible(inv) !== assigneeFilter.value) return false;
-    if (!q) return true;
-    return [inv.title, presetLabel(inv.kind_preset), ...(inv.tags ?? []), inv.assignee_email, inv.owner_email, inv.id]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-      .includes(q);
-  });
-  const key = SORTERS[sortKey.value];
-  return [...rows].sort((a, b) => {
-    const x = key(a);
-    const y = key(b);
-    return (x < y ? -1 : x > y ? 1 : 0) * sortDir.value;
-  });
-});
 
 function sortBy(key: SortKey) {
   if (sortKey.value === key) sortDir.value = sortDir.value === 1 ? -1 : 1;
   else {
     sortKey.value = key;
-    sortDir.value = key === 'updated_at' || key === 'item_count' || key === 'suggested_count' ? -1 : 1;
+    sortDir.value = key === 'updated_at' || (key.startsWith('field.') && queueFields.value.find((f) => `field.${f.id}` === key)?.type !== 'text') ? -1 : 1;
   }
 }
 
 const sortMark = (key: SortKey) => (sortKey.value === key ? (sortDir.value === 1 ? ' ▲' : ' ▼') : '');
 
-/** A counter is a status filter: clicking it again goes back to "Open". */
+/** A counter is a status filter: clicking it again goes back to "In progress". */
 function toggleCounter(filter: StatusFilter) {
-  statusFilter.value = statusFilter.value === filter ? 'open' : filter;
+  statusFilter.value = statusFilter.value === filter ? 'active' : filter;
 }
 
-const counters = computed(() => {
-  const all = store.investigations;
-  return {
-    analysis: all.filter((i) => i.status === 'analysis').length,
-    open: all.filter((i) => i.status === 'open').length,
-    urgent: all.filter(isUrgent).length,
-    decided: all.filter((i) => i.status === 'decided').length,
-    suggested: all.reduce((n, i) => n + (i.suggested_count ?? 0), 0),
-  };
+const counts = computed(() => store.queueCounts);
+const rangeText = computed(() => {
+  if (!store.queueTotal) return '';
+  return `${offset.value + 1}–${Math.min(offset.value + PAGE, store.queueTotal)} of ${store.queueTotal}`;
 });
 
-/** "compartilhado" when the case is someone else's; "só leitura" when it cannot be changed. */
+/** "shared with you" when the case is someone else's; "read only" when it cannot be changed. */
 function accessMark(inv: Investigation): string | null {
   if (inv.owner_email === authStore.email) return null;
-  return inv.has_write_access ? 'compartilhado com você' : 'só leitura';
+  return inv.has_write_access ? 'shared with you' : 'read only';
 }
 
 function who(email?: string | null) {
   if (!email) return '—';
-  return email === authStore.email ? 'você' : email;
+  return email === authStore.email ? 'you' : email;
 }
 
 function updated(inv: Investigation) {
@@ -119,28 +129,32 @@ function updated(inv: Investigation) {
 
 // New investigation
 const showCreate = ref(false);
-const form = ref({ title: '', kind_preset: 'livre' as KindPreset, assignee_email: '' });
+const form = ref({ title: '', case_type: 'general', assignee_email: '', fields: {} as Record<string, string> });
 const creating = ref(false);
+const formType = computed(() => store.caseTypes.find((t) => t.slug === form.value.case_type) ?? null);
+const missingRequired = computed(() => (formType.value?.fields ?? []).some((f) => f.required && !String(form.value.fields[f.id] ?? '').trim()));
 
 function openCreate() {
-  form.value = { title: '', kind_preset: 'livre', assignee_email: '' };
+  form.value = { title: '', case_type: typeFilter.value || 'general', assignee_email: '', fields: {} };
   showCreate.value = true;
 }
 
 async function create() {
   const title = form.value.title.trim();
-  if (!title || creating.value) return;
+  if (!title || creating.value || missingRequired.value) return;
   creating.value = true;
   try {
+    const fields = Object.fromEntries(Object.entries(form.value.fields).filter(([, v]) => String(v).trim() !== ''));
     const inv = await store.createInvestigation({
       title,
-      kind_preset: form.value.kind_preset,
+      case_type: form.value.case_type,
+      fields,
       assignee_email: form.value.assignee_email.trim() || undefined,
     });
     showCreate.value = false;
     router.push(`/investigations/${inv.id}`);
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Não foi possível criar o caso'));
+    toast.error(getErrorMessage(e, 'Could not create the case'));
   } finally {
     creating.value = false;
   }
@@ -150,121 +164,141 @@ async function create() {
 <template>
   <div class="container">
     <div class="page-header">
-      <h1>Investigações</h1>
+      <h1>Investigations</h1>
       <button
         v-if="can('investigation.create')"
         class="btn btn-primary"
         data-testid="new-investigation-btn"
         @click="openCreate"
       >
-        + Novo caso
+        + New case
       </button>
     </div>
 
     <div class="card filter-card">
       <div class="filter-row">
         <div class="form-group search-group">
-          <label for="inv-search">Buscar</label>
+          <label for="inv-search">Search</label>
           <input
             id="inv-search"
             v-model="search"
             class="form-control"
-            placeholder="caso, tipo, tag, responsável…"
+            placeholder="title or description…"
             data-testid="investigations-search"
           />
         </div>
         <div class="form-group">
           <label for="inv-status">Status</label>
           <select id="inv-status" v-model="statusFilter" class="form-control" data-testid="investigations-status">
-            <option value="open">Em andamento</option>
-            <option value="all">Todos</option>
-            <option value="urgent">Prazo em menos de {{ URGENT_DAYS }} dias</option>
-            <option value="suggested">Com sugestões</option>
+            <option value="active">In progress</option>
+            <option value="all">All</option>
+            <option value="urgent">Deadline close</option>
+            <option value="suggested">With suggestions</option>
             <option v-for="(label, key) in STATUS_LABELS" :key="key" :value="key">{{ label }}</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="inv-preset">Tipo</label>
-          <select id="inv-preset" v-model="presetFilter" class="form-control" data-testid="investigations-preset">
-            <option value="">Todos</option>
-            <option v-for="t in presets" :key="t" :value="t">{{ presetLabel(t) }}</option>
+          <label for="inv-type">Type</label>
+          <select id="inv-type" v-model="typeFilter" class="form-control" data-testid="investigations-type">
+            <option value="">All</option>
+            <option v-for="t in store.caseTypes" :key="t.slug" :value="t.slug">{{ t.label }}</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="inv-assignee">Responsável</label>
+          <label for="inv-assignee">Assignee</label>
           <select id="inv-assignee" v-model="assigneeFilter" class="form-control" data-testid="investigations-assignee">
-            <option value="">Qualquer um</option>
-            <option v-for="a in assignees" :key="a" :value="a">{{ who(a) }}</option>
+            <option value="">Anyone</option>
+            <option value="me">Me</option>
           </select>
+        </div>
+      </div>
+      <div v-if="queueFields.length" class="filter-row fields-row" data-testid="queue-field-filters">
+        <div v-for="f in queueFields" :key="f.id" class="form-group">
+          <label :for="`qf-${f.id}`">{{ f.label }}<span v-if="f.type === 'money' || f.type === 'number'" class="muted"> ≥</span><span v-else-if="f.type === 'date'" class="muted"> from</span></label>
+          <select v-if="f.type === 'enum'" :id="`qf-${f.id}`" v-model="fieldFilters[f.id]" class="form-control" :data-testid="`queue-field-${f.id}`">
+            <option value="">Any</option>
+            <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
+          </select>
+          <input
+            v-else
+            :id="`qf-${f.id}`"
+            v-model="fieldFilters[f.id]"
+            :type="f.type === 'date' ? 'date' : f.type === 'text' ? 'text' : 'number'"
+            class="form-control"
+            :data-testid="`queue-field-${f.id}`"
+          />
         </div>
       </div>
     </div>
 
     <div class="counters">
       <button class="card counter" :class="{ on: statusFilter === 'analysis' }" data-testid="counter-analysis" @click="toggleCounter('analysis')">
-        <strong>{{ counters.analysis }}</strong><span>em análise</span>
+        <strong>{{ counts.analysis ?? 0 }}</strong><span>in analysis</span>
       </button>
       <button class="card counter" :class="{ on: statusFilter === 'open' }" data-testid="counter-open" @click="toggleCounter('open')">
-        <strong>{{ counters.open }}</strong><span>abertos</span>
+        <strong>{{ counts.open ?? 0 }}</strong><span>open</span>
       </button>
       <button
         class="card counter"
-        :class="{ warn: counters.urgent > 0, on: statusFilter === 'urgent' }"
+        :class="{ warn: (counts.urgent ?? 0) > 0, on: statusFilter === 'urgent' }"
         data-testid="counter-urgent"
         @click="toggleCounter('urgent')"
       >
-        <strong>{{ counters.urgent }}</strong><span>prazo em menos de {{ URGENT_DAYS }} dias</span>
+        <strong>{{ counts.urgent ?? 0 }}</strong><span>deadline close<template v-if="counts.overdue"> · {{ counts.overdue }} overdue</template></span>
       </button>
-      <button class="card counter" :class="{ on: statusFilter === 'decided' }" data-testid="counter-decided" @click="toggleCounter('decided')">
-        <strong>{{ counters.decided }}</strong><span>decididos</span>
+      <button class="card counter" :class="{ on: statusFilter === 'closed' }" data-testid="counter-closed" @click="toggleCounter('closed')">
+        <strong>{{ counts.closed ?? 0 }}</strong><span>closed</span>
       </button>
-      <button class="card counter" :class="{ warn: counters.suggested > 0, on: statusFilter === 'suggested' }" data-testid="counter-suggested" @click="toggleCounter('suggested')">
-        <strong>{{ counters.suggested }}</strong><span>sugestões para revisar</span>
+      <button class="card counter" :class="{ warn: (counts.suggested ?? 0) > 0, on: statusFilter === 'suggested' }" data-testid="counter-suggested" @click="toggleCounter('suggested')">
+        <strong>{{ counts.suggested ?? 0 }}</strong><span>with suggestions to review</span>
       </button>
     </div>
 
-    <div v-if="store.loading" class="loading"></div>
-    <div v-else-if="store.error" class="error-message">{{ store.error }}</div>
-    <div v-else-if="store.investigations.length === 0" class="empty-state card" data-testid="investigations-empty">
-      <h3>Nenhum caso</h3>
-      <p v-if="can('investigation.create')">Crie um caso e adicione a ele explorações, consultas e arquivos de qualquer context.</p>
-      <p v-else>Os casos compartilhados com você ou sob sua responsabilidade aparecem aqui.</p>
+    <div v-if="store.error" class="error-message">{{ store.error }}</div>
+    <div v-else-if="!store.loading && (counts.total ?? 0) === 0" class="empty-state card" data-testid="investigations-empty">
+      <h3>No cases</h3>
+      <p v-if="can('investigation.create')">Create a case and add explorations, queries and files from any context to it.</p>
+      <p v-else>The cases shared with you or assigned to you show here.</p>
     </div>
-    <div v-else class="card table-card">
+    <div v-else class="card table-card" :class="{ busy: store.loading }">
       <table class="queue" data-testid="investigations-table">
         <thead>
           <tr>
-            <th><button class="sort" data-testid="sort-title" @click="sortBy('title')">Caso{{ sortMark('title') }}</button></th>
-            <th><button class="sort" @click="sortBy('kind_preset')">Tipo{{ sortMark('kind_preset') }}</button></th>
-            <th><button class="sort" @click="sortBy('item_count')">Material{{ sortMark('item_count') }}</button></th>
-            <th><button class="sort" data-testid="sort-suggested" @click="sortBy('suggested_count')">Sugestões{{ sortMark('suggested_count') }}</button></th>
-            <th><button class="sort" @click="sortBy('status')">Status{{ sortMark('status') }}</button></th>
-            <th><button class="sort" @click="sortBy('assignee')">Responsável{{ sortMark('assignee') }}</button></th>
-            <th><button class="sort" data-testid="sort-deadline" @click="sortBy('deadline')">Prazo{{ sortMark('deadline') }}</button></th>
-            <th><button class="sort" @click="sortBy('updated_at')">Atualizado{{ sortMark('updated_at') }}</button></th>
+            <th><button class="sort" data-testid="sort-title" @click="sortBy('title')">Case{{ sortMark('title') }}</button></th>
+            <th>Type</th>
+            <th v-for="f in queueFields" :key="f.id">
+              <button class="sort" :data-testid="`sort-field-${f.id}`" @click="sortBy(`field.${f.id}`)">{{ f.label }}{{ sortMark(`field.${f.id}`) }}</button>
+            </th>
+            <th>Material</th>
+            <th>Suggestions</th>
+            <th>Status</th>
+            <th>Assignee</th>
+            <th><button class="sort" data-testid="sort-deadline" @click="sortBy('deadline')">Deadline{{ sortMark('deadline') }}</button></th>
+            <th><button class="sort" @click="sortBy('updated_at')">Updated{{ sortMark('updated_at') }}</button></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="inv in filtered" :key="inv.id" :data-testid="`investigation-row-${inv.id}`">
+          <tr v-for="inv in store.investigations" :key="inv.id" :data-testid="`investigation-row-${inv.id}`">
             <td>
               <RouterLink :to="`/investigations/${inv.id}`" class="case-title">{{ inv.title }}</RouterLink>
               <span v-if="accessMark(inv)" class="pill access" data-testid="access-mark">{{ accessMark(inv) }}</span>
               <div class="muted">{{ caseNumber(inv.id) }}<template v-if="inv.tags?.length"> · {{ inv.tags.join(', ') }}</template></div>
             </td>
-            <td><span class="pill">{{ presetLabel(inv.kind_preset) }}</span></td>
-            <td>{{ plural(inv.item_count ?? 0, 'item', 'itens') }}</td>
+            <td><span class="pill" data-testid="row-type">{{ store.caseTypeLabel(inv.case_type) }}</span></td>
+            <td v-for="f in queueFields" :key="f.id" :data-testid="`row-field-${f.id}`">{{ fieldText(f, inv.fields?.[f.id]) }}</td>
+            <td>{{ plural(inv.item_count ?? 0, 'item') }}</td>
             <td>
-              <span v-if="inv.suggested_count" class="pill suggested" data-testid="row-suggested">{{ plural(inv.suggested_count, 'sugestão', 'sugestões') }}</span>
+              <span v-if="inv.suggested_count" class="pill suggested" data-testid="row-suggested">{{ plural(inv.suggested_count, 'suggestion') }}</span>
               <span v-else class="muted">—</span>
             </td>
-            <td><span class="status" :class="`status-${inv.status}`">{{ STATUS_LABELS[inv.status] ?? inv.status }}</span></td>
+            <td><span class="status" :class="`status-${inv.status}`">{{ STATUS_LABELS[inv.status] ?? inv.status }}</span><span v-if="inv.stage" class="stage muted" data-testid="row-stage">{{ inv.stage }}</span></td>
             <td>{{ who(responsible(inv)) }}</td>
             <td>
               <template v-if="deadlineOf(inv)">
-                <span :class="{ late: deadlineOf(inv)!.daysLeft < URGENT_DAYS }" :title="`vence em ${formatDate(deadlineOf(inv)!.dueAt, { time: false })}`" data-testid="deadline">
+                <span :class="{ late: deadlineOf(inv)!.urgent }" :title="`due ${formatDate(deadlineOf(inv)!.dueAt)}`" data-testid="deadline">
                   {{ deadlineText(deadlineOf(inv)!) }}
                 </span>
-                <div class="bar" :class="{ late: deadlineOf(inv)!.daysLeft < URGENT_DAYS }">
+                <div class="bar" :class="{ late: deadlineOf(inv)!.urgent }">
                   <span :style="{ width: `${deadlineElapsed(deadlineOf(inv)!)}%` }"></span>
                 </div>
               </template>
@@ -274,39 +308,62 @@ async function create() {
           </tr>
         </tbody>
       </table>
-      <p v-if="filtered.length === 0" class="muted no-match">Nenhum caso corresponde aos filtros.</p>
+      <p v-if="!store.loading && store.investigations.length === 0" class="muted no-match">No case matches the filters.</p>
+      <div v-if="store.queueTotal > PAGE" class="pager" data-testid="queue-pager">
+        <button class="btn btn-outline btn-sm" :disabled="offset === 0" data-testid="queue-prev" @click="offset = Math.max(0, offset - PAGE)">Previous</button>
+        <span class="muted" data-testid="queue-range">{{ rangeText }}</span>
+        <button class="btn btn-outline btn-sm" :disabled="offset + PAGE >= store.queueTotal" data-testid="queue-next" @click="offset += PAGE">Next</button>
+      </div>
     </div>
 
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
       <div class="modal">
         <div class="modal-header">
-          <h2>Novo caso</h2>
-          <button class="modal-close" aria-label="Fechar" @click="showCreate = false">&times;</button>
+          <h2>New case</h2>
+          <button class="modal-close" aria-label="Close" @click="showCreate = false">&times;</button>
         </div>
         <form @submit.prevent="create">
           <div class="form-group">
-            <label for="new-inv-title">Título</label>
+            <label for="new-inv-title">Title</label>
             <input id="new-inv-title" v-model="form.title" class="form-control" data-testid="new-investigation-title" required />
           </div>
           <div class="form-group">
-            <label for="new-inv-preset">Tipo</label>
-            <select id="new-inv-preset" v-model="form.kind_preset" class="form-control" data-testid="new-investigation-preset">
-              <option v-for="(label, key) in KIND_PRESET_LABELS" :key="key" :value="key">{{ label }}</option>
+            <label for="new-inv-type">Type</label>
+            <select id="new-inv-type" v-model="form.case_type" class="form-control" data-testid="new-investigation-type">
+              <option v-for="t in store.caseTypes" :key="t.slug" :value="t.slug">{{ t.label }}</option>
+              <option v-if="!store.caseTypes.length" value="general">General</option>
             </select>
+            <p v-if="formType?.description" class="muted">{{ formType.description }}</p>
+          </div>
+          <div v-for="f in formType?.fields ?? []" :key="f.id" class="form-group">
+            <label :for="`new-field-${f.id}`">{{ f.label }}<span v-if="f.required" class="required"> *</span></label>
+            <select v-if="f.type === 'enum'" :id="`new-field-${f.id}`" v-model="form.fields[f.id]" class="form-control" :data-testid="`new-field-${f.id}`">
+              <option value="">—</option>
+              <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
+            </select>
+            <input
+              v-else
+              :id="`new-field-${f.id}`"
+              v-model="form.fields[f.id]"
+              :type="f.type === 'date' ? 'date' : f.type === 'text' ? 'text' : 'number'"
+              step="any"
+              class="form-control"
+              :data-testid="`new-field-${f.id}`"
+            />
           </div>
           <div class="form-group">
-            <label for="new-inv-assignee">E-mail do responsável</label>
-            <input id="new-inv-assignee" v-model="form.assignee_email" type="email" class="form-control" placeholder="você, se vazio" />
+            <label for="new-inv-assignee">Assignee e-mail</label>
+            <input id="new-inv-assignee" v-model="form.assignee_email" type="email" class="form-control" placeholder="you, when empty" />
           </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-outline" @click="showCreate = false">Cancelar</button>
+            <button type="button" class="btn btn-outline" @click="showCreate = false">Cancel</button>
             <button
               type="submit"
               class="btn btn-primary"
               data-testid="new-investigation-submit"
-              :disabled="creating || !form.title.trim()"
+              :disabled="creating || !form.title.trim() || missingRequired"
             >
-              Criar
+              Create
             </button>
           </div>
         </form>
@@ -332,6 +389,10 @@ async function create() {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
+}
+
+.fields-row {
+  margin-top: 12px;
 }
 
 .filter-row .form-group {
@@ -384,6 +445,10 @@ async function create() {
 .table-card {
   overflow-x: auto;
   padding: 0;
+}
+
+.table-card.busy {
+  opacity: 0.6;
 }
 
 .queue {
@@ -442,9 +507,15 @@ async function create() {
   font-weight: 600;
 }
 
-.status-decided {
+.status-closed {
   background: #ccfbf1;
   color: #115e59;
+}
+
+.stage {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
 }
 
 .late {
@@ -474,6 +545,19 @@ async function create() {
 .no-match {
   padding: 12px 14px;
 }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.required {
+  color: var(--color-danger, #b91c1c);
+}
+
 .pill.suggested {
   background: var(--color-suggested-bg);
   border: 1px solid var(--color-suggested-fg);

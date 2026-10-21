@@ -1,64 +1,188 @@
 {
-  "description": "Case-level identity keys (`overrides.identity_keys`) replace a context's key for the same node_type in every context and add keys to types that had none; other context keys stay. Without them the Titular would key on the lower-cased name and the Cliente would stay `9@c-cad`.",
+  "description": "Case-level identity keys (`overrides.identity_keys`) replace a context's key for the same node_type in every context and add keys to types that had none; other context keys stay. Without them the Holder would key on the lower-cased name and the Customer would stay `9@c-crm`.",
   "contexts": {
-    "c-pix": {
+    "c-bank": {
       "identity_keys": [
-        { "node_type": "Titular", "entity": "Pessoa", "source": { "kind": "prop", "name": "nome" }, "normalize": "lower" },
-        { "node_type": "Conta", "entity": "Conta", "source": "node_id", "normalize": "account" }
+        {
+          "node_type": "Holder",
+          "entity": "Person",
+          "source": {
+            "kind": "prop",
+            "name": "name"
+          },
+          "normalize": "lower"
+        },
+        {
+          "node_type": "Account",
+          "entity": "Account",
+          "source": "node_id",
+          "normalize": "account"
+        }
       ]
     },
-    "c-cad": { "identity_keys": [] }
+    "c-crm": {
+      "identity_keys": []
+    }
   },
   "sources": [
     {
-      "id": "s-pix",
-      "context_id": "c-pix",
+      "id": "s-bank",
+      "context_id": "c-bank",
       "nodes": [
-        { "id": "p1", "type": "Titular", "properties": { "cpf": "123.456.789-01", "nome": "Ana R." } },
-        { "id": "0341-0001234-5", "type": "Conta", "properties": {} }
+        {
+          "id": "p1",
+          "type": "Holder",
+          "properties": {
+            "national_id": "123.456.789-01",
+            "name": "Ana R."
+          }
+        },
+        {
+          "id": "0341-0001234-5",
+          "type": "Account",
+          "properties": {}
+        }
       ],
       "edges": [
-        { "id": "e1", "source": "p1", "target": "0341-0001234-5", "type": "TITULAR", "properties": {} }
+        {
+          "id": "e1",
+          "source": "p1",
+          "target": "0341-0001234-5",
+          "type": "HOLDS",
+          "properties": {}
+        }
       ]
     },
     {
-      "id": "s-cad",
-      "context_id": "c-cad",
+      "id": "s-crm",
+      "context_id": "c-crm",
       "nodes": [
-        { "id": "9", "type": "Cliente", "properties": { "doc": 12345678901, "nome": "Ana Ribeiro" } },
-        { "id": "c1", "type": "Conta", "properties": {} }
+        {
+          "id": "9",
+          "type": "Customer",
+          "properties": {
+            "doc": 12345678901,
+            "name": "Ana Ribeiro"
+          }
+        },
+        {
+          "id": "c1",
+          "type": "Account",
+          "properties": {}
+        }
       ],
       "edges": [
-        { "id": "e1", "source": "9", "target": "c1", "type": "POSSUI", "properties": {} }
+        {
+          "id": "e1",
+          "source": "9",
+          "target": "c1",
+          "type": "OWNS",
+          "properties": {}
+        }
       ]
     }
   ],
   "matches": [],
   "overrides": {
     "identity_keys": [
-      { "node_type": "Titular", "entity": "Pessoa", "source": { "kind": "prop", "name": "cpf" }, "normalize": "cpf_cnpj" },
-      { "node_type": "Cliente", "entity": "Pessoa", "source": { "kind": "prop", "name": "doc" }, "normalize": "cpf_cnpj" }
+      {
+        "node_type": "Holder",
+        "entity": "Person",
+        "source": {
+          "kind": "prop",
+          "name": "national_id"
+        },
+        "normalize": "digits"
+      },
+      {
+        "node_type": "Customer",
+        "entity": "Person",
+        "source": {
+          "kind": "prop",
+          "name": "doc"
+        },
+        "normalize": "digits"
+      }
     ]
   },
   "expected": {
-    "nodes": [
-      { "uid": "Conta:341-1234-5", "type": "Conta", "entity": "Conta", "properties": {}, "sources": [{ "source_id": "s-pix", "node_id": "0341-0001234-5" }] },
-      {
-        "uid": "Pessoa:12345678901",
-        "type": "Titular",
-        "entity": "Pessoa",
-        "properties": { "cpf": "123.456.789-01", "nome": "Ana R.", "doc": 12345678901 },
-        "sources": [{ "source_id": "s-pix", "node_id": "p1" }, { "source_id": "s-cad", "node_id": "9" }],
-        "conflicts": {
-          "node_type": [{ "value": "Cliente", "source_id": "s-cad" }],
-          "nome": [{ "value": "Ana Ribeiro", "source_id": "s-cad" }]
-        }
-      },
-      { "uid": "c1@c-cad", "type": "Conta", "entity": null, "properties": {}, "sources": [{ "source_id": "s-cad", "node_id": "c1" }] }
-    ],
     "edges": [
-      { "id": "s-cad:e1", "src": "Pessoa:12345678901", "dst": "c1@c-cad", "type": "POSSUI", "properties": {}, "source_id": "s-cad" },
-      { "id": "s-pix:e1", "src": "Pessoa:12345678901", "dst": "Conta:341-1234-5", "type": "TITULAR", "properties": {}, "source_id": "s-pix" }
+      {
+        "dst": "Account:341-1234-5",
+        "id": "s-bank:e1",
+        "properties": {},
+        "source_id": "s-bank",
+        "src": "Person:12345678901",
+        "type": "HOLDS"
+      },
+      {
+        "dst": "c1@c-crm",
+        "id": "s-crm:e1",
+        "properties": {},
+        "source_id": "s-crm",
+        "src": "Person:12345678901",
+        "type": "OWNS"
+      }
+    ],
+    "nodes": [
+      {
+        "entity": "Account",
+        "properties": {},
+        "sources": [
+          {
+            "node_id": "0341-0001234-5",
+            "source_id": "s-bank"
+          }
+        ],
+        "type": "Account",
+        "uid": "Account:341-1234-5"
+      },
+      {
+        "conflicts": {
+          "name": [
+            {
+              "source_id": "s-crm",
+              "value": "Ana Ribeiro"
+            }
+          ],
+          "node_type": [
+            {
+              "source_id": "s-crm",
+              "value": "Customer"
+            }
+          ]
+        },
+        "entity": "Person",
+        "properties": {
+          "doc": 12345678901,
+          "name": "Ana R.",
+          "national_id": "123.456.789-01"
+        },
+        "sources": [
+          {
+            "node_id": "p1",
+            "source_id": "s-bank"
+          },
+          {
+            "node_id": "9",
+            "source_id": "s-crm"
+          }
+        ],
+        "type": "Holder",
+        "uid": "Person:12345678901"
+      },
+      {
+        "entity": null,
+        "properties": {},
+        "sources": [
+          {
+            "node_id": "c1",
+            "source_id": "s-crm"
+          }
+        ],
+        "type": "Account",
+        "uid": "c1@c-crm"
+      }
     ]
   }
 }

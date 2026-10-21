@@ -11,7 +11,7 @@ vi.mock('@/services/api', () => ({
     getInvestigationItems: vi.fn(async () => []),
     getInvestigationItemVersions: vi.fn(async () => []),
     getInvestigationItemContent: vi.fn(async () => new TextEncoder().encode(JSON.stringify({ columns: ['cpf', 'valor'], rows: [['1', 2]] })).buffer),
-    joinInvestigationTables: vi.fn(async () => ({ id: 'joined', title: 'KYC + Exposição por cpf' })),
+    joinInvestigationTables: vi.fn(async () => ({ id: 'joined', title: 'KYC + Exposição by cpf' })),
     compareInvestigationTables: vi.fn(),
     promoteInvestigationTables: vi.fn(async () => []),
     setInvestigationItemStatus: vi.fn(),
@@ -103,7 +103,7 @@ describe('CaseItemsPanel', () => {
     expect(getByTestId('brief-text').textContent).toContain('# v2')
   })
 
-  it('F3: two tables selected → Juntar by the shared key; Comparar shows the diff; three → Promover em lote', async () => {
+  it('F3: two tables selected → Join by the shared key; Compare shows the diff; three → Promote in bulk', async () => {
     vi.mocked(api.compareInvestigationTables).mockResolvedValue({
       key_column: 'cpf', columns: { left: ['cpf', 'valor'], right: ['cpf', 'valor'], shared: ['valor'] },
       counts: { left: 2, right: 2, only_left: 1, only_right: 1, changed: 1, same: 0 },
@@ -114,14 +114,14 @@ describe('CaseItemsPanel', () => {
     expect(queryByTestId('table-ops-bar')).toBeNull()
     await fireEvent.click(getByTestId('item-select-t1'))
     await fireEvent.click(getByTestId('item-select-t2'))
-    expect(getByTestId('table-ops-bar').textContent).toContain('2 selecionadas')
+    expect(getByTestId('table-ops-bar').textContent).toContain('2 selected')
 
     await fireEvent.click(getByTestId('table-op-join'))
     await flushPromises()
     expect((getByTestId('ops-key') as HTMLInputElement).value).toBe('cpf') // the shared column
     await fireEvent.click(getByTestId('ops-submit'))
     await flushPromises()
-    expect(api.joinInvestigationTables).toHaveBeenCalledWith('inv', { item_ids: ['t1', 't2'], key_column: 'cpf', title: 'KYC + Exposição por cpf' })
+    expect(api.joinInvestigationTables).toHaveBeenCalledWith('inv', { item_ids: ['t1', 't2'], key_column: 'cpf', title: 'KYC + Exposição by cpf' })
     expect(queryByTestId('table-ops-dialog')).toBeNull()
 
     await fireEvent.click(getByTestId('item-select-t1'))
@@ -131,12 +131,12 @@ describe('CaseItemsPanel', () => {
     await fireEvent.click(getByTestId('ops-submit'))
     await flushPromises()
     expect(api.compareInvestigationTables).toHaveBeenCalledWith('inv', { left: { item_id: 't1' }, right: { item_id: 't2' }, key_column: 'cpf' })
-    expect(getByTestId('table-diff-summary').textContent).toContain('1 alteradas')
+    expect(getByTestId('table-diff-summary').textContent).toContain('1 changed')
     expect(getByTestId('table-diff').textContent).toContain('valor')
 
     await fireEvent.click(getByTestId('table-ops-dialog').querySelector('.modal-close')!)
     await fireEvent.click(getByTestId('item-select-t3'))
-    expect(getByTestId('table-ops-bar').textContent).toContain('3 selecionadas')
+    expect(getByTestId('table-ops-bar').textContent).toContain('3 selected')
     await fireEvent.click(getByTestId('table-op-enrichment'))
     await flushPromises()
     await fireEvent.update(getByTestId('ops-node-types'), 'Pessoa')
@@ -161,7 +161,7 @@ describe('CaseItemsPanel', () => {
     await flushPromises()
     expect(getByTestId('query-params').textContent).toContain(':cpfs')
     const source = getByTestId('query-param-source-cpfs') as HTMLSelectElement
-    expect([...source.options].map((o) => o.textContent)).toEqual(['valor fixo', 'seleção atual', 'grupo', 'propriedade'])
+    expect([...source.options].map((o) => o.textContent)).toEqual(['fixed value', 'current selection', 'group', 'property'])
     await fireEvent.update(getByTestId('query-param-value-cpfs'), '1, 2')
     vi.mocked(api.runInvestigationQuery).mockResolvedValue({ ...ITEMS[1], current_version: 2, latest: { version: 2, sha256: 'd'.repeat(64), run: { row_count: 3, duration_ms: 50 } } } as any)
     await fireEvent.click(getByTestId('query-run-q1'))

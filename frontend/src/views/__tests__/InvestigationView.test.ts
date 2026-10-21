@@ -6,7 +6,8 @@ import InvestigationView from '@/views/InvestigationView.vue'
 import { useGraphStore } from '@/stores/graph'
 import { useInvestigationStore } from '@/stores/investigation'
 import { useContextMenu } from '@/composables/useContextMenu'
-import fixture from '@/__tests__/fixtures/trace/golpe-pix.json'
+import fixture from '@/__tests__/fixtures/trace/flow-chain.json'
+import { roleColor } from '@/utils/graphAppearance'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock('@/services/api', () => ({
@@ -108,10 +109,10 @@ describe('InvestigationView', () => {
     vi.mocked(api.createInvestigationAnnotation).mockResolvedValue({ id: 'r1' } as any)
     vi.mocked(api.getInvestigationAnnotations)
       .mockResolvedValueOnce([
-        { id: 's9', kind: 'role', targets: ['a@c1'], value: { role: 'mula' }, status: 'suggested', author_kind: 'agent', author_email: 'me@x.com', reason: 'repassa' },
+        { id: 's9', kind: 'role', targets: ['a@c1'], value: { role: 'mule' }, status: 'suggested', author_kind: 'agent', author_email: 'me@x.com', reason: 'forwards' },
       ] as any)
       .mockResolvedValue([
-        { id: 'r1', kind: 'role', targets: ['a@c1'], value: { role: 'vítima' }, status: 'confirmed', author_kind: 'human', author_email: 'me@x.com' },
+        { id: 'r1', kind: 'role', targets: ['a@c1'], value: { role: 'mule' }, status: 'confirmed', author_kind: 'human', author_email: 'me@x.com' },
       ] as any)
     vi.mocked(api.setInvestigationAnnotationStatus).mockResolvedValue({ id: 's9', status: 'confirmed' } as any)
     const { getByTestId, findAllByText } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
@@ -120,11 +121,11 @@ describe('InvestigationView', () => {
     graph.selectNode('a@c1')
     await flushPromises()
 
-    expect(getByTestId('suggestion-s9').textContent).toContain('role: mula')
-    await fireEvent.update(getByTestId('inspector-role'), 'vítima')
+    expect(getByTestId('suggestion-s9').textContent).toContain('role: mule')
+    await fireEvent.update(getByTestId('inspector-role'), 'mule')
     await flushPromises()
-    expect(api.createInvestigationAnnotation).toHaveBeenCalledWith('inv', { kind: 'role', targets: ['a@c1'], value: { role: 'vítima' } })
-    expect(graph.roleColors?.get('a@c1')).toBe('#2563eb')
+    expect(api.createInvestigationAnnotation).toHaveBeenCalledWith('inv', { kind: 'role', targets: ['a@c1'], value: { role: 'mule' } })
+    expect(graph.roleColors?.get('a@c1')).toBe(roleColor('mule'))
 
     await fireEvent.click(getByTestId('inspector-notes-tab'))
     await fireEvent.update(getByTestId('note-input'), 'KYC mismatch')
@@ -137,12 +138,12 @@ describe('InvestigationView', () => {
 
   it('confirming an agent suggestion calls the confirm route; the suggestions tab confirms in bulk', async () => {
     vi.mocked(api.getInvestigationAnnotations).mockResolvedValue([
-      { id: 's9', kind: 'role', targets: ['a@c1'], value: { role: 'mula' }, status: 'suggested', author_kind: 'agent', author_email: 'me@x.com' },
+      { id: 's9', kind: 'role', targets: ['a@c1'], value: { role: 'mule' }, status: 'suggested', author_kind: 'agent', author_email: 'me@x.com' },
     ] as any)
     vi.mocked(api.setInvestigationAnnotationStatus).mockResolvedValue({ id: 's9', status: 'confirmed' } as any)
     const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
-    expect(getByTestId('status-suggestions').textContent).toContain('1 suggestions')
+    expect(getByTestId('status-suggestions').textContent).toContain('1 suggestion')
     await fireEvent.click(getByTestId('timeline-tab-suggestions'))
     await fireEvent.click(getByTestId('suggestions-confirm-role:agent'))
     await flushPromises()
@@ -191,7 +192,7 @@ describe('InvestigationView', () => {
     await flushPromises()
 
     expect(api.createInvestigationItem).toHaveBeenCalledWith('inv', expect.objectContaining({ kind: 'table', subkind: 'result', provenance: expect.objectContaining({ tool: 'trace' }) }))
-    expect(getByTestId('trace-exits').textContent).toContain('Saque ATM')
+    expect(getByTestId('trace-exits').textContent).toContain('ATM withdrawal')
     expect(getByTestId('trace-coverage').textContent).toContain('(91%)')
     expect(graph.layoutAlgorithm).toBe('trace-layers')
     expect(graph.traceLayers?.labels).toEqual(['Seed', 'Layer 1', 'Layer 2', 'Exits'])
@@ -221,49 +222,18 @@ describe('InvestigationView', () => {
     expect(action.visible?.({ type: 'edge', id: 'x', label: '' })).toBe(false)
     await action.handler({ type: 'node', id: '0001-9@c1', label: '0001-9' })
     await flushPromises()
-    expect(getByTestId('path-source').textContent).toContain('vítima')
+    expect(getByTestId('path-source').textContent).toContain('victim')
     expect(getByTestId('path-pick-target').textContent).toContain('click a node')
 
-    graph.selectNode('saque-atm@c1')
+    graph.selectNode('atm-cash@c1')
     await flushPromises()
-    expect(getByTestId('path-target').textContent).toContain('Saque ATM')
+    expect(getByTestId('path-target').textContent).toContain('ATM withdrawal')
     await fireEvent.click(getByTestId('path-run'))
     await flushPromises()
     expect(api.createInvestigationItem).toHaveBeenCalledWith('inv', expect.objectContaining({ provenance: expect.objectContaining({ tool: 'paths', params: expect.objectContaining({ mode: 'shortest' }) }) }))
-    expect([...graph.selectedNodeIds]).toEqual(['0001-9@c1', '4471-0@c1', '5520-3@c1', 'saque-atm@c1'])
+    expect([...graph.selectedNodeIds]).toEqual(['0001-9@c1', '4471-0@c1', '5520-3@c1', 'atm-cash@c1'])
     expect(graph.selectedEdgeIds.size).toBe(3)
     expect(getByTestId('path-result').textContent).toContain('3 hops')
-  })
-
-  it('typologies: the popover runs the badges as an item; a badge cites CC 4.001, highlights its entities, accepting writes a typology annotation', async () => {
-    pixCase()
-    vi.mocked(api.createInvestigationAnnotation).mockResolvedValue({ id: 't1' } as any)
-    const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
-    await flushPromises()
-    await fireEvent.click(getByTestId('workspace-typologies-btn'))
-    await fireEvent.click(getByTestId('typologies-run'))
-    await flushPromises()
-    expect(api.createInvestigationItem).toHaveBeenCalledWith('inv', expect.objectContaining({ provenance: expect.objectContaining({ tool: 'typologies' }) }))
-    const badge = getByTestId('typology-passagem')
-    expect(badge.textContent).toContain('CC 4.001 IV-k, IV-ad')
-
-    await fireEvent.click(badge)
-    const graph = useGraphStore()
-    expect(graph.selectedNodeIds.has('4471-0@c1')).toBe(true)
-
-    vi.mocked(api.getInvestigationAnnotations).mockResolvedValue([
-      { id: 't1', kind: 'typology', targets: ['4471-0@c1'], value: { typology: 'passagem' }, status: 'confirmed', author_kind: 'human', author_email: 'me@x.com' },
-    ] as any)
-    await fireEvent.click(getByTestId('typology-accept-passagem'))
-    await flushPromises()
-    expect(api.createInvestigationAnnotation).toHaveBeenCalledWith('inv', expect.objectContaining({
-      kind: 'typology', value: expect.objectContaining({ typology: 'passagem', norm_ref: 'CC 4.001 IV-k, IV-ad' }),
-    }))
-    expect(getByTestId('typology-accepted')).toBeTruthy()
-
-    await fireEvent.click(getByTestId('typology-bipartite'))
-    expect(graph.layoutAlgorithm).toBe('hive')
-    expect(graph.layoutModeConfig.hive.maxAxes).toBe(1)
   })
 
   it('groups: a closed group from the selection collapses into a cluster node and reloading keeps it', async () => {
@@ -279,6 +249,6 @@ describe('InvestigationView', () => {
     expect(getByTestId('status-groups').textContent).toContain('1 group')
     // enhancedNodes: the two members collapse into one cluster node beside x@c2
     expect(graph.enhancedNodes.map((n) => n.node_id).sort()).toEqual(['group:g1', 'x@c2'])
-    expect(getByTestId('chip-groups').textContent).toContain('grupo')
+    expect(getByTestId('chip-groups').textContent).toContain('group')
   })
 })

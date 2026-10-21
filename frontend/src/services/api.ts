@@ -8,9 +8,16 @@ import type {
   CreateInvestigationRequest,
   CreateItemRequest,
   Investigation,
+  InvestigationPage,
+  QueueParams,
+  CaseType,
+  CaseTypeSpec,
   InvestigationEvent,
   InvestigationExportFormat,
-  InvestigationDecision,
+  DecisionRequest,
+  CaseTaskRow,
+  EntityCase,
+  TaskState,
   ItemSearchHit,
   TableDiff,
   ItemSnapshotPayload,
@@ -33,8 +40,7 @@ import type {
   AuditPage,
   ClearEnvironmentResponse,
   OrgLibraryDoc,
-  OrgVocabulary,
-  OrgVocabularyValue,
+  OrgAuthoring,
   PermissionInspection,
   ResolverStatus,
   TransferOwnershipResponse,
@@ -123,13 +129,11 @@ declare global {
       allow_raw_sql_scripts?: boolean;
       /** Personal agent tokens (GRAPH_LAGOON_AGENTS_ENABLED). */
       agents_enabled?: boolean;
-      /** Whether agents read CPF, CNPJ and accounts unmasked (T11 policy note). */
-      agents_allow_unmasked_data?: boolean;
       /** Upload ceiling for case files, in bytes (413 above it). */
       investigation_file_max_bytes?: number;
       /** Ceiling of edges in a case's working graph (G4, Q5). */
       investigation_max_working_edges?: number;
-      /** Years a decided case is retained (F4.5). */
+      /** Years a closed case is retained when its type sets none (06 §1). */
       investigation_retention_years?: number;
       databricks_user_email?: string;
       /**
@@ -673,9 +677,28 @@ class ApiService {
   }
 
   // Investigations (05 §1): one case, items with versions, annotations, a journal.
-  /** `exploration_id`: only the cases that have that exploration as a graph item. */
-  async getInvestigations(params: { exploration_id?: string } = {}): Promise<Investigation[]> {
-    const response = await this.client.get('/api/investigations', { params });
+  /** One page of the queue (06 §2b): server filters, sort and counters;
+   * `exploration_id`: only the cases that have that exploration as a graph item. */
+  async getInvestigationPage(params: QueueParams = {}): Promise<InvestigationPage> {
+    const { fields, ...rest } = params;
+    const query: Record<string, unknown> = { ...rest };
+    for (const [id, expr] of Object.entries(fields ?? {})) if (expr) query[`field.${id}`] = expr;
+    const response = await this.client.get('/api/investigations', { params: query });
+    return response.data;
+  }
+
+  /** Every case the caller reads, page by page (pickers and the admin area). */
+  async getInvestigations(params: Omit<QueueParams, 'limit' | 'offset'> = {}): Promise<Investigation[]> {
+    const out: Investigation[] = [];
+    for (;;) {
+      const page = await this.getInvestigationPage({ ...params, limit: 500, offset: out.length });
+      out.push(...page.items);
+      if (!page.items.length || out.length >= page.total) return out;
+    }
+  }
+
+  async getCaseTypes(): Promise<CaseType[]> {
+    const response = await this.client.get('/api/org/case-types');
     return response.data;
   }
 
@@ -711,11 +734,21 @@ class ApiService {
     return response.data;
   }
 
-  async recordInvestigationDecision(
-    id: string,
-    body: Pick<InvestigationDecision, 'outcome' | 'actions' | 'rationale' | 'reviewer_email'>,
-  ): Promise<Investigation> {
-    const response = await this.client.post(`/api/investigations/${id}/decision`, body);
+  /** Human only: appends a decision (06 §1); a closing one freezes the case. */
+  async recordInvestigationDecision(id: string, body: DecisionRequest): Promise<Investigation> {
+    const response = await this.client.post(`/api/investigations/${id}/decisions`, body);
+    return response.data;
+  }
+
+  /** Four eyes: another person approves or rejects a pending decision. */
+  async reviewInvestigationDecision(id: string, decisionId: string, body: { approve: boolean; note?: string }): Promise<Investigation> {
+    const response = await this.client.post(`/api/investigations/${id}/decisions/${decisionId}/review`, body);
+    return response.data;
+  }
+
+  /** Renders an org report template over the case into a markdown item (06 P5). */
+  async renderInvestigationReport(id: string, template: string, title?: string): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/reports`, { template, ...(title ? { title } : {}) });
     return response.data;
   }
 
@@ -854,6 +887,18 @@ class ApiService {
     return response.data;
   }
 
+  /** The cases the person reads where the entity is present or of interest (06 P7). */
+  async getEntityCases(uid: string): Promise<EntityCase[]> {
+    const response = await this.client.get('/api/investigations/entities/cases', { params: { uid } });
+    return response.data;
+  }
+
+  /** Tasks across the cases the person reads (06 §1); `mine` = assigned to them. */
+  async getTasks(params: { mine?: boolean; state?: TaskState; overdue?: boolean } = {}): Promise<CaseTaskRow[]> {
+    const response = await this.client.get('/api/investigations/tasks', { params });
+    return response.data;
+  }
+
   async deleteInvestigationAnnotation(id: string, annotationId: string): Promise<void> {
     await this.client.delete(`/api/investigations/${id}/annotations/${annotationId}`);
   }
@@ -903,7 +948,6 @@ class ApiService {
     expires_in_days: number;
     scope?: 'user' | 'case';
     investigation_ids?: string[];
-    unmasked?: boolean;
   }): Promise<AgentToken & { token: string }> {
     const response = await this.client.post('/api/agent-tokens', data);
     return response.data;
@@ -913,23 +957,24 @@ class ApiService {
     await this.client.delete(`/api/agent-tokens/${tokenId}`);
   }
 
-  // Org library and vocabularies (05 §6): read by everyone, written in the admin area.
-  async getOrgLibrary(kind?: 'playbook' | 'template'): Promise<OrgLibraryDoc[]> {
+  // Org library and case types (05 §6, 06 §1): read by everyone, written in the admin area.
+  /** What writing case types and library docs needs (schema, placeholders, operators, tools). */
+  async getOrgAuthoring(): Promise<OrgAuthoring> {
+    const response = await this.client.get('/api/org/authoring');
+    return response.data;
+  }
+
+  async getOrgLibrary(kind?: OrgLibraryDoc['kind']): Promise<OrgLibraryDoc[]> {
     const response = await this.client.get('/api/org/library', { params: kind ? { kind } : {} });
     return response.data;
   }
 
-  async getOrgVocabularies(): Promise<OrgVocabulary[]> {
-    const response = await this.client.get('/api/org/vocabularies');
-    return response.data;
-  }
-
-  async putAdminLibraryDoc(slug: string, data: { title: string; kind: 'playbook' | 'template'; body: string }): Promise<OrgLibraryDoc> {
+  async putAdminLibraryDoc(slug: string, data: { title: string; kind: OrgLibraryDoc['kind']; body: string }): Promise<OrgLibraryDoc> {
     const response = await this.client.put(`/api/admin/library/${encodeURIComponent(slug)}`, data);
     return response.data;
   }
 
-  async createAdminLibraryDoc(data: { slug: string; title: string; kind: 'playbook' | 'template'; body: string }): Promise<OrgLibraryDoc> {
+  async createAdminLibraryDoc(data: { slug: string; title: string; kind: OrgLibraryDoc['kind']; body: string }): Promise<OrgLibraryDoc> {
     const response = await this.client.post('/api/admin/library', data);
     return response.data;
   }
@@ -938,14 +983,13 @@ class ApiService {
     await this.client.delete(`/api/admin/library/${encodeURIComponent(slug)}`);
   }
 
-  async putAdminVocabulary(kind: string, values: OrgVocabularyValue[]): Promise<OrgVocabulary> {
-    const response = await this.client.put(`/api/admin/vocabularies/${kind}`, { values });
+  async putAdminCaseType(slug: string, spec: CaseTypeSpec): Promise<CaseType> {
+    const response = await this.client.put(`/api/admin/case-types/${encodeURIComponent(slug)}`, spec);
     return response.data;
   }
 
-  async resetAdminVocabulary(kind: string): Promise<OrgVocabulary> {
-    const response = await this.client.delete(`/api/admin/vocabularies/${kind}`);
-    return response.data;
+  async deleteAdminCaseType(slug: string): Promise<void> {
+    await this.client.delete(`/api/admin/case-types/${encodeURIComponent(slug)}`);
   }
 
   // Admin area (superuser only; every route 403s for anyone else)

@@ -8,16 +8,15 @@
 import type { IdentityKey, IdentityNormalize } from '@/types/graph';
 
 /** Normalizers that make a value an entity key; `lower`/`none`/`regex` only clean it. */
-export const KEY_NORMALIZERS: IdentityNormalize[] = ['cpf_cnpj', 'account', 'phone', 'email', 'device_id', 'ip', 'pix_key', 'card', 'terminal_id', 'address'];
+export const KEY_NORMALIZERS: IdentityNormalize[] = ['digits', 'account', 'phone', 'email', 'device_id', 'ip', 'card', 'terminal_id', 'address'];
 
 export const NORMALIZER_LABELS: Record<IdentityNormalize, string> = {
-  cpf_cnpj: 'CPF/CNPJ',
+  digits: 'Digits only (document, tax or national id)',
   account: 'Account (bank-agency-number)',
   phone: 'Phone',
   email: 'E-mail',
   device_id: 'Device id',
   ip: 'IP address',
-  pix_key: 'Pix key (detects the type)',
   card: 'Card (BIN + last 4)',
   terminal_id: 'Terminal id',
   address: 'Address',
@@ -26,14 +25,11 @@ export const NORMALIZER_LABELS: Record<IdentityNormalize, string> = {
   none: 'As is',
 };
 
-/** CPF (11) or CNPJ (14) digits, zero-padded; null when masked or not a document. */
-export function normalizeCpfCnpj(raw: string): string | null {
-  // A masked document (***.418.207-**) must never become a key: it goes to entity resolution.
-  if (/[*xX]/.test(raw)) return null;
-  const digits = raw.replace(/\D/g, '');
-  if (!digits || digits.length > 14) return null;
-  // Numeric columns drop leading zeros; pad back to the document length.
-  return digits.padStart(digits.length <= 11 ? 11 : 14, '0');
+/** The digits of a document, tax or national id; null when empty or redacted (`***-**-1120`). */
+export function normalizeDigits(raw: string): string | null {
+  // A redacted value must never become a key: it goes to entity resolution.
+  if (raw.includes('*')) return null;
+  return raw.replace(/\D/g, '') || null;
 }
 
 /** `bank-agency-account`: digit groups, each without leading zeros. */
@@ -42,11 +38,9 @@ export function normalizeAccount(raw: string): string | null {
   return parts.length ? parts.join('-') : null;
 }
 
-/** Digits only, without the Brazilian country code. */
+/** Digits only: `+1 (415) 555-0100` and `14155550100` are the same phone. */
 export function normalizePhone(raw: string): string | null {
-  let digits = raw.replace(/\D/g, '');
-  if (digits.length > 11 && digits.startsWith('55')) digits = digits.slice(2);
-  return digits || null;
+  return raw.replace(/\D/g, '') || null;
 }
 
 /** Lowercase alphanumerics: `DEV-123 456` and `dev123456` are the same device. */
@@ -66,26 +60,10 @@ export function normalizeIp(raw: string): string | null {
   return s.toLowerCase();
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** `email:…`, `phone:…`, `cpf:…`, `cnpj:…` or `evp:…` by the shape of the key (a phone key starts with `+`). */
-export function normalizePixKey(raw: string): string | null {
-  const s = raw.trim();
-  if (s.includes('@')) return `email:${s.toLowerCase()}`;
-  if (UUID.test(s)) return `evp:${s.toLowerCase()}`;
-  if (s.startsWith('+')) {
-    const phone = normalizePhone(s);
-    return phone ? `phone:${phone}` : null;
-  }
-  const doc = normalizeCpfCnpj(s);
-  if (!doc) return null;
-  return doc.length === 11 ? `cpf:${doc}` : `cnpj:${doc}`;
-}
-
 /**
- * `BIN*last4`: the leading digits (up to 6) and the last 4. shortcut: a masked
- * number (`5311 **** **** 1234`) keeps only the 4 digits it shows, so it does not
- * match the full PAN; fine until unmasked card data enters a case.
+ * `BIN*last4`: the leading digits (up to 6) and the last 4, so a tokenized or
+ * redacted number (`5311 **** **** 1234`) matches the full one. A case never
+ * needs the full PAN: contexts expose it tokenized (06 §2b, PCI).
  */
 export function normalizeCard(raw: string): string | null {
   const s = raw.replace(/[\s-]/g, '');
@@ -101,39 +79,13 @@ export function normalizeTerminalId(raw: string): string | null {
   return s || null;
 }
 
-const ADDRESS_WORDS: Record<string, string> = {
-  r: 'rua',
-  av: 'avenida',
-  al: 'alameda',
-  tv: 'travessa',
-  apto: 'ap',
-  apartamento: 'ap',
-  bl: 'bloco',
-  cj: 'conj',
-  conjunto: 'conj',
-  n: '',
-  no: '',
-  numero: '',
-  de: '',
-  da: '',
-  do: '',
-  das: '',
-  dos: '',
-};
-
 export function stripAccents(text: string): string {
   return text.normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
-/** Accentless lowercase words, abbreviations expanded, connectives and "nº" dropped. */
+/** Accentless lowercase words, punctuation dropped: `12 Main St., Apt. 3` → `12 main st apt 3` (accents stripped too). */
 export function normalizeAddress(raw: string): string | null {
-  const words = stripAccents(raw)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .split(' ')
-    .filter(Boolean)
-    .map((w) => (w in ADDRESS_WORDS ? ADDRESS_WORDS[w] : w))
-    .filter(Boolean);
+  const words = stripAccents(raw).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter(Boolean);
   return words.length ? words.join(' ') : null;
 }
 
@@ -156,8 +108,8 @@ export function normalizeIdentityValue(value: unknown, normalize: IdentityNormal
   const raw = String(value).trim();
   if (!raw) return null;
   switch (normalize) {
-    case 'cpf_cnpj':
-      return normalizeCpfCnpj(raw);
+    case 'digits':
+      return normalizeDigits(raw);
     case 'account':
       return normalizeAccount(raw);
     case 'phone':
@@ -166,8 +118,6 @@ export function normalizeIdentityValue(value: unknown, normalize: IdentityNormal
       return normalizeDeviceId(raw);
     case 'ip':
       return normalizeIp(raw);
-    case 'pix_key':
-      return normalizePixKey(raw);
     case 'card':
       return normalizeCard(raw);
     case 'terminal_id':
@@ -194,7 +144,7 @@ export function identityKeyOf(
   return normalized === null ? null : `${key.entity}:${normalized}`;
 }
 
-/** Short label for a key: `Pessoa → CPF (prop titular_cpf)`. */
+/** Short label for a key: `Person → Holder (prop national_id)`. */
 export function describeIdentityKey(key: IdentityKey): string {
   const source = key.source === 'node_id' ? 'node id' : `prop ${key.source.name}`;
   return `${key.entity} → ${key.node_type} (${source})`;

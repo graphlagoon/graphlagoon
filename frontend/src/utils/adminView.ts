@@ -129,7 +129,9 @@ function describeAuditBody(entry: AuditEntry): string {
     case 'investigation.item_read':
       return `item ${m.item_id ?? '?'} v${m.version ?? '?'}`;
     case 'investigation.decide':
-      return `decided: ${m.outcome ?? '?'} · hash ${String(m.frozen_hash ?? '?').slice(0, 12)}`;
+      return `decided "${m.outcome ?? '?'}"${m.closes_case ? ' (closes the case)' : ''}${m.review === 'pending' ? ' · waiting for review' : ''} · hash ${String(m.hash ?? '?').slice(0, 12)}`;
+    case 'investigation.decision_review':
+      return `${m.approved ? 'approved' : 'rejected'} decision ${String(m.decision_id ?? '?').slice(0, 8)}${m.closed ? ' · case closed' : ''}`;
     case 'investigation.export':
       return `exported ${m.format ?? '?'} sha256 ${String(m.sha256 ?? '?').slice(0, 12)}`;
     case 'investigation.item_remove':
@@ -139,7 +141,7 @@ function describeAuditBody(entry: AuditEntry): string {
     case 'preset.delete':
       return `${m.name ?? '?'}${m.provider ? ` via ${m.provider}` : ''}`;
     case 'agent_token.create':
-      return `"${m.name ?? entry.resource_id}" (${m.scope ?? 'user'}${m.unmasked ? ', unmasked' : ''})`;
+      return `"${m.name ?? entry.resource_id}" (${m.scope ?? 'user'})`;
     case 'agent.read':
       return `MCP ${m.tool ?? '?'}`;
     case 'enrichment.read':
@@ -155,6 +157,13 @@ function describeAuditBody(entry: AuditEntry): string {
       return `"${m.name ?? entry.resource_id}"${m.rules_removed ? ` — ${m.rules_removed} rule(s) removed` : ''}`;
     case 'permission.update':
       return `${m.permission ?? '?'}: ${m.mode ?? '?'}, ${m.rules ?? 0} rule(s)`;
+    case 'case_type.write':
+      return `"${m.label ?? m.slug}" (${m.slug}): ${m.outcomes ?? 0} outcome(s), ${m.fields ?? 0} field(s)`;
+    case 'case_type.delete':
+      return `${m.slug ?? '?'}`;
+    case 'library.write':
+    case 'library.delete':
+      return `${m.slug ?? '?'}${m.kind ? ` (${m.kind})` : ''}`;
     default: {
       const keys = Object.keys(m);
       return keys.length ? keys.map((k) => `${k}=${String(m[k])}`).join(', ') : '';
@@ -174,4 +183,24 @@ export function flagEntries(overview: AdminOverview | null): Array<{ key: string
 /** The confirmation input enables the destructive button only on exact match. */
 export function canClearEnvironment(input: string, devMode: boolean): boolean {
   return devMode && input === CLEAR_CONFIRMATION;
+}
+
+/** The server's reason for a failed admin write: an error envelope's message, or a
+ * pydantic 422 with the path of each problem (so JSON pasted from an AI says what to fix). */
+export function errorText(e: unknown, fallback: string): string {
+  const detail = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+  if (detail && typeof detail === 'object' && 'error' in detail) return String((detail as { error: { message?: string } }).error.message ?? fallback);
+  // A pydantic 422: say where (outcomes.0.id) as well as what, for JSON pasted from an AI.
+  if (Array.isArray(detail)) {
+    return (
+      detail
+        .map((d: { msg?: string; loc?: (string | number)[] }) => {
+          const where = (d.loc ?? []).filter((p) => p !== 'body').join('.');
+          return d.msg ? (where ? `${where}: ${d.msg}` : d.msg) : '';
+        })
+        .filter(Boolean)
+        .join('; ') || fallback
+    );
+  }
+  return (e as Error).message || fallback;
 }

@@ -1,20 +1,56 @@
 <script setup lang="ts">
 /**
- * Guided decision (05 §7), in the inspector or the dossier: outcome, actions, a
- * rationale pre-filled from the supported hypotheses and the pinned evidence, the
- * tipping-off warning and a reviewer. Recording freezes the case (server hash).
+ * Record a decision (06 §1), in the inspector or the dossier. The outcome comes from
+ * the case type's catalog (each says whether it closes the case and needs a second
+ * person) or, for a type without one, is named here with "closes the case". It may
+ * be about some entities (the selection and the entities with a role), set the
+ * type's actions in motion as tasks, and names a reviewer. The rationale is
+ * pre-filled from the supported hypotheses and the pinned evidence, which the
+ * decision rests on (the server hashes them with the record so far). When an
+ * agent proposed a decision (06 P8), the panel opens with its draft: the person
+ * records it (the proposal is taken up), edits it first, or dismisses it.
  */
 import { computed, ref } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
+import { useGraphStore } from '@/stores/graph';
+import { caseNodeLabel, shortId } from '@/utils/caseLabels';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { DECISION_ACTION_LABELS, DECISION_OUTCOME_LABELS } from '@/utils/investigationStatus';
-import type { DecisionAction, DecisionOutcome } from '@/types/investigation';
+import type { DecisionRequest, DecisionTaskRequest } from '@/types/investigation';
 
 const emit = defineEmits<{ decided: []; cancel: [] }>();
 
 const store = useInvestigationStore();
-const outcome = ref<DecisionOutcome>('comunicar');
-const actions = ref<DecisionAction[]>([]);
+const graph = useGraphStore();
+
+const outcomes = computed(() => store.caseType?.outcomes ?? []);
+const actions = computed(() => store.caseType?.actions ?? []);
+/** The agent's draft this panel opened with (null once dismissed). */
+const proposal = ref(store.decisionProposal);
+const proposed = proposal.value?.value ?? {};
+const proposedTasks: DecisionTaskRequest[] = Array.isArray(proposed.tasks) ? proposed.tasks : [];
+const outcome = ref<string>(outcomes.value.some((o) => o.id === proposed.outcome) ? proposed.outcome : (outcomes.value[0]?.id ?? ''));
+const chosen = computed(() => outcomes.value.find((o) => o.id === outcome.value) ?? null);
+/** A type without catalog: the decision names itself. */
+const freeLabel = ref<string>(proposed.outcome_label ?? '');
+const freeCloses = ref<boolean>(!!proposed.closes_case);
+const closes = computed(() => (outcomes.value.length ? !!chosen.value?.closes_case : freeCloses.value));
+const fourEyes = computed(() => !!chosen.value?.requires_review);
+
+const byId = computed(() => new Map(store.unified.nodes.map((n) => [n.node_id, n])));
+const nameOf = (id: string) => {
+  const n = byId.value.get(id);
+  return n ? caseNodeLabel(n, { templates: store.labelTemplates }) : shortId(id);
+};
+/** Who the decision may be about: the selection first, then the entities with a role. */
+const selection = [...graph.selectedNodeIds].filter((id) => byId.value.has(id));
+const proposedTargets: string[] = proposal.value?.targets ?? [];
+const candidates = computed(() => [...new Set([...proposedTargets, ...selection, ...Object.keys(store.roles)])]);
+const targets = ref<string[]>(proposal.value ? [...proposedTargets] : [...selection]);
+const roleOf = (id: string) => store.roles[id];
+
+const chosenActions = ref<string[]>(proposedTasks.filter((t) => t.action).map((t) => t.action!));
+/** The proposal's free tasks (no catalog action), kept as proposed. */
+const freeTasks = ref<DecisionTaskRequest[]>(proposedTasks.filter((t) => !t.action && t.title));
 const reviewer = ref('');
 const busy = ref(false);
 const error = ref<string | null>(null);
@@ -24,29 +60,49 @@ const prefill = computed(() => {
   const lines: string[] = [];
   const supported = store.hypotheses.filter((h) => h.value.status === 'supported');
   if (supported.length) {
-    lines.push('Hipóteses sustentadas:');
+    lines.push('Supported hypotheses:');
     for (const h of supported) lines.push(`- H${store.hypotheses.indexOf(h) + 1} ${h.value.text}`);
   }
   if (store.evidence.length) {
-    lines.push(supported.length ? '' : '', 'Evidências fixadas:');
+    lines.push(supported.length ? '' : '', 'Pinned evidence:');
     store.evidence.forEach((e, i) => lines.push(`- E${i + 1} ${e.item.title} (v${e.version.version}, ${e.version.sha256.slice(0, 8)})`));
   }
   return lines.join('\n').trim();
 });
-const rationale = ref(prefill.value);
-const RETENTION_YEARS = window.__GRAPH_LAGOON_CONFIG__?.investigation_retention_years ?? 10;
+const rationale = ref<string>(proposal.value ? String(proposed.rationale ?? '') : prefill.value);
+
+async function dismiss() {
+  if (!proposal.value) return;
+  try {
+    await store.setAnnotationStatus(proposal.value.id, 'rejected');
+    proposal.value = null;
+    freeTasks.value = [];
+    rationale.value = prefill.value;
+  } catch (e) {
+    error.value = getErrorMessage(e, 'Could not dismiss the proposal');
+  }
+}
+const retentionYears = computed(
+  () => store.caseType?.retention_years ?? window.__GRAPH_LAGOON_CONFIG__?.investigation_retention_years ?? 10,
+);
+const ready = computed(() => !!rationale.value.trim() && (outcomes.value.length ? !!chosen.value : !!freeLabel.value.trim()));
 
 async function record() {
-  if (!rationale.value.trim() || busy.value) return;
+  if (!ready.value || busy.value) return;
   busy.value = true;
   error.value = null;
+  const body: DecisionRequest = {
+    ...(outcomes.value.length ? { outcome: outcome.value } : { outcome_label: freeLabel.value.trim(), closes_case: freeCloses.value }),
+    rationale: rationale.value.trim(),
+    ...(targets.value.length ? { targets: targets.value } : {}),
+    ...(chosenActions.value.length || freeTasks.value.length
+      ? { tasks: [...chosenActions.value.map((action) => ({ action })), ...freeTasks.value] }
+      : {}),
+    ...(reviewer.value.trim() ? { reviewer_email: reviewer.value.trim() } : {}),
+    ...(proposal.value ? { proposal_id: proposal.value.id } : {}),
+  };
   try {
-    await store.recordDecision({
-      outcome: outcome.value,
-      actions: actions.value,
-      rationale: rationale.value.trim(),
-      ...(reviewer.value.trim() ? { reviewer_email: reviewer.value.trim() } : {}),
-    });
+    await store.recordDecision(body);
     emit('decided');
   } catch (e) {
     error.value = getErrorMessage(e, 'Failed to record the decision');
@@ -58,35 +114,65 @@ async function record() {
 
 <template>
   <form class="decide" data-testid="decision-form" @submit.prevent="record">
+    <div v-if="proposal" class="proposal" data-testid="decision-proposal">
+      <strong>Proposed by {{ proposal.author_kind === 'agent' ? 'the agent' : proposal.author_email }}</strong>
+      <span class="muted">Review it, change what you disagree with, and record it — or dismiss it.</span>
+      <span v-for="(t, i) in freeTasks" :key="i" class="muted">+ task “{{ t.title }}”{{ t.assignee_kind === 'agent' ? ` for agent ${t.agent_name || '(any)'}` : '' }}</span>
+      <button type="button" class="link-btn" data-testid="decision-proposal-dismiss" @click="dismiss">Dismiss the proposal</button>
+    </div>
     <fieldset>
       <legend>1 · Outcome</legend>
-      <label v-for="(text, o) in DECISION_OUTCOME_LABELS" :key="o">
-        <input v-model="outcome" type="radio" :value="o" :data-testid="`decision-outcome-${o}`" /> {{ text }}
+      <template v-if="outcomes.length">
+        <label v-for="o in outcomes" :key="o.id" class="outcome">
+          <input v-model="outcome" type="radio" :value="o.id" :data-testid="`decision-outcome-${o.id}`" />
+          <span>
+            {{ o.label }}
+            <span v-if="o.closes_case" class="flag">closes the case</span>
+            <span v-if="o.requires_review" class="flag">four eyes</span>
+            <span v-if="o.description" class="muted block">{{ o.description }}</span>
+          </span>
+        </label>
+      </template>
+      <template v-else>
+        <input v-model="freeLabel" type="text" maxlength="255" placeholder="What was decided (e.g. Close as false positive)" data-testid="decision-outcome-label" />
+        <label><input v-model="freeCloses" type="checkbox" data-testid="decision-closes" /> Closes the case</label>
+      </template>
+    </fieldset>
+    <fieldset v-if="candidates.length">
+      <legend>2 · About <span class="muted">none = the whole case</span></legend>
+      <label v-for="id in candidates" :key="id">
+        <input v-model="targets" type="checkbox" :value="id" :data-testid="`decision-target-${id}`" />
+        {{ nameOf(id) }}<span v-if="roleOf(id)" class="muted"> · {{ roleOf(id) }}</span>
       </label>
     </fieldset>
-    <fieldset>
-      <legend>2 · Actions with it</legend>
-      <label v-for="(text, a) in DECISION_ACTION_LABELS" :key="a">
-        <input v-model="actions" type="checkbox" :value="a" :data-testid="`decision-action-${a}`" /> {{ text }}
+    <fieldset v-if="actions.length">
+      <legend>3 · Follow-up tasks</legend>
+      <label v-for="a in actions" :key="a.id">
+        <input v-model="chosenActions" type="checkbox" :value="a.id" :data-testid="`decision-action-${a.id}`" />
+        {{ a.label }}<span v-if="a.due_hours" class="muted"> · due in {{ a.due_hours }} h</span>
       </label>
     </fieldset>
     <label class="field">
-      <span class="legend">3 · Rationale <span class="muted">pre-filled with the supported hypotheses and the pinned evidence</span></span>
+      <span class="legend">Rationale <span class="muted">pre-filled with the supported hypotheses and the pinned evidence</span></span>
       <textarea v-model="rationale" rows="7" data-testid="decision-rationale" placeholder="Why, citing the evidence (E1, E2, …)"></textarea>
     </label>
     <label class="field">
-      <span class="legend">4 · Reviewer <span class="muted">optional, a second pair of eyes</span></span>
+      <span class="legend">Reviewer <span class="muted">{{ fourEyes ? 'four eyes: another person approves before it takes effect' : 'optional' }}</span></span>
       <input v-model="reviewer" type="email" placeholder="person@company.com" data-testid="decision-reviewer" />
     </label>
-    <p class="notice" data-testid="decision-tipping-off">
-      <strong>Tipping-off.</strong> The account holder is never told. The case is visible only to the people it was shared with by name.
+    <p v-if="fourEyes" class="muted" data-testid="decision-four-eyes">
+      Waits for {{ reviewer.trim() || 'another person with write access' }} to approve it in the dossier{{ closes ? '; the case closes then' : '' }}.
     </p>
+    <p v-if="store.caseType?.notice" class="notice" data-testid="decision-notice">{{ store.caseType.notice }}</p>
     <p v-if="error" class="error-message">{{ error }}</p>
     <div class="actions">
       <button type="button" class="btn btn-outline btn-sm" data-testid="decision-cancel" @click="emit('cancel')">Cancel</button>
-      <button type="submit" class="btn btn-primary btn-sm" :disabled="busy || !rationale.trim()" data-testid="decision-record">Record decision</button>
+      <button type="submit" class="btn btn-primary btn-sm" :disabled="busy || !ready" data-testid="decision-record">Record decision</button>
     </div>
-    <p class="muted">Recording freezes the journal and the pinned evidence with a hash and retains everything for {{ RETENTION_YEARS }} years. A person can reopen it later; the decision stays in the journal.</p>
+    <p class="muted" data-testid="decision-effect">
+      <template v-if="closes">Closing freezes the case: the record and the {{ store.evidence.length }} pinned version(s) are hashed and retained for {{ retentionYears }} years. A person can reopen it; the decision stays.</template>
+      <template v-else>The case stays open. The decision is hashed with the record so far and stays in it.</template>
+    </p>
   </form>
 </template>
 
@@ -115,6 +201,25 @@ legend,
   font-weight: 600;
 }
 
+.outcome {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.flag {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.block {
+  display: block;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -122,7 +227,8 @@ legend,
 }
 
 .field textarea,
-.field input {
+.field input,
+fieldset input[type='text'] {
   font: inherit;
   padding: 6px 8px;
   border: 1px solid var(--border-color);
@@ -133,6 +239,27 @@ legend,
   font-weight: normal;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-primary-subtle);
+}
+
+.link-btn {
+  align-self: flex-start;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
 }
 
 .notice {

@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { readFileSync } from 'fs';
 import {
   MOCK_CONFIG,
   MOCK_GRAPH_RESPONSE,
@@ -22,6 +23,8 @@ import {
  * Individual tests can override specific routes (later routes take precedence).
  */
 export async function setupAPIMocks(page: Page) {
+  SEEDED_TYPES.clear(); // seedCaseTypes fills it per test
+  SEEDED_LIBRARY.clear();
   // Config endpoint
   await page.route('**/graphlagoon/api/config', (route) => {
     route.fulfill({
@@ -254,6 +257,16 @@ export async function setupAPIMocks(page: Page) {
     } else {
       route.fulfill({ status: 404, contentType: 'application/json', body: '{"detail":"Not found"}' });
     }
+  });
+
+  // Case types (06 §1): only the built-in "general" unless a test seeds more (seedCaseTypes).
+  await page.route(/\/graphlagoon\/api\/org\/case-types(\/[^/?]+)?(\?.*)?$/, (route) => {
+    const slug = new URL(route.request().url()).pathname.split('/case-types/')[1];
+    if (slug && slug !== 'general') return route.fulfill({ status: 404, contentType: 'application/json', body: '{"detail":{"error":{"code":"CASE_TYPE_NOT_FOUND"}}}' });
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(slug ? GENERAL_CASE_TYPE : [GENERAL_CASE_TYPE]) });
+  });
+  await page.route(/\/graphlagoon\/api\/org\/library(\?.*)?$/, (route) => {
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
 
   // Schema discovery
@@ -982,6 +995,86 @@ export async function seedStylePresets(
   );
 }
 
+/** The built-in case type: no rules (06 §1). */
+export const GENERAL_CASE_TYPE = {
+  slug: 'general', label: 'General', description: 'No rules: free vocabulary, a free-text decision, no deadline.', builtin: true,
+  vocabularies: { roles: [], tags: [], link_attributes: [] }, roles_multi: false, outcomes: [], actions: [], stages: [], fields: [],
+  sla_hours: { open: null, analysis: null }, retention_years: null, notice: null, agent_suggest_kinds: null, playbook: null,
+  starter_queries: [], report_templates: [], updated_at: null,
+};
+
+/** The seeded case types by slug, so the case routes read their decision catalog (06 §1). */
+const SEEDED_TYPES = new Map<string, any>();
+/** The org library docs a test seeds (seedLibrary), read by the reports route. */
+const SEEDED_LIBRARY = new Map<string, any>();
+
+/**
+ * `GET /api/investigations/entities/cases?uid=` (06 P7) answers `byUid[uid]` (else []).
+ * Call AFTER seedInvestigations: the most recent route wins over its case route.
+ */
+export async function seedEntityCases(page: Page, byUid: Record<string, any[]>) {
+  await page.route(/\/graphlagoon\/api\/investigations\/entities\/cases(\?.*)?$/, (route) => {
+    const uid = new URL(route.request().url()).searchParams.get('uid') ?? '';
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(byUid[uid] ?? []) });
+  });
+}
+
+/** `GET /api/org/library[?kind=]` answers `docs` (06 P5: templates, mappings). Call AFTER setupAPIMocks. */
+export async function seedLibrary(page: Page, docs: any[] = []) {
+  SEEDED_LIBRARY.clear();
+  for (const d of docs) SEEDED_LIBRARY.set(d.slug, { seeded: false, updated_at: null, ...d });
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  await page.route(/\/graphlagoon\/api\/org\/library(\/[^/?]+)?(\?.*)?$/, (route) => {
+    const url = new URL(route.request().url());
+    const slug = url.pathname.split('/library/')[1];
+    if (slug) return route.fulfill(SEEDED_LIBRARY.has(slug) ? json(SEEDED_LIBRARY.get(slug)) : json({ detail: { error: { code: 'LIBRARY_DOC_NOT_FOUND' } } }, 404));
+    const kind = url.searchParams.get('kind');
+    return route.fulfill(json([...SEEDED_LIBRARY.values()].filter((d) => !kind || d.kind === kind)));
+  });
+}
+
+/** A case type with the spec defaults filled, as the server answers. */
+export function caseType(slug: string, spec: Record<string, unknown>) {
+  return { ...GENERAL_CASE_TYPE, description: null, builtin: false, updated_at: new Date().toISOString(), ...spec, slug };
+}
+
+/**
+ * The org's case types (06 §1) after "general"; `PUT/DELETE /api/admin/case-types/{slug}`
+ * write them and are recorded in the returned `puts` / `deletes`. Call AFTER setupAPIMocks
+ * (and after seedAdmin, whose catch-all would answer these admin routes otherwise).
+ */
+export async function seedCaseTypes(page: Page, types: any[] = []) {
+  const stored = SEEDED_TYPES;
+  stored.clear();
+  for (const t of types) stored.set(t.slug, t);
+  const calls = { puts: [] as Array<{ slug: string; body: any }>, deletes: [] as string[] };
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const all = () => [GENERAL_CASE_TYPE, ...[...stored.values()].sort((a, b) => a.label.localeCompare(b.label))];
+  await page.route(/\/graphlagoon\/api\/org\/case-types(\/[^/?]+)?(\?.*)?$/, (route) => {
+    const slug = new URL(route.request().url()).pathname.split('/case-types/')[1];
+    if (!slug) return route.fulfill(json(all()));
+    const found = all().find((t) => t.slug === slug);
+    return route.fulfill(found ? json(found) : json({ detail: { error: { code: 'CASE_TYPE_NOT_FOUND' } } }, 404));
+  });
+  // The authoring catalog (06): the live one, kept equal by api/tests/test_type_data.py.
+  const authoring = readFileSync(new URL('../../src/__tests__/fixtures/authoring/catalog.json', import.meta.url), 'utf-8');
+  await page.route(/\/graphlagoon\/api\/org\/authoring(\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: authoring }));
+  await page.route(/\/graphlagoon\/api\/admin\/case-types\/[^/?]+(\?.*)?$/, (route) => {
+    const slug = new URL(route.request().url()).pathname.split('/case-types/')[1];
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON();
+      calls.puts.push({ slug, body });
+      const saved = caseType(slug, body);
+      stored.set(slug, saved);
+      return route.fulfill(json(saved));
+    }
+    calls.deletes.push(slug);
+    stored.delete(slug);
+    return route.fulfill(json({ status: 'deleted' }));
+  });
+  return calls;
+}
+
 /**
  * Admin area (superuser only). Mocks every /api/admin/* route plus the
  * contexts/explorations listings the Contexts and Explorations tabs reuse.
@@ -1137,11 +1230,17 @@ export async function seedInvestigations(
   const briefs = new Map<string, string>();
   const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
   const now = () => new Date().toISOString();
-  // The server recomputes the deadline on every status change (Pix/MED: 45 + 45 days).
+  // The server recomputes the deadline on every status change, from the case's SLA hours
+  // (a seeded deadline without SLA hours stays as given while the case is open).
   const deadline = (inv: any) => {
-    const phased = inv.kind_preset === 'pix_med' || inv.deadline_days;
-    inv.deadline = phased && (inv.status === 'open' || inv.status === 'analysis')
-      ? { phase: inv.status, due_at: new Date(Date.now() + 45 * 864e5).toISOString(), days_left: inv.status === 'analysis' ? 90 : 45 }
+    if (inv.status !== 'open' && inv.status !== 'analysis') {
+      inv.deadline = null;
+      return;
+    }
+    if (!inv.sla_hours) return;
+    const hours = (inv.sla_hours.open ?? 0) + (inv.status === 'analysis' ? inv.sla_hours.analysis ?? 0 : 0);
+    inv.deadline = hours
+      ? { phase: inv.status, due_at: new Date(Date.now() + hours * 36e5).toISOString(), hours_left: hours, days_left: Math.ceil(hours / 24), total_hours: hours, urgent: false, overdue: false }
       : null;
   };
   const journal = (id: string, kind: string, payload: Record<string, unknown>) => {
@@ -1188,7 +1287,7 @@ export async function seedInvestigations(
     return { item_count: i.item_count ?? list.length, suggested_count: suggested || (i.suggested_count ?? 0) };
   };
 
-  // Saving a new exploration (F3 "Nova exploração" from the case) creates one the case can reference.
+  // Saving a new exploration (F3 "New exploration" from the case) creates one the case can reference.
   await page.route(/\/graphlagoon\/api\/graph-contexts\/([^/?]+)\/explorations(\?.*)?$/, (route) => {
     const req = route.request();
     const ctxId = req.url().match(/graph-contexts\/([^/?]+)\/explorations/)![1];
@@ -1199,13 +1298,14 @@ export async function seedInvestigations(
     return route.fulfill(json(exp, 201));
   });
 
-  await page.route('**/graphlagoon/api/investigations', (route) => {
+  await page.route(/\/graphlagoon\/api\/investigations(\?.*)?$/, (route) => {
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON();
       const inv = {
         id: cases.has('inv-new') ? `inv-new-${cases.size}` : 'inv-new',
         status: 'open',
-        kind_preset: 'livre',
+        case_type: 'general',
+        fields: {},
         owner_email: 'e2e@test.com',
         tags: [],
         settings: {},
@@ -1222,7 +1322,43 @@ export async function seedInvestigations(
       journal(inv.id, 'case.created', { title: inv.title });
       route.fulfill(json(inv, 201));
     } else {
-      route.fulfill(json([...cases.values()].map((i) => ({ ...i, ...counts(i) }))));
+      // A page of the queue (06 §2b): the filters the view sends, newest first.
+      const q = new URL(route.request().url()).searchParams;
+      const rows = [...cases.values()].map((i) => ({ ...i, case_type: i.case_type ?? 'general', fields: i.fields ?? {}, ...counts(i) }));
+      const statuses = (q.get('status') ?? '').split(',').filter(Boolean);
+      const text = (q.get('q') ?? '').toLowerCase();
+      const fieldFilters = [...q.entries()].filter(([k]) => k.startsWith('field.'));
+      const matched = rows.filter(
+        (i) =>
+          (!statuses.length || statuses.includes(i.status)) &&
+          (!q.get('case_type') || i.case_type === q.get('case_type')) &&
+          (!q.get('external_ref') || i.external_ref === q.get('external_ref')) &&
+          (!q.get('exploration_id') || (material.get(i.id) ?? []).some((it) => it.exploration_id === q.get('exploration_id'))) &&
+          (!q.get('deadline') || !!i.deadline?.urgent) &&
+          (q.get('suggested') !== 'true' || i.suggested_count > 0) &&
+          (!text || `${i.title} ${i.description ?? ''}`.toLowerCase().includes(text)) &&
+          fieldFilters.every(([k, expr]) => {
+            const [op, ...rest] = expr.includes(':') ? expr.split(':') : ['eq', expr];
+            const v = i.fields?.[k.slice('field.'.length)];
+            const arg = rest.join(':');
+            if (v === undefined || v === null) return false;
+            if (op === 'gte') return Number(v) >= Number(arg);
+            if (op === 'lte') return Number(v) <= Number(arg);
+            if (op === 'contains') return String(v).toLowerCase().includes(arg.toLowerCase());
+            return String(v) === arg;
+          }),
+      );
+      const limit = Number(q.get('limit') ?? 50);
+      const offset = Number(q.get('offset') ?? 0);
+      const by = (s: string) => rows.filter((i) => i.status === s).length;
+      route.fulfill(json({
+        items: matched.slice(offset, offset + limit), total: matched.length, limit, offset,
+        counts: {
+          open: by('open'), analysis: by('analysis'), closed: by('closed'), total: rows.length,
+          urgent: rows.filter((i) => i.deadline?.urgent).length, overdue: rows.filter((i) => i.deadline?.overdue).length,
+          suggested: rows.filter((i) => i.suggested_count > 0).length,
+        },
+      }));
     }
   });
 
@@ -1245,7 +1381,8 @@ export async function seedInvestigations(
       if (method === 'PATCH') {
         // Explicit transitions; the server answers 409 to anything else.
         const body = req.postDataJSON();
-        const allowed: Record<string, string[]> = { open: ['analysis', 'archived'], analysis: ['open', 'archived'], decided: ['archived'], archived: ['analysis'] };
+        if (inv.status === 'closed') return route.fulfill(json({ detail: { error: { code: 'CASE_CLOSED', message: 'closed' } } }, 409));
+        const allowed: Record<string, string[]> = { open: ['analysis'], analysis: ['open'] };
         if (body.status && body.status !== inv.status && !allowed[inv.status]?.includes(body.status)) {
           return route.fulfill(json({ detail: { error: { code: 'INVALID_STATUS_TRANSITION', message: 'invalid transition' } } }, 409));
         }
@@ -1273,26 +1410,89 @@ export async function seedInvestigations(
       return route.fulfill(json({ status: 'removed' }));
     }
     if (sub === 'reopen') {
-      if (inv.status !== 'decided') return route.fulfill(json({ detail: { error: { code: 'INVALID_STATUS_TRANSITION' } } }, 409));
-      journal(id, 'case.reopened', { previous_frozen_hash: inv.frozen_hash, previous_decision: inv.decision, to: 'analysis' });
-      Object.assign(inv, { status: 'analysis', decision: null, frozen_hash: null, frozen_at: null });
+      if (inv.status !== 'closed') return route.fulfill(json({ detail: { error: { code: 'INVALID_STATUS_TRANSITION' } } }, 409));
+      const closing = [...(inv.decisions ?? [])].reverse().find((d: any) => d.closed_at);
+      journal(id, 'case.reopened', { decision_id: closing?.id, hash: closing?.hash, to: 'analysis' });
+      Object.assign(inv, { status: 'analysis', frozen_hash: null, frozen_at: null });
       deadline(inv);
       return route.fulfill(json(inv));
     }
-    if (sub === 'decision') {
-      const decided_at = now();
-      inv.decision = { ...req.postDataJSON(), decided_by: 'e2e@test.com', decided_at };
-      Object.assign(inv, { status: 'decided', frozen_hash: 'f'.repeat(60) + 'beef', frozen_at: decided_at, has_write_access: true });
-      deadline(inv);
-      journal(id, 'decision.recorded', inv.decision);
+    if (sub === 'decisions') {
+      // Several per case (06 §1); the outcome comes from the seeded type's catalog, else it is free.
+      const body = req.postDataJSON();
+      const at = now();
+      const close = (d: any) => {
+        d.closed_at = at;
+        Object.assign(inv, { status: 'closed', frozen_hash: d.hash, frozen_at: at });
+        deadline(inv);
+        journal(id, 'case.closed', { decision_id: d.id });
+      };
+      if (a && b === 'review') {
+        const d = (inv.decisions ?? []).find((x: any) => x.id === a);
+        Object.assign(d, { review: body.approve ? 'approved' : 'rejected', reviewed_by: 'e2e@test.com', reviewed_at: at, review_note: body.note ?? null });
+        journal(id, `decision.${d.review}`, { decision_id: d.id, note: d.review_note });
+        if (body.approve && d.closes_case) close(d);
+        return route.fulfill(json(inv));
+      }
+      const kind = SEEDED_TYPES.get(inv.case_type);
+      const outcome = kind?.outcomes?.find((o: any) => o.id === body.outcome);
+      const n = (inv.decisions ?? []).length + 1;
+      // The decision's actions become tasks first (inside its hash on the server).
+      const list = notes();
+      const taskIds = (body.tasks ?? []).map((t: any) => {
+        const action = kind?.actions?.find((x: any) => x.id === t.action);
+        const row = {
+          id: `ann-${list.length + 1}`, kind: 'task', targets: body.targets ?? [], reason: null, status: 'confirmed', author_kind: 'human',
+          author_email: 'ana@test.com', created_at: at,
+          value: { title: t.title ?? action?.label, state: 'open', assignee_kind: t.assignee_kind ?? 'human', assignee: t.assignee ?? null,
+            due_at: action?.due_hours ? new Date(Date.now() + action.due_hours * 36e5).toISOString() : null, action: t.action ?? null, decision_id: `d${n}` },
+        };
+        list.push(row);
+        journal(id, 'task.set', { annotation_id: row.id, targets: row.targets, value: row.value });
+        return row.id;
+      });
+      const d: any = {
+        id: `d${n}`, outcome: outcome?.id ?? null, outcome_label: outcome?.label ?? body.outcome_label,
+        closes_case: outcome ? outcome.closes_case : !!body.closes_case, targets: body.targets ?? [], task_ids: taskIds,
+        rationale: body.rationale, evidence: [], reviewer_email: body.reviewer_email ?? null,
+        // Recorded as a colleague, so the signed-in person can be the four-eyes reviewer.
+        review: outcome?.requires_review ? 'pending' : null, decided_by: body.decided_by ?? 'ana@test.com', decided_at: at,
+        hash: 'f'.repeat(56) + String(n).padStart(4, '0') + 'beef', closed_at: null,
+      };
+      if (body.proposal_id) {
+        const proposal = list.find((a: any) => a.id === body.proposal_id);
+        if (proposal) Object.assign(proposal, { status: 'confirmed', confirmed_by: 'e2e@test.com' });
+        Object.assign(d, { proposal_id: body.proposal_id, proposed_by: { author_kind: proposal?.author_kind ?? 'agent', author_email: 'e2e@test.com' } });
+      }
+      inv.decisions = [...(inv.decisions ?? []), d];
+      inv.has_write_access = true;
+      journal(id, 'decision.recorded', d);
+      if (d.closes_case && !d.review) close(d);
       return route.fulfill(json(inv));
+    }
+    if (sub === 'reports') {
+      // Renders the seeded template (only {{case.title}} here) into a markdown item.
+      const body = req.postDataJSON();
+      const doc = SEEDED_LIBRARY.get(body.template);
+      if (!doc) return route.fulfill(json({ detail: { error: { code: 'TEMPLATE_NOT_FOUND' } } }, 404));
+      const item = base(`item-${added.length + 1}`, {
+        kind: 'document', subkind: 'markdown', title: body.title ?? `${doc.title} · #${id}`, description: null,
+        provenance: { tool: 'report', template: body.template }, position: list.length,
+      });
+      item._text = String(doc.body).replace(/\{\{\s*case\.title\s*\}\}/g, inv.title);
+      item.latest = version(item);
+      item.current_version = 1;
+      added.push(item);
+      list.push(item);
+      journal(id, 'item.created', { item_id: item.id, kind: 'document', subkind: 'markdown', title: item.title });
+      return route.fulfill(json(item, 201));
     }
     if (sub === 'export') {
       const format = url.searchParams.get('format');
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        headers: { 'content-disposition': `attachment; filename*=UTF-8''investigation-${id}-${format}.json` },
+        headers: { 'content-disposition': `attachment; filename*=UTF-8''investigation-${id}.${format}` },
         body: JSON.stringify({ format }),
       });
     }
@@ -1316,7 +1516,7 @@ export async function seedInvestigations(
     if (sub === 'search') return route.fulfill(json([]));
     if (sub === 'analysis') {
       if (a === 'er') return route.fulfill(json([]));
-      return route.fulfill(json({ paths: [], typologies: [], method: {} }));
+      return route.fulfill(json({ paths: [], method: {} }));
     }
 
     if (sub === 'items' && (a === 'join' || a === 'compare' || a === 'promote')) {
@@ -1452,7 +1652,7 @@ export async function seedInvestigations(
         journal(id, 'item.version_added', { item_id: item.id, title: item.title, version: item.current_version, run: item.latest.run });
         return route.fulfill(json(item));
       }
-      if (b === 'text') return route.fulfill(json({ text: '', version: item.latest }));
+      if (b === 'text') return route.fulfill(json({ text: item._text ?? '', version: item.latest }));
       if (b === 'content') return route.fulfill(json(item._content ?? {}));
       return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     }

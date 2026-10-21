@@ -3,96 +3,134 @@ import { render, fireEvent } from '@testing-library/vue'
 import { setActivePinia, createPinia } from 'pinia'
 import InvestigationsView from '@/views/InvestigationsView.vue'
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+const push = vi.fn()
+vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 vi.mock('@/services/api', () => ({
-  api: { getInvestigations: vi.fn() },
+  api: { getInvestigationPage: vi.fn(), getCaseTypes: vi.fn(), createInvestigation: vi.fn() },
 }))
 
 import { api } from '@/services/api'
 
 const now = new Date().toISOString()
+const deadline = (hours_left: number, total_hours: number, phase = 'analysis') => ({
+  phase, due_at: now, hours_left, days_left: Math.ceil(hours_left / 24), total_hours, urgent: hours_left <= total_hours * 0.2, overdue: hours_left < 0,
+})
+const MERCHANT = {
+  slug: 'merchant_review', label: 'Merchant review', builtin: false, outcomes: [], actions: [], stages: [], vocabularies: { roles: [], tags: [], link_attributes: [] },
+  sla_hours: {}, roles_multi: false, starter_queries: [], report_templates: [],
+  fields: [
+    { id: 'merchant_id', label: 'Merchant', type: 'text', options: [], required: true, in_queue: true },
+    { id: 'amount_at_risk', label: 'Amount at risk', type: 'money', options: [], required: false, in_queue: true },
+    { id: 'mcc', label: 'MCC', type: 'enum', options: ['5411', '5999'], required: false, in_queue: false },
+  ],
+}
+const GENERAL = { ...MERCHANT, slug: 'general', label: 'General', builtin: true, fields: [] }
 const CASES = [
-  { id: 'aaaaaaaa-1', title: 'Golpe Pix', status: 'analysis', kind_preset: 'pix_med', tags: [], owner_email: 'me@x.com', assignee_email: 'ana@x.com', created_at: now, updated_at: now, item_count: 2, suggested_count: 1, has_write_access: true, deadline: { phase: 'analysis', due_at: now, days_left: 45 } },
-  { id: 'cccccccc-3', title: 'Urgent', status: 'open', kind_preset: 'pix_med', tags: [], owner_email: 'me@x.com', created_at: now, updated_at: now, item_count: 0, has_write_access: true, deadline: { phase: 'open', due_at: now, days_left: 6 } },
-  { id: 'bbbbbbbb-2', title: 'Old case', status: 'archived', kind_preset: 'livre', tags: [], owner_email: 'me@x.com', created_at: now, updated_at: now, item_count: 1, has_write_access: true },
-  { id: 'dddddddd-4', title: 'Lent to me', status: 'analysis', kind_preset: 'lavagem', tags: [], owner_email: 'zoe@x.com', assignee_email: 'zoe@x.com', created_at: now, updated_at: now, item_count: 3, has_write_access: false, deadline: { phase: 'analysis', due_at: now, days_left: 20 } },
+  { id: 'aaaaaaaa-1', title: 'Mule network', status: 'analysis', case_type: 'merchant_review', fields: { merchant_id: 'M-1', amount_at_risk: 84000 }, tags: [], owner_email: 'me@x.com', assignee_email: 'ana@x.com', created_at: now, updated_at: now, item_count: 2, suggested_count: 1, has_write_access: true, deadline: deadline(1080, 2160) },
+  { id: 'cccccccc-3', title: 'Urgent', status: 'open', case_type: 'general', fields: {}, tags: [], owner_email: 'me@x.com', created_at: now, updated_at: now, item_count: 0, has_write_access: true, deadline: deadline(10, 240, 'open') },
+  { id: 'dddddddd-4', title: 'Lent to me', status: 'analysis', case_type: 'general', fields: {}, tags: [], owner_email: 'zoe@x.com', assignee_email: 'zoe@x.com', created_at: now, updated_at: now, item_count: 3, has_write_access: false },
 ]
+const page = (items = CASES, total = items.length) => ({ items, total, limit: 50, offset: 0, counts: { open: 1, analysis: 2, closed: 4, total: 7, urgent: 1, overdue: 0, suggested: 1 } })
 
 async function renderView() {
   const view = render(InvestigationsView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
-  for (let i = 0; i < 5; i++) await Promise.resolve()
+  for (let i = 0; i < 6; i++) await Promise.resolve()
   return view
+}
+/** The params of the last page the view asked for (after the 250 ms debounce). */
+async function lastQuery() {
+  await vi.advanceTimersByTimeAsync(300)
+  return vi.mocked(api.getInvestigationPage).mock.calls.at(-1)![0]!
 }
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  vi.mocked(api.getInvestigations).mockResolvedValue(CASES as any)
+  vi.clearAllMocks()
+  vi.useRealTimers()
+  vi.mocked(api.getInvestigationPage).mockResolvedValue(page() as any)
+  vi.mocked(api.getCaseTypes).mockResolvedValue([GENERAL, MERCHANT] as any)
 })
 
 describe('InvestigationsView', () => {
-  it('lists open cases with status, assignee, material and deadline', async () => {
+  it('lists a page of cases with type, status, assignee, material, deadline; the counters come from the server', async () => {
     window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
-    const { getByTestId, queryByTestId } = await renderView()
+    const { getByTestId } = await renderView()
+    expect(api.getInvestigationPage).toHaveBeenCalledWith(expect.objectContaining({ status: 'open,analysis', sort: '-updated_at', limit: 50, offset: 0 }))
     const row = getByTestId('investigation-row-aaaaaaaa-1')
-    expect(row.textContent).toContain('Em análise')
+    expect(row.querySelector('[data-testid="row-type"]')!.textContent).toBe('Merchant review')
+    expect(row.textContent).toContain('In analysis')
     expect(row.textContent).toContain('ana@x.com')
-    expect(row.textContent).toContain('2 itens')
-    expect(row.textContent).toContain('1 sugestão')
-    expect(row.textContent).toContain('análise · 45 d')
-    // F4.4: the server's deadline; under 7 days it turns orange and counts as urgent.
+    expect(row.textContent).toContain('2 items')
+    expect(row.textContent).toContain('1 suggestion')
+    expect(row.textContent).toContain('analysis · 45 d')
+    // The server decides what is urgent (under 20% of the SLA left).
     const urgent = getByTestId('investigation-row-cccccccc-3')
     expect(urgent.querySelector('[data-testid="deadline"]')!.classList).toContain('late')
+    expect(urgent.textContent).toContain('open · 10 h')
     expect(row.querySelector('[data-testid="deadline"]')!.classList).not.toContain('late')
     expect(getByTestId('counter-urgent').textContent).toContain('1')
-    // Archived cases are outside the default "Open" filter.
-    expect(queryByTestId('investigation-row-bbbbbbbb-2')).toBeNull()
+    expect(getByTestId('counter-closed').textContent).toContain('4')
   })
 
-  it('filters by type and assignee, sorts by a column, marks read-only cases and uses counters as filters', async () => {
+  it('sends filters, sort and counters to the server; a type shows its queue fields as columns and filters', async () => {
     window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
     localStorage.setItem('userEmail', 'me@x.com')
-    const { getByTestId, queryByTestId, container } = await renderView()
-    const ids = () => [...container.querySelectorAll('tbody tr')].map((r) => r.getAttribute('data-testid'))
-    expect(getByTestId('investigation-row-dddddddd-4').querySelector('[data-testid="access-mark"]')!.textContent).toContain('só leitura')
+    const { getByTestId, queryByTestId } = await renderView()
+    vi.useFakeTimers()
+    expect(getByTestId('investigation-row-dddddddd-4').querySelector('[data-testid="access-mark"]')!.textContent).toContain('read only')
     expect(getByTestId('investigation-row-aaaaaaaa-1').querySelector('[data-testid="access-mark"]')).toBeNull()
 
-    await fireEvent.update(getByTestId('investigations-preset'), 'lavagem')
-    expect(ids()).toEqual(['investigation-row-dddddddd-4'])
-    await fireEvent.update(getByTestId('investigations-preset'), '')
-    await fireEvent.update(getByTestId('investigations-assignee'), 'ana@x.com')
-    expect(ids()).toEqual(['investigation-row-aaaaaaaa-1'])
-    await fireEvent.update(getByTestId('investigations-assignee'), '')
+    await fireEvent.update(getByTestId('investigations-type'), 'merchant_review')
+    expect(await lastQuery()).toMatchObject({ case_type: 'merchant_review', offset: 0 })
+    expect(getByTestId('investigation-row-aaaaaaaa-1').querySelector('[data-testid="row-field-amount_at_risk"]')!.textContent).toContain('84,000.00')
+    await fireEvent.update(getByTestId('queue-field-amount_at_risk'), '100000')
+    expect((await lastQuery()).fields).toEqual({ amount_at_risk: 'gte:100000' })
+    await fireEvent.update(getByTestId('queue-field-merchant_id'), 'M-1')
+    expect((await lastQuery()).fields).toEqual({ amount_at_risk: 'gte:100000', merchant_id: 'contains:M-1' })
+    expect(queryByTestId('queue-field-mcc')).toBeNull() // not a queue field
+    await fireEvent.click(getByTestId('sort-field-amount_at_risk'))
+    expect((await lastQuery()).sort).toBe('-field.amount_at_risk')
 
-    await fireEvent.click(getByTestId('sort-deadline'))
-    expect(ids()).toEqual(['investigation-row-cccccccc-3', 'investigation-row-dddddddd-4', 'investigation-row-aaaaaaaa-1'])
-    await fireEvent.click(getByTestId('sort-deadline'))
-    expect(ids()[0]).toBe('investigation-row-aaaaaaaa-1')
-
+    await fireEvent.update(getByTestId('investigations-assignee'), 'me')
+    expect((await lastQuery()).assignee).toBe('me@x.com')
     await fireEvent.click(getByTestId('counter-urgent'))
-    expect(ids()).toEqual(['investigation-row-cccccccc-3'])
-    await fireEvent.click(getByTestId('counter-urgent')) // again: back to "Open"
-    expect(ids()).toHaveLength(3)
-    await fireEvent.click(getByTestId('counter-decided'))
-    expect(ids()).toEqual([])
-    expect(queryByTestId('investigation-row-bbbbbbbb-2')).toBeNull()
-    // F6: the suggestions counter filters too, and the column sorts.
+    expect(await lastQuery()).toMatchObject({ deadline: 'urgent', status: undefined })
+    await fireEvent.click(getByTestId('counter-urgent')) // again: back to "In progress"
+    expect(await lastQuery()).toMatchObject({ status: 'open,analysis', deadline: undefined })
     await fireEvent.click(getByTestId('counter-suggested'))
-    expect(ids()).toEqual(['investigation-row-aaaaaaaa-1'])
-    await fireEvent.click(getByTestId('counter-suggested'))
-    await fireEvent.click(getByTestId('sort-suggested'))
-    expect(ids()[0]).toBe('investigation-row-aaaaaaaa-1')
+    expect((await lastQuery()).suggested).toBe(true)
+    await fireEvent.update(getByTestId('investigations-search'), 'mule')
+    expect((await lastQuery()).q).toBe('mule')
+    vi.useRealTimers()
   })
 
-  it('shows the deadline bar from the server phases and pt-BR dates', async () => {
+  it('pages through the queue', async () => {
     window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
-    vi.mocked(api.getInvestigations).mockResolvedValue([
-      { ...CASES[1], updated_at: '2026-10-09T15:04:00', deadline: { phase: 'open', due_at: '2026-10-15T00:00:00', days_left: 6, total_days: 45 } },
-    ] as any)
+    vi.mocked(api.getInvestigationPage).mockResolvedValue(page(CASES, 120) as any)
     const { getByTestId } = await renderView()
-    const row = getByTestId('investigation-row-cccccccc-3')
-    expect(row.textContent).toContain('seleção · 6 d')
-    expect(row.textContent).toContain('09/10/2026')
-    expect((row.querySelector('.bar span') as HTMLElement).style.width).toBe(`${((45 - 6) / 45) * 100}%`)
+    expect(getByTestId('queue-range').textContent).toBe('1–50 of 120')
+    vi.useFakeTimers()
+    await fireEvent.click(getByTestId('queue-next'))
+    expect((await lastQuery()).offset).toBe(50)
+    vi.useRealTimers()
+  })
+
+  it('creates a case of a type with its required fields', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true, permissions: ['investigation.create'] }
+    vi.mocked(api.createInvestigation).mockResolvedValue({ ...CASES[0], id: 'new-1' } as any)
+    const { getByTestId } = await renderView()
+    await fireEvent.click(getByTestId('new-investigation-btn'))
+    await fireEvent.update(getByTestId('new-investigation-title'), 'Merchant 77')
+    await fireEvent.update(getByTestId('new-investigation-type'), 'merchant_review')
+    const submit = getByTestId('new-investigation-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true) // the merchant is required
+    await fireEvent.update(getByTestId('new-field-merchant_id'), 'M-77')
+    await fireEvent.update(getByTestId('new-field-mcc'), '5999')
+    expect(submit.disabled).toBe(false)
+    await fireEvent.click(submit)
+    for (let i = 0; i < 4; i++) await Promise.resolve()
+    expect(api.createInvestigation).toHaveBeenCalledWith({ title: 'Merchant 77', case_type: 'merchant_review', fields: { merchant_id: 'M-77', mcc: '5999' }, assignee_email: undefined })
+    expect(push).toHaveBeenCalledWith('/investigations/new-1')
   })
 
   it('hides "New investigation" without investigation.create', async () => {
