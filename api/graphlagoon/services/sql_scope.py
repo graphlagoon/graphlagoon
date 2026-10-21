@@ -71,10 +71,17 @@ def normalize_ref(ref, default_catalog: str, default_schema: str) -> TableRef:
     """
     catalog, schema, table = ref
     return (
-        (catalog or default_catalog).lower(),
-        (schema or default_schema).lower(),
-        table.lower(),
+        _bare(catalog or default_catalog),
+        _bare(schema or default_schema),
+        _bare(table),
     )
+
+
+def _bare(part: str) -> str:
+    """A name part as the parser reports it: no backticks, lowercase. Stored
+    names and settings may carry backticks (```my-cat`.db.t``); sqlglot strips
+    them from the statement, so both sides must match without them."""
+    return part.strip("`").lower()
 
 
 def normalize_table_name(
@@ -165,7 +172,7 @@ def check_scope(
             )
         return None
 
-    allowed_scopes = {(c.lower(), s.lower()) for c, s in allowed_pairs}
+    allowed_scopes = {(_bare(c), _bare(s)) for c, s in allowed_pairs}
     allowed_scopes |= {(c, s) for c, s, _ in own_tables}
     outside = {t for t in normalized if (t[0], t[1]) not in allowed_scopes}
     if outside:

@@ -422,6 +422,20 @@ class TestReaderTierScope:
         )
         assert _scope_error(response) is None, response.text
 
+    def test_backticked_context_tables_allowed(self, query_client, store):
+        # A Databricks context stored as `my-cat`.graphs.edges; the query may
+        # name it quoted or not, sqlglot reports it without backticks.
+        _restrict_context_create_to(store, MEMBER)
+        context = store.create_graph_context(
+            "t", "`my-cat`.graphs.edges", "`my-cat`.graphs.nodes", OUTSIDER
+        )
+        for sql in (
+            "SELECT * FROM `my-cat`.graphs.edges LIMIT 10",
+            "SELECT * FROM `my-cat`.`graphs`.`nodes` LIMIT 10",
+        ):
+            response = _run_sql(query_client, context.id, sql, OUTSIDER)
+            assert _scope_error(response) is None, response.text
+
     def test_other_table_in_same_schema_denied(self, query_client, reader_context):
         response = _run_sql(
             query_client,
@@ -560,6 +574,14 @@ class TestCatalogBrowsingNeedsContextCreate:
             assert response.status_code == 403, (path, response.text)
             error = response.json()["detail"]["error"]
             assert error["details"]["permission"] == "context.create", path
+
+    def test_backticked_catalog_is_not_an_invalid_identifier(self, query_client, store):
+        response = query_client.get(
+            "/api/catalog/databases",
+            params={"catalog": "`my-cat`"},
+            headers=_headers(MEMBER),
+        )
+        assert response.status_code != 400, response.text
 
     def test_hostile_identifier_rejected_before_sql(self, query_client, store):
         response = query_client.get(

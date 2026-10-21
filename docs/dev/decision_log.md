@@ -13374,3 +13374,34 @@ camada (REST segue o escopo de rotas do token, como o PUT de exploração).
 `admin.spec.ts`/`admin-groups.spec.ts` verdes. vitest 2679; vue-tsc limpo.
 **Public docs:** sem mudança de texto; screenshot `bring-your-own-data-enrich.png` regenerada (mostra os "?").
 **Admin-area impact:** nenhum além do comportamento do `HelpTip` (posição e Esc).
+
+## [2026-10-21 16:30] - Bug Fix: nomes de catálogo com crase (`` `catalogo`.schema.tabela ``)
+
+**Sintoma:** no Databricks, um contexto com tabela `` `catalogo`.schema.tabela `` (ou um catálogo como `my-catalog`,
+que só existe entre crases) dava "Invalid SQL identifier" e, nas queries SQL, "outside the permitted catalogs" /
+"outside the current context".
+**Causa:** três pontos tratavam o nome guardado com `split(".")` cru. (1) `validate_identifier_part` só aceitava
+`[A-Za-z0-9_]`, então a parte `` `catalogo` `` (com as crases) e `my-catalog` eram recusadas na criação do contexto,
+no subgraph/expand (`qualified_from_dotted`), no drift e nas rotas `/api/catalog/*` (o form manda as partes com
+crase). (2) `sql_scope.normalize_table_name` guardava as crases e o sqlglot devolve as partes sem elas, então a
+tabela do próprio contexto parecia estrangeira. (3) `list_datasets` montava `my-cat.schema.t` sem crases.
+**Decisões:**
+1. Duas gramáticas em `sql_identifiers`: **parte que o app cita** (`validate_identifier_part`): letras (com acento),
+   dígitos, `_` e `-`, com ou sem crases; devolve sem crases e o chamador cita. **Nome guardado**
+   (`split_qualified`): cada parte é nua `[A-Za-z0-9_]` ou entre crases, porque o transpiler Cypher e o pré-filtro
+   CTE usam o nome como foi escrito (verificado: o SQL gerado mantém `` `my-cat`.sch.edges `` e a troca por
+   `MY_FINAL_EDGES` funciona). `my-cat.db.t` sem crases é recusado com mensagem pedindo crases.
+2. Nada que feche crase ou literal entra (`` ` ``, aspas, `\`, `;`, espaço, `.`): os testes hostis de A4 continuam
+   valendo; só `dash-ed` passou de recusado a aceito (sempre citado).
+3. Escopo compara partes sem crases e minúsculas dos dois lados, inclusive `GRAPH_LAGOON_CATALOG_SCHEMAS` e defaults.
+4. `dotted_name()` para nomes vindos do warehouse: cita só a parte que precisa (`` `my-cat`.db.t ``).
+5. Frontend: `parseTableName` e o `WarehouseTablePicker` tiram as crases das partes (`unquotePart`).
+**Arquivos:** `services/sql_identifiers.py`, `services/sql_scope.py`, `services/schema_drift.py`,
+`services/warehouse.py`; `frontend/src/utils/contextForm.ts`, `components/WarehouseTablePicker.vue`.
+**Testes:** `test_sql_identifiers` (crases, hífen, nomes hostis entre crases), `test_sql_scope` (contexto com crases
+casa com query com ou sem crases; allowlist com crases), `test_schema_drift`, `test_context_table_validation`
+(mensagem pede crases), `test_permission_routes` (rota de query não nega; `/api/catalog/databases?catalog=`
+`` `my-cat` `` não é 400); vitest `ContextsView.logic`. 9 dos testes novos falham sem a correção. pytest 1550
+(5 falhas pré-existentes de cypher/transpiler, sem relação); vue-tsc limpo.
+**Public docs:** `docs/guide/getting-started.md` (crases em "Table not listed?").
+**Admin-area impact:** nenhum.

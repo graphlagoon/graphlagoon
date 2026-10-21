@@ -123,7 +123,11 @@ you have chosen, with their shared `catalog.schema` written once, and warns if
 the two end up in different schemas. Any table in the configured catalogs and schemas can take either role — a
 table called `transacoes` is a perfectly good edge table, and names matching
 `edge`/`node` are only highlighted as a suggestion. A table outside the
-configured scope can be named directly with **Table not listed?**.
+configured scope can be named directly with **Table not listed?**, as
+`catalog.schema.table`. A part that is not just letters, digits and underscores
+goes in backticks, as in Databricks SQL: `` `my-catalog`.graphs.edges ``.
+Backticks are also fine on plain names (`` `main`.graphs.edges ``), and a
+query may name the table with or without them.
 
 Optional property columns you select here become available for filtering,
 labels, and the detail panel later.

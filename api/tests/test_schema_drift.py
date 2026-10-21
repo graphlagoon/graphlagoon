@@ -89,8 +89,14 @@ class TestParseQualifiedTable:
         # subgraph/expand SQL must be bare identifiers.
         assert parse_qualified_table("db.t WHERE 1=1 UNION SELECT 1 --") is None
         assert parse_qualified_table("db.t; DROP TABLE x") is None
-        assert parse_qualified_table("cat.db.`quoted`") is None
+        assert parse_qualified_table("cat.db.`t; DROP`") is None
+        assert parse_qualified_table("my-cat.db.t") is None
         assert parse_qualified_table("db.ta ble") is None
+
+    def test_backticked_parts_come_back_bare(self):
+        # Databricks users write `catalogo`.schema.tabela; `my-cat` needs it.
+        assert parse_qualified_table("cat.db.`quoted`") == ("cat", "db", "quoted")
+        assert parse_qualified_table("`my-cat`.db.t") == ("my-cat", "db", "t")
 
 
 # --- structural_roles ---------------------------------------------------------
