@@ -49,7 +49,7 @@ function createBuiltInActions(): ContextMenuAction[] {
     {
       // The selection (plus the clicked node) as a graph/selection item of the current case (05 §4).
       id: 'add-selection-to-case',
-      label: 'Adicionar seleção ao caso',
+      label: 'Add selection to case',
       icon: Briefcase,
       visible: (t: ContextMenuTarget) => {
         if (t.type !== 'node') return false;

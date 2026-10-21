@@ -1,11 +1,11 @@
 {
-  "description": "Generic entities (05 §4b): device, IP, Pix key, card, terminal, address and a regex capture normalize the same way on both engines; a regex key without a match stays local (uid id@context).",
+  "description": "Generic entities (05 §4b): device, IP, card, terminal, address, document number (`digits`) and a regex capture normalize the same way on both engines; a redacted value and a regex key without a match stay local (uid id@context).",
   "contexts": {
     "c-kyc": {
       "identity_keys": [
         {
-          "node_type": "Dispositivo",
-          "entity": "Dispositivo",
+          "node_type": "Device",
+          "entity": "Device",
           "source": "node_id",
           "normalize": "device_id"
         },
@@ -16,17 +16,8 @@
           "normalize": "ip"
         },
         {
-          "node_type": "ChavePix",
-          "entity": "ChavePix",
-          "source": {
-            "kind": "prop",
-            "name": "chave"
-          },
-          "normalize": "pix_key"
-        },
-        {
-          "node_type": "Cartao",
-          "entity": "Cartao",
+          "node_type": "Card",
+          "entity": "Card",
           "source": "node_id",
           "normalize": "card"
         },
@@ -37,23 +28,32 @@
           "normalize": "terminal_id"
         },
         {
-          "node_type": "Endereco",
-          "entity": "Endereco",
+          "node_type": "Address",
+          "entity": "Address",
           "source": {
             "kind": "prop",
-            "name": "logradouro"
+            "name": "street"
           },
           "normalize": "address"
         },
         {
           "node_type": "Login",
-          "entity": "Sessao",
+          "entity": "Session",
           "source": {
             "kind": "prop",
             "name": "user_agent"
           },
           "normalize": "regex",
           "pattern": "sid=([A-Za-z0-9]+)"
+        },
+        {
+          "node_type": "Document",
+          "entity": "Document",
+          "source": {
+            "kind": "prop",
+            "name": "number"
+          },
+          "normalize": "digits"
         }
       ]
     }
@@ -65,7 +65,7 @@
       "nodes": [
         {
           "id": "DEV-123 456",
-          "type": "Dispositivo",
+          "type": "Device",
           "properties": {}
         },
         {
@@ -74,29 +74,8 @@
           "properties": {}
         },
         {
-          "id": "k1",
-          "type": "ChavePix",
-          "properties": {
-            "chave": "Ana.R@Example.com"
-          }
-        },
-        {
-          "id": "k2",
-          "type": "ChavePix",
-          "properties": {
-            "chave": "+55 (11) 98765-4321"
-          }
-        },
-        {
-          "id": "k3",
-          "type": "ChavePix",
-          "properties": {
-            "chave": "123.456.789-01"
-          }
-        },
-        {
           "id": "5311 2233 4455 1234",
-          "type": "Cartao",
+          "type": "Card",
           "properties": {}
         },
         {
@@ -106,9 +85,9 @@
         },
         {
           "id": "e1",
-          "type": "Endereco",
+          "type": "Address",
           "properties": {
-            "logradouro": "Rua das Acácias, 120 apto 31 - São Paulo"
+            "street": "12 Café Street, Apt. 31 – São Paulo"
           }
         },
         {
@@ -124,6 +103,13 @@
           "properties": {
             "user_agent": "curl/8"
           }
+        },
+        {
+          "id": "doc1",
+          "type": "Document",
+          "properties": {
+            "number": "078-05-1120"
+          }
         }
       ],
       "edges": [
@@ -131,10 +117,10 @@
           "id": "e1",
           "source": "DEV-123 456",
           "target": "177.010.001.009",
-          "type": "CONECTA",
+          "type": "CONNECTS",
           "properties": {
-            "quando": "2024-03-15T14:05:00",
-            "peso": "2"
+            "at": "2024-03-15T14:05:00",
+            "weight": "2"
           }
         }
       ]
@@ -145,9 +131,9 @@
       "nodes": [
         {
           "id": "dev123456",
-          "type": "Dispositivo",
+          "type": "Device",
           "properties": {
-            "so": "android"
+            "os": "android"
           }
         },
         {
@@ -156,22 +142,8 @@
           "properties": {}
         },
         {
-          "id": "k9",
-          "type": "ChavePix",
-          "properties": {
-            "chave": "ana.r@example.com"
-          }
-        },
-        {
-          "id": "k8",
-          "type": "ChavePix",
-          "properties": {
-            "chave": "11987654321"
-          }
-        },
-        {
           "id": "5311-2233-4455-1234",
-          "type": "Cartao",
+          "type": "Card",
           "properties": {}
         },
         {
@@ -181,9 +153,9 @@
         },
         {
           "id": "e9",
-          "type": "Endereco",
+          "type": "Address",
           "properties": {
-            "logradouro": "R. Acacias, nº 120, ap 31, Sao Paulo"
+            "street": "12 cafe street apt 31, sao paulo"
           }
         },
         {
@@ -199,6 +171,20 @@
           "properties": {
             "user_agent": "wget"
           }
+        },
+        {
+          "id": "doc9",
+          "type": "Document",
+          "properties": {
+            "number": "078051120"
+          }
+        },
+        {
+          "id": "doc8",
+          "type": "Document",
+          "properties": {
+            "number": "***-**-1120"
+          }
         }
       ],
       "edges": []
@@ -207,231 +193,203 @@
   "matches": [],
   "overrides": {},
   "expected": {
+    "edges": [
+      {
+        "dst": "IP:177.10.1.9",
+        "id": "s-a:e1",
+        "properties": {
+          "at": "2024-03-15T14:05:00",
+          "weight": "2"
+        },
+        "source_id": "s-a",
+        "src": "Device:dev123456",
+        "type": "CONNECTS"
+      }
+    ],
     "nodes": [
       {
-        "uid": "Cartao:531122*1234",
-        "type": "Cartao",
-        "entity": "Cartao",
+        "conflicts": {
+          "street": [
+            {
+              "source_id": "s-b",
+              "value": "12 cafe street apt 31, sao paulo"
+            }
+          ]
+        },
+        "entity": "Address",
+        "properties": {
+          "street": "12 Café Street, Apt. 31 – São Paulo"
+        },
+        "sources": [
+          {
+            "node_id": "e1",
+            "source_id": "s-a"
+          },
+          {
+            "node_id": "e9",
+            "source_id": "s-b"
+          }
+        ],
+        "type": "Address",
+        "uid": "Address:12 cafe street apt 31 sao paulo"
+      },
+      {
+        "entity": "Card",
         "properties": {},
         "sources": [
           {
-            "source_id": "s-a",
-            "node_id": "5311 2233 4455 1234"
+            "node_id": "5311 2233 4455 1234",
+            "source_id": "s-a"
           },
           {
-            "source_id": "s-b",
-            "node_id": "5311-2233-4455-1234"
-          }
-        ]
-      },
-      {
-        "uid": "ChavePix:cpf:11987654321",
-        "type": "ChavePix",
-        "entity": "ChavePix",
-        "properties": {
-          "chave": "11987654321"
-        },
-        "sources": [
-          {
-            "source_id": "s-b",
-            "node_id": "k8"
-          }
-        ]
-      },
-      {
-        "uid": "ChavePix:cpf:12345678901",
-        "type": "ChavePix",
-        "entity": "ChavePix",
-        "properties": {
-          "chave": "123.456.789-01"
-        },
-        "sources": [
-          {
-            "source_id": "s-a",
-            "node_id": "k3"
-          }
-        ]
-      },
-      {
-        "uid": "ChavePix:email:ana.r@example.com",
-        "type": "ChavePix",
-        "entity": "ChavePix",
-        "properties": {
-          "chave": "Ana.R@Example.com"
-        },
-        "sources": [
-          {
-            "source_id": "s-a",
-            "node_id": "k1"
-          },
-          {
-            "source_id": "s-b",
-            "node_id": "k9"
+            "node_id": "5311-2233-4455-1234",
+            "source_id": "s-b"
           }
         ],
-        "conflicts": {
-          "chave": [
-            {
-              "value": "ana.r@example.com",
-              "source_id": "s-b"
-            }
-          ]
-        }
+        "type": "Card",
+        "uid": "Card:531122*1234"
       },
       {
-        "uid": "ChavePix:phone:11987654321",
-        "type": "ChavePix",
-        "entity": "ChavePix",
+        "entity": "Device",
         "properties": {
-          "chave": "+55 (11) 98765-4321"
+          "os": "android"
         },
         "sources": [
           {
-            "source_id": "s-a",
-            "node_id": "k2"
-          }
-        ]
-      },
-      {
-        "uid": "Dispositivo:dev123456",
-        "type": "Dispositivo",
-        "entity": "Dispositivo",
-        "properties": {
-          "so": "android"
-        },
-        "sources": [
-          {
-            "source_id": "s-a",
-            "node_id": "DEV-123 456"
+            "node_id": "DEV-123 456",
+            "source_id": "s-a"
           },
           {
-            "source_id": "s-b",
-            "node_id": "dev123456"
-          }
-        ]
-      },
-      {
-        "uid": "Endereco:rua acacias 120 ap 31 sao paulo",
-        "type": "Endereco",
-        "entity": "Endereco",
-        "properties": {
-          "logradouro": "Rua das Acácias, 120 apto 31 - São Paulo"
-        },
-        "sources": [
-          {
-            "source_id": "s-a",
-            "node_id": "e1"
-          },
-          {
-            "source_id": "s-b",
-            "node_id": "e9"
+            "node_id": "dev123456",
+            "source_id": "s-b"
           }
         ],
-        "conflicts": {
-          "logradouro": [
-            {
-              "value": "R. Acacias, nº 120, ap 31, Sao Paulo",
-              "source_id": "s-b"
-            }
-          ]
-        }
+        "type": "Device",
+        "uid": "Device:dev123456"
       },
       {
-        "uid": "IP:177.10.1.9",
-        "type": "IP",
+        "conflicts": {
+          "number": [
+            {
+              "source_id": "s-b",
+              "value": "078051120"
+            }
+          ]
+        },
+        "entity": "Document",
+        "properties": {
+          "number": "078-05-1120"
+        },
+        "sources": [
+          {
+            "node_id": "doc1",
+            "source_id": "s-a"
+          },
+          {
+            "node_id": "doc9",
+            "source_id": "s-b"
+          }
+        ],
+        "type": "Document",
+        "uid": "Document:078051120"
+      },
+      {
         "entity": "IP",
         "properties": {},
         "sources": [
           {
-            "source_id": "s-a",
-            "node_id": "177.010.001.009"
+            "node_id": "177.010.001.009",
+            "source_id": "s-a"
           },
           {
-            "source_id": "s-b",
-            "node_id": "177.10.1.9"
+            "node_id": "177.10.1.9",
+            "source_id": "s-b"
           }
-        ]
+        ],
+        "type": "IP",
+        "uid": "IP:177.10.1.9"
       },
       {
-        "uid": "Sessao:abc123",
-        "type": "Login",
-        "entity": "Sessao",
+        "conflicts": {
+          "user_agent": [
+            {
+              "source_id": "s-b",
+              "value": "sid=abc123"
+            }
+          ]
+        },
+        "entity": "Session",
         "properties": {
           "user_agent": "Mozilla/5.0 sid=AbC123 x"
         },
         "sources": [
           {
-            "source_id": "s-a",
-            "node_id": "l1"
+            "node_id": "l1",
+            "source_id": "s-a"
           },
           {
-            "source_id": "s-b",
-            "node_id": "l9"
+            "node_id": "l9",
+            "source_id": "s-b"
           }
         ],
-        "conflicts": {
-          "user_agent": [
-            {
-              "value": "sid=abc123",
-              "source_id": "s-b"
-            }
-          ]
-        }
+        "type": "Login",
+        "uid": "Session:abc123"
       },
       {
-        "uid": "Terminal:T42",
-        "type": "Terminal",
         "entity": "Terminal",
         "properties": {},
         "sources": [
           {
-            "source_id": "s-a",
-            "node_id": "t-0042"
+            "node_id": "t-0042",
+            "source_id": "s-a"
           },
           {
-            "source_id": "s-b",
-            "node_id": "T42"
+            "node_id": "T42",
+            "source_id": "s-b"
           }
-        ]
+        ],
+        "type": "Terminal",
+        "uid": "Terminal:T42"
       },
       {
-        "uid": "l2@c-kyc",
-        "type": "Login",
+        "entity": null,
+        "properties": {
+          "number": "***-**-1120"
+        },
+        "sources": [
+          {
+            "node_id": "doc8",
+            "source_id": "s-b"
+          }
+        ],
+        "type": "Document",
+        "uid": "doc8@c-kyc"
+      },
+      {
+        "conflicts": {
+          "user_agent": [
+            {
+              "source_id": "s-b",
+              "value": "wget"
+            }
+          ]
+        },
         "entity": null,
         "properties": {
           "user_agent": "curl/8"
         },
         "sources": [
           {
-            "source_id": "s-a",
-            "node_id": "l2"
+            "node_id": "l2",
+            "source_id": "s-a"
           },
           {
-            "source_id": "s-b",
-            "node_id": "l2"
+            "node_id": "l2",
+            "source_id": "s-b"
           }
         ],
-        "conflicts": {
-          "user_agent": [
-            {
-              "value": "wget",
-              "source_id": "s-b"
-            }
-          ]
-        }
-      }
-    ],
-    "edges": [
-      {
-        "id": "s-a:e1",
-        "src": "Dispositivo:dev123456",
-        "dst": "IP:177.10.1.9",
-        "type": "CONECTA",
-        "properties": {
-          "quando": "2024-03-15T14:05:00",
-          "peso": "2"
-        },
-        "source_id": "s-a"
+        "type": "Login",
+        "uid": "l2@c-kyc"
       }
     ]
   }

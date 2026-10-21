@@ -1,7 +1,7 @@
 /**
  * Temporal money trace, forward, and backward by reversal (investigations, 03 §6.1). Pure and deterministic:
  * `workers/traceWorker.ts` runs it off the main thread and the server port (F3.8)
- * must return the same numbers for `__tests__/fixtures/trace/golpe-pix.json`.
+ * must return the same numbers for `__tests__/fixtures/trace/flow-chain.json`.
  *
  * Readings of §6.1 fixed here (decision log F3.3):
  * - edges before the window start still run, so they build opening balances (the

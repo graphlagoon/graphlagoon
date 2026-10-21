@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Bottom strip of the case (05 §3): Linha do tempo (swimlanes over every dated
- * edge; the brush becomes the time-window chip), Atividade (the journal with a
- * pessoa / agente / sistema filter; a click goes to the item), Sugestões (confirm
- * in bulk per tool) and, when an analysis is active, its result.
+ * Bottom strip of the case (05 §3): Timeline (swimlanes over every dated
+ * edge; the brush becomes the time-window chip), Activity (the journal with a
+ * person / agent / system filter; a click goes to the item), Tasks (06 §1),
+ * Suggestions (confirm in bulk per tool) and, when an analysis is active, its result.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
@@ -17,10 +17,11 @@ import { annotationKindLabel, itemKindLabel } from '@/utils/investigationStatus'
 import type { TraceFlow } from '@/utils/traceView';
 import SwimlaneTimeline from '@/components/investigation/SwimlaneTimeline.vue';
 import AnalysisResultPanel from '@/components/investigation/AnalysisResultPanel.vue';
+import CaseTasksPanel from '@/components/investigation/CaseTasksPanel.vue';
 import type { TraceView } from '@/components/investigation/TraceResultPanel.vue';
 import type { CaseItem, InvestigationEvent } from '@/types/investigation';
 
-export type TimelineTab = 'timeline' | 'activity' | 'suggestions' | 'result';
+export type TimelineTab = 'timeline' | 'activity' | 'tasks' | 'suggestions' | 'result';
 
 const props = defineProps<{ tab: TimelineTab; activeItem: CaseItem | null; canEdit: boolean; traceView: TraceView; collapsed: boolean }>();
 const emit = defineEmits<{
@@ -47,16 +48,16 @@ const flows = computed<TraceFlow[]>(() =>
 // --- activity --------------------------------------------------------------------
 type Actor = 'all' | 'human' | 'agent' | 'system';
 const actor = ref<Actor>('all');
-const SYSTEM = /^(analysis|trace|path|typology|nodes|view)\./;
+const SYSTEM = /^(analysis|trace|path|nodes|view)\./;
 const kindOf = (e: InvestigationEvent): Exclude<Actor, 'all'> => (e.actor_kind === 'agent' ? 'agent' : SYSTEM.test(e.kind) ? 'system' : 'human');
 /** Event family = the part before the dot (`case`, `item`, `role`, `decision`…). */
 const familyOf = (e: InvestigationEvent) => e.kind.split('.')[0];
-const FAMILY_LABELS: Record<string, string> = { case: 'caso', item: 'item', decision: 'decisão', trace: 'rastreio', path: 'caminhos', nodes: 'nós', metric: 'métrica', view: 'visão', analysis: 'análise' };
+const FAMILY_LABELS: Record<string, string> = { case: 'case', item: 'item', decision: 'decision', trace: 'trace', path: 'paths', nodes: 'nodes', metric: 'metric', view: 'view', analysis: 'analysis' };
 const familyLabel = (f: string) => FAMILY_LABELS[f] ?? annotationKindLabel(f);
 const kindFilter = ref('');
 const families = computed(() => [...new Set(store.events.map(familyOf))].sort((a, b) => familyLabel(a).localeCompare(familyLabel(b))));
 
-// "desde a minha última visita": the previous visit's time, kept per case in localStorage.
+// "Since my last visit": the previous visit's time, kept per case in localStorage.
 const VISIT_KEY = (id: string) => `gl:case:${id}:lastVisit`;
 const lastVisit = ref<string | null>(null);
 const sinceVisit = ref(false);
@@ -80,7 +81,7 @@ const journal = computed(() =>
     .filter((e) => !kindFilter.value || familyOf(e) === kindFilter.value)
     .filter((e) => !sinceVisit.value || isNew(e)),
 );
-/** The row after which the "última visita" divider goes: the oldest new event (the list is newest first). */
+/** The row after which the "last visit" divider goes: the oldest new event (the list is newest first). */
 const dividerAfter = computed(() => {
   const list = journal.value;
   const i = list.findIndex((e) => !isNew(e));
@@ -95,8 +96,9 @@ const itemOf = (e: InvestigationEvent) => {
 const bySource = computed(() => {
   const groups = new Map<string, { label: string; annotations: string[]; items: string[] }>();
   for (const s of store.suggestions) {
+    if (s.kind === 'annotation' && s.annotation.kind === 'decision_proposal') continue; // reviewed in the decision panel
     const key = s.kind === 'annotation' ? `${s.annotation.kind}:${s.annotation.value?.tool ?? s.annotation.author_kind}` : `${s.item.provenance?.tool ?? s.item.subkind}:${s.item.author_kind}`;
-    const label = s.kind === 'annotation' ? `${annotationKindLabel(s.annotation.kind)} · ${s.annotation.author_kind === 'agent' ? 'agente' : s.annotation.author_email}` : `${itemKindLabel(s.item.kind)}/${s.item.subkind} · ${s.item.author_kind === 'agent' ? 'agente' : s.item.author_email}`;
+    const label = s.kind === 'annotation' ? `${annotationKindLabel(s.annotation.kind)} · ${s.annotation.author_kind === 'agent' ? 'agent' : s.annotation.author_email}` : `${itemKindLabel(s.item.kind)}/${s.item.subkind} · ${s.item.author_kind === 'agent' ? 'agent' : s.item.author_email}`;
     const g = groups.get(key) ?? { label, annotations: [], items: [] };
     if (s.kind === 'annotation') g.annotations.push(s.annotation.id);
     else g.items.push(s.item.id);
@@ -110,9 +112,9 @@ async function decideAll(g: { annotations: string[]; items: string[] }, status: 
   try {
     for (const id of g.annotations) await store.setAnnotationStatus(id, status);
     for (const id of g.items) await store.setItemStatus(id, status);
-    toast.success(`${g.annotations.length + g.items.length} ${status === 'confirmed' ? 'confirmadas' : 'recusadas'}`);
+    toast.success(`${g.annotations.length + g.items.length} ${status === 'confirmed' ? 'confirmed' : 'rejected'}`);
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Não foi possível atualizar as sugestões'));
+    toast.error(getErrorMessage(e, 'Failed to update the suggestions'));
   } finally {
     busy.value = false;
   }
@@ -127,10 +129,11 @@ watch(
 );
 
 const tabs = computed<{ id: TimelineTab; label: string }[]>(() => [
-  { id: 'timeline', label: `Linha do tempo${flows.value.length ? ` · ${flows.value.length}` : ''}` },
-  { id: 'activity', label: `Atividade · ${store.events.length}` },
-  { id: 'suggestions', label: `● ${store.suggestions.length} sugestões` },
-  ...(props.activeItem ? [{ id: 'result' as const, label: `Resultado · ${props.activeItem.title}` }] : []),
+  { id: 'timeline', label: `Timeline${flows.value.length ? ` · ${flows.value.length}` : ''}` },
+  { id: 'activity', label: `Activity · ${store.events.length}` },
+  { id: 'tasks', label: `Tasks · ${store.tasks.filter((t) => t.value.state === 'open').length}` },
+  { id: 'suggestions', label: `● ${store.suggestions.length} suggestion${store.suggestions.length === 1 ? '' : 's'}` },
+  ...(props.activeItem ? [{ id: 'result' as const, label: `Result · ${props.activeItem.title}` }] : []),
 ]);
 </script>
 
@@ -138,48 +141,50 @@ const tabs = computed<{ id: TimelineTab; label: string }[]>(() => [
   <section class="strip" :class="{ collapsed }" data-testid="case-timeline">
     <nav class="tabs">
       <button v-for="t in tabs" :key="t.id" :class="{ active: tab === t.id && !collapsed }" :data-testid="`timeline-tab-${t.id}`" @click="emit('update:tab', t.id); emit('update:collapsed', false)">{{ t.label }}</button>
-      <button class="collapse" :title="collapsed ? 'Expandir' : 'Recolher'" data-testid="timeline-collapse" @click="emit('update:collapsed', !collapsed)">{{ collapsed ? '▴' : '▾' }}</button>
+      <button class="collapse" :title="collapsed ? 'Expand' : 'Collapse'" data-testid="timeline-collapse" @click="emit('update:collapsed', !collapsed)">{{ collapsed ? '▴' : '▾' }}</button>
     </nav>
     <div v-if="!collapsed" class="body">
       <template v-if="tab === 'timeline'">
         <SwimlaneTimeline v-if="flows.length" :flows="flows" :name-of="nameOf" :focus="filters.window" :max-lanes="12" @update:focus="filters.window = $event" />
-        <p v-else class="muted empty">Nenhuma relação com data no canvas. Configure a coluna de tempo dos tipos de relação nas preferências do caso (⚙).</p>
+        <p v-else class="muted empty">No dated edge on the canvas. Set the time column of the edge types in the case preferences (⚙).</p>
       </template>
 
       <div v-else-if="tab === 'activity'" class="journal" data-testid="journal">
         <div class="filter">
           <button v-for="a in (['all', 'human', 'agent', 'system'] as Actor[])" :key="a" :class="{ on: actor === a }" :data-testid="`activity-${a}`" @click="actor = a">
-            {{ a === 'all' ? 'Tudo' : a === 'human' ? 'Pessoa' : a === 'agent' ? 'Agente' : 'Sistema' }}
+            {{ a === 'all' ? 'All' : a === 'human' ? 'Person' : a === 'agent' ? 'Agent' : 'System' }}
           </button>
-          <select v-model="kindFilter" class="kind" aria-label="Tipo de evento" data-testid="activity-kind">
-            <option value="">Todos os tipos</option>
+          <select v-model="kindFilter" class="kind" aria-label="Event kind" data-testid="activity-kind">
+            <option value="">All kinds</option>
             <option v-for="f in families" :key="f" :value="f">{{ familyLabel(f) }}</option>
           </select>
           <button v-if="lastVisit" :class="{ on: sinceVisit }" data-testid="activity-since-visit" @click="sinceVisit = !sinceVisit">
-            Desde a minha última visita · {{ newCount }}
+            Since my last visit · {{ newCount }}
           </button>
         </div>
         <template v-for="e in journal" :key="e.id">
           <div class="journal-row" :class="{ clickable: itemOf(e), new: isNew(e) }" data-testid="journal-event" @click="itemOf(e) && emit('select-item', itemOf(e)!)">
             <span class="muted">{{ formatDate(e.at) }}</span>
-            <strong v-if="e.actor_kind === 'agent'" class="agent" data-testid="journal-agent">agente {{ e.agent_name }} por {{ e.actor_email }}</strong>
+            <strong v-if="e.actor_kind === 'agent'" class="agent" data-testid="journal-agent">agent {{ e.agent_name }} for {{ e.actor_email }}</strong>
             <strong v-else>{{ e.actor_email }}</strong>
             <span>{{ describeEvent(e, nameOf) }}</span>
           </div>
-          <div v-if="dividerAfter === e.id" class="divider muted" data-testid="journal-last-visit">— sua última visita · {{ formatDate(lastVisit) }} —</div>
+          <div v-if="dividerAfter === e.id" class="divider muted" data-testid="journal-last-visit">— your last visit · {{ formatDate(lastVisit) }} —</div>
         </template>
-        <p v-if="!journal.length" class="muted">{{ sinceVisit ? 'Nada novo desde a sua última visita.' : 'Nada registrado ainda.' }}</p>
+        <p v-if="!journal.length" class="muted">{{ sinceVisit ? 'Nothing new since your last visit.' : 'Nothing recorded yet.' }}</p>
       </div>
+
+      <CaseTasksPanel v-else-if="tab === 'tasks'" />
 
       <div v-else-if="tab === 'suggestions'" class="suggestions" data-testid="suggestions-panel">
         <div v-for="[key, g] in bySource" :key="key" class="sugg-group" :data-testid="`suggestion-group-${key}`">
           <strong>{{ g.label }}</strong> <span class="muted">{{ g.annotations.length + g.items.length }}</span>
           <span v-if="canEdit" class="row">
-            <button class="link-btn ok" :disabled="busy" :data-testid="`suggestions-confirm-${key}`" @click="decideAll(g, 'confirmed')">✓ Confirmar todas</button>
-            <button class="link-btn danger" :disabled="busy" @click="decideAll(g, 'rejected')">✕ Recusar todas</button>
+            <button class="link-btn ok" :disabled="busy" :data-testid="`suggestions-confirm-${key}`" @click="decideAll(g, 'confirmed')">✓ Confirm all</button>
+            <button class="link-btn danger" :disabled="busy" @click="decideAll(g, 'rejected')">✕ Reject all</button>
           </span>
         </div>
-        <p v-if="!bySource.length" class="muted">Nenhuma sugestão para revisar.</p>
+        <p v-if="!bySource.length" class="muted">No suggestions to review.</p>
       </div>
 
       <AnalysisResultPanel

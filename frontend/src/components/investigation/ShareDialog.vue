@@ -47,9 +47,10 @@ function unshare(target: string) {
         <button class="modal-close" aria-label="Close" @click="emit('close')">&times;</button>
       </div>
       <p class="hint">
-        Named people only: no wildcards, no domains (tipping-off prohibition). Readers see the case; writers also
+        Named people only: no wildcards, no domains (a case is need-to-know). Readers see the case; writers also
         change it. The owner ({{ store.current.owner_email }}) always manages it.
       </p>
+      <p v-if="store.caseType?.notice" class="notice" data-testid="share-notice">{{ store.caseType.notice }}</p>
       <form class="share-form" @submit.prevent="share">
         <input
           v-model="email"
@@ -92,6 +93,14 @@ function unshare(target: string) {
 </template>
 
 <style scoped>
+.notice {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--color-deadline-warn);
+  background: var(--bg-secondary);
+  font-size: 13px;
+}
+
 .share-dialog {
   max-width: 520px;
 }

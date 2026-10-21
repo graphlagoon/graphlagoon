@@ -1,9 +1,9 @@
 /**
- * "Adicionar ao caso" from anywhere (05 §4): one composable behind every
+ * "Add to case" from anywhere (05 §4): one composable behind every
  * button outside the case (toolbar, console, tables, selection, explorations)
  * and inside it (popover, drop/paste). The target is the current case unless
- * `caseId` says otherwise; every add ends in one toast "Adicionado ao caso …
- * · ver" that opens the case.
+ * `caseId` says otherwise; every add ends in one toast "Added to case …
+ * · view" that opens the case.
  */
 import { computed, unref, type MaybeRef } from 'vue';
 import { useRouter } from 'vue-router';
@@ -52,9 +52,20 @@ export function classifyPaste(text: string): { kind: 'url' } | { kind: 'table'; 
   return { kind: 'note' };
 }
 
-/** `:name` placeholders of a query (the same rule as the server's `substitute`). */
-export function queryParameterNames(text: string): string[] {
-  return [...new Set([...text.matchAll(/(?<![:\w]):([A-Za-z_]\w*)/g)].map((m) => m[1]))];
+const QUOTED = String.raw`'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\`[^\`]*\``;
+const PARAMS = {
+  sql: new RegExp(`${QUOTED}|(?<![:\\w]):([A-Za-z_]\\w*)`, 'g'),
+  // In Cypher a colon after `(`, `[` or `|` is a label or a type: `(:Person)`, `-[:KNOWS|OWNS]->`.
+  cypher: new RegExp(`${QUOTED}|(?<![:\\w(\\[|]):([A-Za-z_]\\w*)`, 'g'),
+};
+
+/**
+ * `:name` placeholders of a query, outside string literals (the same rule as
+ * the server's `case_queries.parameter_names`).
+ */
+export function queryParameterNames(text: string, language: string = 'sql'): string[] {
+  const re = language === 'cypher' ? PARAMS.cypher : PARAMS.sql;
+  return [...new Set([...text.matchAll(re)].map((m) => m[1]).filter(Boolean))];
 }
 
 export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
@@ -65,7 +76,7 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
   try {
     router = useRouter();
   } catch {
-    router = null; // outside a component (tests): the toast has no "ver"
+    router = null; // outside a component (tests): the toast has no "view"
   }
 
   const targetId = computed(() => unref(caseId) ?? current.caseId);
@@ -76,15 +87,15 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
 
   /** The case to add to, or null after telling the person to pick one. */
   function target(): string | null {
-    if (!targetId.value) toast.info('Escolha um caso atual na barra superior.');
+    if (!targetId.value) toast.info('Pick a current case in the top bar.');
     return targetId.value;
   }
 
   function notify(item: CaseItem, id: string) {
     const title = targetTitle.value || item.title;
-    const message = `Adicionado ao caso ${title}`;
+    const message = `Added to case ${title}`;
     if (router && router.currentRoute.value.name !== 'investigation') {
-      toast.show(message, 'success', 6000, { label: 'ver', onClick: () => void router!.push(`/investigations/${id}`) });
+      toast.show(message, 'success', 6000, { label: 'view', onClick: () => void router!.push(`/investigations/${id}`) });
     } else {
       toast.success(message);
     }
@@ -99,7 +110,7 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
       notify(item, id);
       return item;
     } catch (e) {
-      toast.error(getErrorMessage(e, 'Falha ao adicionar ao caso'));
+      toast.error(getErrorMessage(e, 'Failed to add to the case'));
       return null;
     }
   }
@@ -130,13 +141,13 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
         .map((e) => ({ id: e.edge_id, source: e.src, target: e.dst, type: e.relationship_type, properties: (e.properties ?? {}) as Record<string, unknown> })),
     };
     if (!picked.nodes.length) {
-      toast.info('Selecione nós no grafo primeiro.');
+      toast.info('Select nodes in the graph first.');
       return Promise.resolve(null);
     }
     return create({
       kind: 'graph',
       subkind: 'selection',
-      title: title ?? `Seleção · ${picked.nodes.length} nós`,
+      title: title ?? `Selection · ${picked.nodes.length} nodes`,
       context_id: graph.currentContext?.id,
       provenance: { context_id: graph.currentContext?.id, exploration_id: graph.currentExploration?.id ?? undefined, tool: 'selection' },
       anchor: { entity_ids: [...nodes] },
@@ -164,7 +175,7 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
         notify(item, id);
         return item;
       } catch (e) {
-        toast.error(getErrorMessage(e, 'Falha ao enviar o arquivo'));
+        toast.error(getErrorMessage(e, 'Failed to upload the file'));
         return null;
       }
     }
@@ -172,7 +183,7 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
     if (URL_RE.test(text)) {
       return create({ kind: 'document', subkind: 'link', title: title ?? text.replace(/^https?:\/\//, '').slice(0, 80), content: text, provenance: { url: text } });
     }
-    return create({ kind: 'document', subkind: 'markdown', title: title ?? (text.split('\n')[0] || 'Documento').slice(0, 80), content: text });
+    return create({ kind: 'document', subkind: 'markdown', title: title ?? (text.split('\n')[0] || 'Document').slice(0, 80), content: text });
   }
 
   function addNote(text: string, anchor?: ItemAnchor) {
@@ -191,7 +202,7 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
   function addPasted(text: string) {
     const what = classifyPaste(text);
     if (what.kind === 'url') return addDocument(text);
-    if (what.kind === 'table') return addTable({ columns: what.columns, rows: what.rows, title: `Colado · ${what.rows.length} linhas`, provenance: { tool: 'paste' } });
+    if (what.kind === 'table') return addTable({ columns: what.columns, rows: what.rows, title: `Pasted · ${what.rows.length} rows`, provenance: { tool: 'paste' } });
     return addNote(text);
   }
 
@@ -200,7 +211,7 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
     const declared = input.parameters ?? [];
     const parameters: TemplateParameter[] = [
       ...declared,
-      ...queryParameterNames(input.text)
+      ...queryParameterNames(input.text, input.language)
         .filter((n) => !declared.some((p) => p.id === n))
         .map((n) => ({ id: n, type: 'input' as const, label: n, required: true })),
     ];
@@ -223,10 +234,10 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
       const item = await api.runInvestigationQuery(id, itemId, parameters);
       if (investigation.current?.id === id) await investigation.fetchItems().catch(() => {});
       const run = item.latest?.run as { row_count?: number; duration_ms?: number } | undefined;
-      toast.success(`Consulta executada: ${run?.row_count ?? '?'} linhas em ${run?.duration_ms ?? '?'} ms`);
+      toast.success(`Query run: ${run?.row_count ?? '?'} rows in ${run?.duration_ms ?? '?'} ms`);
       return item;
     } catch (e) {
-      toast.error(getErrorMessage(e, 'Falha ao executar a consulta'));
+      toast.error(getErrorMessage(e, 'Failed to run the query'));
       return null;
     }
   }

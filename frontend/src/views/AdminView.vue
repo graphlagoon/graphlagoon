@@ -20,8 +20,12 @@ import {
   formatRelative,
   isIdleUser,
   sortUsers,
+  errorText,
 } from '@/utils/adminView';
-import type { AdminTab, AgentToken, OrgLibraryDoc, OrgVocabulary, OrgVocabularyValue } from '@/types/admin';
+import type { AdminTab, AgentToken, OrgAuthoring, OrgLibraryDoc } from '@/types/admin';
+import type { CaseType, CaseTypeSpec } from '@/types/investigation';
+import CaseTypeEditor from '@/components/admin/CaseTypeEditor.vue';
+import LibraryDocEditor, { type LibraryDraft } from '@/components/admin/LibraryDocEditor.vue';
 import { api } from '@/services/api';
 import type { Exploration, GraphContext } from '@/types/graph';
 import type { Investigation } from '@/types/investigation';
@@ -48,7 +52,7 @@ const TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'investigations', label: 'Investigations' },
   { id: 'agents', label: 'Agent tokens' },
   { id: 'library', label: 'Library' },
-  { id: 'vocabularies', label: 'Vocabularies' },
+  { id: 'case-types', label: 'Case types' },
   { id: 'groups', label: 'Groups & permissions' },
   { id: 'audit', label: 'Audit' },
   { id: 'danger', label: 'Danger zone' },
@@ -87,10 +91,10 @@ async function loadTab(id: AdminTab, force = false) {
       await admin.fetchAgentTokens();
       break;
     case 'library':
-      await loadLibrary();
+      await Promise.all([loadLibrary(), loadAuthoring(), caseTypes.value.length ? Promise.resolve() : loadCaseTypes()]);
       break;
-    case 'vocabularies':
-      await loadVocabularies();
+    case 'case-types':
+      await Promise.all([loadCaseTypes(), loadAuthoring(), library.value.length ? Promise.resolve() : loadLibrary()]);
       break;
     case 'groups':
       // Users feed the member/inspector datalists; permissions feed the
@@ -116,17 +120,27 @@ function selectTab(id: AdminTab) {
 
 onMounted(() => loadTab('overview'));
 
-// --- Library and vocabularies (05 §6) ----------------------------------------
+// --- Library and case types (05 §6, 06 §1) -----------------------------------
 // Local state on purpose: two small editors over /api/admin/library and
-// /api/admin/vocabularies; agents read the same data as org:// resources.
+// /api/admin/case-types; agents read the same data as org:// resources.
 
 const library = ref<OrgLibraryDoc[]>([]);
 const libraryError = ref<string | null>(null);
-const libraryDraft = ref<{ slug: string; title: string; kind: 'playbook' | 'template'; body: string; isNew: boolean } | null>(null);
-const vocabularies = ref<OrgVocabulary[]>([]);
-const vocabKind = ref<OrgVocabulary['kind']>('role');
-const vocabRows = ref<Array<{ value: string; label: string; presets: string; norm_ref: string }>>([]);
-const vocabBusy = ref(false);
+const libraryDraft = ref<LibraryDraft | null>(null);
+/** What the help and the "Ask an AI" prompts of both editors are built from (06). */
+const authoring = ref<OrgAuthoring | null>(null);
+async function loadAuthoring() {
+  if (authoring.value) return;
+  try {
+    authoring.value = await api.getOrgAuthoring();
+  } catch {
+    /* older server: the editors work without the help */
+  }
+}
+const caseTypes = ref<CaseType[]>([]);
+/** The type being edited: null = none, 'new' = a new one. */
+const caseTypeDraft = ref<CaseType | 'new' | null>(null);
+const caseTypeBusy = ref(false);
 
 async function loadLibrary() {
   libraryError.value = null;
@@ -140,11 +154,9 @@ function editDoc(doc: OrgLibraryDoc) {
   libraryDraft.value = { slug: doc.slug, title: doc.title, kind: doc.kind, body: doc.body, isNew: false };
 }
 function newDoc() {
-  libraryDraft.value = { slug: '', title: '', kind: 'playbook', body: '# Title\n\nCase {investigation_id}: …\n\n1. Read the brief (`get_brief`).\n', isNew: true };
+  libraryDraft.value = { slug: '', title: '', kind: 'playbook', body: '', isNew: true };
 }
-async function saveDoc() {
-  const d = libraryDraft.value;
-  if (!d) return;
+async function saveDoc(d: LibraryDraft) {
   try {
     const payload = { title: d.title.trim(), kind: d.kind, body: d.body };
     const saved = d.isNew ? await api.createAdminLibraryDoc({ slug: d.slug.trim(), ...payload }) : await api.putAdminLibraryDoc(d.slug, payload);
@@ -152,7 +164,7 @@ async function saveDoc() {
     libraryDraft.value = null;
     toast.success(`Saved ${saved.slug}`);
   } catch (e) {
-    toast.error((e as Error).message || 'Save failed');
+    toast.error(errorText(e, 'Save failed'));
   }
 }
 async function deleteDoc(doc: OrgLibraryDoc) {
@@ -167,44 +179,38 @@ async function deleteDoc(doc: OrgLibraryDoc) {
   }
 }
 
-function showVocab(kind: OrgVocabulary['kind']) {
-  vocabKind.value = kind;
-  const v = vocabularies.value.find((x) => x.kind === kind);
-  vocabRows.value = (v?.values ?? []).map((e) => ({ value: e.value, label: e.label ?? '', presets: e.presets.join(', '), norm_ref: e.norm_ref ?? '' }));
-}
-async function loadVocabularies() {
+async function loadCaseTypes() {
   try {
-    vocabularies.value = await api.getOrgVocabularies();
-    showVocab(vocabKind.value);
+    caseTypes.value = await api.getCaseTypes();
   } catch (e) {
-    toast.error((e as Error).message || 'Failed to load the vocabularies');
+    toast.error((e as Error).message || 'Failed to load the case types');
   }
 }
-async function saveVocab() {
-  vocabBusy.value = true;
+async function saveCaseType(slug: string, spec: CaseTypeSpec) {
+  caseTypeBusy.value = true;
   try {
-    const values: OrgVocabularyValue[] = vocabRows.value
-      .filter((r) => r.value.trim())
-      .map((r) => ({ value: r.value.trim(), label: r.label.trim() || null, presets: r.presets.split(',').map((x) => x.trim()).filter(Boolean), norm_ref: r.norm_ref.trim() || null }));
-    const saved = await api.putAdminVocabulary(vocabKind.value, values);
-    vocabularies.value = vocabularies.value.map((v) => (v.kind === saved.kind ? saved : v));
-    showVocab(saved.kind);
-    toast.success(`Saved ${saved.kind}`);
+    const saved = await api.putAdminCaseType(slug, spec);
+    caseTypes.value = [...caseTypes.value.filter((t) => t.slug !== saved.slug), saved].sort((a, b) =>
+      a.builtin === b.builtin ? a.label.localeCompare(b.label) : a.builtin ? -1 : 1,
+    );
+    caseTypeDraft.value = null;
+    toast.success(`Saved ${saved.label}`);
   } catch (e) {
-    toast.error((e as Error).message || 'Save failed');
+    toast.error(errorText(e, 'Save failed'));
   } finally {
-    vocabBusy.value = false;
+    caseTypeBusy.value = false;
   }
 }
-async function resetVocab() {
+async function deleteCaseType(t: CaseType) {
+  if (!(await confirmAction({ title: 'Delete case type', message: `Delete “${t.label}”? Only a type no case uses can go.`, confirmLabel: 'Delete', danger: true }))) return;
   try {
-    const saved = await api.resetAdminVocabulary(vocabKind.value);
-    vocabularies.value = vocabularies.value.map((v) => (v.kind === saved.kind ? saved : v));
-    showVocab(saved.kind);
+    await api.deleteAdminCaseType(t.slug);
+    caseTypes.value = caseTypes.value.filter((x) => x.slug !== t.slug);
   } catch (e) {
-    toast.error((e as Error).message || 'Reset failed');
+    toast.error(errorText(e, 'Delete failed'));
   }
 }
+/** The `{error: {message}}` of the API, else the generic message. */
 
 // --- Overview ---------------------------------------------------------------
 
@@ -261,7 +267,7 @@ const filteredInvestigations = computed(() => {
   return admin.investigations.filter(
     (i) =>
       (!owner || i.owner_email.toLowerCase() === owner) &&
-      (!q || [i.title, i.owner_email, i.assignee_email ?? '', i.kind_preset ?? ''].join(' ').toLowerCase().includes(q)),
+      (!q || [i.title, i.owner_email, i.assignee_email ?? '', i.case_type ?? ''].join(' ').toLowerCase().includes(q)),
   );
 });
 
@@ -684,7 +690,7 @@ function openGraph(id: string) {
             <div class="list-item-title">{{ t.name }}</div>
             <div class="list-item-subtitle">
               owner <code>{{ t.owner_email }}</code>
-              · {{ t.scope === 'case' ? `${(t.investigation_ids ?? []).length} case(s)` : 'every case' }}{{ t.unmasked ? ' · unmasked' : '' }}
+              · {{ t.scope === 'case' ? `${(t.investigation_ids ?? []).length} case(s)` : 'every case' }}
               · created {{ formatRelative(t.created_at) }}
               · {{ t.revoked_at ? 'revoked' : t.active ? `expires ${t.expires_at.slice(0, 10)}` : 'expired' }}
             </div>
@@ -707,9 +713,10 @@ function openGraph(id: string) {
     <!-- Org library (05 §6): playbooks agents read as org://playbooks/{slug} and MCP prompts -->
     <section v-else-if="tab === 'library'" class="tab-panel" data-testid="admin-library">
       <p class="admin-subtitle">
-        Playbooks and templates in markdown. Agents get them as prompts and <code>org://playbooks/{slug}</code>;
-        <code>{investigation_id}</code> is replaced by the case. Built-in ones are marked <em>seeded</em>; editing one
-        stores your version, deleting your version restores it.
+        Playbooks (steps an AI agent follows; agents get them as prompts), report templates (markdown with
+        placeholders, drafted over a case from the dossier) and file mappings (JSON the import wizard starts from).
+        Built-in playbooks are marked <em>seeded</em>; editing one stores your version, deleting your version restores
+        it. Each editor has a <b>?</b> reference and <b>Ask an AI</b>.
       </p>
       <div v-if="libraryError" class="error">{{ libraryError }}</div>
       <div class="two-cols">
@@ -728,52 +735,60 @@ function openGraph(id: string) {
             <button type="button" class="btn btn-primary btn-sm" data-testid="admin-library-new" @click="newDoc">New doc</button>
           </div>
         </div>
-        <form v-if="libraryDraft" class="card doc-editor" data-testid="admin-library-editor" @submit.prevent="saveDoc">
-          <div class="form-row">
-            <label>Slug <input v-model="libraryDraft.slug" class="form-control" :disabled="!libraryDraft.isNew" pattern="[a-z0-9_-]+" required /></label>
-            <label>Title <input v-model="libraryDraft.title" class="form-control" required /></label>
-            <label>Kind
-              <select v-model="libraryDraft.kind" class="form-control"><option value="playbook">playbook</option><option value="template">template</option></select>
-            </label>
-          </div>
-          <textarea v-model="libraryDraft.body" class="form-control body" rows="18" spellcheck="false"></textarea>
-          <div class="form-row">
-            <button type="submit" class="btn btn-primary btn-sm" data-testid="admin-library-save">Save</button>
-            <button type="button" class="btn btn-outline btn-sm" @click="libraryDraft = null">Cancel</button>
-          </div>
-        </form>
+        <LibraryDocEditor
+          v-if="libraryDraft"
+          :key="libraryDraft.isNew ? 'new' : libraryDraft.slug"
+          :draft="libraryDraft"
+          :authoring="authoring"
+          :case-types="caseTypes"
+          @save="saveDoc"
+          @cancel="libraryDraft = null"
+        />
       </div>
     </section>
 
-    <!-- Org vocabularies (05 §4b): suggestions per preset, never imposed -->
-    <section v-else-if="tab === 'vocabularies'" class="tab-panel" data-testid="admin-vocabularies">
+    <!-- Case types (06 §1): what the org investigates, as data -->
+    <section v-else-if="tab === 'case-types'" class="tab-panel" data-testid="admin-case-types">
       <p class="admin-subtitle">
-        Suggested roles, tags, typologies and link attributes, per case type (presets, comma separated; empty = every
-        type). The case settings offer them; agents read them with <code>list_vocabulary</code>. Reset restores the built-in list.
+        Each case type is a vocabulary, a decision catalog (outcomes, actions that become tasks, four eyes), the case's
+        fields, an SLA and a notice. A new case copies the defaults; agents read them with <code>get_case_type</code>.
+        <em>General</em> is built in and has no rules.
       </p>
-      <div class="card">
+      <CaseTypeEditor
+        v-if="caseTypeDraft"
+        :key="caseTypeDraft === 'new' ? 'new' : caseTypeDraft.slug"
+        :case-type="caseTypeDraft === 'new' ? null : caseTypeDraft"
+        :library="library"
+        :authoring="authoring"
+        :case-types="caseTypes.map((t) => ({ slug: t.slug, label: t.label }))"
+        :busy="caseTypeBusy"
+        @save="saveCaseType"
+        @cancel="caseTypeDraft = null"
+      />
+      <div v-else class="card">
         <div class="form-row">
-          <button v-for="v in vocabularies" :key="v.kind" type="button" class="btn btn-sm" :class="v.kind === vocabKind ? 'btn-primary' : 'btn-outline'" :data-testid="`admin-vocab-${v.kind}`" @click="showVocab(v.kind)">
-            {{ v.kind }}<template v-if="v.seeded"> (seeded)</template>
-          </button>
+          <button type="button" class="btn btn-primary btn-sm" data-testid="admin-case-type-new" @click="caseTypeDraft = 'new'">+ New case type</button>
         </div>
-        <table class="admin-table" data-testid="admin-vocab-table">
-          <thead><tr><th>Value</th><th>Label</th><th>Presets</th><th>Norm. ref.</th><th></th></tr></thead>
+        <table class="admin-table" data-testid="admin-case-types-table">
+          <thead><tr><th>Type</th><th>Slug</th><th>Outcomes</th><th>Actions</th><th>Fields</th><th>SLA (h)</th><th></th></tr></thead>
           <tbody>
-            <tr v-for="(r, i) in vocabRows" :key="i">
-              <td><input v-model="r.value" class="form-control" /></td>
-              <td><input v-model="r.label" class="form-control" /></td>
-              <td><input v-model="r.presets" class="form-control" placeholder="pix_med, lavagem" /></td>
-              <td><input v-model="r.norm_ref" class="form-control" placeholder="CC 4.001 …" /></td>
-              <td><button type="button" class="btn btn-outline btn-sm" @click="vocabRows.splice(i, 1)">×</button></td>
+            <tr v-for="t in caseTypes" :key="t.slug" :data-testid="`admin-case-type-${t.slug}`">
+              <td><strong>{{ t.label }}</strong><div v-if="t.description" class="muted">{{ t.description }}</div></td>
+              <td><code>{{ t.slug }}</code></td>
+              <td>{{ t.outcomes.length || 'free text' }}</td>
+              <td>{{ t.actions.length }}</td>
+              <td>{{ t.fields.length }}</td>
+              <td>{{ t.sla_hours.open || t.sla_hours.analysis ? `${t.sla_hours.open ?? '—'} + ${t.sla_hours.analysis ?? '—'}` : '—' }}</td>
+              <td>
+                <template v-if="!t.builtin">
+                  <button type="button" class="btn btn-outline btn-sm" :data-testid="`admin-case-type-edit-${t.slug}`" @click="caseTypeDraft = t">Edit</button>
+                  <button type="button" class="btn btn-outline btn-sm" :data-testid="`admin-case-type-delete-${t.slug}`" @click="deleteCaseType(t)">Delete</button>
+                </template>
+                <span v-else class="muted">built in</span>
+              </td>
             </tr>
           </tbody>
         </table>
-        <div class="form-row">
-          <button type="button" class="btn btn-outline btn-sm" @click="vocabRows.push({ value: '', label: '', presets: '', norm_ref: '' })">+ value</button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="vocabBusy" data-testid="admin-vocab-save" @click="saveVocab">Save {{ vocabKind }}</button>
-          <button type="button" class="btn btn-outline btn-sm" @click="resetVocab">Reset to built-in</button>
-        </div>
       </div>
     </section>
 
@@ -851,8 +866,6 @@ function openGraph(id: string) {
 <style scoped>
 .admin-subtitle { color: var(--text-secondary); font-size: var(--text-sm, 0.875rem); }
 .two-cols { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 2fr); gap: var(--space-4, 16px); align-items: start; }
-.doc-editor { display: flex; flex-direction: column; gap: var(--space-2, 8px); }
-.doc-editor .body { font-family: var(--font-mono, monospace); font-size: 12px; }
 .form-row { display: flex; flex-wrap: wrap; gap: var(--space-2, 8px); align-items: end; margin: var(--space-2, 8px) 0; }
 .form-row label { display: flex; flex-direction: column; gap: 2px; font-size: var(--text-sm, 0.875rem); }
 .error { color: var(--color-error, #b91c1c); margin-bottom: var(--space-2, 8px); }

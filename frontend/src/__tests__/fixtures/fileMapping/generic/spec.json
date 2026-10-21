@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "name": "Generic transfers",
+  "inputs": {
+    "t": {
+      "match": "*.csv",
+      "delimiter": ",",
+      "header": true
+    }
+  },
+  "nodes": [
+    {
+      "key": "source",
+      "type": "Account",
+      "from": "t",
+      "id": {
+        "col": "t.source",
+        "convert": [
+          "trim",
+          "upper"
+        ]
+      }
+    },
+    {
+      "key": "target",
+      "type": "Account",
+      "from": "t",
+      "when": {
+        "not_empty": "t.target"
+      },
+      "id": {
+        "col": "t.target",
+        "convert": "upper"
+      },
+      "props": {
+        "label": "t.target"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "t",
+      "type": {
+        "col": "t.kind",
+        "map": "kinds"
+      },
+      "when": {
+        "in": [
+          "t.kind",
+          [
+            "FAST",
+            "WIRE"
+          ]
+        ]
+      },
+      "endpoints": {
+        "self": "source",
+        "other": "target"
+      },
+      "props": {
+        "amount": {
+          "col": "t.amount",
+          "convert": "decimal_comma"
+        },
+        "date": {
+          "col": "t.date",
+          "convert": "date:dd/mm/yyyy"
+        }
+      }
+    }
+  ],
+  "edge_semantics": {
+    "amount_prop": "amount",
+    "time_prop": "date"
+  },
+  "tables": {
+    "kinds": {
+      "FAST": "FAST_TRANSFER"
+    }
+  }
+}

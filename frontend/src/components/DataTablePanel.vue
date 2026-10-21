@@ -341,7 +341,7 @@ function exportCSV() {
   dtRef.value?.exportCSV();
 }
 
-// ─── Adicionar ao caso (05 §4): the selected rows (or every visible row) as a table ───
+// ─── Add to case (05 §4): the selected rows (or every visible row) as a table ───
 const currentCase = useCurrentCaseStore();
 const addToCase = useAddToCase();
 const addingToCase = ref(false);
@@ -360,7 +360,7 @@ async function addRowsToCase() {
     await addToCase.addTable({
       columns: cols.map(c => c.header || c.field),
       rows: rows.map(r => cols.map(c => (r[c.field] ?? null) as unknown)),
-      title: `${activeTab.value === 'nodes' ? 'Nós' : 'Arestas'} · ${rows.length} ${selected.size ? 'selecionados' : 'linhas'} · ${graphStore.currentContext?.title ?? ''}`.trim(),
+      title: `${activeTab.value === 'nodes' ? 'Nodes' : 'Edges'} · ${rows.length} ${selected.size ? 'selected' : 'rows'} · ${graphStore.currentContext?.title ?? ''}`.trim(),
       provenance: { context_id: graphStore.currentContext?.id, exploration_id: graphStore.currentExploration?.id ?? undefined, tool: 'data_table', params: { tab: activeTab.value, selected: selected.size } },
     });
   } finally {
@@ -400,10 +400,10 @@ async function addRowsToCase() {
         <button
           class="action-btn"
           :disabled="!currentCase.hasCase || addingToCase || !currentRows.length"
-          :title="currentCase.hasCase ? `Adicionar ${selectedCount ? 'as linhas selecionadas' : 'as linhas visíveis'} como tabela do caso ${currentCase.title}` : 'Escolha um caso atual na barra superior'"
+          :title="currentCase.hasCase ? `Add ${selectedCount ? 'the selected rows' : 'the visible rows'} as a table of case ${currentCase.title}` : 'Pick a current case in the top bar'"
           data-testid="data-table-add-to-case"
           @click="addRowsToCase"
-        >Adicionar ao caso<template v-if="selectedCount"> ({{ selectedCount }})</template></button>
+        >Add to case<template v-if="selectedCount"> ({{ selectedCount }})</template></button>
         <button class="action-btn close-btn btn-icon-only" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
     </div>

@@ -4,7 +4,7 @@ import { api } from '@/services/api';
 import type { Investigation } from '@/types/investigation';
 
 /**
- * The current case, app-wide (05 §2): the target of every "Adicionar ao caso"
+ * The current case, app-wide (05 §2): the target of every "Add to case"
  * button outside the case screen. The id is persisted in localStorage and
  * validated on load (404/403 clears it); the last five opened cases are kept
  * for the chip's quick switch.
@@ -47,9 +47,9 @@ export const useCurrentCaseStore = defineStore('currentCase', () => {
 
   const hasCase = computed(() => caseId.value !== null);
   const shortId = computed(() => (caseId.value ? `#${caseId.value.slice(0, 4)}` : ''));
-  /** Writable target: the case exists, is not decided and the person can edit it. */
+  /** Writable target: the case exists, is not closed and the person can edit it. */
   const canAdd = computed(
-    () => !!investigation.value && investigation.value.has_write_access && investigation.value.status !== 'decided',
+    () => !!investigation.value && investigation.value.has_write_access && investigation.value.status !== 'closed',
   );
   const recentCases = computed(() => recent.value.slice(0, MAX_RECENT));
 

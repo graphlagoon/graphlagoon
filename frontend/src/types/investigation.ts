@@ -2,8 +2,8 @@
 import type { EdgeSemantics, ExplorationState, GraphSnapshot, IdentityKey, TemplateParameter } from '@/types/graph';
 import type { MappingReport } from '@/utils/fileMapping';
 
-export type InvestigationStatus = 'open' | 'analysis' | 'decided' | 'archived';
-export type KindPreset = 'credito' | 'garantia' | 'pix_med' | 'lavagem' | 'lojista' | 'fraude_sintetica' | 'livre';
+/** 06 §1: a case closes only by a decision that closes it; reopening goes back to analysis. */
+export type InvestigationStatus = 'open' | 'analysis' | 'closed';
 /** A person writes `confirmed`; an agent's writes of `settings.agent_suggest_kinds` arrive `suggested`. */
 export type WriteStatus = 'suggested' | 'confirmed' | 'rejected';
 export type AuthorKind = 'human' | 'agent';
@@ -13,23 +13,31 @@ export interface Investigation {
   id: string;
   title: string;
   description?: string | null;
-  kind_preset: KindPreset;
+  /** Slug of an admin-defined case type (06 §1), or the built-in "general". */
+  case_type: string;
+  /** Values of the case type's fields. */
+  fields: Record<string, unknown>;
+  /** The alert or ticket that opened the case. */
+  external_ref?: string | null;
   status: InvestigationStatus;
+  /** Free label from the case type's `stages` ("Waiting for documents"), no semantics. */
+  stage?: string | null;
   owner_email: string;
   assignee_email?: string | null;
   occurred_at?: string | null;
   alert_at?: string | null;
-  /** {open, analysis} days; overrides the preset's phases (Pix/MED: 45 + 45 from alert_at). */
-  deadline_days?: Record<string, number> | null;
-  /** Computed by the server; null without phases or once decided/archived. */
-  deadline?: { phase: 'open' | 'analysis'; due_at: string; days_left: number; total_days?: number } | null;
+  /** {open, analysis} hours, copied from the case type; editable per case. */
+  sla_hours?: Record<string, number> | null;
+  /** Computed by the server; null without an SLA or once closed. */
+  deadline?: CaseDeadline | null;
   tags: string[];
   /** identity_keys, edge_semantics, enrichment_tables, agent_suggest_kinds, label_templates, vocabularies */
   settings: Record<string, unknown>;
   /** View only: layout, pins, views, groups_closed. */
   state: Record<string, unknown>;
-  decision?: InvestigationDecision | null;
-  /** sha256 of the journal and the pinned versions at the decision. */
+  /** Append-only, oldest first (06 §1). */
+  decisions: InvestigationDecision[];
+  /** While closed: the hash of the decision that closed the case. */
   frozen_hash?: string | null;
   frozen_at?: string | null;
   created_at?: string | null;
@@ -42,28 +50,195 @@ export interface Investigation {
   suggested_count?: number | null;
 }
 
-/** 05 §7: communicate (Siscoaf), archive, a precautionary measure, or an opinion only. */
-export type DecisionOutcome = 'comunicar' | 'arquivar' | 'medida' | 'parecer';
-export type DecisionAction = 'dict' | 'spa' | 'bloqueio_cautelar';
-
-/** Recorded once by a person; the case is read-only afterwards. */
-export interface InvestigationDecision {
-  outcome: DecisionOutcome;
-  actions: DecisionAction[];
-  rationale: string;
-  /** Second pair of eyes named on the decision panel; informative. */
-  reviewer_email?: string | null;
-  decided_by: string;
-  decided_at: string;
+export interface CaseDeadline {
+  phase: 'open' | 'analysis';
+  due_at: string;
+  hours_left: number;
+  days_left: number;
+  /** Hours of the phases counted so far (the bar's 100%). */
+  total_hours: number;
+  /** Under 20% of the SLA left (or overdue). */
+  urgent: boolean;
+  overdue: boolean;
 }
 
-/** `GET …/export?format=`; the laudo is the print of the dossier. */
-export type InvestigationExportFormat = 'json' | 'csv' | 'simba' | 'siscoaf';
+/** A page of the queue; `counts` are over every case the caller reads. */
+export interface InvestigationPage {
+  items: Investigation[];
+  total: number;
+  limit: number;
+  offset: number;
+  counts: Partial<Record<InvestigationStatus | 'total' | 'urgent' | 'overdue' | 'suggested', number>>;
+}
+
+/** `GET /api/investigations` filters (06 §2b); `fields` become `field.<id>=<op>:<value>`. */
+export interface QueueParams {
+  /** One status or several, comma separated (`open,analysis`). */
+  status?: string;
+  assignee?: string;
+  case_type?: string;
+  external_ref?: string;
+  exploration_id?: string;
+  q?: string;
+  deadline?: 'urgent' | 'overdue';
+  suggested?: boolean;
+  fields?: Record<string, string>;
+  sort?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Case types (06 §1): what the org investigates, defined in the admin area
+// ---------------------------------------------------------------------------
+
+export interface CaseTypeOutcome {
+  id: string;
+  label: string;
+  description?: string | null;
+  closes_case: boolean;
+  requires_review: boolean;
+}
+
+export interface CaseTypeAction {
+  id: string;
+  label: string;
+  due_hours?: number | null;
+}
+
+export type CaseFieldType = 'text' | 'number' | 'money' | 'date' | 'enum';
+
+export interface CaseTypeField {
+  id: string;
+  label: string;
+  type: CaseFieldType;
+  options: string[];
+  required: boolean;
+  in_queue: boolean;
+}
+
+export interface CaseTypeStarterQuery {
+  title: string;
+  language: 'sql' | 'cypher';
+  query: string;
+  description?: string | null;
+  parameters?: Record<string, unknown>[];
+}
+
+/** A table seen as a chart: `x` and `series` name its columns. */
+export interface TableChartSpec {
+  type: 'line' | 'bar';
+  x: string;
+  series: string[];
+}
+
+export interface ItemState {
+  chart?: TableChartSpec | null;
+}
+
+export interface CaseTypeTraceDefaults {
+  max_hops?: number | null;
+  max_dwell_hours?: number | null;
+  min_amount?: number | null;
+  allocation?: 'fifo' | 'lifo' | 'proportional' | 'libr' | 'total' | null;
+  stop_types?: string[] | null;
+}
+
+export interface CaseTypeSpec {
+  label: string;
+  description?: string | null;
+  vocabularies: { roles: string[]; tags: string[]; link_attributes: string[] };
+  roles_multi: boolean;
+  outcomes: CaseTypeOutcome[];
+  actions: CaseTypeAction[];
+  stages: string[];
+  fields: CaseTypeField[];
+  sla_hours: { open?: number | null; analysis?: number | null };
+  retention_years?: number | null;
+  notice?: string | null;
+  agent_suggest_kinds?: string[] | null;
+  playbook?: string | null;
+  starter_queries: CaseTypeStarterQuery[];
+  report_templates: string[];
+  /** What "Follow the money" starts with on this type's cases. */
+  analysis_defaults?: { trace?: CaseTypeTraceDefaults };
+}
+
+export interface CaseType extends CaseTypeSpec {
+  slug: string;
+  builtin: boolean;
+  updated_at?: string | null;
+}
+
+export interface DecisionEvidence {
+  item_id: string;
+  version: number;
+  sha256: string;
+}
+
+/** Recorded by a person; each one hashes the journal up to its own event (06 §1). */
+export interface InvestigationDecision {
+  id: string;
+  /** The case type's outcome id; null for a free outcome (a type without catalog). */
+  outcome: string | null;
+  /** Snapshot of the outcome's label: editing the catalog later does not rewrite history. */
+  outcome_label: string;
+  closes_case: boolean;
+  /** Entity uids the decision is about; empty = the whole case. */
+  targets: string[];
+  task_ids: string[];
+  rationale: string;
+  evidence: DecisionEvidence[];
+  reviewer_email?: string | null;
+  /** Four eyes: pending until another person approves or rejects it. */
+  review: 'pending' | 'approved' | 'rejected' | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
+  decided_by: string;
+  decided_at: string;
+  hash: string;
+  /** When it closed the case (at once, or when its review approved it). */
+  closed_at?: string | null;
+  proposal_id?: string | null;
+  proposed_by?: { author_kind: AuthorKind; author_email: string } | null;
+}
+
+export interface DecisionTaskRequest {
+  action?: string;
+  title?: string;
+  assignee?: string;
+  assignee_kind?: 'human' | 'agent';
+  agent_name?: string;
+  due_at?: string;
+}
+
+/** `POST /api/investigations/{id}/decisions`. */
+export interface DecisionRequest {
+  /** One of the type's outcomes, or… */
+  outcome?: string;
+  /** …a free outcome when the type has none. */
+  outcome_label?: string;
+  closes_case?: boolean;
+  targets?: string[];
+  tasks?: DecisionTaskRequest[];
+  rationale: string;
+  /** The pinned versions it rests on; every pinned version when omitted. */
+  evidence?: { item_id: string; version: number }[];
+  reviewer_email?: string;
+  /** The agent's draft (a `decision_proposal` annotation) this decision takes up. */
+  proposal_id?: string;
+}
+
+/** `GET …/export?format=`; the printed report is the print of the dossier. */
+export type InvestigationExportFormat = 'json' | 'csv';
 
 export interface CreateInvestigationRequest {
   title: string;
   description?: string;
-  kind_preset?: KindPreset;
+  case_type?: string;
+  fields?: Record<string, unknown>;
+  external_ref?: string;
   assignee_email?: string;
   tags?: string[];
   alert_at?: string;
@@ -74,17 +249,19 @@ export interface CreateInvestigationRequest {
 export interface UpdateInvestigationRequest {
   title?: string;
   description?: string | null;
-  kind_preset?: KindPreset;
+  case_type?: string;
+  /** Merged into the case's fields; a null removes one. */
+  fields?: Record<string, unknown>;
   assignee_email?: string | null;
-  status?: Exclude<InvestigationStatus, 'decided'>;
+  /** Only a decision closes a case. */
+  status?: Exclude<InvestigationStatus, 'closed'>;
+  stage?: string | null;
   occurred_at?: string | null;
   alert_at?: string | null;
-  deadline_days?: Record<string, number> | null;
+  sla_hours?: Record<string, number> | null;
   tags?: string[];
   settings?: Record<string, unknown>;
   state?: Record<string, unknown>;
-  /** Required to archive a case without a decision (05 §7); journaled. */
-  archive_reason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +294,7 @@ export interface ItemProvenance {
   exploration_id?: string;
   query_item_id?: string;
   run_id?: string;
-  /** trace | paths | typologies | er | metrics… for analysis results. */
+  /** trace | paths | links | er | metrics… for analysis results. */
   tool?: string;
   params?: Record<string, unknown>;
   parent_item_id?: string;
@@ -167,6 +344,8 @@ export interface CaseItem {
   query?: CaseQuerySpec | null;
   mapping?: ItemMapping | null;
   anchor?: ItemAnchor | null;
+  /** View only, never a version (06 P5): a table seen as a chart. */
+  state?: ItemState | null;
   current_version: number;
   position: number;
   created_at?: string | null;
@@ -191,6 +370,7 @@ export interface CreateItemRequest {
   query?: CaseQuerySpec;
   mapping?: ItemMapping;
   anchor?: ItemAnchor;
+  state?: ItemState | null;
   /** Version 1: text (markdown, notes, csv) or JSON (snapshots, results). */
   content?: string;
   content_json?: unknown;
@@ -203,6 +383,7 @@ export interface UpdateItemRequest {
   mapping?: ItemMapping | null;
   query?: CaseQuerySpec;
   anchor?: ItemAnchor | null;
+  state?: ItemState | null;
   position?: number;
 }
 
@@ -234,7 +415,7 @@ export interface ItemSnapshotPayload {
   edge_semantics: EdgeSemantics | null;
   exploration?: { id: string; title: string; state: ExplorationState } | null;
   report?: MappingReport & { truncated_edges: number };
-  /** A derived item (Vínculos, a saved selection): node ids are unified ids already. */
+  /** A derived item (links analysis, a saved selection): node ids are unified ids already. */
   unified?: boolean;
 }
 
@@ -277,14 +458,58 @@ export type AnnotationKind =
   | 'same_as'
   | 'hypothesis'
   | 'hypothesis_status'
-  | 'typology'
-  | 'status_change';
+  | 'status_change'
+  | 'task'
+  | 'decision_proposal';
 export type HypothesisStatus = 'open' | 'supported' | 'refuted';
+export type TaskState = 'open' | 'done' | 'cancelled';
+
+/** `value` of a `task` annotation (06 §1): a follow-up for a person or an agent. */
+export interface TaskValue {
+  title: string;
+  state: TaskState;
+  assignee_kind: 'human' | 'agent';
+  /** A person's e-mail. */
+  assignee?: string | null;
+  /** The agent token's name that picks it up; empty = any agent. */
+  agent_name?: string | null;
+  due_at?: string | null;
+  /** The case type's action it came from. */
+  action?: string | null;
+  decision_id?: string | null;
+}
+
+/** `GET /api/investigations/entities/cases?uid=`: a case where the entity is present or of interest (06 P7). */
+export interface EntityCase {
+  investigation_id: string;
+  title: string;
+  status: InvestigationStatus;
+  case_type: string;
+  case_type_label: string;
+  updated_at?: string | null;
+  /** On the case's unified graph (else only annotated or decided on). */
+  present: boolean;
+  label?: string | null;
+  node_type?: string | null;
+  roles: string[];
+  tags: string[];
+  groups: string[];
+  tasks: string[];
+  decisions: { id: string; outcome_label: string; decided_at: string; review?: string | null; closes_case: boolean }[];
+}
+
+/** `GET /api/investigations/tasks`: a task with its case. */
+export interface CaseTaskRow extends CaseAnnotation {
+  investigation_id: string;
+  case_title: string;
+  case_status: InvestigationStatus;
+  overdue: boolean;
+}
 
 export interface CaseAnnotation {
   id: string;
   kind: AnnotationKind;
-  /** Unified entity ids (role, tag, group, same_as, typology) or annotation/item ids. */
+  /** Unified entity ids (role, tag, group, same_as) or annotation/item ids. */
   targets: string[];
   value: Record<string, any>;
   reason?: string | null;
@@ -326,6 +551,6 @@ export interface FileEnrichmentSpec {
   columns: string[];
   match_node_types: string[];
   match_source: 'node_id' | { kind: 'prop'; name: string };
-  /** Node key → its digits, first N (CNPJ → CNPJ básico for the QSA). */
+  /** Node key → its first N digits (a company id → its group prefix, to match a related table). */
   key_digits?: number | null;
 }

@@ -177,7 +177,7 @@ export type CrossingHeuristic = 'barycenter' | 'median' | 'sifting';
 export type { RingOrdering };
 
 /** Bucket label for nodes lacking the attribute a sector strategy groups by. */
-export const RING_SECTOR_MISSING = '(sem valor)';
+export const RING_SECTOR_MISSING = '(no value)';
 
 export interface TreeLevelStat {
   level: number;
@@ -1074,7 +1074,7 @@ const EGO_CROSS_RING_MAX_OFFSET = 0.5;
  * and selectable (which is precisely what edge bundling gives up).
  *
  * Same-ring geometry: for endpoints separated by signed shortest angle Δ on a
- * ring of radius r, a quadratic Bézier whose peak lands exactly on the ring
+ * ring of radius r, a quadratic Bezier whose peak lands exactly on the ring
  * needs curvature tan(|Δ|/4). We overshoot slightly, then clamp so the peak
  * never reaches the next ring — an arc that invaded its neighbour would read as
  * passing through nodes it does not touch.
@@ -1139,7 +1139,7 @@ export function computeEgoLinkCurvatures<L extends CurvatureLinkInput>(
         curvature = 0;
       } else {
         const gap = gapByLevel.get(sourceLevel) ?? fallbackGap;
-        // Quadratic Bézier midpoint sits at (chordMidpoint + control)/2, so the
+        // Quadratic Bezier midpoint sits at (chordMidpoint + control)/2, so the
         // peak radius for curvature k is r·cos(h) + k·chord/2. The midpoint is
         // also the curve's true maximum (the curve is symmetric), so bounding it
         // bounds the whole arc.

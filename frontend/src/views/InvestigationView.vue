@@ -3,7 +3,7 @@
  * The case screen (05 §3): one canvas fed by the case's graph items (checked
  * "on canvas" in the material list), filter chips over it, an analysis bar whose
  * results are items, an inspector (entity · selection · item · decision) and a
- * bottom strip (timeline · activity · suggestions · result). `?mode=dossie` is the
+ * bottom strip (timeline · activity · suggestions · result). `?mode=dossier` is the
  * same store laid out as a document. Everything that enters the case is an item;
  * roles, tags, groups and matches are annotations.
  */
@@ -21,7 +21,7 @@ import { useToast } from '@/composables/useToast';
 import type { TraceContent } from '@/composables/useCaseAnalyses';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
 import { caseNodeLabel } from '@/utils/caseLabels';
-import { provenanceRingColors, roleColor, roleColorMap, ROLE_LABELS } from '@/utils/graphAppearance';
+import { provenanceRingColors, roleColor, roleColorMap } from '@/utils/graphAppearance';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { traceColumns, traceFlows } from '@/utils/traceView';
 import { baseSourceId, mergedEntityCounts, nodeSourceIds, type NodeOrigin, type UnifiedNode } from '@/utils/unifyGraph';
@@ -62,7 +62,7 @@ const filters = useCaseFilters();
 const contextMenu = useContextMenu();
 const toast = useToast();
 
-const mode = computed<'canvas' | 'dossie'>(() => (route.query.mode === 'dossie' ? 'dossie' : 'canvas'));
+const mode = computed<'canvas' | 'dossier'>(() => (route.query.mode === 'dossier' ? 'dossier' : 'canvas'));
 
 const showAdd = ref(false);
 const showWizard = ref(false);
@@ -85,7 +85,7 @@ const analysisBar = ref<InstanceType<typeof AnalysisBar> | null>(null);
 const sourceTitle = (sourceId: string) => store.itemTitle(baseSourceId(sourceId));
 const contextTitle = (contextId: string) => store.contexts[contextId]?.title ?? store.itemTitle(contextId);
 const mergedCounts = computed(() => mergedEntityCounts(store.unified.nodes));
-const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'decided');
+const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'closed');
 
 // --- context picker for expanding a node that exists in several contexts ---
 const pickerOrigins = ref<NodeOrigin[] | null>(null);
@@ -113,7 +113,7 @@ function applyExpansion(origin: NodeOrigin, response: GraphResponse) {
 let savedCommunities: Record<string, unknown> | undefined;
 
 const labelOf = (n: { node_id: string; node_type: string; properties?: Record<string, unknown> }) =>
-  caseNodeLabel(n, { templates: store.labelTemplates, unmasked: filters.unmasked });
+  caseNodeLabel(n, { templates: store.labelTemplates });
 
 function graphMode(rings: Map<string, string[]>): InvestigationGraphMode {
   return {
@@ -216,7 +216,7 @@ watch(
 );
 
 watch(() => store.graphItems.map((s) => `${s.id}:${s.current_version}:${s.mapping?.as ?? ''}`).join(','), loadWorkspace);
-watch([() => store.unified, activeTrace, traceView, () => filters.window, () => filters.unmasked, () => store.labelTemplates], render);
+watch([() => store.unified, activeTrace, traceView, () => filters.window, () => store.labelTemplates], render);
 
 // Fills follow the confirmed roles (or the groups, when painting by group), without reloading the graph.
 watch(
@@ -287,7 +287,7 @@ watch(
 );
 
 function onRerun(tool: string) {
-  analysisBar.value?.show(tool as 'trace' | 'paths' | 'typologies' | 'links' | 'metrics');
+  analysisBar.value?.show(tool as 'trace' | 'paths' | 'links' | 'metrics');
 }
 
 function selectItem(item: CaseItem | null) {
@@ -344,7 +344,7 @@ onUnmounted(() => {
     <template v-else-if="store.current">
       <CaseHeader :mode="mode" @decide="decideMode = true" @settings="showSettings = true" />
 
-      <CaseDossier v-if="mode === 'dossie'" :id="id" />
+      <CaseDossier v-if="mode === 'dossier'" :id="id" />
 
       <template v-else>
         <div class="ws-body">
@@ -374,7 +374,7 @@ onUnmounted(() => {
                   <div class="legend-title roles-title">Role (fill)</div>
                   <div v-for="role in legendRoles" :key="role" class="legend-row">
                     <span class="fill" :style="{ background: roleColor(role) }"></span>
-                    {{ ROLE_LABELS[role] ?? role }}
+                    {{ role }}
                   </div>
                 </template>
                 <p class="muted" data-testid="unification-summary">
@@ -415,6 +415,7 @@ onUnmounted(() => {
                 @console="toast.info('The case console arrives with the query loop (F3): save the result as a table of the case from the Query Console')"
                 @upload="openUpload('enrichment')"
                 @activate="activateAnalysis"
+                @select-item="selectItem"
               />
             </section>
             <div v-if="panels.table" class="table-panel" data-testid="panel-table">
@@ -455,7 +456,7 @@ onUnmounted(() => {
             {{ store.canvasItems.length }} {{ store.canvasItems.length === 1 ? 'source' : 'sources' }}<template v-if="store.restrictedItems.length"> + {{ store.restrictedItems.length }} restricted</template>
           </span>
           <span v-if="store.groups.length" data-testid="status-groups">{{ store.groups.length }} {{ store.groups.length === 1 ? 'group' : 'groups' }}</span>
-          <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} suggestions</span>
+          <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} {{ store.suggestions.length === 1 ? 'suggestion' : 'suggestions' }}</span>
           <AgentsIndicator v-if="store.current" :investigation-id="store.current.id" /><!-- F5 hook -->
           <button class="link-btn journal-btn" data-testid="journal-toggle" @click="openJournal">Journal ({{ store.events.length }})</button>
         </footer>

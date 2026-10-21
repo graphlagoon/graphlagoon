@@ -1,11 +1,32 @@
 {
-  "description": "Two explorations of the same context: account (node id, leading zeros), phone (country code, punctuation) and email (case) normalizers agree on both engines; a node without a key but with the same raw id merges because its uid is `id@context`; the two CADASTRO edges stay separate.",
+  "description": "Two explorations of the same context: account (node id, leading zeros), phone (digits only: punctuation and the leading +) and email (case) normalizers agree on both engines; a node without a key but with the same raw id merges because its uid is `id@context`; the two SIGNUP edges stay separate.",
   "contexts": {
     "c-ops": {
       "identity_keys": [
-        { "node_type": "Conta", "entity": "Conta", "source": "node_id", "normalize": "account" },
-        { "node_type": "Telefone", "entity": "Telefone", "source": { "kind": "prop", "name": "numero" }, "normalize": "phone" },
-        { "node_type": "Email", "entity": "Email", "source": { "kind": "prop", "name": "endereco" }, "normalize": "email" }
+        {
+          "node_type": "Account",
+          "entity": "Account",
+          "source": "node_id",
+          "normalize": "account"
+        },
+        {
+          "node_type": "Phone",
+          "entity": "Phone",
+          "source": {
+            "kind": "prop",
+            "name": "number"
+          },
+          "normalize": "phone"
+        },
+        {
+          "node_type": "Email",
+          "entity": "Email",
+          "source": {
+            "kind": "prop",
+            "name": "address"
+          },
+          "normalize": "email"
+        }
       ]
     }
   },
@@ -14,64 +35,216 @@
       "id": "s-a",
       "context_id": "c-ops",
       "nodes": [
-        { "id": "0001-12345-6", "type": "Conta", "properties": { "ag": "0001" } },
-        { "id": "t1", "type": "Telefone", "properties": { "numero": "+55 (11) 98765-4321" } },
-        { "id": "m1", "type": "Email", "properties": { "endereco": "Ana.R@Example.com" } },
-        { "id": "x1", "type": "Log", "properties": {} }
+        {
+          "id": "0001-12345-6",
+          "type": "Account",
+          "properties": {
+            "branch": "0001"
+          }
+        },
+        {
+          "id": "t1",
+          "type": "Phone",
+          "properties": {
+            "number": "+1 (415) 555-0100"
+          }
+        },
+        {
+          "id": "m1",
+          "type": "Email",
+          "properties": {
+            "address": "Ana.R@Example.com"
+          }
+        },
+        {
+          "id": "x1",
+          "type": "Log",
+          "properties": {}
+        }
       ],
       "edges": [
-        { "id": "e1", "source": "0001-12345-6", "target": "t1", "type": "CADASTRO", "properties": {} },
-        { "id": "e2", "source": "t1", "target": "m1", "type": "RECUPERACAO", "properties": {} }
+        {
+          "id": "e1",
+          "source": "0001-12345-6",
+          "target": "t1",
+          "type": "SIGNUP",
+          "properties": {}
+        },
+        {
+          "id": "e2",
+          "source": "t1",
+          "target": "m1",
+          "type": "RECOVERY",
+          "properties": {}
+        }
       ]
     },
     {
       "id": "s-b",
       "context_id": "c-ops",
       "nodes": [
-        { "id": "1-12345-6", "type": "Conta", "properties": { "ag": "1" } },
-        { "id": "t5", "type": "Telefone", "properties": { "numero": "11987654321" } },
-        { "id": "m2", "type": "Email", "properties": { "endereco": "ana.r@example.com" } },
-        { "id": "x1", "type": "Log", "properties": {} }
+        {
+          "id": "1-12345-6",
+          "type": "Account",
+          "properties": {
+            "branch": "1"
+          }
+        },
+        {
+          "id": "t5",
+          "type": "Phone",
+          "properties": {
+            "number": "14155550100"
+          }
+        },
+        {
+          "id": "m2",
+          "type": "Email",
+          "properties": {
+            "address": "ana.r@example.com"
+          }
+        },
+        {
+          "id": "x1",
+          "type": "Log",
+          "properties": {}
+        }
       ],
       "edges": [
-        { "id": "e1", "source": "1-12345-6", "target": "t5", "type": "CADASTRO", "properties": {} }
+        {
+          "id": "e1",
+          "source": "1-12345-6",
+          "target": "t5",
+          "type": "SIGNUP",
+          "properties": {}
+        }
       ]
     }
   ],
   "matches": [],
   "overrides": {},
   "expected": {
+    "edges": [
+      {
+        "dst": "Phone:14155550100",
+        "id": "s-a:e1",
+        "properties": {},
+        "source_id": "s-a",
+        "src": "Account:1-12345-6",
+        "type": "SIGNUP"
+      },
+      {
+        "dst": "Email:ana.r@example.com",
+        "id": "s-a:e2",
+        "properties": {},
+        "source_id": "s-a",
+        "src": "Phone:14155550100",
+        "type": "RECOVERY"
+      },
+      {
+        "dst": "Phone:14155550100",
+        "id": "s-b:e1",
+        "properties": {},
+        "source_id": "s-b",
+        "src": "Account:1-12345-6",
+        "type": "SIGNUP"
+      }
+    ],
     "nodes": [
       {
-        "uid": "Conta:1-12345-6",
-        "type": "Conta",
-        "entity": "Conta",
-        "properties": { "ag": "0001" },
-        "sources": [{ "source_id": "s-a", "node_id": "0001-12345-6" }, { "source_id": "s-b", "node_id": "1-12345-6" }],
-        "conflicts": { "ag": [{ "value": "1", "source_id": "s-b" }] }
+        "conflicts": {
+          "branch": [
+            {
+              "source_id": "s-b",
+              "value": "1"
+            }
+          ]
+        },
+        "entity": "Account",
+        "properties": {
+          "branch": "0001"
+        },
+        "sources": [
+          {
+            "node_id": "0001-12345-6",
+            "source_id": "s-a"
+          },
+          {
+            "node_id": "1-12345-6",
+            "source_id": "s-b"
+          }
+        ],
+        "type": "Account",
+        "uid": "Account:1-12345-6"
       },
       {
-        "uid": "Email:ana.r@example.com",
-        "type": "Email",
+        "conflicts": {
+          "address": [
+            {
+              "source_id": "s-b",
+              "value": "ana.r@example.com"
+            }
+          ]
+        },
         "entity": "Email",
-        "properties": { "endereco": "Ana.R@Example.com" },
-        "sources": [{ "source_id": "s-a", "node_id": "m1" }, { "source_id": "s-b", "node_id": "m2" }],
-        "conflicts": { "endereco": [{ "value": "ana.r@example.com", "source_id": "s-b" }] }
+        "properties": {
+          "address": "Ana.R@Example.com"
+        },
+        "sources": [
+          {
+            "node_id": "m1",
+            "source_id": "s-a"
+          },
+          {
+            "node_id": "m2",
+            "source_id": "s-b"
+          }
+        ],
+        "type": "Email",
+        "uid": "Email:ana.r@example.com"
       },
       {
-        "uid": "Telefone:11987654321",
-        "type": "Telefone",
-        "entity": "Telefone",
-        "properties": { "numero": "+55 (11) 98765-4321" },
-        "sources": [{ "source_id": "s-a", "node_id": "t1" }, { "source_id": "s-b", "node_id": "t5" }],
-        "conflicts": { "numero": [{ "value": "11987654321", "source_id": "s-b" }] }
+        "conflicts": {
+          "number": [
+            {
+              "source_id": "s-b",
+              "value": "14155550100"
+            }
+          ]
+        },
+        "entity": "Phone",
+        "properties": {
+          "number": "+1 (415) 555-0100"
+        },
+        "sources": [
+          {
+            "node_id": "t1",
+            "source_id": "s-a"
+          },
+          {
+            "node_id": "t5",
+            "source_id": "s-b"
+          }
+        ],
+        "type": "Phone",
+        "uid": "Phone:14155550100"
       },
-      { "uid": "x1@c-ops", "type": "Log", "entity": null, "properties": {}, "sources": [{ "source_id": "s-a", "node_id": "x1" }, { "source_id": "s-b", "node_id": "x1" }] }
-    ],
-    "edges": [
-      { "id": "s-a:e1", "src": "Conta:1-12345-6", "dst": "Telefone:11987654321", "type": "CADASTRO", "properties": {}, "source_id": "s-a" },
-      { "id": "s-a:e2", "src": "Telefone:11987654321", "dst": "Email:ana.r@example.com", "type": "RECUPERACAO", "properties": {}, "source_id": "s-a" },
-      { "id": "s-b:e1", "src": "Conta:1-12345-6", "dst": "Telefone:11987654321", "type": "CADASTRO", "properties": {}, "source_id": "s-b" }
+      {
+        "entity": null,
+        "properties": {},
+        "sources": [
+          {
+            "node_id": "x1",
+            "source_id": "s-a"
+          },
+          {
+            "node_id": "x1",
+            "source_id": "s-b"
+          }
+        ],
+        "type": "Log",
+        "uid": "x1@c-ops"
+      }
     ]
   }
 }

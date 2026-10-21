@@ -1,0 +1,71 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "ACCT A",
+        "node_type": "Account",
+        "properties": {
+          "label": "Acct A"
+        }
+      },
+      {
+        "node_id": "ACCT B",
+        "node_type": "Account",
+        "properties": {
+          "label": "Acct B"
+        }
+      },
+      {
+        "node_id": "ACCT C",
+        "node_type": "Account",
+        "properties": {
+          "label": "acct c"
+        }
+      },
+      {
+        "node_id": "ACCT D",
+        "node_type": "Account",
+        "properties": {}
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "0:t:1",
+        "src": "ACCT A",
+        "dst": "ACCT B",
+        "relationship_type": "FAST_TRANSFER",
+        "properties": {
+          "amount": 1234.56,
+          "date": "2026-03-01"
+        }
+      },
+      {
+        "edge_id": "0:t:2",
+        "src": "ACCT B",
+        "dst": "ACCT C",
+        "relationship_type": "WIRE",
+        "properties": {
+          "amount": 900.0,
+          "date": "2026-03-02"
+        }
+      }
+    ],
+    "truncated": false
+  },
+  "report": {
+    "rows_read": 5,
+    "rows_discarded": 1,
+    "discarded": [
+      {
+        "from": "t",
+        "row": 4,
+        "reason": "invalid decimal_comma: \"abc\""
+      }
+    ],
+    "unknown_nodes": 0,
+    "edge_rows": 3,
+    "without_counterpart": 1,
+    "missing_inputs": [],
+    "missing_columns": []
+  }
+}

@@ -32,13 +32,13 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-describe('CaseTimeline · Atividade', () => {
+describe('CaseTimeline · Activity', () => {
   it('filters the journal by actor and by event kind, with pt-BR dates', async () => {
     const { getByTestId, getAllByTestId, queryByTestId } = mount()
     const rows = () => getAllByTestId('journal-event').map((r) => r.textContent!)
     expect(rows()).toHaveLength(4)
     expect(rows()[0]).toContain('09/10/2026 11:00')
-    expect(getByTestId('journal-agent').textContent).toContain('agente claude por ana@x.com')
+    expect(getByTestId('journal-agent').textContent).toContain('agent claude for ana@x.com')
     expect(queryByTestId('activity-since-visit')).toBeNull() // first visit: nothing to compare with
 
     await fireEvent.click(getByTestId('activity-agent'))
@@ -49,7 +49,7 @@ describe('CaseTimeline · Atividade', () => {
     await fireEvent.click(getByTestId('activity-all'))
 
     const kind = getByTestId('activity-kind') as HTMLSelectElement
-    expect([...kind.options].map((o) => o.textContent)).toEqual(['Todos os tipos', 'caso', 'item', 'papel', 'rastreio'])
+    expect([...kind.options].map((o) => o.textContent)).toEqual(['All kinds', 'case', 'item', 'role', 'trace'])
     await fireEvent.update(kind, 'item')
     expect(rows()).toHaveLength(1)
     expect(rows()[0]).toContain('KYC')
@@ -61,7 +61,7 @@ describe('CaseTimeline · Atividade', () => {
     const { getByTestId, getAllByTestId } = mount()
     await nextTick() // lastVisit is read in onMounted
     const since = getByTestId('activity-since-visit')
-    expect(since.textContent).toContain('Desde a minha última visita · 2')
+    expect(since.textContent).toContain('Since my last visit · 2')
     const rows = getAllByTestId('journal-event')
     expect(rows[0].classList).toContain('new')
     expect(rows[1].classList).toContain('new')

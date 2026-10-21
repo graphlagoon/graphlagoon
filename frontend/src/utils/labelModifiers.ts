@@ -113,7 +113,7 @@ export const MODIFIER_REGISTRY: Record<TextFormatModifier, ModifierDef> = {
     },
     args: [{ name: 'currencyCode', kind: 'string', required: false }],
     description: 'Format as currency',
-    example: '{prop:amount|currency:BRL}',
+    example: '{prop:amount|currency:USD}',
     docCategory: 'number',
   },
   percent: {
@@ -202,7 +202,7 @@ export const MODIFIER_REGISTRY: Record<TextFormatModifier, ModifierDef> = {
       { name: 'replacement', kind: 'string', required: false },
     ],
     description: 'Regex replace, all occurrences (empty replacement removes the match)',
-    example: '{node_id|replace:/_CNPJ_RAIZ/:}',
+    example: '{node_id|replace:/_ROOT/:}',
     docCategory: 'regex',
     regexGlobal: true,
   },

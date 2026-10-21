@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "name": "Settlement file (fixed width)",
+  "inputs": {
+    "s": {
+      "match": "SETTLEMENT_*.TXT",
+      "widths": [
+        8,
+        10,
+        8,
+        12,
+        7,
+        30
+      ],
+      "header": false,
+      "columns": [
+        "merchant",
+        "terminal",
+        "date",
+        "amount",
+        "account",
+        "name"
+      ]
+    }
+  },
+  "nodes": [
+    {
+      "key": "merchant",
+      "type": "Merchant",
+      "from": "s",
+      "id": "s.merchant",
+      "props": {
+        "name": "s.name"
+      }
+    },
+    {
+      "key": "terminal",
+      "type": "Terminal",
+      "from": "s",
+      "id": {
+        "col": "s.terminal",
+        "normalize": "terminal_id"
+      }
+    },
+    {
+      "key": "account",
+      "type": "Account",
+      "from": "s",
+      "id": {
+        "col": "s.account",
+        "normalize": "account"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "s",
+      "type": "CAPTURED_AT",
+      "endpoints": {
+        "self": "merchant",
+        "other": "terminal"
+      }
+    },
+    {
+      "from": "s",
+      "type": "SETTLED_TO",
+      "endpoints": {
+        "self": "merchant",
+        "other": "account"
+      },
+      "props": {
+        "amount": {
+          "col": "s.amount",
+          "convert": "cents"
+        },
+        "date": {
+          "col": "s.date",
+          "convert": "date:yyyymmdd"
+        }
+      }
+    }
+  ],
+  "edge_semantics": {
+    "amount_prop": "amount",
+    "time_prop": "date"
+  }
+}

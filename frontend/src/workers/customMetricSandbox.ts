@@ -27,7 +27,11 @@ export const STRIPPED_GLOBALS = [
   'XMLHttpRequest',
   'WebSocket',
   'EventSource',
+  'WebTransport',
   'importScripts',
+  // fonts load from a URL (`new FontFace('x', 'url(https://…)').load()`)
+  'FontFace',
+  'fonts',
   // nested execution contexts (a fresh scope would have fetch again)
   'Worker',
   'SharedWorker',

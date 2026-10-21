@@ -97,8 +97,8 @@ const ticks = computed(() => {
   const out: { x: number; label: string }[] = [];
   for (let t = Math.ceil(a / step) * step; t <= b; t += step) {
     const d = new Date(t);
-    const hm = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    out.push({ x: x(t), label: long ? `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${hm}` : hm });
+    const hm = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    out.push({ x: x(t), label: long ? `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${hm}` : hm });
   }
   return out;
 });
@@ -142,7 +142,7 @@ const selection = computed(() => {
 
 const focusLabel = computed(() => {
   if (!props.focus) return '';
-  const f = (t: number) => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const f = (t: number) => new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   return `${f(props.focus[0])} – ${f(props.focus[1])}`;
 });
 </script>

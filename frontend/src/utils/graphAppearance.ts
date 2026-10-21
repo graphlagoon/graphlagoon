@@ -484,34 +484,10 @@ export function provenanceRingColors(
 // Case roles (investigation workspace, T2): node fill
 // ---------------------------------------------------------------------------
 
-/**
- * Fill per role. Roles are a free vocabulary (05 §4b); the Pix ones keep their
- * 02-design colors (victim blue, mule orange, exit navy, discarded gray) and
- * any other role gets a stable color from its name.
- */
-export const ROLE_COLORS: Record<string, string> = {
-  victim: '#2563eb',
-  vítima: '#2563eb',
-  mule: '#ea580c',
-  mula: '#ea580c',
-  exit: '#0d1b2a',
-  saída: '#0d1b2a',
-  discarded: '#9ca3af',
-  descartado: '#9ca3af',
-};
-
-/** Suggested roles for the selector; anything typed is accepted. */
-export const ROLE_LABELS: Record<string, string> = {
-  vítima: 'Victim',
-  mula: 'Mule / suspect',
-  saída: 'Exit (cash-out)',
-  descartado: 'Discarded',
-};
-
+/** Fill per role: roles are the case type's vocabulary (06 §1), each with a stable color from its name. */
 const ROLE_PALETTE = ['#7c3aed', '#0f766e', '#b45309', '#be123c', '#4d7c0f', '#1d4ed8', '#9333ea', '#0e7490'];
 
 export function roleColor(role: string): string {
-  if (ROLE_COLORS[role]) return ROLE_COLORS[role];
   let h = 0;
   for (const c of role) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return ROLE_PALETTE[h % ROLE_PALETTE.length];

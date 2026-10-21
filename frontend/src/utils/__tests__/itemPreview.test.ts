@@ -32,6 +32,13 @@ describe('buildPreview', () => {
     expect(buildPreview(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff, 0x00]).buffer, 'application/zip').kind).toBe('none')
   })
 
+  it('an SVG is never an image from a blob URL (its scripts would run in the app origin): it previews as text', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    expect(buildPreview(bytes(svg), 'image/svg+xml')).toEqual({ kind: 'text', text: svg, truncated: false })
+    expect(buildPreview(bytes('x'), 'image/jpeg; charset=binary').kind).toBe('image')
+    expect(buildPreview(bytes('x'), 'image/webp').kind).toBe('image')
+  })
+
   it('falls back to Windows-1252 for declared text that is not UTF-8', () => {
     const latin1 = new Uint8Array([0x4e, 0x4f, 0x4d, 0x45, 0x0a, 0x4a, 0x6f, 0xe3, 0x6f]).buffer // "NOME\nJoão"
     expect(buildPreview(latin1, 'text/plain')).toMatchObject({ kind: 'text', text: 'NOME\nJoão' })

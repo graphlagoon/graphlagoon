@@ -1,8 +1,7 @@
 <script setup lang="ts">
 /**
  * Agent tokens (05 §6: /settings/agents). A token is the person's identity for
- * an MCP client: scope "every case I read" or specific cases, optional
- * unmasked data (when the org allows it), validity, the `claude mcp add`
+ * an MCP client: scope "every case I read" or specific cases, validity, the `claude mcp add`
  * command and the stdio bridge, last activity, revoke.
  */
 import { computed, onMounted, ref } from 'vue';
@@ -15,14 +14,13 @@ import type { Investigation } from '@/types/investigation';
 const { can } = usePermissions();
 const config = window.__GRAPH_LAGOON_CONFIG__ ?? {};
 const agentsEnabled = config.agents_enabled === true;
-const orgUnmasked = config.agents_allow_unmasked_data === true;
 // The API prefix is usually relative ("/graphlagoon"); an MCP client needs the full URL.
 const mcpUrl = new URL(`${window.__GRAPH_LAGOON_API_URL__ || ''}/mcp`, window.location.origin).href;
 
 const tokens = ref<AgentToken[]>([]);
 const cases = ref<Investigation[]>([]);
 const error = ref<string | null>(null);
-const form = ref({ name: 'Claude Code', scope: 'user' as 'user' | 'case', investigation_ids: [] as string[], unmasked: false, days: 30 });
+const form = ref({ name: 'Claude Code', scope: 'user' as 'user' | 'case', investigation_ids: [] as string[], days: 30 });
 const created = ref<{ name: string; token: string } | null>(null);
 
 const activeTokens = computed(() => tokens.value.filter((t) => t.active));
@@ -76,7 +74,6 @@ function createToken() {
       expires_in_days: form.value.days,
       scope: form.value.scope,
       investigation_ids: form.value.scope === 'case' ? form.value.investigation_ids : [],
-      unmasked: form.value.unmasked,
     });
     created.value = { name: token.name, token: token.token };
     tokens.value = [token, ...tokens.value];
@@ -119,9 +116,6 @@ const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime()
               <option v-for="c in cases" :key="c.id" :value="c.id">{{ c.title }}</option>
             </select>
           </div>
-          <label v-if="orgUnmasked" class="check">
-            <input v-model="form.unmasked" type="checkbox" data-testid="token-unmasked" /> Unmasked data (CPF, CNPJ, accounts)
-          </label>
           <label class="field">
             <span>Validity</span>
             <select v-model.number="form.days" data-testid="token-days">
@@ -153,10 +147,10 @@ const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime()
         <p v-else class="muted">You don't have the permission to create agent tokens.</p>
         <div class="policy" data-testid="agents-policy">
           The agent can do what you can in a case, except decide, share, delete, reopen, export and confirm
-          suggestions. The kinds in the case's ⚙ “Agent” section (by default roles, tags, matches, typologies,
-          hypothesis statuses and status changes) arrive as suggestions you confirm in the case; everything else
-          applies directly with the agent's chip. Administrator policy: personal data is
-          <strong>{{ orgUnmasked ? 'available unmasked to tokens marked so' : 'always masked' }}</strong>.
+          suggestions. The kinds in the case's ⚙ “Agent” section (by default roles, tags, matches, hypothesis
+          statuses and status changes) arrive as suggestions you confirm in the case; everything else applies
+          directly with the agent's chip. The agent reads what you read: limit a token to some cases when that is
+          too much.
         </div>
       </section>
 
@@ -167,7 +161,7 @@ const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime()
             <strong>{{ t.name }}</strong>
             <div class="muted">
               {{ t.scope === 'case' ? (t.investigation_ids ?? []).map(caseTitle).join(', ') : 'every case' }}
-              <template v-if="t.unmasked"> · unmasked</template> · expires in {{ daysLeft(t.expires_at) }} days
+              · expires in {{ daysLeft(t.expires_at) }} days
               · <span :data-testid="`token-last-used-${t.id}`">{{ lastUsed(t.last_used_at) }}</span>
             </div>
           </div>

@@ -5,6 +5,8 @@ import { useInvestigationStore } from '@/stores/investigation'
 vi.mock('@/services/api', () => ({
   api: {
     getInvestigations: vi.fn(),
+    getInvestigationPage: vi.fn(),
+    getCaseTypes: vi.fn(async () => []),
     getInvestigation: vi.fn(),
     getInvestigationItems: vi.fn(),
     getInvestigationAnnotations: vi.fn(async () => []),
@@ -37,7 +39,7 @@ describe('investigation store', () => {
   it('adds explorations one by one as live references and reports a partial failure', async () => {
     vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv1' } as any)
     vi.mocked(api.getInvestigationItems).mockResolvedValue([])
-    vi.mocked(api.getInvestigations).mockResolvedValue([{ id: 'inv1', item_count: 1 }] as any)
+    vi.mocked(api.getInvestigationPage).mockResolvedValue({ items: [{ id: 'inv1', item_count: 1 }], total: 1, limit: 50, offset: 0, counts: {} } as any)
     vi.mocked(api.createInvestigationItem)
       .mockResolvedValueOnce(item('s1') as any)
       .mockRejectedValueOnce({ response: { data: { detail: 'No access to context' } } })

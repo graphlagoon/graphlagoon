@@ -19,9 +19,16 @@ export type ItemPreview =
   | { kind: 'html'; html: string }
   | { kind: 'none' };
 
+/**
+ * Images shown from a blob URL of the app's origin: raster formats only. An SVG
+ * is a document that runs its scripts when opened on its own ("Open image in
+ * new tab"), so it is never wrapped in a blob; it previews as its text.
+ */
+const RASTER_IMAGE = /^image\/(png|jpeg|gif|webp|bmp|avif)$/;
+
 export function buildPreview(data: ArrayBuffer, contentType: string | null | undefined): ItemPreview {
   const type = (contentType ?? '').toLowerCase();
-  if (type.startsWith('image/')) return { kind: 'image' };
+  if (RASTER_IMAGE.test(type.split(';')[0].trim())) return { kind: 'image' };
   if (type === 'application/pdf') return { kind: 'pdf' };
   const text = decodeText(data, type);
   if (text === null) return { kind: 'none' };
@@ -68,7 +75,7 @@ const EXTENSIONS: Record<string, string> = {
   'image/svg+xml': 'svg',
 };
 
-/** UTF-8, or Windows-1252 for a declared text type (SIMBA and bank exports); null for binary. */
+/** UTF-8, or Windows-1252 for a declared text type (bank statement exports); null for binary. */
 function decodeText(data: ArrayBuffer, type: string): string | null {
   let text: string;
   try {

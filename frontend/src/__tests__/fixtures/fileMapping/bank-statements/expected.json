@@ -1,0 +1,106 @@
+{
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "1-1-12345",
+        "node_type": "Account",
+        "properties": {
+          "bank": "001",
+          "branch": "0001",
+          "account": "0012345"
+        }
+      },
+      {
+        "node_id": "98765432100",
+        "node_type": "Person",
+        "properties": {
+          "name": "JOHN VICTIM",
+          "document": "98765432100"
+        }
+      },
+      {
+        "node_id": "11122233344",
+        "node_type": "Person",
+        "properties": {
+          "name": "CARLOS MULA",
+          "document": "111.222.333-44"
+        }
+      },
+      {
+        "node_id": "unknown:OD5",
+        "node_type": "Unknown",
+        "properties": {
+          "note": "NAO-CORRENTISTA"
+        }
+      },
+      {
+        "node_id": "12345678901",
+        "node_type": "Person",
+        "properties": {
+          "name": "ANA SILVA",
+          "document": "12345678901",
+          "income": 3500.0
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "OD1",
+        "src": "98765432100",
+        "dst": "1-1-12345",
+        "relationship_type": "TRANSFER",
+        "properties": {
+          "amount": 1500.0,
+          "date": "2026-03-05",
+          "description": "TRANSFER IN"
+        }
+      },
+      {
+        "edge_id": "OD2",
+        "src": "1-1-12345",
+        "dst": "11122233344",
+        "relationship_type": "TRANSFER",
+        "properties": {
+          "amount": 1400.0,
+          "date": "2026-03-05",
+          "description": "TRANSFER OUT"
+        }
+      },
+      {
+        "edge_id": "OD5",
+        "src": "unknown:OD5",
+        "dst": "1-1-12345",
+        "relationship_type": "CASH_DEPOSIT",
+        "properties": {
+          "amount": 200.0,
+          "date": "2026-03-07",
+          "description": "DEPOSIT"
+        }
+      },
+      {
+        "edge_id": "1:holders:1",
+        "src": "12345678901",
+        "dst": "1-1-12345",
+        "relationship_type": "HOLDS",
+        "properties": {}
+      }
+    ],
+    "truncated": false
+  },
+  "report": {
+    "rows_read": 6,
+    "rows_discarded": 1,
+    "discarded": [
+      {
+        "from": "entry",
+        "row": 4,
+        "reason": "invalid date:ddmmyyyy: \"32032026\""
+      }
+    ],
+    "unknown_nodes": 1,
+    "edge_rows": 5,
+    "without_counterpart": 1,
+    "missing_inputs": [],
+    "missing_columns": []
+  }
+}

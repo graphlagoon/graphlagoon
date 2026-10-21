@@ -39,9 +39,9 @@ const router = createRouter({
       props: true,
     },
     {
-      // The dossier is `?mode=dossie` of the case (05 §2); old links still land there.
+      // The dossier is `?mode=dossier` of the case (05 §2); old links still land there.
       path: '/investigations/:id/dossier',
-      redirect: (to) => ({ path: `/investigations/${to.params.id}`, query: { mode: 'dossie' } }),
+      redirect: (to) => ({ path: `/investigations/${to.params.id}`, query: { mode: 'dossier' } }),
     },
     {
       path: '/settings/agents',

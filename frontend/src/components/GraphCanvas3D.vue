@@ -54,7 +54,7 @@ const labelOptions = { metrics: metricsStore.metricResolver };
 /**
  * Node label: the context's template and rules; in a case with no rule for
  * the type and an id-based default template, the readable fallback
- * (name → masked document → type · short id, F1).
+ * (name → type · short id, F1).
  */
 function nodeLabelOf(node: Node): string {
   const { textFormatRules, textFormatDefaults } = graphStore;

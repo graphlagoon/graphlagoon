@@ -77,7 +77,7 @@ type LucideIconData = any;
 export const ICON_CATEGORIES: IconCategory[] = [
   {
     label: 'People',
-    aliases: ['pessoa', 'cliente', 'user', 'person', 'people'],
+    aliases: ['user', 'person', 'people', 'customer', 'client'],
     icons: [
       'user', 'user-check', 'user-x', 'user-plus', 'user-minus',
       'user-search', 'user-star', 'user-key', 'user-lock', 'user-cog',
@@ -86,14 +86,14 @@ export const ICON_CATEGORIES: IconCategory[] = [
   },
   {
     label: 'Organizations',
-    aliases: ['empresa', 'pj', 'juridica', 'org', 'company'],
+    aliases: ['org', 'company', 'business', 'organization'],
     icons: [
       'building', 'store', 'landmark', 'factory', 'briefcase', 'briefcase-business',
     ],
   },
   {
     label: 'Money',
-    aliases: ['dinheiro', 'nota', 'banco', 'bank', 'cash', 'money'],
+    aliases: ['bank', 'cash', 'money'],
     icons: [
       'banknote', 'banknote-down', 'banknote-up', 'banknote-x',
       'coins', 'hand-coins', 'piggy-bank',
@@ -101,7 +101,7 @@ export const ICON_CATEGORIES: IconCategory[] = [
   },
   {
     label: 'Cards & Wallets',
-    aliases: ['cartao', 'carteira', 'card', 'wallet', 'payment'],
+    aliases: ['card', 'wallet', 'payment'],
     icons: [
       'credit-card', 'id-card', 'id-card-lanyard', 'card-sim',
       'wallet', 'wallet-cards', 'wallet-minimal',
@@ -109,7 +109,7 @@ export const ICON_CATEGORIES: IconCategory[] = [
   },
   {
     label: 'Transactions',
-    aliases: ['transacao', 'transfer', 'pagamento', 'financeiro', 'financial'],
+    aliases: ['transaction', 'transfer', 'payment', 'financial'],
     icons: [
       'dollar-sign', 'receipt', 'percent', 'trending-up', 'trending-down',
       'arrow-left-right', 'repeat',
@@ -117,7 +117,7 @@ export const ICON_CATEGORIES: IconCategory[] = [
   },
   {
     label: 'Security',
-    aliases: ['seguranca', 'shield', 'protecao', 'security', 'protection'],
+    aliases: ['shield', 'security', 'protection'],
     icons: [
       'shield', 'shield-alert', 'shield-ban', 'shield-check', 'shield-x',
       'shield-off', 'shield-plus', 'shield-question', 'shield-user',
@@ -126,70 +126,70 @@ export const ICON_CATEGORIES: IconCategory[] = [
   },
   {
     label: 'Fraud & Alerts',
-    aliases: ['fraude', 'fraud', 'risco', 'risk', 'alerta', 'alert', 'bloqueio'],
+    aliases: ['fraud', 'risk', 'alert', 'block'],
     icons: [
       'alert-triangle', 'octagon-alert', 'ban', 'skull', 'siren', 'bug',
     ],
   },
   {
     label: 'Identity & Auth',
-    aliases: ['identidade', 'autenticacao', 'identity', 'auth', 'biometria'],
+    aliases: ['identity', 'auth', 'authentication', 'biometrics'],
     icons: [
       'key', 'lock', 'fingerprint', 'eye', 'scan-face',
     ],
   },
   {
     label: 'Devices',
-    aliases: ['dispositivo', 'device', 'celular', 'computador'],
+    aliases: ['device', 'phone', 'mobile', 'computer'],
     icons: [
       'smartphone', 'laptop', 'monitor', 'cpu', 'wifi',
     ],
   },
   {
     label: 'Communication',
-    aliases: ['comunicacao', 'contato', 'contact', 'email'],
+    aliases: ['communication', 'contact', 'email'],
     icons: [
       'mail', 'phone', 'message', 'bell', 'send',
     ],
   },
   {
     label: 'Systems',
-    aliases: ['sistema', 'infra', 'server', 'data'],
+    aliases: ['system', 'infra', 'server', 'data'],
     icons: [
       'database', 'server', 'cloud', 'network', 'globe', 'link',
     ],
   },
   {
     label: 'Documents',
-    aliases: ['documento', 'arquivo', 'document', 'file'],
+    aliases: ['document', 'file'],
     icons: [
       'file-text', 'folder', 'tag', 'hash',
     ],
   },
   {
     label: 'Location & Time',
-    aliases: ['localizacao', 'endereco', 'location', 'time', 'tempo', 'data'],
+    aliases: ['location', 'address', 'time', 'date'],
     icons: [
       'map-pin', 'calendar', 'clock', 'flag',
     ],
   },
   {
     label: 'Payments',
-    aliases: ['pix', 'boleto', 'qr', 'pagamento'],
+    aliases: ['payment', 'qr', 'barcode', 'invoice'],
     icons: [
       'qr-code', 'barcode',
     ],
   },
   {
     label: 'Status',
-    aliases: ['estado', 'status', 'resultado', 'result'],
+    aliases: ['state', 'status', 'result'],
     icons: [
       'check-circle', 'x-circle', 'alert-circle', 'info',
     ],
   },
   {
     label: 'Merchant Types',
-    aliases: ['estabelecimento', 'comercio', 'loja', 'merchant', 'mcc', 'segmento'],
+    aliases: ['merchant', 'store', 'shop', 'commerce', 'mcc', 'segment'],
     icons: [
       'utensils', 'coffee', 'pizza', 'beer',
       'glasses', 'scissors', 'shirt', 'shopping-bag', 'shopping-cart',
@@ -200,7 +200,7 @@ export const ICON_CATEGORIES: IconCategory[] = [
   },
   {
     label: 'General',
-    aliases: ['geral', 'outro', 'general', 'other'],
+    aliases: ['general', 'other'],
     icons: [
       'activity', 'zap', 'search', 'scale',
     ],

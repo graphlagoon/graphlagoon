@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/vue'
 import { createPinia, setActivePinia } from 'pinia'
-import fixture from '@/__tests__/fixtures/trace/golpe-pix.json'
+import fixture from '@/__tests__/fixtures/trace/flow-chain.json'
 import SwimlaneTimeline from '@/components/investigation/SwimlaneTimeline.vue'
 import { useInvestigationStore } from '@/stores/investigation'
 import { useCaseAnalyses, type TraceContent } from '@/composables/useCaseAnalyses'
@@ -43,7 +43,7 @@ describe('swimlane timeline (F3.5, F4)', () => {
     expect(lanes[0]).toContain('0001-9')
     expect(lanes[5]).toBe('Exits')
     expect(getAllByTestId('swimlane-arrow')).toHaveLength(7)
-    expect(getAllByTestId('swimlane-arrow').map((a) => a.textContent).join('|')).toContain('Saque ATM')
+    expect(getAllByTestId('swimlane-arrow').map((a) => a.textContent).join('|')).toContain('ATM withdrawal')
     // 4471-0 14:02→14:15, 5520-3 14:09→14:40, 8812-7 14:11→15:05, 3090-1 14:15→14:31; the victim has none.
     expect(getAllByTestId('swimlane-dwell')).toHaveLength(4)
   })

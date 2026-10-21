@@ -12,6 +12,8 @@ import {
   seedPrecomputedGraphs,
   seedSimilarityEndpoints,
   seedInvestigations,
+  seedCaseTypes,
+  caseType,
   enableDatasources,
 } from '../helpers/api-mocks';
 import { MOCK_EXPLORATION, MOCK_REST_CONNECTION } from '../fixtures/mock-data';
@@ -209,34 +211,62 @@ const DEMO_PRESETS = {
   },
 };
 
-// Investigations guide: a case whose two sources share companies by name, so the
-// unified view merges them (two rings) and shows two role fills.
+// Investigations guide: a case whose two graph items share companies by name, so
+// the unified view merges them (two rings) and shows two role fills.
 const COMPANY_KEY = [
   { node_type: 'Company', entity: 'Company', source: { kind: 'prop', name: 'name' }, normalize: 'lower' },
 ];
+const VENDOR_REVIEW = caseType('vendor_due_diligence', {
+  label: 'Vendor due diligence',
+  fields: [
+    { id: 'vendor_id', label: 'Vendor', type: 'text', options: [], required: true, in_queue: true },
+    { id: 'amount_at_risk', label: 'Amount at risk', type: 'money', options: [], required: false, in_queue: true },
+  ],
+  outcomes: [
+    { id: 'approve', label: 'Approve the vendor', closes_case: true, requires_review: false },
+    { id: 'reject', label: 'Reject the vendor', closes_case: true, requires_review: true },
+  ],
+  sla_hours: { open: 72, analysis: 336 },
+});
+const now = new Date().toISOString();
+const deadline = (hours: number, total: number, phase: 'open' | 'analysis' = 'analysis') => ({
+  phase, due_at: new Date(Date.now() + hours * 3_600_000).toISOString(), hours_left: hours,
+  days_left: Math.ceil(hours / 24), total_hours: total, urgent: hours <= total * 0.2, overdue: hours < 0,
+});
 const DEMO_CASE = {
-  id: 'case-pix',
-  title: 'Golpe Pix · falsa central',
-  status: 'analise',
-  typology: 'Golpe Pix',
+  id: 'case-vendor',
+  title: 'Vendor network · shared directors',
+  description: 'Two suppliers bid together and share directors with a competitor.',
+  status: 'analysis',
+  stage: null,
+  case_type: 'vendor_due_diligence',
+  fields: { vendor_id: 'V-2291', amount_at_risk: 184_000 },
   owner_email: 'demo@graphlagoon.dev',
   assignee_email: 'ana.costa@example.com',
-  state: { roles: { 'person-0@ctx-screenshot': 'victim', 'Company:globex data': 'mule' } },
+  settings: {},
+  state: {},
+  decisions: [],
+  tags: [],
   shared_with: [],
   has_write_access: true,
   can_manage: true,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-  deadline: { phase: 'analysis', due_at: new Date(Date.now() + 31 * 86_400_000).toISOString(), days_left: 31 },
+  created_at: now,
+  updated_at: now,
+  sla_hours: { open: 72, analysis: 336 },
+  deadline: deadline(220, 408),
+  item_count: 2,
+  suggested_count: 1,
 };
 const DEMO_CASES = [
   DEMO_CASE,
-  { ...DEMO_CASE, id: 'case-shell', title: 'Lojistas de fachada · região sul', typology: 'Lojista de fachada', status: 'selecao', assignee_email: 'bruno.rocha@example.com', state: {} },
-  { ...DEMO_CASE, id: 'case-mules', title: 'Contas laranja · abertura em lote', typology: 'Conta laranja', status: 'arquivado', assignee_email: null, state: {} },
+  { ...DEMO_CASE, id: 'case-ring', title: 'Fraud ring · shared devices at sign-up', case_type: 'general', fields: {}, status: 'open', assignee_email: 'bruno.rocha@example.com', deadline: null, item_count: 4, suggested_count: 0 },
+  { ...DEMO_CASE, id: 'case-credit', title: 'Credit review · Alpha group', case_type: 'general', fields: {}, status: 'closed', assignee_email: null, deadline: null, item_count: 7, suggested_count: 0 },
+  { ...DEMO_CASE, id: 'case-urgent', title: 'Vendor V-1187 · duplicate invoices', fields: { vendor_id: 'V-1187', amount_at_risk: 9_400 }, status: 'open', deadline: deadline(10, 72, 'open'), item_count: 1, suggested_count: 0 },
 ];
-const caseSource = (id: string, contextId: string, title: string, position: number) => ({
-  id, kind: 'exploration', position, title_snapshot: title, accessible: true,
-  exploration_id: `exp-${id}`, context_id: contextId, mode: 'live',
+const caseItem = (id: string, contextId: string, title: string, position: number) => ({
+  id, kind: 'graph', subkind: 'exploration_ref', title, tags: [], status: 'confirmed', author_kind: 'human',
+  author_email: 'demo@graphlagoon.dev', provenance: {}, exploration_id: `exp-${id}`, context_id: contextId,
+  current_version: 0, position, accessible: true, pinned: [], created_at: now,
 });
 /** The curated graph split in two: people ↔ companies, and companies → products. */
 function caseSnapshot(sid: string) {
@@ -244,10 +274,7 @@ function caseSnapshot(sid: string) {
   const edges = SCREENSHOT_GRAPH_RESPONSE.edges.filter((e) => types.includes(e.relationship_type));
   const ids = new Set(edges.flatMap((e) => [e.src, e.dst]));
   return {
-    exploration: {
-      id: sid, title: sid, graph_context_id: 'x', owner_email: 'demo@graphlagoon.dev',
-      state: DEMO_PRESETS.docs,
-    },
+    identity_keys: COMPANY_KEY,
     snapshot: {
       nodes: SCREENSHOT_GRAPH_RESPONSE.nodes
         .filter((n) => ids.has(n.node_id))
@@ -321,16 +348,26 @@ async function setupPage(page: Page) {
     },
   });
   await seedSimilarityEndpoints(page, DEMO_SIMILARITY_ENDPOINTS);
-  await seedInvestigations(page, DEMO_CASES, {
-    'case-pix': [
-      caseSource('src-social', SCREENSHOT_CONTEXT.id, 'Social · who works where', 0),
-      caseSource('src-supply', 'ctx-supply', 'Supply · who builds what', 1),
-    ],
+  const { annotations } = await seedInvestigations(
+    page,
+    DEMO_CASES,
+    {
+      'case-vendor': [
+        caseItem('src-social', SCREENSHOT_CONTEXT.id, 'Social · who works where', 0),
+        caseItem('src-supply', 'ctx-supply', 'Supply · who builds what', 1),
+      ],
+    },
+    [],
+    { 'src-social': caseSnapshot('src-social'), 'src-supply': caseSnapshot('src-supply') },
+  );
+  const role = (id: string, target: string, value: string, status = 'confirmed', author_kind = 'human') => ({
+    id, kind: 'role', targets: [target], value: { role: value }, status, author_kind, author_email: 'demo@graphlagoon.dev', created_at: now,
   });
-  await page.route('**/graphlagoon/api/investigations/case-pix/sources/*/snapshot', (route) => {
-    const sid = route.request().url().split('/sources/')[1].split('/')[0];
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(caseSnapshot(sid)) });
-  });
+  annotations.set('case-vendor', [
+    role('r1', 'person-0@ctx-screenshot', 'director'),
+    role('r2', 'Company:globex data', 'related supplier', 'suggested', 'agent'),
+  ]);
+  await seedCaseTypes(page, [VENDOR_REVIEW]);
   // Advertise a named REST connection so the datasource picker shows the full
   // roster (rest-connections scene). Invisible everywhere else — the picker
   // only exists inside the create-context modal.
@@ -355,15 +392,15 @@ const SCENES: Scene[] = [
     scene: 'queue',
     path: '/investigations',
     prepare: async (page) => {
-      await expect(page.getByTestId('investigation-row-case-pix')).toBeVisible();
-      await page.getByTestId('investigations-status').selectOption('all');
+      await expect(page.getByTestId('investigation-row-case-vendor')).toBeVisible();
+      await page.getByTestId('investigations-type').selectOption('vendor_due_diligence');
       await page.waitForTimeout(300);
     },
   },
   {
     guide: 'investigations',
     scene: 'workspace',
-    path: '/investigations/case-pix',
+    path: '/investigations/case-vendor',
     prepare: async (page) => {
       await waitForGraphSettled(page);
       // The first fit runs before the layout spreads out; Space + C refits.

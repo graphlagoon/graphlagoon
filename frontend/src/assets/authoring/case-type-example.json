@@ -1,0 +1,115 @@
+{
+  "label": "Merchant review",
+  "description": "A merchant (point of sale) under suspicion: collusion, bust-out, transaction laundering.",
+  "vocabularies": {
+    "roles": [
+      "suspect merchant",
+      "front partner",
+      "lent terminal",
+      "beneficiary"
+    ],
+    "tags": [
+      "bust-out",
+      "transaction laundering",
+      "MCC mismatch"
+    ],
+    "link_attributes": [
+      "phone",
+      "email",
+      "account",
+      "terminal_id",
+      "address"
+    ]
+  },
+  "roles_multi": true,
+  "outcomes": [
+    {
+      "id": "offboard",
+      "label": "Offboard the merchant",
+      "closes_case": true,
+      "requires_review": true
+    },
+    {
+      "id": "monitor",
+      "label": "Keep with monitoring",
+      "closes_case": true,
+      "requires_review": false
+    },
+    {
+      "id": "block_terminal",
+      "label": "Block a terminal",
+      "closes_case": false,
+      "requires_review": false
+    }
+  ],
+  "actions": [
+    {
+      "id": "hold_settlements",
+      "label": "Hold the settlements",
+      "due_hours": 2
+    },
+    {
+      "id": "report_to_network",
+      "label": "Report to the card network",
+      "due_hours": 120
+    }
+  ],
+  "stages": [
+    "Waiting for documents",
+    "Escalated to legal"
+  ],
+  "fields": [
+    {
+      "id": "merchant_id",
+      "label": "Merchant",
+      "type": "text",
+      "required": true,
+      "in_queue": true
+    },
+    {
+      "id": "mcc",
+      "label": "MCC",
+      "type": "enum",
+      "options": [
+        "5411",
+        "5999",
+        "7995"
+      ]
+    },
+    {
+      "id": "amount_at_risk",
+      "label": "Amount at risk",
+      "type": "money",
+      "in_queue": true
+    }
+  ],
+  "sla_hours": {
+    "open": 24,
+    "analysis": 120
+  },
+  "retention_years": 5,
+  "notice": "Do not contact the merchant about this review.",
+  "agent_suggest_kinds": null,
+  "playbook": null,
+  "starter_queries": [
+    {
+      "title": "Volume and chargebacks by day",
+      "language": "sql",
+      "query": "SELECT day, tpv, chargebacks FROM acq.daily WHERE merchant_id = :merchant ORDER BY day",
+      "parameters": [
+        {
+          "id": "merchant",
+          "label": "Merchant id",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "report_templates": [],
+  "analysis_defaults": {
+    "trace": {
+      "max_hops": 4,
+      "max_dwell_hours": 48
+    }
+  }
+}

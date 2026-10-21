@@ -42,7 +42,7 @@ describe('currentCase store', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
     expect(store.recentCases.map((r) => r.id)).toEqual(['ok'])
 
-    vi.mocked(api.getInvestigation).mockResolvedValueOnce(inv('ok', 'Ok renomeado', { status: 'decided' }))
+    vi.mocked(api.getInvestigation).mockResolvedValueOnce(inv('ok', 'Ok renomeado', { status: 'closed' }))
     store.setCurrentCase({ id: 'ok', title: 'Ok' })
     await flushPromises()
     expect(store.title).toBe('Ok renomeado')

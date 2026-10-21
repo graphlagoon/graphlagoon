@@ -127,13 +127,12 @@ export interface DatasourceConnectionConfig {
 }
 
 export type IdentityNormalize =
-  | 'cpf_cnpj'
+  | 'digits'
   | 'account'
   | 'phone'
   | 'email'
   | 'device_id'
   | 'ip'
-  | 'pix_key'
   | 'card'
   | 'terminal_id'
   | 'address'
@@ -144,7 +143,7 @@ export type IdentityNormalize =
 /** How a node type maps to a real-world entity, so contexts unify on it (investigations). */
 export interface IdentityKey {
   node_type: string;
-  /** Concept label shared across contexts: "Pessoa", "Conta", "Dispositivo". */
+  /** Concept label shared across contexts: "Person", "Account", "Device". */
   entity: string;
   source: 'node_id' | { kind: 'prop'; name: string };
   normalize: IdentityNormalize;
@@ -173,7 +172,7 @@ export interface EdgeSemantics {
   amount_prop?: string | null;
   amount_unit?: 'units' | 'cents';
   time_prop?: string | null;
-  currency?: string;
+  currency?: string | null;
   /** Generic relations (05 §4b): a weight stands in for the amount, a timestamp for the time. */
   weight_prop?: string | null;
   timestamp_prop?: string | null;
@@ -1076,14 +1075,14 @@ export type TextFormatModifier =
   | 'capitalize'      // Capitalize first letter
   | 'truncate'        // Truncate with ellipsis: truncate:20:...
   | 'number'          // Format as number with locale
-  | 'currency'        // Format as currency: currency:BRL or currency:USD
+  | 'currency'        // Format as currency: currency:USD or currency:EUR
   | 'percent'         // Format as percentage
   | 'split'           // Split by delimiter, take part: split:_:0 (negative = from end)
   | 'slice'           // Substring: slice:0:5 (String.prototype.slice semantics)
   | 'trim'            // Trim surrounding whitespace
   | 'default'         // Fallback when value is empty: default:N/A
   | 'match'           // Regex capture: match:/@(.+)$/:1
-  | 'replace';        // Regex replace (all occurrences): replace:/_CNPJ_RAIZ/:
+  | 'replace';        // Regex replace (all occurrences): replace:/_ROOT/:
 
 /** Operators for conditional expressions */
 export type TextFormatConditionOperator =

@@ -53,7 +53,7 @@ async function onPaste(event: ClipboardEvent) {
   if (!files.length) await addToCase.addPasted(text);
 }
 
-// --- operations between tables (05 §3): multi-select → Juntar | Comparar | Promover | Unir ---
+// --- operations between tables (05 §3): multi-select → Join | Compare | Promote | Merge ---
 const selectedTables = ref<Set<string>>(new Set());
 const tableOp = ref<TableOp | null>(null);
 const opItems = computed(() => store.items.filter((i) => selectedTables.value.has(i.id)));
@@ -194,7 +194,7 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
     @drop.prevent="onDrop"
     @paste="onPaste"
   >
-    <div v-if="dragging" class="drop-hint" data-testid="items-drop-hint">Solte para adicionar ao caso (arquivos, texto, URL ou TSV)</div>
+    <div v-if="dragging" class="drop-hint" data-testid="items-drop-hint">Drop to add to the case (files, text, URL or TSV)</div>
     <header class="head">
       <h2>Material</h2>
       <span v-if="suggestedCount" class="suggested-count" data-testid="suggested-count">{{ suggestedCount }} suggested</span>
@@ -245,12 +245,12 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
       </button>
       <template v-if="!collapsed.has(g.kind)">
         <div v-if="g.kind === 'table' && selectedTables.size && canEdit" class="ops-bar" data-testid="table-ops-bar">
-          <span class="muted">{{ selectedTables.size }} selecionada{{ selectedTables.size === 1 ? '' : 's' }}</span>
-          <button class="link-btn" :disabled="selectedTables.size < 2" data-testid="table-op-join" @click="tableOp = 'join'">Juntar</button>
-          <button class="link-btn" :disabled="selectedTables.size !== 2" data-testid="table-op-compare" @click="tableOp = 'compare'">Comparar</button>
-          <button class="link-btn" data-testid="table-op-enrichment" @click="tableOp = 'enrichment'">Promover em lote</button>
-          <button class="link-btn" data-testid="table-op-graph" @click="tableOp = 'graph'">Unir no grafo</button>
-          <button class="link-btn muted" @click="selectedTables = new Set()">limpar</button>
+          <span class="muted">{{ selectedTables.size }} selected</span>
+          <button class="link-btn" :disabled="selectedTables.size < 2" data-testid="table-op-join" @click="tableOp = 'join'">Join</button>
+          <button class="link-btn" :disabled="selectedTables.size !== 2" data-testid="table-op-compare" @click="tableOp = 'compare'">Compare</button>
+          <button class="link-btn" data-testid="table-op-enrichment" @click="tableOp = 'enrichment'">Promote in bulk</button>
+          <button class="link-btn" data-testid="table-op-graph" @click="tableOp = 'graph'">Merge into the graph</button>
+          <button class="link-btn muted" @click="selectedTables = new Set()">clear</button>
         </div>
         <div
           v-for="item in g.items"
@@ -287,12 +287,12 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
               v-if="item.kind === 'table' && canEdit"
               type="checkbox"
               class="pick"
-              title="Selecionar para juntar, comparar ou promover"
+              title="Select to join, compare or promote"
               :checked="selectedTables.has(item.id)"
               :data-testid="`item-select-${item.id}`"
               @change="toggleTable(item.id, ($event.target as HTMLInputElement).checked)"
             />
-            <button v-if="item.kind === 'query'" class="link-btn" title="Parâmetros, histórico, promover" :data-testid="`item-expand-${item.id}`" @click="toggleExpand(item.id)">
+            <button v-if="item.kind === 'query'" class="link-btn" title="Parameters, history, promote" :data-testid="`item-expand-${item.id}`" @click="toggleExpand(item.id)">
               {{ expanded.has(item.id) ? '▾' : '▸' }}
             </button>
             <template v-if="item.status === 'suggested' && canEdit">

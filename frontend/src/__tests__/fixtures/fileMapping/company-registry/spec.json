@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "name": "Company registry (headerless, Latin-1)",
+  "inputs": {
+    "reg": {
+      "match": "*",
+      "delimiter": ";",
+      "encoding": "latin-1",
+      "header": false,
+      "columns": [
+        "COMPANY_ID",
+        "PARTNER_KIND",
+        "PARTNER_NAME",
+        "PARTNER_ID",
+        "ROLE_CODE",
+        "SINCE",
+        "COUNTRY",
+        "REP_ID",
+        "REP_NAME",
+        "REP_ROLE",
+        "AGE_BAND"
+      ]
+    }
+  },
+  "nodes": [
+    {
+      "key": "company",
+      "type": "Company",
+      "from": "reg",
+      "id": {
+        "col": "reg.COMPANY_ID",
+        "convert": "digits"
+      },
+      "props": {
+        "company_id": "reg.COMPANY_ID"
+      }
+    },
+    {
+      "key": "partner_co",
+      "type": "Company",
+      "from": "reg",
+      "when": {
+        "eq": [
+          "reg.PARTNER_KIND",
+          "1"
+        ]
+      },
+      "id": {
+        "col": "reg.PARTNER_ID",
+        "normalize": "digits"
+      },
+      "props": {
+        "name": "reg.PARTNER_NAME",
+        "registry_id": "reg.PARTNER_ID"
+      }
+    },
+    {
+      "key": "partner_person",
+      "type": "Person",
+      "from": "reg",
+      "when": {
+        "ne": [
+          "reg.PARTNER_KIND",
+          "1"
+        ]
+      },
+      "id": {
+        "template": "partner:{reg.PARTNER_NAME}|{reg.PARTNER_ID}"
+      },
+      "props": {
+        "name": "reg.PARTNER_NAME",
+        "redacted_id": "reg.PARTNER_ID"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "reg",
+      "type": "PARTNER_OF",
+      "direction": "in",
+      "endpoints": {
+        "self": "company",
+        "other": [
+          "partner_co",
+          "partner_person"
+        ]
+      },
+      "props": {
+        "role": {
+          "col": "reg.ROLE_CODE",
+          "map": "role_code"
+        },
+        "since": {
+          "col": "reg.SINCE",
+          "convert": "date:yyyymmdd"
+        }
+      }
+    }
+  ],
+  "tables": {
+    "role_code": {
+      "05": "Administrator",
+      "22": "Partner",
+      "49": "Managing partner"
+    }
+  }
+}

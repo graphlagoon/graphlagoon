@@ -4,10 +4,11 @@ import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { applyAliases, snapshotToGraph, unifyGraph, type NodeOrigin, type UnifySource } from '@/utils/unifyGraph';
 import { provenanceColor } from '@/utils/graphAppearance';
-import { groupColor, vocabularyOf } from '@/utils/casePresets';
+import { groupColor, vocabularyOf } from '@/utils/caseVocabulary';
 import type { Edge, EdgeSemanticsByType, ExplorationState, GraphContext, IdentityKey, Node } from '@/types/graph';
 import type {
   CaseAnnotation,
+  TaskValue,
   CaseBrief,
   CaseItem,
   CaseViewContent,
@@ -15,7 +16,10 @@ import type {
   CreateInvestigationRequest,
   CreateItemRequest,
   GroupValue,
+  CaseType,
   Investigation,
+  InvestigationPage,
+  QueueParams,
   InvestigationEvent,
   ItemProvenance,
   ShareRole,
@@ -40,9 +44,9 @@ export interface CaseGroup {
   author_kind: CaseAnnotation['author_kind'];
 }
 
-/** An analysis saved as an item (05 §3 "Resultado = item"): the content of its latest version. */
+/** An analysis saved as an item (05 §3 "Result = item"): the content of its latest version. */
 export interface AnalysisSpec {
-  tool: 'trace' | 'paths' | 'typologies' | 'links' | 'metrics' | 'communities';
+  tool: 'trace' | 'paths' | 'links' | 'metrics' | 'communities';
   title: string;
   kind: 'table' | 'graph';
   subkind: CaseItem['subkind'];
@@ -65,6 +69,12 @@ export function isGraphItem(item: CaseItem): boolean {
 export const useInvestigationStore = defineStore('investigation', () => {
   /** The queue. */
   const investigations = ref<Investigation[]>([]);
+  /** The queue page (06 §2b): `investigations` holds its rows. */
+  const queueTotal = ref(0);
+  const queueCounts = ref<InvestigationPage['counts']>({});
+  /** The org's case types (06 §1), loaded once. */
+  const caseTypes = ref<CaseType[]>([]);
+  let caseTypesLoaded: Promise<void> | null = null;
   /** The open case and its material (05 §1). */
   const current = ref<Investigation | null>(null);
   const items = ref<CaseItem[]>([]);
@@ -140,14 +150,17 @@ export const useInvestigationStore = defineStore('investigation', () => {
       }),
   );
   const groupsClosed = computed<string[]>(() => (current.value?.state?.groups_closed as string[] | undefined) ?? []);
-  const vocabulary = computed(() => vocabularyOf(current.value?.settings, current.value?.kind_preset));
+  const vocabulary = computed(() => vocabularyOf(current.value?.settings));
+  /** The current case's type (its catalog, fields, notice), null until the types load. */
+  const caseType = computed(() => caseTypes.value.find((t) => t.slug === (current.value?.case_type ?? 'general')) ?? null);
+  const caseTypeLabel = (slug: string | null | undefined) => caseTypes.value.find((t) => t.slug === (slug ?? 'general'))?.label ?? slug ?? 'General';
   const labelTemplates = computed(() => (current.value?.settings?.label_templates as Record<string, string> | undefined) ?? null);
   /** Saved views (`graph/view` items). */
   const views = computed(() => items.value.filter((i) => i.kind === 'graph' && i.subkind === 'view' && !i.deleted_at));
   /** Analyses: results saved as items, newest first. */
   const analyses = computed(() =>
     items.value
-      .filter((i) => !i.deleted_at && i.provenance?.tool && ['trace', 'paths', 'typologies', 'links', 'metrics', 'communities'].includes(String(i.provenance.tool)))
+      .filter((i) => !i.deleted_at && i.provenance?.tool && ['trace', 'paths', 'links', 'metrics', 'communities'].includes(String(i.provenance.tool)))
       .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')),
   );
   const hypotheses = computed(() => annotations.value.filter((a) => a.kind === 'hypothesis'));
@@ -167,16 +180,35 @@ export const useInvestigationStore = defineStore('investigation', () => {
 
   // --- queue and case ---------------------------------------------------------
 
-  async function fetchInvestigations() {
+  /** One page of the queue; the server filters, sorts and counts. */
+  async function fetchInvestigations(params: QueueParams = {}) {
     loading.value = true;
     error.value = null;
     try {
-      investigations.value = await api.getInvestigations();
+      const page = await api.getInvestigationPage(params);
+      investigations.value = page.items;
+      queueTotal.value = page.total;
+      queueCounts.value = page.counts ?? {};
     } catch (e) {
       error.value = getErrorMessage(e, 'Failed to load investigations');
     } finally {
       loading.value = false;
     }
+  }
+
+  /** The case types, once per session (a failed load is retried next time). */
+  function fetchCaseTypes(force = false): Promise<void> {
+    if (force || !caseTypesLoaded) {
+      caseTypesLoaded = Promise.resolve()
+        .then(() => api.getCaseTypes())
+        .then((types) => {
+          caseTypes.value = types;
+        })
+        .catch(() => {
+          caseTypesLoaded = null;
+        });
+    }
+    return caseTypesLoaded;
   }
 
   async function createInvestigation(data: CreateInvestigationRequest) {
@@ -228,10 +260,18 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
-  /** The server freezes the case; the store just takes the frozen copy. */
+  /** The server hashes the decision (and closes the case when it closes); the store takes the copy. */
   async function recordDecision(body: Parameters<typeof api.recordInvestigationDecision>[1]) {
     if (!current.value) return;
     current.value = await api.recordInvestigationDecision(current.value.id, body);
+    syncRow(current.value);
+    if (body.tasks?.length || body.proposal_id) await fetchAnnotations(); // its actions became tasks; the proposal was taken up
+    void fetchEvents();
+  }
+
+  async function reviewDecision(decisionId: string, approve: boolean, note?: string) {
+    if (!current.value) return;
+    current.value = await api.reviewInvestigationDecision(current.value.id, decisionId, { approve, ...(note ? { note } : {}) });
     syncRow(current.value);
     void fetchEvents();
   }
@@ -252,6 +292,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
       derived.value = [];
       contents.value = {};
     }
+    void fetchCaseTypes();
     try {
       const [inv, rows, notes] = await Promise.all([
         api.getInvestigation(id),
@@ -304,6 +345,15 @@ export const useInvestigationStore = defineStore('investigation', () => {
     if (!current.value) return;
     upsertItem(await api.updateInvestigationItem(current.value.id, itemId, patch));
     void fetchEvents();
+  }
+
+  /** A report drafted from an org template: a new markdown item of the case. */
+  async function renderReport(template: string) {
+    if (!current.value) return null;
+    const item = await api.renderInvestigationReport(current.value.id, template);
+    upsertItem(item);
+    void fetchEvents();
+    return item;
   }
 
   async function addVersion(itemId: string, body: { content?: string; content_json?: unknown }) {
@@ -438,6 +488,30 @@ export const useInvestigationStore = defineStore('investigation', () => {
     }
     const existing = annotations.value.find((a) => a.kind === 'role' && a.status === 'confirmed' && a.targets[0] === entity);
     if (existing) await deleteAnnotation(existing.id);
+  }
+
+  /** The agent's pending decision draft (06 P8, A4), the latest one: the decision panel opens filled with it. */
+  const decisionProposal = computed(
+    () => [...annotations.value].reverse().find((a) => a.kind === 'decision_proposal' && a.status === 'suggested') ?? null,
+  );
+
+  /** Follow-ups (06 §1), due first; rejected suggestions drop out. */
+  const tasks = computed(() =>
+    annotations.value
+      .filter((a) => a.kind === 'task' && a.status !== 'rejected')
+      .sort((a, b) => String(a.value.due_at ?? '\uffff').localeCompare(String(b.value.due_at ?? '\uffff')) || String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))),
+  );
+
+  async function addTask(value: Partial<TaskValue> & { title: string }, targets: string[] = []) {
+    return addAnnotation({ kind: 'task', targets, value: { state: 'open', assignee_kind: 'human', ...value } });
+  }
+
+  /** Works on a closed case too: follow-ups outlive the decision. */
+  async function updateTask(annotationId: string, value: Partial<TaskValue>, reason?: string) {
+    if (!current.value) return;
+    await api.updateInvestigationAnnotation(current.value.id, annotationId, { value, ...(reason ? { reason } : {}) });
+    await fetchAnnotations();
+    void fetchEvents();
   }
 
   async function addHypothesis(text: string) {
@@ -655,14 +729,20 @@ export const useInvestigationStore = defineStore('investigation', () => {
     return item;
   }
 
-  /** "Usar no dossiê": a `dossie` tag on the item. */
+  /** "Use in the dossier": a `dossier` tag on the item. */
   async function setInDossier(item: CaseItem, on: boolean) {
-    const tags = item.tags.filter((t) => t !== 'dossie');
-    await updateItem(item.id, { tags: on ? [...tags, 'dossie'] : tags });
+    const tags = item.tags.filter((t) => t !== 'dossier');
+    await updateItem(item.id, { tags: on ? [...tags, 'dossier'] : tags });
   }
 
   return {
     investigations,
+    queueTotal,
+    queueCounts,
+    caseTypes,
+    caseType,
+    caseTypeLabel,
+    fetchCaseTypes,
     current,
     items,
     annotations,
@@ -706,6 +786,12 @@ export const useInvestigationStore = defineStore('investigation', () => {
     deleteInvestigation,
     reopenInvestigation,
     recordDecision,
+    renderReport,
+    tasks,
+    decisionProposal,
+    addTask,
+    updateTask,
+    reviewDecision,
     openInvestigation,
     fetchItems,
     addItem,

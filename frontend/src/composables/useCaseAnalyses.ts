@@ -1,6 +1,6 @@
 /**
- * Analyses of the case (05 §3 "Resultado = item"): follow the money, paths,
- * typologies, Vínculos (shared attributes) and metrics run on the unified graph
+ * Analyses of the case (05 §3 "Resultado = item"): flow trace, paths, links
+ * (shared attributes) and metrics run on the unified graph
  * (workers when available) and come back as items with provenance
  * `{tool, params}`; the panels render from the item's content, never from a
  * volatile store. Re-running into an item adds a version.
@@ -11,21 +11,30 @@ import { useGraphStore } from '@/stores/graph';
 import { useMetricsStore } from '@/stores/metrics';
 import { caseNodeLabel } from '@/utils/caseLabels';
 import { edgeValue } from '@/utils/edgeSemantics';
-import { sharedAttributeLinks, type SharedLinkEdge, type SharedLinkPair, type SharedLinksParams } from '@/utils/entityResolution';
+import { sharedAttributeLinks, type SharedLinkEdge, type SharedLinkPair, type SharedLinksParams } from '@/utils/sharedLinks';
 import { findPaths, MAX_K, type Path, type PathParams } from '@/utils/paths';
 import { orientEdges, runTrace, toTraceEdges, type Allocation, type TraceEdge, type TraceParams, type TraceResult } from '@/utils/trace';
 import { methodStamp } from '@/utils/traceView';
-import { runTypologies, TYPOLOGIES, type TypologyParams, type TypologyResult } from '@/utils/typologies';
 import type { PathWorkerInput, PathWorkerOutput } from '@/workers/pathWorker';
 import type { TraceWorkerInput, TraceWorkerOutput } from '@/workers/traceWorker';
 import type { CaseItem } from '@/types/investigation';
 
 export type TraceDirection = TraceParams['direction'];
 const HOUR = 3_600_000;
-/** README Q4 defaults. */
-export const TRACE_DEFAULTS = { maxHops: 3, dwellHours: 24, minAmount: 50 };
-/** Node types checked as stops by default: cash-out, crypto, betting and out-of-case banks. */
-export const DEFAULT_STOP_TYPE = /saque|withdraw|atm|cash|exchange|cripto|crypto|aposta|bet|externo|external/i;
+/** Starting values of the trace form. */
+export const TRACE_DEFAULTS = { maxHops: 3, dwellHours: 24, minAmount: 0 };
+
+/**
+ * Node types where value only ends (forward: they receive, none of them sends;
+ * backward: they send, none receives): the default stops. Twin of
+ * `services/trace.py::end_types`.
+ */
+export function endTypes(edges: TraceEdge[], nodeTypes: Map<string, string>, direction: TraceDirection): string[] {
+  const [into, out] = direction === 'forward' ? (['dst', 'src'] as const) : (['src', 'dst'] as const);
+  const reached = new Set(edges.map((e) => nodeTypes.get(e[into])));
+  const leaving = new Set(edges.map((e) => nodeTypes.get(e[out])));
+  return [...reached].filter((t): t is string => !!t && !leaving.has(t)).sort();
+}
 
 export const ALLOCATIONS: Record<TraceDirection, { id: Allocation; label: string; hint: string }[]> = {
   forward: [
@@ -74,13 +83,7 @@ export interface PathsContent {
   paths: Path[];
 }
 
-export interface TypologiesContent {
-  tool: 'typologies';
-  params: Record<string, TypologyParams>;
-  results: TypologyResult[];
-}
-
-/** A `graph/derived` item: unified ids, `compartilha_<attr>` edges. */
+/** A `graph/derived` item: unified ids, `shares_<attr>` edges. */
 export interface LinksContent {
   tool: 'links';
   unified: true;
@@ -159,11 +162,26 @@ export function useCaseAnalyses() {
       : [Math.min(...seedTimes) - span, Math.max(...seedTimes)];
   }
 
-  /** README defaults from a seed; null when nothing valued leaves (or reaches) it. */
+  /** README defaults, overridden by the case type's `analysis_defaults.trace` (06 §3c). */
+  const traceDefaults = computed(() => {
+    const t = inv.caseType?.analysis_defaults?.trace ?? {};
+    return {
+      maxHops: t.max_hops ?? TRACE_DEFAULTS.maxHops,
+      // 0 on the type means no limit, like the server's.
+      dwellHours: t.max_dwell_hours === 0 ? null : (t.max_dwell_hours ?? TRACE_DEFAULTS.dwellHours),
+      minAmount: t.min_amount ?? TRACE_DEFAULTS.minAmount,
+      allocation: t.allocation ?? null,
+      stopTypes: t.stop_types ?? null,
+    };
+  });
+
+  /** The defaults from a seed; null when nothing valued leaves (or reaches) it. */
   function defaultTraceParams(target: { type: 'node' | 'edge'; id: string }, direction: TraceDirection): TraceRunParams | null {
     const seeds = seedsFor(target, direction);
     if (!seeds.length) return null;
     const seedEdgeIds = seeds.map((e) => e.id);
+    const d = traceDefaults.value;
+    const allocation = ALLOCATIONS[direction].some((a) => a.id === d.allocation) ? d.allocation! : ALLOCATIONS[direction][0].id;
     return {
       seedEdgeIds,
       seedLabel:
@@ -171,12 +189,12 @@ export function useCaseAnalyses() {
           ? `${nameOf(seeds[0].src)} → ${nameOf(seeds[0].dst)}`
           : `${direction === 'forward' ? 'outgoing' : 'incoming'} edges of ${nameOf(target.id)}`,
       direction,
-      maxHops: TRACE_DEFAULTS.maxHops,
-      dwellHours: TRACE_DEFAULTS.dwellHours,
-      minAmount: TRACE_DEFAULTS.minAmount,
-      window: defaultWindow(seedEdgeIds, direction, TRACE_DEFAULTS.dwellHours),
-      allocation: ALLOCATIONS[direction][0].id,
-      stopTypes: allNodeTypes.value.filter((t) => DEFAULT_STOP_TYPE.test(t)),
+      maxHops: d.maxHops,
+      dwellHours: d.dwellHours,
+      minAmount: d.minAmount,
+      window: defaultWindow(seedEdgeIds, direction, d.dwellHours),
+      allocation,
+      stopTypes: d.stopTypes ?? endTypes(traceEdges.value, new Map(inv.unified.nodes.map((n) => [n.node_id, n.node_type])), direction),
     };
   }
 
@@ -253,32 +271,7 @@ export function useCaseAnalyses() {
     });
   }
 
-  async function runTypologiesAnalysis(ids: string[], params: Record<string, TypologyParams>, itemId?: string | null): Promise<CaseItem | null> {
-    return guarded('typologies', async () => {
-      // shortcut: main thread; the cycle search is capped, move to a worker if big cases stall.
-      const results = runTypologies(
-        {
-          nodes: inv.unified.nodes.map((n) => ({ id: n.node_id, type: n.node_type })),
-          edges: inv.unified.edges.map((e) => ({ id: e.edge_id, src: e.src, dst: e.dst, ...edgeValue(e, null) })),
-        },
-        params,
-        ids.length ? ids : undefined,
-      );
-      const content: TypologiesContent = { tool: 'typologies', params, results };
-      const found = results.filter((r) => r.hits.length).length;
-      return inv.saveAnalysis({
-        tool: 'typologies',
-        title: `Typologies · ${found} of ${results.length} found`,
-        kind: 'table',
-        subkind: 'result',
-        params: { typologies: ids.length ? ids : TYPOLOGIES.map((t) => t.id), params },
-        content,
-        itemId,
-      });
-    });
-  }
-
-  /** Vínculos: entities sharing attributes become a `graph/derived` layer of `compartilha_<attr>` edges. */
+  /** Links: entities sharing attributes become a `graph/derived` layer of `shares_<attr>` edges. */
   async function runLinksAnalysis(params: SharedLinksParams, itemId?: string | null): Promise<CaseItem | null> {
     return guarded('links', async () => {
       const nodes = inv.unified.nodes.map((n) => ({ uid: n.node_id, type: n.node_type, properties: n.properties }));
@@ -294,13 +287,13 @@ export function useCaseAnalyses() {
       };
       return inv.saveAnalysis({
         tool: 'links',
-        title: `Vínculos por ${params.attributes.join(' + ')} · ${pairs.length} ${pairs.length === 1 ? 'par' : 'pares'}`,
+        title: `Links by ${params.attributes.join(' + ')} · ${pairs.length} ${pairs.length === 1 ? 'pair' : 'pairs'}`,
         kind: 'graph',
         subkind: 'derived',
         params: { ...params },
         content,
         itemId,
-        description: `${edges.length} compartilha_* edges between ${touched.size} entities`,
+        description: `${edges.length} shares_* edges between ${touched.size} entities`,
       });
     });
   }
@@ -334,6 +327,7 @@ export function useCaseAnalyses() {
     running,
     error,
     traceEdges,
+    traceDefaults,
     allNodeTypes,
     nameOf,
     seedsFor,
@@ -341,7 +335,6 @@ export function useCaseAnalyses() {
     defaultTraceParams,
     runTrace: runTraceAnalysis,
     runPaths: runPathsAnalysis,
-    runTypologies: runTypologiesAnalysis,
     runLinks: runLinksAnalysis,
     saveMetricsTable,
   };

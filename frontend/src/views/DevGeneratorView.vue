@@ -142,8 +142,8 @@ const result = ref<RandomGraphResponse | null>(null);
 const clearMessage = ref<string | null>(null);
 
 const graphModels: { value: GraphModel; label: string; description: string }[] = [
-  { value: 'barabasi_albert', label: 'Barabási-Albert', description: 'Scale-free network with preferential attachment' },
-  { value: 'erdos_renyi', label: 'Erdős-Rényi', description: 'Random graph G(n, p)' },
+  { value: 'barabasi_albert', label: 'Barabasi-Albert', description: 'Scale-free network with preferential attachment' },
+  { value: 'erdos_renyi', label: 'Erdos-Renyi', description: 'Random graph G(n, p)' },
   { value: 'watts_strogatz', label: 'Watts-Strogatz', description: 'Small-world network' },
   { value: 'complete', label: 'Complete', description: 'Fully connected graph K_n' },
   { value: 'cycle', label: 'Cycle', description: 'Circular graph' },

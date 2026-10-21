@@ -91,7 +91,7 @@ function emptyForm() {
     default_behaviors: '',
     identity_keys: [] as IdentityKeyRow[],
     enrichment_tables: [] as EnrichmentRow[],
-    edge_semantics: { amount_prop: '', amount_unit: 'units', time_prop: '', currency: 'BRL' } as EdgeSemanticsForm,
+    edge_semantics: { amount_prop: '', amount_unit: 'units', time_prop: '', currency: '' } as EdgeSemanticsForm,
   };
 }
 
@@ -162,7 +162,7 @@ interface IdentityKeyRow {
 }
 
 const NORMALIZERS: { value: IdentityNormalize; label: string }[] = [
-  { value: 'cpf_cnpj', label: 'CPF/CNPJ' },
+  { value: 'digits', label: 'Digits only (document, tax or national id)' },
   { value: 'account', label: 'Account (bank-agency-account)' },
   { value: 'phone', label: 'Phone' },
   { value: 'email', label: 'E-mail' },
@@ -217,7 +217,7 @@ function formFromContext(context: GraphContext) {
       amount_prop: context.edge_semantics?.amount_prop ?? '',
       amount_unit: context.edge_semantics?.amount_unit ?? 'units',
       time_prop: context.edge_semantics?.time_prop ?? '',
-      currency: context.edge_semantics?.currency ?? 'BRL',
+      currency: context.edge_semantics?.currency ?? '',
     },
   };
 }
@@ -564,7 +564,7 @@ const edgeSemantics = computed<EdgeSemantics>(() => {
     amount_prop: f.amount_prop.trim() || null,
     amount_unit: f.amount_unit,
     time_prop: f.time_prop.trim() || null,
-    currency: f.currency.trim().toUpperCase() || 'BRL',
+    currency: f.currency.trim().toUpperCase() || null,
   };
 });
 const edgePropertyOptions = computed(() =>
@@ -1084,7 +1084,7 @@ async function submit() {
           </div>
           <span v-else class="hint">
             Optional. An investigation merges nodes from different contexts that share
-            the same entity and normalized value (e.g. Pessoa by CPF).
+            the same entity and normalized value (e.g. Person by national id).
           </span>
           <div
             v-for="(row, i) in form.identity_keys"
@@ -1108,7 +1108,7 @@ async function submit() {
                 v-model="row.entity"
                 type="text"
                 class="form-control"
-                placeholder="Pessoa"
+                placeholder="Person"
                 data-testid="identity-key-entity"
               />
             </div>

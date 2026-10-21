@@ -157,7 +157,7 @@ export function formatTraceTime(t: number): string {
 }
 
 /** One line with every parameter of the run (the method stamp of T5 and of the evidence). */
-export function methodStamp(method: TraceResult['method'], currency = 'BRL'): string {
+export function methodStamp(method: TraceResult['method'], currency?: string | null): string {
   const parts = [
     `method: ${method.direction}`,
     `${method.maxHops} layers`,

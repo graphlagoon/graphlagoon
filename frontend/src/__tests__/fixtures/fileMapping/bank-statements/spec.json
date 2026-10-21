@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "name": "Bank statements (TAB, Latin-1)",
+  "inputs": {
+    "statement": {
+      "match": "*_STATEMENT.TXT",
+      "delimiter": "\t",
+      "encoding": "latin-1",
+      "header": true
+    },
+    "cp": {
+      "match": "*_COUNTERPARTS.TXT",
+      "delimiter": "\t",
+      "encoding": "latin-1",
+      "header": true
+    },
+    "holders": {
+      "match": "*_HOLDERS.TXT",
+      "delimiter": "\t",
+      "encoding": "latin-1",
+      "header": true
+    }
+  },
+  "joins": [
+    {
+      "left": "statement.ENTRY_ID",
+      "right": "cp.ENTRY_ID",
+      "as": "entry"
+    }
+  ],
+  "nodes": [
+    {
+      "key": "account",
+      "type": "Account",
+      "from": "entry",
+      "id": {
+        "concat": [
+          "statement.BANK",
+          "statement.BRANCH",
+          "statement.ACCOUNT"
+        ],
+        "normalize": "account"
+      },
+      "props": {
+        "bank": "statement.BANK",
+        "branch": "statement.BRANCH",
+        "account": "statement.ACCOUNT"
+      }
+    },
+    {
+      "key": "person",
+      "type": "Person",
+      "from": "entry",
+      "when": {
+        "ne": [
+          "cp.CP_BRANCH",
+          "9999"
+        ]
+      },
+      "id": {
+        "col": "cp.CP_DOCUMENT",
+        "normalize": "digits"
+      },
+      "props": {
+        "name": "cp.CP_NAME",
+        "document": "cp.CP_DOCUMENT"
+      }
+    },
+    {
+      "key": "unknown",
+      "type": "Unknown",
+      "from": "entry",
+      "when": {
+        "eq": [
+          "cp.CP_BRANCH",
+          "9999"
+        ]
+      },
+      "id": {
+        "template": "unknown:{cp.COUNTERPART_ID}"
+      },
+      "props": {
+        "note": "cp.NOTE"
+      }
+    },
+    {
+      "key": "holder_account",
+      "type": "Account",
+      "from": "holders",
+      "id": {
+        "concat": [
+          "holders.BANK",
+          "holders.BRANCH",
+          "holders.ACCOUNT"
+        ],
+        "normalize": "account"
+      }
+    },
+    {
+      "key": "holder",
+      "type": "Person",
+      "from": "holders",
+      "id": {
+        "col": "holders.HOLDER_DOCUMENT",
+        "normalize": "digits"
+      },
+      "props": {
+        "name": "holders.HOLDER_NAME",
+        "document": "holders.HOLDER_DOCUMENT",
+        "income": {
+          "col": "holders.INCOME",
+          "convert": "cents"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "entry",
+      "id": {
+        "col": "cp.COUNTERPART_ID"
+      },
+      "type": {
+        "col": "statement.ENTRY_TYPE",
+        "map": "entry_type"
+      },
+      "direction": {
+        "col": "statement.SIDE",
+        "C": "in",
+        "D": "out"
+      },
+      "endpoints": {
+        "self": "account",
+        "other": [
+          "person",
+          "unknown"
+        ]
+      },
+      "props": {
+        "amount": {
+          "col": "cp.CP_AMOUNT",
+          "convert": "cents"
+        },
+        "date": {
+          "col": "statement.POSTED_ON",
+          "convert": "date:ddmmyyyy"
+        },
+        "description": "statement.DESCRIPTION"
+      }
+    },
+    {
+      "from": "holders",
+      "type": "HOLDS",
+      "endpoints": {
+        "self": "holder",
+        "other": "holder_account"
+      }
+    }
+  ],
+  "edge_semantics": {
+    "amount_prop": "amount",
+    "time_prop": "date"
+  },
+  "tables": {
+    "entry_type": {
+      "114": "WITHDRAWAL",
+      "120": "TRANSFER",
+      "209": "TRANSFER",
+      "220": "CASH_DEPOSIT",
+      "222": "CARD_RECEIVABLES",
+      "223": "QR_PAYMENT"
+    }
+  }
+}

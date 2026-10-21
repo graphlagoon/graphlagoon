@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import fixture from '@/__tests__/fixtures/trace/golpe-pix.json';
+import fixture from '@/__tests__/fixtures/trace/flow-chain.json';
 import { runTrace, toTraceEdges, traceForward, type TraceEdge, type TraceParams, type TraceResult } from '@/utils/trace';
 
 const edges = toTraceEdges(fixture.edges, fixture.edge_semantics);
@@ -22,7 +22,7 @@ describe('temporal trace, forward (03 §6.1)', () => {
 
   it('FIFO: exits, retained and coverage of the T5 screen', () => {
     const r = run();
-    expect(r.exits).toEqual({ 'saque-atm': 2000, 'exchange-gama': 1550, 'bet-delta': 880 });
+    expect(r.exits).toEqual({ 'atm-cash': 2000, 'exchange-gama': 1550, 'bet-delta': 880 });
     expect(r.exitTotal).toBe(4430);
     expect(Math.round(r.coverage * 100)).toBe(91);
     expect(retained(r)).toEqual({ '4471-0': 70, '8812-7': 350, '3090-1': 20 });
@@ -42,7 +42,7 @@ describe('temporal trace, forward (03 §6.1)', () => {
 
   it('Δ = 40 min cuts only the 15:05 exit (54 min dwell)', () => {
     const r = run({ maxDwellMs: 40 * 60_000 });
-    expect(r.exits).toEqual({ 'saque-atm': 2000, 'bet-delta': 880 }); // 31 and 16 min dwell
+    expect(r.exits).toEqual({ 'atm-cash': 2000, 'bet-delta': 880 }); // 31 and 16 min dwell
     expect(r.edgeTrace.e8).toBeUndefined();
     expect(r.discarded.expired).toBe(1900);
   });
@@ -97,7 +97,7 @@ describe('temporal trace, forward (03 §6.1)', () => {
   it('backward LIFO from the 15:05 exchange payment walks back to the victim, not the 300 opening balance', () => {
     const t = (hhmm: string) => Date.parse(`2026-09-09T${hhmm}:00-03:00`);
     const r = runTrace(edges, types, { edgeIds: ['e8'] }, {
-      ...params, direction: 'backward', allocation: 'lifo', stopTypes: ['BancoExterno'], window: [t('13:00'), t('15:05')],
+      ...params, direction: 'backward', allocation: 'lifo', stopTypes: ['ExternalBank'], window: [t('13:00'), t('15:05')],
     });
     expect(r.edgeTrace).toEqual({ e8: 1850, e4: 1850, e2: 1850 });
     expect(r.nodes['4471-0'].layer).toBe(2);

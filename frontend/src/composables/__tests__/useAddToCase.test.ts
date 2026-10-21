@@ -47,7 +47,7 @@ describe('useAddToCase', () => {
     expect(vi.mocked(api.createInvestigationItem).mock.calls[2][1]).toMatchObject({ kind: 'note', subkind: 'anchored', anchor: { entity_ids: ['p1'] } })
 
     const toasts = useToast().toasts.value
-    expect(toasts.filter((t) => t.message.startsWith('Adicionado ao caso Golpe Pix'))).toHaveLength(3)
+    expect(toasts.filter((t) => t.message.startsWith('Added to case Golpe Pix'))).toHaveLength(3)
   })
 
   it('addSelection stores the selected nodes and their edges as graph/selection; nothing selected = no call', async () => {
@@ -81,7 +81,7 @@ describe('useAddToCase', () => {
     expect(add.enabled.value).toBe(false)
     expect(await add.addExploration('e1')).toBeNull()
     expect(api.createInvestigationItem).not.toHaveBeenCalled()
-    expect(useToast().toasts.value[0].message).toContain('Escolha um caso')
+    expect(useToast().toasts.value[0].message).toContain('Pick a current case')
 
     const explicit = useAddToCase('inv-9')
     await explicit.addExploration('e1')
@@ -94,5 +94,9 @@ describe('useAddToCase', () => {
     expect(classifyPaste('a;b\n1;2;3')).toEqual({ kind: 'note' })
     expect(classifyPaste('só uma frase')).toEqual({ kind: 'note' })
     expect(queryParameterNames('SELECT :a, :a, t.c, x::int, :d_1')).toEqual(['a', 'd_1'])
+    // A quoted ':x' is text; in Cypher, labels and relationship types are not parameters.
+    expect(queryParameterNames("SELECT ':no', \"a:b\", `c:d`, 'it\\'s :z', :yes")).toEqual(['yes'])
+    expect(queryParameterNames('MATCH (a:Person)-[:KNOWS|OWNS]->(:Account {id: :acc}) WHERE a.x = :x', 'cypher')).toEqual(['acc', 'x'])
+    expect(queryParameterNames('SELECT * FROM t WHERE id IN (:ids)', 'sql')).toEqual(['ids'])
   })
 })

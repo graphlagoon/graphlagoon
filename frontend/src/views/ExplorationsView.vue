@@ -22,7 +22,7 @@ const explorations = ref<Exploration[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const filterContextId = ref<string>('');
-/** "Adicionar ao caso <atual>" on each row (05 §4). */
+/** "Add to case <current>" on each row (05 §4). */
 const currentCase = useCurrentCaseStore();
 const addToCase = useAddToCase();
 const addingToCase = ref<string | null>(null);
@@ -358,10 +358,10 @@ async function quickShare(email: string) {
               class="btn btn-outline btn-sm"
               :data-testid="`exploration-add-to-investigation-${exploration.id}`"
               :disabled="!currentCase.hasCase || addingToCase === exploration.id"
-              :title="currentCase.hasCase ? `Adicionar ao caso ${currentCase.title}` : 'Escolha um caso atual na barra superior'"
+              :title="currentCase.hasCase ? `Add to case ${currentCase.title}` : 'Pick a current case in the top bar'"
               @click="addExplorationToCase(exploration)"
             >
-              Adicionar ao caso<template v-if="currentCase.hasCase"> {{ currentCase.shortId }}</template>
+              Add to case<template v-if="currentCase.hasCase"> {{ currentCase.shortId }}</template>
             </button>
             <button
               v-if="canManage(exploration)"

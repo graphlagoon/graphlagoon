@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * The expanded card of a saved query (05 §3 "Consulta do caso"): context and
- * SQL, the `:name` parameters with their source (valor fixo | seleção atual |
- * grupo | propriedade), "Executar de novo", the run history (versions with
- * `run`), "Comparar 2 runs", "Usar no dossiê" (tag) and "Promover → grafo |
- * enriquecimento" (the latest run becomes a mapped table item).
+ * The expanded card of a saved query (05 §3 "Case query"): context and
+ * SQL, the `:name` parameters with their source (fixed value | current selection |
+ * group | property), "Run again", the run history (versions with
+ * `run`), "Compare 2 runs", "Use in the dossier" (tag) and "Promote → graph |
+ * enrichment" (the latest run becomes a mapped table item).
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { api } from '@/services/api';
@@ -25,15 +25,15 @@ const toast = useToast();
 
 type Source = 'fixed' | 'selection' | 'group' | 'property';
 const SOURCES: { id: Source; label: string }[] = [
-  { id: 'fixed', label: 'valor fixo' },
-  { id: 'selection', label: 'seleção atual' },
-  { id: 'group', label: 'grupo' },
-  { id: 'property', label: 'propriedade' },
+  { id: 'fixed', label: 'fixed value' },
+  { id: 'selection', label: 'current selection' },
+  { id: 'group', label: 'group' },
+  { id: 'property', label: 'property' },
 ];
 
 const params = computed(() => {
   const declared = props.item.query?.parameters ?? [];
-  const names = queryParameterNames(props.item.query?.text ?? '');
+  const names = queryParameterNames(props.item.query?.text ?? '', props.item.query?.language);
   return names.map((id) => declared.find((p) => p.id === id) ?? { id, label: id, type: 'input' as const, required: true });
 });
 const sourceOf = ref<Record<string, Source>>({});
@@ -74,10 +74,10 @@ async function run() {
     const values = Object.fromEntries(params.value.map((p) => [p.id, resolve(p.id)]));
     const updated = await store.runQuery(props.item.id, values);
     const r = updated?.latest?.run as { row_count?: number; duration_ms?: number } | undefined;
-    toast.success(`Executada: ${r?.row_count ?? '?'} linhas em ${r?.duration_ms ?? '?'} ms`);
+    toast.success(`Ran: ${r?.row_count ?? '?'} rows in ${r?.duration_ms ?? '?'} ms`);
     await loadHistory();
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Falha ao executar a consulta'));
+    toast.error(getErrorMessage(e, 'Failed to run the query'));
   } finally {
     busy.value = false;
   }
@@ -104,27 +104,27 @@ async function compareRuns() {
   try {
     diff.value = await api.compareInvestigationTables(store.current.id, { left: { item_id: props.item.id, version: a }, right: { item_id: props.item.id, version: b } });
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Falha ao comparar'));
+    toast.error(getErrorMessage(e, 'Failed to compare'));
   }
 }
 async function pinRun(version: number) {
   try {
     const v = await store.pinItem(props.item.id, { version });
-    if (v) toast.success(`Fixada v${v.version} · ${v.sha256.slice(0, 8)}`);
+    if (v) toast.success(`Pinned v${v.version} · ${v.sha256.slice(0, 8)}`);
     await loadHistory();
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Falha ao fixar'));
+    toast.error(getErrorMessage(e, 'Failed to pin'));
   }
 }
 
 // --- dossier flag and promotion --------------------------------------------------
-const inDossier = computed(() => props.item.tags.includes('dossie'));
+const inDossier = computed(() => props.item.tags.includes('dossier'));
 async function toggleDossier() {
-  const tags = inDossier.value ? props.item.tags.filter((t) => t !== 'dossie') : [...props.item.tags, 'dossie'];
+  const tags = inDossier.value ? props.item.tags.filter((t) => t !== 'dossier') : [...props.item.tags, 'dossier'];
   try {
     await store.updateItem(props.item.id, { tags });
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Falha ao atualizar'));
+    toast.error(getErrorMessage(e, 'Failed to update'));
   }
 }
 const promoting = ref(false);
@@ -135,9 +135,9 @@ async function promote(as: 'graph' | 'enrichment') {
     const [created] = await api.promoteInvestigationTables(store.current.id, { item_ids: [props.item.id], as });
     await store.fetchItems();
     if (as === 'graph') await store.loadWorkspace();
-    toast.success(`“${created.title}” ${as === 'graph' ? 'no grafo' : 'como enriquecimento'}`);
+    toast.success(`“${created.title}” ${as === 'graph' ? 'in the graph' : 'as enrichment'}`);
   } catch (e) {
-    toast.error(getErrorMessage(e, 'Falha ao promover'));
+    toast.error(getErrorMessage(e, 'Failed to promote'));
   } finally {
     promoting.value = false;
   }
@@ -158,44 +158,44 @@ async function promote(as: 'graph' | 'enrichment') {
         <select v-model="sourceOf[p.id]" class="form-control" :data-testid="`query-param-source-${p.id}`">
           <option v-for="s in SOURCES" :key="s.id" :value="s.id">{{ s.label }}</option>
         </select>
-        <input v-if="sourceOf[p.id] === 'fixed'" v-model="valueOf[p.id]" class="form-control" :placeholder="p.placeholder || 'valor (vírgula separa listas)'" :data-testid="`query-param-value-${p.id}`" />
-        <span v-else-if="sourceOf[p.id] === 'selection'" class="muted">{{ selectedIds.length }} selecionado{{ selectedIds.length === 1 ? '' : 's' }}</span>
+        <input v-if="sourceOf[p.id] === 'fixed'" v-model="valueOf[p.id]" class="form-control" :placeholder="p.placeholder || 'value (comma separates lists)'" :data-testid="`query-param-value-${p.id}`" />
+        <span v-else-if="sourceOf[p.id] === 'selection'" class="muted">{{ selectedIds.length }} selected</span>
         <select v-else-if="sourceOf[p.id] === 'group'" v-model="valueOf[p.id]" class="form-control">
-          <option value="" disabled>grupo…</option>
+          <option value="" disabled>group…</option>
           <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.value.name ?? g.id }} ({{ g.targets.length }})</option>
         </select>
-        <input v-else v-model="valueOf[p.id]" class="form-control" placeholder="nome da propriedade (dos selecionados)" />
+        <input v-else v-model="valueOf[p.id]" class="form-control" placeholder="property name (of the selected)" />
       </div>
     </div>
 
     <div class="row">
-      <button v-if="canEdit" class="btn btn-primary btn-sm" :disabled="busy" :data-testid="`query-run-${item.id}`" @click="run">▶ Executar de novo</button>
-      <button class="link-btn" :data-testid="`query-history-${item.id}`" @click="showHistory = !showHistory">Histórico ({{ history.length }})</button>
+      <button v-if="canEdit" class="btn btn-primary btn-sm" :disabled="busy" :data-testid="`query-run-${item.id}`" @click="run">▶ Run again</button>
+      <button class="link-btn" :data-testid="`query-history-${item.id}`" @click="showHistory = !showHistory">History ({{ history.length }})</button>
       <button v-if="canEdit" class="link-btn" :class="{ on: inDossier }" :data-testid="`query-dossier-${item.id}`" @click="toggleDossier">
-        {{ inDossier ? '★ No dossiê' : 'Usar no dossiê' }}
+        {{ inDossier ? '★ In the dossier' : 'Use in the dossier' }}
       </button>
       <template v-if="canEdit && item.current_version">
-        <span class="muted">Promover →</span>
-        <button class="link-btn" :disabled="promoting" :data-testid="`query-promote-graph-${item.id}`" @click="promote('graph')">grafo</button>
-        <button class="link-btn" :disabled="promoting" :data-testid="`query-promote-enrichment-${item.id}`" @click="promote('enrichment')">enriquecimento</button>
+        <span class="muted">Promote →</span>
+        <button class="link-btn" :disabled="promoting" :data-testid="`query-promote-graph-${item.id}`" @click="promote('graph')">graph</button>
+        <button class="link-btn" :disabled="promoting" :data-testid="`query-promote-enrichment-${item.id}`" @click="promote('enrichment')">enrichment</button>
       </template>
     </div>
 
     <div v-if="showHistory" class="history" data-testid="query-history">
-      <p v-if="!history.length" class="muted">Nenhuma execução ainda.</p>
+      <p v-if="!history.length" class="muted">No runs yet.</p>
       <div v-for="v in history" :key="v.id" class="run" :data-testid="`query-run-row-${v.version}`">
-        <input type="checkbox" :checked="picked.includes(v.version)" title="Comparar" @change="togglePick(v.version)" />
+        <input type="checkbox" :checked="picked.includes(v.version)" title="Compare" @change="togglePick(v.version)" />
         <span>v{{ v.version }}</span>
         <code :title="v.sha256">{{ v.sha256.slice(0, 8) }}</code>
-        <span>{{ runOf(v)?.row_count ?? '?' }} linhas</span>
+        <span>{{ runOf(v)?.row_count ?? '?' }} rows</span>
         <span>{{ runOf(v)?.duration_ms ?? '?' }} ms</span>
         <span v-if="runOf(v)?.statement_id" class="muted" :title="runOf(v)?.statement_id">stmt</span>
-        <span class="muted">{{ runOf(v)?.author_kind === 'agent' ? 'agente' : runOf(v)?.run_by }} · {{ when(v.created_at) }}</span>
+        <span class="muted">{{ runOf(v)?.author_kind === 'agent' ? 'agent' : runOf(v)?.run_by }} · {{ when(v.created_at) }}</span>
         <span v-if="v.pinned_at" class="muted">📌</span>
-        <button v-else-if="canEdit" class="link-btn" @click="pinRun(v.version)">Fixar</button>
+        <button v-else-if="canEdit" class="link-btn" @click="pinRun(v.version)">Pin</button>
       </div>
       <button v-if="history.length >= 2" class="btn btn-outline btn-sm" :disabled="picked.length !== 2" :data-testid="`query-compare-runs-${item.id}`" @click="compareRuns">
-        Comparar 2 runs
+        Compare 2 runs
       </button>
       <TableDiffView v-if="diff" :diff="diff" />
     </div>

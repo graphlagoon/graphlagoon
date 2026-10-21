@@ -17,6 +17,7 @@ import { useCurrentCaseStore } from '@/stores/currentCase';
 import { useAddToCase } from '@/composables/useAddToCase';
 import { downloadJson } from '@/utils/portableExport';
 import { GRAPH_SHORTCUTS } from '@/utils/shortcuts';
+import { uuidOrNull } from '@/utils/uuid';
 import {
   Filter,
   Sliders,
@@ -68,7 +69,7 @@ const showExplorationSelector = ref(false);
 const showExportModal = ref(false);
 const addingToCase = ref(false);
 /** Started from a case (`?case=`): saving attaches the exploration and goes back (05 §4). */
-const caseReturnId = computed(() => (route.query?.case as string | undefined) ?? null);
+const caseReturnId = computed(() => uuidOrNull(route.query?.case));
 
 async function addExplorationToCase() {
   const id = graphStore.currentExploration?.id;
@@ -132,7 +133,7 @@ async function saveExploration() {
         await api.createInvestigationItem(caseId, { kind: 'graph', subkind: 'exploration_ref', exploration_id: graphStore.currentExploration.id });
       } catch (e) {
         // Already attached (409) is fine: the reference is live.
-        if ((e as { response?: { status?: number } })?.response?.status !== 409) toast.error(getErrorMessage(e, 'Falha ao anexar ao caso'));
+        if ((e as { response?: { status?: number } })?.response?.status !== 409) toast.error(getErrorMessage(e, 'Failed to attach to the case'));
       }
       await router.push(`/investigations/${caseId}`);
       return;
@@ -358,11 +359,11 @@ function handleExportPng(options: ExportPNGOptions) {
             v-if="graphStore.currentExploration"
             class="toolbar-btn"
             :disabled="!currentCase.hasCase || addingToCase"
-            :title="currentCase.hasCase ? `Adicionar esta exploração ao caso ${currentCase.title}` : 'Escolha um caso atual na barra superior'"
+            :title="currentCase.hasCase ? `Add this exploration to case ${currentCase.title}` : 'Pick a current case in the top bar'"
             data-testid="toolbar-add-to-investigation"
             @click="addExplorationToCase"
           >
-            <Briefcase :size="15" /><span class="btn-text">Adicionar ao caso<template v-if="currentCase.hasCase"> {{ currentCase.shortId }}</template></span>
+            <Briefcase :size="15" /><span class="btn-text">Add to case<template v-if="currentCase.hasCase"> {{ currentCase.shortId }}</template></span>
           </button>
 
         </div>
@@ -476,7 +477,7 @@ function handleExportPng(options: ExportPNGOptions) {
             <label>Title</label>
             <input v-model="saveTitle" class="form-control" required data-testid="save-exploration-title" />
           </div>
-          <p v-if="caseReturnId" class="save-hint" data-testid="save-exploration-case-hint">Ao salvar, a exploração entra no caso {{ currentCase.title || currentCase.shortId }} como referência viva.</p>
+          <p v-if="caseReturnId" class="save-hint" data-testid="save-exploration-case-hint">On save, the exploration joins case {{ currentCase.title || currentCase.shortId }} as a live reference.</p>
           <div v-if="saveError" class="save-error">{{ saveError }}</div>
           <div class="modal-footer">
             <button type="button" class="btn btn-outline" @click="showSaveModal = false">Cancel</button>

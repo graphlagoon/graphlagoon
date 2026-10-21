@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Footer chip "N agentes ativos" (05 §6): the caller's active agent tokens
+ * Footer chip "N active agents" (05 §6): the caller's active agent tokens
  * that can reach this case (scope user, or a case token naming it), linking to
  * /settings/agents. Silent when agents are off or the list cannot be read.
  */
@@ -36,7 +36,7 @@ onMounted(async () => {
     :title="active.map((t) => t.name).join(', ')"
     @click.prevent="router.push('/settings/agents')"
   >
-    ◆ {{ active.length }} {{ active.length === 1 ? 'agente ativo' : 'agentes ativos' }}
+    ◆ {{ active.length }} {{ active.length === 1 ? 'active agent' : 'active agents' }}
   </a>
 </template>
 

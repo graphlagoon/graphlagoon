@@ -27,6 +27,8 @@ export type When =
 export interface MappingInput {
   match: string;
   delimiter?: string;
+  /** Fixed-width lines instead of a delimiter: cell i is the next widths[i] characters. */
+  widths?: number[];
   encoding?: string;
   header?: boolean;
   columns?: string[];
@@ -85,15 +87,15 @@ export interface MappingResult {
 export class MappingError extends Error {}
 class RowError extends Error {}
 
-const CONVERTERS = ['cents', 'decimal_br', 'trim', 'upper', 'digits'];
-const NORMALIZERS = ['cpf_cnpj', 'account', 'phone', 'email', 'device_id', 'ip', 'pix_key', 'card', 'terminal_id', 'address', 'lower', 'none'];
+const CONVERTERS = ['cents', 'decimal_comma', 'trim', 'upper', 'digits'];
+const NORMALIZERS = ['digits', 'account', 'phone', 'email', 'device_id', 'ip', 'card', 'terminal_id', 'address', 'lower', 'none'];
 const WHEN_OPS = ['eq', 'ne', 'in', 'empty', 'not_empty'];
 const MAX_DISCARDED = 20;
 
 const REF = /^[A-Za-z_]\w*\.[^.\s{}]+$/;
 const PLACEHOLDER = /\{([^}]+)\}/g;
 const CENTS = /^-?\d+$/;
-const DECIMAL_BR = /^-?(\d{1,3}(\.\d{3})*|\d+)(,\d+)?$/;
+const DECIMAL_COMMA = /^-?(\d{1,3}(\.\d{3})*|\d+)(,\d+)?$/;
 
 type Obj = Record<string, unknown>;
 type Row = Record<string, string>;
@@ -193,8 +195,15 @@ export function validateSpec(spec: unknown): Set<string> {
   if (!isObj(s.inputs) || !Object.keys(s.inputs).length) throw new MappingError('inputs: declare at least one input');
   for (const [name, inp] of Object.entries(s.inputs)) {
     const where = `inputs.${name}`;
-    keys(inp, where, ['match', 'delimiter', 'encoding', 'header', 'columns'], ['match']);
+    keys(inp, where, ['match', 'delimiter', 'widths', 'encoding', 'header', 'columns'], ['match']);
     if (inp.header === false && !inp.columns?.length) throw new MappingError(`${where}: header false needs columns`);
+    if (inp.widths !== undefined) {
+      if ('delimiter' in inp) throw new MappingError(`${where}: give delimiter or widths, not both`);
+      if (!Array.isArray(inp.widths) || !inp.widths.length || !inp.widths.every((w) => Number.isInteger(w) && w > 0)) {
+        throw new MappingError(`${where}: widths is a list of positive integers`);
+      }
+      if (inp.header === false && inp.columns!.length !== inp.widths.length) throw new MappingError(`${where}: one width per column`);
+    }
   }
   const tables = s.tables ?? {};
   if (!isObj(tables) || !Object.values(tables).every(isObj)) {
@@ -317,10 +326,21 @@ export function matchFile(inp: MappingInput, names: string[]): string | null {
   return [...names].sort().find((n) => glob(inp.match, n)) ?? null;
 }
 
+/** The cells of one line: by `widths` (fixed-width) or by the delimiter. */
+export function splitCells(inp: MappingInput, line: string): string[] {
+  if (!inp.widths?.length) return parseLine(line, inp.delimiter ?? ',');
+  let start = 0;
+  return inp.widths.map((w) => {
+    const cell = line.slice(start, start + w).trim();
+    start += w;
+    return cell;
+  });
+}
+
 export function columnsOf(inp: MappingInput, all: string[]): [string[], string[]] {
   if (inp.header === false) return [[...(inp.columns ?? [])], all];
   if (!all.length) return [[], []];
-  return [parseLine(all[0], inp.delimiter ?? ','), all.slice(1)];
+  return [splitCells(inp, all[0]), all.slice(1)];
 }
 
 // ---------------------------------------------------------------------------
@@ -340,8 +360,8 @@ function convert(value: Value, conv: string): Value {
     if (!CENTS.test(s)) throw new RowError(`invalid cents: "${s}"`);
     return parseInt(s, 10) / 100;
   }
-  if (conv === 'decimal_br') {
-    if (!DECIMAL_BR.test(s)) throw new RowError(`invalid decimal_br: "${s}"`);
+  if (conv === 'decimal_comma') {
+    if (!DECIMAL_COMMA.test(s)) throw new RowError(`invalid decimal_comma: "${s}"`);
     return parseFloat(s.replace(/\./g, '').replace(',', '.'));
   }
   const fmt = conv.slice('date:'.length);
@@ -441,7 +461,7 @@ export function interpretMapping(spec: MappingSpec, files: Record<string, string
     }
     const [columns, data] = columnsOf(inp, lines(files[file]));
     rowsOf[name] = data.map((line) => {
-      const cells = parseLine(line, inp.delimiter ?? ',');
+      const cells = splitCells(inp, line);
       const row: Row = {};
       columns.forEach((c, i) => (row[`${name}.${c}`] = i < cells.length ? cells[i] : ''));
       return row;
@@ -546,7 +566,7 @@ export function interpretMapping(spec: MappingSpec, files: Record<string, string
     });
   }
 
-  report.unknown_nodes = [...nodes.values()].filter((n) => n.node_type === 'Desconhecido').length;
+  report.unknown_nodes = [...nodes.values()].filter((n) => n.node_type === 'Unknown').length;
   return {
     graph: {
       nodes: [...nodes.values()],
@@ -569,7 +589,8 @@ export function suggestPresets(files: Record<string, string>, presets: Record<st
         const file = matchFile(inp, Object.keys(files));
         const all = file === null ? [] : lines(files[file]);
         if (!all.length) return false;
-        const first = parseLine(all[0], inp.delimiter ?? ',');
+        const first = splitCells(inp, all[0]);
+        if (inp.header === false && inp.widths?.length) return all[0].length > inp.widths.slice(0, -1).reduce((a, b) => a + b, 0);
         if (inp.header === false) return first.length === (inp.columns ?? []).length;
         const header = new Set(first);
         return [...refs].filter((r) => alias(r) === name).every((r) => header.has(r.slice(name.length + 1)));

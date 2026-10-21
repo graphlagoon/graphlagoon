@@ -228,7 +228,7 @@ Branch values may themselves contain placeholders:
   to 2-3 lines.
 - The label font only covers **basic ASCII** (letters, digits, common
   punctuation). Accented letters are drawn without the accent (e.g. "Jose" for
-  "José"); any other character — emoji, the single-char ellipsis, arrows — is
+  "Jos\u00e9"); any other character — emoji, the single-char ellipsis, arrows — is
   drawn as \`?\`. Use ASCII in literal text: \`...\` (three dots) as a truncate
   suffix, a word like \`NEW\` instead of an emoji badge.
 
@@ -274,10 +274,10 @@ Rule "Recent transactions" — target \`edge\`, types \`[PAID]\`, priority \`30\
 \`\`\`
 
 Rule "Clean company ids" — target \`node\`, types \`[Company]\`, when ids carry a
-fixed suffix like \`12321_CNPJ_RAIZ\` (extraction + chaining):
+fixed suffix like \`12321_ROOT\` (extraction + chaining):
 
 \`\`\`
-Empresa {node_id|split:_:0}
+Company {node_id|split:_:0}
 \`\`\`
 
 ## How to help me

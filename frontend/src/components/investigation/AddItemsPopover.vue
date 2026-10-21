@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * "+ Adicionar" of the case (05 §4), replacing the global exploration modal.
- * Tabs: Minhas recentes (server-side search, node count, empty ones
- * disabled, "todas" for superusers), Nova exploração (a readable context →
- * the graph page with `?case=`; saving attaches and comes back), Consulta
- * (the Query Console embedded against a chosen context), Arquivo (F2 upload
- * path; the mapping wizard is opened from here) and Colar/Link.
+ * "+ Add" of the case (05 §4), replacing the global exploration modal.
+ * Tabs: My recent (server-side search, node count, empty ones
+ * disabled, "All" for superusers), New exploration (a readable context →
+ * the graph page with `?case=`; saving attaches and comes back), Query
+ * (the Query Console embedded against a chosen context), File (F2 upload
+ * path; the mapping wizard is opened from here) and Paste/link.
  */
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -35,11 +35,11 @@ const emit = defineEmits<{ close: []; added: [investigationId: string]; upload: 
 
 type Tab = 'recent' | 'new' | 'query' | 'file' | 'paste';
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'recent', label: 'Minhas recentes' },
-  { id: 'new', label: 'Nova exploração' },
-  { id: 'query', label: 'Consulta' },
-  { id: 'file', label: 'Arquivo' },
-  { id: 'paste', label: 'Colar / link' },
+  { id: 'recent', label: 'My recent' },
+  { id: 'new', label: 'New exploration' },
+  { id: 'query', label: 'Query' },
+  { id: 'file', label: 'File' },
+  { id: 'paste', label: 'Paste / link' },
 ];
 const PAGE = 50;
 
@@ -128,7 +128,7 @@ const contextOf = (id: string): GraphContext | undefined => contextsStore.contex
 /** Newest first, as the server orders them. */
 const rows = computed(() => [...explorations.value].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? '')));
 const isEmpty = (exp: Exploration) => exp.node_count === 0;
-const nodesText = (exp: Exploration) => (exp.node_count === null || exp.node_count === undefined ? 'grafo salvo' : `${exp.node_count} nós`);
+const nodesText = (exp: Exploration) => (exp.node_count === null || exp.node_count === undefined ? 'saved graph' : `${exp.node_count} nodes`);
 const when = (iso: string) => formatDate(iso, { time: false });
 const toAdd = computed(() => checked.value.filter((id) => !inCase.value.has(id)));
 const newContextIds = computed(
@@ -144,7 +144,7 @@ async function submit() {
     toast.error(added ? `Added ${added}, then failed: ${error}` : error);
     return;
   }
-  toast.success(`Adicionado ao caso ${caseTitle.value || ''}: ${added} exploração${added === 1 ? '' : 'ões'}`);
+  toast.success(`Added to case ${caseTitle.value || ''}: ${added} exploration${added === 1 ? '' : 's'}`);
   emit('added', props.investigationId);
   emit('close');
 }
@@ -173,7 +173,7 @@ async function onFiles(event: Event) {
 }
 
 const pasteKind = computed(() => (pasted.value.trim() ? classifyPaste(pasted.value).kind : null));
-const pasteLabel = computed(() => ({ url: 'link (documento)', table: 'tabela', note: 'nota', '': '' })[pasteKind.value ?? ''] ?? '');
+const pasteLabel = computed(() => ({ url: 'link (document)', table: 'table', note: 'note', '': '' })[pasteKind.value ?? ''] ?? '');
 
 async function submitPaste() {
   if (!pasted.value.trim() || pasting.value) return;
@@ -194,7 +194,7 @@ async function submitPaste() {
   <div v-if="open" class="modal-overlay" @click.self="emit('close')">
     <div class="modal add-popover" data-testid="add-items-popover">
       <div class="modal-header">
-        <h2>Adicionar ao caso<template v-if="caseTitle"> “{{ caseTitle }}”</template></h2>
+        <h2>Add to the case<template v-if="caseTitle"> “{{ caseTitle }}”</template></h2>
         <button class="modal-close" aria-label="Close" @click="emit('close')">&times;</button>
       </div>
 
@@ -216,16 +216,16 @@ async function submitPaste() {
 
       <div v-if="loadError" class="error-message">{{ loadError }}</div>
 
-      <!-- Minhas recentes -->
+      <!-- My recent -->
       <div v-if="tab === 'recent'" class="add-body" data-testid="add-tab-panel-recent">
         <div class="scope-row">
           <div class="scope" role="tablist">
-            <button type="button" class="tab small" :class="{ on: scope === 'mine' }" data-testid="add-scope-mine" @click="scope = 'mine'">Minhas</button>
-            <button v-if="isSuperuser" type="button" class="tab small" :class="{ on: scope === 'all' }" data-testid="add-scope-all" @click="scope = 'all'">Todas</button>
+            <button type="button" class="tab small" :class="{ on: scope === 'mine' }" data-testid="add-scope-mine" @click="scope = 'mine'">Mine</button>
+            <button v-if="isSuperuser" type="button" class="tab small" :class="{ on: scope === 'all' }" data-testid="add-scope-all" @click="scope = 'all'">All</button>
           </div>
-          <input v-model="search" class="form-control search" placeholder="Buscar por título…" aria-label="Buscar explorações" data-testid="add-search" />
+          <input v-model="search" class="form-control search" placeholder="Search by title…" aria-label="Search explorations" data-testid="add-search" />
         </div>
-        <p v-if="listLoading && !rows.length" class="hint">Carregando…</p>
+        <p v-if="listLoading && !rows.length" class="hint">Loading…</p>
         <div class="list">
           <label
             v-for="exp in rows"
@@ -238,35 +238,35 @@ async function submitPaste() {
             <span class="exp-text">
               <span class="exp-title">{{ exp.title }}</span>
               <span class="exp-sub">
-                {{ contextOf(exp.graph_context_id)?.title ?? 'Context desconhecido' }}
+                {{ contextOf(exp.graph_context_id)?.title ?? 'Unknown context' }}
                 · {{ nodesText(exp) }}
                 · {{ when(exp.updated_at) }}
                 <template v-if="exp.owner_email !== authStore.email"> · {{ exp.owner_email }}</template>
-                <template v-if="inCase.has(exp.id)"> · já está no caso</template>
-                <template v-else-if="isEmpty(exp)"> · vazia: abra e salve um grafo antes</template>
+                <template v-if="inCase.has(exp.id)"> · already in the case</template>
+                <template v-else-if="isEmpty(exp)"> · empty: open it and save a graph first</template>
               </span>
             </span>
           </label>
         </div>
         <p v-if="!rows.length && !loadError && !listLoading" class="hint" data-testid="add-empty">
-          {{ search ? 'Nenhuma exploração corresponde.' : 'Nenhuma exploração sua ainda. Comece uma nova em “Nova exploração”.' }}
+          {{ search ? 'No exploration matches.' : 'No explorations of yours yet. Start one in “New exploration”.' }}
         </p>
         <div v-for="s in restricted" :key="s.id" class="restricted" data-testid="add-restricted-source">
-          <Lock :size="12" /> “{{ s.title }}” está no caso, mas você não tem acesso ao context dela ({{ s.author_email || 'dono' }}).
+          <Lock :size="12" /> “{{ s.title }}” is in the case, but you have no access to its context ({{ s.author_email || 'owner' }}).
         </div>
         <div class="footer">
           <span class="hint" data-testid="add-preview">
-            {{ toAdd.length }} nova{{ toAdd.length === 1 ? '' : 's' }} exploraç{{ toAdd.length === 1 ? 'ão' : 'ões' }}, de {{ newContextIds.size }} context{{ newContextIds.size === 1 ? '' : 's' }} · referência viva (fixe uma versão no material para congelar)
+            {{ toAdd.length }} new exploration{{ toAdd.length === 1 ? '' : 's' }}, from {{ newContextIds.size }} context{{ newContextIds.size === 1 ? '' : 's' }} · live reference (pin a version in the material to freeze it)
           </span>
           <button type="button" class="btn btn-primary" data-testid="add-submit" :disabled="toAdd.length === 0 || saving" @click="submit">
-            Adicionar {{ toAdd.length }}
+            Add {{ toAdd.length }}
           </button>
         </div>
       </div>
 
-      <!-- Nova exploração -->
+      <!-- New exploration -->
       <div v-else-if="tab === 'new'" class="add-body" data-testid="add-tab-panel-new">
-        <p class="hint">Escolha o context: a exploração abre com “← Caso” na barra; ao salvar ela entra no caso como referência viva.</p>
+        <p class="hint">Pick the context: the exploration opens with “← Case” in the bar; saving adds it to the case as a live reference.</p>
         <div class="list">
           <button
             v-for="ctx in readableContexts"
@@ -282,10 +282,10 @@ async function submitPaste() {
             </span>
           </button>
         </div>
-        <p v-if="!readableContexts.length" class="hint">Nenhum context legível.</p>
+        <p v-if="!readableContexts.length" class="hint">No readable context.</p>
       </div>
 
-      <!-- Consulta -->
+      <!-- Query -->
       <div v-else-if="tab === 'query'" class="add-body query-body" data-testid="add-tab-panel-query">
         <div class="scope-row">
           <label for="add-query-context">Context</label>
@@ -293,7 +293,7 @@ async function submitPaste() {
             <option v-for="ctx in readableContexts" :key="ctx.id" :value="ctx.id">{{ ctx.title }}</option>
           </select>
           <span v-if="lastResult" class="hint" data-testid="add-query-result">
-            {{ lastResult.rows.length }} linhas · use “Adicionar resultado” ou “Salvar como consulta do caso”
+            {{ lastResult.rows.length }} rows · use “Add result” or “Save as case query”
           </span>
         </div>
         <QueryConsolePanel
@@ -305,31 +305,31 @@ async function submitPaste() {
           @close="tab = 'recent'"
           @result="onResult"
         />
-        <p v-else class="hint">Escolha um context para consultar.</p>
+        <p v-else class="hint">Pick a context to query.</p>
       </div>
 
-      <!-- Arquivo -->
+      <!-- File -->
       <div v-else-if="tab === 'file'" class="add-body" data-testid="add-tab-panel-file">
-        <p class="hint">CSV/TSV entram como tabela; o resto como documento. Para mapear um arquivo para o grafo ou como enriquecimento, use o assistente.</p>
+        <p class="hint">CSV/TSV come in as a table; anything else as a document. To map a file to the graph or as enrichment, use the wizard.</p>
         <input v-if="can('investigation.upload')" type="file" multiple :disabled="uploading" data-testid="add-file-input" @change="onFiles" />
-        <p v-else class="hint">Você não tem a permissão “Upload investigation files”.</p>
+        <p v-else class="hint">You do not have the “Upload investigation files” permission.</p>
         <button v-if="can('investigation.upload')" type="button" class="btn btn-outline" data-testid="add-file-wizard" @click="emit('upload')">
-          Abrir assistente de importação (grafo | enriquecimento | documento)
+          Open the import wizard (graph | enrichment | document)
         </button>
       </div>
 
-      <!-- Colar / link -->
+      <!-- Paste / link -->
       <div v-else class="add-body" data-testid="add-tab-panel-paste">
         <textarea
           v-model="pasted"
           rows="8"
           class="form-control mono"
-          placeholder="Cole um texto (vira nota), uma URL (vira documento-link) ou linhas separadas por tab/;/, (viram tabela)…"
+          placeholder="Paste text (becomes a note), a URL (becomes a link document) or rows separated by tab/;/, (become a table)…"
           data-testid="add-paste-input"
         ></textarea>
         <div class="footer">
-          <span class="hint" data-testid="add-paste-kind">{{ pasteLabel ? `Detectado: ${pasteLabel}` : '' }}</span>
-          <button type="button" class="btn btn-primary" data-testid="add-paste-submit" :disabled="!pasted.trim() || pasting" @click="submitPaste">Adicionar</button>
+          <span class="hint" data-testid="add-paste-kind">{{ pasteLabel ? `Detected: ${pasteLabel}` : '' }}</span>
+          <button type="button" class="btn btn-primary" data-testid="add-paste-submit" :disabled="!pasted.trim() || pasting" @click="submitPaste">Add</button>
         </div>
       </div>
     </div>
