@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance } from 'axios';
+import type { GraphOverlay } from '@/utils/graphOverlay';
 import type {
   CaseAnnotation,
   CaseBrief,
@@ -133,6 +134,8 @@ declare global {
       investigation_file_max_bytes?: number;
       /** Ceiling of edges in a case's working graph (G4, Q5). */
       investigation_max_working_edges?: number;
+      /** Largest user layer of an exploration (BYOD-2), as JSON bytes. */
+      exploration_overlay_max_bytes?: number;
       /** Years a closed case is retained when its type sets none (06 §1). */
       investigation_retention_years?: number;
       databricks_user_email?: string;
@@ -322,6 +325,18 @@ class ApiService {
     data: { title?: string; state?: ExplorationState; snapshot?: GraphSnapshot }
   ): Promise<Exploration> {
     const response = await this.client.put(`/api/explorations/${id}`, data);
+    return response.data;
+  }
+
+  /** The user's layer of an exploration (BYOD-2): its own nodes, edges and enrichment files. */
+  async getExplorationOverlay(id: string): Promise<GraphOverlay> {
+    const response = await this.client.get(`/api/explorations/${id}/overlay`);
+    return response.data;
+  }
+
+  /** Replaces the layer; an empty one removes it. Returns the exploration (its `state.has_overlay`). */
+  async putExplorationOverlay(id: string, overlay: GraphOverlay): Promise<Exploration> {
+    const response = await this.client.put(`/api/explorations/${id}/overlay`, overlay);
     return response.data;
   }
 

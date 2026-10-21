@@ -33,6 +33,7 @@ import ContextMenuActionsModal from '@/components/ContextMenuActionsModal.vue';
 import TemplateExecuteModal from '@/components/TemplateExecuteModal.vue';
 import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
+import YourDataButton from '@/components/YourDataButton.vue';
 import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
 import QueryTemplatesPanel from '@/components/QueryTemplatesPanel.vue';
 import PrecomputedGraphPanel from '@/components/PrecomputedGraphPanel.vue';
@@ -936,6 +937,9 @@ watch(
                  common point of confusion. -->
             <span class="btn-label">Console</span>
           </button>
+
+          <!-- The user's layer (BYOD-2): enrich, add nodes and edges, draw. -->
+          <YourDataButton />
         </div>
 
         <div class="status-bar" data-testid="graph-status-bar">

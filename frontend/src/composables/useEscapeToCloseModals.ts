@@ -25,6 +25,9 @@ export function useEscapeToCloseModals() {
     // A confirmation is the top-most thing whenever it is open, and it handles
     // Escape itself.
     if (document.querySelector('.confirm-overlay')) return;
+    // So does anything open over a modal that closes on Escape by itself (a help
+    // popover): Escape closes that first, the modal on the next press.
+    if (document.querySelector('[data-escape-owner]')) return;
 
     const overlays = document.querySelectorAll<HTMLElement>('.modal-overlay');
     const top = overlays[overlays.length - 1];

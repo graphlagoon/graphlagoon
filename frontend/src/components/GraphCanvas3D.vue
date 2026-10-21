@@ -1245,7 +1245,8 @@ async function initGraph() {
         return;
       }
       // Alt+Click expands the node's neighbors (depth 1) — same as the context-menu action
-      if (event.altKey && !graphStore.loading && graphStore.supportsExpand) {
+      // The context does not know the user's own nodes (BYOD-2): nothing to expand there.
+      if (event.altKey && !graphStore.loading && graphStore.supportsExpand && !graphStore.overlayAddedNodeIds.has(node.id)) {
         graphStore.selectNode(node.id);
         void graphStore.expandFromNode(node.id, 1);
         return;
@@ -1424,7 +1425,7 @@ async function initGraph() {
       if (!graph3d) return null;
       const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
       return node
-        ? { color: node.color, iconColor: node.__iconColor, rings: graphStore.investigationMode?.rings.get(nodeId) ?? [] }
+        ? { color: node.color, iconColor: node.__iconColor, rings: graphStore.nodeRings?.get(nodeId) ?? [] }
         : null;
     };
 
@@ -1643,8 +1644,9 @@ watch(
   }
 );
 
-// Investigation workspace: provenance rings follow the loaded source set.
-watch(() => graphStore.investigationMode, () => rings.updateRings());
+// Investigation workspace: provenance rings follow the loaded source set; outside a case,
+// the user's layer (BYOD-2) rings its own nodes.
+watch(() => graphStore.nodeRings, () => rings.updateRings());
 
 // Layout execution settings — apply to graph3d live
 watch(
@@ -2458,7 +2460,7 @@ onMounted(() => {
     icon: Network,
     // Hidden entirely (not just disabled) on a connection without expand
     // support — a permanently disabled action reads as a bug.
-    visible: (t) => t.type === 'node' && graphStore.supportsExpand,
+    visible: (t) => t.type === 'node' && graphStore.supportsExpand && !graphStore.overlayAddedNodeIds.has(t.id),
     disabled: () => graphStore.loading,
     handler: async (t) => {
       await graphStore.expandFromNode(t.id, 1);

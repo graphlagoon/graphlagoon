@@ -12,6 +12,7 @@ vi.mock('@/services/api', () => ({
     getInvestigationAnnotations: vi.fn(async () => []),
     getInvestigationEvents: vi.fn(async () => []),
     getInvestigationItemSnapshot: vi.fn(),
+    getInvestigationItemContent: vi.fn(),
     getGraphContext: vi.fn(),
     createInvestigation: vi.fn(),
     createInvestigationItem: vi.fn(),
@@ -92,6 +93,34 @@ describe('investigation store', () => {
     store.annotations[0] = { ...store.annotations[0], status: 'confirmed' }
     expect(store.unified.nodes).toHaveLength(1)
     expect(store.unified.nodes[0].__sources.map((s) => s.sourceId)).toEqual(['g1', 't1'])
+  })
+
+  it('enrichment files add properties to the canvas, re-keyed when the mapping changes (BYOD-2)', async () => {
+    const spec = { name: 'Risk', input: { delimiter: ';', header: true }, key_column: 'doc', columns: ['risk'], match_node_types: [], match_source: 'node_id' }
+    const enrich = item('e1', { kind: 'table', subkind: 'csv', current_version: 1, mapping: { as: 'enrichment', spec }, latest: { content_type: 'text/csv' } })
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv1', settings: {} } as any)
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([item('g1', { context_id: 'c1' }), enrich] as any)
+    vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValue({
+      item_id: 'g1', title: 'g1', context_id: 'c1', identity_keys: [], edge_semantics: null,
+      snapshot: { nodes: [{ id: 'p', type: 'Person', properties: { risk: 'low', doc: '1.1' } }, { id: 'q', type: 'Person', properties: {} }], edges: [] },
+    } as any)
+    vi.mocked(api.getGraphContext).mockResolvedValue({ id: 'c1', title: 'Bank', identity_keys: [] } as any)
+    vi.mocked(api.getInvestigationItemContent).mockResolvedValue(new TextEncoder().encode('doc;risk\np;high\nq;mid\n11;top\n').buffer as any)
+
+    const store = useInvestigationStore()
+    await store.openInvestigation('inv1')
+    expect(store.graphItems.map((i) => i.id)).toEqual(['g1']) // no nodes of its own
+    await store.loadWorkspace()
+    const byId = () => Object.fromEntries(store.unified.nodes.map((n) => [n.node_id, n]))
+    // An empty type list is every type; the value already there wins and the file's is a conflict.
+    expect(byId()['q@c1'].properties?.risk).toBe('mid')
+    expect(byId()['p@c1'].properties?.risk).toBe('low')
+    expect(byId()['p@c1'].__conflicts?.risk).toEqual([{ value: 'high', sourceId: 'e1' }])
+
+    // A mapping edit (no new version) re-keys the cached rows: by the doc property, digits only.
+    store.items[1] = { ...store.items[1], mapping: { as: 'enrichment', spec: { ...spec, match_source: { kind: 'prop', name: 'doc' }, normalize: 'digits', overwrite: true } } } as any
+    expect(byId()['p@c1'].properties?.risk).toBe('top')
+    expect(api.getInvestigationItemContent).toHaveBeenCalledTimes(1)
   })
 
   it('roles come from confirmed annotations; pinEvidence adds an item and pins it', async () => {

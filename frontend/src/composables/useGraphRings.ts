@@ -1,7 +1,7 @@
 /**
  * Provenance rings (investigation workspace, T2): one colored ring per source
- * around each node of a unified graph. Colors come from
- * `graphStore.investigationMode.rings` (see `provenanceRingColors`).
+ * around each node of a unified graph. Colors come from `graphStore.nodeRings`: a case's
+ * `investigationMode.rings` (see `provenanceRingColors`), else the user's layer (BYOD-2).
  *
  * shortcut: one THREE.Sprite per ring (sprites billboard for free); move to an
  * instanced billboard like FastIconRenderer if case graphs reach tens of thousands of nodes.
@@ -54,7 +54,7 @@ export function useGraphRings(getGraph3d: () => any) {
   function updateRings() {
     const graph3d = getGraph3d();
     if (!graph3d || !group) return;
-    const rings = graphStore.investigationMode?.rings;
+    const rings = graphStore.nodeRings;
     let used = 0;
     if (rings && rings.size > 0) {
       const relSize = graphStore.aesthetics.nodeSize / 2;

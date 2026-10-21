@@ -49,15 +49,17 @@ beforeEach(() => {
   const store = useInvestigationStore()
   store.current = { id: 'inv' } as any
   store.contexts = contexts as any
-  store.items = [{ id: 'f1', kind: 'table', subkind: 'csv', title: 'registry.csv', mapping: { as: 'enrichment', spec: PARTNERS }, current_version: 1, pinned: [], provenance: { filename: 'registry.csv' } } as any]
+  store.items = [{ id: 'f1', kind: 'table', subkind: 'csv', title: 'registry.csv', mapping: { as: 'enrichment', spec: PARTNERS }, current_version: 1, accessible: true, latest: { content_type: 'text/csv' }, pinned: [], provenance: { filename: 'registry.csv' } } as any]
   vi.mocked(api.getInvestigationItemContent).mockResolvedValue(REGISTRY.buffer.slice(REGISTRY.byteOffset, REGISTRY.byteOffset + REGISTRY.byteLength) as ArrayBuffer)
 })
 
 describe('case table as enrichment', () => {
   it('the registry enriches a merchant by its company id prefix', async () => {
+    // The store reads each enrichment file once (the workspace load); the tab shows its rows.
+    await useInvestigationStore().loadEnrichments()
+    expect(api.getInvestigationItemContent).toHaveBeenCalledWith('inv', 'f1')
     const { getByTestId } = render(EnrichmentTab, { props: { node: merchant, canEdit: true }, global: { plugins: [pinia] } })
     await flushPromises()
-    expect(api.getInvestigationItemContent).toHaveBeenCalledWith('inv', 'f1')
     const rows = getByTestId('enrichment-file-rows').textContent!
     expect(rows).toContain('ANA SILVA')
     expect(rows).toContain('HOLDING XYZ LTD')

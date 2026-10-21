@@ -104,3 +104,37 @@ describe('useContextMenu', () => {
     expect(ctx.getVisibleActions()).toEqual([])
   })
 })
+
+describe('useContextMenu — drawing by hand (BYOD-2)', () => {
+  it('offers drawing on a writable graph: link a node, connect to the one selected, remove what was drawn', async () => {
+    const { setActivePinia, createPinia } = await import('pinia')
+    const { useGraphStore } = await import('@/stores/graph')
+    setActivePinia(createPinia())
+    window.__GRAPH_LAGOON_CONFIG__ = {} as never
+    const graph = useGraphStore()
+    graph.currentContext = { id: 'c1', title: 'Bank' } as never
+    graph.nodes = [
+      { node_id: 'a', node_type: 'Account', properties: {} },
+      { node_id: 'b', node_type: 'Account', properties: {} },
+    ]
+    const ctx = useContextMenu()
+    ctx.resetActions()
+    const ids = (target: { type: 'node' | 'edge'; id: string }) => {
+      ctx.show(new MouseEvent('contextmenu'), { ...target, label: target.id })
+      return ctx.getVisibleActions().map((a) => a.id)
+    }
+    expect(ids({ type: 'node', id: 'a' })).toContain('sketch-add-linked-node')
+    expect(ids({ type: 'node', id: 'a' })).not.toContain('sketch-connect')
+    graph.selectedNodeIds = new Set(['b'])
+    expect(ids({ type: 'node', id: 'a' })).toContain('sketch-connect')
+    expect(ids({ type: 'node', id: 'a' })).not.toContain('sketch-remove') // a context node
+
+    const { id } = await graph.addSketchNode({ type: 'Person' })
+    expect(ids({ type: 'node', id })).toContain('sketch-remove')
+
+    // Without the permission, none of it.
+    window.__GRAPH_LAGOON_CONFIG__ = { permissions: [] } as never
+    expect(ids({ type: 'node', id: 'a' }).filter((x) => x.startsWith('sketch-'))).toEqual([])
+    window.__GRAPH_LAGOON_CONFIG__ = {} as never
+  })
+})

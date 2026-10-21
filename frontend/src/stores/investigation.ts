@@ -3,6 +3,8 @@ import { computed, ref } from 'vue';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { applyAliases, snapshotToGraph, unifyGraph, type NodeOrigin, type UnifySource } from '@/utils/unifyGraph';
+import { applyFileEnrichment, fileEnrichmentRows, tableContentOf, type FileRows, type TableContent } from '@/utils/enrichment';
+import { decoderLabel } from '@/utils/fileImport';
 import { provenanceColor } from '@/utils/graphAppearance';
 import { groupColor, vocabularyOf } from '@/utils/caseVocabulary';
 import type { Edge, EdgeSemanticsByType, ExplorationState, GraphContext, IdentityKey, Node } from '@/types/graph';
@@ -12,6 +14,7 @@ import type {
   CaseBrief,
   CaseItem,
   CaseViewContent,
+  FileEnrichmentSpec,
   CreateAnnotationRequest,
   CreateInvestigationRequest,
   CreateItemRequest,
@@ -66,6 +69,19 @@ export function isGraphItem(item: CaseItem): boolean {
   return false;
 }
 
+/** Tables whose rows add properties to the canvas (BYOD-2): no nodes of their own. */
+export function isEnrichmentItem(item: CaseItem): boolean {
+  if (item.deleted_at || item.status === 'rejected') return false;
+  return item.kind === 'table' && item.mapping?.as === 'enrichment' && item.current_version > 0;
+}
+
+/** One enrichment file of the case, parsed: what `unified` applies and the inspector shows. */
+export interface EnrichmentFile {
+  item: CaseItem;
+  spec: FileEnrichmentSpec;
+  rows: FileRows;
+}
+
 export const useInvestigationStore = defineStore('investigation', () => {
   /** The queue. */
   const investigations = ref<Investigation[]>([]);
@@ -105,10 +121,26 @@ export const useInvestigationStore = defineStore('investigation', () => {
       .filter((a) => a.kind === 'same_as' && a.status === 'confirmed' && a.targets.length === 2)
       .map((a) => [a.targets[0], a.targets[1]]),
   );
+  /** Enrichment files' contents by item id, fetched once per version (an audited read). */
+  const enrichmentContents = ref<Record<string, { version: number; content: TableContent | null; error: string | null }>>({});
+  const enrichmentItems = computed(() => items.value.filter((i) => isEnrichmentItem(i) && i.accessible));
+  /** Parsed per spec, so a mapping edit (no new version) re-keys the rows without a fetch. */
+  const enrichmentFiles = computed<EnrichmentFile[]>(() =>
+    enrichmentItems.value.flatMap((item) => {
+      const loaded = enrichmentContents.value[item.id];
+      if (!loaded?.content || loaded.version !== item.current_version) return [];
+      const spec = (item.mapping as { as: 'enrichment'; spec: FileEnrichmentSpec }).spec;
+      try {
+        return [{ item, spec, rows: fileEnrichmentRows(loaded.content, spec) }];
+      } catch {
+        return [];
+      }
+    }),
+  );
   const unified = computed(() => {
     const overrides = (current.value?.settings?.identity_keys as IdentityKey[] | undefined) ?? [];
     const edgeOverrides = (current.value?.settings?.edge_semantics as EdgeSemanticsByType | undefined) ?? null;
-    return applyAliases(
+    const graph = applyAliases(
       unifyGraph(
         [...sourceGraphs.value.filter((g) => !offCanvas.value.has(g.id)), ...expansions.value, ...derived.value],
         contexts.value,
@@ -117,6 +149,9 @@ export const useInvestigationStore = defineStore('investigation', () => {
       ),
       sameAs.value,
     );
+    // Same order as the server (case_graph): sources, aliases, then the files' properties.
+    for (const f of enrichmentFiles.value) applyFileEnrichment(graph, f.spec, f.rows, f.item.id);
+    return graph;
   });
   /** Dated edges exist: trace, paths by time and the timeline have something to work with. */
   const hasAmounts = computed(() => unified.value.edges.some((e) => e.__amount !== undefined && e.__t !== undefined));
@@ -596,12 +631,35 @@ export const useInvestigationStore = defineStore('investigation', () => {
       const contextIds = [...new Set(readable.map((s) => s.context_id).filter(Boolean) as string[])];
       const ctxs = await Promise.all(contextIds.map((id) => api.getGraphContext(id).catch(() => null)));
       for (const c of ctxs) if (c) contexts.value[c.id] = c;
+      await loadEnrichments();
       sourceGraphs.value = graphs;
       expansions.value = [];
       derived.value = [];
     } finally {
       graphLoading.value = false;
     }
+  }
+
+  /** Fetches the enrichment files not loaded at their current version. */
+  async function loadEnrichments() {
+    const inv = current.value;
+    if (!inv) return;
+    const stale = enrichmentItems.value.filter((i) => enrichmentContents.value[i.id]?.version !== i.current_version);
+    await Promise.all(
+      stale.map(async (item) => {
+        const spec = (item.mapping as { as: 'enrichment'; spec: FileEnrichmentSpec }).spec;
+        let entry: { version: number; content: TableContent | null; error: string | null };
+        try {
+          const buffer = await api.getInvestigationItemContent(inv.id, item.id);
+          const json = item.latest?.content_type?.startsWith('application/json');
+          const text = new TextDecoder(json ? 'utf-8' : decoderLabel(spec.input?.encoding)).decode(buffer);
+          entry = { version: item.current_version, content: tableContentOf(text, item.latest?.content_type), error: null };
+        } catch (e) {
+          entry = { version: item.current_version, content: null, error: getErrorMessage(e, 'Failed to read the file') };
+        }
+        enrichmentContents.value = { ...enrichmentContents.value, [item.id]: entry };
+      }),
+    );
   }
 
   /** Unifies an expansion as the source `expansion:<itemId>`. */
@@ -818,6 +876,9 @@ export const useInvestigationStore = defineStore('investigation', () => {
     findMatches,
     fetchEvents,
     loadWorkspace,
+    loadEnrichments,
+    enrichmentFiles,
+    enrichmentContents,
     addExpansion,
     addDerived,
     postEvent,

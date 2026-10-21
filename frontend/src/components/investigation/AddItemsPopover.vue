@@ -8,6 +8,7 @@
  * path; the mapping wizard is opened from here) and Paste/link.
  */
 import { computed, ref, watch } from 'vue';
+import { useSketch } from '@/composables/useSketch';
 import { useRouter } from 'vue-router';
 import { Lock } from 'lucide-vue-next';
 import { api } from '@/services/api';
@@ -32,6 +33,12 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ close: []; added: [investigationId: string]; upload: [] }>();
+
+/** Drawing by hand (BYOD-2): the dialog writes the case's "Manual additions" item. */
+function drawNode() {
+  emit('close');
+  useSketch().openNodeDialog(null);
+}
 
 type Tab = 'recent' | 'new' | 'query' | 'file' | 'paste';
 const TABS: { id: Tab; label: string }[] = [
@@ -310,11 +317,17 @@ async function submitPaste() {
 
       <!-- File -->
       <div v-else-if="tab === 'file'" class="add-body" data-testid="add-tab-panel-file">
-        <p class="hint">CSV/TSV come in as a table; anything else as a document. To map a file to the graph or as enrichment, use the wizard.</p>
+        <p class="hint">
+          CSV/TSV come in as a table; anything else as a document. To put a file on the graph, or to add its columns as
+          properties of the nodes or edges already there (enrichment), use the wizard.
+        </p>
         <input v-if="can('investigation.upload')" type="file" multiple :disabled="uploading" data-testid="add-file-input" @change="onFiles" />
         <p v-else class="hint">You do not have the “Upload investigation files” permission.</p>
         <button v-if="can('investigation.upload')" type="button" class="btn btn-outline" data-testid="add-file-wizard" @click="emit('upload')">
           Open the import wizard (graph | enrichment | document)
+        </button>
+        <button type="button" class="btn btn-outline" data-testid="add-draw-node" @click="drawNode">
+          Draw a node by hand (Manual additions)
         </button>
       </div>
 

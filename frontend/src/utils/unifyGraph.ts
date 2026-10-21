@@ -23,6 +23,8 @@ export interface UnifiedNode extends Node {
 
 export interface UnifiedEdge extends Edge {
   __source: string;
+  /** Values an enrichment file could not set because the edge already had one. */
+  __conflicts?: Record<string, { value: unknown; sourceId: string }[]>;
 }
 
 export interface UnifySource {
@@ -67,7 +69,7 @@ function sameValue(a: unknown, b: unknown): boolean {
   return typeof a === 'object' && typeof b === 'object' && JSON.stringify(a) === JSON.stringify(b);
 }
 
-function addConflict(node: UnifiedNode, prop: string, value: unknown, sourceId: string) {
+function addConflict(node: Mergeable, prop: string, value: unknown, sourceId: string) {
   const list = ((node.__conflicts ??= {})[prop] ??= []);
   if (!list.some((c) => sameValue(c.value, value))) list.push({ value, sourceId });
 }
@@ -96,12 +98,37 @@ function mergeNode(
     existing.__sources.push(origin);
   }
   if (n.node_type !== existing.node_type) addConflict(existing, 'node_type', n.node_type, origin.sourceId);
-  const props = existing.properties!;
-  for (const [k, v] of Object.entries(n.properties ?? {})) {
+  mergeProps(existing, n.properties ?? {}, origin.sourceId);
+}
+
+/** Anything that carries properties and the values that lost to them (a unified node or edge). */
+export interface Mergeable {
+  properties?: Record<string, unknown>;
+  __conflicts?: Record<string, { value: unknown; sourceId: string }[]>;
+}
+
+/**
+ * The one merge rule (nodes, edges, enrichment files; twin of `case_graph.merge_props`): a
+ * missing or null value is filled; a different non-null value loses to the one already there
+ * and is recorded in `__conflicts`, unless `overwrite`, when it replaces it. Returns how many
+ * properties changed.
+ */
+export function mergeProps(target: Mergeable, props: Record<string, unknown>, sourceId: string, overwrite = false): number {
+  const current = (target.properties ??= {});
+  let changed = 0;
+  for (const [k, v] of Object.entries(props)) {
     // A missing value is not a disagreement: the other source just fills it.
-    if (props[k] === null || props[k] === undefined) props[k] = v;
-    else if (v !== null && v !== undefined && !sameValue(props[k], v)) addConflict(existing, k, v, origin.sourceId);
+    if (current[k] === null || current[k] === undefined) {
+      current[k] = v;
+      if (v !== null && v !== undefined) changed++;
+    } else if (v !== null && v !== undefined && !sameValue(current[k], v)) {
+      if (overwrite) {
+        current[k] = v;
+        changed++;
+      } else addConflict(target, k, v, sourceId);
+    }
   }
+  return changed;
 }
 
 /**

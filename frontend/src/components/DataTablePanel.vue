@@ -58,8 +58,17 @@ const dtRef = ref<InstanceType<typeof DataTable>>();
 // freezing the tab on open. Strip the proxy once so all downstream passes read
 // plain objects. (One O(n) map over a raw-lookup; membership/order preserved.)
 
-const rawNodes = computed(() => graphStore.filteredNodes.map(n => toRaw(n)));
-const rawEdges = computed(() => graphStore.filteredEdges.map(e => toRaw(e)));
+// nodePatchVersion: properties patched in place (background loading, enrichment files,
+// the user's layer) replace a node's dict without changing the arrays; read it so the
+// table's columns and cells follow.
+const rawNodes = computed(() => {
+  void graphStore.nodePatchVersion;
+  return graphStore.filteredNodes.map(n => toRaw(n));
+});
+const rawEdges = computed(() => {
+  void graphStore.nodePatchVersion;
+  return graphStore.filteredEdges.map(e => toRaw(e));
+});
 
 // ─── Property keys ───
 
