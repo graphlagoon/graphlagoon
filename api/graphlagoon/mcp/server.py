@@ -480,7 +480,11 @@ def build_server():
           {"sources": [item ids], "roles": [], "tags": [], "groups": [group
           annotation ids], "types": [node types], "window": [start_ms, end_ms] |
           null}, "layout": "force" | "hierarchical" | …, "groups_closed": [group
-          ids]}). A wrong shape is INVALID_CONTENT.
+          ids]}); sketch (nodes and edges drawn by hand, one "Manual additions"
+          item per case: {"unified": true, nodes, edges}; nodes need a type,
+          edges an id and a type, and both ends in the sketch; a node already
+          on the canvas is a stub {id: its unified id, type, properties: {}}).
+          A wrong shape is INVALID_CONTENT.
         - table: csv text with mapping {as: graph | enrichment, spec}; result or
           metrics as content_json {columns, rows}.
         - query: query {text, language, parameters, output} + context_id.
@@ -570,7 +574,10 @@ def build_server():
         [{"from": "t", "type", "endpoints": {"self", "other"}, "props"}]}; the
         org's saved mappings are library docs of kind "mapping" (get_playbook
         lists and reads them; the body is the mapping JSON). {as: "enrichment", spec:
-        {name, key_column, columns, match_node_types}} makes it a side table.
+        {name, input: {delimiter, header}, key_column, columns, normalize?,
+        match_node_types? (default every type), target?: "nodes" | "edges"}}
+        adds its columns as properties of the nodes (or edges) already on the
+        canvas whose key matches; values already there win unless overwrite.
         Bigger files: POST the bytes to /api/investigations/{id}/items?kind=table
         &subkind=csv&filename=… with the same Bearer token, then update_item.
         Needs the investigation.upload permission of the person you act for."""
@@ -643,7 +650,11 @@ def build_server():
         """Promote tables (or the latest run of queries) to the graph
         (as_="graph": source_column, target_column, source_type, target_type,
         edge_type, normalize, amount_prop, time_prop) or to enrichment
-        (as_="enrichment": key_column, match_node_types, match_source)."""
+        (as_="enrichment": the rows add properties to the nodes, or with
+        target="edges" the edges, already on the canvas: key_column,
+        match_node_types (default every type), match_source, normalize,
+        key_digits, overwrite, edge_key {by: edge_id | endpoints,
+        source_column, target_column, type_column})."""
         user = _agent(ctx)
         return _out(await _call(case_tables.promote(investigation_id, user, item_ids, as_, options or {})))
 

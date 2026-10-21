@@ -17,7 +17,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Callable, Optional, Union, Awaitable, TYPE_CHECKING
+from typing import Callable, Literal, Optional, Union, Awaitable, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import httpx
@@ -26,6 +26,11 @@ if TYPE_CHECKING:
     from graphlagoon.config import Settings
 
 logger = logging.getLogger(__name__)
+
+# What is stored per exploration: its graph snapshot, and the user's layer (BYOD-2)
+# beside it, in a file of its own so neither write races the other.
+Kind = Literal["snapshot", "overlay"]
+_SUFFIX: dict[str, str] = {"snapshot": ".json.gz", "overlay": ".overlay.json.gz"}
 
 # Same type as warehouse.py HeaderProvider
 HeaderProvider = Callable[[], Union[str, Awaitable[str]]]
@@ -57,16 +62,16 @@ def decompress_snapshot(data: bytes) -> dict:
 
 class SnapshotService(ABC):
     @abstractmethod
-    async def save(self, exploration_id: UUID, data: bytes) -> None: ...
+    async def save(self, exploration_id: UUID, data: bytes, kind: Kind = "snapshot") -> None: ...
 
     @abstractmethod
-    async def load(self, exploration_id: UUID) -> Optional[bytes]: ...
+    async def load(self, exploration_id: UUID, kind: Kind = "snapshot") -> Optional[bytes]: ...
 
     @abstractmethod
-    async def delete(self, exploration_id: UUID) -> None: ...
+    async def delete(self, exploration_id: UUID, kind: Kind = "snapshot") -> None: ...
 
     @abstractmethod
-    async def exists(self, exploration_id: UUID) -> bool: ...
+    async def exists(self, exploration_id: UUID, kind: Kind = "snapshot") -> bool: ...
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +89,10 @@ class LocalSnapshotService(SnapshotService):
         self._base = Path(base_dir)
         self._base.mkdir(parents=True, exist_ok=True)
 
-    def _path(self, eid: UUID) -> Path:
-        return self._base / f"{eid}.json.gz"
+    def _path(self, eid: UUID, kind: Kind = "snapshot") -> Path:
+        return self._base / f"{eid}{_SUFFIX[kind]}"
 
-    async def save(self, eid: UUID, data: bytes) -> None:
+    async def save(self, eid: UUID, data: bytes, kind: Kind = "snapshot") -> None:
         # A unique temp name per write (mirrors LocalBlobStore._save_sync).
         # Deriving it from the target via with_suffix(".tmp") gave concurrent
         # writers of the same exploration one shared temp file: their writes
@@ -95,24 +100,24 @@ class LocalSnapshotService(SnapshotService):
         tmp = self._base / f".tmp-{uuid4().hex}"
         try:
             tmp.write_bytes(data)
-            tmp.replace(self._path(eid))  # atomic on same filesystem
+            tmp.replace(self._path(eid, kind))  # atomic on same filesystem
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
 
-    async def load(self, eid: UUID) -> Optional[bytes]:
-        p = self._path(eid)
+    async def load(self, eid: UUID, kind: Kind = "snapshot") -> Optional[bytes]:
+        p = self._path(eid, kind)
         if p.exists():
             return p.read_bytes()
         return None
 
-    async def delete(self, eid: UUID) -> None:
-        p = self._path(eid)
+    async def delete(self, eid: UUID, kind: Kind = "snapshot") -> None:
+        p = self._path(eid, kind)
         if p.exists():
             p.unlink()
 
-    async def exists(self, eid: UUID) -> bool:
-        return self._path(eid).exists()
+    async def exists(self, eid: UUID, kind: Kind = "snapshot") -> bool:
+        return self._path(eid, kind).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +177,8 @@ class DatabricksSnapshotService(SnapshotService):
                 f"Failed to obtain auth token for snapshot: {exc}"
             ) from exc
 
-    def _api_url(self, eid: UUID) -> str:
-        return f"{self._base_url}/api/2.0/fs/files{self._volume_path}/{eid}.json.gz"
+    def _api_url(self, eid: UUID, kind: Kind = "snapshot") -> str:
+        return f"{self._base_url}/api/2.0/fs/files{self._volume_path}/{eid}{_SUFFIX[kind]}"
 
     def _check_response(
         self, resp: httpx.Response, operation: str, eid: UUID, url: str
@@ -221,8 +226,8 @@ class DatabricksSnapshotService(SnapshotService):
             f"url={url} body={body}"
         )
 
-    async def save(self, eid: UUID, data: bytes) -> None:
-        url = self._api_url(eid)
+    async def save(self, eid: UUID, data: bytes, kind: Kind = "snapshot") -> None:
+        url = self._api_url(eid, kind)
         headers = await self._auth_headers()
         headers["Content-Type"] = "application/octet-stream"
         try:
@@ -247,8 +252,8 @@ class DatabricksSnapshotService(SnapshotService):
                 f"Databricks snapshot save [{eid}]: network error — {exc}. url={url}"
             ) from exc
 
-    async def load(self, eid: UUID) -> Optional[bytes]:
-        url = self._api_url(eid)
+    async def load(self, eid: UUID, kind: Kind = "snapshot") -> Optional[bytes]:
+        url = self._api_url(eid, kind)
         headers = await self._auth_headers()
         try:
             async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
@@ -273,8 +278,8 @@ class DatabricksSnapshotService(SnapshotService):
                 f"Databricks snapshot load [{eid}]: network error — {exc}. url={url}"
             ) from exc
 
-    async def delete(self, eid: UUID) -> None:
-        url = self._api_url(eid)
+    async def delete(self, eid: UUID, kind: Kind = "snapshot") -> None:
+        url = self._api_url(eid, kind)
         headers = await self._auth_headers()
         try:
             async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:
@@ -301,8 +306,8 @@ class DatabricksSnapshotService(SnapshotService):
                 f"Databricks snapshot delete [{eid}]: network error — {exc}. url={url}"
             ) from exc
 
-    async def exists(self, eid: UUID) -> bool:
-        url = self._api_url(eid)
+    async def exists(self, eid: UUID, kind: Kind = "snapshot") -> bool:
+        url = self._api_url(eid, kind)
         headers = await self._auth_headers()
         try:
             async with httpx.AsyncClient(timeout=self._HTTP_TIMEOUT) as client:

@@ -307,6 +307,7 @@ class TestConfigCarriesPermissions:
         payload = client.get("/api/config", headers=_headers(SUPERUSER)).json()
         assert payload["permissions"] == [
             "context.create",
+            "exploration.edit_graph",
             "exploration.save",
             "investigation.agent",
             "investigation.create",
@@ -319,6 +320,7 @@ class TestConfigCarriesPermissions:
         _restrict_context_create_to(store, MEMBER)
         payload = client.get("/api/config", headers=_headers(OUTSIDER)).json()
         assert payload["permissions"] == [
+            "exploration.edit_graph",
             "exploration.save",
             "investigation.agent",
             "investigation.create",
@@ -329,6 +331,7 @@ class TestConfigCarriesPermissions:
         member_payload = client.get("/api/config", headers=_headers(MEMBER)).json()
         assert member_payload["permissions"] == [
             "context.create",
+            "exploration.edit_graph",
             "exploration.save",
             "investigation.agent",
             "investigation.create",

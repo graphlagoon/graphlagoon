@@ -101,3 +101,15 @@ def test_failed_write_cleans_up_temp_file(service, tmp_path, monkeypatch):
         asyncio.run(service.save(uuid4(), b"data"))
 
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_the_layer_lives_in_its_own_file(service, tmp_path):
+    """BYOD-2: the user's layer sits beside the snapshot; neither write touches the other."""
+    eid = uuid4()
+    await service.save(eid, b"snap")
+    await service.save(eid, b"layer", kind="overlay")
+    assert sorted(p.name for p in tmp_path.iterdir()) == [f"{eid}.json.gz", f"{eid}.overlay.json.gz"]
+    assert await service.load(eid) == b"snap" and await service.load(eid, kind="overlay") == b"layer"
+    await service.delete(eid, kind="overlay")
+    assert await service.exists(eid) and not await service.exists(eid, kind="overlay")

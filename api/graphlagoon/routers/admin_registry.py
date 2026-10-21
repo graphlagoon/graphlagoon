@@ -85,6 +85,7 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "api_docs_enabled": "public",
     "investigations_volume_path": "public",
     "investigation_file_max_bytes": "public",
+    "exploration_overlay_max_bytes": "public",
     "investigation_max_working_edges": "public",
     "investigation_retention_years": "public",
     "enrichment_max_keys": "public",
@@ -176,6 +177,9 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ): "edit by owner/writer; not destructive",
     ("POST", "/api/graph-contexts/{context_id}/explorations"): "owner-scoped create",
     ("PUT", "/api/explorations/{exploration_id}"): "edit by owner/writer",
+    ("PUT", "/api/explorations/{exploration_id}/overlay"): (
+        "edit by owner/writer, like the exploration; replaces the user's layer only"
+    ),
     ("POST", "/api/graph-contexts/{context_id}/query-templates"): "owner-scoped create",
     ("PUT", "/api/graph-contexts/{context_id}/query-templates/{template_id}"): "edit",
     ("DELETE", "/api/graph-contexts/{context_id}/query-templates/{template_id}"): (

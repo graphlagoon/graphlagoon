@@ -234,17 +234,28 @@ async def compare_tables(
 
 
 def enrichment_mapping(title: str, columns: list[str], options: dict) -> dict:
+    """Promote to enrichment (BYOD-2): the rows add properties to the nodes (or,
+    with ``target: edges``, the edges) whose key matches. Every node type by
+    default. The table's own content is read as is (JSON or text), so the input
+    block only matters for text files."""
     key = options.get("key_column") or columns[0]
+    edge_key = options.get("edge_key")
+    used = {key} if not edge_key else {c for c in (edge_key.get("source_column"), edge_key.get("target_column"), edge_key.get("type_column")) if c}
     return {
         "as": "enrichment",
         "spec": {
             "name": options.get("name") or title,
             "input": {"delimiter": "\t", "header": True},
+            "target": options.get("target") or "nodes",
             "key_column": key,
-            "columns": [c for c in columns if c.lower() != key.lower()] or [key],
+            "columns": [c for c in columns if c.lower() not in {u.lower() for u in used}] or [key],
             "match_node_types": options.get("match_node_types") or ["*"],
             "match_source": options.get("match_source") or "node_id",
+            **({"match_edge_types": options["match_edge_types"]} if options.get("match_edge_types") else {}),
+            **({"edge_key": edge_key} if edge_key else {}),
+            **({"normalize": options["normalize"]} if options.get("normalize") else {}),
             **({"key_digits": options["key_digits"]} if options.get("key_digits") else {}),
+            **({"overwrite": True} if options.get("overwrite") else {}),
         },
     }
 

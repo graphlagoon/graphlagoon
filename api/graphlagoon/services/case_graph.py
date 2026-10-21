@@ -123,12 +123,28 @@ def _merge_node(
         node["sources"].append(origin)
     if node_type != node["type"]:
         _add_conflict(node, "node_type", node_type, origin["source_id"])
+    merge_props(node, props, origin["source_id"])
+
+
+def merge_props(target: dict, props: dict, source_id: str, overwrite: bool = False) -> int:
+    """The one merge rule (nodes, edges, enrichment files): a missing or null value
+    is filled; a different non-null value loses to the one already there and is
+    recorded in ``target["conflicts"]`` — unless ``overwrite``, when it replaces it.
+    Returns how many properties changed."""
+    current = target.setdefault("properties", {})
+    changed = 0
     for k, v in props.items():
         # A missing value is not a disagreement: the other source just fills it.
-        if node["properties"].get(k) is None:
-            node["properties"][k] = v
-        elif v is not None and not _same(node["properties"][k], v):
-            _add_conflict(node, k, v, origin["source_id"])
+        if current.get(k) is None:
+            current[k] = v
+            changed += v is not None
+        elif v is not None and not _same(current[k], v):
+            if overwrite:
+                current[k] = v
+                changed += 1
+            else:
+                _add_conflict(target, k, v, source_id)
+    return changed
 
 
 def apply_aliases(graph: dict, pairs: list[tuple[str, str]]) -> dict:
@@ -287,10 +303,19 @@ async def _exploration_snapshot(session, exploration_id: Optional[UUID]) -> tupl
     from graphlagoon.services.snapshot import decompress_snapshot, get_snapshot_service
 
     exploration = await _exploration(session, exploration_id)
-    if exploration is None or not (exploration.state or {}).get("has_snapshot"):
-        return exploration, None
-    raw = await get_snapshot_service().load(exploration.id)
-    return exploration, (decompress_snapshot(raw) if raw else None)
+    state = (exploration.state or {}) if exploration is not None else {}
+    snapshot = None
+    if state.get("has_snapshot"):
+        raw = await get_snapshot_service().load(exploration.id)
+        snapshot = decompress_snapshot(raw) if raw else None
+    if state.get("has_overlay"):
+        # The user's layer (BYOD-2): the case sees the exploration as its owner does.
+        from graphlagoon.services.enrichment_files import fold_overlay
+
+        raw = await get_snapshot_service().load(exploration.id, kind="overlay")
+        if raw:
+            snapshot = fold_overlay(snapshot, decompress_snapshot(raw))
+    return exploration, snapshot
 
 
 def _as_snapshot(payload: Any) -> Optional[dict]:
@@ -461,7 +486,7 @@ async def case_graph(investigation_id: UUID, user_email: str, item_id: Optional[
     and its confirmed ``same_as`` annotations apply, as in the browser. The full
     graph, seen by someone who reads every source, refreshes the case's entity
     presence (``case_entities``, 06 P7)."""
-    from graphlagoon.services import case_entities
+    from graphlagoon.services import case_entities, enrichment_files
     from graphlagoon.services.case_annotations import aliases_of
     from graphlagoon.services.case_items import ITEMS, sources_readable
 
@@ -501,7 +526,23 @@ async def case_graph(investigation_id: UUID, user_email: str, item_id: Optional[
                 )
             )
         aliases = await aliases_of(session, investigation_id)
+        # Enrichment files add properties to what is already there (BYOD-2); the
+        # whole graph only: a single item is one source as it stands.
+        enrichments = []
+        for item in sorted(all_items, key=lambda i: (i.position, i.created_at)) if item_id is None else []:
+            if not enrichment_files.is_enrichment_item(item):
+                continue
+            if not await sources_readable(item, user_email, readable):
+                restricted += 1
+                continue
+            try:
+                enrichments.append((str(item.id), item.mapping["spec"], await enrichment_files.item_rows(session, investigation_id, item)))
+            except (service.InvestigationError, ValueError, LookupError, TypeError, AttributeError) as exc:
+                logger.warning("case %s: enrichment %s left out: %s", investigation_id, item.id, exc)
+                broken.append({"item_id": str(item.id), "title": item.title, "error": _error_text(exc)})
     graph = unify(parts, overrides, aliases, (inv.settings or {}).get("edge_semantics"))
+    for source_id, spec, rows in enrichments:
+        enrichment_files.enrich_graph(graph, spec, rows, source_id)
     graph["restricted_sources"] = restricted
     graph["broken_sources"] = broken
     if item_id is None and not restricted and not broken:

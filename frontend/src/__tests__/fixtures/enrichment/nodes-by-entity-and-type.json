@@ -1,0 +1,207 @@
+{
+  "description": "A file keyed by a document matches the Person merged by identity key (entity value); the value already there wins and the file's is a conflict; a null is filled; types restrict the match; numbers are numbers, leading zeros stay strings.",
+  "contexts": {
+    "c-bank": {
+      "identity_keys": [
+        {
+          "node_type": "Holder",
+          "entity": "Person",
+          "source": {
+            "kind": "prop",
+            "name": "doc"
+          },
+          "normalize": "digits"
+        }
+      ]
+    },
+    "c-crm": {
+      "identity_keys": []
+    }
+  },
+  "sources": [
+    {
+      "id": "s-bank",
+      "context_id": "c-bank",
+      "nodes": [
+        {
+          "id": "p1",
+          "type": "Holder",
+          "properties": {
+            "doc": "123.456.789-01",
+            "name": "Ana R."
+          }
+        },
+        {
+          "id": "a1",
+          "type": "Account",
+          "properties": {}
+        },
+        {
+          "id": "a2",
+          "type": "Account",
+          "properties": {
+            "segment": null
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "p1",
+          "target": "a1",
+          "type": "HOLDS",
+          "properties": {}
+        },
+        {
+          "id": "e2",
+          "source": "a1",
+          "target": "a2",
+          "type": "PIX",
+          "properties": {
+            "amount": 10
+          }
+        }
+      ]
+    },
+    {
+      "id": "s-crm",
+      "context_id": "c-crm",
+      "nodes": [
+        {
+          "id": "0042",
+          "type": "Store",
+          "properties": {
+            "city": "Recife"
+          }
+        }
+      ],
+      "edges": []
+    }
+  ],
+  "files": [
+    {
+      "id": "f-risk",
+      "content": "doc;risk;name;since\n123.456.789-01;high;Ana Rocha;2019\n",
+      "spec": {
+        "version": 1,
+        "kind": "enrichment",
+        "name": "Risk",
+        "input": {
+          "delimiter": ";",
+          "header": true,
+          "columns": []
+        },
+        "target": "nodes",
+        "key_column": "doc",
+        "columns": [
+          "risk",
+          "name",
+          "since"
+        ],
+        "match_node_types": [
+          "*"
+        ],
+        "match_source": "node_id",
+        "match_edge_types": [
+          "*"
+        ],
+        "normalize": "digits",
+        "overwrite": false
+      }
+    },
+    {
+      "id": "f-seg",
+      "content": {
+        "columns": [
+          "account",
+          "segment",
+          "code"
+        ],
+        "rows": [
+          [
+            "a2",
+            "retail",
+            "007"
+          ],
+          [
+            "a1",
+            "corporate",
+            "1"
+          ]
+        ]
+      },
+      "spec": {
+        "version": 1,
+        "kind": "enrichment",
+        "name": "Segments",
+        "input": {
+          "delimiter": ",",
+          "header": true,
+          "columns": []
+        },
+        "target": "nodes",
+        "key_column": "account",
+        "columns": [
+          "segment",
+          "code"
+        ],
+        "match_node_types": [
+          "Account"
+        ],
+        "match_source": "node_id",
+        "match_edge_types": [
+          "*"
+        ],
+        "normalize": "none",
+        "overwrite": false
+      }
+    }
+  ],
+  "expected": {
+    "nodes": {
+      "Person:12345678901": {
+        "properties": {
+          "doc": "123.456.789-01",
+          "name": "Ana R.",
+          "risk": "high",
+          "since": 2019
+        },
+        "conflicts": {
+          "name": [
+            {
+              "value": "Ana Rocha",
+              "source_id": "f-risk"
+            }
+          ]
+        }
+      },
+      "a1@c-bank": {
+        "properties": {
+          "segment": "corporate",
+          "code": 1
+        }
+      },
+      "a2@c-bank": {
+        "properties": {
+          "segment": "retail",
+          "code": "007"
+        }
+      },
+      "0042@c-crm": {
+        "properties": {
+          "city": "Recife"
+        }
+      }
+    },
+    "edges": {
+      "s-bank:e1": {
+        "properties": {}
+      },
+      "s-bank:e2": {
+        "properties": {
+          "amount": 10
+        }
+      }
+    }
+  }
+}

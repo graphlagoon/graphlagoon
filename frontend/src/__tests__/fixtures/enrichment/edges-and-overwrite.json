@@ -1,0 +1,214 @@
+{
+  "description": "Edges by endpoints in either direction with a type column, edges by id, property sources, key_digits and overwrite.",
+  "contexts": {
+    "c-bank": {
+      "identity_keys": [
+        {
+          "node_type": "Holder",
+          "entity": "Person",
+          "source": {
+            "kind": "prop",
+            "name": "doc"
+          },
+          "normalize": "digits"
+        }
+      ]
+    },
+    "c-crm": {
+      "identity_keys": []
+    }
+  },
+  "sources": [
+    {
+      "id": "s-bank",
+      "context_id": "c-bank",
+      "nodes": [
+        {
+          "id": "p1",
+          "type": "Holder",
+          "properties": {
+            "doc": "123.456.789-01",
+            "name": "Ana R."
+          }
+        },
+        {
+          "id": "a1",
+          "type": "Account",
+          "properties": {}
+        },
+        {
+          "id": "a2",
+          "type": "Account",
+          "properties": {
+            "segment": null
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "p1",
+          "target": "a1",
+          "type": "HOLDS",
+          "properties": {}
+        },
+        {
+          "id": "e2",
+          "source": "a1",
+          "target": "a2",
+          "type": "PIX",
+          "properties": {
+            "amount": 99,
+            "channel": "app"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s-crm",
+      "context_id": "c-crm",
+      "nodes": [
+        {
+          "id": "0042",
+          "type": "Store",
+          "properties": {
+            "city": "Recife"
+          }
+        }
+      ],
+      "edges": []
+    }
+  ],
+  "files": [
+    {
+      "id": "f-chan",
+      "content": "to,from,kind,channel\na2,a1,PIX,app\na1,p1,HOLDS,branch\n",
+      "spec": {
+        "version": 1,
+        "kind": "enrichment",
+        "name": "Channels",
+        "input": {
+          "delimiter": ",",
+          "header": true,
+          "columns": []
+        },
+        "target": "edges",
+        "columns": [
+          "channel"
+        ],
+        "match_node_types": [
+          "*"
+        ],
+        "match_source": "node_id",
+        "match_edge_types": [
+          "*"
+        ],
+        "edge_key": {
+          "by": "endpoints",
+          "source_column": "from",
+          "target_column": "to",
+          "type_column": "kind"
+        },
+        "normalize": "none",
+        "overwrite": false
+      }
+    },
+    {
+      "id": "f-ids",
+      "content": "edge,amount\ne2,99\n",
+      "spec": {
+        "version": 1,
+        "kind": "enrichment",
+        "name": "Amounts",
+        "input": {
+          "delimiter": ",",
+          "header": true,
+          "columns": []
+        },
+        "target": "edges",
+        "key_column": "edge",
+        "columns": [
+          "amount"
+        ],
+        "match_node_types": [
+          "*"
+        ],
+        "match_source": "node_id",
+        "match_edge_types": [
+          "*"
+        ],
+        "normalize": "none",
+        "overwrite": true
+      }
+    },
+    {
+      "id": "f-city",
+      "content": "prefix;city\n123;Olinda\n",
+      "spec": {
+        "version": 1,
+        "kind": "enrichment",
+        "name": "City",
+        "input": {
+          "delimiter": ";",
+          "header": true,
+          "columns": []
+        },
+        "target": "nodes",
+        "key_column": "prefix",
+        "columns": [
+          "city"
+        ],
+        "match_node_types": [
+          "*"
+        ],
+        "match_source": {
+          "kind": "prop",
+          "name": "doc"
+        },
+        "match_edge_types": [
+          "*"
+        ],
+        "normalize": "digits",
+        "key_digits": 3,
+        "overwrite": false
+      }
+    }
+  ],
+  "expected": {
+    "nodes": {
+      "Person:12345678901": {
+        "properties": {
+          "doc": "123.456.789-01",
+          "name": "Ana R.",
+          "city": "Olinda"
+        }
+      },
+      "a1@c-bank": {
+        "properties": {}
+      },
+      "a2@c-bank": {
+        "properties": {
+          "segment": null
+        }
+      },
+      "0042@c-crm": {
+        "properties": {
+          "city": "Recife"
+        }
+      }
+    },
+    "edges": {
+      "s-bank:e1": {
+        "properties": {
+          "channel": "branch"
+        }
+      },
+      "s-bank:e2": {
+        "properties": {
+          "amount": 99,
+          "channel": "app"
+        }
+      }
+    }
+  }
+}

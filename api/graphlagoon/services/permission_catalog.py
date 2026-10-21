@@ -51,6 +51,15 @@ PERMISSIONS: tuple[Permission, ...] = (
         ),
     ),
     Permission(
+        id="exploration.edit_graph",
+        label="Add your own data to explorations",
+        description=(
+            "Add nodes, edges and enrichment files to an exploration you can "
+            "write. The layer is saved beside the exploration, never in the "
+            "context. Viewing a layer someone saved stays open."
+        ),
+    ),
+    Permission(
         id="investigation.create",
         label="Create investigations",
         description=(

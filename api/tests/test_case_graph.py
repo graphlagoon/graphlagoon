@@ -252,3 +252,78 @@ def test_unified_parts_keep_their_ids_and_case_semantics_apply_by_edge_type():
 
     keys = derived_identity_keys({"nodes": [{"type": "Device", "id": {"col": "t.dev", "normalize": "device_id"}}, {"type": "Log", "id": {"col": "t.x", "normalize": "lower"}}]})
     assert [k["node_type"] for k in keys] == ["Device"]
+
+
+# ---------------------------------------------------------------------------
+# Enrichment files (BYOD-2): a table with mapping.as = enrichment adds
+# properties to the unified graph; it puts no node on the canvas.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enrichment_tables_add_properties_to_the_case_graph(env):
+    client, url, inv = env
+    csv = b"doc;risk;name\n123.456.789-01;high;Ana Rocha\n555;low;Nobody\n"
+    r = client.post(
+        f"{url}/items", content=csv, params={"filename": "risk.csv", "kind": "table", "subkind": "csv"},
+        headers={**h(OWNER), "Content-Type": "text/csv"},
+    )
+    assert r.status_code == 201, r.text
+    table = r.json()["id"]
+    mapping = {"as": "enrichment", "spec": {"name": "Risk", "input": {"delimiter": ";"}, "key_column": "doc",
+                                             "columns": ["risk", "name"], "normalize": "digits"}}
+    r = client.patch(f"{url}/items/{table}", json={"mapping": mapping}, headers=h(OWNER))
+    assert r.status_code == 200, r.text
+    assert r.json()["mapping"]["spec"]["match_node_types"] == ["*"]
+
+    graph = await case_graph(inv.id, OWNER)
+    assert len(graph["nodes"]) == 4  # no node added: only properties
+    [ana] = [n for n in graph["nodes"] if n["uid"] == "Person:12345678901"]
+    assert ana["properties"]["risk"] == "high"
+    # The name already on the node wins; the file's is a conflict with the table as source.
+    assert ana["properties"]["name"] == "Ana R."
+    assert ana["conflicts"]["name"] == [{"value": "Ana Rocha", "source_id": table}]
+    # The graph endpoint (what MCP get_graph and exports read) carries it too.
+    served = client.get(f"{url}/graph", headers=h(OWNER)).json()
+    assert next(n for n in served["nodes"] if n["uid"] == "Person:12345678901")["properties"]["risk"] == "high"
+
+    # A file that cannot be read never takes the graph down.
+    bad = {"as": "enrichment", "spec": {**mapping["spec"], "input": {"delimiter": ";", "encoding": "no-such-codec"}}}
+    assert client.patch(f"{url}/items/{table}", json={"mapping": bad}, headers=h(OWNER)).status_code == 200
+    graph = await case_graph(inv.id, OWNER)
+    assert len(graph["nodes"]) == 4 and graph["broken_sources"][0]["item_id"] == table
+
+
+@pytest.mark.asyncio
+async def test_a_sketch_draws_nodes_and_edges_onto_existing_entities(env):
+    client, url, inv = env
+    sketch = {
+        "unified": True,
+        "nodes": [
+            {"id": "Person:12345678901", "type": "Holder", "properties": {}},  # stub of a node on the canvas
+            {"id": "sketch:n1", "type": "Phone", "properties": {"number": "+1 415 555 0100"}},
+        ],
+        "edges": [{"id": "sketch:e1", "source": "sketch:n1", "target": "Person:12345678901", "type": "USES", "properties": {}}],
+    }
+    r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "sketch", "title": "Manual additions", "content_json": sketch}, headers=h(OWNER))
+    assert r.status_code == 201, r.text
+    item = r.json()["id"]
+    graph = await case_graph(inv.id, OWNER)
+    assert len(graph["nodes"]) == 5
+    [uses] = [e for e in graph["edges"] if e["type"] == "USES"]
+    assert (uses["src"], uses["dst"]) == ("sketch:n1", "Person:12345678901")
+    [ana] = [n for n in graph["nodes"] if n["uid"] == "Person:12345678901"]
+    assert item in {o["source_id"] for o in ana["sources"]} and ana["properties"]["name"] == "Ana R."
+    assert "conflicts" not in ana  # an empty stub disagrees with nothing
+
+    # Shape errors are a 422 now, not a broken canvas later; a new version is checked too.
+    for bad in (
+        {**sketch, "nodes": [{"id": "x", "properties": {}}]},
+        {**sketch, "edges": [{"id": "e", "source": "sketch:n1", "target": "nowhere", "type": "USES"}]},
+        {**sketch, "edges": [{"source": "sketch:n1", "target": "Person:12345678901", "type": "USES"}]},
+        {**sketch, "unified": False},
+    ):
+        r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "sketch", "title": "x", "content_json": bad}, headers=h(OWNER))
+        assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "INVALID_CONTENT", r.text
+    r = client.post(f"{url}/items/{item}/versions", json={"content_json": {**sketch, "nodes": [{"id": 1}]}}, headers=h(OWNER))
+    assert r.status_code == 422

@@ -131,6 +131,8 @@ async def test_seeds_the_four_scenarios_on_items_and_annotations_then_resets(in_
     flagship = next(i for i in seeded if i.title.startswith("Mule network"))
     assert stats.flagship == str(flagship.id)
     trace_item = next(i for i in items if i.investigation_id == flagship.id and (i.provenance or {}).get("tool") == "trace")
+    # BYOD-2: the mule case carries a hand-drawn "Manual additions" item.
+    assert any(i.subkind == "sketch" for i in items if i.investigation_id == flagship.id)
     data, version, _ = await case_items.get_content(flagship.id, flagship.owner_email, trace_item.id)
     trace = json.loads(data)
     assert version["pinned_at"] and (sorted(trace["exits"].values()), trace["coverage"]) == ([880, 1550, 2000], 0.9097)

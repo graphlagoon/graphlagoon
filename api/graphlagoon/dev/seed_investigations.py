@@ -680,6 +680,20 @@ async def seed_mule_network(client, owner, agent, rng, stats, log) -> dict:
                 "and splits it at once.\n\nOpen: who controls 8812-7, which also had an opening balance.")
     await add_item(me, url, stats, kind="note", subkind="free", title="Next step",
                    content="Ask the receiving bank for 90 days of statements on 4471-0 and 8812-7.")
+    # Drawn by hand (BYOD-2): the number the victim was called from, tied to the first mule.
+    mule_type = next(n["node_type"] for n in fixture["nodes"] if str(n["node_id"]) == "4471-0")
+    await add_item(
+        me, url, stats, kind="graph", subkind="sketch", title="Manual additions",
+        description="From the victim's statement: the call came from this number.",
+        content_json={
+            "unified": True,
+            "nodes": [
+                {"id": uid("4471-0"), "type": mule_type, "properties": {}},
+                {"id": "sketch:caller", "type": "Phone", "properties": {"label": "+1 415 555 0142", "reported_by": "victim"}},
+            ],
+            "edges": [{"id": "sketch:called", "source": "sketch:caller", "target": uid("4471-0"), "type": "CALLED_FROM", "properties": {}}],
+        },
+    )
     await finish(client, url, owner, "analysis", stats)
     if stats.case_types:  # a decision on two accounts that does not close the case
         await decide(client, url, owner, stats, "monitor", "Keep the two receiving accounts under watch while the bank answers.",
