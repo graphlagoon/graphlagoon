@@ -119,7 +119,7 @@ a small envelope around the settings:
     "context_title": "Fraud ring",
     "node_types": ["Person", "Company"],
     "relationship_types": ["OWNS"],
-    "node_properties": ["name", "cnpj"],
+    "node_properties": ["name", "tax_id"],
     "edge_properties": ["share"]
   },
   "settings": { "nodeTypeColors": { "Person": "#4f8cff" }, "...": "..." }
@@ -150,7 +150,7 @@ preset against this graph's types and properties and lists what does not
 match:
 
 > This preset names things this graph does not have: node types: Person,
-> Company · properties: cnpj
+> Company · properties: tax_id
 
 The **robot button** — the same Ask-AI helper the Labels and Actions editors
 have — then switches to *adapt* mode. The prompt it generates carries the

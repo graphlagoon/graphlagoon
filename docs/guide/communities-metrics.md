@@ -257,13 +257,13 @@ const f = String(item.properties.first_name ?? '').trim();
 const l = String(item.properties.last_name ?? '').trim();
 return (f + ' ' + l).replace(/\s+/g, ' ').trim().toUpperCase();
 
-// CNPJ formatted from digits
-const d = String(item.properties.cnpj ?? '').replace(/\D/g, '');
-return d.length === 14 ? d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : d;
+// US employer id (EIN) formatted from digits
+const d = String(item.properties.tax_id ?? '').replace(/\D/g, '');
+return d.length === 9 ? d.replace(/(\d{2})(\d{7})/, '$1-$2') : d;
 
 // Entity kind by regex on the name
 const n = String(item.properties.name ?? '');
-if (/\b(LTDA|S\.?A\.?|EIRELI|ME)\b/i.test(n)) return 'company';
+if (/\b(INC|LLC|LTD|CORP|S\.?A\.?|GMBH)\b/i.test(n)) return 'company';
 if (/^\p{Lu}\p{Ll}+( \p{Lu}\p{Ll}+)+$/u.test(n)) return 'person';
 return 'unknown';
 

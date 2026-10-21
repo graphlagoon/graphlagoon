@@ -69,7 +69,10 @@ The differences that matter:
 
 ### Routers à la carte
 
-`create_api_router(settings)` returns just the `/api/...` routers;
+`create_api_router(settings)` returns just the `/api/...` routers (included in
+your app, they appear in your app's own `/docs`; mounted with
+`create_mountable_app`, they are documented at `{prefix}/docs` instead — see
+[REST API & Integrations](./rest-api.md#the-reference-openapi-and-swagger));
 `create_frontend_router(...)` serves the SPA with config injection.
 Combining them yourself means the `configure_*` wiring
 `create_mountable_app` does is on you — see

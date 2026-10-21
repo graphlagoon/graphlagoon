@@ -424,39 +424,43 @@ created the token (`Authorization: Bearer glt_…`; creating one needs the
 With agents on and the `mcp` extra installed (`pip install "graphlagoon[mcp]"`),
 the app serves an MCP server (Streamable HTTP) at `{app URL}/graphlagoon/mcp`
 (`/mcp` under the mount prefix of `create_mountable_app`). It accepts agent
-tokens only. Its tools read cases, run the server analyses (matches, follow
-the money, paths, typology badges), write notes, sources, files, frozen
-evidence and draft artifacts, and make proposals; none decides, exports,
-shares, deletes, approves an artifact or accepts a proposal. Every read is
-recorded in the audit log (`agent.read`). Where the agent cannot reach `/mcp`
-directly (the Databricks Apps proxy wants a Databricks login), the local
-`graphlagoon mcp-bridge` forwards every message. Connection commands, scopes
-and masking: [AI Agents (MCP)](./agents-mcp.md).
+tokens only. Its tools open and read cases, import files, run queries and the
+server analyses, annotate, plan tasks, draft reports and propose decisions;
+none records or reviews a decision, exports, shares, deletes or reopens.
+Every read is recorded in the audit log (`agent.read`). Where the agent cannot
+reach `/mcp` directly (the Databricks Apps proxy wants a Databricks login),
+the local `graphlagoon mcp-bridge` forwards every message. Connection
+commands, scopes and the Claude Code flow: [AI Agents (MCP)](./agents-mcp.md).
 
 | Variable | Default | Notes |
 |---|---|---|
 | `GRAPH_LAGOON_AGENTS_ENABLED` | `false` | Off: the token routes return 404 and agent tokens are rejected. |
 | `GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS` | `90` | Maximum validity of a token. |
-| `GRAPH_LAGOON_AGENTS_ALLOW_UNMASKED_DATA` | `false` | Let agents read CPF, CNPJ and account numbers unmasked. |
 | `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per token, counted in a store every worker shares: the `usage_logs` table (one `agent.request` line per request) with a database, the in-memory store otherwise. |
+| `GRAPH_LAGOON_API_DOCS_ENABLED` | *(dev mode)* | Serve the OpenAPI spec and Swagger UI at `{prefix}/docs`, `{prefix}/redoc` and `{prefix}/openapi.json`, behind the same login as the API. Unset: on in dev mode, off otherwise. The spec is also published with these docs ([REST API](./rest-api.md)). |
+| `GRAPH_LAGOON_AGENT_IMAGE_MAX_BYTES` | `2000000` | PNG, JPEG, GIF and WebP items up to this size reach an agent as MCP image content in `read_item` (multimodal models look at them); `0` = never. Other binaries never reach agents. |
+
+There is no masking of personal data for agents: an agent sees what its owner
+sees. Minimize what reaches it with the columns a context exposes, the shares
+of each case and case-scoped tokens.
 
 ## Investigation storage
 
-Case files, frozen sources, frozen evidence and the case space (versioned
-artifacts) of an [investigation](./investigations.md) are stored as files,
-never overwritten, and reached only through the app. Uploads stream to disk
-while their sha256 is computed.
+Case files and item versions of an [investigation](./investigations.md) are
+stored as files, never overwritten, and reached only through the app. Uploads
+stream to disk while their sha256 is computed.
 
 | Variable | Default | Notes |
 |---|---|---|
 | `GRAPH_LAGOON_INVESTIGATIONS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to an `investigations` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set; otherwise files go to `{GRAPH_LAGOON_EXPLORATION_SNAPSHOTS_DIR}/investigations`. Give write access to the app's service principal only. |
-| `GRAPH_LAGOON_ARTIFACT_MAX_BYTES` | `104857600` | Maximum size of one artifact version (100 MB). |
-| `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` | `209715200` | Maximum size of one file uploaded to a case (200 MB); larger uploads get 413. |
+| `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` | `209715200` | Maximum size of one file uploaded to a case (200 MB), and of an item's inline JSON body (text or JSON content); larger ones get 413. |
 | `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Ceiling of edges in a case's working graph in the browser: a graph built from a case file keeps only this many edges. |
-| `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a decided case is retained: it cannot be deleted before then, except by a superuser with a reason. |
-| `GRAPH_LAGOON_INVESTIGATION_DEADLINE_DAYS` | `{"pix_med": {"selection": 45, "analysis": 45}}` | Deadline phases per case type, in days from the alert (JSON `{preset: {selection, analysis}}`). A type without an entry has no deadline; a case may override the days in its settings. |
+| `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a case closed by a decision is retained when its case type sets no `retention_years`: it cannot be deleted before then, except by a superuser with a reason. |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` | `500` | Node keys per enrichment lookup (a context's enrichment tables). |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` | `5000` | Rows one enrichment lookup returns; more are cut and flagged `truncated`. |
+
+Deadlines are not settings: each **case type** (admin area → *Case types*)
+has its SLA hours per phase (open, analysis), and a case may change its own.
 
 ## Programmatic Configuration
 

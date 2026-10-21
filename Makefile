@@ -7,7 +7,7 @@
         test test-unit test-coverage test-e2e test-e2e-headed test-e2e-ui test-e2e-report \
         test-integration test-integration-headed test-all \
         build build-pypi build-frontend build-wheel-only build-verify \
-        docs docs-build docs-preview docs-screenshots \
+        docs docs-build docs-api docs-preview docs-screenshots \
         install setup-gsql2rsql \
         run-api run-api-no-debug run-api-db run-warehouse run-warehouse-no-debug run-frontend \
         db-up db-down db-logs migrate migrate-create \
@@ -68,6 +68,7 @@ help:
 	@echo "$(GREEN)Docs$(RESET)"
 	@echo "  make docs                  Start VitePress dev server"
 	@echo "  make docs-build            Build documentation site"
+	@echo "  make docs-api              Regenerate the MCP tool reference and openapi.json"
 	@echo "  make docs-screenshots      Generate screenshots with Playwright"
 	@echo ""
 	@echo "$(GREEN)Setup$(RESET)"
@@ -474,7 +475,11 @@ release-dry: build-pypi build-verify ## Dry-run: build + verify (no publish)
 docs:
 	cd docs && npx vitepress dev
 
+docs-api:
+	cd api && .venv/bin/python -m graphlagoon.dev.api_docs
+
 docs-build:
+	cd api && .venv/bin/python -m graphlagoon.dev.api_docs --check
 	cd docs && npx vitepress build
 
 docs-preview:

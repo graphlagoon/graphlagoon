@@ -5,7 +5,7 @@ A small template language that decides **what text** each node and edge
 shows — on the canvas and in the hover tooltip — extract the readable
 part out of messy columns, per type, with live preview.
 
-- **Use it when** ids are unreadable (`12321_CNPJ_RAIZ`), the useful text
+- **Use it when** ids are unreadable (`12321_ROOT`), the useful text
   is buried inside a property, or different node types need different
   labels.
 - **Not the tool for** colors, sizes or icons (that's the
@@ -15,7 +15,7 @@ part out of messy columns, per type, with live preview.
   crowded, though a [tooltip](#hover-tooltips) can carry them.
 :::
 
-Raw node ids make terrible labels. A graph of `12321_CNPJ_RAIZ`-style
+Raw node ids make terrible labels. A graph of `12321_ROOT`-style
 identifiers is unreadable, and a graph that shows a 60-character description
 on every node is worse. The **Labels** panel solves both with a small
 template language: you decide what text each node and edge shows, extract
@@ -90,7 +90,7 @@ defaults are 20 and `...`.
 | Modifier | Example | Result |
 |---|---|---|
 | `number` | `{prop:count\|number}` | `1,234,567` |
-| `currency:code` | `{prop:price\|currency:BRL}` | `R$ 1.234,56` |
+| `currency:code` | `{prop:price\|currency:USD}` | `$1,234.56` |
 | `percent` | `{prop:rate\|percent}` on `0.855` | `85.5%` |
 
 `percent` expects a fraction, not an already-multiplied value. Non-numeric
@@ -100,7 +100,7 @@ input passes through unchanged.
 
 | Modifier | Example | Result |
 |---|---|---|
-| `split:delim:index` | `{node_id\|split:_:0}` on `12321_CNPJ_RAIZ` | `12321` |
+| `split:delim:index` | `{node_id\|split:_:0}` on `12321_ROOT` | `12321` |
 | `slice:start:end` | `{prop:code\|slice:-5}` on `BR-SP-00123` | `00123` |
 | `trim` | `{prop:name\|trim}` on `  alice  ` | `alice` |
 | `default:fallback` | `{prop:nickname\|default:anon}` | `anon` |
@@ -114,7 +114,7 @@ characters; the only allowed flag is `i`.
 | Modifier | Example | Result |
 |---|---|---|
 | `match:/pattern/:group` | `{prop:email\|match:/@(.+)$/:1}` | `empresa.com` |
-| `replace:/pattern/:repl` | `{node_id\|replace:/_CNPJ_RAIZ/:}` | `12321` |
+| `replace:/pattern/:repl` | `{node_id\|replace:/_ROOT/:}` | `12321` |
 
 `match` with no match yields an empty string — chain `|default:` after it:
 `{prop:email|match:/@(.+)$/:1|default:no domain}`. `replace` replaces every

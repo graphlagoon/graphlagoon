@@ -1,11 +1,11 @@
 # Investigações: pacote de execução
 
-> Status: **plano v1 (G1–F4.6) e plano v2 (F0–F6) concluídos** em `feature/investigations`,
-> 2026-10-11. O que vale agora é o [05-plano-v2.md](05-plano-v2.md); o 04 é histórico.
->
-> Este pacote basta sozinho para um agente implementar a funcionalidade. Os
-> artefatos no claude.ai (canvas e documentos) são cópias para humanos e são
-> privados; nada aqui depende deles.
+> Status: plano v1 (G1–F4.6), plano v2 (F0–F6) e **plano 06 (P0–P8)** concluídos em
+> `feature/investigations` (2026-10-20): a plataforma é genérica (tipos de caso, várias decisões com
+> quatro olhos e proposta do agente, tarefas, extensão por dados, entidade vista em outros casos,
+> Claude Code de ponta a ponta, UI em inglês). O 05 vale onde o 06 não o substitui. Próximo:
+> [07-ai-first-runtime.md](07-ai-first-runtime.md) (esqueleto: i18n, ação em lote, webhooks,
+> agente de serviço, política do agente como dado, assistente no app).
 
 ## Objetivo
 
@@ -56,7 +56,9 @@ construído.
 | # | Arquivo | Para quê |
 |---|---|---|
 | 1 | Este README | Regras de trabalho e mapa do pacote |
-| 2 | [05-plano-v2.md](05-plano-v2.md) | **O que fazer agora:** redesenho aprovado em 2026-10-10 (modelo, UX, AI-first), fases F0–F6 |
+| 2 | [06-plataforma-generica.md](06-plataforma-generica.md) | Plataforma genérica (tipos de caso, várias decisões, tarefas, sem domínio BR no código), P0–P8 concluídas |
+| 2a | [05-plano-v2.md](05-plano-v2.md) | Redesenho de 2026-10-10 (modelo, UX, AI-first), F0–F6 concluídas; §7 e §9 superados pelo 06 |
+| 2c | [07-ai-first-runtime.md](07-ai-first-runtime.md) | Esqueleto do próximo plano: webhooks, agente de serviço, política do agente, assistente no app |
 | 2b | [04-plano-de-implementacao.md](04-plano-de-implementacao.md) | Plano original, já executado; referência histórica |
 | 3 | [03-arquitetura.md](03-arquitetura.md) | **Como fazer:** modelo de dados, API, frontend, algoritmos e segurança |
 | 4 | [02-design.md](02-design.md) | **Como deve parecer:** telas, fluxos, sistema visual, avaliação |
@@ -160,7 +162,7 @@ Use a skill skill_feature_creation e execute o plano de investigações de ponta
 
 1. Leia docs/dev/plans/investigation/README.md (Definition of Done e decisões em aberto). Leia também 03-arquitetura.md e 02-design.md quando a tarefa pedir.
 2. Trabalhe no branch feature/investigations: se não existir, crie-o a partir do branch que contém este pacote. Faça push depois de cada tarefa. Na primeira tarefa, abra um PR draft para main com gh e mantenha a descrição com o progresso.
-3. Repita até não restar fase desmarcada na seção 10 de 05-plano-v2.md (ou tarefa de um plano posterior), na ordem do arquivo: pegue a próxima não marcada cujas dependências estejam feitas; implemente; rode os testes do Definition of Done e corrija até ficarem verdes; registre no decision log; marque [x]; faça commit e push.
+3. Repita até não restar fase desmarcada na seção "Progresso" de 06-plataforma-generica.md, na ordem do arquivo: pegue a próxima não marcada cujas dependências estejam feitas; implemente; rode os testes do Definition of Done e corrija até ficarem verdes; registre no decision log; marque [x]; faça commit e push.
 4. Decisões em aberto: use os padrões do README e registre cada suposição no decision log. Nunca pare para perguntar.
 5. Bloqueio real (teste que não passa depois de 3 tentativas diferentes, dependência externa indisponível): registre no decision log, troque o [ ] da tarefa por [~] com uma linha explicando, e siga para a próxima que não dependa dela.
 6. Proibido: force push, merge ou push em main, apagar dados ou arquivos fora do escopo da tarefa, mexer nas tarefas F5.

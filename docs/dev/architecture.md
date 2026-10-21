@@ -350,68 +350,82 @@ The transpiler requires schema information:
 
 ## Investigations
 
-A case (`Investigation`) gathers explorations from any context and uploaded
-files into one workspace and ends in a human decision. Plan and rationale:
-`docs/dev/plans/investigation/`; user guide: `docs/guide/investigations.md`
-and `docs/guide/agents-mcp.md`.
+A case (`Investigation`) gathers graphs, tables, queries, documents and notes
+from any context into one workspace and ends in decisions recorded by people.
+What a case means to the org (types, fields, vocabulary, decision catalog,
+SLAs, templates) is data. Plans: `docs/dev/plans/investigation/` (05 then 06);
+user guide: `docs/guide/investigations.md` and `docs/guide/agents-mcp.md`.
 
-**Entities** (`db/models.py`, migration `016_investigations`, mirrored by the
-in-memory store):
-- `Investigation` - title, owner, assignee, status (`selecao` → `analise` →
-  `decidido` | `arquivado`), `selected_at`, `state` JSON (roles, pins,
-  hypotheses), `decision`, `frozen_hash`, `frozen_at`
+**Entities** (`db/models.py`, migration `016_cases`, mirrored by the in-memory
+store with the same child-table helpers in `services/cases.py`):
+- `Investigation` - title, owner, assignee, `case_type`, `fields` (JSON,
+  validated by the type), `external_ref` (idempotent creation), `status`
+  (`open` ⇄ `analysis`; `closed` only by a decision), `stage`, `sla_hours`,
+  `settings` (identity keys, edge semantics, vocabularies, suggest kinds,
+  label templates), `state` (view only), `decisions` (JSON, append-only)
 - `InvestigationShare` - nominal e-mail shares only (no wildcards)
-- `InvestigationSource` - an exploration (`live` or `frozen` with
-  `frozen_sha256`) or a file graph; `context_id` denormalized so a restricted
-  source still shows a placeholder
-- `InvestigationFile` - uploaded file, role (graph, enrichment, attachment),
-  sha256, mapping
-- `InvestigationEvent` - append-only journal, `hash = sha256(prev_hash +
-  canonical json)`, actor `human` or `agent` (with token and agent name)
-- `InvestigationNote`, `InvestigationEvidence` (frozen snapshot + sha256),
-  `EntityMatch`, `InvestigationArtifact` / `InvestigationArtifactVersion`
-  (drafts until a person approves), `InvestigationProposal` (agent changes
-  waiting for a person), `AgentToken` (hash only, scopes, expiry)
+- `CaseItem` / `CaseItemVersion` - every item (graph, table, query, document,
+  note) with author, status (`suggested` | `confirmed` | `rejected`), `query`,
+  `mapping`, `anchor`, `state` (a table's chart) and immutable versions
+  (sha256, blob, run metadata, pin)
+- `CaseAnnotation` - role, tag, group, same_as, hypothesis, hypothesis_status,
+  status_change, task, decision_proposal
+- `CaseEntity` - the entities of each case's unified graph by uid, with a
+  stamp of the graph's inputs ("seen in other cases")
+- `InvestigationEvent` - append-only journal, actor `human` or `agent`
+- `CaseType` (slug, spec JSON; `general` is code), `OrgLibrary` (playbooks,
+  report templates, file mappings), `AgentToken` (hash only, scope, expiry)
 
-**Access** (`services/investigations.py`): read = owner, assignee, any share,
-superuser; write = owner, assignee, write share; manage (share, delete) =
-owner or superuser. Unreadable cases answer 404. After the decision every
-mutation answers 409. Four permissions gate actions: `investigation.create`,
-`.upload`, `.export`, `.agent` (`services/permission_catalog.py`).
+**Decisions** (`services/cases.py`): an outcome of the type's catalog (or a
+free one), targets, tasks (created as `task` annotations before the
+decision's event), rationale, pinned evidence and an optional reviewer. Each
+decision stores the sha256 of the canonical journal up to its own
+`decision.recorded`; `verify_decisions` recomputes it and checks the version
+bytes it cited. A closing outcome sets `status=closed` (409 on every change
+except tasks and drafted reports) — after a four-eyes approval when the
+outcome requires review. Reopen is human-only and keeps the decisions.
+
+**Access** (`services/cases.py`): read = owner, assignee, any share,
+superuser (a case-scoped agent token: only its cases); write = owner,
+assignee, editor share; manage (share, delete) = owner or superuser.
+Unreadable cases answer 404. Five permissions gate actions:
+`investigation.create`, `.upload`, `.decide`, `.share`, `.agent`
+(`services/permission_catalog.py`).
 
 **Storage** (`services/investigation_storage.py`): one `BlobStore` rooted at
 `investigations_volume_path` (a Unity Catalog Volume through the Files API)
-or `{exploration_snapshots_dir}/investigations` on disk. Write-once layout:
+or `{exploration_snapshots_dir}/investigations` on disk; every version is
+written once under `{investigation_id}/items/{item_id}/{sha256}`, with its
+text extraction next to it. Exports are generated on request and audited
+with their sha256, never stored. A table with `mapping.as = graph` is
+interpreted on read (`services/file_mapping.py`, twin of
+`frontend/src/utils/fileMapping.ts`, delimited or fixed-width).
 
-```
-{investigation_id}/sources/{source_id}.json.gz          # frozen sources
-{investigation_id}/files/{sha256}                       # uploads, by content hash
-{investigation_id}/evidence/{evidence_id}.json.gz       # frozen evidence
-{investigation_id}/artifacts/{artifact_id}/v{n}/{name}  # case space versions
-```
+**Unified graph and analyses.** The browser unifies items by identity keys
+(`frontend/src/utils/unifyGraph.ts`) and runs trace and paths in workers; the
+server has Python ports at parity (`services/case_graph.py`, `trace.py`,
+`paths.py`, `entity_resolution.py`) behind
+`POST /api/investigations/{id}/analysis/{trace,paths,er}`, checked against
+shared fixtures (`frontend/src/__tests__/fixtures/`). The server's full graph
+of a case refreshes its `case_entities` rows.
 
-Exports are generated on request and audited with their sha256, never
-stored. A graph file becomes a `file` datasource context
-(`services/investigation_files.py`, mapping specs and presets in
-`services/file_mapping*.py`).
-
-**Unified graph and analyses.** The browser unifies sources by identity keys
-(`frontend/src/utils/unifyGraph.ts`), runs trace and paths in workers and
-typologies (`utils/typologies.ts`) on the main thread; the server has Python ports at parity (`services/case_graph.py`,
-`trace.py`, `paths.py`, `typologies.py`) behind
-`POST /api/investigations/{id}/analysis/{trace,paths,typologies}`, checked
-against shared fixtures.
+**Data, not code** (`services/case_types.py`, `org_library.py`,
+`reports.py`): case types (copied into a new case: vocabulary, suggest
+kinds, SLA hours, starter queries; read live: label, catalog, notice,
+playbook, templates, trace defaults), report templates rendered with
+`{{placeholders}}` into markdown items, saved file mappings.
 
 **MCP** (`mcp/server.py`, optional `mcp` extra): an `MCPServer` (official
 `mcp` SDK) mounted at `{prefix}/mcp` (Streamable HTTP) when `agents_enabled`,
 authenticated by personal agent tokens (`Bearer glt_…`, `middleware/auth.py`,
-per-token rate limit). Tools check a scope (`read`, `analyze`, `write`,
-`propose`), call the same services as the REST routes with the token owner as
-user, mask CPF, CNPJ and accounts unless `agents_allow_unmasked_data`, and
-wrap output in `untrusted_data`. `mcp/registry.py` maps every investigation
-route to its tool or to a reason it has none; `human-only:` routes (decision,
-export, share, delete, approve, accept/reject, tokens) carry `forbid_agents`,
-and `tests/test_agent_registry.py` enforces the coverage. `graphlagoon
+per-token rate limit). Tools call the same services as the REST routes with
+the token owner as user and the agent as actor, return data wrapped in
+`untrusted_data` (images from `read_item` as MCP image content), and never
+decide: `propose_decision` writes a `decision_proposal` a person takes up.
+`mcp/registry.py` maps every investigation route to its tool or to a reason it
+has none; `human-only:` routes (decisions, reviews, export, share, delete,
+reopen, confirm/reject, tokens) carry `forbid_agents`, and
+`tests/test_agent_registry.py` enforces the coverage. `graphlagoon
 mcp-bridge` is a local stdio bridge for clients behind the Databricks Apps
 proxy.
 
@@ -466,14 +480,21 @@ POST   /api/explorations/{id}/share                   # Share exploration
 ### Investigations
 
 ```
-GET|POST         /api/investigations                       # Queue / create
+GET|POST         /api/investigations                       # Paged queue (filters, fields, sort) / create (idempotent by external_ref)
+GET              /api/investigations/tasks                 # Tasks across readable cases (?mine, state, overdue)
+GET              /api/investigations/entities/cases?uid=   # Cases where an entity is present or of interest
 GET|PATCH|DELETE /api/investigations/{id}                  # Case (DELETE: retention)
-POST|DELETE      /api/investigations/{id}/share[/{email}]  # Nominal shares
-*                /api/investigations/{id}/sources|files|notes|evidence|hypotheses|matches|artifacts|proposals|events
-PATCH            /api/investigations/{id}/state            # Roles, pins
-POST             /api/investigations/{id}/analysis/{trace|paths|typologies}
-POST             /api/investigations/{id}/decision         # Human-only, freezes the case
-GET              /api/investigations/{id}/export?format=json|csv|simba|siscoaf
+POST|DELETE      /api/investigations/{id}/share[/{email}]  # Nominal shares (human-only)
+*                /api/investigations/{id}/items[/{item}/versions|pin|run|text|content|confirm|reject]
+*                /api/investigations/{id}/annotations[/{aid}/confirm|reject]
+POST             /api/investigations/{id}/analysis/{trace|paths|er}
+POST             /api/investigations/{id}/reports          # Render an org template into a markdown item
+POST             /api/investigations/{id}/decisions        # Human-only; a closing outcome freezes the case
+POST             /api/investigations/{id}/decisions/{did}/review  # Four eyes (human-only)
+POST             /api/investigations/{id}/reopen           # Human-only
+GET              /api/investigations/{id}/export?format=json|csv
+GET              /api/org/case-types[/{slug}] · /api/org/library[/{slug}]
+PUT|DELETE       /api/admin/case-types/{slug} · /api/admin/library[/{slug}]
 GET|POST|DELETE  /api/agent-tokens[/{id}]                  # Personal agent tokens
 POST             /api/admin/investigations/{id}/transfer   # Superuser: new owner
 ```
