@@ -1,6 +1,6 @@
 # 05 · Investigações v2: redesenho do produto, da UX e do modelo
 
-> Status: **aprovado em 2026-10-10**, substitui a execução de [04-plano-de-implementacao.md](04-plano-de-implementacao.md)
+> Status: **aprovado em 2026-10-10**; §7 e §9 superados pelo [06-plataforma-generica.md](06-plataforma-generica.md) em 2026-10-19, substitui a execução de [04-plano-de-implementacao.md](04-plano-de-implementacao.md)
 > (concluída em `feature/investigations`, nunca publicada). As fases abaixo são as tarefas novas;
 > progresso marcado nos checkboxes da seção 10 e no decision log.
 
@@ -171,6 +171,8 @@ O núcleo do grafo já é genérico: `IdentityKey` aceita qualquer `node_type`, 
 
 ## 7. Compliance no fluxo, não no caminho
 
+> **Superado pelo [06](06-plataforma-generica.md) (2026-10-19):** decisões viram várias por caso, com catálogo do tipo de caso; prazos, exports e selos BR saem do código.
+
 - Prazos no header; fases por `kind_preset` (Pix/MED: 45+45 a partir de `alert_at`), dias configuráveis em `config.py` e por caso.
 - **Decidir** abre painel guiado no inspector: resultado (comunicar/arquivar/medida/parecer), ações, fundamentação pré-preenchida com hipóteses sustentadas e evidências fixadas, aviso de tipping-off, revisor. Registrar congela: `frozen_hash` de eventos + versões fixadas; status → decided; rota só humana. `archived` só após `decided` ou "arquivado sem decisão" explícito com motivo.
 - Exportações (Siscoaf, SIMBA, Laudo PDF via print, CSV/JSON) no Dossiê e no painel de decisão; export verifica `frozen_hash`.
@@ -185,6 +187,8 @@ TS (workers, resposta instantânea) e Python (agentes/servidor) ficam. Obrigató
 ---
 
 ## 9. Kill list
+
+> **"Compliance BR fica no núcleo" foi revertido pelo [06](06-plataforma-generica.md) (2026-10-19):** o que é Brasil/PLD sai do código e passa a ser configurável como dado (tipos de caso, templates).
 
 | Remover | Motivo |
 |---|---|

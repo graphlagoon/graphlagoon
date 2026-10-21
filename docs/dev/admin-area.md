@@ -39,6 +39,19 @@ runtime (`get_settings()` is `lru_cache`d and connections are registered in
 | add a permission to the catalog (`services/permission_catalog.py`) | put `Depends(require_permission("<id>"))` on the route it protects and hide the matching frontend affordance behind `usePermissions().can('<id>')`; the admin matrix/inspector render it automatically | `test_admin_registry::test_permission_gates_reference_catalog` |
 | add a route under `/api/admin` for groups/permissions | it goes in `routers/admin_groups.py` — a SIBLING of `admin.router` (FastAPI 0.139's lazy nested includes hide routes from introspection) with its own `require_superuser` router dependency; update `test_admin_groups.py`'s gate walk body builder if it has one | `test_admin_groups::TestGate` |
 
+| add or change a route under `/api/investigations` or `/api/org`, or an MCP tool | a docstring (the OpenAPI description) and one `tags=[…]` group on the route; then `make docs-api` (regenerates `docs/guide/agents-mcp-tools.md` and `docs/public/openapi.json`; a new tool also goes in a group of `dev/api_docs.GROUPS`) | `test_app_docs::test_the_spec_explains_itself`, `test_api_docs` |
+| add a route under `/api/investigations` or `/api/org` | `mcp/registry.py`: the MCP tool that mirrors it (`TOOL_ROUTES`), or a reason in `AGENT_EXEMPT_ROUTES` (`human-only:` routes also carry `forbid_agents`) | `test_agent_registry` |
+| add a field to `CaseTypeSpec` (case types are org data) | `components/admin/CaseTypeEditor.vue` (`formFrom` / `buildSpec`) so saving and Import JSON keep it, a line in "What each part means" of `utils/caseTypeSkill.ts`, `get_case_type`'s docstring and the investigations guide; the AI prompt's JSON Schema follows by itself | `CaseTypeEditor.test.ts` |
+| change the authoring catalog (`services/authoring.py`: placeholders in `reports.PLACEHOLDERS`, mapping operators, suggest kinds, MCP tools) | regenerate `frontend/src/__tests__/fixtures/authoring/catalog.json` (command in the test's docstring); the help and the prompts read it live from `GET /api/org/authoring` | `test_type_data::test_the_frontend_authoring_fixture_is_the_live_catalog`, `authoringSkills.test.ts` (client suggest kinds = server) |
+| change an example the AI prompts teach (`frontend/src/assets/authoring/`) | nothing else | `test_type_data::test_the_*examples*` (the case type validates, placeholders and tools exist, the mapping validates) |
+| add an investigation child table | `INVESTIGATION_CHILDREN` + `_MODELS` (generic CRUD and cascade), `CLEARABLE_TABLES`, migration `016_cases` while the branch is unmerged | `test_cases::test_child_fields_cover_every_table`, `test_every_table_is_clearable_or_preserved` |
+
+Investigation tables today: `investigations`, `investigation_shares`, `case_items`, `case_item_versions`,
+`case_annotations`, `case_entities`, `investigation_events`, `agent_tokens`, `case_types`, `org_library` (all
+clearable). Audited investigation and org routes: case create/update/delete, shares, items (create, join,
+delete, reports), decisions and their reviews, reopen, export, transfer, `PUT/DELETE /api/admin/case-types/{slug}`
+and the library (`case_type.*`, `library.*`, `investigation.*`).
+
 The skill [`skill_feature_creation`](../../.claude/skills/skill_feature_creation/SKILL.md)
 has a mandatory **Step 4.2b — Admin-area impact** that asks these questions
 and requires the decision-log entry to state either what was updated or

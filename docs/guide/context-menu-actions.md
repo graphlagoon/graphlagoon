@@ -227,7 +227,7 @@ envelope style presets use, with a `source` block describing this graph
     "context_title": "Fraud ring",
     "node_types": ["Person", "Company"],
     "relationship_types": ["OWNS"],
-    "node_properties": ["name", "cnpj"],
+    "node_properties": ["name", "tax_id"],
     "edge_properties": [],
     "query_templates": [{ "id": "…", "name": "Neighbors", "parameters": ["person"] }]
   },

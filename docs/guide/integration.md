@@ -225,6 +225,11 @@ app.mount("/graphlagoon", sgraph_app)
 # Access at: http://localhost:8000/graphlagoon/
 ```
 
+With `GRAPH_LAGOON_API_DOCS_ENABLED` on (the default in dev mode), Graph Lagoon's
+Swagger UI answers at `/graphlagoon/docs`. Your app's own `/docs` does not list
+Graph Lagoon's routes: FastAPI never merges a mounted app into the host's spec.
+See [REST API & Integrations](./rest-api.md#the-reference-openapi-and-swagger).
+
 ### API Only
 
 Include only the API routes (no frontend):

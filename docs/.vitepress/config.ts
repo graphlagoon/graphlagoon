@@ -23,7 +23,9 @@ export default defineConfig({
           { text: 'Exploring the Graph', link: '/guide/exploring-the-graph' },
           { text: 'Explorations & Sharing', link: '/guide/explorations' },
           { text: 'Investigations', link: '/guide/investigations' },
+          { text: 'Bring Your Own Data', link: '/guide/bring-your-own-data' },
           { text: 'AI Agents (MCP)', link: '/guide/agents-mcp' },
+          { text: 'MCP Tool Reference', link: '/guide/agents-mcp-tools' },
         ],
       },
       {
@@ -56,6 +58,7 @@ export default defineConfig({
           { text: 'Groups & Permissions', link: '/guide/permissions' },
           { text: 'Configuration', link: '/guide/configuration' },
           { text: 'Python API Reference', link: '/guide/python-api' },
+          { text: 'REST API & Integrations', link: '/guide/rest-api' },
         ],
       },
     ],

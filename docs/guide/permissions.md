@@ -33,10 +33,10 @@ the default: **until an admin writes a rule, nothing changes for anyone.**
 | `context.create` | Creating graph contexts; browsing the warehouse catalog (listing catalogs/schemas/tables, table schema and preview, type discovery); and the **wide** query tier — see [Query scope](#query-scope) below. |
 | `exploration.save` | Saving or updating explorations. Exploring and querying stay open — this only gates persisting the result. |
 | `investigation.create` | Opening new [investigation](./investigations.md) cases (also by an agent acting for you). Working on a case someone shared with you or assigned to you stays open. |
-| `investigation.upload` | Uploading files (bank statements, QSA, CSV) to an [investigation](./investigations.md#case-files), by hand or through an agent's `add_item`. Reading material already in a case stays open to its readers. |
-| `investigation.decide` | Recording the [decision](./investigations.md#decision-freeze-and-retention) of a case, which freezes it with a hash. Analysing and writing in the case stay open to its editors. |
-| `investigation.share` | Sharing a case with named people and assigning it. Only the owner (or a superuser) can; this gate decides who may at all. |
-| `investigation.agent` | Creating personal [agent tokens](./agents-mcp.md), so an AI agent can work on investigations with your access. Only when `GRAPH_LAGOON_AGENTS_ENABLED` is on. Existing tokens keep working until they expire or are revoked. |
+| `investigation.upload` | Uploading files (statements, registries, any CSV or fixed-width file) to an [investigation](./investigations.md#case-files), by hand or through an agent's `import_file`. Reading material already in a case stays open to its readers. |
+| `investigation.decide` | Recording and reviewing [decisions](./investigations.md#decisions) of a case (a closing one freezes it). Analysing, writing and proposing in the case stay open to its editors. |
+| `investigation.share` | Sharing a case with named people and assigning it to someone else (assigning shares the case as editor; assigning yourself needs no permission). Only the owner (or a superuser) can; this gate decides who may at all. |
+| `investigation.agent` | Creating personal [agent tokens](./agents-mcp.md), so an AI agent can work on investigations with your access. Only when `GRAPH_LAGOON_AGENTS_ENABLED` is on. Using a token needs it too: when its owner loses it, the token answers 403 until the permission is back. |
 
 ## Query scope
 

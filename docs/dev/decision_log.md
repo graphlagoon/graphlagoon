@@ -12716,3 +12716,518 @@ caso novo do inspetor (CSV → tabela, download com o nome do upload, bytes lido
 `investigations`, `investigation-workspace` e `user-journeys` (24) verdes; conferido no app local (extrato SIMBA do
 CASO17 abre com 21 linhas). **Public docs:** `investigations.md` ganha "Viewing and downloading" em *Case files* e perde
 o "case files have no download button" dos limites. **Admin area:** No admin-area impact (rota e auditoria já existiam).
+
+## [2026-10-19 19:00] - Feature Planning: P0 · Plataforma de investigação genérica (plano 06)
+
+**Propósito:** o sistema de investigações tinha Brasil/PLD cravado no núcleo (decisão COAF/Siscoaf/DICT/SPA em
+`Literal`, "Tipo" = `kind_preset` fixo, tipologias CC 4.001, SIMBA/QSA, máscara de CPF/CNPJ, prazos 45+45). O
+mantenedor pediu uma plataforma genérica, AI-first, onde pessoas e agentes coordenam, decidem e mantêm artefatos.
+**User story:** como organização de qualquer domínio (crédito, fraude, AML, adquirência, seguros, incidentes),
+quero definir meus tipos de caso, decisões e ações como dado, para investigar sem depender de código.
+**Decisões do mantenedor (2026-10-19):** (1) domínio BR sai do código e vira dado; (2) várias decisões por caso,
+catálogo por tipo, alvos por entidade, quatro olhos opcional; (3) admin define tipos de caso, com "General" sempre
+presente; (4) interface em inglês, termos de domínio dos dados; (5) máscara para agentes removida por inteiro;
+(6) ER generalizada (bloqueio por chave de identidade); (7) busca "entidade vista em outros casos" no escopo;
+(8) webhooks, agente de serviço, agente decidindo, assistente no app e i18n vão para o plano 07.
+**Design:** [06-plataforma-generica.md](plans/investigation/06-plataforma-generica.md) — tipos de caso
+(`case_types` substitui `org_vocabularies`), `decisions` JSON com hash por decisão, status `open|analysis|closed`
++ `stage`, tarefas como anotação `task`, campos por tipo, fila paginada, templates de mapeamento e de relatório,
+busca entre casos, P8 para o Claude Code operar de ponta a ponta. Teste de estresse com 14 cenários de crédito e
+fraude (Brasil e fora) e 10 de adquirência.
+**Arquivos:** `docs/dev/plans/investigation/06-plataforma-generica.md` (novo), `07-ai-first-runtime.md` (esqueleto),
+`05-plano-v2.md` (banners em §7 e §9), `README.md` (status, ordem de leitura, prompt de execução).
+**Testes:** nenhum (só documentação). **Public docs:** nenhum impacto nesta fase (as guias mudam na P6).
+**Admin area:** nenhum impacto nesta fase.
+
+## [2026-10-19 21:30] - Feature Implemented: P1 · Tirar o domínio Brasil/PLD do código (plano 06)
+
+**O quê:** sai do núcleo tudo o que era Brasil/PLD e não era configurável, sem mudar o modelo de casos (P2+).
+- **Apagado:** tipologias CC 4.001 (`services/typologies.py`, `utils/typologies.ts`, `TypologyBadgesPanel.vue`, rota
+  `/analysis/typologies`, kind `typology`, botão do AnalysisBar, `run_analysis` kind typologies); presets SIMBA/QSA
+  (`file_mapping_presets.py`, `fileMappingPresets.ts`); exports `simba`/`siscoaf` e `ready_to_communicate`;
+  normalizadores `cpf_cnpj`/`pix_key`, corte de `+55`, abreviações de endereço em português; parse `1.234,56` e
+  `dd/mm/yyyy` no rastreio; `BRL` padrão; `ROLE_COLORS`/`ROLE_LABELS` (vítima/mula); os 6 playbooks BR; citações de lei;
+  **a máscara inteira** (`services/masking.py`, `agent_view` em 24 pontos, MCP `_out`/`MASKED`, `secrets` do grafo,
+  `agent_tokens.unmasked`, `agents_allow_unmasked_data`, chip do olho, `maskDocument`); `utils/entityResolution.ts` e
+  `workers/erWorker.ts` (a ER roda só no servidor).
+- **Generalizado:** normalizador `digits` (documento, CPF, SSN, CNPJ…; valor com `*` nunca vira chave), `phone` = só
+  dígitos, `address` = minúsculas sem acento; ER no servidor com bloqueio por atributos configuráveis (`block_on`,
+  `name_keys`; padrão e-mail, telefone, documento, data de nascimento) e nome por Jaro-Winkler; links com `normalize` por
+  atributo e arestas `shares_<attr>` (antes `compartilha_`), no novo `utils/sharedLinks.ts`; `decimal_br` →
+  `decimal_comma`; tag e modo `dossie` → `dossier`; rótulos por `name/title/label` ou template; paradas padrão do rastreio
+  = tipos onde o valor só termina (`end_types`/`endTypes`, gêmeos), em vez da regex `saque|cripto|aposta`; `min_amount`
+  padrão 0; o assistente de import detecta layouts por "mapeamentos salvos" (vazio até a P5).
+- **Bug corrigido:** um token com escopo de caso criava caso pelo MCP (`create_case`) que depois não conseguia ler →
+  403 `CASE_SCOPED_TOKEN` em `cases.create_investigation` (a REST já barrava antes).
+- **Seed:** `dev/seed_investigations.py` reescrito em inglês: rede de contas de passagem (a fixture de rastreio como
+  snapshot, rastreio FIFO salvo e fixado com os números do T5), anel de fraude por dispositivo, revisão de crédito de
+  grupo econômico, acesso indevido a dados, mais 6 casos gerados de domínios diferentes.
+**Decisões:** (1) a ER sai do browser: a UI só chama `/analysis/er`, um gêmeo a menos; (2) `entity_resolution.py` mantém o
+nome (só o TS virou `sharedLinks.ts`) para não mexer nos imports do MCP; (3) fixtures traduzidas em vez de apagadas:
+`simba-mini` → `bank-statements`, `qsa-mini` → `company-registry`, `generico` → `generic`, `trace/golpe-pix` →
+`trace/flow-chain`, `unify/cpf-across-contexts` → `id-across-contexts`; o `expected` foi regenerado pelo Python e o vitest
+prova a paridade sozinho; (4) sem máscara, minimizar dado para agentes é trabalho do context e do escopo do token.
+**Testes:** `pytest` 1468 passam (as 5 falhas são as pré-existentes de `test_cypher_comments`/`test_transpile_options`,
+iguais no HEAD); novos `test_entity_resolution_blocks_on_any_attribute_and_scores_names`,
+`test_the_default_stops_are_the_types_where_value_only_ends`, `test_a_case_scoped_token_cannot_open_cases`,
+`test_agents_read_what_the_person_reads_but_never_the_bytes`; vitest 2613 passam (novo `sharedLinks.test.ts`);
+`vue-tsc` limpo; e2e investigations + workspace + user-journeys 23/23.
+**Public docs:** as guias ainda citam máscara, tipologias e SIMBA; são reescritas na P6 (registrado no plano).
+**Admin area:** `CONFIG_FIELD_KINDS` perde `agents_allow_unmasked_data`; `AUDIT_EXEMPT_ROUTES` perde `analysis/typologies`;
+`describeAudit` de token sem "unmasked".
+
+## [2026-10-19 23:40] - Feature Implemented: P2 · Tipos de caso, campos e fila paginada (plano 06)
+
+**O quê:** o "Tipo" deixa de ser o `kind_preset` fixo e vira **tipo de caso definido pelo admin** (dado, não código).
+- **Backend:** `services/case_types.py` (no lugar de `org_vocabularies.py`) com `general` embutido e read-only;
+  `schemas.CaseTypeSpec` (vocabulários, `roles_multi`, `outcomes` com `closes_case`/`requires_review`, `actions` com
+  `due_hours`, `stages`, `fields` text|number|money|date|enum com `required`/`in_queue`, `sla_hours`, `retention_years`,
+  `notice`, `agent_suggest_kinds`, `playbook`, `starter_queries`, `report_templates`); rotas `GET /api/org/case-types[/{slug}]`
+  e `PUT/DELETE /api/admin/case-types/{slug}` (superusuário, auditadas `case_type.write|delete`; 409 em uso; playbook
+  precisa existir). Migração 016 editada: `kind_preset` → `case_type`, novas colunas `fields` e `external_ref`,
+  `deadline_days` → `sla_hours`, tabela `org_vocabularies` → `case_types`.
+- **Caso:** a criação valida o tipo e os campos e copia vocabulários, suggest kinds e SLA; `external_ref` torna a
+  criação idempotente entre os casos que quem chama lê (201 novo, 200 o existente; sem vazar casos alheios); o PATCH
+  com outro tipo re-semeia os padrões e re-checa os campos; `fields` mescla (null remove; obrigatório não sai); prazo em
+  horas com `urgent` (≤ 20% do SLA) e `overdue` calculados no servidor; `roles_multi` deixa vários papéis por entidade.
+- **Fila:** `GET /api/investigations` devolve página `{items, total, limit, offset, counts}` com filtros `status` (vários,
+  `open,analysis`), `case_type`, `external_ref`, `q`, `deadline=urgent|overdue`, `suggested`, `field.<id>=eq:|gte:|lte:|contains:`,
+  `sort` (`updated_at|created_at|title|deadline|field.<id>`, `-` desc; quem não tem o valor vai por último) e paginação.
+- **MCP:** `get_case_type` (lista ou um) e o recurso `org://case-types/{slug}` no lugar de `list_vocabulary`;
+  `create_case(case_type, fields, external_ref, alert_at, occurred_at)` devolve `created`; `list_cases` paginado com os
+  mesmos filtros; `update_case(case_type, fields)`; `get_case` traz o tipo (catálogo, campos, aviso, playbook).
+- **Frontend:** aba Admin "Case types" com `components/admin/CaseTypeEditor.vue`; fila (`InvestigationsView`) paginada
+  no servidor, com contadores da API, filtro e colunas dos campos `in_queue` do tipo e criação com campos obrigatórios;
+  `CaseHeader` com o tipo da API e os campos editáveis no lugar; `CaseSettingsDrawer` troca o tipo e reabastece o
+  formulário com os padrões do novo tipo, prazos em horas; aviso de sigilo do tipo no `ShareDialog`; `caseVocabulary.ts`
+  (antes `casePresets.ts`, sem presets); rótulos de status/itens/anotações em inglês; `caseFields.ts`.
+- **Seed:** 7 tipos de domínios diferentes (fraud_ring, credit_review, insider_data_leak, merchant_review,
+  chargeback_dispute, vendor_due_diligence, security_incident) gravados pela API admin; os cenários usam tipo e campos;
+  `--chargebacks N` (padrão 300) cria disputas pequenas para a fila paginada; sem superusuário tudo cai em `general`.
+**Decisões:** (1) filtros e ordenação da fila em Python sobre os casos legíveis (o navegador recebe uma página);
+levar para SQL quando uma org tiver dezenas de milhares (registrado no código); (2) idempotência do `external_ref` só
+entre casos legíveis, sem índice único; (3) os campos do tipo ficam em `investigations.fields` (JSON), sem tabela;
+(4) `general` não é armazenado; (5) parte das telas tocadas já passou para inglês (fila, rótulos), adiantando a P6.
+**Testes:** novo `test_case_types.py` (embutido, CRUD auditado, validação do catálogo, em uso, padrões copiados, troca de
+tipo, campos, `external_ref`, fila com filtros/ordem/páginas/contadores, SLA com urgência, `roles_multi`); `test_cases`,
+`test_admin`, `test_mcp_server`, `test_dev_seed_investigations` atualizados; pytest 1465 + as 9 pré-existentes
+desmarcadas. Vitest 2619 (novos `CaseTypeEditor.test.ts`, `caseFields.test.ts`, `InvestigationsView.test.ts` reescrito);
+`vue-tsc` limpo; e2e investigations + workspace + user-journeys + admin 32/32 (novos: fila por tipo e campos; aba Case types).
+**Public docs:** guias reescritas na P6. **Admin area:** aba Case types; `CLEARABLE_TABLES` `org_vocabularies` →
+`case_types`; `AUDITED_ROUTES` com `PUT/DELETE /api/admin/case-types/{slug}`; `AuditAction.CASE_TYPE_WRITE|DELETE`;
+`CONFIG_FIELD_KINDS` perde `investigation_deadline_days`; `describeAudit` cobre `case_type.*` e `library.*`.
+
+## [2026-10-20 00:40] - Feature Implemented: P3 · Decisões e ciclo de vida (plano 06)
+
+**O quê:** um caso tem **várias decisões**, do catálogo do tipo de caso (ou texto livre no `general`), com alvos,
+quatro olhos e hash por decisão; status `open | analysis | closed`, sem `decided`/`archived`.
+- **Backend:** `investigations.decision/frozen_hash/frozen_at` → `decisions JSON []` (append-only, reatribuído, nunca
+  mutado no lugar) e `stage` (migração 016 editada; InMemory igual). `POST /{id}/decisions` (só humano,
+  `investigation.decide`, auditado com `outcome_label`, `closes_case`, `review`, `hash`): resultado do catálogo
+  (`UNKNOWN_OUTCOME`) ou `outcome_label` + `closes_case` sem catálogo (`OUTCOME_REQUIRED`); snapshot do rótulo e do
+  "fecha"; `targets` (uids, sem duplicatas); `evidence` = as versões fixadas indicadas (`EVIDENCE_NOT_PINNED`) ou todas;
+  `tasks` validadas contra as `actions` do tipo (`UNKNOWN_ACTION`; a P4 as cria antes do evento); `reviewer_email`.
+  Resultado com `requires_review` fica `pending` (nada mais se decide até a revisão: `REVIEW_PENDING`);
+  `POST /{id}/decisions/{decision_id}/review` (só humano, auditado `investigation.decision_review`): outra pessoa
+  (`FOUR_EYES`), a nomeada quando houver (`NOT_THE_REVIEWER`), aprova (um resultado que fecha fecha o caso agora) ou
+  rejeita. Eventos `decision.recorded|approved|rejected`, `case.closed`. **Hash por decisão** = sha256 do diário até o
+  `decision.recorded` dela (corrige o corte na primeira decisão); a verificação também confere o sha256 das versões
+  que a decisão citou. `closed` congela (409 `CASE_CLOSED`); `POST /reopen` volta para `analysis` e as decisões ficam
+  (`case.reopened` com o id e o hash da decisão que fechou). `stage` livre entre os `stages` do tipo
+  (`UNKNOWN_STAGE`). Retenção pela decisão que fechou, com `retention_years` do tipo ou o global. Sai o
+  arquivar-com-motivo. Export JSON com `decisions` e `integrity {decisions: [{id, hash, verified}], verified}`; CSV com
+  uma linha por decisão.
+- **Frontend:** `DecisionPanel.vue` reescrito: resultados do catálogo (com "closes the case" / "four eyes" e descrição)
+  ou nome livre + "Closes the case"; alvos entre a seleção e as entidades com papel; ações do tipo como tarefas;
+  revisor; aviso do tipo no lugar do texto fixo de tipping-off; rodapé diz se congela. `CaseDossier` mostra o
+  histórico D1, D2… (alvos, revisão, hash) com Approve/Reject para quem pode revisar e "Record another decision";
+  `CaseHeader` sem o diálogo de arquivar, com o select de stage, o selo "Decision waiting for review" e Decide/Reopen;
+  status `closed` em tipos, rótulos, fila (contador `closed`, stage na linha), `currentCase`, chips e grafo;
+  `investigationEvents` descreve `decision.*`, `case.closed` e o reopen novo (bug de `decided: … COAF` corrigido);
+  `describeAudit` cobre `investigation.decide` novo e `investigation.decision_review`; saem
+  `DECISION_OUTCOME_LABELS`/`DECISION_ACTION_LABELS`.
+- **Seed:** decisões nos cenários (parcial com alvos no mule network, pedido de documentos + aprovação pendente no
+  crédito, contenção e fechamento no insider, extras fechados e reabertos); `stats.decisions`.
+**Decisões:** (1) só uma decisão pendente de revisão por vez, para o caso não fechar por duas rotas; (2) `frozen_hash`
+continua na resposta, mas só enquanto `closed` (o hash da decisão que fechou); (3) o hash cobre o diário até a
+decisão, e as versões citadas são conferidas à parte na verificação (o diário já carrega os sha256); (4) o mock e2e
+grava decisões como `ana@test.com` para a pessoa logada poder revisar.
+**Testes:** `test_cases` reescrito (transições, `UNKNOWN_STAGE`, `OUTCOME_REQUIRED`, fechar/reabrir; hash
+reproduzível e adulteração; várias decisões com alvos, `UNKNOWN_OUTCOME`/`UNKNOWN_ACTION`, `REVIEW_PENDING`,
+`FOUR_EYES`, `NOT_THE_REVIEWER`, `NOT_PENDING`, reabrir e decidir de novo com os três hashes válidos, revisão
+rejeitada; agente 403 em decidir/revisar/reabrir), `test_investigation_exports` (duas decisões, adulteração do diário e
+da evidência), `test_mcp_server`, `test_permission_routes`, `test_dev_seed_investigations`. pytest: 1471 verdes (as
+falhas restantes são as pré-existentes de gsql2rsql). Vitest 2620; `vue-tsc` limpo; e2e investigations +
+investigation-workspace + user-journeys + admin 32/32 (novo: catálogo, decisão parcial, quatro olhos fecha o caso).
+**Public docs:** guias reescritas na P6. **Admin area:** `AUDITED_ROUTES` com `decisions` e `decisions/{id}/review`
+(sai `decision`); `AuditAction.INVESTIGATION_DECISION_REVIEW`; `describeAudit` atualizado.
+
+## [2026-10-20 02:10] - Feature Implemented: P4 · Tarefas (plano 06)
+
+**O quê:** as ações de uma decisão viram **tarefas**, e pessoas e agentes coordenam por elas.
+- **Backend:** novo kind de anotação `task` (`value = {title, state: open|done|cancelled, assignee_kind: human|agent,
+  assignee?, agent_name?, due_at?, action?, decision_id?}`, validado: título, estado, tipo de responsável, `due_at` ISO).
+  Fora do congelamento (`FREEZE_EXEMPT`): criar, editar, concluir e confirmar tarefas funciona com o caso `closed`; o
+  resto continua 409. `record_decision` cria as tarefas (rótulo da ação como título, `due_at` = decisão + `due_hours`,
+  alvos da decisão) com `task.set` **antes** do `decision.recorded`, então o hash da decisão as cobre; `task_ids` na
+  decisão. Agente: `task` entra em `DEFAULT_SUGGEST_KINDS` (chega `suggested`) e só edita/remove a tarefa que escreveu ou
+  que é de agentes com o nome do seu token (ou sem nome) — senão 403 `TASK_NOT_YOURS`. Rota nova
+  `GET /api/investigations/tasks?mine&state&overdue` (casos legíveis; token de caso só o seu escopo; vencidas primeiro,
+  sem prazo por último; cada uma com o caso). MCP: `list_tasks` (padrão: as minhas abertas), `add_task`, `update_task`
+  (com `note` como reason), mapeadas no registry.
+- **Frontend:** `CaseTasksPanel.vue` (filtros All/Mine/Agents/Overdue, concluídas recolhidas, prazo vencido em
+  destaque, "from D1", sugestão do agente com ✓/✕, formulário para pessoa ou agente com prazo); aba "Tasks · N" no
+  `CaseTimeline`; card "Tasks" no dossiê com as abertas; store `tasks`/`addTask`/`updateTask` (decidir com ações
+  recarrega as anotações); `api.getTasks`; journal descreve `task.*`; tipos `TaskValue`, `CaseTaskRow`.
+- **Seed:** a decisão "monitor" do mule network cria "Notify the partner institution" e uma tarefa para o agente do
+  seed; o agente sugere "Ask who opened 8812-7"; a contenção do insider cria "Revoke access" e "Preserve the evidence".
+**Decisões:** (1) tarefa é anotação (reusa sugerido/confirmado, diário, PATCH, contadores), sem tabela nova; (2) a lista
+entre casos é uma rota própria (`/tasks`), declarada antes de `/{investigation_id}`; (3) concluir depois de fechar só
+acrescenta eventos depois da decisão, então os hashes continuam válidos; (4) o card do dossiê some quando não há
+tarefa aberta (a aba do canvas tem todas).
+**Testes:** novo `test_case_tasks.py` (tarefas da decisão com prazo, alvos e ordem no diário; concluir e criar com o
+caso fechado e hash ainda válido; agente sugere, conclui a própria, 403 na alheia e na de outro agente; `mine` de
+pessoa e de agente; validação; vencidas; acesso e token de caso); `test_dev_seed_investigations` cobre as tarefas.
+pytest 1474 verdes (só as falhas pré-existentes de gsql2rsql). Vitest 2623 (novo `CaseTasksPanel.test.ts`); `vue-tsc`
+limpo; e2e 32/32 (o teste de decisões verifica a tarefa da ação e a conclusão com o caso fechado).
+**Public docs:** guias na P6 (`agents-mcp.md` ganha `list_tasks`/`add_task`/`update_task`). **Admin area:** sem mudança
+(sem permissão nova; a rota `/tasks` é leitura e não é auditada).
+
+## [2026-10-20 04:30] - Feature Implemented: P5 · Extensão por dados (plano 06)
+
+**O quê:** o que antes era código de domínio vira dado da org: consultas iniciais, templates de mapeamento e de
+relatório, gráfico de tabela e padrões de análise por tipo de caso.
+- **Consultas iniciais:** `starter_queries` do tipo (parâmetros agora validados como `TemplateParameter` no PUT do tipo)
+  viram itens `query` do caso novo (`provenance {tool: case_type}`); o `AnalysisBar` lista esses itens como
+  **Detectors** e abre o escolhido no inspector para rodar.
+- **Padrões de análise:** `analysis_defaults.trace` no tipo (`max_hops`, `max_dwell_hours` com 0 = sem limite,
+  `min_amount`, `allocation`, `stop_types`) preenche o que a requisição de rastreio não trouxe (servidor:
+  `trace._type_defaults` por `model_fields_set`; navegador: `useCaseAnalyses.traceDefaults`, mostrado no popover).
+- **Arquivo posicional:** `widths: [n…]` no input do mapeamento (no lugar de `delimiter`, que fica proibido junto;
+  uma largura por coluna sem cabeçalho) nos dois gêmeos (`split_cells`/`splitCells`), também na sugestão de layout e
+  na prévia; nova fixture dourada `fileMapping/fixed-width` (arquivo de liquidação de adquirente, uma linha descartada
+  por data inválida).
+- **Templates de mapeamento:** org library ganha `kind=mapping` (corpo JSON `{as, spec}` validado como o `mapping` do
+  item; 422 `INVALID_LIBRARY_DOC`). O `FileImportWizard` carrega os mapeamentos da org e detecta o layout por eles
+  (grafo pela sugestão de presets; enriquecimento quando chave e colunas estão no cabeçalho) e o superusuário salva o
+  mapeamento atual para a org. A aba Library do admin edita os três kinds.
+- **Templates de relatório:** `services/reports.py` renderiza um doc `kind=template` com `{{placeholders}}` (caso,
+  campos do tipo, brief, decisões e a última, evidências E1…, hipóteses, papéis com o rótulo da entidade, tarefas
+  abertas, `today`/`user`); desconhecidos ficam no texto e vão para `provenance.unknown_placeholders`. Rota
+  `POST /{id}/reports` (auditada como `investigation.item_add`) e MCP `render_report` (sem template, lista os da org
+  com os do tipo primeiro). Do agente chega `suggested`; o caso fechado aceita (fora do hash, como as tarefas).
+  `report_templates` do tipo é validado (`UNKNOWN_TEMPLATE`). Dossiê ganha "Draft report" com os templates do tipo
+  primeiro.
+- **Tabela como gráfico (AQ2):** item ganha `state` (JSON só de visualização, migração 016 editada, InMemory igual)
+  com `chart {type: line|bar, x, series[]}` validado (`ItemState`; só tabela); novo `TableChart.vue` (SVG puro, linhas
+  com quebra onde falta valor, barras agrupadas, legenda); `ItemPreview` alterna Table/Chart, escolhe eixo e séries e
+  salva como a visão do item; `update_item` do MCP aceita `chart`.
+- **Admin:** `CaseTypeEditor` edita consultas iniciais, templates de relatório e os padrões do rastreio (antes perdia
+  `analysis_defaults` ao salvar). `SUGGEST_KINDS` inclui `task`.
+- **Seed:** exemplo BR só no seed de dev: tipo `pix_scam` (resultados COAF/arquivar/bloqueio, ações DICT/MED, campos,
+  SLA 24 h + 45 d, aviso de sigilo, consulta inicial, padrões de rastreio), doc `simba-bank-statements` (mapeamento
+  dos extratos) e `siscoaf-cos` (template). O cenário importa os extratos pelo mapeamento da org, monta o grafo e gera
+  o rascunho da COS pelo template — o cenário 1 do plano sem código BR.
+**Decisões:** (1) o campo do item se chama `state` (como o `state` do caso: visão, nunca versão); (2) sem tipo, os
+padrões do rastreio continuam os do README (3 camadas, 24 h): o plano falava em "sem limite", mas mudar o padrão
+quebraria o rastreio já documentado — o tipo é que muda; (3) salvar mapeamento para a org é do superusuário (a
+biblioteca é dele); (4) relatório de caso fechado é permitido porque o follow-up "enviar o relatório" vem depois da
+decisão.
+**Testes:** novo `test_type_data.py` (consultas iniciais e parâmetro inválido, padrões do rastreio, mapeamentos válidos
+e inválidos, template renderizado com caso fechado, placeholders desconhecidos, rascunho do agente sugerido, gráfico só
+em tabela); `test_file_mapping` (validação e sugestão de `widths`); `test_dev_seed_investigations` (exemplo BR). pytest
+1481 verdes (só as pré-existentes de gsql2rsql). Vitest 2632 (novos `TableChart.test.ts`, `ItemPreview.test.ts`; wizard
+com mapeamento da org e "salvar para a org"; dossiê com rascunho de relatório; editor do tipo; paridade `widths`);
+`vue-tsc` limpo; e2e 33/33 (novo: tabela vira gráfico e relatório pelo template do tipo).
+**Public docs:** guias na P6. **Admin area:** Library com kinds `template` (report template) e `mapping`;
+`AUDITED_ROUTES` com `POST /{id}/reports`; `CaseTypeEditor` com "A new case starts with".
+
+## [2026-10-20 06:00] - Feature Implemented: P7 · Entidade vista em outros casos (plano 06)
+
+**O quê:** "onde mais esta conta/telefone/aparelho apareceu?" entre os casos que a pessoa (ou o token) lê.
+- **Backend:** nova tabela filha `case_entities(investigation_id, uid, entity, node_type, label, stamp, updated_at)`
+  (migração 016 editada, InMemory com cascata, `CLEARABLE_TABLES`). `case_graph` regrava as linhas quando monta o grafo
+  inteiro **e** quem pediu lê todas as fontes (grafo parcial nunca é gravado). `stamp` = sha256 das entradas do grafo
+  (itens de grafo e suas versões/mapeamentos, identity keys, `same_as` aceitos): a busca reconstrói só os casos com
+  linhas velhas. `services/case_entities.find_cases(uid)` junta as duas camadas — presença no grafo e interesse (alvo
+  de anotação confirmada: papel, tag, grupo, same_as, tarefa; ou de decisão) — e devolve por caso título, status, tipo,
+  rótulo, papéis, tags, grupos, tarefas e as decisões sobre a entidade. Rota `GET /api/investigations/entities/cases?uid=`
+  (leitura, não auditada; só casos legíveis, token de caso só o seu escopo); MCP `find_entity_cases(uid,
+  investigation_id?)` no registry.
+- **Frontend:** `SeenInOtherCases.vue` — chip "Seen in N other cases" (sem contar o caso aberto) que abre a lista com
+  link para cada caso, tipo, status, "not on its graph" e o que o caso diz (papel, tag, grupo, tarefa, decisão); cache
+  por entidade; some quando a busca falha. No `SelectionInspector` (uma entidade) e na `EntityPage`.
+- **Seed:** o cenário fraud ring abre um segundo caso `fraud_ring` ("refund requests") com o telefone, o aparelho e o
+  cartão compartilhados pelo anel — selecionar o aparelho mostra o outro caso.
+**Decisões:** (1) a rota usa `?uid=` em vez de `/entities/{uid}/cases` do plano: uids podem ter `/` e `@`; (2) presença
+lazy por `stamp` em vez de reindexar a cada escrita (o canvas monta o grafo no navegador; o servidor só monta quando
+pedem); (3) só entidades com identity key casam entre casos (uids `nó@contexto` casam só no mesmo contexto); (4) o seed
+de N cenários cria N+1 casos (o anel traz o seu caso de acompanhamento).
+**Testes:** novo `test_case_entities.py` (presença e interesse, caso alheio não vaza, leitor compartilhado, token de
+caso, presença que sai com a nova versão do grafo, uid obrigatório); `test_cases` cobre a tabela filha;
+`test_dev_seed_investigations` cobre o caso de acompanhamento. pytest 1483 verdes (só as pré-existentes). Vitest 2634
+(novo `SeenInOtherCases.test.ts`); `vue-tsc` limpo; e2e 33/33 (passo novo no `user-journeys`: a pessoa unificada foi
+vista noutro caso).
+**Public docs:** guias na P6. **Admin area:** `CLEARABLE_TABLES` + `case_entities`.
+
+## [2026-10-20 08:00] - Feature Implemented: P8 · Claude Code de ponta a ponta (plano 06)
+
+**O quê:** uma sessão do Claude Code conectada por `claude mcp add` investiga um caso do alerta até a decisão
+proposta, sem a UI; a pessoa só grava a decisão.
+- **A4 `propose_decision`:** novo kind de anotação `decision_proposal` (resultado do catálogo ou `outcome_label` +
+  `closes_case`, alvos, tarefas, evidências, fundamentação), sempre `suggested` (de agente ou de pessoa), validado
+  contra o tipo (`UNKNOWN_OUTCOME`, `UNKNOWN_ACTION`); confirmar pela rota de sugestões é 409
+  `PROPOSAL_NEEDS_DECISION`. `POST /decisions` aceita `proposal_id`: a decisão leva `proposal_id` e `proposed_by`, a
+  proposta vira `confirmed` (evento `decision_proposal.confirmed`, antes do `decision.recorded`, logo dentro do hash).
+  MCP `propose_decision` (o teste de registry aceita só este nome com "decision", e só sobre `POST …/annotations`).
+  Frontend: selo "Decision proposed" no header, painel aberto e preenchido (resultado, alvos, ações, tarefas livres,
+  fundamentação) com "Dismiss the proposal"; o dossiê abre o painel quando há proposta; a aba Suggestions não confirma
+  propostas em lote.
+- **A5:** `graph/view` (`CaseViewContent`: filtros, layout, grupos fechados; `extra=forbid`) e `graph/selection`
+  (`GraphSelectionContent`: nós e arestas entre eles) validados na criação e em nova versão (422 `INVALID_CONTENT`);
+  formato documentado no docstring do `add_item`.
+- **A7:** `read_item` devolve PNG/JPEG/GIF/WebP como conteúdo de imagem MCP (além do JSON), até
+  `GRAPH_LAGOON_AGENT_IMAGE_MAX_BYTES` (2 MB; 0 = nunca; `CONFIG_FIELD_KINDS` público); a leitura dos bytes é auditada
+  como `investigation.item_read`. A rota REST `…/content` continua proibida a agentes.
+- **Docstrings e regras:** todos os docstrings do `mcp/server.py` revistos (o do `import_file` descrevia um spec que
+  não existe; agora traz o formato real, `widths`, o limite inline de ~4 MB e o caminho REST com o mesmo token para
+  arquivos grandes; `get_playbook` cobre os três kinds; `annotate` aponta para `add_task`/`propose_decision`). `RULES`
+  diz que o agente propõe e a pessoa grava; tarefas entram nos kinds sugeridos.
+- **Playbook** `claude_code_quickstart` na org library (seed): conhecer a org, abrir/criar caso, importar, analisar,
+  anotar, tarefas, relatório, propor decisão, voltar depois.
+- **Guia:** seção "Using Graph Lagoon from Claude Code" em `docs/guide/agents-mcp.md` (o resto do guia é da P6).
+- **Bug achado na validação ao vivo:** uma decisão podia nomear um revisor sem acesso de edição ao caso — ficava
+  pendente para sempre e o `REVIEW_PENDING` travava outras decisões. Agora o revisor nomeado precisa poder editar o
+  caso (422 `REVIEWER_NO_ACCESS`) e não pode ser o autor (422 `FOUR_EYES`); o autor pode **retirar** (rejeitar) a
+  própria decisão pendente, nunca aprovar (botão "Withdraw" no dossiê).
+**Validação ao vivo:** API em memória + seed (`--cases 8 --chargebacks 20`); um script com o cliente MCP do SDK por
+HTTP real fez: 40 ferramentas, quickstart, tipos, `create_case` idempotente, `import_file` com o aparelho do anel,
+`find_entity_cases` achou os dois casos do anel, `add_task`, `propose_decision`; a pessoa compartilhou com a revisora,
+gravou com `proposal_id` (pendente de quatro olhos) e a revisora aprovou → `closed`. Não rodei uma sessão interativa
+do Claude Code (o ambiente não tem um cliente interativo); o script exercita o mesmo endpoint e as mesmas ferramentas.
+**Testes:** `test_mcp_server` ganhou o teste de aceite (quickstart, tipos, caso idempotente, dois arquivos no grafo,
+entidade no outro caso, papel, tarefa, visão inválida e válida, imagem como conteúdo, evidência, relatório pelo
+template, proposta inválida e válida, agente 403 ao decidir, 409 ao confirmar a proposta, a pessoa grava com
+`proposal_id`, o agente acha e conclui a sua tarefa); `test_cases` (revisor sem acesso, autor como revisor, retirada);
+`test_org_library`, `test_agent_registry`. pytest 1484 verdes (só as pré-existentes). Vitest 2636 (novo
+`DecisionPanel.test.ts`); `vue-tsc` limpo; e2e 34/34 (novo: proposta do agente gravada pelo painel preenchido).
+**Public docs:** seção nova do guia de agentes. **Admin area:** `CONFIG_FIELD_KINDS` + `agent_image_max_bytes`.
+
+## [2026-10-20 10:30] - Feature Implemented: P6 · Inglês e documentação (plano 06)
+
+**O quê:** a UI e o código ficam em inglês e sem domínio brasileiro; a documentação passa a descrever a plataforma
+genérica.
+- **Varredura (três agentes em paralelo, arquivos disjuntos):** todas as strings pt-BR visíveis e comentários dos
+  componentes de investigação (dossiê, header, chips, grupos, preferências, material, agentes; barra de análise,
+  timeline, popover de adicionar, operações de tabela, diff, card de consulta, inspetor, prévia, trilha de caminho),
+  das views, stores, composables, utils, tipos e de componentes do explorador que falavam do caso (toolbar, tabela de
+  dados, console, templates, ajuda de formatação, formulário de contexto). `SwimlaneTimeline` usa o locale do
+  navegador; `format.ts` formata dinheiro como `$1,234.56` e tempos relativos em inglês (datas continuam
+  `dd/mm/yyyy HH:mm`); aliases de ícone e exemplos de label/currency neutros (`_ROOT`, `USD`/`EUR`); promover tabela no
+  grafo usa `Entity`/`related` (front e back); `FIELD_LABELS` do diário sem `kind_preset`/`deadline_days`; plurais de
+  "suggestion". **Critério de pronto:** o grep do plano (`cpf|cnpj|pix|coaf|siscoaf|simba|qsa|typolog|kind_preset|
+  dossiê|BRL|mula|unmasked|masking` e acentos) em `frontend/src` e `api/graphlagoon` volta vazio fora do seed e dos
+  testes/fixtures (dados de teste em português, como "Exposição por CPF", ficaram por serem dados).
+- **Config:** sai `GRAPH_LAGOON_ARTIFACT_MAX_BYTES` (o "case space" que ele limitava não existe mais; registry
+  atualizado); a descrição da retenção fala de caso fechado.
+- **Docs:** `docs/guide/investigations.md` reescrito em inglês (conceitos, fila e tipos de caso, arquivos e mapeamentos
+  da org, workspace, identity keys com os normalizadores reais, análises e detectores, tarefas, evidência, dossiê,
+  relatórios por template, decisões com alvos/quatro olhos/retirada/proposta do agente, retenção, exports com
+  verificação por decisão, dados sensíveis sem máscara + nota PCI, settings, limites e admin); `agents-mcp.md` (TL;DR,
+  tokens sem "unmasked", o que é direto/sugerido/nunca, dados sensíveis e imagens, recursos, tabela de ferramentas,
+  playbooks semeados), `configuration.md` (agentes sem máscara, `AGENT_IMAGE_MAX_BYTES`, prazos são dos tipos),
+  `permissions.md`, `getting-started.md` (o que o seed cria), `labels.md`/`style-presets.md`/
+  `context-menu-actions.md`/`communities-metrics.md` (exemplos neutros), `docs/dev/architecture.md` (modelo, decisões,
+  storage, rotas), `docs/dev/admin-area.md` (registries de investigação), `agent-capabilities.md` (política em vigor),
+  README do plano (status). Screenshots `investigations-queue/workspace` regenerados com o modelo novo (tipo com campos
+  na fila, papéis, sugestão do agente) — `e2e/screenshots/generate.ts` reescrito para itens e tipos de caso.
+  `make docs-build` verde.
+**Decisões:** (1) datas mantêm `dd/mm/yyyy` (trocar o formato quebraria asserções de vários componentes; fica para o
+i18n do plano 07); (2) dados de exemplo dos testes não foram traduzidos; (3) docs de dev (decision log, planos)
+continuam em português, como antes.
+**Testes:** pytest 1484 verdes (só as pré-existentes de gsql2rsql/caplog). Vitest 2636; `vue-tsc` limpo; e2e completo
+243/243 (specs atualizados para os textos em inglês: share, caso atual, nós/linhas, toasts, breadcrumb, chips, dossiê).
+**Public docs:** guias acima. **Admin area:** `CONFIG_FIELD_KINDS` perde `artifact_max_bytes`.
+
+## [2026-10-20 14:30] - Feature Implemented: ajuda e "Ask an AI" para tipos de caso e biblioteca (plano 06, pós-P6)
+
+**Pedido:** ícones de ajuda e prompt de ajuda (em inglês) para criar tipos de caso e docs da biblioteca, avaliando o
+que refazer no caminho.
+- **Backend:** `services/authoring.py` + `GET /api/org/authoring` (leitura; isenta no registry MCP com motivo): o JSON
+  Schema do `CaseTypeSpec`, os placeholders de relatório (`reports.PLACEHOLDERS`, agora a fonte única do renderer e
+  da ajuda), os operadores de mapeamento (`convert`, `normalize`, `when`, schema do enrichment), os suggest kinds
+  (todos e padrão) e as ferramentas MCP com o resumo tirado do próprio servidor.
+- **Frontend:** `HelpTip.vue` (o "?" com popover), `AuthoringSkillModal.vue` (prompt + copiar), `utils/caseTypeSkill.ts`
+  e `utils/librarySkill.ts` (prompts no padrão dos `*Skill.ts`: entrevistar primeiro, explicar cada parte, regras do
+  servidor, schema, exemplo, o que a org já tem; modo "improve" quando já há conteúdo). `CaseTypeEditor`: "?" em cada
+  seção, **Ask an AI**, **Import JSON** (aceita a resposta com cerca ```json, recusa chaves fora do schema, preenche o
+  formulário sem salvar) e **Copy JSON**. Novo `LibraryDocEditor.vue` (extraído do `AdminView`): "?" dos três kinds,
+  referência por kind com chips que inserem no cursor (placeholders + campos do tipo escolhido; ferramentas do agente;
+  operadores do mapeamento), **Start from the example**, **Ask an AI**, JSON de mapeamento inválido bloqueia o Save.
+- **Exemplos que os prompts ensinam** em `frontend/src/assets/authoring/` (tipo de caso, template, playbook,
+  mapeamento), validados no pytest (o tipo passa no `CaseTypeSpec`, placeholders e ferramentas existem, o mapeamento
+  passa no `validate_mapping`). O fixture `fixtures/authoring/catalog.json` dos testes do front é comparado com o
+  catálogo vivo.
+**Refeito no caminho:** (1) o editor de tipo só preservava `trace.allocation/stop_types` do tipo salvo — um JSON
+importado os perdia; agora ficam no estado carregado (`formFrom`/`buildSpec`); (2) salvar doc da biblioteca mostrava
+"Request failed with status code 422" em vez do motivo do servidor, e o erro de validação do tipo não dizia o campo;
+`errorText` (movido para `utils/adminView.ts`, testado) diz `outcomes.0.id: …`; (3) a lista `SUGGEST_KINDS` do front
+divergia da do servidor (faltavam `hypothesis`, `graph`, `table`, `query`, `document`); alinhada e com teste de
+paridade; (4) o texto da aba Library ainda falava só de playbooks; (5) eu tinha escrito no prompt de mapeamento que
+`date:` aceita hora — não aceita (só dd, mm, yyyy, tamanho exato); corrigido antes de publicar; (6) ao subir o
+ambiente de novo, o seed com `--cases 20` (o uso documentado) quebrava: um resultado com quatro olhos era aprovado por
+um colega sem acesso ao caso (404). O seed agora compartilha o caso com o revisor como editor antes, e um teste novo
+semeia 20 casos (os testes só semeavam 6).
+**Não feito (fica anotado):** ajuda equivalente no ⚙ do caso (identity keys, edge semantics, label templates); editar
+os parâmetros das consultas iniciais pela UI (hoje só por Import JSON).
+**Testes:** pytest 1489 verdes (só as pré-existentes); vitest 2649; `vue-tsc` limpo; e2e investigations +
+workspace + user-journeys + admin 35/35 (novo: ajuda, prompt do catálogo e Import JSON no admin); `make docs-build`.
+**Public docs:** `investigations.md` (Admin area). **Admin area:** abas Case types e Library com ajuda e Ask an AI;
+`docs/dev/admin-area.md` com as regras do catálogo e dos exemplos.
+
+## [2026-10-20 17:00] - Feature Implemented: documentação da API — referência MCP gerada e REST/OpenAPI
+
+**Pergunta:** a documentação está atualizada, inclusive a das integrações de agentes? É via Swagger? Qual a forma
+mais apropriada?
+**Resposta implementada:** são dois públicos, com duas formas. **Agentes usam MCP**, que descreve as próprias
+ferramentas (`tools/list`); o que faltava era uma referência humana gerada do servidor. **Sistemas** (alerta que abre
+caso, upload noturno) **usam REST + OpenAPI**; o Swagger já existia em `/graphlagoon/docs`, mas sem guia, sem esquema
+de autenticação, com 22 operações de caso/org sem descrição, ids ilegíveis e regra de acesso inconsistente (público
+standalone, com login quando montado).
+- **Swagger atrás de setting:** `GRAPH_LAGOON_API_DOCS_ENABLED` (sem valor = ligado em dev mode, desligado fora); os
+  dois factories passam `docs_url/redoc_url/openapi_url` ou `None`. `/docs`, `/openapi.json` e `/redoc` saem de
+  `PUBLIC_PATHS`: quando ligados, ficam atrás do mesmo login da API, standalone ou montado. **Montado** dentro de
+  outro FastAPI: funciona em `/<prefix>/docs` (a UI busca `/<prefix>/openapi.json` pelo `root_path`); o `/docs` do
+  host **não** lista nossas rotas (FastAPI não mescla apps montados); com os routers incluídos no host
+  (`create_api_router`), elas aparecem no `/docs` do host. Documentado.
+- **OpenAPI melhor** (`app.install_openapi`): `securitySchemes` `agentToken` (bearer `glt_…`) e `forwardedEmail`
+  (header do proxy) para o Authorize do Swagger; as rotas só humanas recebem "**People only**…" a partir de
+  `mcp/registry.AGENT_EXEMPT_ROUTES` (uma fonte só); `operationId` legível (`cases_create_investigation`, tag + nome
+  da função, únicos); um tag por grupo nas rotas de caso (cases, case items, annotations & tasks, decisions, graph &
+  analysis); docstrings nas 22 operações sem descrição; exemplos nos corpos principais (`InvestigationCreate` com
+  `external_ref`, decisão com alvos/tarefas/revisor e texto livre, relatório, anotação de papel e de tarefa),
+  validados pelo próprio modelo; título e versão do pacote no spec.
+- **Referências geradas, checadas por teste:** `graphlagoon/dev/api_docs.py` (`make docs-api`; `docs-build` roda
+  `--check` antes) gera `docs/guide/agents-mcp-tools.md` (as 40 ferramentas por grupo, com descrição, tabela de
+  parâmetros do `inputSchema` e a rota humana gêmea; recursos e prompts; página em `v-pre` e `<`/`>` escapados fora
+  de código para o VitePress) e `docs/public/openapi.json`. `test_api_docs` falha se estiverem desatualizados ou se
+  uma ferramenta nova não estiver num grupo.
+- **Guias:** novo `rest-api.md` ("REST API & Integrations": autenticação, onde está a referência, tabela de
+  standalone/montado/routers, convenções de erro/paginação/idempotência/409, fluxos em curl: abrir caso de um alerta,
+  upload grande com mapeamento da org, pegar as próprias tarefas, decisão só de pessoa); `agents-mcp.md` (MCP para
+  agentes, REST para sistemas; a tabela manual de ferramentas virou link para a referência gerada; a linha
+  desatualizada do rate limit "por processo" corrigida); sidebar; `configuration.md`, `integration.md`,
+  `python-api.md`; `docs/dev/admin-area.md` (rota nova pede docstring + tag + `make docs-api`).
+**Refeito no caminho:** um token de agente recebia 403 em `GET /api/org/case-types/{slug}` pela REST, enquanto a
+ferramenta MCP gêmea (`get_case_type`) lia o mesmo dado — e uma integração precisa dos campos obrigatórios do tipo
+para abrir caso. `/api/org/` entrou na allowlist dos tokens; um teste garante que as rotas `/api/org` continuam só
+leitura (as escritas da org ficam em `/api/admin`).
+**Validação ao vivo (dev server):** `/graphlagoon/docs` 200 buscando `/graphlagoon/openapi.json`; token lê o tipo de
+caso pela REST (200); `POST /api/investigations` com o mesmo `external_ref` duas vezes → 201 e 200, mesmo caso; o
+token tentando decidir → `AGENT_FORBIDDEN`, e o spec marca a rota como People only; o `/docs` do host não lista as
+rotas do Graph Lagoon.
+**Testes:** novos `test_app_docs.py` (liga/desliga nos dois factories, login fora do dev mode, montado sob prefixo,
+spec com esquemas, descrições, tags, ids únicos, People only, exemplos) e `test_api_docs.py`;
+`test_agent_route_scoping` com os tags novos e a leitura de `/api/org`. pytest 1496 verdes (só as pré-existentes);
+`make docs-build` verde. Sem mudança de frontend.
+**Public docs:** `rest-api.md` (novo), `agents-mcp-tools.md` (gerado), `openapi.json` (gerado), `agents-mcp.md`,
+`configuration.md`, `integration.md`, `python-api.md`. **Admin area:** `CONFIG_FIELD_KINDS` + `api_docs_enabled`.
+
+## [2026-10-20 19:30] - Security Fix: revisão de segurança do branch (uso interno) — fontes restritas, token de caso, agentes e tipo do caso
+
+**Pedido:** avaliar as falhas de segurança do que foi implementado e corrigir as prioritárias, supondo **uso interno
+de empresas** (atrás do SSO, não exposto à internet). Com essa premissa, os atacantes que sobram são o **funcionário
+logado** (segregação entre analistas e quatro olhos são controles de compliance/LGPD) e o **conteúdo do caso** lido
+por um agente de IA (prompt injection vinda de documentos externos). Três revisões em paralelo (acesso, injeção e
+arquivos, frontend); os achados de acesso foram provados por testes antes da correção.
+**Corrigido:**
+- **Fonte restrita vazava pelo conteúdo** (alta): quem lia o caso sem ler o contexto recebia 403 no `/snapshot`,
+  mas 200 em `/items/{id}/content`, `/text`, na busca e no `read_item`; um editor ainda congelava (`pin`) a
+  exploração viva e baixava. `case_items.source_contexts`/`sources_readable`/`ensure_sources_readable` (o
+  `context_id` do item + `provenance.context_ids` de tabelas derivadas) passam a valer em content, text, pin,
+  busca (acha pelo título, nunca pelo texto), `accessible` de todo tipo (consultas incluídas), join/compare/promote
+  (`load_table` exige a fonte; o derivado herda `context_ids`), arquivos extras de um mapeamento
+  (`mapping.extra_item_ids`) e a rota de snapshot. `read_item` devolve só metadados de um item restrito.
+- **ReDoS nas identity keys** (alta → robustez no uso interno): `settings` do caso era `dict` livre, então o
+  `IdentityKey` (500 chars) não validava, e `re.search` de um `(a+)+` prendia o worker ao montar o grafo.
+  `utils/safe_regex.py` recusa padrão com repetição aninhada, alternância dentro de repetição e backreference
+  (pelo parser do `re`, sem dependência nova); `IdentityKey` valida (vale também para os contextos); a execução
+  re-checa padrões gravados antes e ignora ids acima de 256 chars. `CaseSettings` (extra permitido) tipa
+  `identity_keys`, `edge_semantics`, `agent_suggest_kinds` e `vocabularies` no create e no PATCH, guardando só as
+  chaves enviadas.
+- **Token de caso fora do caso** (média): só `/api/investigations/{uuid}` era limitado; o token listava, lia e
+  apagava explorações do dono e consultava qualquer contexto dele. Agora fica nos seus casos, `/api/org/…`,
+  `/api/config` e `/mcp` (as ferramentas MCP que tocam contexto já recebem o caso).
+- **Agente apagava e reescrevia o que pessoas confirmaram** (média): DELETE de item e de anotação com
+  `forbid_agents` (registry: People only); um agente edita só anotações escritas por agentes
+  (`ANNOTATION_NOT_YOURS`), e a edição de um kind sugerível volta a `suggested`; move hipótese só por
+  `hypothesis_status` (`USE_HYPOTHESIS_STATUS`); muda `mapping`/`query` só de itens de agentes (`ITEM_NOT_YOURS`;
+  título, tags e gráfico seguem livres); `update_task` só move tarefas (`kind="task"`).
+- **Agente desligava o próprio modo de sugestão** (média): `assignee_email`, `case_type`, `settings` e `sla_hours`
+  são só de pessoas no PATCH (`_PEOPLE_ONLY_CHANGES`, 403 `AGENT_FORBIDDEN`), e `assignee_email`/`settings` na
+  criação; `update_case` do MCP perde `case_type`.
+- **Quatro olhos contornável trocando o tipo** (média): o autor retirava a decisão pendente, trocava o tipo para
+  `general` e fechava sozinho. Com qualquer decisão no caso (mesmo retirada ou rejeitada), o tipo não muda mais
+  (409 `CASE_TYPE_LOCKED`); isso também fecha o encurtamento da retenção pela troca de tipo.
+- **Frontend:** `?case=` só aceita UUID (`utils/uuid.ts`; antes um link plantado transformava "Salvar exploração"
+  num POST só de pessoas, como `confirm` ou `reopen`); o preview só cria blob para imagem raster (um SVG aberto
+  "em nova aba" rodava script na origem do app) e o blob é revogado ao fechar o preview.
+**Mantido de propósito:** reabrir continua com acesso de escrita (a decisão fica, o journal registra, e a próxima
+decisão segue o catálogo e os quatro olhos do tipo, agora travado); itens derivados do grafo por quem lê todas as
+fontes (trace, links, relatório) são material que essa pessoa pôs no caso, como uma nota.
+**Dívida registrada (não corrigida, risco baixo no uso interno; parte foi feita na entrada seguinte, "quick wins"):**
+- "Visto em outros casos" confirma presença de entidade vinda de fonte que o leitor não lê;
+- token continua válido se o dono perde `investigation.agent` (o SSO corta o acesso de quem sai);
+- atribuir (`assignee_email`) dá editor sem checar `investigation.share`;
+- parâmetros `:nome` de consulta salva são colados no texto (quem roda já escreve SQL), e o regex confunde o Cypher
+  `(:Person)` com parâmetro;
+- limites de recurso: glob com backtracking e joins sem teto nos mapeamentos, arquivos lidos inteiros em memória,
+  corpo JSON sem limite, item malformado derruba o grafo do caso (500), entity resolution e trace quadráticos;
+- `Content-Type` de upload sem allowlist (CSP sandbox e `nosniff` seguram);
+- Swagger, quando ligado, carrega `swagger-ui-dist@5` do jsdelivr sem versão fixa nem SRI (servir local se ligar
+  fora do dev);
+- o sandbox de métrica no worker ainda tem rede por `FontFace`/`WebTransport` (anterior ao branch).
+**Testes:** `api/tests/test_security_hardening.py` (8: fonte restrita em content/text/busca/pin e nas tabelas
+derivadas e mapeamentos, token de caso, agente × material de pessoas, `update_task`, agente × settings/tipo/SLA/
+atribuição, tipo travado após decisão, regex recusada e execução limitada); vitest de `uuidOrNull` e do SVG; e2e de
+"nova exploração a partir do caso" com id UUID. Referências regeneradas (`make docs-api`) e fixture do catálogo de
+autoria. pytest 1504 verdes (só as pré-existentes: test_cypher_comments ×4, test_transpile_options ×1,
+test_precomputed_providers); vitest 2651; vue-tsc limpo; e2e 244/244; `vitepress build` verde.
+**Public docs:** `agents-mcp.md` (o que o agente nunca faz, alcance REST do token de caso, itens restritos),
+`investigations.md` (fontes restritas, tipo travado, regex), `rest-api.md`, `agents-mcp-tools.md` e `openapi.json`
+(gerados). **Admin area:** sem mudança de settings; `AGENT_EXEMPT_ROUTES` marca os DELETE de item e anotação como
+`HUMAN_ONLY`.
+
+## [2026-10-20 21:00] - Security Fix: quick wins da revisão de segurança (atribuição, token, itens quebrados, parâmetros, limites)
+
+**Pedido:** dos itens deixados como dívida na entrada anterior, fazer os que são rápidos e não mudam o desenho.
+- **Atribuir exige `investigation.share`** (`cases._ensure_may_assign`, no create e no PATCH): atribuir compartilha o
+  caso como editor, então segue a mesma permissão de compartilhar, como o catálogo já descrevia ("share … and
+  assign"). Atribuir a si mesmo e desatribuir não pedem nada.
+- **O token para quando o dono perde `investigation.agent`** (`authenticate_agent`): 403
+  `AGENT_PERMISSION_REVOKED` até a permissão voltar. O SSO só corta quem sai da empresa; quem muda de área
+  continuava com o agente.
+- **Item ilegível não derruba o grafo do caso:** `case_graph` deixa de fora o item cujo conteúdo não é um grafo
+  (JSON inválido, formato errado, mapeamento que não se aplica) e o lista em `broken_sources` (sem gravar a
+  presença das entidades, como com fontes restritas); `/items/{id}/snapshot` responde 422 `ITEM_UNREADABLE` (o canvas
+  já mostra o erro por item). Ao salvar, o mapeamento recusa `encoding` desconhecido (`codecs.lookup`) e
+  `extra_item_ids` que não são UUID. Antes, um arquivo ruim dava 500 no grafo, nas análises, nos relatórios e no
+  "visto em outros casos" de todos que liam o caso.
+- **Parâmetros de consulta salva** (`case_queries.parameter_names`, espelhado em `queryParameterNames`): `:nome`
+  dentro de aspas é texto, e no Cypher `(:Person)`, `[:KNOWS|OWNS]` são rótulo e tipo, não parâmetro (antes davam
+  "Parameter :Person has no value"). A substituição continua literal (dívida abaixo).
+- **Corpo JSON limitado:** criar item e criar versão leem o JSON em stream até `investigation_file_max_bytes` (413
+  `BODY_TOO_LARGE`); antes o corpo era lido e parseado inteiro sem limite.
+- **Content-Type normalizado** (`case_items.normalize_content_type`): só um tipo bem formado, em minúsculas, com
+  `charset` só para `text/*`; o resto (`text/plain, text/html`, parâmetros estranhos) cai no tipo do nome do
+  arquivo ou em `application/octet-stream`. É o tipo que a rota de conteúdo serve.
+- **Sandbox do worker sem rede de verdade:** `FontFace`, `fonts` e `WebTransport` entram em `STRIPPED_GLOBALS`.
+**Dívida que continua:** "visto em outros casos" por fonte (pede presença por fonte); parâmetros como bind de
+verdade (depende de cada datasource); limites de recurso dos mapeamentos, joins, trace e entity resolution, e
+leitura de arquivo em stream (pedem números de uso); Swagger servido localmente.
+**Testes:** `test_security_hardening.py` +6 (atribuição × share, token × permissão revogada, item ilegível no grafo
+e no snapshot + mapeamento recusado, parâmetros, corpo acima do limite, Content-Type); vitest de
+`queryParameterNames`. pytest 1510 verdes (só as pré-existentes); vitest 2651; vue-tsc limpo; e2e 244/244.
+**Public docs:** `investigations.md` (item ilegível, parâmetros), `agents-mcp.md` (token com permissão revogada),
+`permissions.md` (`investigation.agent` vale no uso; atribuir é compartilhar), `configuration.md` (limite do corpo
+JSON). **Admin area:** sem setting novo; descrição de `investigation_file_max_bytes` cobre o corpo JSON.
