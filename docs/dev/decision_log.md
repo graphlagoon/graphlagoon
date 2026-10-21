@@ -13231,3 +13231,146 @@ e no snapshot + mapeamento recusado, parâmetros, corpo acima do limite, Content
 **Public docs:** `investigations.md` (item ilegível, parâmetros), `agents-mcp.md` (token com permissão revogada),
 `permissions.md` (`investigation.agent` vale no uso; atribuir é compartilhar), `configuration.md` (limite do corpo
 JSON). **Admin area:** sem setting novo; descrição de `investigation_file_max_bytes` cobre o corpo JSON.
+
+## [2026-10-21 12:45] - Feature Implemented: dados próprios em explorações e casos (BYOD-2: enriquecer nós e arestas, subir e desenhar nós e arestas)
+
+**Pedido:** o "bring your own data" só punha um grafo inteiro num caso. Faltava: subir um CSV que **enriquece** nós
+(e arestas) que já estão no canvas, e **adicionar nós e arestas** (de arquivo, JSON ou à mão) — no caso **e numa
+exploração sem caso**. O usuário confirmou o escopo "também em exploração, sem investigação".
+
+**Requisitos:**
+- [x] CSV que enriquece nós por chave (id ou propriedade, normalização, prefixo de dígitos, tipos; vazio = todos)
+- [x] CSV que enriquece arestas (por id da aresta ou pelas duas pontas, nos dois sentidos, tipo opcional)
+- [x] Subir nós e arestas numa exploração (CSV com mapping ou JSON) e desenhar à mão (exploração e caso)
+- [x] Não quebrar métricas, comunidades, estilos, filtros, snapshot, "save as property", precomputed
+- [x] Uma exploração com dados próprios, ligada a um caso, aparece no caso com os nós, arestas e propriedades
+
+**Decisões de design:**
+1. **O modo `as: enrichment` do caso agora enriquece de verdade** (supera o atalho de F2.6, que só mostrava linhas na
+   aba Enrichment). Novo `services/enrichment_files.py` (gêmeo de `utils/enrichment.ts`): a passada roda **depois** de
+   `unify` + `apply_aliases` em `case_graph()` e no `unified` do store, em ordem de item. Regra única de merge,
+   extraída como `merge_props` (Python) / `mergeProps` (TS): valor ausente é preenchido; valor presente vence e o do
+   arquivo vira `conflicts` com o item como fonte; `overwrite: true` inverte. Enriquecimento **não** entra em
+   `sources` (sem anel); `is_graph_item` não mudou. Nó unificado por identity key também casa pelo valor da entidade
+   (`Person:123` → `123`): um CSV de documentos acha a pessoa mesmo com node ids internos.
+2. **`FileEnrichmentSpec` estendido** (compatível): `target: nodes|edges`, `edge_key {by: edge_id|endpoints,
+   source_column, target_column, type_column}`, `match_edge_types`, `normalize`, `overwrite`; `match_node_types`
+   default `["*"]` e pode ser vazio (antes `["*"]` não casava com nada no browser); `key_column` opcional só para
+   arestas por pontas. Célula numérica vira número (zeros à esquerda continuam texto), célula vazia não seta nada.
+   Paridade TS/Python fixada por `frontend/src/__tests__/fixtures/enrichment/*.json`.
+3. **Exploração: camada do usuário ("overlay"), nunca dentro do snapshot.** Um segundo arquivo gzip ao lado do
+   snapshot (`SnapshotService` ganhou `kind="overlay"` → `{id}.overlay.json.gz`), flag `state.has_overlay` escrita só
+   pelo servidor. `GraphOverlay {nodes, edges, enrichments[{spec, rows (1ª linha por chave)}], imports}`. Rotas
+   `GET/PUT /api/explorations/{id}/overlay` (PUT: `exploration.edit_graph` + `can_write` + limite de corpo; overlay
+   vazio apaga). O v2 (2026-10-10) proibiu contexto/exploração **por upload**; isto respeita: nenhum contexto nem
+   exploração é criado, o contexto nunca vê os dados, e o snapshot continua sendo a resposta do contexto.
+   Rejeitado: escrever no snapshot (perde na re-execução da query e mistura dado do contexto com dado do usuário) e
+   um contexto `file` por upload (o que o v2 matou).
+4. **Store:** `utils/graphOverlay.ts` puro, com contabilidade **por objeto** (WeakMap/WeakSet com `toRaw`), não por
+   id: uma query nova traz objetos novos com os mesmos ids, e "restaurar" neles apagaria valores reais. `withOverlay()`
+   roda **antes** de cada atribuição em massa (`loadSubgraph`, `loadPrecomputedGraph`, `applyGraphResponse`,
+   `loadExploration`, `expandFromNode`) → uma atribuição só, os watchers de comunidade disparam uma vez.
+   `patchNodeProperties` desfaz e reaplica a camada nos nós patchados (carga progressiva e "save as property": a
+   métrica vence uma coluna enriquecida de mesmo nome). `baseGraph()` alimenta o snapshot e o publish de precomputed.
+   Mudança só de propriedades → patch in place + `nodePatchVersion` (sem reset de layout); nós entram/saem → uma
+   atribuição. Persistência imediata em exploração gravável; sem exploração, em memória até "Save" (PUT depois do
+   create; falha vira aviso "Saved without your data layer").
+5. **Caso vê a exploração como o dono:** `case_graph._exploration_snapshot` dobra a camada (`fold_overlay`) — vale
+   para o canvas do caso (`/items/{id}/snapshot`), análises, MCP, exports e **pin** (versões já pinadas não mudam).
+6. **Desenho à mão:** no caso, novo subkind `graph/sketch` ("Manual additions", um por caso, versão por mudança),
+   `{unified: true, nodes, edges}` validado por `GraphSketchContent`; nó já no canvas vira stub (id + tipo, sem
+   propriedades: stale-proof, sem conflito). Na exploração, vai para a camada com ids `sketch:<id>`. Menu de contexto:
+   "Add a linked node…", "Connect to the selected node…" (com exatamente um outro selecionado), "Remove from your
+   data". Nós de import mantêm o id (fundem com nó do contexto de mesmo id, preenchendo o que falta); arestas de
+   import ganham namespace `import:<importId>:<id>`.
+7. **UI:** botão **Your data** na barra de baixo do grafo (ao lado de Table/Console) — na barra de cima ele espremia
+   o título e cobria o "Unsaved" a 1280 px com um caso atual (e2e de `investigations.spec` pegou). Modal com abas
+   "Enrich from a file" (chave adivinhada pelos ids do canvas, preview "N of M nodes match", valores que ficam),
+   "Nodes and edges from a file" (reusa `MappingStep` + mappings salvos da org, ou JSON), "Draw"; lista do que está
+   na camada com Remove. Anel âmbar nos nós da camada (`graphStore.nodeRings` substitui a leitura direta de
+   `investigationMode.rings` em `useGraphRings` e no hook de e2e); chip "your data" no SidePanel; expand escondido nos
+   nós da camada. No caso: "+ Add → File → Draw a node by hand".
+8. **Compatibilidade verificada (matriz do plano):** tipos novos aparecem em filtros/cores (derivam de `nodes`);
+   métricas e comunidades contam os nós da camada; Data Table passou a depender de `nodePatchVersion` (antes uma
+   coluna patchada in place só aparecia no próximo filtro — teste falha sem o ajuste); state da exploração sem campo
+   novo vindo do cliente (o servidor preserva `has_overlay` em todo PUT e força `false` no create).
+
+**Desvios do plano:** não extraí um `utils/body_limit.py` comum (as duas cópias existentes têm folga ×10 e códigos de
+erro próprios; unificar mudaria comportamento): a rota do overlay tem a sua checagem (Content-Length + tamanho
+parseado). A marcação "dirty" não inclui o overlay (ele é salvo na hora numa exploração gravável). O mapping de um
+import de exploração é interpretado no browser (o overlay guarda o resultado, não o arquivo); agentes usam o caso.
+
+**Arquivos criados:** `api/graphlagoon/services/enrichment_files.py`, `api/tests/test_enrichment_files.py`,
+`api/tests/test_exploration_overlay.py`, `frontend/src/utils/graphOverlay.ts`, `frontend/src/composables/useSketch.ts`,
+`frontend/src/components/{YourDataModal,YourDataButton,SketchDialog}.vue`,
+`frontend/src/__tests__/fixtures/enrichment/*.json`, testes vitest (`enrichment.parity`, `graph.overlay`,
+`useSketch`, `YourDataButton`, `DataTablePanel.patch`), `frontend/e2e/tests/your-data.spec.ts`.
+**Arquivos modificados (principais):** `models/schemas.py` (spec, `EnrichmentEdgeKey`, `GraphOverlay`,
+`GraphSketchContent`, `has_overlay`), `services/case_graph.py` (`merge_props`, passada de enriquecimento, fold),
+`services/case_items.py` (subkind `sketch`), `services/case_tables.py` (opções de promote), `services/snapshot.py`
+(`kind`), `routers/explorations.py`, `db/memory_store.py`, `services/permission_catalog.py`, `config.py`,
+`routers/admin_registry.py`, `services/public_config.py`, `mcp/server.py` (docstrings), `dev/seed_investigations.py`
+(item "Manual additions" no caso de mulas); `stores/graph.ts`, `stores/investigation.ts`, `utils/enrichment.ts`,
+`utils/unifyGraph.ts`, `MappingStep.vue`, `EnrichmentTab.vue`, `FileImportWizard.vue`, `InvestigationView.vue`,
+`GraphVisualizationView.vue`, `GraphCanvas3D.vue`, `GraphContextMenu.vue`, `useContextMenu.ts`, `useGraphRings.ts`,
+`SidePanel.vue`, `DataTablePanel.vue`, `AddItemsPopover.vue`, `Toolbar.vue` (aviso ao salvar), `services/api.ts`.
+
+**Testes:** pytest 1530 verdes (só as 5 pré-existentes: `test_cypher_comments` ×4, `test_transpile_options` ×1, ver
+entrada de 2026-10-20 19:30); novos: paridade de enriquecimento, enriquecimento no grafo do caso (+ arquivo ilegível
+em `broken_sources`), sketch (stub, 422 de forma), rotas do overlay (roundtrip, flag preservada, leitor × escritor,
+permissão, 413, 422, delete, caso vê a camada, pin congela), arquivo separado no `LocalSnapshotService`. Listas do
+catálogo fixadas em `test_permission_routes`, `test_permissions`, `test_admin_groups` ganharam
+`exploration.edit_graph`; fixture `authoring/catalog.json` regenerada. vitest 2674 verdes; vue-tsc limpo; e2e:
+`your-data.spec.ts` (CSV → preview → PUT do overlay; desenhar nó; read-only sem botão); suíte e2e completa 246/246.
+Bug pego pelo e2e: `structuredClone` recusa proxies do Vue (spec vindo de formulário) → cópia JSON (teste de
+regressão no store).
+
+**Public docs:** `bring-your-own-data.md` reescrita (o que dá para fazer e onde; enriquecer nós/arestas; adicionar
+nós e arestas; desenhar; a camada da exploração; limites), `explorations.md` (seção "Your data", tabela do que é
+salvo), `investigations.md` (upload, enrichment aplicado como propriedade, Manual additions), `permissions.md`
+(`exploration.edit_graph`), `configuration.md` (`GRAPH_LAGOON_EXPLORATION_OVERLAY_MAX_BYTES`), `agents-mcp-tools.md`
+e `openapi.json` regenerados (`make docs-api`). Screenshot nova `bring-your-own-data-enrich.png` e todas
+regeneradas (`make docs-screenshots`: a barra de baixo ganhou um botão). `make docs-build` verde.
+
+**Admin-area impact:** `CONFIG_FIELD_KINDS["exploration_overlay_max_bytes"] = "public"`;
+`AUDIT_EXEMPT_ROUTES[("PUT", "/api/explorations/{exploration_id}/overlay")]` (mesma postura do PUT da exploração);
+permissão nova `exploration.edit_graph` no catálogo (matriz e inspector a mostram sozinhos). Sem tabela nova: o
+overlay é arquivo ao lado do snapshot; o sketch é `case_item`. `InMemoryStore.delete_graph_context` apaga também os
+overlays.
+
+**Segurança:** PUT exige `can_write` + permissão + limite de corpo; GET segue o acesso do GET do snapshot; o caso só
+lê a camada de explorações que o leitor já pode ler (`sources_readable` inalterado). Agentes: sem tool MCP para a
+camada (REST segue o escopo de rotas do token, como o PUT de exploração).
+
+**Limitações conhecidas / dívida:**
+- No modo DB, apagar um contexto não apaga os arquivos de snapshot nem de overlay das explorações (dívida #26 já
+  existente, agora com um arquivo a mais).
+- Enriquecimento de arestas por pontas usa `match_source` também para as pontas quando é propriedade; um patch
+  tardio de propriedades de nó não re-enriquece arestas (só nós).
+- Pickers que leem o schema do contexto (eixos do hive plot) não listam colunas enriquecidas.
+- Sem MCP para a camada da exploração; agentes põem dados num caso.
+- `user-journeys.spec.ts` não ganhou caso: o fold exploração → caso é do servidor (coberto por pytest) e o browser só
+  renderiza o snapshot do item.
+
+## [2026-10-21 14:10] - Feature Implemented: ajuda contextual no "Your data" e no mapeamento (BYOD-2, continuação)
+
+**Pedido:** ícones de ajuda nos modais da feature.
+**Decisões:**
+1. **Reuso do `HelpTip`** (popover "?" da área de admin) em vez de modal de ajuda sobre modal: um "?" por
+   configuração do enriquecimento no `MappingStep` (alvo nós/arestas, como achar a aresta, chave, colunas, tipos,
+   propriedade, normalização, dígitos, quem vence) e na identidade do mapeamento de grafo; um por aba do
+   `YourDataModal` e na lista "In this exploration"; dois no `SketchDialog`. Link "Full guide" para o guia público via
+   `utils/docsLinks.ts` (`https://graphlagoon.github.io/graphlagoon/guide/...`, o mesmo do README; o app não linkava
+   para a documentação antes).
+2. **Bug do Esc (pré-existente, exposto agora):** o listener global `useEscapeToCloseModals` (captura) fechava o
+   modal inteiro quando havia um popover aberto dentro dele. Quem fecha sozinho com Esc se marca com
+   `data-escape-owner` e o listener global cede: o primeiro Esc fecha a dica, o segundo o modal.
+3. **Popover cortado:** dentro de modal com rolagem o popover (absoluto, sempre para baixo) era cortado no rodapé.
+   Agora é `position: fixed`, medido após render, abre para cima quando não cabe embaixo, acompanha a rolagem (o
+   foco do "?" já rola o contêiner no próprio clique — fechar ao rolar quebrava a dica do admin, e2e pegou) e fecha
+   quando o "?" sai da tela. Vale também para as dicas do admin.
+**Testes:** vitest `MappingStep.help` (dicas por modo, cartões do caso fora da camada) e `useEscapeToCloseModals`
+(Esc fecha a dica antes do modal; falha sem a correção); e2e `your-data.spec.ts` (link do guia, dica abre),
+`admin.spec.ts`/`admin-groups.spec.ts` verdes. vitest 2679; vue-tsc limpo.
+**Public docs:** sem mudança de texto; screenshot `bring-your-own-data-enrich.png` regenerada (mostra os "?").
+**Admin-area impact:** nenhum além do comportamento do `HelpTip` (posição e Esc).

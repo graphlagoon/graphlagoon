@@ -146,8 +146,10 @@ sandboxed frame with scripts off. Every read is audited
 
 **Upload** (needs `investigation.upload` and edit access) opens the file
 assistant: pick the files of a layout, choose **Graph** (the table is mapped
-onto the canvas through a mapping spec), **Enrichment** (joined by key to the
-case's nodes) or **Attachment** (kept with its hash). Files may be delimited
+onto the canvas through a mapping spec), **Enrichment** (its columns become
+properties of the nodes or edges already on the canvas, by key; see
+[Bring your own data](./bring-your-own-data.md#enrich-nodes-or-edges-from-a-file))
+or **Attachment** (kept with its hash). Files may be delimited
 or **fixed-width** (`widths` instead of a delimiter). The org's **saved
 mappings** are detected from the file names and headers, and a superuser can
 **save the current mapping for the org**. No graph context is created: the
@@ -215,13 +217,26 @@ entities into one on the canvas and in every server analysis.
 ## Enrichment tables
 
 A context can attach side tables (KYC, devices, chargebacks) in the context
-form, and a case can upload its own as an **Enrichment** file: the key column,
-the node types it applies to and which node value matches the key. The
-inspector's **Enrichment** tab looks a table up for the selected entity; a
-table can **promote** a column to nodes (each distinct value becomes a node
-linked to the entities that share it). Lookups are by key, return only the
-listed columns, are capped (`GRAPH_LAGOON_ENRICHMENT_MAX_KEYS`,
+form. The inspector's **Enrichment** tab looks a table up for the selected
+entity; a table can **promote** a column to nodes (each distinct value becomes
+a node linked to the entities that share it). Lookups are by key, return only
+the listed columns, are capped (`GRAPH_LAGOON_ENRICHMENT_MAX_KEYS`,
 `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS`) and are audited (`enrichment.read`).
+
+A case can upload its own as an **Enrichment** file: the key column, how keys
+are normalized, the node types it applies to (every type by default) or, for
+edges, the edge id or the two endpoints. Its columns become **properties** of
+the matching nodes or edges, on the canvas, in the server analyses and in what
+agents read. A value already there wins and the file's is shown as a conflict,
+unless the file says to replace it. The **Enrichment** tab lists every row the
+file has for the selected entity. Details:
+[Bring your own data](./bring-your-own-data.md#enrich-nodes-or-edges-from-a-file).
+
+**Manual additions.** Right-click a node for **Add a linked node** or, with one
+other node selected, **Connect to the selected node**; **+ Add → File → Draw a
+node by hand** draws one alone. What you draw goes to one `graph/sketch` item
+of the case, with you as author and a version per change
+([Drawn by hand](./bring-your-own-data.md#drawn-by-hand)).
 
 ## Analyses
 

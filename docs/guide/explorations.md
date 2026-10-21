@@ -65,15 +65,28 @@ does not bring it back. Re-save when you want to keep new changes.
 | Filters & viewport | Type filters, search, camera |
 | Analysis | Cluster results and exploration-scoped cluster programs, communities, similarity state |
 | Behaviors | Data-fetching preferences |
+| Your data | Nodes, edges and enrichment files you added, in a [layer](./bring-your-own-data.md#in-an-exploration-your-layer) saved beside the snapshot, not in it |
 
 Not captured: the context definition itself, context-scoped cluster
 programs (those are shared by every exploration in the context), query
 templates, and your current selection.
 
 Loading prefers the snapshot — that's what makes reopening instant and
-keeps hand-arranged positions. If the snapshot is missing (or the
+keeps hand-arranged positions. Your data layer is then drawn on top of it,
+and again after every query or expand. If the snapshot is missing (or the
 exploration predates snapshots), the saved query is re-executed instead and
 a fresh snapshot is written back transparently.
+
+## Your data
+
+**Your data**, in the bar under the graph next to **Table**, adds your own data to the exploration: a CSV whose
+columns become properties of the nodes or edges on the canvas, nodes and edges
+from a mapped CSV or JSON, or nodes drawn by hand (right-click a node → **Add a
+linked node**). It is saved in a layer beside the exploration, comes back after
+every query and expand, and never changes the context. Whoever opens the
+exploration sees it; only who can write it changes it (and holds
+`exploration.edit_graph`). How it works:
+[Bring your own data](./bring-your-own-data.md#in-an-exploration-your-layer).
 
 ## Loading
 

@@ -58,6 +58,7 @@ construído.
 | 1 | Este README | Regras de trabalho e mapa do pacote |
 | 2 | [06-plataforma-generica.md](06-plataforma-generica.md) | Plataforma genérica (tipos de caso, várias decisões, tarefas, sem domínio BR no código), P0–P8 concluídas |
 | 2a | [05-plano-v2.md](05-plano-v2.md) | Redesenho de 2026-10-10 (modelo, UX, AI-first), F0–F6 concluídas; §7 e §9 superados pelo 06 |
+| 2d | decision log, 2026-10-21 12:45 (BYOD-2) | Dados próprios: arquivo de enriquecimento aplicado como propriedade (nós e arestas), subkind `graph/sketch`, camada do usuário na exploração (`/explorations/{id}/overlay`); supera o atalho de F2.6. Guia público: `docs/guide/bring-your-own-data.md` |
 | 2c | [07-ai-first-runtime.md](07-ai-first-runtime.md) | Esqueleto do próximo plano: webhooks, agente de serviço, política do agente, assistente no app |
 | 2b | [04-plano-de-implementacao.md](04-plano-de-implementacao.md) | Plano original, já executado; referência histórica |
 | 3 | [03-arquitetura.md](03-arquitetura.md) | **Como fazer:** modelo de dados, API, frontend, algoritmos e segurança |

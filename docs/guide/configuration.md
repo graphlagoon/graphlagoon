@@ -454,6 +454,7 @@ stream to disk while their sha256 is computed.
 |---|---|---|
 | `GRAPH_LAGOON_INVESTIGATIONS_VOLUME_PATH` | *(unset)* | Unity Catalog Volume path. Defaults to an `investigations` subdirectory of `GRAPH_LAGOON_DATABRICKS_VOLUME_PATH` when that is set; otherwise files go to `{GRAPH_LAGOON_EXPLORATION_SNAPSHOTS_DIR}/investigations`. Give write access to the app's service principal only. |
 | `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` | `209715200` | Maximum size of one file uploaded to a case (200 MB), and of an item's inline JSON body (text or JSON content); larger ones get 413. |
+| `GRAPH_LAGOON_EXPLORATION_OVERLAY_MAX_BYTES` | `5242880` | Largest [user layer](./bring-your-own-data.md#in-an-exploration-your-layer) of one exploration (its own nodes, edges and enrichment rows, as JSON), 5 MB; larger ones get 413. |
 | `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Ceiling of edges in a case's working graph in the browser: a graph built from a case file keeps only this many edges. |
 | `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a case closed by a decision is retained when its case type sets no `retention_years`: it cannot be deleted before then, except by a superuser with a reason. |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` | `500` | Node keys per enrichment lookup (a context's enrichment tables). |
