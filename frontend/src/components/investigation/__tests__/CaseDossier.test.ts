@@ -73,6 +73,7 @@ const decision = (over: Record<string, unknown>) => ({
 beforeEach(() => {
   vi.clearAllMocks()
   setActivePinia(createPinia())
+  vi.spyOn(window, 'confirm').mockReturnValue(true) // confirmAction falls back to it without the dialog host
   vi.mocked(api.getInvestigation).mockResolvedValue(structuredClone(CASE) as any)
   vi.mocked(api.getInvestigationItems).mockResolvedValue(structuredClone(ITEMS) as any)
   vi.mocked(api.getInvestigationAnnotations).mockResolvedValue(structuredClone(ANNOTATIONS) as any)
@@ -163,6 +164,9 @@ describe('CaseDossier (mode=dossier)', () => {
     expect(getByTestId('decision-targets').textContent).toContain('About')
 
     await fireEvent.click(getByTestId('decision-new'))
+    expect((getByTestId('decision-record') as HTMLButtonElement).disabled).toBe(true) // the pre-fill alone is not a rationale
+    expect(getByTestId('decision-own-words')).toBeTruthy()
+    await fireEvent.update(getByTestId('decision-rationale'), 'Ring confirmed by the trace (E1).')
     await fireEvent.update(getByTestId('decision-reviewer'), 'rev@x.com')
     expect(getByTestId('decision-four-eyes').textContent).toContain('rev@x.com')
     await fireEvent.click(getByTestId('decision-record'))
@@ -193,10 +197,12 @@ describe('CaseDossier (mode=dossier)', () => {
     const record = getByTestId('decision-record') as HTMLButtonElement
     expect(record.disabled).toBe(true) // the outcome needs a name
     await fireEvent.update(getByTestId('decision-outcome-label'), ' False positive ')
+    await fireEvent.update(getByTestId('decision-rationale'), 'Nothing links the accounts.')
     await fireEvent.click(getByTestId('decision-closes'))
     expect(getByTestId('decision-effect').textContent).toContain('Closing freezes the case')
     await fireEvent.click(record)
     await flushPromises()
+    expect(window.confirm).toHaveBeenCalled() // closing the case is asked first
     expect(api.recordInvestigationDecision).toHaveBeenCalledWith('inv-1', expect.objectContaining({ outcome_label: 'False positive', closes_case: true }))
     expect(getByTestId('decision-closed').textContent).toContain('Closed by D1')
   })

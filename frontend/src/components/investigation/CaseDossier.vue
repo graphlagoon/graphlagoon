@@ -198,6 +198,21 @@ const RETENTION_YEARS = computed(
 const decisions = computed(() => inv.value?.decisions ?? []);
 /** The panel shows for the first decision, or when asked; never while one waits for review. */
 const deciding = ref(false);
+const decisionAside = ref<HTMLElement | null>(null);
+/** The header's Decide (and `#decisions`): the decision panel, in view. */
+async function startDecision() {
+  if (canDecide.value) deciding.value = true;
+  await nextTick();
+  decisionAside.value?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+}
+defineExpose({ startDecision });
+watch(
+  () => !!store.current,
+  async (ready) => {
+    if (ready && window.location.hash === '#decisions') await startDecision();
+  },
+  { immediate: true },
+);
 const pending = computed(() => decisions.value.some((d) => d.review === 'pending'));
 const canDecide = computed(() => canEdit.value && !pending.value);
 const closedBy = computed(() => (inv.value?.status === 'closed' ? [...decisions.value].reverse().find((d) => d.closed_at) ?? null : null));
@@ -483,7 +498,7 @@ const unflag = (t: CaseItem) => act(() => store.setInDossier(t, false), 'Could n
           </section>
         </main>
 
-        <aside class="card decision" data-testid="dossier-decision">
+        <aside id="decisions" ref="decisionAside" class="card decision" data-testid="dossier-decision">
           <h2>Decisions</h2>
           <ol v-if="decisions.length" class="decisions">
             <li v-for="d in decisions" :key="d.id" :data-testid="`decision-${decisionNumber(d)}`">

@@ -4,12 +4,18 @@
  * with the allowed transitions (only a decision closes), the type's stage, assignee,
  * deadline, suggestions counter and the actions (Dossier, Decide, Share, "…" with
  * reopen and delete). Edits go through the
- * store, which keeps the queue row in sync.
+ * store, which keeps the queue row in sync. An action the server would refuse is not offered
+ * (UX-1): Decide needs `investigation.decide`, Share `investigation.share` and manage rights,
+ * the assignee manage rights; the type is locked after a decision; a retained case is only
+ * deleted by a superuser, with a reason.
  */
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useToast } from '@/composables/useToast';
+import { usePermissions } from '@/composables/usePermissions';
+import { usePersistence } from '@/composables/usePersistence';
+import { confirmAction } from '@/composables/useConfirm';
 import { getErrorMessage } from '@/utils/errorMessage';
 import {
   STATUS_LABELS,
@@ -35,6 +41,8 @@ const emit = defineEmits<{ decide: []; settings: [] }>();
 const store = useInvestigationStore();
 const router = useRouter();
 const toast = useToast();
+const { can } = usePermissions();
+const { isSuperuser } = usePersistence();
 
 const inv = computed(() => store.current!);
 const canEdit = computed(() => inv.value.has_write_access && inv.value.status !== 'closed');
@@ -55,6 +63,15 @@ const confirmDelete = ref(false);
 const busy = ref(false);
 const stages = computed(() => store.caseType?.stages ?? []);
 const pendingReview = computed(() => (inv.value.decisions ?? []).some((d) => d.review === 'pending'));
+const canDecide = computed(() => canEdit.value && !pendingReview.value && can('investigation.decide'));
+const canShare = computed(() => inv.value.can_manage && can('investigation.share'));
+const canAssign = computed(() => canEdit.value && inv.value.can_manage);
+/** The type holds the decision catalog and the retention: after a decision it no longer moves. */
+const typeLocked = computed(() => (inv.value.decisions ?? []).length > 0);
+/** Closed by a decision at some point: kept for the retention period (the server answers 409). */
+const retained = computed(() => (inv.value.decisions ?? []).some((d) => d.closed_at));
+const canDelete = computed(() => inv.value.can_manage && (!retained.value || isSuperuser.value));
+const deleteReason = ref('');
 
 async function save(patch: UpdateInvestigationRequest, fallback: string) {
   busy.value = true;
@@ -68,7 +85,7 @@ async function save(patch: UpdateInvestigationRequest, fallback: string) {
 }
 
 function edit(field: Field) {
-  if (!canEdit.value) return;
+  if (!canEdit.value || (field === 'assignee_email' && !canAssign.value)) return;
   editing.value = field;
   draft.value = inv.value[field] ?? '';
   void nextTick(() => fieldInput.value?.focus());
@@ -115,9 +132,10 @@ async function reopen() {
 }
 
 async function remove() {
+  if (retained.value && !deleteReason.value.trim()) return;
   busy.value = true;
   try {
-    await store.deleteInvestigation();
+    await store.deleteInvestigation(retained.value ? deleteReason.value.trim() : undefined);
     toast.success('Case deleted');
     router.push('/investigations');
   } catch (e) {
@@ -129,9 +147,20 @@ async function remove() {
   }
 }
 
-function onType(event: Event) {
-  const case_type = (event.target as HTMLSelectElement).value;
-  if (case_type !== inv.value.case_type) void save({ case_type }, 'Could not change the case type');
+async function onType(event: Event) {
+  const select = event.target as HTMLSelectElement;
+  const case_type = select.value;
+  if (case_type === inv.value.case_type) return;
+  const ok = await confirmAction({
+    title: `Change the type to “${store.caseTypeLabel(case_type)}”?`,
+    message: 'The case takes the new type’s vocabularies, stages, fields and deadline. Roles and tags already set stay.',
+    confirmLabel: 'Change type',
+  });
+  if (!ok) {
+    select.value = inv.value.case_type;
+    return;
+  }
+  void save({ case_type }, 'Could not change the case type');
 }
 
 // The case type's fields (06 §1), edited in place.
@@ -158,7 +187,32 @@ async function commitField(f: CaseTypeField) {
 function toggleMenu() {
   showMenu.value = !showMenu.value;
   confirmDelete.value = false;
+  deleteReason.value = '';
 }
+
+// The "…" menu closes with Escape, a click outside it, or once an entry is chosen.
+const menuWrap = ref<HTMLElement | null>(null);
+function onDocumentPointer(event: PointerEvent) {
+  if (menuWrap.value && !menuWrap.value.contains(event.target as Node)) showMenu.value = false;
+}
+function onDocumentKey(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return;
+  event.stopPropagation();
+  showMenu.value = false;
+}
+watch(showMenu, (open) => {
+  if (open) {
+    document.addEventListener('pointerdown', onDocumentPointer, true);
+    document.addEventListener('keydown', onDocumentKey, true);
+  } else {
+    document.removeEventListener('pointerdown', onDocumentPointer, true);
+    document.removeEventListener('keydown', onDocumentKey, true);
+  }
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointer, true);
+  document.removeEventListener('keydown', onDocumentKey, true);
+});
 </script>
 
 <template>
@@ -181,8 +235,11 @@ function toggleMenu() {
         v-else
         :class="{ editable: canEdit }"
         :title="canEdit ? 'Click to rename' : undefined"
+        :tabindex="canEdit ? 0 : undefined"
+        :role="canEdit ? 'button' : undefined"
         data-testid="investigation-title"
         @click="edit('title')"
+        @keydown.enter.prevent="edit('title')"
       >
         {{ inv.title }}
       </h1>
@@ -192,6 +249,7 @@ function toggleMenu() {
         class="status-select"
         :class="`status-${inv.status}`"
         :value="inv.status"
+        aria-label="Status"
         :disabled="!inv.has_write_access || busy || inv.status === 'closed'"
         :title="inv.status === 'closed' ? 'Closed by a decision; reopen it from the … menu' : undefined"
         data-testid="case-status"
@@ -202,6 +260,7 @@ function toggleMenu() {
       <select
         v-if="stages.length || inv.stage"
         class="status-select stage"
+        aria-label="Stage"
         :value="inv.stage ?? ''"
         :disabled="!canEdit || busy"
         data-testid="case-stage"
@@ -224,7 +283,7 @@ function toggleMenu() {
       </span>
 
       <button
-        v-if="store.decisionProposal && canEdit && !pendingReview"
+        v-if="store.decisionProposal && canDecide"
         class="badge review proposal"
         data-testid="decision-proposal-badge"
         title="An agent proposed a decision: review it in the decision panel"
@@ -232,7 +291,13 @@ function toggleMenu() {
       >
         Decision proposed
       </button>
-      <span v-if="pendingReview" class="badge review" data-testid="review-pending" title="Four eyes: another person approves it in the dossier">Decision waiting for review</span>
+      <RouterLink
+        v-if="pendingReview"
+        :to="`/investigations/${inv.id}?mode=dossier#decisions`"
+        class="badge review"
+        data-testid="review-pending"
+        title="Four eyes: another person approves it in the dossier"
+      >Decision waiting for review</RouterLink>
 
       <span v-if="suggested" class="badge suggested" data-testid="suggested-badge">● {{ suggested }} {{ suggested === 1 ? 'suggestion' : 'suggestions' }}</span>
 
@@ -245,7 +310,7 @@ function toggleMenu() {
           {{ props.mode === 'dossier' ? 'Canvas' : 'Dossier' }}
         </RouterLink>
         <button
-          v-if="canEdit && !pendingReview"
+          v-if="canDecide"
           class="btn btn-primary btn-sm"
           data-testid="case-decide"
           @click="emit('decide')"
@@ -254,38 +319,54 @@ function toggleMenu() {
         </button>
         <button class="btn btn-outline btn-sm" title="Case settings" aria-label="Case settings" data-testid="case-settings-btn" @click="emit('settings')">⚙</button>
         <button
-          v-if="inv.can_manage"
+          v-if="canShare"
           class="btn btn-outline btn-sm"
           data-testid="case-share"
           @click="showShare = true"
         >
           Share<template v-if="inv.shared_with.length"> · {{ inv.shared_with.length }}</template>
         </button>
-        <span class="menu-wrap">
-          <button class="btn btn-outline btn-sm" aria-label="More actions" data-testid="case-menu" @click="toggleMenu">
+        <span ref="menuWrap" class="menu-wrap">
+          <button
+            class="btn btn-outline btn-sm"
+            aria-label="More actions"
+            title="More actions"
+            aria-haspopup="menu"
+            :aria-expanded="showMenu"
+            data-testid="case-menu"
+            @click="toggleMenu"
+          >
             …
           </button>
-          <div v-if="showMenu" class="menu" data-testid="case-menu-list">
-            <RouterLink to="/settings/agents" class="menu-item" data-testid="agents-link">Agent tokens…</RouterLink>
+          <div v-if="showMenu" class="menu" role="menu" data-testid="case-menu-list">
+            <RouterLink to="/settings/agents" class="menu-item" role="menuitem" data-testid="agents-link" @click="showMenu = false">Agent tokens…</RouterLink>
             <button
               v-if="inv.status === 'closed' && inv.has_write_access"
               class="menu-item"
+              role="menuitem"
               :disabled="busy"
               data-testid="case-reopen"
               @click="reopen"
             >
               Reopen (back to analysis)
             </button>
-            <template v-if="inv.can_manage">
-              <button v-if="!confirmDelete" class="menu-item danger" data-testid="case-delete" @click="confirmDelete = true">
+            <template v-if="canDelete">
+              <button v-if="!confirmDelete" class="menu-item danger" role="menuitem" data-testid="case-delete" @click="confirmDelete = true">
                 Delete case…
               </button>
               <div v-else class="confirm" data-testid="case-delete-confirm">
                 <span>Delete “{{ inv.title }}” and everything in it?</span>
-                <button class="btn btn-danger btn-sm" :disabled="busy" data-testid="case-delete-yes" @click="remove">Delete</button>
+                <template v-if="retained">
+                  <span class="muted">A decision closed it: it is under retention. As a superuser you may delete it with a reason, kept in the audit log.</span>
+                  <input v-model="deleteReason" class="form-control" placeholder="Reason" aria-label="Reason for deleting a retained case" data-testid="case-delete-reason" />
+                </template>
+                <button class="btn btn-danger btn-sm" :disabled="busy || (retained && !deleteReason.trim())" data-testid="case-delete-yes" @click="remove">Delete</button>
                 <button class="btn btn-outline btn-sm" @click="confirmDelete = false">Keep</button>
               </div>
             </template>
+            <p v-else-if="inv.can_manage && retained" class="menu-note muted" data-testid="case-retained">
+              Closed by a decision: kept for its retention period, it cannot be deleted.
+            </p>
           </div>
         </span>
       </span>
@@ -294,7 +375,15 @@ function toggleMenu() {
     <div class="row meta">
       <span class="field">
         <span class="muted">Type</span>
-        <select class="chip" :value="inv.case_type" :disabled="!canEdit" data-testid="case-type" @change="onType">
+        <select
+          class="chip"
+          :value="inv.case_type"
+          :disabled="!canEdit || typeLocked"
+          :title="typeLocked ? 'The case has a decision: its type no longer changes' : undefined"
+          aria-label="Case type"
+          data-testid="case-type"
+          @change="onType"
+        >
           <option v-for="t in store.caseTypes" :key="t.slug" :value="t.slug">{{ t.label }}</option>
           <option v-if="!store.caseTypes.some((t) => t.slug === inv.case_type)" :value="inv.case_type">{{ store.caseTypeLabel(inv.case_type) }}</option>
         </select>
@@ -336,7 +425,14 @@ function toggleMenu() {
           @keydown.esc.prevent="cancel"
           @blur="commit"
         />
-        <button v-else class="chip" :disabled="!canEdit" data-testid="case-assignee" @click="edit('assignee_email')">
+        <button
+          v-else
+          class="chip"
+          :disabled="!canAssign"
+          :title="canEdit && !inv.can_manage ? 'Only who can share the case assigns it' : undefined"
+          data-testid="case-assignee"
+          @click="edit('assignee_email')"
+        >
           {{ inv.assignee_email || inv.owner_email }}
         </button>
       </span>
@@ -360,11 +456,38 @@ function toggleMenu() {
       </span>
     </div>
 
+    <p v-if="inv.status === 'closed'" class="banner" data-testid="case-readonly-banner">
+      Closed by a decision: read only.<template v-if="inv.has_write_access"> Reopen it from the … menu to change it.</template>
+    </p>
+    <p v-else-if="!inv.has_write_access" class="banner" data-testid="case-readonly-banner">
+      Read only: shared with you as a viewer.
+    </p>
+
     <ShareDialog :open="showShare" @close="showShare = false" />
   </header>
 </template>
 
 <style scoped>
+.banner {
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.menu-note {
+  max-width: 240px;
+  margin: 4px 8px;
+  font-size: 12px;
+}
+
+h1.editable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .case-header {
   display: flex;
   flex-direction: column;

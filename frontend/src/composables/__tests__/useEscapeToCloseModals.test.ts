@@ -40,4 +40,27 @@ describe('useEscapeToCloseModals', () => {
     expect(wrapper.find('[data-testid="modal"]').exists()).toBe(false);
     wrapper.unmount();
   });
+
+  it('closes a side drawer, and a modal over it first (UX-1)', async () => {
+    const Drawer = defineComponent({
+      setup() {
+        useEscapeToCloseModals();
+        const drawer = ref(true);
+        const modal = ref(true);
+        const close = (flag: typeof drawer) => (e: MouseEvent) => e.target === e.currentTarget && (flag.value = false);
+        return () => [
+          drawer.value ? h('div', { class: 'drawer-overlay', onClick: close(drawer) }, [h('aside', { 'data-testid': 'drawer' })]) : null,
+          modal.value ? h('div', { class: 'modal-overlay', onClick: close(modal) }, [h('div', { 'data-testid': 'over' })]) : null,
+        ];
+      },
+    });
+    const wrapper = mount(Drawer, { attachTo: document.body });
+    escape();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="over"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="drawer"]').exists()).toBe(true);
+    escape();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="drawer"]').exists()).toBe(false);
+  });
 });

@@ -3,6 +3,7 @@
 import { ref } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { confirmAction } from '@/composables/useConfirm';
 import type { ShareRole } from '@/types/investigation';
 
 defineProps<{ open: boolean }>();
@@ -34,8 +35,19 @@ async function share() {
   if (await run(() => store.shareInvestigation(target, role.value), 'Failed to share')) email.value = '';
 }
 
-function unshare(target: string) {
-  void run(() => store.unshareInvestigation(target), 'Failed to remove the share');
+async function unshare(target: string) {
+  const ok = await confirmAction({
+    title: `Stop sharing with ${target}?`,
+    message: 'They lose access to the case at once; the journal keeps what they did.',
+    confirmLabel: 'Remove access',
+    danger: true,
+  });
+  if (ok) await run(() => store.unshareInvestigation(target), 'Failed to remove the share');
+}
+
+/** Changing a share's role: the share endpoint updates an existing one. */
+function changeRole(target: string, next: ShareRole) {
+  void run(() => store.shareInvestigation(target, next), 'Failed to change the role');
 }
 </script>
 
@@ -72,7 +84,17 @@ function unshare(target: string) {
       <ul class="share-list" data-testid="share-list">
         <li v-for="s in store.current.shared_with" :key="s.email" :data-testid="`share-row-${s.email}`">
           <span>{{ s.email }}</span>
-          <span class="perm">{{ s.role === 'editor' ? 'can write' : 'can read' }}</span>
+          <select
+            class="perm"
+            :value="s.role"
+            :disabled="busy"
+            :aria-label="`Role of ${s.email}`"
+            :data-testid="`share-role-${s.email}`"
+            @change="changeRole(s.email, ($event.target as HTMLSelectElement).value as ShareRole)"
+          >
+            <option value="reader">can read</option>
+            <option value="editor">can write</option>
+          </select>
           <button
             type="button"
             class="link-btn"

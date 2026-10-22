@@ -732,8 +732,9 @@ class ApiService {
     return response.data;
   }
 
-  async deleteInvestigation(id: string): Promise<void> {
-    await this.client.delete(`/api/investigations/${id}`);
+  /** `reason`: a superuser deleting a case under retention (otherwise 409 INVESTIGATION_RETAINED). */
+  async deleteInvestigation(id: string, reason?: string): Promise<void> {
+    await this.client.delete(`/api/investigations/${id}`, { params: reason ? { reason } : {} });
   }
 
   async shareInvestigation(id: string, email: string, role: ShareRole): Promise<void> {

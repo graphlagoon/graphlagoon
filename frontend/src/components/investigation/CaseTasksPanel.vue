@@ -9,6 +9,7 @@ import { computed, ref } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useAuthStore } from '@/stores/auth';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { confirmAction } from '@/composables/useConfirm';
 import { formatDate } from '@/utils/format';
 import { TASK_STATE_LABELS, taskOverdue } from '@/utils/investigationStatus';
 import type { CaseAnnotation, TaskState, TaskValue } from '@/types/investigation';
@@ -67,6 +68,17 @@ async function act(action: () => Promise<unknown>, fallback: string) {
 }
 
 const setState = (t: CaseAnnotation, state: TaskState) => act(() => store.updateTask(t.id, { state }), 'Could not update the task');
+/** A cancelled task cannot be reopened: asked first. */
+async function cancelTask(t: CaseAnnotation) {
+  const ok = await confirmAction({
+    title: `Cancel “${value(t).title}”?`,
+    message: 'A cancelled task stays in the record but cannot be reopened.',
+    confirmLabel: 'Cancel task',
+    cancelLabel: 'Keep it',
+    danger: true,
+  });
+  if (ok) await setState(t, 'cancelled');
+}
 const toggle = (t: CaseAnnotation) => setState(t, value(t).state === 'done' ? 'open' : 'done');
 
 // --- add ---------------------------------------------------------------------
@@ -133,7 +145,7 @@ async function add() {
         class="link-btn"
         :disabled="busy"
         :data-testid="`task-cancel-${t.id}`"
-        @click="setState(t, 'cancelled')"
+        @click="cancelTask(t)"
       >
         cancel
       </button>

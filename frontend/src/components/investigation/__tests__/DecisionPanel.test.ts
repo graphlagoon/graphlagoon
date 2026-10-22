@@ -30,6 +30,7 @@ const PROPOSAL = {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  vi.spyOn(window, 'confirm').mockReturnValue(true) // confirmAction falls back to it without the dialog host
   const store = useInvestigationStore()
   store.current = { id: 'inv-1', status: 'analysis', case_type: 'fraud_ring', has_write_access: true, settings: {}, state: {}, decisions: [] } as any
   store.caseTypes = [RING] as any

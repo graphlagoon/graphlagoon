@@ -12,6 +12,7 @@ import { useCurrentCaseStore } from '@/stores/currentCase';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
+import { usePermissions } from '@/composables/usePermissions';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { CaseItem, CaseQuerySpec, CreateItemRequest, ItemAnchor, ItemProvenance } from '@/types/investigation';
 import type { TemplateParameter } from '@/types/graph';
@@ -72,6 +73,7 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
   const current = useCurrentCaseStore();
   const investigation = useInvestigationStore();
   const toast = useToast();
+  const { can } = usePermissions();
   let router: ReturnType<typeof useRouter> | null = null;
   try {
     router = useRouter();
@@ -164,7 +166,12 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
     if (source instanceof File) {
       const id = target();
       if (!id) return null;
-      const table = /\.(csv|tsv|txt)$/i.test(source.name);
+      if (!can('investigation.upload')) {
+        toast.error('Adding files needs the "Upload investigation files" permission: ask an administrator.');
+        return null;
+      }
+      // CSV and TSV are tables; a .txt is a document (a fixed-width table goes through Upload, with a mapping).
+      const table = /\.(csv|tsv)$/i.test(source.name);
       try {
         const item = await api.uploadInvestigationItem(id, source, {
           kind: table ? 'table' : 'document',
