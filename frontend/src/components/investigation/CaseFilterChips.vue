@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * Filter chips over the canvas (05 §3): source, role, tag, group, type, time
- * window and the audited 👁 toggle. Multi-value, visual only (the layout
- * stays). Saved views keep the chips, the layout and the closed groups (05 §5).
+ * Filter chips over the canvas (05 §3): source, role, tag, group, type and time
+ * window. Multi-value, visual only (the layout stays). Saved views keep the
+ * chips, the layout, the closed groups (05 §5) and the graphs on the canvas.
  */
 import { computed, ref } from 'vue';
 import { X } from 'lucide-vue-next';

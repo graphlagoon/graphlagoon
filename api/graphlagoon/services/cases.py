@@ -487,7 +487,7 @@ async def _counts(session, ids: list) -> dict:
     return {i: (items[i], suggested[i]) for i in ids}
 
 
-QUEUE_SORTS = ("updated_at", "created_at", "title", "deadline")
+QUEUE_SORTS = ("updated_at", "created_at", "title", "deadline", "case_type", "status", "assignee")
 
 
 def _field_filter(value: Any, expr: str) -> bool:
@@ -516,6 +516,13 @@ def _sort_key(sort: str):
         return lambda inv: d["due_at"].replace(tzinfo=None) if (d := deadline_of(inv)) else None
     if key == "title":
         return lambda inv: (inv.title or "").lower()
+    if key == "case_type":
+        return lambda inv: inv.case_type or ""
+    if key == "status":
+        # The workflow order, not the alphabet.
+        return lambda inv: STATUSES.index(inv.status) if inv.status in STATUSES else len(STATUSES)
+    if key == "assignee":
+        return lambda inv: (inv.assignee_email or inv.owner_email or "").lower()
     if key not in QUEUE_SORTS:
         raise InvestigationError(422, "INVALID_SORT", f"sort is one of {', '.join(QUEUE_SORTS)} or field.<id>, with - for descending")
     return lambda inv: getattr(inv, key) or datetime.min
@@ -576,12 +583,17 @@ async def list_investigations(
     sort: str = "-updated_at",
     limit: int = 50,
     offset: int = 0,
+    scope: Optional[str] = None,
 ) -> dict:
     """A page of the queue (06 §2b): filters, then sort, then ``limit``/``offset``.
     ``exploration_id``: only cases with that exploration as a graph item;
     ``deadline``: ``urgent`` (incl. overdue) or ``overdue``; ``fields``: ``{id:
-    "gte:100000"}``; ``status`` may list several (``open,analysis``). ``counts``
-    are over every case the caller reads.
+    "gte:100000"}``; ``status`` may list several (``open,analysis``).
+    ``assignee`` matches whoever the case is on: its assignee, else its owner
+    (what the queue shows). ``scope``: ``owned`` (the caller's cases) or
+    ``shared`` (shared with the caller). ``counts`` (per status, deadline,
+    suggestions) are over the cases the other filters keep, so they read as
+    "of these, how many…".
 
     shortcut: the filters run in Python over the readable cases (the browser
     gets one page); push them to SQL when an org reaches tens of thousands."""
@@ -590,30 +602,45 @@ async def list_investigations(
         rows = await _readable_cases(session, user_email, exploration_id)
         all_counts = await _counts(session, [inv.id for inv in rows])
         deadlines = {inv.id: deadline_of(inv) for inv in rows}
-        counts = {s: sum(inv.status == s for inv in rows) for s in STATUSES}
-        counts.update(
-            total=len(rows),
-            urgent=sum(bool(d and d["urgent"]) for d in deadlines.values()),
-            overdue=sum(bool(d and d["overdue"]) for d in deadlines.values()),
-            suggested=sum(all_counts[inv.id][1] > 0 for inv in rows),
-        )
         needle = (q or "").strip().lower()
         statuses = {x for x in (status or "").split(",") if x}
+        me = nominal_email(user_email)
+        who = nominal_email(assignee) if assignee else None
+
+        def in_scope(inv: Any) -> bool:
+            """The filters that are not counted: what the counters are counts of."""
+            owner = nominal_email(inv.owner_email or "")
+            return (
+                (who is None or nominal_email(inv.assignee_email or inv.owner_email or "") == who)
+                and (case_type is None or inv.case_type == case_type)
+                and (external_ref is None or inv.external_ref == external_ref)
+                and (scope is None or (owner == me) == (scope == "owned"))
+                and (
+                    not needle
+                    or needle in (inv.title or "").lower()
+                    or needle in (inv.description or "").lower()
+                    or str(inv.id).startswith(needle)  # the #ab12 a case is known by
+                )
+                and all(_field_filter((inv.fields or {}).get(fid), expr) for fid, expr in (fields or {}).items())
+            )
 
         def keep(inv: Any) -> bool:
             d = deadlines[inv.id]
             return (
                 (not statuses or inv.status in statuses)
-                and (assignee is None or inv.assignee_email == assignee)
-                and (case_type is None or inv.case_type == case_type)
-                and (external_ref is None or inv.external_ref == external_ref)
-                and (not needle or needle in (inv.title or "").lower() or needle in (inv.description or "").lower())
                 and (deadline is None or bool(d and (d["overdue"] if deadline == "overdue" else d["urgent"])))
                 and (suggested is None or (all_counts[inv.id][1] > 0) == suggested)
-                and all(_field_filter((inv.fields or {}).get(fid), expr) for fid, expr in (fields or {}).items())
             )
 
-        matched = [inv for inv in rows if keep(inv)]
+        scoped = [inv for inv in rows if in_scope(inv)]
+        counts = {s: sum(inv.status == s for inv in scoped) for s in STATUSES}
+        counts.update(
+            total=len(scoped),
+            urgent=sum(bool((d := deadlines[inv.id]) and d["urgent"]) for inv in scoped),
+            overdue=sum(bool((d := deadlines[inv.id]) and d["overdue"]) for inv in scoped),
+            suggested=sum(all_counts[inv.id][1] > 0 for inv in scoped),
+        )
+        matched = [inv for inv in scoped if keep(inv)]
         # A case without the sort value (no such field, no deadline) goes last whichever the direction.
         present = [inv for inv in matched if key(inv) is not None]
         matched = sorted(present, key=key, reverse=sort.startswith("-")) + [inv for inv in matched if key(inv) is None]

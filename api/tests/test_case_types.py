@@ -174,12 +174,38 @@ def test_the_queue_filters_sorts_pages_and_counts(client):
     assert [i["title"] for i in big["items"]] == ["Case 1"]
     assert client.get("/api/investigations?field.merchant_id=M-2", headers=h(USER)).json()["total"] == 1
     assert client.get("/api/investigations?q=other", headers=h(USER)).json()["total"] == 1
-    assert page["counts"]["total"] == 5 and page["counts"]["open"] == 5
+    # Counters are over what the other filters keep: of the 4 merchant reviews, how many are open.
+    assert page["counts"]["total"] == 4 and page["counts"]["open"] == 4
+    assert client.get("/api/investigations", headers=h(USER)).json()["counts"]["total"] == 5
     assert client.get("/api/investigations?status=open,analysis", headers=h(USER)).json()["total"] == 5
     assert client.get("/api/investigations?status=decided", headers=h(USER)).json()["total"] == 0
     assert client.get("/api/investigations?sort=nope", headers=h(USER)).status_code == 422
     # Only the cases the caller reads.
     assert client.get("/api/investigations", headers=h("bia@example.com")).json()["total"] == 0
+
+
+def test_the_queue_assignee_is_whoever_the_case_is_on_and_scope_splits_owned_from_shared(client):
+    """UX-1: "Assignee: me" keeps my unassigned cases (the queue shows them as mine)."""
+    mine = _case(client, title="Mine, unassigned")
+    _case(client, title="Mine, on Bia", assignee_email="bia@example.com")
+    other = client.post("/api/investigations", json={"title": "Shared with me"}, headers=h("bia@example.com")).json()
+    client.post(f"/api/investigations/{other['id']}/share", json={"email": USER, "role": "editor"}, headers=h("bia@example.com"))
+
+    on_me = client.get("/api/investigations", params={"assignee": USER}, headers=h(USER)).json()
+    assert [i["title"] for i in on_me["items"]] == ["Mine, unassigned"]
+    assert on_me["items"][0]["id"] == mine["id"]
+    owned = client.get("/api/investigations", params={"scope": "owned"}, headers=h(USER)).json()
+    assert sorted(i["title"] for i in owned["items"]) == ["Mine, on Bia", "Mine, unassigned"]
+    shared = client.get("/api/investigations", params={"scope": "shared"}, headers=h(USER)).json()
+    assert [i["title"] for i in shared["items"]] == ["Shared with me"]
+    assert shared["counts"]["total"] == 1
+    assert client.get("/api/investigations", params={"scope": "nope"}, headers=h(USER)).status_code == 422
+
+    by_assignee = client.get("/api/investigations", params={"sort": "assignee"}, headers=h(USER)).json()
+    assert [i["title"] for i in by_assignee["items"]][0] == "Mine, unassigned"  # ana@… (owner, unassigned) before bia@…
+    assert client.get("/api/investigations", params={"q": mine["id"][:6]}, headers=h(USER)).json()["total"] == 1  # by id
+    for key in ("case_type", "-status", "created_at"):
+        assert client.get("/api/investigations", params={"sort": key}, headers=h(USER)).status_code == 200
 
 
 def test_sla_hours_give_a_deadline_with_urgency(client, monkeypatch):

@@ -3916,7 +3916,7 @@
           "cases"
         ],
         "summary": "List Investigations",
-        "description": "A page of the queue (06 §2b). Field filters are ``field.<id>=<value>``\nor ``field.<id>=gte:<n>`` (also ``lte:``, ``contains:``); ``sort`` is\n``updated_at | created_at | title | deadline | field.<id>``, ``-`` first\nfor descending.",
+        "description": "A page of the queue (06 §2b). Field filters are ``field.<id>=<value>``\nor ``field.<id>=gte:<n>`` (also ``lte:``, ``contains:``); ``sort`` is\n``updated_at | created_at | title | deadline | case_type | status | assignee\n| field.<id>``, ``-`` first for descending. ``assignee`` matches the\nassignee, else the owner; ``scope`` is ``owned`` or ``shared``. ``counts``\nare over the cases the other filters keep (all but status, deadline and\nsuggestions).",
         "operationId": "cases_list_investigations",
         "parameters": [
           {
@@ -4084,6 +4084,26 @@
               "minimum": 0,
               "default": 0,
               "title": "Offset"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "owned",
+                    "shared"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope"
             }
           }
         ],

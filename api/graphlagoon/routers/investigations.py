@@ -98,16 +98,20 @@ async def list_investigations(
     sort: str = "-updated_at",
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    scope: Optional[Literal["owned", "shared"]] = None,
 ):
     """A page of the queue (06 §2b). Field filters are ``field.<id>=<value>``
     or ``field.<id>=gte:<n>`` (also ``lte:``, ``contains:``); ``sort`` is
-    ``updated_at | created_at | title | deadline | field.<id>``, ``-`` first
-    for descending."""
+    ``updated_at | created_at | title | deadline | case_type | status | assignee
+    | field.<id>``, ``-`` first for descending. ``assignee`` matches the
+    assignee, else the owner; ``scope`` is ``owned`` or ``shared``. ``counts``
+    are over the cases the other filters keep (all but status, deadline and
+    suggestions)."""
     fields = {k[len("field."):]: v for k, v in request.query_params.items() if k.startswith("field.")}
     try:
         return await service.list_investigations(
             get_current_user(request), status, assignee, case_type, exploration_id, external_ref, q, deadline,
-            suggested, fields, sort, limit, offset,
+            suggested, fields, sort, limit, offset, scope,
         )
     except service.InvestigationError as exc:
         raise _http(exc)

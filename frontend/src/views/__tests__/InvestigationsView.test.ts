@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/vue'
 import { setActivePinia, createPinia } from 'pinia'
+import { flushPromises } from '@vue/test-utils'
 import InvestigationsView from '@/views/InvestigationsView.vue'
 
 const push = vi.fn()
-vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
+const replace = vi.fn()
+const routeQuery: { value: Record<string, string> } = { value: {} }
+vi.mock('vue-router', () => ({ useRouter: () => ({ push, replace }), useRoute: () => ({ query: routeQuery.value }) }))
 vi.mock('@/services/api', () => ({
-  api: { getInvestigationPage: vi.fn(), getCaseTypes: vi.fn(), createInvestigation: vi.fn() },
+  api: { getInvestigationPage: vi.fn(), getCaseTypes: vi.fn(), createInvestigation: vi.fn(), getTasks: vi.fn(async () => []) },
 }))
 
 import { api } from '@/services/api'
@@ -47,6 +50,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   vi.useRealTimers()
+  routeQuery.value = {}
   vi.mocked(api.getInvestigationPage).mockResolvedValue(page() as any)
   vi.mocked(api.getCaseTypes).mockResolvedValue([GENERAL, MERCHANT] as any)
 })
@@ -141,5 +145,62 @@ describe('InvestigationsView', () => {
     window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true, permissions: ['investigation.create'] }
     const again = await renderView()
     expect(again.container.querySelector('[data-testid="new-investigation-btn"]')).not.toBeNull()
+  })
+
+  it('keeps filters, sort and page in the URL and reads them back (Back returns to the same list)', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
+    routeQuery.value = { q: 'mule', status: 'all', scope: 'shared', sort: 'status', page: '2' }
+    const first = await renderView()
+    expect(api.getInvestigationPage).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'mule', scope: 'shared', sort: 'status', offset: 50 }))
+    expect(vi.mocked(api.getInvestigationPage).mock.calls.at(-1)![0]!.status).toBeUndefined()
+
+    first.unmount()
+    vi.useFakeTimers()
+    routeQuery.value = {}
+    const { getByTestId } = await renderView()
+    await fireEvent.update(getByTestId('investigations-scope'), 'owned')
+    await fireEvent.click(getByTestId('sort-assignee'))
+    expect((await lastQuery())).toMatchObject({ scope: 'owned', sort: 'assignee' })
+    expect(replace).toHaveBeenLastCalledWith({ query: { scope: 'owned', sort: 'assignee' } })
+  })
+
+  it('a filter with no match offers to clear the filters; a failed load offers Retry', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
+    vi.useFakeTimers()
+    vi.mocked(api.getInvestigationPage).mockResolvedValue({ ...page([], 0), counts: { total: 0 } } as any)
+    const { getByTestId, queryByTestId } = await renderView()
+    expect(getByTestId('investigations-empty')).toBeTruthy() // no filter: the "no cases" state
+    await fireEvent.update(getByTestId('investigations-search'), 'zzz')
+    await lastQuery()
+    expect(queryByTestId('investigations-empty')).toBeNull()
+    await fireEvent.click(getByTestId('investigations-clear'))
+    expect((await lastQuery()).q).toBeUndefined()
+
+    vi.mocked(api.getInvestigationPage).mockRejectedValueOnce(new Error('boom'))
+    await fireEvent.update(getByTestId('investigations-search'), 'x')
+    await lastQuery()
+    expect(getByTestId('investigations-error')).toBeTruthy()
+    vi.mocked(api.getInvestigationPage).mockResolvedValue(page() as any)
+    await fireEvent.click(getByTestId('investigations-retry'))
+    await vi.advanceTimersByTimeAsync(10)
+    expect(queryByTestId('investigations-error')).toBeNull()
+  })
+
+  it('"My tasks" lists the open tasks on me across cases; ?new=1 opens the new-case form', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true, permissions: ['investigation.create'] }
+    vi.mocked(api.getTasks).mockResolvedValue([
+      { id: 't1', investigation_id: 'aaaaaaaa-1', case_title: 'Mule network', value: { title: 'Pull statements', due_at: null }, overdue: false },
+    ] as any)
+    const { getByTestId, unmount } = await renderView()
+    await fireEvent.click(getByTestId('queue-tab-tasks'))
+    await flushPromises()
+    expect(api.getTasks).toHaveBeenCalledWith({ mine: true, state: 'open' })
+    expect(getByTestId('my-task-t1').textContent).toContain('Pull statements')
+    expect(getByTestId('my-task-t1').textContent).toContain('Mule network')
+
+    unmount()
+    routeQuery.value = { new: '1' }
+    const second = await renderView()
+    expect(second.getByTestId('new-investigation-title')).toBeTruthy()
   })
 })

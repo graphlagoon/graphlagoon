@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
  * Top-bar chip `[● title · #id ▾]` (05 §2): the current case, app-wide.
- * Opens a quick switch (5 recent + search over the queue) and "New case".
+ * Opens a quick switch (5 recent + a search the server runs, by title or id) and
+ * "New case": a quick one (General type) or the full form with type and fields.
  * Opening a case (`/investigations/:id`) or a graph with `?case=` makes it
  * current; a case that no longer exists or was unshared clears the chip.
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Briefcase, ChevronDown, Plus } from 'lucide-vue-next';
 import { api } from '@/services/api';
@@ -23,32 +24,56 @@ const toast = useToast();
 
 const open = ref(false);
 const search = ref('');
-const all = ref<Investigation[]>([]);
+const found = ref<Investigation[]>([]);
 const loading = ref(false);
+const searchError = ref<string | null>(null);
 const newTitle = ref('');
 const creating = ref(false);
 
-const matches = computed(() => {
-  const q = search.value.trim().toLowerCase();
-  const writable = all.value.filter((i) => i.status !== 'closed');
-  if (!q) return [];
-  return writable.filter((i) => i.title.toLowerCase().includes(q) || i.id.startsWith(q)).slice(0, 8);
-});
+/** Open cases only: closed ones take no new material. */
+const matches = computed(() => found.value.filter((i) => i.status !== 'closed').slice(0, 8));
 const label = computed(() => (store.hasCase ? `${store.title || 'Case'} · ${store.shortId}` : 'No current case'));
 
-async function toggle() {
+// The server searches (title, description or id); the chip no longer downloads the whole queue.
+let timer: ReturnType<typeof setTimeout> | null = null;
+let seq = 0;
+watch(search, (value) => {
+  if (timer) clearTimeout(timer);
+  const q = value.trim().replace(/^#/, '');
+  searchError.value = null;
+  if (!q) {
+    found.value = [];
+    return;
+  }
+  const mine = ++seq;
+  loading.value = true;
+  timer = setTimeout(async () => {
+    try {
+      const page = await api.getInvestigationPage({ q, status: 'open,analysis', limit: 20 });
+      if (mine === seq) found.value = page.items;
+    } catch (e) {
+      if (mine === seq) {
+        found.value = [];
+        searchError.value = getErrorMessage(e, 'Could not search the cases');
+      }
+    } finally {
+      if (mine === seq) loading.value = false;
+    }
+  }, 250);
+});
+onBeforeUnmount(() => timer && clearTimeout(timer));
+
+function toggle() {
   open.value = !open.value;
   if (!open.value) return;
   search.value = '';
   newTitle.value = '';
-  loading.value = true;
-  try {
-    all.value = await api.getInvestigations();
-  } catch {
-    all.value = [];
-  } finally {
-    loading.value = false;
-  }
+}
+
+/** The queue's full form: the case type and its required fields. */
+function fullForm() {
+  open.value = false;
+  void router.push({ path: '/investigations', query: { new: '1' } });
 }
 
 function pick(inv: { id: string; title: string }) {
@@ -106,7 +131,9 @@ watch(
         <button v-for="inv in matches" :key="inv.id" class="menu-item" :data-testid="`current-case-pick-${inv.id}`" @click="pick(inv)">
           {{ inv.title }} <span class="muted">#{{ inv.id.slice(0, 4) }}</span>
         </button>
-        <p v-if="!matches.length && !loading" class="muted hint">No case found.</p>
+        <p v-if="searchError" class="error-message hint" data-testid="current-case-search-error">{{ searchError }}</p>
+        <p v-else-if="loading" class="muted hint">Searching…</p>
+        <p v-else-if="!matches.length" class="muted hint">No open case found.</p>
       </template>
       <template v-else>
         <p class="section">Recent</p>
@@ -127,6 +154,7 @@ watch(
         <button class="btn btn-primary btn-sm" :disabled="!newTitle.trim() || creating" data-testid="current-case-new-submit" @click="createCase">
           <Plus :size="12" /> New case
         </button>
+        <button class="link-btn more" data-testid="current-case-new-full" @click="fullForm">With a type and its fields…</button>
       </div>
       <button v-if="store.hasCase" class="menu-item muted" data-testid="current-case-clear" @click="store.setCurrentCase(null); open = false">
         No current case
@@ -231,6 +259,7 @@ watch(
 
 .new-case {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding-top: 6px;
   border-top: 1px solid var(--border-color, #ddd);
@@ -243,5 +272,15 @@ watch(
 
 .muted {
   color: var(--text-muted, #666);
+}
+.more {
+  flex-basis: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
 }
 </style>
