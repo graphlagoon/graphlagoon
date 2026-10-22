@@ -20,7 +20,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   const inv = useInvestigationStore()
-  inv.current = { id: 'inv-1', status: 'analysis', has_write_access: true, settings: {}, state: {}, kind_preset: 'livre' } as any
+  inv.current = { id: 'inv-1', status: 'analysis', has_write_access: true, settings: {}, state: { canvas_items: 'all' }, kind_preset: 'livre' } as any
   inv.items = [
     { id: 's1', kind: 'graph', subkind: 'exploration_ref', title: 'Pix', tags: [], status: 'confirmed', accessible: true, current_version: 0, pinned: [], provenance: {} },
     { id: 's2', kind: 'graph', subkind: 'exploration_ref', title: 'KYC', tags: [], status: 'confirmed', accessible: true, current_version: 0, pinned: [], provenance: {} },
@@ -102,7 +102,7 @@ describe('CaseFilterChips (05 §3)', () => {
     await flushPromises()
     expect(api.createInvestigationItem).toHaveBeenCalledWith('inv-1', expect.objectContaining({
       kind: 'graph', subkind: 'view', title: 'Mulas',
-      content_json: { filters: { sources: [], roles: ['mula'], tags: [], groups: [], types: ['Pessoa'], window: null }, layout: 'force', groups_closed: [] },
+      content_json: { filters: { sources: [], roles: ['mula'], tags: [], groups: [], types: ['Pessoa'], window: null }, layout: 'force', groups_closed: [], canvas_items: 'all' },
     }))
     expect(inv.views.map((v) => v.title)).toEqual(['Mulas'])
 

@@ -81,6 +81,10 @@ describe('investigation store', () => {
     await store.openInvestigation('inv1')
     expect(store.graphItems.map((i) => i.id)).toEqual(['g1', 't1']) // the document is not a graph item
     await store.loadWorkspace()
+    // One graph at a time by default (UX-1): the first item; "all" unifies.
+    expect(store.unified.nodes.map((n) => n.node_id)).toEqual(['Pessoa:1'])
+    await store.showAll()
+    expect(store.allOnCanvas).toBe(true)
     expect(store.unified.nodes.map((n) => n.node_id).sort()).toEqual(['Pessoa:1', 'x@t1'])
     expect(store.contexts.t1.title).toBe('t1') // a mapped table carries its own pseudo-context
 

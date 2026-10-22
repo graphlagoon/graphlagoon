@@ -173,7 +173,7 @@ describe('CaseItemsPanel', () => {
     const store = useInvestigationStore()
     const { getByTestId, queryByTestId, unmount } = render(CaseItemsPanel, { props: { canEdit: true } })
     await fireEvent.click(getByTestId('item-canvas-g1'))
-    expect(store.offCanvas.has('g1')).toBe(true)
+    expect(store.canvasIds.has('g1')).toBe(false)
     expect(store.canvasItems).toEqual([])
     unmount()
     const ro = render(CaseItemsPanel, { props: { canEdit: false } })

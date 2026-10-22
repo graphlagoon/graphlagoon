@@ -54,6 +54,11 @@ export function buildPreview(data: ArrayBuffer, contentType: string | null | und
   return textPreview(text);
 }
 
+/** Items whose versions are rows: what "Use in the dossier" puts in the dossier's tables. */
+export function isTabular(item: Pick<CaseItem, 'kind' | 'query'>): boolean {
+  return item.kind === 'table' || (item.kind === 'query' && item.query?.output !== 'graph');
+}
+
 /** The name a download gets: the uploaded file name, else the title with an extension for its type. */
 export function itemFileName(item: CaseItem): string {
   if (item.provenance?.filename) return item.provenance.filename;

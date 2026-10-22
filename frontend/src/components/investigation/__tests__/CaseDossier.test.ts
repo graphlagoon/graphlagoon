@@ -227,3 +227,41 @@ describe('CaseDossier (mode=dossier)', () => {
     expect(print).toHaveBeenCalled()
   })
 })
+
+describe('CaseDossier notes and documents (UX-1)', () => {
+  const WRITINGS = [
+    { ...base, id: 'n1', kind: 'note', subkind: 'anchored', title: 'Same phone', description: 'Same **phone** as the mule', anchor: { entity_ids: ['a'] }, current_version: 1, created_at: '2026-10-09T10:00:00' },
+    { ...base, id: 'n2', kind: 'note', subkind: 'free', title: 'Agent note', description: null, author_kind: 'agent', current_version: 1, status: 'suggested', created_at: '2026-10-09T10:01:00' },
+    { ...base, id: 'd1', kind: 'document', subkind: 'markdown', title: 'Ring memo', current_version: 1, created_at: '2026-10-09T10:02:00' },
+    { ...base, id: 'd2', kind: 'document', subkind: 'link', title: 'Bank notice', provenance: { url: 'https://example.com/notice' }, current_version: 1, created_at: '2026-10-09T10:03:00' },
+    { ...base, id: 'd3', kind: 'document', subkind: 'upload', title: 'statement.pdf', provenance: { filename: 'statement.pdf' }, current_version: 1, latest: { version: 1, sha256: 'f'.repeat(64), content_type: 'application/pdf', size_bytes: 2048 }, created_at: '2026-10-09T10:04:00' },
+    { ...base, id: 'd4', kind: 'document', subkind: 'markdown', title: 'Rejected draft', status: 'rejected', current_version: 1, created_at: '2026-10-09T10:05:00' },
+    { ...base, id: 'd5', kind: 'document', subkind: 'markdown', title: 'Flagged but not a table', tags: ['dossier'], current_version: 1, created_at: '2026-10-09T10:06:00' },
+  ]
+
+  it('shows every note and document, rendered, with links, files and anchors; tables stay tables', async () => {
+    vi.mocked(api.getInvestigationItems).mockResolvedValue(structuredClone([...ITEMS, ...WRITINGS]) as any)
+    vi.mocked(api.getInvestigationItemContent).mockImplementation(async (_i: string, itemId: string) => {
+      const text = itemId === 'n2' ? 'Body from the version' : itemId === 'd1' ? '# Memo\n- <script>x</script>' : '{}'
+      return new TextEncoder().encode(text).buffer as ArrayBuffer
+    })
+    const { getByTestId, queryByTestId } = render(CaseDossier, { props: { id: 'inv-1' }, global: { stubs } })
+    await flushPromises()
+
+    const section = getByTestId('dossier-documents')
+    expect(getByTestId('dossier-writing-body-n1').innerHTML).toContain('<strong>phone</strong>')
+    expect(within(getByTestId('dossier-writing-n1')).getByText(/^On /)).toBeTruthy()
+    expect(getByTestId('dossier-writing-body-n2').textContent).toContain('Body from the version') // an agent's note has no description
+    expect(within(getByTestId('dossier-writing-n2')).getByText('suggested')).toBeTruthy()
+    const memo = getByTestId('dossier-writing-body-d1').innerHTML
+    expect(memo).toContain('<h3>Memo</h3>')
+    expect(memo).not.toContain('<script>')
+    expect(getByTestId('dossier-link-d2').getAttribute('href')).toBe('https://example.com/notice')
+    expect(getByTestId('dossier-writing-d3').textContent).toContain('application/pdf · 2.0 KB')
+    expect(getByTestId('dossier-download-d3')).toBeTruthy()
+    expect(within(section).queryByText('Rejected draft')).toBeNull()
+    expect(queryByTestId('dossier-table-d5')).toBeNull() // a flagged document is read above, not as an empty table
+    expect(getByTestId('dossier-table-q1')).toBeTruthy()
+    expect(getByTestId('dossier-brief').innerHTML).toContain('<h3>Brief</h3>')
+  })
+})

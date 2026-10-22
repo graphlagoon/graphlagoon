@@ -29,7 +29,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   const inv = useInvestigationStore()
   inv.current = { ...CASE } as any
-  inv.items = [ITEM] as any
+  inv.items = [ITEM, { id: 's1', kind: 'graph', subkind: 'exploration_ref', title: 'KYC', tags: [], status: 'confirmed', accessible: true, current_version: 0, pinned: [], provenance: {}, exploration_id: 'e1', context_id: 'c1' }] as any
   inv.contexts = { c1: { id: 'c1', title: 'KYC', identity_keys: [] } } as any
   inv.sourceGraphs = [
     { id: 's1', contextId: 'c1', nodes: [node('a', 'Person', { name: 'Ana', document: '12345678901' }), node('b', 'Person', { name: 'Bia' }), node('c', 'Person', { name: 'Caio' })], edges: [], state: null, error: null },
@@ -86,7 +86,7 @@ describe('SelectionInspector (05 §3, three states)', () => {
     await fireEvent.click(getByTestId('bulk-save-selection'))
     await flushPromises()
     expect(api.createInvestigationItem).toHaveBeenCalledWith('inv-1', expect.objectContaining({ kind: 'graph', subkind: 'selection', content_json: expect.objectContaining({ unified: true }) }))
-    expect(useInvestigationStore().offCanvas.has('it-1')).toBe(true)
+    expect(useInvestigationStore().canvasIds.has('it-1')).toBe(false)
 
     graph.selectedNodeIds = new Set(['a@c1', 'b@c1'])
     await flushPromises()

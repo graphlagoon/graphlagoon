@@ -21,6 +21,7 @@ beforeEach(async () => {
   const inv = useInvestigationStore()
   inv.current = { id: 'inv-1', status: 'analysis', has_write_access: true, settings: {}, state: {} } as any
   inv.contexts = { ctx: { id: 'ctx', identity_keys: [], edge_semantics: fixture.edge_semantics } } as any
+  inv.items = [{ id: 'src', kind: 'graph', subkind: 'exploration_ref', title: 'src', tags: [], status: 'confirmed', accessible: true, current_version: 0, pinned: [], provenance: {} }] as any
   inv.sourceGraphs = [{ id: 'src', contextId: 'ctx', nodes: fixture.nodes, edges: fixture.edges, state: null, error: null }] as any
   const analyses = useCaseAnalyses()
   nameOf = analyses.nameOf
