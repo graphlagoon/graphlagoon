@@ -193,8 +193,10 @@ version, and any version can be pinned.
 ![Investigation workspace](/screenshots/investigations-workspace.png)
 
 - **One graph at a time.** A case opens on its first graph item; the legend
-  over the canvas lists every graph of the case: click one to show only it,
-  Shift+click to add or remove it, **All graphs** to unify them all. On a
+  over the canvas lists every graph of the case: click one (or click it in the
+  material list) to clear the canvas and show only it, laid out on its own as
+  in its exploration; Shift+click adds it to or removes it from what is shown,
+  keeping their layout; **All graphs** unifies them all. On a
   unified canvas each node gets one colored ring per source it came from (two
   rings: found in two sources and merged). The material's *on canvas* box adds
   or removes one graph too. The choice is saved with the case (and in saved

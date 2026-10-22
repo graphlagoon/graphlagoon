@@ -452,6 +452,12 @@ export const useGraphStore = defineStore('graph', () => {
   // how many node ids overlap the previous graph. Expand does NOT set it, so it
   // stays an incremental update. Consumed (reset) by the canvas on update.
   const freshLayoutRequested = ref(false);
+  /**
+   * The next canvas update starts from nothing: no position carried over from the graph on
+   * screen, even for nodes that stay. A case switching to another graph (UX-1) shows it laid
+   * out on its own, not as a piece of the previous layout.
+   */
+  const positionsResetRequested = ref(false);
   const error = ref<string | null>(null);
 
   // Query error state (for non-blocking alert modal)
@@ -1610,7 +1616,11 @@ export const useGraphStore = defineStore('graph', () => {
   }
 
   /** Loads a unified (or per-source) investigation graph, keeping the selection of entities still present. */
-  function loadInvestigationGraph(mode: InvestigationGraphMode, newNodes: Node[], newEdges: Edge[]) {
+  function loadInvestigationGraph(mode: InvestigationGraphMode, newNodes: Node[], newEdges: Edge[], options: { fresh?: boolean } = {}) {
+    if (options.fresh) {
+      freshLayoutRequested.value = true;
+      positionsResetRequested.value = true;
+    }
     currentContext.value = null;
     currentExploration.value = null;
     // A case shows explorations through its own items (their layers folded in by the server).
@@ -3096,6 +3106,7 @@ export const useGraphStore = defineStore('graph', () => {
     loading,
     loadingMessage,
     freshLayoutRequested,
+    positionsResetRequested,
     // Progressive load
     pendingPropertyNodeIds,
     nodePatchVersion,

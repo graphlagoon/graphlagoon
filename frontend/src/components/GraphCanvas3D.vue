@@ -847,11 +847,16 @@ async function updateGraph() {
 
   const currentData = graph3d.graphData();
   const positionMap = new Map<string, { x: number; y: number; z: number }>();
-  currentData.nodes.forEach((node: GraphNode) => {
-    if (node.x !== undefined && node.y !== undefined && node.z !== undefined) {
-      positionMap.set(node.id, { x: node.x, y: node.y, z: node.z });
-    }
-  });
+  // A clean canvas (a case switching graphs): every node is laid out anew.
+  const resetPositions = graphStore.positionsResetRequested;
+  if (resetPositions) graphStore.positionsResetRequested = false;
+  if (!resetPositions) {
+    currentData.nodes.forEach((node: GraphNode) => {
+      if (node.x !== undefined && node.y !== undefined && node.z !== undefined) {
+        positionMap.set(node.id, { x: node.x, y: node.y, z: node.z });
+      }
+    });
+  }
 
   let hasNewNodes = false;
   let newNodeCount = 0;
@@ -1418,6 +1423,13 @@ async function initGraph() {
       const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
       if (!node || typeof node.x !== 'number') return null;
       return graph3d.graph2ScreenCoords(node.x, node.y ?? 0, node.z ?? 0);
+    };
+
+    // Lets e2e tests tell a fresh layout from a kept one
+    (window as any).__GRAPH_NODE_POSITION__ = (nodeId: string) => {
+      if (!graph3d) return null;
+      const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
+      return node && typeof node.x === 'number' ? { x: node.x, y: node.y ?? 0, z: node.z ?? 0 } : null;
     };
 
     // Lets e2e tests assert the sphere↔icon treatment without camera interaction
