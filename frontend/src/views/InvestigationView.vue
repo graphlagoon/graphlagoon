@@ -353,6 +353,13 @@ function applyView(content: CaseViewContent) {
   if (canEdit.value) store.saveState({ groups_closed: content.groups_closed ?? [] }).catch((e) => toast.error(getErrorMessage(e, 'Failed to apply the view')));
 }
 
+/** A journal line about an entity: selected and framed on the canvas. */
+function focusEntity(id: string) {
+  activeItem.value = null;
+  graphStore.selectNode(id);
+  canvasRef.value?.focusOnNode?.(id);
+}
+
 function openJournal() {
   timelineTab.value = 'activity';
   timelineCollapsed.value = false;
@@ -519,6 +526,7 @@ onUnmounted(() => {
           :trace-view="traceView"
           @update:trace-view="traceView = $event"
           @select-item="selectItem($event)"
+          @focus-entity="focusEntity"
           @close-analysis="activeAnalysis = null"
           @rerun="onRerun"
         />
@@ -532,7 +540,7 @@ onUnmounted(() => {
           <span v-if="store.groups.length" data-testid="status-groups">{{ store.groups.length }} {{ store.groups.length === 1 ? 'group' : 'groups' }}</span>
           <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} {{ store.suggestions.length === 1 ? 'suggestion' : 'suggestions' }}</span>
           <AgentsIndicator v-if="store.current" :investigation-id="store.current.id" /><!-- F5 hook -->
-          <button class="link-btn journal-btn" data-testid="journal-toggle" @click="openJournal">Journal ({{ store.events.length }})</button>
+          <button class="link-btn journal-btn" data-testid="journal-toggle" @click="openJournal">Journal</button>
         </footer>
       </template>
     </template>

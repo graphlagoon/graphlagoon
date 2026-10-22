@@ -25,6 +25,7 @@ vi.mock('@/services/api', () => ({
     pinInvestigationItem: vi.fn(),
     lookupEnrichment: vi.fn(),
     postInvestigationEvent: vi.fn(async () => ({})),
+    setInvestigationAnnotationsStatus: vi.fn(async () => ({ applied: [{ id: 's9' }], skipped: [] })),
     updateInvestigation: vi.fn(async (_id: string, patch: Record<string, unknown>) => ({
       id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, shared_with: [], tags: [], state: {}, ...patch,
     })),
@@ -184,9 +185,10 @@ describe('InvestigationView', () => {
     await flushPromises()
     expect(getByTestId('status-suggestions').textContent).toContain('1 suggestion')
     await fireEvent.click(getByTestId('timeline-tab-suggestions'))
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
     await fireEvent.click(getByTestId('suggestions-confirm-role:agent'))
     await flushPromises()
-    expect(api.setInvestigationAnnotationStatus).toHaveBeenCalledWith('inv', 's9', 'confirmed')
+    expect(api.setInvestigationAnnotationsStatus).toHaveBeenCalledWith('inv', ['s9'], 'confirmed') // one request for the group
   })
 
   it('shows enrichment rows and promotes shared devices to a node', async () => {

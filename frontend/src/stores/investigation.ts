@@ -366,6 +366,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
       removedItems.value = [];
       annotations.value = [];
       events.value = [];
+      eventsMore.value = false;
       brief.value = { item: null, text: '' };
       briefError.value = null;
       canvasOverride.value = null;
@@ -753,8 +754,27 @@ export const useInvestigationStore = defineStore('investigation', () => {
     return created.length;
   }
 
+  /**
+   * The journal, newest page first (UX-1: a long case used to show only its 500 oldest
+   * events). `events` stays oldest first; older pages load on request (`fetchOlderEvents`).
+   */
+  const EVENTS_PAGE = 200;
+  const eventsMore = ref(false);
   async function fetchEvents() {
-    if (current.value) events.value = await api.getInvestigationEvents(current.value.id);
+    if (!current.value) return;
+    const page = (await api.getInvestigationEvents(current.value.id, { order: 'desc', limit: EVENTS_PAGE })).reverse();
+    const ids = new Set(page.map((e) => e.id));
+    const oldest = page[0]?.at;
+    // Older pages already read stay; the newest page replaces what it covers.
+    const kept = oldest ? events.value.filter((e) => !ids.has(e.id) && e.at < oldest) : [];
+    if (!kept.length) eventsMore.value = page.length === EVENTS_PAGE;
+    events.value = [...kept, ...page];
+  }
+  async function fetchOlderEvents() {
+    if (!current.value || !events.value.length) return;
+    const older = await api.getInvestigationEvents(current.value.id, { order: 'desc', limit: EVENTS_PAGE, after: events.value[0].id });
+    eventsMore.value = older.length === EVENTS_PAGE;
+    events.value = [...older.reverse(), ...events.value];
   }
 
   // --- canvas -----------------------------------------------------------------
@@ -1060,6 +1080,8 @@ export const useInvestigationStore = defineStore('investigation', () => {
     addNote,
     findMatches,
     fetchEvents,
+    fetchOlderEvents,
+    eventsMore,
     loadWorkspace,
     loadEnrichments,
     enrichmentFiles,

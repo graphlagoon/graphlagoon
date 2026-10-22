@@ -5,7 +5,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import CaseTimeline from '@/components/investigation/CaseTimeline.vue'
 import { useInvestigationStore } from '@/stores/investigation'
 
-vi.mock('@/services/api', () => ({ api: {} }))
+const api = vi.hoisted(() => ({ getInvestigationEvents: vi.fn(async () => [] as unknown[]) }))
+vi.mock('@/services/api', () => ({ api }))
 vi.mock('@/composables/useCaseAnalyses', () => ({ useCaseAnalyses: () => ({ nameOf: (id: string) => id }) }))
 
 const CASE_ID = 'inv-1'
@@ -72,5 +73,56 @@ describe('CaseTimeline · Activity', () => {
     expect(getAllByTestId('journal-event')).toHaveLength(2)
     // The visit is stamped now, so the next load compares with this one.
     expect(new Date(localStorage.getItem(`gl:case:${CASE_ID}:lastVisit`)!).getTime()).toBeGreaterThan(new Date(2026, 9, 9, 9, 30).getTime())
+  })
+})
+
+describe('CaseTimeline · Journal (UX-1)', () => {
+  it('leaves out view-only updates, says "you", searches, and a line about an entity shows it', async () => {
+    const { useAuthStore } = await import('@/stores/auth')
+    useAuthStore().email = 'ana@x.com'
+    const store = useInvestigationStore()
+    store.current = { id: CASE_ID, title: 'Golpe Pix', status: 'analysis', settings: {}, tags: [] } as any
+    store.events = [
+      ...EVENTS,
+      { id: 'e5', at: T(12), actor_email: 'bob@x.com', actor_kind: 'human', kind: 'case.updated', payload: { state: { canvas_items: 'all' } } },
+      { id: 'e6', at: T(13), actor_email: 'bob@x.com', actor_kind: 'human', kind: 'case.updated', payload: { fields: { amount: 3 } } },
+    ] as any
+    store.sourceGraphs = [{ id: 'g', contextId: 'c', nodes: [{ node_id: 'a', node_type: 'P', properties: {} }], edges: [], state: null, error: null }] as any
+    store.items = [{ id: 'g', kind: 'graph', subkind: 'exploration_ref', title: 'g', tags: [], status: 'confirmed', accessible: true, current_version: 0, pinned: [], provenance: {} }] as any
+    const uid = store.unified.nodes[0].node_id
+    store.events[1] = { ...store.events[1], payload: { targets: [uid], value: { role: 'mula' } } } as any
+    const { getAllByTestId, getByTestId, emitted } = render(CaseTimeline, { props, global: { stubs } })
+    const rows = getAllByTestId('journal-event')
+    expect(rows).toHaveLength(5) // the view-only update is not a journal line
+    expect(rows[0].textContent).toContain('updated fields (amount)')
+    expect(rows.find((r) => r.textContent!.includes('created the case'))!.textContent).toContain('you')
+    expect(getByTestId('timeline-tab-timeline').textContent).toContain('Dated edges')
+    expect(getByTestId('timeline-tab-activity').textContent).toContain('Journal · 5')
+
+    const role = rows.find((r) => r.textContent!.includes('mula'))!
+    await fireEvent.click(role)
+    expect(emitted()['focus-entity']).toEqual([[uid]])
+
+    await fireEvent.update(getByTestId('activity-search'), 'kyc')
+    expect(getAllByTestId('journal-event')).toHaveLength(1)
+  })
+
+  it('loads older events on request when the newest page is full', async () => {
+    const store = useInvestigationStore()
+    store.current = { id: CASE_ID, title: 'Golpe Pix', status: 'analysis', settings: {}, tags: [] } as any
+    const page = Array.from({ length: 200 }, (_, i) => ({ id: `n${i}`, at: new Date(2026, 9, 10, 0, 200 - i).toISOString(), actor_email: 'x', actor_kind: 'human', kind: 'case.created', payload: {} }))
+    api.getInvestigationEvents.mockResolvedValueOnce(page).mockResolvedValueOnce([{ id: 'old', at: T(1), actor_email: 'x', actor_kind: 'human', kind: 'case.created', payload: { title: 'first' } }])
+    await store.fetchEvents()
+    expect(api.getInvestigationEvents).toHaveBeenCalledWith(CASE_ID, { order: 'desc', limit: 200 })
+    expect(store.events[0].id).toBe('n199') // oldest first in the store
+    expect(store.eventsMore).toBe(true)
+    const { getByTestId, queryByTestId } = render(CaseTimeline, { props, global: { stubs } })
+    expect(getByTestId('timeline-tab-activity').textContent).toContain('200+')
+    await fireEvent.click(getByTestId('journal-older'))
+    await nextTick()
+    await new Promise((r) => setTimeout(r))
+    expect(api.getInvestigationEvents).toHaveBeenLastCalledWith(CASE_ID, { order: 'desc', limit: 200, after: 'n199' })
+    expect(store.events[0].id).toBe('old')
+    expect(queryByTestId('journal-older')).toBeNull()
   })
 })

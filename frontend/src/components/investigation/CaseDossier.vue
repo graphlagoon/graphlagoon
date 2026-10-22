@@ -11,7 +11,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { downloadBlob } from '@/utils/portableExport';
 import { useInvestigationStore } from '@/stores/investigation';
 import { api } from '@/services/api';
-import { describeEvent } from '@/utils/investigationEvents';
+import { describeEvent, isQuietEvent } from '@/utils/investigationEvents';
 import { AUTHOR_KIND_LABELS, HYPOTHESIS_STATUS_LABELS, REVIEW_LABELS, caseNumber, itemKindLabel } from '@/utils/investigationStatus';
 import { useAuthStore } from '@/stores/auth';
 import { caseNodeLabel, shortId } from '@/utils/caseLabels';
@@ -67,12 +67,13 @@ const indicators = computed(() => {
     { label: 'Material', value: store.items.length, hint: 'items' },
     { label: 'Evidence', value: store.evidence.length, hint: 'pinned with sha256' },
     { label: 'Hypotheses', value: store.hypotheses.length, hint: `${by('supported')} supported · ${by('open')} open · ${by('refuted')} refuted` },
-    { label: 'Journal', value: store.events.length, hint: 'events' },
+    { label: 'Journal', value: `${journalEvents.value.length}${store.eventsMore ? '+' : ''}`, hint: 'events' },
     { label: 'Suggestions', value: store.suggestions.length, hint: 'to review' },
   ];
 });
 
-const journal = computed(() => (showAllEvents.value ? store.events : store.events.slice(-JOURNAL_ROWS)));
+const journalEvents = computed(() => store.events.filter((e) => !isQuietEvent(e)));
+const journal = computed(() => (showAllEvents.value ? journalEvents.value : journalEvents.value.slice(-JOURNAL_ROWS)));
 
 /** Tables flagged "Use in the dossier" (tag `dossier`): the latest or pinned version, first rows. */
 const dossierTables = computed(() => store.items.filter((i) => !i.deleted_at && isTabular(i) && i.tags.includes('dossier') && i.current_version > 0));
@@ -483,9 +484,9 @@ const unflag = (t: CaseItem) => act(() => store.setInDossier(t, false), 'Could n
                 <span class="muted">{{ e.actor_kind === 'agent' ? `${AUTHOR_KIND_LABELS.agent} ${e.agent_name} by ${e.actor_email}` : e.actor_email }}</span>
               </span>
             </div>
-            <p v-if="!store.events.length" class="muted">Nothing recorded yet.</p>
-            <button v-if="store.events.length > JOURNAL_ROWS" class="link-btn" data-testid="dossier-all-events" @click="showAllEvents = !showAllEvents">
-              {{ showAllEvents ? 'Show only the latest' : `See all ${store.events.length} events` }}
+            <p v-if="!journalEvents.length" class="muted">Nothing recorded yet.</p>
+            <button v-if="journalEvents.length > JOURNAL_ROWS" class="link-btn" data-testid="dossier-all-events" @click="showAllEvents = !showAllEvents">
+              {{ showAllEvents ? 'Show only the latest' : `See all ${journalEvents.length} events` }}
             </button>
           </section>
 
