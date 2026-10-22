@@ -13477,3 +13477,47 @@ real recusa). Mocks do e2e ganharam as rotas novas.
 `docs/guide/agents-mcp-tools.md` e `openapi.json` regenerados; screenshot do workspace com `canvas_items: 'all'`.
 **Admin-area impact:** `AUDITED_ROUTES` (+restore), `AUDIT_EXEMPT_ROUTES` (+reopen ×2, +annotations/status),
 `AuditAction.INVESTIGATION_ITEM_RESTORE` com rótulo no admin.
+
+## [2026-10-22 09:30] - Dev Tooling: `make dev` sobe com os dados de demonstração completos
+
+**Pedido:** rodar o ambiente de dev com o seed completo (superusuário, casos com grafo) por padrão.
+**Problemas encontrados:**
+1. `make dev` quebrava no `uv sync` da API: `[tool.uv.sources]` aponta o gsql2rsql para `../../cyper2dsql/python`,
+   que só existe na máquina de quem desenvolve o transpiler ("Distribution not found"). O `uv.lock` já fixava o
+   release do PyPI (0.12.1) e estava desatualizado (o extra `mcp` entrou no `pyproject` sem relock).
+2. A API de dev subia sem superusuário, sem domínio de compartilhamento e sem agentes; o guia dizia que
+   `dev@graphlagoon.local` era superusuário, mas o seed pulava tipos de caso, grupos e transferências (403).
+3. O seed de investigações era um passo à parte, e as explorações do seed não tinham snapshot (corrigido em
+   `4008924`), então os casos com `exploration_ref` ficavam sem grafo.
+**Decisões:**
+1. Makefile exporta `UV_NO_SOURCES_PACKAGE=gsql2rsql` quando o checkout irmão não existe (fora dos alvos
+   `dev-gsql2rsql*`, que querem a fonte local): uv usa o release que o lock fixa. `uv.lock` refeito assim (só
+   acrescenta o `mcp` e dependências).
+2. `DEV_API_ENV` com os valores do `api/.env.example` (superusuário, `example.com`, agentes) nos alvos locais
+   (`dev`, `dev-db`, `dev-gsql2rsql*`, `dev-neptune*`); não se aplica quando há `api/.env`, e `DEV_API_ENV=` desliga.
+   Os alvos Databricks não mudam.
+3. `_seed-after-dev` roda `dev-seed` e depois `dev-seed-investigations`; `SEED_DATA=0` pula os dois.
+**Verificação:** `make dev` do zero nesta máquina: sync ok, 60 contextos, 200 explorações, 8 tipos de caso, grupos,
+321 casos escritos por token de agente; os 25 casos (fora as 300 disputas de chargeback) têm grafo.
+**Public docs:** `docs/guide/getting-started.md` ("Sample data").
+**Admin-area impact:** nenhum.
+
+## [2026-10-22 09:30] - Bug Fix: trocar de grafo no caso não limpava o canvas (UX-1, continuação)
+
+**Relato:** clicar num grafo da legenda "ainda carregava a visualização todas juntas"; o esperado é limpar o que está
+e carregar a exploração isolada.
+**Causa:** o filtro do store estava certo (só os nós do grafo escolhido), mas o `GraphCanvas3D` copia a posição de
+todo nó que já está na tela e o fixa. Isolar um grafo que estava no canvas unificado mostrava um recorte do layout
+unificado, no mesmo lugar. `freshLayoutRequested` existia, mas abaixo do limiar de arestas não impedia essa cópia.
+**Decisões:**
+1. Flag nova `graphStore.positionsResetRequested` (consumida pelo canvas): nenhuma posição é herdada; todo nó é novo
+   e o layout roda do zero. Só o caso a usa (`loadInvestigationGraph(..., { fresh })`); os demais fluxos não mudam.
+2. Pedem canvas limpo: clique na legenda, "All graphs", aplicar uma view com grafos, e **clique num grafo na lista
+   do material** (antes só selecionava o item). Shift+clique e a checkbox continuam somando/tirando sem refazer o
+   layout. As comunidades do grafo anterior não passam para o novo.
+3. Gancho de dev `__GRAPH_NODE_POSITION__` para o e2e comparar posições.
+**Testes:** vitest `InvestigationView` (troca pede canvas limpo, Shift não, linha do material isola); e2e
+`investigation-ux.spec.ts` "picking a graph clears the canvas…" — falha com a cópia de posições restaurada e passa
+com a correção.
+**Public docs:** `docs/guide/investigations.md` (workspace).
+**Admin-area impact:** nenhum.

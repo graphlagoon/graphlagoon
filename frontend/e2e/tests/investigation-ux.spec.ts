@@ -63,6 +63,33 @@ test.describe('Investigation workspace UX (UX-1)', () => {
     await expect(page.getByTestId('canvas-one')).toBeVisible();
   });
 
+  test('picking a graph clears the canvas and lays it out on its own, not as a piece of the unified view', async ({ authenticatedPage: page }) => {
+    const unified = { ...structuredClone(CASE), state: { canvas_items: 'all' } };
+    await seedInvestigations(page, [unified], { 'inv-u': structuredClone(ITEMS) }, [], SNAPSHOTS);
+    await page.goto('/investigations/inv-u');
+    const status = page.getByTestId('workspace-status');
+    await expect(status).toContainText('5 nodes', { timeout: 15_000 });
+    const position = () => page.evaluate(() => (window as any).__GRAPH_NODE_POSITION__?.('a1@ctx-a') ?? null);
+    await expect.poll(() => page.evaluate(() => (window as any).__GRAPH_LAYOUT_DONE__?.() ?? false), { timeout: 15_000 }).toBe(true);
+    const before = await position();
+    expect(before).not.toBeNull();
+
+    await page.getByTestId('legend-item-g-a').click();
+    await expect(status).toContainText('3 nodes');
+    // Laid out anew: the node does not keep its place from the unified layout.
+    await expect
+      .poll(async () => {
+        const now = await position();
+        return now ? Math.hypot(now.x - before.x, now.y - before.y, now.z - before.z) : 0;
+      }, { timeout: 15_000 })
+      .toBeGreaterThan(1);
+
+    // A graph picked in the material list shows alone too.
+    await page.getByTestId('item-g-b').click();
+    await expect(status).toContainText('2 nodes');
+    await expect(status).toContainText('1 source');
+  });
+
   test('an attached exploration opens on its own page, with the way back to the case', async ({ authenticatedPage: page }) => {
     await seedInvestigations(page, [structuredClone(CASE)], { 'inv-u': structuredClone(ITEMS) }, [], SNAPSHOTS);
     await page.goto('/investigations/inv-u');

@@ -150,12 +150,31 @@ async function render() {
     graphStore.traceLayers = null;
     graphStore.setLayoutAlgorithm('force');
   }
-  if (graphStore.nodes.length) savedCommunities = communityStore.getState();
+  // Another graph picked (legend, row, "All graphs", a view): a clean canvas, laid out on its
+  // own like its exploration, with none of the previous graph's positions or communities.
+  const fresh = freshNext;
+  freshNext = false;
+  if (fresh) {
+    savedCommunities = undefined;
+    communityStore.clearCommunities();
+  } else if (graphStore.nodes.length) savedCommunities = communityStore.getState();
   const { nodes, edges } = store.unified;
   const rings = new Map(nodes.map((n) => [n.node_id, provenanceRingColors(nodeSourceIds(n), store.sourceColors)]));
-  graphStore.loadInvestigationGraph(graphMode(rings), nodes, edges);
+  graphStore.loadInvestigationGraph(graphMode(rings), nodes, edges, { fresh });
   await nextTick();
-  communityStore.loadState(savedCommunities);
+  if (!fresh) communityStore.loadState(savedCommunities);
+}
+
+/** Set before switching graphs: the next render starts from a clean canvas. */
+let freshNext = false;
+/** Shows other graphs on a clean canvas (see `render`). */
+function switchCanvas(change: () => Promise<unknown> | unknown) {
+  freshNext = true;
+  void change();
+  // The render the change triggers has run by the next tick; a change that moved nothing must
+  // not leave the flag for an unrelated update.
+  void nextTick().then(() => (freshNext = false));
+  zoomToFitSoon();
 }
 
 /** The traced subgraph, laid out by layer (`trace-layers`); the time-window chip filters the flows. */
@@ -208,16 +227,29 @@ watch(() => [...store.canvasIds].join(','), () => {
   if (!store.graphLoading) applyCanvasStyle();
 });
 
-/** Legend click: only this graph; with Shift (or Ctrl/⌘), add it to or take it off the canvas. */
+/**
+ * Legend click: only this graph, on a clean canvas; with Shift (or Ctrl/⌘), add it to or take
+ * it off the canvas, keeping the layout of the others.
+ */
 function pickCanvasItem(id: string, event: MouseEvent) {
-  if (event.shiftKey || event.ctrlKey || event.metaKey) void store.toggleCanvas(id, !store.canvasIds.has(id));
-  else void store.showOnly(id);
-  zoomToFitSoon();
+  if (event.shiftKey || event.ctrlKey || event.metaKey) {
+    void store.toggleCanvas(id, !store.canvasIds.has(id));
+    zoomToFitSoon();
+  } else if (!(store.canvasItems.length === 1 && store.canvasIds.has(id))) {
+    switchCanvas(() => store.showOnly(id));
+  }
 }
 
 function showAllOnCanvas() {
-  void store.showAll();
-  zoomToFitSoon();
+  if (!store.allOnCanvas) switchCanvas(() => store.showAll());
+}
+
+/** A graph picked in the material list is shown alone, like the legend; other items only select. */
+function onMaterialSelect(item: CaseItem) {
+  selectItem(item);
+  if (isGraphItem(item) && item.accessible && !(store.canvasItems.length === 1 && store.canvasIds.has(item.id))) {
+    switchCanvas(() => store.showOnly(item.id));
+  }
 }
 
 const CASE_NODE_SIZE = 5;
@@ -351,7 +383,7 @@ function applyView(content: CaseViewContent) {
   if ((LAYOUT_ALGORITHMS as readonly string[]).includes(content.layout) && content.layout !== 'trace-layers') {
     graphStore.setLayoutAlgorithm(content.layout as LayoutAlgorithm);
   }
-  if (content.canvas_items) void store.setCanvas(content.canvas_items);
+  if (content.canvas_items) switchCanvas(() => store.setCanvas(content.canvas_items!));
   if (canEdit.value) store.saveState({ groups_closed: content.groups_closed ?? [] }).catch((e) => toast.error(getErrorMessage(e, 'Failed to apply the view')));
 }
 
@@ -419,7 +451,7 @@ onUnmounted(() => {
 
       <template v-else>
         <div class="ws-body">
-          <CaseItemsPanel :can-edit="canEdit" :active-item="activeItem?.id" @add="showAdd = true" @upload="openUpload()" @select="selectItem($event)" />
+          <CaseItemsPanel :can-edit="canEdit" :active-item="activeItem?.id" @add="showAdd = true" @upload="openUpload()" @select="onMaterialSelect" />
 
           <div class="center">
             <CaseFilterChips :can-edit="canEdit" @apply-view="applyView" />

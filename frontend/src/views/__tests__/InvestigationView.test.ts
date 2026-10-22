@@ -99,17 +99,25 @@ describe('InvestigationView', () => {
     expect(graph.nodes.map((n) => n.node_id).sort()).toEqual(['a@c1', 'b@c1'])
     expect(queryByTestId('unification-summary')).toBeNull()
 
+    graph.positionsResetRequested = false
     await fireEvent.click(getByTestId('legend-item-s2'))
     await flushPromises()
     expect(graph.nodes.map((n) => n.node_id)).toEqual(['x@c2'])
     expect(api.updateInvestigation).toHaveBeenLastCalledWith('inv', { state: { canvas_items: ['s2'] } })
+    expect(graph.positionsResetRequested).toBe(true) // another graph: a clean canvas, laid out on its own
 
+    graph.positionsResetRequested = false
     await fireEvent.click(getByTestId('legend-item-s1'), { shiftKey: true })
     await flushPromises()
     expect(graph.nodes.map((n) => n.node_id).sort()).toEqual(['a@c1', 'b@c1', 'x@c2'])
+    expect(graph.positionsResetRequested).toBe(false) // Shift adds to what is laid out
 
-    await fireEvent.click(getByTestId('canvas-one'))
+    // A graph picked in the material list shows alone too, on a clean canvas.
+    await fireEvent.click(getByTestId('item-s2'))
     await flushPromises()
+    expect(graph.nodes.map((n) => n.node_id)).toEqual(['x@c2'])
+    expect(graph.positionsResetRequested).toBe(true)
+
     await fireEvent.click(getByTestId('canvas-all'))
     await flushPromises()
     expect(api.updateInvestigation).toHaveBeenLastCalledWith('inv', { state: { canvas_items: 'all' } })
