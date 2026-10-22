@@ -288,3 +288,22 @@ def test_graph_payload_depends_only_on_the_index():
     assert graph_payload(6)["table_name"] == "seed_6"
     assert graph_payload(6, "spark_catalog", "graphs")["catalog"] == "spark_catalog"
     assert graph_payload(6)["model"] != graph_payload(7)["model"]
+
+
+def test_exploration_snapshot_holds_the_picked_nodes_and_their_edges():
+    # Without a snapshot an exploration attached to a case adds nothing to it.
+    from graphlagoon.dev.seed import _snapshot_around
+
+    graph = {
+        "nodes": [{"node_id": i, "node_type": "Person", "properties": {"n": i}} for i in "abcd"],
+        "edges": [
+            {"edge_id": "ab", "src": "a", "dst": "b", "relationship_type": "KNOWS"},
+            {"edge_id": "cd", "src": "c", "dst": "d", "relationship_type": "KNOWS"},
+        ],
+    }
+    snapshot = _snapshot_around(graph, [graph["nodes"][0]])
+    assert [n["id"] for n in snapshot["nodes"]] == ["a", "b"]
+    assert snapshot["edges"] == [
+        {"id": "ab", "source": "a", "target": "b", "type": "KNOWS", "properties": {}}
+    ]
+    assert _snapshot_around(graph, []) is None

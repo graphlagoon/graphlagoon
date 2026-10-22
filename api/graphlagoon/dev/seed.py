@@ -361,6 +361,29 @@ class SeedClient:
         return response
 
 
+def _snapshot_around(graph: dict[str, list[dict[str, Any]]], picked: list[dict[str, Any]]) -> Optional[dict]:
+    """What saving the exploration in the app would store: the picked nodes, the
+    edges touching them and the nodes at their other end. Without a snapshot an
+    exploration attached to a case adds nothing to the case's graph."""
+    if not picked:
+        return None
+    ids = {n["node_id"] for n in picked}
+    edges = [e for e in graph["edges"] if e["src"] in ids or e["dst"] in ids]
+    ids |= {end for e in edges for end in (e["src"], e["dst"])}
+    return {
+        "nodes": [
+            {"id": n["node_id"], "type": n["node_type"], "properties": n.get("properties") or {}}
+            for n in graph["nodes"]
+            if n["node_id"] in ids
+        ],
+        "edges": [
+            {"id": e["edge_id"], "source": e["src"], "target": e["dst"],
+             "type": e["relationship_type"], "properties": e.get("properties") or {}}
+            for e in edges
+        ],
+    }
+
+
 CASES = [
     ("Account takeover · call-center scam", "account takeover", "alert"),
     ("Front merchants · south region", "merchant review", "monitoring"),
@@ -650,12 +673,12 @@ async def run_seed(
         weights = [rng.expovariate(1.0) + 0.2 for _ in seeded]
         exploration_ids: list[tuple[str, str]] = []  # (id, owner)
         exploration_ctx: dict[str, str] = {}  # id -> context id
-        node_cache: dict[str, list[dict[str, Any]]] = {}
+        graph_cache: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
-        async def fetch_nodes(ctx: SeedContext) -> list[dict[str, Any]]:
-            if ctx.id in node_cache:
-                return node_cache[ctx.id]
-            nodes: list[dict[str, Any]] = []
+        async def fetch_graph(ctx: SeedContext) -> dict[str, list[dict[str, Any]]]:
+            if ctx.id in graph_cache:
+                return graph_cache[ctx.id]
+            graph: dict[str, list[dict[str, Any]]] = {"nodes": [], "edges": []}
             if not no_graphs:
                 try:
                     response = await client.request(
@@ -664,15 +687,17 @@ async def run_seed(
                         ctx.owner,
                         json={"edge_limit": 60},
                     )
-                    nodes = response.json().get("nodes", [])
+                    body = response.json()
+                    graph = {"nodes": body.get("nodes", []), "edges": body.get("edges", [])}
                 except SeedError as exc:
                     log(f"  subgraph for {ctx.title} failed, saving empty state: {exc}")
-            node_cache[ctx.id] = nodes
-            return nodes
+            graph_cache[ctx.id] = graph
+            return graph
 
         for i in range(explorations):
             ctx = rng.choices(seeded, weights=weights)[0]
-            nodes = await fetch_nodes(ctx)
+            graph = await fetch_graph(ctx)
+            nodes = graph["nodes"]
             picked = (
                 rng.sample(nodes, min(len(nodes), rng.randint(5, 40))) if nodes else []
             )
@@ -700,7 +725,7 @@ async def run_seed(
                     "POST",
                     f"/api/graph-contexts/{ctx.id}/explorations",
                     ctx.owner,
-                    json={"title": title, "state": state},
+                    json={"title": title, "state": state, "snapshot": _snapshot_around(graph, picked)},
                 )
             ).json()
             exploration_ids.append((created["id"], ctx.owner))
