@@ -24,6 +24,21 @@ RESET := \033[0m
 
 GSQL2RSQL_PATH ?= $(HOME)/phd/cyper2dsql/python
 
+# api/pyproject.toml points gsql2rsql at a sibling checkout (../cyper2dsql).
+# Without one, uv takes the PyPI release the lockfile pins instead of failing
+# with "Distribution not found". The dev-gsql2rsql* targets keep the source.
+ifeq ($(wildcard $(CURDIR)/../cyper2dsql/python),)
+ifeq ($(filter dev-gsql2rsql%,$(MAKECMDGOALS)),)
+export UV_NO_SOURCES_PACKAGE := gsql2rsql
+endif
+endif
+
+# Local dev defaults (the values of api/.env.example): the seeded admin is a
+# superuser, seeded users may share with example.com, and agents (MCP, agent
+# tokens) are on so the investigation seed writes as the agent. Not applied
+# when api/.env exists: that file is the configuration then.
+DEV_API_ENV ?= $(if $(wildcard api/.env),,GRAPH_LAGOON_SUPERUSER_EMAILS=dev@graphlagoon.local GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=example.com GRAPH_LAGOON_AGENTS_ENABLED=true)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Help
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41,7 +56,7 @@ help:
 	@echo "  make dev-databricks-db     Databricks SQL + local PostgreSQL"
 	@echo "  make dev-stop              Stop all background services"
 	@echo "  make dev-logs              Show logs"
-	@echo "  make dev-seed              Seed users/contexts/explorations (auto after dev*; SEED_DATA=0 skips)"
+	@echo "  make dev-seed              Seed users/contexts/explorations (auto after dev*, with the cases; SEED_DATA=0 skips)"
 	@echo "  make dev-seed-big          Large seed (200 users / 500 contexts / 2000 explorations)"
 	@echo "  make dev-seed-investigations  ~20 demo investigation cases (SEED_ARGS=--reset replaces them)"
 	@echo "  make dev-reset             Wipe the dev environment and seed it from scratch"
@@ -91,7 +106,7 @@ dev:
 	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
 	@sleep 2
 	@echo "$(CYAN)Starting API on :8000...$(RESET)"
-	@cd api && nohup uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
+	@cd api && nohup env $(DEV_API_ENV) uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
 	@sleep 2
 	@echo "$(CYAN)Starting frontend on :3000...$(RESET)"
 	@cd frontend && nohup npm run dev > $(CURDIR)/.logs/frontend.log 2>&1 & echo $$! > $(CURDIR)/.pids/frontend.pid
@@ -111,7 +126,7 @@ dev-db: db-up
 	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
 	@sleep 2
 	@echo "$(CYAN)Starting API on :8000 (database enabled)...$(RESET)"
-	@cd api && nohup env GRAPH_LAGOON_DATABASE_ENABLED=true uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
+	@cd api && nohup env $(DEV_API_ENV) GRAPH_LAGOON_DATABASE_ENABLED=true uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
 	@sleep 2
 	@echo "$(CYAN)Starting frontend on :3000...$(RESET)"
 	@cd frontend && nohup env VITE_DATABASE_ENABLED=true npm run dev > $(CURDIR)/.logs/frontend.log 2>&1 & echo $$! > $(CURDIR)/.pids/frontend.pid
@@ -130,7 +145,7 @@ dev-gsql2rsql: _ensure-gsql2rsql
 	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
 	@sleep 2
 	@echo "$(CYAN)Starting API on :8000 (local gsql2rsql)...$(RESET)"
-	@cd api && nohup uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
+	@cd api && nohup env $(DEV_API_ENV) uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
 	@sleep 2
 	@echo "$(CYAN)Starting frontend on :3000...$(RESET)"
 	@cd frontend && nohup npm run dev > $(CURDIR)/.logs/frontend.log 2>&1 & echo $$! > $(CURDIR)/.pids/frontend.pid
@@ -150,7 +165,7 @@ dev-gsql2rsql-db: _ensure-gsql2rsql db-up
 	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
 	@sleep 2
 	@echo "$(CYAN)Starting API on :8000 (local gsql2rsql + database)...$(RESET)"
-	@cd api && nohup env GRAPH_LAGOON_DATABASE_ENABLED=true uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
+	@cd api && nohup env $(DEV_API_ENV) GRAPH_LAGOON_DATABASE_ENABLED=true uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
 	@sleep 2
 	@echo "$(CYAN)Starting frontend on :3000...$(RESET)"
 	@cd frontend && nohup env VITE_DATABASE_ENABLED=true npm run dev > $(CURDIR)/.logs/frontend.log 2>&1 & echo $$! > $(CURDIR)/.pids/frontend.pid
@@ -173,7 +188,7 @@ dev-neptune: neptune-seed
 	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
 	@sleep 2
 	@echo "$(CYAN)Starting API on :8000 (Neptune + warehouse)...$(RESET)"
-	@cd api && nohup env $(_NEPTUNE_ENV) uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
+	@cd api && nohup env $(DEV_API_ENV) $(_NEPTUNE_ENV) uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
 	@sleep 2
 	@echo "$(CYAN)Starting frontend on :3000...$(RESET)"
 	@cd frontend && nohup npm run dev > $(CURDIR)/.logs/frontend.log 2>&1 & echo $$! > $(CURDIR)/.pids/frontend.pid
@@ -195,7 +210,7 @@ dev-neptune-db: neptune-seed db-up
 	@cd warehouse && nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 > $(CURDIR)/.logs/warehouse.log 2>&1 & echo $$! > $(CURDIR)/.pids/warehouse.pid
 	@sleep 2
 	@echo "$(CYAN)Starting API on :8000 (Neptune + warehouse + database)...$(RESET)"
-	@cd api && nohup env GRAPH_LAGOON_DATABASE_ENABLED=true $(_NEPTUNE_ENV) uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
+	@cd api && nohup env $(DEV_API_ENV) GRAPH_LAGOON_DATABASE_ENABLED=true $(_NEPTUNE_ENV) uv run uvicorn graphlagoon.main:app --host 0.0.0.0 --port 8000 > $(CURDIR)/.logs/api.log 2>&1 & echo $$! > $(CURDIR)/.pids/api.pid
 	@sleep 2
 	@echo "$(CYAN)Starting frontend on :3000...$(RESET)"
 	@cd frontend && nohup env VITE_DATABASE_ENABLED=true npm run dev > $(CURDIR)/.logs/frontend.log 2>&1 & echo $$! > $(CURDIR)/.pids/frontend.pid
@@ -248,7 +263,8 @@ dev-databricks-lakebase: _ensure-databricks-env
 
 # Seed data — generated users, contexts, explorations, shares and audit
 # activity, via the API of the running stack (works for memory and DB modes).
-# Runs automatically at the end of dev / dev-db / dev-gsql2rsql*; SEED_DATA=0 skips.
+# Runs automatically at the end of dev / dev-db / dev-gsql2rsql*, followed by
+# the investigation seed (dev-seed-investigations); SEED_DATA=0 skips both.
 SEED_DATA ?= 1
 SEED_USERS ?= 30
 SEED_CONTEXTS ?= 60
@@ -283,7 +299,9 @@ dev-reset:
 	@$(MAKE) --no-print-directory dev-seed SEED_ARGS=--reset
 
 _seed-after-dev:
-	@if [ "$(SEED_DATA)" != "0" ]; then $(MAKE) --no-print-directory dev-seed; else echo "$(DIM)seed skipped (SEED_DATA=0)$(RESET)"; fi
+	@if [ "$(SEED_DATA)" != "0" ]; then \
+		$(MAKE) --no-print-directory dev-seed && $(MAKE) --no-print-directory dev-seed-investigations; \
+	else echo "$(DIM)seed skipped (SEED_DATA=0)$(RESET)"; fi
 
 dev-stop:
 	@echo "$(CYAN)Stopping all services...$(RESET)"

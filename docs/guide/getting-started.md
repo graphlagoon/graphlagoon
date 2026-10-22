@@ -70,17 +70,25 @@ Use `make dev-stop` to stop all services.
 
 `make dev` and `make dev-db` finish by seeding the running stack with
 generated users, graphs, contexts, explorations and shares (30 / 5 / 60 / 200
-by default), so there is something to click on immediately. The seed prints
-which e-mails to log in as; `dev@graphlagoon.local` is a local superuser.
-`SEED_DATA=0 make dev` starts empty; `make dev-seed` reseeds a running stack.
-`make dev-seed-investigations` writes the dev org's case types (fraud ring,
-credit review, merchant review, chargeback dispute, a Brazilian Pix scam
-example and more), their report templates and a saved file mapping, then ~20
-demo cases (file graphs, a flow trace, evidence, tasks, decisions in every
-state, a case seen in another) and a few hundred small chargeback disputes for
-the paged queue; `SEED_ARGS=--reset` replaces them. Start the API with
-`GRAPH_LAGOON_AGENTS_ENABLED=true` to have an agent token write the agent's
-suggestions.
+by default), then the investigation seed, so there is something to click on
+immediately. The seed prints which e-mails to log in as; `dev@graphlagoon.local`
+is a local superuser and sees every case. The investigation seed writes the dev
+org's case types (fraud ring, credit review, merchant review, chargeback
+dispute, a Brazilian Pix scam example and more), their report templates and a
+saved file mapping, then ~20 demo cases (file graphs, a flow trace, evidence,
+tasks, decisions in every state, a case seen in another) and a few hundred
+small chargeback disputes for the paged queue.
+
+The local workflows start the API with the values of `api/.env.example`:
+`dev@graphlagoon.local` as superuser, sharing allowed with `example.com`, and
+agents on (`GRAPH_LAGOON_AGENTS_ENABLED=true`), so an agent token writes the
+agent's suggestions in the seeded cases. When `api/.env` exists, it is the
+configuration instead; `DEV_API_ENV=` (empty) starts the API with neither.
+
+`SEED_DATA=0 make dev` starts empty. On a running stack, `make dev-seed`
+reseeds users, contexts and explorations and `make dev-seed-investigations`
+adds the cases (`SEED_ARGS=--reset` replaces them). With the in-memory API,
+restarting it loses everything, so seed again after a restart.
 
 Reseeding is also the repair. Contexts live in PostgreSQL (a Docker volume)
 while their tables live in the Spark warehouse (a local directory), so the two
