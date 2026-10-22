@@ -65,7 +65,7 @@ const prefill = computed(() => {
   }
   if (store.evidence.length) {
     lines.push(supported.length ? '' : '', 'Pinned evidence:');
-    store.evidence.forEach((e, i) => lines.push(`- E${i + 1} ${e.item.title} (v${e.version.version}, ${e.version.sha256.slice(0, 8)})`));
+    store.evidence.forEach((e) => lines.push(`- ${store.evidenceLabel(e.item.id, e.version.version)} ${e.item.title} (v${e.version.version}, ${e.version.sha256.slice(0, 8)})`));
   }
   return lines.join('\n').trim();
 });

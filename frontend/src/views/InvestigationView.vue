@@ -9,8 +9,8 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { Banknote, Plus, Route } from 'lucide-vue-next';
-import { useInvestigationStore } from '@/stores/investigation';
+import { AlertTriangle, Banknote, Plus, Route } from 'lucide-vue-next';
+import { isGraphItem, useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
@@ -170,12 +170,42 @@ async function loadWorkspace() {
   if (!store.current || key === loadedKey) return;
   loadedKey = key;
   await store.loadWorkspace();
-  // shortcut: the first readable exploration's style (colors, icons, labels) dresses the canvas.
-  const styled = store.sourceGraphs.find((g) => g.state);
-  if (styled?.state) graphStore.applyStylePreset(styled.state);
+  styledSource = null;
+  applyCanvasStyle();
+  zoomToFitSoon();
+}
+
+/**
+ * The canvas wears an exploration's style (colors, icons, labels): the one on the canvas when a
+ * single graph shows, so it looks as it does in its exploration. With several, the first that has
+ * a style (shortcut: no per-source styles on a unified canvas).
+ */
+let styledSource: string | null = null;
+function applyCanvasStyle() {
+  const on = store.canvasIds;
+  const styled =
+    (on.size === 1 && store.sourceGraphs.find((g) => on.has(g.id) && g.state)) ||
+    (styledSource ? null : store.sourceGraphs.find((g) => on.has(g.id) && g.state) ?? store.sourceGraphs.find((g) => g.state));
+  if (!styled?.state || styled.id === styledSource) return;
+  styledSource = styled.id;
+  graphStore.applyStylePreset(styled.state);
   syncGroupClusters(); // the style preset reloads the cluster state and drops the group clusters
-  // Small base nodes and thin rings read better on a unified graph (05 §3).
+  // Small base nodes and thin rings read better on a case canvas (05 §3).
   graphStore.updateAesthetics({ nodeSize: Math.min(graphStore.aesthetics.nodeSize, CASE_NODE_SIZE) });
+}
+watch(() => [...store.canvasIds].join(','), () => {
+  if (!store.graphLoading) applyCanvasStyle();
+});
+
+/** Legend click: only this graph; with Shift (or Ctrl/⌘), add it to or take it off the canvas. */
+function pickCanvasItem(id: string, event: MouseEvent) {
+  if (event.shiftKey || event.ctrlKey || event.metaKey) void store.toggleCanvas(id, !store.canvasIds.has(id));
+  else void store.showOnly(id);
+  zoomToFitSoon();
+}
+
+function showAllOnCanvas() {
+  void store.showAll();
   zoomToFitSoon();
 }
 
@@ -310,6 +340,7 @@ function applyView(content: CaseViewContent) {
   if ((LAYOUT_ALGORITHMS as readonly string[]).includes(content.layout) && content.layout !== 'trace-layers') {
     graphStore.setLayoutAlgorithm(content.layout as LayoutAlgorithm);
   }
+  if (content.canvas_items) void store.setCanvas(content.canvas_items);
   if (canEdit.value) store.saveState({ groups_closed: content.groups_closed ?? [] }).catch((e) => toast.error(getErrorMessage(e, 'Failed to apply the view')));
 }
 
@@ -321,6 +352,9 @@ function openJournal() {
 function onWizardDone(items: CaseItem[]) {
   showWizard.value = false;
   store.fetchItems().catch(() => {});
+  // A file mapped as a graph is what the person wants to see next.
+  const graphs = items.filter(isGraphItem).map((i) => i.id);
+  if (graphs.length) void store.setCanvas(graphs);
   toast.success(`Added ${items.length} file${items.length === 1 ? '' : 's'} to the case`);
 }
 
@@ -363,14 +397,40 @@ onUnmounted(() => {
                 <p>Nothing on the canvas yet. Add a recent exploration, start a new one from a context, or upload a file with a mapping.</p>
                 <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="canvas-empty-add" @click="showAdd = true"><Plus :size="14" /> Add exploration</button>
               </div>
+              <div v-else-if="!store.canvasItems.length && store.readableGraphItems.length" class="overlay empty-canvas" data-testid="canvas-none-selected">
+                <p>No graph on the canvas. Pick one in the legend or tick it in the material list.</p>
+                <button class="btn btn-outline btn-sm" @click="showAllOnCanvas">Show all graphs</button>
+              </div>
               <div v-if="graphStore.queryError" class="error-banner">{{ graphStore.queryError.message }}</div>
 
-              <div v-if="store.canvasItems.length" class="legend" data-testid="provenance-legend">
-                <div class="legend-title">Provenance (ring)</div>
-                <div v-for="s in store.canvasItems" :key="s.id" class="legend-row">
-                  <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
-                  {{ s.title }}
+              <div v-if="store.readableGraphItems.length" class="legend" data-testid="provenance-legend">
+                <div class="legend-head">
+                  <span class="legend-title">Graphs on canvas (ring)</span>
+                  <button
+                    v-if="store.readableGraphItems.length > 1"
+                    class="link-btn legend-all"
+                    :data-testid="store.allOnCanvas ? 'canvas-one' : 'canvas-all'"
+                    :title="store.allOnCanvas ? 'Back to one graph at a time' : 'Unify every graph on one canvas, one ring per source'"
+                    @click="store.allOnCanvas ? pickCanvasItem(store.canvasItems[0].id, $event) : showAllOnCanvas()"
+                  >
+                    {{ store.allOnCanvas ? 'One at a time' : `All graphs (${store.readableGraphItems.length})` }}
+                  </button>
                 </div>
+                <button
+                  v-for="s in store.readableGraphItems"
+                  :key="s.id"
+                  type="button"
+                  class="legend-row legend-pick"
+                  :class="{ off: !store.canvasIds.has(s.id) }"
+                  :aria-pressed="store.canvasIds.has(s.id)"
+                  :title="store.sourceErrors[s.id] ?? 'Show only this graph · Shift+click adds or removes it'"
+                  :data-testid="`legend-item-${s.id}`"
+                  @click="pickCanvasItem(s.id, $event)"
+                >
+                  <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
+                  <span class="legend-label">{{ s.title }}</span>
+                  <AlertTriangle v-if="store.sourceErrors[s.id]" :size="12" class="warn" :data-testid="`legend-error-${s.id}`" />
+                </button>
                 <template v-if="paintByGroup && store.groups.length">
                   <div class="legend-title roles-title">Group (fill)</div>
                   <div v-for="g in store.groups" :key="g.id" class="legend-row"><span class="fill" :style="{ background: g.color }"></span>{{ g.name }}</div>
@@ -382,7 +442,7 @@ onUnmounted(() => {
                     {{ role }}
                   </div>
                 </template>
-                <p class="muted" data-testid="unification-summary">
+                <p v-if="store.canvasItems.length > 1" class="muted" data-testid="unification-summary">
                   <template v-if="Object.keys(mergedCounts).length">
                     {{ Object.values(mergedCounts).reduce((a, b) => a + b, 0) }} entities merged by identity key:
                     {{ Object.entries(mergedCounts).map(([e, n]) => `${n} by ${e}`).join(', ') }}
@@ -579,11 +639,61 @@ onUnmounted(() => {
   right: 12px;
   z-index: 4;
   max-width: 260px;
+  max-height: calc(100% - 80px);
+  overflow-y: auto;
   padding: 10px 12px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--color-surface);
   font-size: 12px;
+}
+
+.legend-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.legend-all {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.legend-pick {
+  width: 100%;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.legend-pick:hover,
+.legend-pick:focus-visible {
+  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
+}
+
+.legend-pick.off {
+  opacity: 0.45;
+}
+
+.legend-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warn {
+  color: var(--color-warning, #d97706);
+  flex-shrink: 0;
 }
 
 .legend-title {

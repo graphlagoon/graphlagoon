@@ -14,6 +14,8 @@ import { useToast } from '@/composables/useToast';
 import { caseNodeLabel, shortId } from '@/utils/caseLabels';
 import { formatDate } from '@/utils/format';
 import { itemKindLabel } from '@/utils/investigationStatus';
+import { explorationUrl } from '@/utils/investigationLinks';
+import { isTabular } from '@/utils/itemPreview';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { GROUP_COLORS } from '@/utils/caseVocabulary';
 import { baseSourceId, nodeSourceIds, type UnifiedNode } from '@/utils/unifyGraph';
@@ -58,6 +60,12 @@ const nameOf = (id: string) => {
 };
 const sourceTitle = (sourceId: string) => store.itemTitle(baseSourceId(sourceId));
 const contextTitle = (contextId: string) => store.contexts[contextId]?.title ?? store.itemTitle(contextId);
+/** The exploration page of an `exploration_ref` item, with `?case=` for the way back. */
+function explorationLink(itemId: string): string | null {
+  const it = store.items.find((i) => i.id === itemId);
+  if (!it || it.subkind !== 'exploration_ref' || !store.current) return null;
+  return explorationUrl(it, store.current.id);
+}
 
 // --- one entity ------------------------------------------------------------------
 /** The one selected entity, from the unified graph (the canvas may show a traced subset). */
@@ -398,6 +406,12 @@ const formatTime = (iso: string) => formatDate(iso);
         <div v-for="o in selected.__sources" :key="`${o.sourceId}:${o.nodeId}`" class="origin-row">
           <strong>{{ sourceTitle(o.sourceId) }}</strong>
           <span class="muted">{{ o.sourceId.startsWith('expansion:') ? 'expansion · ' : '' }}{{ contextTitle(o.contextId) }} · id {{ o.nodeId }}</span>
+          <RouterLink
+            v-if="explorationLink(baseSourceId(o.sourceId))"
+            :to="explorationLink(baseSourceId(o.sourceId))!"
+            class="link-btn"
+            :data-testid="`origin-open-exploration-${baseSourceId(o.sourceId)}`"
+          >Open in exploration ↗</RouterLink>
         </div>
         <div v-for="(list, prop) in selected.__conflicts ?? {}" :key="prop" class="origin-row conflict">
           {{ prop }}: kept “{{ prop === 'node_type' ? selected.node_type : selected.properties?.[prop] }}”; also {{ list.map((c) => `“${c.value}” (${sourceTitle(c.sourceId)})`).join(', ') }}
@@ -431,11 +445,17 @@ const formatTime = (iso: string) => formatDate(iso);
       </dl>
       <div v-if="actionError" class="action-error">{{ actionError }}</div>
       <div class="row-actions">
+        <RouterLink
+          v-if="explorationLink(item.id)"
+          :to="explorationLink(item.id)!"
+          class="btn btn-outline btn-sm"
+          data-testid="item-open-exploration"
+        >Open exploration ↗</RouterLink>
         <button v-if="isAnalysis" class="btn btn-outline btn-sm" data-testid="item-show-analysis" @click="emit('activate', item)">Show analysis</button>
         <button v-if="canEdit && item.current_version" class="btn btn-outline btn-sm" :disabled="itemPinned" data-testid="item-pin" @click="run(async () => { const v = await store.pinItem(item!.id); if (v) toast.success(`Pinned · hash ${v.sha256.slice(0, 8)}`); }, 'Failed to pin')">
           {{ itemPinned ? '📌 Pinned' : 'Pin' }}
         </button>
-        <button v-if="canEdit" class="btn btn-outline btn-sm" :class="{ on: inDossier }" data-testid="item-dossier" @click="run(() => store.setInDossier(item!, !inDossier), 'Failed to update')">
+        <button v-if="canEdit && isTabular(item)" class="btn btn-outline btn-sm" :class="{ on: inDossier }" data-testid="item-dossier" @click="run(() => store.setInDossier(item!, !inDossier), 'Failed to update')">
           {{ inDossier ? '✓ In the dossier' : 'Use in the dossier' }}
         </button>
       </div>

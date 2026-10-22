@@ -7,7 +7,7 @@
  * "Upload" the file assistant; "Note" a markdown editor for a new document/note.
  */
 import { computed, ref } from 'vue';
-import { Bot, FileText, GitBranch, Lock, Pin, Plus, StickyNote, Table2, Terminal, Upload, User } from 'lucide-vue-next';
+import { AlertTriangle, Bot, ExternalLink, FileText, GitBranch, Lock, Pin, Plus, StickyNote, Table2, Terminal, Upload, User } from 'lucide-vue-next';
 import QueryItemCard from './QueryItemCard.vue';
 import TableOpsDialog, { type TableOp } from './TableOpsDialog.vue';
 import { useInvestigationStore, isGraphItem } from '@/stores/investigation';
@@ -18,6 +18,7 @@ import { useAddToCase } from '@/composables/useAddToCase';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { formatRelative } from '@/utils/format';
 import { ITEM_KIND_PLURALS } from '@/utils/investigationStatus';
+import { explorationUrl } from '@/utils/investigationLinks';
 import type { CaseItem, ItemKind } from '@/types/investigation';
 
 const props = defineProps<{ canEdit: boolean; activeItem?: string | null }>();
@@ -80,7 +81,6 @@ const GROUPS: { kind: ItemKind; label: string; icon: typeof GitBranch }[] = [
   { kind: 'document', label: ITEM_KIND_PLURALS.document, icon: FileText },
   { kind: 'note', label: ITEM_KIND_PLURALS.note, icon: StickyNote },
 ];
-const PREFIX: Record<ItemKind, string> = { graph: 'G', query: 'Q', table: 'T', document: 'D', note: 'N' };
 
 const search = ref('');
 const collapsed = ref<Set<ItemKind>>(new Set());
@@ -99,11 +99,8 @@ const groups = computed(() =>
   GROUPS.map((g) => ({ ...g, items: visible.value.filter((i) => i.kind === g.kind) })).filter((g) => g.items.length || !search.value),
 );
 const suggestedCount = computed(() => store.suggestions.length);
-/** `G3`, `Q2`, `D1`: the item's position within its kind (05 §3: never a raw UUID). */
-const shortIds = computed(() => {
-  const counters: Partial<Record<ItemKind, number>> = {};
-  return new Map(store.items.filter((i) => i.subkind !== 'brief').map((i) => [i.id, `${PREFIX[i.kind]}${(counters[i.kind] = (counters[i.kind] ?? 0) + 1)}`]));
-});
+/** `G3`, `Q2`, `D1`: stable short ids (05 §3: never a raw UUID; see `caseShortIds`). */
+const shortIds = computed(() => store.shortIds);
 
 function toggle(kind: ItemKind) {
   const next = new Set(collapsed.value);
@@ -263,8 +260,9 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           <input
             v-if="isGraphItem(item) && item.accessible"
             type="checkbox"
-            :checked="!store.offCanvas.has(item.id)"
-            title="On canvas"
+            :checked="store.canvasIds.has(item.id)"
+            title="On canvas (adds it to the graphs shown)"
+            :aria-label="`${item.title} on canvas`"
             :data-testid="`item-canvas-${item.id}`"
             @click.stop
             @change="store.toggleCanvas(item.id, ($event.target as HTMLInputElement).checked)"
@@ -280,9 +278,27 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           <span v-if="item.pinned.length" class="badge pin" :title="`${item.pinned.length} pinned version(s)`" :data-testid="`item-pinned-${item.id}`">
             <Pin :size="10" /> v{{ item.pinned[item.pinned.length - 1].version }}
           </span>
-          <span v-if="item.subkind === 'exploration_ref'" class="badge live" title="Live reference to the exploration">🔗</span>
+          <AlertTriangle v-if="store.sourceErrors[item.id]" :size="12" class="warn" :title="store.sourceErrors[item.id]" :data-testid="`item-error-${item.id}`" />
+          <RouterLink
+            v-if="item.subkind === 'exploration_ref' && store.current && explorationUrl(item, store.current.id)"
+            :to="explorationUrl(item, store.current.id)!"
+            class="badge live"
+            title="Open the exploration"
+            :aria-label="`Open the exploration ${item.title}`"
+            :data-testid="`item-open-exploration-${item.id}`"
+            @click.stop
+          ><ExternalLink :size="10" /></RouterLink>
+          <span v-else-if="item.subkind === 'exploration_ref'" class="badge live" title="Live reference to the exploration">🔗</span>
           <span v-if="item.status === 'suggested'" class="badge suggested-badge" :data-testid="`item-suggested-${item.id}`">suggested</span>
           <span class="actions" @click.stop>
+            <button
+              v-if="isGraphItem(item) && item.accessible && store.readableGraphItems.length > 1"
+              class="link-btn only"
+              title="Show only this graph on the canvas"
+              :aria-label="`Show only ${item.title} on the canvas`"
+              :data-testid="`item-only-${item.id}`"
+              @click="store.showOnly(item.id)"
+            >only</button>
             <input
               v-if="item.kind === 'table' && canEdit"
               type="checkbox"
@@ -546,6 +562,28 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
 .actions {
   display: inline-flex;
   gap: 4px;
+}
+
+/* "only" shows on hover and keyboard focus: the row stays quiet otherwise. */
+.only {
+  font-size: 11px;
+  opacity: 0;
+}
+
+.item:hover .only,
+.item:focus-within .only {
+  opacity: 1;
+}
+
+a.badge.live {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-primary);
+}
+
+.warn {
+  color: var(--color-warning, #d97706);
+  flex-shrink: 0;
 }
 
 .sub {

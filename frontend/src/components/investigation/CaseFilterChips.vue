@@ -75,7 +75,12 @@ function summary(c: Chip): string {
 async function saveView() {
   const title = viewName.value.trim() || `View ${store.views.length + 1}`;
   try {
-    await store.saveView(title, { filters: filters.snapshot(), layout: graph.layoutAlgorithm, groups_closed: [...store.groupsClosed] });
+    await store.saveView(title, {
+      filters: filters.snapshot(),
+      layout: graph.layoutAlgorithm,
+      groups_closed: [...store.groupsClosed],
+      canvas_items: store.allOnCanvas ? 'all' : store.canvasItems.map((i) => i.id),
+    });
     viewName.value = '';
     open.value = null;
     toast.success(`View “${title}” saved`);

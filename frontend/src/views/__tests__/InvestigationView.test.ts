@@ -25,6 +25,9 @@ vi.mock('@/services/api', () => ({
     pinInvestigationItem: vi.fn(),
     lookupEnrichment: vi.fn(),
     postInvestigationEvent: vi.fn(async () => ({})),
+    updateInvestigation: vi.fn(async (_id: string, patch: Record<string, unknown>) => ({
+      id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, shared_with: [], tags: [], state: {}, ...patch,
+    })),
   },
 }))
 vi.mock('@/components/GraphCanvas3D.vue', () => ({ default: { render: () => null } }))
@@ -88,12 +91,48 @@ const pixCase = () => {
 }
 
 describe('InvestigationView', () => {
-  it('unifies the graph items and the "on canvas" checkbox removes an item without a reload', async () => {
+  it('opens one graph at a time; the legend picks, "All graphs" unifies and the choice is saved in the case (UX-1)', async () => {
+    const { getByTestId, queryByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    const graph = useGraphStore()
+    expect(graph.nodes.map((n) => n.node_id).sort()).toEqual(['a@c1', 'b@c1'])
+    expect(queryByTestId('unification-summary')).toBeNull()
+
+    await fireEvent.click(getByTestId('legend-item-s2'))
+    await flushPromises()
+    expect(graph.nodes.map((n) => n.node_id)).toEqual(['x@c2'])
+    expect(api.updateInvestigation).toHaveBeenLastCalledWith('inv', { state: { canvas_items: ['s2'] } })
+
+    await fireEvent.click(getByTestId('legend-item-s1'), { shiftKey: true })
+    await flushPromises()
+    expect(graph.nodes.map((n) => n.node_id).sort()).toEqual(['a@c1', 'b@c1', 'x@c2'])
+
+    await fireEvent.click(getByTestId('canvas-one'))
+    await flushPromises()
+    await fireEvent.click(getByTestId('canvas-all'))
+    await flushPromises()
+    expect(api.updateInvestigation).toHaveBeenLastCalledWith('inv', { state: { canvas_items: 'all' } })
+    expect(graph.nodes.map((n) => n.node_id).sort()).toEqual(['a@c1', 'b@c1', 'x@c2'])
+    expect(getByTestId('workspace-status').textContent).toContain('2 sources')
+    expect(api.getInvestigationItemSnapshot).toHaveBeenCalledTimes(2) // switching graphs never reloads them
+  })
+
+  it('a graph item that loads nothing says why, in the legend and the material list', async () => {
+    vi.mocked(api.getInvestigationItemSnapshot).mockImplementation(async (_i, sid) =>
+      (sid === 's1' ? snapshot(['a']) : { ...snapshot([]), snapshot: null }) as any,
+    )
+    const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    expect(getByTestId('legend-item-s2').getAttribute('title')).toContain('No saved graph')
+    expect(getByTestId('item-error-s2')).toBeTruthy()
+  })
+
+  it('the "on canvas" checkbox removes an item without a reload', async () => {
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: { canvas_items: 'all' }, shared_with: [], tags: [] } as any)
     const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
     const graph = useGraphStore()
     expect(graph.nodes.map((n) => n.node_id).sort()).toEqual(['a@c1', 'b@c1', 'x@c2'])
-    expect(getByTestId('workspace-status').textContent).toContain('2 sources')
 
     await fireEvent.click(getByTestId('item-canvas-s2'))
     await flushPromises()
@@ -240,7 +279,7 @@ describe('InvestigationView', () => {
     vi.mocked(api.getInvestigationAnnotations).mockResolvedValue([
       { id: 'g1', kind: 'group', targets: ['a@c1', 'b@c1'], value: { name: 'Dupla', color: 1 }, status: 'confirmed', author_kind: 'human', author_email: 'me@x.com' },
     ] as any)
-    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: { groups_closed: ['g1'] }, shared_with: [], tags: [] } as any)
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: { groups_closed: ['g1'], canvas_items: 'all' }, shared_with: [], tags: [] } as any)
     const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
     const graph = useGraphStore()

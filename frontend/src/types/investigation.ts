@@ -440,6 +440,8 @@ export interface CaseViewContent {
   };
   layout: string;
   groups_closed: string[];
+  /** The graphs on the canvas when the view was saved (UX-1); older views leave it as it is. */
+  canvas_items?: string[] | 'all';
 }
 
 export interface CaseBrief {

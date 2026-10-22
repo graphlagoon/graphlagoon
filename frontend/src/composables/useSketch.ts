@@ -92,7 +92,9 @@ export function useSketch() {
     if (item) {
       await store.addVersion(item.id, { content_json: content });
     } else {
-      await store.addItem({ kind: 'graph', subkind: 'sketch', title: SKETCH_ITEM_TITLE, content_json: content });
+      const created = await store.addItem({ kind: 'graph', subkind: 'sketch', title: SKETCH_ITEM_TITLE, content_json: content });
+      // Drawn over the graphs on the canvas: its stubs are their nodes.
+      if (created) void store.toggleCanvas(created.id, true);
     }
     // The case view reloads its canvas when a graph item gets a new version.
   }

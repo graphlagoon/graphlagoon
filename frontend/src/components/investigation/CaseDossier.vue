@@ -2,8 +2,8 @@
 /**
  * Dossier (05 §2, §7): `?mode=dossier` of the case screen, same store. Summary and
  * indicators, groups, hypotheses with the evidence for and against each
- * (pinned versions E1, E2, … oldest first), the evidence, the tables flagged "Use in the
- * dossier", the journal, the decisions (with their four-eyes reviews) and the panel to
+ * (pinned versions E1, E2, … oldest first), the evidence, the notes and documents (read
+ * here, rendered: UX-1), the tables flagged "Use in the dossier", the journal, the decisions (with their four-eyes reviews) and the panel to
  * record one. Read-only once closed. Exports
  * download from the server; the print report is this page printed (print CSS below).
  */
@@ -18,7 +18,8 @@ import { caseNodeLabel, shortId } from '@/utils/caseLabels';
 import { formatDate } from '@/utils/format';
 import { methodStamp } from '@/utils/traceView';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { buildPreview } from '@/utils/itemPreview';
+import { buildPreview, isTabular, itemFileName } from '@/utils/itemPreview';
+import { renderMarkdown } from '@/utils/markdown';
 import DecisionPanel from '@/components/investigation/DecisionPanel.vue';
 import CaseTasksPanel from '@/components/investigation/CaseTasksPanel.vue';
 import type { TraceResult } from '@/utils/trace';
@@ -49,7 +50,7 @@ const inv = computed(() => store.current);
 const canEdit = computed(() => !!inv.value?.has_write_access && inv.value.status !== 'closed');
 
 /** E1, E2, … by pin order; keyed by item id (a hypothesis cites items). */
-const label = computed(() => new Map(store.evidence.map((e, i) => [e.item.id, `E${i + 1}`])));
+const label = computed(() => new Map(store.evidence.map((e) => [e.item.id, store.evidenceLabel(e.item.id, e.version.version)])));
 const evidenceTitle = (itemId: string) => store.items.find((i) => i.id === itemId)?.title ?? '';
 
 const roleCounts = computed(() => {
@@ -74,7 +75,74 @@ const indicators = computed(() => {
 const journal = computed(() => (showAllEvents.value ? store.events : store.events.slice(-JOURNAL_ROWS)));
 
 /** Tables flagged "Use in the dossier" (tag `dossier`): the latest or pinned version, first rows. */
-const dossierTables = computed(() => store.items.filter((i) => !i.deleted_at && i.tags.includes('dossier') && i.current_version > 0));
+const dossierTables = computed(() => store.items.filter((i) => !i.deleted_at && isTabular(i) && i.tags.includes('dossier') && i.current_version > 0));
+
+/**
+ * Notes and documents (UX-1): the case's writing, read here rather than one item at a time in
+ * the inspector. Rejected suggestions stay out; a suggested one shows marked.
+ */
+const writings = computed(() =>
+  store.items.filter((i) => !i.deleted_at && i.status !== 'rejected' && (i.kind === 'note' || (i.kind === 'document' && i.subkind !== 'brief'))),
+);
+const WRITING_LINES = 40;
+const expandedWriting = ref<Set<string>>(new Set());
+/** Text of a writing's latest version, by `${id}:${version}`; a UI note carries it in `description`. */
+const writingText = ref<Record<string, { text: string | null; error: string | null }>>({});
+const needsText = (i: CaseItem) =>
+  i.current_version > 0 && ((i.kind === 'note' && !i.description) || (i.kind === 'document' && i.subkind === 'markdown'));
+watch(
+  writings,
+  async (list) => {
+    const inv = store.current;
+    if (!inv) return;
+    await Promise.all(
+      list.filter(needsText).map(async (i) => {
+        const key = `${i.id}:${i.current_version}`;
+        if (writingText.value[key]) return;
+        writingText.value = { ...writingText.value, [key]: { text: null, error: null } };
+        try {
+          const text = new TextDecoder().decode(await api.getInvestigationItemContent(inv.id, i.id));
+          writingText.value = { ...writingText.value, [key]: { text, error: null } };
+        } catch (e) {
+          writingText.value = { ...writingText.value, [key]: { text: null, error: getErrorMessage(e, 'Could not read it') } };
+        }
+      }),
+    );
+  },
+  { immediate: true },
+);
+function bodyOf(i: CaseItem): { text: string | null; error: string | null; loading: boolean } {
+  if (i.kind === 'note' && i.description) return { text: i.description, error: null, loading: false };
+  const entry = writingText.value[`${i.id}:${i.current_version}`];
+  return { text: entry?.text ?? null, error: entry?.error ?? null, loading: !!entry && entry.text === null && !entry.error };
+}
+const isLong = (text: string) => text.split('\n').length > WRITING_LINES;
+function shownText(i: CaseItem, text: string) {
+  return expandedWriting.value.has(i.id) || !isLong(text) ? text : text.split('\n').slice(0, WRITING_LINES).join('\n');
+}
+function toggleWriting(id: string) {
+  const next = new Set(expandedWriting.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expandedWriting.value = next;
+}
+const linkOf = (i: CaseItem) => {
+  const url = String(i.provenance?.url ?? '');
+  return /^https?:\/\//i.test(url) ? url : null;
+};
+const anchorsOf = (i: CaseItem) => (i.anchor?.entity_ids ?? []).map(entityName);
+const fileSize = (bytes?: number | null) =>
+  bytes == null ? '' : bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const downloading = ref<string | null>(null);
+async function downloadItem(i: CaseItem) {
+  if (!store.current) return;
+  downloading.value = i.id;
+  await act(async () => {
+    const data = await api.getInvestigationItemContent(store.current!.id, i.id);
+    downloadBlob(itemFileName(i), new Blob([data], { type: i.latest?.content_type || 'application/octet-stream' }));
+  }, 'Failed to download the file');
+  downloading.value = null;
+}
 const tableRows = ref<Record<string, { columns: string[]; rows: unknown[][] }>>({});
 watch(
   dossierTables,
@@ -244,7 +312,8 @@ const unflag = (t: CaseItem) => act(() => store.setInDossier(t, false), 'Could n
           <section class="card" data-testid="dossier-summary">
             <h2>Summary <span class="muted">built from the case and the evidence · review before deciding</span></h2>
             <p class="description">{{ inv.description || 'No description yet.' }}</p>
-            <pre v-if="store.brief.text" class="brief" data-testid="dossier-brief">{{ store.brief.text }}</pre>
+            <!-- v-html: escape-first renderer only (utils/markdown) -->
+            <div v-if="store.brief.text" class="brief case-markdown" data-testid="dossier-brief" v-html="renderMarkdown(store.brief.text)"></div>
             <div class="chips">
               <span class="chip seal" data-testid="dossier-case-type">{{ store.caseTypeLabel(inv.case_type) }}</span>
               <span v-for="t in inv.tags" :key="t" class="chip">{{ t }}</span>
@@ -323,13 +392,50 @@ const unflag = (t: CaseItem) => act(() => store.setInDossier(t, false), 'Could n
             <div v-if="store.evidence.length" class="evidence-grid">
               <article v-for="e in store.evidence" :key="`${e.item.id}:${e.version.version}`" class="evidence" :data-testid="`evidence-${e.item.id}`">
                 <div class="ev-kind">{{ itemKindLabel(e.item.kind) }} / {{ e.item.subkind }}</div>
-                <strong>{{ label.get(e.item.id) }} · {{ e.item.title }}<template v-if="e.version.pin_label"> · {{ e.version.pin_label }}</template></strong>
+                <strong>{{ store.evidenceLabel(e.item.id, e.version.version) }} · {{ e.item.title }}<template v-if="e.version.pin_label"> · {{ e.version.pin_label }}</template></strong>
                 <div class="muted mono" :title="e.version.sha256">v{{ e.version.version }} · hash {{ shortHash(e.version.sha256) }}</div>
                 <div class="muted params">{{ paramsLine(e) }}</div>
                 <div class="muted">{{ e.version.pinned_by }} · {{ fmtTime(e.version.pinned_at) }}</div>
               </article>
             </div>
             <p v-else class="muted">No evidence yet. Pin a version in the material list (📌) or an analysis result.</p>
+          </section>
+
+          <section v-if="writings.length" class="card" data-testid="dossier-documents">
+            <h2>Notes and documents <span class="muted">the case's writing · latest version</span></h2>
+            <article v-for="w in writings" :key="w.id" class="writing" :data-testid="`dossier-writing-${w.id}`">
+              <div class="table-head">
+                <strong>{{ store.shortIds.get(w.id) }} · {{ w.title }}</strong>
+                <span class="muted">
+                  {{ w.author_kind === 'agent' ? 'agent · ' : '' }}{{ w.author_email }}<template v-if="w.created_at"> · {{ fmtTime(w.created_at) }}</template>
+                </span>
+                <span v-if="w.status === 'suggested'" class="chip suggested">suggested</span>
+              </div>
+              <p v-if="anchorsOf(w).length" class="muted anchors">On {{ anchorsOf(w).join(', ') }}</p>
+
+              <template v-if="w.subkind === 'link'">
+                <a v-if="linkOf(w)" :href="linkOf(w)!" target="_blank" rel="noopener noreferrer" :data-testid="`dossier-link-${w.id}`">{{ linkOf(w) }}</a>
+                <p v-else class="muted">{{ w.description || 'Link without an address.' }}</p>
+              </template>
+              <template v-else-if="w.subkind === 'upload'">
+                <p class="muted">
+                  {{ w.provenance?.filename ?? w.title }} · {{ w.latest?.content_type ?? 'file' }}<template v-if="w.latest"> · {{ fileSize(w.latest.size_bytes) }} · hash {{ shortHash(w.latest.sha256) }}</template>
+                </p>
+                <p v-if="w.description" class="description">{{ w.description }}</p>
+                <button v-if="w.current_version" class="btn btn-outline btn-sm no-print" :disabled="downloading === w.id" :data-testid="`dossier-download-${w.id}`" @click="downloadItem(w)">Download</button>
+              </template>
+              <template v-else>
+                <p v-if="bodyOf(w).error" class="error-message">{{ bodyOf(w).error }}</p>
+                <p v-else-if="bodyOf(w).text === null" class="muted">{{ w.current_version ? 'Loading…' : 'Empty.' }}</p>
+                <template v-else>
+                  <!-- v-html: escape-first renderer only (utils/markdown) -->
+                  <div class="case-markdown" :data-testid="`dossier-writing-body-${w.id}`" v-html="renderMarkdown(shownText(w, bodyOf(w).text!))"></div>
+                  <button v-if="isLong(bodyOf(w).text!)" class="link-btn no-print" @click="toggleWriting(w.id)">
+                    {{ expandedWriting.has(w.id) ? 'Show less' : 'Show all' }}
+                  </button>
+                </template>
+              </template>
+            </article>
           </section>
 
           <section v-if="dossierTables.length" class="card" data-testid="dossier-tables">
@@ -765,9 +871,24 @@ const unflag = (t: CaseItem) => act(() => store.setInDossier(t, false), 'Could n
   padding: 8px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-muted);
-  white-space: pre-wrap;
-  font: inherit;
-  font-size: 13px;
+}
+
+.writing {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  break-inside: avoid-page;
+}
+
+.writing:last-child {
+  border-bottom: 0;
+}
+
+.writing .anchors {
+  margin: 0 0 6px;
+}
+
+.chip.suggested {
+  border-style: dashed;
 }
 
 /* Print report: the dossier as a document, without the app chrome or controls. */
@@ -803,6 +924,7 @@ const unflag = (t: CaseItem) => act(() => store.setInDossier(t, false), 'Could n
   .exports,
   .decide,
   .add,
+  .no-print,
   .link-btn,
   .link-select,
   .x {

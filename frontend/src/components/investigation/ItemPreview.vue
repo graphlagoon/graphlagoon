@@ -2,7 +2,9 @@
 /**
  * Shows any item version the browser can render (table, text, image, PDF, HTML)
  * and downloads the rest. Case data never runs in the app's origin: HTML goes
- * into a sandboxed iframe, markdown is shown as text, images and PDFs as blobs.
+ * into a sandboxed iframe, markdown goes through the escape-first renderer
+ * (`utils/markdown`, "Raw" shows the source), images and PDFs as blobs. A link
+ * document opens its URL. `version` previews an older version (default: latest).
  * A table may be seen as a chart (06 P5); the chart is the item's view
  * (`state.chart`), saved without a new version.
  */
@@ -14,9 +16,10 @@ import { downloadBlob } from '@/utils/portableExport';
 import { buildPreview, itemFileName, PREVIEW_MAX_BYTES, type ItemPreview } from '@/utils/itemPreview';
 import { useInvestigationStore } from '@/stores/investigation';
 import TableChart from '@/components/investigation/TableChart.vue';
-import type { CaseItem, TableChartSpec } from '@/types/investigation';
+import { renderMarkdown } from '@/utils/markdown';
+import type { CaseItem, CaseItemVersion, TableChartSpec } from '@/types/investigation';
 
-const props = defineProps<{ item: CaseItem; investigationId: string }>();
+const props = defineProps<{ item: CaseItem; investigationId: string; version?: CaseItemVersion | null }>();
 
 const toast = useToast();
 const busy = ref(false);
@@ -24,11 +27,20 @@ const preview = ref<ItemPreview | null>(null);
 const blobUrl = ref<string | null>(null);
 let bytes: ArrayBuffer | null = null;
 
-const contentType = computed(() => props.item.latest?.content_type ?? '');
-const tooBig = computed(() => (props.item.latest?.size_bytes ?? 0) > PREVIEW_MAX_BYTES);
+const shown = computed(() => props.version ?? props.item.latest ?? null);
+const contentType = computed(() => shown.value?.content_type ?? '');
+const tooBig = computed(() => (shown.value?.size_bytes ?? 0) > PREVIEW_MAX_BYTES);
+const isMarkdown = computed(() => contentType.value.startsWith('text/markdown'));
+const raw = ref(false);
+/** A link document's URL (the content is the URL; provenance keeps it too). */
+const linkUrl = computed(() => {
+  if (props.item.subkind !== 'link') return null;
+  const url = String(props.item.provenance?.url ?? '');
+  return /^https?:\/\//i.test(url) ? url : null;
+});
 
 async function load(): Promise<ArrayBuffer> {
-  bytes ??= await api.getInvestigationItemContent(props.investigationId, props.item.id);
+  bytes ??= await api.getInvestigationItemContent(props.investigationId, props.item.id, props.version?.version);
   return bytes;
 }
 
@@ -116,6 +128,7 @@ onBeforeUnmount(revokeBlob);
 <template>
   <div class="item-preview">
     <div class="row-actions">
+      <a v-if="linkUrl" :href="linkUrl" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" data-testid="item-open-link">Open link ↗</a>
       <button v-if="!preview && !tooBig" class="btn btn-outline btn-sm" :disabled="busy" data-testid="item-preview-open" @click="open">
         {{ busy ? 'Loading…' : 'Preview' }}
       </button>
@@ -154,7 +167,16 @@ onBeforeUnmount(revokeBlob);
         </div>
       </template>
       <template v-else-if="preview.kind === 'text'">
-        <pre class="scroll text">{{ preview.text }}</pre>
+        <template v-if="isMarkdown">
+          <div class="view-toggle">
+            <button class="btn btn-outline btn-sm" :class="{ on: !raw }" data-testid="item-view-rendered" @click="raw = false">Rendered</button>
+            <button class="btn btn-outline btn-sm" :class="{ on: raw }" data-testid="item-view-raw" @click="raw = true">Raw</button>
+          </div>
+          <pre v-if="raw" class="scroll text">{{ preview.text }}</pre>
+          <!-- v-html: escape-first renderer only (utils/markdown) -->
+          <div v-else class="scroll case-markdown" data-testid="item-markdown" v-html="renderMarkdown(preview.text)"></div>
+        </template>
+        <pre v-else class="scroll text">{{ preview.text }}</pre>
         <p v-if="preview.truncated" class="muted">Text cut; download the file to see all of it.</p>
       </template>
       <img v-else-if="preview.kind === 'image' && blobUrl" :src="blobUrl" :alt="item.title" class="media" />

@@ -2,11 +2,12 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
-import { applyAliases, snapshotToGraph, unifyGraph, type NodeOrigin, type UnifySource } from '@/utils/unifyGraph';
+import { applyAliases, baseSourceId, snapshotToGraph, unifyGraph, type NodeOrigin, type UnifySource } from '@/utils/unifyGraph';
 import { applyFileEnrichment, fileEnrichmentRows, tableContentOf, type FileRows, type TableContent } from '@/utils/enrichment';
 import { decoderLabel } from '@/utils/fileImport';
 import { provenanceColor } from '@/utils/graphAppearance';
 import { groupColor, vocabularyOf } from '@/utils/caseVocabulary';
+import { caseShortIds, evidenceNumbers } from '@/utils/caseShortIds';
 import type { Edge, EdgeSemanticsByType, ExplorationState, GraphContext, IdentityKey, Node } from '@/types/graph';
 import type {
   CaseAnnotation,
@@ -60,6 +61,12 @@ export interface AnalysisSpec {
   description?: string;
 }
 
+/** `state.canvas_items`: the graph items on the canvas, or all of them. */
+export type CanvasChoice = string[] | 'all';
+
+/** Graph items made from what was already on the canvas: never the one a case opens on. */
+const FROZEN_SUBKINDS = new Set(['snapshot', 'selection', 'derived']);
+
 /** Items that put nodes on the canvas (a saved view is chips + layout only). */
 export function isGraphItem(item: CaseItem): boolean {
   if (item.deleted_at || item.status === 'rejected') return false;
@@ -94,6 +101,8 @@ export const useInvestigationStore = defineStore('investigation', () => {
   /** The open case and its material (05 §1). */
   const current = ref<Investigation | null>(null);
   const items = ref<CaseItem[]>([]);
+  /** Removed items (soft delete): restorable, and they keep their short ids and evidence numbers. */
+  const removedItems = ref<CaseItem[]>([]);
   const annotations = ref<CaseAnnotation[]>([]);
   const events = ref<InvestigationEvent[]>([]);
   const brief = ref<CaseBrief>({ item: null, text: '' });
@@ -101,9 +110,32 @@ export const useInvestigationStore = defineStore('investigation', () => {
   const error = ref<string | null>(null);
 
   const graphItems = computed(() => items.value.filter(isGraphItem));
-  /** Graph items the person unchecked ("no canvas"): nodes leave without a layout reset. */
-  const offCanvas = ref<Set<string>>(new Set());
-  const canvasItems = computed(() => graphItems.value.filter((i) => i.accessible && !offCanvas.value.has(i.id)));
+  const readableGraphItems = computed(() => graphItems.value.filter((i) => i.accessible));
+  /**
+   * Which graph items are on the canvas (UX-1): `state.canvas_items`, ids or "all". Several graphs
+   * merged into one layout confuse more than they show, so a case opens one graph at a time and
+   * "All items" unifies them on request.
+   */
+  const canvasOverride = ref<CanvasChoice | null>(null);
+  const canvasChoice = computed<CanvasChoice | null>(
+    () => canvasOverride.value ?? ((current.value?.state?.canvas_items as CanvasChoice | undefined) ?? null),
+  );
+  const canvasItems = computed(() => {
+    const readable = readableGraphItems.value;
+    const choice = canvasChoice.value;
+    if (choice === 'all') return readable;
+    if (choice) {
+      if (!choice.length) return [];
+      const ids = new Set(choice);
+      const picked = readable.filter((i) => ids.has(i.id));
+      if (picked.length) return picked;
+    }
+    // Nothing chosen (or all of it gone): the first graph someone brought, not a frozen copy of the canvas.
+    const first = readable.find((i) => !FROZEN_SUBKINDS.has(i.subkind)) ?? readable[0];
+    return first ? [first] : [];
+  });
+  const canvasIds = computed(() => new Set(canvasItems.value.map((i) => i.id)));
+  const allOnCanvas = computed(() => readableGraphItems.value.length > 0 && canvasItems.value.length === readableGraphItems.value.length);
   const restrictedItems = computed(() => graphItems.value.filter((i) => !i.accessible));
 
   /** Workspace: each canvas item's graph, the contexts (or per-item keys) and expansions. */
@@ -113,6 +145,10 @@ export const useInvestigationStore = defineStore('investigation', () => {
   /** Nodes promoted from enrichment tables. shortcut: session only; the journal records them. */
   const derived = ref<UnifySource[]>([]);
   const graphLoading = ref(false);
+  /** Why a graph item shows nothing (no saved snapshot, load failure), by item id. */
+  const sourceErrors = computed<Record<string, string>>(() =>
+    Object.fromEntries(sourceGraphs.value.filter((g) => g.error).map((g) => [g.id, g.error as string])),
+  );
   const sourceColors = computed<Record<string, string>>(() =>
     Object.fromEntries(graphItems.value.map((s, i) => [s.id, provenanceColor(i)])),
   );
@@ -142,7 +178,11 @@ export const useInvestigationStore = defineStore('investigation', () => {
     const edgeOverrides = (current.value?.settings?.edge_semantics as EdgeSemanticsByType | undefined) ?? null;
     const graph = applyAliases(
       unifyGraph(
-        [...sourceGraphs.value.filter((g) => !offCanvas.value.has(g.id)), ...expansions.value, ...derived.value],
+        [
+          ...sourceGraphs.value.filter((g) => canvasIds.value.has(g.id)),
+          ...expansions.value.filter((e) => canvasIds.value.has(baseSourceId(e.id))),
+          ...derived.value,
+        ],
         contexts.value,
         overrides,
         edgeOverrides,
@@ -210,6 +250,10 @@ export const useInvestigationStore = defineStore('investigation', () => {
       .sort((a, b) => (a.version.pinned_at ?? '').localeCompare(b.version.pinned_at ?? '')),
   );
   const notes = computed(() => items.value.filter((i) => i.kind === 'note'));
+  /** G3, Q2, D1…: stable, see `caseShortIds`. */
+  const shortIds = computed(() => caseShortIds([...items.value, ...removedItems.value]));
+  const evidenceLabels = computed(() => evidenceNumbers([...items.value, ...removedItems.value]));
+  const evidenceLabel = (itemId: string, version: number) => evidenceLabels.value.get(`${itemId}:${version}`) ?? 'E?';
 
   const itemTitle = (itemId: string) => items.value.find((i) => i.id === itemId)?.title ?? itemId;
 
@@ -318,10 +362,11 @@ export const useInvestigationStore = defineStore('investigation', () => {
       // Another case's lists must not show while this one loads.
       current.value = null;
       items.value = [];
+      removedItems.value = [];
       annotations.value = [];
       events.value = [];
       brief.value = { item: null, text: '' };
-      offCanvas.value = new Set();
+      canvasOverride.value = null;
       sourceGraphs.value = [];
       expansions.value = [];
       derived.value = [];
@@ -331,11 +376,11 @@ export const useInvestigationStore = defineStore('investigation', () => {
     try {
       const [inv, rows, notes] = await Promise.all([
         api.getInvestigation(id),
-        api.getInvestigationItems(id),
+        api.getInvestigationItems(id, { include_deleted: true }),
         api.getInvestigationAnnotations(id),
       ]);
       current.value = inv;
-      items.value = rows;
+      setItems(rows);
       annotations.value = notes;
     } catch (e) {
       current.value = null;
@@ -348,8 +393,13 @@ export const useInvestigationStore = defineStore('investigation', () => {
 
   // --- material ---------------------------------------------------------------
 
+  function setItems(rows: CaseItem[]) {
+    items.value = rows.filter((i) => !i.deleted_at);
+    removedItems.value = rows.filter((i) => i.deleted_at);
+  }
+
   async function fetchItems() {
-    if (current.value) items.value = await api.getInvestigationItems(current.value.id);
+    if (current.value) setItems(await api.getInvestigationItems(current.value.id, { include_deleted: true }));
   }
 
   function upsertItem(item: CaseItem) {
@@ -400,6 +450,8 @@ export const useInvestigationStore = defineStore('investigation', () => {
   async function removeItem(itemId: string) {
     if (!current.value) return;
     await api.deleteInvestigationItem(current.value.id, itemId);
+    const gone = items.value.find((i) => i.id === itemId);
+    if (gone) removedItems.value = [...removedItems.value, { ...gone, deleted_at: new Date().toISOString() }];
     items.value = items.value.filter((i) => i.id !== itemId);
     sourceGraphs.value = sourceGraphs.value.filter((g) => g.id !== itemId);
     const row = investigations.value.find((i) => i.id === current.value?.id);
@@ -429,11 +481,32 @@ export const useInvestigationStore = defineStore('investigation', () => {
     return item;
   }
 
+  /**
+   * Puts graph items on the canvas. Saved in the case (`state.canvas_items`) for whoever can edit
+   * it; a reader's (or a closed case's) choice lasts the session.
+   */
+  async function setCanvas(choice: CanvasChoice) {
+    canvasOverride.value = choice;
+    const inv = current.value;
+    if (!inv?.has_write_access || inv.status === 'closed') return;
+    try {
+      await saveState({ canvas_items: choice });
+      if (canvasOverride.value === choice) canvasOverride.value = null;
+    } catch {
+      // Kept for the session: the canvas must not jump back because a save failed.
+    }
+  }
+
+  /** Only this graph on the canvas. */
+  const showOnly = (itemId: string) => setCanvas([itemId]);
+  /** Every readable graph, unified (one ring per source). */
+  const showAll = () => setCanvas('all');
+  /** Adds or removes one graph, keeping the others. */
   function toggleCanvas(itemId: string, on: boolean) {
-    const next = new Set(offCanvas.value);
-    if (on) next.delete(itemId);
-    else next.add(itemId);
-    offCanvas.value = next;
+    const ids = new Set(canvasIds.value);
+    if (on) ids.add(itemId);
+    else ids.delete(itemId);
+    return setCanvas([...ids]);
   }
 
   /**
@@ -442,12 +515,18 @@ export const useInvestigationStore = defineStore('investigation', () => {
    */
   async function addExplorations(investigationId: string, explorationIds: string[]): Promise<{ added: number; error: string | null }> {
     let added = 0;
+    const shown: string[] = [];
     try {
       for (const id of explorationIds) {
         const item = await api.createInvestigationItem(investigationId, { kind: 'graph', subkind: 'exploration_ref', exploration_id: id });
-        if (current.value?.id === investigationId) upsertItem(item);
+        if (current.value?.id === investigationId) {
+          upsertItem(item);
+          shown.push(item.id);
+        }
         added++;
       }
+      // What was just brought is what the person wants to look at.
+      if (shown.length) void setCanvas(shown);
       return { added, error: null };
     } catch (e) {
       return { added, error: getErrorMessage(e, 'Failed to add exploration') };
@@ -737,6 +816,8 @@ export const useInvestigationStore = defineStore('investigation', () => {
       });
     }
     if (item) rememberContent(item, spec.content);
+    // A graph result (links) is drawn over the graphs it was computed on.
+    if (item && !spec.itemId && spec.kind === 'graph') void toggleCanvas(item.id, true);
     return item;
   }
 
@@ -803,15 +884,22 @@ export const useInvestigationStore = defineStore('investigation', () => {
     fetchCaseTypes,
     current,
     items,
+    removedItems,
+    shortIds,
+    evidenceLabel,
     annotations,
     events,
     brief,
     loading,
     error,
     graphItems,
+    readableGraphItems,
     canvasItems,
+    canvasIds,
+    canvasChoice,
+    allOnCanvas,
     restrictedItems,
-    offCanvas,
+    sourceErrors,
     sourceGraphs,
     contexts,
     expansions,
@@ -861,6 +949,9 @@ export const useInvestigationStore = defineStore('investigation', () => {
     setItemStatus,
     runQuery,
     toggleCanvas,
+    setCanvas,
+    showOnly,
+    showAll,
     addExplorations,
     pinEvidence,
     fetchBrief,

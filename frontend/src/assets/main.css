@@ -551,3 +551,53 @@ select.field-input:focus {
   font-size: var(--text-lg);
   font-weight: var(--font-medium);
 }
+
+/* Case markdown (utils/markdown, UX-1): notes, documents and reports rendered in the
+   inspector and the dossier. Global because v-html content escapes scoped styles. */
+.case-markdown {
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.case-markdown > :first-child { margin-top: 0; }
+.case-markdown > :last-child { margin-bottom: 0; }
+.case-markdown p,
+.case-markdown ul,
+.case-markdown ol,
+.case-markdown blockquote,
+.case-markdown pre,
+.case-markdown table { margin: 0 0 8px; }
+.case-markdown h3,
+.case-markdown h4,
+.case-markdown h5,
+.case-markdown h6 { margin: 12px 0 6px; font-size: 14px; }
+.case-markdown h3 { font-size: 15px; }
+.case-markdown ul,
+.case-markdown ol { padding-left: 20px; }
+.case-markdown blockquote {
+  padding-left: 10px;
+  border-left: 3px solid var(--border-color);
+  color: var(--text-muted);
+}
+.case-markdown code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.case-markdown pre {
+  padding: 8px;
+  overflow: auto;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
+}
+.case-markdown pre code { padding: 0; background: none; }
+.case-markdown table { border-collapse: collapse; font-size: 12px; }
+.case-markdown th,
+.case-markdown td {
+  padding: 3px 8px;
+  border: 1px solid var(--border-color);
+  text-align: left;
+}
+.case-markdown hr { border: 0; border-top: 1px solid var(--border-color); margin: 10px 0; }

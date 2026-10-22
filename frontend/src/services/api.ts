@@ -778,7 +778,7 @@ class ApiService {
   }
 
   // Items
-  async getInvestigationItems(id: string, params: { kind?: string; status?: string } = {}): Promise<CaseItem[]> {
+  async getInvestigationItems(id: string, params: { kind?: string; status?: string; include_deleted?: boolean } = {}): Promise<CaseItem[]> {
     const response = await this.client.get(`/api/investigations/${id}/items`, { params });
     return response.data;
   }
