@@ -1336,7 +1336,9 @@ export async function seedInvestigations(
           (!q.get('exploration_id') || (material.get(i.id) ?? []).some((it) => it.exploration_id === q.get('exploration_id'))) &&
           (!q.get('deadline') || !!i.deadline?.urgent) &&
           (q.get('suggested') !== 'true' || i.suggested_count > 0) &&
-          (!text || `${i.title} ${i.description ?? ''}`.toLowerCase().includes(text)) &&
+          (!text || `${i.title} ${i.description ?? ''}`.toLowerCase().includes(text) || i.id.startsWith(text)) &&
+          (!q.get('assignee') || (i.assignee_email ?? i.owner_email) === q.get('assignee')) &&
+          (!q.get('scope') || (i.owner_email === 'e2e@test.com') === (q.get('scope') === 'owned')) &&
           fieldFilters.every(([k, expr]) => {
             const [op, ...rest] = expr.includes(':') ? expr.split(':') : ['eq', expr];
             const v = i.fields?.[k.slice('field.'.length)];
@@ -1580,7 +1582,8 @@ export async function seedInvestigations(
       if (!a) {
         if (method !== 'POST') {
           const kind = url.searchParams.get('kind');
-          return route.fulfill(json(list.filter((i) => !i.deleted_at && (!kind || i.kind === kind))));
+          const withDeleted = url.searchParams.get('include_deleted') === 'true';
+          return route.fulfill(json(list.filter((i) => (withDeleted || !i.deleted_at) && (!kind || i.kind === kind))));
         }
         const isJson = (req.headers()['content-type'] ?? '').startsWith('application/json');
         const body = isJson ? req.postDataJSON() : { kind: url.searchParams.get('kind'), subkind: url.searchParams.get('subkind'), title: url.searchParams.get('filename'), provenance: { filename: url.searchParams.get('filename') } };
@@ -1646,6 +1649,17 @@ export async function seedInvestigations(
         journal(id, `item.${item.status}`, { item_id: item.id, title: item.title });
         return route.fulfill(json(item));
       }
+      if (b === 'restore') {
+        item.deleted_at = null;
+        journal(id, 'item.restored', { item_id: item.id, kind: item.kind, title: item.title });
+        return route.fulfill(json(item));
+      }
+      if (b === 'reopen') {
+        if (item.status !== 'rejected') return route.fulfill(json({ detail: { error: { code: 'NOT_REJECTED' } } }, 409));
+        item.status = 'suggested';
+        journal(id, 'item.reopened', { item_id: item.id, title: item.title });
+        return route.fulfill(json(item));
+      }
       if (b === 'run') {
         item.latest = version(item, { statement_id: 'stmt-1', row_count: 12, duration_ms: 310, params: req.postDataJSON()?.parameters ?? {}, run_by: 'e2e@test.com', author_kind: 'human', output: 'table' });
         item.current_version += 1;
@@ -1653,7 +1667,11 @@ export async function seedInvestigations(
         return route.fulfill(json(item));
       }
       if (b === 'text') return route.fulfill(json({ text: item._text ?? '', version: item.latest }));
-      if (b === 'content') return route.fulfill(json(item._content ?? {}));
+      if (b === 'content') {
+        // Text items (notes, markdown) answer their text; tables their JSON.
+        if (typeof item._text === 'string') return route.fulfill({ status: 200, contentType: 'text/markdown', body: item._text });
+        return route.fulfill(json(item._content ?? {}));
+      }
       return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     }
 
@@ -1679,8 +1697,31 @@ export async function seedInvestigations(
         journal(id, `${row.kind}.set`, { annotation_id: row.id, targets: row.targets, value: row.value });
         return route.fulfill(json(row, 201));
       }
+      if (a === 'status' && method === 'POST') {
+        const body = req.postDataJSON();
+        const applied: any[] = [];
+        const skipped: string[] = [];
+        for (const aid of body.ids) {
+          const r = l.find((x) => x.id === aid);
+          if (!r || r.status !== 'suggested') {
+            skipped.push(aid);
+            continue;
+          }
+          r.status = body.status;
+          r.confirmed_by = 'e2e@test.com';
+          journal(id, `${r.kind}.${r.status}`, { annotation_id: r.id, targets: r.targets, value: r.value });
+          applied.push(r);
+        }
+        return route.fulfill(json({ applied, skipped }));
+      }
       const row = l.find((x) => x.id === a);
       if (!row) return route.fulfill(json({ detail: { error: { code: 'ANNOTATION_NOT_FOUND' } } }, 404));
+      if (b === 'reopen') {
+        row.status = 'suggested';
+        row.confirmed_by = null;
+        journal(id, `${row.kind}.reopened`, { annotation_id: row.id, targets: row.targets, value: row.value });
+        return route.fulfill(json(row));
+      }
       if (b === 'confirm' || b === 'reject') {
         row.status = b === 'confirm' ? 'confirmed' : 'rejected';
         row.confirmed_by = 'e2e@test.com';
@@ -1709,7 +1750,12 @@ export async function seedInvestigations(
       journal(id, body.kind, body.payload);
       return route.fulfill(json(events.get(id)!.at(-1), 201));
     }
-    return route.fulfill(json(events.get(id) ?? []));
+    // order=desc (newest first) and after=<last id seen>, like the server.
+    let list2 = [...(events.get(id) ?? [])];
+    if (url.searchParams.get('order') === 'desc') list2.reverse();
+    const after = url.searchParams.get('after');
+    if (after) list2 = list2.slice(list2.findIndex((e) => e.id === after) + 1);
+    return route.fulfill(json(list2.slice(0, Number(url.searchParams.get('limit') ?? 500))));
   });
   return { added, material, annotations };
 }

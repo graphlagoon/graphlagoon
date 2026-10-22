@@ -81,7 +81,7 @@ describe('CaseTimeline · Journal (UX-1)', () => {
     const { useAuthStore } = await import('@/stores/auth')
     useAuthStore().email = 'ana@x.com'
     const store = useInvestigationStore()
-    store.current = { id: CASE_ID, title: 'Golpe Pix', status: 'analysis', settings: {}, tags: [] } as any
+    store.current = { id: CASE_ID, title: 'Mule ring', status: 'analysis', settings: {}, tags: [] } as any
     store.events = [
       ...EVENTS,
       { id: 'e5', at: T(12), actor_email: 'bob@x.com', actor_kind: 'human', kind: 'case.updated', payload: { state: { canvas_items: 'all' } } },
@@ -109,7 +109,7 @@ describe('CaseTimeline · Journal (UX-1)', () => {
 
   it('loads older events on request when the newest page is full', async () => {
     const store = useInvestigationStore()
-    store.current = { id: CASE_ID, title: 'Golpe Pix', status: 'analysis', settings: {}, tags: [] } as any
+    store.current = { id: CASE_ID, title: 'Mule ring', status: 'analysis', settings: {}, tags: [] } as any
     const page = Array.from({ length: 200 }, (_, i) => ({ id: `n${i}`, at: new Date(2026, 9, 10, 0, 200 - i).toISOString(), actor_email: 'x', actor_kind: 'human', kind: 'case.created', payload: {} }))
     api.getInvestigationEvents.mockResolvedValueOnce(page).mockResolvedValueOnce([{ id: 'old', at: T(1), actor_email: 'x', actor_kind: 'human', kind: 'case.created', payload: { title: 'first' } }])
     await store.fetchEvents()

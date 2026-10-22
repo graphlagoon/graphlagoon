@@ -13405,3 +13405,75 @@ casa com query com ou sem crases; allowlist com crases), `test_schema_drift`, `t
 (5 falhas pré-existentes de cypher/transpiler, sem relação); vue-tsc limpo.
 **Public docs:** `docs/guide/getting-started.md` (crases em "Table not listed?").
 **Admin-area impact:** nenhum.
+
+## [2026-10-21 22:30] - Feature Implemented: UX do workspace de investigação (UX-1)
+
+**Pedido:** (1) os grafos de um caso iam obrigatoriamente para o mesmo canvas, o que confunde o layout: por padrão,
+ver um grafo por vez; (2) abrir a exploração a partir do caso; (3) o dossiê não mostrava notas, documentos e
+anexos. Depois: levantar o resto da UX, separar em *quick win* / *sem banco* / *muda muito*, e fazer os quick wins
+e tudo o que dá sem grande risco nem migração.
+
+**Triagem** (três varreduras do código; detalhe no plano `hoje-temos-a-opcao-valiant-meerkat.md`):
+- *Quick wins* (Q1–Q22): legenda não clicável e seleção do canvas só na sessão; sem link para a exploração; erro
+  de carga de item nunca exibido; ações oferecidas que o servidor recusa (Decide sem `investigation.decide`,
+  Share sem `investigation.share`, assignee sem manage, tipo após decisão, delete de caso retido, upload sem
+  permissão); destrutivos sem confirmação; menu e drawers sem Escape; Decide no dossiê sem efeito; "updated state"
+  no journal; `href` absoluto do chip de agentes; fila sem URL; "Assignee: me" incoerente com a coluna; busca do
+  material só em título; sem a11y nas linhas e ícones; sem spinner/Retry; chip do caso baixando a fila toda;
+  nomes de abas confusos; pin só da última versão; sem banner de read-only; Console placeholder; docstrings velhas.
+- *Sem banco* (S1–S20): journal truncado nos 500 **mais antigos**; dossiê sem escrita; sem restaurar item; rejeição
+  final; lote em N requests; contadores ignorando filtros; sem escopo/ordenações; sem editar/reordenar item; sem
+  versões; trocar papel de share; "My tasks" sem UI; criação rápida sem tipo; painel de decisão (alvos congelados,
+  reviewer livre, rationale só pré-preenchido, fechar sem confirmar); decisões só no dossiê; markdown cru; journal
+  ilegível; `.txt` como tabela; short ids que mudam; estilo da 1ª exploração; expansões só na sessão.
+- *Muda muito* (fora): M1–M8 (layout redimensionável, arquivar caso/soft delete de anotações, última visita no
+  servidor, lote na fila/webhooks, console de agente, paginação indexada de eventos, comunidades remapeadas, abas).
+
+**Decisões:**
+1. **Um grafo por vez** (escolha do usuário): `investigations.state.canvas_items` = ids ou `"all"` (JSON livre, sem
+   migração); sem escolha → o primeiro item de grafo que não seja cópia do canvas (snapshot/selection/derived). A
+   legenda vira seletor (clique = só este, Shift = soma, "All graphs"); a checkbox do material soma/tira. Leitor e
+   caso fechado: escolha só na sessão (o servidor recusa `state` em caso fechado). Item novo: exploração e arquivo
+   como grafo aparecem sozinhos; sketch e análise de links se somam (desenham sobre o canvas). Views salvam
+   `canvas_items`. Com um grafo, o canvas veste o estilo da exploração dele (S19).
+2. **Link para a exploração**: `/graph/<ctx>?exploration=<id>&case=<inv>` (o mesmo do MCP), no cartão, na linha e
+   na aba Origin.
+3. **Dossiê**: seção "Notes and documents" (notas — de agente lidas da versão —, markdown e relatórios renderizados,
+   links, uploads com tipo/tamanho/hash/download, âncoras). "Use in the dossier" só para tabelas (`isTabular`).
+4. **Markdown sem dependência**: `utils/markdown.ts` escapa tudo antes e só então aplica um subset (títulos,
+   listas, código, ênfase, tabelas, citações, links só `http(s)`/`mailto`); é o único `v-html` de dados de caso.
+   Testado contra XSS. Usado no dossiê, no brief e no preview (com "Raw").
+5. **Undo em vez de "tem certeza?"** onde é reversível (padrão `toast.undoable` do projeto): remover item →
+   restaurar (`POST items/{id}/restore`, auditado `investigation.item_restore`); rejeitar → reabrir
+   (`POST items|annotations/{id}/reopen`). Confirmação só no irreversível ou em lote: cancelar tarefa, remover share,
+   descartar proposta, fechar o caso, trocar tipo, Confirm/Reject all.
+6. **Lote**: `POST annotations/status` valida tudo antes e aplica numa transação; já decididos voltam em `skipped`.
+7. **Journal**: `GET events?order=desc` (default `asc`: MCP e agentes inalterados); a UI lê a página mais recente
+   (200) e "Load older events". `case.updated` só de `state` não é linha.
+8. **Fila**: `assignee` casa assignee ou, sem ele, o owner (o que a coluna mostra); `scope=owned|shared`; ordenar
+   por tipo, status (ordem do fluxo), assignee e criação; contadores sobre o que os outros filtros mantêm; `q` casa
+   prefixo do id. Estado na URL; `?new=1` abre o formulário; aba "My tasks" (`GET /investigations/tasks`).
+9. **Short ids e E#** estáveis: numerados por criação sobre todos os itens, removidos inclusive
+   (`include_deleted=true` no store).
+10. **Permissões**: nenhuma nova; as rotas novas são `forbid_agents` (registradas como human-only no registry MCP).
+
+**Fora (com motivo):** M1–M8 (migração ou mudança de layout/modelo); S20 (persistir expansões exigiria re-executar
+queries do contexto a cada carga). Registrados em `docs/dev/plans/investigation/README.md` (2e).
+
+**Arquivos (principais):** backend `services/case_items.py`, `case_annotations.py`, `cases.py`,
+`routers/investigations.py`, `models/schemas.py`, `services/audit.py`, `routers/admin_registry.py`,
+`mcp/registry.py`; frontend `stores/investigation.ts`, `views/InvestigationView.vue`, `InvestigationsView.vue`,
+`components/investigation/{CaseItemsPanel,CaseDossier,CaseHeader,CaseTimeline,DecisionPanel,SelectionInspector,
+ItemPreview,ItemDetails (novo),ShareDialog,CaseTasksPanel,CaseSettingsDrawer,CurrentCaseChip,AgentsIndicator}.vue`,
+`utils/{markdown,caseShortIds,investigationLinks}.ts` (novos), `composables/useEscapeToCloseModals.ts`.
+
+**Testes:** pytest (restore/reopen/bulk/journal desc em `test_case_items.py`; fila em `test_case_types.py`) —
+1556 passam, 5 falhas pré-existentes de cypher/transpiler fora do escopo; vitest 2716 (canvas, markdown/XSS,
+dossiê, header, material, item, journal, fila, chip, Escape); e2e `investigation-ux.spec.ts` (novo, 5 cenários) e
+`investigations`, `investigation-workspace`, `user-journeys`, `your-data` ajustados (confirmação de fechar, link no
+lugar do 🔗, "All graphs" antes da unificação, caso retido sem delete — o mock antes deixava apagar o que o servidor
+real recusa). Mocks do e2e ganharam as rotas novas.
+**Public docs:** `docs/guide/investigations.md` (fila, edição, workspace, itens, dossiê, decisões, limites);
+`docs/guide/agents-mcp-tools.md` e `openapi.json` regenerados; screenshot do workspace com `canvas_items: 'all'`.
+**Admin-area impact:** `AUDITED_ROUTES` (+restore), `AUDIT_EXEMPT_ROUTES` (+reopen ×2, +annotations/status),
+`AuditAction.INVESTIGATION_ITEM_RESTORE` com rótulo no admin.
