@@ -1,11 +1,15 @@
 <script setup lang="ts">
 /**
  * The case queue (05 §2, 06 §2b): a page of cases filtered, sorted and counted
- * by the server. Counters are filters; the case type's `in_queue` fields are
- * columns (and filters once a type is chosen).
+ * by the server. Counters are filters (counted over what the other filters keep);
+ * the case type's `in_queue` fields are columns (and filters once a type is chosen).
+ * Filters, sort and page live in the URL (UX-1), so Back from a case returns to
+ * the same list; `?new=1` opens the new-case form. "My tasks" lists the open tasks
+ * assigned to the caller across cases.
  */
 import { ref, computed, onMounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import { api } from '@/services/api';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
@@ -14,11 +18,12 @@ import { getErrorMessage } from '@/utils/errorMessage';
 import { STATUS_LABELS, caseNumber, deadlineElapsed, deadlineOf, deadlineText } from '@/utils/investigationStatus';
 import { formatDate, plural } from '@/utils/format';
 import { fieldText } from '@/utils/caseFields';
-import type { CaseTypeField, Investigation, InvestigationStatus, QueueParams } from '@/types/investigation';
+import type { CaseTaskRow, CaseTypeField, Investigation, InvestigationStatus, QueueParams } from '@/types/investigation';
 
 const PAGE = 50;
 
 const router = useRouter();
+const route = useRoute();
 const store = useInvestigationStore();
 const authStore = useAuthStore();
 const toast = useToast();
@@ -29,8 +34,9 @@ type StatusFilter = 'active' | 'all' | 'urgent' | 'suggested' | InvestigationSta
 const statusFilter = ref<StatusFilter>('active');
 const typeFilter = ref('');
 const assigneeFilter = ref<'' | 'me'>('');
+const scopeFilter = ref<'' | 'owned' | 'shared'>('');
 const fieldFilters = ref<Record<string, string | number>>({});
-type SortKey = 'title' | 'deadline' | 'updated_at' | `field.${string}`;
+type SortKey = 'title' | 'deadline' | 'updated_at' | 'created_at' | 'case_type' | 'status' | 'assignee' | `field.${string}`;
 const sortKey = ref<SortKey>('updated_at');
 const sortDir = ref<1 | -1>(-1);
 const offset = ref(0);
@@ -60,6 +66,7 @@ const params = computed<QueueParams>(() => {
     suggested: f === 'suggested' ? true : undefined,
     case_type: typeFilter.value || undefined,
     assignee: assigneeFilter.value === 'me' ? authStore.email ?? undefined : undefined,
+    scope: scopeFilter.value || undefined,
     fields,
     sort: `${sortDir.value === -1 ? '-' : ''}${sortKey.value}`,
     limit: PAGE,
@@ -67,24 +74,123 @@ const params = computed<QueueParams>(() => {
   };
 });
 
+// --- the URL holds the queue's state ------------------------------------------------
+const STATUS_FILTERS = ['active', 'all', 'urgent', 'suggested', ...Object.keys(STATUS_LABELS)];
+const one = (v: unknown) => (Array.isArray(v) ? v[0] : v) as string | null | undefined;
+/** Reads the filters from the URL; returns whether it set anything (then the watchers load). */
+function fromQuery(q: Record<string, unknown>) {
+  restoring = true;
+  search.value = one(q.q) ?? '';
+  const st = one(q.status);
+  statusFilter.value = (st && STATUS_FILTERS.includes(st) ? st : 'active') as StatusFilter;
+  typeFilter.value = one(q.type) ?? '';
+  assigneeFilter.value = one(q.assignee) === 'me' ? 'me' : '';
+  const sc = one(q.scope);
+  scopeFilter.value = sc === 'owned' || sc === 'shared' ? sc : '';
+  const sort = one(q.sort) ?? '-updated_at';
+  sortDir.value = sort.startsWith('-') ? -1 : 1;
+  sortKey.value = sort.replace(/^-/, '') as SortKey;
+  fieldFilters.value = Object.fromEntries(
+    Object.entries(q).filter(([k]) => k.startsWith('f.')).map(([k, v]) => [k.slice(2), one(v) ?? '']),
+  );
+  offset.value = Math.max(0, (Number(one(q.page)) || 1) - 1) * PAGE;
+  restoring = false;
+}
+function toQuery(): Record<string, string> {
+  const q: Record<string, string> = {};
+  if (search.value.trim()) q.q = search.value.trim();
+  if (statusFilter.value !== 'active') q.status = statusFilter.value;
+  if (typeFilter.value) q.type = typeFilter.value;
+  if (assigneeFilter.value) q.assignee = assigneeFilter.value;
+  if (scopeFilter.value) q.scope = scopeFilter.value;
+  const sort = `${sortDir.value === -1 ? '-' : ''}${sortKey.value}`;
+  if (sort !== '-updated_at') q.sort = sort;
+  for (const [id, v] of Object.entries(fieldFilters.value)) if (String(v ?? '').trim()) q[`f.${id}`] = String(v);
+  if (offset.value) q.page = String(offset.value / PAGE + 1);
+  if (tab.value === 'tasks') q.tab = 'tasks';
+  return q;
+}
+let restoring = false;
+function syncUrl() {
+  if (!route) return;
+  const next = toQuery();
+  const current = Object.fromEntries(Object.entries(route.query).filter(([k]) => k !== 'new').map(([k, v]) => [k, one(v) ?? '']));
+  if (JSON.stringify(next) !== JSON.stringify(current)) void router.replace({ query: next });
+}
+
 let timer: ReturnType<typeof setTimeout> | undefined;
 function load() {
   clearTimeout(timer);
   timer = setTimeout(() => store.fetchInvestigations(params.value), 250);
 }
 // A new filter starts again at the first page.
-watch([search, statusFilter, typeFilter, assigneeFilter, fieldFilters, sortKey, sortDir], () => {
+watch([search, statusFilter, typeFilter, assigneeFilter, scopeFilter, fieldFilters, sortKey, sortDir], () => {
+  if (restoring) return;
   offset.value = 0;
+  syncUrl();
   load();
 }, { deep: true });
-watch(offset, load);
-watch(typeFilter, () => {
+watch(offset, () => {
+  if (restoring) return;
+  syncUrl();
+  load();
+});
+watch(typeFilter, (_now, before) => {
+  if (restoring || before === undefined) return;
   fieldFilters.value = {};
   if (sortKey.value.startsWith('field.')) sortKey.value = 'updated_at';
 });
 
+const hasFilters = computed(
+  () =>
+    !!search.value.trim() ||
+    statusFilter.value !== 'active' ||
+    !!typeFilter.value ||
+    !!assigneeFilter.value ||
+    !!scopeFilter.value ||
+    Object.values(fieldFilters.value).some((v) => String(v ?? '').trim()),
+);
+function clearFilters() {
+  search.value = '';
+  statusFilter.value = 'active';
+  typeFilter.value = '';
+  assigneeFilter.value = '';
+  scopeFilter.value = '';
+  fieldFilters.value = {};
+}
+const retry = () => store.fetchInvestigations(params.value);
+
+// --- my tasks across cases ------------------------------------------------------------
+const tab = ref<'cases' | 'tasks'>('cases');
+const myTasks = ref<CaseTaskRow[]>([]);
+const tasksLoading = ref(false);
+const tasksError = ref<string | null>(null);
+async function loadTasks() {
+  tasksLoading.value = true;
+  tasksError.value = null;
+  try {
+    myTasks.value = await api.getTasks({ mine: true, state: 'open' });
+  } catch (e) {
+    tasksError.value = getErrorMessage(e, 'Failed to load your tasks');
+  } finally {
+    tasksLoading.value = false;
+  }
+}
+watch(tab, (t) => {
+  syncUrl();
+  if (t === 'tasks') void loadTasks();
+});
+
 onMounted(() => {
   void store.fetchCaseTypes();
+  if (route) {
+    fromQuery(route.query as Record<string, unknown>);
+    if (one(route.query.tab) === 'tasks') tab.value = 'tasks';
+    if (one(route.query.new) === '1' && can('investigation.create')) {
+      openCreate();
+      void router.replace({ query: toQuery() });
+    }
+  }
   void store.fetchInvestigations(params.value);
 });
 
@@ -95,7 +201,7 @@ function sortBy(key: SortKey) {
   if (sortKey.value === key) sortDir.value = sortDir.value === 1 ? -1 : 1;
   else {
     sortKey.value = key;
-    sortDir.value = key === 'updated_at' || (key.startsWith('field.') && queueFields.value.find((f) => `field.${f.id}` === key)?.type !== 'text') ? -1 : 1;
+    sortDir.value = key === 'updated_at' || key === 'created_at' || (key.startsWith('field.') && queueFields.value.find((f) => `field.${f.id}` === key)?.type !== 'text') ? -1 : 1;
   }
 }
 
@@ -211,6 +317,14 @@ async function create() {
             <option value="me">Me</option>
           </select>
         </div>
+        <div class="form-group">
+          <label for="inv-scope">Cases</label>
+          <select id="inv-scope" v-model="scopeFilter" class="form-control" data-testid="investigations-scope">
+            <option value="">Mine and shared</option>
+            <option value="owned">Owned by me</option>
+            <option value="shared">Shared with me</option>
+          </select>
+        </div>
       </div>
       <div v-if="queueFields.length" class="filter-row fields-row" data-testid="queue-field-filters">
         <div v-for="f in queueFields" :key="f.id" class="form-group">
@@ -231,6 +345,30 @@ async function create() {
       </div>
     </div>
 
+    <nav class="queue-tabs" role="tablist">
+      <button role="tab" :aria-selected="tab === 'cases'" :class="{ on: tab === 'cases' }" data-testid="queue-tab-cases" @click="tab = 'cases'">Cases</button>
+      <button role="tab" :aria-selected="tab === 'tasks'" :class="{ on: tab === 'tasks' }" data-testid="queue-tab-tasks" @click="tab = 'tasks'">
+        My tasks<template v-if="tab === 'tasks' && !tasksLoading"> · {{ myTasks.length }}</template>
+      </button>
+    </nav>
+
+    <section v-if="tab === 'tasks'" class="card tasks-card" data-testid="my-tasks">
+      <p v-if="tasksLoading" class="muted"><span class="spinner" aria-hidden="true"></span> Loading your tasks…</p>
+      <p v-else-if="tasksError" class="error-message">{{ tasksError }} <button class="btn btn-outline btn-sm" @click="loadTasks">Retry</button></p>
+      <p v-else-if="!myTasks.length" class="muted">No open task is assigned to you. A decision's actions become tasks of whoever they name.</p>
+      <table v-else class="queue">
+        <thead><tr><th>Task</th><th>Case</th><th>Due</th></tr></thead>
+        <tbody>
+          <tr v-for="t in myTasks" :key="t.id" :data-testid="`my-task-${t.id}`">
+            <td>{{ t.value.title }}</td>
+            <td><RouterLink :to="`/investigations/${t.investigation_id}`">{{ t.case_title }}</RouterLink> <span class="muted">{{ caseNumber(t.investigation_id) }}</span></td>
+            <td :class="{ late: t.overdue }">{{ t.value.due_at ? formatDate(t.value.due_at) : '—' }}<template v-if="t.overdue"> · overdue</template></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <template v-else>
     <div class="counters">
       <button class="card counter" :class="{ on: statusFilter === 'analysis' }" data-testid="counter-analysis" @click="toggleCounter('analysis')">
         <strong>{{ counts.analysis ?? 0 }}</strong><span>in analysis</span>
@@ -254,27 +392,33 @@ async function create() {
       </button>
     </div>
 
-    <div v-if="store.error" class="error-message">{{ store.error }}</div>
-    <div v-else-if="!store.loading && (counts.total ?? 0) === 0" class="empty-state card" data-testid="investigations-empty">
+    <div v-if="store.queueError" class="error-message" data-testid="investigations-error">
+      {{ store.queueError }} <button class="btn btn-outline btn-sm" data-testid="investigations-retry" @click="retry">Retry</button>
+    </div>
+    <p v-else-if="store.queueLoading && !store.investigations.length" class="muted loading-line" data-testid="investigations-loading">
+      <span class="spinner" aria-hidden="true"></span> Loading cases…
+    </p>
+    <div v-else-if="!store.queueLoading && !hasFilters && (counts.total ?? 0) === 0" class="empty-state card" data-testid="investigations-empty">
       <h3>No cases</h3>
       <p v-if="can('investigation.create')">Create a case and add explorations, queries and files from any context to it.</p>
       <p v-else>The cases shared with you or assigned to you show here.</p>
     </div>
-    <div v-else class="card table-card" :class="{ busy: store.loading }">
+    <div v-else class="card table-card" :class="{ busy: store.queueLoading }" :aria-busy="store.queueLoading">
       <table class="queue" data-testid="investigations-table">
         <thead>
           <tr>
             <th><button class="sort" data-testid="sort-title" @click="sortBy('title')">Case{{ sortMark('title') }}</button></th>
-            <th>Type</th>
+            <th><button class="sort" data-testid="sort-type" @click="sortBy('case_type')">Type{{ sortMark('case_type') }}</button></th>
             <th v-for="f in queueFields" :key="f.id">
               <button class="sort" :data-testid="`sort-field-${f.id}`" @click="sortBy(`field.${f.id}`)">{{ f.label }}{{ sortMark(`field.${f.id}`) }}</button>
             </th>
             <th>Material</th>
             <th>Suggestions</th>
-            <th>Status</th>
-            <th>Assignee</th>
+            <th><button class="sort" data-testid="sort-status" @click="sortBy('status')">Status{{ sortMark('status') }}</button></th>
+            <th><button class="sort" data-testid="sort-assignee" @click="sortBy('assignee')">Assignee{{ sortMark('assignee') }}</button></th>
             <th><button class="sort" data-testid="sort-deadline" @click="sortBy('deadline')">Deadline{{ sortMark('deadline') }}</button></th>
-            <th><button class="sort" @click="sortBy('updated_at')">Updated{{ sortMark('updated_at') }}</button></th>
+            <th><button class="sort" data-testid="sort-updated" @click="sortBy('updated_at')">Updated{{ sortMark('updated_at') }}</button></th>
+            <th><button class="sort" data-testid="sort-created" @click="sortBy('created_at')">Created{{ sortMark('created_at') }}</button></th>
           </tr>
         </thead>
         <tbody>
@@ -305,16 +449,21 @@ async function create() {
               <span v-else class="muted">—</span>
             </td>
             <td class="muted">{{ updated(inv) }}</td>
+            <td class="muted">{{ inv.created_at ? formatDate(inv.created_at, { time: false }) : '—' }}</td>
           </tr>
         </tbody>
       </table>
-      <p v-if="!store.loading && store.investigations.length === 0" class="muted no-match">No case matches the filters.</p>
+      <p v-if="!store.queueLoading && store.investigations.length === 0" class="muted no-match" data-testid="investigations-no-match">
+        No case matches the filters.
+        <button v-if="hasFilters" class="btn btn-outline btn-sm" data-testid="investigations-clear" @click="clearFilters">Clear filters</button>
+      </p>
       <div v-if="store.queueTotal > PAGE" class="pager" data-testid="queue-pager">
         <button class="btn btn-outline btn-sm" :disabled="offset === 0" data-testid="queue-prev" @click="offset = Math.max(0, offset - PAGE)">Previous</button>
         <span class="muted" data-testid="queue-range">{{ rangeText }}</span>
         <button class="btn btn-outline btn-sm" :disabled="offset + PAGE >= store.queueTotal" data-testid="queue-next" @click="offset += PAGE">Next</button>
       </div>
     </div>
+    </template>
 
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
       <div class="modal">
@@ -373,6 +522,53 @@ async function create() {
 </template>
 
 <style scoped>
+.queue-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 8px;
+}
+
+.queue-tabs button {
+  padding: 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: inherit;
+  cursor: pointer;
+}
+
+.queue-tabs button.on {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.tasks-card {
+  padding: 12px;
+}
+
+.loading-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .page-header {
   display: flex;
   align-items: center;

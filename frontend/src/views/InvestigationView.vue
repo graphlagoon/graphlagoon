@@ -65,6 +65,8 @@ const toast = useToast();
 const mode = computed<'canvas' | 'dossier'>(() => (route.query.mode === 'dossier' ? 'dossier' : 'canvas'));
 
 const showAdd = ref(false);
+/** The add popover's first tab: the analysis bar's Console opens it on "Query". */
+const addTab = ref<'query' | undefined>(undefined);
 const showWizard = ref(false);
 const wizardRole = ref<'graph' | 'enrichment' | 'attachment' | undefined>(undefined);
 const showSettings = ref(false);
@@ -360,6 +362,14 @@ function focusEntity(id: string) {
   canvasRef.value?.focusOnNode?.(id);
 }
 
+async function reloadCase() {
+  await store.openInvestigation(props.id);
+  store.fetchEvents().catch(() => {});
+  store.fetchBrief().catch(() => {});
+  loadedKey = null;
+  await loadWorkspace();
+}
+
 function openJournal() {
   timelineTab.value = 'activity';
   timelineCollapsed.value = false;
@@ -394,8 +404,14 @@ onUnmounted(() => {
 
 <template>
   <div class="workspace">
-    <div v-if="store.loading && !store.current" class="loading"></div>
-    <div v-else-if="store.error" class="error-message">{{ store.error }}</div>
+    <p v-if="store.loading && !store.current" class="loading-line" data-testid="case-loading">
+      <span class="spinner" aria-hidden="true"></span> Opening the case…
+    </p>
+    <div v-else-if="store.error" class="error-message case-error" data-testid="case-error">
+      {{ store.error }}
+      <button class="btn btn-outline btn-sm" data-testid="case-retry" @click="reloadCase">Retry</button>
+      <RouterLink to="/investigations" class="btn btn-outline btn-sm">← Queue</RouterLink>
+    </div>
     <template v-else-if="store.current">
       <CaseHeader :mode="mode" @decide="onDecide" @settings="showSettings = true" />
 
@@ -493,7 +509,7 @@ onUnmounted(() => {
                 @toggle="togglePanel"
                 @fit="canvasRef?.zoomToFit?.()"
                 @settings="showSettings = true"
-                @console="toast.info('The case console arrives with the query loop (F3): save the result as a table of the case from the Query Console')"
+                @console="addTab = 'query'; showAdd = true"
                 @upload="openUpload('enrichment')"
                 @activate="activateAnalysis"
                 @select-item="selectItem"
@@ -545,7 +561,13 @@ onUnmounted(() => {
       </template>
     </template>
 
-    <AddItemsPopover :open="showAdd" :investigation-id="id" @close="showAdd = false" @upload="showAdd = false; openUpload()" /><!-- F3 -->
+    <AddItemsPopover
+      :open="showAdd"
+      :investigation-id="id"
+      :initial-tab="addTab"
+      @close="showAdd = false; addTab = undefined"
+      @upload="showAdd = false; openUpload()"
+    /><!-- F3; Console opens it on a saved query of the case -->
     <FileImportWizard v-if="showWizard" :investigation-id="id" :initial-role="wizardRole" @close="showWizard = false" @done="onWizardDone" />
     <CaseSettingsDrawer :open="showSettings" @close="showSettings = false" @share="showShare = true" />
     <ShareDialog :open="showShare" @close="showShare = false" />
@@ -569,6 +591,38 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.loading-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--text-muted);
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.case-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 16px;
+}
+
 .workspace {
   display: flex;
   flex-direction: column;

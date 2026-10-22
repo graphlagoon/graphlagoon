@@ -211,7 +211,7 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
       <button :class="btn('enrich')" data-testid="analysis-enrich" @click="toggle('enrich')"><GitBranch :size="14" /> Enrich</button>
       <button :class="btn('metrics')" data-testid="analysis-metrics" @click="toggle('metrics')"><Sigma :size="14" /> Metrics</button>
       <button v-if="detectors.length" :class="btn('detectors')" data-testid="analysis-detectors" @click="toggle('detectors')"><Radar :size="14" /> Detectors · {{ detectors.length }}</button>
-      <button class="btn btn-outline btn-sm" data-testid="analysis-console" title="Query console of the case" @click="emit('console')"><Terminal :size="14" /> Console</button>
+      <button class="btn btn-outline btn-sm" data-testid="analysis-console" title="Write a query of the case: run it here and keep each result as a version" @click="emit('console')"><Terminal :size="14" /> Console</button>
       <span class="sep"></span>
       <button class="btn btn-outline btn-sm" :class="{ on: panels.filters }" data-testid="workspace-filters-btn" @click="emit('toggle', 'filters')"><Filter :size="14" /> Filters</button>
       <button class="btn btn-outline btn-sm" :class="{ on: panels.table }" data-testid="workspace-table-btn" @click="emit('toggle', 'table')"><Table2 :size="14" /> Table</button>

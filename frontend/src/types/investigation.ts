@@ -82,6 +82,8 @@ export interface QueueParams {
   q?: string;
   deadline?: 'urgent' | 'overdue';
   suggested?: boolean;
+  /** `owned`: the caller's cases; `shared`: shared with the caller. */
+  scope?: 'owned' | 'shared';
   fields?: Record<string, string>;
   sort?: string;
   limit?: number;

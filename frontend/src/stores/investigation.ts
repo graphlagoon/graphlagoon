@@ -259,19 +259,22 @@ export const useInvestigationStore = defineStore('investigation', () => {
 
   // --- queue and case ---------------------------------------------------------
 
+  /** The queue's own state: a failed queue load must not blank an open case, nor the reverse. */
+  const queueLoading = ref(false);
+  const queueError = ref<string | null>(null);
   /** One page of the queue; the server filters, sorts and counts. */
   async function fetchInvestigations(params: QueueParams = {}) {
-    loading.value = true;
-    error.value = null;
+    queueLoading.value = true;
+    queueError.value = null;
     try {
       const page = await api.getInvestigationPage(params);
       investigations.value = page.items;
       queueTotal.value = page.total;
       queueCounts.value = page.counts ?? {};
     } catch (e) {
-      error.value = getErrorMessage(e, 'Failed to load investigations');
+      queueError.value = getErrorMessage(e, 'Failed to load investigations');
     } finally {
-      loading.value = false;
+      queueLoading.value = false;
     }
   }
 
@@ -984,6 +987,8 @@ export const useInvestigationStore = defineStore('investigation', () => {
     investigations,
     queueTotal,
     queueCounts,
+    queueLoading,
+    queueError,
     caseTypes,
     caseType,
     caseTypeLabel,

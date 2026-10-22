@@ -1,6 +1,6 @@
 /**
- * Filter chips of the case canvas (05 §3): source, role, tag, group, time window
- * and the audited 👁 toggle. Visual only: the hidden set goes to
+ * Filter chips of the case canvas (05 §3): source, role, tag, group and time
+ * window. Visual only: the hidden set goes to
  * `graphStore.caseHiddenNodeIds`, so the layout never resets. Node types reuse
  * the graph store's own filter (`filters.node_types`, the FilterPanel logic).
  */
