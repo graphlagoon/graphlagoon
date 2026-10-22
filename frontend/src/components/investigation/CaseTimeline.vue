@@ -1,16 +1,19 @@
 <script setup lang="ts">
 /**
- * Bottom strip of the case (05 §3): Timeline (swimlanes over every dated
- * edge; the brush becomes the time-window chip), Activity (the journal with a
- * person / agent / system filter; a click goes to the item), Tasks (06 §1),
- * Suggestions (confirm in bulk per tool) and, when an analysis is active, its result.
+ * Bottom strip of the case (05 §3): Dated edges (swimlanes over every dated
+ * edge; the brush becomes the time-window chip), Journal (newest first, older pages on
+ * request; person / agent / system filter and a text search; a click goes to the item or
+ * the entity), Tasks (06 §1), Suggestions (confirm in bulk per tool, one request) and,
+ * when an analysis is active, its result. The tab ids stay (`timeline`, `activity`).
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useCaseFilters } from '@/stores/caseFilters';
 import { useCaseAnalyses } from '@/composables/useCaseAnalyses';
 import { useToast } from '@/composables/useToast';
-import { describeEvent } from '@/utils/investigationEvents';
+import { confirmAction } from '@/composables/useConfirm';
+import { useAuthStore } from '@/stores/auth';
+import { describeEvent, eventTargets, isQuietEvent } from '@/utils/investigationEvents';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { formatDate } from '@/utils/format';
 import { annotationKindLabel, itemKindLabel } from '@/utils/investigationStatus';
@@ -28,6 +31,7 @@ const emit = defineEmits<{
   'update:tab': [tab: TimelineTab];
   'update:collapsed': [on: boolean];
   'select-item': [item: CaseItem];
+  'focus-entity': [id: string];
   'close-analysis': [];
   rerun: [tool: string];
   'update:traceView': [view: TraceView];
@@ -55,7 +59,34 @@ const familyOf = (e: InvestigationEvent) => e.kind.split('.')[0];
 const FAMILY_LABELS: Record<string, string> = { case: 'case', item: 'item', decision: 'decision', trace: 'trace', path: 'paths', nodes: 'nodes', metric: 'metric', view: 'view', analysis: 'analysis' };
 const familyLabel = (f: string) => FAMILY_LABELS[f] ?? annotationKindLabel(f);
 const kindFilter = ref('');
-const families = computed(() => [...new Set(store.events.map(familyOf))].sort((a, b) => familyLabel(a).localeCompare(familyLabel(b))));
+const shown = computed(() => store.events.filter((e) => !isQuietEvent(e)));
+const families = computed(() => [...new Set(shown.value.map(familyOf))].sort((a, b) => familyLabel(a).localeCompare(familyLabel(b))));
+const auth = useAuthStore();
+const me = computed(() => (auth.email ?? '').toLowerCase());
+/** "you" for your own lines; the e-mail stays in the tooltip. */
+const actorLabel = (email: string) => (email && email.toLowerCase() === me.value ? 'you' : email);
+const query = ref('');
+const lineOf = (e: InvestigationEvent) => `${e.actor_email} ${e.agent_name ?? ''} ${describeEvent(e, nameOf)}`.toLowerCase();
+const loadingOlder = ref(false);
+async function loadOlder() {
+  loadingOlder.value = true;
+  try {
+    await store.fetchOlderEvents();
+  } catch (e) {
+    toast.error(getErrorMessage(e, 'Failed to load older events'));
+  } finally {
+    loadingOlder.value = false;
+  }
+}
+const entityOf = (e: InvestigationEvent) => eventTargets(e).find((id) => store.unified.nodes.some((n) => n.node_id === id)) ?? null;
+function openEvent(e: InvestigationEvent) {
+  const item = itemOf(e);
+  if (item) emit('select-item', item);
+  else {
+    const entity = entityOf(e);
+    if (entity) emit('focus-entity', entity);
+  }
+}
 
 // "Since my last visit": the previous visit's time, kept per case in localStorage.
 const VISIT_KEY = (id: string) => `gl:case:${id}:lastVisit`;
@@ -72,15 +103,17 @@ onMounted(() => {
   }
 });
 const isNew = (e: InvestigationEvent) => lastVisit.value !== null && e.at > lastVisit.value;
-const newCount = computed(() => store.events.filter(isNew).length);
+const newCount = computed(() => shown.value.filter(isNew).length);
 
-const journal = computed(() =>
-  [...store.events]
+const journal = computed(() => {
+  const q = query.value.trim().toLowerCase();
+  return [...shown.value]
     .reverse()
     .filter((e) => actor.value === 'all' || kindOf(e) === actor.value)
     .filter((e) => !kindFilter.value || familyOf(e) === kindFilter.value)
-    .filter((e) => !sinceVisit.value || isNew(e)),
-);
+    .filter((e) => !sinceVisit.value || isNew(e))
+    .filter((e) => !q || lineOf(e).includes(q));
+});
 /** The row after which the "last visit" divider goes: the oldest new event (the list is newest first). */
 const dividerAfter = computed(() => {
   const list = journal.value;
@@ -107,12 +140,22 @@ const bySource = computed(() => {
   return [...groups.entries()];
 });
 const busy = ref(false);
-async function decideAll(g: { annotations: string[]; items: string[] }, status: 'confirmed' | 'rejected') {
+async function decideAll(g: { label: string; annotations: string[]; items: string[] }, status: 'confirmed' | 'rejected') {
+  const n = g.annotations.length + g.items.length;
+  const ok = await confirmAction({
+    title: `${status === 'confirmed' ? 'Confirm' : 'Reject'} ${n} suggestion${n === 1 ? '' : 's'}?`,
+    message: status === 'confirmed' ? `${g.label}: each takes effect as if confirmed one by one.` : `${g.label}: each can be reopened later from the case.`,
+    confirmLabel: status === 'confirmed' ? 'Confirm all' : 'Reject all',
+    danger: status === 'rejected',
+  });
+  if (!ok) return;
   busy.value = true;
   try {
-    for (const id of g.annotations) await store.setAnnotationStatus(id, status);
+    // Annotations in one request (checked together); items one by one (few, and each journals).
+    const { skipped } = await store.setAnnotationsStatus(g.annotations, status);
     for (const id of g.items) await store.setItemStatus(id, status);
-    toast.success(`${g.annotations.length + g.items.length} ${status === 'confirmed' ? 'confirmed' : 'rejected'}`);
+    const done = n - skipped;
+    toast.success(`${done} ${status === 'confirmed' ? 'confirmed' : 'rejected'}${skipped ? ` · ${skipped} already decided by someone else` : ''}`);
   } catch (e) {
     toast.error(getErrorMessage(e, 'Failed to update the suggestions'));
   } finally {
@@ -129,8 +172,8 @@ watch(
 );
 
 const tabs = computed<{ id: TimelineTab; label: string }[]>(() => [
-  { id: 'timeline', label: `Timeline${flows.value.length ? ` · ${flows.value.length}` : ''}` },
-  { id: 'activity', label: `Activity · ${store.events.length}` },
+  { id: 'timeline', label: `Dated edges${flows.value.length ? ` · ${flows.value.length}` : ''}` },
+  { id: 'activity', label: `Journal · ${shown.value.length}${store.eventsMore ? '+' : ''}` },
   { id: 'tasks', label: `Tasks · ${store.tasks.filter((t) => t.value.state === 'open').length}` },
   { id: 'suggestions', label: `● ${store.suggestions.length} suggestion${store.suggestions.length === 1 ? '' : 's'}` },
   ...(props.activeItem ? [{ id: 'result' as const, label: `Result · ${props.activeItem.title}` }] : []),
@@ -161,17 +204,32 @@ const tabs = computed<{ id: TimelineTab; label: string }[]>(() => [
           <button v-if="lastVisit" :class="{ on: sinceVisit }" data-testid="activity-since-visit" @click="sinceVisit = !sinceVisit">
             Since my last visit · {{ newCount }}
           </button>
+          <input v-model="query" class="kind search" placeholder="Search the journal…" aria-label="Search the journal" data-testid="activity-search" />
         </div>
         <template v-for="e in journal" :key="e.id">
-          <div class="journal-row" :class="{ clickable: itemOf(e), new: isNew(e) }" data-testid="journal-event" @click="itemOf(e) && emit('select-item', itemOf(e)!)">
+          <div
+            class="journal-row"
+            :class="{ clickable: itemOf(e) || entityOf(e), new: isNew(e) }"
+            data-testid="journal-event"
+            :role="itemOf(e) || entityOf(e) ? 'button' : undefined"
+            :tabindex="itemOf(e) || entityOf(e) ? 0 : undefined"
+            :title="itemOf(e) ? 'Open the item' : entityOf(e) ? 'Show the entity on the canvas' : undefined"
+            @click="openEvent(e)"
+            @keydown.enter.prevent="openEvent(e)"
+          >
             <span class="muted">{{ formatDate(e.at) }}</span>
-            <strong v-if="e.actor_kind === 'agent'" class="agent" data-testid="journal-agent">agent {{ e.agent_name }} for {{ e.actor_email }}</strong>
-            <strong v-else>{{ e.actor_email }}</strong>
+            <strong v-if="e.actor_kind === 'agent'" class="agent" data-testid="journal-agent" :title="e.actor_email">agent {{ e.agent_name }} for {{ actorLabel(e.actor_email) }}</strong>
+            <strong v-else :title="e.actor_email">{{ actorLabel(e.actor_email) }}</strong>
             <span>{{ describeEvent(e, nameOf) }}</span>
           </div>
           <div v-if="dividerAfter === e.id" class="divider muted" data-testid="journal-last-visit">— your last visit · {{ formatDate(lastVisit) }} —</div>
         </template>
-        <p v-if="!journal.length" class="muted">{{ sinceVisit ? 'Nothing new since your last visit.' : 'Nothing recorded yet.' }}</p>
+        <p v-if="!journal.length" class="muted">
+          {{ query.trim() ? 'No line matches the search.' : sinceVisit ? 'Nothing new since your last visit.' : 'Nothing recorded yet.' }}
+        </p>
+        <button v-if="store.eventsMore" class="link-btn" :disabled="loadingOlder" data-testid="journal-older" @click="loadOlder">
+          {{ loadingOlder ? 'Loading…' : 'Load older events' }}
+        </button>
       </div>
 
       <CaseTasksPanel v-else-if="tab === 'tasks'" />
@@ -181,7 +239,7 @@ const tabs = computed<{ id: TimelineTab; label: string }[]>(() => [
           <strong>{{ g.label }}</strong> <span class="muted">{{ g.annotations.length + g.items.length }}</span>
           <span v-if="canEdit" class="row">
             <button class="link-btn ok" :disabled="busy" :data-testid="`suggestions-confirm-${key}`" @click="decideAll(g, 'confirmed')">✓ Confirm all</button>
-            <button class="link-btn danger" :disabled="busy" @click="decideAll(g, 'rejected')">✕ Reject all</button>
+            <button class="link-btn danger" :disabled="busy" :data-testid="`suggestions-reject-${key}`" @click="decideAll(g, 'rejected')">✕ Reject all</button>
           </span>
         </div>
         <p v-if="!bySource.length" class="muted">No suggestions to review.</p>
