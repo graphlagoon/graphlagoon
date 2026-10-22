@@ -846,6 +846,27 @@ class ApiService {
     return response.data;
   }
 
+  /** A new version of an uploaded file: the raw bytes, like the first upload. */
+  async uploadInvestigationItemVersion(id: string, itemId: string, file: File): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/versions`, file, {
+      params: { filename: file.name },
+      headers: { 'Content-Type': file.type && file.type !== 'application/json' ? file.type : 'application/octet-stream' },
+    });
+    return response.data;
+  }
+
+  /** Puts a removed item back in the material. */
+  async restoreInvestigationItem(id: string, itemId: string): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/restore`);
+    return response.data;
+  }
+
+  /** A rejected item becomes a suggestion again. */
+  async reopenInvestigationItem(id: string, itemId: string): Promise<CaseItem> {
+    const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/reopen`);
+    return response.data;
+  }
+
   async setInvestigationItemStatus(id: string, itemId: string, status: 'confirmed' | 'rejected'): Promise<CaseItem> {
     const response = await this.client.post(`/api/investigations/${id}/items/${itemId}/${status === 'confirmed' ? 'confirm' : 'reject'}`);
     return response.data;
@@ -919,6 +940,22 @@ class ApiService {
     await this.client.delete(`/api/investigations/${id}/annotations/${annotationId}`);
   }
 
+  /** Several suggestions at once; ones no longer suggested come back in `skipped`. */
+  async setInvestigationAnnotationsStatus(
+    id: string,
+    ids: string[],
+    status: 'confirmed' | 'rejected',
+  ): Promise<{ applied: CaseAnnotation[]; skipped: string[] }> {
+    const response = await this.client.post(`/api/investigations/${id}/annotations/status`, { ids, status });
+    return response.data;
+  }
+
+  /** A rejected suggestion becomes a suggestion again. */
+  async reopenInvestigationAnnotation(id: string, annotationId: string): Promise<CaseAnnotation> {
+    const response = await this.client.post(`/api/investigations/${id}/annotations/${annotationId}/reopen`);
+    return response.data;
+  }
+
   async setInvestigationAnnotationStatus(id: string, annotationId: string, status: 'confirmed' | 'rejected'): Promise<CaseAnnotation> {
     const response = await this.client.post(
       `/api/investigations/${id}/annotations/${annotationId}/${status === 'confirmed' ? 'confirm' : 'reject'}`,
@@ -933,8 +970,12 @@ class ApiService {
   }
 
   // Journal, brief
-  async getInvestigationEvents(id: string, limit = 500): Promise<InvestigationEvent[]> {
-    const response = await this.client.get(`/api/investigations/${id}/events`, { params: { limit } });
+  /** The journal; `order: 'desc'` reads it newest first, `after` pages on from the last event seen. */
+  async getInvestigationEvents(
+    id: string,
+    params: { limit?: number; order?: 'asc' | 'desc'; after?: string } = {},
+  ): Promise<InvestigationEvent[]> {
+    const response = await this.client.get(`/api/investigations/${id}/events`, { params: { limit: 500, ...params } });
     return response.data;
   }
 

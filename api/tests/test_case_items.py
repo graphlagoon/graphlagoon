@@ -263,3 +263,76 @@ def test_enrichment_mapping_and_upload_permission(env):
     assert denied.status_code == 403 and denied.json()["detail"]["error"]["details"]["permission"] == "investigation.upload"
     # JSON items need no upload permission.
     assert client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": "ok"}, headers=h(OWNER)).status_code == 201
+
+
+def test_removed_items_restore_and_rejections_reopen(env):
+    """UX-1: removing an item and rejecting a suggestion are no longer final for people."""
+    client, url, store, exp, _ = env
+    token = client.post("/api/agent-tokens", json={"name": "claude"}, headers=h(OWNER)).json()["token"]
+    agent = {"Authorization": f"Bearer {token}"}
+
+    ref = client.post(f"{url}/items", json={"kind": "graph", "subkind": "exploration_ref", "exploration_id": str(exp.id)}, headers=h(OWNER)).json()
+    assert client.delete(f"{url}/items/{ref['id']}", headers=h(OWNER)).status_code == 200
+    removed = client.get(f"{url}/items", params={"include_deleted": True}, headers=h(OWNER)).json()
+    assert [i["deleted_at"] is not None for i in removed if i["id"] == ref["id"]] == [True]
+    assert client.post(f"{url}/items/{ref['id']}/restore", headers=agent).status_code == 403  # people only
+    restored = client.post(f"{url}/items/{ref['id']}/restore", headers=h(OWNER))
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["deleted_at"] is None
+    assert [i["id"] for i in client.get(f"{url}/items", headers=h(OWNER)).json()] == [ref["id"]]
+    # Restoring is idempotent; a removed exploration re-added meanwhile cannot come back twice.
+    assert client.post(f"{url}/items/{ref['id']}/restore", headers=h(OWNER)).status_code == 200
+    client.delete(f"{url}/items/{ref['id']}", headers=h(OWNER))
+    client.post(f"{url}/items", json={"kind": "graph", "subkind": "exploration_ref", "exploration_id": str(exp.id)}, headers=h(OWNER))
+    clash = client.post(f"{url}/items/{ref['id']}/restore", headers=h(OWNER))
+    assert clash.status_code == 409 and clash.json()["detail"]["error"]["code"] == "ITEM_EXISTS"
+    kinds = [e["kind"] for e in client.get(f"{url}/events", headers=h(OWNER)).json()]
+    assert "item.restored" in kinds
+    assert "investigation.item_restore" in [r.action for r in store.usage_logs]  # audited like the removal
+
+    client.patch(url, json={"settings": {"agent_suggest_kinds": ["note"]}}, headers=h(OWNER))
+    note = client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": "x"}, headers=agent).json()
+    assert client.post(f"{url}/items/{note['id']}/reopen", headers=h(OWNER)).status_code == 409  # still suggested
+    client.post(f"{url}/items/{note['id']}/reject", headers=h(OWNER))
+    assert client.post(f"{url}/items/{note['id']}/reopen", headers=agent).status_code == 403
+    reopened = client.post(f"{url}/items/{note['id']}/reopen", headers=h(OWNER)).json()
+    assert reopened["status"] == "suggested"
+    assert client.post(f"{url}/items/{note['id']}/confirm", headers=h(OWNER)).json()["status"] == "confirmed"
+
+
+def test_annotations_reopen_and_change_status_in_bulk(env):
+    client, url, _, _, _ = env
+    token = client.post("/api/agent-tokens", json={"name": "claude"}, headers=h(OWNER)).json()["token"]
+    agent = {"Authorization": f"Bearer {token}"}
+    client.patch(url, json={"settings": {"agent_suggest_kinds": ["role", "tag"]}}, headers=h(OWNER))
+    a, b, c = (
+        client.post(f"{url}/annotations", json={"kind": "tag", "targets": [f"n{i}"], "value": {"tag": "kyc"}}, headers=agent).json()
+        for i in range(3)
+    )
+    assert {x["status"] for x in (a, b, c)} == {"suggested"}
+
+    client.post(f"{url}/annotations/{c['id']}/reject", headers=h(OWNER))
+    bulk = client.post(f"{url}/annotations/status", json={"ids": [a["id"], b["id"], c["id"]], "status": "confirmed"}, headers=h(OWNER))
+    assert bulk.status_code == 200, bulk.text
+    body = bulk.json()
+    assert sorted(x["id"] for x in body["applied"]) == sorted([a["id"], b["id"]])
+    assert body["skipped"] == [c["id"]]
+    assert client.post(f"{url}/annotations/status", json={"ids": [a["id"]], "status": "rejected"}, headers=agent).status_code == 403
+    unknown = client.post(f"{url}/annotations/status", json={"ids": [c["id"], "00000000-0000-0000-0000-000000000000"], "status": "rejected"}, headers=h(OWNER))
+    assert unknown.status_code == 404
+
+    assert client.post(f"{url}/annotations/{a['id']}/reopen", headers=h(OWNER)).status_code == 409  # confirmed, not rejected
+    reopened = client.post(f"{url}/annotations/{c['id']}/reopen", headers=h(OWNER)).json()
+    assert (reopened["status"], reopened["confirmed_by"]) == ("suggested", None)
+    assert "tag.reopened" in [e["kind"] for e in client.get(f"{url}/events", headers=h(OWNER)).json()]
+
+
+def test_journal_reads_newest_first_with_paging(env):
+    client, url, _, _, _ = env
+    for i in range(5):
+        client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": f"note {i}"}, headers=h(OWNER))
+    oldest_first = client.get(f"{url}/events", headers=h(OWNER)).json()
+    newest = client.get(f"{url}/events", params={"order": "desc", "limit": 2}, headers=h(OWNER)).json()
+    assert [e["id"] for e in newest] == [e["id"] for e in reversed(oldest_first)][:2]
+    older = client.get(f"{url}/events", params={"order": "desc", "limit": 2, "after": newest[-1]["id"]}, headers=h(OWNER)).json()
+    assert [e["id"] for e in older] == [e["id"] for e in reversed(oldest_first)][2:4]

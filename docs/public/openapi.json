@@ -5295,6 +5295,60 @@
         }
       }
     },
+    "/graphlagoon/api/investigations/{investigation_id}/items/{item_id}/restore": {
+      "post": {
+        "tags": [
+          "case items"
+        ],
+        "summary": "Restore Item",
+        "description": "Put a removed item back in the material (people only), with its versions and pins. 409\n`ITEM_EXISTS` when the case meanwhile has the same exploration or another brief.\n\n**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (a person restores a removed item, as only people remove them (UX-1)).",
+        "operationId": "case_items_restore_item",
+        "parameters": [
+          {
+            "name": "investigation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Investigation Id"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/investigations/{investigation_id}/items/{item_id}/versions": {
       "get": {
         "tags": [
@@ -5723,6 +5777,60 @@
           }
         },
         "description": "**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (a person rejects suggestions (05 §6))."
+      }
+    },
+    "/graphlagoon/api/investigations/{investigation_id}/items/{item_id}/reopen": {
+      "post": {
+        "tags": [
+          "case items"
+        ],
+        "summary": "Reopen Item",
+        "description": "A rejected suggestion is a suggestion again (people only): 409 `NOT_REJECTED` otherwise.\n\n**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (a person takes back a rejection (UX-1)).",
+        "operationId": "case_items_reopen_item",
+        "parameters": [
+          {
+            "name": "investigation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Investigation Id"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/graphlagoon/api/investigations/{investigation_id}/items/{item_id}/run": {
@@ -6159,6 +6267,114 @@
         "description": "**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (a person rejects suggestions (05 §6))."
       }
     },
+    "/graphlagoon/api/investigations/{investigation_id}/annotations/{annotation_id}/reopen": {
+      "post": {
+        "tags": [
+          "annotations & tasks"
+        ],
+        "summary": "Reopen Annotation",
+        "description": "A rejected suggestion is a suggestion again (people only): 409 `NOT_REJECTED` otherwise.\nNothing was applied when it was rejected, so nothing is undone.\n\n**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (a person takes back a rejection (UX-1)).",
+        "operationId": "annotations_tasks_reopen_annotation",
+        "parameters": [
+          {
+            "name": "investigation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Investigation Id"
+            }
+          },
+          {
+            "name": "annotation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Annotation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/graphlagoon/api/investigations/{investigation_id}/annotations/status": {
+      "post": {
+        "tags": [
+          "annotations & tasks"
+        ],
+        "summary": "Set Annotations Status",
+        "description": "Confirm or reject several suggestions at once (people only). All are checked first; one\nunknown id or forbidden kind fails the call. Ones no longer suggested come back in `skipped`.\n\n**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (a person confirms or rejects suggestions in bulk (UX-1)).",
+        "operationId": "annotations_tasks_set_annotations_status",
+        "parameters": [
+          {
+            "name": "investigation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Investigation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationStatusBulk"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationStatusBulkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/investigations/{investigation_id}/graph": {
       "get": {
         "tags": [
@@ -6444,7 +6660,7 @@
           "cases"
         ],
         "summary": "List Events",
-        "description": "The case journal, oldest first: who did what, a person or an agent for a person. `after` is\nthe last event id already seen.",
+        "description": "The case journal: who did what, a person or an agent for a person. Oldest first by default;\n`order=desc` reads it newest first (the UI's journal). `after` is the last event id already\nseen, in the same order.",
         "operationId": "cases_list_events",
         "parameters": [
           {
@@ -6484,6 +6700,20 @@
               "minimum": 1,
               "default": 100,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "asc",
+              "title": "Order"
             }
           }
         ],
@@ -7973,6 +8203,59 @@
           "author_email"
         ],
         "title": "AnnotationResponse"
+      },
+      "AnnotationStatusBulk": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Ids"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "rejected"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids",
+          "status"
+        ],
+        "title": "AnnotationStatusBulk",
+        "description": "``POST …/annotations/status``: confirm or reject several suggestions at once."
+      },
+      "AnnotationStatusBulkResponse": {
+        "properties": {
+          "applied": {
+            "items": {
+              "$ref": "#/components/schemas/AnnotationResponse"
+            },
+            "type": "array",
+            "title": "Applied"
+          },
+          "skipped": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Skipped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "applied"
+        ],
+        "title": "AnnotationStatusBulkResponse"
       },
       "AnnotationUpdate": {
         "properties": {

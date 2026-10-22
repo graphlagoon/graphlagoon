@@ -330,36 +330,84 @@ async def set_status(investigation_id: UUID, user_email: str, annotation_id: UUI
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "write")
         row = await _row(session, investigation_id, annotation_id)
+        await _apply_status(session, inv, investigation_id, user_email, row, status)
+        await commit(session)
+        return serialize(row)
+
+
+async def set_status_many(investigation_id: UUID, user_email: str, annotation_ids: list[UUID], status: str) -> dict:
+    """Confirm or reject several suggestions in one go (UX-1: "Confirm all"). Each is checked
+    before any is applied, then all are applied in one transaction: an unknown id or a forbidden
+    kind fails the whole call. Ones no longer suggested are skipped and listed."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        rows = [await _row(session, investigation_id, a) for a in dict.fromkeys(annotation_ids)]
+        for row in rows:
+            _guard(inv, row.kind)
+            if row.kind == "decision_proposal" and status == "confirmed":
+                raise InvestigationError(
+                    409, "PROPOSAL_NEEDS_DECISION", "A proposal is taken up by recording the decision (proposal_id); reject it otherwise"
+                )
+        applied, skipped = [], []
+        for row in rows:
+            if row.status != "suggested":
+                skipped.append(str(row.id))
+                continue
+            await _apply_status(session, inv, investigation_id, user_email, row, status)
+            applied.append(serialize(row))
+        await commit(session)
+        return {"applied": applied, "skipped": skipped}
+
+
+async def reopen(investigation_id: UUID, user_email: str, annotation_id: UUID) -> dict:
+    """A rejected suggestion becomes a suggestion again (UX-1). Nothing was applied when it was
+    rejected, so nothing is undone; only a rejected annotation reopens (409 ``NOT_REJECTED``)."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        row = await _row(session, investigation_id, annotation_id)
         _guard(inv, row.kind)
-        if row.status != "suggested":
-            raise InvestigationError(409, "NOT_SUGGESTED", "Only a suggestion is confirmed or rejected")
-        if row.kind == "decision_proposal" and status == "confirmed":
-            raise InvestigationError(
-                409, "PROPOSAL_NEEDS_DECISION", "A proposal is taken up by recording the decision (proposal_id); reject it otherwise"
-            )
-        now = datetime.now()
-        await update_row(session, TABLE, row, status=status, confirmed_by=user_email, confirmed_at=now)
-        if status == "confirmed":
-            if row.kind == "role":
-                await _replace_roles(session, inv, investigation_id, row.targets, row.value["role"], keep=row.id)
-            elif row.kind == "hypothesis_status":
-                await _apply_hypothesis_status(session, investigation_id, row)
-            elif row.kind == "status_change":
-                from graphlagoon.services.cases import check_transition
-
-                check_transition(inv, row.value["to"])
-                if session is None:
-                    from graphlagoon.db.memory_store import get_memory_store
-
-                    get_memory_store().update_investigation(investigation_id, status=row.value["to"])
-                else:
-                    inv.status = row.value["to"]
+        if row.status != "rejected":
+            raise InvestigationError(409, "NOT_REJECTED", "Only a rejected suggestion is reopened")
+        await update_row(session, TABLE, row, status="suggested", confirmed_by=None, confirmed_at=None)
         await append_event(
-            session, investigation_id, user_email, f"{row.kind}.{status}",
+            session, investigation_id, user_email, f"{row.kind}.reopened",
             {"annotation_id": str(annotation_id), "targets": row.targets, "value": row.value, "author_email": row.author_email},
         )
         await commit(session)
         return serialize(row)
+
+
+async def _apply_status(session, inv, investigation_id: UUID, user_email: str, row, status: str) -> None:
+    """One suggestion confirmed or rejected, with its effects and journal line (no commit)."""
+    annotation_id = row.id
+    _guard(inv, row.kind)
+    if row.status != "suggested":
+        raise InvestigationError(409, "NOT_SUGGESTED", "Only a suggestion is confirmed or rejected")
+    if row.kind == "decision_proposal" and status == "confirmed":
+        raise InvestigationError(
+            409, "PROPOSAL_NEEDS_DECISION", "A proposal is taken up by recording the decision (proposal_id); reject it otherwise"
+        )
+    now = datetime.now()
+    await update_row(session, TABLE, row, status=status, confirmed_by=user_email, confirmed_at=now)
+    if status == "confirmed":
+        if row.kind == "role":
+            await _replace_roles(session, inv, investigation_id, row.targets, row.value["role"], keep=row.id)
+        elif row.kind == "hypothesis_status":
+            await _apply_hypothesis_status(session, investigation_id, row)
+        elif row.kind == "status_change":
+            from graphlagoon.services.cases import check_transition
+
+            check_transition(inv, row.value["to"])
+            if session is None:
+                from graphlagoon.db.memory_store import get_memory_store
+
+                get_memory_store().update_investigation(investigation_id, status=row.value["to"])
+            else:
+                inv.status = row.value["to"]
+    await append_event(
+        session, investigation_id, user_email, f"{row.kind}.{status}",
+        {"annotation_id": str(annotation_id), "targets": row.targets, "value": row.value, "author_email": row.author_email},
+    )
 
 
 # ---------------------------------------------------------------------------

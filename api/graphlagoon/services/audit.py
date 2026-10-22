@@ -51,6 +51,7 @@ class AuditAction:
     INVESTIGATION_UNSHARE = "investigation.unshare"
     INVESTIGATION_ITEM_ADD = "investigation.item_add"
     INVESTIGATION_ITEM_REMOVE = "investigation.item_remove"
+    INVESTIGATION_ITEM_RESTORE = "investigation.item_restore"
     INVESTIGATION_ITEM_READ = "investigation.item_read"
     INVESTIGATION_TRANSFER = "investigation.transfer"
     INVESTIGATION_DECIDE = "investigation.decide"

@@ -20,6 +20,8 @@ from graphlagoon.middleware.auth import get_current_actor, get_current_user
 from graphlagoon.models.schemas import (
     AnnotationCreate,
     AnnotationResponse,
+    AnnotationStatusBulk,
+    AnnotationStatusBulkResponse,
     AnnotationUpdate,
     DecisionReview,
     EntityResolutionRequest,
@@ -531,6 +533,24 @@ async def delete_item(investigation_id: UUID, item_id: UUID, request: Request):
     return {"status": "deleted"}
 
 
+@router.post(
+    "/{investigation_id}/items/{item_id}/restore",
+    tags=["case items"],
+    response_model=ItemResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def restore_item(investigation_id: UUID, item_id: UUID, request: Request):
+    """Put a removed item back in the material (people only), with its versions and pins. 409
+    `ITEM_EXISTS` when the case meanwhile has the same exploration or another brief."""
+    user_email = get_current_user(request)
+    try:
+        item = await case_items.restore_item(investigation_id, user_email, item_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+    await _record(user_email, AuditAction.INVESTIGATION_ITEM_RESTORE, investigation_id, item_id=str(item_id), title=item["title"])
+    return item
+
+
 @router.get("/{investigation_id}/items/{item_id}/versions", tags=["case items"], response_model=list[ItemVersionResponse])
 async def list_versions(investigation_id: UUID, item_id: UUID, request: Request):
     """Every version of an item, oldest first: number, sha256, size, content type, author, run
@@ -641,6 +661,20 @@ async def reject_item(investigation_id: UUID, item_id: UUID, request: Request):
         raise _http(exc)
 
 
+@router.post(
+    "/{investigation_id}/items/{item_id}/reopen",
+    tags=["case items"],
+    response_model=ItemResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def reopen_item(investigation_id: UUID, item_id: UUID, request: Request):
+    """A rejected suggestion is a suggestion again (people only): 409 `NOT_REJECTED` otherwise."""
+    try:
+        return await case_items.reopen_item(investigation_id, get_current_user(request), item_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
 @router.post("/{investigation_id}/items/{item_id}/run", tags=["case items"], response_model=ItemResponse)
 async def run_query(investigation_id: UUID, item_id: UUID, data: ItemRunRequest, request: Request):
     """Executes a saved query (05 §1) and stores the result as a version with ``run``."""
@@ -742,6 +776,36 @@ async def reject_annotation(investigation_id: UUID, annotation_id: UUID, request
         return await case_annotations.set_status(
             investigation_id, get_current_user(request), annotation_id, "rejected"
         )
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/annotations/{annotation_id}/reopen",
+    tags=["annotations & tasks"],
+    response_model=AnnotationResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def reopen_annotation(investigation_id: UUID, annotation_id: UUID, request: Request):
+    """A rejected suggestion is a suggestion again (people only): 409 `NOT_REJECTED` otherwise.
+    Nothing was applied when it was rejected, so nothing is undone."""
+    try:
+        return await case_annotations.reopen(investigation_id, get_current_user(request), annotation_id)
+    except service.InvestigationError as exc:
+        raise _http(exc)
+
+
+@router.post(
+    "/{investigation_id}/annotations/status",
+    tags=["annotations & tasks"],
+    response_model=AnnotationStatusBulkResponse,
+    dependencies=[Depends(forbid_agents)],
+)
+async def set_annotations_status(investigation_id: UUID, data: AnnotationStatusBulk, request: Request):
+    """Confirm or reject several suggestions at once (people only). All are checked first; one
+    unknown id or forbidden kind fails the call. Ones no longer suggested come back in `skipped`."""
+    try:
+        return await case_annotations.set_status_many(investigation_id, get_current_user(request), data.ids, data.status)
     except service.InvestigationError as exc:
         raise _http(exc)
 
@@ -849,11 +913,13 @@ async def list_events(
     request: Request,
     after: Optional[UUID] = None,
     limit: int = Query(100, ge=1, le=500),
+    order: Literal["asc", "desc"] = "asc",
 ):
-    """The case journal, oldest first: who did what, a person or an agent for a person. `after` is
-    the last event id already seen."""
+    """The case journal: who did what, a person or an agent for a person. Oldest first by default;
+    `order=desc` reads it newest first (the UI's journal). `after` is the last event id already
+    seen, in the same order."""
     try:
-        return await service.list_events(investigation_id, get_current_user(request), after, limit)
+        return await service.list_events(investigation_id, get_current_user(request), after, limit, order)
     except service.InvestigationError as exc:
         raise _http(exc)
 
