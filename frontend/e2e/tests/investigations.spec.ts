@@ -168,6 +168,9 @@ test.describe('Investigations', () => {
     await page.getByTestId('decision-closes').check();
     await page.getByTestId('decision-rationale').fill('Conta de passagem.');
     await page.getByTestId('decision-record').click();
+    // Closing the case is asked first (UX-1).
+    await expect(page.getByTestId('confirm-dialog')).toContainText('close the case');
+    await page.getByTestId('confirm-dialog-accept').click();
     await expect(page.getByTestId('decision-panel')).toHaveCount(0); // the panel leaves the inspector once recorded
     await expect(status).toHaveValue('closed');
     await expect(status).toBeDisabled();
@@ -182,12 +185,13 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('journal')).toContainText('reopened the case');
     await expect(page.getByTestId('journal')).toContainText('shared with ana@test.com (editor)');
 
-    // delete with confirmation → back to the queue
+    // A decision closed it: retained, so it is not offered for deletion (the server answers 409);
+    // only a superuser deletes it, with a reason (unit-tested in CaseHeader).
     await page.getByTestId('case-menu').click();
-    await page.getByTestId('case-delete').click();
-    await page.getByTestId('case-delete-yes').click();
-    await page.waitForURL('**/investigations');
-    await expect(page.getByTestId('investigations-empty')).toBeVisible();
+    await expect(page.getByTestId('case-delete')).toHaveCount(0);
+    await expect(page.getByTestId('case-retained')).toContainText('cannot be deleted');
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('case-menu-list')).toHaveCount(0);
   });
 
   test('F3: the current-case chip picks the target; the explorations list adds to it in one click; the popover shows the restricted item', async ({
@@ -278,7 +282,8 @@ test.describe('Investigations', () => {
     expect(added).toEqual([{ investigation_id: caseId, kind: 'graph', subkind: 'exploration_ref', exploration_id: 'exp-new-1' }]);
     const ref = material.get(caseId)!.find((i) => i.subkind === 'exploration_ref')!;
     await expect(page.getByTestId(`item-${ref.id}`)).toContainText('Rastreio inicial');
-    await expect(page.getByTestId(`item-${ref.id}`)).toContainText('🔗');
+    // The live reference opens its exploration, with the case for the way back (UX-1).
+    await expect(page.getByTestId(`item-open-exploration-${ref.id}`)).toHaveAttribute('href', new RegExp(`/graph/.+\\?exploration=exp-new-1&case=${caseId}$`));
   });
 
   test('F3: five tables from different origins — join two by key, promote three to enrichment at once', async ({ authenticatedPage: page }) => {
@@ -361,6 +366,10 @@ test.describe('Investigations', () => {
 
     await page.goto('/investigations/inv-1');
     const status = page.getByTestId('workspace-status');
+    // One graph at a time by default (UX-1); "All graphs" unifies them.
+    await expect(status).toContainText('1 source', { timeout: 15_000 });
+    await expect(page.getByTestId('unification-summary')).toHaveCount(0);
+    await page.getByTestId('canvas-all').click();
     await expect(status).toContainText('4 nodes', { timeout: 15_000 });
     await expect(status).toContainText('3 edges');
     await expect(status).toContainText('2 sources + 1 restricted');
@@ -518,6 +527,7 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('decision-action-block')).toBeChecked();
     await expect(page.getByTestId('decision-rationale')).toHaveValue('Two customers share one phone (E1).');
     await page.getByTestId('decision-record').click();
+    await page.getByTestId('confirm-dialog-accept').click(); // it closes the case: asked first
     await expect(page.getByTestId('case-status')).toHaveValue('closed');
     await expect(page.getByTestId('decision-proposal-badge')).toHaveCount(0);
   });

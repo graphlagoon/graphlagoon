@@ -244,7 +244,8 @@ const DEMO_CASE = {
   owner_email: 'demo@graphlagoon.dev',
   assignee_email: 'ana.costa@example.com',
   settings: {},
-  state: {},
+  // The guide shows the unified view: a case opens one graph at a time, "All graphs" merges them.
+  state: { canvas_items: 'all' },
   decisions: [],
   tags: [],
   shared_with: [],

@@ -640,7 +640,7 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
 
 .title {
   flex: 1;
-  min-width: 80px;
+  min-width: 48px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -698,15 +698,15 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
   gap: 4px;
 }
 
-/* "only" shows on hover and keyboard focus: the row stays quiet otherwise. */
-.only {
+/* "only" shows on hover and keyboard focus, and takes no room otherwise (the column is narrow). */
+.actions .only {
+  display: none;
   font-size: 11px;
-  opacity: 0;
 }
 
-.item:hover .only,
-.item:focus-within .only {
-  opacity: 1;
+.item:hover .actions .only,
+.item:focus-within .actions .only {
+  display: inline;
 }
 
 a.badge.live {

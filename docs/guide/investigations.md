@@ -106,16 +106,25 @@ On a given case:
 
 ## The queue and opening a case
 
-The queue is paged on the server: filter by text, status (*Open*, *In
-analysis*, *Closed*; *In progress* = the first two), case type, assignee,
+The queue is paged on the server: filter by text (title, description or the
+case's `#id`), status (*Open*, *In analysis*, *Closed*; *In progress* = the
+first two), case type, assignee, cases owned by you or shared with you,
 deadline (urgent or overdue) and suggestions to review; the counters on top
-are filters too. With one **case type** chosen, its queue fields (for example
-*Amount at risk* or *Reason code*) become columns, filters and sort keys.
-Each row shows the type, status and stage, assignee, material, pending
-suggestions and the deadline.
+are filters too, and count the cases the other filters keep. **Assignee: me**
+is whoever the case is on: its assignee or, unassigned, its owner. With one
+**case type** chosen, its queue fields (for example *Amount at risk* or
+*Reason code*) become columns, filters and sort keys. Each row shows the
+type, status and stage, assignee, material, pending suggestions, the
+deadline and the dates; most columns sort. Filters, sort and page are in the
+address, so **Back** from a case returns to the same list and a filtered
+queue can be shared as a link.
+
+**My tasks** (next to *Cases*) lists the open tasks assigned to you across
+every case you read, with their due time and a link to the case.
 
 **New investigation** asks for a title, a type and the type's required
-fields. A case can also be opened by an alerting system or an agent through
+fields (the current-case chip in the top bar creates a General case in one
+step, or opens this form). A case can also be opened by an alerting system or an agent through
 the API with an `external_ref` (the alert id): the same ref again returns the
 case already opened, so a retry never duplicates it.
 
@@ -128,7 +137,12 @@ report templates are read live from the type.
 a field to edit it in place; the type and its stage are selects. The status
 moves between *Open* and *In analysis*; only a decision closes a case and only
 **Reopen** (the **…** menu, people only) brings it back to analysis.
-**Decide**, **Share**, **⚙** (settings) and **Dossier** are next to it.
+**Decide**, **Share**, **⚙** (settings) and **Dossier** are next to it. The
+header only offers what you may do: **Decide** needs the *Decide* permission,
+**Share** and the assignee need manage rights, the type no longer changes after
+a decision (and asks before changing), and a case a decision closed is kept
+for its retention period — only a superuser deletes it, with a reason that goes
+to the audit log. A closed or read-only case says so under the header.
 
 ## Case files
 
@@ -139,10 +153,22 @@ without resetting the layout.
 **Viewing and downloading.** Selecting an item shows its card in the
 inspector, with **Preview** and **Download** for its latest version. Tables
 open as a table with the first 200 rows — or as a **chart** (line or bars, an
-x column and numeric series), which you can save as the item's view; markdown,
-text and JSON open as text; images and PDFs display inline; HTML renders in a
-sandboxed frame with scripts off. Every read is audited
-(`investigation.item_read`).
+x column and numeric series), which you can save as the item's view; markdown
+renders (headings, lists, tables, links; **Raw** shows the source, and no HTML
+of the document ever runs); text and JSON open as text; images and PDFs display
+inline; HTML renders in a sandboxed frame with scripts off; a link document
+opens its address. Every read is audited (`investigation.item_read`).
+
+**Working with an item.** An attached exploration opens on its own page
+(**Open exploration ↗** on its card, ↗ on its row, *Open in exploration* in a
+node's Origin tab), with **← Case** to come back. **Edit** changes the title,
+description and tags; ↑ ↓ move it among the items of its kind. **Edit text**
+saves a note or markdown document as a new version, **Upload new version**
+does the same for a file; **Versions** lists every version to preview,
+download or pin with a label. Removing an item is undone from the toast or
+from **Removed** at the end of the list, and a rejected suggestion can be
+reopened; the short ids (G1, D2, E3…) never move. The material's search also
+looks inside files, notes and documents, with a snippet of the match.
 
 **Upload** (needs `investigation.upload` and edit access) opens the file
 assistant: pick the files of a layout, choose **Graph** (the table is mapped
@@ -166,9 +192,14 @@ version, and any version can be pinned.
 
 ![Investigation workspace](/screenshots/investigations-workspace.png)
 
-- **One canvas.** Every graph item checked *on canvas* shows together; each
-  node gets one colored ring per source it came from (two rings: found in two
-  sources and merged).
+- **One graph at a time.** A case opens on its first graph item; the legend
+  over the canvas lists every graph of the case: click one to show only it,
+  Shift+click to add or remove it, **All graphs** to unify them all. On a
+  unified canvas each node gets one colored ring per source it came from (two
+  rings: found in two sources and merged). The material's *on canvas* box adds
+  or removes one graph too. The choice is saved with the case (and in saved
+  views); with a single graph, the canvas wears its exploration's style. A graph
+  that shows nothing (an exploration never saved) says why with ⚠.
 - **Inspector** (right) shows the selected entity: data, role and tags, the
   items that cite it, notes, enrichment and origin — and **Seen in N other
   cases** when the same entity appears in other cases you can read, with the
@@ -178,9 +209,12 @@ version, and any version can be pinned.
   closed groups as a `graph/view` item.
 - The **analysis bar** opens each analysis with its parameters; every run is
   an item with its provenance, shown in the bottom strip and pinnable.
-- The bottom strip has the **Timeline** of dated edges, the **Activity**
-  journal (filter person / agent / system, *since my last visit*), **Tasks**,
-  **Suggestions** to confirm in bulk, and the active analysis result.
+- The bottom strip has the **Dated edges** timeline, the **Journal** (newest
+  first, *Load older events* for the rest; filter person / agent / system,
+  event kind, *since my last visit*, or search its text; a line about an item
+  opens it, one about an entity shows it on the canvas), **Tasks**,
+  **Suggestions** to confirm in bulk (asked first, sent at once), and the
+  active analysis result.
 - **⚙** edits the case settings: deadlines, the agent's suggest kinds,
   vocabularies, identity keys, edge semantics by relationship type and label
   templates. Only people change them (an agent token gets 403).
@@ -302,6 +336,9 @@ The dossier numbers pinned versions E1, E2, … by pin order.
 - **Hypotheses** (H1, H2, …) with their status (open, supported, refuted) and
   the evidence for and against each; a wrong one is refuted, never deleted;
 - **Evidence**: E1, E2, … with how each was made;
+- **Notes and documents**: every note and document of the case, rendered
+  (markdown, the reports drafted from templates), links clickable, files with
+  their type, size, hash and download, and the entities a note is about;
 - **Tables** flagged *Use in the dossier*, with their latest rows;
 - **Tasks** still open, and the **Journal**;
 - **Decisions** on the right: every decision so far, the panel to record one,
@@ -336,7 +373,9 @@ one decision:
   block account X and monitor Y.
 - **Follow-up tasks**: the type's actions it sets in motion.
 - **Rationale**, pre-filled with the supported hypotheses and the pinned
-  evidence; **reviewer** (an editor of the case, never the author).
+  evidence — the pre-fill alone is not enough: add your own words;
+  **reviewer** (an editor of the case, never the author; the people on the
+  case are suggested). A decision that closes the case asks before recording.
 
 Recording appends the decision with the **hash** of the journal up to it
 (sha256 of the canonical journal, which carries the pinned versions' hashes
@@ -445,6 +484,12 @@ SLA left the case is *urgent*.
   signature.
 - **Uploads** go in one request, so a proxy limit below
   `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` wins.
+- **Workspace layout**: the three columns have fixed widths and do not
+  collapse; on a narrow screen use the dossier. Cases are not archived (a case
+  is open, in analysis or closed), and removing a role, tag or group is final.
+- **Expanded neighbors** and nodes promoted from enrichment tables last the
+  session (the journal records them); save the exploration to keep them.
+- *Since my last visit* is remembered per browser.
 
 ## Admin area
 
