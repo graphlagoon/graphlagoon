@@ -6,7 +6,7 @@
  * in place, the pin badge and remove. "+ Add" opens the exploration picker;
  * "Upload" the file assistant; "Note" a markdown editor for a new document/note.
  */
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { AlertTriangle, Bot, ExternalLink, FileText, GitBranch, Lock, Pin, Plus, StickyNote, Table2, Terminal, Upload, User } from 'lucide-vue-next';
 import QueryItemCard from './QueryItemCard.vue';
 import TableOpsDialog, { type TableOp } from './TableOpsDialog.vue';
@@ -15,11 +15,27 @@ import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { useAddToCase } from '@/composables/useAddToCase';
-import { confirmAction } from '@/composables/useConfirm';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { formatRelative } from '@/utils/format';
 import { ITEM_KIND_PLURALS } from '@/utils/investigationStatus';
 import { explorationUrl } from '@/utils/investigationLinks';
+import { renderMarkdown } from '@/utils/markdown';
+import { api } from '@/services/api';
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeFlag(key: string, on: boolean) {
+  try {
+    localStorage.setItem(key, on ? '1' : '0');
+  } catch {
+    /* private mode: the choice lasts the page */
+  }
+}
 import type { CaseItem, ItemKind } from '@/types/investigation';
 
 const props = defineProps<{ canEdit: boolean; activeItem?: string | null }>();
@@ -92,13 +108,52 @@ const draftTitle = ref('');
 const draftBody = ref('');
 const busy = ref<string | null>(null);
 
+/** Rejected suggestions can be hidden (remembered per browser). */
+const HIDE_REJECTED_KEY = 'graphlagoon.case.hideRejected';
+const hideRejected = ref(readFlag(HIDE_REJECTED_KEY));
+watch(hideRejected, (on) => writeFlag(HIDE_REJECTED_KEY, on));
+const rejectedCount = computed(() => store.items.filter((i) => i.status === 'rejected').length);
+
+/**
+ * Search: titles and tags at once; from 3 characters, also the text of the files, notes and
+ * documents (the server's search, with a snippet of where it matched).
+ */
+const textHits = ref<Map<string, string | null>>(new Map());
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let searchSeq = 0;
+watch(search, (value) => {
+  if (searchTimer) clearTimeout(searchTimer);
+  const q = value.trim();
+  const caseId = store.current?.id;
+  if (q.length < 3 || !caseId) {
+    textHits.value = new Map();
+    return;
+  }
+  const seq = ++searchSeq;
+  searchTimer = setTimeout(async () => {
+    try {
+      const hits = await api.searchInvestigation(caseId, q);
+      if (seq === searchSeq) textHits.value = new Map(hits.map((h) => [h.id, h.match === 'text' ? (h.snippet ?? null) : null]));
+    } catch {
+      if (seq === searchSeq) textHits.value = new Map(); // titles still filter
+    }
+  }, 300);
+});
+onBeforeUnmount(() => searchTimer && clearTimeout(searchTimer));
+
 const visible = computed(() => {
   const q = search.value.trim().toLowerCase();
-  return store.items.filter((i) => i.subkind !== 'brief' && (!q || i.title.toLowerCase().includes(q) || i.tags.some((t) => t.toLowerCase().includes(q))));
+  return store.items.filter(
+    (i) =>
+      i.subkind !== 'brief' &&
+      !(hideRejected.value && i.status === 'rejected') &&
+      (!q || i.title.toLowerCase().includes(q) || i.tags.some((t) => t.toLowerCase().includes(q)) || textHits.value.has(i.id)),
+  );
 });
 const groups = computed(() =>
   GROUPS.map((g) => ({ ...g, items: visible.value.filter((i) => i.kind === g.kind) })).filter((g) => g.items.length || !search.value),
 );
+const showRemoved = ref(false);
 const suggestedCount = computed(() => store.suggestions.length);
 /** `G3`, `Q2`, `D1`: stable short ids (05 §3: never a raw UUID; see `caseShortIds`). */
 const shortIds = computed(() => store.shortIds);
@@ -150,24 +205,27 @@ function saveDraft() {
   }, 'Failed to add');
 }
 
-async function remove(item: CaseItem) {
-  const ok = await confirmAction({
-    title: `Remove “${item.title}”?`,
-    message: item.pinned.length
-      ? `It has ${item.pinned.length} pinned version(s) — evidence. They stay in the record; the item leaves the material and can be restored from “Removed”.`
-      : 'It leaves the material; its versions stay in the record and it can be restored from “Removed”.',
-    confirmLabel: 'Remove',
-    danger: true,
-  });
-  if (!ok) return;
+/** Removing is undone from the toast or from "Removed" (the versions and pins stay). */
+function remove(item: CaseItem) {
   run(item.id, async () => {
     await store.removeItem(item.id);
-    toast.success(`Removed “${item.title}” from the case`);
+    const pins = item.pinned.length ? ` (its ${item.pinned.length} pinned version${item.pinned.length === 1 ? '' : 's'} stay in the record)` : '';
+    toast.undoable(`Removed “${item.title}”${pins}`, () => restore(item));
   }, 'Failed to remove the item');
 }
 
+function restore(item: CaseItem) {
+  run(item.id, async () => {
+    await store.restoreItem(item.id);
+    toast.success(`“${item.title}” is back in the material`);
+  }, 'Failed to restore the item');
+}
+
 function decide(item: CaseItem, status: 'confirmed' | 'rejected') {
-  run(item.id, () => store.setItemStatus(item.id, status), 'Failed to update the suggestion');
+  run(item.id, async () => {
+    await store.setItemStatus(item.id, status);
+    if (status === 'rejected') toast.undoable(`Rejected “${item.title}”`, () => run(item.id, () => store.reopenItem(item.id), 'Failed to reopen'));
+  }, 'Failed to update the suggestion');
 }
 
 function pin(item: CaseItem) {
@@ -224,7 +282,7 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           v{{ store.brief.item.current_version }}
         </span>
         <span class="spacer"></span>
-        <button v-if="canEdit && !editingBrief" class="link-btn" data-testid="brief-edit" @click="startBrief">
+        <button v-if="canEdit && !editingBrief && !store.briefError" class="link-btn" data-testid="brief-edit" @click="startBrief">
           {{ store.brief.text ? 'Edit' : 'Write' }}
         </button>
       </div>
@@ -235,11 +293,21 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           <button class="btn btn-outline btn-sm" @click="editingBrief = false">Cancel</button>
         </div>
       </template>
-      <pre v-else-if="store.brief.text" class="brief-text" data-testid="brief-text">{{ store.brief.text }}</pre>
+      <p v-else-if="store.briefError" class="muted" data-testid="brief-error">
+        Could not load the brief. <button class="link-btn" @click="store.fetchBrief().catch(() => {})">Retry</button>
+      </p>
+      <!-- v-html: escape-first renderer only (utils/markdown) -->
+      <div v-else-if="store.brief.text" class="brief-text case-markdown" data-testid="brief-text" v-html="renderMarkdown(store.brief.text)"></div>
       <p v-else class="muted">No brief yet.</p>
     </section>
 
-    <input v-model="search" class="form-control search" placeholder="Search material…" data-testid="items-search" />
+    <div class="search-row">
+      <input v-model="search" class="form-control search" placeholder="Search titles, tags and text…" aria-label="Search the material" data-testid="items-search" />
+      <label v-if="rejectedCount" class="muted hide-rejected">
+        <input v-model="hideRejected" type="checkbox" data-testid="items-hide-rejected" /> hide {{ rejectedCount }} rejected
+      </label>
+    </div>
+    <p v-if="search.trim() && store.items.length && !visible.length" class="muted" data-testid="items-no-match">No item matches “{{ search.trim() }}”.</p>
 
     <div v-if="!store.items.length" class="empty" data-testid="items-empty">
       <p>Nothing in the case yet. Add a recent exploration, upload a file, or write a note.</p>
@@ -267,7 +335,13 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           class="row item"
           :class="{ suggested: item.status === 'suggested', rejected: item.status === 'rejected', active: activeItem === item.id }"
           :data-testid="`item-${item.id}`"
+          role="button"
+          tabindex="0"
+          :aria-label="`${item.title} (${shortIds.get(item.id) ?? item.kind})`"
+          :aria-current="activeItem === item.id ? 'true' : undefined"
           @click="emit('select', item)"
+          @keydown.enter.self.prevent="emit('select', item)"
+          @keydown.space.self.prevent="emit('select', item)"
         >
           <input
             v-if="isGraphItem(item) && item.accessible"
@@ -320,18 +394,18 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
               :data-testid="`item-select-${item.id}`"
               @change="toggleTable(item.id, ($event.target as HTMLInputElement).checked)"
             />
-            <button v-if="item.kind === 'query'" class="link-btn" title="Parameters, history, promote" :data-testid="`item-expand-${item.id}`" @click="toggleExpand(item.id)">
+            <button v-if="item.kind === 'query'" class="link-btn" title="Parameters, history, promote" :aria-label="`Parameters and history of ${item.title}`" :aria-expanded="expanded.has(item.id)" :data-testid="`item-expand-${item.id}`" @click="toggleExpand(item.id)">
               {{ expanded.has(item.id) ? '▾' : '▸' }}
             </button>
             <template v-if="item.status === 'suggested' && canEdit">
-              <button class="link-btn ok" :disabled="busy === item.id" :data-testid="`item-confirm-${item.id}`" @click="decide(item, 'confirmed')">✓</button>
-              <button class="link-btn danger" :disabled="busy === item.id" :data-testid="`item-reject-${item.id}`" @click="decide(item, 'rejected')">✕</button>
+              <button class="link-btn ok" title="Confirm the suggestion" :aria-label="`Confirm ${item.title}`" :disabled="busy === item.id" :data-testid="`item-confirm-${item.id}`" @click="decide(item, 'confirmed')">✓</button>
+              <button class="link-btn danger" title="Reject the suggestion" :aria-label="`Reject ${item.title}`" :disabled="busy === item.id" :data-testid="`item-reject-${item.id}`" @click="decide(item, 'rejected')">✕</button>
             </template>
-            <button v-if="canEdit && item.kind === 'query'" class="link-btn" title="Run again" :disabled="busy === item.id" :data-testid="`item-run-${item.id}`" @click="rerun(item)">▶</button>
-            <button v-if="canEdit && (item.current_version || item.subkind === 'exploration_ref')" class="link-btn" title="Pin this version as evidence" :disabled="busy === item.id" :data-testid="`item-pin-${item.id}`" @click="pin(item)">
+            <button v-if="canEdit && item.kind === 'query'" class="link-btn" title="Run again" :aria-label="`Run ${item.title} again`" :disabled="busy === item.id" :data-testid="`item-run-${item.id}`" @click="rerun(item)">▶</button>
+            <button v-if="canEdit && (item.current_version || item.subkind === 'exploration_ref')" class="link-btn" title="Pin this version as evidence" :aria-label="`Pin ${item.title} as evidence`" :disabled="busy === item.id" :data-testid="`item-pin-${item.id}`" @click="pin(item)">
               <Pin :size="12" />
             </button>
-            <button v-if="canEdit" class="link-btn danger" title="Remove from the case" :disabled="busy === item.id" :data-testid="`item-remove-${item.id}`" @click="remove(item)">×</button>
+            <button v-if="canEdit" class="link-btn danger" title="Remove from the case" :aria-label="`Remove ${item.title}`" :disabled="busy === item.id" :data-testid="`item-remove-${item.id}`" @click="remove(item)">×</button>
           </span>
           <div v-if="item.kind === 'query'" class="sub muted">
             <template v-if="lastRun(item)">
@@ -341,6 +415,29 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
             <template v-else>never run · {{ item.query?.language }} → {{ item.query?.output }}</template>
           </div>
           <QueryItemCard v-if="item.kind === 'query' && expanded.has(item.id)" :item="item" :can-edit="canEdit" />
+          <div v-if="textHits.get(item.id)" class="sub muted snippet" :data-testid="`item-snippet-${item.id}`">… {{ textHits.get(item.id) }} …</div>
+        </div>
+      </template>
+    </section>
+
+    <section v-if="store.removedItems.length" class="group removed" data-testid="items-removed">
+      <button class="group-head" :aria-expanded="showRemoved" @click="showRemoved = !showRemoved">
+        <span>{{ showRemoved ? '▾' : '▸' }}</span>
+        Removed <span class="muted">{{ store.removedItems.length }}</span>
+      </button>
+      <template v-if="showRemoved">
+        <div v-for="item in store.removedItems" :key="item.id" class="row item removed-row" :data-testid="`removed-${item.id}`">
+          <span class="title" :title="item.title">{{ item.title }}</span>
+          <span class="short muted">{{ shortIds.get(item.id) }}</span>
+          <span class="spacer"></span>
+          <button
+            v-if="canEdit"
+            class="link-btn"
+            :disabled="busy === item.id"
+            :aria-label="`Restore ${item.title}`"
+            :data-testid="`item-restore-${item.id}`"
+            @click="restore(item)"
+          >restore</button>
         </div>
       </template>
     </section>
@@ -455,13 +552,38 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
   max-height: 160px;
   margin: 6px 0 0;
   overflow: auto;
-  white-space: pre-wrap;
-  font: inherit;
   font-size: 12px;
+}
+
+.search-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .search {
   font-size: 12px;
+}
+
+.hide-rejected {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.snippet {
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.removed-row .title {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .empty {

@@ -693,6 +693,48 @@ async def pin_version(
         return serialize_version(row)
 
 
+async def restore_item(investigation_id: UUID, user_email: str, item_id: UUID) -> dict:
+    """Undo a removal (UX-1): the item is back in the material with its versions. Refused (409
+    ``ITEM_EXISTS``) when the case meanwhile got what only exists once: the same exploration,
+    or another brief."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        ensure_not_closed(inv)
+        item = await item_row(session, investigation_id, item_id, deleted_ok=True)
+        if item.deleted_at is None:
+            return await _serialize(session, item, user_email)
+        live = [i for i in await list_rows(session, ITEMS, investigation_id) if i.deleted_at is None and i.id != item.id]
+        if item.exploration_id and any(i.exploration_id == item.exploration_id for i in live):
+            raise InvestigationError(409, "ITEM_EXISTS", "This exploration is already in the case")
+        if item.subkind == "brief" and any(i.subkind == "brief" for i in live):
+            raise InvestigationError(409, "ITEM_EXISTS", "The case already has its brief")
+        await update_row(session, ITEMS, item, deleted_at=None)
+        await append_event(
+            session, investigation_id, user_email, "item.restored",
+            {"item_id": str(item_id), "kind": item.kind, "title": item.title},
+        )
+        await commit(session)
+        return await _serialize(session, item, user_email)
+
+
+async def reopen_item(investigation_id: UUID, user_email: str, item_id: UUID) -> dict:
+    """A rejected suggestion becomes a suggestion again (UX-1): rejecting is no longer final.
+    Only a rejected item reopens (409 ``NOT_REJECTED``)."""
+    async with _session() as session:
+        inv = await load_case(session, investigation_id, user_email, "write")
+        ensure_not_closed(inv)
+        item = await item_row(session, investigation_id, item_id)
+        if item.status != "rejected":
+            raise InvestigationError(409, "NOT_REJECTED", "Only a rejected item is reopened")
+        await update_row(session, ITEMS, item, status="suggested")
+        await append_event(
+            session, investigation_id, user_email, "item.reopened",
+            {"item_id": str(item_id), "title": item.title, "author_email": item.author_email},
+        )
+        await commit(session)
+        return await _serialize(session, item, user_email)
+
+
 async def set_status(investigation_id: UUID, user_email: str, item_id: UUID, status: str) -> dict:
     """confirm | reject a suggested item (people only; the route forbids agents)."""
     async with _session() as session:

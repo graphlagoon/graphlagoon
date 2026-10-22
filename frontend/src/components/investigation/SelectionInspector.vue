@@ -22,6 +22,7 @@ import { baseSourceId, nodeSourceIds, type UnifiedNode } from '@/utils/unifyGrap
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import DecisionPanel from '@/components/investigation/DecisionPanel.vue';
 import ItemPreview from '@/components/investigation/ItemPreview.vue';
+import ItemDetails from '@/components/investigation/ItemDetails.vue';
 import SeenInOtherCases from '@/components/investigation/SeenInOtherCases.vue';
 import type { CaseAnnotation, CaseItem } from '@/types/investigation';
 
@@ -460,6 +461,7 @@ const formatTime = (iso: string) => formatDate(iso);
         </button>
       </div>
       <ItemPreview v-if="item.current_version && store.current" :key="`${item.id}:${item.current_version}`" :item="item" :investigation-id="store.current.id" />
+      <ItemDetails :key="`details:${item.id}`" :item="item" :can-edit="canEdit" />
     </template>
 
     <template v-else>

@@ -3,6 +3,7 @@ import { render, fireEvent } from '@testing-library/vue'
 import { flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import CaseItemsPanel from '@/components/investigation/CaseItemsPanel.vue'
+import { useToast } from '@/composables/useToast'
 import { useInvestigationStore } from '@/stores/investigation'
 
 vi.mock('@/services/api', () => ({
@@ -20,6 +21,9 @@ vi.mock('@/services/api', () => ({
     putInvestigationBrief: vi.fn(),
     createInvestigationItem: vi.fn(async (_id: string, data: any) => ({ id: 'new', title: data.title, tags: [], pinned: [] })),
     deleteInvestigationItem: vi.fn(async () => {}),
+    restoreInvestigationItem: vi.fn(async (_i: string, id: string) => ({ id, kind: 'table', subkind: 'csv', title: 'KYC', tags: [], pinned: [], status: 'confirmed', current_version: 1, position: 0 })),
+    reopenInvestigationItem: vi.fn(async (_i: string, id: string) => ({ id, kind: 'note', subkind: 'free', title: 'Achado', tags: [], pinned: [], status: 'suggested', current_version: 1, position: 0 })),
+    searchInvestigation: vi.fn(async () => []),
     getInvestigation: vi.fn(),
   },
 }))
@@ -100,7 +104,7 @@ describe('CaseItemsPanel', () => {
     await fireEvent.click(getByTestId('brief-save'))
     await flushPromises()
     expect(api.putInvestigationBrief).toHaveBeenCalledWith('inv', '# v2')
-    expect(getByTestId('brief-text').textContent).toContain('# v2')
+    expect(getByTestId('brief-text').innerHTML).toContain('<h3>v2</h3>') // rendered as markdown
   })
 
   it('F3: two tables selected → Join by the shared key; Compare shows the diff; three → Promote in bulk', async () => {
@@ -180,5 +184,67 @@ describe('CaseItemsPanel', () => {
     expect(ro.queryByTestId('items-add')).toBeNull()
     expect(ro.queryByTestId('item-remove-g1')).toBeNull()
     expect(queryByTestId('compose-note')).toBeNull()
+  })
+
+  it('removing is undone from the toast or from "Removed"; a rejection can be undone too (UX-1)', async () => {
+    const store = useInvestigationStore()
+    vi.mocked(api.restoreInvestigationItem).mockImplementation(async (_i, id) => ({ ...ITEMS.find((x) => x.id === id), deleted_at: null }) as any)
+    vi.mocked(api.reopenInvestigationItem).mockImplementation(async (_i, id) => ({ ...ITEMS.find((x) => x.id === id), status: 'suggested' }) as any)
+    const { getByTestId, queryByTestId } = render(CaseItemsPanel, { props: { canEdit: true } })
+    await fireEvent.click(getByTestId('item-remove-t1'))
+    await flushPromises()
+    expect(api.deleteInvestigationItem).toHaveBeenCalledWith('inv', 't1')
+    expect(queryByTestId('item-t1')).toBeNull()
+    const undo = useToast().toasts.value.find((t) => t.message.startsWith('Removed “KYC”'))
+    expect(undo?.action?.label).toBe('Undo')
+    await fireEvent.click(getByTestId('items-removed').querySelector('button')!)
+    await fireEvent.click(getByTestId('item-restore-t1'))
+    await flushPromises()
+    expect(api.restoreInvestigationItem).toHaveBeenCalledWith('inv', 't1')
+    expect(store.removedItems).toEqual([])
+    expect(getByTestId('item-t1')).toBeTruthy()
+
+    vi.mocked(api.setInvestigationItemStatus).mockImplementation(async (_i, id, status) => ({ ...ITEMS.find((x) => x.id === id), status }) as any)
+    await fireEvent.click(getByTestId('item-reject-n1'))
+    await flushPromises()
+    const reopen = useToast().toasts.value.find((t) => t.message === 'Rejected “Achado”')
+    reopen!.action!.onClick()
+    await flushPromises()
+    expect(api.reopenInvestigationItem).toHaveBeenCalledWith('inv', 'n1')
+  })
+
+  it('search reaches the text of the files with a snippet, says when nothing matches, and hides rejected items', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api.searchInvestigation).mockResolvedValue([{ id: 't2', match: 'text', snippet: 'linha com 4471-0' }] as any)
+    const store = useInvestigationStore()
+    store.items[1] = { ...store.items[1], status: 'rejected' } as any
+    const { getByTestId, queryByTestId } = render(CaseItemsPanel, { props: { canEdit: true } })
+    await fireEvent.update(getByTestId('items-search'), '4471')
+    await vi.advanceTimersByTimeAsync(350)
+    await flushPromises()
+    expect(api.searchInvestigation).toHaveBeenCalledWith('inv', '4471')
+    expect(getByTestId('item-t2')).toBeTruthy()
+    expect(getByTestId('item-snippet-t2').textContent).toContain('4471-0')
+    vi.mocked(api.searchInvestigation).mockResolvedValue([])
+    await fireEvent.update(getByTestId('items-search'), 'zzzz')
+    await vi.advanceTimersByTimeAsync(350)
+    await flushPromises()
+    expect(getByTestId('items-no-match')).toBeTruthy()
+    await fireEvent.update(getByTestId('items-search'), '')
+    const rejectedId = store.items[1].id
+    expect(getByTestId(`item-${rejectedId}`)).toBeTruthy()
+    await fireEvent.click(getByTestId('items-hide-rejected'))
+    expect(queryByTestId(`item-${rejectedId}`)).toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('rows are keyboard-selectable and icon buttons are labelled', async () => {
+    const { getByTestId, emitted } = render(CaseItemsPanel, { props: { canEdit: true } })
+    const row = getByTestId('item-t1')
+    expect(row.getAttribute('tabindex')).toBe('0')
+    await fireEvent.keyDown(row, { key: 'Enter' })
+    expect((emitted().select as unknown[][])[0][0]).toMatchObject({ id: 't1' })
+    expect(getByTestId('item-remove-t1').getAttribute('aria-label')).toBe('Remove KYC')
+    expect(getByTestId('item-confirm-n1').getAttribute('aria-label')).toBe('Confirm Achado')
   })
 })

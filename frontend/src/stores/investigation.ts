@@ -367,6 +367,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
       annotations.value = [];
       events.value = [];
       brief.value = { item: null, text: '' };
+      briefError.value = null;
       canvasOverride.value = null;
       sourceGraphs.value = [];
       expansions.value = [];
@@ -474,6 +475,64 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
+  /** Undo of a removal: back in the material with its versions and pins. */
+  async function restoreItem(itemId: string) {
+    if (!current.value) return;
+    const item = await api.restoreInvestigationItem(current.value.id, itemId);
+    removedItems.value = removedItems.value.filter((i) => i.id !== itemId);
+    upsertItem(item);
+    void fetchEvents();
+    return item;
+  }
+
+  /** A rejected suggestion is a suggestion again. */
+  async function reopenItem(itemId: string) {
+    if (!current.value) return;
+    upsertItem(await api.reopenInvestigationItem(current.value.id, itemId));
+    void fetchEvents();
+  }
+
+  /** A new text version of a note or markdown document; a note's description follows it. */
+  async function editItemText(item: CaseItem, text: string) {
+    if (!current.value) return;
+    let next = await api.addInvestigationItemVersion(current.value.id, item.id, { content: text });
+    if (item.kind === 'note') {
+      next = await api.updateInvestigationItem(current.value.id, item.id, {
+        description: text,
+        title: text.length > 60 ? `${text.slice(0, 57)}…` : text,
+      });
+    }
+    upsertItem(next);
+    void fetchEvents();
+  }
+
+  async function uploadVersion(itemId: string, file: File) {
+    if (!current.value) return;
+    upsertItem(await api.uploadInvestigationItemVersion(current.value.id, itemId, file));
+    void fetchEvents();
+  }
+
+  /** Moves an item one place up or down among the items of its kind (the material's order). */
+  async function moveItem(item: CaseItem, direction: -1 | 1) {
+    if (!current.value) return;
+    const siblings = items.value
+      .filter((i) => i.kind === item.kind && i.subkind !== 'brief')
+      .sort((a, b) => a.position - b.position || (a.created_at ?? '').localeCompare(b.created_at ?? ''));
+    const at = siblings.findIndex((i) => i.id === item.id);
+    const other = siblings[at + direction];
+    if (at < 0 || !other) return;
+    // Equal positions (older cases) get distinct ones first, so the swap moves something.
+    const a = other.position === item.position ? at : item.position;
+    const b = other.position === item.position ? at + direction : other.position;
+    const [mine, theirs] = await Promise.all([
+      api.updateInvestigationItem(current.value.id, item.id, { position: b }),
+      api.updateInvestigationItem(current.value.id, other.id, { position: a }),
+    ]);
+    upsertItem(mine);
+    upsertItem(theirs);
+    items.value = [...items.value].sort((x, y) => x.position - y.position || (x.created_at ?? '').localeCompare(y.created_at ?? ''));
+  }
+
   async function runQuery(itemId: string, parameters: Record<string, unknown> = {}) {
     if (!current.value) return null;
     const item = await api.runInvestigationQuery(current.value.id, itemId, parameters);
@@ -555,8 +614,17 @@ export const useInvestigationStore = defineStore('investigation', () => {
     return pinItem(item.id);
   }
 
+  /** Set when the brief could not be read: the panel must not offer to write over it. */
+  const briefError = ref<string | null>(null);
   async function fetchBrief() {
-    if (current.value) brief.value = await api.getInvestigationBrief(current.value.id);
+    if (!current.value) return;
+    try {
+      brief.value = await api.getInvestigationBrief(current.value.id);
+      briefError.value = null;
+    } catch (e) {
+      briefError.value = getErrorMessage(e, 'Failed to load the brief');
+      throw e;
+    }
   }
 
   async function saveBrief(text: string) {
@@ -585,6 +653,23 @@ export const useInvestigationStore = defineStore('investigation', () => {
     await api.setInvestigationAnnotationStatus(current.value.id, annotationId, status);
     await fetchAnnotations();
     if (status === 'confirmed') current.value = await api.getInvestigation(current.value.id); // a status_change moves the case
+    void fetchEvents();
+  }
+
+  /** Several suggestions in one request (all checked first, applied together). */
+  async function setAnnotationsStatus(annotationIds: string[], status: 'confirmed' | 'rejected') {
+    if (!current.value || !annotationIds.length) return { applied: 0, skipped: 0 };
+    const result = await api.setInvestigationAnnotationsStatus(current.value.id, annotationIds, status);
+    await fetchAnnotations();
+    if (status === 'confirmed') current.value = await api.getInvestigation(current.value.id);
+    void fetchEvents();
+    return { applied: result.applied.length, skipped: result.skipped.length };
+  }
+
+  async function reopenAnnotation(annotationId: string) {
+    if (!current.value) return;
+    await api.reopenInvestigationAnnotation(current.value.id, annotationId);
+    await fetchAnnotations();
     void fetchEvents();
   }
 
@@ -891,6 +976,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     annotations,
     events,
     brief,
+    briefError,
     loading,
     error,
     graphItems,
@@ -948,6 +1034,13 @@ export const useInvestigationStore = defineStore('investigation', () => {
     removeItem,
     pinItem,
     setItemStatus,
+    restoreItem,
+    reopenItem,
+    editItemText,
+    uploadVersion,
+    moveItem,
+    setAnnotationsStatus,
+    reopenAnnotation,
     runQuery,
     toggleCanvas,
     setCanvas,

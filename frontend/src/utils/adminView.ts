@@ -136,6 +136,8 @@ function describeAuditBody(entry: AuditEntry): string {
       return `exported ${m.format ?? '?'} sha256 ${String(m.sha256 ?? '?').slice(0, 12)}`;
     case 'investigation.item_remove':
       return `removed ${m.kind ?? 'item'} "${m.title ?? m.item_id ?? '?'}"`;
+    case 'investigation.item_restore':
+      return `restored "${m.title ?? m.item_id ?? '?'}"`;
     case 'precomputed.publish':
     case 'precomputed.delete':
     case 'preset.delete':

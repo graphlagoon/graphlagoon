@@ -2463,6 +2463,19 @@ class AnnotationResponse(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class AnnotationStatusBulk(BaseModel):
+    """``POST …/annotations/status``: confirm or reject several suggestions at once."""
+
+    ids: list[UUID] = Field(min_length=1, max_length=500)
+    status: Literal["confirmed", "rejected"]
+
+
+class AnnotationStatusBulkResponse(BaseModel):
+    applied: list[AnnotationResponse]
+    #: Ids no longer suggested (someone decided them meanwhile): left as they are.
+    skipped: list[UUID] = Field(default_factory=list)
+
+
 class ReportCreate(BaseModel):
     """``POST …/reports``: render an org library template into a markdown document."""
 

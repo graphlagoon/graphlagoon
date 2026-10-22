@@ -420,12 +420,15 @@ def serialize_event(e: Any) -> dict:
 
 
 async def list_events(
-    investigation_id: UUID, user_email: str, after: Optional[UUID] = None, limit: int = 100
+    investigation_id: UUID, user_email: str, after: Optional[UUID] = None, limit: int = 100, order: str = "asc"
 ) -> list[dict]:
-    """Oldest first; ``after`` is the id of the last event of the previous page."""
+    """Oldest first (``order="desc"``: newest first); ``after`` is the id of the last event of the
+    previous page, in that order."""
     async with _session() as session:
         await load_case(session, investigation_id, user_email)
         events = await _list_events(session, investigation_id)
+        if order == "desc":
+            events = list(reversed(events))
         start = 0
         if after is not None:
             ids = [e.id for e in events]
