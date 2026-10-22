@@ -80,6 +80,15 @@ const paintByGroup = ref(false);
 const selectedClusterId = ref<string | null>(null);
 const panels = ref<Record<CasePanel, boolean>>({ filters: false, table: false, metrics: false, layout: false, advanced: false });
 const canvasRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
+const dossierRef = ref<InstanceType<typeof CaseDossier> | null>(null);
+
+/** Decide: the inspector's panel on the canvas, the dossier's own panel in the dossier. */
+function onDecide() {
+  if (mode.value === 'dossier') void dossierRef.value?.startDecision();
+  else decideMode.value = true;
+}
+// A decision started on one side does not reopen on the other.
+watch(mode, () => (decideMode.value = false));
 const analysisBar = ref<InstanceType<typeof AnalysisBar> | null>(null);
 
 const sourceTitle = (sourceId: string) => store.itemTitle(baseSourceId(sourceId));
@@ -381,9 +390,9 @@ onUnmounted(() => {
     <div v-if="store.loading && !store.current" class="loading"></div>
     <div v-else-if="store.error" class="error-message">{{ store.error }}</div>
     <template v-else-if="store.current">
-      <CaseHeader :mode="mode" @decide="decideMode = true" @settings="showSettings = true" />
+      <CaseHeader :mode="mode" @decide="onDecide" @settings="showSettings = true" />
 
-      <CaseDossier v-if="mode === 'dossier'" :id="id" />
+      <CaseDossier v-if="mode === 'dossier'" :id="id" ref="dossierRef" />
 
       <template v-else>
         <div class="ws-body">

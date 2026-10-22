@@ -49,7 +49,7 @@ const fmt = (iso?: string | null) => formatDate(iso);
 
 <template>
   <div class="drawer-overlay" @click.self="emit('close')">
-    <aside class="entity-page" data-testid="entity-page">
+    <aside class="entity-page" role="dialog" aria-modal="true" :aria-label="title" data-testid="entity-page">
       <header>
         <div>
           <div class="muted">{{ node.node_type }} · {{ shortId(node.node_id) }}</div>

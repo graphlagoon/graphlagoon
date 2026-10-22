@@ -13,6 +13,9 @@ import { onMounted, onUnmounted } from 'vue';
  * so dispatching a click *on the overlay element itself* is exactly the event
  * that handler is waiting for, whatever each modal does to close.
  *
+ * Side drawers (`.drawer-overlay`: case settings, entity page) close the same
+ * way, through their backdrop handler.
+ *
  * Registered in the capture phase and stopping propagation, so that a modal
  * over the graph takes Escape instead of the canvas clearing the selection
  * underneath it. `ConfirmDialog` owns its own Escape (it has to resolve a
@@ -29,7 +32,7 @@ export function useEscapeToCloseModals() {
     // popover): Escape closes that first, the modal on the next press.
     if (document.querySelector('[data-escape-owner]')) return;
 
-    const overlays = document.querySelectorAll<HTMLElement>('.modal-overlay');
+    const overlays = document.querySelectorAll<HTMLElement>('.modal-overlay, .drawer-overlay');
     const top = overlays[overlays.length - 1];
     if (!top) return;
 

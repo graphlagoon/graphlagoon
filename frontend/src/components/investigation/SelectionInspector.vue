@@ -462,11 +462,43 @@ const formatTime = (iso: string) => formatDate(iso);
       <ItemPreview v-if="item.current_version && store.current" :key="`${item.id}:${item.current_version}`" :item="item" :investigation-id="store.current.id" />
     </template>
 
-    <p v-else class="muted">Select a node to see its data and where it came from, shift-click for a selection, or pick an item of the material.</p>
+    <template v-else>
+      <p class="muted">Select a node to see its data and where it came from, shift-click for a selection, or pick an item of the material.</p>
+      <section v-if="store.current?.decisions?.length" class="decisions-so-far" data-testid="inspector-decisions">
+        <h4>Decisions so far</h4>
+        <div v-for="(d, i) in store.current.decisions" :key="d.id" class="decision-row" :data-testid="`inspector-decision-${d.id}`">
+          <strong>D{{ i + 1 }} · {{ d.outcome_label }}</strong>
+          <span class="muted">
+            {{ d.decided_by }} · {{ formatTime(d.decided_at) }}<template v-if="d.closes_case"> · closes the case</template>
+            <template v-if="d.review"> · review {{ d.review }}</template>
+          </span>
+        </div>
+        <RouterLink :to="`/investigations/${store.current.id}?mode=dossier#decisions`" class="link-btn" data-testid="inspector-decisions-dossier">Rationale and reviews in the dossier →</RouterLink>
+      </section>
+    </template>
   </aside>
 </template>
 
 <style scoped>
+.decisions-so-far {
+  margin-top: 14px;
+}
+
+.decisions-so-far h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.decision-row {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
 .inspector {
   padding: 14px;
   overflow-y: auto;

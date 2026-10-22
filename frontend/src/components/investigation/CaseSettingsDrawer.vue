@@ -10,6 +10,7 @@ import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { confirmAction } from '@/composables/useConfirm';
 import { NORMALIZER_LABELS } from '@/utils/identityKeys';
 import { DEFAULT_SUGGEST_KINDS, SUGGEST_KINDS } from '@/utils/caseVocabulary';
 import type { EdgeSemantics, IdentityKey, IdentityNormalize } from '@/types/graph';
@@ -72,7 +73,27 @@ function load() {
   }));
   form.labels = Object.entries((s.label_templates as Record<string, string> | undefined) ?? {}).map(([node_type, template]) => ({ node_type, template }));
 }
-watch(() => props.open, (o) => o && load(), { immediate: true });
+/** The form as loaded: closing with changes asks first (Escape, the backdrop, ×). */
+let loaded = '';
+watch(() => props.open, (o) => {
+  if (!o) return;
+  load();
+  loaded = JSON.stringify(form);
+}, { immediate: true });
+
+async function requestClose() {
+  if (canEdit.value && JSON.stringify(form) !== loaded) {
+    const ok = await confirmAction({
+      title: 'Discard your changes?',
+      message: 'The case settings you edited are not saved.',
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep editing',
+      danger: true,
+    });
+    if (!ok) return;
+  }
+  emit('close');
+}
 
 /** Another type: its vocabularies, suggest kinds and SLA replace the form's (still editable). */
 function applyType() {
@@ -150,11 +171,11 @@ async function save() {
 </script>
 
 <template>
-  <div v-if="open && store.current" class="drawer-overlay" @click.self="emit('close')">
-    <aside class="drawer" data-testid="case-settings">
+  <div v-if="open && store.current" class="drawer-overlay" @click.self="requestClose">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label="Case settings" data-testid="case-settings">
       <header>
         <h2>Case settings</h2>
-        <button class="modal-close" aria-label="Close" @click="emit('close')">&times;</button>
+        <button class="modal-close" aria-label="Close" @click="requestClose">&times;</button>
       </header>
       <form class="body" @submit.prevent="save">
         <section>

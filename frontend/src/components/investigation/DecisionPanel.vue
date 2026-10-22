@@ -9,8 +9,12 @@
  * decision rests on (the server hashes them with the record so far). When an
  * agent proposed a decision (06 P8), the panel opens with its draft: the person
  * records it (the proposal is taken up), edits it first, or dismisses it.
+ * The pre-fill alone is not a rationale: the person adds their own words (UX-1). A decision
+ * that closes the case is confirmed first; the reviewer is picked among who can read it.
  */
 import { computed, ref } from 'vue';
+import { confirmAction } from '@/composables/useConfirm';
+import { useAuthStore } from '@/stores/auth';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { caseNodeLabel, shortId } from '@/utils/caseLabels';
@@ -41,17 +45,26 @@ const nameOf = (id: string) => {
   const n = byId.value.get(id);
   return n ? caseNodeLabel(n, { templates: store.labelTemplates }) : shortId(id);
 };
-/** Who the decision may be about: the selection first, then the entities with a role. */
-const selection = [...graph.selectedNodeIds].filter((id) => byId.value.has(id));
+/** Who the decision may be about: the selection (as it is now), then the entities with a role. */
+const selection = computed(() => [...graph.selectedNodeIds].filter((id) => byId.value.has(id)));
 const proposedTargets: string[] = proposal.value?.targets ?? [];
-const candidates = computed(() => [...new Set([...proposedTargets, ...selection, ...Object.keys(store.roles)])]);
-const targets = ref<string[]>(proposal.value ? [...proposedTargets] : [...selection]);
+const targets = ref<string[]>(proposal.value ? [...proposedTargets] : [...selection.value]);
+// What is already ticked stays listed when the selection moves on.
+const candidates = computed(() => [...new Set([...proposedTargets, ...targets.value, ...selection.value, ...Object.keys(store.roles)])]);
 const roleOf = (id: string) => store.roles[id];
 
 const chosenActions = ref<string[]>(proposedTasks.filter((t) => t.action).map((t) => t.action!));
 /** The proposal's free tasks (no catalog action), kept as proposed. */
 const freeTasks = ref<DecisionTaskRequest[]>(proposedTasks.filter((t) => !t.action && t.title));
 const reviewer = ref('');
+const auth = useAuthStore();
+/** People who can read the case, but not whoever decides: a second pair of eyes. */
+const reviewers = computed(() => {
+  const inv = store.current;
+  if (!inv) return [];
+  const me = (auth.email ?? '').toLowerCase();
+  return [...new Set([inv.owner_email, ...(inv.shared_with ?? []).map((s) => s.email)])].filter((e) => e && e.toLowerCase() !== me);
+});
 const busy = ref(false);
 const error = ref<string | null>(null);
 
@@ -70,9 +83,17 @@ const prefill = computed(() => {
   return lines.join('\n').trim();
 });
 const rationale = ref<string>(proposal.value ? String(proposed.rationale ?? '') : prefill.value);
+/** The pre-fill lists what the decision rests on; the why is the person's. */
+const ownWords = computed(() => rationale.value.trim() !== prefill.value.trim());
 
 async function dismiss() {
   if (!proposal.value) return;
+  const ok = await confirmAction({
+    title: 'Dismiss the proposed decision?',
+    message: 'The proposal is rejected and stays in the journal. You can still record a decision of your own.',
+    confirmLabel: 'Dismiss',
+  });
+  if (!ok) return;
   try {
     await store.setAnnotationStatus(proposal.value.id, 'rejected');
     proposal.value = null;
@@ -85,10 +106,18 @@ async function dismiss() {
 const retentionYears = computed(
   () => store.caseType?.retention_years ?? window.__GRAPH_LAGOON_CONFIG__?.investigation_retention_years ?? 10,
 );
-const ready = computed(() => !!rationale.value.trim() && (outcomes.value.length ? !!chosen.value : !!freeLabel.value.trim()));
+const ready = computed(() => !!rationale.value.trim() && ownWords.value && (outcomes.value.length ? !!chosen.value : !!freeLabel.value.trim()));
 
 async function record() {
   if (!ready.value || busy.value) return;
+  if (closes.value && !fourEyes.value) {
+    const ok = await confirmAction({
+      title: 'Record the decision and close the case?',
+      message: `The case becomes read only; the record and the ${store.evidence.length} pinned version(s) are hashed and retained. A person can reopen it; the decision stays.`,
+      confirmLabel: 'Record and close',
+    });
+    if (!ok) return;
+  }
   busy.value = true;
   error.value = null;
   const body: DecisionRequest = {
@@ -155,10 +184,12 @@ async function record() {
     <label class="field">
       <span class="legend">Rationale <span class="muted">pre-filled with the supported hypotheses and the pinned evidence</span></span>
       <textarea v-model="rationale" rows="7" data-testid="decision-rationale" placeholder="Why, citing the evidence (E1, E2, …)"></textarea>
+      <span v-if="rationale.trim() && !ownWords" class="muted" data-testid="decision-own-words">Add your own words: why these lead to this outcome.</span>
     </label>
     <label class="field">
       <span class="legend">Reviewer <span class="muted">{{ fourEyes ? 'four eyes: another person approves before it takes effect' : 'optional' }}</span></span>
-      <input v-model="reviewer" type="email" placeholder="person@company.com" data-testid="decision-reviewer" />
+      <input v-model="reviewer" type="email" list="decision-reviewers" placeholder="person@company.com" data-testid="decision-reviewer" />
+      <datalist id="decision-reviewers"><option v-for="r in reviewers" :key="r" :value="r" /></datalist>
     </label>
     <p v-if="fourEyes" class="muted" data-testid="decision-four-eyes">
       Waits for {{ reviewer.trim() || 'another person with write access' }} to approve it in the dossier{{ closes ? '; the case closes then' : '' }}.

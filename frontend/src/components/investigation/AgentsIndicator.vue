@@ -5,12 +5,10 @@
  * /settings/agents. Silent when agents are off or the list cannot be read.
  */
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { api } from '@/services/api';
 import type { AgentToken } from '@/types/admin';
 
 const props = defineProps<{ investigationId: string }>();
-const router = useRouter();
 const tokens = ref<AgentToken[]>([]);
 
 const active = computed(() =>
@@ -28,16 +26,15 @@ onMounted(async () => {
 </script>
 
 <template>
-  <a
+  <RouterLink
     v-if="active.length"
-    href="/settings/agents"
+    to="/settings/agents"
     class="agents-indicator"
     data-testid="status-agents"
     :title="active.map((t) => t.name).join(', ')"
-    @click.prevent="router.push('/settings/agents')"
   >
     ◆ {{ active.length }} {{ active.length === 1 ? 'active agent' : 'active agents' }}
-  </a>
+  </RouterLink>
 </template>
 
 <style scoped>

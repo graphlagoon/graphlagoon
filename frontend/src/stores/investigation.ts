@@ -324,10 +324,11 @@ export const useInvestigationStore = defineStore('investigation', () => {
     void fetchEvents();
   }
 
-  async function deleteInvestigation() {
+  /** `reason`: a superuser deleting a case under retention (kept in the audit log). */
+  async function deleteInvestigation(reason?: string) {
     if (!current.value) return;
     const id = current.value.id;
-    await api.deleteInvestigation(id);
+    await api.deleteInvestigation(id, reason);
     investigations.value = investigations.value.filter((i) => i.id !== id);
     current.value = null;
   }

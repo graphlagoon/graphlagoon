@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { useAddToCase } from '@/composables/useAddToCase';
+import { confirmAction } from '@/composables/useConfirm';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { formatRelative } from '@/utils/format';
 import { ITEM_KIND_PLURALS } from '@/utils/investigationStatus';
@@ -149,7 +150,16 @@ function saveDraft() {
   }, 'Failed to add');
 }
 
-function remove(item: CaseItem) {
+async function remove(item: CaseItem) {
+  const ok = await confirmAction({
+    title: `Remove “${item.title}”?`,
+    message: item.pinned.length
+      ? `It has ${item.pinned.length} pinned version(s) — evidence. They stay in the record; the item leaves the material and can be restored from “Removed”.`
+      : 'It leaves the material; its versions stay in the record and it can be restored from “Removed”.',
+    confirmLabel: 'Remove',
+    danger: true,
+  });
+  if (!ok) return;
   run(item.id, async () => {
     await store.removeItem(item.id);
     toast.success(`Removed “${item.title}” from the case`);
@@ -191,7 +201,9 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
     @drop.prevent="onDrop"
     @paste="onPaste"
   >
-    <div v-if="dragging" class="drop-hint" data-testid="items-drop-hint">Drop to add to the case (files, text, URL or TSV)</div>
+    <div v-if="dragging" class="drop-hint" data-testid="items-drop-hint">
+      {{ can('investigation.upload') ? 'Drop to add to the case (files, text, URL or TSV)' : 'Drop text, a URL or TSV to add it (adding files needs the upload permission)' }}
+    </div>
     <header class="head">
       <h2>Material</h2>
       <span v-if="suggestedCount" class="suggested-count" data-testid="suggested-count">{{ suggestedCount }} suggested</span>
