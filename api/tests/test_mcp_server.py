@@ -2,6 +2,7 @@
 through tools that are twins of the human actions, every write attributed to
 the agent, suggestions where the case says so, case data as untrusted data."""
 
+import base64
 import json
 import sys
 
@@ -443,9 +444,9 @@ async def test_claude_code_works_a_case_from_the_alert_to_the_proposed_decision(
             view = await _tool(client, "add_item", investigation_id=cid, kind="graph", subkind="view", title="The ring",
                                content_json={"filters": {"types": ["Customer", "Phone"]}, "layout": "force", "groups_closed": []})
             assert view["subkind"] == "view"
-            shot = (await rest.post(f"/api/investigations/{cid}/items", content=PNG,
-                                    params={"kind": "document", "subkind": "upload", "filename": "kyc-photo.png"},
-                                    headers={"Content-Type": "image/png"})).json()
+            shot = await _tool(client, "upload_file", investigation_id=cid, filename="kyc-photo.png",
+                               content_base64=base64.b64encode(PNG).decode(), content_type="image/png")
+            assert (shot["kind"], shot["subkind"], shot["latest"]["content_type"]) == ("document", "upload", "image/png")
             image = await client.call_tool("read_item", {"investigation_id": cid, "item_id": shot["id"]})
             assert not image.is_error and [c.type for c in image.content] == ["text", "image"]
             assert image.content[1].mime_type == "image/png" and image.content[1].data
@@ -494,3 +495,79 @@ async def test_claude_code_works_a_case_from_the_alert_to_the_proposed_decision(
             assert [t["value"]["title"] for t in mine["tasks"]] == ["Pull 90 days of statements"]
             done = await _tool(client, "update_task", investigation_id=cid, task_id=task["id"], state="done", note="3 months pulled")
             assert done["value"]["state"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_upload_file_takes_any_bytes_and_import_file_has_a_real_limit(env, monkeypatch):
+    """A PDF, a text file or a CSV arrive as base64 through upload_file: the
+    same storage path as the REST upload (sha256, text extraction, journal,
+    agent attribution); the size, kind and base64 are checked; a version can
+    be added to an existing item; import_file no longer takes unbounded text."""
+    from graphlagoon.services import case_items
+
+    app, _ = env
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        cid = (await rest.post("/api/investigations", json={"title": "Uploads"})).json()["id"]
+        async with _mcp(app, token) as client:
+            notes = await _tool(client, "upload_file", investigation_id=cid, filename="notes.txt",
+                                content_base64=base64.b64encode(b"Ana called the mule on Monday").decode())
+            assert (notes["kind"], notes["subkind"], notes["author_kind"], notes["title"]) == ("document", "upload", "agent", "notes.txt")
+            assert notes["latest"]["content_type"] == "text/plain" and notes["latest"]["size_bytes"] == 29
+            read = await _tool(client, "read_item", investigation_id=cid, item_id=notes["id"])
+            assert "mule on Monday" in read["text"]
+            csv = await _tool(client, "upload_file", investigation_id=cid, filename="rows.csv", kind="table",
+                              content_base64=base64.b64encode(b"a;b\n1;2\n").decode())
+            assert (csv["kind"], csv["subkind"], csv["latest"]["content_type"]) == ("table", "csv", "text/csv")
+            again = await _tool(client, "upload_file", investigation_id=cid, filename="notes.txt", item_id=notes["id"],
+                                content_base64=base64.b64encode(b"Ana called the mule twice").decode())
+            assert again["current_version"] == 2
+            # The agent chip and the journal: every version names the agent.
+            versions = (await rest.get(f"/api/investigations/{cid}/items/{notes['id']}/versions")).json()
+            assert [v["author_kind"] for v in versions] == ["agent", "agent"]
+            for args, code in (
+                ({"filename": "x.bin", "content_base64": "not*base64"}, "INVALID_BODY"),
+                ({"filename": "../x.bin", "content_base64": "aGk="}, "INVALID_FILE_NAME"),
+                ({"filename": "x.bin", "content_base64": "aGk=", "kind": "graph"}, "INVALID_ITEM"),
+            ):
+                bad = await client.call_tool("upload_file", {"investigation_id": cid, **args})
+                assert bad.is_error and code in bad.content[0].text, bad.content
+            monkeypatch.setenv("GRAPH_LAGOON_AGENT_UPLOAD_MAX_BYTES", "8")
+            get_settings.cache_clear()
+            big = await client.call_tool("upload_file", {"investigation_id": cid, "filename": "big.bin",
+                                                         "content_base64": base64.b64encode(b"123456789").decode()})
+            assert big.is_error and "FILE_TOO_LARGE" in big.content[0].text
+            big = await client.call_tool("import_file", {"investigation_id": cid, "filename": "big.csv", "text": "a;b\n" * 5})
+            assert big.is_error and "FILE_TOO_LARGE" in big.content[0].text
+            get_settings.cache_clear()
+    assert case_items.check_kind  # the kind check is the service's, not a copy
+
+
+@pytest.mark.asyncio
+async def test_mcp_endpoint_binds_the_token_to_the_proxy_identity_without_middleware(env, monkeypatch):
+    """A mounted app without AuthMiddleware: /mcp resolves the token itself and,
+    in auth_mode=databricks, still refuses it in someone else's hands."""
+    from graphlagoon.services.agent_tokens import create_token
+    from graphlagoon.services.identity_verification import StubIdentityVerifier, set_identity_verifier
+
+    monkeypatch.setenv("GRAPH_LAGOON_AUTH_MODE", "databricks")
+    monkeypatch.setenv("GRAPH_LAGOON_DATABRICKS_HOST", "dbx.example")
+    get_settings.cache_clear()
+    set_identity_verifier(StubIdentityVerifier({"tok-owner": OWNER, "tok-other": "other@example.com"}))
+    try:
+        _, raw = await create_token(OWNER, "claude", 30)
+        bare = FastAPI()
+        mount_mcp(bare)
+        initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                      "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}
+        headers = {"Accept": "application/json, text/event-stream", "X-Graphlagoon-Agent-Token": raw}
+        async with mcp_lifespan(bare), httpx.AsyncClient(transport=httpx.ASGITransport(app=bare), base_url="http://test") as http:
+            r = await http.post("/mcp", json=initialize, headers={**headers, "Authorization": "Bearer tok-other"})
+            assert r.status_code == 403 and r.json()["detail"]["error"]["code"] == "AGENT_TOKEN_IDENTITY_MISMATCH"
+            r = await http.post("/mcp", json=initialize, headers={**headers, "Authorization": "Bearer tok-owner"})
+            assert r.status_code == 200, r.text
+            r = await http.post("/mcp", json=initialize, headers=headers)
+            assert r.status_code == 200, r.text  # outside any proxy the token alone still works
+    finally:
+        set_identity_verifier(None)
+        get_settings.cache_clear()

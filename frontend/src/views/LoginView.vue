@@ -13,13 +13,30 @@ const devMode = computed(() => {
   return window.__GRAPH_LAGOON_CONFIG__?.dev_mode ?? import.meta.env.DEV;
 });
 
+// The workspace-verified sign-in (auth_mode=databricks): the backend starts
+// the OAuth flow at login_url and comes back with a session.
+const databricksLogin = computed(() => {
+  const config = window.__GRAPH_LAGOON_CONFIG__;
+  return config?.auth_mode === 'databricks' && config.login_url ? config.login_url : null;
+});
+
 onMounted(() => {
+  if (databricksLogin.value) {
+    if (authStore.isAuthenticated) router.push('/contexts');
+    return;
+  }
   // If not in dev mode, redirect to contexts
   // (authentication will be handled by proxy headers)
   if (!devMode.value) {
     router.push('/contexts');
   }
 });
+
+function signInWithDatabricks() {
+  const apiUrl = window.__GRAPH_LAGOON_API_URL__ || import.meta.env.VITE_API_URL || '';
+  const base = (window.__GRAPH_LAGOON_CONFIG__?.router_base || '/').replace(/\/$/, '');
+  window.location.assign(`${apiUrl}${databricksLogin.value}?next=${encodeURIComponent(`${base}/contexts`)}`);
+}
 
 function login() {
   if (!email.value.includes('@')) {
@@ -44,7 +61,19 @@ function login() {
       </div>
       <p class="subtitle">Interactive Graph Visualization</p>
 
-      <form @submit.prevent="login">
+      <div v-if="databricksLogin" class="databricks-login">
+        <button
+          type="button"
+          class="btn btn-primary btn-block"
+          data-testid="login-databricks"
+          @click="signInWithDatabricks"
+        >
+          Sign in with Databricks
+        </button>
+        <p class="prod-mode-notice">You will be sent to your workspace to sign in.</p>
+      </div>
+
+      <form v-else @submit.prevent="login">
         <div class="form-group">
           <label for="email">Email</label>
           <input
@@ -64,7 +93,8 @@ function login() {
         </button>
       </form>
 
-      <p v-if="devMode" class="dev-mode-notice">
+      <p v-if="databricksLogin" class="dev-mode-notice"></p>
+      <p v-else-if="devMode" class="dev-mode-notice">
         Dev Mode: Enter any email to login
       </p>
       <p v-else class="prod-mode-notice">

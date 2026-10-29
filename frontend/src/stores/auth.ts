@@ -2,6 +2,13 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { refreshRuntimeConfig } from '@/services/config';
 
+const API_URL = window.__GRAPH_LAGOON_API_URL__ || import.meta.env.VITE_API_URL || '';
+
+/** The backend verifies every identity with the workspace (auth_mode=databricks). */
+export function isDatabricksAuth(): boolean {
+  return window.__GRAPH_LAGOON_CONFIG__?.auth_mode === 'databricks';
+}
+
 function _resolveInitialEmail(): string | null {
   // Databricks email takes priority (injected by backend or Vite env)
   const dbEmail =
@@ -11,6 +18,9 @@ function _resolveInitialEmail(): string | null {
     localStorage.setItem('userEmail', dbEmail);
     return dbEmail;
   }
+  // With the workspace-verified sign-in the page's identity is the session the
+  // backend injected; a remembered e-mail would only paint a stale login.
+  if (isDatabricksAuth()) return null;
   return localStorage.getItem('userEmail');
 }
 
@@ -37,6 +47,19 @@ export const useAuthStore = defineStore('auth', () => {
   async function logout(): Promise<void> {
     email.value = null;
     localStorage.removeItem('userEmail');
+    if (isDatabricksAuth()) {
+      // Ends the app-hosted session (a cookie); the proxy's own login is untouched.
+      try {
+        await fetch(`${API_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'graphlagoon' },
+        });
+      } catch {
+        /* the session cookie expires on its own */
+      }
+      if (window.__GRAPH_LAGOON_CONFIG__) delete window.__GRAPH_LAGOON_CONFIG__.databricks_user_email;
+      return;
+    }
     if (isDevMode()) await refreshRuntimeConfig(null);
   }
 

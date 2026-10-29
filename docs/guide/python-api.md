@@ -106,9 +106,10 @@ router base and API prefix; a mismatch renders a blank page.
 `add_mount_redirect(app, "/graphlagoon")` makes the no-trailing-slash URL
 work. It must be called **before** `app.mount(...)`.
 
-**4. Install auth on the host.** `create_mountable_app` does **not**
-install `AuthMiddleware` — see the next section, because this is the one
-that fails silently.
+**4. Auth comes with the mounted app.** `create_mountable_app` installs
+`AuthMiddleware` on the app it returns (agent tokens, the sign-in session and
+`auth_mode=databricks` live there). Pass `install_auth_middleware=False` only
+when your host installs `AuthMiddleware` itself — see the next section.
 
 ## Authentication: `configure_auth` and `UserProvider`
 
@@ -133,36 +134,43 @@ async def provider(request):
 configure_auth(provider)
 ```
 
-Resolution order at request time: your provider → the `x-forwarded-email`
-header (what Databricks Apps inject) → in `dev_mode`, the fallback
-`dev@graphlagoon.local` → otherwise the request is rejected.
+Resolution order at request time: an agent token (`glt_…`) → your provider
+→ the request's own identity (the `x-forwarded-email` header as the proxy set
+it; with [`auth_mode=databricks`](/guide/configuration#identity-verification)
+verified with the workspace, or a Bearer user token, or the sign-in session)
+→ in `dev_mode`, the fallback `dev@graphlagoon.local` → otherwise the request
+is rejected.
 
 ::: warning The provider only runs inside `AuthMiddleware`
-`create_mountable_app(user_provider=...)` alone does nothing — the
-middleware that calls the provider is only installed by `create_app`. When
-mounting, add it on the **host** so it covers the mounted routes:
+`create_mountable_app` installs the middleware on the mounted app, so
+`create_mountable_app(user_provider=...)` works as is. If your host installs
+`AuthMiddleware` itself (it covers the mounted routes too, and the mounted
+copy then steps aside), pass `install_auth_middleware=False`:
 
 ```python
 from graphlagoon.middleware.auth import AuthMiddleware  # not in __all__
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
+app.mount("/graphlagoon", create_mountable_app(install_auth_middleware=False, ...))
 ```
 
 Alternatively, skip Graph Lagoon's middleware entirely and have your own
 middleware set `request.state.user_email` — Starlette propagates request
-state into mounted apps, and every handler reads it.
+state into mounted apps, and every handler reads it. Without any middleware,
+an agent token or `auth_mode=databricks` answers `500 AUTH_MISCONFIGURED`
+rather than silently falling back to the header.
 :::
 
 Two more behaviors worth knowing:
 
-- **A provider that raises is silently skipped** and resolution falls
-  through to headers / dev default. A broken provider therefore looks like
-  "everyone is `dev@graphlagoon.local`", not like an error — log inside
-  your provider.
+- **A provider that raises rejects the request** with
+  `401 AUTH_PROVIDER_FAILED` (it never falls through to the forgeable
+  header). A provider that returns `None` lets the header resolution run.
 - **`dev_mode` defaults to `true`.** A deployment that forgets
   `GRAPH_LAGOON_DEV_MODE=false` authenticates every anonymous request as
-  the dev user. Set it explicitly in production.
+  the dev user. Set it explicitly in production; the server logs a warning
+  at startup when Databricks mode runs with `dev_mode` on.
 
 The provider is a process-wide global: one per interpreter, cleared with
 `configure_auth(None)`.

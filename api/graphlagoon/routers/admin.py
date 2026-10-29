@@ -19,13 +19,14 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from graphlagoon.config import Settings, get_settings
 from graphlagoon.db.database import get_session_maker, is_database_available
 from graphlagoon.db.memory_store import get_memory_store
 from graphlagoon.models.schemas import (
     AgentTokenResponse,
+    AdminAuth,
     AdminConfigEntry,
     AdminCounts,
     AdminHealth,
@@ -144,14 +145,27 @@ def _storage(settings: Settings) -> AdminStorage:
     )
 
 
+def _auth(request: Request, settings: Settings) -> AdminAuth:
+    from graphlagoon.middleware.auth import FORWARDED_HEADER_NAMES
+    from graphlagoon.services.identity_verification import get_identity_verifier
+
+    names = (*FORWARDED_HEADER_NAMES, "authorization", "x-graphlagoon-agent-token")
+    return AdminAuth(
+        mode=settings.auth_mode,
+        forwarded_headers={name: name in request.headers for name in names},
+        verification=get_identity_verifier().status(),
+    )
+
+
 @router.get("/overview", response_model=AdminOverview)
-async def get_overview(user_email: str = Depends(require_superuser)):
+async def get_overview(request: Request, user_email: str = Depends(require_superuser)):
     """Environment at a glance. Cheap: no warehouse call (see /health/warehouse)."""
     settings = get_settings()
     return AdminOverview(
         version=app_version(),
         dev_mode=settings.dev_mode,
         databricks_mode=settings.databricks_mode,
+        auth=_auth(request, settings),
         persistence_backend=persistence_backend(settings),
         alembic_version=await alembic_version(),
         counts=await _counts(),

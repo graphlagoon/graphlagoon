@@ -118,6 +118,7 @@ ROUTER_MODULES = (
     "admin",
     "agent_tokens",
     "admin_groups",
+    "auth",
     "catalog",
     "config",
     "explorations",

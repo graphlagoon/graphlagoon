@@ -16,8 +16,26 @@ Two ways to drive Graph Lagoon from outside the browser, for two kinds of client
 
 | Who calls | How | Notes |
 |---|---|---|
-| A person in the browser | The authenticating proxy (Databricks Apps, an SSO gateway) sets `X-Forwarded-Email` | Never sent by clients themselves outside dev mode. A host app can plug its own identity with `configure_auth` ([Python API](./python-api.md#authentication-configure-auth-and-userprovider)). |
+| A person in the browser | The authenticating proxy (Databricks Apps, an SSO gateway) sets `X-Forwarded-Email` | Never sent by clients themselves outside dev mode. With [`GRAPH_LAGOON_AUTH_MODE=databricks`](./configuration.md#identity-verification) the app verifies it with the workspace (the proxy's `X-Forwarded-Access-Token`), or signs the person in itself outside Databricks Apps. A host app can plug its own identity with `configure_auth` ([Python API](./python-api.md#authentication-configure-auth-and-userprovider)). |
 | A system or a script | `Authorization: Bearer glt_…`, a personal **agent token** | Created on the Agents page of the account menu (needs `investigation.agent` and `GRAPH_LAGOON_AGENTS_ENABLED`). It acts with the access of the person who created it; a **case-scoped** token reaches only the cases it names (plus `/api/org/…` and `/api/config`; no explorations or context queries outside a case). Limited to `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` requests per minute (429 above). |
+| A system or a script, **through the Databricks Apps proxy** | `Authorization: Bearer <Databricks OAuth token>` **and** `X-Graphlagoon-Agent-Token: glt_…` | The proxy wants a Databricks login of its own (an OAuth token of the caller: `databricks auth token`; personal access tokens do not pass), so `Authorization` is taken and the agent token travels in its own header, exactly as the `mcp-bridge` sends it. The app then sees the caller's e-mail from the proxy and the agent token; in `databricks` mode the two must belong to the same person. |
+| A person's script, in `databricks` mode | `Authorization: Bearer <Databricks OAuth token>` alone | The workspace says whose token it is; the call acts as that person (no agent chip). |
+
+## How the security works on Databricks Apps
+
+The Databricks proxy is the authenticator for everyone. Browser users pass
+the workspace's SSO; scripts present a Databricks OAuth token to the proxy;
+the app's container is reachable only through it. The proxy then forwards the
+caller's e-mail in `X-Forwarded-Email` (and, with user authorization enabled
+on the app, the caller's token in `X-Forwarded-Access-Token`).
+
+With the default `GRAPH_LAGOON_AUTH_MODE=header` the app trusts that e-mail
+as the proxy set it, and an agent token is honoured on its own. With
+`GRAPH_LAGOON_AUTH_MODE=databricks` the app additionally **verifies** the
+forwarded token with the workspace and refuses an agent token in anyone's
+hands but its owner's, so a leaked token needs the owner's workspace login
+too. The admin area (`/admin`, *Environment → Identity*) shows which forwarded headers a
+request carried, to confirm the access token arrives before switching modes.
 
 An agent token reaches the case routes (`/api/investigations…`), explorations, a context's graph queries, the
 org's case types and library (`/api/org/…`, read-only) and `/api/config`; anything else answers
@@ -64,7 +82,14 @@ Where `/docs` lives depends on how Graph Lagoon runs:
 ## Flows
 
 The examples use `API=http://localhost:8000/graphlagoon` (the dev server), a token in `$TOKEN`, a case id in
-`$CASE` and the slug of a saved file mapping of the org library in `$MAPPING`.
+`$CASE` and the slug of a saved file mapping of the org library in `$MAPPING`. They send the agent token as
+`Authorization: Bearer $TOKEN`, which is right **outside** the Databricks Apps proxy. Through the proxy, replace
+that header with the pair above:
+
+```bash
+DBX="Authorization: Bearer $(databricks auth token --host https://<workspace> | jq -r .access_token)"
+curl -s "$API/api/investigations" -H "$DBX" -H "X-Graphlagoon-Agent-Token: $TOKEN"
+```
 
 ### Open a case from an alert
 
@@ -113,4 +138,6 @@ curl -s -X POST "$API/api/investigations/$CASE/decisions" \
 ```
 
 An agent token gets `403 AGENT_FORBIDDEN` here; an agent proposes the decision instead (MCP
-`propose_decision`) and a person records it with `proposal_id`.
+`propose_decision`) and a person records it with `proposal_id`. The `X-Forwarded-Email` header in this example
+is what the dev server accepts; in production it comes from the proxy (or, in `databricks` mode, the person's
+own Databricks token in `Authorization` does).

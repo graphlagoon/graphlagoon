@@ -36,6 +36,7 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "add_table": [("POST", f"{_CASE}/items")],
     "save_query": [("POST", f"{_CASE}/items")],
     "import_file": [("POST", f"{_CASE}/items")],
+    "upload_file": [("POST", f"{_CASE}/items"), ("POST", f"{_ITEM}/versions")],
     "create_exploration": [("POST", f"{_CASE}/items")],
     "run_query": [("POST", f"{_ITEM}/run")],
     "join_tables": [("POST", f"{_CASE}/items/join")],

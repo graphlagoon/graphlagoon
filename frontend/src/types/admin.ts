@@ -26,10 +26,22 @@ export interface AdminStorage {
   style_presets: string;
 }
 
+/**
+ * How people are identified and which forwarded headers THIS request carried
+ * (names only, never values): lets an operator confirm the proxy forwards the
+ * access token before switching to auth_mode=databricks.
+ */
+export interface AdminAuth {
+  mode: 'header' | 'databricks' | string;
+  forwarded_headers: Record<string, boolean>;
+  verification: Record<string, unknown>;
+}
+
 export interface AdminOverview {
   version: string;
   dev_mode: boolean;
   databricks_mode: boolean;
+  auth?: AdminAuth;
   persistence_backend: 'memory' | 'postgres' | 'lakebase' | string;
   alembic_version: string | null;
   counts: AdminCounts;

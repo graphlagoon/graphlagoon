@@ -158,6 +158,13 @@ command:
 env:
   - name: "DATABRICKS_WAREHOUSE_ID"
     value: "your-warehouse-id"
+  # Production: never let an anonymous request become the dev user
+  - name: "GRAPH_LAGOON_DEV_MODE"
+    value: "false"
+  # Verify every identity with the workspace instead of trusting the
+  # forwarded header (see "Verifying who is calling" below)
+  - name: "GRAPH_LAGOON_AUTH_MODE"
+    value: "databricks"
   # Disable PostgreSQL persistence (in-memory store), or configure a database / Lakebase instead
   - name: "GRAPH_LAGOON_DATABASE_ENABLED"
     value: "false"
@@ -198,6 +205,37 @@ The app's service principal needs permission on the resources it reads:
 
 Grant these to the app's service principal from the app's **Authorization** settings or via `GRANT` statements.
 
+### Verifying who is calling
+
+The Databricks Apps proxy authenticates every caller (workspace SSO for the
+browser, a Databricks OAuth token for scripts and the `mcp-bridge`) and
+forwards the caller's e-mail in `X-Forwarded-Email`. By default
+(`GRAPH_LAGOON_AUTH_MODE=header`) the app trusts that header as the proxy set
+it. `GRAPH_LAGOON_AUTH_MODE=databricks` makes the app **verify** it: the
+proxy also forwards the caller's token in `X-Forwarded-Access-Token`, and the
+app asks the workspace whose token it is (`/api/2.0/preview/scim/v2/Me`) and
+checks it is the forwarded e-mail. An agent token is then only accepted in
+its owner's hands ([REST API](./rest-api.md#how-the-security-works-on-databricks-apps)).
+
+Before switching the mode:
+
+1. Enable **user authorization** on the app (the Databricks App's
+   authorization settings; the scope that reads the current user,
+   `iam.current-user:read`, is enough), so the proxy forwards
+   `X-Forwarded-Access-Token`. Without it every request answers
+   `401 IDENTITY_TOKEN_REQUIRED`.
+2. Open the admin area (`/admin`, superusers) → **Environment** → *Identity*:
+   it lists which forwarded headers the request carried (names only). When
+   `x-forwarded-access-token` shows ✓, set `GRAPH_LAGOON_AUTH_MODE=databricks`
+   in `app.yaml` and redeploy.
+3. Keep the app's service principal credential (`DATABRICKS_CLIENT_ID` /
+   `DATABRICKS_CLIENT_SECRET`) for the warehouse as before: it is the app's
+   identity toward Databricks, never a user's.
+
+`create_mountable_app` installs Graph Lagoon's `AuthMiddleware` on the mounted
+app itself, so the sample `app.py` above needs nothing more for agent tokens
+and the verification to work.
+
 ::: warning Least privilege is the outer security boundary
 Every query runs as this **one** service principal — Unity Catalog's per-user
 grants do not apply to what users do through the app. Whatever the principal
@@ -215,8 +253,9 @@ can read, any authenticated app user can read through free-form queries (see
 A future evolution is Databricks Apps **on-behalf-of-user** authorization
 (scope `sql:restricted-query`), where each query would run read-only under
 the end user's own Unity Catalog permissions — row filters and column masks
-included. Graph Lagoon does not implement OBO yet; least-privilege grants on
-the service principal are the mechanism today.
+included. Graph Lagoon does not run queries OBO yet (it only uses the
+forwarded user token to verify *who* is calling, see above); least-privilege
+grants on the service principal are the mechanism today.
 :::
 
 ## Persistence options

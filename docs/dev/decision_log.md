@@ -13521,3 +13521,82 @@ unificado, no mesmo lugar. `freshLayoutRequested` existia, mas abaixo do limiar 
 com a correção.
 **Public docs:** `docs/guide/investigations.md` (workspace).
 **Admin-area impact:** nenhum.
+
+## [2026-10-27 14:30] - Feature Implemented: identidade verificada no Databricks, token de agente vinculado ao dono, login U2M e `upload_file` no MCP
+
+**Feature:** três perguntas do usuário sobre a autenticação da API/MCP e o upload por agentes.
+
+**Requirements:**
+- Pessoas eram só o header `X-Forwarded-Email`, sem verificação (M5 do security-assessment). O MCP já exigia
+  token de agente; a REST honrava o token **só** com `AuthMiddleware` instalado.
+- Achado durante a análise: `create_mountable_app` nunca instalava o middleware e o `app.py` de exemplo do
+  Databricks Apps monta o app bare — nesse deploy o token de agente na REST era ignorado e a chamada virava a
+  pessoa do proxy (sem chip, sem rate limit, sem `forbid_agents`).
+- `import_file` só aceitava texto CSV; PDF/imagem/DOCX só por `curl`, e os exemplos de `rest-api.md` com
+  `Authorization: Bearer glt_…` não passam pelo proxy do Databricks Apps.
+- Restrição: o app roda como Databricks App (proxy não configurável) e, fora dele, sem nada na frente, com o
+  `app_id/app_secret` do Databricks para U2M.
+
+**Design Decisions:**
+1. **`GRAPH_LAGOON_AUTH_MODE=databricks`** (default `header` = hoje): toda identidade é verificada com o workspace
+   via `GET /scim/v2/Me` **com o token do chamador**, em ordem: `X-Forwarded-Email` + `X-Forwarded-Access-Token`
+   (proxy do Apps, e-mail tem de bater), `Authorization: Bearer <token de usuário>` (CLI), cookie de sessão do
+   login hospedado no app (browser fora do Apps). Cache por sha256 do token (TTL 300 s), stale até 3600 s, **fail-closed
+   a frio** (503) — o inverso do cache de grupos, porque aqui degradar daria *mais* acesso.
+2. **Binding do token de agente** implícito no modo `databricks`: com uma pessoa verificada na requisição, o token
+   tem de ser dela (`403 AGENT_TOKEN_IDENTITY_MISMATCH`); sozinho (dev local) continua valendo. Um service
+   principal que cunha o próprio token bate com a própria identidade.
+3. **Login U2M hospedado no app** (`routers/auth.py`): Authorization Code + PKCE contra `/oidc/v1/authorize|token`,
+   token do usuário usado uma vez para `/Me` e descartado (o warehouse segue com a credencial M2M); sessão =
+   cookie HMAC-SHA256 (stdlib), `HttpOnly`/`SameSite=Lax`/`Secure`, 8 h, sem refresh; CSRF: writes com cookie
+   exigem `X-Requested-With: graphlagoon` (o axios manda sempre). Sem dependência nova (httpx; o `databricks-sdk`
+   é extra opcional).
+4. **Parte 0:** `create_mountable_app` instala `AuthMiddleware` (`install_auth_middleware=False` para hosts que já o
+   instalam; o middleware é idempotente quando o pai já resolveu a identidade). `get_current_user` sem middleware
+   responde `500 AUTH_MISCONFIGURED` a um token de agente ou ao modo `databricks` em vez de rebaixar para header.
+   `user_provider` que lança → `401 AUTH_PROVIDER_FAILED` (era fall-through).
+5. **`dev_mode` continua `True`** por decisão do usuário; `log_auth_posture` avisa no startup e o `app.yaml` de
+   exemplo passa a setar `DEV_MODE=false` + `AUTH_MODE=databricks`.
+6. **MCP `upload_file`** (base64, `kind/subkind` default `document/upload`, `item_id` = nova versão) pelo mesmo
+   `case_items.create_item` da REST; `import_file` ganha limite real (`agent_upload_max_bytes`, 10 MB, cap por
+   `investigation_file_max_bytes`).
+7. Diagnóstico: `AdminOverview.auth` lista **só os nomes** dos headers `X-Forwarded-*` presentes na requisição
+   e o `status()` do verificador, para o operador conferir que o `X-Forwarded-Access-Token` chega antes de trocar
+   o modo. CORS de `create_app` só oferece credenciais com lista explícita de origens.
+
+**Implementation:**
+- Backend novos: `services/identity_verification.py`, `services/session.py`, `routers/auth.py`.
+- Backend modificados: `middleware/auth.py` (`resolve_person_identity`, `bind_agent_to_proxy_identity`,
+  `is_page_request`, `log_auth_posture`, `PUBLIC_SUFFIXES`), `app.py`, `config.py` (9 settings),
+  `routers/admin_registry.py`, `routers/admin.py`, `models/schemas.py` (`AdminAuth`), `services/public_config.py`
+  (`auth_mode`, `login_url`), `mcp/server.py` (binding no `_AgentEndpoint`, `upload_file`, `_check_upload_size`),
+  `mcp/registry.py`.
+- Frontend: `services/api.ts` (tipos + `X-Requested-With`), `stores/auth.ts` (`isDatabricksAuth`, logout chama
+  `POST /api/auth/logout`), `router/index.ts` (guard exige sessão no modo `databricks`), `views/LoginView.vue`
+  (botão **Sign in with Databricks**), `types/admin.ts` + `views/AdminView.vue` (linha *Identity*).
+
+**Testing:**
+- [x] `tests/test_identity_verification.py` (verificador + middleware + binding + diagnóstico), `tests/test_auth_login.py`
+  (PKCE, state, troca de code mockada, cookie, CSRF, logout, binding por sessão), adições em `test_agent_tokens.py`
+  (app montado honra o token; host com middleware não conta duas vezes) e `test_mcp_server.py` (`upload_file`,
+  limites, binding no `/mcp` sem middleware).
+- [x] Vitest: `LoginView.test.ts`, `auth.test.ts`, `guards.test.ts`.
+- [ ] Manual num Databricks App real: confirmar F1–F7 do plano (o proxy encaminha `X-Forwarded-Access-Token`
+  com user authorization; escopo `iam.current-user:read` basta para `/Me`; o `app_id/app_secret` é uma App
+  connection U2M). Até lá o modo `databricks` fica documentado como opt-in com o check no `/admin`.
+
+**Public Docs:** `configuration.md` (Identity verification + `AGENT_UPLOAD_MAX_BYTES`), `rest-api.md` (tabela de
+auth, seção "How the security works on Databricks Apps", `curl` atrás do proxy), `agents-mcp.md` (`upload_file`,
+binding), `agents-mcp-tools.md` (regenerado), `databricks-apps.md` (`app.yaml`, "Verifying who is calling"),
+`python-api.md` (middleware no app montado, provider fail-closed). `make docs-build` passa.
+
+**Admin-Area Impact:** `CONFIG_FIELD_KINDS` (+9: `auth_*` com os dois secrets, `agent_upload_max_bytes`),
+`AUDIT_EXEMPT_ROUTES` (`POST /api/auth/logout`), `ROUTER_MODULES` (+`auth`), campo `auth` no overview e linha
+*Identity* no `AdminView`.
+
+**Security Considerations:** o token do usuário nunca é guardado nem logado (chave de cache = sha256, logs só com
+8 hex); `next` do login só aceita caminho relativo; `state` conferido com `compare_digest`; cookie assinado,
+sem segredo fora do servidor; `AGENT_ALLOWED_PATHS` não inclui `/api/auth` (agente → 403).
+
+**Known Limitations:** sem OIDC genérico (débito #39); sem refresh token (#40); `dev_mode=True` default (#38);
+CORS de `main.py` continua `*` + credenciais.

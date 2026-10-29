@@ -34,4 +34,11 @@ describe('router guard (resolveGuard)', () => {
     expect(resolveGuard({ meta: { devOnly: true } }, { ...base, devMode: false })).toEqual({ name: 'contexts' });
     expect(resolveGuard({ meta: { devOnly: true } }, base)).toBeNull();
   });
+
+  it('requires the sign-in session with the workspace-verified sign-in (auth_mode=databricks)', () => {
+    const prod = { ...base, devMode: false, databricksAuth: true };
+    expect(resolveGuard({ meta: {} }, { ...prod, isAuthenticated: false })).toEqual({ name: 'login' });
+    expect(resolveGuard({ meta: { public: true } }, { ...prod, isAuthenticated: false })).toBeNull();
+    expect(resolveGuard({ meta: {} }, prod)).toBeNull();
+  });
 });

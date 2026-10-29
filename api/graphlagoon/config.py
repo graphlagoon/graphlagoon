@@ -1,9 +1,10 @@
 import json
 import logging
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from functools import lru_cache
-from typing import Optional
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,54 @@ class Settings(BaseSettings):
         description="Comma-separated list of emails granted superuser access "
         "(full read/write/delete/share on all contexts, explorations, and "
         "query templates). E.g. 'admin@company.com,ops@company.com'.",
+    )
+
+    # Identity of the people calling the API (docs/guide/configuration.md,
+    # "Access Control"). ``header`` trusts X-Forwarded-Email as the proxy set
+    # it; ``databricks`` verifies every identity with the workspace.
+    auth_mode: Literal["header", "databricks"] = Field(
+        default="header",
+        description="How people are identified. 'header': trust X-Forwarded-Email "
+        "from the authenticating proxy (Databricks Apps, an SSO gateway). "
+        "'databricks': verify the Databricks user token behind every identity "
+        "(X-Forwarded-Access-Token next to the forwarded e-mail, a Bearer user "
+        "token from the CLI, or the session of the app-hosted sign-in) against "
+        "the workspace, and bind agent tokens to their owner's login.",
+    )
+    auth_identity_cache_ttl_seconds: int = Field(
+        default=300,
+        description="How long a verified identity is cached per token (keyed by the "
+        "token's sha256; the token is never stored). Bounds the revocation lag.",
+    )
+    auth_identity_stale_max_seconds: int = Field(
+        default=3600,
+        description="How long an already-verified identity keeps serving while the "
+        "workspace is unreachable. A cold cache fails closed (503).",
+    )
+    auth_oauth_client_id: Optional[str] = Field(
+        default=None,
+        description="OAuth client id of the Databricks App connection used by the "
+        "app-hosted sign-in (auth_mode=databricks outside Databricks Apps). "
+        "Defaults to DATABRICKS_CLIENT_ID from the environment.",
+    )
+    auth_oauth_client_secret: Optional[str] = Field(
+        default=None,
+        description="OAuth client secret of that App connection. Defaults to "
+        "DATABRICKS_CLIENT_SECRET from the environment.",
+    )
+    auth_oauth_redirect_url: Optional[str] = Field(
+        default=None,
+        description="Redirect URL registered on the App connection. Unset: built "
+        "from the request as {scheme}://{host}{prefix}/api/auth/callback.",
+    )
+    auth_session_secret: Optional[str] = Field(
+        default=None,
+        description="Secret that signs the sign-in session cookie. Required with "
+        "auth_mode=databricks outside dev mode; in dev mode a per-process "
+        "secret is generated (sessions end with the process).",
+    )
+    auth_session_hours: int = Field(
+        default=8, description="Lifetime of a sign-in session, in hours"
     )
 
     # Frontend defaults
@@ -183,6 +232,13 @@ class Settings(BaseSettings):
         default=2_000_000,
         description="PNG/JPEG/GIF/WebP items up to this size reach an agent as MCP image "
         "content in read_item (multimodal models read them); 0 = never.",
+    )
+    agent_upload_max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        description="Largest file (decoded bytes) an agent may add through the "
+        "MCP upload_file tool, and the longest text import_file takes inline; "
+        "bigger files go to the REST upload route. Capped by "
+        "investigation_file_max_bytes.",
     )
 
     # Case storage (03-arquitetura §2.3): files, frozen sources, artifacts
@@ -500,6 +556,20 @@ class Settings(BaseSettings):
                 if d.strip()
             ]
         return []
+
+    @property
+    def auth_oauth_client_id_effective(self) -> Optional[str]:
+        """The sign-in client id: the setting, else the App runtime's env var."""
+        return self.auth_oauth_client_id or os.environ.get("DATABRICKS_CLIENT_ID") or None
+
+    @property
+    def auth_oauth_client_secret_effective(self) -> Optional[str]:
+        return self.auth_oauth_client_secret or os.environ.get("DATABRICKS_CLIENT_SECRET") or None
+
+    @property
+    def agent_upload_limit(self) -> int:
+        """Bytes an agent may hand over in one MCP call."""
+        return min(self.agent_upload_max_bytes, self.investigation_file_max_bytes)
 
     @property
     def superuser_email_list(self) -> list[str]:
