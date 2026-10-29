@@ -140,6 +140,13 @@ declare global {
       investigation_retention_years?: number;
       databricks_user_email?: string;
       /**
+       * How people are identified: "header" (the proxy's X-Forwarded-Email) or
+       * "databricks" (workspace-verified; without a session the SPA offers the
+       * app-hosted sign-in at `login_url`, relative to the API prefix).
+       */
+      auth_mode?: 'header' | 'databricks';
+      login_url?: string | null;
+      /**
        * True when the current user is in GRAPH_LAGOON_SUPERUSER_EMAILS.
        * Backend-computed per user; the superuser list itself is never exposed.
        */
@@ -187,6 +194,9 @@ class ApiService {
   constructor() {
     // Auth interceptor shared by both clients
     const authInterceptor = (config: import('axios').InternalAxiosRequestConfig) => {
+      // A cross-site form cannot set this header: with the sign-in session
+      // cookie (auth_mode=databricks) the backend requires it on every write.
+      config.headers['X-Requested-With'] = 'graphlagoon';
       if (this.devMode) {
         const email = localStorage.getItem('userEmail');
         if (email) {

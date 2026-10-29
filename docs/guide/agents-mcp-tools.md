@@ -8,13 +8,13 @@ outline: [2, 3]
 
 ::: v-pre
 
-Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (40 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
+Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (41 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
 
 | Group | Tools |
 |---|---|
 | Cases | [`list_cases`](#list-cases), [`get_case`](#get-case), [`create_case`](#create-case), [`update_case`](#update-case) |
 | Brief and material | [`get_brief`](#get-brief), [`write_brief`](#write-brief), [`list_items`](#list-items), [`read_item`](#read-item), [`update_item`](#update-item), [`search_case`](#search-case) |
-| Adding material | [`add_note`](#add-note), [`add_document`](#add-document), [`add_table`](#add-table), [`save_query`](#save-query), [`import_file`](#import-file), [`create_exploration`](#create-exploration), [`add_item`](#add-item) |
+| Adding material | [`add_note`](#add-note), [`add_document`](#add-document), [`add_table`](#add-table), [`save_query`](#save-query), [`import_file`](#import-file), [`upload_file`](#upload-file), [`create_exploration`](#create-exploration), [`add_item`](#add-item) |
 | Queries and tables | [`run_query`](#run-query), [`join_tables`](#join-tables), [`compare_tables`](#compare-tables), [`promote_tables`](#promote-tables) |
 | Annotations and evidence | [`annotate`](#annotate), [`group`](#group), [`list_annotations`](#list-annotations), [`pin_evidence`](#pin-evidence) |
 | Tasks | [`list_tasks`](#list-tasks), [`add_task`](#add-task), [`update_task`](#update-task) |
@@ -229,7 +229,7 @@ Human twin: `POST /api/investigations/{investigation_id}/items`
 
 ### import_file
 
-Import a delimited or fixed-width text file as a table/csv item, with the text inline (up to about 4 MB; convert other formats to CSV first). ``mapping`` {as: "graph", spec} puts it on the canvas: spec is a file mapping {"version": 1, "inputs": {"t": {"match": "*.csv", "delimiter": ";" | "widths": [8, 10, …], "header": true}}, "nodes": [{"key", "type", "from": "t", "id": "t.col" | {"col", "normalize"}, "props"}], "edges": [{"from": "t", "type", "endpoints": {"self", "other"}, "props"}]}; the org's saved mappings are library docs of kind "mapping" (get_playbook lists and reads them; the body is the mapping JSON). {as: "enrichment", spec: {name, input: {delimiter, header}, key_column, columns, normalize?, match_node_types? (default every type), target?: "nodes" | "edges"}} adds its columns as properties of the nodes (or edges) already on the canvas whose key matches; values already there win unless overwrite. Bigger files: POST the bytes to /api/investigations/{id}/items?kind=table &subkind=csv&filename=… with the same Bearer token, then update_item. Needs the investigation.upload permission of the person you act for.
+Import a delimited or fixed-width text file as a table/csv item, with the text inline (up to agent_upload_max_bytes, 10 MB by default; for a PDF, DOCX, image, XLSX or any other file use upload_file). ``mapping`` {as: "graph", spec} puts it on the canvas: spec is a file mapping {"version": 1, "inputs": {"t": {"match": "*.csv", "delimiter": ";" | "widths": [8, 10, …], "header": true}}, "nodes": [{"key", "type", "from": "t", "id": "t.col" | {"col", "normalize"}, "props"}], "edges": [{"from": "t", "type", "endpoints": {"self", "other"}, "props"}]}; the org's saved mappings are library docs of kind "mapping" (get_playbook lists and reads them; the body is the mapping JSON). {as: "enrichment", spec: {name, input: {delimiter, header}, key_column, columns, normalize?, match_node_types? (default every type), target?: "nodes" | "edges"}} adds its columns as properties of the nodes (or edges) already on the canvas whose key matches; values already there win unless overwrite. Bigger files: POST the bytes to /api/investigations/{id}/items?kind=table &subkind=csv&filename=… with the same token, then update_item. Needs the investigation.upload permission of the person you act for.
 
 Human twin: `POST /api/investigations/{investigation_id}/items`
 
@@ -241,6 +241,26 @@ Human twin: `POST /api/investigations/{investigation_id}/items`
 | `mapping` | object |  | null |
 | `title` | string |  | null |
 | `description` | string |  | null |
+
+### upload_file
+
+Add any file to the case as material: the bytes in ``content_base64`` (standard base64, up to agent_upload_max_bytes decoded, 10 MB by default), with its ``filename`` and ``content_type`` (guessed from the name when omitted). ``kind``/``subkind`` default to document/upload; a CSV meant for the graph is kind="table" (subkind csv) with a ``mapping`` like import_file's. ``item_id`` adds the bytes as a new version of that item instead. Text, CSV, JSON, PDF and DOCX get a text extraction read_item returns; PNG, JPEG, GIF and WebP come back from read_item as image content; other binaries stay material a person opens in the app. Bigger files: POST the raw bytes to /api/investigations/{id}/items?kind=&subkind=&filename= with the same token (behind Databricks Apps: the Databricks OAuth token in Authorization and the agent token in X-Graphlagoon-Agent-Token). Needs the investigation.upload permission of the person you act for.
+
+Human twin: `POST /api/investigations/{investigation_id}/items`, `POST /api/investigations/{investigation_id}/items/{item_id}/versions`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `investigation_id` | uuid | yes |  |
+| `filename` | string | yes |  |
+| `content_base64` | string | yes |  |
+| `content_type` | string |  | null |
+| `kind` | string |  | `"document"` |
+| `subkind` | string |  | null |
+| `title` | string |  | null |
+| `description` | string |  | null |
+| `tags` | list of string |  | null |
+| `mapping` | object |  | null |
+| `item_id` | uuid |  | null |
 
 ### create_exploration
 

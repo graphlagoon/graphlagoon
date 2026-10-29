@@ -76,11 +76,13 @@ const router = createRouter({
  */
 export function resolveGuard(
   to: { meta: Record<string, unknown> },
-  state: { devMode: boolean; isAuthenticated: boolean; isSuperuser: boolean },
+  state: { devMode: boolean; isAuthenticated: boolean; isSuperuser: boolean; databricksAuth?: boolean },
 ): { name: string } | null {
-  // In dev mode, require login via authStore
-  // In production mode (dev_mode=false), email comes from proxy headers
-  if (state.devMode && !to.meta.public && !state.isAuthenticated) {
+  // In dev mode, require login via authStore.
+  // With the workspace-verified sign-in (auth_mode=databricks) a visitor
+  // without a session also lands on the login page, which starts it.
+  // In production header mode, email comes from proxy headers.
+  if ((state.devMode || state.databricksAuth) && !to.meta.public && !state.isAuthenticated) {
     return { name: 'login' };
   }
   if (to.meta.superuserOnly && !state.isSuperuser) {
@@ -100,6 +102,7 @@ router.beforeEach((to, _from, next) => {
     devMode: config?.dev_mode ?? import.meta.env.DEV,
     isAuthenticated: authStore.isAuthenticated,
     isSuperuser: config?.is_superuser === true,
+    databricksAuth: config?.auth_mode === 'databricks',
   });
   if (redirect) next(redirect);
   else next();

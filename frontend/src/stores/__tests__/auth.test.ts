@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 
@@ -47,5 +47,34 @@ describe('auth store', () => {
 
     expect(store.email).toBe('second@test.com')
     expect(localStorage.getItem('userEmail')).toBe('second@test.com')
+  })
+
+  describe('workspace-verified sign-in (auth_mode=databricks)', () => {
+    it('ignores a remembered e-mail: the session the backend injected is the identity', () => {
+      localStorage.setItem('userEmail', 'stale@example.com')
+      window.__GRAPH_LAGOON_CONFIG__ = { auth_mode: 'databricks' }
+      expect(useAuthStore().isAuthenticated).toBe(false)
+      window.__GRAPH_LAGOON_CONFIG__ = { auth_mode: 'databricks', databricks_user_email: 'ana@example.com' }
+      setActivePinia(createPinia())
+      expect(useAuthStore().email).toBe('ana@example.com')
+    })
+
+    it('logout ends the backend session with the CSRF header', async () => {
+      window.__GRAPH_LAGOON_CONFIG__ = { auth_mode: 'databricks', databricks_user_email: 'ana@example.com' }
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+      vi.stubGlobal('fetch', fetchMock)
+      try {
+        const store = useAuthStore()
+        await store.logout()
+        expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'graphlagoon' },
+        })
+        expect(store.email).toBeNull()
+        expect(window.__GRAPH_LAGOON_CONFIG__?.databricks_user_email).toBeUndefined()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
   })
 })

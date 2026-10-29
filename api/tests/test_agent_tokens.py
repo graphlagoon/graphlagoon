@@ -32,7 +32,7 @@ from uuid import UUID  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from graphlagoon.app import create_api_router  # noqa: E402
+from graphlagoon.app import create_api_router, create_mountable_app  # noqa: E402
 from graphlagoon.config import get_settings  # noqa: E402
 from graphlagoon.db.memory_store import InMemoryStore  # noqa: E402
 from graphlagoon.middleware import auth  # noqa: E402
@@ -347,3 +347,34 @@ def test_token_use_is_recorded_and_a_case_token_stays_in_its_cases(client, env, 
     other = client.post("/api/investigations", json={"title": "other"}, headers=h(OWNER)).json()
     scoped = mint(client, scope="case", investigation_ids=[other["id"]])
     assert client.get(f"{url}/items/{doc['id']}/text", headers=bearer(scoped["token"])).status_code == 403
+
+
+def test_mountable_app_resolves_agent_tokens_on_rest(env):
+    """The Databricks Apps sample mounts the app bare: the mounted app must
+    carry AuthMiddleware itself, or a token is silently read as the person."""
+    app = create_mountable_app(include_frontend=False)
+    client = TestClient(app)
+    token = mint(client)["token"]
+    r = client.post("/api/investigations", json={"title": "by agent"}, headers=bearer(token))
+    assert r.status_code == 201, r.text
+    case = r.json()
+    assert case["owner_email"] == OWNER
+    events = client.get(f"/api/investigations/{case['id']}/events", headers=h(OWNER)).json()
+    assert events[0]["actor_kind"] == "agent"
+    r = client.delete(f"/api/investigations/{case['id']}", headers=bearer(token))
+    assert r.status_code == 403 and r.json()["detail"]["error"]["code"] == "AGENT_FORBIDDEN"
+
+
+def test_host_that_installs_the_middleware_itself_is_not_double_counted(env):
+    env.setenv("GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE", "2")
+    get_settings.cache_clear()
+    host = FastAPI()
+    host.add_middleware(auth.AuthMiddleware)
+    host.mount("/graphlagoon", create_mountable_app(include_frontend=False, mount_prefix="/graphlagoon"))
+    client = TestClient(host)
+    r = client.post("/graphlagoon/api/agent-tokens", json={"name": "claude"}, headers=h(OWNER))
+    token = r.json()["token"]
+    first = client.get("/graphlagoon/api/investigations", headers=bearer(token))
+    second = client.get("/graphlagoon/api/investigations", headers=bearer(token))
+    assert (first.status_code, second.status_code) == (200, 200)
+    assert client.get("/graphlagoon/api/investigations", headers=bearer(token)).status_code == 429

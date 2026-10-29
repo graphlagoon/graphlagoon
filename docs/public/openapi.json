@@ -7320,6 +7320,46 @@
         }
       }
     },
+    "/graphlagoon/api/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Me",
+        "description": "Who the server thinks is calling, or 401.",
+        "operationId": "auth_me",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/graphlagoon/api/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout",
+        "description": "End the sign-in session (the cookie); the proxy's own login is untouched.",
+        "operationId": "auth_logout",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Redirect To Graphlagoon",
@@ -7356,6 +7396,34 @@
   },
   "components": {
     "schemas": {
+      "AdminAuth": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "forwarded_headers": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Forwarded Headers"
+          },
+          "verification": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "forwarded_headers",
+          "verification"
+        ],
+        "title": "AdminAuth",
+        "description": "How people are identified, and what this very request carried: the\nnames of the proxy's forwarded headers (never their values), so an\noperator can confirm the platform forwards the access token before\nswitching to ``auth_mode=databricks``."
+      },
       "AdminConfigEntry": {
         "properties": {
           "key": {
@@ -7587,6 +7655,16 @@
           "databricks_mode": {
             "type": "boolean",
             "title": "Databricks Mode"
+          },
+          "auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminAuth"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "persistence_backend": {
             "type": "string",
@@ -17028,12 +17106,21 @@
         "in": "header",
         "name": "X-Forwarded-Email",
         "description": "Set by the authenticating proxy (Databricks Apps, an SSO gateway). Clients never send it themselves outside dev mode."
+      },
+      "agentTokenHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Graphlagoon-Agent-Token",
+        "description": "The agent token when `Authorization` is taken: behind the Databricks Apps proxy it carries the caller's Databricks OAuth token, and the agent token travels here."
       }
     }
   },
   "security": [
     {
       "agentToken": []
+    },
+    {
+      "agentTokenHeader": []
     },
     {
       "forwardedEmail": []

@@ -6,10 +6,20 @@ from collections import deque
 from collections.abc import Awaitable
 from contextvars import ContextVar
 import inspect
+import logging
 import re
+import secrets
 import time
 
 from graphlagoon.config import get_settings
+from graphlagoon.services.session import (
+    REQUESTED_WITH_HEADER,
+    REQUESTED_WITH_VALUE,
+    SESSION_COOKIE,
+    session_email,
+)
+
+logger = logging.getLogger(__name__)
 
 DEV_DEFAULT_EMAIL = "dev@graphlagoon.local"
 
@@ -155,6 +165,163 @@ def _bearer_agent_token(request: Request) -> Optional[str]:
 EMAIL_HEADERS = [
     "x-forwarded-email",  # Used by Databricks proxy
 ]
+# What the Databricks Apps proxy forwards; the admin overview reports which
+# of these a request carried (names only), so an operator can confirm the
+# platform forwards the access token before switching auth_mode.
+FORWARDED_HEADER_NAMES = (
+    "x-forwarded-email",
+    "x-forwarded-user",
+    "x-forwarded-preferred-username",
+    "x-forwarded-access-token",
+    "x-real-ip",
+)
+ACCESS_TOKEN_HEADER = "x-forwarded-access-token"
+
+# Dev-mode fallback for the session cookie secret: sessions end with the process.
+_dev_session_secret = secrets.token_urlsafe(32)
+
+
+def session_secret(settings) -> Optional[str]:
+    if settings.auth_session_secret:
+        return settings.auth_session_secret
+    return _dev_session_secret if settings.dev_mode else None
+
+
+def _databricks_access_token(request: Request) -> Optional[str]:
+    """A Databricks *user* token on the request: forwarded by the Apps proxy,
+    or sent as ``Authorization: Bearer`` by a CLI caller (an agent token is
+    not one — ``_bearer_agent_token`` owns those)."""
+    from graphlagoon.services.agent_tokens import TOKEN_PREFIX
+
+    forwarded = request.headers.get(ACCESS_TOKEN_HEADER, "").strip()
+    if forwarded:
+        return forwarded
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    value = value.strip()
+    if scheme.lower() == "bearer" and value and not value.startswith(TOKEN_PREFIX):
+        return value
+    return None
+
+
+def _verdict_error(verdict) -> Optional[JSONResponse]:
+    if verdict.status == "unavailable":
+        return _error(
+            503,
+            "IDENTITY_VERIFICATION_UNAVAILABLE",
+            "The workspace could not be reached to verify your identity; try again shortly.",
+        )
+    if verdict.status != "verified" or not verdict.email:
+        return _error(401, "IDENTITY_TOKEN_INVALID", "The Databricks token is invalid or expired.")
+    return None
+
+
+async def resolve_person_identity(request: Request, settings):
+    """``(email, None)`` for the person behind the request, ``(None, None)``
+    when the request carries no identity, ``(None, error_response)`` when it
+    carries one the server cannot accept.
+
+    ``auth_mode=header``: the forwarded e-mail, as the proxy set it.
+    ``auth_mode=databricks``: every identity is verified with the workspace
+    (``services.identity_verification``), in this order: the forwarded e-mail
+    with its forwarded access token (Databricks Apps proxy); a Bearer user
+    token (CLI); the session cookie of the app-hosted sign-in (browser).
+    """
+    header = request.headers.get("x-forwarded-email", "").strip() or None
+    if settings.auth_mode != "databricks":
+        return header, None
+
+    from graphlagoon.services.identity_verification import get_identity_verifier
+
+    verifier = get_identity_verifier()
+    token = _databricks_access_token(request)
+    if header:
+        if not token:
+            return None, _error(
+                401,
+                "IDENTITY_TOKEN_REQUIRED",
+                "auth_mode=databricks needs the forwarded access token next to "
+                f"X-Forwarded-Email (header {ACCESS_TOKEN_HEADER}).",
+            )
+        verdict = await verifier.verify(token)
+        error = _verdict_error(verdict)
+        if error is not None:
+            return None, error
+        if verdict.email.strip().lower() != header.lower():
+            return None, _error(
+                401, "IDENTITY_MISMATCH", "The forwarded e-mail does not match the token's owner."
+            )
+        return header, None
+    if token:
+        verdict = await verifier.verify(token)
+        error = _verdict_error(verdict)
+        if error is not None:
+            return None, error
+        return verdict.email.strip(), None
+    cookie = request.cookies.get(SESSION_COOKIE)
+    if cookie:
+        email = session_email(cookie, session_secret(settings))
+        if email is None:
+            return None, _error(401, "SESSION_INVALID", "Your session is invalid or expired; sign in again.")
+        if request.method not in ("GET", "HEAD", "OPTIONS") and (
+            request.headers.get(REQUESTED_WITH_HEADER, "").strip().lower() != REQUESTED_WITH_VALUE
+        ):
+            return None, _error(
+                403,
+                "CSRF_HEADER_REQUIRED",
+                f"Requests with a session cookie need the header {REQUESTED_WITH_HEADER}: {REQUESTED_WITH_VALUE}.",
+            )
+        return email, None
+    return None, None
+
+
+async def bind_agent_to_proxy_identity(request: Request, actor: dict) -> Optional[JSONResponse]:
+    """In ``auth_mode=databricks`` an agent token is only good in the hands
+    of its owner: when the request also carries a verified person (the
+    proxy's forwarded headers, a Bearer user token, a session), that person
+    must be the token's owner. With no person on the request (local dev, a
+    host without a proxy) the token alone keeps working."""
+    settings = get_settings()
+    if settings.auth_mode != "databricks":
+        return None
+    email, error = await resolve_person_identity(request, settings)
+    if error is not None:
+        return error
+    if email is None:
+        return None
+    if email.lower() != actor["owner_email"].lower():
+        return _error(
+            403,
+            "AGENT_TOKEN_IDENTITY_MISMATCH",
+            "This agent token belongs to someone else; sign in as its owner or use your own token.",
+        )
+    return None
+
+
+def is_page_request(request: Request) -> bool:
+    """A browser asking for the SPA (not the API, not MCP): in
+    ``auth_mode=databricks`` it is served without identity so the sign-in
+    page can load."""
+    path = request.url.path
+    if request.method != "GET" or "/api/" in path or path.rstrip("/").endswith("/mcp"):
+        return False
+    return "text/html" in request.headers.get("accept", "")
+
+
+def log_auth_posture(settings) -> None:
+    """Startup warning when the deployment trusts an unverified header."""
+    if settings.databricks_mode and settings.auth_mode == "header":
+        if settings.dev_mode:
+            logger.warning(
+                "dev_mode is on and auth_mode=header: anonymous requests become %s and "
+                "X-Forwarded-Email is trusted unverified. Set GRAPH_LAGOON_DEV_MODE=false "
+                "and GRAPH_LAGOON_AUTH_MODE=databricks for a workspace-verified identity.",
+                DEV_DEFAULT_EMAIL,
+            )
+        else:
+            logger.warning(
+                "auth_mode=header: X-Forwarded-Email is trusted as the proxy set it. "
+                "GRAPH_LAGOON_AUTH_MODE=databricks verifies every identity with the workspace."
+            )
 
 
 # Where an agent token may go (05 §6): the case routes, explorations, the
@@ -198,8 +365,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     If a custom user_provider was configured via configure_auth(), it will be
     used to extract the user email. Otherwise, checks standard headers:
-    - X-Forwarded-Email: Used by Databricks proxy
-    - X-User-Email: Legacy/custom header for backwards compatibility
+    - X-Forwarded-Email: set by the authenticating proxy (Databricks Apps);
+      in ``auth_mode=databricks`` verified against the workspace together
+      with X-Forwarded-Access-Token, or replaced by a Bearer user token or
+      the sign-in session cookie (``resolve_person_identity``).
+
+    An agent token (``Authorization: Bearer glt_…`` or
+    ``X-Graphlagoon-Agent-Token``) wins over all of that and, in
+    ``auth_mode=databricks``, must belong to the person on the request.
 
     In dev mode, uses a default email if no user is found.
 
@@ -213,6 +386,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
     PUBLIC_PATHS = {"/health", "/favicon.ico"}
     # Prefixes that don't require authentication (for static files)
     PUBLIC_PREFIXES = ("/static/",)
+    # The app-hosted sign-in (routers/auth.py): reached before any identity
+    # exists, under whatever prefix the app is mounted at.
+    PUBLIC_SUFFIXES = ("/api/auth/login", "/api/auth/callback")
 
     async def dispatch(self, request: Request, call_next):
         # Skip auth for public paths
@@ -223,6 +399,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         for prefix in self.PUBLIC_PREFIXES:
             if request.url.path.startswith(prefix):
                 return await call_next(request)
+        # A parent app's AuthMiddleware already resolved the identity (the
+        # mountable app installs its own; a host that installs one too must
+        # not count an agent request twice).
+        if getattr(request.state, "user_email", None):
+            return await call_next(request)
 
         settings = get_settings()
         _current_actor.set(None)
@@ -233,9 +414,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if raw_token is not None:
             return await self._dispatch_agent(request, call_next, raw_token)
 
+        # The sign-in itself needs no identity (people only: an agent token
+        # was already answered above).
+        if request.url.path.rstrip("/").endswith(self.PUBLIC_SUFFIXES):
+            return await call_next(request)
+
         user_email = None
 
-        # First, try custom user provider if configured
+        # First, try custom user provider if configured. A provider that
+        # raises is a failed authentication, never a fall-through to the
+        # (forgeable) header.
         if _user_provider is not None:
             try:
                 result = _user_provider(request)
@@ -243,21 +431,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     user_email = await result
                 else:
                     user_email = result
-            except Exception:
-                # Provider failed, fall through to header check
-                pass
+            except Exception as exc:
+                logger.warning("user_provider failed: %s: %s", type(exc).__name__, exc)
+                return _error(401, "AUTH_PROVIDER_FAILED", "The host's authentication rejected the request.")
 
-        # If no custom provider or it failed, try headers
+        # If no custom provider (or it returned nothing), the request's own
+        # identity: the forwarded header, verified in auth_mode=databricks.
         if not user_email:
-            for header in EMAIL_HEADERS:
-                user_email = request.headers.get(header)
-                if user_email:
-                    break
+            user_email, error = await resolve_person_identity(request, settings)
+            if error is not None:
+                return error
 
         # In dev mode, use default email if nothing found
         if not user_email:
             if settings.dev_mode:
                 user_email = DEV_DEFAULT_EMAIL
+            elif settings.auth_mode == "databricks" and is_page_request(request):
+                # The SPA itself: it renders the sign-in page for a visitor.
+                return await call_next(request)
             else:
                 # Return the response directly: an HTTPException raised from a
                 # BaseHTTPMiddleware sits above the exception handlers and
@@ -269,7 +460,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                             "error": {
                                 "code": "FORBIDDEN",
                                 "message": (
-                                    "Access denied. Authentication header required. "
+                                    "Access denied. Sign in first."
+                                    if settings.auth_mode == "databricks"
+                                    else "Access denied. Authentication header required. "
                                     f"Expected header: {', '.join(EMAIL_HEADERS)}"
                                 ),
                                 "details": {},
@@ -290,6 +483,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def _dispatch_agent(self, request: Request, call_next, raw_token: str):
         actor, error = await authenticate_agent(raw_token)
+        if error is None:
+            error = await bind_agent_to_proxy_identity(request, actor)
         if error is not None:
             return error
         path = request.url.path
@@ -389,8 +584,18 @@ def get_current_user(request: Request) -> str:
     if _user_provider is not None:
         try:
             result = _user_provider(request)
-        except Exception:
-            result = None
+        except Exception as exc:
+            logger.warning("user_provider failed: %s: %s", type(exc).__name__, exc)
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": {
+                        "code": "AUTH_PROVIDER_FAILED",
+                        "message": "The host's authentication rejected the request.",
+                        "details": {},
+                    }
+                },
+            )
         if inspect.isawaitable(result):
             if hasattr(result, "close"):
                 result.close()  # avoid "coroutine was never awaited" warnings
@@ -412,13 +617,31 @@ def get_current_user(request: Request) -> str:
             request.state.user_email = result
             return result
 
+    settings = get_settings()
+    # The direct header read below exists for routers mounted bare (tests). It
+    # must never downgrade an agent token to a person, nor stand in for the
+    # verification auth_mode=databricks promises: both need AuthMiddleware.
+    if _bearer_agent_token(request) is not None or settings.auth_mode == "databricks":
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "code": "AUTH_MISCONFIGURED",
+                    "message": (
+                        "AuthMiddleware is not installed, so agent tokens and "
+                        "auth_mode=databricks cannot be honoured; install it on the app."
+                    ),
+                    "details": {},
+                }
+            },
+        )
+
     # Direct header read as fallback
     for header in EMAIL_HEADERS:
         email = request.headers.get(header)
         if email:
             return email
 
-    settings = get_settings()
     if settings.dev_mode:
         return DEV_DEFAULT_EMAIL
 

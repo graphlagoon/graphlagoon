@@ -74,7 +74,7 @@ Cada achado é pontuado por **(impacto × alcançabilidade dentro do modelo de a
 | **M2** | 🟡 Média | `show_error_details=True` default → traceback completo nas respostas de erro | `api/graphlagoon/config.py:102`, `app.py:104` | Usuário autenticado |
 | **M3** | 🟡 Média | Valores de propriedade de nó entram sem filtro em SQL executado via `paramBindings` de ações de menu | `frontend/src/composables/useConfigurableMenuActions.ts:39-61` → `useTemplateExecution.ts:36` | Insider (via context compartilhado) |
 | **M4** | 🟡 Média | ~~CSV/TSV export sem mitigação de fórmula (`= + - @`) — 4 caminhos~~ ✅ Corrigido 2026-10-09 (`utils/csvSafe.ts`) | `frontend/src/utils/tableExport.ts:8-14` e 3 outros | Insider (via dado do grafo) |
-| **M5** | 🟡 Média | Identidade é `X-Forwarded-Email` não verificado; superuser é concedido por string; CORS `*` + `allow_credentials=True` | `middleware/auth.py:98-123`, `app.py:756-763`, `main.py:40-41` | Ator que contorne o proxy |
+| **M5** | 🟡 Média (✅ parcial 2026-10-27: `auth_mode=databricks` + binding do token de agente) | Identidade é `X-Forwarded-Email` não verificado; superuser é concedido por string; CORS `*` + `allow_credentials=True` | `middleware/auth.py:98-123`, `app.py:756-763`, `main.py:40-41` | Ator que contorne o proxy |
 | **M6** | 🟡 Média | Caminho Postgres puro não força SSL (Lakebase força) | `api/graphlagoon/db/database.py:57-66` vs `db/lakebase.py:126` | Atacante na rota (se Postgres externo) |
 | **M7** | 🟡 Média | Job async e `statement_id` não são owner-scoped (mitigado por UUID de 122 bits) | `api/graphlagoon/routers/graph.py:645-727` | Usuário autenticado (força-bruta inviável) |
 | **B1** | 🟢 Baixa | Sem CSP / `frame-ancestors` / `X-Frame-Options` | `frontend/index.html`, `api/graphlagoon/templates/index.html` | — |
@@ -373,6 +373,24 @@ Valores de propriedade do grafo vão direto para as células, então uma linha d
 ---
 
 ### 🟡 M5 — Identidade por cabeçalho não verificado + CORS `*` + credentials
+
+> **✅ Parcial 2026-10-27 (identidade):** `GRAPH_LAGOON_AUTH_MODE=databricks`
+> verifica toda identidade com o workspace (`/scim/v2/Me` com o token do
+> próprio chamador: o `X-Forwarded-Access-Token` do proxy do Apps, um Bearer
+> de usuário da CLI ou a sessão do login hospedado no app), cacheado por
+> sha256 do token, fail-closed a frio; e **vincula o token de agente ao dono**
+> (`403 AGENT_TOKEN_IDENTITY_MISMATCH`), fechando o caso do `glt_` roubado. O
+> `user_provider` que lança virou 401 (era fall-through para o header). Achado
+> novo corrigido junto: `create_mountable_app` não instalava o
+> `AuthMiddleware`, então no deploy Databricks Apps (que monta o app bare) o
+> token de agente na REST era **ignorado** e a chamada virava a pessoa do
+> proxy, sem `forbid_agents`; o app montado agora traz o middleware
+> (`install_auth_middleware=False` para hosts que o instalam no pai), e
+> `get_current_user` sem middleware responde 500 em vez de rebaixar um token.
+> Residual: no modo `header` nada muda (decisão do operador); CORS `*` com
+> credenciais só é oferecido agora com lista explícita de origens
+> (`create_app`), mas `main.py` segue aberto. Testes:
+> `test_identity_verification.py`, `test_auth_login.py`.
 
 `X-Forwarded-Email` é confiado sem assinatura/JWT e sem allowlist de proxy; superuser é concedido puramente por match de string (`utils/authz.py:12-16`). CORS é `allow_origins=["*"]` **com** `allow_credentials=True` (`app.py:756-763`, `main.py:40-41`). **No modelo de ameaça (proxy é o único caminho de rede), isto é médio, não crítico** — depende de alguém alcançar o processo ASGI direto, contornando o proxy (outro workload na mesma rede, ou pivot via SSRF). Mas é a fundação de toda a autz, então merece hardening.
 

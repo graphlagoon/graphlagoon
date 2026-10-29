@@ -88,6 +88,10 @@ claude mcp add graphlagoon -e GRAPHLAGOON_AGENT_TOKEN=glt_… -- \
   your Databricks OAuth token (refreshed by the SDK) to get through the proxy
   and the agent token in `X-Graphlagoon-Agent-Token`. Without them it sends
   the agent token as `Authorization: Bearer`.
+- Those two headers are also what binds the token to **your** login when the
+  server runs with `GRAPH_LAGOON_AUTH_MODE=databricks`: a token used under
+  someone else's Databricks identity answers `403 AGENT_TOKEN_IDENTITY_MISMATCH`
+  ([Identity verification](./configuration.md#identity-verification)).
 
 ## Using Graph Lagoon from Claude Code
 
@@ -109,8 +113,13 @@ walks the agent through it:
    model can look at, up to `GRAPH_LAGOON_AGENT_IMAGE_MAX_BYTES`, 2 MB by
    default).
 3. **Bring data in.** `import_file` takes a delimited or fixed-width text file
-   inline (up to about 4 MB) with a file mapping onto the graph or as an
-   enrichment table. Bigger files go to the REST route with the same token:
+   inline with a file mapping onto the graph or as an enrichment table;
+   `upload_file` takes **any file** as base64 (a PDF, DOCX, image, XLSX, a
+   CSV for the graph with `kind="table"` and a mapping, or a new version of an
+   item with `item_id`), through the same path as an upload in the app:
+   sha256, text extraction for `read_item`, the journal, the agent chip. Both
+   stop at `GRAPH_LAGOON_AGENT_UPLOAD_MAX_BYTES` (10 MB by default). Bigger
+   files go to the REST route with the same token:
 
    ```bash
    curl -X POST -H "Authorization: Bearer glt_…" -H "Content-Type: text/csv" \
@@ -119,6 +128,8 @@ walks the agent through it:
    ```
 
    then `update_item` (or the person's import wizard) gives it the mapping.
+   Through the Databricks Apps proxy the token goes in `X-Graphlagoon-Agent-Token`
+   next to your Databricks OAuth token ([REST API](./rest-api.md#authentication)).
    `save_query` + `run_query` run SQL or Cypher against a context the person
    reads; `add_table` keeps a result the agent computed.
 4. **Analyse.** `get_graph`, `search_entities`, `get_entity`,
@@ -159,6 +170,7 @@ read/analyze/write scopes.
 | Scope **case** | only the cases it names; 403 anywhere else, and it cannot create cases |
 | Validity | up to `GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS`; expired and revoked tokens answer 401; a token whose owner lost `investigation.agent` answers 403 `AGENT_PERMISSION_REVOKED` |
 | Last activity | bumped on use (at most once a minute); shown on the Agents page and in the admin area |
+| Bound to your login | with `GRAPH_LAGOON_AUTH_MODE=databricks`, a token only works together with its owner's Databricks identity (the proxy's forwarded headers, a Bearer user token or the sign-in session); anyone else's answers 403 `AGENT_TOKEN_IDENTITY_MISMATCH`. Alone, with no person on the request (local dev), it keeps working |
 
 Over the REST API the same token acts with your access on the case routes
 (`/api/investigations/*`), explorations, a context's graph queries, the org's

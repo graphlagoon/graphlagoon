@@ -1652,10 +1652,22 @@ class AdminStorage(BaseModel):
     style_presets: str
 
 
+class AdminAuth(BaseModel):
+    """How people are identified, and what this very request carried: the
+    names of the proxy's forwarded headers (never their values), so an
+    operator can confirm the platform forwards the access token before
+    switching to ``auth_mode=databricks``."""
+
+    mode: str
+    forwarded_headers: dict[str, bool]
+    verification: dict[str, Any]
+
+
 class AdminOverview(BaseModel):
     version: str
     dev_mode: bool
     databricks_mode: bool
+    auth: Optional[AdminAuth] = None
     persistence_backend: str
     alembic_version: Optional[str] = None
     counts: AdminCounts

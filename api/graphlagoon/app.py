@@ -43,11 +43,12 @@ from graphlagoon.services.precomputed import (
 from graphlagoon.services.style_presets import configure_style_preset_service
 from graphlagoon.services.investigation_storage import configure_investigation_storage
 from graphlagoon.services.group_resolution import configure_group_resolution
+from graphlagoon.services.identity_verification import configure_identity_verification
 from graphlagoon.services.datasource import (
     close_datasources,
     configure_datasources,
 )
-from graphlagoon.middleware.auth import AuthMiddleware, configure_auth, UserProvider
+from graphlagoon.middleware.auth import AuthMiddleware, configure_auth, UserProvider, log_auth_posture
 from graphlagoon.mcp.server import mcp_lifespan, mount_mcp
 from graphlagoon.services.public_config import build_public_config
 
@@ -210,6 +211,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         investigations,
         agent_tokens,
         org,
+        auth,
     )
     from graphlagoon.utils.authz import agent_guard
 
@@ -229,6 +231,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(investigations.router)
     router.include_router(agent_tokens.router)
     router.include_router(org.router)
+    router.include_router(auth.router)
 
     return router
 
@@ -448,6 +451,13 @@ SECURITY_SCHEMES = {
         "description": "Set by the authenticating proxy (Databricks Apps, an SSO gateway). Clients never send "
         "it themselves outside dev mode.",
     },
+    "agentTokenHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Graphlagoon-Agent-Token",
+        "description": "The agent token when `Authorization` is taken: behind the Databricks Apps proxy it "
+        "carries the caller's Databricks OAuth token, and the agent token travels here.",
+    },
 }
 
 
@@ -464,7 +474,7 @@ def install_openapi(app: FastAPI) -> None:
             return app.openapi_schema
         schema = generate()
         schema.setdefault("components", {}).setdefault("securitySchemes", {}).update(SECURITY_SCHEMES)
-        schema["security"] = [{"agentToken": []}, {"forwardedEmail": []}]
+        schema["security"] = [{"agentToken": []}, {"agentTokenHeader": []}, {"forwardedEmail": []}]
         human_only = {(m.lower(), p): why for (m, p), why in AGENT_EXEMPT_ROUTES.items() if why.startswith(HUMAN_ONLY)}
         for path, ops in schema.get("paths", {}).items():
             # create_app serves the API under /graphlagoon; the registry names the bare routes.
@@ -486,6 +496,7 @@ def create_mountable_app(
     mount_prefix: str = "/",
     header_provider: Optional[HeaderProvider] = None,
     user_provider: Optional[UserProvider] = None,
+    install_auth_middleware: bool = True,
     databricks_catalog: Optional[str] = None,
     databricks_schema: Optional[str] = None,
     catalog_schemas: Optional[list[tuple[str, str]]] = None,
@@ -559,7 +570,12 @@ def create_mountable_app(
                         Takes precedence over settings.databricks_token.
         user_provider: Optional async/sync callable that extracts user email from request.
                       Use this when parent app has its own auth middleware.
-                      If not provided, reads from X-User-Email or X-Forwarded-Email headers.
+                      If not provided, the identity is the X-Forwarded-Email header
+                      (verified against the workspace in auth_mode=databricks).
+        install_auth_middleware: Install AuthMiddleware on the mounted app (default
+                      True) so agent tokens, the sign-in session and the identity
+                      verification work. Pass False only when the host app installs
+                      AuthMiddleware itself.
         databricks_catalog: Override catalog for Databricks queries.
                            Required when databricks_mode=True if not in settings.
         databricks_schema: Override schema for Databricks queries.
@@ -594,6 +610,7 @@ def create_mountable_app(
     configure_style_preset_service(settings, header_provider=header_provider)
     configure_investigation_storage(settings, header_provider=header_provider)
     configure_group_resolution(settings, header_provider=header_provider)
+    configure_identity_verification(settings)
     if user_provider is not None:
         configure_auth(user_provider=user_provider)
 
@@ -633,6 +650,7 @@ def create_mountable_app(
 
     @asynccontextmanager
     async def mountable_lifespan(app: FastAPI):
+        log_auth_posture(settings)
         if not settings.databricks_volume_path:
             Path(settings.exploration_snapshots_dir).mkdir(parents=True, exist_ok=True)
         _prepare_precomputed_graph_storage(settings, verbose=False)
@@ -669,6 +687,13 @@ def create_mountable_app(
     # Compress large responses (graph payloads). Benefit shows on real
     # networks; negligible on loopback. minimum_size skips tiny responses.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    # Identity on the mounted app itself: agent tokens, the sign-in session
+    # and auth_mode=databricks all live in AuthMiddleware, and a host that
+    # mounts the app bare (the Databricks Apps sample) would otherwise fall
+    # back to the raw header read in get_current_user.
+    if install_auth_middleware:
+        app.add_middleware(AuthMiddleware)
 
     # Static files
     if STATIC_DIR.exists():
@@ -755,6 +780,7 @@ def create_app(
     configure_style_preset_service(settings, header_provider=header_provider)
     configure_investigation_storage(settings, header_provider=header_provider)
     configure_group_resolution(settings, header_provider=header_provider)
+    configure_identity_verification(settings)
 
     # Register similarity endpoints
     if similarity_endpoints:
@@ -795,6 +821,8 @@ def create_app(
         # Startup
         logger.info("Starting Graph Lagoon Studio...")
         logger.info(f"Dev mode: {settings.dev_mode}")
+        logger.info(f"Auth mode: {settings.auth_mode}")
+        log_auth_posture(settings)
         logger.info(f"Database enabled: {settings.database_enabled}")
         logger.info(f"Lakebase enabled: {settings.lakebase_enabled}")
         logger.info(f"Databricks mode: {settings.databricks_mode}")
@@ -849,12 +877,14 @@ def create_app(
     # networks; negligible on loopback. minimum_size skips tiny responses.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-    # CORS middleware
+    # CORS middleware. Browsers refuse "*" together with credentials, and the
+    # sign-in session (auth_mode=databricks) is a cookie: credentials are only
+    # offered when the origins are an explicit list.
     origins = cors_origins or ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=True,
+        allow_credentials=origins != ["*"],
         allow_methods=["*"],
         allow_headers=["*"],
     )

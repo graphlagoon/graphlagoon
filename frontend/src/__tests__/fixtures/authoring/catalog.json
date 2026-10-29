@@ -1102,7 +1102,7 @@
   },
   {
    "name": "import_file",
-   "summary": "Import a delimited or fixed-width text file as a table/csv item, with the text inline (up to about 4 MB; convert other formats to CSV first)."
+   "summary": "Import a delimited or fixed-width text file as a table/csv item, with the text inline (up to agent_upload_max_bytes, 10 MB by default; for a PDF, DOCX, image, XLSX or any other file use upload_file)."
   },
   {
    "name": "join_tables",
@@ -1183,6 +1183,10 @@
   {
    "name": "update_task",
    "summary": "Move a task you wrote or that is assigned to you (agent): ``state`` done | cancelled | open, a new ``title`` or ``due_at``; ``note`` says what was done (kept as the task's reason)."
+  },
+  {
+   "name": "upload_file",
+   "summary": "Add any file to the case as material: the bytes in ``content_base64`` (standard base64, up to agent_upload_max_bytes decoded, 10 MB by default), with its ``filename`` and ``content_type`` (guessed from the name when omitted)."
   },
   {
    "name": "write_brief",

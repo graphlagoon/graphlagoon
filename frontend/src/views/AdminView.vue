@@ -433,6 +433,28 @@ function openGraph(id: string) {
                 </span>
                 <span v-if="admin.overview.databricks_mode" class="badge badge-secondary">databricks</span>
               </dd>
+              <template v-if="admin.overview.auth">
+                <dt>Identity</dt>
+                <dd data-testid="admin-auth">
+                  <span
+                    class="badge"
+                    :class="admin.overview.auth.mode === 'databricks' ? 'badge-primary' : 'badge-warning'"
+                    :title="admin.overview.auth.mode === 'databricks'
+                      ? 'Every identity is verified with the workspace'
+                      : 'X-Forwarded-Email is trusted as the proxy set it (GRAPH_LAGOON_AUTH_MODE)'"
+                  >
+                    {{ admin.overview.auth.mode === 'databricks' ? 'verified (databricks)' : 'header' }}
+                  </span>
+                  <span class="muted"> · this request carried:</span>
+                  <code
+                    v-for="(present, name) in admin.overview.auth.forwarded_headers"
+                    :key="name"
+                    class="header-flag"
+                    :data-present="present"
+                    :title="present ? 'present' : 'absent'"
+                  >{{ present ? '✓' : '✗' }} {{ name }}</code>
+                </dd>
+              </template>
               <dt>Persistence</dt>
               <dd>
                 <code data-testid="admin-persistence">{{ admin.overview.persistence_backend }}</code>
@@ -914,4 +936,13 @@ function openGraph(id: string) {
 .badge-warning { background: #fef3c7; color: #92400e; }
 .danger-zone { border: 1px solid var(--color-danger, #b91c1c); }
 .danger-zone h2 { color: var(--color-danger, #b91c1c); margin-top: 0; }
+.header-flag {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.header-flag[data-present="true"] {
+  opacity: 1;
+}
 </style>

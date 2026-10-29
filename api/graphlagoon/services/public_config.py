@@ -35,6 +35,15 @@ async def build_public_config(
         settings = get_settings()
     return {
         "dev_mode": settings.dev_mode,
+        # How people sign in: "header" (the proxy's X-Forwarded-Email) or
+        # "databricks" (workspace-verified; the SPA offers the app-hosted
+        # sign-in at login_url when there is no session yet).
+        "auth_mode": settings.auth_mode,
+        "login_url": (
+            "/api/auth/login"
+            if settings.auth_mode == "databricks" and settings.auth_oauth_client_id_effective
+            else None
+        ),
         "database_enabled": is_database_available(),
         "databricks_mode": settings.databricks_mode,
         # Reading a precomputed graph only needs context access; creating and

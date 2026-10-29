@@ -78,6 +78,10 @@ GRAPH_LAGOON_SHOW_ERROR_DETAILS=true
 
 # Access control (see "Access Control" below)
 GRAPH_LAGOON_SUPERUSER_EMAILS=admin@company.com,ops@company.com
+# Identity verification (see "Access Control" → "Identity verification")
+GRAPH_LAGOON_AUTH_MODE=header
+# GRAPH_LAGOON_AUTH_MODE=databricks
+# GRAPH_LAGOON_AUTH_SESSION_SECRET=<long random string>
 GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS=company.com
 ```
 
@@ -387,7 +391,8 @@ What superusers do **not** bypass:
 - Share-target validation: wildcard shares (`*@domain`) still require the
   domain to be listed in `GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS`.
 - Identity: the user's email still comes from the platform
-  (`X-Forwarded-Email` header in Databricks Apps).
+  (`X-Forwarded-Email` set by the Databricks Apps proxy, verified against the
+  workspace with `GRAPH_LAGOON_AUTH_MODE=databricks`, see below).
 
 The list is read at startup — restart the app after changing it. Regular users
 never receive the list; each user only gets a boolean `is_superuser` flag for
@@ -397,6 +402,75 @@ themselves.
 # Programmatic equivalent
 settings = Settings(superuser_emails="admin@company.com,ops@company.com")
 ```
+
+### Identity verification
+
+::: tip TL;DR
+`GRAPH_LAGOON_AUTH_MODE=databricks` makes the app **verify** who is calling
+with the workspace instead of trusting the `X-Forwarded-Email` header, and
+binds every agent token to its owner's login.
+
+- **Use it when** the app runs as a Databricks App, or anywhere people sign
+  in to a Databricks workspace.
+- **Not the tool for** another identity provider (Okta, Azure AD without
+  Databricks): there a gateway sets `X-Forwarded-Email` and the default
+  `header` mode trusts it as the gateway set it. Hosts with their own auth
+  use [`configure_auth`](./python-api.md#authentication-configure-auth-and-userprovider).
+:::
+
+How a person is identified depends on `GRAPH_LAGOON_AUTH_MODE`:
+
+| Mode | Who the request is | What is checked |
+|---|---|---|
+| `header` (default) | the `X-Forwarded-Email` header | nothing: the authenticating proxy (Databricks Apps, an SSO gateway) is trusted to set it, and nothing else must reach the port |
+| `databricks` | a Databricks user, verified | every identity is confirmed with the workspace (`GET /api/2.0/preview/scim/v2/Me` with the caller's own token) |
+
+In `databricks` mode the identity comes from one of these, in this order:
+
+1. **Behind the Databricks Apps proxy**: `X-Forwarded-Email` together with the
+   `X-Forwarded-Access-Token` the proxy forwards. The token's owner must be
+   the forwarded e-mail (`401 IDENTITY_MISMATCH` otherwise). Without the
+   access token the request is refused (`401 IDENTITY_TOKEN_REQUIRED`), so
+   the app needs *user authorization* enabled on the Databricks App — check
+   in the admin area (`/admin`, *Environment → Identity*) that `x-forwarded-access-token`
+   arrives before switching the mode ([Databricks Apps](./databricks-apps.md#verifying-who-is-calling)).
+2. **A Databricks user token** in `Authorization: Bearer …` (a script or CLI
+   outside the proxy, `databricks auth token`). The workspace says whose it is.
+3. **The sign-in session**: a cookie the app sets after its own
+   *Sign in with Databricks* (Authorization Code + PKCE against the workspace,
+   for a browser outside Databricks Apps). It needs the OAuth client of a
+   Databricks **App connection** and a secret to sign the cookie.
+
+Agent tokens (`glt_…`) come on top: with a verified person on the request,
+the token must belong to that person (`403 AGENT_TOKEN_IDENTITY_MISMATCH`),
+so a leaked token is useless without its owner's login. A token alone, with
+no person on the request (local dev), keeps working.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GRAPH_LAGOON_AUTH_MODE` | `header` | `header` or `databricks`. The latter needs `GRAPH_LAGOON_DATABRICKS_HOST` (the workspace that signs people in). |
+| `GRAPH_LAGOON_AUTH_IDENTITY_CACHE_TTL_SECONDS` | `300` | A verified identity is cached per token (by its sha256; the token is never stored) for this long: at most one workspace call per user every 5 minutes, and a revoked token stops working within it. |
+| `GRAPH_LAGOON_AUTH_IDENTITY_STALE_MAX_SECONDS` | `3600` | While the workspace is unreachable an already-verified identity keeps serving up to this long; an identity never verified fails closed (`503 IDENTITY_VERIFICATION_UNAVAILABLE`). |
+| `GRAPH_LAGOON_AUTH_OAUTH_CLIENT_ID` | `DATABRICKS_CLIENT_ID` | OAuth client id of the App connection the sign-in uses. |
+| `GRAPH_LAGOON_AUTH_OAUTH_CLIENT_SECRET` | `DATABRICKS_CLIENT_SECRET` | Its secret. |
+| `GRAPH_LAGOON_AUTH_OAUTH_REDIRECT_URL` | *(from the request)* | The redirect URL registered on the App connection; unset, `{scheme}://{host}{prefix}/api/auth/callback`. |
+| `GRAPH_LAGOON_AUTH_SESSION_SECRET` | *(unset)* | Signs the session cookie. Required for the sign-in outside dev mode; in dev mode a per-process secret is generated. |
+| `GRAPH_LAGOON_AUTH_SESSION_HOURS` | `8` | Session lifetime; afterwards the person signs in again (no refresh token is kept). |
+
+Writes made with the session cookie must carry the header
+`X-Requested-With: graphlagoon` (the frontend does; a cross-site form
+cannot), and the cookie is `HttpOnly`, `SameSite=Lax` and `Secure` on HTTPS.
+
+**When something is wrong**
+
+| Response | Cause |
+|---|---|
+| `401 IDENTITY_TOKEN_REQUIRED` | `databricks` mode, a forwarded e-mail without `X-Forwarded-Access-Token`: the Databricks App has no user authorization, or a gateway that is not Databricks sits in front (use `header` mode) |
+| `401 IDENTITY_TOKEN_INVALID` / `IDENTITY_MISMATCH` | the token is expired, revoked, from another workspace, or not the forwarded user's |
+| `503 IDENTITY_VERIFICATION_UNAVAILABLE` | the workspace could not be reached and this token was never verified |
+| `403 AGENT_TOKEN_IDENTITY_MISMATCH` | an agent token used under someone else's login |
+| `403 CSRF_HEADER_REQUIRED` | a write with the session cookie and no `X-Requested-With` header |
+| the server refuses to start mentioning `DATABRICKS_HOST` | `databricks` mode without the workspace host |
 
 ### Share domains
 
@@ -439,6 +513,11 @@ commands, scopes and the Claude Code flow: [AI Agents (MCP)](./agents-mcp.md).
 | `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per token, counted in a store every worker shares: the `usage_logs` table (one `agent.request` line per request) with a database, the in-memory store otherwise. |
 | `GRAPH_LAGOON_API_DOCS_ENABLED` | *(dev mode)* | Serve the OpenAPI spec and Swagger UI at `{prefix}/docs`, `{prefix}/redoc` and `{prefix}/openapi.json`, behind the same login as the API. Unset: on in dev mode, off otherwise. The spec is also published with these docs ([REST API](./rest-api.md)). |
 | `GRAPH_LAGOON_AGENT_IMAGE_MAX_BYTES` | `2000000` | PNG, JPEG, GIF and WebP items up to this size reach an agent as MCP image content in `read_item` (multimodal models look at them); `0` = never. Other binaries never reach agents. |
+| `GRAPH_LAGOON_AGENT_UPLOAD_MAX_BYTES` | `10485760` | Largest file (decoded) an agent may add in one `upload_file` call, and the longest text `import_file` takes inline; bigger files go to the REST upload route. Capped by `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES`. |
+
+With `GRAPH_LAGOON_AUTH_MODE=databricks` a token is bound to its owner's
+login: used under someone else's Databricks identity it answers
+`403 AGENT_TOKEN_IDENTITY_MISMATCH` (see [Identity verification](#identity-verification)).
 
 There is no masking of personal data for agents: an agent sees what its owner
 sees. Minimize what reaches it with the columns a context exposes, the shares

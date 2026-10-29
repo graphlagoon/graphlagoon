@@ -104,6 +104,16 @@ async def _permission(user: str, permission: str) -> None:
         raise _tool_error("PERMISSION_DENIED", f"Missing {permission}")
 
 
+def _check_upload_size(size: int) -> None:
+    limit = get_settings().agent_upload_limit
+    if size > limit:
+        raise _tool_error(
+            "FILE_TOO_LARGE",
+            f"{size} bytes is over the {limit} bytes an agent may send in one call; "
+            "POST the raw bytes to /api/investigations/{id}/items instead.",
+        )
+
+
 def _validated(model, **fields):
     try:
         return model(**fields)
@@ -566,7 +576,8 @@ def build_server():
                           mapping: Optional[dict[str, Any]] = None, title: Optional[str] = None,
                           description: Optional[str] = None) -> dict:
         """Import a delimited or fixed-width text file as a table/csv item, with
-        the text inline (up to about 4 MB; convert other formats to CSV first).
+        the text inline (up to agent_upload_max_bytes, 10 MB by default; for a
+        PDF, DOCX, image, XLSX or any other file use upload_file).
         ``mapping`` {as: "graph", spec} puts it on the canvas: spec is a file
         mapping {"version": 1, "inputs": {"t": {"match": "*.csv", "delimiter":
         ";" | "widths": [8, 10, …], "header": true}}, "nodes": [{"key", "type",
@@ -579,13 +590,73 @@ def build_server():
         adds its columns as properties of the nodes (or edges) already on the
         canvas whose key matches; values already there win unless overwrite.
         Bigger files: POST the bytes to /api/investigations/{id}/items?kind=table
-        &subkind=csv&filename=… with the same Bearer token, then update_item.
+        &subkind=csv&filename=… with the same token, then update_item.
         Needs the investigation.upload permission of the person you act for."""
         user = _agent(ctx)
         await _permission(user, "investigation.upload")
+        _check_upload_size(len(text.encode("utf-8")))
         data = dict(kind="table", subkind="csv", title=title or filename, description=description,
                     mapping=mapping, provenance={"filename": filename})
         return _out(await _create(investigation_id, user, data, text))
+
+    @tool("upload_file")
+    async def upload_file(ctx: Context, investigation_id: UUID, filename: str, content_base64: str,
+                          content_type: Optional[str] = None, kind: str = "document",
+                          subkind: Optional[str] = None, title: Optional[str] = None,
+                          description: Optional[str] = None, tags: Optional[list[str]] = None,
+                          mapping: Optional[dict[str, Any]] = None,
+                          item_id: Optional[UUID] = None) -> dict:
+        """Add any file to the case as material: the bytes in ``content_base64``
+        (standard base64, up to agent_upload_max_bytes decoded, 10 MB by
+        default), with its ``filename`` and ``content_type`` (guessed from the
+        name when omitted). ``kind``/``subkind`` default to document/upload; a
+        CSV meant for the graph is kind="table" (subkind csv) with a
+        ``mapping`` like import_file's. ``item_id`` adds the bytes as a new
+        version of that item instead. Text, CSV, JSON, PDF and DOCX get a text
+        extraction read_item returns; PNG, JPEG, GIF and WebP come back from
+        read_item as image content; other binaries stay material a person opens
+        in the app. Bigger files: POST the raw bytes to
+        /api/investigations/{id}/items?kind=&subkind=&filename= with the same
+        token (behind Databricks Apps: the Databricks OAuth token in
+        Authorization and the agent token in X-Graphlagoon-Agent-Token).
+        Needs the investigation.upload permission of the person you act for."""
+        import base64
+        import binascii
+        import mimetypes
+
+        user = _agent(ctx)
+        await _permission(user, "investigation.upload")
+        try:
+            data = base64.b64decode(content_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise _tool_error("INVALID_BODY", f"content_base64 is not valid base64: {exc}") from exc
+        _check_upload_size(len(data))
+        try:
+            name = case_items.check_filename(filename)
+        except service.InvestigationError as exc:
+            raise _tool_error(exc.code, exc.message) from exc
+        media_type = case_items.normalize_content_type(content_type) or mimetypes.guess_type(name)[0] \
+            or "application/octet-stream"
+        if item_id is not None:
+            return _out(await _call(case_items.add_version(investigation_id, user, item_id, data, media_type)))
+        subkind = subkind or ("csv" if kind == "table" else "upload")
+        try:
+            case_items.check_kind(kind, subkind)
+        except service.InvestigationError as exc:
+            raise _tool_error(exc.code, exc.message) from exc
+        fields = dict(kind=kind, subkind=subkind, title=title or name, description=description, tags=tags or [],
+                      mapping=mapping, provenance={"filename": name})
+        from graphlagoon.models.schemas import ItemCreate
+
+        body = _validated(ItemCreate, **fields).model_dump(exclude={"content", "content_json"})
+        body["filename"] = name
+        item = await _call(case_items.create_item(investigation_id, user, body, data, media_type))
+        await audit.record(
+            user, AuditAction.INVESTIGATION_ITEM_ADD, resource_type="investigation", resource_id=investigation_id,
+            metadata={"item_id": str(item["id"]), "kind": f"{item['kind']}/{item['subkind']}", "title": item["title"],
+                      "sha256": (item["latest"] or {}).get("sha256"), "size_bytes": len(data)},
+        )
+        return _out(item)
 
     @tool("create_exploration")
     async def create_exploration(ctx: Context, investigation_id: UUID, context_id: UUID, title: str,
@@ -1116,6 +1187,8 @@ class _AgentEndpoint:
                 error = auth._error(401, "AGENT_TOKEN_REQUIRED", "MCP needs an agent token (Bearer glt_…).")
             else:
                 actor, error = await auth.authenticate_agent(raw)
+                if error is None:
+                    error = await auth.bind_agent_to_proxy_identity(request, actor)
             if error is not None:
                 return await error(scope, receive, send)
             request.state.actor = actor

@@ -37,6 +37,14 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "allowed_share_domains": "public",
     # Shown as a list on the overview, not as a raw string here.
     "superuser_emails": "hidden",
+    "auth_mode": "public",
+    "auth_identity_cache_ttl_seconds": "public",
+    "auth_identity_stale_max_seconds": "public",
+    "auth_oauth_client_id": "public",
+    "auth_oauth_client_secret": "secret",
+    "auth_oauth_redirect_url": "public",
+    "auth_session_secret": "secret",
+    "auth_session_hours": "public",
     "default_behaviors": "public",
     "dev_mode": "public",
     "port": "public",
@@ -82,6 +90,7 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "agent_token_max_days": "public",
     "agent_rate_limit_per_minute": "public",
     "agent_image_max_bytes": "public",
+    "agent_upload_max_bytes": "public",
     "api_docs_enabled": "public",
     "investigations_volume_path": "public",
     "investigation_file_max_bytes": "public",
@@ -225,6 +234,9 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/schema-discovery"): "read-only discovery",
     ("POST", "/api/catalog/refresh"): "cache refresh; no data change",
     ("POST", "/api/admin/health/warehouse"): "read-only probe",
+    ("POST", "/api/auth/logout"): (
+        "ends the caller's own sign-in session (clears a cookie); nothing else changes"
+    ),
     ("POST", "/api/admin/groups/resolution/refresh"): (
         "cache refresh; no data change"
     ),

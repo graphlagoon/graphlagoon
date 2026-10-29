@@ -76,4 +76,36 @@ describe('LoginView', () => {
     expect(authStore.email).toBe('user@test.com')
     expect(pushMock).toHaveBeenCalledWith('/contexts')
   })
+
+  describe('workspace-verified sign-in (auth_mode=databricks)', () => {
+    beforeEach(() => {
+      window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: false, auth_mode: 'databricks', login_url: '/api/auth/login', router_base: '/graphlagoon/' }
+    })
+
+    it('offers the Databricks button instead of the e-mail form and does not redirect', () => {
+      const { getByTestId, queryByLabelText } = render(LoginView)
+      expect(getByTestId('login-databricks')).toBeDefined()
+      expect(queryByLabelText('Email')).toBeNull()
+      expect(pushMock).not.toHaveBeenCalled()
+    })
+
+    it('sends the browser to the backend sign-in with a local next path', async () => {
+      const assign = vi.fn()
+      const original = window.location
+      Object.defineProperty(window, 'location', { value: { ...original, assign }, writable: true })
+      try {
+        const { getByTestId } = render(LoginView)
+        await fireEvent.click(getByTestId('login-databricks'))
+        expect(assign).toHaveBeenCalledWith('/api/auth/login?next=%2Fgraphlagoon%2Fcontexts')
+      } finally {
+        Object.defineProperty(window, 'location', { value: original, writable: true })
+      }
+    })
+
+    it('goes straight to contexts when the session already exists', () => {
+      window.__GRAPH_LAGOON_CONFIG__!.databricks_user_email = 'ana@example.com'
+      render(LoginView)
+      expect(pushMock).toHaveBeenCalledWith('/contexts')
+    })
+  })
 })

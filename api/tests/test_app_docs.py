@@ -96,7 +96,7 @@ def test_mounted_under_a_prefix_the_ui_reads_the_prefixed_spec_and_the_host_docs
 
 def test_the_spec_explains_itself(env):
     spec = _standalone(env(dev_mode=True)).get("/openapi.json").json()
-    assert set(spec["components"]["securitySchemes"]) == {"agentToken", "forwardedEmail"}
+    assert set(spec["components"]["securitySchemes"]) == {"agentToken", "agentTokenHeader", "forwardedEmail"}
     assert spec["components"]["securitySchemes"]["agentToken"]["scheme"] == "bearer"
     ops = [(m, p, o) for p, items in spec["paths"].items() for m, o in items.items()]
     case_ops = [(m, p, o) for m, p, o in ops if p.startswith("/graphlagoon/api/investigations") or p.startswith("/graphlagoon/api/org")]
