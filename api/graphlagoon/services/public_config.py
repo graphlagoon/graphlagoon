@@ -60,6 +60,8 @@ async def build_public_config(
         # Personal agent tokens (Bearer glt_…) and their admin list.
         "agents_enabled": settings.agents_enabled,
         "investigation_file_max_bytes": settings.investigation_file_max_bytes,
+        # How the case's HTML items run their scripts (ItemPreview's sandboxed iframe).
+        "investigation_html_scripts": settings.investigation_html_scripts,
         # The user's layer of an exploration (BYOD-2): the "Your data" dialog checks files against it.
         "exploration_overlay_max_bytes": settings.exploration_overlay_max_bytes,
         "live_refresh_seconds": settings.live_refresh_seconds,

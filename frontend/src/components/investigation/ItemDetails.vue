@@ -14,11 +14,13 @@ import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { formatDate } from '@/utils/format';
 import ItemPreview from '@/components/investigation/ItemPreview.vue';
+import { useItemViewerStore } from '@/stores/itemViewer';
 import type { CaseItem, CaseItemVersion } from '@/types/investigation';
 
 const props = defineProps<{ item: CaseItem; canEdit: boolean }>();
 
 const store = useInvestigationStore();
+const viewer = useItemViewerStore();
 const toast = useToast();
 const { can } = usePermissions();
 const busy = ref(false);
@@ -202,6 +204,7 @@ async function pin(v: CaseItemVersion) {
             <button class="link-btn" :data-testid="`item-version-preview-${v.version}`" @click="previewing = previewing === v.version ? null : v.version">
               {{ previewing === v.version ? 'Close' : 'Preview / download' }}
             </button>
+            <button class="link-btn" :data-testid="`item-version-expand-${v.version}`" @click="viewer.open(item.id, v.version === item.current_version ? null : v.version)">⤢ Expand</button>
             <button
               v-if="canEdit && !v.pinned_at"
               class="link-btn"

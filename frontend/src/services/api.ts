@@ -133,6 +133,8 @@ declare global {
       agents_enabled?: boolean;
       /** Upload ceiling for case files, in bytes (413 above it). */
       investigation_file_max_bytes?: number;
+      /** Scripts in a case's HTML items (GRAPH_LAGOON_INVESTIGATION_HTML_SCRIPTS); see utils/htmlSandbox. */
+      investigation_html_scripts?: 'none' | 'inline' | 'cdn';
       /** Ceiling of edges in a case's working graph (G4, Q5). */
       investigation_max_working_edges?: number;
       /** Largest user layer of an exploration (BYOD-2), as JSON bytes. */
