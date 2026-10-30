@@ -23,6 +23,15 @@ async function freezeLayout(page: Page) {
   await page.getByTestId('graph-toolbar-layout').click();
 }
 
+/** Open the Look panel on the Labels tab (closed again by `closeLook`). */
+async function openLabels(page: Page) {
+  await page.getByTestId('toolbar-look').click();
+  await page.getByTestId('look-tab-labels').click();
+}
+async function closeLook(page: Page) {
+  await page.getByTestId('toolbar-look').click();
+}
+
 /** Point at a node and wait for the hover raycast to engage. */
 async function hoverNode(page: Page, nodeId: string) {
   const canvas = page.locator(CANVAS);
@@ -71,11 +80,11 @@ test.describe('Hover tooltip templates', () => {
 
   /** Type the template into the panel and let the 400 ms debounce land. */
   async function setNodeTooltipTemplate(page: Page, template: string) {
-    await page.getByTitle('Labels', { exact: true }).click();
+    await openLabels(page);
     await page.getByTestId('labels-tab-tooltips').click();
     await page.getByTestId('tooltip-template-node').fill(template);
     await page.waitForTimeout(600);
-    await page.getByTitle('Labels', { exact: true }).click();
+    await closeLook(page);
   }
 
   test('a template drives the body, over several lines, and keeps the chip', async ({
@@ -108,10 +117,10 @@ test.describe('Hover tooltip templates', () => {
   }) => {
     await setNodeTooltipTemplate(page, 'TIP {node_id}');
 
-    await page.getByTitle('Labels', { exact: true }).click();
+    await openLabels(page);
     await page.getByTestId('labels-tab-tooltips').click();
     await expect(page.getByTestId('tooltip-template-node')).toHaveValue('TIP {node_id}');
-    await page.getByTitle('Labels', { exact: true }).click();
+    await closeLook(page);
 
     await hoverNode(page, 'n2');
     await expect(page.getByTestId('graph-tooltip-body')).toHaveText(/^TIP n\d$/);
@@ -131,7 +140,7 @@ test.describe('Tooltip-surface rules (rule editor modal)', () => {
   }) => {
     // Create the rule through the modal, from the Tooltips tab — its + button
     // opens the editor already preset to the tooltip surface.
-    await page.getByTitle('Labels', { exact: true }).click();
+    await openLabels(page);
     await page.getByTestId('labels-tab-tooltips').click();
     await page.locator('.add-rule-btn').click();
 
@@ -147,7 +156,7 @@ test.describe('Tooltip-surface rules (rule editor modal)', () => {
 
     // The list shows the surface chip; close the panel.
     await expect(page.locator('.rule-surface')).toHaveText('tooltip');
-    await page.getByTitle('Labels', { exact: true }).click();
+    await closeLook(page);
 
     // Hovering a Person shows the rule's body — the type chip stays. Under a
     // slow runner the raycast can land on a neighbouring Person, so assert the
@@ -158,7 +167,7 @@ test.describe('Tooltip-surface rules (rule editor modal)', () => {
   });
 
   test('Escape closes the modal without saving', async ({ authenticatedPage: page }) => {
-    await page.getByTitle('Labels', { exact: true }).click();
+    await openLabels(page);
     await page.locator('.add-rule-btn').click();
     await expect(page.getByTestId('rule-editor-modal')).toBeVisible();
 

@@ -2,13 +2,13 @@
 /**
  * Analysis bar of the canvas (05 §3): visible buttons, each with a parameter
  * popover (never only a context menu). Every run comes back as an item of the
- * case (useCaseAnalyses) and the parent activates it. Filters / Table / Layout /
- * Fit / Advanced toggle the explorer's panels mounted in the case. "Detectors"
- * lists the case type's starter queries (06 §3c): analyses that are data, opened
- * in the inspector to run.
+ * case (useCaseAnalyses) and the parent activates it. The canvas tools (Filters,
+ * Table, Layout, Look, …) live in the strip over the canvas, so this bar never
+ * wraps into the panels above it. "Detectors" lists the case type's starter
+ * queries (06 §3c): analyses that are data, opened in the inspector to run.
  */
-import { computed, ref, watch } from 'vue';
-import { Banknote, Filter, GitBranch, Layers, Link2, Maximize2, Radar, Route, Settings2, Sigma, Table2, Terminal, Users } from 'lucide-vue-next';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { Banknote, GitBranch, Link2, Radar, Route, Sigma, Terminal, Users } from 'lucide-vue-next';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useCaseFilters } from '@/stores/caseFilters';
@@ -20,7 +20,7 @@ import { formatTraceTime } from '@/utils/traceView';
 import GroupsPanel from '@/components/investigation/GroupsPanel.vue';
 import type { CaseItem } from '@/types/investigation';
 
-export type CasePanel = 'filters' | 'table' | 'metrics' | 'layout' | 'advanced';
+export type CasePanel = 'filters' | 'table' | 'metrics' | 'layout' | 'look' | 'advanced';
 export type Popover = 'trace' | 'paths' | 'groups' | 'links' | 'enrich' | 'metrics' | 'detectors';
 
 const props = defineProps<{
@@ -32,7 +32,8 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   toggle: [panel: CasePanel];
-  fit: [];
+  /** The height of the button row, so the panels over the canvas stop above it. */
+  height: [px: number];
   settings: [];
   console: [];
   upload: [];
@@ -51,6 +52,18 @@ const open = ref<Popover | null>(null);
 function toggle(p: Popover) {
   open.value = open.value === p ? null : p;
 }
+
+// The panels over the canvas end above this row, whatever its height (it wraps
+// on a narrow screen).
+const buttonsEl = ref<HTMLElement | null>(null);
+let heightObserver: ResizeObserver | null = null;
+onMounted(() => {
+  if (!buttonsEl.value || typeof ResizeObserver === 'undefined') return;
+  heightObserver = new ResizeObserver(() => emit('height', buttonsEl.value?.offsetHeight ?? 0));
+  heightObserver.observe(buttonsEl.value);
+  emit('height', buttonsEl.value.offsetHeight);
+});
+onUnmounted(() => heightObserver?.disconnect());
 
 /** The case type's starter queries, copied into the case as query items. */
 const detectors = computed(() =>
@@ -203,7 +216,7 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
 
 <template>
   <div class="analysis-bar" data-testid="analysis-bar" @keydown.esc="open = null">
-    <div class="buttons">
+    <div ref="buttonsEl" class="buttons">
       <button :class="btn('trace')" data-testid="analysis-trace" @click="toggle('trace')"><Banknote :size="14" /> Follow the money</button>
       <button :class="btn('paths')" data-testid="analysis-paths" @click="toggle('paths')"><Route :size="14" /> Paths</button>
       <button :class="btn('groups')" data-testid="analysis-groups" @click="toggle('groups')"><Users :size="14" /> Groups</button>
@@ -212,12 +225,6 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
       <button :class="btn('metrics')" data-testid="analysis-metrics" @click="toggle('metrics')"><Sigma :size="14" /> Metrics</button>
       <button v-if="detectors.length" :class="btn('detectors')" data-testid="analysis-detectors" @click="toggle('detectors')"><Radar :size="14" /> Detectors · {{ detectors.length }}</button>
       <button class="btn btn-outline btn-sm" data-testid="analysis-console" title="Write a query of the case: run it here and keep each result as a version" @click="emit('console')"><Terminal :size="14" /> Console</button>
-      <span class="sep"></span>
-      <button class="btn btn-outline btn-sm" :class="{ on: panels.filters }" data-testid="workspace-filters-btn" @click="emit('toggle', 'filters')"><Filter :size="14" /> Filters</button>
-      <button class="btn btn-outline btn-sm" :class="{ on: panels.table }" data-testid="workspace-table-btn" @click="emit('toggle', 'table')"><Table2 :size="14" /> Table</button>
-      <button class="btn btn-outline btn-sm" :class="{ on: panels.layout }" data-testid="workspace-layout-btn" @click="emit('toggle', 'layout')"><Layers :size="14" /> Layout</button>
-      <button class="btn btn-outline btn-sm" title="Fit the graph in the view" aria-label="Fit to view" data-testid="workspace-fit-btn" @click="emit('fit')"><Maximize2 :size="14" /></button>
-      <button class="btn btn-outline btn-sm" :class="{ on: panels.advanced }" title="Cluster programs (JS)" data-testid="workspace-advanced-btn" @click="emit('toggle', 'advanced')"><Settings2 :size="14" /> Advanced</button>
     </div>
 
     <!-- Detectors: the case type's starter queries -->
@@ -385,12 +392,6 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
   border-color: var(--color-primary);
   color: var(--color-primary);
   font-weight: 600;
-}
-
-.sep {
-  width: 1px;
-  margin: 0 4px;
-  background: var(--border-color);
 }
 
 .popover {

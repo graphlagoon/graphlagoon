@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import type { Ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import type { GraphNode } from '@/types/graph3d';
+import type { ViewportState } from '@/types/graph';
 
 const ORTHO_FRUSTUM_SIZE = 2000;
 const ORTHO_MAX_FIT_ZOOM = 6;
@@ -317,6 +318,49 @@ export function useGraphCamera(
     centerOnBestMatch(nodeId);
   }
 
+  /**
+   * The camera as a saveable viewport: position, orbit target, zoom (ortho)
+   * and the view mode it was captured in. Null before the scene exists.
+   */
+  function getViewport(): ViewportState | null {
+    const graph3d = getGraph3d();
+    const camera = graph3d?.camera();
+    if (!camera) return null;
+    const controls = graph3d.controls();
+    const target = controls?.target ?? { x: 0, y: 0, z: 0 };
+    return {
+      position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      target: { x: target.x, y: target.y, z: target.z },
+      zoom: camera.zoom ?? 1,
+      mode: graphStore.behaviors.viewMode,
+    };
+  }
+
+  /**
+   * Put the camera back where a viewport says. Only a viewport captured in
+   * the current view mode is honoured (a 3D orbit means nothing to the flat
+   * projection and vice versa); returns whether it was applied.
+   */
+  function applyViewport(viewport: ViewportState | null | undefined): boolean {
+    const graph3d = getGraph3d();
+    const camera = graph3d?.camera();
+    if (!camera || !viewport?.position || !viewport.target) return false;
+    if (viewport.mode && viewport.mode !== graphStore.behaviors.viewMode) return false;
+    camera.position.set(viewport.position.x, viewport.position.y, viewport.position.z);
+    if (camera.isOrthographicCamera && typeof viewport.zoom === 'number' && viewport.zoom > 0) {
+      camera.zoom = viewport.zoom;
+      camera.updateProjectionMatrix();
+    }
+    const controls = graph3d.controls();
+    if (controls) {
+      controls.target.set(viewport.target.x, viewport.target.y, viewport.target.z);
+      controls.update();
+    } else {
+      camera.lookAt(viewport.target.x, viewport.target.y, viewport.target.z);
+    }
+    return true;
+  }
+
   function getIsCameraMoving() {
     return isCameraMoving;
   }
@@ -454,6 +498,8 @@ export function useGraphCamera(
     resetView,
     centerOnBestMatch,
     focusOnNode,
+    getViewport,
+    applyViewport,
     getIsCameraMoving,
     syncPanMode,
     applyMapStylePan,

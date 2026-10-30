@@ -20,11 +20,9 @@ import { GRAPH_SHORTCUTS } from '@/utils/shortcuts';
 import { uuidOrNull } from '@/utils/uuid';
 import {
   Filter,
-  Sliders,
   Search,
   BarChart2,
   Palette,
-  Tag,
   Hexagon,
   FileText,
   FolderOpen,
@@ -62,7 +60,6 @@ function logout() {
   router.push('/login');
 }
 
-const showAboutModal = ref(false);
 const showUserMenu = ref(false);
 const showSaveModal = ref(false);
 const showExplorationSelector = ref(false);
@@ -124,6 +121,9 @@ function openSaveModal() {
 async function saveExploration() {
   if (!saveTitle.value) return;
   saveError.value = null;
+  // The camera goes with the exploration: it reopens where it was left.
+  const viewport = toolbarHandlers.value?.getViewport?.();
+  if (viewport) graphStore.viewport = viewport;
   const result = await graphStore.saveExploration(saveTitle.value);
   if (result.success) {
     showSaveModal.value = false;
@@ -283,24 +283,17 @@ function handleExportPng(options: ExportPNGOptions) {
 
         <!-- Group 2: Visualize -->
         <div class="btn-group" role="group" aria-label="Visualize">
+          <!-- Style, labels, behaviors and presets share one panel: three
+               unlabeled icons for what is one question — how the graph looks. -->
           <button
             class="toolbar-btn"
-            :class="{ active: toolbarStore.activePanels.has('aesthetics') }"
-            :aria-pressed="toolbarStore.activePanels.has('aesthetics')"
-            title="Style"
-            @click="toolbarHandlers?.onToggleAesthetics()"
+            :class="{ active: toolbarStore.activePanels.has('look') }"
+            :aria-pressed="toolbarStore.activePanels.has('look')"
+            title="Look"
+            data-testid="toolbar-look"
+            @click="toolbarHandlers?.onToggleLook()"
           >
-            <Palette :size="15" /><span class="btn-text">Style</span>
-          </button>
-
-          <button
-            class="toolbar-btn"
-            :class="{ active: toolbarStore.activePanels.has('labels') }"
-            :aria-pressed="toolbarStore.activePanels.has('labels')"
-            title="Labels"
-            @click="toolbarHandlers?.onToggleLabels()"
-          >
-            <Tag :size="15" /><span class="btn-text">Labels</span>
+            <Palette :size="15" /><span class="btn-text">Look</span>
           </button>
 
           <button
@@ -321,21 +314,6 @@ function handleExportPng(options: ExportPNGOptions) {
             @click="toolbarHandlers?.onToggleClusterPrograms()"
           >
             <Hexagon :size="15" /><span class="btn-text">Clusters</span>
-          </button>
-        </div>
-
-        <div class="btn-group-sep" aria-hidden="true"></div>
-
-        <!-- Group 3: Config -->
-        <div class="btn-group" role="group" aria-label="Config">
-          <button
-            class="toolbar-btn"
-            :class="{ active: toolbarStore.activePanels.has('behaviors') }"
-            :aria-pressed="toolbarStore.activePanels.has('behaviors')"
-            title="Behaviors"
-            @click="toolbarHandlers?.onToggleBehaviors()"
-          >
-            <Sliders :size="15" /><span class="btn-text">Behaviors</span>
           </button>
         </div>
 
@@ -389,7 +367,7 @@ function handleExportPng(options: ExportPNGOptions) {
       <button
         class="toolbar-btn"
         title="About Graph Lagoon Studio"
-        @click="showAboutModal = true"
+        @click="toolbarStore.aboutOpen = true"
       >
         <Info :size="15" />
       </button>
@@ -522,11 +500,11 @@ function handleExportPng(options: ExportPNGOptions) {
     />
 
     <!-- About Modal -->
-    <div v-if="showAboutModal" class="modal-overlay" @click.self="showAboutModal = false">
+    <div v-if="toolbarStore.aboutOpen" class="modal-overlay" data-testid="about-modal" @click.self="toolbarStore.aboutOpen = false">
       <div class="modal about-modal">
         <div class="modal-header">
           <h2>About Graph Lagoon Studio</h2>
-          <button class="modal-close" aria-label="Close" @click="showAboutModal = false">
+          <button class="modal-close" aria-label="Close" @click="toolbarStore.aboutOpen = false">
             <X :size="16" />
           </button>
         </div>

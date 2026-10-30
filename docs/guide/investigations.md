@@ -232,20 +232,50 @@ version, and any version can be pinned.
 
 ![Investigation workspace](/screenshots/investigations-workspace.png)
 
-- **One graph at a time.** A case opens on its first graph item; the legend
-  over the canvas lists every graph of the case: click one (or click it in the
-  material list) to clear the canvas and show only it, laid out on its own as
-  in its exploration; Shift+click adds it to or removes it from what is shown,
-  keeping their layout; **All graphs** unifies them all. On a
-  unified canvas each node gets one colored ring per source it came from (two
-  rings: found in two sources and merged). The material's *on canvas* box adds
-  or removes one graph too. The choice is saved with the case (and in saved
-  views); with a single graph, the canvas wears its exploration's style. A graph
-  that shows nothing (an exploration never saved) says why with ⚠.
-- **Inspector** (right) shows the selected entity: data, role and tags, the
-  items that cite it, notes, enrichment and origin — and **Seen in N other
-  cases** when the same entity appears in other cases you can read, with the
-  roles, tags and decisions it got there.
+![The Look panel of a case](/screenshots/investigations-look-panel.png)
+
+- **One graph at a time.** A case opens on its first graph item; the graph
+  chips in the strip over the canvas list every graph of the case: click one
+  (or click it in the material list) to clear the canvas and show only it,
+  laid out on its own as in its exploration; Shift+click adds it to or removes
+  it from what is shown, keeping their layout; **All graphs** unifies them all.
+  On a unified canvas each node gets one colored ring per source it came from
+  (two rings: found in two sources and merged); **legend ▾** lists the fills
+  (roles or groups). The material's *on canvas* box adds or removes one graph
+  too. The choice is saved with the case (and in saved views). A graph that
+  shows nothing (an exploration never saved) says why with ⚠.
+- **The look of the canvas.** A graph is drawn the way its exploration is —
+  colors, icons, sizes, labels, layout — never the way the previous page left
+  the store. The look comes, in order, from the **look saved on the item**
+  (what the case decided), else the **exploration's own** (a live reference
+  follows it, a restyle lands at the next refresh), else the **style a frozen
+  item embeds** (a pinned snapshot, a saved selection or a sketch keeps the
+  look it was made on), else the stock look. On a unified canvas the first
+  graph with a look sets it for all. **Look** in the strip opens the same
+  panel the explorer has — Style, Labels, Behaviors and the **Presets** of the
+  graph's context — and **Save look** stores what is on screen on that graph
+  item, so it opens like that for everyone (one graph on the canvas, write
+  access; **Reset look** drops it). Nothing here lives in the URL: a case has
+  no `?style=` or `?layout=`. Agents set the same thing through
+  `update_item … look`.
+- **Default focus.** With one graph on the canvas, **Default focus** on a
+  selected entity (inspector) makes the case open that graph selected and
+  centred on it; the exploration's own default focus (set from its page) is
+  used when the case has none. Without either, the canvas fits the graph.
+- **Inspector** (right) shows the selected entity: data (the same properties
+  view as the explorer: allowlist, hidden empties, computed metrics, **Open
+  details**), role and tags, the items that cite it, notes, enrichment and
+  origin — and **Seen in N other cases** when the same entity appears in other
+  cases you can read, with the roles, tags and decisions it got there. Clicking
+  an **edge** shows it too: type, readable endpoints (click one to select the
+  node), the item it came from, its amount and time, its properties, notes
+  anchored on the edge, and **Follow the money** in either direction. Several
+  edges selected show their composition and total amount.
+- **Canvas tools** sit in the strip over the canvas, next to the filter chips:
+  Filters, Table, Layout, Look, Advanced (cluster programs), Fit, Export PNG,
+  3D/2D and Fullscreen — the explorer's bottom bar, in the same words. The
+  right-click menu is the explorer's too: the context's configured actions,
+  cluster programs and the community table.
 - **Filter chips** over the canvas (source, role, tag, group, type, time
   window) filter visually; **views** saves the chips, the layout and the
   closed groups as a `graph/view` item.

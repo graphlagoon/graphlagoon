@@ -112,19 +112,28 @@ def validate_mapping(mapping: Optional[dict]) -> Optional[dict]:
 
 def validate_graph_content(subkind: str, content: Optional[bytes]) -> None:
     """``graph/view``, ``graph/selection`` and ``graph/sketch`` have a documented
-    shape (06 P8, A5, BYOD-2): a wrong one is a 422 here, not a blank canvas later."""
-    if subkind not in ("view", "selection", "sketch") or content is None:
+    shape (06 P8, A5, BYOD-2): a wrong one is a 422 here, not a blank canvas later.
+    A ``graph/snapshot`` or ``graph/derived`` payload is whatever was saved, but
+    its ``style`` (the look frozen with it) is a ``GraphLook`` when given."""
+    if subkind not in ("view", "selection", "sketch", "snapshot", "derived") or content is None:
         return
     import json
 
     from pydantic import ValidationError
 
-    from graphlagoon.models.schemas import CaseViewContent, GraphSelectionContent, GraphSketchContent
+    from graphlagoon.models.schemas import CaseViewContent, GraphLook, GraphSelectionContent, GraphSketchContent
 
     try:
         payload = json.loads(content)
     except ValueError:
         raise InvestigationError(422, "INVALID_CONTENT", f"graph/{subkind} content is JSON")
+    if subkind in ("snapshot", "derived"):
+        if isinstance(payload, dict) and payload.get("style") is not None:
+            try:
+                GraphLook.model_validate(payload["style"])
+            except ValidationError as exc:
+                raise InvestigationError(422, "INVALID_CONTENT", f"graph/{subkind} style: {exc.errors()[0]['msg']}")
+        return
     model = {"view": CaseViewContent, "selection": GraphSelectionContent, "sketch": GraphSketchContent}[subkind]
     try:
         model.model_validate(payload)
@@ -132,6 +141,15 @@ def validate_graph_content(subkind: str, content: Optional[bytes]) -> None:
         err = exc.errors()[0]
         where = ".".join(str(p) for p in err["loc"]) or "content"
         raise InvestigationError(422, "INVALID_CONTENT", f"graph/{subkind} {where}: {err['msg']}")
+
+
+def check_state(kind: str, state: Optional[dict]) -> None:
+    """A view state fits its item: ``chart`` is a table's, ``look`` a graph item's."""
+    state = state or {}
+    if kind != "table" and state.get("chart"):
+        raise _invalid("Only a table is seen as a chart")
+    if kind != "graph" and state.get("look"):
+        raise _invalid("Only a graph item has a look")
 
 
 def validate_query(query: Optional[dict]) -> Optional[dict]:
@@ -427,6 +445,7 @@ async def create_item(
     query = validate_query(data.get("query")) if kind == "query" else None
     if kind == "query" and query is None:
         raise _invalid("A query item needs its query")
+    check_state(kind, data.get("state"))
     try:
         async with _session() as session:
             inv = await load_case(session, investigation_id, user_email, "write")
@@ -581,8 +600,8 @@ async def update_item(investigation_id: UUID, user_email: str, item_id: UUID, ch
             changes.pop("query")
         if item.kind != "table" and "mapping" in changes:
             changes.pop("mapping")
-        if item.kind != "table" and (changes.get("state") or {}).get("chart"):
-            raise _invalid("Only a table is seen as a chart")
+        if "state" in changes:
+            check_state(item.kind, changes["state"])
         await update_row(session, ITEMS, item, **changes)
         await append_event(
             session,

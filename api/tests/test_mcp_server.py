@@ -571,3 +571,38 @@ async def test_mcp_endpoint_binds_the_token_to_the_proxy_identity_without_middle
     finally:
         set_identity_verifier(None)
         get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_an_agent_sets_the_look_of_a_graph_item(env):
+    app, exploration = env
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        cid = (await rest.post("/api/investigations", json={"title": "Caso"})).json()["id"]
+        async with _mcp(app, token) as client:
+            ref = await _tool(client, "add_item", investigation_id=cid, kind="graph", subkind="exploration_ref",
+                              exploration_id=str(exploration.id))
+            look = {"nodeTypeColors": {"Person": "#f00"}, "layout_algorithm": "hierarchical", "focus_node_id": "p1"}
+            out = await _tool(client, "update_item", investigation_id=cid, item_id=ref["id"], look=look)
+            assert out["state"] == {"look": look}
+            assert (await _tool(client, "read_item", investigation_id=cid, item_id=ref["id"]))["state"]["look"] == look
+            [listed] = await _tool(client, "list_items", investigation_id=cid, kind="graph")
+            assert listed["state"]["look"]["focus_node_id"] == "p1"
+            out = await _tool(client, "update_item", investigation_id=cid, item_id=ref["id"], look={})
+            assert out["state"] == {"look": None}
+
+            table = await _tool(client, "add_table", investigation_id=cid, title="Mules", columns=["account", "n"], rows=[["1", 5]])
+            failed = await client.call_tool("update_item", {"investigation_id": cid, "item_id": table["id"], "look": look})
+            assert failed.is_error and "Only a graph item has a look" in failed.content[0].text
+            failed = await client.call_tool("update_item", {"investigation_id": cid, "item_id": table["id"]})
+            assert failed.is_error and "chart or look" in failed.content[0].text
+
+            style = {"edgeTypeColors": {"HOLDS": "#888"}, "focus_node_id": "p1"}
+            sel = await _tool(client, "add_item", investigation_id=cid, kind="graph", subkind="selection", title="Sel",
+                              content_json={"nodes": SNAPSHOT["nodes"], "edges": SNAPSHOT["edges"], "style": style})
+            assert sel["subkind"] == "selection"
+            failed = await client.call_tool("add_item", {"investigation_id": cid, "kind": "graph", "subkind": "selection",
+                                                         "content_json": {"nodes": SNAPSHOT["nodes"], "style": "red"}})
+            assert failed.is_error and "INVALID_CONTENT" in failed.content[0].text
+        part = (await rest.get(f"/api/investigations/{cid}/items/{sel['id']}/snapshot")).json()
+        assert part["look"] == style

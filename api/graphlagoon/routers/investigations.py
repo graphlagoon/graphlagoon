@@ -513,8 +513,8 @@ async def get_item(investigation_id: UUID, item_id: UUID, request: Request):
 @router.patch("/{investigation_id}/items/{item_id}", tags=["case items"], response_model=ItemResponse)
 async def update_item(investigation_id: UUID, item_id: UUID, data: ItemUpdate, request: Request):
     """Edit an item's title, description, tags, mapping (tables), query (queries), anchor, view
-    state (`state.chart` for a table) or position. Content changes are new versions, never
-    edits."""
+    state (`state.chart` for a table, `state.look` for a graph item: the style-preset block plus
+    `focus_node_id`) or position. Content changes are new versions, never edits."""
     try:
         return await case_items.update_item(
                 investigation_id, get_current_user(request), item_id, data.model_dump(exclude_unset=True)
@@ -832,7 +832,9 @@ async def get_graph(investigation_id: UUID, request: Request, item_id: Optional[
 @router.get("/{investigation_id}/items/{item_id}/snapshot", tags=["graph & analysis"])
 async def get_item_snapshot(investigation_id: UUID, item_id: UUID, request: Request):
     """What one graph item puts on the canvas (snapshot, identity keys, edge
-    semantics); the browser unifies these with ``unifyGraph.ts``."""
+    semantics, and `look`: the look keys of a live exploration's state or the
+    `style` frozen in the content, null for a mapped table); the browser unifies
+    these with ``unifyGraph.ts``."""
     from graphlagoon.services.case_graph import is_graph_item, item_snapshot_or_error
     from graphlagoon.services.case_items import ensure_sources_readable, item_row
 

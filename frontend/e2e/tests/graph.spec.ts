@@ -118,15 +118,15 @@ test.describe('Graph Visualization', () => {
       // Wait for loading to finish
       await expect(page.getByTitle('Filters', { exact: true })).toBeVisible({ timeout: 15_000 });
 
-      // All panel buttons + Load button
-      await expect(page.getByTitle('Behaviors')).toBeVisible();
+      // All panel buttons + Load button. Style, labels and behaviors share one Look button.
       await expect(page.getByTitle('Query', { exact: true })).toBeVisible();
       await expect(page.getByTitle('Query Templates')).toBeVisible();
       await expect(page.getByTitle('Metrics')).toBeVisible();
-      await expect(page.getByTitle('Style')).toBeVisible();
-      await expect(page.getByTitle('Labels')).toBeVisible();
+      await expect(page.getByTestId('toolbar-look')).toBeVisible();
       await expect(page.getByTitle('Clusters')).toBeVisible();
       await expect(page.getByTitle('Load Exploration')).toBeVisible();
+      await expect(page.getByTitle('Style', { exact: true })).toHaveCount(0);
+      await expect(page.getByTitle('Behaviors', { exact: true })).toHaveCount(0);
     });
   });
 
@@ -150,15 +150,16 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByText('Node Types')).not.toBeVisible();
     });
 
-    test('Behaviors panel shows behavior settings', async ({ authenticatedPage: page }) => {
+    test('Look panel: the Behaviors tab shows behavior settings', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
-      await expect(page.getByTitle('Behaviors')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('toolbar-look')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTitle('Behaviors').click();
+      await page.getByTestId('toolbar-look').click();
+      await page.getByTestId('look-tab-behaviors').click();
       await expect(page.getByText('Graph Lens')).toBeVisible();
       await expect(page.getByText('Degree Dimming')).toBeVisible();
 
-      await page.getByTitle('Behaviors').click();
+      await page.getByTestId('toolbar-look').click();
       await expect(page.getByText('Graph Lens')).not.toBeVisible();
     });
 
@@ -277,29 +278,40 @@ test.describe('Graph Visualization', () => {
       await page.getByTitle('Query Templates').click();
     });
 
-    test('Style panel shows visual controls for nodes and edges', async ({ authenticatedPage: page }) => {
+    test('Look panel: the Style tab shows visual controls for nodes and edges', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
-      await expect(page.getByTitle('Style')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('toolbar-look')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTitle('Style').click();
+      await page.getByTestId('toolbar-look').click();
+      await expect(page.getByTestId('look-panel')).toBeVisible();
       // "Edges" and "Nodes" as h5 headings inside the panel (avoid matching status bar "6 edges")
       await expect(page.getByRole('heading', { name: 'Edges' })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Nodes' })).toBeVisible();
 
-      await page.getByTitle('Style').click();
+      await page.getByTestId('toolbar-look').click();
+      await expect(page.getByTestId('look-panel')).toHaveCount(0);
     });
 
-    test('Labels panel shows template settings', async ({ authenticatedPage: page }) => {
+    test('Look panel: the Labels tab shows template settings', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
-      await expect(page.getByTitle('Labels')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('toolbar-look')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTitle('Labels').click();
+      await page.getByTestId('toolbar-look').click();
+      await page.getByTestId('look-tab-labels').click();
       // exact: the Custom Rules hint mentions "default templates" too
       await expect(page.getByText('Default Templates', { exact: true })).toBeVisible();
       // "Custom Rules" exact to avoid matching the hint text
       await expect(page.getByText('Custom Rules', { exact: true })).toBeVisible();
 
-      await page.getByTitle('Labels').click();
+      await page.getByTestId('toolbar-look').click();
+    });
+
+    test('the shortcuts live behind a status-bar chip, not a strip over the canvas', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('controls-hint')).toHaveCount(0);
+      await page.getByTestId('graph-status-shortcuts').click();
+      await expect(page.getByTestId('about-shortcuts')).toBeVisible();
     });
 
     test('Clusters panel opens and closes', async ({ authenticatedPage: page }) => {

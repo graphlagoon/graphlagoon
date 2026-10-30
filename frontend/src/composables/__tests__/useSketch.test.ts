@@ -42,6 +42,7 @@ describe('useSketch in a case', () => {
     expect(body.subkind).toBe('sketch')
     expect(body.title).toBe('Manual additions')
     expect(body.content_json.unified).toBe(true)
+    expect((body.content_json as unknown as { style?: object }).style).toHaveProperty('layout_algorithm') // the look it was drawn on
     expect(body.content_json.nodes).toEqual([
       { id: 'Person:1', type: 'Person', properties: {} },
       { id: 'acc@c1', type: 'Account', properties: {} },

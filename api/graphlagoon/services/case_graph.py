@@ -335,6 +335,16 @@ def _as_snapshot(payload: Any) -> Optional[dict]:
     return None
 
 
+def look_of(state: Any) -> Optional[dict]:
+    """The look keys (style-preset block + focus_node_id) of an exploration state, or None."""
+    from graphlagoon.models.schemas import GraphLook
+
+    if not isinstance(state, dict):
+        return None
+    look = {k: state[k] for k in GraphLook.model_fields if state.get(k) is not None}
+    return look or None
+
+
 def is_unified_payload(payload: Any) -> bool:
     """A derived item (links, a saved selection) stores unified ids: ``{"unified": true}``."""
     return isinstance(payload, dict) and bool(payload.get("unified"))
@@ -409,8 +419,11 @@ async def _mapped_table(session, investigation_id: UUID, item: Any, user_email: 
 
 async def item_snapshot(session, inv: Any, item: Any, user_email: str) -> dict:
     """What one graph item puts on the canvas: ``{snapshot, context_id,
-    identity_keys, edge_semantics, title, report?}``. The browser unifies these
-    with ``unifyGraph.ts``; ``case_graph`` unifies them here."""
+    identity_keys, edge_semantics, title, look, report?}``. ``look`` is how the
+    source shows it (the look keys of a live exploration's state, the ``style``
+    frozen in the content, nothing for a mapped table); the item's own
+    ``state.look`` wins over it. The browser unifies these with
+    ``unifyGraph.ts``; ``case_graph`` unifies them here."""
     from graphlagoon.models.schemas import EdgeSemantics
 
     context = await _context(session, item.context_id)
@@ -421,6 +434,7 @@ async def item_snapshot(session, inv: Any, item: Any, user_email: str) -> dict:
         "title": item.title,
         "context_id": str(item.context_id) if item.context_id else None,
         "snapshot": None,
+        "look": None,
     }
     if item.subkind == "exploration_ref":
         exploration, snapshot = await _exploration_snapshot(session, item.exploration_id)
@@ -428,6 +442,7 @@ async def item_snapshot(session, inv: Any, item: Any, user_email: str) -> dict:
         out["exploration"] = (
             {"id": str(exploration.id), "title": exploration.title, "state": exploration.state or {}} if exploration else None
         )
+        out["look"] = look_of(exploration.state if exploration else None)
     elif item.kind == "table":
         out["snapshot"], out["report"] = await _mapped_table(session, inv.id, item, user_email)
         spec = item.mapping["spec"]
@@ -440,6 +455,7 @@ async def item_snapshot(session, inv: Any, item: Any, user_email: str) -> dict:
         if isinstance(payload, dict):
             keys = keys or list(payload.get("identity_keys") or [])
             semantics = semantics or payload.get("edge_semantics")
+            out["look"] = payload.get("style")
     out["identity_keys"] = keys
     out["edge_semantics"] = semantics
     return out

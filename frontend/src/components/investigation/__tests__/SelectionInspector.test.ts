@@ -134,4 +134,86 @@ describe('SelectionInspector (05 §3, three states)', () => {
     expect(getByTestId('decision-panel')).toBeTruthy()
     expect(getByTestId('decision-form')).toBeTruthy()
   })
+
+  it('one node: the data tab is the shared details view (allowlist, hidden empties) and Open details asks the host', async () => {
+    const graph = useGraphStore()
+    graph.setPropertyVisibility('node', ['name'])
+    graph.selectNode('a@c1')
+    const { getByTestId, emitted } = mount()
+    await flushPromises()
+    expect(getByTestId('inspector-data').textContent).toContain('Ana')
+    expect(getByTestId('inspector-data').textContent).not.toContain('12345678901')
+    expect(getByTestId('property-visibility-hint').textContent).toContain('1 of 2')
+    await fireEvent.click(getByTestId('inspector-open-details'))
+    expect(emitted('open-details')).toHaveLength(1)
+  })
+
+  it('one node: "Default focus" saves the node (as the item knows it) on the one graph on the canvas', async () => {
+    const inv = useInvestigationStore()
+    inv.current = { ...CASE, state: { canvas_items: ['s1'] } } as any
+    useGraphStore().selectNode('a@c1')
+    const { getByTestId } = mount()
+    await flushPromises()
+    await fireEvent.click(getByTestId('inspector-default-focus'))
+    await flushPromises()
+    expect(api.updateInvestigationItem).toHaveBeenCalledWith('inv-1', 's1', { state: { look: { focus_node_id: 'a' } } })
+  })
+
+  it('one node: no default focus button in a read-only case or with several graphs on the canvas', async () => {
+    const inv = useInvestigationStore()
+    inv.current = { ...CASE, has_write_access: false, state: { canvas_items: ['s1'] } } as any
+    useGraphStore().selectNode('a@c1')
+    const { queryByTestId } = mount({ canEdit: false })
+    await flushPromises()
+    expect(queryByTestId('inspector-default-focus')).toBeNull()
+  })
+
+  it('one edge: type, readable endpoints that select, source chip, amount and time, follow the money both ways, a note on the edge', async () => {
+    const inv = useInvestigationStore()
+    inv.contexts = { c1: { id: 'c1', title: 'KYC', identity_keys: [], edge_semantics: { amount_prop: 'valor', time_prop: 'quando' } } } as any
+    inv.sourceGraphs[0].edges = [
+      { edge_id: 'e1', src: 'a', dst: 'b', relationship_type: 'PIX', properties: { valor: 1500, quando: '2026-03-01T10:00:00Z', memo: 'rent' } },
+      { edge_id: 'e2', src: 'b', dst: 'c', relationship_type: 'PIX', properties: { valor: 500, quando: '2026-03-02T10:00:00Z' } },
+    ] as any
+    inv.items = [...inv.items, { id: 'n1', kind: 'note', subkind: 'anchored', title: 'Suspicious', description: 'Suspicious', tags: [], status: 'confirmed', author_kind: 'human', author_email: 'me', anchor: { edge_ids: ['s1:e1'] }, current_version: 1, pinned: [], accessible: true, position: 0 }] as any
+    const graph = useGraphStore()
+    graph.selectEdge('s1:e1') // unified edge ids are <source>:<edge_id>
+    const { getByTestId, emitted } = mount()
+    await flushPromises()
+    expect(getByTestId('inspector-edge-title').textContent).toContain('Ana')
+    expect(getByTestId('inspector-edge-title').textContent).toContain('Bia')
+    expect(getByTestId('inspector-edge-source').textContent).toBe('KYC')
+    expect(getByTestId('inspector-edge-amount').textContent).toContain('1')
+    expect(getByTestId('inspector-edge-time')).toBeTruthy()
+    expect(document.body.textContent).toContain('memo')
+
+    await fireEvent.click(getByTestId('inspector-edge-trace-backward'))
+    expect(emitted('trace')?.[0]).toEqual([{ type: 'edge', id: 's1:e1' }, 'backward']) // the unified id, what the analyses take
+
+    await fireEvent.click(getByTestId('inspector-edge-notes-tab'))
+    expect(getByTestId('inspector-edge-notes').textContent).toContain('Suspicious')
+    await fireEvent.update(getByTestId('edge-note-input'), 'Check the receipt')
+    await fireEvent.click(getByTestId('edge-note-add'))
+    await flushPromises()
+    expect(api.createInvestigationItem).toHaveBeenCalledWith('inv-1', expect.objectContaining({ kind: 'note', subkind: 'anchored', anchor: { edge_ids: ['s1:e1'] } }))
+
+    await fireEvent.click(getByTestId('inspector-edge-dst'))
+    expect(graph.selectedNodeIds.has('b@c1')).toBe(true)
+  })
+
+  it('several edges: count, composition by type and the total amount', async () => {
+    const inv = useInvestigationStore()
+    inv.contexts = { c1: { id: 'c1', title: 'KYC', identity_keys: [], edge_semantics: { amount_prop: 'valor', time_prop: 'quando' } } } as any
+    inv.sourceGraphs[0].edges = [
+      { edge_id: 'e1', src: 'a', dst: 'b', relationship_type: 'PIX', properties: { valor: 1500, quando: '2026-03-01T10:00:00Z' } },
+      { edge_id: 'e2', src: 'b', dst: 'c', relationship_type: 'TED', properties: { valor: 500, quando: '2026-03-02T10:00:00Z' } },
+    ] as any
+    const graph = useGraphStore()
+    graph.selectedEdgeIds = new Set(['s1:e1', 's1:e2'])
+    const { getByTestId } = mount()
+    await flushPromises()
+    expect(getByTestId('inspector-edges-title').textContent).toContain('2 edges')
+    expect(getByTestId('inspector-edges-composition').textContent).toContain('1 PIX')
+    expect(getByTestId('inspector-edges-total').textContent).toContain('2')
+  })
 })

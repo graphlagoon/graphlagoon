@@ -70,6 +70,7 @@ describe('useAddToCase', () => {
     expect(body.subkind).toBe('selection')
     expect(body.context_id).toBe('c1')
     expect((body.content_json as any).nodes.map((n: any) => n.id)).toEqual(['a', 'b'])
+    expect((body.content_json as any).style).toHaveProperty('layout_algorithm') // the look it had on the canvas
     expect((body.content_json as any).edges.map((e: any) => e.id)).toEqual(['ab'])
 
     await add.addSelection([])

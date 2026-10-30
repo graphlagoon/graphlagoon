@@ -142,7 +142,8 @@ test.describe('Progressive load', () => {
     await expect.poll(() => bodies.length, { timeout: 15_000 }).toBeGreaterThan(0);
     expect(bodies[0].nodes_mode).toBe('types');
 
-    await page.getByRole('button', { name: 'Behaviors' }).click();
+    await page.getByTestId('toolbar-look').click();
+    await page.getByTestId('look-tab-behaviors').click();
     // The control lives behind the Advanced disclosure, like the other
     // load-shaping settings.
     const advanced = page.getByText('Advanced', { exact: true });
@@ -163,7 +164,8 @@ test.describe('Progressive load', () => {
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
     releaseBatch();
 
-    await page.getByRole('button', { name: 'Behaviors' }).click();
+    await page.getByTestId('toolbar-look').click();
+    await page.getByTestId('look-tab-behaviors').click();
     const advanced = page.getByText('Advanced', { exact: true });
     if (await advanced.isVisible().catch(() => false)) await advanced.click();
 

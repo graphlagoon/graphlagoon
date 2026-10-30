@@ -13,12 +13,16 @@ import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { caseNodeLabel, shortId } from '@/utils/caseLabels';
 import { formatDate } from '@/utils/format';
+import { formatAmount } from '@/utils/edgeSemantics';
+import { formatTraceTime } from '@/utils/traceView';
+import { toLocalId } from '@/utils/caseLook';
 import { itemKindLabel } from '@/utils/investigationStatus';
 import { explorationUrl } from '@/utils/investigationLinks';
 import { isTabular } from '@/utils/itemPreview';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { GROUP_COLORS } from '@/utils/caseVocabulary';
-import { baseSourceId, nodeSourceIds, type UnifiedNode } from '@/utils/unifyGraph';
+import { baseSourceId, nodeSourceIds, type UnifiedEdge, type UnifiedNode } from '@/utils/unifyGraph';
+import SelectionDetails from '@/components/SelectionDetails.vue';
 import EnrichmentTab from '@/components/investigation/EnrichmentTab.vue';
 import DecisionPanel from '@/components/investigation/DecisionPanel.vue';
 import ItemPreview from '@/components/investigation/ItemPreview.vue';
@@ -36,6 +40,8 @@ const emit = defineEmits<{
   'cancel-decide': [];
   trace: [target: { type: 'node' | 'edge'; id: string }, direction: 'forward' | 'backward'];
   'path-from': [id: string];
+  /** Every property of the selection in the full modal (the explorer's DetailModal). */
+  'open-details': [];
 }>();
 
 const store = useInvestigationStore();
@@ -77,7 +83,56 @@ const noteDraft = ref('');
 const tagDraft = ref('');
 
 const selectedSources = computed(() => (selected.value ? nodeSourceIds(selected.value) : []));
-const selectedProps = computed(() => Object.entries(selected.value?.properties ?? {}));
+
+// --- one edge, several edges ------------------------------------------------------
+// Node and edge selections are exclusive (selecting one clears the other).
+const edgeById = computed(() => new Map(store.unified.edges.map((e) => [e.edge_id, e as UnifiedEdge])));
+const selectedEdge = computed(() => (graph.selectedEdgeIds.size === 1 ? edgeById.value.get([...graph.selectedEdgeIds][0]) ?? null : null));
+const multiEdges = computed(() =>
+  graph.selectedEdgeIds.size > 1 ? [...graph.selectedEdgeIds].map((id) => edgeById.value.get(id)).filter((e): e is UnifiedEdge => !!e) : [],
+);
+const edgeTab = ref<'data' | 'notes'>('data');
+const edgeNoteDraft = ref('');
+const edgeNotes = computed(() => store.notes.filter((n) => n.anchor?.edge_ids?.includes(selectedEdge.value?.edge_id ?? '')));
+const edgeComposition = computed(() => {
+  const counts = new Map<string, number>();
+  for (const e of multiEdges.value) counts.set(e.relationship_type, (counts.get(e.relationship_type) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+});
+/** The sum of the amounts, when every selected edge carries one. */
+const edgesTotalAmount = computed(() => {
+  if (!multiEdges.value.length || multiEdges.value.some((e) => typeof e.__amount !== 'number')) return null;
+  return multiEdges.value.reduce((sum, e) => sum + (e.__amount as number), 0);
+});
+function addEdgeNote() {
+  const id = selectedEdge.value?.edge_id;
+  const body = edgeNoteDraft.value.trim();
+  if (!id || !body) return;
+  run(async () => {
+    await store.addNote({ edge_ids: [id] }, body);
+    edgeNoteDraft.value = '';
+  }, 'Failed to add note');
+}
+
+// --- default focus (saved on the one graph item on the canvas) ---------------------
+const singleItem = computed(() => (store.canvasItems.length === 1 ? store.canvasItems[0] : null));
+/** The selected node as the item knows it; null when it did not come from that item. */
+const focusLocalId = computed(() =>
+  selected.value && singleItem.value ? toLocalId(store.unified.nodes, singleItem.value.id, selected.value.node_id) : null,
+);
+const isDefaultFocus = computed(
+  () => !!singleItem.value && !!focusLocalId.value && singleItem.value.state?.look?.focus_node_id === focusLocalId.value,
+);
+function toggleDefaultFocus() {
+  const item = singleItem.value;
+  const localId = focusLocalId.value;
+  if (!item || !localId) return;
+  const next = isDefaultFocus.value ? null : localId;
+  run(async () => {
+    await store.updateItem(item.id, { state: { ...(item.state ?? {}), look: { ...(item.state?.look ?? {}), focus_node_id: next } } });
+    toast.success(next ? `“${item.title}” opens on ${label(selected.value!)}` : `“${item.title}” opens fitted to the graph`);
+  }, 'Failed to set the default focus');
+}
 const selectedRole = computed(() => (selected.value ? store.roles[selected.value.node_id] ?? '' : ''));
 const roleOptions = computed(() => {
   const used = new Set(Object.values(store.roles));
@@ -223,6 +278,8 @@ function saveSelection() {
         edges: store.unified.edges
           .filter((e) => ids.has(e.src) && ids.has(e.dst))
           .map((e) => ({ id: e.edge_id, source: e.src, target: e.dst, type: e.relationship_type, properties: e.properties ?? {} })),
+        // The look it had on the canvas, so it opens the same later.
+        style: graph.buildStylePreset(),
       },
     });
     // A saved selection duplicates what is on the canvas: it stays off it until checked.
@@ -357,6 +414,18 @@ const formatTime = (iso: string) => formatDate(iso);
         <button class="link-btn" data-testid="inspector-trace" @click="emit('trace', { type: 'node', id: selected.node_id }, 'forward')">Follow the money →</button>
         <button class="link-btn" data-testid="inspector-path-from" @click="emit('path-from', selected.node_id)">Path to…</button>
         <button class="link-btn" data-testid="inspector-open-entity" @click="emit('open-entity', selected)">Full profile</button>
+        <button class="link-btn" data-testid="inspector-open-details" @click="emit('open-details')">Open details</button>
+        <button
+          v-if="canEdit && singleItem"
+          class="link-btn"
+          :class="{ on: isDefaultFocus }"
+          :disabled="!focusLocalId"
+          :title="!focusLocalId ? `Only a node of “${singleItem.title}” can be its default focus` : isDefaultFocus ? 'The graph opens on this node; click to stop' : 'Open this graph selected and centred on this node, for everyone in the case'"
+          data-testid="inspector-default-focus"
+          @click="toggleDefaultFocus"
+        >
+          {{ isDefaultFocus ? 'Default focus ✓' : 'Default focus' }}
+        </button>
       </div>
       <div class="inspector-tabs">
         <button :class="{ active: inspectorTab === 'data' }" @click="inspectorTab = 'data'">Data</button>
@@ -365,23 +434,18 @@ const formatTime = (iso: string) => formatDate(iso);
         <button :class="{ active: inspectorTab === 'notes' }" data-testid="inspector-notes-tab" @click="inspectorTab = 'notes'">Notes<template v-if="selectedNotes.length"> ({{ selectedNotes.length }})</template></button>
         <button :class="{ active: inspectorTab === 'origin' }" data-testid="inspector-origin-tab" @click="inspectorTab = 'origin'">Origin</button>
       </div>
-      <dl v-if="inspectorTab === 'data'" class="props">
-        <template v-for="[k, v] in selectedProps" :key="k">
-          <dt>{{ k }}</dt>
-          <dd>
-            {{ v }}
-            <span v-if="selected.__conflicts?.[k]" class="conflict" title="Other items disagree">≠ {{ selected.__conflicts[k].map((c) => c.value).join(', ') }}</span>
-          </dd>
-        </template>
-        <template v-if="selectedEvents.length">
+      <div v-if="inspectorTab === 'data'" data-testid="inspector-data">
+        <!-- The same properties view as the explorer: visibility allowlist, hidden empties, metrics. -->
+        <SelectionDetails :item="{ type: 'node', data: selected }" :show-identity="false" :conflicts="selected.__conflicts" />
+        <dl v-if="selectedEvents.length" class="props">
           <dt class="section">Events</dt>
           <dd class="section"></dd>
           <template v-for="e in selectedEvents" :key="e.id">
             <dt class="muted">{{ formatTime(e.at) }}</dt>
             <dd class="muted">{{ e.kind }} · {{ e.actor_kind === 'agent' ? 'agent' : e.actor_email }}</dd>
           </template>
-        </template>
-      </dl>
+        </dl>
+      </div>
       <div v-else-if="inspectorTab === 'items'" class="notes" data-testid="inspector-items">
         <button v-for="i in citingItems" :key="i.id" class="item-link" @click="emit('select-item', i)">
           <span class="muted">{{ itemKindLabel(i.kind) }}/{{ i.subkind }}</span> {{ i.title }}
@@ -418,6 +482,68 @@ const formatTime = (iso: string) => formatDate(iso);
           {{ prop }}: kept “{{ prop === 'node_type' ? selected.node_type : selected.properties?.[prop] }}”; also {{ list.map((c) => `“${c.value}” (${sourceTitle(c.sourceId)})`).join(', ') }}
         </div>
       </div>
+    </template>
+
+    <!-- one edge -->
+    <template v-else-if="selectedEdge">
+      <div class="muted">{{ selectedEdge.relationship_type }} · {{ shortId(selectedEdge.edge_id) }}</div>
+      <h3 class="entity edge-title" :title="selectedEdge.edge_id" data-testid="inspector-edge-title">
+        <button class="link-btn endpoint" data-testid="inspector-edge-src" @click="graph.selectNode(selectedEdge.src)">{{ nameOf(selectedEdge.src) }}</button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="link-btn endpoint" data-testid="inspector-edge-dst" @click="graph.selectNode(selectedEdge.dst)">{{ nameOf(selectedEdge.dst) }}</button>
+      </h3>
+      <div class="chips">
+        <span class="chip" :style="{ borderColor: store.sourceColors[baseSourceId(selectedEdge.__source)], color: store.sourceColors[baseSourceId(selectedEdge.__source)] }" data-testid="inspector-edge-source">{{ sourceTitle(selectedEdge.__source) }}</span>
+        <span v-if="typeof selectedEdge.__amount === 'number'" class="chip plain" data-testid="inspector-edge-amount">{{ formatAmount(selectedEdge.__amount) }}</span>
+        <span v-if="typeof selectedEdge.__t === 'number'" class="chip plain" data-testid="inspector-edge-time">{{ formatTraceTime(selectedEdge.__t) }}</span>
+      </div>
+      <div v-if="actionError" class="action-error">{{ actionError }}</div>
+      <div class="row-actions">
+        <button class="link-btn" data-testid="inspector-edge-trace-forward" @click="emit('trace', { type: 'edge', id: selectedEdge.edge_id }, 'forward')">Follow the money →</button>
+        <button class="link-btn" data-testid="inspector-edge-trace-backward" @click="emit('trace', { type: 'edge', id: selectedEdge.edge_id }, 'backward')">← Follow back</button>
+        <button class="link-btn" data-testid="inspector-edge-open-details" @click="emit('open-details')">Open details</button>
+      </div>
+      <div class="inspector-tabs">
+        <button :class="{ active: edgeTab === 'data' }" data-testid="inspector-edge-data-tab" @click="edgeTab = 'data'">Data</button>
+        <button :class="{ active: edgeTab === 'notes' }" data-testid="inspector-edge-notes-tab" @click="edgeTab = 'notes'">Notes<template v-if="edgeNotes.length"> ({{ edgeNotes.length }})</template></button>
+      </div>
+      <SelectionDetails
+        v-if="edgeTab === 'data'"
+        :item="{ type: 'edge', data: selectedEdge }"
+        :label-of="nameOf"
+        :conflicts="selectedEdge.__conflicts"
+        @select-node="graph.selectNode($event)"
+      />
+      <div v-else class="notes" data-testid="inspector-edge-notes">
+        <div v-for="n in edgeNotes" :key="n.id" class="note" data-testid="note">
+          <p>{{ n.description ?? n.title }}</p>
+          <div class="muted">
+            {{ n.author_kind === 'agent' ? 'agent · ' : '' }}{{ n.author_email }} · {{ n.created_at ? formatTime(n.created_at) : '' }}
+            <button v-if="canEdit && n.author_email === auth.email" class="link-btn" @click="run(() => store.removeItem(n.id), 'Failed to delete note')">delete</button>
+          </div>
+        </div>
+        <p v-if="!edgeNotes.length" class="muted">No notes on this edge yet.</p>
+        <template v-if="canEdit">
+          <textarea v-model="edgeNoteDraft" rows="3" placeholder="Add a note…" data-testid="edge-note-input"></textarea>
+          <button class="btn btn-primary btn-sm" :disabled="!edgeNoteDraft.trim()" data-testid="edge-note-add" @click="addEdgeNote">Add note</button>
+        </template>
+      </div>
+    </template>
+
+    <!-- several edges -->
+    <template v-else-if="multiEdges.length > 1">
+      <div class="muted">Selection</div>
+      <h3 class="entity" data-testid="inspector-edges-title">{{ multiEdges.length }} edges</h3>
+      <div class="chips" data-testid="inspector-edges-composition">
+        <span v-for="[t, n] in edgeComposition" :key="t" class="chip plain">{{ n }} {{ t }}</span>
+      </div>
+      <p v-if="edgesTotalAmount !== null" class="muted" data-testid="inspector-edges-total">Total {{ formatAmount(edgesTotalAmount) }}</p>
+      <ul class="plain-list">
+        <li v-for="e in multiEdges.slice(0, 30)" :key="e.edge_id">
+          <button class="link-btn" @click="graph.selectEdge(e.edge_id)">{{ nameOf(e.src) }} → {{ nameOf(e.dst) }}</button> <span class="muted">{{ e.relationship_type }}</span>
+        </li>
+        <li v-if="multiEdges.length > 30" class="muted">… {{ multiEdges.length - 30 }} more</li>
+      </ul>
     </template>
 
     <!-- item -->
@@ -581,6 +707,23 @@ const formatTime = (iso: string) => formatDate(iso);
 .suggestion .row {
   display: flex;
   gap: 10px;
+}
+
+.edge-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.link-btn.endpoint {
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+
+.arrow {
+  color: var(--text-muted);
 }
 
 .row-actions {

@@ -276,6 +276,13 @@ class StylePresetSettings(BaseModel):
     behaviors: Optional[dict[str, Any]] = None
 
 
+class GraphLook(StylePresetSettings):
+    """A graph item's look in a case (``ItemState.look``, frozen content ``style``): the
+    style-preset block plus the node the canvas opens on (an id local to the item)."""
+
+    focus_node_id: Optional[str] = Field(default=None, max_length=2000)
+
+
 class StylePresetWriteRequest(BaseModel):
     """Body of PUT /api/graph-contexts/{id}/style-presets/{name}."""
 
@@ -745,10 +752,23 @@ class FilterState(BaseModel):
     search_query: Optional[str] = None
 
 
+class ViewportPoint(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+
+
 class ViewportState(BaseModel):
+    """The camera of a saved exploration: where it stood, what it looked at, the
+    orthographic zoom and the view mode it was captured in. ``center_x`` /
+    ``center_y`` are the legacy fields older explorations carry; nothing reads them."""
+
     zoom: float = 1.0
     center_x: float = 0.0
     center_y: float = 0.0
+    position: Optional[ViewportPoint] = None
+    target: Optional[ViewportPoint] = None
+    mode: Optional[Literal["3d", "2d-proj"]] = None
 
 
 # Text format models for label formatting
@@ -930,6 +950,8 @@ class ExplorationState(BaseModel):
     cte_fallback_silent: Optional[bool] = None
     community: Optional[dict] = None
     similarity: Optional[dict] = None
+    # The node the canvas opens on (its id in this exploration); a case item's look carries it too.
+    focus_node_id: Optional[str] = Field(default=None, max_length=2000)
 
 
 class ExplorationCreate(BaseModel):
@@ -2254,6 +2276,8 @@ class GraphSketchContent(BaseModel):
     unified: Literal[True] = True
     nodes: list[GraphContentNode] = Field(default_factory=list, max_length=5000)
     edges: list[GraphContentEdge] = Field(default_factory=list, max_length=20000)
+    # How the case shows it (a style-preset block plus ``focus_node_id``), frozen with the content.
+    style: Optional[GraphLook] = None
 
     @model_validator(mode="after")
     def _typed_and_joined(self):
@@ -2277,6 +2301,8 @@ class GraphSelectionContent(BaseModel):
     nodes: list[GraphContentNode] = Field(min_length=1)
     edges: list[GraphContentEdge] = Field(default_factory=list)
     unified: bool = False
+    # How the case shows it (a style-preset block plus ``focus_node_id``), frozen with the content.
+    style: Optional[GraphLook] = None
 
     @model_validator(mode="after")
     def _edges_join_nodes(self):
@@ -2301,6 +2327,9 @@ class ItemState(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     chart: Optional[TableChartSpec] = None
+    # A graph item's look (06 §2b): the style-preset block plus ``focus_node_id``; it wins over
+    # the exploration's state or the frozen content's ``style``.
+    look: Optional[GraphLook] = None
 
 
 class ItemCreate(BaseModel):

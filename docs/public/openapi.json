@@ -5207,7 +5207,7 @@
           "case items"
         ],
         "summary": "Update Item",
-        "description": "Edit an item's title, description, tags, mapping (tables), query (queries), anchor, view\nstate (`state.chart` for a table) or position. Content changes are new versions, never\nedits.",
+        "description": "Edit an item's title, description, tags, mapping (tables), query (queries), anchor, view\nstate (`state.chart` for a table, `state.look` for a graph item: the style-preset block plus\n`focus_node_id`) or position. Content changes are new versions, never edits.",
         "operationId": "case_items_update_item",
         "parameters": [
           {
@@ -6459,7 +6459,7 @@
           "graph & analysis"
         ],
         "summary": "Get Item Snapshot",
-        "description": "What one graph item puts on the canvas (snapshot, identity keys, edge\nsemantics); the browser unifies these with ``unifyGraph.ts``.",
+        "description": "What one graph item puts on the canvas (snapshot, identity keys, edge\nsemantics, and `look`: the look keys of a live exploration's state or the\n`style` frozen in the content, null for a mapped table); the browser unifies\nthese with ``unifyGraph.ts``.",
         "operationId": "graph_analysis_get_item_snapshot",
         "parameters": [
           {
@@ -10868,6 +10868,18 @@
               }
             ],
             "title": "Similarity"
+          },
+          "focus_node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focus Node Id"
           }
         },
         "additionalProperties": true,
@@ -11934,6 +11946,189 @@
         ],
         "title": "GraphJobSubmitResponse",
         "description": "Response to submitting a cancellable graph/cypher query job."
+      },
+      "GraphLook": {
+        "properties": {
+          "aesthetics": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aesthetics"
+          },
+          "nodeTypeColors": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nodetypecolors"
+          },
+          "edgeTypeColors": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edgetypecolors"
+          },
+          "nodeTypeIcons": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nodetypeicons"
+          },
+          "edgeTypeIcons": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edgetypeicons"
+          },
+          "nodePropertyIconConfigs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nodepropertyiconconfigs"
+          },
+          "textFormat": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Textformat"
+          },
+          "layout_algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout Algorithm"
+          },
+          "layout_mode_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout Mode Config"
+          },
+          "force3d_settings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force3D Settings"
+          },
+          "visual_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Mapping"
+          },
+          "property_visibility": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Visibility"
+          },
+          "behaviors": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behaviors"
+          },
+          "focus_node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focus Node Id"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "GraphLook",
+        "description": "A graph item's look in a case (``ItemState.look``, frozen content ``style``): the\nstyle-preset block plus the node the canvas opens on (an id local to the item)."
       },
       "GraphOverlay": {
         "properties": {
@@ -13618,6 +13813,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/TableChartSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "look": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphLook"
               },
               {
                 "type": "null"
@@ -17165,6 +17370,27 @@
         ],
         "title": "ValidationError"
       },
+      "ViewportPoint": {
+        "properties": {
+          "x": {
+            "type": "number",
+            "title": "X",
+            "default": 0.0
+          },
+          "y": {
+            "type": "number",
+            "title": "Y",
+            "default": 0.0
+          },
+          "z": {
+            "type": "number",
+            "title": "Z",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "title": "ViewportPoint"
+      },
       "ViewportState": {
         "properties": {
           "zoom": {
@@ -17181,10 +17407,46 @@
             "type": "number",
             "title": "Center Y",
             "default": 0.0
+          },
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewportPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewportPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "3d",
+                  "2d-proj"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
           }
         },
         "type": "object",
-        "title": "ViewportState"
+        "title": "ViewportState",
+        "description": "The camera of a saved exploration: where it stood, what it looked at, the\northographic zoom and the view mode it was captured in. ``center_x`` /\n``center_y`` are the legacy fields older explorations carry; nothing reads them."
       }
     },
     "securitySchemes": {

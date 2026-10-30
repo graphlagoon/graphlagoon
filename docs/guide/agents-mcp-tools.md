@@ -140,7 +140,7 @@ Human twin: `GET /api/investigations/{investigation_id}/items/{item_id}`, `GET /
 
 ### update_item
 
-Edit an item's title, description or tags (content changes are new versions: add_item with item_id). ``chart`` shows a table as a chart: {"type": "line" | "bar", "x": column, "series": [columns]} (e.g. TPV and chargebacks by day); ``{}`` goes back to the table.
+Edit an item's title, description or tags (content changes are new versions: add_item with item_id). ``chart`` shows a table as a chart: {"type": "line" | "bar", "x": column, "series": [columns]} (e.g. TPV and chargebacks by day); ``{}`` goes back to the table. ``look`` on a graph item: the style block (aesthetics, nodeTypeColors, edgeTypeColors, textFormat, layout_algorithm, layout_mode_config, … — the same keys as a style preset) plus ``focus_node_id``, a node id of that item; ``{}`` goes back to the exploration's / embedded look. The PATCH replaces the item's view state.
 
 Human twin: `PATCH /api/investigations/{investigation_id}/items/{item_id}`
 
@@ -152,6 +152,7 @@ Human twin: `PATCH /api/investigations/{investigation_id}/items/{item_id}`
 | `description` | string |  | null |
 | `tags` | list of string |  | null |
 | `chart` | object |  | null |
+| `look` | object |  | null |
 
 ### search_case
 
@@ -269,7 +270,7 @@ Generic add: any kind/subkind, or a new version of ``item_id`` (text or content_
 
 - graph: exploration_ref (exploration_id); snapshot/derived (content_json
 
-{nodes: [{id, type, properties}], edges: [{id, source, target, type, properties}]}); selection (the same shape, every edge between listed nodes; "unified": true when the ids are the case's unified ids from get_graph); view (how the canvas looks, no data: {"filters": {"sources": [item ids], "roles": [], "tags": [], "groups": [group annotation ids], "types": [node types], "window": [start_ms, end_ms] | null}, "layout": "force" | "hierarchical" | …, "groups_closed": [group ids]}); sketch (nodes and edges drawn by hand, one "Manual additions" item per case: {"unified": true, nodes, edges}; nodes need a type, edges an id and a type, and both ends in the sketch; a node already on the canvas is a stub {id: its unified id, type, properties: {}}). A wrong shape is INVALID_CONTENT.
+{nodes: [{id, type, properties}], edges: [{id, source, target, type, properties}]}); selection (the same shape, every edge between listed nodes; "unified": true when the ids are the case's unified ids from get_graph); view (how the canvas looks, no data: {"filters": {"sources": [item ids], "roles": [], "tags": [], "groups": [group annotation ids], "types": [node types], "window": [start_ms, end_ms] | null}, "layout": "force" | "hierarchical" | …, "groups_closed": [group ids]}); sketch (nodes and edges drawn by hand, one "Manual additions" item per case: {"unified": true, nodes, edges}; nodes need a type, edges an id and a type, and both ends in the sketch; a node already on the canvas is a stub {id: its unified id, type, properties: {}}). snapshot/derived/selection/sketch content may carry a top-level "style" (the same keys as a style preset + focus_node_id) so the case shows the graph as it looked. A wrong shape is INVALID_CONTENT.
 
 - table: csv text with mapping {as: graph | enrichment, spec}; result or
 
@@ -318,7 +319,7 @@ Human twin: `GET /api/explorations`, `GET /api/graph-contexts/{context_id}/explo
 
 ### get_exploration
 
-One exploration: title, context, graph_query, revision, last_change and its graph as the person sees it (the saved snapshot with their own layer on top), each node and edge with ``origin`` snapshot | layer. ``offset``/``limit`` page nodes and edges alike; ``node_count`` and ``edge_count`` are the whole. ``materialized`` false: nothing is saved yet and the page loads the context's default view.
+One exploration: title, context, graph_query, revision, last_change, ``look`` (its style, labels and layout: the style-preset keys it carries) and its graph as the person sees it (the saved snapshot with their own layer on top), each node and edge with ``origin`` snapshot | layer. ``offset``/``limit`` page nodes and edges alike; ``node_count`` and ``edge_count`` are the whole. ``materialized`` false: nothing is saved yet and the page loads the context's default view.
 
 Human twin: `GET /api/explorations/{exploration_id}`, `GET /api/explorations/{exploration_id}/snapshot`, `GET /api/explorations/{exploration_id}/overlay`
 
@@ -330,7 +331,7 @@ Human twin: `GET /api/explorations/{exploration_id}`, `GET /api/explorations/{ex
 
 ### create_exploration
 
-A new exploration in a readable context, saved with its graph: ``graph_query`` (Cypher, or SQL on a SQL context) runs now and its answer is the graph; ``nodes`` [{id, type, properties}] and ``edges`` [{id?, source, target, type, properties}] are added on top (or are the whole graph without a query). With neither it opens on the context's default view. ``investigation_id`` also attaches it to that case as a live reference. Returns ``url`` for the person to open.
+A new exploration in a readable context, saved with its graph: ``graph_query`` (Cypher, or SQL on a SQL context) runs now and its answer is the graph; ``nodes`` [{id, type, properties}] and ``edges`` [{id?, source, target, type, properties}] are added on top (or are the whole graph without a query). With neither it opens on the context's default view. ``investigation_id`` also attaches it to that case as a live reference. ``focus_node_id`` is the node the page opens on. ``look`` is how it is drawn: the keys of a style preset — ``nodeTypeColors`` and ``edgeTypeColors`` {type: "#rrggbb"}, ``nodeTypeIcons`` / ``edgeTypeIcons`` {type: icon name}, ``textFormat`` {defaults: {nodeTemplate, edgeTemplate}, rules: [...]} for the labels, ``aesthetics``, ``layout_algorithm``, ``layout_mode_config``, ``behaviors``, ``property_visibility`` (see a person's exploration through get_exploration for the shapes). Returns ``url`` for the person to open.
 
 Human twin: `POST /api/graph-contexts/{context_id}/explorations`, `POST /api/investigations/{investigation_id}/items`
 
@@ -342,10 +343,12 @@ Human twin: `POST /api/graph-contexts/{context_id}/explorations`, `POST /api/inv
 | `nodes` | list of object |  | null |
 | `edges` | list of object |  | null |
 | `investigation_id` | uuid |  | null |
+| `focus_node_id` | string |  | null |
+| `look` | object |  | null |
 
 ### edit_exploration
 
-Change an exploration's graph in place, in one atomic batch, in this order: ``replace`` (drop every node and edge, the person's layer too: a brand-new graph under the same id) → ``remove_node_ids`` (deleted, with their edges; for good, from the saved graph and the layer) → ``remove_edge_ids`` → ``add_nodes`` [{id, type, properties}] (an id already there gets the type and properties given) → ``add_edges`` [{id?, source, target, type, properties}] (both ends must exist after the batch) → ``set_properties`` [{id, kind: node|edge, properties, unset: [keys]}]. Ids match exactly, else case-insensitively. Give the ``revision`` you read as ``expected_revision`` to be refused (EXPLORATION_CHANGED) instead of overwriting a newer save. A page with the exploration open picks the change up within seconds.
+Change an exploration's graph in place, in one atomic batch, in this order: ``replace`` (drop every node and edge, the person's layer too: a brand-new graph under the same id) → ``remove_node_ids`` (deleted, with their edges; for good, from the saved graph and the layer) → ``remove_edge_ids`` → ``add_nodes`` [{id, type, properties}] (an id already there gets the type and properties given) → ``add_edges`` [{id?, source, target, type, properties}] (both ends must exist after the batch) → ``set_properties`` [{id, kind: node|edge, properties, unset: [keys]}]. Ids match exactly, else case-insensitively. Give the ``revision`` you read as ``expected_revision`` to be refused (EXPLORATION_CHANGED) instead of overwriting a newer save. A page with the exploration open picks the change up within seconds. ``focus_node_id`` sets the node the page opens on ("" clears it). ``look`` changes how it is drawn — the same keys as in create_exploration (colors, icons, ``textFormat`` for the labels, layout, behaviors, …): only the keys given change, a key given as null goes back to its default; the graph may stay as it is. A case showing the exploration takes the new look at its next refresh.
 
 Human twin: `PUT /api/explorations/{exploration_id}`, `PUT /api/explorations/{exploration_id}/overlay`
 
@@ -360,6 +363,8 @@ Human twin: `PUT /api/explorations/{exploration_id}`, `PUT /api/explorations/{ex
 | `replace` | boolean |  | `false` |
 | `title` | string |  | null |
 | `expected_revision` | integer |  | null |
+| `focus_node_id` | string |  | null |
+| `look` | object |  | null |
 
 ### expand_exploration
 

@@ -29,6 +29,7 @@ vi.mock('@/services/api', () => ({
     updateInvestigation: vi.fn(async (_id: string, patch: Record<string, unknown>) => ({
       id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, shared_with: [], tags: [], state: {}, ...patch,
     })),
+    updateInvestigationItem: vi.fn(async (_id: string, itemId: string, patch: Record<string, unknown>) => ({ ...item(itemId, 'c1'), ...patch })),
   },
 }))
 vi.mock('@/components/GraphCanvas3D.vue', () => ({ default: { render: () => null } }))
@@ -79,6 +80,8 @@ const stubs = {
   RouterLink: { template: '<a><slot /></a>' },
   GraphCanvas3D: true,
   LayoutPanel: true,
+  // The footer (Save look) is the view's; the tabs are tested on their own.
+  LookPanel: { template: '<div data-testid="look-panel-stub"><slot name="footer" /></div>' },
   AddItemsPopover: true,
   FileImportWizard: true,
   CaseSettingsDrawer: true,
@@ -299,5 +302,73 @@ describe('InvestigationView', () => {
     // enhancedNodes: the two members collapse into one cluster node beside x@c2
     expect(graph.enhancedNodes.map((n) => n.node_id).sort()).toEqual(['group:g1', 'x@c2'])
     expect(getByTestId('chip-groups').textContent).toContain('group')
+  })
+
+  describe('the look of the canvas', () => {
+    const RED = { nodeTypeColors: { T: '#ff0000' } }
+    const BLUE = { nodeTypeColors: { T: '#0000ff' } }
+    const withLook = (ids: string[], look: object | null) => ({ ...snapshot(ids), look })
+
+    it('the look saved on the item wins over the exploration\'s; without any, the stock look (nothing leaks) and small case nodes', async () => {
+      vi.mocked(api.getInvestigationItems).mockResolvedValue([{ ...item('s1', 'c1'), state: { look: RED } }, item('s2', 'c2')] as any)
+      vi.mocked(api.getInvestigationItemSnapshot).mockImplementation(async (_i, sid) => (sid === 's1' ? withLook(['a', 'b'], BLUE) : snapshot(['x'])) as any)
+      const graph = useGraphStore()
+      // What the previous page left behind must not show on the case canvas.
+      graph.nodeTypeColors = new Map([['T', '#123456']])
+      graph.updateAesthetics({ nodeSize: 14 })
+      const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+      await flushPromises()
+      expect(graph.nodeTypeColors.get('T')).toBe('#ff0000')
+
+      graph.positionsResetRequested = false
+      await fireEvent.click(getByTestId('legend-item-s2'))
+      await flushPromises()
+      expect(graph.nodeTypeColors.size).toBe(0)
+      expect(graph.aesthetics.nodeSize).toBe(5)
+    })
+
+    it('the exploration\'s look applies to its item, re-applies at a new revision, and arms the default focus with the unified id', async () => {
+      vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1')] as any)
+      vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValue({ ...withLook(['a', 'b'], { ...BLUE, focus_node_id: 'a' }), exploration: { state: { revision: 1 } } } as any)
+      render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+      await flushPromises()
+      const graph = useGraphStore()
+      const store = useInvestigationStore()
+      expect(graph.nodeTypeColors.get('T')).toBe('#0000ff')
+      expect(graph.pendingFocusNodeId).toBe('a@c1')
+
+      // A live refresh (syncLive) replaces the source at a new revision with a new look.
+      graph.freshLayoutRequested = false
+      store.sourceGraphs = store.sourceGraphs.map((g) => ({ ...g, look: RED, state: { revision: 2 } as any }))
+      await flushPromises()
+      expect(graph.nodeTypeColors.get('T')).toBe('#ff0000')
+      expect(graph.freshLayoutRequested).toBe(false) // colors only: positions stay
+    })
+
+    it('"All graphs": the first canvas item with a look decides', async () => {
+      vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: { canvas_items: 'all' }, shared_with: [], tags: [] } as any)
+      vi.mocked(api.getInvestigationItemSnapshot).mockImplementation(async (_i, sid) => (sid === 's1' ? snapshot(['a', 'b']) : withLook(['x'], BLUE)) as any)
+      render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+      await flushPromises()
+      expect(useGraphStore().nodeTypeColors.get('T')).toBe('#0000ff')
+    })
+
+    it('the Look panel opens from the strip; Save look stores the look on the one graph shown, and is off on a unified canvas', async () => {
+      const { getByTestId, queryByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+      await flushPromises()
+      expect(queryByTestId('panel-look')).toBeNull()
+      await fireEvent.click(getByTestId('workspace-look-btn'))
+      expect(getByTestId('panel-look')).toBeTruthy()
+
+      await fireEvent.click(getByTestId('style-save-look'))
+      await flushPromises()
+      expect(api.updateInvestigationItem).toHaveBeenCalledWith('inv', 's1', { state: { look: expect.objectContaining({ aesthetics: expect.anything(), layout_algorithm: 'force' }) } })
+      expect((api.updateInvestigationItem as any).mock.calls[0][2].state.look).not.toHaveProperty('focus_node_id')
+
+      await fireEvent.click(getByTestId('canvas-all'))
+      await flushPromises()
+      expect((getByTestId('style-save-look') as HTMLButtonElement).disabled).toBe(true)
+      expect(getByTestId('style-save-look-reason').textContent).toContain('one graph')
+    })
   })
 })

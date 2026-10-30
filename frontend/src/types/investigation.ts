@@ -1,5 +1,5 @@
 /** Investigations v2 (cases): see docs/dev/plans/investigation/05-plano-v2.md §1. */
-import type { EdgeSemantics, ExplorationState, GraphSnapshot, IdentityKey, IdentityNormalize, TemplateParameter } from '@/types/graph';
+import type { EdgeSemantics, ExplorationState, GraphSnapshot, IdentityKey, IdentityNormalize, TemplateParameter, StylePresetSettings } from '@/types/graph';
 import type { MappingReport } from '@/utils/fileMapping';
 
 /** 06 §1: a case closes only by a decision that closes it; reopening goes back to analysis. */
@@ -134,8 +134,19 @@ export interface TableChartSpec {
   series: string[];
 }
 
+/**
+ * How a graph item is shown in a case (`item.state.look`, and the `style` a frozen
+ * item embeds): the style-preset block plus the node the canvas opens on.
+ * `focus_node_id` is an id local to the item (its own snapshot), mapped to the
+ * case's unified id when applied. Absent: inherit the source's focus; null: none.
+ */
+export interface GraphLook extends StylePresetSettings {
+  focus_node_id?: string | null;
+}
+
 export interface ItemState {
   chart?: TableChartSpec | null;
+  look?: GraphLook | null;
 }
 
 export interface CaseTypeTraceDefaults {
@@ -413,6 +424,8 @@ export interface ItemSnapshotPayload {
   title: string;
   context_id: string | null;
   snapshot: GraphSnapshot | null;
+  /** The source's own look: the exploration's style block, or the `style` a frozen item embeds. */
+  look?: GraphLook | null;
   identity_keys: IdentityKey[];
   edge_semantics: EdgeSemantics | null;
   exploration?: { id: string; title: string; state: ExplorationState } | null;

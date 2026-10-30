@@ -5,6 +5,7 @@
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION } from '../fixtures/mock-data';
 import { seedContexts, seedExplorations, seedInvestigations } from '../helpers/api-mocks';
+import { waitForNodeVisualState } from '../helpers/graph-hooks';
 
 const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 const node = (id: string, props: Record<string, unknown> = {}) => ({ id, type: 'Conta', properties: { titular: id, ...props } });
@@ -64,7 +65,7 @@ test('the case page shows what an agent added and the new graph of its explorati
     accessible: true, pinned: [], created_at: now,
   };
   const snapshots: Record<string, any> = {
-    'src-1': { exploration: { id: 'exp-1', title: 'Contas', state: { revision: 1 } }, snapshot: { nodes: [node('a'), node('b')], edges: [] } },
+    'src-1': { exploration: { id: 'exp-1', title: 'Contas', state: { revision: 1 } }, snapshot: { nodes: [node('a'), node('b')], edges: [] }, look: { nodeTypeColors: { Conta: '#0000ff' } } },
   };
   await seedContexts(page, [{ ...MOCK_CONTEXT, id: 'ctx-l', title: 'Pix' }]);
   const { events, material } = await seedInvestigations(page, [CASE], { 'inv-l': [ITEM] }, [], snapshots);
@@ -80,19 +81,22 @@ test('the case page shows what an agent added and the new graph of its explorati
 
   await page.goto('/investigations/inv-l');
   await expect(page.getByTestId('workspace-status')).toContainText('2 nodes', { timeout: 15_000 });
+  expect((await waitForNodeVisualState(page, 'a@ctx-l')).color.toLowerCase()).toBe('#0000ff');
 
   // The agent adds a note and grows the exploration (journalled as an agent).
   material.get('inv-l')!.push({
     ...ITEM, id: 'note-1', kind: 'note', subkind: 'free', title: 'Nota do agente', exploration_id: null, context_id: null,
     author_kind: 'agent', current_version: 1,
   });
-  snapshots['src-1'] = { exploration: { id: 'exp-1', title: 'Contas', state: { revision: 2 } }, snapshot: { nodes: [node('a'), node('b'), node('c')], edges: [] } };
+  // …and restyled it: the case canvas takes the new look without a reload.
+  snapshots['src-1'] = { exploration: { id: 'exp-1', title: 'Contas', state: { revision: 2 } }, snapshot: { nodes: [node('a'), node('b'), node('c')], edges: [] }, look: { nodeTypeColors: { Conta: '#ff0000' } } };
   revision = 2;
   const list = events.get('inv-l') ?? [];
   list.push({ id: 'ev-agent', at: new Date().toISOString(), actor_email: 'e2e@test.com', actor_kind: 'agent', agent_name: 'claude', kind: 'exploration.changed', payload: { title: 'Contas', added_nodes: 1 } });
   events.set('inv-l', list);
 
   await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 6_000 });
+  await expect.poll(async () => (await waitForNodeVisualState(page, 'a@ctx-l')).color.toLowerCase(), { timeout: 10_000 }).toBe('#ff0000');
   await expect(page.getByTestId('case-items-panel')).toContainText('Nota do agente');
   await expect(page.locator('.toast')).toContainText('claude updated the case');
 });

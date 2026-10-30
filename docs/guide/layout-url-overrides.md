@@ -95,6 +95,13 @@ field:
   refused even when the name exists elsewhere in the app's type system —
   only algorithms with a real implementation are accepted.
 
+## Not on the case page
+
+The case canvas reads no URL parameters: its layout, like its style and
+labels, is the look saved on the graph item (or the exploration's own). Set
+the layout in the case's **Layout** panel and keep it with **Save look** in
+the Look panel. See [Investigations](./investigations.md#the-workspace).
+
 ## Precedence and composition
 
 Overrides apply **after** the style preset, and that order matters: applying

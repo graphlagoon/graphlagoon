@@ -92,7 +92,8 @@ export function useSketch() {
     if (item) {
       await store.addVersion(item.id, { content_json: content });
     } else {
-      const created = await store.addItem({ kind: 'graph', subkind: 'sketch', title: SKETCH_ITEM_TITLE, content_json: content });
+      // A new sketch keeps the look of the canvas it was drawn on; later versions keep what is stored.
+      const created = await store.addItem({ kind: 'graph', subkind: 'sketch', title: SKETCH_ITEM_TITLE, content_json: { ...content, style: graph.buildStylePreset() } });
       // Drawn over the graphs on the canvas: its stubs are their nodes.
       if (created) void store.toggleCanvas(created.id, true);
     }

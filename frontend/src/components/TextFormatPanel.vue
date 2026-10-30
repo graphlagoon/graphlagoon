@@ -1,7 +1,7 @@
 <template>
-  <div class="text-format-panel">
-    <div class="panel-header">
-      <h3>Labels</h3>
+  <div class="text-format-panel" :class="{ embedded: props.embedded }">
+    <div class="panel-header" :class="{ embedded: props.embedded }">
+      <h3 v-if="!props.embedded">Labels</h3>
       <div class="header-actions">
         <button
           class="btn-icon-only btn-skill-ai"
@@ -13,7 +13,7 @@
           <Bot :size="16" />
         </button>
         <button class="btn-icon-only" @click="showHelp = true" title="Help"><HelpCircle :size="16" /></button>
-        <button class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
+        <button v-if="!props.embedded" class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
     </div>
 
@@ -202,6 +202,9 @@ import TemplatePreviewInline from './TemplatePreviewInline.vue';
 import { X, HelpCircle, Bot } from 'lucide-vue-next';
 import { useToast } from '@/composables/useToast';
 
+/** Inside the Look panel: no title or close button of its own (the host has them). */
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
+
 const emit = defineEmits<{
   (e: 'close'): void;
 }>();
@@ -313,6 +316,17 @@ function deleteRule(ruleId: string) {
   border-right: 1px solid var(--border-color);
   overflow-y: auto;
   padding: 16px;
+}
+
+.text-format-panel.embedded {
+  width: auto;
+  border-right: 0;
+  padding: 0;
+}
+
+.panel-header.embedded {
+  justify-content: flex-end;
+  margin-bottom: 8px;
 }
 
 .panel-header {

@@ -176,6 +176,14 @@ Deleting is narrower on purpose: ownership lives inside the preset file
 itself, per preset rather than per context, so one person's saved look cannot
 be thrown away by another — not even by whoever owns the context.
 
+## In a case
+
+A case canvas has no URL look: there is no `?style=` on the case page. The
+**Presets** tab of its Look panel lists the presets of the graph's context and
+applies one straight to the canvas; **Save look** then stores it on the graph
+item, where it stays for everyone who opens the case. See
+[Investigations](./investigations.md#the-workspace).
+
 ## Composing with other features
 
 The URL parameters compose, so one link can pin the data and its look
