@@ -196,9 +196,19 @@ it writes, or both; `edit_exploration` changes the graph in one atomic batch
 `expand_exploration`, `query_into_exploration` and `enrich_exploration` bring
 neighbours, a query's answer or an enrichment table's columns in.
 
+The **look** is the agent's too: `create_exploration(look=…)` and
+`edit_exploration(look=…)` take the keys of a [style preset](./style-presets.md)
+— `nodeTypeColors`, `edgeTypeColors`, `nodeTypeIcons`, `edgeTypeIcons`,
+`textFormat` (the [label](./labels.md) templates and rules), `aesthetics`,
+`layout_algorithm`, `layout_mode_config`, `behaviors`, `property_visibility` —
+plus `focus_node_id`, the node the page opens on. Only the keys given change; a
+key given as `null` goes back to its default; the graph may stay as it is.
+`get_exploration` reads the look back. In a [case](./investigations.md#the-workspace),
+`update_item(look=…)` does the same for one graph item, over the exploration's.
+
 Nothing is recreated: the change is written to the exploration's saved graph
-under **the same id**, so its title, view, style and shares stay, and every
-link and case that references it shows the new graph.
+under **the same id**, so its title, shares and whatever the look does not name
+stay, and every link and case that references it shows the new graph.
 
 | | |
 |---|---|
