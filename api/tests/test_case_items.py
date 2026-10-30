@@ -336,3 +336,52 @@ def test_journal_reads_newest_first_with_paging(env):
     assert [e["id"] for e in newest] == [e["id"] for e in reversed(oldest_first)][:2]
     older = client.get(f"{url}/events", params={"order": "desc", "limit": 2, "after": newest[-1]["id"]}, headers=h(OWNER)).json()
     assert [e["id"] for e in older] == [e["id"] for e in reversed(oldest_first)][2:4]
+
+
+def test_a_graph_item_keeps_its_look_and_the_snapshot_route_tells_the_source_look(env):
+    client, url, store, exp, _ = env
+    ref = client.post(f"{url}/items", json={"kind": "graph", "subkind": "exploration_ref", "exploration_id": str(exp.id)}, headers=h(OWNER)).json()
+    # The live reference reports only the look keys of the exploration's state, never its query or data.
+    exp.state.update({"graph_query": "MATCH (n) RETURN n", "nodeTypeColors": {"Person": "#f00"},
+                      "textFormat": {"rules": [], "defaults": {"nodeTemplate": "{node_id}"}}, "focus_node_id": "p1"})
+    part = client.get(f"{url}/items/{ref['id']}/snapshot", headers=h(OWNER)).json()
+    assert part["look"] == {"nodeTypeColors": {"Person": "#f00"}, "textFormat": {"rules": [], "defaults": {"nodeTemplate": "{node_id}"}}, "focus_node_id": "p1"}
+    assert part["snapshot"] == SNAPSHOT and part["exploration"]["state"]["graph_query"] == "MATCH (n) RETURN n"
+
+    # The item's own look (view state, no version) round-trips through GET and the list.
+    look = {"nodeTypeColors": {"Person": "#0f0", "Account": "#00f"}, "aesthetics": {"nodeSize": 3}, "focus_node_id": "c1"}
+    r = client.patch(f"{url}/items/{ref['id']}", json={"state": {"look": look}}, headers=h(OWNER))
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == {"look": look} and r.json()["current_version"] == 0
+    assert client.get(f"{url}/items/{ref['id']}", headers=h(OWNER)).json()["state"] == {"look": look}
+    [listed] = client.get(f"{url}/items?kind=graph", headers=h(OWNER)).json()
+    assert listed["state"]["look"]["focus_node_id"] == "c1"
+    assert client.get(f"{url}/items/{ref['id']}/snapshot", headers=h(OWNER)).json()["look"]["focus_node_id"] == "p1"  # the source's
+    assert client.patch(f"{url}/items/{ref['id']}", json={"state": {"look": None}}, headers=h(OWNER)).json()["state"] == {"look": None}
+    bad = client.patch(f"{url}/items/{ref['id']}", json={"state": {"look": {"focus_node_id": ["p1"]}}}, headers=h(OWNER))
+    assert bad.status_code == 422
+    assert client.patch(f"{url}/items/{ref['id']}", json={"state": {"zoom": 2}}, headers=h(OWNER)).status_code == 422
+
+    # Only a graph item has a look; a mapped table has no source look.
+    table = _upload(client, url, "pix.csv", CSV).json()
+    bad = client.patch(f"{url}/items/{table['id']}", json={"state": {"look": look}}, headers=h(OWNER))
+    assert bad.status_code == 422 and bad.json()["detail"]["error"]["message"] == "Only a graph item has a look"
+    assert client.patch(f"{url}/items/{table['id']}", json={"mapping": {"as": "graph", "spec": MAPPING}}, headers=h(OWNER)).status_code == 200
+    assert client.get(f"{url}/items/{table['id']}/snapshot", headers=h(OWNER)).json()["look"] is None
+    note = client.post(f"{url}/items", json={"kind": "note", "subkind": "free", "content": "x", "state": {"look": look}}, headers=h(OWNER))
+    assert note.status_code == 422 and note.json()["detail"]["error"]["message"] == "Only a graph item has a look"
+
+    # A selection freezes its look in the content; the route hands it back as the look.
+    style = {"edgeTypeColors": {"HOLDS": "#888"}, "layout_algorithm": "hierarchical", "focus_node_id": "p1"}
+    selection = {"nodes": SNAPSHOT["nodes"], "edges": SNAPSHOT["edges"], "style": style}
+    r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "selection", "title": "Sel", "content_json": selection}, headers=h(OWNER))
+    assert r.status_code == 201, r.text
+    part = client.get(f"{url}/items/{r.json()['id']}/snapshot", headers=h(OWNER)).json()
+    assert part["look"] == style and part["snapshot"] == {"nodes": SNAPSHOT["nodes"], "edges": SNAPSHOT["edges"]}
+
+    # The exploration's focus node round-trips through PUT/GET as any other state key.
+    state = client.get(f"/api/explorations/{exp.id}", headers=h(OWNER)).json()["state"]
+    r = client.put(f"/api/explorations/{exp.id}", json={"state": {**state, "focus_node_id": "c1"}}, headers=h(OWNER))
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/explorations/{exp.id}", headers=h(OWNER)).json()["state"]["focus_node_id"] == "c1"
+    assert client.get(f"{url}/items/{ref['id']}/snapshot", headers=h(OWNER)).json()["look"]["focus_node_id"] == "c1"

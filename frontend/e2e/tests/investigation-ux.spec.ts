@@ -5,7 +5,8 @@
  * keeps its filters across Back, and Escape closes the menu and the settings drawer.
  */
 import { test, expect } from '../fixtures/test-fixtures';
-import { seedInvestigations } from '../helpers/api-mocks';
+import { seedInvestigations, seedStylePresets } from '../helpers/api-mocks';
+import { waitForLayoutDone, waitForNodeVisualState } from '../helpers/graph-hooks';
 
 const now = new Date().toISOString();
 const CASE = {
@@ -151,5 +152,102 @@ test.describe('Investigation workspace UX (UX-1)', () => {
     await expect(page.getByTestId('case-settings')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('case-settings')).toHaveCount(0);
+  });
+
+  test('the canvas wears the look saved on the item over its exploration\'s, and the stock look when there is none', async ({ authenticatedPage: page }) => {
+    const snapshots = structuredClone(SNAPSHOTS) as Record<string, any>;
+    snapshots['g-a'].look = { nodeTypeColors: { Account: '#0000ff' } }; // the exploration's
+    const items = structuredClone(ITEMS) as any[];
+    items[0].state = { look: { nodeTypeColors: { Account: '#ff0000' } } }; // the case's
+    await seedInvestigations(page, [structuredClone(CASE)], { 'inv-u': items }, [], snapshots);
+    await page.goto('/investigations/inv-u');
+    await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 15_000 });
+    expect((await waitForNodeVisualState(page, 'a1@ctx-a')).color.toLowerCase()).toBe('#ff0000');
+
+    // Bank B has no look of its own: the stock palette, not Bank A's red.
+    await page.getByTestId('legend-item-g-b').click();
+    await expect(page.getByTestId('workspace-status')).toContainText('2 nodes');
+    expect((await waitForNodeVisualState(page, 'b1@ctx-b')).color.toLowerCase()).not.toBe('#ff0000');
+  });
+
+  test('the Look panel applies a preset of the graph\'s context and saves it on the item; off on a unified canvas', async ({ authenticatedPage: page }) => {
+    await seedInvestigations(page, [structuredClone(CASE)], { 'inv-u': structuredClone(ITEMS) }, [], SNAPSHOTS);
+    await seedStylePresets(page, 'ctx-a', { investigacao: { nodeTypeColors: { Account: '#00ff00' }, layout_algorithm: 'force' } });
+    await page.goto('/investigations/inv-u');
+    await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 15_000 });
+
+    await page.getByTestId('workspace-look-btn').click();
+    await expect(page.getByTestId('panel-look')).toBeVisible();
+    await expect(page.getByTestId('look-caption')).toContainText('Default look');
+    await page.getByTestId('look-tab-presets').click();
+    await page.getByTestId('style-preset-apply-investigacao').click();
+    await expect.poll(async () => (await waitForNodeVisualState(page, 'a1@ctx-a')).color.toLowerCase(), { timeout: 15_000 }).toBe('#00ff00');
+
+    const patches: any[] = [];
+    page.on('request', (r) => { if (r.method() === 'PATCH' && r.url().includes('/items/g-a')) patches.push(r.postDataJSON()); });
+    await page.getByTestId('style-save-look').click();
+    await expect.poll(() => patches.length).toBe(1);
+    expect(patches[0].state.look.nodeTypeColors).toEqual({ Account: '#00ff00' });
+    await expect(page.getByTestId('look-caption')).toContainText('Bank A transfers');
+
+    // The saved look survives a reload: the mock keeps the patched item.
+    await page.reload();
+    await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 15_000 });
+    expect((await waitForNodeVisualState(page, 'a1@ctx-a')).color.toLowerCase()).toBe('#00ff00');
+
+    await page.getByTestId('canvas-all').click();
+    await page.getByTestId('workspace-look-btn').click();
+    await expect(page.getByTestId('style-save-look')).toBeDisabled();
+    await expect(page.getByTestId('style-save-look-reason')).toContainText('one graph');
+  });
+
+  test('a default focus opens the graph selected and centred on that node, without a click', async ({ authenticatedPage: page }) => {
+    const items = structuredClone(ITEMS) as any[];
+    items[0].state = { look: { focus_node_id: 'a2' } };
+    await seedInvestigations(page, [structuredClone(CASE)], { 'inv-u': items }, [], SNAPSHOTS);
+    await page.goto('/investigations/inv-u');
+    await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 15_000 });
+    await expect(page.getByTestId('inspector-title')).toHaveText('a2', { timeout: 15_000 });
+    // The hook returns null once the focus landed (undefined would mean no hook at all).
+    await expect.poll(() => page.evaluate(() => (window as any).__GRAPH_PENDING_FOCUS__?.()), { timeout: 15_000 }).toBeNull();
+    // The inspector offers to drop it; a node of the graph can take its place.
+    await expect(page.getByTestId('inspector-default-focus')).toContainText('✓');
+  });
+
+  test('clicking an edge shows its details in the inspector and follows the money from it', async ({ authenticatedPage: page }) => {
+    const snapshots = structuredClone(SNAPSHOTS) as Record<string, any>;
+    snapshots['g-a'].snapshot.edges = [{ id: 'e1', source: 'a1', target: 'a2', type: 'TRANSFER', properties: { amount: 1500, memo: 'rent' } }];
+    await seedInvestigations(page, [structuredClone(CASE)], { 'inv-u': structuredClone(ITEMS) }, [], snapshots);
+    await page.goto('/investigations/inv-u');
+    await expect(page.getByTestId('workspace-status')).toContainText('1 edges', { timeout: 15_000 });
+    await waitForLayoutDone(page);
+    await page.evaluate(() => (window as any).__GRAPH_SELECT_EDGE__('g-a:e1'));
+    const title = page.getByTestId('inspector-edge-title');
+    await expect(title).toContainText('a1');
+    await expect(title).toContainText('a2');
+    await expect(page.getByTestId('workspace-inspector')).toContainText('memo');
+    await expect(page.getByTestId('inspector-edge-source')).toHaveText('Bank A transfers');
+    await page.getByTestId('inspector-edge-dst').click();
+    await expect(page.getByTestId('inspector-title')).toHaveText('a2');
+  });
+
+  test('nothing over the canvas overlaps: the strip, the panels and the analysis bar keep to their own space', async ({ authenticatedPage: page }) => {
+    await seedInvestigations(page, [structuredClone(CASE)], { 'inv-u': structuredClone(ITEMS) }, [], SNAPSHOTS);
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }]) {
+      await page.setViewportSize(viewport);
+      await page.goto('/investigations/inv-u');
+      await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 15_000 });
+      await page.getByTestId('workspace-look-btn').click();
+      await page.getByTestId('workspace-layout-btn').click();
+      const box = async (testid: string) => (await page.getByTestId(testid).boundingBox())!;
+      const bar = await page.locator('[data-testid="analysis-bar"] .buttons').boundingBox();
+      const look = await box('panel-look');
+      const strip = await box('case-filter-chips');
+      expect(bar).not.toBeNull();
+      // The panel ends above the analysis bar and starts below the strip.
+      expect(look.y + look.height).toBeLessThanOrEqual(bar!.y + 1);
+      expect(look.y).toBeGreaterThanOrEqual(strip.y + strip.height - 1);
+      await expect(page.getByTestId('controls-hint')).toHaveCount(0);
+    }
   });
 });

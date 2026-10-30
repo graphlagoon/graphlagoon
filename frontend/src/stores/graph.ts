@@ -140,7 +140,7 @@ const DEFAULT_BEHAVIORS = {
 };
 
 /** 3D Force-Directed layout defaults (D3-Force only). Fresh object per call — never share by reference. */
-function defaultForce3DSettings() {
+export function defaultForce3DSettings() {
   return {
     // D3-Force simulation settings
     d3AlphaDecay: 0.0228,      // Cooling rate (lower = slower stabilization)
@@ -493,6 +493,12 @@ export const useGraphStore = defineStore('graph', () => {
     center_x: 0,
     center_y: 0,
   });
+  /**
+   * A saved camera the canvas still has to restore: set by `loadExploration`
+   * when the exploration carries one, consumed by the canvas's `frame()` once
+   * the graph is on screen (a pending default focus wins over it).
+   */
+  const pendingViewport = ref<ViewportState | null>(null);
   const layoutAlgorithm = ref<LayoutAlgorithm>('force');
 
   // Per-layout-mode parameters (persisted with the exploration)
@@ -562,8 +568,10 @@ export const useGraphStore = defineStore('graph', () => {
     return !allowed || allowed.includes(key);
   }
 
-  // Aesthetic settings (visual appearance)
-  const aesthetics = ref({
+  // Aesthetic settings (visual appearance). A factory, so a reset (or a case
+  // canvas that must not inherit the previous page's look) gets a fresh copy.
+  function defaultAesthetics() {
+    return {
     // Common settings
     showArrows: true,         // Show directional arrows on edges
     arrowSize: 1.0,           // Arrow size multiplier (0.5 to 3.0)
@@ -584,7 +592,9 @@ export const useGraphStore = defineStore('graph', () => {
     nodeLabelPosition3D: 'right' as 'top' | 'right' | 'left', // Label placement relative to node
     // Details display
     hideEmptyValues: true,    // Omit empty properties/metrics in Open details & the side panel
-  });
+    };
+  }
+  const aesthetics = ref(defaultAesthetics());
 
   // Color scheme for node/edge types (custom colors override default palette)
   const nodeTypeColors = ref<Map<string, string>>(new Map());
@@ -650,6 +660,19 @@ export const useGraphStore = defineStore('graph', () => {
 
   // Node positions (pinned nodes)
   const nodePositions = ref<Map<string, { x: number; y: number; pinned: boolean }>>(new Map());
+
+  /**
+   * The exploration's default focus: the node it opens on, selected and framed
+   * (saved as `state.focus_node_id`). Null: open fitted to the whole graph.
+   */
+  const focusNodeId = ref<string | null>(null);
+  /**
+   * A focus the canvas still has to land: set by a load (the exploration's
+   * default, a case item's), consumed by the canvas once the layout has settled
+   * and the node has a position. The canvas drops it when the node is not in
+   * the graph.
+   */
+  const pendingFocusNodeId = ref<string | null>(null);
 
   // Computed
   const selectedNode = computed(() => {
@@ -2426,7 +2449,10 @@ export const useGraphStore = defineStore('graph', () => {
    * load — and a graph loaded later inherits it, because this is store state,
    * not something derived per query.
    */
-  function applyStylePreset(settings: StylePresetSettings | undefined) {
+  function applyStylePreset(
+    settings: StylePresetSettings | undefined,
+    options: { freshLayout?: boolean } = {},
+  ) {
     if (!settings) return;
 
     // Style
@@ -2495,8 +2521,25 @@ export const useGraphStore = defineStore('graph', () => {
       );
     }
 
-    // A new layout only takes effect when the simulation restarts.
-    freshLayoutRequested.value = true;
+    // A new layout only takes effect when the simulation restarts. A caller
+    // that re-applies a look whose layout did not change (a live refresh, a
+    // case saving its look) passes `freshLayout: false`, so colors never
+    // scramble positions.
+    if (options.freshLayout ?? true) freshLayoutRequested.value = true;
+  }
+
+  /**
+   * Back to the stock look: what a graph with no saved style shows.
+   *
+   * `applyStylePreset({})` already clears the type maps, the labels, the
+   * layout, the force settings, the visual mapping and the property allowlist
+   * (a full replace: a field the preset omits resets); aesthetics are the one
+   * thing it leaves alone, so they are reset here. Behaviors stay, by the
+   * precedence chain defaults < server < context < panel.
+   */
+  function resetLook(options: { freshLayout?: boolean } = {}) {
+    aesthetics.value = defaultAesthetics();
+    applyStylePreset({}, options);
   }
 
   /**
@@ -2569,6 +2612,9 @@ export const useGraphStore = defineStore('graph', () => {
       // block a style preset stores, so the two can never describe the same
       // thing differently.
       ...buildStylePreset(),
+      // The default focus is the exploration's, not the preset's: a preset is
+      // a look for any graph of the context, a focus names one node.
+      focus_node_id: focusNodeId.value,
       community: communityStore.getState(),
       similarity: similarityStore.getState(),
     };
@@ -2586,7 +2632,9 @@ export const useGraphStore = defineStore('graph', () => {
 
   function fingerprintExplorationState(): string {
     try {
-      return JSON.stringify(getExplorationState());
+      // Moving the camera is not a change worth a dirty marker: the viewport
+      // is captured at save time, never edited.
+      return JSON.stringify({ ...getExplorationState(), viewport: undefined });
     } catch {
       // Never let a serialisation problem break the toolbar: an empty
       // fingerprint just means "cannot tell", handled as not-dirty below.
@@ -2933,6 +2981,11 @@ export const useGraphStore = defineStore('graph', () => {
       // Clear selections after loading
       selectedNodeIds.value.clear();
       selectedEdgeIds.value.clear();
+      // The default focus: the canvas selects and frames it once the layout settles.
+      focusNodeId.value = exploration.state.focus_node_id ?? null;
+      pendingFocusNodeId.value = focusNodeId.value;
+      // The saved camera (explorations saved before it existed carry no position: fit as before).
+      pendingViewport.value = viewport.value?.position ? { ...viewport.value } : null;
       // Baseline for the dirty marker: everything the exploration carries has
       // been applied by now, so what we read here is "as saved".
       markExplorationSaved();
@@ -3142,6 +3195,18 @@ export const useGraphStore = defineStore('graph', () => {
     egoLayoutStats.value = null;
     force3DSettings.value = defaultForce3DSettings();
     propertyVisibility.value = { nodeProperties: null, edgeProperties: null };
+    // The look belongs to the graph being left: a context switch or a case
+    // must not inherit the previous page's colors, icons or labels.
+    aesthetics.value = defaultAesthetics();
+    nodeTypeColors.value = new Map();
+    edgeTypeColors.value = new Map();
+    nodeTypeIcons.value = new Map();
+    edgeTypeIcons.value = new Map();
+    loadTextFormatState(undefined);
+    useMetricsStore().loadVisualMappingState(undefined);
+    focusNodeId.value = null;
+    pendingFocusNodeId.value = null;
+    pendingViewport.value = null;
     resetFilters();
     resetTranspileOptions();
   }
@@ -3193,6 +3258,9 @@ export const useGraphStore = defineStore('graph', () => {
     loadingMessage,
     freshLayoutRequested,
     positionsResetRequested,
+    focusNodeId,
+    pendingFocusNodeId,
+    pendingViewport,
     // Progressive load
     pendingPropertyNodeIds,
     nodePatchVersion,
@@ -3270,6 +3338,8 @@ export const useGraphStore = defineStore('graph', () => {
     saveStylePreset,
     buildStylePreset,
     applyStylePreset,
+    resetLook,
+    defaultAesthetics,
     expandFromNode,
     supportsExpand,
     investigationMode,

@@ -10,6 +10,7 @@ import {
   seedPrecomputedGraphs,
   seedGraphResponse,
 } from '../helpers/api-mocks';
+import { waitForNodeVisualState } from '../helpers/graph-hooks';
 
 // Kept WITHOUT property_visibility/behaviors on purpose: presets saved before
 // those fields existed must still apply cleanly (backward-compat guard).
@@ -42,16 +43,21 @@ const GRAPH_WITH_PROPS = {
   ],
 };
 
-/**
- * Presets open from a button inside the existing Style (aesthetics) panel — not
- * from a toolbar entry of their own, and not inline in the sidebar.
- */
+/** Presets are the Presets tab of the Look panel — no toolbar entry of their own. */
 async function openPresets(page: any) {
-  if (!(await page.getByTestId('style-preset-open').isVisible().catch(() => false))) {
-    await page.getByTitle('Style', { exact: true }).click();
+  if (!(await page.getByTestId('look-panel').isVisible().catch(() => false))) {
+    await page.getByTestId('toolbar-look').click();
   }
-  await page.getByTestId('style-preset-open').click();
-  await expect(page.getByTestId('style-preset-modal')).toBeVisible();
+  await page.getByTestId('look-tab-presets').click();
+  await expect(page.getByTestId('style-presets')).toBeVisible();
+}
+
+/** The Style tab of the Look panel (sliders, property visibility). */
+async function openStyleTab(page: any) {
+  if (!(await page.getByTestId('look-panel').isVisible().catch(() => false))) {
+    await page.getByTestId('toolbar-look').click();
+  }
+  await page.getByTestId('look-tab-style').click();
 }
 
 test.describe('Style presets', () => {
@@ -208,7 +214,7 @@ test.describe('Style presets', () => {
     await expect(page.getByTestId('style-preset-empty')).toBeVisible();
   });
 
-  test('presets open from the Style panel, not a second Style button', async ({
+  test('presets are a tab of the Look panel, not a second toolbar button', async ({
     authenticatedPage: page,
   }) => {
     await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
@@ -216,16 +222,14 @@ test.describe('Style presets', () => {
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
-    // Exactly one toolbar entry says "Style".
-    await expect(page.getByTitle('Style', { exact: true })).toHaveCount(1);
-
-    // Opening it shows sliders, not a preset list — that lives behind a button.
-    await page.getByTitle('Style', { exact: true }).click();
+    // One Look button; the Style tab shows sliders, not a preset list.
+    await expect(page.getByTestId('toolbar-look')).toHaveCount(1);
+    await page.getByTestId('toolbar-look').click();
     await expect(page.getByTestId('style-preset-list')).toHaveCount(0);
-    await expect(page.getByTestId('style-preset-open')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Nodes' })).toBeVisible();
 
-    await page.getByTestId('style-preset-open').click();
-    await expect(page.getByTestId('style-preset-modal')).toBeVisible();
+    await page.getByTestId('look-tab-presets').click();
+    await expect(page.getByTestId('style-presets')).toBeVisible();
     await expect(page.getByTestId('style-preset-item-investigacao')).toBeVisible();
   });
 
@@ -251,7 +255,8 @@ test.describe('Style presets', () => {
     );
 
     // The preset's behaviors landed too: Dim Hub defaults to on, preset turned it off.
-    await page.getByTitle('Behaviors').click();
+    await page.getByTestId('toolbar-look').click();
+    await page.getByTestId('look-tab-behaviors').click();
     await expect(
       page.locator('label', { hasText: 'Dim Hub' }).locator('input'),
     ).not.toBeChecked();
@@ -268,7 +273,7 @@ test.describe('Style presets', () => {
 
     // Limit node properties: checking the box seeds the full list, then
     // deselect "age" in the MultiSelect.
-    await page.getByTitle('Style', { exact: true }).click();
+    await openStyleTab(page);
     await page.getByTestId('property-visibility-node-toggle').check();
     await page.getByTestId('property-visibility-node').click();
     await page.getByRole('option', { name: 'age' }).click();
@@ -298,7 +303,7 @@ test.describe('Style presets', () => {
     await expect(drawer.locator('th', { hasText: 'age' })).toBeVisible();
   });
 
-  test('closing the modal leaves the applied style in place', async ({
+  test('closing the Look panel leaves the applied style in place', async ({
     authenticatedPage: page,
   }) => {
     await seedStylePresets(page, MOCK_CONTEXT.id, { investigacao: INVESTIGACAO });
@@ -308,52 +313,13 @@ test.describe('Style presets', () => {
 
     await openPresets(page);
     await page.getByTestId('style-preset-apply-investigacao').click();
-    await page.getByTestId('style-preset-close').click();
+    await page.getByTestId('look-close').click();
 
-    await expect(page.getByTestId('style-preset-modal')).toHaveCount(0);
+    await expect(page.getByTestId('look-panel')).toHaveCount(0);
     await expect(page.getByTestId('graph-status-style')).toContainText('investigacao');
   });
 });
 
-/**
- * The sphere/icon state of one node, read straight from graphData once the
- * graph holding it is built and laid out.
- *
- * Deliberately not rendering-dependent: `color` and `__iconColor` are plain JS
- * state written by updateVisuals(), so these assertions hold identically on a
- * GPU and on CI's software renderer.
- *
- * `__GRAPH_LAYOUT_DONE__` alone is not a readiness signal here: it turns true
- * on the initial (empty) mount and stays true while a large fresh load empties
- * the scene for its headless settle — on a slow runner that leaves seconds of
- * "done" over an empty graph. Waiting for the node itself closes that window.
- * The state is captured by the same poll that first sees the node, i.e. the
- * earliest post-swap state, so a regression that only heals on a later camera
- * idle still fails.
- */
-async function waitForNodeVisualState(page: Page, nodeId: string) {
-  try {
-    const handle = await page.waitForFunction(
-      (id) => {
-        const w = window as any;
-        if (!w.__GRAPH_LAYOUT_DONE__?.()) return null;
-        return w.__GRAPH_NODE_VISUAL_STATE__?.(id) ?? null;
-      },
-      nodeId,
-      { timeout: 30_000 },
-    );
-    return (await handle.jsonValue()) as { color: string; iconColor?: string };
-  } catch (error) {
-    const hookInstalled = await page.evaluate(
-      () => typeof (window as any).__GRAPH_NODE_VISUAL_STATE__ === 'function',
-    );
-    throw new Error(
-      hookInstalled
-        ? `node ${nodeId} never appeared in a laid-out graph: ${error}`
-        : 'no __GRAPH_NODE_VISUAL_STATE__ hook: the app is a production build without the dev hooks',
-    );
-  }
-}
 
 /**
  * Regression: on a first load with ?style=, the preset's fetch used to land

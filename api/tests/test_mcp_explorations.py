@@ -258,3 +258,32 @@ async def test_a_case_scoped_token_reaches_only_the_explorations_of_its_cases(en
         # And the REST twin of the agent never deletes the exploration itself.
         r = await rest.delete(f"/api/explorations/{exploration.id}", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_the_focus_node_travels_with_the_exploration(env):
+    app, context, exploration, files, ds = env
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        async with _mcp(app, token) as client:
+            made = await _tool(client, "create_exploration", context_id=str(context.id), title="Foco",
+                               nodes=[{"id": "a", "type": "Pessoa"}, {"id": "b", "type": "Conta"}], focus_node_id="a")
+            eid = made["exploration"]["id"]
+            assert made["exploration"]["state"]["focus_node_id"] == "a"
+            assert (await _tool(client, "get_exploration", exploration_id=eid))["focus_node_id"] == "a"
+            assert (await _tool(client, "get_exploration", exploration_id=str(exploration.id)))["focus_node_id"] is None
+
+            out = await _tool(client, "edit_exploration", exploration_id=eid, add_nodes=[{"id": "c", "type": "Conta"}], focus_node_id="c")
+            assert out["revision"] == 1
+            seen = await _tool(client, "get_exploration", exploration_id=eid)
+            assert (seen["focus_node_id"], seen["node_count"]) == ("c", 3)
+            out = await _tool(client, "edit_exploration", exploration_id=eid, focus_node_id="")
+            assert out["revision"] == 2 and (await _tool(client, "get_exploration", exploration_id=eid))["focus_node_id"] is None
+            await _tool(client, "edit_exploration", exploration_id=eid, focus_node_id="b")
+
+        # The page reads and writes it as any other state key.
+        page = (await rest.get(f"/api/explorations/{eid}")).json()
+        assert page["state"]["focus_node_id"] == "b" and page["state"]["revision"] == 3
+        r = await rest.put(f"/api/explorations/{eid}", json={"state": {**page["state"], "focus_node_id": "a"}, "expected_revision": 3})
+        assert r.status_code == 200 and r.json()["state"]["focus_node_id"] == "a"
+        assert (await rest.get(f"/api/explorations/{eid}")).json()["state"]["focus_node_id"] == "a"

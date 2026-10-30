@@ -116,3 +116,24 @@ def test_rule_surface_round_trips():
 
     assert rules[0]["surface"] == "tooltip"
     assert rules[1]["surface"] == "label"
+
+
+def test_focus_node_id_round_trips():
+    """The node the canvas opens on is a declared key (OpenAPI shows it) and survives the save."""
+    assert ExplorationState(focus_node_id="p1").model_dump()["focus_node_id"] == "p1"
+    assert ExplorationState().model_dump()["focus_node_id"] is None
+
+
+def test_the_camera_round_trips_and_old_viewports_still_load():
+    """The viewport carries the camera (position, target, zoom, mode); explorations
+    saved before it carry only the legacy zoom/center fields and still validate."""
+    from graphlagoon.models.schemas import ViewportState
+
+    camera = ViewportState.model_validate(
+        {"position": {"x": 1, "y": 2, "z": 3}, "target": {"x": 0, "y": 0, "z": 0}, "zoom": 2.5, "mode": "2d-proj"}
+    ).model_dump()
+    assert camera["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert camera["mode"] == "2d-proj"
+    legacy = ViewportState.model_validate({"zoom": 1, "center_x": 10, "center_y": -5}).model_dump()
+    assert legacy["position"] is None and legacy["center_x"] == 10.0
+    assert ExplorationState(viewport=camera).model_dump()["viewport"]["target"] == {"x": 0.0, "y": 0.0, "z": 0.0}

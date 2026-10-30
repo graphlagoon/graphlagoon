@@ -29,11 +29,15 @@ import type {
   ShareRole,
   UpdateInvestigationRequest,
   UpdateItemRequest,
+  GraphLook,
+  ItemAnchor,
 } from '@/types/investigation';
 
 /** One graph item loaded into the workspace (its snapshot in the store's shape). */
 export interface SourceGraph extends UnifySource {
   state: ExplorationState | null;
+  /** The source's own look: the exploration's style block, or the `style` a frozen item embeds. */
+  look: GraphLook | null;
   /** Why the item shows no graph (no snapshot, load failure). */
   error: string | null;
 }
@@ -605,11 +609,21 @@ export const useInvestigationStore = defineStore('investigation', () => {
    * Freezes an analysis result or a graph as an item and pins it (evidence).
    * Returns the pinned version (sha256).
    */
-  async function pinEvidence(body: { title: string; kind: 'trace' | 'graph_state' | 'table'; params: Record<string, unknown>; snapshot: unknown }) {
+  async function pinEvidence(body: {
+    title: string;
+    kind: 'trace' | 'graph_state' | 'table';
+    params: Record<string, unknown>;
+    snapshot: unknown;
+    /** A frozen graph keeps the look it had on the canvas (the style-preset block). */
+    style?: GraphLook | null;
+  }) {
     if (!current.value) return null;
+    const frozen = body.kind === 'graph_state' && body.snapshot && typeof body.snapshot === 'object'
+      ? { ...(body.snapshot as Record<string, unknown>), ...(body.style ? { style: body.style } : {}) }
+      : body.snapshot;
     const item = await addItem(
       body.kind === 'graph_state'
-        ? { kind: 'graph', subkind: 'snapshot', title: body.title, content_json: body.snapshot, provenance: { tool: 'graph_state', params: body.params } }
+        ? { kind: 'graph', subkind: 'snapshot', title: body.title, content_json: frozen, provenance: { tool: 'graph_state', params: body.params } }
         : { kind: 'table', subkind: 'result', title: body.title, content_json: body.snapshot, provenance: { tool: body.kind, params: body.params } },
     );
     if (!item) return null;
@@ -735,16 +749,18 @@ export const useInvestigationStore = defineStore('investigation', () => {
     }
   }
 
-  /** A note anchored on an entity (item note/anchored). */
-  async function addNote(entityId: string | null, body: string) {
+  /** A note anchored on an entity, or on edges (item note/anchored). */
+  async function addNote(anchor: string | ItemAnchor | null, body: string) {
+    const resolved: ItemAnchor | undefined =
+      typeof anchor === 'string' ? { entity_ids: [anchor] } : anchor && (anchor.entity_ids?.length || anchor.edge_ids?.length) ? anchor : undefined;
     // The body is also the description, so the inspector shows it without fetching the version.
     return addItem({
       kind: 'note',
-      subkind: entityId ? 'anchored' : 'free',
+      subkind: resolved ? 'anchored' : 'free',
       title: body.length > 60 ? `${body.slice(0, 57)}…` : body,
       description: body,
       content: body,
-      anchor: entityId ? { entity_ids: [entityId] } : undefined,
+      anchor: resolved,
     });
   }
 
@@ -802,11 +818,12 @@ export const useInvestigationStore = defineStore('investigation', () => {
         ...snapshotToGraph(payload.snapshot),
         unified: !!payload.unified,
         state: payload.exploration?.state ?? null,
+        look: payload.look ?? null,
         // shortcut: no query re-run here; an exploration without a snapshot shows empty.
         error: payload.snapshot ? null : 'No saved graph: open the exploration and save it',
       };
     } catch (e) {
-      return { ...base, nodes: [], edges: [], state: null, error: getErrorMessage(e, 'Failed to load item') };
+      return { ...base, nodes: [], edges: [], state: null, look: null, error: getErrorMessage(e, 'Failed to load item') };
     }
   }
 

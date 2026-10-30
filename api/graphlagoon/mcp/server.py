@@ -551,19 +551,29 @@ def build_server():
     @tool("update_item")
     async def update_item(ctx: Context, investigation_id: UUID, item_id: UUID, title: Optional[str] = None,
                           description: Optional[str] = None, tags: Optional[list[str]] = None,
-                          chart: Optional[dict[str, Any]] = None) -> dict:
+                          chart: Optional[dict[str, Any]] = None, look: Optional[dict[str, Any]] = None) -> dict:
         """Edit an item's title, description or tags (content changes are new
         versions: add_item with item_id). ``chart`` shows a table as a chart:
         {"type": "line" | "bar", "x": column, "series": [columns]} (e.g. TPV and
-        chargebacks by day); ``{}`` goes back to the table."""
+        chargebacks by day); ``{}`` goes back to the table. ``look`` on a graph
+        item: the style block (aesthetics, nodeTypeColors, edgeTypeColors,
+        textFormat, layout_algorithm, layout_mode_config, … — the same keys as a
+        style preset) plus ``focus_node_id``, a node id of that item; ``{}`` goes
+        back to the exploration's / embedded look. The PATCH replaces the item's
+        view state."""
         from graphlagoon.models.schemas import ItemUpdate
 
         user = _agent(ctx)
         given = {k: v for k, v in {"title": title, "description": description, "tags": tags}.items() if v is not None}
+        state = {}
         if chart is not None:
-            given["state"] = {"chart": chart or None}
+            state["chart"] = chart or None
+        if look is not None:
+            state["look"] = look or None
+        if state:
+            given["state"] = state
         if not given:
-            raise _tool_error("INVALID_BODY", "Give title, description, tags or chart")
+            raise _tool_error("INVALID_BODY", "Give title, description, tags, chart or look")
         changes = _validated(ItemUpdate, **given).model_dump(exclude_unset=True)
         return _out(await _call(case_items.update_item(investigation_id, user, item_id, changes)))
 
@@ -611,7 +621,9 @@ def build_server():
           item per case: {"unified": true, nodes, edges}; nodes need a type,
           edges an id and a type, and both ends in the sketch; a node already
           on the canvas is a stub {id: its unified id, type, properties: {}}).
-          A wrong shape is INVALID_CONTENT.
+          snapshot/derived/selection/sketch content may carry a top-level
+          "style" (the same keys as a style preset + focus_node_id) so the case
+          shows the graph as it looked. A wrong shape is INVALID_CONTENT.
         - table: csv text with mapping {as: graph | enrichment, spec}; result or
           metrics as content_json {columns, rows}.
         - query: query {text, language, parameters, output} + context_id.
@@ -823,7 +835,8 @@ def build_server():
         await _audit_read(user, "get_exploration")
         return _out({
             "id": loaded.id, "title": loaded.title, "context_id": loaded.context_id, "owner_email": loaded.owner_email,
-            "graph_query": loaded.state.get("graph_query"), "revision": loaded.revision,
+            "graph_query": loaded.state.get("graph_query"), "focus_node_id": loaded.state.get("focus_node_id"),
+            "revision": loaded.revision,
             "last_change": loaded.state.get("last_change"), "materialized": bool(loaded.state.get("has_snapshot")),
             "node_count": len(graph["nodes"]), "edge_count": len(graph["edges"]),
             "nodes": graph["nodes"][offset: offset + limit], "edges": graph["edges"][offset: offset + limit],
@@ -834,14 +847,16 @@ def build_server():
     async def create_exploration(ctx: Context, context_id: UUID, title: str, graph_query: Optional[str] = None,
                                  nodes: Optional[list[dict[str, Any]]] = None,
                                  edges: Optional[list[dict[str, Any]]] = None,
-                                 investigation_id: Optional[UUID] = None) -> dict:
+                                 investigation_id: Optional[UUID] = None,
+                                 focus_node_id: Optional[str] = None) -> dict:
         """A new exploration in a readable context, saved with its graph:
         ``graph_query`` (Cypher, or SQL on a SQL context) runs now and its
         answer is the graph; ``nodes`` [{id, type, properties}] and ``edges``
         [{id?, source, target, type, properties}] are added on top (or are the
         whole graph without a query). With neither it opens on the context's
         default view. ``investigation_id`` also attaches it to that case as a
-        live reference. Returns ``url`` for the person to open."""
+        live reference. ``focus_node_id`` is the node the page opens on.
+        Returns ``url`` for the person to open."""
         from graphlagoon.models.schemas import ExplorationCreate, ExplorationState, GraphSnapshot
         from graphlagoon.routers import explorations as explorations_router
 
@@ -863,7 +878,7 @@ def build_server():
                 context_id,
                 ExplorationCreate(
                     title=title,
-                    state=ExplorationState(graph_query=graph_query, last_change={
+                    state=ExplorationState(graph_query=graph_query, focus_node_id=focus_node_id or None, last_change={
                         "by": user, "author_kind": "agent", "tool": "create_exploration",
                         "at": datetime.now().isoformat(), **({"summary": exploration_graph.summary(report)} if report else {}),
                     }),
@@ -893,7 +908,8 @@ def build_server():
                                remove_edge_ids: Optional[list[str]] = None,
                                set_properties: Optional[list[dict[str, Any]]] = None,
                                replace: bool = False, title: Optional[str] = None,
-                               expected_revision: Optional[int] = None) -> dict:
+                               expected_revision: Optional[int] = None,
+                               focus_node_id: Optional[str] = None) -> dict:
         """Change an exploration's graph in place, in one atomic batch, in this
         order: ``replace`` (drop every node and edge, the person's layer too:
         a brand-new graph under the same id) → ``remove_node_ids`` (deleted,
@@ -905,13 +921,16 @@ def build_server():
         unset: [keys]}]. Ids match exactly, else case-insensitively. Give the
         ``revision`` you read as ``expected_revision`` to be refused
         (EXPLORATION_CHANGED) instead of overwriting a newer save. A page with
-        the exploration open picks the change up within seconds."""
+        the exploration open picks the change up within seconds.
+        ``focus_node_id`` sets the node the page opens on ("" clears it)."""
         user = _agent(ctx)
         ops = {"replace": replace, "add_nodes": add_nodes, "add_edges": add_edges, "remove_node_ids": remove_node_ids,
                "remove_edge_ids": remove_edge_ids, "set_properties": set_properties}
         loaded = await _writable_exploration(user, exploration_id, expected_revision, needs_graph=not replace)
         snapshot, overlay, report = _edited(loaded.snapshot, loaded.overlay, ops)
-        return await _save_exploration(user, loaded, "edit_exploration", snapshot, overlay, report, title=title)
+        state_changes = {"focus_node_id": focus_node_id or None} if focus_node_id is not None else None
+        return await _save_exploration(user, loaded, "edit_exploration", snapshot, overlay, report, title=title,
+                                       state_changes=state_changes)
 
     @tool("expand_exploration")
     async def expand_exploration(ctx: Context, exploration_id: UUID, node_ids: list[str], depth: int = 1,

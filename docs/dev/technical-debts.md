@@ -1236,6 +1236,7 @@ The admin work made `get_current_user` consult the `configure_auth` provider (so
 | 37 | 🟢 Medium | Backend | `get_current_user` cannot await an async `user_provider` (500 without `AuthMiddleware`) | Small |
 | 38 | 🟡 High | Backend | `dev_mode` defaults to `True`: a deployment that forgets `GRAPH_LAGOON_DEV_MODE=false` authenticates anonymous requests as the dev user (A1 of the security assessment; kept by decision on 2026-10-27, with a startup warning) | Small |
 | 39 | 🟢 Medium | Backend | Only Databricks can verify identities (`auth_mode=databricks`); a generic OIDC/JWKS mode for other gateways, and a shared-secret proxy check, do not exist (2026-10-27) | Medium |
+| 41 | 🟢 Medium | Frontend | The exploration page and the case still orchestrate the canvas on their own (`GraphVisualizationView.vue` ~1,300 lines, `InvestigationView.vue` ~1,100): the shared pieces exist (`LookPanel`, `GraphCanvasToolbar`, `GraphStatusBar`, `SelectionDetails`, menu composables), so a `GraphWorkspace.vue` (canvas + chrome + panels + modals, props/slots) would give parity by construction (2026-10-30) | Medium |
 | 40 | 🟢 Medium | Backend | The sign-in session keeps no refresh token (`offline_access`): people sign in again after `GRAPH_LAGOON_AUTH_SESSION_HOURS`; and `main.py`'s CORS still allows `*` with credentials (2026-10-27) | Small |
 
 ## Prioritization Recommendations

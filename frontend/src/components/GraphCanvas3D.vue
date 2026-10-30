@@ -34,7 +34,6 @@ import { useGraphCamera } from '@/composables/useGraphCamera';
 import { useAxisConstrainedRotation } from '@/composables/useAxisConstrainedRotation';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
 import GraphContextMenu from '@/components/GraphContextMenu.vue';
-import { CANVAS_SHORTCUTS, formatShortcuts } from '@/utils/shortcuts';
 import { Network } from 'lucide-vue-next';
 import { recordPerf } from '@/utils/perfMetrics';
 import { isStationaryRightClick, resolveContextMenuTarget } from '@/utils/contextMenuTrigger';
@@ -128,7 +127,6 @@ const devPerf = useDevPerf();
 
 // Context menu
 const contextMenu = useContextMenu();
-const shortcutsTooltip = formatShortcuts();
 let rightClickMouseDownPos: { x: number; y: number } | null = null;
 // Menu target captured at right-button PRESS time. Resolving it at mouseup is unreliable:
 // any pointer jitter while the button is held makes the library flag a drag, and its next
@@ -291,6 +289,62 @@ const camera = useGraphCamera(getGraph3d, containerRef, initialLayoutDone, {
   updateLabels: () => updateOverlays(),
 });
 
+// ---------------------------------------------------------------------------
+// Default focus and framing
+// ---------------------------------------------------------------------------
+
+// A focus just landed: the automatic fits that follow a load must not undo it.
+let lastFocusAt = 0;
+const FOCUS_GUARD_MS = 2000;
+const recentlyFocused = () => performance.now() - lastFocusAt < FOCUS_GUARD_MS;
+
+/**
+ * Land the pending default focus (`graphStore.pendingFocusNodeId`): select the
+ * node and move the camera to it, once it is in the scene with a position.
+ * Not in the graph at all → dropped (the canvas fits instead). In the store
+ * but not yet in the scene → kept for the next settle: `initialLayoutDone` is
+ * already true on an empty mount, and a case swaps the store before the scene.
+ */
+function settleFocus(): boolean {
+  const id = graphStore.pendingFocusNodeId;
+  if (!id || !graph3d) return false;
+  if (!graphStore.nodes.some((n) => n.node_id === id)) {
+    graphStore.pendingFocusNodeId = null;
+    return false;
+  }
+  const node = (graph3d.graphData().nodes as GraphNode[]).find((n) => n.id === id);
+  if (!node || node.x === undefined || node.y === undefined) return false;
+  graphStore.pendingFocusNodeId = null;
+  if (!(graphStore.selectedNodeIds.size === 1 && graphStore.selectedNodeIds.has(id))) graphStore.selectNode(id);
+  camera.focusOnNode(id);
+  lastFocusAt = performance.now();
+  return true;
+}
+
+/**
+ * Frame the graph: the pending default focus if any, else the saved camera
+ * of the exploration (once per load), else fit — unless a focus just landed.
+ */
+function frame() {
+  if (settleFocus()) return;
+  if (recentlyFocused()) return;
+  const viewport = graphStore.pendingViewport;
+  if (viewport) {
+    graphStore.pendingViewport = null;
+    if (camera.applyViewport(viewport)) return;
+  }
+  camera.zoomToFit();
+}
+
+/** Whether an automatic fit may run now (nothing pending, no fresh focus). */
+const canAutoFit = () => !recentlyFocused() && !graphStore.pendingFocusNodeId && !graphStore.pendingViewport;
+
+watch(initialLayoutDone, (done) => { if (done) settleFocus(); });
+watch(isLayoutRunning, (running) => { if (!running) settleFocus(); });
+watch(() => graphStore.pendingFocusNodeId, (id) => {
+  if (id && initialLayoutDone.value && !isLayoutRunning.value) settleFocus();
+});
+
 const axisRotation = useAxisConstrainedRotation(
   getGraph3d,
   containerRef,
@@ -351,7 +405,6 @@ function collectAppearanceContext(): AppearanceContext {
     searchMatchedIds: searchMatched,
     searchHiddenIds: searchHiddenNodeIds.value,
     isHighlightMode: graphStore.behaviors.searchMode === 'highlight' && searchMatched !== null,
-
 
     layoutHiddenNodeIds: layoutHiddenNodeIds.value,
 
@@ -1048,7 +1101,7 @@ async function updateGraph() {
   if (isRenderingScene.value || shouldRefit) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (initToken !== myToken) { isRenderingScene.value = false; return; }
-      if (shouldRefit && graph3d) camera.zoomToFit();
+      if (shouldRefit && graph3d) frame();
       isRenderingScene.value = false;
     }));
   }
@@ -1417,6 +1470,8 @@ async function initGraph() {
     // Lets e2e tests locate a node on the canvas (WebGL is opaque to DOM selectors)
     // Lets the docs screenshot generator wait for the moment labels appear
     (window as any).__GRAPH_LAYOUT_DONE__ = () => initialLayoutDone.value;
+    (window as any).__GRAPH_PENDING_FOCUS__ = () => graphStore.pendingFocusNodeId;
+    (window as any).__GRAPH_SELECT_EDGE__ = (id: string) => graphStore.selectEdge(id);
 
     (window as any).__GRAPH_NODE_SCREEN_COORDS__ = (nodeId: string) => {
       if (!graph3d) return null;
@@ -1464,7 +1519,7 @@ async function initGraph() {
   }
 
   setTimeout(() => {
-    if (graph3d) camera.zoomToFit();
+    if (graph3d) frame();
   }, 500);
 }
 
@@ -1576,6 +1631,9 @@ function exportPNG(
 defineExpose({
   zoomToFit: camera.zoomToFit,
   focusOnNode: camera.focusOnNode,
+  frame,
+  getViewport: camera.getViewport,
+  applyViewport: camera.applyViewport,
   updateGraph,
   startLayout: layout.startLayout,
   stopLayout: layout.stopLayout,
@@ -1999,7 +2057,7 @@ function applyLayoutMode() {
   const myToken = initToken;
   const scheduleRefit = () => {
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (initToken === myToken && graph3d) camera.zoomToFit();
+      if (initToken === myToken && graph3d && canAutoFit()) camera.zoomToFit();
     }));
   };
 
@@ -2770,16 +2828,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 3D Controls hint -->
-    <div class="controls-hint" :title="shortcutsTooltip" data-testid="controls-hint">
-      <span v-for="s in CANVAS_SHORTCUTS" :key="s.label" class="controls-hint-item">
-        <template v-for="(k, i) in s.keys" :key="k"><kbd>{{ k }}</kbd><template v-if="i < s.keys.length - 1">+</template></template>
-        {{ s.short ?? s.label }}
-      </span>
-      <!-- Narrow viewports show only this; the full list is in the tooltip
-           and in About → Graph shortcuts. -->
-      <span class="controls-hint-compact"><kbd>?</kbd> Shortcuts</span>
-    </div>
   </div>
 </template>
 
@@ -2877,41 +2925,6 @@ onUnmounted(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-.controls-hint {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  display: flex;
-  gap: 12px;
-  padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.85);
-  border-radius: 4px;
-  font-size: 11px;
-  color: var(--text-muted, #666);
-  pointer-events: none;
-}
-
-/* The hint sits bottom-right (~760px) and the view's graph toolbar
-   bottom-left (ends ~550px); below ~1400px the two overlap, and the toolbar
-   is the one that must stay usable — so collapse to a single "? Shortcuts"
-   chip (full list in its tooltip). */
-.controls-hint-compact { display: none; }
-@media (max-width: 1400px) {
-  .controls-hint-item { display: none; }
-  .controls-hint-compact { display: inline; }
-}
-
-.controls-hint kbd {
-  display: inline-block;
-  padding: 1px 4px;
-  font-size: 10px;
-  font-family: inherit;
-  background: var(--bg-secondary, #eee);
-  border: 1px solid var(--border-color, #ccc);
-  border-radius: 3px;
-  margin-right: 2px;
 }
 
 </style>

@@ -327,3 +327,43 @@ async def test_a_sketch_draws_nodes_and_edges_onto_existing_entities(env):
         assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "INVALID_CONTENT", r.text
     r = client.post(f"{url}/items/{item}/versions", json={"content_json": {**sketch, "nodes": [{"id": 1}]}}, headers=h(OWNER))
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_frozen_style_is_checked_and_never_reaches_the_unifier(env):
+    client, url, inv = env
+    sketch = {
+        "unified": True,
+        "nodes": [{"id": "sketch:n1", "type": "Phone", "properties": {"number": "+1 415 555 0100"}},
+                  {"id": "sketch:n2", "type": "Phone", "properties": {}}],
+        "edges": [{"id": "sketch:e1", "source": "sketch:n1", "target": "sketch:n2", "type": "CALLS", "properties": {}}],
+    }
+    r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "sketch", "title": "Manual additions", "content_json": sketch}, headers=h(OWNER))
+    assert r.status_code == 201, r.text
+    item = r.json()["id"]
+    before = await case_graph(inv.id, OWNER)
+
+    style = {"nodeTypeColors": {"Phone": "#f0f"}, "textFormat": {"rules": []}, "focus_node_id": "sketch:n1"}
+    r = client.post(f"{url}/items/{item}/versions", json={"content_json": {**sketch, "style": style}}, headers=h(OWNER))
+    assert r.status_code == 201, r.text
+    after = await case_graph(inv.id, OWNER)
+    assert (len(after["nodes"]), len(after["edges"])) == (len(before["nodes"]), len(before["edges"])) == (6, 2)
+    assert {n["uid"] for n in after["nodes"]} == {n["uid"] for n in before["nodes"]}
+    assert {(e["src"], e["dst"], e["type"]) for e in after["edges"]} == {(e["src"], e["dst"], e["type"]) for e in before["edges"]}
+    assert all("style" not in n for n in after["nodes"])
+    part = client.get(f"{url}/items/{item}/snapshot", headers=h(OWNER)).json()
+    assert part["look"] == style and part["snapshot"] == {"nodes": sketch["nodes"], "edges": sketch["edges"]}
+
+    # A wrong style is a 422 on a sketch (its model) and on a snapshot (whose payload is otherwise free).
+    r = client.post(f"{url}/items/{item}/versions", json={"content_json": {**sketch, "style": "red"}}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "INVALID_CONTENT", r.text
+    snap = {"nodes": [{"id": "s1", "type": "Person", "properties": {}}], "edges": [], "whatever": 1}
+    r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "snapshot", "title": "x", "content_json": {**snap, "style": "red"}}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "INVALID_CONTENT", r.text
+    assert r.json()["detail"]["error"]["message"].startswith("graph/snapshot style:")
+    r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "snapshot", "title": "x", "content_json": {**snap, "style": {"focus_node_id": 1}}}, headers=h(OWNER))
+    assert r.status_code == 422 and r.json()["detail"]["error"]["code"] == "INVALID_CONTENT", r.text
+    assert client.post(f"{url}/items", json={"kind": "graph", "subkind": "snapshot", "title": "x", "content_json": snap}, headers=h(OWNER)).status_code == 201
+    r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "derived", "title": "x", "content_json": {**snap, "style": {"focus_node_id": "s1"}}}, headers=h(OWNER))
+    assert r.status_code == 201, r.text
+    assert client.get(f"{url}/items/{r.json()['id']}/snapshot", headers=h(OWNER)).json()["look"] == {"focus_node_id": "s1"}
