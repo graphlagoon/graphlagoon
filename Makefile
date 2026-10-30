@@ -24,14 +24,10 @@ RESET := \033[0m
 
 GSQL2RSQL_PATH ?= $(HOME)/phd/cyper2dsql/python
 
-# api/pyproject.toml points gsql2rsql at a sibling checkout (../cyper2dsql).
-# Without one, uv takes the PyPI release the lockfile pins instead of failing
-# with "Distribution not found". The dev-gsql2rsql* targets keep the source.
-ifeq ($(wildcard $(CURDIR)/../cyper2dsql/python),)
-ifeq ($(filter dev-gsql2rsql%,$(MAKECMDGOALS)),)
-export UV_NO_SOURCES_PACKAGE := gsql2rsql
-endif
-endif
+# gsql2rsql comes from PyPI (api/uv.lock pins it). A local checkout is opt-in:
+# make dev-gsql2rsql[-db] or make setup-gsql2rsql (GSQL2RSQL_PATH=/your/path)
+# run `uv add --editable`, which writes [tool.uv.sources] into api/pyproject.toml
+# and api/uv.lock; do not commit those two files in that state.
 
 # Local dev defaults (the values of api/.env.example): the seeded admin is a
 # superuser, seeded users may share with example.com, and agents (MCP, agent
@@ -76,7 +72,7 @@ help:
 	@echo "  make perf-report           Collect perf metrics (needs running dev server)"
 	@echo ""
 	@echo "$(GREEN)Build$(RESET)"
-	@echo "  make build                 Build frontend + Python wheel (local gsql2rsql)"
+	@echo "  make build                 Build frontend + Python wheel (gsql2rsql from PyPI)"
 	@echo "  make build-pypi            Build frontend + Python wheel (gsql2rsql from PyPI)"
 	@echo "  make build-verify          Verify wheel contains static assets"
 	@echo ""
