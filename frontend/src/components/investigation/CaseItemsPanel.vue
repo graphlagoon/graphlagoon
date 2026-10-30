@@ -11,6 +11,7 @@ import { AlertTriangle, Bot, ExternalLink, FileText, GitBranch, Lock, Pin, Plus,
 import QueryItemCard from './QueryItemCard.vue';
 import TableOpsDialog, { type TableOp } from './TableOpsDialog.vue';
 import { useInvestigationStore, isGraphItem } from '@/stores/investigation';
+import { useItemViewerStore } from '@/stores/itemViewer';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
@@ -42,6 +43,7 @@ const props = defineProps<{ canEdit: boolean; activeItem?: string | null }>();
 const emit = defineEmits<{ add: []; upload: []; select: [item: CaseItem] }>();
 
 const store = useInvestigationStore();
+const viewer = useItemViewerStore();
 const auth = useAuthStore();
 const { can } = usePermissions();
 const toast = useToast();
@@ -339,7 +341,9 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           tabindex="0"
           :aria-label="`${item.title} (${shortIds.get(item.id) ?? item.kind})`"
           :aria-current="activeItem === item.id ? 'true' : undefined"
+          :title="item.kind === 'graph' ? undefined : 'Double-click to open it large'"
           @click="emit('select', item)"
+          @dblclick="item.kind !== 'graph' && item.current_version > 0 && viewer.open(item.id)"
           @keydown.enter.self.prevent="emit('select', item)"
           @keydown.space.self.prevent="emit('select', item)"
         >

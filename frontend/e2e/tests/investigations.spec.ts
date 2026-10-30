@@ -561,6 +561,61 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('dossier-journal')).toContainText('Offboarding memo');
   });
 
+  test("an agent's HTML report and image open large: scripts run sandboxed and offline, ← → step, Esc and Back close", async ({ authenticatedPage: page }) => {
+    const ver = (id: string, content_type: string) => ({ id: `v-${id}`, item_id: id, version: 1, sha256: 'c'.repeat(64), size_bytes: 400, content_type, has_text: false, created_by: 'agent@test.com', author_kind: 'agent' });
+    const doc = (id: string, title: string, contentType: string, extra: Record<string, unknown>) =>
+      item(id, 'ctx', title, { kind: 'document', subkind: 'upload', exploration_id: null, context_id: null, author_kind: 'agent', current_version: 1, latest: ver(id, contentType), ...extra });
+    const report = doc('rep', 'Relatório do agente', 'text/html', {
+      provenance: { filename: 'relatorio.html' },
+      _text: `<html><body><h1>Relatório</h1><p id="out"></p><script>
+        const out = (t) => (document.getElementById('out').textContent += t + ' ');
+        out('script ran');
+        fetch('https://example.com/leak').then(() => out('net open'), () => out('net blocked'));
+      </script></body></html>`,
+    });
+    const image = doc('img', 'Mapa de fluxos', 'image/png', {
+      _base64: 'iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAIAAABwJOjsAAAAJElEQVR4nGM4oaExIIhh1OJRi0ctHrV41OJRi0ctHrV45FgMAK3qay69l+VGAAAAAElFTkSuQmCC',
+    });
+    await seedInvestigations(page, [CASE], { 'inv-1': [report, image] });
+    await page.addInitScript(() => {
+      const w = window as any;
+      w.__GRAPH_LAGOON_CONFIG__ = { ...(w.__GRAPH_LAGOON_CONFIG__ || {}), investigation_html_scripts: 'cdn' };
+    });
+
+    await page.goto('/investigations/inv-1');
+    await page.getByTestId('item-rep').click();
+    await page.getByTestId('item-expand').click();
+    const viewer = page.getByTestId('item-viewer');
+    await expect(viewer).toBeVisible();
+    await expect(page).toHaveURL(/view=rep/);
+    await expect(page.getByTestId('viewer-title')).toHaveText('Relatório do agente');
+    await expect(page.getByTestId('item-html')).toHaveAttribute('sandbox', 'allow-scripts');
+    const frame = page.frameLocator('[data-testid="item-html"]');
+    await expect(frame.locator('#out')).toContainText('script ran');
+    await expect(frame.locator('#out')).toContainText('net blocked'); // the injected CSP: no way out
+
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(/view=img/);
+    await expect(page.getByTestId('item-image')).toBeVisible();
+    await page.getByTestId('image-actual').click();
+    await expect(page.getByTestId('image-zoom-level')).toHaveText('100%');
+    await page.getByTestId('image-zoom-in').click();
+    await expect(page.getByTestId('image-zoom-level')).toHaveText('125%');
+
+    await page.keyboard.press('Escape');
+    await expect(viewer).toHaveCount(0);
+    await expect(page).not.toHaveURL(/view=/);
+
+    // A double click opens it; the browser's Back closes it, and a link opens it again.
+    await page.getByTestId('item-img').dblclick();
+    await expect(viewer).toBeVisible();
+    await page.goBack();
+    await expect(viewer).toHaveCount(0);
+    await expect(page).toHaveURL(/\/investigations\/inv-1$/);
+    await page.goto('/investigations/inv-1?view=rep');
+    await expect(page.getByTestId('viewer-title')).toHaveText('Relatório do agente');
+  });
+
   test('follow the money: right-click the victim, trace forward, see the exits and the Sankey', async ({
     authenticatedPage: page,
   }) => {

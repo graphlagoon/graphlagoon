@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import ItemPreview from '@/components/investigation/ItemPreview.vue'
 import { useInvestigationStore } from '@/stores/investigation'
+import { useItemViewerStore } from '@/stores/itemViewer'
 
 const TABLE = { columns: ['day', 'tpv', 'cb'], rows: [['2026-10-01', 1000, 10], ['2026-10-02', 1500, 20]] }
 const api = vi.hoisted(() => ({
@@ -45,5 +46,26 @@ describe('ItemPreview · a table as a chart (06 P5)', () => {
     expect(getByTestId('table-chart').dataset.type).toBe('bar')
     expect(queryByTestId('chart-series-tpv')).toBeNull()
     expect(queryByTestId('chart-save')).toBeNull() // a closed case keeps its views
+  })
+})
+
+describe('ItemPreview · Expand', () => {
+  it('opens the full-screen viewer on the latest, or on the older version it shows, without reading the bytes here', async () => {
+    const { getByTestId, unmount } = render(ItemPreview, { props: { item: { ...ITEM, current_version: 3 } as any, investigationId: 'inv-1' } })
+    await fireEvent.click(getByTestId('item-expand'))
+    expect(useItemViewerStore().target).toEqual({ itemId: 't1', version: null })
+    unmount()
+    const older = render(ItemPreview, { props: { item: { ...ITEM, current_version: 3 } as any, investigationId: 'inv-1', version: { version: 2 } as any } })
+    await fireEvent.click(older.getByTestId('item-expand'))
+    expect(useItemViewerStore().target).toEqual({ itemId: 't1', version: 2 })
+    expect(api.getInvestigationItemContent).not.toHaveBeenCalled()
+  })
+
+  it('a file too large for the inspector can still be expanded or downloaded', () => {
+    const big = { ...ITEM, latest: { ...ITEM.latest, size_bytes: 50 * 1024 * 1024 } }
+    const { queryByTestId, getByTestId } = render(ItemPreview, { props: { item: big as any, investigationId: 'inv-1' } })
+    expect(queryByTestId('item-preview-open')).toBeNull()
+    expect(getByTestId('item-expand')).toBeTruthy()
+    expect(getByTestId('item-download')).toBeTruthy()
   })
 })

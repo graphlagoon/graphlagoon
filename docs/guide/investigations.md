@@ -151,13 +151,53 @@ items carry an **on canvas** checkbox: unchecking one removes its nodes
 without resetting the layout.
 
 **Viewing and downloading.** Selecting an item shows its card in the
-inspector, with **Preview** and **Download** for its latest version. Tables
-open as a table with the first 200 rows — or as a **chart** (line or bars, an
-x column and numeric series), which you can save as the item's view; markdown
-renders (headings, lists, tables, links; **Raw** shows the source, and no HTML
-of the document ever runs); text and JSON open as text; images and PDFs display
-inline; HTML renders in a sandboxed frame with scripts off; a link document
-opens its address. Every read is audited (`investigation.item_read`).
+inspector, with **Preview**, **⤢ Expand** and **Download** for its latest
+version. Tables open as a table with the first 200 rows — or as a **chart**
+(line or bars, an x column and numeric series), which you can save as the
+item's view; markdown renders (headings, lists, tables, links; **Raw** shows
+the source, and no HTML of the document ever runs); text and JSON open as
+text; images and PDFs display inline; HTML and SVG render in a sandboxed frame
+(see below); a link document opens its address. Every read is audited
+(`investigation.item_read`).
+
+**Expand** (or a double click on the item in the material list, or *Expand*
+on one of its versions) opens it in a viewer that takes the whole window — the
+place for an agent's HTML report or slides, a large image, a PDF or a long
+table:
+
+| In the viewer | |
+|---|---|
+| ◀ ▶ or ← → | the previous or next item, in the material list's order (graphs open on the canvas instead) |
+| version selector | any version of the item |
+| ⤢ | the browser's full screen |
+| Esc, ✕ or the browser's **Back** | close |
+| tables | up to 2,000 rows, a row filter, Table/Chart |
+| images | Fit, 100 %, + / −, wheel to zoom, drag to move |
+
+![An agent's HTML report opened in the item viewer](/screenshots/investigations-item-viewer.png)
+
+The viewer is in the address (`…/investigations/<id>?view=<item>&v=<version>`),
+so a link opens the case with that item already large. Files over 100 MB are
+download only.
+
+**HTML from agents.** An HTML item never runs in the app: it is shown in an
+iframe whose sandbox has no `allow-same-origin`, so the document gets an
+opaque origin and cannot read the app's page, storage or cookies, nor call its
+API. A Content-Security-Policy injected at the top of the document closes its
+way out: no requests (`fetch`, XHR, beacons), no remote images, frames, forms,
+navigation or pop-ups; a policy the document carries can only add
+restrictions. `GRAPH_LAGOON_INVESTIGATION_HTML_SCRIPTS` sets what it may run:
+
+| Value | Scripts | Use it when |
+|---|---|---|
+| `cdn` *(default)* | its own, plus scripts, styles and fonts from cdnjs, jsdelivr, unpkg and Google Fonts | agents produce charts or slides with common libraries |
+| `inline` | its own only, no network at all | reports are self-contained |
+| `none` | none; static HTML and CSS | no case document should run code |
+
+Two things the sandbox does not stop: in `cdn` mode a script's address on a
+CDN could carry data in its query string (the CDN sees it), and a script
+stuck in a loop can freeze the tab. Choose `inline` or `none` when that
+matters.
 
 **Working with an item.** An attached exploration opens on its own page
 (**Open exploration ↗** on its card, ↗ on its row, *Open in exploration* in a

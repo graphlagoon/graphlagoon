@@ -8,9 +8,13 @@ import { parseTableContent } from '@/utils/caseTables';
 import type { CaseItem } from '@/types/investigation';
 
 export const PREVIEW_MAX_ROWS = 200;
+/** Rows the full-screen viewer shows (it has the room and a filter). */
+export const PREVIEW_MAX_ROWS_FULL = 2000;
 export const PREVIEW_MAX_CHARS = 200_000;
 /** Above this, the inspector does not fetch the bytes to preview: download only. */
 export const PREVIEW_MAX_BYTES = 20 * 1024 * 1024;
+/** The full-screen viewer reads up to this (an explicit action); a bigger file is parsed by no tab: download only. */
+export const PREVIEW_MAX_BYTES_FULL = 100 * 1024 * 1024;
 
 export type ItemPreview =
   | { kind: 'table'; columns: string[]; rows: unknown[][]; total: number }
@@ -22,19 +26,21 @@ export type ItemPreview =
 /**
  * Images shown from a blob URL of the app's origin: raster formats only. An SVG
  * is a document that runs its scripts when opened on its own ("Open image in
- * new tab"), so it is never wrapped in a blob; it previews as its text.
+ * new tab"), so it is never wrapped in a blob: it renders as HTML, inside the
+ * same sandboxed iframe (utils/htmlSandbox).
  */
 const RASTER_IMAGE = /^image\/(png|jpeg|gif|webp|bmp|avif)$/;
 
-export function buildPreview(data: ArrayBuffer, contentType: string | null | undefined): ItemPreview {
+export function buildPreview(data: ArrayBuffer, contentType: string | null | undefined, maxRows = PREVIEW_MAX_ROWS): ItemPreview {
   const type = (contentType ?? '').toLowerCase();
   if (RASTER_IMAGE.test(type.split(';')[0].trim())) return { kind: 'image' };
   if (type === 'application/pdf') return { kind: 'pdf' };
   const text = decodeText(data, type);
   if (text === null) return { kind: 'none' };
   if (type.startsWith('text/html')) return { kind: 'html', html: text };
+  if (type.startsWith('image/svg+xml')) return { kind: 'html', html: `<html><body style="margin:0">${text}</body></html>` };
   if (/^text\/(csv|tab-separated-values)/.test(type) || (type.startsWith('text/plain') && looksTabSeparated(text))) {
-    return table(parseTableContent(text, type));
+    return table(parseTableContent(text, type), maxRows);
   }
   if (!type || type.startsWith('application/json')) {
     let json: unknown;
@@ -44,10 +50,10 @@ export function buildPreview(data: ArrayBuffer, contentType: string | null | und
       return textPreview(text);
     }
     if (Array.isArray(json) && json.length && json.every((r) => r && typeof r === 'object' && !Array.isArray(r))) {
-      return table(parseTableContent(JSON.stringify({ rows: json }), 'application/json'));
+      return table(parseTableContent(JSON.stringify({ rows: json }), 'application/json'), maxRows);
     }
     if (json && typeof json === 'object' && Array.isArray((json as { rows?: unknown }).rows)) {
-      return table(parseTableContent(text, 'application/json'));
+      return table(parseTableContent(text, 'application/json'), maxRows);
     }
     return textPreview(JSON.stringify(json, null, 2));
   }
@@ -58,6 +64,17 @@ export function buildPreview(data: ArrayBuffer, contentType: string | null | und
 export function isTabular(item: Pick<CaseItem, 'kind' | 'query'>): boolean {
   return item.kind === 'table' || (item.kind === 'query' && item.query?.output !== 'graph');
 }
+
+/**
+ * The items the full-screen viewer steps through with ◀ ▶, in the material
+ * list's order (CaseItemsPanel: queries, tables, documents, notes). Graphs open
+ * on the canvas, the brief is shown on top of the list, and an item without a
+ * version has nothing to show.
+ */
+export function viewerItems(items: CaseItem[]): CaseItem[] {
+  return VIEWER_KINDS.flatMap((kind) => items.filter((i) => i.kind === kind && i.subkind !== 'brief' && !i.deleted_at && i.current_version > 0));
+}
+const VIEWER_KINDS: CaseItem['kind'][] = ['query', 'table', 'document', 'note'];
 
 /** The name a download gets: the uploaded file name, else the title with an extension for its type. */
 export function itemFileName(item: CaseItem): string {
@@ -99,8 +116,8 @@ function looksTabSeparated(text: string): boolean {
   return tabs > 1 && lines.every((l) => l.split('\t').length === tabs);
 }
 
-function table({ columns, rows }: { columns: string[]; rows: unknown[][] }): ItemPreview {
-  return { kind: 'table', columns, rows: rows.slice(0, PREVIEW_MAX_ROWS), total: rows.length };
+function table({ columns, rows }: { columns: string[]; rows: unknown[][] }, maxRows: number): ItemPreview {
+  return { kind: 'table', columns, rows: rows.slice(0, maxRows), total: rows.length };
 }
 
 function textPreview(text: string): ItemPreview {

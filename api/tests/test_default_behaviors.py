@@ -98,6 +98,29 @@ class TestConfigInjection:
 
         assert "default_behaviors" in asyncio.run(build_public_config(None))
 
+    def test_public_config_says_how_case_html_runs_scripts(self, monkeypatch):
+        """The viewer's sandbox reads GRAPH_LAGOON_INVESTIGATION_HTML_SCRIPTS from the payload."""
+        import asyncio
+
+        import pytest
+        from pydantic import ValidationError
+
+        from graphlagoon.config import get_settings
+        from graphlagoon.services.public_config import build_public_config
+
+        monkeypatch.delenv("GRAPH_LAGOON_INVESTIGATION_HTML_SCRIPTS", raising=False)
+        get_settings.cache_clear()
+        try:
+            assert asyncio.run(build_public_config(None))["investigation_html_scripts"] == "cdn"
+            monkeypatch.setenv("GRAPH_LAGOON_INVESTIGATION_HTML_SCRIPTS", "none")
+            get_settings.cache_clear()
+            assert asyncio.run(build_public_config(None))["investigation_html_scripts"] == "none"
+            monkeypatch.setenv("GRAPH_LAGOON_INVESTIGATION_HTML_SCRIPTS", "all")
+            with pytest.raises(ValidationError):
+                Settings()
+        finally:
+            get_settings.cache_clear()
+
     def test_api_config_route_uses_the_shared_builder(self):
         import inspect
 

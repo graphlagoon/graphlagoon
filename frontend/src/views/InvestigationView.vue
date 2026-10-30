@@ -8,7 +8,7 @@
  * roles, tags, groups and matches are annotations.
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter, type LocationQuery } from 'vue-router';
 import { AlertTriangle, Banknote, Plus, Route } from 'lucide-vue-next';
 import { isGraphItem, useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
@@ -16,6 +16,7 @@ import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useClusterStore } from '@/stores/cluster';
 import { useCaseFilters } from '@/stores/caseFilters';
+import { useItemViewerStore } from '@/stores/itemViewer';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
 import { useToast } from '@/composables/useToast';
 import { useLiveRevision } from '@/composables/useLiveRevision';
@@ -44,6 +45,7 @@ import CaseTimeline, { type TimelineTab } from '@/components/investigation/CaseT
 import AgentsIndicator from '@/components/investigation/AgentsIndicator.vue'; // F5 hook
 import CaseSettingsDrawer from '@/components/investigation/CaseSettingsDrawer.vue';
 import EntityPage from '@/components/investigation/EntityPage.vue';
+import ItemViewer from '@/components/investigation/ItemViewer.vue';
 import CaseDossier from '@/components/investigation/CaseDossier.vue';
 import ShareDialog from '@/components/investigation/ShareDialog.vue';
 import AddItemsPopover from '@/components/investigation/AddItemsPopover.vue'; // F3: popover replaces the modal
@@ -82,6 +84,54 @@ useLiveRevision({
 });
 
 const mode = computed<'canvas' | 'dossier'>(() => (route.query.mode === 'dossier' ? 'dossier' : 'canvas'));
+
+/**
+ * The full-screen item viewer lives in the URL (`?view=<item>&v=<n>`): a link
+ * opens it, Back closes it. Opening from the case pushes a history entry (so
+ * Back or closing returns to the case); stepping to another item replaces it.
+ */
+const router = useRouter();
+const itemViewer = useItemViewerStore();
+let viewerPushed = false;
+const viewerQuery = (query: LocationQuery) => ({
+  itemId: typeof query.view === 'string' && query.view ? query.view : null,
+  version: typeof query.v === 'string' && /^\d+$/.test(query.v) ? Number(query.v) : null,
+});
+watch(
+  () => viewerQuery(route.query),
+  ({ itemId, version }) => {
+    const open = itemViewer.target;
+    if (!itemId) {
+      viewerPushed = false;
+      if (open) itemViewer.close();
+    } else if (open?.itemId !== itemId || open.version !== version) {
+      itemViewer.open(itemId, version);
+    }
+  },
+  { immediate: true, deep: true },
+);
+watch(
+  () => itemViewer.target,
+  (target) => {
+    const inUrl = viewerQuery(route.query);
+    const { view: _view, v: _v, ...rest } = route.query;
+    if (!target) {
+      if (!inUrl.itemId) return;
+      if (viewerPushed) {
+        viewerPushed = false;
+        router.back();
+      } else void router.replace({ query: rest });
+      return;
+    }
+    if (inUrl.itemId === target.itemId && inUrl.version === target.version) return;
+    const query = { ...rest, view: target.itemId, ...(target.version ? { v: String(target.version) } : {}) };
+    if (inUrl.itemId) void router.replace({ query });
+    else {
+      viewerPushed = true;
+      void router.push({ query });
+    }
+  },
+);
 
 const showAdd = ref(false);
 /** The add popover's first tab: the analysis bar's Console opens it on "Query". */
@@ -441,6 +491,7 @@ function openUpload(role?: 'graph' | 'enrichment' | 'attachment') {
 }
 
 onUnmounted(() => {
+  itemViewer.close();
   for (const [direction] of TRACE_ACTIONS) contextMenu.removeAction(`trace-${direction}`);
   contextMenu.removeAction('path-to');
   graphStore.traceLayers = null;
@@ -622,6 +673,7 @@ onUnmounted(() => {
     <FileImportWizard v-if="showWizard" :investigation-id="id" :initial-role="wizardRole" @close="showWizard = false" @done="onWizardDone" />
     <CaseSettingsDrawer :open="showSettings" @close="showSettings = false" @share="showShare = true" />
     <ShareDialog :open="showShare" @close="showShare = false" />
+    <ItemViewer v-if="itemViewer.target && store.current" />
     <EntityPage v-if="entityPage" :node="entityPage" :can-edit="canEdit" @close="entityPage = null" @select-item="(i) => { entityPage = null; selectItem(i); }" />
     <ClusterNodeModal v-if="selectedClusterId" :cluster-id="selectedClusterId" @close="selectedClusterId = null" />
 

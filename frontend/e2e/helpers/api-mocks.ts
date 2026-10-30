@@ -1668,7 +1668,8 @@ export async function seedInvestigations(
       }
       if (b === 'text') return route.fulfill(json({ text: item._text ?? '', version: item.latest }));
       if (b === 'content') {
-        // Text items (notes, markdown) answer their text; tables their JSON.
+        // Text items (notes, markdown) answer their text; tables their JSON; files (`_base64`) their bytes.
+        if (typeof item._base64 === 'string') return route.fulfill({ status: 200, contentType: 'application/octet-stream', body: Buffer.from(item._base64, 'base64') });
         if (typeof item._text === 'string') return route.fulfill({ status: 200, contentType: 'text/markdown', body: item._text });
         return route.fulfill(json(item._content ?? {}));
       }

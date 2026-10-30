@@ -254,6 +254,13 @@ class Settings(BaseSettings):
         description="Maximum size of one file uploaded to an investigation, and of an "
         "item's inline JSON body, in bytes",
     )
+    investigation_html_scripts: Literal["none", "inline", "cdn"] = Field(
+        default="cdn",
+        description="Scripts in HTML items of a case (agent reports, slides), shown in an "
+        "opaque-origin sandboxed iframe that never reaches the app: none (static HTML only), "
+        "inline (the document's own scripts, no network) or cdn (also scripts and styles from "
+        "cdnjs, jsdelivr and unpkg)",
+    )
     exploration_overlay_max_bytes: int = Field(
         default=5 * 1024 * 1024,
         description="Maximum size of the user's layer of one exploration (its own nodes, "

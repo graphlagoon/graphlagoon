@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildPreview, itemFileName, PREVIEW_MAX_ROWS } from '@/utils/itemPreview'
+import { buildPreview, itemFileName, viewerItems, PREVIEW_MAX_ROWS, PREVIEW_MAX_ROWS_FULL } from '@/utils/itemPreview'
 
 const bytes = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer
 
@@ -32,9 +32,9 @@ describe('buildPreview', () => {
     expect(buildPreview(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff, 0x00]).buffer, 'application/zip').kind).toBe('none')
   })
 
-  it('an SVG is never an image from a blob URL (its scripts would run in the app origin): it previews as text', () => {
+  it('an SVG is never an image from a blob URL (its scripts would run in the app origin): it renders as sandboxed HTML', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
-    expect(buildPreview(bytes(svg), 'image/svg+xml')).toEqual({ kind: 'text', text: svg, truncated: false })
+    expect(buildPreview(bytes(svg), 'image/svg+xml')).toEqual({ kind: 'html', html: `<html><body style="margin:0">${svg}</body></html>` })
     expect(buildPreview(bytes('x'), 'image/jpeg; charset=binary').kind).toBe('image')
     expect(buildPreview(bytes('x'), 'image/webp').kind).toBe('image')
   })
@@ -51,5 +51,22 @@ describe('itemFileName', () => {
     expect(itemFileName({ ...base, provenance: { filename: 'CASO17_EXTRATO.TXT' } })).toBe('CASO17_EXTRATO.TXT')
     expect(itemFileName(base)).toBe('Relatório.md')
     expect(itemFileName({ ...base, latest: { content_type: 'application/x-unknown' } })).toBe('Relatório.bin')
+  })
+
+  it('the full-screen viewer asks for more rows', () => {
+    const csv = ['n', ...Array.from({ length: 3000 }, (_, i) => String(i))].join('\n')
+    expect(buildPreview(bytes(csv), 'text/csv')).toMatchObject({ total: 3000, rows: { length: PREVIEW_MAX_ROWS } })
+    expect(buildPreview(bytes(csv), 'text/csv', PREVIEW_MAX_ROWS_FULL)).toMatchObject({ total: 3000, rows: { length: PREVIEW_MAX_ROWS_FULL } })
+  })
+})
+
+describe('viewerItems', () => {
+  it('steps through the material in its order: no graphs, no brief, nothing removed or without a version', () => {
+    const it = (id: string, kind: string, extra: object = {}) => ({ id, kind, subkind: 'x', current_version: 1, ...extra }) as any
+    const items = [
+      it('n1', 'note'), it('g1', 'graph'), it('d1', 'document'), it('b', 'document', { subkind: 'brief' }),
+      it('t1', 'table'), it('t0', 'table', { current_version: 0 }), it('q1', 'query'), it('d2', 'document', { deleted_at: '2026-10-01' }),
+    ]
+    expect(viewerItems(items).map((i) => i.id)).toEqual(['q1', 't1', 'd1', 'n1'])
   })
 })

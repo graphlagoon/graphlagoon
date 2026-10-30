@@ -13695,3 +13695,52 @@ auditoria `exploration.agent_edit` com frase em `describeAudit`. Rota nova só G
 `live_refresh_seconds` de atraso; mudanças de estilo/filtros/layout não são aplicadas ao vivo (as ferramentas não mexem
 nisso); propriedade local não salva de um nó que o agente também alterou é substituída pela do servidor; SQL bruto só
 quando o context é SQL (`query_into_exploration` e `create_exploration` detectam Cypher por `MATCH`).
+
+## [2026-10-29 20:30] - Feature Implemented: visualizador de item em tela grande e HTML de agente com scripts por flag
+
+**Relato:** agentes sobem imagens, relatórios HTML e slides para o caso, mas a única visualização era o
+`ItemPreview` no inspetor (coluna estreita, iframe de 360 px) e o HTML rodava em `sandbox=""` (gráficos em JS e slides
+quebrados). Pedido: abrir em tela cheia ou modal. Plano aprovado: modal quase tela cheia; scripts e CDNs conhecidos
+atrás de variável de ambiente.
+**Decisões:**
+1. **Modal quase tela cheia** (`ItemViewer.vue`, `Teleport` para o body, 96vw × 94vh) com ◀ ▶ e ← → na ordem do
+   material (`viewerItems`: consultas, tabelas, documentos, notas; sem grafos, brief, removidos ou itens sem versão),
+   seletor de versão, ⤢ tela cheia do navegador (`requestFullscreen` no painel), Baixar, Esc/✕. Setas não navegam
+   com foco num campo (filtro da tabela). Rejeitado: aba no centro (menos espaço; mais estado).
+2. **Na URL:** `?view=<item>&v=<n>`; só a `InvestigationView` conhece o router. Os componentes pedem pela store
+   `itemViewer` (Pinia, `open/close`), sem router em `ItemPreview`, `ItemDetails` e `CaseItemsPanel`. Abrir do caso faz
+   `push` (Voltar fecha); navegar entre itens faz `replace`; fechar volta (`back`) se foi aberto do caso, senão `replace`.
+3. **Reuso:** `composables/useItemContent.ts` (bytes lidos uma vez por item+versão, ignorando respostas de um item que
+   já ficou para trás; blob URL revogado) e `ItemPreviewBody.vue` (render por tipo, `size: compact | full`) servem o
+   inspetor e o modal. No `full`: tabela até 2.000 linhas com filtro, imagem com Ajustar/100 %/±/roda/arrastar, iframes
+   em altura total, markdown em coluna de leitura. Teto de 100 MB para ler no modal (20 MB no inspetor); acima, só baixar.
+4. **HTML (segurança):** iframe `srcdoc` **sem `allow-same-origin`** em todos os modos (origem opaca: sem DOM, storage,
+   cookies ou API do app) e uma CSP injetada como primeiro filho do `<head>` (via `DOMParser`, inerte) que fecha a
+   saída: `connect-src`, `frame-src`, `form-action`, `base-uri` `'none'`, imagens só `data:`/`blob:`. A CSP do documento
+   só pode somar restrições. `GRAPH_LAGOON_INVESTIGATION_HTML_SCRIPTS` = `cdn` (padrão: scripts próprios + cdnjs,
+   jsdelivr, unpkg e Google Fonts), `inline` (só os próprios, sem rede) ou `none` (estático; `sandbox=""`). Além do
+   plano: a CSP também vale no `none`, porque mesmo sem script um `<img src="https://…">` saía para a rede. Riscos
+   residuais documentados: query string numa URL de CDN e loop infinito travando a aba. Sem config do servidor
+   (API antiga), o front usa `none`.
+5. **SVG** deixa de aparecer como texto: renderiza como HTML no mesmo iframe sandboxed (nunca blob, que rodaria script
+   na origem do app ao abrir em aba nova).
+6. **Entradas:** botão ⤢ Expand no inspetor (visível também para arquivo grande demais para a prévia), duplo clique
+   no item do material, ⤢ Expand por versão em `ItemDetails`.
+**Arquivos:** novos `frontend/src/components/investigation/{ItemViewer,ItemPreviewBody}.vue`,
+`composables/useItemContent.ts`, `stores/itemViewer.ts`, `utils/htmlSandbox.ts`; alterados
+`components/investigation/{ItemPreview,ItemDetails,CaseItemsPanel}.vue`, `views/InvestigationView.vue`,
+`utils/itemPreview.ts` (`PREVIEW_MAX_ROWS_FULL`, `PREVIEW_MAX_BYTES_FULL`, `viewerItems`, SVG como HTML),
+`services/api.ts` (tipo do config); backend `config.py` (`investigation_html_scripts`), `services/public_config.py`,
+`routers/admin_registry.py`; `e2e/helpers/api-mocks.ts` (`_base64` no conteúdo), `e2e/screenshots/generate.ts`.
+**Testes:** vitest `htmlSandbox` (sandbox por modo, nunca `allow-same-origin`, CSP exata, `<meta>` primeiro mesmo com
+`<script>` antes do `<head>`, CSP do documento preservada, modo lido do config), `ItemViewer` (HTML grande em sandbox
+com CSP, ← → e ◀ ▶ na ordem sem grafos, Esc fecha, setas no filtro não navegam, versão antiga lida após a lista,
+seletor volta à última, download com o nome do upload sem reler, tela cheia, item inexistente), `ItemPreview`
+(Expand com versão; arquivo grande ainda expande), `itemPreview` (SVG, linhas no modo cheio, `viewerItems`); pytest
+`test_default_behaviors` (payload com `investigation_html_scripts`, padrão `cdn`, valor inválido falha);
+`test_admin_registry` verde. E2E `investigations.spec.ts` "an agent's HTML report and image open large…": o script
+roda, `fetch` externo é bloqueado pela CSP, ← → , zoom da imagem, Esc, Voltar do navegador e link `?view=`.
+**Public docs:** `docs/guide/investigations.md` (Case files: Expand, tabela de atalhos, link `?view=`, "HTML from
+agents" com os três modos e riscos, screenshot `investigations-item-viewer.png`); `docs/guide/configuration.md`
+(variável nova).
+**Admin-area impact:** `CONFIG_FIELD_KINDS["investigation_html_scripts"] = "public"`; nenhuma tabela, rota ou ação nova.

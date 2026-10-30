@@ -269,6 +269,43 @@ const caseItem = (id: string, contextId: string, title: string, position: number
   author_email: 'demo@graphlagoon.dev', provenance: {}, exploration_id: `exp-${id}`, context_id: contextId,
   current_version: 0, position, accessible: true, pinned: [], created_at: now,
 });
+/** An agent's report on the vendor case: what the item viewer shows large (static HTML, inline SVG). */
+const AGENT_REPORT_HTML = `<!doctype html><html><head><style>
+  body { font: 15px/1.55 system-ui, sans-serif; color: #1f2937; margin: 0; padding: 32px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; } .sub { color: #6b7280; margin: 0 0 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #e5e7eb; } th { color: #6b7280; font-weight: 600; }
+  .risk { font-weight: 600; color: #b91c1c; } .note { background: #f3f4f6; border-radius: 8px; padding: 12px 16px; margin-top: 24px; }
+</style></head><body>
+  <h1>Vendor review · Globex Data</h1>
+  <p class="sub">Drafted by the case agent from the Social and Supply graphs · 3 findings</p>
+  <div class="grid">
+    <table>
+      <tr><th>Finding</th><th>Evidence</th><th>Risk</th></tr>
+      <tr><td>Director also works at the supplier</td><td>G1 · WORKS_AT</td><td class="risk">high</td></tr>
+      <tr><td>Single source for two products</td><td>G2 · BUILDS</td><td>medium</td></tr>
+      <tr><td>Shared address with a past vendor</td><td>enrichment</td><td>medium</td></tr>
+    </table>
+    <svg viewBox="0 0 360 200" width="100%" role="img" aria-label="Spend by supplier">
+      <text x="0" y="14" font-size="13" fill="#6b7280">Spend by supplier (k$)</text>
+      <g font-size="12" fill="#374151">
+        <rect x="110" y="30" width="220" height="26" fill="#6366f1" rx="3"/><text x="0" y="48">Globex Data</text><text x="320" y="48" text-anchor="end" fill="#fff">840</text>
+        <rect x="110" y="70" width="120" height="26" fill="#a5b4fc" rx="3"/><text x="0" y="88">Initech</text><text x="236" y="88">460</text>
+        <rect x="110" y="110" width="70" height="26" fill="#a5b4fc" rx="3"/><text x="0" y="128">Umbrella</text><text x="186" y="128">270</text>
+        <rect x="110" y="150" width="40" height="26" fill="#a5b4fc" rx="3"/><text x="0" y="168">Hooli</text><text x="156" y="168">150</text>
+      </g>
+    </svg>
+  </div>
+  <p class="note">Recommendation: escalate to procurement; confirm the director's role (suggested, awaiting a person).</p>
+</body></html>`;
+const agentReport = {
+  id: 'rep-vendor', kind: 'document', subkind: 'upload', title: 'Vendor review · agent report', tags: [], status: 'confirmed',
+  author_kind: 'agent', author_email: 'demo@graphlagoon.dev', provenance: { filename: 'vendor-review.html' }, current_version: 1,
+  position: 0, accessible: true, pinned: [], created_at: now, _text: AGENT_REPORT_HTML,
+  latest: { id: 'v-rep-vendor', item_id: 'rep-vendor', version: 1, sha256: 'd'.repeat(64), size_bytes: AGENT_REPORT_HTML.length, content_type: 'text/html', has_text: true, created_by: 'demo@graphlagoon.dev', author_kind: 'agent' },
+};
+
 /** The curated graph split in two: people ↔ companies, and companies → products. */
 function caseSnapshot(sid: string) {
   const types = sid === 'src-social' ? ['WORKS_AT', 'KNOWS'] : ['BUILDS'];
@@ -356,6 +393,7 @@ async function setupPage(page: Page) {
       'case-vendor': [
         caseItem('src-social', SCREENSHOT_CONTEXT.id, 'Social · who works where', 0),
         caseItem('src-supply', 'ctx-supply', 'Supply · who builds what', 1),
+        agentReport,
       ],
     },
     [],
@@ -410,6 +448,17 @@ const SCENES: Scene[] = [
       await page.keyboard.press('c');
       await page.keyboard.up('Space');
       await page.waitForTimeout(1000);
+    },
+  },
+  {
+    // An agent's HTML report opened large (⤢ Expand): the item viewer over the case.
+    guide: 'investigations',
+    scene: 'item-viewer',
+    path: '/investigations/case-vendor?view=rep-vendor',
+    prepare: async (page) => {
+      await expect(page.getByTestId('item-viewer')).toBeVisible();
+      await expect(page.frameLocator('[data-testid="item-html"]').getByText('Vendor review · Globex Data')).toBeVisible();
+      await page.waitForTimeout(300);
     },
   },
   {
