@@ -13833,3 +13833,21 @@ screenshot `investigations-look-panel.png`), `exploring-the-graph.md` (Look, ? S
 mudança de estilo de outro autor (só o caso); `GraphWorkspace` completo (canvas + chrome + painéis num componente)
 fica como débito #41.
 
+## [2026-10-30 16:30] - Feature Implemented: agente MCP define o look (estilo, ícones, rótulos, layout) de uma exploração
+
+**Relato:** com o look salvo por item do caso, o MCP já definia estilo e rótulos de um item (`update_item(look=…)`),
+mas numa exploração só podia mudar `focus_node_id`. Pedido: a exploração também.
+**Decisões:**
+1. `create_exploration(look=…)` e `edit_exploration(look=…)` aceitam as chaves de `GraphLook` (bloco de style preset +
+   `focus_node_id`); validação pelo modelo e **chaves desconhecidas recusadas com o nome** (um erro de digitação não some
+   em silêncio). Semântica: merge no topo do estado (`state_changes`): só as chaves dadas mudam, `null` volta ao padrão,
+   o grafo pode ficar como está (um `edit_exploration` só com `look` bumpa a revisão e é auditado/jornalado como os
+   outros). `get_exploration` devolve `look` (via `look_of`). Resposta do edit traz `look_changed`.
+2. Limitação conhecida mantida: a página da exploração aberta não aplica o look de um agente ao vivo (só o grafo); o
+   canvas do caso aplica no próximo refresh (revisão nova).
+**Arquivos:** `api/graphlagoon/mcp/server.py` (`_look_changes`, três tools), `docs/guide/agents-mcp.md`,
+`docs/guide/agents-mcp-tools.md` e `docs/public/openapi.json` regenerados.
+**Testes:** pytest `test_mcp_explorations::test_an_agent_sets_the_look_of_an_exploration` (look na criação, leitura,
+troca de rótulos mantendo cores/ícones, `null` reseta, chave desconhecida e valor inválido recusados).
+**Public docs:** `agents-mcp.md`, tool page regenerada. **Admin-area impact:** nenhum.
+

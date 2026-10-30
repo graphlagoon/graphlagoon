@@ -123,6 +123,26 @@ def _validated(model, **fields):
         raise _tool_error("INVALID_BODY", str(exc)) from exc
 
 
+def _look_changes(look: Optional[dict]) -> dict:
+    """The look an agent gives for an exploration, as state changes: the keys of a
+    style preset (colors, icons, ``textFormat`` for the labels, layout, behaviors,
+    property visibility) plus ``focus_node_id``. Only the keys given change; a key
+    given as null goes back to its default. Unknown keys are refused, so a typo
+    does not vanish silently."""
+    from graphlagoon.models.schemas import GraphLook
+
+    if not look:
+        return {}
+    if not isinstance(look, dict):
+        raise _tool_error("INVALID_BODY", "look must be an object with style-preset keys")
+    unknown = sorted(set(look) - set(GraphLook.model_fields))
+    if unknown:
+        raise _tool_error("INVALID_BODY", f"Unknown look keys: {', '.join(unknown)}. "
+                          f"Valid: {', '.join(sorted(GraphLook.model_fields))}")
+    _validated(GraphLook, **look)
+    return dict(look)
+
+
 async def _graph(investigation_id: UUID, user: str, item_id: Optional[str] = None) -> dict:
     return await _call(case_graph(investigation_id, user, item_id))
 
@@ -821,12 +841,15 @@ def build_server():
 
     @tool("get_exploration")
     async def get_exploration(ctx: Context, exploration_id: UUID, offset: int = 0, limit: int = 500) -> dict:
-        """One exploration: title, context, graph_query, revision, last_change
+        """One exploration: title, context, graph_query, revision, last_change,
+        ``look`` (its style, labels and layout: the style-preset keys it carries)
         and its graph as the person sees it (the saved snapshot with their own
         layer on top), each node and edge with ``origin`` snapshot | layer.
         ``offset``/``limit`` page nodes and edges alike; ``node_count`` and
         ``edge_count`` are the whole. ``materialized`` false: nothing is saved
         yet and the page loads the context's default view."""
+        from graphlagoon.services.case_graph import look_of
+
         user = _agent(ctx)
         await _exploration_in_scope(user, exploration_id)
         loaded = await _edit(exploration_graph.load(exploration_id, user))
@@ -836,7 +859,7 @@ def build_server():
         return _out({
             "id": loaded.id, "title": loaded.title, "context_id": loaded.context_id, "owner_email": loaded.owner_email,
             "graph_query": loaded.state.get("graph_query"), "focus_node_id": loaded.state.get("focus_node_id"),
-            "revision": loaded.revision,
+            "look": look_of(loaded.state), "revision": loaded.revision,
             "last_change": loaded.state.get("last_change"), "materialized": bool(loaded.state.get("has_snapshot")),
             "node_count": len(graph["nodes"]), "edge_count": len(graph["edges"]),
             "nodes": graph["nodes"][offset: offset + limit], "edges": graph["edges"][offset: offset + limit],
@@ -848,7 +871,8 @@ def build_server():
                                  nodes: Optional[list[dict[str, Any]]] = None,
                                  edges: Optional[list[dict[str, Any]]] = None,
                                  investigation_id: Optional[UUID] = None,
-                                 focus_node_id: Optional[str] = None) -> dict:
+                                 focus_node_id: Optional[str] = None,
+                                 look: Optional[dict[str, Any]] = None) -> dict:
         """A new exploration in a readable context, saved with its graph:
         ``graph_query`` (Cypher, or SQL on a SQL context) runs now and its
         answer is the graph; ``nodes`` [{id, type, properties}] and ``edges``
@@ -856,6 +880,12 @@ def build_server():
         whole graph without a query). With neither it opens on the context's
         default view. ``investigation_id`` also attaches it to that case as a
         live reference. ``focus_node_id`` is the node the page opens on.
+        ``look`` is how it is drawn: the keys of a style preset — ``nodeTypeColors``
+        and ``edgeTypeColors`` {type: "#rrggbb"}, ``nodeTypeIcons`` / ``edgeTypeIcons``
+        {type: icon name}, ``textFormat`` {defaults: {nodeTemplate, edgeTemplate},
+        rules: [...]} for the labels, ``aesthetics``, ``layout_algorithm``,
+        ``layout_mode_config``, ``behaviors``, ``property_visibility`` (see a
+        person's exploration through get_exploration for the shapes).
         Returns ``url`` for the person to open."""
         from graphlagoon.models.schemas import ExplorationCreate, ExplorationState, GraphSnapshot
         from graphlagoon.routers import explorations as explorations_router
@@ -865,6 +895,7 @@ def build_server():
         actor = auth.get_current_actor() or {}
         if investigation_id is None and actor.get("scope") == "case":
             raise _tool_error("OUT_OF_SCOPE", "This token is limited to its cases: pass the investigation_id to attach it to")
+        look_state = _look_changes(look)
         snapshot, report, info = None, None, {}
         if graph_query or nodes or edges:
             base = None
@@ -878,10 +909,12 @@ def build_server():
                 context_id,
                 ExplorationCreate(
                     title=title,
-                    state=ExplorationState(graph_query=graph_query, focus_node_id=focus_node_id or None, last_change={
-                        "by": user, "author_kind": "agent", "tool": "create_exploration",
-                        "at": datetime.now().isoformat(), **({"summary": exploration_graph.summary(report)} if report else {}),
-                    }),
+                    state=ExplorationState(**{**look_state, "graph_query": graph_query, "focus_node_id": focus_node_id or None,
+                                              "last_change": {
+                                                  "by": user, "author_kind": "agent", "tool": "create_exploration",
+                                                  "at": datetime.now().isoformat(),
+                                                  **({"summary": exploration_graph.summary(report)} if report else {}),
+                                              }}),
                     snapshot=GraphSnapshot.model_validate(snapshot) if snapshot is not None else None,
                 ),
                 None,
@@ -909,7 +942,8 @@ def build_server():
                                set_properties: Optional[list[dict[str, Any]]] = None,
                                replace: bool = False, title: Optional[str] = None,
                                expected_revision: Optional[int] = None,
-                               focus_node_id: Optional[str] = None) -> dict:
+                               focus_node_id: Optional[str] = None,
+                               look: Optional[dict[str, Any]] = None) -> dict:
         """Change an exploration's graph in place, in one atomic batch, in this
         order: ``replace`` (drop every node and edge, the person's layer too:
         a brand-new graph under the same id) → ``remove_node_ids`` (deleted,
@@ -922,15 +956,22 @@ def build_server():
         ``revision`` you read as ``expected_revision`` to be refused
         (EXPLORATION_CHANGED) instead of overwriting a newer save. A page with
         the exploration open picks the change up within seconds.
-        ``focus_node_id`` sets the node the page opens on ("" clears it)."""
+        ``focus_node_id`` sets the node the page opens on ("" clears it).
+        ``look`` changes how it is drawn — the same keys as in create_exploration
+        (colors, icons, ``textFormat`` for the labels, layout, behaviors, …): only
+        the keys given change, a key given as null goes back to its default; the
+        graph may stay as it is. A case showing the exploration takes the new look
+        at its next refresh."""
         user = _agent(ctx)
         ops = {"replace": replace, "add_nodes": add_nodes, "add_edges": add_edges, "remove_node_ids": remove_node_ids,
                "remove_edge_ids": remove_edge_ids, "set_properties": set_properties}
+        look_state = _look_changes(look)
         loaded = await _writable_exploration(user, exploration_id, expected_revision, needs_graph=not replace)
         snapshot, overlay, report = _edited(loaded.snapshot, loaded.overlay, ops)
-        state_changes = {"focus_node_id": focus_node_id or None} if focus_node_id is not None else None
+        state_changes = {**look_state, **({"focus_node_id": focus_node_id or None} if focus_node_id is not None else {})}
         return await _save_exploration(user, loaded, "edit_exploration", snapshot, overlay, report, title=title,
-                                       state_changes=state_changes)
+                                       state_changes=state_changes or None,
+                                       info={"look_changed": sorted(look_state)} if look_state else None)
 
     @tool("expand_exploration")
     async def expand_exploration(ctx: Context, exploration_id: UUID, node_ids: list[str], depth: int = 1,

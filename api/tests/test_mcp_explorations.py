@@ -287,3 +287,44 @@ async def test_the_focus_node_travels_with_the_exploration(env):
         r = await rest.put(f"/api/explorations/{eid}", json={"state": {**page["state"], "focus_node_id": "a"}, "expected_revision": 3})
         assert r.status_code == 200 and r.json()["state"]["focus_node_id"] == "a"
         assert (await rest.get(f"/api/explorations/{eid}")).json()["state"]["focus_node_id"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_an_agent_sets_the_look_of_an_exploration(env):
+    """Style, icons and labels travel with the exploration: given at creation, read
+    back, changed key by key (the others stay), reset with null, typos refused."""
+    app, context, exploration, files, ds = env
+    red = {"nodeTypeColors": {"Pessoa": "#ff0000"}, "nodeTypeIcons": {"Pessoa": "user"}}
+    labels = {"textFormat": {"defaults": {"nodeTemplate": "{prop:name}", "edgeTemplate": "{relationship_type}"}, "rules": []}}
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        async with _mcp(app, token) as client:
+            made = await _tool(client, "create_exploration", context_id=str(context.id), title="Vermelho",
+                               nodes=[{"id": "a", "type": "Pessoa", "properties": {"name": "Ana"}}], look=red)
+            eid = made["exploration"]["id"]
+            assert made["exploration"]["state"]["nodeTypeIcons"] == {"Pessoa": "user"}
+            seen = await _tool(client, "get_exploration", exploration_id=eid)
+            assert seen["look"]["nodeTypeColors"] == {"Pessoa": "#ff0000"}
+            assert "graph_query" not in seen["look"]
+
+            # Labels change; the colors and icons given before stay. No graph op needed.
+            out = await _tool(client, "edit_exploration", exploration_id=eid, look=labels)
+            assert out["revision"] == 1 and out["look_changed"] == ["textFormat"]
+            seen = await _tool(client, "get_exploration", exploration_id=eid)
+            assert seen["look"]["textFormat"]["defaults"]["nodeTemplate"] == "{prop:name}"
+            assert seen["look"]["nodeTypeIcons"] == {"Pessoa": "user"}
+            assert seen["revision"] == 1
+
+            # null resets one key; the REST state (what the page loads) agrees.
+            await _tool(client, "edit_exploration", exploration_id=eid, look={"nodeTypeIcons": None})
+            state = (await rest.get(f"/api/explorations/{eid}")).json()["state"]
+            assert state["nodeTypeIcons"] is None and state["nodeTypeColors"] == {"Pessoa": "#ff0000"}
+            assert "nodeTypeIcons" not in (await _tool(client, "get_exploration", exploration_id=eid))["look"]
+
+            # A key that is not part of a look is refused, named.
+            with pytest.raises(Exception) as err:
+                await _tool(client, "edit_exploration", exploration_id=eid, look={"nodeColours": {}})
+            assert "nodeColours" in str(err.value)
+            with pytest.raises(Exception):
+                await _tool(client, "create_exploration", context_id=str(context.id), title="Ruim", look={"focus_node_id": 7})
+
