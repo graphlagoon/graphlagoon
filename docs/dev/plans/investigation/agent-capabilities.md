@@ -2,7 +2,8 @@
 
 > **Documento de referência da política em vigor** (05-plano-v2 §6, F5, 2026-10-10;
 > atualizado pelo plano 06, P1–P8, 2026-10-20: sem máscara, tipos de caso, decisões
-> múltiplas com proposta do agente, tarefas, entidade em outros casos).
+> múltiplas com proposta do agente, tarefas, entidade em outros casos; 2026-10-29: o agente
+> edita explorações no lugar, inclusive apagando nós e arestas).
 > Substitui a matriz "direto / propõe / nunca" do plano antigo, que não existe mais:
 > não há `propose`, tabela de propostas nem tela própria. Ao mudar a política,
 > atualize este arquivo, `mcp/registry.py` e o decision log no mesmo commit.
@@ -44,7 +45,9 @@ no registry e o teste exige que ele exista.
 | `list_cases`, `get_case`, `create_case`, `update_case` | `GET/POST /investigations`, `GET/PATCH /{id}` | fila paginada; `create_case` com tipo, campos e `external_ref` idempotente, exige `investigation.create`; token `scope=case` não cria; status do agente vira `status_change` sugerido |
 | `get_brief`, `write_brief` | `GET/PUT /{id}/brief` | nova versão do `document/brief` |
 | `list_items`, `read_item`, `update_item`, `search_case` | `GET /{id}/items`, `/items/{item}` + `/versions` + `/text`, `PATCH /items/{item}`, `GET /{id}/search` | `read_item` pagina o texto e devolve PNG/JPEG/GIF/WebP como conteúdo de imagem (até `agent_image_max_bytes`); `update_item(chart=…)` |
-| `add_item`, `add_note`, `add_document`, `add_table`, `save_query`, `import_file`, `create_exploration` | `POST /{id}/items` (e `POST /items/{item}/versions`) | `graph/view` e `graph/selection` validados; `import_file` exige `investigation.upload` |
+| `add_item`, `add_note`, `add_document`, `add_table`, `save_query`, `import_file` | `POST /{id}/items` (e `POST /items/{item}/versions`) | `graph/view` e `graph/selection` validados; `import_file` exige `investigation.upload` |
+| `list_explorations`, `get_exploration`, `create_exploration` | `GET /api/explorations`, `GET /api/explorations/{e}` + `/snapshot` + `/overlay`, `POST /api/graph-contexts/{c}/explorations` (+ `POST /{id}/items` com `investigation_id`) | sem caso; `create_exploration` grava o grafo de `graph_query` e/ou `nodes`/`edges`; token `scope=case` só vê as explorações referenciadas pelos seus casos e só cria anexando a um deles |
+| `edit_exploration`, `expand_exploration`, `query_into_exploration`, `enrich_exploration` | `PUT /api/explorations/{e}` (+ `/overlay`), `POST /api/graph-contexts/{c}/expand` \| `/cypher`, enrichment lookup | **editam e apagam nós e arestas no lugar** (mesmo id; `replace` = grafo novo); `exploration.save` (+ `exploration.edit_graph` se a camada muda); `expected_revision` → `EXPLORATION_CHANGED`; auditado `exploration.agent_edit`; `exploration.changed` no diário dos casos que a referenciam |
 | `run_query`, `join_tables`, `compare_tables`, `promote_tables` | `POST /items/{item}/run`, `/items/join`, `/compare`, `/promote` | cada run é uma versão |
 | `pin_evidence` | `POST /items/{item}/pin` | imutável |
 | `annotate`, `list_annotations`, `group` | `POST/GET /{id}/annotations`, `PATCH /annotations/{a}` | `role, tag, same_as, hypothesis, hypothesis_status`, grupos |
@@ -73,6 +76,7 @@ no registry e o teste exige que ele exista.
 | `POST /items/{i}/confirm|reject`, `POST /annotations/{a}/confirm|reject` | **Nunca** | o agente não confirma as próprias sugestões |
 | `/api/agent-tokens*` | **Nunca** | o agente não emite nem revoga token |
 | `DELETE /items/{i}`, `DELETE /annotations/{a}` | sem ferramenta | o agente acrescenta e versiona, não remove |
+| `DELETE /api/explorations/{e}`, `POST/DELETE /api/explorations/{e}/share*` | **Nunca** | apagar ou compartilhar a exploração inteira; dentro dela o agente apaga nós e arestas com `edit_exploration` |
 | `GET /items/{i}/content` | sem ferramenta | binário nunca pela REST; o agente lê `/text`, e imagens pelo `read_item` |
 | Qualquer rota fora da allowlist (`/api/admin`, `/api/graph-contexts` exceto consultas, share de contexto/exploração) | **Nunca** | `AGENT_FORBIDDEN` no middleware |
 

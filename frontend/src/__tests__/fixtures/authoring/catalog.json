@@ -1066,7 +1066,19 @@
   },
   {
    "name": "create_exploration",
-   "summary": "Start a new exploration in a readable context and attach it to the case as a live reference; returns ``url`` for the person to open (``/graph/{context}?exploration=\u2026&case=\u2026``)."
+   "summary": "A new exploration in a readable context, saved with its graph: ``graph_query`` (Cypher, or SQL on a SQL context) runs now and its answer is the graph; ``nodes`` [{id, type, properties}] and ``edges`` [{id?, source, target, type, properties}] are added on top (or are the whole graph without a query)."
+  },
+  {
+   "name": "edit_exploration",
+   "summary": "Change an exploration's graph in place, in one atomic batch, in this order: ``replace`` (drop every node and edge, the person's layer too: a brand-new graph under the same id) \u2192 ``remove_node_ids`` (deleted, with their edges; for good, from the saved graph and the layer) \u2192 ``remove_edge_ids`` \u2192 ``add_nodes`` [{id, type, properties}] (an id already there gets the type and properties given) \u2192 ``add_edges`` [{id?, source, target, type, properties}] (both ends must exist after the batch) \u2192 ``set_properties`` [{id, kind: node|edge, properties, unset: [keys]}]."
+  },
+  {
+   "name": "enrich_exploration",
+   "summary": "Look up enrichment table ``table`` (a name from the context's ``enrichment_tables``) for the nodes it applies to (``node_ids``, or every node of its types) and save the first row's columns as their properties: missing ones only, or every column with ``overwrite``."
+  },
+  {
+   "name": "expand_exploration",
+   "summary": "Bring the neighbours of ``node_ids`` from the exploration's context into it (the page's Expand: ``depth`` 1\u20132, ``edge_types`` to follow, ``directed`` follows edge direction, ``edge_limit`` 4\u20131000 per node)."
   },
   {
    "name": "find_entity_cases",
@@ -1087,6 +1099,10 @@
   {
    "name": "get_entity",
    "summary": "One entity: properties, the items it came from, its confirmed role, the annotations and notes anchored on it, and its edges."
+  },
+  {
+   "name": "get_exploration",
+   "summary": "One exploration: title, context, graph_query, revision, last_change and its graph as the person sees it (the saved snapshot with their own layer on top), each node and edge with ``origin`` snapshot | layer."
   },
   {
    "name": "get_graph",
@@ -1121,6 +1137,10 @@
    "summary": "The case journal, oldest first; ``after`` is the last event id you saw."
   },
   {
+   "name": "list_explorations",
+   "summary": "Explorations the person can open (newest first): id, title, context, owner, revision and who changed it last."
+  },
+  {
    "name": "list_items",
    "summary": "The case material: items of kind graph | table | query | document | note with author, status (suggested | confirmed | rejected), latest version and pins."
   },
@@ -1143,6 +1163,10 @@
   {
    "name": "propose_decision",
    "summary": "Propose the decision; a person records it (you never decide)."
+  },
+  {
+   "name": "query_into_exploration",
+   "summary": "Run a graph query against the exploration's context (Cypher; SQL on a SQL context) and ``mode`` \"add\" its answer to the graph (what is there stays) or \"replace\" the graph with it (the query becomes the exploration's ``graph_query``)."
   },
   {
    "name": "read_item",

@@ -259,6 +259,14 @@ class Settings(BaseSettings):
         description="Maximum size of the user's layer of one exploration (its own nodes, "
         "edges and enrichment rows, as JSON), in bytes",
     )
+    live_refresh_seconds: int = Field(
+        default=5,
+        ge=0,
+        le=3600,
+        description="How often an open exploration or case page asks GET /api/live whether "
+        "an agent (or another tab) changed it, in seconds, only while the tab is visible; "
+        "0 turns the live refresh off",
+    )
     investigation_max_working_edges: int = Field(
         default=50_000,
         description="Ceiling of edges in an investigation's working graph in the "

@@ -55,6 +55,21 @@ the first save it shows an **Unsaved** badge instead. The badge means
 *never saved*, not *has unsaved changes* — editing a loaded exploration
 does not bring it back. Re-save when you want to keep new changes.
 
+### When someone else changes it while it is open
+
+An open exploration follows what is saved to it elsewhere: an
+[AI agent](./agents-mcp.md#explorations) editing its graph, or you in another
+tab. Every few seconds (`GRAPH_LAGOON_LIVE_REFRESH_SECONDS`, 5 by default, only
+while the tab is visible) the page asks whether the exploration moved; when it
+did, the change lands **in place** — new nodes join, deleted ones leave, changed
+properties update — and a toast says who did what (*"An agent changed this
+exploration: +3 nodes, −1 edge"*). Nodes you already had keep their position,
+and what you have not saved yet (nodes you expanded, filters, style) stays.
+
+Saving never overwrites a change you have not seen: if the exploration was
+saved elsewhere since you loaded it, **Save** merges that change into your view
+first and then saves both, with a warning that it did.
+
 ## What an exploration captures
 
 | Saved | Details |

@@ -103,6 +103,16 @@ export function describeEvent(e: InvestigationEvent, nameOf: (id: string) => str
     case 'item.confirmed': return `confirmed the suggested item “${p.title}”`;
     case 'item.rejected': return `rejected the suggested item “${p.title}”`;
     case 'nodes.promoted': return `promoted ${p.nodes} ${p.node_type} node(s) from enrichment table ${p.table}`;
+    case 'exploration.changed': {
+      const parts = [
+        p.added_nodes ? `+${p.added_nodes} node(s)` : '',
+        p.removed_nodes ? `−${p.removed_nodes} node(s)` : '',
+        p.added_edges ? `+${p.added_edges} edge(s)` : '',
+        p.removed_edges ? `−${p.removed_edges} edge(s)` : '',
+        (p.updated_nodes ?? 0) + (p.updated_edges ?? 0) ? `${(p.updated_nodes ?? 0) + (p.updated_edges ?? 0)} changed` : '',
+      ].filter(Boolean);
+      return `changed the exploration “${p.title}”${parts.length ? ` (${parts.join(', ')})` : ''}`;
+    }
     case 'metric.saved': return `saved metric ${p.metric} as property ${p.property} on ${p.nodes} node(s) of “${p.exploration_title}”`;
     case 'trace.run': return `followed the money (${p.allocation ?? 'fifo'}, ${p.maxHops ?? '?'} layers): ${Math.round((p.coverage ?? 0) * 100)}% reached exits`;
     case 'path.run': return `searched paths ${nameOf(p.source)} → ${nameOf(p.target)} (${p.mode}): ${p.found} found`;

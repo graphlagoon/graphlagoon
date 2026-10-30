@@ -438,6 +438,43 @@ async def list_events(
         return [serialize_event(e) for e in events[start : start + limit]]
 
 
+async def live_revision(investigation_id: UUID, user_email: str) -> dict:
+    """What a case page polls (``GET /api/live``): the newest journal event and the
+    revision of each exploration the case references. Metadata only, no audit."""
+    async with _session() as session:
+        await load_case(session, investigation_id, user_email)
+        if session is None:
+            store = get_memory_store()
+            events = store.list_investigation_children(_EVENTS, investigation_id)
+            last = max(events, key=lambda e: (e.created_at, str(e.id)), default=None)
+            refs = [i.exploration_id for i in store.case_items.values()
+                    if i.investigation_id == investigation_id and i.exploration_id and i.deleted_at is None]
+            states = {e: (store.get_exploration(e).state or {}) for e in refs if store.get_exploration(e)}
+        else:
+            from sqlalchemy import select
+
+            from graphlagoon.db.models import CaseItem, Exploration
+
+            model = _model(_EVENTS)
+            last = (await session.execute(
+                select(model).where(model.investigation_id == investigation_id)
+                .order_by(model.created_at.desc(), model.id.desc()).limit(1)
+            )).scalar_one_or_none()
+            rows = (await session.execute(
+                select(Exploration.id, Exploration.state).where(Exploration.id.in_(
+                    select(CaseItem.exploration_id).where(
+                        CaseItem.investigation_id == investigation_id, CaseItem.deleted_at.is_(None)
+                    )
+                ))
+            )).all()
+            states = {r[0]: (r[1] or {}) for r in rows}
+    return {
+        "last_event_id": str(last.id) if last else None,
+        "last_event_at": last.created_at.isoformat() if last else None,
+        "explorations": {str(e): int(state.get("revision") or 0) for e, state in states.items()},
+    }
+
+
 async def post_client_event(investigation_id: UUID, user_email: str, kind: str, payload: dict) -> dict:
     if kind not in CLIENT_EVENT_KINDS:
         raise InvestigationError(

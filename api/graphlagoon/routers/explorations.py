@@ -110,6 +110,40 @@ async def _delete_snapshot_if_exists(state: dict, exploration_id: UUID) -> None:
             logger.warning("Could not delete the layer of exploration %s: %s", exploration_id, exc)
 
 
+def _stamp_write(current: dict, new_state: dict, user_email: str) -> dict:
+    """Server-owned fields of a written state: ``revision`` + 1 and who wrote
+    (the live refresh of an open page polls them; the client never sets them)."""
+    from datetime import datetime
+
+    from graphlagoon.middleware.auth import get_current_actor
+
+    return {
+        **new_state,
+        "revision": int(current.get("revision") or 0) + 1,
+        "last_change": {
+            "by": user_email,
+            "author_kind": "agent" if get_current_actor() else "human",
+            "at": datetime.now().isoformat(),
+        },
+    }
+
+
+def _check_revision(current: dict, expected: Optional[int]) -> None:
+    """409 when the writer read an older revision than the stored one."""
+    stored = int(current.get("revision") or 0)
+    if expected is not None and expected != stored:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "code": "EXPLORATION_CHANGED",
+                    "message": "The exploration changed since it was loaded (an agent or another tab saved it)",
+                    "details": {"revision": stored, "last_change": current.get("last_change")},
+                }
+            },
+        )
+
+
 def exploration_to_response(
     exploration: Union["Exploration", MemoryExploration],
     user_email: str = "",
@@ -551,6 +585,7 @@ async def update_exploration(
                     status_code=403,
                     detail="No write access to update exploration",
                 )
+            _check_revision(exploration.state or {}, data.expected_revision)
 
             # Check for duplicate name if title is being changed
             if data.title is not None and data.title != exploration.title:
@@ -567,18 +602,17 @@ async def update_exploration(
                     )
                 exploration.title = data.title
 
+            current = dict(exploration.state or {})
             if data.state is not None:
                 new_state = data.state.model_dump()
                 if data.snapshot is not None:
                     new_state["has_snapshot"] = True
                 # Only PUT .../overlay sets the layer flag; a state from the client keeps it.
-                new_state["has_overlay"] = bool((exploration.state or {}).get("has_overlay"))
-                exploration.state = new_state
-            elif data.snapshot is not None:
-                # snapshot-only update: patch has_snapshot in existing state
-                current = dict(exploration.state or {})
-                current["has_snapshot"] = True
-                exploration.state = current
+                new_state["has_overlay"] = bool(current.get("has_overlay"))
+            else:
+                # title- or snapshot-only update: patch the existing state
+                new_state = {**current, **({"has_snapshot": True} if data.snapshot is not None else {})}
+            exploration.state = _stamp_write(current, new_state, user_email)
 
             await session.commit()
             await session.refresh(exploration)
@@ -600,6 +634,7 @@ async def update_exploration(
                 status_code=403,
                 detail="No write access to update exploration",
             )
+        _check_revision(exploration.state or {}, data.expected_revision)
 
         updates = {}
 
@@ -617,18 +652,17 @@ async def update_exploration(
                     )
             updates["title"] = data.title
 
+        current = dict(exploration.state or {})
         if data.state is not None:
             new_state = data.state.model_dump()
             if data.snapshot is not None:
                 new_state["has_snapshot"] = True
             # Only PUT .../overlay sets the layer flag; a state from the client keeps it.
-            new_state["has_overlay"] = bool((exploration.state or {}).get("has_overlay"))
-            updates["state"] = new_state
-        elif data.snapshot is not None:
-            # snapshot-only update: patch has_snapshot in existing state
-            current = dict(exploration.state or {})
-            current["has_snapshot"] = True
-            updates["state"] = current
+            new_state["has_overlay"] = bool(current.get("has_overlay"))
+        else:
+            # title- or snapshot-only update: patch the existing state
+            new_state = {**current, **({"has_snapshot": True} if data.snapshot is not None else {})}
+        updates["state"] = _stamp_write(current, new_state, user_email)
 
         exploration = store.update_exploration(exploration_id, **updates)
 
@@ -638,7 +672,7 @@ async def update_exploration(
         return exploration_to_response(exploration, user_email)
 
 
-@router.delete("/api/explorations/{exploration_id}")
+@router.delete("/api/explorations/{exploration_id}", dependencies=[Depends(forbid_agents)])
 async def delete_exploration(exploration_id: UUID, request: Request):
     """Delete an exploration."""
     user_email = get_current_user(request)
@@ -851,7 +885,7 @@ async def put_exploration_overlay(
                 raise HTTPException(status_code=403, detail="No write access to this exploration")
             # The file first: a failed write leaves the flag as it was.
             await write_file(exploration.state or {})
-            exploration.state = {**(exploration.state or {}), "has_overlay": not empty}
+            exploration.state = _stamp_write(exploration.state or {}, {**(exploration.state or {}), "has_overlay": not empty}, user_email)
             await session.commit()
             await session.refresh(exploration)
             await session.refresh(exploration, ["shares"])
@@ -864,7 +898,10 @@ async def put_exploration_overlay(
     if not can_write(exploration.owner_email, exploration.shares, user_email):
         raise HTTPException(status_code=403, detail="No write access to this exploration")
     await write_file(exploration.state or {})
-    exploration = store.update_exploration(exploration_id, state={**(exploration.state or {}), "has_overlay": not empty})
+    exploration = store.update_exploration(
+        exploration_id,
+        state=_stamp_write(exploration.state or {}, {**(exploration.state or {}), "has_overlay": not empty}, user_email),
+    )
     return exploration_to_response(exploration, user_email)
 
 

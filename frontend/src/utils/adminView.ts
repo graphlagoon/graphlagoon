@@ -120,6 +120,8 @@ function describeAuditBody(entry: AuditEntry): string {
     case 'exploration.delete':
     case 'investigation.delete':
       return `"${m.title ?? entry.resource_id}" (owner ${m.owner ?? '?'})${m.reason ? ` — reason: ${m.reason}` : ''}`;
+    case 'exploration.agent_edit':
+      return `"${m.title ?? entry.resource_id}" via ${m.tool ?? '?'} → revision ${m.revision ?? '?'}: +${m.added_nodes ?? 0}/−${m.removed_nodes ?? 0} nodes, +${m.added_edges ?? 0}/−${m.removed_edges ?? 0} edges, ${(Number(m.updated_nodes) || 0) + (Number(m.updated_edges) || 0)} changed`;
     case 'investigation.create':
       return `"${m.title ?? entry.resource_id}"`;
     case 'investigation.update':

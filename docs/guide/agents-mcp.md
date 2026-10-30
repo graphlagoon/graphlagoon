@@ -8,7 +8,9 @@ cases for alerts, read the brief, the material (images included) and the
 graph, import files, save and run queries, run the analyses (trace, paths,
 entity resolution, links, communities), group and annotate entities, find
 them in your other cases, pin evidence, plan tasks, write the brief, draft
-reports from the org's templates and **propose** the decision. Every write
+reports from the org's templates and **propose** the decision. Outside any
+case it works on your **explorations**: builds one from scratch, adds and
+deletes nodes and edges, expands, queries into and enriches it, in place. Every write
 carries the **agent** chip; the kinds the case lists in
 *agent_suggest_kinds* (roles, tags, matches, hypothesis statuses, status
 changes and tasks by default) arrive as **suggestions** you confirm or reject.
@@ -16,7 +18,8 @@ changes and tasks by default) arrive as **suggestions** you confirm or reject.
 - **Use it when** you want an agent to do the legwork on a case while you
   keep the decision.
 - **Not the tool for** letting an agent decide, review, export, share,
-  delete, reopen or confirm its own suggestions: no tool does that, by design.
+  delete a case, its material or an exploration, reopen or confirm its own
+  suggestions: no tool does that, by design.
 - **Needs** `GRAPH_LAGOON_AGENTS_ENABLED=true`, the `mcp` extra on the
   server (`pip install "graphlagoon[mcp]"`) and the `investigation.agent`
   [permission](./permissions.md) for whoever creates the token (see
@@ -182,6 +185,33 @@ case the footer shows how many of your agents reach it, linking
 to the Agents page; administrators list and revoke anyone's tokens in the
 admin area.
 
+## Explorations
+
+An agent works on an [exploration](./explorations.md) itself, with or without
+a case: `list_explorations` and `get_exploration` read it (the saved graph with
+your own layer on top, each node and edge marked `snapshot` or `layer`);
+`create_exploration` makes one from a `graph_query`, from `nodes` and `edges`
+it writes, or both; `edit_exploration` changes the graph in one atomic batch
+(add, **delete**, set properties, or `replace` to start a brand-new graph);
+`expand_exploration`, `query_into_exploration` and `enrich_exploration` bring
+neighbours, a query's answer or an enrichment table's columns in.
+
+Nothing is recreated: the change is written to the exploration's saved graph
+under **the same id**, so its title, view, style and shares stay, and every
+link and case that references it shows the new graph.
+
+| | |
+|---|---|
+| **Deleting** | `remove_node_ids` / `remove_edge_ids` delete for good — from the saved graph and from your layer (a node takes its edges with it). There is no undo: the exploration keeps no history of its graph. Every agent edit is in the audit log of the admin area (`/admin`, `exploration.agent_edit`, with counts), and each case that references the exploration journals it (`exploration.changed`). |
+| **A brand-new graph** | `edit_exploration(replace=true, add_nodes=…, add_edges=…)`, or `query_into_exploration(mode="replace")`, which also makes the query the exploration's `graph_query`. |
+| **Not saved yet** | An exploration that only has a query runs it first; one with neither a saved graph nor a query (it opens on the context's default view) only takes `replace` or `query_into_exploration`. |
+| **Someone saved in between** | Pass the `revision` you read as `expected_revision`: a newer save makes the tool answer `EXPLORATION_CHANGED` instead of overwriting it. The other way round, a person saving from an older revision has the agent's change merged in first. |
+| **Watching it happen** | A page with the exploration (or a case that references it) open picks the change up within `GRAPH_LAGOON_LIVE_REFRESH_SECONDS`, in place, with a toast. |
+| **Limits** | 5,000 nodes and 20,000 edges per exploration after an agent edit; `exploration.save` (and `exploration.edit_graph` when the layer changes) as for a person; write access to the exploration. |
+
+A **case-scoped token** reaches only the explorations its cases reference, and
+creates one only to attach it to one of its cases (`investigation_id`).
+
 ## What the agent does directly, what arrives suggested, what it never does
 
 The agent uses **the same service functions as the screen**, with
@@ -190,9 +220,9 @@ line.
 
 | | What | How you see it |
 |---|---|---|
-| **Directly** | Read everything in the case it may read; open cases (idempotent by `external_ref`); edit title, description, tags, fields and stage; add notes, documents, tables, files with a mapping, saved queries, explorations, views and new versions; run queries; join, compare and promote tables; run the analyses; groups; hypotheses; pin evidence; write the brief; chart a table; move its own tasks; edit what agents wrote (an edit of a suggested kind is a suggestion again) | Items and annotations with the **agent** chip; journal lines "agent X for Y"; filter Person / Agent / All |
+| **Directly** | Read everything in the case it may read; open cases (idempotent by `external_ref`); edit title, description, tags, fields and stage; add notes, documents, tables, files with a mapping, saved queries, explorations, views and new versions; build and edit explorations' graphs, deleting nodes and edges included; run queries; join, compare and promote tables; run the analyses; groups; hypotheses; pin evidence; write the brief; chart a table; move its own tasks; edit what agents wrote (an edit of a suggested kind is a suggestion again) | Items and annotations with the **agent** chip; journal lines "agent X for Y"; filter Person / Agent / All |
 | **Suggested** (a person confirms or rejects) | The kinds in the case's ⚙ **Agent** section — by default `role`, `tag`, `hypothesis_status`, `same_as`, `status_change`, `task`; a case may add `group` and `note` or remove kinds. Reports drafted from a template. **Decision proposals** (always) | Dashed amber rows with **Confirm** / **Reject**; the queue's "suggested" counter; a proposal opens the decision panel filled in |
-| **Never** | Record or review a decision, export, share, delete a case, reopen a closed case, confirm or reject suggestions, delete items or annotations, mint tokens; assign a case, change its type, its ⚙ settings (what arrives suggested included) or its SLA hours; edit a person's annotation, or the mapping or query of a person's item; move a hypothesis other than through `hypothesis_status` | No tool exists; the routes answer 403 to an agent token even when its owner is a superuser (`forbid_agents`, `AGENT_FORBIDDEN`, `ANNOTATION_NOT_YOURS`, `ITEM_NOT_YOURS`) |
+| **Never** | Record or review a decision, export, share, delete a case or an exploration, reopen a closed case, confirm or reject suggestions, delete items or annotations, mint tokens; assign a case, change its type, its ⚙ settings (what arrives suggested included) or its SLA hours; edit a person's annotation, or the mapping or query of a person's item; move a hypothesis other than through `hypothesis_status` | No tool exists; the routes answer 403 to an agent token even when its owner is a superuser (`forbid_agents`, `AGENT_FORBIDDEN`, `ANNOTATION_NOT_YOURS`, `ITEM_NOT_YOURS`) |
 
 The token acts with **your** access and never more: cases you cannot see,
 restricted items and permissions apply the same way (an item from a graph
@@ -241,7 +271,7 @@ twin, or a case route with neither a tool nor a reason, fails the build).
 
 The **[MCP tool reference](./agents-mcp-tools.md)** lists every tool with its
 description, its parameters and the route it mirrors, by group: cases, brief
-and material, adding material, queries and tables, annotations and evidence,
+and material, adding material, explorations, queries and tables, annotations and evidence,
 tasks, graph and entities, analyses, reports and decisions, journal,
 organization. It is generated from the server (`make docs-api`), so it is
 exactly what an agent sees in `tools/list`.
@@ -280,8 +310,9 @@ identity ring) are the org's own docs, written in the admin area.
 
 ## Limits
 
-- No tool deletes: an agent adds items, versions and annotations but never
-  removes them (it can empty a group it created).
+- In a case no tool deletes: an agent adds items, versions and annotations but
+  never removes them (it can empty a group it created). Inside an exploration
+  it does delete nodes and edges, for good (see [Explorations](#explorations)).
 - `search_case` is a case-insensitive substring search over titles and the
   latest text of each item; there is no full-text ranking.
 - `communities` is label propagation on the unified graph, not the browser's

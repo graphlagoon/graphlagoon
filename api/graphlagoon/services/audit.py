@@ -36,6 +36,8 @@ class AuditAction:
     EXPLORATION_SHARE = "exploration.share"
     EXPLORATION_UNSHARE = "exploration.unshare"
     EXPLORATION_TRANSFER = "exploration.transfer"
+    # An agent changed an exploration's graph through MCP (removals are for good).
+    EXPLORATION_AGENT_EDIT = "exploration.agent_edit"
     PRECOMPUTED_PUBLISH = "precomputed.publish"
     PRECOMPUTED_DELETE = "precomputed.delete"
     PRESET_DELETE = "preset.delete"

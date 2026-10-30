@@ -13600,3 +13600,98 @@ sem segredo fora do servidor; `AGENT_ALLOWED_PATHS` não inclui `/api/auth` (age
 
 **Known Limitations:** sem OIDC genérico (débito #39); sem refresh token (#40); `dev_mode=True` default (#38);
 CORS de `main.py` continua `*` + credenciais.
+
+## [2026-10-29 10:00] - Fix: gsql2rsql vem do PyPI por padrão; checkout local é opt-in
+
+**O quê:** `make dev`, `make dev-seed-investigations` e qualquer `uv run` falhavam com "Distribution not found at
+file:///root/cyper2dsql/python" em máquina sem o checkout irmão, porque `[tool.uv.sources]` em `api/pyproject.toml` apontava o
+gsql2rsql para `../../cyper2dsql/python`. O Makefile contornava isso com `UV_NO_SOURCES_PACKAGE`, mas só quando o checkout não
+existia; com ele presente, o local era o padrão. **Decisão:** removida a seção `[tool.uv.sources]` (padrão = PyPI, versão
+fixada em `api/uv.lock`, `uv lock --check` ok) e removido o bloco `ifeq`/`UV_NO_SOURCES_PACKAGE` do Makefile. O local continua
+disponível e não é padrão: `make dev-gsql2rsql[-db]` e `make setup-gsql2rsql GSQL2RSQL_PATH=…` rodam `uv add --editable`
+(que reescreve `pyproject.toml` e `uv.lock`; não commitar nesse estado, comentário no Makefile). `build` e `build-pypi` agora
+equivalem. **Arquivos:** `api/pyproject.toml`, `Makefile`. **Testes:** `uv sync --extra dev` e `make
+dev-seed-investigations` sem variável de ambiente. **Public docs:** No public docs impact. **Admin area:** No admin-area impact.
+
+## [2026-10-29 16:00] - Feature Implemented: agente MCP edita explorações no lugar + atualização ao vivo da página
+
+**Feature:** o agente MCP passa a trabalhar na exploração em si, sem caso: ler o grafo, criar uma com grafo, adicionar,
+**apagar**, alterar propriedades, expandir, consultar para dentro, enriquecer e montar um grafo novo; a página aberta
+(exploração ou caso que a referencia) mostra a mudança em segundos, sem recarregar.
+
+**Requirements:** "o agente deveria conseguir interagir com uma exploração incluindo adicionar, remover arestas,
+enriquecer, ou adicionar nodes e arestas" — remover é apagar; o agente pode querer um grafo totalmente novo; e a página
+precisa refletir o que o agente fez sem F5.
+
+**Design Decisions:**
+1. **Nem recriar nem refazer:** o grafo de uma exploração é o snapshot (o browser o carrega quando `has_snapshot`) com a
+   camada do usuário por cima. Editar = ler snapshot + camada, aplicar um lote e regravar **no mesmo id** (título, estado,
+   estilo e shares ficam). Grafo novo = o mesmo lote com `replace`.
+2. **`services/exploration_graph.py`:** `apply_edit` puro e atômico (ordem: replace → remoções → adições → propriedades;
+   ids exatos e depois sem caixa; aresta precisa das duas pontas; teto 5.000 nós / 20.000 arestas; `skip_existing` para
+   somar respostas do context); `load`/`save` com acesso, arquivos e checagem de revisão, banco e memória.
+3. **Apagar é de verdade:** sai do snapshot **e** da camada (inclusive `imports`); um nó leva as arestas. Sem histórico
+   do snapshot, então cada edição é auditada (`exploration.agent_edit` com contagens) e entra no diário dos casos que
+   referenciam a exploração (`exploration.changed`).
+4. **`state.revision` + `state.last_change`, do servidor** (como `has_overlay`): todo `PUT`, `PUT …/overlay` e edição do
+   agente soma 1 e carimba quem escreveu. Escolhi revisão inteira em vez de `updated_at` (o plano dizia
+   `expected_updated_at`): `func.now()` do SQLite tem resolução de segundo, e duas gravações no mesmo segundo passariam
+   despercebidas no polling e no 409. `expected_revision` velho → 409 `EXPLORATION_CHANGED` (REST e ferramenta);
+   omitido, a última gravação vence como antes.
+5. **Ferramentas:** `list_explorations`, `get_exploration` (snapshot ⊕ camada, `origin` por nó/aresta, paginado),
+   `create_exploration` (caso opcional; `graph_query` roda na hora e/ou `nodes`/`edges`), `edit_exploration`,
+   `expand_exploration`, `query_into_exploration` (`add` | `replace`, que também troca o `graph_query`),
+   `enrich_exploration` (primeira linha vira propriedades, só as ausentes salvo `overwrite`; `promote` cria nós
+   `<tipo>:<valor>` como o "promote to nodes" do browser). Exploração sem nada salvo roda o `graph_query` antes; sem
+   query, só aceita `replace`. Nenhum nome contém `delete` (regra do registry): apagar é parâmetro.
+6. **Escopo:** token `scope=case` só alcança explorações referenciadas pelos seus casos e só cria anexando a um deles.
+   `DELETE /api/explorations/{id}` e os shares de exploração passam a ser HUMAN_ONLY com `forbid_agents` — o agente
+   apaga dentro da exploração, nunca a exploração. `test_agent_registry` cobre agora `routers/explorations.py` e as
+   rotas `expand`/`cypher` do `routers/graph.py`.
+7. **Ao vivo por polling, não SSE:** `GET /api/live?exploration=&case=` devolve só revisões (exploração:
+   `{revision, last_change}`; caso: `{last_event_id, last_event_at, explorations: {id: revision}}`), sem auditoria, id
+   sem acesso = null. Funciona atrás do proxy do Databricks Apps e com vários workers (lê o banco). Setting
+   `live_refresh_seconds` (5; 0 desliga), público no `/api/config` e devolvido em cada resposta.
+8. **Merge em três vias no browser** (`utils/liveMerge.ts`): base = impressões digitais do snapshot que a página sabe
+   que o servidor tem (no load, a cada gravação própria e a cada merge); só o que mudou entre base e remoto é tocado.
+   Objetos `Node` existentes ficam (posição), nós expandidos e não salvos ficam, propriedades mudadas entram por
+   `patchNodeProperties` (a camada é reaplicada por `withOverlay`), seleção filtrada, marcador de "não salvo" preservado.
+   Salvar com revisão velha: o store faz o merge e salva de novo uma vez, com aviso.
+9. **Caso:** `syncLive` recarrega só a fonte cuja exploração mudou de revisão (mantém expansões e nós promovidos) e,
+   com evento novo de outra pessoa ou de agente, o registro do caso, material, anotações e brief; eventos próprios só
+   atualizam o diário.
+
+**Implementation:**
+- Backend novos: `services/exploration_graph.py`, `routers/live.py`. Modificados: `mcp/server.py` (7 ferramentas +
+  helpers), `mcp/registry.py`, `routers/explorations.py` (`_stamp_write`, `_check_revision`, DELETE `forbid_agents`),
+  `models/schemas.py` (`revision`, `last_change`, `expected_revision`), `services/cases.py` (`live_revision`),
+  `services/audit.py`, `config.py` + `public_config.py` + `admin_registry.py` (`live_refresh_seconds`), `app.py`,
+  `dev/api_docs.py` (grupo Explorations).
+- Frontend novos: `utils/liveMerge.ts`, `composables/useLiveRevision.ts`. Modificados: `stores/graph.ts`
+  (`applyRemoteChange`, `putExploration`), `stores/investigation.ts` (`loadSource`, `syncLive`),
+  `views/GraphVisualizationView.vue`, `views/InvestigationView.vue`, `services/api.ts` (`getLive`), `types/graph.ts`,
+  `utils/investigationEvents.ts`, `utils/adminView.ts`; `e2e/helpers/api-mocks.ts` devolve `events`.
+
+**Testing:**
+- [x] `tests/test_exploration_edit.py` (7), `tests/test_mcp_explorations.py` (3, ponta a ponta com o cliente SDK: ler,
+  editar, 409, apagar, expandir, consultar, enriquecer com promote, auditoria, diário do caso, grafo do caso; criar do
+  zero e por consulta; replace limpa a camada; escopo de caso; REST do agente não apaga a exploração),
+  `tests/test_live.py` (3); `test_agent_registry`, `test_admin_registry`, `test_api_docs`, `test_type_data` verdes.
+  Suíte do backend: só as 16 falhas de ambiente já existentes (sem `alembic` no venv, versão do `gsql2rsql`).
+- [x] Vitest: `liveMerge.test.ts`, `useLiveRevision.test.ts`, `graph.liveChange.test.ts`, `investigation.test.ts`
+  (+1); suíte completa 2733 verde. `InvestigationsView.test.ts` tem um caso intermitente que também falha sem esta
+  mudança. `vue-tsc` limpo.
+- [x] E2E `live-refresh.spec.ts`: exploração aberta recebe a edição do agente no lugar com toast; página do caso
+  mostra a nota do agente e o grafo novo da exploração.
+
+**Public docs:** `explorations.md` ("When someone else changes it while it is open"), `agents-mcp.md` (seção
+Explorations, níveis e limites), `configuration.md` (`GRAPH_LAGOON_LIVE_REFRESH_SECONDS`), `agents-mcp-tools.md` e
+`openapi.json` regenerados; `agent-capabilities.md` atualizado. `vitepress build` passa.
+
+**Admin-Area Impact:** `CONFIG_FIELD_KINDS` (+`live_refresh_seconds`, public), `ROUTER_MODULES` (+`live`), nova ação de
+auditoria `exploration.agent_edit` com frase em `describeAudit`. Rota nova só GET (sem auditoria).
+
+**Known Limitations:** apagar não tem desfazer (sem histórico do snapshot); a atualização tem até
+`live_refresh_seconds` de atraso; mudanças de estilo/filtros/layout não são aplicadas ao vivo (as ferramentas não mexem
+nisso); propriedade local não salva de um nó que o agente também alterou é substituída pela do servidor; SQL bruto só
+quando o context é SQL (`query_into_exploration` e `create_exploration` detectam Cypher por `MATCH`).

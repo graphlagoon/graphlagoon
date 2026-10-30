@@ -62,6 +62,7 @@ async def build_public_config(
         "investigation_file_max_bytes": settings.investigation_file_max_bytes,
         # The user's layer of an exploration (BYOD-2): the "Your data" dialog checks files against it.
         "exploration_overlay_max_bytes": settings.exploration_overlay_max_bytes,
+        "live_refresh_seconds": settings.live_refresh_seconds,
         "investigation_max_working_edges": settings.investigation_max_working_edges,
         "investigation_retention_years": settings.investigation_retention_years,
         # Which backends this server can serve, and the named REST connections
