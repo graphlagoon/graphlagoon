@@ -26,6 +26,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from graphlagoon.config import get_settings
@@ -38,6 +39,7 @@ from graphlagoon.services import (
     case_queries,
     case_tables,
     case_types,
+    exploration_graph,
     org_library,
 )
 from graphlagoon.services import cases as service
@@ -143,6 +145,121 @@ async def _create(investigation_id: UUID, user: str, data: dict, text: Optional[
                   "sha256": (item["latest"] or {}).get("sha256")},
     )
     return item
+
+
+def _as_request(user: str):
+    """What a router handler reads the caller from, for handlers the tools reuse."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(state=SimpleNamespace(user_email=user), headers={})
+
+
+def _http_tool_error(exc: HTTPException):
+    detail = exc.detail
+    error = detail.get("error", {}) if isinstance(detail, dict) else {}
+    default = {403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT"}.get(exc.status_code, "REQUEST_FAILED")
+    return _tool_error(error.get("code", default), error.get("message", str(detail)))
+
+
+async def _edit(awaitable):
+    """Awaits an exploration_graph call, its errors as tool errors."""
+    try:
+        return await awaitable
+    except exploration_graph.ExplorationEditError as exc:
+        raise _tool_error(exc.code, exc.message) from exc
+
+
+def _edited(snapshot, overlay, ops: dict):
+    try:
+        return exploration_graph.apply_edit(snapshot, overlay, ops)
+    except exploration_graph.ExplorationEditError as exc:
+        raise _tool_error(exc.code, exc.message) from exc
+
+
+async def _scoped_exploration_ids(user: str) -> Optional[set[str]]:
+    """The explorations a case-scoped token reaches (those its cases reference); None: no scope."""
+    actor = auth.get_current_actor() or {}
+    if actor.get("scope") != "case":
+        return None
+    items = []
+    for investigation_id in actor.get("investigation_ids", []):
+        try:
+            items += await case_items.list_items(UUID(investigation_id), user, "graph")
+        except service.InvestigationError:
+            continue
+    return {str(i["exploration_id"]) for i in items if i.get("exploration_id")}
+
+
+async def _exploration_in_scope(user: str, exploration_id: UUID) -> None:
+    allowed = await _scoped_exploration_ids(user)
+    if allowed is not None and str(exploration_id) not in allowed:
+        raise _tool_error("OUT_OF_SCOPE", "This token is limited to its cases, and none of them references this exploration")
+
+
+async def _writable_exploration(user: str, exploration_id: UUID, expected_revision: Optional[int],
+                                needs_graph: bool = True) -> "exploration_graph.Loaded":
+    """The exploration to edit, its saved graph in hand: one never saved runs its
+    graph_query first (the page would), and with no query either it has nothing
+    to edit but ``replace``."""
+    await _permission(user, "exploration.save")
+    await _exploration_in_scope(user, exploration_id)
+    loaded = await _edit(exploration_graph.load(exploration_id, user, write=True))
+    if expected_revision is not None and expected_revision != loaded.revision:
+        raise _tool_error("EXPLORATION_CHANGED", f"The exploration is at revision {loaded.revision}, not {expected_revision}; "
+                                                 "read it again (get_exploration)")
+    if needs_graph and not loaded.state.get("has_snapshot"):
+        query = loaded.state.get("graph_query")
+        if not query:
+            raise _tool_error("EXPLORATION_NOT_MATERIALIZED",
+                              "Nothing is saved for this exploration yet (it opens on the context's default view): "
+                              "use query_into_exploration, or edit_exploration with replace=true")
+        loaded.snapshot, _ = await _edit(exploration_graph.run_graph_query(loaded.context_id, user, query))
+    elif needs_graph and loaded.snapshot is None:
+        raise _tool_error("SNAPSHOT_MISSING", "The saved graph file of this exploration is missing; "
+                                              "rebuild it with query_into_exploration mode=replace")
+    return loaded
+
+
+def _resolve_exploration_nodes(graph: dict, given: list[str]) -> list[str]:
+    ids = exploration_graph._Ids(str(n["id"]) for n in graph["nodes"])
+    out = []
+    for g in given:
+        real = ids.find(g)
+        if real is None:
+            raise _tool_error("NODE_NOT_FOUND", f"No node '{g}' in this exploration")
+        out.append(real)
+    return out
+
+
+async def _save_exploration(user: str, loaded, tool: str, snapshot: dict, overlay: Optional[dict], report: dict,
+                            info: Optional[dict] = None, state_changes: Optional[dict] = None,
+                            title: Optional[str] = None) -> dict:
+    """Writes an agent's edit, audits it and journals it in the cases that
+    reference the exploration (their pages refresh their graph from that)."""
+    if overlay is not None:
+        await _permission(user, "exploration.edit_graph")
+    change = {"by": user, "author_kind": "agent", "tool": tool, "summary": exploration_graph.summary(report)}
+    saved = await _edit(exploration_graph.save(loaded, user, snapshot=snapshot, overlay=overlay, last_change=change,
+                                               state_changes=state_changes, title=title))
+    await audit.record(
+        user, AuditAction.EXPLORATION_AGENT_EDIT, resource_type="exploration", resource_id=loaded.id,
+        metadata={"tool": tool, "title": saved.title, "revision": saved.state.revision, **change["summary"]},
+    )
+    await _journal_exploration_change(user, loaded.id, saved.title, tool, change["summary"])
+    return _out({**report, **(info or {}), "exploration_id": loaded.id, "revision": saved.state.revision,
+                 "url": f"/graph/{loaded.context_id}?exploration={loaded.id}"})
+
+
+async def _journal_exploration_change(user: str, exploration_id: UUID, title: str, tool: str, summary: dict) -> None:
+    """``exploration.changed`` in every case that references it and the person
+    may write (a closed case keeps its journal as it was)."""
+    async with service._session() as session:
+        for inv in await service._readable_cases(session, user, exploration_id):
+            if not service.can_write_case(inv, user) or inv.status == "closed":
+                continue
+            await service.append_event(session, inv.id, user, "exploration.changed",
+                                       {"exploration_id": str(exploration_id), "title": title, "tool": tool, **summary})
+        await service.commit(session)
 
 
 def _when(value: Any) -> Optional[datetime]:
@@ -658,30 +775,248 @@ def build_server():
         )
         return _out(item)
 
-    @tool("create_exploration")
-    async def create_exploration(ctx: Context, investigation_id: UUID, context_id: UUID, title: str,
-                                 graph_query: Optional[str] = None) -> dict:
-        """Start a new exploration in a readable context and attach it to the
-        case as a live reference; returns ``url`` for the person to open
-        (``/graph/{context}?exploration=…&case=…``). ``graph_query`` (Cypher)
-        seeds what it loads."""
-        from fastapi import HTTPException
+    @tool("list_explorations")
+    async def list_explorations(ctx: Context, context_id: Optional[UUID] = None, q: Optional[str] = None,
+                                mine: bool = False, limit: int = 50) -> dict:
+        """Explorations the person can open (newest first): id, title, context,
+        owner, revision and who changed it last. ``context_id`` keeps one
+        context; ``q`` searches titles. A case-scoped token sees only the
+        explorations its cases reference."""
+        from graphlagoon.routers import explorations as explorations_router
 
-        from graphlagoon.models.schemas import ExplorationCreate, ExplorationState
+        user = _agent(ctx)
+        limit = max(1, min(limit, 500))
+        request = _as_request(user)
+        try:
+            if context_id is not None:
+                rows = await explorations_router.list_explorations(context_id, request)
+                needle = (q or "").strip().lower()
+                rows = [r for r in rows if (not mine or r.owner_email == user) and needle in r.title.lower()]
+            else:
+                rows = await explorations_router.list_all_explorations(request, q, mine, None, 0)
+        except HTTPException as exc:
+            raise _http_tool_error(exc) from exc
+        allowed = await _scoped_exploration_ids(user)
+        rows = [r for r in rows if allowed is None or str(r.id) in allowed][:limit]
+        await _audit_read(user, "list_explorations")
+        return _out([
+            {"id": r.id, "title": r.title, "context_id": r.graph_context_id, "owner_email": r.owner_email,
+             "has_write_access": r.has_write_access, "updated_at": r.updated_at,
+             "revision": r.state.revision, "last_change": r.state.last_change,
+             "url": f"/graph/{r.graph_context_id}?exploration={r.id}"}
+            for r in rows
+        ])
+
+    @tool("get_exploration")
+    async def get_exploration(ctx: Context, exploration_id: UUID, offset: int = 0, limit: int = 500) -> dict:
+        """One exploration: title, context, graph_query, revision, last_change
+        and its graph as the person sees it (the saved snapshot with their own
+        layer on top), each node and edge with ``origin`` snapshot | layer.
+        ``offset``/``limit`` page nodes and edges alike; ``node_count`` and
+        ``edge_count`` are the whole. ``materialized`` false: nothing is saved
+        yet and the page loads the context's default view."""
+        user = _agent(ctx)
+        await _exploration_in_scope(user, exploration_id)
+        loaded = await _edit(exploration_graph.load(exploration_id, user))
+        graph = exploration_graph.effective_graph(loaded.snapshot, loaded.overlay)
+        limit = max(1, min(limit, 5000))
+        await _audit_read(user, "get_exploration")
+        return _out({
+            "id": loaded.id, "title": loaded.title, "context_id": loaded.context_id, "owner_email": loaded.owner_email,
+            "graph_query": loaded.state.get("graph_query"), "revision": loaded.revision,
+            "last_change": loaded.state.get("last_change"), "materialized": bool(loaded.state.get("has_snapshot")),
+            "node_count": len(graph["nodes"]), "edge_count": len(graph["edges"]),
+            "nodes": graph["nodes"][offset: offset + limit], "edges": graph["edges"][offset: offset + limit],
+            "url": f"/graph/{loaded.context_id}?exploration={loaded.id}",
+        })
+
+    @tool("create_exploration")
+    async def create_exploration(ctx: Context, context_id: UUID, title: str, graph_query: Optional[str] = None,
+                                 nodes: Optional[list[dict[str, Any]]] = None,
+                                 edges: Optional[list[dict[str, Any]]] = None,
+                                 investigation_id: Optional[UUID] = None) -> dict:
+        """A new exploration in a readable context, saved with its graph:
+        ``graph_query`` (Cypher, or SQL on a SQL context) runs now and its
+        answer is the graph; ``nodes`` [{id, type, properties}] and ``edges``
+        [{id?, source, target, type, properties}] are added on top (or are the
+        whole graph without a query). With neither it opens on the context's
+        default view. ``investigation_id`` also attaches it to that case as a
+        live reference. Returns ``url`` for the person to open."""
+        from graphlagoon.models.schemas import ExplorationCreate, ExplorationState, GraphSnapshot
         from graphlagoon.routers import explorations as explorations_router
 
         user = _agent(ctx)
         await _permission(user, "exploration.save")
+        actor = auth.get_current_actor() or {}
+        if investigation_id is None and actor.get("scope") == "case":
+            raise _tool_error("OUT_OF_SCOPE", "This token is limited to its cases: pass the investigation_id to attach it to")
+        snapshot, report, info = None, None, {}
+        if graph_query or nodes or edges:
+            base = None
+            if graph_query:
+                base, info = await _edit(exploration_graph.run_graph_query(context_id, user, graph_query))
+            snapshot, _, report = _edited(base, None, {"add_nodes": nodes or [], "add_edges": edges or []})
         try:
+            if investigation_id is not None:  # the case must take it before anything is written
+                await _call(service.ensure_case_access(investigation_id, user, "write"))
             exploration = await explorations_router.create_exploration(
-                context_id, ExplorationCreate(title=title, state=ExplorationState(graph_query=graph_query)), None, user
+                context_id,
+                ExplorationCreate(
+                    title=title,
+                    state=ExplorationState(graph_query=graph_query, last_change={
+                        "by": user, "author_kind": "agent", "tool": "create_exploration",
+                        "at": datetime.now().isoformat(), **({"summary": exploration_graph.summary(report)} if report else {}),
+                    }),
+                    snapshot=GraphSnapshot.model_validate(snapshot) if snapshot is not None else None,
+                ),
+                None,
+                user,
             )
         except HTTPException as exc:
-            error = exc.detail.get("error", {}) if isinstance(exc.detail, dict) else {}
-            raise _tool_error(error.get("code", "EXPLORATION_FAILED"), error.get("message", str(exc.detail))) from exc
-        item = await _create(investigation_id, user, dict(kind="graph", subkind="exploration_ref", exploration_id=exploration.id))
-        return _out({"exploration": exploration.model_dump(), "item": item,
-                     "url": f"/graph/{context_id}?exploration={exploration.id}&case={investigation_id}"})
+            raise _http_tool_error(exc) from exc
+        except ValueError as exc:
+            raise _tool_error("INVALID_BODY", str(exc)) from exc
+        url = f"/graph/{context_id}?exploration={exploration.id}"
+        out = {"exploration": exploration.model_dump(), "url": url, **info,
+               **({"node_count": report["node_count"], "edge_count": report["edge_count"]} if report else {})}
+        if investigation_id is not None:
+            out["item"] = await _create(investigation_id, user, dict(kind="graph", subkind="exploration_ref",
+                                                                     exploration_id=exploration.id))
+            out["url"] = f"{url}&case={investigation_id}"
+        return _out(out)
+
+    @tool("edit_exploration")
+    async def edit_exploration(ctx: Context, exploration_id: UUID,
+                               add_nodes: Optional[list[dict[str, Any]]] = None,
+                               add_edges: Optional[list[dict[str, Any]]] = None,
+                               remove_node_ids: Optional[list[str]] = None,
+                               remove_edge_ids: Optional[list[str]] = None,
+                               set_properties: Optional[list[dict[str, Any]]] = None,
+                               replace: bool = False, title: Optional[str] = None,
+                               expected_revision: Optional[int] = None) -> dict:
+        """Change an exploration's graph in place, in one atomic batch, in this
+        order: ``replace`` (drop every node and edge, the person's layer too:
+        a brand-new graph under the same id) → ``remove_node_ids`` (deleted,
+        with their edges; for good, from the saved graph and the layer) →
+        ``remove_edge_ids`` → ``add_nodes`` [{id, type, properties}] (an id
+        already there gets the type and properties given) → ``add_edges``
+        [{id?, source, target, type, properties}] (both ends must exist after
+        the batch) → ``set_properties`` [{id, kind: node|edge, properties,
+        unset: [keys]}]. Ids match exactly, else case-insensitively. Give the
+        ``revision`` you read as ``expected_revision`` to be refused
+        (EXPLORATION_CHANGED) instead of overwriting a newer save. A page with
+        the exploration open picks the change up within seconds."""
+        user = _agent(ctx)
+        ops = {"replace": replace, "add_nodes": add_nodes, "add_edges": add_edges, "remove_node_ids": remove_node_ids,
+               "remove_edge_ids": remove_edge_ids, "set_properties": set_properties}
+        loaded = await _writable_exploration(user, exploration_id, expected_revision, needs_graph=not replace)
+        snapshot, overlay, report = _edited(loaded.snapshot, loaded.overlay, ops)
+        return await _save_exploration(user, loaded, "edit_exploration", snapshot, overlay, report, title=title)
+
+    @tool("expand_exploration")
+    async def expand_exploration(ctx: Context, exploration_id: UUID, node_ids: list[str], depth: int = 1,
+                                 edge_types: Optional[list[str]] = None, directed: bool = False,
+                                 edge_limit: int = 100, expected_revision: Optional[int] = None) -> dict:
+        """Bring the neighbours of ``node_ids`` from the exploration's context
+        into it (the page's Expand: ``depth`` 1–2, ``edge_types`` to follow,
+        ``directed`` follows edge direction, ``edge_limit`` 4–1000 per node).
+        Nodes and edges already there are kept as they are."""
+        user = _agent(ctx)
+        loaded = await _writable_exploration(user, exploration_id, expected_revision)
+        graph = exploration_graph.effective_graph(loaded.snapshot, loaded.overlay)
+        ids = _resolve_exploration_nodes(graph, node_ids)
+        found, info = await _edit(exploration_graph.expand_nodes(
+            loaded.context_id, user, ids, depth=depth, edge_types=edge_types or [], directed=directed,
+            edge_limit=edge_limit,
+        ))
+        snapshot, overlay, report = _edited(loaded.snapshot, loaded.overlay,
+                                            {**exploration_graph.additions(found), "skip_existing": True})
+        return await _save_exploration(user, loaded, "expand_exploration", snapshot, overlay, report, info=info)
+
+    @tool("query_into_exploration")
+    async def query_into_exploration(ctx: Context, exploration_id: UUID, query: str, mode: str = "add",
+                                     expected_revision: Optional[int] = None) -> dict:
+        """Run a graph query against the exploration's context (Cypher; SQL on a
+        SQL context) and ``mode`` "add" its answer to the graph (what is there
+        stays) or "replace" the graph with it (the query becomes the
+        exploration's ``graph_query``)."""
+        user = _agent(ctx)
+        if mode not in ("add", "replace"):
+            raise _tool_error("INVALID_BODY", "mode is add or replace")
+        loaded = await _writable_exploration(user, exploration_id, expected_revision, needs_graph=mode == "add")
+        found, info = await _edit(exploration_graph.run_graph_query(loaded.context_id, user, query))
+        ops = {**exploration_graph.additions(found), "replace": mode == "replace", "skip_existing": mode == "add"}
+        snapshot, overlay, report = _edited(loaded.snapshot, loaded.overlay, ops)
+        return await _save_exploration(user, loaded, "query_into_exploration", snapshot, overlay, report, info=info,
+                                       state_changes={"graph_query": query} if mode == "replace" else None)
+
+    @tool("enrich_exploration")
+    async def enrich_exploration(ctx: Context, exploration_id: UUID, table: str,
+                                 node_ids: Optional[list[str]] = None, overwrite: bool = False,
+                                 promote: bool = False, expected_revision: Optional[int] = None) -> dict:
+        """Look up enrichment table ``table`` (a name from the context's
+        ``enrichment_tables``) for the nodes it applies to (``node_ids``, or
+        every node of its types) and save the first row's columns as their
+        properties: missing ones only, or every column with ``overwrite``.
+        ``promote`` also turns the table's promote column into nodes linked
+        from each node (the page's "promote to nodes"; ids
+        ``<node_type>:<value>``)."""
+        from graphlagoon.routers.graph_contexts import run_enrichment_lookup
+        from graphlagoon.services.warehouse import get_warehouse_client
+        from graphlagoon.utils.context_access import get_context_with_access
+
+        user = _agent(ctx)
+        loaded = await _writable_exploration(user, exploration_id, expected_revision)
+        try:
+            context = await get_context_with_access(loaded.context_id, user)
+        except HTTPException as exc:
+            raise _http_tool_error(exc) from exc
+        spec = next((t for t in context.enrichment_tables or [] if t["name"] == table), None)
+        if spec is None:
+            names = [t["name"] for t in context.enrichment_tables or []]
+            raise _tool_error("ENRICHMENT_TABLE_NOT_FOUND", f"No enrichment table '{table}' in this context; it has {names}")
+        if promote and not spec.get("promote"):
+            raise _tool_error("NOT_PROMOTABLE", f"Table '{table}' declares no promote column")
+        graph = exploration_graph.effective_graph(loaded.snapshot, loaded.overlay)
+        wanted = set(_resolve_exploration_nodes(graph, node_ids)) if node_ids else None
+        source = spec.get("match_source", "node_id")
+        keyed = []
+        for n in graph["nodes"]:
+            if n.get("type") not in spec["match_node_types"] or (wanted is not None and str(n["id"]) not in wanted):
+                continue
+            key = n["id"] if source == "node_id" else (n.get("properties") or {}).get(source["name"])
+            if key not in (None, ""):
+                keyed.append((n, str(key)))
+        if not keyed:
+            raise _tool_error("NO_MATCHING_NODES", f"No node of types {spec['match_node_types']} to look '{table}' up for")
+        try:
+            result = await run_enrichment_lookup(get_warehouse_client(), context, table,
+                                                 sorted({k for _, k in keyed}), user)
+        except HTTPException as exc:
+            raise _http_tool_error(exc) from exc
+        ops: dict = {"set_properties": [], "add_nodes": [], "add_edges": [], "skip_existing": True}
+        matched = several = 0
+        for node, key in keyed:
+            rows = result["rows"].get(key) or []
+            if not rows:
+                continue
+            matched += 1
+            several += len(rows) > 1
+            current = node.get("properties") or {}
+            props = {c: v for c, v in rows[0].items() if v is not None and (overwrite or current.get(c) is None)}
+            if props:
+                ops["set_properties"].append({"id": node["id"], "kind": "node", "properties": props})
+            if promote:
+                p = spec["promote"]
+                for value in sorted({str(r[p["id_column"]]) for r in rows if r.get(p["id_column"])}):
+                    target = f"{p['node_type']}:{value}"
+                    ops["add_nodes"].append({"id": target, "type": p["node_type"], "properties": {p["id_column"]: value}})
+                    ops["add_edges"].append({"id": f"{node['id']}->{target}", "source": node["id"], "target": target,
+                                             "type": p["edge_type"]})
+        snapshot, overlay, report = _edited(loaded.snapshot, loaded.overlay, ops)
+        info = {"table": table, "looked_up": len(keyed), "matched": matched, "several_rows": several,
+                "truncated": result.get("truncated", False)}
+        return await _save_exploration(user, loaded, "enrich_exploration", snapshot, overlay, report, info=info)
 
     # -- queries and tables -------------------------------------------------------
 

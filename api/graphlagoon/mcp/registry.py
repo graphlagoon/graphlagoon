@@ -6,8 +6,10 @@ investigation route either has a tool or a reason in ``AGENT_EXEMPT_ROUTES``.
 A reason starting with ``HUMAN_ONLY`` marks a route agents must never reach:
 it carries ``forbid_agents`` and has no tool. ``tests/test_agent_registry.py``
 enforces all of it, so a new route in ``routers/investigations.py``,
-``routers/org.py`` (or an enrichment route in ``routers/graph_contexts.py``)
-must land here with its tool or its reason, and a new tool must name its twin.
+``routers/org.py``, ``routers/explorations.py`` (or an enrichment route in
+``routers/graph_contexts.py``, the expand and Cypher routes of
+``routers/graph.py``) must land here with its tool or its reason, and a new
+tool must name its twin.
 """
 
 HUMAN_ONLY = "human-only:"
@@ -16,6 +18,8 @@ _CASE = "/api/investigations/{investigation_id}"
 _ITEM = f"{_CASE}/items/{{item_id}}"
 _ANNOTATION = f"{_CASE}/annotations/{{annotation_id}}"
 _ENRICHMENT = "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"
+_EXPLORATION = "/api/explorations/{exploration_id}"
+_CONTEXT_EXPLORATIONS = "/api/graph-contexts/{context_id}/explorations"
 
 # tool name (``mcp/server.py``) → the human actions it is the twin of.
 TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
@@ -37,7 +41,13 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "save_query": [("POST", f"{_CASE}/items")],
     "import_file": [("POST", f"{_CASE}/items")],
     "upload_file": [("POST", f"{_CASE}/items"), ("POST", f"{_ITEM}/versions")],
-    "create_exploration": [("POST", f"{_CASE}/items")],
+    "list_explorations": [("GET", "/api/explorations"), ("GET", _CONTEXT_EXPLORATIONS)],
+    "get_exploration": [("GET", _EXPLORATION), ("GET", f"{_EXPLORATION}/snapshot"), ("GET", f"{_EXPLORATION}/overlay")],
+    "create_exploration": [("POST", _CONTEXT_EXPLORATIONS), ("POST", f"{_CASE}/items")],
+    "edit_exploration": [("PUT", _EXPLORATION), ("PUT", f"{_EXPLORATION}/overlay")],
+    "expand_exploration": [("POST", "/api/graph-contexts/{context_id}/expand"), ("PUT", _EXPLORATION)],
+    "query_into_exploration": [("POST", "/api/graph-contexts/{context_id}/cypher"), ("PUT", _EXPLORATION)],
+    "enrich_exploration": [("POST", _ENRICHMENT), ("PUT", _EXPLORATION)],
     "run_query": [("POST", f"{_ITEM}/run")],
     "join_tables": [("POST", f"{_CASE}/items/join")],
     "compare_tables": [("POST", f"{_CASE}/items/compare")],
@@ -98,6 +108,12 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", "/api/agent-tokens/{token_id}"): f"{HUMAN_ONLY} token management",
     ("DELETE", _ITEM): f"{HUMAN_ONLY} deleting material (agents add and version, never remove)",
     ("DELETE", _ANNOTATION): f"{HUMAN_ONLY} deleting annotations (agents add, never remove)",
+    ("DELETE", _EXPLORATION): (
+        f"{HUMAN_ONLY} deleting a whole exploration (an agent deletes nodes and edges inside one "
+        "with edit_exploration, never the exploration)"
+    ),
+    ("POST", f"{_EXPLORATION}/share"): f"{HUMAN_ONLY} sharing an exploration (05 §6)",
+    ("DELETE", f"{_EXPLORATION}/share/{{email}}"): f"{HUMAN_ONLY} sharing an exploration (05 §6)",
     ("GET", "/api/org/authoring"): (
         "authoring help for people writing case types and library docs; agents read the same "
         "through get_case_type, get_playbook and the tool descriptions"

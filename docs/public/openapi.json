@@ -3,7 +3,7 @@
   "info": {
     "title": "Graph Lagoon Studio",
     "description": "Graph visualization, exploration and investigations",
-    "version": "0.32.0"
+    "version": "0.41.0"
   },
   "paths": {
     "/graphlagoon/api/config": {
@@ -1782,7 +1782,7 @@
           "explorations"
         ],
         "summary": "Delete Exploration",
-        "description": "Delete an exploration.",
+        "description": "Delete an exploration.\n\n**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (deleting a whole exploration (an agent deletes nodes and edges inside one with edit_exploration, never the exploration)).",
         "operationId": "explorations_delete_exploration",
         "parameters": [
           {
@@ -1960,7 +1960,7 @@
           "explorations"
         ],
         "summary": "Share Exploration",
-        "description": "Share an exploration with another user.",
+        "description": "Share an exploration with another user.\n\n**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (sharing an exploration (05 §6)).",
         "operationId": "explorations_share_exploration",
         "parameters": [
           {
@@ -2012,7 +2012,7 @@
           "explorations"
         ],
         "summary": "Unshare Exploration",
-        "description": "Remove sharing for an exploration.",
+        "description": "Remove sharing for an exploration.\n\n**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (sharing an exploration (05 §6)).",
         "operationId": "explorations_unshare_exploration",
         "parameters": [
           {
@@ -7360,6 +7360,70 @@
         }
       }
     },
+    "/graphlagoon/api/live": {
+      "get": {
+        "tags": [
+          "live"
+        ],
+        "summary": "Live",
+        "description": "``explorations[id]``: ``{revision, last_change}``; ``cases[id]``:\n``{last_event_id, last_event_at, explorations: {id: revision}}``. An id the\ncaller cannot read (or that is gone) is null, never an error.",
+        "operationId": "live_live",
+        "parameters": [
+          {
+            "name": "exploration",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "default": [],
+              "title": "Exploration"
+            }
+          },
+          {
+            "name": "case",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "default": [],
+              "title": "Case"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Live Live"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Redirect To Graphlagoon",
@@ -10507,6 +10571,23 @@
             "title": "Has Overlay",
             "default": false
           },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 0
+          },
+          "last_change": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Change"
+          },
           "filters": {
             "$ref": "#/components/schemas/FilterState"
           },
@@ -10825,6 +10906,17 @@
                 "type": "null"
               }
             ]
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
           }
         },
         "type": "object",

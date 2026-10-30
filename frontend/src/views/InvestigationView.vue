@@ -18,6 +18,8 @@ import { useClusterStore } from '@/stores/cluster';
 import { useCaseFilters } from '@/stores/caseFilters';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
 import { useToast } from '@/composables/useToast';
+import { useLiveRevision } from '@/composables/useLiveRevision';
+import { useAuthStore } from '@/stores/auth';
 import type { TraceContent } from '@/composables/useCaseAnalyses';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
 import { caseNodeLabel } from '@/utils/caseLabels';
@@ -61,6 +63,23 @@ const clusterStore = useClusterStore();
 const filters = useCaseFilters();
 const contextMenu = useContextMenu();
 const toast = useToast();
+const auth = useAuthStore();
+
+// What an agent or someone else does in the case (material, notes, an exploration it
+// references) shows up without a reload.
+useLiveRevision({
+  targets: () => ({ case: store.current?.id }),
+  paused: () => store.loading || store.graphLoading,
+  onUpdate: async (live) => {
+    const info = store.current ? live.cases[store.current.id] : null;
+    if (!info) return;
+    const foreign = await store.syncLive(info, auth.email);
+    if (!foreign.length) return;
+    const agents = foreign.filter((e) => e.actor_kind === 'agent');
+    const who = agents.length ? (agents[0].agent_name ?? 'An agent') : (foreign[0].actor_email ?? 'Someone');
+    toast.info(`${who} updated the case (${foreign.length} change${foreign.length === 1 ? '' : 's'})`);
+  },
+});
 
 const mode = computed<'canvas' | 'dossier'>(() => (route.query.mode === 'dossier' ? 'dossier' : 'canvas'));
 

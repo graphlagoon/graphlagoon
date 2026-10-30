@@ -40,6 +40,8 @@ import PrecomputedGraphPanel from '@/components/PrecomputedGraphPanel.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
 import { Info, Settings2, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
 import { useToast } from '@/composables/useToast';
+import { useLiveRevision } from '@/composables/useLiveRevision';
+import { describeSummary } from '@/utils/liveMerge';
 import {
   layoutQuerySignature,
   parseLayoutOverrides,
@@ -77,6 +79,7 @@ const currentCaseStore = useCurrentCaseStore();
 /** `?case=<id>`: a new exploration started from the case popover (F3). */
 const caseReturnId = computed(() => uuidOrNull(route.query.case));
 const toast = useToast();
+
 
 /**
  * Layout parameters the URL asked for but could not be applied.
@@ -131,6 +134,22 @@ function reviewContextSchema() {
 }
 
 const graphStore = useGraphStore();
+
+// What an agent (or another tab) saves into the open exploration shows up in place.
+useLiveRevision({
+  targets: () => ({ exploration: graphStore.currentExploration?.id }),
+  paused: () => graphStore.loading,
+  onUpdate: async (live) => {
+    const exp = graphStore.currentExploration;
+    const info = exp ? live.explorations[exp.id] : null;
+    if (!exp || !info || info.revision <= (exp.state.revision ?? 0)) return;
+    const change = await graphStore.applyRemoteChange();
+    if (!change) return;
+    const who = change.author_kind === 'agent' ? `An agent${change.by ? ` (for ${change.by})` : ''}` : (change.by ?? 'Someone');
+    const what = describeSummary(change.summary);
+    toast.info(`${who} changed this exploration${what ? `: ${what}` : ''}`);
+  },
+});
 const toolbarStore = useToolbarStore();
 const clusterStore = useClusterStore();
 const communityStore = useCommunityStore();

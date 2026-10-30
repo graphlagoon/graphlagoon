@@ -95,6 +95,7 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "investigations_volume_path": "public",
     "investigation_file_max_bytes": "public",
     "exploration_overlay_max_bytes": "public",
+    "live_refresh_seconds": "public",
     "investigation_max_working_edges": "public",
     "investigation_retention_years": "public",
     "enrichment_max_keys": "public",

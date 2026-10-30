@@ -896,6 +896,11 @@ class ExplorationState(BaseModel):
     has_snapshot: bool = False
     # The user's layer (BYOD-2) is saved beside the snapshot; set by the server only.
     has_overlay: bool = False
+    # Server-owned: + 1 on every write (a stale ``expected_revision`` is a 409),
+    # and who wrote last ({by, author_kind, at, tool?, summary?}). The live
+    # refresh of an open exploration polls both.
+    revision: int = 0
+    last_change: Optional[dict] = None
     filters: FilterState = Field(default_factory=FilterState)
     viewport: ViewportState = Field(default_factory=ViewportState)
     layout_algorithm: str = "force-atlas-2"
@@ -937,6 +942,10 @@ class ExplorationUpdate(BaseModel):
     title: Optional[str] = None
     state: Optional[ExplorationState] = None
     snapshot: Optional[GraphSnapshot] = None
+    # The ``state.revision`` the writer last read: a stale one is a 409
+    # EXPLORATION_CHANGED instead of overwriting what an agent (or another
+    # tab) saved in between. Omitted: last write wins, as before.
+    expected_revision: Optional[int] = None
 
 
 class ExplorationResponse(BaseModel):

@@ -61,6 +61,7 @@ import type {
   CreateExplorationRequest,
   ShareRequest,
   ExplorationState,
+  LiveResponse,
   GraphSnapshot,
   PrecomputedGraphCapabilities,
   PrecomputedGraphData,
@@ -136,6 +137,8 @@ declare global {
       investigation_max_working_edges?: number;
       /** Largest user layer of an exploration (BYOD-2), as JSON bytes. */
       exploration_overlay_max_bytes?: number;
+      /** Seconds between live-refresh polls of an open exploration or case (0: off). */
+      live_refresh_seconds?: number;
       /** Years a closed case is retained when its type sets none (06 §1). */
       investigation_retention_years?: number;
       databricks_user_email?: string;
@@ -332,7 +335,7 @@ class ApiService {
 
   async updateExploration(
     id: string,
-    data: { title?: string; state?: ExplorationState; snapshot?: GraphSnapshot }
+    data: { title?: string; state?: ExplorationState; snapshot?: GraphSnapshot; expected_revision?: number }
   ): Promise<Exploration> {
     const response = await this.client.put(`/api/explorations/${id}`, data);
     return response.data;
@@ -347,6 +350,18 @@ class ApiService {
   /** Replaces the layer; an empty one removes it. Returns the exploration (its `state.has_overlay`). */
   async putExplorationOverlay(id: string, overlay: GraphOverlay): Promise<Exploration> {
     const response = await this.client.put(`/api/explorations/${id}/overlay`, overlay);
+    return response.data;
+  }
+
+  /**
+   * What an open page polls to pick up changes made elsewhere (an agent, another
+   * tab): revisions only, no graph. An id the caller cannot read comes back null.
+   */
+  async getLive(targets: { explorations?: string[]; cases?: string[] }): Promise<LiveResponse> {
+    const params = new URLSearchParams();
+    for (const id of targets.explorations ?? []) params.append('exploration', id);
+    for (const id of targets.cases ?? []) params.append('case', id);
+    const response = await this.client.get('/api/live', { params });
     return response.data;
   }
 

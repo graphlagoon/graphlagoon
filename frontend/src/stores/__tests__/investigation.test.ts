@@ -19,6 +19,7 @@ vi.mock('@/services/api', () => ({
     createInvestigationAnnotation: vi.fn(),
     deleteInvestigationAnnotation: vi.fn(async () => {}),
     pinInvestigationItem: vi.fn(),
+    getInvestigationBrief: vi.fn(async () => ({ item: null, text: '' })),
   },
 }))
 
@@ -161,5 +162,48 @@ describe('investigation store', () => {
     await store.openInvestigation('missing')
     expect(store.current).toBeNull()
     expect(store.error).toBeTruthy()
+  })
+
+  it('live: an exploration at a new revision reloads that source only; someone else\'s event reloads the case', async () => {
+    const ref = item('s1', { exploration_id: 'x1', context_id: 'c1', current_version: 1 })
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv1', title: 'Caso' } as any)
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([ref] as any)
+    vi.mocked(api.getGraphContext).mockResolvedValue({ id: 'c1', identity_keys: [] } as any)
+    const snap = (ids: string[], revision: number) => ({
+      snapshot: { nodes: ids.map((id) => ({ id, type: 'Conta', properties: {} })), edges: [] },
+      exploration: { id: 'x1', title: 'x', state: { revision } },
+    })
+    vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValueOnce(snap(['a'], 1) as any)
+    const mine = { id: 'ev1', kind: 'item.created', actor_email: 'me@x.com', actor_kind: 'human', at: '2026-10-29T10:00:00', payload: {} }
+    vi.mocked(api.getInvestigationEvents).mockResolvedValue([mine] as any)
+
+    const store = useInvestigationStore()
+    await store.openInvestigation('inv1')
+    await store.fetchEvents()
+    await store.loadWorkspace()
+    expect(store.sourceGraphs[0].nodes.map((n) => n.node_id)).toEqual(['a'])
+
+    // Nothing moved: nothing is fetched.
+    vi.mocked(api.getInvestigationItems).mockClear()
+    expect(await store.syncLive({ last_event_id: 'ev1', explorations: { x1: 1 } }, 'me@x.com')).toEqual([])
+    expect(api.getInvestigationItemSnapshot).toHaveBeenCalledTimes(1)
+    expect(api.getInvestigationItems).not.toHaveBeenCalled()
+
+    // An agent edited the exploration and journalled it.
+    vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValueOnce(snap(['a', 'b'], 2) as any)
+    const agent = { id: 'ev2', kind: 'exploration.changed', actor_email: 'me@x.com', actor_kind: 'agent', agent_name: 'claude', at: '2026-10-29T10:01:00', payload: {} }
+    vi.mocked(api.getInvestigationEvents).mockResolvedValue([agent, mine] as any) // newest first
+    const foreign = await store.syncLive({ last_event_id: 'ev2', explorations: { x1: 2 } }, 'me@x.com')
+    expect(foreign.map((e) => e.id)).toEqual(['ev2'])
+    expect(store.sourceGraphs[0].nodes.map((n) => n.node_id)).toEqual(['a', 'b'])
+    expect(api.getInvestigationItems).toHaveBeenCalledTimes(1)
+
+    // The person's own action elsewhere (another tab): the journal follows, nothing reloads.
+    vi.mocked(api.getInvestigationItems).mockClear()
+    const own = { ...mine, id: 'ev3', at: '2026-10-29T10:02:00' }
+    vi.mocked(api.getInvestigationEvents).mockResolvedValue([own, agent, mine] as any)
+    expect(await store.syncLive({ last_event_id: 'ev3', explorations: { x1: 2 } }, 'me@x.com')).toEqual([])
+    expect(store.events.map((e) => e.id)).toEqual(['ev1', 'ev2', 'ev3'])
+    expect(api.getInvestigationItems).not.toHaveBeenCalled()
   })
 })

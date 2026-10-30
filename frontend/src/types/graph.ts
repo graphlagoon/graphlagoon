@@ -578,6 +578,24 @@ export interface ExplorationState {
   similarity?: Record<string, unknown>;    // Similarity system state (optional for backwards compat)
   has_snapshot?: boolean;                  // Whether a file-based graph snapshot exists
   has_overlay?: boolean;                   // Whether the user's layer (BYOD-2) is saved beside it
+  revision?: number;                       // Server-owned: +1 on every write (live refresh, stale-save 409)
+  last_change?: ExplorationLastChange | null; // Server-owned: who wrote last (an agent's tool and summary)
+}
+
+/** Who wrote an exploration last (server-owned `state.last_change`). */
+export interface ExplorationLastChange {
+  by?: string;
+  author_kind?: 'human' | 'agent';
+  tool?: string | null;
+  at?: string;
+  summary?: Partial<Record<'added_nodes' | 'added_edges' | 'updated_nodes' | 'updated_edges' | 'removed_nodes' | 'removed_edges', number>>;
+}
+
+/** `GET /api/live`: the revisions an open page polls. */
+export interface LiveResponse {
+  refresh_seconds: number;
+  explorations: Record<string, { revision: number; last_change: ExplorationLastChange | null } | null>;
+  cases: Record<string, { last_event_id: string | null; last_event_at: string | null; explorations: Record<string, number> } | null>;
 }
 
 export interface Exploration {

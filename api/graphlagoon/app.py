@@ -212,6 +212,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
         agent_tokens,
         org,
         auth,
+        live,
     )
     from graphlagoon.utils.authz import agent_guard
 
@@ -232,6 +233,7 @@ def create_api_router(settings: Optional[Settings] = None) -> APIRouter:
     router.include_router(agent_tokens.router)
     router.include_router(org.router)
     router.include_router(auth.router)
+    router.include_router(live.router)
 
     return router
 

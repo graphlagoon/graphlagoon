@@ -782,40 +782,41 @@ export const useInvestigationStore = defineStore('investigation', () => {
 
   // --- canvas -----------------------------------------------------------------
 
+  /** One graph item of the case as the canvas reads it (its snapshot, the exploration's state). */
+  async function loadSource(investigationId: string, s: CaseItem): Promise<SourceGraph> {
+    const contextId = s.context_id ?? s.id;
+    const base = { id: s.id, contextId };
+    try {
+      const payload = await api.getInvestigationItemSnapshot(investigationId, s.id);
+      // Mapped tables and stored snapshots carry their own keys: a pseudo-context per item.
+      if (!s.context_id) {
+        contexts.value[s.id] = {
+          id: s.id,
+          title: s.title,
+          identity_keys: payload.identity_keys ?? [],
+          edge_semantics: payload.edge_semantics ?? undefined,
+        } as unknown as GraphContext;
+      }
+      return {
+        ...base,
+        ...snapshotToGraph(payload.snapshot),
+        unified: !!payload.unified,
+        state: payload.exploration?.state ?? null,
+        // shortcut: no query re-run here; an exploration without a snapshot shows empty.
+        error: payload.snapshot ? null : 'No saved graph: open the exploration and save it',
+      };
+    } catch (e) {
+      return { ...base, nodes: [], edges: [], state: null, error: getErrorMessage(e, 'Failed to load item') };
+    }
+  }
+
   async function loadWorkspace() {
     const inv = current.value;
     if (!inv) return;
     graphLoading.value = true;
     const readable = graphItems.value.filter((s) => s.accessible);
     try {
-      const graphs = await Promise.all(
-        readable.map(async (s): Promise<SourceGraph> => {
-          const contextId = s.context_id ?? s.id;
-          const base = { id: s.id, contextId };
-          try {
-            const payload = await api.getInvestigationItemSnapshot(inv.id, s.id);
-            // Mapped tables and stored snapshots carry their own keys: a pseudo-context per item.
-            if (!s.context_id) {
-              contexts.value[s.id] = {
-                id: s.id,
-                title: s.title,
-                identity_keys: payload.identity_keys ?? [],
-                edge_semantics: payload.edge_semantics ?? undefined,
-              } as unknown as GraphContext;
-            }
-            return {
-              ...base,
-              ...snapshotToGraph(payload.snapshot),
-              unified: !!payload.unified,
-              state: payload.exploration?.state ?? null,
-              // shortcut: no query re-run here; an exploration without a snapshot shows empty.
-              error: payload.snapshot ? null : 'No saved graph: open the exploration and save it',
-            };
-          } catch (e) {
-            return { ...base, nodes: [], edges: [], state: null, error: getErrorMessage(e, 'Failed to load item') };
-          }
-        }),
-      );
+      const graphs = await Promise.all(readable.map((s) => loadSource(inv.id, s)));
       const contextIds = [...new Set(readable.map((s) => s.context_id).filter(Boolean) as string[])];
       const ctxs = await Promise.all(contextIds.map((id) => api.getGraphContext(id).catch(() => null)));
       for (const c of ctxs) if (c) contexts.value[c.id] = c;
@@ -826,6 +827,52 @@ export const useInvestigationStore = defineStore('investigation', () => {
     } finally {
       graphLoading.value = false;
     }
+  }
+
+  /**
+   * Live refresh (`GET /api/live` → `useLiveRevision`): what an agent or another person
+   * did shows up without a reload. A new journal event from someone else reloads the
+   * case, its material, annotations and brief (the items watcher reloads the canvas
+   * when a graph item came or went); an exploration the case references at a new
+   * revision reloads that source only, keeping expansions and promoted nodes.
+   * Returns the events that came from someone else (for a toast).
+   */
+  async function syncLive(
+    live: { last_event_id: string | null; explorations: Record<string, number> },
+    me: string | null,
+  ): Promise<InvestigationEvent[]> {
+    const inv = current.value;
+    if (!inv) return [];
+    const stale = graphItems.value.filter((g) => {
+      const revision = g.exploration_id ? live.explorations[g.exploration_id] : undefined;
+      const source = sourceGraphs.value.find((s) => s.id === g.id);
+      return revision !== undefined && !!source && (source.state?.revision ?? 0) !== revision;
+    });
+    if (stale.length) {
+      const fresh = await Promise.all(stale.map((g) => loadSource(inv.id, g)));
+      if (current.value?.id !== inv.id) return [];
+      const byId = new Map(fresh.map((g) => [g.id, g]));
+      sourceGraphs.value = sourceGraphs.value.map((g) => byId.get(g.id) ?? g);
+    }
+    const known = events.value[events.value.length - 1]?.id ?? null;
+    if (!live.last_event_id || live.last_event_id === known) return [];
+    const seen = new Set(events.value.map((e) => e.id));
+    await fetchEvents();
+    const added = events.value.filter((e) => !seen.has(e.id));
+    const foreign = added.filter((e) => e.actor_kind === 'agent' || e.actor_email !== me);
+    if (foreign.length && current.value?.id === inv.id) {
+      const [record] = await Promise.all([
+        api.getInvestigation(inv.id),
+        fetchItems(),
+        fetchAnnotations(),
+        fetchBrief().catch(() => {}),
+      ]);
+      if (current.value?.id === inv.id) {
+        current.value = record;
+        syncRow(record);
+      }
+    }
+    return foreign;
   }
 
   /** Fetches the enrichment files not loaded at their current version. */
@@ -1085,6 +1132,7 @@ export const useInvestigationStore = defineStore('investigation', () => {
     addNote,
     findMatches,
     fetchEvents,
+    syncLive,
     fetchOlderEvents,
     eventsMore,
     loadWorkspace,

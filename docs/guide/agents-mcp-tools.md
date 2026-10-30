@@ -8,13 +8,14 @@ outline: [2, 3]
 
 ::: v-pre
 
-Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (41 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
+Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (47 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
 
 | Group | Tools |
 |---|---|
 | Cases | [`list_cases`](#list-cases), [`get_case`](#get-case), [`create_case`](#create-case), [`update_case`](#update-case) |
 | Brief and material | [`get_brief`](#get-brief), [`write_brief`](#write-brief), [`list_items`](#list-items), [`read_item`](#read-item), [`update_item`](#update-item), [`search_case`](#search-case) |
-| Adding material | [`add_note`](#add-note), [`add_document`](#add-document), [`add_table`](#add-table), [`save_query`](#save-query), [`import_file`](#import-file), [`upload_file`](#upload-file), [`create_exploration`](#create-exploration), [`add_item`](#add-item) |
+| Adding material | [`add_note`](#add-note), [`add_document`](#add-document), [`add_table`](#add-table), [`save_query`](#save-query), [`import_file`](#import-file), [`upload_file`](#upload-file), [`add_item`](#add-item) |
+| Explorations | [`list_explorations`](#list-explorations), [`get_exploration`](#get-exploration), [`create_exploration`](#create-exploration), [`edit_exploration`](#edit-exploration), [`expand_exploration`](#expand-exploration), [`query_into_exploration`](#query-into-exploration), [`enrich_exploration`](#enrich-exploration) |
 | Queries and tables | [`run_query`](#run-query), [`join_tables`](#join-tables), [`compare_tables`](#compare-tables), [`promote_tables`](#promote-tables) |
 | Annotations and evidence | [`annotate`](#annotate), [`group`](#group), [`list_annotations`](#list-annotations), [`pin_evidence`](#pin-evidence) |
 | Tasks | [`list_tasks`](#list-tasks), [`add_task`](#add-task), [`update_task`](#update-task) |
@@ -262,19 +263,6 @@ Human twin: `POST /api/investigations/{investigation_id}/items`, `POST /api/inve
 | `mapping` | object |  | null |
 | `item_id` | uuid |  | null |
 
-### create_exploration
-
-Start a new exploration in a readable context and attach it to the case as a live reference; returns ``url`` for the person to open (``/graph/{context}?exploration=…&case=…``). ``graph_query`` (Cypher) seeds what it loads.
-
-Human twin: `POST /api/investigations/{investigation_id}/items`
-
-| Parameter | Type | Required | Default |
-|---|---|---|---|
-| `investigation_id` | uuid | yes |  |
-| `context_id` | uuid | yes |  |
-| `title` | string | yes |  |
-| `graph_query` | string |  | null |
-
 ### add_item
 
 Generic add: any kind/subkind, or a new version of ``item_id`` (text or content_json). Kinds:
@@ -312,6 +300,110 @@ Human twin: `POST /api/investigations/{investigation_id}/items`, `POST /api/inve
 | `anchor` | object |  | null |
 | `provenance` | object |  | null |
 | `item_id` | uuid |  | null |
+
+## Explorations
+
+### list_explorations
+
+Explorations the person can open (newest first): id, title, context, owner, revision and who changed it last. ``context_id`` keeps one context; ``q`` searches titles. A case-scoped token sees only the explorations its cases reference.
+
+Human twin: `GET /api/explorations`, `GET /api/graph-contexts/{context_id}/explorations`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `context_id` | uuid |  | null |
+| `q` | string |  | null |
+| `mine` | boolean |  | `false` |
+| `limit` | integer |  | `50` |
+
+### get_exploration
+
+One exploration: title, context, graph_query, revision, last_change and its graph as the person sees it (the saved snapshot with their own layer on top), each node and edge with ``origin`` snapshot | layer. ``offset``/``limit`` page nodes and edges alike; ``node_count`` and ``edge_count`` are the whole. ``materialized`` false: nothing is saved yet and the page loads the context's default view.
+
+Human twin: `GET /api/explorations/{exploration_id}`, `GET /api/explorations/{exploration_id}/snapshot`, `GET /api/explorations/{exploration_id}/overlay`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `exploration_id` | uuid | yes |  |
+| `offset` | integer |  | `0` |
+| `limit` | integer |  | `500` |
+
+### create_exploration
+
+A new exploration in a readable context, saved with its graph: ``graph_query`` (Cypher, or SQL on a SQL context) runs now and its answer is the graph; ``nodes`` [{id, type, properties}] and ``edges`` [{id?, source, target, type, properties}] are added on top (or are the whole graph without a query). With neither it opens on the context's default view. ``investigation_id`` also attaches it to that case as a live reference. Returns ``url`` for the person to open.
+
+Human twin: `POST /api/graph-contexts/{context_id}/explorations`, `POST /api/investigations/{investigation_id}/items`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `context_id` | uuid | yes |  |
+| `title` | string | yes |  |
+| `graph_query` | string |  | null |
+| `nodes` | list of object |  | null |
+| `edges` | list of object |  | null |
+| `investigation_id` | uuid |  | null |
+
+### edit_exploration
+
+Change an exploration's graph in place, in one atomic batch, in this order: ``replace`` (drop every node and edge, the person's layer too: a brand-new graph under the same id) → ``remove_node_ids`` (deleted, with their edges; for good, from the saved graph and the layer) → ``remove_edge_ids`` → ``add_nodes`` [{id, type, properties}] (an id already there gets the type and properties given) → ``add_edges`` [{id?, source, target, type, properties}] (both ends must exist after the batch) → ``set_properties`` [{id, kind: node|edge, properties, unset: [keys]}]. Ids match exactly, else case-insensitively. Give the ``revision`` you read as ``expected_revision`` to be refused (EXPLORATION_CHANGED) instead of overwriting a newer save. A page with the exploration open picks the change up within seconds.
+
+Human twin: `PUT /api/explorations/{exploration_id}`, `PUT /api/explorations/{exploration_id}/overlay`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `exploration_id` | uuid | yes |  |
+| `add_nodes` | list of object |  | null |
+| `add_edges` | list of object |  | null |
+| `remove_node_ids` | list of string |  | null |
+| `remove_edge_ids` | list of string |  | null |
+| `set_properties` | list of object |  | null |
+| `replace` | boolean |  | `false` |
+| `title` | string |  | null |
+| `expected_revision` | integer |  | null |
+
+### expand_exploration
+
+Bring the neighbours of ``node_ids`` from the exploration's context into it (the page's Expand: ``depth`` 1–2, ``edge_types`` to follow, ``directed`` follows edge direction, ``edge_limit`` 4–1000 per node). Nodes and edges already there are kept as they are.
+
+Human twin: `POST /api/graph-contexts/{context_id}/expand`, `PUT /api/explorations/{exploration_id}`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `exploration_id` | uuid | yes |  |
+| `node_ids` | list of string | yes |  |
+| `depth` | integer |  | `1` |
+| `edge_types` | list of string |  | null |
+| `directed` | boolean |  | `false` |
+| `edge_limit` | integer |  | `100` |
+| `expected_revision` | integer |  | null |
+
+### query_into_exploration
+
+Run a graph query against the exploration's context (Cypher; SQL on a SQL context) and ``mode`` "add" its answer to the graph (what is there stays) or "replace" the graph with it (the query becomes the exploration's ``graph_query``).
+
+Human twin: `POST /api/graph-contexts/{context_id}/cypher`, `PUT /api/explorations/{exploration_id}`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `exploration_id` | uuid | yes |  |
+| `query` | string | yes |  |
+| `mode` | string |  | `"add"` |
+| `expected_revision` | integer |  | null |
+
+### enrich_exploration
+
+Look up enrichment table ``table`` (a name from the context's ``enrichment_tables``) for the nodes it applies to (``node_ids``, or every node of its types) and save the first row's columns as their properties: missing ones only, or every column with ``overwrite``. ``promote`` also turns the table's promote column into nodes linked from each node (the page's "promote to nodes"; ids ``&lt;node_type&gt;:&lt;value&gt;``).
+
+Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `PUT /api/explorations/{exploration_id}`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `exploration_id` | uuid | yes |  |
+| `table` | string | yes |  |
+| `node_ids` | list of string |  | null |
+| `overwrite` | boolean |  | `false` |
+| `promote` | boolean |  | `false` |
+| `expected_revision` | integer |  | null |
 
 ## Queries and tables
 

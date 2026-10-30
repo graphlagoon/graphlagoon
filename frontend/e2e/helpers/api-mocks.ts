@@ -1757,5 +1757,5 @@ export async function seedInvestigations(
     if (after) list2 = list2.slice(list2.findIndex((e) => e.id === after) + 1);
     return route.fulfill(json(list2.slice(0, Number(url.searchParams.get('limit') ?? 500))));
   });
-  return { added, material, annotations };
+  return { added, material, annotations, events };
 }

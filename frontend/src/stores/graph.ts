@@ -24,6 +24,8 @@ import type {
   StylePreset,
   StylePresetSettings,
   PropertyVisibility,
+  ExplorationLastChange,
+  GraphSnapshot,
 } from '@/types/graph';
 import { DEFAULT_PROCEDURAL_BFS_OPTIONS, isNodelessContext, LAYOUT_ALGORITHMS } from '@/types/graph';
 import { api } from '@/services/api';
@@ -36,6 +38,7 @@ import { useMetricsStore } from '@/stores/metrics';
 import { recordPerf } from '@/utils/perfMetrics';
 import { isSqlScript } from '@/utils/sqlScript';
 import { snapshotToGraph, type NodeOrigin } from '@/utils/unifyGraph';
+import { applyDiff, diffSnapshot, emptyFingerprints, fingerprints, type Fingerprints } from '@/utils/liveMerge';
 import {
   afterPatch,
   applyOverlay,
@@ -2631,21 +2634,25 @@ export const useGraphStore = defineStore('graph', () => {
       // Update existing only if title matches, otherwise create new
       const shouldUpdate = currentExploration.value && currentExploration.value.title === title;
 
+      let merged = false;
       if (shouldUpdate) {
-        currentExploration.value = await api.updateExploration(
-          currentExploration.value!.id,
-          { title, state, snapshot }
-        );
+        // Built on each try: after a merge, what an agent saved meanwhile goes in too.
+        ({ merged } = await putExploration(() => ({ title, state: getExplorationState(), snapshot: buildGraphSnapshot() })));
       } else {
         currentExploration.value = await api.createExploration(
           currentContext.value.id,
           { title, state, snapshot }
         );
+        liveBase = fingerprints(snapshot);
       }
       markExplorationSaved();
       // The layer is saved after the exploration exists (a new one gets it too).
       const layerError = await persistOverlay();
-      return layerError ? { success: true, warning: `Saved without your data layer: ${layerError}` } : { success: true };
+      const warnings = [
+        merged ? 'This exploration was changed elsewhere (an agent or another tab) while you worked; those changes were merged before saving' : '',
+        layerError ? `Saved without your data layer: ${layerError}` : '',
+      ].filter(Boolean);
+      return warnings.length ? { success: true, warning: warnings.join('. ') } : { success: true };
     } catch (e: unknown) {
       const errorMessage = getErrorMessage(e, 'Failed to save exploration');
       error.value = errorMessage;
@@ -2692,6 +2699,85 @@ export const useGraphStore = defineStore('graph', () => {
     similarityStore.loadState(exploration.state.similarity);
   }
 
+  // --- Live refresh: what an agent (or another tab) saves shows up in place ---------
+
+  /** What the page last knew the server saved (the snapshot's fingerprints): the merge base. */
+  let liveBase: Fingerprints = emptyFingerprints();
+  let remoteSync: Promise<ExplorationLastChange | null> | null = null;
+
+  function isExplorationChanged(e: unknown): boolean {
+    const response = (e as { response?: { status?: number; data?: { detail?: { error?: { code?: string } } } } })?.response;
+    return response?.status === 409 && response.data?.detail?.error?.code === 'EXPLORATION_CHANGED';
+  }
+
+  /**
+   * PUT of the open exploration with the revision this page holds. On a 409
+   * EXPLORATION_CHANGED (an agent saved in between) the server's change is merged
+   * in first and `build` runs again, so the save carries both.
+   */
+  async function putExploration(
+    build: () => { title?: string; state?: ExplorationState; snapshot?: GraphSnapshot },
+  ): Promise<{ merged: boolean }> {
+    const id = currentExploration.value!.id;
+    const put = async () => {
+      const body = build();
+      currentExploration.value = await api.updateExploration(id, {
+        ...body,
+        expected_revision: currentExploration.value?.state?.revision ?? 0,
+      });
+      if (body.snapshot) liveBase = fingerprints(body.snapshot);
+    };
+    try {
+      await put();
+      return { merged: false };
+    } catch (e) {
+      if (!isExplorationChanged(e)) throw e;
+    }
+    await applyRemoteChange();
+    await put();
+    return { merged: true };
+  }
+
+  /**
+   * Pulls what changed on the server into the open exploration without a reload:
+   * a three-way merge against `liveBase` (utils/liveMerge.ts). Node objects stay
+   * (the layout too), nodes the person expanded and has not saved stay, and the
+   * dirty marker keeps its meaning. Concurrent calls share one pull. Returns the
+   * server's `last_change` (who changed it), or null when there was nothing to pull.
+   */
+  function applyRemoteChange(): Promise<ExplorationLastChange | null> {
+    remoteSync ??= pullRemoteChange().finally(() => {
+      remoteSync = null;
+    });
+    return remoteSync;
+  }
+
+  async function pullRemoteChange(): Promise<ExplorationLastChange | null> {
+    const exp = currentExploration.value;
+    if (!exp) return null;
+    const fresh = await api.getExploration(exp.id);
+    const snapshot = fresh.state.has_snapshot ? await api.getExplorationSnapshot(exp.id) : null;
+    const layer = fresh.state.has_overlay ? await api.getExplorationOverlay(exp.id) : null;
+    if (currentExploration.value?.id !== exp.id) return null; // navigated away meanwhile
+    const wasDirty = isExplorationDirty.value;
+    if (snapshot) {
+      const diff = diffSnapshot(liveBase, snapshot);
+      const merged = applyDiff(nodes.value, edges.value, diff);
+      patchNodeProperties(merged.patch, { merge: false });
+      overlay.value = layer;
+      [nodes.value, edges.value] = withOverlay(merged.nodes, merged.edges);
+      liveBase = fingerprints(snapshot);
+      const nodeIds = new Set(nodes.value.map((n) => n.node_id));
+      const edgeIds = new Set(edges.value.map((e) => e.edge_id));
+      selectedNodeIds.value = new Set([...selectedNodeIds.value].filter((id) => nodeIds.has(id)));
+      selectedEdgeIds.value = new Set([...selectedEdgeIds.value].filter((id) => edgeIds.has(id)));
+    }
+    if ((fresh.state.graph_query ?? '') !== (exp.state.graph_query ?? '')) graphQuery.value = fresh.state.graph_query || '';
+    currentExploration.value = fresh;
+    if (!wasDirty) markExplorationSaved();
+    return fresh.state.last_change ?? null;
+  }
+
   /**
    * Auto-save a snapshot for the current exploration after a query-based load.
    * Used as a migration path: after the first load of an old exploration (or
@@ -2704,10 +2790,8 @@ export const useGraphStore = defineStore('graph', () => {
     if (!exp?.has_write_access) return;
     if (nodes.value.length === 0) return;
     try {
-      const snapshot = buildGraphSnapshot();
-      const updated = await api.updateExploration(exp.id, { snapshot });
-      // Reflect has_snapshot=true locally without a full reload
-      currentExploration.value = updated;
+      // Reflects has_snapshot=true locally without a full reload.
+      await putExploration(() => ({ snapshot: buildGraphSnapshot() }));
     } catch (err) {
       console.warn('[loadExploration] Auto-snapshot save failed:', err);
     }
@@ -2731,7 +2815,7 @@ export const useGraphStore = defineStore('graph', () => {
 
     const exp = currentExploration.value;
     if (!exp?.has_write_access || patch.size === 0) return { nodes: patch.size, persisted: false, cases: 0 };
-    currentExploration.value = await api.updateExploration(exp.id, { snapshot: buildGraphSnapshot() });
+    await putExploration(() => ({ snapshot: buildGraphSnapshot() }));
 
     const cases = (await api.getInvestigations({ exploration_id: exp.id })).filter(
       (c) => c.has_write_access && c.status !== 'closed',
@@ -2755,6 +2839,7 @@ export const useGraphStore = defineStore('graph', () => {
     try {
       const exploration = await api.getExploration(explorationId);
       currentExploration.value = exploration;
+      liveBase = emptyFingerprints();
       // The layer is loaded before the graph so every path below draws it.
       overlay.value = null;
       overlayError.value = null;
@@ -2815,6 +2900,7 @@ export const useGraphStore = defineStore('graph', () => {
           const tSnapshot = performance.now();
           const snapshot = await api.getExplorationSnapshot(explorationId);
           const tFetched = performance.now();
+          liveBase = fingerprints(snapshot);
           const graph = snapshotToGraph(snapshot);
           [nodes.value, edges.value] = withOverlay(graph.nodes, graph.edges);
           recordGraphLoad(
@@ -3245,6 +3331,7 @@ export const useGraphStore = defineStore('graph', () => {
     toggleNodePinned,
     getExplorationState,
     saveExploration,
+    applyRemoteChange,
     markExplorationSaved,
     loadExploration,
     clear,
