@@ -1,31 +1,34 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import type { ViewportState } from '@/types/graph';
 
 export interface ExportPNGOptions {
   scale: number;
   background: 'white' | 'transparent';
 }
 
+/** The tabs of the Look panel (style, labels, behaviors and presets in one place). */
+export type LookTab = 'style' | 'labels' | 'behaviors' | 'presets';
+
 export interface ToolbarHandlers {
   onToggleFilters: () => void;
-  onToggleBehaviors: () => void;
   onToggleQuery: () => void;
   onToggleMetrics: () => void;
-  onToggleAesthetics: () => void;
-  onToggleLabels: () => void;
+  /** Toggle the Look panel; with a tab, open it on that tab (never close). */
+  onToggleLook: (tab?: LookTab) => void;
   onToggleClusterPrograms: () => void;
   onToggleTemplates: () => void;
   onTogglePrecomputed: () => void;
   onExportPNG: (options: ExportPNGOptions) => void;
+  /** The camera as it is now, captured into the exploration on save. */
+  getViewport?: () => ViewportState | null;
 }
 
 export type PanelId =
   | 'filters'
-  | 'behaviors'
+  | 'look'
   | 'query'
   | 'metrics'
-  | 'aesthetics'
-  | 'labels'
   | 'clusters'
   | 'templates'
   | 'precomputed';
@@ -35,6 +38,8 @@ export const useToolbarStore = defineStore('toolbar', () => {
   const canvasWidth = ref(0);
   const canvasHeight = ref(0);
   const _activePanels = ref<Set<PanelId>>(new Set());
+  /** The About dialog (with the graph shortcuts), openable from any page's status bar. */
+  const aboutOpen = ref(false);
 
   // Expose as a plain object so components can call .has() reactively
   const activePanels = computed(() => _activePanels.value);
@@ -71,6 +76,7 @@ export const useToolbarStore = defineStore('toolbar', () => {
     canvasWidth,
     canvasHeight,
     activePanels,
+    aboutOpen,
     registerHandlers,
     unregisterHandlers,
     updateCanvasDimensions,

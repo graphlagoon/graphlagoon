@@ -70,6 +70,13 @@ async function openPanel(page: Page, title: string) {
   await page.waitForTimeout(400);
 }
 
+/** The Look panel (style, labels, behaviors, presets) on one of its tabs. */
+async function openLook(page: Page, tab: 'style' | 'labels' | 'behaviors' | 'presets') {
+  await page.getByTestId('toolbar-look').click();
+  await page.getByTestId(`look-tab-${tab}`).click();
+  await page.waitForTimeout(400);
+}
+
 /**
  * Hover a node using the dev-only __GRAPH_NODE_SCREEN_COORDS__ hook (WebGL is
  * opaque to DOM selectors) — same approach as e2e/tests/context-menu.spec.ts.
@@ -391,7 +398,8 @@ async function setupPage(page: Page) {
     DEMO_CASES,
     {
       'case-vendor': [
-        caseItem('src-social', SCREENSHOT_CONTEXT.id, 'Social · who works where', 0),
+        // The look saved on the item: the case canvas wears the docs preset.
+        { ...caseItem('src-social', SCREENSHOT_CONTEXT.id, 'Social · who works where', 0), state: { look: DEMO_PRESETS.docs } },
         caseItem('src-supply', 'ctx-supply', 'Supply · who builds what', 1),
         agentReport,
       ],
@@ -448,6 +456,18 @@ const SCENES: Scene[] = [
       await page.keyboard.press('c');
       await page.keyboard.up('Space');
       await page.waitForTimeout(1000);
+    },
+  },
+  {
+    // The Look panel of the case: the saved look of the graph on the canvas.
+    guide: 'investigations',
+    scene: 'look-panel',
+    path: '/investigations/case-vendor',
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await page.getByTestId('workspace-look-btn').click();
+      await expect(page.getByTestId('panel-look')).toBeVisible();
+      await page.waitForTimeout(400);
     },
   },
   {
@@ -537,9 +557,8 @@ const SCENES: Scene[] = [
     path: GRAPH_URL,
     prepare: async (page) => {
       await waitForGraphSettled(page);
-      await openPanel(page, 'Style');
-      await page.getByTestId('style-preset-open').click();
-      await expect(page.getByTestId('style-preset-modal')).toBeVisible();
+      await openLook(page, 'presets');
+      await expect(page.getByTestId('style-presets')).toBeVisible();
       await page.waitForTimeout(300);
     },
   },
@@ -558,7 +577,7 @@ const SCENES: Scene[] = [
     path: GRAPH_URL,
     prepare: async (page) => {
       await waitForGraphSettled(page);
-      await openPanel(page, 'Labels');
+      await openLook(page, 'labels');
     },
   },
   {
@@ -567,7 +586,7 @@ const SCENES: Scene[] = [
     path: GRAPH_URL,
     prepare: async (page) => {
       await waitForGraphSettled(page);
-      await openPanel(page, 'Labels');
+      await openLook(page, 'labels');
       // The Tooltips tab's + button opens the editor preset to that surface.
       await page.getByTestId('labels-tab-tooltips').click();
       await page.locator('.add-rule-btn').click();
@@ -610,7 +629,7 @@ const SCENES: Scene[] = [
     path: GRAPH_URL,
     prepare: async (page) => {
       await waitForGraphSettled(page);
-      await openPanel(page, 'Style');
+      await openLook(page, 'style');
       await page.getByTestId('property-visibility-node-toggle').check();
       await page.getByTestId('property-visibility-node').click();
       await page.getByRole('option', { name: 'role' }).click();
@@ -632,7 +651,7 @@ const SCENES: Scene[] = [
     path: GRAPH_URL,
     prepare: async (page) => {
       await waitForGraphSettled(page);
-      await openPanel(page, 'Style');
+      await openLook(page, 'style');
       // The section sits near the bottom of the Style panel — scroll it in.
       await page
         .locator('.aesthetics-panel')

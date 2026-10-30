@@ -13744,3 +13744,92 @@ roda, `fetch` externo é bloqueado pela CSP, ← → , zoom da imagem, Esc, Volt
 agents" com os três modos e riscos, screenshot `investigations-item-viewer.png`); `docs/guide/configuration.md`
 (variável nova).
 **Admin-area impact:** `CONFIG_FIELD_KINDS["investigation_html_scripts"] = "public"`; nenhuma tabela, rota ou ação nova.
+
+## [2026-10-30 15:00] - Feature Implemented: paridade entre exploração e canvas do caso (look salvo por item, painel Look compartilhado, aresta no inspetor, foco padrão, câmera, menos sobreposição)
+
+**Relato:** o grafo no caso não parecia com sua exploração: sem estilo nem rótulos (o `item_snapshot` só devolvia o
+estado para `exploration_ref`; `clear()` não zerava aesthetics/cores/ícones/labels, então o look da página anterior
+vazava; o refresh ao vivo nunca reaplicava o estilo; `nodeSize` preso em 5), clicar numa aresta não mostrava nada
+(`SelectionInspector` só lia nós), não havia foco padrão em lugar nenhum (o `viewport` salvo nunca era lido), e o look
+da exploração só existia na URL (`?style=`, `?layout=`), que o caso não tem. Na revisão apareceram mais lacunas
+(menu de contexto, chrome do canvas, propriedades cruas no inspetor) e sobreposições reais nas screenshots: a faixa de
+atalhos sob a barra inferior nas duas páginas; no caso, a legenda sobre os nós e sob os painéis da direita, e a
+AnalysisBar de 13 botões quebrando em duas linhas por cima do painel de layout. Plano aprovado: extrações pontuais
+compartilhadas (não o `GraphWorkspace` completo), look salvo por item, foco nas duas páginas, câmera da exploração,
+menu completo e chrome no caso; remover a faixa de atalhos, legenda vira chips, Style+Labels+Behaviors = um painel.
+**Decisões:**
+1. **Compartilhar UI onde é store-driven.** `SelectionDetails.vue` (extraído do `SidePanel`: identidade,
+   propriedades com allowlist/vazios ocultos/JSON/"your data", métricas) serve o `SidePanel` e a aba Data do inspetor
+   (nó e aresta). `LookPanel.vue` (abas Style, Labels, Behaviors, Presets; os três painéis ganharam `embedded`) é o
+   único botão **Look** da toolbar da exploração (`PanelId` `look`, `onToggleLook(tab?)`) e o painel do caso.
+   `StylePresetModal` virou `StylePresetList` com `apply: 'url' | 'store'` e `contextId`/`canWrite` por props — o modal
+   e o botão "Presets" do painel Style saíram. `GraphCanvasToolbar.vue` (Layout, 3D/2D, Fullscreen, Fit, Table, Look,
+   …, test ids por host) e `GraphStatusBar.vue` (contagens, chips de loading/truncado/clusters, slot, chip
+   **? Shortcuts** que abre o About via `toolbarStore.aboutOpen`) saíram do `GraphVisualizationView` e vão nas duas
+   páginas; `useCanvasFullscreen` idem.
+2. **Look salvo por item do caso** (`item.state.look` = bloco de style preset + `focus_node_id`, id local ao item).
+   Resolução pura em `utils/caseLook.ts`: look do item → look da fonte (`GET …/items/{id}/snapshot` agora devolve
+   `look`: bloco de estilo da exploração ou o `style` embutido num item congelado) → `resetLook()` (nunca sobra).
+   Foco resolve à parte (um look só de foco mantém as cores da exploração; `null` vence a exploração; ausente
+   herda). Canvas unificado: o primeiro item do canvas com estilo decide. A chave de reaplicação inclui versão,
+   revisão e os dois looks — por isso o refresh ao vivo reaplica. `applyStylePreset(…, { freshLayout })` +
+   `layoutBlockChanged` (valores efetivos sobre os defaults) para só re-layoutar quando o bloco de layout muda; com
+   `trace-layers` ativo o layout do look é ignorado. `clear()` agora zera o look. `CASE_NODE_SIZE` só no caminho sem
+   look. Itens congelados (snapshot fixado, seleção, sketch) embutem `style` (`buildStylePreset()`); backend valida
+   (`GraphLook`, `GraphSketchContent.style`, `GraphSelectionContent.style`, `ItemState.look` só em `kind=graph`).
+   Painel Look do caso: presets do contexto do grafo único, **Save look** (`updateItem` com `state.look`,
+   `ego.focusNodeId` mapeado de volta ao id do item) e **Reset look**.
+3. **Foco padrão nas duas páginas.** `ExplorationState.focus_node_id` (SidePanel: "Default focus"; entra no
+   fingerprint de sujo; `loadExploration` arma `pendingFocusNodeId`). No caso, `item.state.look.focus_node_id`
+   (inspetor: "Default focus", só com um grafo no canvas e nó daquele item; `toLocalId`). O canvas assenta o foco em
+   `settleFocus()` (nó na store e na cena com posição; fora do grafo descarta; ainda sem cena mantém pendente) e
+   `frame()` = foco → câmera salva → fit, com guarda de 2 s contra os fits automáticos. MCP: `create/edit_exploration`
+   aceitam `focus_node_id`, `get_exploration` devolve, `update_item(look=…)`.
+4. **Câmera da exploração.** `ViewportState` passa a `{position, target, zoom, mode}` (legado `zoom/center_x/center_y`
+   ignorado na leitura; backend `ViewportPoint`/campos opcionais), capturada no Save pelo handler `getViewport` da
+   toolbar e restaurada por `frame()` quando não há foco pendente e o modo bate; mover a câmera não suja.
+5. **Aresta no inspetor:** tipo, extremos legíveis (clicam para selecionar), chip da fonte, valor e tempo
+   (`__amount`/`__t`), Follow the money nos dois sentidos, Open details (DetailModal montado no caso), aba Data
+   (`SelectionDetails` com `labelOf`/conflitos) e Notas ancoradas em `edge_ids` (`addNote` aceita `ItemAnchor`);
+   várias arestas: composição por tipo e total.
+6. **Menu e chrome no caso:** `useConfigurableMenuActions`, `useClusterProgramMenuActions`, `useCommunityTableAction`
+   registrados na `InvestigationView` (ações do contexto hidratadas do contexto do grafo único, sem
+   `run-query-template`, que trocaria o grafo); `CommunityNodeModal` e `TemplateExecuteModal` montados; 3D/2D,
+   fullscreen (`.canvas-area.fullscreen`), Fit, Export PNG, chips de status.
+7. **Sobreposições e declutter:** faixa `controls-hint` removida do canvas (chip na status bar); legenda do caso virou
+   `CaseGraphChips.vue` na faixa (chips por grafo, All/One, resumo de merge, popover `legend ▾` com roles/grupos),
+   mesmos test ids; ferramentas do canvas saíram da `AnalysisBar` (só análises; emite `height`) para a faixa, e os
+   painéis laterais/`layout-panel` param em `calc(var(--canvas-bottom-bar) + …)`; banner de erro em fluxo sob a faixa.
+   Rejeitado (pelo usuário): tirar Info e o chip MULTI.
+**Arquivos:** novos `frontend/src/components/{SelectionDetails,LookPanel,StylePresetList,GraphCanvasToolbar,
+GraphStatusBar}.vue`, `components/investigation/CaseGraphChips.vue`, `composables/useCanvasFullscreen.ts`,
+`utils/caseLook.ts`, `e2e/helpers/graph-hooks.ts`; removido `components/StylePresetModal.vue`; alterados
+`components/{SidePanel,AestheticsPanel,TextFormatPanel,BehaviorPanel,Toolbar,GraphCanvas3D}.vue`,
+`components/investigation/{SelectionInspector,AnalysisBar}.vue`, `views/{GraphVisualizationView,InvestigationView}.vue`,
+`stores/{graph,toolbar,investigation}.ts`, `composables/{useGraphCamera,useAddToCase,useSketch}.ts`,
+`types/{graph,investigation}.ts`; backend `models/schemas.py` (`GraphLook`, `ItemState.look`, `style` nos conteúdos,
+`ExplorationState.focus_node_id`, `ViewportState`), `services/{case_items,case_graph}.py`, `mcp/server.py`,
+`routers/investigations.py` (docstrings), `docs/guide/agents-mcp-tools.md` e `docs/public/openapi.json` regenerados.
+**Testes:** vitest novos `utils/caseLook` (ordem de resolução, foco só, canvas unificado, chave, mapeamento de ids,
+`layoutBlockChanged` efetivo), `stores/graph.look` (`resetLook`, `clear()`, `freshLayout`, foco/câmera no load e no
+sujo), `components/{SelectionDetails,SidePanel.defaultFocus,LookPanel,GraphCanvasToolbar,GraphStatusBar}`,
+`investigation/CaseGraphChips`; estendidos `StylePresetList` (modo store), `SelectionInspector` (aresta, várias
+arestas, foco padrão, Data compartilhada), `InvestigationView` (look do item > exploração > padrão sem vazar, refresh
+por revisão sem re-layout, foco armado com id unificado, All graphs, Save look e seu bloqueio), `investigation`
+(look da fonte, refresh, snapshot com style, nota em aresta), `useSketch`/`useAddToCase` (style). E2E atualizados
+(`graph`, `tooltip-templates`, `style-presets`, `progressive-load`: botão Look e abas; `live-refresh`: a cor muda ao
+vivo) e novos em `investigation-ux` (look salvo > exploração > padrão, painel Look + preset + Save look + reload,
+foco padrão sem clique, aresta no inspetor via `__GRAPH_SELECT_EDGE__`, sem sobreposição em 1440×900 e 1280×800).
+Pytest: `test_case_items` (look no item, 422 em tabela, `look` por subtipo na rota), `test_case_graph` (style
+validado e ignorado pelo unificador), `test_exploration_state_roundtrip` (foco, câmera), `test_mcp_server`,
+`test_mcp_explorations`.
+**Public docs:** `docs/guide/investigations.md` (workspace: chips, look, foco, inspetor de aresta, ferramentas;
+screenshot `investigations-look-panel.png`), `exploring-the-graph.md` (Look, ? Shortcuts, foco), `explorations.md`
+(câmera e foco capturados), `style-presets.md` e `layout-url-overrides.md` (o caso não lê URL), `agents-mcp-tools.md`
+(regenerado). Screenshots: cena nova `investigations-look-panel`; `investigations-workspace`, `labels-*`,
+`style-presets-modal` e `exploring-the-graph-*` passam pelo painel Look.
+**Admin-area impact:** nenhum — sem rota, tabela ou setting novos; só parâmetros novos em tools MCP já auditadas.
+**Known limitations:** canvas unificado usa o look do primeiro item; a página da exploração não aplica ao vivo uma
+mudança de estilo de outro autor (só o caso); `GraphWorkspace` completo (canvas + chrome + painéis num componente)
+fica como débito #41.
+

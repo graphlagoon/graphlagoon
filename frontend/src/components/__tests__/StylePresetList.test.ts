@@ -1,20 +1,16 @@
 /**
- * Style presets, all in one modal opened from the Style panel.
+ * Style presets: the Presets tab of the Look panel.
  *
- * It is not a second toolbar panel and not inline in the sidebar: a preset is
- * the Style panel's contents saved under a name — an occasional, deliberate act
- * — so it gets a button there and a modal of its own, leaving the sliders
- * uncluttered.
- *
- * The modal teleports to body, so assertions query document.body rather than the
- * render container.
+ * `apply: 'url'` is the exploration page (a preset is applied through `?style=`
+ * so the look stays a shareable link); `apply: 'store'` is a case (no URL look:
+ * the preset lands on the canvas and the host saves it on the graph item).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/vue';
 import { setActivePinia, createPinia } from 'pinia';
 import { nextTick } from 'vue';
-import StylePresetModal from '@/components/StylePresetModal.vue';
+import StylePresetList from '@/components/StylePresetList.vue';
 import { useGraphStore } from '@/stores/graph';
 
 vi.mock('@/services/api', () => ({
@@ -56,15 +52,15 @@ function entry(name: string) {
   return { name, size_bytes: 512, modified_at: '2026-08-20T12:00:00Z' };
 }
 
-async function renderModal() {
+async function renderModal(apply: 'url' | 'store' = 'url', contextId: string | null = CONTEXT_ID) {
   const graphStore = useGraphStore();
   graphStore.currentContext = { id: CONTEXT_ID, title: 'ctx' } as any;
-  const utils = render(StylePresetModal);
+  const utils = render(StylePresetList, { props: { apply, contextId, canWrite: true } });
   await flush();
   return { ...utils, graphStore };
 }
 
-describe('StylePresetModal', () => {
+describe('StylePresetList', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
@@ -85,9 +81,9 @@ describe('StylePresetModal', () => {
     document.body.innerHTML = '';
   });
 
-  it('renders into the body', async () => {
+  it('renders', async () => {
     await renderModal();
-    expect(el('style-preset-modal')).not.toBeNull();
+    expect(el('style-presets')).not.toBeNull();
   });
 
   describe('listing', () => {
@@ -211,7 +207,7 @@ describe('StylePresetModal', () => {
       await flush();
 
       expect(el('style-preset-error')!.textContent).toContain('write access');
-      expect(el('style-preset-modal')).not.toBeNull();
+      expect(el('style-presets')).not.toBeNull();
     });
   });
 
@@ -318,14 +314,42 @@ describe('StylePresetModal', () => {
     });
   });
 
-  it('closes on the close button', async () => {
-    const { emitted } = await renderModal();
-    await fireEvent.click(document.body.querySelector('.modal-close')!);
-    expect(emitted().close).toBeTruthy();
+  describe('applying to the store (a case)', () => {
+    it('fetches the preset and applies it without touching the URL', async () => {
+      vi.mocked(api.listStylePresets).mockResolvedValue([entry('investigacao')] as any);
+      vi.mocked(api.getStylePreset).mockResolvedValue({
+        name: 'investigacao',
+        settings: { nodeTypeColors: { Person: '#123456' } },
+      } as any);
+      const { graphStore, emitted } = await renderModal('store');
+
+      await fireEvent.click(el('style-preset-apply-investigacao')!);
+      await flush();
+
+      expect(api.getStylePreset).toHaveBeenCalledWith(CONTEXT_ID, 'investigacao');
+      expect(graphStore.nodeTypeColors.get('Person')).toBe('#123456');
+      expect(replace).not.toHaveBeenCalled();
+      expect(emitted().applied?.[0]).toEqual(['investigacao']);
+      expect(el('style-preset-item-investigacao')!.classList.contains('active')).toBe(true);
+    });
+
+    it('offers no link to copy and nothing to stop using: a case has no ?style=', async () => {
+      vi.mocked(api.listStylePresets).mockResolvedValue([entry('investigacao')] as any);
+      await renderModal('store');
+      expect(el('style-preset-copy-investigacao')).toBeNull();
+      expect(el('style-preset-clear')).toBeNull();
+    });
+
+    it('says so when the graph has no context to list presets for', async () => {
+      await renderModal('store', null);
+      expect(el('style-preset-no-context')).not.toBeNull();
+      expect(el('style-preset-list')).toBeNull();
+      expect(api.listStylePresets).not.toHaveBeenCalled();
+    });
   });
 });
 
-describe('StylePresetModal — export / import', () => {
+describe('StylePresetList — export / import', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
@@ -477,8 +501,11 @@ describe('StylePresetModal — export / import', () => {
   });
 
   it('hides the save form for read-only viewers but keeps Apply only', async () => {
-    const { graphStore } = await renderModal();
+    // The host says whether the person may write presets (`canWrite`).
+    const graphStore = useGraphStore();
     graphStore.currentContext = { id: CONTEXT_ID, title: 'ctx', has_write_access: false } as any;
+    render(StylePresetList, { props: { apply: 'url', contextId: CONTEXT_ID, canWrite: false } });
+    await flush();
     await fireEvent.click(el('style-preset-import-toggle')!);
     await nextTick();
     expect(el('style-preset-import-save')).toBeNull();

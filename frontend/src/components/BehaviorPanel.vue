@@ -5,6 +5,9 @@ import { ChevronDown, ChevronRight, X, MousePointerClick } from 'lucide-vue-next
 
 const showAdvanced = ref(false);
 
+/** Inside the Look panel: no title or close button of its own (the host has them). */
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
+
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'open-menu-actions'): void;
@@ -118,12 +121,12 @@ function resetBehaviors() {
 </script>
 
 <template>
-  <div class="behavior-panel">
-    <div class="panel-header">
-      <h3>Behaviors</h3>
+  <div class="behavior-panel" :class="{ embedded: props.embedded }">
+    <div class="panel-header" :class="{ embedded: props.embedded }">
+      <h3 v-if="!props.embedded">Behaviors</h3>
       <div class="header-actions">
-        <button class="btn btn-outline btn-sm" @click="resetBehaviors">Reset</button>
-        <button class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
+        <button class="btn btn-outline btn-sm" data-testid="behaviors-reset" @click="resetBehaviors">Reset</button>
+        <button v-if="!props.embedded" class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
     </div>
 
@@ -546,6 +549,17 @@ function resetBehaviors() {
   border-right: 1px solid var(--border-color);
   overflow-y: auto;
   padding: 16px;
+}
+
+.behavior-panel.embedded {
+  width: auto;
+  border-right: 0;
+  padding: 0;
+}
+
+.panel-header.embedded {
+  justify-content: flex-end;
+  margin-bottom: 8px;
 }
 
 .panel-header {

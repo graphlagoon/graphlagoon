@@ -77,14 +77,21 @@ first and then saves both, with a warning that it did.
 | The query | OpenCypher/SQL text plus its transpile and rendering options |
 | The data | A snapshot of the visible nodes and edges **with their positions** — expanded nodes included |
 | The look | Colors, icons, sizes, label templates, layout mode and settings (the same block a [style preset](./style-presets.md) carries) |
-| Filters & viewport | Type filters, search, camera |
+| Filters & camera | Type filters, search, and the camera as you left it (position, target, zoom, 3D/2D): the exploration reopens where you were |
+| Default focus | The node it opens on, selected and centred (**Default focus** in the node's details panel); it wins over the saved camera |
 | Analysis | Cluster results and exploration-scoped cluster programs, communities, similarity state |
 | Behaviors | Data-fetching preferences |
 | Your data | Nodes, edges and enrichment files you added, in a [layer](./bring-your-own-data.md#in-an-exploration-your-layer) saved beside the snapshot, not in it |
 
 Not captured: the context definition itself, context-scoped cluster
 programs (those are shared by every exploration in the context), query
-templates, and your current selection.
+templates, and your current selection (the default focus is the one node
+that is: it is saved, and restored as the selection).
+
+Moving the camera never marks the exploration as changed; it is captured
+when you save. Explorations saved before the camera existed open fitted to
+the graph, as before, until saved once more. In a [case](./investigations.md#the-workspace)
+the same look and focus apply to the graph item, unless the case saved its own.
 
 Loading prefers the snapshot — that's what makes reopening instant and
 keeps hand-arranged positions. Your data layer is then drawn on top of it,

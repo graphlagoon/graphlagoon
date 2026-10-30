@@ -153,7 +153,8 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
       context_id: graph.currentContext?.id,
       provenance: { context_id: graph.currentContext?.id, exploration_id: graph.currentExploration?.id ?? undefined, tool: 'selection' },
       anchor: { entity_ids: [...nodes] },
-      content_json: picked,
+      // The look it had on the canvas, so the case shows it the same.
+      content_json: { ...picked, style: graph.buildStylePreset() },
     });
   }
 

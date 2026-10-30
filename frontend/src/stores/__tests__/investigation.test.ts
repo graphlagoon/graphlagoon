@@ -207,3 +207,52 @@ describe('investigation store', () => {
     expect(api.getInvestigationItems).not.toHaveBeenCalled()
   })
 })
+
+describe('investigation store · looks', () => {
+  it('a source carries its own look from the snapshot route, and a live refresh brings the new one', async () => {
+    const ref = item('s1', { exploration_id: 'x1', context_id: 'c1', current_version: 1 })
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv1', title: 'Caso' } as any)
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([ref] as any)
+    vi.mocked(api.getGraphContext).mockResolvedValue({ id: 'c1', identity_keys: [] } as any)
+    const snap = (color: string, revision: number) => ({
+      snapshot: { nodes: [{ id: 'a', type: 'Conta', properties: {} }], edges: [] },
+      exploration: { id: 'x1', title: 'x', state: { revision } },
+      look: { nodeTypeColors: { Conta: color }, focus_node_id: 'a' },
+    })
+    vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValueOnce(snap('#f00', 1) as any)
+    const store = useInvestigationStore()
+    await store.openInvestigation('inv1')
+    await store.loadWorkspace()
+    expect(store.sourceGraphs[0].look).toEqual({ nodeTypeColors: { Conta: '#f00' }, focus_node_id: 'a' })
+
+    vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValueOnce(snap('#00f', 2) as any)
+    await store.syncLive({ last_event_id: null, explorations: { x1: 2 } }, 'me@x.com')
+    expect(store.sourceGraphs[0].look?.nodeTypeColors).toEqual({ Conta: '#00f' })
+    expect(store.sourceGraphs[0].state?.revision).toBe(2)
+  })
+
+  it('a frozen graph keeps the look it had on the canvas', async () => {
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv1' } as any)
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([])
+    vi.mocked(api.createInvestigationItem).mockResolvedValue(item('frozen', { subkind: 'snapshot', current_version: 1 }) as any)
+    vi.mocked(api.pinInvestigationItem).mockResolvedValue({ version: 1, sha256: 'ab'.repeat(32) } as any)
+    const store = useInvestigationStore()
+    await store.openInvestigation('inv1')
+    await store.pinEvidence({ title: 'Canvas', kind: 'graph_state', params: {}, snapshot: { nodes: [], edges: [] }, style: { nodeTypeColors: { Conta: '#f00' } } })
+    expect(api.createInvestigationItem).toHaveBeenCalledWith('inv1', expect.objectContaining({
+      kind: 'graph', subkind: 'snapshot', content_json: { nodes: [], edges: [], style: { nodeTypeColors: { Conta: '#f00' } } },
+    }))
+  })
+
+  it('a note can anchor on edges', async () => {
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv1' } as any)
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([])
+    vi.mocked(api.createInvestigationItem).mockResolvedValue(item('n1', { kind: 'note', subkind: 'anchored' }) as any)
+    const store = useInvestigationStore()
+    await store.openInvestigation('inv1')
+    await store.addNote({ edge_ids: ['e1'] }, 'Check it')
+    expect(api.createInvestigationItem).toHaveBeenCalledWith('inv1', expect.objectContaining({ subkind: 'anchored', anchor: { edge_ids: ['e1'] } }))
+    await store.addNote('a@c1', 'On a node')
+    expect(api.createInvestigationItem).toHaveBeenLastCalledWith('inv1', expect.objectContaining({ anchor: { entity_ids: ['a@c1'] } }))
+  })
+})

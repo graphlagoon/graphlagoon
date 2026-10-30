@@ -16,11 +16,9 @@ describe('toolbar store', () => {
     const store = useToolbarStore()
     const handlers = {
       onToggleFilters: vi.fn(),
-      onToggleBehaviors: vi.fn(),
       onToggleQuery: vi.fn(),
       onToggleMetrics: vi.fn(),
-      onToggleAesthetics: vi.fn(),
-      onToggleLabels: vi.fn(),
+      onToggleLook: vi.fn(),
       onToggleClusterPrograms: vi.fn(),
       onToggleTemplates: vi.fn(),
     onTogglePrecomputed: vi.fn(),
@@ -36,11 +34,9 @@ describe('toolbar store', () => {
     const store = useToolbarStore()
     store.registerHandlers({
       onToggleFilters: vi.fn(),
-      onToggleBehaviors: vi.fn(),
       onToggleQuery: vi.fn(),
       onToggleMetrics: vi.fn(),
-      onToggleAesthetics: vi.fn(),
-      onToggleLabels: vi.fn(),
+      onToggleLook: vi.fn(),
       onToggleClusterPrograms: vi.fn(),
       onToggleTemplates: vi.fn(),
     onTogglePrecomputed: vi.fn(),
@@ -56,11 +52,9 @@ describe('toolbar store', () => {
     const onToggleFilters = vi.fn()
     store.registerHandlers({
       onToggleFilters,
-      onToggleBehaviors: vi.fn(),
       onToggleQuery: vi.fn(),
       onToggleMetrics: vi.fn(),
-      onToggleAesthetics: vi.fn(),
-      onToggleLabels: vi.fn(),
+      onToggleLook: vi.fn(),
       onToggleClusterPrograms: vi.fn(),
       onToggleTemplates: vi.fn(),
     onTogglePrecomputed: vi.fn(),

@@ -124,7 +124,8 @@ test.describe('Responsive layout', () => {
 
     // Every panel toggle stays inside the viewport, not scrolled out of the
     // centre group.
-    for (const title of ['Filters', 'Query', 'Query Templates', 'Style', 'Labels', 'Metrics', 'Clusters', 'Behaviors', 'Load Exploration']) {
+    // Style, labels and behaviors share the one Look button.
+    for (const title of ['Filters', 'Query', 'Query Templates', 'Look', 'Metrics', 'Clusters', 'Load Exploration']) {
       const box = await page.getByTitle(title, { exact: true }).boundingBox();
       expect(box, `${title} has no box`).not.toBeNull();
       expect(box!.x, `${title} scrolled off the left`).toBeGreaterThanOrEqual(0);

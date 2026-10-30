@@ -442,10 +442,20 @@ export interface FilterState {
   search_query?: string;
 }
 
+/**
+ * The camera of a saved exploration: where it stood, what it looked at, how
+ * far in (orthographic zoom) and in which view mode. Explorations saved before
+ * this carried `{zoom, center_x, center_y}` that nothing ever read; such a
+ * viewport is ignored and the graph opens fitted, as before.
+ */
 export interface ViewportState {
-  zoom: number;
-  center_x: number;
-  center_y: number;
+  position?: { x: number; y: number; z: number };
+  target?: { x: number; y: number; z: number };
+  zoom?: number;
+  mode?: '3d' | '2d-proj';
+  /** Legacy fields, never read. */
+  center_x?: number;
+  center_y?: number;
 }
 
 /** Layout algorithms a saved state may name. Anything else falls back to 'force'. */
@@ -576,6 +586,7 @@ export interface ExplorationState {
   property_visibility?: PropertyVisibility;   // Property display allowlist (optional for backwards compat)
   community?: Record<string, unknown>;     // Community detection state (optional for backwards compat)
   similarity?: Record<string, unknown>;    // Similarity system state (optional for backwards compat)
+  focus_node_id?: string | null;           // The node the exploration opens on, selected and framed (optional)
   has_snapshot?: boolean;                  // Whether a file-based graph snapshot exists
   has_overlay?: boolean;                   // Whether the user's layer (BYOD-2) is saved beside it
   revision?: number;                       // Server-owned: +1 on every write (live refresh, stale-save 409)

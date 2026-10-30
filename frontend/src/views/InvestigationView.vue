@@ -9,25 +9,32 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter, type LocationQuery } from 'vue-router';
-import { AlertTriangle, Banknote, Plus, Route } from 'lucide-vue-next';
+import { Banknote, Plus, Route } from 'lucide-vue-next';
 import { isGraphItem, useInvestigationStore } from '@/stores/investigation';
-import { useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
+import { defaultForce3DSettings, defaultLayoutModeConfig, useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useClusterStore } from '@/stores/cluster';
 import { useCaseFilters } from '@/stores/caseFilters';
 import { useItemViewerStore } from '@/stores/itemViewer';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
+import { useCommunityTableAction } from '@/composables/useCommunityTableAction';
+import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
+import { useConfigurableMenuActions } from '@/composables/useConfigurableMenuActions';
+import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
+import { useCanvasFullscreen } from '@/composables/useCanvasFullscreen';
+import type { LookTab } from '@/stores/toolbar';
 import { useToast } from '@/composables/useToast';
 import { useLiveRevision } from '@/composables/useLiveRevision';
 import { useAuthStore } from '@/stores/auth';
 import type { TraceContent } from '@/composables/useCaseAnalyses';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
 import { caseNodeLabel } from '@/utils/caseLabels';
-import { provenanceRingColors, roleColor, roleColorMap } from '@/utils/graphAppearance';
+import { provenanceRingColors, roleColorMap } from '@/utils/graphAppearance';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { traceColumns, traceFlows } from '@/utils/traceView';
-import { baseSourceId, mergedEntityCounts, nodeSourceIds, type NodeOrigin, type UnifiedNode } from '@/utils/unifyGraph';
+import { baseSourceId, nodeSourceIds, type NodeOrigin, type UnifiedNode } from '@/utils/unifyGraph';
+import { layoutBlockChanged, mapLookToCanvas, mapLookToItem, resolveCanvasLook, toUnifiedId } from '@/utils/caseLook';
 import { LAYOUT_ALGORITHMS, type LayoutAlgorithm } from '@/types/graph';
 import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import LayoutPanel from '@/components/LayoutPanel.vue';
@@ -36,6 +43,13 @@ import DataTablePanel from '@/components/DataTablePanel.vue';
 import MetricsPanel from '@/components/MetricsPanel.vue';
 import ClusterProgramPanel from '@/components/ClusterProgramPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
+import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
+import DetailModal from '@/components/DetailModal.vue';
+import LookPanel from '@/components/LookPanel.vue';
+import GraphCanvasToolbar, { type CanvasToolbarButton } from '@/components/GraphCanvasToolbar.vue';
+import GraphStatusBar from '@/components/GraphStatusBar.vue';
+import TemplateExecuteModal from '@/components/TemplateExecuteModal.vue';
+import CaseGraphChips from '@/components/investigation/CaseGraphChips.vue';
 import CaseHeader from '@/components/investigation/CaseHeader.vue';
 import CaseItemsPanel from '@/components/investigation/CaseItemsPanel.vue';
 import CaseFilterChips from '@/components/investigation/CaseFilterChips.vue';
@@ -149,8 +163,59 @@ const timelineTab = ref<TimelineTab>('timeline');
 const timelineCollapsed = ref(true);
 const paintByGroup = ref(false);
 const selectedClusterId = ref<string | null>(null);
-const panels = ref<Record<CasePanel, boolean>>({ filters: false, table: false, metrics: false, layout: false, advanced: false });
+const panels = ref<Record<CasePanel, boolean>>({ filters: false, table: false, metrics: false, layout: false, look: false, advanced: false });
+const lookTab = ref<LookTab>('style');
 const canvasRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
+const canvasAreaRef = ref<HTMLElement | null>(null);
+const { isFullscreen, toggle: toggleFullscreen } = useCanvasFullscreen(canvasAreaRef);
+/** The analysis bar's height: the panels over the canvas stop above it. */
+const bottomBarHeight = ref(48);
+const showDetailModal = ref(false);
+const detailModalItem = computed(() => {
+  if (!showDetailModal.value) return null;
+  if (graphStore.selectedNode) return { type: 'node' as const, data: graphStore.selectedNode };
+  if (graphStore.selectedEdge) return { type: 'edge' as const, data: graphStore.selectedEdge };
+  return null;
+});
+
+/** The context of the one graph on the canvas: whose presets and menu actions apply. */
+const canvasContextId = computed(() => (store.canvasItems.length === 1 ? store.canvasItems[0].context_id ?? null : null));
+const canWritePresets = computed(() => !!(canvasContextId.value && store.contexts[canvasContextId.value]?.has_write_access));
+
+function openLook(tab: LookTab) {
+  lookTab.value = tab;
+  panels.value.look = true;
+}
+
+function setViewMode(mode: '3d' | '2d-proj') {
+  graphStore.updateBehaviors({ viewMode: mode });
+}
+
+function exportPng() {
+  canvasRef.value?.exportPNG(`${store.current?.title || 'case'}.png`, 2, 'white');
+}
+
+// Right-click: the context's configured actions (open a URL, copy), cluster
+// programs and the community table — the same menu the exploration has.
+// Query-template actions are the exploration's: running one replaces the graph.
+const communityTable = useCommunityTableAction();
+const clusterProgramActions = useClusterProgramMenuActions();
+const configurableMenuActions = useConfigurableMenuActions();
+const { pendingTemplateExecution } = configurableMenuActions;
+const menuActionsStore = useContextMenuActionsStore();
+watch(
+  canvasContextId,
+  (id) => {
+    const configs = id ? (store.contexts[id]?.context_menu_actions ?? []) : [];
+    menuActionsStore.hydrateFromContext(configs.filter((c) => c.kind !== 'run-query-template'));
+  },
+  { immediate: true },
+);
+watch(() => store.contexts, () => {
+  const id = canvasContextId.value;
+  if (!id) return;
+  menuActionsStore.hydrateFromContext((store.contexts[id]?.context_menu_actions ?? []).filter((c) => c.kind !== 'run-query-template'));
+});
 const dossierRef = ref<InstanceType<typeof CaseDossier> | null>(null);
 
 /** Decide: the inspector's panel on the canvas, the dossier's own panel in the dossier. */
@@ -164,7 +229,6 @@ const analysisBar = ref<InstanceType<typeof AnalysisBar> | null>(null);
 
 const sourceTitle = (sourceId: string) => store.itemTitle(baseSourceId(sourceId));
 const contextTitle = (contextId: string) => store.contexts[contextId]?.title ?? store.itemTitle(contextId);
-const mergedCounts = computed(() => mergedEntityCounts(store.unified.nodes));
 const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'closed');
 
 // --- context picker for expanding a node that exists in several contexts ---
@@ -230,8 +294,12 @@ async function render() {
   const { nodes, edges } = store.unified;
   const rings = new Map(nodes.map((n) => [n.node_id, provenanceRingColors(nodeSourceIds(n), store.sourceColors)]));
   graphStore.loadInvestigationGraph(graphMode(rings), nodes, edges, { fresh });
+  armDefaultFocus();
   await nextTick();
   if (!fresh) communityStore.loadState(savedCommunities);
+  // The cluster store drops every cluster when the nodes change: the closed
+  // groups come back as cluster nodes once the new graph is in.
+  syncGroupClusters();
 }
 
 /** Set before switching graphs: the next render starts from a clean canvas. */
@@ -269,32 +337,100 @@ async function loadWorkspace() {
   if (!store.current || key === loadedKey) return;
   loadedKey = key;
   await store.loadWorkspace();
-  styledSource = null;
   applyCanvasStyle();
   zoomToFitSoon();
 }
 
 /**
- * The canvas wears an exploration's style (colors, icons, labels): the one on the canvas when a
- * single graph shows, so it looks as it does in its exploration. With several, the first that has
- * a style (shortcut: no per-source styles on a unified canvas).
+ * The canvas wears the look of the graph it shows (utils/caseLook): the look saved
+ * on the item, else its exploration's (or the style a frozen item embeds), else
+ * the stock look — never whatever the previous page or case left in the store.
+ * On a unified canvas the first canvas item with a style decides. Re-applied
+ * whenever the canvas, an item's version or saved look, or a source's revision
+ * changes (a live refresh of the exploration's style lands too).
  */
-let styledSource: string | null = null;
+const resolvedLook = computed(() => resolveCanvasLook(store.canvasItems, store.sourceGraphs));
+let appliedLookKey: string | null = null;
+let focusedKey: string | null = null;
 function applyCanvasStyle() {
-  const on = store.canvasIds;
-  const styled =
-    (on.size === 1 && store.sourceGraphs.find((g) => on.has(g.id) && g.state)) ||
-    (styledSource ? null : store.sourceGraphs.find((g) => on.has(g.id) && g.state) ?? store.sourceGraphs.find((g) => g.state));
-  if (!styled?.state || styled.id === styledSource) return;
-  styledSource = styled.id;
-  graphStore.applyStylePreset(styled.state);
-  syncGroupClusters(); // the style preset reloads the cluster state and drops the group clusters
-  // Small base nodes and thin rings read better on a case canvas (05 §3).
-  graphStore.updateAesthetics({ nodeSize: Math.min(graphStore.aesthetics.nodeSize, CASE_NODE_SIZE) });
+  const r = resolvedLook.value;
+  if (store.graphLoading || r.key === appliedLookKey) return;
+  appliedLookKey = r.key;
+  // A look whose layout block matches what is on screen only recolors: no re-layout.
+  const fresh = layoutBlockChanged(graphStore.buildStylePreset(), r.look, {
+    layout_mode_config: defaultLayoutModeConfig(),
+    force3d_settings: defaultForce3DSettings(),
+  });
+  // A trace laid out by layer keeps its columns whatever the look says.
+  const layoutLocked = graphStore.layoutAlgorithm === 'trace-layers';
+  if (r.look) {
+    const mapped = mapLookToCanvas(r.look, r.sourceId!, store.unified.nodes);
+    const { layout_algorithm: _la, layout_mode_config: _lm, ...withoutLayout } = mapped;
+    graphStore.applyStylePreset(layoutLocked ? withoutLayout : mapped, { freshLayout: fresh && !layoutLocked });
+  } else {
+    graphStore.resetLook({ freshLayout: fresh && !layoutLocked });
+    // Small base nodes read better on a case canvas with no look of its own (05 §3).
+    graphStore.updateAesthetics({ nodeSize: Math.min(graphStore.aesthetics.nodeSize, CASE_NODE_SIZE) });
+  }
+  syncGroupClusters(); // the look reloads the cluster state and drops the group clusters
 }
-watch(() => [...store.canvasIds].join(','), () => {
-  if (!store.graphLoading) applyCanvasStyle();
+
+/**
+ * The default focus, once per canvas and focus. Armed by `render()` right after
+ * the nodes land in the store: armed earlier, the canvas would look the node up
+ * in the previous graph (or none) and drop it as missing.
+ */
+function armDefaultFocus() {
+  const focus = resolvedLook.value.focus;
+  const focusKey = focus ? `${[...store.canvasIds].join(',')}|${focus.sourceId}:${focus.nodeId}` : null;
+  if (!focusKey) {
+    focusedKey = null;
+    return;
+  }
+  if (focusKey === focusedKey || !store.unified.nodes.length) return; // an empty render (sources still loading) retries later
+  const id = toUnifiedId(store.unified.nodes, focus!.sourceId, focus!.nodeId);
+  if (id) graphStore.pendingFocusNodeId = id;
+  focusedKey = focusKey; // a node that is not in the graph arms nothing, and is not asked again until the canvas changes
+}
+watch(() => [resolvedLook.value.key, store.graphLoading], () => applyCanvasStyle());
+
+/** The one graph on the canvas, when there is exactly one: the item a look or a focus is saved on. */
+const singleCanvasItem = computed(() => (store.canvasItems.length === 1 ? store.canvasItems[0] : null));
+const lookCaption = computed(() => {
+  const r = resolvedLook.value;
+  if (!r.sourceId) return 'Default look';
+  const title = store.itemTitle(r.sourceId);
+  return store.canvasItems.length > 1 ? `Unified canvas · look from “${title}”` : `Look of “${title}”`;
 });
+const saveLookBlockedReason = computed(() => {
+  if (!canEdit.value) return 'Read-only case';
+  if (!singleCanvasItem.value) return 'Pick one graph in the legend to save its look';
+  return null;
+});
+async function saveLook() {
+  const item = singleCanvasItem.value;
+  if (!item || saveLookBlockedReason.value) return;
+  const look = {
+    ...mapLookToItem(graphStore.buildStylePreset(), item.id, store.unified.nodes),
+    ...(item.state?.look && 'focus_node_id' in item.state.look ? { focus_node_id: item.state.look.focus_node_id } : {}),
+  };
+  try {
+    await store.updateItem(item.id, { state: { ...(item.state ?? {}), look } });
+    toast.success(`Look saved on “${item.title}”`);
+  } catch (e) {
+    toast.error(getErrorMessage(e, 'Failed to save the look'));
+  }
+}
+async function resetSavedLook() {
+  const item = singleCanvasItem.value;
+  if (!item) return;
+  try {
+    await store.updateItem(item.id, { state: { ...(item.state ?? {}), look: null } });
+    toast.success(`“${item.title}” is back to its own look`);
+  } catch (e) {
+    toast.error(getErrorMessage(e, 'Failed to reset the look'));
+  }
+}
 
 /**
  * Legend click: only this graph, on a clean canvas; with Shift (or Ctrl/⌘), add it to or take
@@ -324,9 +460,10 @@ function onMaterialSelect(item: CaseItem) {
 const CASE_NODE_SIZE = 5;
 
 /** Frames the graph once the layout has settled: case nodes arrive without
- * coordinates, so fitting right after the load frames a single point. */
+ * coordinates, so fitting right after the load frames a single point. A
+ * pending default focus wins over the fit (the canvas's `frame`). */
 function zoomToFitSoon() {
-  const fit = () => canvasRef.value?.zoomToFit?.();
+  const fit = () => (canvasRef.value?.frame ? canvasRef.value.frame() : canvasRef.value?.zoomToFit?.());
   const started = Date.now();
   const tick = () => {
     const running = canvasRef.value?.isLayoutRunning ?? false;
@@ -377,8 +514,6 @@ watch(
   },
   { immediate: true },
 );
-const legendRoles = computed(() => [...new Set(Object.values(store.roles))].sort());
-
 // Closed groups collapse into cluster nodes (05 §5), reusing the closed-cluster rendering.
 const GROUP_PREFIX = 'group:';
 function removeGroupClusters() {
@@ -404,6 +539,9 @@ const TRACE_ACTIONS: ['forward' | 'backward', string][] = [
   ['backward', 'Follow the money → backward'],
 ];
 onMounted(() => {
+  communityTable.register();
+  clusterProgramActions.register();
+  configurableMenuActions.register();
   for (const [direction, label] of TRACE_ACTIONS) {
     contextMenu.addAction({ id: `trace-${direction}`, label, icon: Banknote, handler: (t) => followMoney(t, direction) });
   }
@@ -492,6 +630,10 @@ function openUpload(role?: 'graph' | 'enrichment' | 'attachment') {
 
 onUnmounted(() => {
   itemViewer.close();
+  communityTable.unregister();
+  clusterProgramActions.unregister();
+  configurableMenuActions.unregister();
+  menuActionsStore.hydrateFromContext([]);
   for (const [direction] of TRACE_ACTIONS) contextMenu.removeAction(`trace-${direction}`);
   contextMenu.removeAction('path-to');
   graphStore.traceLayers = null;
@@ -524,8 +666,31 @@ onUnmounted(() => {
           <CaseItemsPanel :can-edit="canEdit" :active-item="activeItem?.id" @add="showAdd = true" @upload="openUpload()" @select="onMaterialSelect" />
 
           <div class="center">
+            <div class="strip">
+              <CaseGraphChips
+                :paint-by-group="paintByGroup"
+                @pick="pickCanvasItem"
+                @show-all="showAllOnCanvas"
+                @show-one="(e: MouseEvent) => pickCanvasItem(store.canvasItems[0].id, e)"
+              />
+              <GraphCanvasToolbar
+                class="strip-toolbar"
+                compact
+                :buttons="['filters', 'table', 'layout', 'look', 'advanced', 'fit', 'export']"
+                :active="{ filters: panels.filters, table: panels.table, layout: panels.layout, look: panels.look, advanced: panels.advanced }"
+                :view-mode="graphStore.behaviors.viewMode"
+                :is-fullscreen="isFullscreen"
+                :test-ids="{ filters: 'workspace-filters-btn', table: 'workspace-table-btn', layout: 'workspace-layout-btn', look: 'workspace-look-btn', advanced: 'workspace-advanced-btn', fit: 'workspace-fit-btn', export: 'workspace-export-btn' }"
+                @toggle="(id: CanvasToolbarButton) => togglePanel(id as CasePanel)"
+                @fit="canvasRef?.zoomToFit?.()"
+                @fullscreen="toggleFullscreen"
+                @view-mode="setViewMode"
+                @export="exportPng"
+              />
+            </div>
             <CaseFilterChips :can-edit="canEdit" @apply-view="applyView" />
-            <section class="canvas-area" data-testid="graph-container">
+            <div v-if="graphStore.queryError" class="error-banner" data-testid="canvas-error">{{ graphStore.queryError.message }}</div>
+            <section ref="canvasAreaRef" class="canvas-area" :class="{ fullscreen: isFullscreen }" :style="{ '--canvas-bottom-bar': `${bottomBarHeight}px` }" data-testid="graph-container">
               <div v-if="store.graphLoading || graphStore.loading" class="overlay">{{ graphStore.loadingMessage || 'Loading the case…' }}</div>
               <div v-else-if="store.graphItems.length === 0" class="overlay empty-canvas" data-testid="canvas-empty">
                 <p>Nothing on the canvas yet. Add a recent exploration, start a new one from a context, or upload a file with a mapping.</p>
@@ -535,61 +700,48 @@ onUnmounted(() => {
                 <p>No graph on the canvas. Pick one in the legend or tick it in the material list.</p>
                 <button class="btn btn-outline btn-sm" @click="showAllOnCanvas">Show all graphs</button>
               </div>
-              <div v-if="graphStore.queryError" class="error-banner">{{ graphStore.queryError.message }}</div>
-
-              <div v-if="store.readableGraphItems.length" class="legend" data-testid="provenance-legend">
-                <div class="legend-head">
-                  <span class="legend-title">Graphs on canvas (ring)</span>
-                  <button
-                    v-if="store.readableGraphItems.length > 1"
-                    class="link-btn legend-all"
-                    :data-testid="store.allOnCanvas ? 'canvas-one' : 'canvas-all'"
-                    :title="store.allOnCanvas ? 'Back to one graph at a time' : 'Unify every graph on one canvas, one ring per source'"
-                    @click="store.allOnCanvas ? pickCanvasItem(store.canvasItems[0].id, $event) : showAllOnCanvas()"
-                  >
-                    {{ store.allOnCanvas ? 'One at a time' : `All graphs (${store.readableGraphItems.length})` }}
-                  </button>
-                </div>
-                <button
-                  v-for="s in store.readableGraphItems"
-                  :key="s.id"
-                  type="button"
-                  class="legend-row legend-pick"
-                  :class="{ off: !store.canvasIds.has(s.id) }"
-                  :aria-pressed="store.canvasIds.has(s.id)"
-                  :title="store.sourceErrors[s.id] ?? 'Show only this graph · Shift+click adds or removes it'"
-                  :data-testid="`legend-item-${s.id}`"
-                  @click="pickCanvasItem(s.id, $event)"
-                >
-                  <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
-                  <span class="legend-label">{{ s.title }}</span>
-                  <AlertTriangle v-if="store.sourceErrors[s.id]" :size="12" class="warn" :data-testid="`legend-error-${s.id}`" />
-                </button>
-                <template v-if="paintByGroup && store.groups.length">
-                  <div class="legend-title roles-title">Group (fill)</div>
-                  <div v-for="g in store.groups" :key="g.id" class="legend-row"><span class="fill" :style="{ background: g.color }"></span>{{ g.name }}</div>
-                </template>
-                <template v-else-if="legendRoles.length">
-                  <div class="legend-title roles-title">Role (fill)</div>
-                  <div v-for="role in legendRoles" :key="role" class="legend-row">
-                    <span class="fill" :style="{ background: roleColor(role) }"></span>
-                    {{ role }}
-                  </div>
-                </template>
-                <p v-if="store.canvasItems.length > 1" class="muted" data-testid="unification-summary">
-                  <template v-if="Object.keys(mergedCounts).length">
-                    {{ Object.values(mergedCounts).reduce((a, b) => a + b, 0) }} entities merged by identity key:
-                    {{ Object.entries(mergedCounts).map(([e, n]) => `${n} by ${e}`).join(', ') }}
-                  </template>
-                  <template v-else>No entity merged across items yet.</template>
-                </p>
-              </div>
-
               <GraphCanvas3D ref="canvasRef" @cluster-node-click="selectedClusterId = $event" />
 
               <div v-if="panels.filters" class="side-panel left" data-testid="panel-filters"><FilterPanel @close="panels.filters = false" /></div>
               <div v-if="panels.metrics" class="side-panel right" data-testid="panel-metrics"><MetricsPanel @close="panels.metrics = false" /></div>
               <div v-if="panels.advanced" class="side-panel right" data-testid="panel-advanced"><ClusterProgramPanel @close="panels.advanced = false" /></div>
+              <div v-if="panels.look" class="side-panel right look-host" data-testid="panel-look">
+                <LookPanel
+                  v-model:tab="lookTab"
+                  class="fill"
+                  presets-apply="store"
+                  :presets-context-id="canvasContextId"
+                  :can-write-presets="canWritePresets"
+                  :caption="lookCaption"
+                  @close="panels.look = false"
+                  @applied="syncGroupClusters"
+                >
+                  <template #footer>
+                    <div class="look-footer">
+                      <button
+                        class="btn btn-primary btn-sm"
+                        :disabled="!!saveLookBlockedReason"
+                        :title="saveLookBlockedReason ?? 'Save the look on screen on this graph item: it opens like this for everyone in the case'"
+                        data-testid="style-save-look"
+                        @click="saveLook"
+                      >
+                        Save look
+                      </button>
+                      <button
+                        v-if="singleCanvasItem?.state?.look"
+                        class="btn btn-outline btn-sm"
+                        :disabled="!canEdit"
+                        title="Drop the saved look: back to the exploration's own (or the stock look)"
+                        data-testid="style-reset-look"
+                        @click="resetSavedLook"
+                      >
+                        Reset look
+                      </button>
+                      <span v-if="saveLookBlockedReason" class="muted" data-testid="style-save-look-reason">{{ saveLookBlockedReason }}</span>
+                    </div>
+                  </template>
+                </LookPanel>
+              </div>
               <div v-if="panels.layout" class="layout-panel">
                 <LayoutPanel
                   :is-layout-running="canvasRef?.isLayoutRunning ?? false"
@@ -609,7 +761,7 @@ onUnmounted(() => {
                 :active-item="activeAnalysis"
                 v-model:paint-by-group="paintByGroup"
                 @toggle="togglePanel"
-                @fit="canvasRef?.zoomToFit?.()"
+                @height="bottomBarHeight = $event"
                 @settings="showSettings = true"
                 @console="addTab = 'query'; showAdd = true"
                 @upload="openUpload('enrichment')"
@@ -633,6 +785,7 @@ onUnmounted(() => {
             @cancel-decide="decideMode = false"
             @trace="(t, d) => followMoney({ ...t, label: '' }, d)"
             @path-from="analysisBar?.startPath($event)"
+            @open-details="showDetailModal = true"
           />
         </div>
 
@@ -649,9 +802,13 @@ onUnmounted(() => {
           @rerun="onRerun"
         />
 
-        <footer class="status-bar" data-testid="workspace-status">
-          <span>{{ graphStore.nodes.length }} nodes</span>
-          <span>{{ graphStore.edges.length }} edges</span>
+        <GraphStatusBar
+          :nodes="graphStore.nodes.length"
+          :edges="graphStore.edges.length"
+          test-id="workspace-status"
+          @open-behaviors="openLook('behaviors')"
+          @show-clusters="panels.advanced = true"
+        >
           <span>
             {{ store.canvasItems.length }} {{ store.canvasItems.length === 1 ? 'source' : 'sources' }}<template v-if="store.restrictedItems.length"> + {{ store.restrictedItems.length }} restricted</template>
           </span>
@@ -659,7 +816,7 @@ onUnmounted(() => {
           <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} {{ store.suggestions.length === 1 ? 'suggestion' : 'suggestions' }}</span>
           <AgentsIndicator v-if="store.current" :investigation-id="store.current.id" /><!-- F5 hook -->
           <button class="link-btn journal-btn" data-testid="journal-toggle" @click="openJournal">Journal</button>
-        </footer>
+        </GraphStatusBar>
       </template>
     </template>
 
@@ -676,6 +833,14 @@ onUnmounted(() => {
     <ItemViewer v-if="itemViewer.target && store.current" />
     <EntityPage v-if="entityPage" :node="entityPage" :can-edit="canEdit" @close="entityPage = null" @select-item="(i) => { entityPage = null; selectItem(i); }" />
     <ClusterNodeModal v-if="selectedClusterId" :cluster-id="selectedClusterId" @close="selectedClusterId = null" />
+    <CommunityNodeModal :community-id="communityTable.selectedCommunityId.value" @close="communityTable.close()" />
+    <DetailModal :item="detailModalItem" @close="showDetailModal = false" />
+    <TemplateExecuteModal
+      v-if="pendingTemplateExecution"
+      :template="pendingTemplateExecution.template"
+      :initial-values="pendingTemplateExecution.initialValues"
+      @close="pendingTemplateExecution = null"
+    />
 
     <div v-if="pickerOrigins" class="modal-overlay" @click.self="pick(null)">
       <div class="modal picker" data-testid="expand-context-picker">
@@ -752,6 +917,21 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--color-surface);
+}
+
+.strip-toolbar {
+  margin-left: auto;
+}
+
 .canvas-area {
   flex: 1;
   min-height: 0;
@@ -760,6 +940,12 @@ onUnmounted(() => {
   flex-direction: column;
   min-width: 0;
   background: var(--bg-color, #fafafa);
+}
+
+.canvas-area.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
 }
 
 .table-panel {
@@ -796,120 +982,17 @@ onUnmounted(() => {
 }
 
 .error-banner {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 6;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
+  padding: 6px 12px;
   background: var(--color-error);
   color: #fff;
   font-size: 12px;
 }
 
-.legend {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 4;
-  max-width: 260px;
-  max-height: calc(100% - 80px);
-  overflow-y: auto;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  font-size: 12px;
-}
-
-.legend-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 2px;
-}
-
-.legend-all {
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.legend-pick {
-  width: 100%;
-  padding: 2px 4px;
-  margin-left: -4px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.legend-pick:hover,
-.legend-pick:focus-visible {
-  background: var(--color-surface-hover, rgba(127, 127, 127, 0.12));
-}
-
-.legend-pick.off {
-  opacity: 0.45;
-}
-
-.legend-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.warn {
-  color: var(--color-warning, #d97706);
-  flex-shrink: 0;
-}
-
-.legend-title {
-  margin-bottom: 4px;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.legend-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.legend p {
-  margin: 8px 0 0;
-}
-
-.ring {
-  width: 10px;
-  height: 10px;
-  border: 2px solid;
-  border-radius: 50%;
-}
-
-.roles-title {
-  margin-top: 10px;
-}
-
-.fill {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
 .side-panel {
   position: absolute;
   top: 12px;
-  bottom: 60px;
+  /* Stops above the analysis bar, whatever its height. */
+  bottom: calc(var(--canvas-bottom-bar, 48px) + 24px);
   z-index: 7;
   width: 320px;
   overflow-y: auto;
@@ -929,9 +1012,22 @@ onUnmounted(() => {
 
 .layout-panel {
   position: absolute;
-  bottom: 56px;
+  bottom: calc(var(--canvas-bottom-bar, 48px) + 20px);
   left: 12px;
   z-index: 7;
+}
+
+.look-host {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.look-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .link-btn {
@@ -946,15 +1042,6 @@ onUnmounted(() => {
 
 .journal-btn {
   margin-left: auto;
-}
-
-.status-bar {
-  display: flex;
-  gap: 24px;
-  padding: 6px 16px;
-  border-top: 1px solid var(--border-color);
-  font-size: 12px;
-  color: var(--text-muted);
 }
 
 .picker {

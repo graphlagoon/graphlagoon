@@ -170,7 +170,7 @@ carry it.
   **Esc** clears.
 - Selected nodes render at 1.5×. A clicked node also jumps to the front
   of the property-loading queue, so its details fill in immediately.
-- The hint strip at the bottom of the canvas is the cheat sheet:
+- **? Shortcuts** in the status bar (and **About**) is the cheat sheet:
 
 | Shortcut | Effect |
 |---|---|
@@ -188,9 +188,19 @@ Shortcuts apply while the pointer is over the canvas.
   your mode afterwards.
 - **Fullscreen** uses the browser's native fullscreen; the details panel
   floats over the canvas there. **Info** shows the context's schema and
-  connection summary.
+  connection summary. **Fit** frames the whole graph.
 - Node dragging (pin a node where you drop it) is off by default — enable
-  it in **Behaviors**.
+  it in **Look → Behaviors**.
+- **Look**, in the top bar, is where the graph's appearance lives: the
+  **Style** tab (colors, icons, sizes, property visibility), **Labels**
+  (templates and rules), **Behaviors** (interaction, loading) and **Presets**
+  (the same look under a name, see [Style Presets](./style-presets.md)). One
+  panel, four tabs — the same panel a [case](./investigations.md#the-workspace)
+  uses for its canvas.
+- **Default focus**, in the details panel of a selected node, makes the
+  exploration open selected and centred on that node once saved (the
+  [exploration](./explorations.md#what-an-exploration-captures) also keeps
+  the camera you left it with).
 
 ## Expanding neighbors
 
@@ -225,7 +235,7 @@ The strip under the canvas is the graph's honesty panel:
 - `loading properties…` — the graph drew before node properties finished
   loading; [tooltips](./labels.md#hover-tooltips) may briefly show `[prop:x]`
   sentinels. Hovering or clicking a node prioritizes it.
-  This progressive load is controlled in **Behaviors → property loading**
+  This progressive load is controlled in **Look → Behaviors → property loading**
   (`auto`, the default, uses it only when the node table is wide enough to
   pay off).
 - `⚠ truncated` — the edge limit was hit and this is a **partial view**;

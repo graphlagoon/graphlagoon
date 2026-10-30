@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, type Ref } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { useCurrentCaseStore } from '@/stores/currentCase';
 import { useGraphStore } from '@/stores/graph';
-import { useToolbarStore, type PanelId } from '@/stores/toolbar';
+import { useToolbarStore, type LookTab, type PanelId } from '@/stores/toolbar';
 import { useQueryConsoleStore } from '@/stores/queryConsole';
 import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
@@ -12,13 +12,14 @@ import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
 import SidePanel from '@/components/SidePanel.vue';
 import FilterPanel from '@/components/FilterPanel.vue';
 import LayoutPanel from '@/components/LayoutPanel.vue';
-import BehaviorPanel from '@/components/BehaviorPanel.vue';
 import GraphQueryPanel from '@/components/GraphQueryPanel.vue';
 import ContextInfoPanel from '@/components/ContextInfoPanel.vue';
 import MetricsPanel from '@/components/MetricsPanel.vue';
 import ResourceMonitorModal from '@/components/ResourceMonitorModal.vue';
-import AestheticsPanel from '@/components/AestheticsPanel.vue';
-import TextFormatPanel from '@/components/TextFormatPanel.vue';
+import LookPanel from '@/components/LookPanel.vue';
+import GraphCanvasToolbar, { type CanvasToolbarButton } from '@/components/GraphCanvasToolbar.vue';
+import GraphStatusBar from '@/components/GraphStatusBar.vue';
+import { useCanvasFullscreen } from '@/composables/useCanvasFullscreen';
 import QueryErrorModal from '@/components/QueryErrorModal.vue';
 import QueryRunningState from '@/components/QueryRunningState.vue';
 import ClusterProgramPanel, { type ClustersTab } from '@/components/ClusterProgramPanel.vue';
@@ -38,7 +39,7 @@ import QueryConsolePanel from '@/components/QueryConsolePanel.vue';
 import QueryTemplatesPanel from '@/components/QueryTemplatesPanel.vue';
 import PrecomputedGraphPanel from '@/components/PrecomputedGraphPanel.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
-import { Info, Settings2, Maximize2, Minimize2, Table2, TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
+import { TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
 import { useToast } from '@/composables/useToast';
 import { useLiveRevision } from '@/composables/useLiveRevision';
 import { describeSummary } from '@/utils/liveMerge';
@@ -164,13 +165,13 @@ const { executeTemplateAsGraph } = useTemplateExecution();
 
 const showFilters = ref(false);
 const showLayoutPanel = ref(false);
-const showBehaviorPanel = ref(false);
 const showQueryPanel = ref(false);
 const showContextInfo = ref(false);
 const showMetricsPanel = ref(false);
 const showResourceMonitor = ref(false);
-const showAestheticsPanel = ref(false);
-const showTextFormatPanel = ref(false);
+// Style, labels, behaviors and presets: one panel, four tabs.
+const showLookPanel = ref(false);
+const lookTab = ref<LookTab>('style');
 const showClusterPrograms = ref(false);
 const showTemplatesPanel = ref(false);
 const showMenuActionsModal = ref(false);
@@ -215,41 +216,19 @@ const detailModalItem = computed(() => {
   return null;
 });
 
-const isFullscreen = ref(false);
 const graphCanvas3DRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
 const graphContainerRef = ref<HTMLDivElement | null>(null);
+const { isFullscreen, toggle: toggleFullscreen } = useCanvasFullscreen(graphContainerRef);
 
 function setViewMode(mode: '3d' | '2d-proj') {
   graphStore.updateBehaviors({ viewMode: mode });
 }
 
-// Fullscreen toggle
-function toggleFullscreen() {
-  if (!graphContainerRef.value) return;
-
-  if (!document.fullscreenElement) {
-    // Fullscreen the DOCUMENT, not the graph container. A native fullscreen
-    // element is rendered alone in the top layer, so anything teleported to
-    // <body> — the right-click context menu, every modal, toasts, PrimeVue
-    // overlays in the Data Table — was invisible while the container itself
-    // was fullscreen. The `.fullscreen` class below already pins the graph
-    // over the whole viewport (position: fixed, z-index 1000); overlays keep
-    // their higher z-indices and stay usable.
-    document.documentElement.requestFullscreen().then(() => {
-      isFullscreen.value = true;
-    }).catch(() => {
-      // Fullscreen not supported or denied
-    });
-  } else {
-    document.exitFullscreen().then(() => {
-      isFullscreen.value = false;
-    });
-  }
-}
-
-// Listen for fullscreen changes (e.g., user presses Esc)
-function onFullscreenChange() {
-  isFullscreen.value = !!document.fullscreenElement;
+/** The shared canvas toolbar's toggles that are this page's own panels. */
+function onCanvasToolbarToggle(id: CanvasToolbarButton) {
+  if (id === 'info') showContextInfo.value = !showContextInfo.value;
+  else if (id === 'layout') showLayoutPanel.value = !showLayoutPanel.value;
+  else if (id === 'table') toggleDataTable();
 }
 
 /**
@@ -261,11 +240,9 @@ function onFullscreenChange() {
  */
 const dockedPanels: Record<PanelId, Ref<boolean>> = {
   filters: showFilters,
-  behaviors: showBehaviorPanel,
+  look: showLookPanel,
   query: showQueryPanel,
   metrics: showMetricsPanel,
-  aesthetics: showAestheticsPanel,
-  labels: showTextFormatPanel,
   clusters: showClusterPrograms,
   templates: showTemplatesPanel,
   precomputed: showPrecomputedPanel,
@@ -292,6 +269,17 @@ function toggleDocked(id: PanelId) {
  */
 function openPanel(id: PanelId) {
   setDocked(id, true);
+}
+
+/** Open the Look panel on a tab (the status chips and the toolbar use it). */
+function openLook(tab: LookTab) {
+  lookTab.value = tab;
+  setDocked('look', true);
+}
+
+function toggleLook(tab?: LookTab) {
+  if (tab) openLook(tab);
+  else toggleDocked('look');
 }
 
 /**
@@ -612,18 +600,15 @@ onMounted(async () => {
   // Register toolbar handlers for the global Toolbar component
   toolbarStore.registerHandlers({
     onToggleFilters: () => toggleDocked('filters'),
-    onToggleBehaviors: () => toggleDocked('behaviors'),
     onToggleQuery: () => toggleDocked('query'),
     onToggleMetrics: () => toggleDocked('metrics'),
-    onToggleAesthetics: () => toggleDocked('aesthetics'),
-    onToggleLabels: () => toggleDocked('labels'),
+    onToggleLook: toggleLook,
     onToggleClusterPrograms: () => toggleDocked('clusters'),
     onToggleTemplates: () => toggleDocked('templates'),
     onTogglePrecomputed: () => toggleDocked('precomputed'),
     onExportPNG: handleExportPNG,
+    getViewport: () => graphCanvas3DRef.value?.getViewport() ?? null,
   });
-
-  document.addEventListener('fullscreenchange', onFullscreenChange);
 
   // Right-click a node → "View community members" (when communities are detected)
   communityTable.register();
@@ -654,7 +639,6 @@ onUnmounted(() => {
   clusterProgramActions.unregister();
   configurableMenuActions.unregister();
   toolbarStore.unregisterHandlers();
-  document.removeEventListener('fullscreenchange', onFullscreenChange);
   canvasResizeObserver?.disconnect();
   canvasResizeObserver = null;
   // Terminate background workers: the metrics pool outlives the view as a
@@ -791,9 +775,13 @@ watch(
     </div>
     <div class="main-content">
       <FilterPanel v-if="showFilters" @close="showFilters = false; toolbarStore.setPanelActive('filters', false)" />
-      <BehaviorPanel
-        v-if="showBehaviorPanel"
-        @close="showBehaviorPanel = false; toolbarStore.setPanelActive('behaviors', false)"
+      <LookPanel
+        v-if="showLookPanel"
+        v-model:tab="lookTab"
+        presets-apply="url"
+        :presets-context-id="graphStore.currentContext?.id ?? null"
+        :can-write-presets="graphStore.currentContext?.has_write_access === true"
+        @close="setDocked('look', false)"
         @open-menu-actions="showMenuActionsModal = true"
       />
       <GraphQueryPanel v-if="showQueryPanel" @close="showQueryPanel = false; toolbarStore.setPanelActive('query', false)" />
@@ -802,8 +790,6 @@ watch(
         @close="showMetricsPanel = false; toolbarStore.setPanelActive('metrics', false)"
         @show-resource-monitor="showResourceMonitor = true"
       />
-      <AestheticsPanel v-if="showAestheticsPanel" @close="showAestheticsPanel = false; toolbarStore.setPanelActive('aesthetics', false)" />
-      <TextFormatPanel v-if="showTextFormatPanel" @close="showTextFormatPanel = false; toolbarStore.setPanelActive('labels', false)" />
       <ClusterProgramPanel
         v-if="showClusterPrograms"
         v-model:tab="clustersTab"
@@ -876,127 +862,46 @@ watch(
           @review-schema="reviewContextSchema"
         />
 
-        <!-- Bottom toolbar -->
-        <div class="graph-toolbar">
-          <button
-            class="toolbar-btn"
-            :class="{ active: showContextInfo }"
-            :aria-pressed="showContextInfo"
-            @click="showContextInfo = !showContextInfo"
-            title="Context Info"
+        <!-- Bottom toolbar: the chrome shared with the case, plus this page's drawers -->
+        <div class="graph-toolbar-host">
+          <GraphCanvasToolbar
+            :buttons="['info', 'layout', 'table', 'fit']"
+            :active="{ info: showContextInfo, layout: showLayoutPanel, table: showDataTable }"
+            :view-mode="graphStore.behaviors.viewMode"
+            :is-fullscreen="isFullscreen"
+            :test-ids="{ layout: 'graph-toolbar-layout' }"
+            @toggle="onCanvasToolbarToggle"
+            @fit="graphCanvas3DRef?.zoomToFit()"
+            @fullscreen="toggleFullscreen"
+            @view-mode="setViewMode"
           >
-            <Info :size="14" />
-            <span class="btn-label">Info</span>
-          </button>
-
-          <button
-            class="toolbar-btn"
-            :class="{ active: showLayoutPanel }"
-            :aria-pressed="showLayoutPanel"
-            @click="showLayoutPanel = !showLayoutPanel"
-            title="Layout Settings"
-            data-testid="graph-toolbar-layout"
-          >
-            <Settings2 :size="14" />
-            <span class="btn-label">Layout</span>
-          </button>
-
-
-          <div class="toolbar-segmented" role="group" aria-label="View mode">
             <button
-              class="seg-btn"
-              :class="{ active: graphStore.behaviors.viewMode === '3d' }"
-              :aria-pressed="graphStore.behaviors.viewMode === '3d'"
-              @click="setViewMode('3d')"
-              title="3D"
-            >3D</button>
-            <button
-              class="seg-btn"
-              :class="{ active: graphStore.behaviors.viewMode === '2d-proj' }"
-              :aria-pressed="graphStore.behaviors.viewMode === '2d-proj'"
-              @click="setViewMode('2d-proj')"
-              title="2D Projection (flat layout)"
-            >2D</button>
-          </div>
+              v-if="supportsQuery"
+              class="toolbar-btn"
+              :class="{ active: queryConsoleStore.isOpen }"
+              :aria-pressed="queryConsoleStore.isOpen"
+              @click="toggleQueryConsole"
+              title="Query Console"
+              data-testid="query-console-toggle"
+            >
+              <TerminalSquare :size="14" />
+              <!-- "Console", not "Query": the top bar already has a Query button
+                   (graph query) and two identical labels on screen was the most
+                   common point of confusion. -->
+              <span class="btn-label">Console</span>
+            </button>
 
-          <button
-            class="toolbar-btn"
-            @click="toggleFullscreen"
-            :aria-pressed="isFullscreen"
-            :title="isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'"
-          >
-            <Minimize2 v-if="isFullscreen" :size="14" />
-            <Maximize2 v-else :size="14" />
-            <span class="btn-label">{{ isFullscreen ? 'Exit' : 'Fullscreen' }}</span>
-          </button>
-
-          <button
-            class="toolbar-btn"
-            :class="{ active: showDataTable }"
-            :aria-pressed="showDataTable"
-            @click="toggleDataTable"
-            title="Data Table"
-          >
-            <Table2 :size="14" />
-            <span class="btn-label">Table</span>
-          </button>
-
-          <button
-            v-if="supportsQuery"
-            class="toolbar-btn"
-            :class="{ active: queryConsoleStore.isOpen }"
-            :aria-pressed="queryConsoleStore.isOpen"
-            @click="toggleQueryConsole"
-            title="Query Console"
-            data-testid="query-console-toggle"
-          >
-            <TerminalSquare :size="14" />
-            <!-- "Console", not "Query": the top bar already has a Query button
-                 (graph query) and two identical labels on screen was the most
-                 common point of confusion. -->
-            <span class="btn-label">Console</span>
-          </button>
-
-          <!-- The user's layer (BYOD-2): enrich, add nodes and edges, draw. -->
-          <YourDataButton />
+            <!-- The user's layer (BYOD-2): enrich, add nodes and edges, draw. -->
+            <YourDataButton />
+          </GraphCanvasToolbar>
         </div>
 
-        <div class="status-bar" data-testid="graph-status-bar">
-          <span>{{ graphStore.filteredNodes.length }} nodes</span>
-          <span>{{ graphStore.filteredEdges.length }} edges</span>
-          <!-- Progressive load: the graph is already interactive here; this only
-               explains why some tooltips are still empty. -->
-          <span
-            v-if="graphStore.enriching"
-            class="status-enriching"
-            data-testid="graph-status-enriching"
-            :title="`Loading properties for ${graphStore.pendingPropertyNodeIds.size} nodes`"
-          >
-            loading properties…
-          </span>
-          <!-- The edge result hit its cap, so this graph is a slice of a larger
-               one. Worth stating plainly: a truncated graph looks exactly like
-               a complete one, and conclusions drawn from it may not hold. -->
-          <button
-            v-if="graphStore.truncated"
-            type="button"
-            class="status-chip status-truncated"
-            data-testid="graph-status-truncated"
-            title="The edge limit was reached — this graph is a partial view. Raise the limit or narrow the query to see more. Click to open Behaviors."
-            @click="openPanel('behaviors')"
-          >
-            ⚠ truncated
-          </button>
-          <button
-            v-if="clusterStore.clusters.length > 0"
-            type="button"
-            class="status-chip status-item"
-            data-testid="graph-status-clusters"
-            :title="`${clusterStore.clusters.length} clusters on this graph — click to list them`"
-            @click="showClusterResults"
-          >
-            {{ clusterStore.clusters.length }} clusters
-          </button>
+        <GraphStatusBar
+          :nodes="graphStore.filteredNodes.length"
+          :edges="graphStore.filteredEdges.length"
+          @open-behaviors="openLook('behaviors')"
+          @show-clusters="showClusterResults"
+        >
           <!-- Resolved from a name rather than queried just now. It may not
                reflect the current state of the source, so say so where the
                other qualifiers about this graph already live. -->
@@ -1048,7 +953,7 @@ watch(
             class="status-chip status-style-error"
             data-testid="graph-status-style-error"
             :title="graphStore.stylePresetError + '\nClick to open Style.'"
-            @click="openPanel('aesthetics')"
+            @click="openLook('style')"
           >
             style not applied
           </button>
@@ -1068,7 +973,7 @@ watch(
               ? 'layout setting not applied'
               : `${layoutOverrideIssues.length} layout settings not applied` }}
           </button>
-        </div>
+        </GraphStatusBar>
       </div>
 
       <SidePanel v-if="!isFullscreen" @show-details="showDetailModal = true" />
@@ -1284,30 +1189,6 @@ watch(
 .status-chip:hover { text-decoration: underline; }
 .status-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 2px; }
 
-/* Above the loading / error / empty overlays (z-index 10): those cover the
-   whole graph container, and washing out the node and edge counts made the
-   whole bottom strip read as disabled. The graph toolbar already sits at 20
-   for the same reason. */
-.status-bar {
-  position: relative;
-  z-index: 20;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  padding: 8px 16px;
-  background: var(--card-background);
-  border-top: 1px solid var(--border-color);
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-/* Deliberately understated: background enrichment is not something the user
-   needs to act on, and the graph is already usable while it runs. */
-.status-enriching {
-  opacity: 0.65;
-  font-style: italic;
-}
-
 /* Truncation, unlike enrichment, changes what conclusions the graph supports —
    so it gets colour rather than fading into the status bar. */
 .status-styled {
@@ -1363,19 +1244,17 @@ watch(
   right: 16px;
 }
 
-.graph-toolbar {
+.graph-toolbar-host {
   position: absolute;
   bottom: 48px;
   left: 16px;
   /* Never wider than the canvas: on narrow viewports the buttons wrap
      instead of running off the right edge. */
   max-width: calc(100% - 32px);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   z-index: 20;
 }
 
+/* The page's own buttons inside the shared toolbar (slot content is styled here). */
 .toolbar-btn {
   display: flex;
   align-items: center;
@@ -1385,7 +1264,9 @@ watch(
   border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   cursor: pointer;
+  font: inherit;
   font-size: 13px;
+  color: inherit;
   transition: all 0.15s;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
@@ -1400,42 +1281,7 @@ watch(
   border-color: var(--primary-color, #42b883);
 }
 
-.btn-icon {
-  font-size: 14px;
-}
-
 .btn-label {
   font-size: 12px;
-}
-
-.toolbar-segmented {
-  display: flex;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 6px;
-  overflow: hidden;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.seg-btn {
-  padding: 8px 10px;
-  background: var(--card-background, white);
-  border: none;
-  border-right: 1px solid var(--border-color, #ddd);
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.15s;
-}
-
-.seg-btn:last-child {
-  border-right: none;
-}
-
-.seg-btn:hover {
-  background: var(--bg-secondary, #f0f0f0);
-}
-
-.seg-btn.active {
-  background: var(--primary-color, #42b883);
-  color: white;
 }
 </style>
