@@ -667,8 +667,26 @@ const SCENES: Scene[] = [
     prepare: async (page) => {
       await waitForGraphSettled(page);
       await openPanel(page, 'Clusters');
-      await page.getByRole('button', { name: 'Programs' }).click();
+      await page.getByTestId('cluster-manage-programs').click();
+      await page.getByTestId('cluster-program-library').waitFor();
       await page.waitForTimeout(400);
+    },
+  },
+  {
+    // The panel results first: the run bar folded into its summary, the
+    // groups as layers with one shown alone, the canvas showing only it.
+    guide: 'clusters',
+    scene: 'panel',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Clusters');
+      await page.getByTestId('community-algorithm-select').selectOption('cluster-program:default-group-by-node-type');
+      await page.getByTestId('cluster-run').click();
+      await page.getByTestId('cluster-run-summary').waitFor();
+      await page.locator('[data-testid^="group-name-community:"]').first().click();
+      await page.getByTestId('status-isolation').waitFor();
+      await page.waitForTimeout(600);
     },
   },
   {

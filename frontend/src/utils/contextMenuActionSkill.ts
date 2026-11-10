@@ -183,7 +183,7 @@ array (no prose around it) so I can paste it into the Import JSON box.`
 ${intro}
 ${adaptSection}
 
-## What an action can do (the three kinds)
+## What an action can do (the four kinds)
 
 1. \`open-url\` — build a URL from the clicked item's properties and open it in
    a new tab or the current tab. Example: open a PubMed search for a gene node.
@@ -201,6 +201,11 @@ ${adaptSection}
 3. \`run-query-template\` — run one of this context's saved query templates,
    with the clicked item's properties bound to the template's parameters.
    Example: right-click a Person node runs a "neighbors of $person" template.
+4. \`show-same-value\` — nodes only: hide every node except those whose
+   \`field\` (a node property, \`node_type\`, or \`metric:<name>\`) equals the
+   clicked node's (\`"mode": "same"\`) or is set at all (\`"mode": "has"\`).
+   Example: right-click an account shows only the accounts of the same
+   \`branch_id\`. The layout stays; the status bar's ✕ shows everything again.
 
 ## The JSON shape (your final output)
 
@@ -238,6 +243,14 @@ Output a JSON array of action objects:
     "templateId": "<uuid from the template list below>",
     "templateName": "Account transactions",
     "paramBindings": { "account": "{prop:account_id}" }
+  },
+  {
+    "kind": "show-same-value",
+    "label": "Show only this branch",
+    "enabled": true,
+    "match": { "target": "node", "nodeTypes": ["Account"] },
+    "field": "branch_id",
+    "mode": "same"
   },
   {
     "kind": "open-url",

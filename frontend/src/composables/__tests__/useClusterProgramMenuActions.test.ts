@@ -11,6 +11,7 @@ import { useClusterStore } from '@/stores/cluster'
 import { useCommunityStore } from '@/stores/community'
 import { useGraphStore } from '@/stores/graph'
 import type { ContextMenuTarget } from '@/composables/useContextMenu'
+import { useClusterProgramRunRequest } from '@/composables/useClusterProgramRunRequest'
 
 const BFS_ID = 'default-bfs-from-node'
 const BFS_ACTION_ID = CLUSTER_PROGRAM_ACTION_PREFIX + BFS_ID
@@ -264,6 +265,52 @@ describe('useClusterProgramMenuActions', () => {
       const last = useToast().toasts.value.at(-1)
       expect(last?.type).toBe('error')
       expect(last?.message).toContain('boom')
+    })
+  })
+
+  describe('run dialog when a required value is missing', () => {
+    it('opens the run dialog pre-filled instead of running', async () => {
+      await setupGraph()
+      const clusterStore = useClusterStore()
+      const communityStore = useCommunityStore()
+      const { pendingRunRequest, clearRunRequest } = useClusterProgramRunRequest()
+      clearRunRequest()
+      const prog = clusterStore.createProgram({
+        program_name: 'Needs input',
+        code: 'return []',
+        show_in_context_menu: true,
+        parameters: [
+          { id: 'start', type: 'text', required: true, node_binding: 'node_id' },
+          { id: 'depth', type: 'number', required: true },
+          { id: 'label', type: 'text', required: true, default: 'x' },
+        ],
+      })
+      const menu = useClusterProgramMenuActions()
+      await menu.runProgramForNode(prog.program_id, 'n1')
+
+      expect(pendingRunRequest.value).toMatchObject({
+        program: { program_id: prog.program_id },
+        mode: 'community',
+        initialValues: { start: 'n1', label: 'x' },
+      })
+      expect(communityStore.hasResults).toBe(false)
+      clearRunRequest()
+    })
+
+    it('runs straight away when every required value resolves', async () => {
+      await setupGraph()
+      const clusterStore = useClusterStore()
+      const { pendingRunRequest, clearRunRequest } = useClusterProgramRunRequest()
+      clearRunRequest()
+      const prog = clusterStore.createProgram({
+        program_name: 'Ready',
+        code: 'return [{ cluster_name: "a", node_ids: [params.start] }]',
+        show_in_context_menu: true,
+        parameters: [{ id: 'start', type: 'text', required: true, node_binding: 'node_id' }],
+      })
+      const menu = useClusterProgramMenuActions()
+      await menu.runProgramForNode(prog.program_id, 'n1').catch(() => {})
+      expect(pendingRunRequest.value).toBeNull()
     })
   })
 })

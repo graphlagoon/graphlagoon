@@ -75,6 +75,7 @@ import {
 } from '@/composables/useCancellableQuery';
 import type { QueryMetadata, GraphJobStatusResponse, GraphResponse } from '@/types/graph';
 import type { ComputedMetric } from '@/types/metrics';
+import { resolveIsolation, mergeIsolation, isIsolationRule, type IsolationRule } from '@/utils/isolation';
 
 /**
  * Investigation workspace (F1.6): the graph is a union of sources from several
@@ -315,7 +316,9 @@ export function resolveInitialBehaviors(
 ): GraphBehaviors {
   const resolved = { ...DEFAULT_BEHAVIORS };
   applyBehaviorOverrides(resolved, window.__GRAPH_LAGOON_CONFIG__?.default_behaviors, 'server');
-  applyBehaviorOverrides(resolved, contextBehaviors, 'context');
+  // `look` is the context's default look (utils/caseLook contextDefaultLook), not a behavior.
+  const { look: _look, ...contextOnly } = contextBehaviors ?? {};
+  applyBehaviorOverrides(resolved, contextOnly, 'context');
   return resolved;
 }
 
@@ -835,9 +838,48 @@ export const useGraphStore = defineStore('graph', () => {
   /** Nodes a case's filter chips hide (05 §3): visual only, the layout stays. */
   const caseHiddenNodeIds = shallowRef<Set<string> | null>(null);
 
+  /**
+   * "Show only" (communities, clusters, nodes sharing a value): a rule, saved
+   * with the exploration and a case's views, resolved against the nodes on
+   * screen. Visual only, like the chips — the layout stays.
+   */
+  const isolation = ref<IsolationRule | null>(null);
+
+  const isolatedNodeIds = computed<Set<string> | null>(() => {
+    const rule = isolation.value;
+    if (!rule) return null;
+    const keep = resolveIsolation(rule, {
+      nodes: nodes.value,
+      communityMap: useCommunityStore().communityMap,
+      clusters: useClusterStore().clusters,
+      metrics: useMetricsStore().metricResolver,
+    });
+    if (!keep) return null;
+    // The node you are looking at never disappears under you.
+    for (const id of selectedNodeIds.value) keep.add(id);
+    return keep;
+  });
+
+  function isolate(rule: IsolationRule | null) {
+    isolation.value = rule;
+  }
+
+  function addToIsolation(rule: IsolationRule) {
+    isolation.value = mergeIsolation(isolation.value, rule);
+  }
+
+  function clearIsolation() {
+    isolation.value = null;
+  }
+
   // Node IDs that should be hidden in 'hide' search mode (for visual hiding, not data filtering)
   const searchHiddenNodeIds = computed(() => {
-    const byChips = caseHiddenNodeIds.value;
+    let byChips = caseHiddenNodeIds.value;
+    const keep = isolatedNodeIds.value;
+    if (keep) {
+      byChips = new Set(byChips ?? []);
+      for (const n of nodes.value) if (!keep.has(n.node_id)) byChips.add(n.node_id);
+    }
     if (!filters.value.search_query || behaviors.value.searchMode !== 'hide') return byChips;
     const matched = searchMatchedNodeIds.value;
     if (!matched || matched.size === 0) return byChips;
@@ -2617,6 +2659,8 @@ export const useGraphStore = defineStore('graph', () => {
       focus_node_id: focusNodeId.value,
       community: communityStore.getState(),
       similarity: similarityStore.getState(),
+      // "Show only" — a rule, re-resolved against the communities/clusters above.
+      isolation: isolation.value ? { ...isolation.value } : null,
     };
   }
 
@@ -2986,6 +3030,8 @@ export const useGraphStore = defineStore('graph', () => {
       pendingFocusNodeId.value = focusNodeId.value;
       // The saved camera (explorations saved before it existed carry no position: fit as before).
       pendingViewport.value = viewport.value?.position ? { ...viewport.value } : null;
+      // After the communities and clusters it refers to are back.
+      isolation.value = isIsolationRule(exploration.state.isolation) ? exploration.state.isolation : null;
       // Baseline for the dirty marker: everything the exploration carries has
       // been applied by now, so what we read here is "as saved".
       markExplorationSaved();
@@ -3172,6 +3218,7 @@ export const useGraphStore = defineStore('graph', () => {
     investigationMode.value = null;
     roleColors.value = null;
     caseHiddenNodeIds.value = null;
+    isolation.value = null;
     savedStateFingerprint.value = null;
     currentPrecomputedGraph.value = null;
     currentStylePreset.value = null;
@@ -3327,6 +3374,11 @@ export const useGraphStore = defineStore('graph', () => {
     searchMatchedNodeIds,
     searchHiddenNodeIds,
     caseHiddenNodeIds,
+    isolation,
+    isolatedNodeIds,
+    isolate,
+    addToIsolation,
+    clearIsolation,
     focusedNodeIds,
 
     // Actions

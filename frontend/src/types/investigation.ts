@@ -1,6 +1,7 @@
 /** Investigations v2 (cases): see docs/dev/plans/investigation/05-plano-v2.md §1. */
 import type { EdgeSemantics, ExplorationState, GraphSnapshot, IdentityKey, IdentityNormalize, TemplateParameter, StylePresetSettings } from '@/types/graph';
 import type { MappingReport } from '@/utils/fileMapping';
+import type { IsolationRule } from '@/utils/isolation';
 
 /** 06 §1: a case closes only by a decision that closes it; reopening goes back to analysis. */
 export type InvestigationStatus = 'open' | 'analysis' | 'closed';
@@ -457,6 +458,8 @@ export interface CaseViewContent {
   groups_closed: string[];
   /** The graphs on the canvas when the view was saved (UX-1); older views leave it as it is. */
   canvas_items?: string[] | 'all';
+  /** "Show only" when the view was saved (utils/isolation.ts). */
+  isolation?: IsolationRule | null;
 }
 
 export interface CaseBrief {

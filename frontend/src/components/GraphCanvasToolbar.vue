@@ -9,7 +9,7 @@
 import { computed, type Component } from 'vue';
 import { Download, Filter, Info, Layers, Maximize2, Minimize2, Palette, Scan, Settings2, Table2 } from 'lucide-vue-next';
 
-export type CanvasToolbarButton = 'info' | 'filters' | 'layout' | 'look' | 'table' | 'advanced' | 'fit' | 'export';
+export type CanvasToolbarButton = 'info' | 'filters' | 'layout' | 'look' | 'table' | 'clusters' | 'fit' | 'export';
 
 const props = withDefaults(
   defineProps<{
@@ -44,7 +44,7 @@ const META: Record<CanvasToolbarButton, { label: string; title: string; icon: Co
   layout: { label: 'Layout', title: 'Layout Settings', icon: Settings2, action: 'toggle' },
   look: { label: 'Look', title: 'Look: style, labels, behaviors and presets', icon: Palette, action: 'toggle' },
   table: { label: 'Table', title: 'Data Table', icon: Table2, action: 'toggle' },
-  advanced: { label: 'Advanced', title: 'Cluster programs (JS)', icon: Layers, action: 'toggle' },
+  clusters: { label: 'Clusters', title: 'Communities and cluster programs: group the nodes, show only a group', icon: Layers, action: 'toggle' },
   fit: { label: 'Fit', title: 'Fit the graph in the view', icon: Scan, action: 'fit' },
   export: { label: 'Export', title: 'Export the canvas as PNG', icon: Download, action: 'export' },
 };

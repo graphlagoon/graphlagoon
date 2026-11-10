@@ -250,4 +250,28 @@ test.describe('Investigation workspace UX (UX-1)', () => {
       await expect(page.getByTestId('controls-hint')).toHaveCount(0);
     }
   });
+
+  test('the Clusters button groups the case graph; the groups become chips that show only one', async ({ authenticatedPage: page }) => {
+    await seedInvestigations(page, [structuredClone(CASE)], { 'inv-u': structuredClone(ITEMS) }, [], SNAPSHOTS);
+    await page.goto('/investigations/inv-u');
+    await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 15_000 });
+
+    await page.getByTestId('workspace-clusters-btn').click();
+    const panel = page.getByTestId('panel-clusters');
+    await expect(panel).toBeVisible();
+    // No edges in this fixture: every account is its own weak component (three groups).
+    await panel.getByTestId('community-algorithm-select').selectOption('weak-components');
+    await panel.getByTestId('cluster-run').click();
+    await expect(panel.locator('[data-testid^="group-row-community:"]').first()).toBeVisible();
+
+    // Panel closed: the groups stay reachable as chips in the strip.
+    await page.getByTestId('workspace-clusters-btn').click();
+    await expect(panel).toHaveCount(0);
+    const chip = page.getByTestId('group-legend').locator('[data-testid^="group-legend-community:"]').first();
+    await chip.click();
+    await expect(page.getByTestId('status-isolation')).toBeVisible();
+    await page.getByTestId('group-legend-show-all').click();
+    await expect(page.getByTestId('status-isolation')).toHaveCount(0);
+  });
 });
+

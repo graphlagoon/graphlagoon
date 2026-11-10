@@ -3,6 +3,7 @@
  * shortcuts chip that replaced the strip over the canvas.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { nextTick } from 'vue';
 import { render, fireEvent } from '@testing-library/vue';
 import { setActivePinia, createPinia } from 'pinia';
 import GraphStatusBar from '@/components/GraphStatusBar.vue';
@@ -33,5 +34,24 @@ describe('GraphStatusBar', () => {
     const { getByTestId, emitted } = render(GraphStatusBar, { props: { nodes: 1, edges: 1 } });
     await fireEvent.click(getByTestId('graph-status-truncated'));
     expect(emitted('open-behaviors')).toHaveLength(1);
+  });
+
+  it('"Showing only" says what is shown and its ✕ shows every node', async () => {
+    const store = useGraphStore();
+    store.nodes = [
+      { node_id: 'a', node_type: 'T', properties: { branch: 'x' } },
+      { node_id: 'b', node_type: 'T', properties: { branch: 'y' } },
+    ];
+    const { getByTestId, queryByTestId } = render(GraphStatusBar, { props: { nodes: 2, edges: 0 } });
+    expect(queryByTestId('status-isolation')).toBeNull();
+    store.isolate({ kind: 'value', field: 'branch', value: 'x', mode: 'same', label: 'branch = x' });
+    await nextTick();
+    const chip = getByTestId('status-isolation');
+    expect(chip.textContent).toContain('branch = x');
+    expect(chip.getAttribute('title')).toContain('1 of 2 nodes shown');
+    await fireEvent.click(getByTestId('status-isolation-clear'));
+    expect(store.isolation).toBeNull();
+    await nextTick();
+    expect(queryByTestId('status-isolation')).toBeNull();
   });
 });

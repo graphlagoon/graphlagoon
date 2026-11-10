@@ -12,6 +12,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
 import type { CaseItem, CaseViewContent } from '@/types/investigation';
+import { isIsolationRule } from '@/utils/isolation';
 import { formatDate } from '@/utils/format';
 
 const props = defineProps<{ canEdit: boolean }>();
@@ -80,6 +81,7 @@ async function saveView() {
       layout: graph.layoutAlgorithm,
       groups_closed: [...store.groupsClosed],
       canvas_items: store.allOnCanvas ? 'all' : store.canvasItems.map((i) => i.id),
+      isolation: graph.isolation ? { ...graph.isolation } : null,
     });
     viewName.value = '';
     open.value = null;
@@ -94,6 +96,7 @@ async function applyView(item: CaseItem) {
     const content = await store.loadItemJson<CaseViewContent>(item);
     if (!content) return;
     filters.restore(content.filters);
+    graph.isolate(isIsolationRule(content.isolation) ? content.isolation : null);
     emit('apply-view', content);
     open.value = null;
   } catch (e) {

@@ -24,13 +24,44 @@ export interface LookSource {
   state?: { revision?: number } | null;
 }
 
+/** The slice of a graph context the resolver reads (`GraphContext` satisfies it). */
+export interface LookContext {
+  default_behaviors?: Record<string, unknown> | null;
+}
+
+/**
+ * A context's default look: the style block under the reserved
+ * `default_behaviors.look` key (kept there so it needs no new column). Its
+ * `behaviors` are dropped — a context's behaviors are the other keys.
+ */
+export function contextDefaultLook(ctx?: LookContext | null): StylePresetSettings | null {
+  const raw = ctx?.default_behaviors?.look;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const { behaviors: _b, ...rest } = raw as StylePresetSettings;
+  return styleOf(rest as GraphLook);
+}
+
+/** A context's default behaviors: `default_behaviors` without the reserved `look` key, or null when empty. */
+export function contextDefaultBehaviors(ctx?: LookContext | null): Record<string, unknown> | null {
+  const raw = ctx?.default_behaviors;
+  if (!raw) return null;
+  const { look: _l, ...rest } = raw;
+  return Object.keys(rest).length ? rest : null;
+}
+
 export interface ResolvedLook {
   /** What `applyStylePreset` receives; null = the stock look (`resetLook`). */
   look: StylePresetSettings | null;
   /** The node the canvas opens on, as the item knows it (an id local to that item). */
   focus: { sourceId: string; nodeId: string } | null;
-  /** The item the look came from (a caption for the Look panel). */
+  /** The item the look came from (a caption for the Look panel); null for a context default or the stock look. */
   sourceId: string | null;
+  /** The context whose default look the canvas wears, when no item has one of its own. */
+  contextId: string | null;
+  /** An item of that context: ids in the default look (an ego focus) are mapped through it. */
+  contextItemId: string | null;
+  /** The canvas context's default behaviors (one context on the canvas), the baseline under a look's. */
+  behaviors: Record<string, unknown> | null;
   /** Changes whenever anything that decides the look changes: the canvas, a version, a revision, a source's look, a saved look. */
   key: string;
 }
@@ -75,17 +106,30 @@ export function itemLook(item: CaseItem, source: LookSource | undefined): { styl
   return { style, focus };
 }
 
-/** The canvas: the first canvas item with a style decides; its focus goes with it. */
-export function resolveCanvasLook(canvasItems: CaseItem[], sources: LookSource[]): ResolvedLook {
+/**
+ * The canvas: the first canvas item with a style decides; its focus goes with it.
+ * When no item has a style (saved or from its source), the first item whose
+ * context has a default look gives it; then the stock look.
+ */
+export function resolveCanvasLook(
+  canvasItems: CaseItem[],
+  sources: LookSource[],
+  contexts: Record<string, LookContext | undefined> = {},
+): ResolvedLook {
   const byId = new Map(sources.map((s) => [s.id, s]));
+  const ctxOf = (i: CaseItem) => (i.context_id ? contexts[i.context_id] : undefined);
   // The source's look is in the key too: a source that was not loaded yet and
-  // the same source once loaded must not look like the same answer.
+  // the same source once loaded must not look like the same answer. So is the
+  // context's default, for an edit of the context to land.
   const key = canvasItems
     .map((i) => {
       const source = byId.get(i.id);
-      return `${i.id}:${i.current_version}:${source?.state?.revision ?? ''}:${JSON.stringify(source?.look ?? null)}:${JSON.stringify(i.state?.look ?? null)}`;
+      return `${i.id}:${i.current_version}:${source?.state?.revision ?? ''}:${JSON.stringify(source?.look ?? null)}:${JSON.stringify(i.state?.look ?? null)}:${JSON.stringify(ctxOf(i)?.default_behaviors ?? null)}`;
     })
     .join('|');
+  const contextIds = new Set(canvasItems.map((i) => i.context_id ?? null));
+  const single = contextIds.size === 1 ? [...contextIds][0] : null;
+  const behaviors = single ? contextDefaultBehaviors(contexts[single]) : null;
   let styled: { item: CaseItem; style: StylePresetSettings; focus: string | null } | null = null;
   let firstFocus: { item: CaseItem; focus: string } | null = null;
   for (const item of canvasItems) {
@@ -95,10 +139,16 @@ export function resolveCanvasLook(canvasItems: CaseItem[], sources: LookSource[]
   }
   // The focus follows the styled item when it has one; else the first item that names one.
   const focusOwner = styled?.focus ? { item: styled.item, focus: styled.focus } : firstFocus;
+  const fallback = styled
+    ? null
+    : canvasItems.map((item) => ({ item, look: contextDefaultLook(ctxOf(item)) })).find((c) => c.look) ?? null;
   return {
-    look: styled?.style ?? null,
+    look: styled?.style ?? fallback?.look ?? null,
     focus: focusOwner ? { sourceId: focusOwner.item.id, nodeId: focusOwner.focus } : null,
     sourceId: styled?.item.id ?? null,
+    contextId: fallback?.item.context_id ?? null,
+    contextItemId: fallback?.item.id ?? null,
+    behaviors,
     key,
   };
 }

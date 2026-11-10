@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useClusterStore } from '@/stores/cluster'
 import { useGraphStore } from '@/stores/graph'
 import { useMetricsStore } from '@/stores/metrics'
@@ -10,7 +10,11 @@ import type {
   ClusterProgramScope,
 } from '@/types/cluster'
 import JavaScriptEditor from './JavaScriptEditor.vue'
-import { X } from 'lucide-vue-next'
+import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
+import { parseImportedClusterPrograms, portableClusterProgram } from '@/utils/clusterProgramImport'
+import { buildSourceSchema, downloadJson, readFileAsText, safeFilename } from '@/utils/portableExport'
+import { PORTABLE_EXPORT_VERSION, type PortableClusterPrograms } from '@/types/portable'
+import { X, Bot, Download } from 'lucide-vue-next'
 
 const props = defineProps<{
   /** Program to edit, or null to create a new one */
@@ -195,6 +199,99 @@ function onTypeChange(idx: number) {
   }
 }
 
+// ─── Import JSON (Ask-AI return leg) / Export JSON ───
+const showImport = ref(false)
+const importText = ref('')
+const importError = ref<string | null>(null)
+const importNote = ref<string | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const importSection = ref<HTMLElement | null>(null)
+const skillOpen = ref(false)
+
+/** Parsed view of the Import box; null while it holds nothing. */
+const parsedImport = computed(() => {
+  const text = importText.value.trim()
+  return text ? parseImportedClusterPrograms(text) : null
+})
+
+/** The form as a portable program (what Export writes and "Edit as JSON" starts from). */
+function draft() {
+  return portableClusterProgram({
+    program_name: name.value.trim(),
+    description: description.value.trim() || undefined,
+    code: code.value,
+    parameters: parameters.value.map(p => ({ ...p, id: p.id.trim() })),
+    show_in_context_menu: showInContextMenu.value,
+  })
+}
+
+/** The program as the AI prompt sees it when editing an existing one. */
+const promptProgram = computed(() => (isEditMode.value ? draft() : null))
+
+/** Open the JSON box; in edit mode it starts with the current program so it can be tweaked and re-applied. */
+function toggleImport() {
+  showImport.value = !showImport.value
+  if (showImport.value && !importText.value.trim() && isEditMode.value) {
+    importText.value = JSON.stringify(draft(), null, 2)
+  }
+  if (showImport.value) {
+    void nextTick(() => importSection.value?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+  }
+}
+
+async function pickFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  importError.value = null
+  try {
+    importText.value = await readFileAsText(file)
+  } catch {
+    importError.value = 'Could not read the file'
+  } finally {
+    input.value = ''
+  }
+}
+
+/** Fill the form from the pasted JSON (first program when several were pasted). */
+function applyImport() {
+  importError.value = null
+  importNote.value = null
+  const result = parseImportedClusterPrograms(importText.value)
+  if (!result.ok) {
+    importError.value = result.error
+    return
+  }
+  const [first, ...rest] = result.programs
+  name.value = first.program_name
+  description.value = first.description ?? ''
+  code.value = first.code
+  showInContextMenu.value = first.show_in_context_menu === true
+  parameters.value = (first.parameters ?? []).map(p => ({ ...p, options: p.options ? [...p.options] : undefined }))
+  optionsText.value = {}
+  if (rest.length > 0) {
+    importNote.value = `Loaded the first of ${result.programs.length} programs — use "Import…" in Manage programs to add several at once.`
+  } else {
+    showImport.value = false
+    importText.value = ''
+  }
+}
+
+/** Download the program in the form as a portable JSON file. */
+function exportProgram() {
+  const payload: PortableClusterPrograms = {
+    graphlagoon_export: 'cluster-programs',
+    export_version: PORTABLE_EXPORT_VERSION,
+    source: buildSourceSchema({
+      context: graphStore.currentContext,
+      loadedNodeTypes: graphStore.nodeTypes,
+      loadedEdgeTypes: graphStore.edgeTypes,
+    }),
+    programs: [draft()],
+  }
+  downloadJson(safeFilename(`cluster-program-${name.value.trim() || 'program'}`), payload)
+}
+
 function handleSave() {
   if (!isValid.value) return
 
@@ -228,6 +325,49 @@ function handleSave() {
         </div>
 
         <div class="modal-body">
+          <!-- Import JSON (Ask-AI return leg) -->
+          <div v-if="showImport" ref="importSection" class="import-section">
+            <div class="field-label">{{ isEditMode ? 'Edit as JSON' : 'Import JSON' }}</div>
+            <span class="field-hint">
+              Paste the JSON the AI prompt (robot button) answered with, or a file exported
+              from another context. Name, code and parameters are filled from it — review, save.
+            </span>
+            <textarea
+              v-model="importText"
+              class="field-input import-textarea"
+              data-testid="cluster-program-import-text"
+              rows="6"
+              placeholder='{"program_name": "...", "code": "return [...]", "parameters": [{"id": "threshold", "type": "number", "default": 3}]}'
+            />
+            <div class="import-actions">
+              <input
+                ref="fileInput"
+                type="file"
+                accept=".json,application/json"
+                class="file-input"
+                data-testid="cluster-program-import-file"
+                @change="pickFile"
+              />
+              <button type="button" class="btn btn-outline" @click="fileInput?.click()">Choose file…</button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                data-testid="cluster-program-import-apply"
+                :disabled="!parsedImport?.ok"
+                @click="applyImport"
+              >
+                {{ isEditMode ? 'Apply JSON' : 'Fill the form' }}
+              </button>
+            </div>
+            <span
+              v-if="parsedImport && !parsedImport.ok"
+              class="field-error"
+              data-testid="cluster-program-import-parse-error"
+            >{{ parsedImport.error }}</span>
+            <span v-if="importError" class="field-error">{{ importError }}</span>
+            <span v-if="importNote" class="field-hint" data-testid="cluster-program-import-note">{{ importNote }}</span>
+          </div>
+
           <div class="field-group">
             <label class="field-label">Name <span class="required-mark">*</span></label>
             <input
@@ -445,7 +585,41 @@ function handleSave() {
           </div>
         </div>
 
+        <ClusterProgramSkillModal v-model="skillOpen" :program="promptProgram" />
+
         <div class="modal-footer">
+          <div class="import-toolbar">
+            <button
+              type="button"
+              class="btn btn-outline"
+              :class="{ active: showImport }"
+              data-testid="cluster-program-import-toggle"
+              @click="toggleImport"
+            >
+              {{ isEditMode ? 'Edit as JSON' : 'Import JSON' }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline"
+              data-testid="cluster-program-export"
+              :disabled="!isValid"
+              title="Download this program as a JSON file you can import into another context"
+              @click="exportProgram"
+            >
+              <Download :size="14" /> Export JSON
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline btn-icon"
+              data-testid="cluster-program-editor-ask-ai"
+              :title="isEditMode ? 'Ask an AI to change this program' : 'Ask an AI to write this program'"
+              :aria-label="isEditMode ? 'Ask an AI to change this program' : 'Ask an AI to write this program'"
+              @click="skillOpen = true"
+            >
+              <Bot :size="14" />
+            </button>
+          </div>
+          <span class="footer-spacer" />
           <button class="btn btn-outline" @click="emit('close')">Cancel</button>
           <button
             class="btn btn-primary"
@@ -707,9 +881,55 @@ function handleSave() {
   padding: 7px 0;
 }
 
+.import-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px dashed var(--border-color, #ddd);
+  border-radius: 8px;
+}
+
+.import-textarea {
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
+.import-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.file-input {
+  display: none;
+}
+
+.field-error {
+  font-size: 12px;
+  color: var(--error-color, #e74c3c);
+}
+
+.import-toolbar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.import-toolbar .btn.active {
+  border-color: var(--primary-color, #42b883);
+  color: var(--primary-color, #42b883);
+}
+
+.footer-spacer {
+  flex: 1;
+}
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   padding: 16px 24px 20px;
   border-top: 1px solid var(--border-color, #ddd);

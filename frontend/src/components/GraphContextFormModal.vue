@@ -23,6 +23,8 @@ import type {
   IdentityNormalize,
 } from '@/types/graph';
 import { describeIdentityKey } from '@/utils/identityKeys';
+import ContextDefaultLookField from '@/components/ContextDefaultLookField.vue';
+import { storedDefaultLook, withDefaultLook, type DefaultLook } from '@/composables/useContextDefaultLook';
 
 /**
  * Create/edit modal for a graph context.
@@ -89,6 +91,8 @@ function emptyForm() {
     node_types: '',
     relationship_types: '',
     default_behaviors: '',
+    // The context's default look, kept under default_behaviors.look on save (no column of its own).
+    default_look: null as DefaultLook | null,
     identity_keys: [] as IdentityKeyRow[],
     enrichment_tables: [] as EnrichmentRow[],
     edge_semantics: { amount_prop: '', amount_unit: 'units', time_prop: '', currency: '' } as EdgeSemanticsForm,
@@ -207,10 +211,11 @@ function formFromContext(context: GraphContext) {
     node_type_col: context.node_structure.node_type_col,
     node_types: (context.node_types || []).join(', '),
     relationship_types: (context.relationship_types || []).join(', '),
-    default_behaviors:
-      context.default_behaviors && Object.keys(context.default_behaviors).length > 0
-        ? JSON.stringify(context.default_behaviors, null, 2)
-        : '',
+    default_behaviors: (() => {
+      const { look: _look, ...behaviors } = context.default_behaviors ?? {};
+      return Object.keys(behaviors).length > 0 ? JSON.stringify(behaviors, null, 2) : '';
+    })(),
+    default_look: storedDefaultLook(context),
     identity_keys: (context.identity_keys || []).map(rowFromKey),
     enrichment_tables: (context.enrichment_tables || []).map(rowFromEnrichment),
     edge_semantics: {
@@ -244,6 +249,18 @@ function selectDatasource(option: DatasourceDescriptor) {
   if (props.mode === 'edit') return;
   form.value.datasource_type = option.type;
   form.value.datasource_name = option.name || '';
+}
+
+/** Behaviors imported from an exploration or a preset land over what the textarea already has. */
+function importBehaviors(behaviors: Record<string, unknown>) {
+  let current: Record<string, unknown> = {};
+  try {
+    const raw = form.value.default_behaviors.trim();
+    if (raw) current = JSON.parse(raw);
+  } catch {
+    // An unparsable textarea is replaced: the import is the newer intent.
+  }
+  form.value.default_behaviors = JSON.stringify({ ...current, ...behaviors }, null, 2);
 }
 
 /** Parse error for the default_behaviors textarea, or null when it's valid/empty. */
@@ -611,9 +628,14 @@ async function submit() {
 
   try {
     const rawBehaviors = form.value.default_behaviors.trim();
-    const defaultBehaviors = rawBehaviors
+    const parsedBehaviors = rawBehaviors
       ? (JSON.parse(rawBehaviors) as Record<string, unknown>)
       : undefined;
+    // The look section owns the reserved `look` key, whatever the textarea says.
+    const defaultBehaviors =
+      parsedBehaviors || form.value.default_look
+        ? withDefaultLook(parsedBehaviors, form.value.default_look)
+        : undefined;
 
     const tags = splitCsv(form.value.tags);
     const nodeTypes = splitCsv(form.value.node_types);
@@ -1283,6 +1305,12 @@ async function submit() {
           />
           <span class="hint">Comma-separated, use name:value format (e.g., env:prod)</span>
         </div>
+
+        <ContextDefaultLookField
+          v-model="form.default_look"
+          :context-id="mode === 'edit' ? (context?.id ?? null) : null"
+          @import-behaviors="importBehaviors"
+        />
 
         <div class="form-group">
           <label>Default Behaviors</label>

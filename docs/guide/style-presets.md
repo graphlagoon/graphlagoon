@@ -184,6 +184,29 @@ applies one straight to the canvas; **Save look** then stores it on the graph
 item, where it stays for everyone who opens the case. See
 [Investigations](./investigations.md#the-workspace).
 
+## A context's default look
+
+A context can open with a look instead of the stock one. The **default look**
+is used when the context opens with no exploration (an exploration brings its
+own; `?style=` still wins over both), and on a case canvas for a graph that has
+no look of its own. Three ways to set it, all needing write access to the
+context:
+
+- **★ on a preset** (Look → Presets): makes that preset the default; click the
+  ★ again to stop.
+- **Make context default** (the Look panel's footer on the exploration page):
+  saves the look on screen. **Clear default** removes it.
+- **Default Look** in the context's edit form: **Import from…** one of the
+  context's explorations, one of its presets, or pasted JSON (a preset
+  export). **Import behaviors** fills the **Default Behaviors** field from the
+  same exploration or preset.
+
+The default look is a copy, not a link: deleting or editing the preset later
+does not change it. It carries colors, icons, sizes, labels, layout and
+property visibility; behaviors stay in **Default Behaviors**. It is stored in
+the context's `default_behaviors` under the reserved key `look`, so the API
+(`PUT /api/graph-contexts/{id}`) sets it like any other default.
+
 ## Composing with other features
 
 The URL parameters compose, so one link can pin the data and its look

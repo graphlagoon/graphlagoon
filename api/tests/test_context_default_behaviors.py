@@ -74,6 +74,56 @@ class TestSchemas:
         assert data.default_behaviors == {"viewMode": "3d"}
 
 
+class TestDefaultLook:
+    """``default_behaviors['look']``: the context's default look, kept in the same
+    JSON column so it needs no migration."""
+
+    LOOK = {
+        "nodeTypeColors": {"Person": "#ff0000"},
+        "nodeTypeIcons": {"Person": "user"},
+        "textFormat": {"node": {"template": "{name}"}},
+        "layout_algorithm": "circular",
+    }
+
+    def test_create_accepts_a_look(self):
+        data = GraphContextCreate(
+            title="t", edge_table_name="e", node_table_name="n",
+            default_behaviors={"viewMode": "3d", "look": self.LOOK},
+        )
+        assert data.default_behaviors["look"] == self.LOOK
+
+    def test_update_accepts_a_look_and_null(self):
+        assert GraphContextUpdate(default_behaviors={"look": self.LOOK}).default_behaviors == {"look": self.LOOK}
+        assert GraphContextUpdate(default_behaviors={"look": None}).default_behaviors == {"look": None}
+
+    def test_a_look_that_is_not_an_object_is_refused(self):
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GraphContextUpdate(default_behaviors={"look": "blue"})
+
+    def test_a_look_with_a_wrong_block_is_refused(self):
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GraphContextCreate(
+                title="t", edge_table_name="e", node_table_name="n",
+                default_behaviors={"look": {"nodeTypeColors": ["red"]}},
+            )
+
+    def test_a_look_round_trips_through_the_store(self):
+        InMemoryStore.reset()
+        store = InMemoryStore.get_instance()
+        context = store.create_graph_context(
+            title="t", edge_table_name="e", node_table_name="n",
+            owner_email="a@b.com", default_behaviors={"look": self.LOOK},
+        )
+        store.update_graph_context(context.id, default_behaviors={"viewMode": "2d-proj", "look": self.LOOK})
+        assert store.get_graph_context(context.id).default_behaviors == {"viewMode": "2d-proj", "look": self.LOOK}
+
+
 class TestMemoryStore:
     """The in-memory backend (`make dev`, database_enabled=false)."""
 

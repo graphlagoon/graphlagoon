@@ -8,8 +8,10 @@ import { useGraphStore } from '@/stores/graph';
 import { useMetricsStore } from '@/stores/metrics';
 import {
   defaultParamValues,
+  missingRequiredParams,
   resolveNodeBoundValues,
 } from '@/utils/clusterProgramParams';
+import { useClusterProgramRunRequest } from './useClusterProgramRunRequest';
 
 export const CLUSTER_PROGRAM_ACTION_PREFIX = 'cluster-program-action:';
 
@@ -22,6 +24,8 @@ export const CLUSTER_PROGRAM_ACTION_PREFIX = 'cluster-program-action:';
  * parameter defaults, overridden by node-bound parameters (`node_binding` =
  * node_id / node_type / prop:<name> / metric:<ref>) resolved from the clicked node. Feedback
  * is toast-only; the graph recolors through existing community reactivity.
+ * When a required parameter is still empty after that (no default, no node
+ * binding), the run dialog opens pre-filled instead (`ClusterProgramRunHost`).
  *
  * The owning component (GraphVisualizationView) calls register()/unregister()
  * in its mount/unmount hooks. The action list reconciles automatically when
@@ -35,6 +39,7 @@ export function useClusterProgramMenuActions() {
   const graphStore = useGraphStore();
   const metricsStore = useMetricsStore();
   const { success, error } = useToast();
+  const { requestRun } = useClusterProgramRunRequest();
 
   const registered = ref(false);
   let registeredIds: string[] = [];
@@ -106,10 +111,12 @@ export function useClusterProgramMenuActions() {
 
     // Defaults + node-bound values, replacing any panel-edited values so the
     // Communities tab shows exactly what this run used.
-    communityStore.programParams[programId] = {
-      ...defaultParamValues(program.parameters),
-      ...values,
-    };
+    const runValues = { ...defaultParamValues(program.parameters), ...values };
+    if (missingRequiredParams(program.parameters, runValues).length > 0) {
+      requestRun({ program, mode: 'community', initialValues: runValues });
+      return;
+    }
+    communityStore.programParams[programId] = runValues;
     communityStore.algorithm = `cluster-program:${programId}`;
     await communityStore.runDetection();
 

@@ -557,6 +557,16 @@ def _validate_distinct_tables(
         )
 
 
+def _validate_default_look(default_behaviors: Optional[dict]) -> None:
+    """``default_behaviors['look']`` is a style-preset settings block (or null)."""
+    if not default_behaviors or default_behaviors.get("look") is None:
+        return
+    look = default_behaviors["look"]
+    if not isinstance(look, dict):
+        raise ValueError("default_behaviors.look must be an object")
+    StylePresetSettings.model_validate(look)
+
+
 class GraphContextCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -577,7 +587,10 @@ class GraphContextCreate(BaseModel):
         default_factory=dict,
         description="Default graph behavior settings applied when this context is "
         "opened (e.g. {'viewMode': '3d'}). Passed through opaquely; the frontend "
-        "validates keys against its own schema. A saved exploration overrides these.",
+        "validates keys against its own schema. A saved exploration overrides these. "
+        "The reserved key 'look' holds the context's default look (a style-preset "
+        "settings block: colors, icons, labels, layout), applied when the context "
+        "opens with no exploration and on a case canvas whose item has no look.",
     )
     cluster_programs: list[dict] = Field(
         default_factory=list,
@@ -587,7 +600,7 @@ class GraphContextCreate(BaseModel):
     context_menu_actions: list[dict] = Field(
         default_factory=list,
         description="Context-level configurable context-menu actions (open-url, "
-        "copy-text, run-query-template). Passed through opaquely; the frontend "
+        "copy-text, run-query-template, show-same-value). Passed through opaquely; the frontend "
         "owns the shape.",
     )
     metric_definitions: list[MetricDefinition] = Field(
@@ -602,6 +615,7 @@ class GraphContextCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextCreate":
+        _validate_default_look(self.default_behaviors)
         _validate_unique_metric_definitions(self.metric_definitions)
         _validate_identity_keys(self.identity_keys)
         _validate_enrichment_tables(self.enrichment_tables)
@@ -692,6 +706,7 @@ class GraphContextUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_metric_definitions(self) -> "GraphContextUpdate":
+        _validate_default_look(self.default_behaviors)
         if self.metric_definitions is not None:
             _validate_unique_metric_definitions(self.metric_definitions)
         if self.identity_keys is not None:
@@ -2241,6 +2256,21 @@ class CaseViewFilters(BaseModel):
     window: Optional[list[float]] = Field(default=None, min_length=2, max_length=2)
 
 
+class CaseViewIsolation(BaseModel):
+    """"Show only" on a saved view, as a rule (never node ids) so it re-applies
+    to the graph as it is when the view is opened: communities or clusters by
+    id, or the nodes whose ``field`` (a property, ``node_type`` or
+    ``metric:<ref>``) equals ``value`` (``mode='same'``) or is set (``'has'``)."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["community", "cluster", "value"]
+    label: str = Field(max_length=200)
+    ids: Optional[list[Union[int, str]]] = Field(default=None, max_length=10_000)
+    field: Optional[str] = Field(default=None, max_length=200)
+    value: Optional[str] = Field(default=None, max_length=2000)
+    mode: Optional[Literal["same", "has"]] = None
+
+
 class CaseViewContent(BaseModel):
     """``graph/view`` content (06 P8, A5): how the canvas looks, never data."""
 
@@ -2248,6 +2278,12 @@ class CaseViewContent(BaseModel):
     filters: CaseViewFilters = Field(default_factory=CaseViewFilters)
     layout: str = Field(default="force", max_length=40)
     groups_closed: list[str] = Field(default_factory=list)
+    canvas_items: Optional[Union[Literal["all"], list[str]]] = Field(
+        default=None, description="The graphs on the canvas when the view was saved: item ids, or 'all'."
+    )
+    isolation: Optional[CaseViewIsolation] = Field(
+        default=None, description="'Show only': a community, cluster or same-value rule; null shows every node."
+    )
 
 
 class GraphContentNode(BaseModel):

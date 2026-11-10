@@ -20,7 +20,7 @@ import { formatTraceTime } from '@/utils/traceView';
 import GroupsPanel from '@/components/investigation/GroupsPanel.vue';
 import type { CaseItem } from '@/types/investigation';
 
-export type CasePanel = 'filters' | 'table' | 'metrics' | 'layout' | 'look' | 'advanced';
+export type CasePanel = 'filters' | 'table' | 'metrics' | 'layout' | 'look' | 'clusters';
 export type Popover = 'trace' | 'paths' | 'groups' | 'links' | 'enrich' | 'metrics' | 'detectors';
 
 const props = defineProps<{

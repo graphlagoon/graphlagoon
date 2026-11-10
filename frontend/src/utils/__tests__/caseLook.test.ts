@@ -5,6 +5,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  contextDefaultBehaviors,
+  contextDefaultLook,
   hasStyleFields,
   itemLook,
   layoutBlockChanged,
@@ -107,6 +109,49 @@ describe('resolveCanvasLook', () => {
     expect(resolveCanvasLook([item('s1')], [{ id: 's1', look: null, state: { revision: 2 } }]).key).not.toBe(base);
     expect(resolveCanvasLook([item('s1', { state: { look: RED } })], [{ id: 's1', look: null, state: { revision: 1 } }]).key).not.toBe(base);
     expect(resolveCanvasLook([item('s1')], [{ id: 's1', look: null, state: { revision: 1 } }]).key).toBe(base);
+  });
+});
+
+describe('context default look', () => {
+  const ctx = (look: unknown, extra: Record<string, unknown> = {}) => ({ default_behaviors: { ...extra, look } });
+
+  it('reads the look under default_behaviors.look, without behaviors or the source label', () => {
+    expect(contextDefaultLook(ctx({ ...RED, behaviors: { viewMode: '3d' }, source: 'preset:x' }))).toEqual(RED);
+    expect(contextDefaultLook(ctx(null))).toBeNull();
+    expect(contextDefaultLook(ctx('blue'))).toBeNull();
+    expect(contextDefaultLook(null)).toBeNull();
+  });
+
+  it('behaviors are the other keys', () => {
+    expect(contextDefaultBehaviors(ctx(RED, { viewMode: '3d' }))).toEqual({ viewMode: '3d' });
+    expect(contextDefaultBehaviors(ctx(RED))).toBeNull();
+  });
+
+  it('is the fallback when no canvas item has a look of its own', () => {
+    const contexts = { c1: ctx(RED, { viewMode: '3d' }) };
+    const r = resolveCanvasLook([item('s1', { context_id: 'c1' })], [{ id: 's1', look: null }], contexts);
+    expect(r.look).toEqual(RED);
+    expect(r.sourceId).toBeNull();
+    expect(r.contextId).toBe('c1');
+    expect(r.contextItemId).toBe('s1');
+    expect(r.behaviors).toEqual({ viewMode: '3d' });
+  });
+
+  it('an item look (saved or from its source) wins over any context default', () => {
+    const contexts = { c1: ctx(RED), c2: ctx(RED) };
+    const items = [item('s1', { context_id: 'c1' }), item('s2', { context_id: 'c2' })];
+    const r = resolveCanvasLook(items, [{ id: 's1', look: null }, { id: 's2', look: BLUE }], contexts);
+    expect(r.look).toEqual(BLUE);
+    expect(r.contextId).toBeNull();
+    // Two contexts on the canvas: no single context's behaviors.
+    expect(r.behaviors).toBeNull();
+  });
+
+  it('an edit of the context default changes the key', () => {
+    const items = [item('s1', { context_id: 'c1' })];
+    const a = resolveCanvasLook(items, [{ id: 's1' }], { c1: ctx(RED) });
+    const b = resolveCanvasLook(items, [{ id: 's1' }], { c1: ctx(BLUE) });
+    expect(a.key).not.toBe(b.key);
   });
 });
 

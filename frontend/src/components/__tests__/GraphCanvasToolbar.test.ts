@@ -39,4 +39,14 @@ describe('GraphCanvasToolbar', () => {
     expect(queryByTestId('canvas-toolbar-fullscreen')).toBeNull();
     expect(queryByTestId('canvas-toolbar-filters')).not.toBeNull();
   });
+
+  it('the Clusters button (case toolbar) toggles the clusters panel', async () => {
+    const { getByTestId, emitted } = render(GraphCanvasToolbar, {
+      props: { buttons: ['clusters'], testIds: { clusters: 'workspace-clusters-btn' } },
+    });
+    const button = getByTestId('workspace-clusters-btn');
+    expect(button.textContent).toContain('Clusters');
+    await fireEvent.click(button);
+    expect(emitted('toggle')?.[0]).toEqual(['clusters']);
+  });
 });

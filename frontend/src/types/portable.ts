@@ -14,6 +14,7 @@
 import type { StylePresetSettings } from './graph';
 import type { ContextMenuActionConfig } from './contextMenuActions';
 import type { CustomMetricDefinition } from './customMetrics';
+import type { ImportedClusterProgram } from '@/utils/clusterProgramImport';
 
 export const PORTABLE_EXPORT_VERSION = 1;
 
@@ -54,4 +55,11 @@ export interface PortableCustomMetrics {
   export_version: number;
   source: PortableSourceSchema;
   metrics: CustomMetricDefinition[];
+}
+
+export interface PortableClusterPrograms {
+  graphlagoon_export: 'cluster-programs';
+  export_version: number;
+  source: PortableSourceSchema;
+  programs: ImportedClusterProgram[];
 }

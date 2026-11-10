@@ -22,7 +22,8 @@ size nodes by importance. Communities live in the **Clusters** panel
 
 ## Community detection
 
-Open **Clusters → Communities**, pick an algorithm, and press **Detect**.
+Open **Clusters**, pick an algorithm in **Group by**, and press **Run**
+(the panel is described in [Cluster Programs](./clusters.md)).
 
 **Louvain** (the default) is classic modularity-based community detection.
 It runs in a background worker, so the UI stays responsive, and reports
@@ -57,10 +58,14 @@ node in several clusters takes the first, and uncovered nodes form an
 - **Layout**: *None* keeps the force layout; **Radial** pulls each
   community to its own sector of a circle (switching the view to 2D);
   **Hive plot** puts each community on its own axis.
-- The results list shows every community with its color, label and size;
-  right-click any member node → **View community members** for a
-  searchable, CSV-exportable table.
-- **Community column in Data Table** adds each node's community as a
+- The group list shows every community with its color, label and size.
+  Click one to show only it (Shift+click adds more); its **⋯** menu or
+  right-click on a member node → **View community members** opens a
+  searchable, CSV-exportable table. While the panel is closed the same list
+  is a small legend over the canvas (on a case, chips under the filters).
+- **Output → Collapse** turns each community into one cluster node; open
+  one from the list.
+- **Group column in the Data Table** (under *Display*) adds each node's community as a
   filterable column in the [Data Table](./exploring-the-graph.md)'s Nodes
   tab (and its CSV export). The setting is saved with explorations; the
   column disappears whenever the detection results do.

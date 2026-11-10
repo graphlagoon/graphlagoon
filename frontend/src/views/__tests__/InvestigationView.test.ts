@@ -345,6 +345,18 @@ describe('InvestigationView', () => {
       expect(graph.freshLayoutRequested).toBe(false) // colors only: positions stay
     })
 
+    it('a graph with no look of its own wears its context\'s default look and behaviors', async () => {
+      vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1')] as any)
+      vi.mocked(api.getInvestigationItemSnapshot).mockResolvedValue(snapshot(['a', 'b']) as any)
+      vi.mocked(api.getGraphContext).mockImplementation(async (id) =>
+        ({ id, title: id, identity_keys: [], default_behaviors: { viewMode: '2d-proj', look: { ...RED, source: 'current' } } }) as any)
+      render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+      await flushPromises()
+      const graph = useGraphStore()
+      expect(graph.nodeTypeColors.get('T')).toBe('#ff0000')
+      expect(graph.behaviors.viewMode).toBe('2d-proj')
+    })
+
     it('"All graphs": the first canvas item with a look decides', async () => {
       vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: { canvas_items: 'all' }, shared_with: [], tags: [] } as any)
       vi.mocked(api.getInvestigationItemSnapshot).mockImplementation(async (_i, sid) => (sid === 's1' ? snapshot(['a', 'b']) : withLook(['x'], BLUE)) as any)

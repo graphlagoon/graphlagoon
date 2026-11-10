@@ -171,7 +171,7 @@ The toolbar groups what you can do with a loaded graph:
 | Labels | What text each node/edge shows, with a template language |
 | Metrics | Degree and other per-node metrics, mappable to size/color |
 | Clusters | Community detection and user-defined cluster programs |
-| Behaviors | Per-context defaults, like auto-loading data on open |
+| Behaviors | Per-context defaults, like auto-loading data on open; a context can also have a [default look](/guide/style-presets#a-context-s-default-look) |
 
 ### 4. Save what you found
 

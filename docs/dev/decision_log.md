@@ -13851,3 +13851,66 @@ mas numa exploração só podia mudar `focus_node_id`. Pedido: a exploração ta
 troca de rótulos mantendo cores/ícones, `null` reseta, chave desconhecida e valor inválido recusados).
 **Public docs:** `agents-mcp.md`, tool page regenerada. **Admin-area impact:** nenhum.
 
+
+## [2026-11-09 18:00] - Feature Implemented: look padrão do contexto, import JSON de cluster programs, painel Clusters "resultado primeiro" e "mostrar só" (comunidade, cluster, mesmo valor)
+
+**Relato:** avaliados na exploração e no caso: (1) não havia como tornar um estilo o padrão de um contexto nem importar
+estilo/behaviors de explorações no modal do contexto; (2) cluster programs não importavam JSON — parâmetros à mão — e o
+prompt de IA só pedia o corpo JS; (3) na aba de cluster não dava para clicar numa comunidade e ver só ela; a UX do painel
+(4 abas, o mesmo programa rodando de dois jeitos com resultado em lugares diferentes, lista no fim, linhas inertes) foi
+revista; (4) faltava ação de menu "mostrar só nós com o mesmo valor deste".
+**Decisões (com o usuário):**
+1. **Sem migração.** O look padrão fica em `graph_contexts.default_behaviors.look` (coluna JSON opaca existente),
+   validado contra `StylePresetSettings` em `GraphContextCreate/Update` (422); `resolveInitialBehaviors` ignora a chave.
+   Ordem: exploração sem estado → look padrão do contexto antes de `?style=`; caso → item > fonte > embutido >
+   **padrão do contexto** > stock (na chave do resolver); com um contexto no canvas, seus `default_behaviors` valem.
+   Definido por ★ no preset, "Make context default" no painel Look e a seção **Default Look** do modal do contexto
+   (importar de exploração, preset ou JSON; "Import behaviors" para o textarea).
+2. **Cluster programs:** `utils/clusterProgramImport.ts` (objeto, lista, fence ou envelope `cluster-programs`), Import/Export
+   JSON no editor e na biblioteca; o prompt pede **um objeto JSON** com o schema de parâmetros e embute o programa atual
+   quando aberto dele. Menu de contexto com parâmetro obrigatório sem default nem binding abre o run modal pré-preenchido
+   (`useClusterProgramRunRequest` + `ClusterProgramRunHost`).
+3. **Isolamento como regra**, nunca ids: `utils/isolation.ts` (`community` / `cluster` / `value` com `field` =
+   propriedade, `node_type` ou `metric:` e `mode` same/has), `graphStore.isolation` resolvido em `isolatedNodeIds` e
+   somado a `searchHiddenNodeIds` (esconde, não refaz layout; o nó selecionado fica). Regra cujas comunidades/clusters
+   não existem resolve para `null` (nunca apaga o canvas). **Salvo** no estado da exploração (topo, `extra="allow"`) e
+   nas views do caso (`CaseViewContent.isolation`, `CaseViewIsolation`; `canvas_items` também declarado — o frontend já
+   enviava e o schema `extra="forbid"` não tinha). Chip "Showing only: … ✕" na status bar; "Clear" dos chips do caso
+   também limpa. Corrigido: nada observava `searchHiddenNodeIds` no canvas (chips do caso podiam não repintar).
+4. **Painel Clusters resultado primeiro:** barra de execução (Group by = Louvain/componentes/programas, parâmetros inline,
+   saída **Color | Collapse** = `communityStore.collapseEnabled`, Run; recolhe num resumo), lista de grupos como camadas
+   (`useGroupRows`: clique = só este, de novo = todos; Shift/olho = adicionar/esconder; ⋯ selecionar, tabela de membros,
+   apagar cluster com undo; troca Colors|Clusters quando há os dois), Display recolhível; biblioteca de programas em
+   `ClusterProgramLibraryModal` ("Programs…", Use/Run/Import/Export); Similarity como 2ª aba; `ClusterListPanel` removido;
+   abas antigas viram aliases. Legenda clicável `GroupLegend` (flutuante no canto inferior direito na exploração,
+   dobrável e dobrada <900px; chips sob os filtros no caso) com o painel fechado. No caso: botão **Clusters** (era
+   "Advanced") e programas do contexto único hidratados.
+5. **Menu:** built-ins "Show only this community / cluster" e "Show all nodes" (`useCommunityTableAction` →
+   `useCommunityMenuActions`); tipo configurável `show-same-value` (`field`, `mode`) no modal, import, prompt e descrição
+   do schema.
+**Rejeitado:** destaque por hover na lista (a lente depende de `edgeLensMode`, desligada por padrão); salvar grupo do
+caso a partir do menu ⋯ (o painel Groups do caso já faz).
+**Arquivos:** novos `frontend/src/utils/{isolation,clusterProgramImport}.ts`, `composables/{useGroupRows,useCommunityMenuActions,
+useClusterProgramRunRequest,useContextDefaultLook}.ts`, `components/{GroupLegend,ClusterProgramLibraryModal,
+ClusterProgramRunHost,ContextDefaultLookField}.vue`; removidos `components/ClusterListPanel.vue`,
+`composables/useCommunityTableAction.ts`; alterados `ClusterProgramPanel`, `ClusterProgram{Editor,Run,Skill}Modal`,
+`ContextMenuActionsModal`, `GraphContextFormModal`, `StylePresetList`, `GraphStatusBar`, `GraphCanvasToolbar`,
+`GraphCanvas3D`, `investigation/{CaseFilterChips,AnalysisBar}`, `views/{GraphVisualizationView,InvestigationView}`,
+`stores/{graph,community,caseFilters}.ts`, `utils/{caseLook,clusterProgramSkill,contextMenuActionImport,
+contextMenuActionSkill}.ts`, tipos; backend `models/schemas.py`.
+**Testes:** vitest novos `isolation`, `graph.isolation`, `useGroupRows`, `ClusterProgramPanel`, `GroupLegend`,
+`clusterProgramImport`, `ClusterProgramLibraryModal`, `useContextDefaultLook`; estendidos `useCommunityMenuActions`,
+`useConfigurableMenuActions`, `contextMenuActionImport/Skill`, `GraphStatusBar`, `GraphCanvasToolbar`, `CaseFilterChips`
+(view com isolamento), `caseLook`, `GraphContextFormModal`, `StylePresetList`, `InvestigationView`, editor/run/skill de
+cluster programs, `useClusterProgramMenuActions`. E2E: `graph` (Clusters pela biblioteca e lista; mostrar só pelo painel
+e pela legenda), `context-menu` (show only this community), `investigation-ux` (botão Clusters, chip de grupo),
+`context-default-look` (novo). Pytest: `test_context_default_behaviors` (look validado), `test_case_graph` (view com
+`canvas_items` e `isolation`).
+**Public docs:** `clusters.md` (painel novo, biblioteca, import JSON, prompt, mostrar só), `communities-metrics.md`,
+`exploring-the-graph.md` (Show only, chip), `context-menu-actions.md` (tipo novo), `investigations.md` (Clusters,
+views com mostrar só, ordem do look), `style-presets.md` (look padrão do contexto), `getting-started.md`;
+`agents-mcp-tools.md` e `openapi.json` regenerados; screenshots `clusters-panel` (nova) e `clusters-programs`.
+**Admin-area impact:** nenhum — sem rota, tabela ou setting novos; o look padrão usa o PUT de contexto e a permissão de
+escrita existentes.
+**Known limitations:** programas criados no caso não persistem no contexto (o caso não tem `currentContext`); com vários
+grafos no canvas só os built-ins; nós com propriedades ainda carregando entram no "mesmo valor" quando chegam.

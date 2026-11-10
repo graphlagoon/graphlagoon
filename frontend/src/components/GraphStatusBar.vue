@@ -32,6 +32,18 @@ const clusterStore = useClusterStore();
 const toolbarStore = useToolbarStore();
 
 const clusterCount = computed(() => clusterStore.clusters.length);
+
+/** How many nodes "show only" keeps, against the nodes loaded. */
+const isolationTitle = computed(() => {
+  const keep = graphStore.isolatedNodeIds;
+  const rule = graphStore.isolation;
+  if (!rule) return '';
+  const counted = keep ? `${keep.size} of ${graphStore.nodes.length} nodes shown` : 'not applied: what it names is not on the graph';
+  const loading = rule.kind === 'value' && graphStore.enriching
+    ? ` — ${graphStore.pendingPropertyNodeIds.size} nodes are still loading properties and may join`
+    : '';
+  return `${counted}${loading}. Click ✕ to show every node.`;
+});
 </script>
 
 <template>
@@ -71,6 +83,22 @@ const clusterCount = computed(() => clusterStore.clusters.length);
     >
       {{ clusterCount }} clusters
     </button>
+
+    <span
+      v-if="graphStore.isolation"
+      class="status-isolation"
+      data-testid="status-isolation"
+      :title="isolationTitle"
+    >
+      Showing only: <strong>{{ graphStore.isolation.label }}</strong>
+      <button
+        type="button"
+        class="status-isolation-clear"
+        data-testid="status-isolation-clear"
+        aria-label="Show every node"
+        @click="graphStore.clearIsolation()"
+      >✕</button>
+    </span>
 
     <slot />
 
@@ -114,6 +142,34 @@ const clusterCount = computed(() => clusterStore.clusters.length);
 
 .status-chip:hover { text-decoration: underline; }
 .status-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 2px; }
+
+.status-isolation {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 8px;
+  border-radius: 10px;
+  background: var(--primary-light, rgba(66, 184, 131, 0.12));
+  color: var(--text-color);
+}
+
+.status-isolation strong {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-isolation-clear {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.status-isolation-clear:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 2px; }
 
 .status-enriching {
   font-style: italic;

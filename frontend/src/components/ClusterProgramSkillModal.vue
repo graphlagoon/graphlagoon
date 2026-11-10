@@ -3,7 +3,7 @@
     <div v-if="modelValue" class="modal-overlay" @click.self="close">
       <div class="modal-container" data-testid="cluster-skill-modal">
         <div class="modal-header">
-          <h2>Ask an AI to write a cluster program</h2>
+          <h2>{{ program ? 'Ask an AI to change this cluster program' : 'Ask an AI to write a cluster program' }}</h2>
           <button class="close-btn" @click="close" title="Close">
             <X :size="20" />
           </button>
@@ -14,7 +14,12 @@
             Not sure how to write a cluster program? Copy the text below and paste it
             into any AI assistant (ChatGPT, Claude, etc.), then describe the grouping
             you want. It already includes this graph's node/edge types and properties
-            plus the exact rules the program must follow.
+            plus the exact rules the program must follow<template v-if="program">, and the
+            program as it is now</template>.
+          </p>
+          <p class="intro" data-testid="cluster-skill-return-hint">
+            The AI answers with one JSON object — name, code and parameters. Paste it into
+            <strong>Import JSON</strong> in the program editor and every field is filled.
           </p>
 
           <div class="skill-toolbar">
@@ -37,9 +42,12 @@ import { X, Copy, Check } from 'lucide-vue-next'
 import { useGraphStore } from '@/stores/graph'
 import { useMetricsStore } from '@/stores/metrics'
 import { buildClusterProgramSkill } from '@/utils/clusterProgramSkill'
+import type { ImportedClusterProgram } from '@/utils/clusterProgramImport'
 
 const props = defineProps<{
   modelValue: boolean
+  /** The program being edited — the prompt embeds it so the AI changes it */
+  program?: ImportedClusterProgram | null
 }>()
 
 const emit = defineEmits<{
@@ -57,6 +65,7 @@ const skillText = computed(() =>
     edgeProperties: graphStore.currentContext?.edge_properties ?? [],
     nodeMetrics: metricsStore.nodeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
     edgeMetrics: metricsStore.edgeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
+    program: props.program ?? null,
   })
 )
 

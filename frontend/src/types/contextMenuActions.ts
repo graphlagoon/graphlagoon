@@ -82,15 +82,32 @@ export interface RunQueryTemplateActionConfig extends MenuActionBase {
   paramBindings: Record<string, string>;
 }
 
+export interface ShowSameValueActionConfig extends MenuActionBase {
+  kind: 'show-same-value';
+  /**
+   * What to compare: a node property, `node_type`, or `metric:<ref>`. Read
+   * with the label renderer's lookup (resolveItemValue), so a value shows the
+   * same way in a label and in this filter.
+   */
+  field: string;
+  /**
+   * `same`: show only the nodes whose field equals the clicked node's.
+   * `has`: show only the nodes where the field is set (not empty).
+   */
+  mode: 'same' | 'has';
+}
+
 export type ContextMenuActionConfig =
   | OpenUrlActionConfig
   | CopyTextActionConfig
-  | RunQueryTemplateActionConfig;
+  | RunQueryTemplateActionConfig
+  | ShowSameValueActionConfig;
 
 export const CONTEXT_MENU_ACTION_KINDS = [
   'open-url',
   'copy-text',
   'run-query-template',
+  'show-same-value',
 ] as const;
 
 /** Skip configs whose kind this build doesn't know (forward compatibility). */

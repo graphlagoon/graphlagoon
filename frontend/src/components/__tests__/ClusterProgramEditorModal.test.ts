@@ -291,4 +291,41 @@ describe('ClusterProgramEditorModal', () => {
       expect(store.programs[store.programs.length - 1].scope).toBe('exploration')
     })
   })
+
+  it('Import JSON fills name, code and parameters from an AI answer', async () => {
+    renderModal()
+    await fireEvent.click(q('[data-testid="cluster-program-import-toggle"]'))
+    const answer = {
+      program_name: 'Same city',
+      code: 'return []',
+      show_in_context_menu: true,
+      parameters: [{ id: 'city', type: 'select', options: ['A', 'B'], default: 'B', node_binding: 'prop:city' }],
+    }
+    await fireEvent.update(q('[data-testid="cluster-program-import-text"]'), '```json\n' + JSON.stringify(answer) + '\n```')
+    await fireEvent.click(q('[data-testid="cluster-program-import-apply"]'))
+
+    expect(q<HTMLInputElement>('[data-testid="program-name-input"]').value).toBe('Same city')
+    expect(q<HTMLInputElement>('[data-testid="show-in-context-menu"]').checked).toBe(true)
+    await fireEvent.click(q('[data-testid="save-program"]'))
+    const saved = useClusterStore().programs.find(p => p.program_name === 'Same city')!
+    expect(saved.parameters).toEqual([
+      { id: 'city', type: 'select', options: ['A', 'B'], default: 'B', required: true, node_binding: 'prop:city' },
+    ])
+    expect(saved.show_in_context_menu).toBe(true)
+  })
+
+  it('Import JSON shows a parse error and keeps Apply disabled', async () => {
+    renderModal()
+    await fireEvent.click(q('[data-testid="cluster-program-import-toggle"]'))
+    await fireEvent.update(q('[data-testid="cluster-program-import-text"]'), '{"program_name": "x"}')
+    expect(q('[data-testid="cluster-program-import-parse-error"]').textContent).toContain('missing "code"')
+    expect(q<HTMLButtonElement>('[data-testid="cluster-program-import-apply"]').disabled).toBe(true)
+  })
+
+  it('Edit as JSON starts from the program being edited', async () => {
+    renderModal({ program_name: 'Existing', code: 'return []' })
+    await fireEvent.click(q('[data-testid="cluster-program-import-toggle"]'))
+    const text = q<HTMLTextAreaElement>('[data-testid="cluster-program-import-text"]').value
+    expect(JSON.parse(text)).toMatchObject({ program_name: 'Existing', code: 'return []' })
+  })
 })

@@ -1,6 +1,7 @@
 import type { ClusterProgram } from './cluster';
 import type { ContextMenuActionConfig } from './contextMenuActions';
 import type { CustomMetricDefinition } from './customMetrics';
+import type { IsolationRule } from '@/utils/isolation';
 
 export interface Node {
   node_id: string;
@@ -210,7 +211,11 @@ export interface GraphContext {
   node_properties: PropertyColumn[];
   node_types: string[];
   relationship_types: string[];
-  /** Behavior settings applied when this context is opened. A saved exploration overrides them. */
+  /**
+   * Behavior settings applied when this context is opened. A saved exploration overrides them.
+   * The reserved key `look` holds the context's default look (a `StylePresetSettings` block);
+   * read it with `contextDefaultLook` / `contextDefaultBehaviors` (utils/caseLook).
+   */
   default_behaviors?: Record<string, unknown>;
   /** Context-level cluster programs, shared by all explorations. Built-in defaults are never stored here. */
   cluster_programs?: ClusterProgram[];
@@ -585,6 +590,7 @@ export interface ExplorationState {
   visual_mapping?: Record<string, unknown>;   // Metric visual mapping (optional for backwards compat)
   property_visibility?: PropertyVisibility;   // Property display allowlist (optional for backwards compat)
   community?: Record<string, unknown>;     // Community detection state (optional for backwards compat)
+  isolation?: IsolationRule | null;        // "Show only" rule (utils/isolation.ts)
   similarity?: Record<string, unknown>;    // Similarity system state (optional for backwards compat)
   focus_node_id?: string | null;           // The node the exploration opens on, selected and framed (optional)
   has_snapshot?: boolean;                  // Whether a file-based graph snapshot exists
