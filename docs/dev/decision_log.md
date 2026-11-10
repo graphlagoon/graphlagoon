@@ -13914,3 +13914,36 @@ views com mostrar só, ordem do look), `style-presets.md` (look padrão do conte
 escrita existentes.
 **Known limitations:** programas criados no caso não persistem no contexto (o caso não tem `currentContext`); com vários
 grafos no canvas só os built-ins; nós com propriedades ainda carregando entram no "mesmo valor" quando chegam.
+
+## [2026-11-10 12:00] - Docs: skill_feature_creation rewritten (workflow + checks, UX mode, agent coordination)
+
+**Feature:** the feature-creation skill went from one 1,295-line file of mostly generic boilerplate to a 190-line
+workflow plus on-demand references, a runnable definition-of-done check and a UX reviewer agent.
+**Decisions:**
+1. **Only what the repo cannot tell you.** Generic CRUD/Vue/Pinia templates removed; step 2 points at the nearest
+   sibling feature to copy instead. Kept: order of work, the three gates (step numbers 2.4b / 4.2 / 4.2b unchanged,
+   other docs link to them), the two persistence modes, Canvas3D rules, test traps.
+2. **Progressive disclosure, one level deep:** `reference/{backend,frontend,testing,gates,ux,orchestration}.md`, each
+   opened only when its row applies.
+3. **A check to run instead of prose:** `verify.sh` picks checks from the files changed against `origin/main`
+   (registry and doc-freshness pytest guards, changed pytest files, `vue-tsc`, vitest files of changed sources, changed
+   e2e specs, `make docs-build`, decision-log gate), one PASS/FAIL line each, full logs in `$TMPDIR/graphlagoon-verify`.
+   Ruff is a warning: the tree is not ruff-clean on `main` (64 unformatted files, 5 lint findings).
+4. **Scope widened to improving existing features and UX** (`reference/ux.md`: look at real screenshots first,
+   look → fix → look-again rounds, findings into `ux-review.md`) with a report-only `ux-reviewer` agent
+   (`.claude/agents/ux-reviewer.md`).
+5. **Agent coordination and loops are explicit** (`reference/orchestration.md`): when a subagent pays off, contract
+   first and disjoint file ownership, briefing template, and a stop condition for every loop.
+**Rejected:** renaming the skill to the hyphenated form the platform docs ask for (plans, briefings and prompts refer
+to `skill_feature_creation`); `scripts/` subfolder (`.gitignore` ignores `scripts` at any depth); `vitest related`
+in the check (parse error on any import graph that reaches a `.vue` file).
+**Files:** rewritten `.claude/skills/skill_feature_creation/SKILL.md`; new `reference/*.md`, `verify.sh`,
+`.claude/agents/ux-reviewer.md`; regenerated `docs/public/openapi.json` (version was left at 0.41.0 by the 0.42.0
+release, which kept `test_api_docs` and `make docs-build` red).
+**Tests:** `verify.sh` run on this branch: pytest guards and changed files, `vue-tsc`, 67 vitest files, docs build.
+The Playwright step could not run in the authoring container (no Chromium for the pinned 1.45).
+**Public docs:** No public docs impact (only the regenerated `openapi.json` version).
+**Admin-area impact:** No admin-area impact.
+**Known limitations:** stale corrections found and fixed in the skill text only — the pre-commit `vitest-related`
+hook itself still has the `.vue` parse problem; `docs/dev/README.md` still lists a `skill_feature_creation.md`
+that does not exist.
