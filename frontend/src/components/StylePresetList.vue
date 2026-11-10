@@ -10,7 +10,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Bot, Check, Download, Link2, Trash2 } from 'lucide-vue-next';
+import { Bot, Check, Download, Link2, Star, Trash2 } from 'lucide-vue-next';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import { ARTIFACT_NAME_PATTERN, type StylePresetEntry, type StylePresetSettings } from '@/types/graph';
@@ -25,6 +25,8 @@ import {
 } from '@/utils/stylePresetImport';
 import StylePresetSkillModal from './StylePresetSkillModal.vue';
 import { confirmAction } from '@/composables/useConfirm';
+import { storedDefaultLook, toDefaultLook, useContextDefaultLook } from '@/composables/useContextDefaultLook';
+import { useInvestigationStore } from '@/stores/investigation';
 
 const props = defineProps<{
   /** `url`: `?style=<name>` (the exploration page); `store`: straight onto the canvas (a case). */
@@ -182,6 +184,37 @@ async function remove(value: string) {
     // A 403 here names the author — the only place ownership ever surfaces,
     // since the listing deliberately does not carry it.
     error.value = getErrorMessage(e, 'Failed to delete style preset');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Context default — the look the context opens with when no exploration says
+// otherwise (and the fallback on a case canvas). One per context.
+// ---------------------------------------------------------------------------
+
+const investigationStore = useInvestigationStore();
+const { setDefaultLook } = useContextDefaultLook();
+const defaultSource = computed(() => {
+  const id = contextId.value;
+  if (!id) return null;
+  const ctx = graphStore.currentContext?.id === id ? graphStore.currentContext : investigationStore.contexts[id];
+  return storedDefaultLook(ctx)?.source ?? null;
+});
+
+async function toggleDefault(value: string) {
+  if (!contextId.value || !props.canWrite) return;
+  error.value = null;
+  try {
+    if (defaultSource.value === `preset:${value}`) {
+      await setDefaultLook(contextId.value, null);
+      toast.success('The context opens with the stock look again');
+      return;
+    }
+    const preset = await api.getStylePreset(contextId.value, value);
+    await setDefaultLook(contextId.value, toDefaultLook(preset.settings, `preset:${value}`));
+    toast.success(`“${value}” is the context's default look`);
+  } catch (e) {
+    error.value = getErrorMessage(e, 'Failed to set the default look');
   }
 }
 
@@ -606,6 +639,17 @@ watch(contextId, refresh);
           </button>
           <div class="preset-actions">
             <button
+              v-if="canWrite"
+              class="btn-icon-only"
+              :class="{ starred: defaultSource === `preset:${entry.name}` }"
+              :title="defaultSource === `preset:${entry.name}` ? 'The context\'s default look — click to stop' : 'Use as the context\'s default look'"
+              :aria-pressed="defaultSource === `preset:${entry.name}`"
+              :data-testid="`style-preset-default-${entry.name}`"
+              @click="toggleDefault(entry.name)"
+            >
+              <Star :size="14" :fill="defaultSource === `preset:${entry.name}` ? 'currentColor' : 'none'" />
+            </button>
+            <button
               class="btn-icon-only"
               title="Export as JSON file"
               :data-testid="`style-preset-export-${entry.name}`"
@@ -644,6 +688,10 @@ watch(contextId, refresh);
 </template>
 
 <style scoped>
+.starred {
+  color: var(--warning-color, #e0a800);
+}
+
 .style-presets {
   display: flex;
   flex-direction: column;

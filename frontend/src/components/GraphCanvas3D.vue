@@ -1492,7 +1492,7 @@ async function initGraph() {
       if (!graph3d) return null;
       const node = (graph3d.graphData().nodes as GraphNode[]).find(n => n.id === nodeId);
       return node
-        ? { color: node.color, iconColor: node.__iconColor, rings: graphStore.nodeRings?.get(nodeId) ?? [] }
+        ? { color: node.color, iconColor: node.__iconColor, rings: graphStore.nodeRings?.get(nodeId) ?? [], hidden: !!node.hidden }
         : null;
     };
 
@@ -2280,6 +2280,14 @@ watch(
     }, LENS_HOVER_DEBOUNCE_MS);
   }
 );
+
+// Hide-sets that are not the search itself: the case's filter chips and "show
+// only" (isolation). Without this a chip or a community click changed the set
+// but nothing repainted until some other watcher fired.
+watch(searchHiddenNodeIds, () => {
+  updateVisuals();
+  updateOverlays();
+});
 
 // Search changes — visuals + center on match
 let previousSearchQuery3D = '';

@@ -367,3 +367,22 @@ async def test_a_frozen_style_is_checked_and_never_reaches_the_unifier(env):
     r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "derived", "title": "x", "content_json": {**snap, "style": {"focus_node_id": "s1"}}}, headers=h(OWNER))
     assert r.status_code == 201, r.text
     assert client.get(f"{url}/items/{r.json()['id']}/snapshot", headers=h(OWNER)).json()["look"] == {"focus_node_id": "s1"}
+
+
+def test_a_saved_view_keeps_its_canvas_and_its_show_only():
+    from graphlagoon.services.case_items import InvestigationError, validate_graph_content
+
+    view = {
+        "filters": {"roles": ["mula"]},
+        "layout": "force",
+        "groups_closed": [],
+        "canvas_items": "all",
+        "isolation": {"kind": "community", "ids": [3], "label": "Community 3"},
+    }
+    validate_graph_content("view", json.dumps(view))
+    validate_graph_content("view", json.dumps({**view, "canvas_items": ["i1"], "isolation": {
+        "kind": "value", "field": "branch_id", "value": "12", "mode": "same", "label": "branch_id = 12"}}))
+    validate_graph_content("view", json.dumps({**view, "isolation": None}))
+    for bad in ({"kind": "everything", "label": "x"}, {"kind": "community", "ids": [1], "label": "x", "extra": 1}):
+        with pytest.raises(InvestigationError):
+            validate_graph_content("view", json.dumps({**view, "isolation": bad}))

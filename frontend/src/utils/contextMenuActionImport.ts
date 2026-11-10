@@ -157,6 +157,18 @@ export function parseImportedActionConfigs(json: string): ImportResult {
         return { ok: false, error: `Action ${i + 1}: missing "textTemplate"` };
       }
       configs.push({ ...base, kind: 'copy-text', textTemplate: raw.textTemplate });
+    } else if (kind === 'show-same-value') {
+      if (typeof raw.field !== 'string' || raw.field.trim() === '') {
+        return { ok: false, error: `Action ${i + 1}: missing "field"` };
+      }
+      configs.push({
+        ...base,
+        // Isolating by a node's value: an edge has nothing to isolate by.
+        match: { ...match, target: 'node' },
+        kind: 'show-same-value',
+        field: raw.field.trim(),
+        mode: raw.mode === 'has' ? 'has' : 'same',
+      });
     } else {
       if (typeof raw.templateId !== 'string' || raw.templateId.trim() === '') {
         return { ok: false, error: `Action ${i + 1}: missing "templateId"` };
@@ -244,7 +256,11 @@ export function actionCompatibilityWarnings(
     }
     if (config.kind === 'open-url') checkTemplate(config.urlTemplate);
     else if (config.kind === 'copy-text') checkTemplate(config.textTemplate);
-    else {
+    else if (config.kind === 'show-same-value') {
+      const metricRef = parseMetricRef(config.field);
+      if (metricRef != null) sessionMetricRefs.add(metricRef);
+      else if (!properties.has(config.field) && !BUILTIN_PROPERTIES.has(config.field)) missingProperties.add(config.field);
+    } else {
       if (!templateIds.has(config.templateId)) missingTemplateIds.add(config.templateId);
       for (const binding of Object.values(config.paramBindings)) checkTemplate(binding);
     }

@@ -41,6 +41,23 @@ Behavior**:
   grey and shrinks. Nothing leaves the screen.
 - **Hide**: non-matches disappear and drop out of the counts.
 
+### Show only
+
+To look at one part of the graph without losing the rest of the layout,
+**show only** it:
+
+- click a community or cluster in the **Clusters** panel, or in its legend
+  over the canvas (Shift+click adds another);
+- right-click a node → **Show only this community** / **Show only this
+  cluster**;
+- a context's own right-click actions of the kind **Show only nodes with…**
+  ([context-menu actions](./context-menu-actions.md#show-only-nodes-with)) —
+  e.g. the accounts of the same branch as the one you clicked.
+
+Every other node hides (the selected node always stays). The status bar
+says **Showing only: …**; its **✕**, or right-click → **Show all nodes**,
+brings everything back. It is saved with the exploration.
+
 ## Query Console
 
 Canvas footer → **Console** opens a resizable bottom drawer for *tabular*
@@ -238,6 +255,8 @@ The strip under the canvas is the graph's honesty panel:
   This progressive load is controlled in **Look → Behaviors → property loading**
   (`auto`, the default, uses it only when the node table is wide enough to
   pay off).
+- `Showing only: <group> ✕` — a [show only](#show-only) is hiding the other
+  nodes; ✕ shows them again. Hover it for how many nodes it keeps.
 - `⚠ truncated` — the edge limit was hit and this is a **partial view**;
   conclusions drawn from it may not hold. Raise the limit or narrow the
   query.

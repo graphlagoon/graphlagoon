@@ -104,4 +104,26 @@ describe('ClusterProgramRunModal', () => {
     )
     expect(emitted().close).toBeFalsy()
   })
+
+  it('community mode runs the program as the community algorithm with the initial values', async () => {
+    seedGraph()
+    const store = useClusterStore()
+    const program = store.createProgram({
+      program_name: 'P',
+      code: 'return [{ cluster_name: params.name, node_ids: ["n1"] }]',
+      parameters: [
+        createClusterProgramParameter({ id: 'name', type: 'text', required: true }),
+        createClusterProgramParameter({ id: 'n', type: 'number', default: 1 }),
+      ],
+    })
+    const { useCommunityStore } = await import('@/stores/community')
+    const community = useCommunityStore()
+    const run = vi.spyOn(community, 'runDetection').mockResolvedValue(undefined as never)
+    render(ClusterProgramRunModal, { props: { program, mode: 'community', initialValues: { name: 'A' } } })
+
+    await fireEvent.click(q('[data-testid="run-program"]'))
+    await waitFor(() => expect(run).toHaveBeenCalled())
+    expect(community.algorithm).toBe(`cluster-program:${program.program_id}`)
+    expect(community.programParams[program.program_id]).toEqual({ n: 1, name: 'A' })
+  })
 })

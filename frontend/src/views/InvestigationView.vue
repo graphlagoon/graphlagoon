@@ -11,14 +11,14 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter, type LocationQuery } from 'vue-router';
 import { Banknote, Plus, Route } from 'lucide-vue-next';
 import { isGraphItem, useInvestigationStore } from '@/stores/investigation';
-import { defaultForce3DSettings, defaultLayoutModeConfig, useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
+import { defaultForce3DSettings, defaultLayoutModeConfig, resolveInitialBehaviors, useGraphStore, type InvestigationGraphMode } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
 import { useClusterStore } from '@/stores/cluster';
 import { useCaseFilters } from '@/stores/caseFilters';
 import { useItemViewerStore } from '@/stores/itemViewer';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
-import { useCommunityTableAction } from '@/composables/useCommunityTableAction';
+import { useCommunityMenuActions } from '@/composables/useCommunityMenuActions';
 import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
 import { useConfigurableMenuActions } from '@/composables/useConfigurableMenuActions';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
@@ -44,12 +44,14 @@ import MetricsPanel from '@/components/MetricsPanel.vue';
 import ClusterProgramPanel from '@/components/ClusterProgramPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
 import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
+import ClusterProgramRunHost from '@/components/ClusterProgramRunHost.vue';
 import DetailModal from '@/components/DetailModal.vue';
 import LookPanel from '@/components/LookPanel.vue';
 import GraphCanvasToolbar, { type CanvasToolbarButton } from '@/components/GraphCanvasToolbar.vue';
 import GraphStatusBar from '@/components/GraphStatusBar.vue';
 import TemplateExecuteModal from '@/components/TemplateExecuteModal.vue';
 import CaseGraphChips from '@/components/investigation/CaseGraphChips.vue';
+import GroupLegend from '@/components/GroupLegend.vue';
 import CaseHeader from '@/components/investigation/CaseHeader.vue';
 import CaseItemsPanel from '@/components/investigation/CaseItemsPanel.vue';
 import CaseFilterChips from '@/components/investigation/CaseFilterChips.vue';
@@ -163,7 +165,7 @@ const timelineTab = ref<TimelineTab>('timeline');
 const timelineCollapsed = ref(true);
 const paintByGroup = ref(false);
 const selectedClusterId = ref<string | null>(null);
-const panels = ref<Record<CasePanel, boolean>>({ filters: false, table: false, metrics: false, layout: false, look: false, advanced: false });
+const panels = ref<Record<CasePanel, boolean>>({ filters: false, table: false, metrics: false, layout: false, look: false, clusters: false });
 const lookTab = ref<LookTab>('style');
 const canvasRef = ref<InstanceType<typeof GraphCanvas3D> | null>(null);
 const canvasAreaRef = ref<HTMLElement | null>(null);
@@ -198,7 +200,7 @@ function exportPng() {
 // Right-click: the context's configured actions (open a URL, copy), cluster
 // programs and the community table — the same menu the exploration has.
 // Query-template actions are the exploration's: running one replaces the graph.
-const communityTable = useCommunityTableAction();
+const communityTable = useCommunityMenuActions();
 const clusterProgramActions = useClusterProgramMenuActions();
 const configurableMenuActions = useConfigurableMenuActions();
 const { pendingTemplateExecution } = configurableMenuActions;
@@ -208,6 +210,9 @@ watch(
   (id) => {
     const configs = id ? (store.contexts[id]?.context_menu_actions ?? []) : [];
     menuActionsStore.hydrateFromContext(configs.filter((c) => c.kind !== 'run-query-template'));
+    // The Clusters panel offers that context's programs (the built-ins only on
+    // a canvas with several graphs: a program is written for one schema).
+    clusterStore.hydrateProgramsFromContext(id ? store.contexts[id]?.cluster_programs : undefined);
   },
   { immediate: true },
 );
@@ -215,6 +220,7 @@ watch(() => store.contexts, () => {
   const id = canvasContextId.value;
   if (!id) return;
   menuActionsStore.hydrateFromContext((store.contexts[id]?.context_menu_actions ?? []).filter((c) => c.kind !== 'run-query-template'));
+  clusterStore.hydrateProgramsFromContext(store.contexts[id]?.cluster_programs);
 });
 const dossierRef = ref<InstanceType<typeof CaseDossier> | null>(null);
 
@@ -349,7 +355,7 @@ async function loadWorkspace() {
  * whenever the canvas, an item's version or saved look, or a source's revision
  * changes (a live refresh of the exploration's style lands too).
  */
-const resolvedLook = computed(() => resolveCanvasLook(store.canvasItems, store.sourceGraphs));
+const resolvedLook = computed(() => resolveCanvasLook(store.canvasItems, store.sourceGraphs, store.contexts));
 let appliedLookKey: string | null = null;
 let focusedKey: string | null = null;
 function applyCanvasStyle() {
@@ -363,8 +369,10 @@ function applyCanvasStyle() {
   });
   // A trace laid out by layer keeps its columns whatever the look says.
   const layoutLocked = graphStore.layoutAlgorithm === 'trace-layers';
+  // The context's default behaviors are the baseline a look's own behaviors land on.
+  if (r.behaviors) graphStore.behaviors = resolveInitialBehaviors(r.behaviors);
   if (r.look) {
-    const mapped = mapLookToCanvas(r.look, r.sourceId!, store.unified.nodes);
+    const mapped = mapLookToCanvas(r.look, (r.sourceId ?? r.contextItemId)!, store.unified.nodes);
     const { layout_algorithm: _la, layout_mode_config: _lm, ...withoutLayout } = mapped;
     graphStore.applyStylePreset(layoutLocked ? withoutLayout : mapped, { freshLayout: fresh && !layoutLocked });
   } else {
@@ -398,6 +406,7 @@ watch(() => [resolvedLook.value.key, store.graphLoading], () => applyCanvasStyle
 const singleCanvasItem = computed(() => (store.canvasItems.length === 1 ? store.canvasItems[0] : null));
 const lookCaption = computed(() => {
   const r = resolvedLook.value;
+  if (r.contextId) return `Default look of “${contextTitle(r.contextId)}”`;
   if (!r.sourceId) return 'Default look';
   const title = store.itemTitle(r.sourceId);
   return store.canvasItems.length > 1 ? `Unified canvas · look from “${title}”` : `Look of “${title}”`;
@@ -485,6 +494,7 @@ watch(
     decideMode.value = false;
     entityPage.value = null;
     filters.restore(null);
+    graphStore.clearIsolation();
     await store.openInvestigation(id);
     // The journal and the brief are secondary: a failure here must not block the graph.
     store.fetchEvents().catch(() => {});
@@ -676,11 +686,11 @@ onUnmounted(() => {
               <GraphCanvasToolbar
                 class="strip-toolbar"
                 compact
-                :buttons="['filters', 'table', 'layout', 'look', 'advanced', 'fit', 'export']"
-                :active="{ filters: panels.filters, table: panels.table, layout: panels.layout, look: panels.look, advanced: panels.advanced }"
+                :buttons="['filters', 'table', 'layout', 'look', 'clusters', 'fit', 'export']"
+                :active="{ filters: panels.filters, table: panels.table, layout: panels.layout, look: panels.look, clusters: panels.clusters }"
                 :view-mode="graphStore.behaviors.viewMode"
                 :is-fullscreen="isFullscreen"
-                :test-ids="{ filters: 'workspace-filters-btn', table: 'workspace-table-btn', layout: 'workspace-layout-btn', look: 'workspace-look-btn', advanced: 'workspace-advanced-btn', fit: 'workspace-fit-btn', export: 'workspace-export-btn' }"
+                :test-ids="{ filters: 'workspace-filters-btn', table: 'workspace-table-btn', layout: 'workspace-layout-btn', look: 'workspace-look-btn', clusters: 'workspace-clusters-btn', fit: 'workspace-fit-btn', export: 'workspace-export-btn' }"
                 @toggle="(id: CanvasToolbarButton) => togglePanel(id as CasePanel)"
                 @fit="canvasRef?.zoomToFit?.()"
                 @fullscreen="toggleFullscreen"
@@ -689,6 +699,8 @@ onUnmounted(() => {
               />
             </div>
             <CaseFilterChips :can-edit="canEdit" @apply-view="applyView" />
+            <!-- The groups (communities, program clusters) as chips while the Clusters panel is closed -->
+            <GroupLegend v-if="!panels.clusters" variant="chips" class="group-strip" @open-panel="panels.clusters = true" />
             <div v-if="graphStore.queryError" class="error-banner" data-testid="canvas-error">{{ graphStore.queryError.message }}</div>
             <section ref="canvasAreaRef" class="canvas-area" :class="{ fullscreen: isFullscreen }" :style="{ '--canvas-bottom-bar': `${bottomBarHeight}px` }" data-testid="graph-container">
               <div v-if="store.graphLoading || graphStore.loading" class="overlay">{{ graphStore.loadingMessage || 'Loading the case…' }}</div>
@@ -704,7 +716,7 @@ onUnmounted(() => {
 
               <div v-if="panels.filters" class="side-panel left" data-testid="panel-filters"><FilterPanel @close="panels.filters = false" /></div>
               <div v-if="panels.metrics" class="side-panel right" data-testid="panel-metrics"><MetricsPanel @close="panels.metrics = false" /></div>
-              <div v-if="panels.advanced" class="side-panel right" data-testid="panel-advanced"><ClusterProgramPanel @close="panels.advanced = false" /></div>
+              <div v-if="panels.clusters" class="side-panel right" data-testid="panel-clusters"><ClusterProgramPanel @close="panels.clusters = false" /></div>
               <div v-if="panels.look" class="side-panel right look-host" data-testid="panel-look">
                 <LookPanel
                   v-model:tab="lookTab"
@@ -807,7 +819,7 @@ onUnmounted(() => {
           :edges="graphStore.edges.length"
           test-id="workspace-status"
           @open-behaviors="openLook('behaviors')"
-          @show-clusters="panels.advanced = true"
+          @show-clusters="panels.clusters = true"
         >
           <span>
             {{ store.canvasItems.length }} {{ store.canvasItems.length === 1 ? 'source' : 'sources' }}<template v-if="store.restrictedItems.length"> + {{ store.restrictedItems.length }} restricted</template>
@@ -833,6 +845,7 @@ onUnmounted(() => {
     <ItemViewer v-if="itemViewer.target && store.current" />
     <EntityPage v-if="entityPage" :node="entityPage" :can-edit="canEdit" @close="entityPage = null" @select-item="(i) => { entityPage = null; selectItem(i); }" />
     <ClusterNodeModal v-if="selectedClusterId" :cluster-id="selectedClusterId" @close="selectedClusterId = null" />
+    <ClusterProgramRunHost />
     <CommunityNodeModal :community-id="communityTable.selectedCommunityId.value" @close="communityTable.close()" />
     <DetailModal :item="detailModalItem" @close="showDetailModal = false" />
     <TemplateExecuteModal
@@ -859,6 +872,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.group-strip {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
 .loading-line {
   display: flex;
   align-items: center;

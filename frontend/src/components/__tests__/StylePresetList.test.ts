@@ -20,6 +20,7 @@ vi.mock('@/services/api', () => ({
     getStylePreset: vi.fn(),
     putStylePreset: vi.fn(),
     deleteStylePreset: vi.fn(),
+    updateGraphContext: vi.fn(),
   },
 }));
 
@@ -510,5 +511,40 @@ describe('StylePresetList — export / import', () => {
     await nextTick();
     expect(el('style-preset-import-save')).toBeNull();
     expect(el('style-preset-import-apply')).not.toBeNull();
+  });
+  describe('context default (★)', () => {
+    it('makes a preset the default look, without its behaviors, and unmarks it on a second click', async () => {
+      vi.mocked(api.listStylePresets).mockResolvedValue([entry('dark')] as any);
+      vi.mocked(api.getStylePreset).mockResolvedValue({
+        name: 'dark',
+        settings: { nodeTypeColors: { Person: '#000' }, behaviors: { viewMode: '3d' } },
+      } as any);
+      vi.mocked(api.updateGraphContext).mockImplementation(async (id, data) => ({ id, title: 'ctx', ...data }) as any);
+      const { graphStore } = await renderModal();
+      graphStore.currentContext = { id: CONTEXT_ID, title: 'ctx', default_behaviors: { autoLoadOnOpen: true } } as any;
+      await flush();
+
+      await fireEvent.click(el('style-preset-default-dark')!);
+      await flush();
+      expect(api.updateGraphContext).toHaveBeenLastCalledWith(CONTEXT_ID, {
+        default_behaviors: { autoLoadOnOpen: true, look: { nodeTypeColors: { Person: '#000' }, source: 'preset:dark' } },
+      });
+      expect(graphStore.currentContext?.default_behaviors?.look).toBeTruthy();
+      expect(el('style-preset-default-dark')!.getAttribute('aria-pressed')).toBe('true');
+
+      await fireEvent.click(el('style-preset-default-dark')!);
+      await flush();
+      expect(api.updateGraphContext).toHaveBeenLastCalledWith(CONTEXT_ID, { default_behaviors: { autoLoadOnOpen: true } });
+    });
+
+    it('is not offered without write access', async () => {
+      vi.mocked(api.listStylePresets).mockResolvedValue([entry('dark')] as any);
+      const graphStore = useGraphStore();
+      graphStore.currentContext = { id: CONTEXT_ID, title: 'ctx' } as any;
+      render(StylePresetList, { props: { apply: 'url', contextId: CONTEXT_ID, canWrite: false } });
+      await flush();
+      expect(el('style-preset-item-dark')).toBeTruthy();
+      expect(el('style-preset-default-dark')).toBeNull();
+    });
   });
 });

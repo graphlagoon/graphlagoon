@@ -1,5 +1,5 @@
 import { ref, computed, watch } from 'vue';
-import { ExternalLink, Copy, Play } from 'lucide-vue-next';
+import { ExternalLink, Copy, Play, Focus } from 'lucide-vue-next';
 import type { Component } from 'vue';
 import { useContextMenu, type ContextMenuTarget } from './useContextMenu';
 import { useToast } from './useToast';
@@ -9,6 +9,7 @@ import { useMetricsStore } from '@/stores/metrics';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useTemplateExecution } from './useTemplateExecution';
 import { matchesAction } from '@/utils/menuActionMatcher';
+import { nodeFieldValue } from '@/utils/isolation';
 import { buildUrlFromTemplate, openUrl } from '@/utils/safeUrl';
 import {
   formatLabel,
@@ -31,6 +32,7 @@ const KIND_ICONS: Record<string, Component> = {
   'open-url': ExternalLink,
   'copy-text': Copy,
   'run-query-template': Play,
+  'show-same-value': Focus,
 };
 
 /**
@@ -180,6 +182,20 @@ export function useConfigurableMenuActions() {
           return;
         }
         await executeTemplateAsGraph(template, values);
+        return;
+      }
+      case 'show-same-value': {
+        if (target.type !== 'node') return;
+        const value = nodeFieldValue(item as Node, config.field, metricsStore.metricResolver);
+        if (config.mode === 'same' && value === '') {
+          error(`"${config.label}": this node has no ${config.field}`);
+          return;
+        }
+        graphStore.isolate(
+          config.mode === 'has'
+            ? { kind: 'value', field: config.field, value: null, mode: 'has', label: `${config.field} is set` }
+            : { kind: 'value', field: config.field, value, mode: 'same', label: `${config.field} = ${value}` },
+        );
         return;
       }
     }

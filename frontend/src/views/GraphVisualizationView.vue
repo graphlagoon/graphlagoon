@@ -18,6 +18,7 @@ import MetricsPanel from '@/components/MetricsPanel.vue';
 import ResourceMonitorModal from '@/components/ResourceMonitorModal.vue';
 import LookPanel from '@/components/LookPanel.vue';
 import GraphCanvasToolbar, { type CanvasToolbarButton } from '@/components/GraphCanvasToolbar.vue';
+import GroupLegend from '@/components/GroupLegend.vue';
 import GraphStatusBar from '@/components/GraphStatusBar.vue';
 import { useCanvasFullscreen } from '@/composables/useCanvasFullscreen';
 import QueryErrorModal from '@/components/QueryErrorModal.vue';
@@ -25,8 +26,12 @@ import QueryRunningState from '@/components/QueryRunningState.vue';
 import ClusterProgramPanel, { type ClustersTab } from '@/components/ClusterProgramPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
 import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
+import ClusterProgramRunHost from '@/components/ClusterProgramRunHost.vue';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
-import { useCommunityTableAction } from '@/composables/useCommunityTableAction';
+import { contextDefaultLook } from '@/utils/caseLook';
+import { storedDefaultLook, toDefaultLook, useContextDefaultLook, type DefaultLook } from '@/composables/useContextDefaultLook';
+import { getErrorMessage } from '@/utils/errorMessage';
+import { useCommunityMenuActions } from '@/composables/useCommunityMenuActions';
 import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
 import { useConfigurableMenuActions } from '@/composables/useConfigurableMenuActions';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
@@ -171,13 +176,34 @@ const showMetricsPanel = ref(false);
 const showResourceMonitor = ref(false);
 // Style, labels, behaviors and presets: one panel, four tabs.
 const showLookPanel = ref(false);
+
+// The context's default look (`default_behaviors.look`): the look on screen, saved on the context.
+const { setDefaultLook } = useContextDefaultLook();
+const savingDefaultLook = ref(false);
+const hasContextDefaultLook = computed(() => !!storedDefaultLook(graphStore.currentContext));
+async function saveContextDefaultLook(look: DefaultLook | null, done: string) {
+  const id = graphStore.currentContext?.id;
+  if (!id) return;
+  savingDefaultLook.value = true;
+  try {
+    await setDefaultLook(id, look);
+    toast.success(done);
+  } catch (e) {
+    toast.error(getErrorMessage(e, 'Failed to save the default look'));
+  } finally {
+    savingDefaultLook.value = false;
+  }
+}
+const makeContextDefaultLook = () =>
+  saveContextDefaultLook(toDefaultLook(graphStore.buildStylePreset(), 'current'), 'This look is now the context default');
+const clearContextDefaultLook = () => saveContextDefaultLook(null, 'The context opens with the stock look again');
 const lookTab = ref<LookTab>('style');
 const showClusterPrograms = ref(false);
 const showTemplatesPanel = ref(false);
 const showMenuActionsModal = ref(false);
 const showPrecomputedPanel = ref(false);
 const selectedClusterId = ref<string | null>(null);
-const communityTable = useCommunityTableAction();
+const communityTable = useCommunityMenuActions();
 const clusterProgramActions = useClusterProgramMenuActions();
 const configurableMenuActions = useConfigurableMenuActions();
 // Ref driving the pre-filled TemplateExecuteModal opened by run-query-template
@@ -288,7 +314,7 @@ function toggleLook(tab?: LookTab) {
  * named two different surfaces; they are now the panel's Results tab, reached
  * from the status bar's cluster count.
  */
-const clustersTab = ref<ClustersTab>('communities');
+const clustersTab = ref<ClustersTab>('groups');
 
 function showClusterResults() {
   clustersTab.value = 'results';
@@ -468,6 +494,14 @@ async function loadGraphFromRoute(
   explorationId: string | undefined,
   templateParsed: ParsedTemplateUrl,
 ) {
+  // A graph opened without an exploration wears the context's default look
+  // (`default_behaviors.look`). An exploration brings its own; `?style=` runs
+  // after this and wins over both.
+  if (!explorationId) {
+    const look = contextDefaultLook(graphStore.currentContext);
+    if (look) graphStore.applyStylePreset(look);
+  }
+
   // Precedence: exploration > precomputed > template > default auto-load.
   // A template shadowed by either of the first two is ignored ENTIRELY —
   // running it as well would race two loads for one canvas.
@@ -783,7 +817,28 @@ watch(
         :can-write-presets="graphStore.currentContext?.has_write_access === true"
         @close="setDocked('look', false)"
         @open-menu-actions="showMenuActionsModal = true"
-      />
+      >
+        <template v-if="graphStore.currentContext?.has_write_access" #footer>
+          <button
+            class="btn btn-outline btn-sm"
+            data-testid="look-make-context-default"
+            title="Open this context with the look on screen when no exploration says otherwise"
+            :disabled="savingDefaultLook"
+            @click="makeContextDefaultLook"
+          >
+            Make context default
+          </button>
+          <button
+            v-if="hasContextDefaultLook"
+            class="btn btn-outline btn-sm"
+            data-testid="look-clear-context-default"
+            :disabled="savingDefaultLook"
+            @click="clearContextDefaultLook"
+          >
+            Clear default
+          </button>
+        </template>
+      </LookPanel>
       <GraphQueryPanel v-if="showQueryPanel" @close="showQueryPanel = false; toolbarStore.setPanelActive('query', false)" />
       <MetricsPanel
         v-if="showMetricsPanel"
@@ -851,6 +906,9 @@ watch(
             @close="showLayoutPanel = false"
           />
         </div>
+
+        <!-- The groups as a clickable legend while the Clusters panel is closed -->
+        <GroupLegend v-if="!showClusterPrograms" @open-panel="openPanel('clusters')" />
 
         <!-- Floating Details Panel (shown in fullscreen mode) -->
         <SidePanel v-if="isFullscreen" variant="floating" @show-details="showDetailModal = true" />
@@ -1023,6 +1081,7 @@ watch(
     />
 
     <!-- Community Node Modal (opened via node context menu) -->
+    <ClusterProgramRunHost />
     <CommunityNodeModal
       :community-id="communityTable.selectedCommunityId.value"
       @close="communityTable.close()"

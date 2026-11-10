@@ -450,7 +450,7 @@ export const useCommunityStore = defineStore('community', () => {
     for (const [communityId, nodeIds] of communitiesById.value) {
       newClusters.push({
         cluster_id: `community-${communityId}`,
-        cluster_name: `Community ${communityId}`,
+        cluster_name: communityLabels.value[communityId] ?? `Community ${communityId}`,
         cluster_class: 'community',
         figure: 'circle',
         state: 'closed',

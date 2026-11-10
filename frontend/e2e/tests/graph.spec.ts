@@ -1,6 +1,7 @@
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_CONTEXT_NO_AUTOLOAD, MOCK_EXPLORATION } from '../fixtures/mock-data';
 import { seedContexts, seedExplorations, mockCancellableGraphJob, seedQueryTemplates } from '../helpers/api-mocks';
+import { waitForNodeVisualState } from '../helpers/graph-hooks';
 
 test.describe('Graph Visualization', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
@@ -319,10 +320,13 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByTitle('Clusters')).toBeVisible({ timeout: 15_000 });
 
       await page.getByTitle('Clusters').click();
-      await expect(page.getByRole('button', { name: 'Communities' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Programs' })).toBeVisible();
+      // Results first: a run bar and the groups, Similarity apart.
+      await expect(page.getByTestId('cluster-run-bar')).toBeVisible();
+      await expect(page.getByTestId('clusters-tab-groups')).toBeVisible();
+      await expect(page.getByTestId('clusters-tab-similarity')).toBeVisible();
 
       await page.getByTitle('Clusters').click();
+      await expect(page.getByTestId('cluster-run-bar')).toHaveCount(0);
     });
   });
 
@@ -330,53 +334,94 @@ test.describe('Graph Visualization', () => {
   // Clusters
   // ---------------------------------------------------------------------------
   test.describe('Clusters', () => {
-    test('a program run lands in the Results tab, reachable from the status bar', async ({ authenticatedPage: page }) => {
+    /** Run a built-in program from the library: its clusters become cluster nodes. */
+    async function runProgramFromLibrary(page: import('@playwright/test').Page) {
+      await page.getByTitle('Clusters', { exact: true }).click();
+      await page.getByTestId('cluster-manage-programs').click();
+      await expect(page.getByTestId('cluster-program-library')).toBeVisible();
+      // Group by Node Type always produces clusters; Orphan Clusters would not
+      // on this fixture graph.
+      await page.getByTestId('cluster-program-run-default-group-by-node-type').click();
+      await page.getByTestId('cluster-program-library').getByRole('button', { name: 'Close' }).click();
+    }
+
+    test('a program run from the library lists its clusters, reachable from the status bar', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
       // No clusters yet: nothing claims there are.
       await expect(page.getByTestId('graph-status-clusters')).toHaveCount(0);
 
-      await page.getByTitle('Clusters', { exact: true }).click();
-      await page.getByRole('button', { name: 'Programs' }).click();
-      // Group by Node Type always produces clusters; Orphan Clusters would not
-      // on this fixture graph.
-      await page.getByTestId('cluster-program-run-default-group-by-node-type').click();
-
-      // The clusters produced live in this panel's Results tab — they used to
-      // be a separate floating panel with its own toolbar button.
+      await runProgramFromLibrary(page);
       const chip = page.getByTestId('graph-status-clusters');
       await expect(chip).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTestId('clusters-tab-results').click();
-      await expect(page.getByTestId('clusters-results-pane')).toBeVisible();
+      // The clusters are layers of the Groups list.
+      await expect(page.locator('[data-testid^="group-row-cluster:"]')).toHaveCount(2);
 
-      // The status-bar count opens that same tab.
-      await page.getByRole('button', { name: 'Communities' }).click();
+      // The status-bar count opens the panel on that list.
+      await page.getByTitle('Clusters', { exact: true }).click();
+      await expect(page.getByTestId('clusters-groups-pane')).toHaveCount(0);
       await chip.click();
-      await expect(page.getByTestId('clusters-results-pane')).toBeVisible();
+      await expect(page.locator('[data-testid^="group-row-cluster:"]')).toHaveCount(2);
     });
 
     test('deleting a cluster is undoable instead of asking first', async ({ authenticatedPage: page }) => {
       await page.goto(`/graph/${MOCK_CONTEXT.id}`);
       await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTitle('Clusters', { exact: true }).click();
-      await page.getByRole('button', { name: 'Programs' }).click();
-      await page.getByTestId('cluster-program-run-default-group-by-node-type').click();
-      await page.getByTestId('clusters-tab-results').click();
-
+      await runProgramFromLibrary(page);
       const chip = page.getByTestId('graph-status-clusters');
       await expect(chip).toBeVisible({ timeout: 15_000 });
       const before = (await chip.textContent())!.trim();
 
       // No confirmation for client-side state the app can put back.
-      await page.getByRole('button', { name: /^Delete cluster/ }).first().click();
+      await page.locator('[data-testid^="group-menu-cluster:"]').first().click();
+      await page.getByRole('menuitem', { name: 'Delete cluster' }).click();
       await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
       await expect(chip).not.toHaveText(before);
 
       await page.getByTestId('toast-action-undo').click();
       await expect(chip).toHaveText(before);
+    });
+
+    test('grouping from the run bar, then clicking a group shows only it', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+      expect((await waitForNodeVisualState(page, 'n1')).hidden).toBe(false);
+
+      await page.getByTitle('Clusters', { exact: true }).click();
+      await page.getByTestId('community-algorithm-select').selectOption('cluster-program:default-group-by-node-type');
+      await page.getByTestId('cluster-run').click();
+      // The run bar folds into its summary; the groups take the room.
+      await expect(page.getByTestId('cluster-run-summary')).toContainText('Group by Node Type');
+      await expect(page.locator('[data-testid^="group-row-community:"]')).toHaveCount(2);
+
+      await page.locator('[data-testid^="group-name-community:"]', { hasText: 'Company' }).click();
+      await expect(page.getByTestId('status-isolation')).toContainText('Company');
+      await expect.poll(async () => (await waitForNodeVisualState(page, 'n1')).hidden).toBe(true);
+      expect((await waitForNodeVisualState(page, 'n4')).hidden).toBe(false);
+
+      await page.getByTestId('status-isolation-clear').click();
+      await expect(page.getByTestId('status-isolation')).toHaveCount(0);
+      await expect.poll(async () => (await waitForNodeVisualState(page, 'n1')).hidden).toBe(false);
+    });
+
+    test('with the panel closed, the floating legend shows only a group too', async ({ authenticatedPage: page }) => {
+      await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+      await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTitle('Clusters', { exact: true }).click();
+      await page.getByTestId('community-algorithm-select').selectOption('cluster-program:default-group-by-node-type');
+      await page.getByTestId('cluster-run').click();
+      await expect(page.locator('[data-testid^="group-row-community:"]')).toHaveCount(2);
+      await page.getByTitle('Clusters', { exact: true }).click();
+
+      const legend = page.getByTestId('group-legend');
+      await expect(legend).toBeVisible();
+      await legend.locator('[data-testid^="group-legend-community:"]', { hasText: 'Person' }).click();
+      await expect(page.getByTestId('status-isolation')).toContainText('Person');
+      await expect.poll(async () => (await waitForNodeVisualState(page, 'n4')).hidden).toBe(true);
     });
   });
 

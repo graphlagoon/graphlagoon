@@ -132,6 +132,26 @@ describe('parseImportedActionConfigs', () => {
       ).ok,
     ).toBe(false);
   });
+
+  it('parses show-same-value, forcing the target to nodes', () => {
+    const r = parseImportedActionConfigs(JSON.stringify([
+      { kind: 'show-same-value', label: 'Same branch', match: { target: 'both' }, field: ' branch_id ', mode: 'same' },
+      { kind: 'show-same-value', label: 'Has email', match: { target: 'node' }, field: 'email', mode: 'whatever' },
+    ]));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.configs[0]).toMatchObject({ kind: 'show-same-value', field: 'branch_id', mode: 'same', match: { target: 'node' } });
+    // An unknown mode falls back to "same".
+    expect(r.configs[1]).toMatchObject({ field: 'email', mode: 'same' });
+  });
+
+  it('rejects show-same-value without a field', () => {
+    const r = parseImportedActionConfigs(
+      JSON.stringify([{ kind: 'show-same-value', label: 'X', match: { target: 'node' }, mode: 'has' }]),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('field');
+  });
 });
 
 describe('parseImportedActionConfigs — portable envelope', () => {
@@ -223,6 +243,21 @@ describe('actionCompatibilityWarnings', () => {
       CURRENT,
     );
     expect(hasActionCompatibilityWarnings(w)).toBe(false);
+  });
+
+  it('show-same-value: an unknown field is a missing property, a metric a session ref, node_type fine', () => {
+    const base = { label: 'Same', enabled: true, kind: 'show-same-value' as const, mode: 'same' as const, match: { target: 'node' as const } };
+    const w = actionCompatibilityWarnings(
+      [
+        { ...base, id: '1', field: 'branch_id' },
+        { ...base, id: '2', field: 'metric:degree' },
+        { ...base, id: '3', field: 'node_type' },
+        { ...base, id: '4', field: 'full_name' },
+      ],
+      CURRENT,
+    );
+    expect(w.missingProperties).toEqual(['branch_id']);
+    expect(w.sessionMetricRefs).toEqual(['degree']);
   });
 
   it('collects metric refs as session warnings, never as missing columns', () => {

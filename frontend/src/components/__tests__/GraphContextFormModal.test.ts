@@ -12,6 +12,9 @@ vi.mock('@/services/api', () => ({
     discoverSchema: vi.fn(),
     createGraphContext: vi.fn(),
     updateGraphContext: vi.fn(),
+    getExplorations: vi.fn(),
+    listStylePresets: vi.fn(),
+    getStylePreset: vi.fn(),
   },
 }))
 
@@ -442,6 +445,98 @@ describe('GraphContextFormModal', () => {
       expect(payload.edge_semantics).toEqual({
         amount_prop: 'valor', amount_unit: 'cents', time_prop: 'data', currency: 'BRL',
       })
+    })
+  })
+  describe('default look (default_behaviors.look)', () => {
+    const LOOK = { nodeTypeColors: { Person: '#ff0000' }, layout_algorithm: 'circular' }
+
+    beforeEach(() => {
+      vi.mocked(api.getExplorations).mockResolvedValue([
+        { id: 'exp-1', title: 'Styled', state: { ...LOOK, behaviors: { viewMode: '2d-proj' } } },
+        { id: 'exp-2', title: 'Plain', state: {} },
+      ] as any)
+      vi.mocked(api.listStylePresets).mockResolvedValue([{ name: 'dark' }] as any)
+      vi.mocked(api.getStylePreset).mockResolvedValue({ name: 'dark', settings: { nodeTypeColors: { Person: '#000' } } } as any)
+    })
+
+    async function submitted() {
+      await flush()
+      return vi.mocked(api.updateGraphContext).mock.calls[0][1]
+    }
+
+    it('keeps the look out of the behaviors textarea and saves both back', async () => {
+      const context = createGraphContext({ id: 'ctx', default_behaviors: { viewMode: '3d', look: { ...LOOK, source: 'json' } } })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+
+      expect((getByTestId('create-context-default-behaviors') as HTMLTextAreaElement).value).not.toContain('look')
+      expect(getByTestId('context-default-look-summary').textContent).toContain('1 type color')
+      await fireEvent.click(getByTestId('create-context-submit'))
+      expect((await submitted()).default_behaviors).toEqual({ viewMode: '3d', look: { ...LOOK, source: 'json' } })
+    })
+
+    it('imports the look of an exploration, listing only explorations that have one', async () => {
+      const context = createGraphContext({ id: 'ctx' })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+
+      await fireEvent.click(getByTestId('context-default-look-open-import'))
+      await flush()
+      const select = getByTestId('context-default-look-source') as HTMLSelectElement
+      const values = [...select.options].map((o) => o.value)
+      expect(values).toContain('exploration:exp-1')
+      expect(values).not.toContain('exploration:exp-2')
+      expect(values).toContain('preset:dark')
+
+      await fireEvent.update(select, 'exploration:exp-1')
+      await fireEvent.click(getByTestId('context-default-look-import'))
+      await flush()
+      await fireEvent.click(getByTestId('create-context-submit'))
+      const payload = await submitted()
+      expect(payload.default_behaviors?.look).toEqual({ ...LOOK, source: 'exploration:Styled' })
+    })
+
+    it('imports the behaviors of an exploration into the textarea', async () => {
+      const context = createGraphContext({ id: 'ctx', default_behaviors: { autoLoadOnOpen: true } })
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      await fireEvent.click(getByTestId('context-default-look-open-import'))
+      await flush()
+      await fireEvent.update(getByTestId('context-default-look-source'), 'exploration:exp-1')
+      await fireEvent.click(getByTestId('context-default-behaviors-import'))
+      await flush()
+      expect(JSON.parse((getByTestId('create-context-default-behaviors') as HTMLTextAreaElement).value)).toEqual({
+        autoLoadOnOpen: true,
+        viewMode: '2d-proj',
+      })
+    })
+
+    it('imports a preset and pasted JSON; Clear removes the look', async () => {
+      const context = createGraphContext({ id: 'ctx', default_behaviors: { viewMode: '3d' } })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+      const { getByTestId, queryByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+
+      await fireEvent.click(getByTestId('context-default-look-open-import'))
+      await flush()
+      await fireEvent.update(getByTestId('context-default-look-source'), 'preset:dark')
+      await fireEvent.click(getByTestId('context-default-look-import'))
+      await flush()
+      expect(getByTestId('context-default-look-summary').textContent).toContain('preset “dark”')
+
+      await fireEvent.click(getByTestId('context-default-look-open-import'))
+      await flush()
+      await fireEvent.update(getByTestId('context-default-look-source'), 'json')
+      await fireEvent.update(getByTestId('context-default-look-json'), 'not json')
+      await fireEvent.click(getByTestId('context-default-look-import'))
+      await flush()
+      expect(getByTestId('context-default-look-error').textContent).toContain('Not valid JSON')
+
+      await fireEvent.click(queryByTestId('context-default-look-clear')!)
+      await fireEvent.click(getByTestId('create-context-submit'))
+      expect((await submitted()).default_behaviors).toEqual({ viewMode: '3d' })
     })
   })
 })

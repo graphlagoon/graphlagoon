@@ -31,7 +31,7 @@ export async function waitForNodeVisualState(page: Page, nodeId: string) {
       nodeId,
       { timeout: 30_000 },
     );
-    return (await handle.jsonValue()) as { color: string; iconColor?: string };
+    return (await handle.jsonValue()) as { color: string; iconColor?: string; hidden?: boolean };
   } catch (error) {
     const hookInstalled = await page.evaluate(
       () => typeof (window as any).__GRAPH_NODE_VISUAL_STATE__ === 'function',

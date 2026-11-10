@@ -1,122 +1,73 @@
 <script setup lang="ts">
+/**
+ * The Clusters panel, results first: one run bar ("Group by" any algorithm or
+ * cluster program, output Color or Collapse), then the groups on the graph
+ * as layers (click = show only, Shift/Ctrl or the eye = add/remove), then the
+ * display options. The program library lives in its own modal; Similarity
+ * (it makes edges, not groups) is a separate tab.
+ */
 import { ref, computed, watch } from 'vue'
-import { useClusterStore, isDefaultProgramId } from '@/stores/cluster'
+import { useClusterStore } from '@/stores/cluster'
 import { useCommunityStore } from '@/stores/community'
 import { useSimilarityStore } from '@/stores/similarity'
 import { useGraphStore } from '@/stores/graph'
-import type { ClusterProgram } from '@/types/cluster'
 import { missingRequiredParams } from '@/utils/clusterProgramParams'
+import { useGroupRows, type GroupKind, type GroupRow } from '@/composables/useGroupRows'
 import SimilarityPanel from './SimilarityPanel.vue'
 import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
-import ClusterProgramEditorModal from './ClusterProgramEditorModal.vue'
-import ClusterProgramRunModal from './ClusterProgramRunModal.vue'
+import ClusterProgramLibraryModal from './ClusterProgramLibraryModal.vue'
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
-import ClusterListPanel from './ClusterListPanel.vue'
-import { X, Play, Loader2, Bot } from 'lucide-vue-next'
+import CommunityNodeModal from './CommunityNodeModal.vue'
+import { X, Play, Loader2, Bot, Eye, EyeOff, MoreHorizontal, Library, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
-import { confirmAction } from '@/composables/useConfirm';
+
+/**
+ * `groups` and `similarity` are the tabs. `communities`, `results` and
+ * `programs` are the tabs of the old panel, kept as aliases so links and the
+ * status bar's clusters chip keep working: they open the groups (programs
+ * opens the library).
+ */
+export type ClustersTab = 'groups' | 'similarity' | 'communities' | 'results' | 'programs'
+
+const props = withDefaults(defineProps<{ tab?: ClustersTab }>(), { tab: undefined })
 
 const emit = defineEmits<{
   'update:tab': [tab: ClustersTab]
   close: []
 }>()
 
-const toast = useToast()
-
 const clusterStore = useClusterStore()
 const communityStore = useCommunityStore()
 const similarityStore = useSimilarityStore()
 const graphStore = useGraphStore()
+const groups = useGroupRows()
+const toast = useToast()
 
-// UI state
-export type ClustersTab = 'communities' | 'programs' | 'similarity' | 'results'
+// ── Tabs ────────────────────────────────────────────────────────────────────
+type PaneTab = 'groups' | 'similarity'
+/** Which groups the list shows (declared before the tab watcher, which sets it). */
+const listKind = ref<GroupKind>('community')
+const showLibrary = ref(false)
+const showSkillModal = ref(false)
 
-/**
- * `tab` lets the page open the panel straight on a tab — the status bar's
- * cluster chip opens Results. Two-way so clicking a tab keeps the page in
- * sync.
- */
-const props = withDefaults(defineProps<{ tab?: ClustersTab }>(), { tab: undefined })
+function paneOf(tab: ClustersTab | undefined): PaneTab {
+  return tab === 'similarity' ? 'similarity' : 'groups'
+}
 
-const activeTab = ref<ClustersTab>(props.tab ?? 'communities')
-watch(() => props.tab, (t) => { if (t) activeTab.value = t })
-function selectTab(tab: ClustersTab) {
+const activeTab = ref<PaneTab>(paneOf(props.tab))
+watch(() => props.tab, (t) => {
+  if (!t) return
+  activeTab.value = paneOf(t)
+  if (t === 'results' && groups.clusterRows.value.length > 0) listKind.value = 'cluster'
+  if (t === 'programs') showLibrary.value = true
+}, { immediate: true })
+
+function selectTab(tab: PaneTab) {
   activeTab.value = tab
   emit('update:tab', tab)
 }
 
-// Community layout: one control for the mutually-exclusive spatial arrangements
-// (radial force vs. hive plot with one axis per community).
-type CommunityLayout = 'none' | 'radial' | 'hive'
-
-const communityLayout = computed<CommunityLayout>(() => {
-  if (communityStore.radialLayoutEnabled) return 'radial'
-  if (graphStore.layoutAlgorithm === 'hive' && graphStore.layoutModeConfig.hive.axisKey === 'community') return 'hive'
-  return 'none'
-})
-
-function setCommunityLayout(layout: CommunityLayout) {
-  if (layout === 'radial') {
-    // Enabling radial reverts any non-force layout mode (store watcher)
-    communityStore.radialLayoutEnabled = true
-  } else if (layout === 'hive') {
-    graphStore.updateLayoutModeConfig({ hive: { axisKey: 'community' } })
-    graphStore.setLayoutAlgorithm('hive') // disables radial via mutual exclusion
-  } else {
-    communityStore.radialLayoutEnabled = false
-    if (communityLayout.value === 'hive') {
-      graphStore.setLayoutAlgorithm('force')
-    }
-  }
-}
-const showSkillModal = ref(false)
-const expandedProgramId = ref<string | null>(null)
-
-// Editor modal: null = closed; { program: null } = create; { program } = edit
-const showEditor = ref(false)
-const editorProgram = ref<ClusterProgram | null>(null)
-
-// Run modal: set when executing a program that declares parameters
-const runProgram = ref<ClusterProgram | null>(null)
-
-function openCreate() {
-  editorProgram.value = null
-  showEditor.value = true
-}
-
-function handleEdit(program: ClusterProgram) {
-  editorProgram.value = program
-  showEditor.value = true
-}
-
-async function handleDelete(programId: string) {
-  const ok = await confirmAction({
-    title: 'Delete this cluster program?',
-    message: 'Clusters it already produced stay on the graph; the program itself is gone.',
-    confirmLabel: 'Delete',
-    danger: true,
-  })
-  if (ok) clusterStore.deleteProgram(programId)
-}
-
-async function handleExecute(program: ClusterProgram) {
-  // Programs with parameters prompt for values first
-  if ((program.parameters?.length ?? 0) > 0) {
-    runProgram.value = program
-    return
-  }
-
-  const result = await clusterStore.executeProgram(program.program_id)
-
-  if (result.success) {
-    const count = result.clusters?.length || 0
-    toast.success(`Generated ${count} cluster${count !== 1 ? 's' : ''} in ${result.duration_ms}ms`)
-  } else {
-    toast.error(`Cluster program failed: ${result.error}`)
-  }
-}
-
-// Communities tab: cluster program selected as algorithm, with inline params
+// ── Run bar ─────────────────────────────────────────────────────────────────
 const selectedCommunityProgram = computed(() =>
   communityStore.selectedProgramId
     ? clusterStore.getProgram(communityStore.selectedProgramId)
@@ -145,75 +96,158 @@ function setCommunityProgramParams(values: Record<string, string | number | bool
   communityStore.programParams[communityStore.selectedProgramId] = values
 }
 
-function toggleExpand(programId: string) {
-  expandedProgramId.value = expandedProgramId.value === programId ? null : programId
-}
-
-function formatDate(dateStr: string) {
-  const date = new Date(dateStr)
-  return date.toLocaleString()
-}
-
-function getExecutionHistory(programId: string) {
-  return clusterStore.getExecutionHistory(programId).slice(0, 5) // Last 5 executions
-}
-
-function scopeLabel(program: ClusterProgram): string {
-  if (isDefaultProgramId(program.program_id)) return 'built-in'
-  return program.scope === 'exploration' ? 'exploration' : 'context'
-}
-
 function toggleEdgeTypeFilter(edgeType: string) {
   const current = communityStore.edgeTypeFilter
-  const idx = current.indexOf(edgeType)
-  if (idx >= 0) {
-    communityStore.edgeTypeFilter = current.filter(t => t !== edgeType)
-  } else {
-    communityStore.edgeTypeFilter = [...current, edgeType]
+  communityStore.edgeTypeFilter = current.includes(edgeType)
+    ? current.filter(t => t !== edgeType)
+    : [...current, edgeType]
+}
+
+const algorithmName = computed(() => {
+  if (selectedCommunityProgram.value) return selectedCommunityProgram.value.program_name
+  if (communityStore.algorithm === 'weak-components') return 'Weak components'
+  if (communityStore.algorithm === 'strong-components') return 'Strong components'
+  return 'Louvain'
+})
+
+/** One line saying how the groups on screen were made. */
+const runSummary = computed(() => {
+  const parts = [algorithmName.value]
+  if (communityStore.isLouvain) parts.push(`resolution ${communityStore.resolution.toFixed(1)}`)
+  parts.push(communityStore.collapseEnabled ? 'Collapse' : 'Color')
+  return parts.join(' · ')
+})
+
+// The run bar folds into its summary once there is a result, so the groups
+// get the room; "change" opens it again.
+const runOpen = ref(!communityStore.hasResults)
+watch(() => communityStore.hasResults, (has) => { if (!has) runOpen.value = true })
+
+async function run() {
+  await communityStore.runDetection()
+  if (communityStore.hasResults && !communityStore.error) {
+    runOpen.value = false
+    listKind.value = 'community'
   }
 }
+
+/** "Use" in the library: the program becomes the run bar's algorithm. */
+function useProgram(programId: string) {
+  communityStore.algorithm = `cluster-program:${programId}`
+  runOpen.value = true
+  activeTab.value = 'groups'
+}
+
+// ── Group list ──────────────────────────────────────────────────────────────
+const hasBothKinds = computed(() => groups.communityRows.value.length > 0 && groups.clusterRows.value.length > 0)
+watch(
+  () => [groups.communityRows.value.length, groups.clusterRows.value.length] as const,
+  ([communities, clusters]) => {
+    if (communities === 0 && clusters > 0) listKind.value = 'cluster'
+    if (clusters === 0 && communities > 0) listKind.value = 'community'
+  },
+  { immediate: true },
+)
+
+const search = ref('')
+const sortBy = ref<'size' | 'name'>('size')
+const SEARCH_FROM = 10
+
+const allRows = computed(() => groups.rowsOf(listKind.value))
+const visibleRows = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  const rows = q ? allRows.value.filter(r => r.label.toLowerCase().includes(q)) : [...allRows.value]
+  if (sortBy.value === 'name') rows.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
+  else rows.sort((a, b) => b.count - a.count)
+  return rows
+})
+const shownCount = computed(() => groups.shownCount(listKind.value))
+const isolating = computed(() => graphStore.isolation !== null)
+
+// ⋯ menu of one row
+const menuFor = ref<string | null>(null)
+function toggleMenu(row: GroupRow) {
+  menuFor.value = menuFor.value === row.key ? null : row.key
+}
+function menuAction(fn: () => void) {
+  fn()
+  menuFor.value = null
+}
+
+const membersCommunityId = ref<number | null>(null)
+
+function deleteCluster(row: GroupRow) {
+  const index = clusterStore.clusters.findIndex(c => c.cluster_id === row.id)
+  const cluster = clusterStore.clusters[index]
+  if (!cluster) return
+  if (graphStore.isolation?.kind === 'cluster') graphStore.clearIsolation()
+  clusterStore.deleteCluster(cluster.cluster_id)
+  // Client-side state the app can put back: undo instead of asking first.
+  toast.undoable(`“${cluster.cluster_name}” deleted`, () =>
+    clusterStore.restoreCluster(cluster, index),
+  )
+}
+
+function clearProgramClusters() {
+  if (graphStore.isolation?.kind === 'cluster') graphStore.clearIsolation()
+  clusterStore.clusters = clusterStore.clusters.filter(c => c.cluster_class === 'community' || c.cluster_class === 'group')
+}
+
+function clearCommunities() {
+  if (graphStore.isolation?.kind === 'community') graphStore.clearIsolation()
+  communityStore.clearCommunities()
+}
+
+// ── Display ─────────────────────────────────────────────────────────────────
+// Community layout: one control for the mutually-exclusive spatial arrangements
+// (radial force vs. hive plot with one axis per community).
+type CommunityLayout = 'none' | 'radial' | 'hive'
+
+const communityLayout = computed<CommunityLayout>(() => {
+  if (communityStore.radialLayoutEnabled) return 'radial'
+  if (graphStore.layoutAlgorithm === 'hive' && graphStore.layoutModeConfig.hive.axisKey === 'community') return 'hive'
+  return 'none'
+})
+
+function setCommunityLayout(layout: CommunityLayout) {
+  if (layout === 'radial') {
+    // Enabling radial reverts any non-force layout mode (store watcher)
+    communityStore.radialLayoutEnabled = true
+  } else if (layout === 'hive') {
+    graphStore.updateLayoutModeConfig({ hive: { axisKey: 'community' } })
+    graphStore.setLayoutAlgorithm('hive') // disables radial via mutual exclusion
+  } else {
+    communityStore.radialLayoutEnabled = false
+    if (communityLayout.value === 'hive') {
+      graphStore.setLayoutAlgorithm('force')
+    }
+  }
+}
+
+const displayOpen = ref(false)
 </script>
 
 <template>
   <div class="cluster-panel">
-    <!-- Header -->
     <div class="panel-header">
       <h3>Clusters</h3>
       <button class="btn-close btn-icon-only" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
     </div>
 
-    <!-- Tabs -->
     <div class="tab-bar">
       <button
         class="tab-btn"
-        :class="{ active: activeTab === 'communities' }"
-        @click="selectTab('communities')"
+        :class="{ active: activeTab === 'groups' }"
+        data-testid="clusters-tab-groups"
+        @click="selectTab('groups')"
       >
-        Communities
-        <span v-if="communityStore.hasResults" class="tab-badge">{{ communityStore.communityStats.count }}</span>
-      </button>
-      <button
-        class="tab-btn"
-        :class="{ active: activeTab === 'programs' }"
-        @click="selectTab('programs')"
-      >
-        Programs
-      </button>
-      <!-- The clusters a program produced used to live in a separate floating
-           panel with its own toolbar button, so "Clusters" meant two different
-           surfaces. -->
-      <button
-        class="tab-btn"
-        :class="{ active: activeTab === 'results' }"
-        data-testid="clusters-tab-results"
-        @click="selectTab('results')"
-      >
-        Results
-        <span v-if="clusterStore.clusters.length > 0" class="tab-badge">{{ clusterStore.clusterStats.total }}</span>
+        Groups
+        <span v-if="allRows.length" class="tab-badge">{{ groups.communityRows.value.length + groups.clusterRows.value.length }}</span>
       </button>
       <button
         class="tab-btn"
         :class="{ active: activeTab === 'similarity' }"
+        data-testid="clusters-tab-similarity"
         @click="selectTab('similarity')"
       >
         Similarity
@@ -221,41 +255,42 @@ function toggleEdgeTypeFilter(edgeType: string) {
       </button>
     </div>
 
-    <!-- Tab Content -->
     <div class="tab-content">
-
-      <!-- ================================================================ -->
-      <!-- Communities Tab -->
-      <!-- ================================================================ -->
-      <div v-if="activeTab === 'communities'" class="tab-pane">
-        <div class="community-config">
-          <!-- Algorithm selector: Louvain or a cluster program used as a community algorithm -->
+      <div v-if="activeTab === 'groups'" class="tab-pane" data-testid="clusters-groups-pane">
+        <!-- ── Run bar ─────────────────────────────────────────────── -->
+        <div v-if="!runOpen" class="run-summary" data-testid="cluster-run-summary">
+          <span class="run-summary-text" :title="runSummary">{{ runSummary }}</span>
+          <button class="btn-link" data-testid="cluster-run-change" @click="runOpen = true">change</button>
+        </div>
+        <div v-else class="run-bar" data-testid="cluster-run-bar">
           <div class="form-row">
-            <label for="community-algorithm">Algorithm</label>
+            <label for="community-algorithm">Group by</label>
             <select
               id="community-algorithm"
               v-model="communityStore.algorithm"
               class="community-algorithm-select"
               data-testid="community-algorithm-select"
             >
-              <option value="louvain">Louvain</option>
-              <option value="weak-components">Weak components</option>
-              <option value="strong-components">Strong components</option>
-              <option
-                v-for="program in clusterStore.programs"
-                :key="program.program_id"
-                :value="`cluster-program:${program.program_id}`"
-              >
-                {{ program.program_name }}
-              </option>
+              <optgroup label="Algorithms">
+                <option value="louvain">Louvain (communities)</option>
+                <option value="weak-components">Weak components</option>
+                <option value="strong-components">Strong components</option>
+              </optgroup>
+              <optgroup v-if="clusterStore.programs.length" label="Cluster programs">
+                <option
+                  v-for="program in clusterStore.programs"
+                  :key="program.program_id"
+                  :value="`cluster-program:${program.program_id}`"
+                >
+                  {{ program.program_name }}
+                </option>
+              </optgroup>
             </select>
-            <small v-if="communityStore.selectedProgramId" class="help-text">
-              Runs the cluster program as a community algorithm (no collapsed nodes).
-              Nodes in multiple clusters use the first; uncovered nodes form an "others" community.
+            <small v-if="selectedCommunityProgram?.description" class="help-text">
+              {{ selectedCommunityProgram.description }}
             </small>
           </div>
 
-          <!-- Cluster program parameters (inline, like the Louvain resolution slider) -->
           <div
             v-if="selectedCommunityProgram && (selectedCommunityProgram.parameters?.length ?? 0) > 0"
             class="form-row"
@@ -290,7 +325,6 @@ function toggleEdgeTypeFilter(edgeType: string) {
             <small class="help-text">Higher = more communities, lower = fewer</small>
           </div>
 
-          <!-- Edge type filter (Louvain only) -->
           <div v-if="!communityStore.selectedProgramId && graphStore.edgeTypes.length > 1" class="form-row">
             <label>Edge types</label>
             <div class="edge-type-chips">
@@ -311,275 +345,261 @@ function toggleEdgeTypeFilter(edgeType: string) {
                 {{ et }}
               </button>
             </div>
-            <small class="help-text">
-              Self-loops ignored. Multi-edges merged (weighted).
-            </small>
+          </div>
+
+          <div class="form-row">
+            <label>Output</label>
+            <div class="segmented" role="radiogroup" aria-label="Output">
+              <button
+                role="radio"
+                :aria-checked="!communityStore.collapseEnabled"
+                :class="{ active: !communityStore.collapseEnabled }"
+                data-testid="cluster-output-color"
+                title="Color each group; nodes stay where they are"
+                @click="communityStore.collapseEnabled = false"
+              >
+                Color
+              </button>
+              <button
+                role="radio"
+                :aria-checked="communityStore.collapseEnabled"
+                :class="{ active: communityStore.collapseEnabled }"
+                data-testid="cluster-output-collapse"
+                title="Collapse each group into one cluster node (open one from the list)"
+                @click="communityStore.collapseEnabled = true"
+              >
+                Collapse
+              </button>
+            </div>
           </div>
 
           <div class="community-actions">
             <button
               class="btn-detect"
+              data-testid="cluster-run"
               :disabled="communityStore.computing || communityMissingParams.length > 0"
-              @click="communityStore.runDetection()"
+              @click="run"
             >
               <Loader2 v-if="communityStore.computing" :size="12" class="spin" />
               <Play v-else :size="12" />
-              {{ communityStore.computing ? 'Detecting...' : 'Detect' }}
+              {{ communityStore.computing ? 'Running…' : 'Run' }}
+            </button>
+            <button
+              class="btn-secondary-sm"
+              data-testid="cluster-manage-programs"
+              title="Create, import, edit or run cluster programs"
+              @click="showLibrary = true"
+            >
+              <Library :size="12" /> Programs…
+            </button>
+            <button
+              class="btn-skill-help btn-icon-only"
+              data-testid="cluster-panel-ask-ai"
+              title="Not sure how? Get an AI prompt to write a cluster program"
+              aria-label="Get help writing a cluster program"
+              @click="showSkillModal = true"
+            >
+              <Bot :size="16" />
             </button>
             <button
               v-if="communityStore.hasResults"
-              class="btn-clear-community"
-              @click="communityStore.clearCommunities()"
+              class="btn-link"
+              @click="runOpen = false"
             >
-              Clear
+              cancel
             </button>
           </div>
 
-          <!-- Progress -->
           <div v-if="communityStore.computing && communityStore.progressMessage" class="community-progress">
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: communityStore.progressValue + '%' }"></div>
             </div>
             <small>{{ communityStore.progressMessage }}</small>
           </div>
-
-          <!-- Error -->
-          <div v-if="communityStore.error" class="community-error">
-            {{ communityStore.error }}
-          </div>
         </div>
 
-        <!-- Results -->
-        <template v-if="communityStore.hasResults">
-          <div class="stats">
-            <div class="stat">
-              <span class="stat-label">Found:</span>
-              <span class="stat-value">{{ communityStore.communityStats.count }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Q:</span>
-              <span class="stat-value" title="Modularity">{{ communityStore.modularity?.toFixed(3) ?? '—' }}</span>
-            </div>
-            <div class="stat">
-              <span class="stat-label">Avg:</span>
-              <span class="stat-value">{{ communityStore.communityStats.avgSize }}</span>
-            </div>
-          </div>
+        <div v-if="communityStore.error" class="community-error">
+          {{ communityStore.error }}
+        </div>
 
-          <!-- Visualization toggles -->
-          <div class="community-toggles">
-            <label class="toggle-row">
-              <input v-model="communityStore.colorEnabled" type="checkbox" />
-              <span>Color by community</span>
-            </label>
-            <label class="toggle-row">
-              <input
-                v-model="communityStore.tableColumnEnabled"
-                type="checkbox"
-                data-testid="community-table-toggle"
-              />
-              <span>Community column in Data Table</span>
-            </label>
-            <label class="toggle-row layout-select-row">
-              <span>Layout</span>
-              <select
-                class="community-layout-select"
-                data-testid="community-layout-select"
-                :value="communityLayout"
-                @change="setCommunityLayout(($event.target as HTMLSelectElement).value as CommunityLayout)"
-              >
-                <option value="none">None (force)</option>
-                <option value="radial">Radial</option>
-                <option value="hive">Hive plot</option>
-              </select>
-            </label>
-          </div>
+        <!-- ── Groups as layers ────────────────────────────────────── -->
+        <div v-if="allRows.length === 0" class="empty-state" data-testid="groups-empty">
+          <p>No groups yet.</p>
+          <p>Pick how to group the nodes above and press Run.</p>
+        </div>
 
-          <!-- Community list -->
-          <div class="community-list">
-            <div
-              v-for="comm in communityStore.communitiesSorted"
-              :key="comm.id"
-              class="community-item"
+        <template v-else>
+          <div v-if="hasBothKinds" class="segmented kind-switch">
+            <button
+              :class="{ active: listKind === 'community' }"
+              data-testid="groups-kind-community"
+              @click="listKind = 'community'"
             >
-              <span class="color-swatch" :style="{ backgroundColor: comm.color }"></span>
-              <span class="community-name">{{ comm.label }}</span>
-              <span class="community-count">{{ comm.nodeCount }}</span>
-            </div>
+              Colors ({{ groups.communityRows.value.length }})
+            </button>
+            <button
+              :class="{ active: listKind === 'cluster' }"
+              data-testid="groups-kind-cluster"
+              @click="listKind = 'cluster'"
+            >
+              Clusters ({{ groups.clusterRows.value.length }})
+            </button>
           </div>
-        </template>
-      </div>
 
-      <!-- ================================================================ -->
-      <!-- Programs Tab -->
-      <!-- ================================================================ -->
-      <div v-if="activeTab === 'programs'" class="tab-pane">
-        <!-- Programs toolbar -->
-        <div class="programs-toolbar">
-          <button
-            class="btn-create"
-            data-testid="cluster-program-new"
-            @click="openCreate"
-          >
-            + New
-          </button>
-          <button
-            class="btn-skill-help btn-icon-only"
-            data-testid="cluster-skill-help"
-            title="Not sure how? Get an AI prompt to write a cluster program"
-            aria-label="Get help writing a cluster program"
-            @click="showSkillModal = true"
-          >
-            <Bot :size="16" />
-          </button>
-          <button
-            v-if="clusterStore.clusters.length > 0"
-            class="btn-clear"
-            @click="clusterStore.clearClusters()"
-            title="Clear all clusters"
-          >
-            Clear Clusters
-          </button>
-        </div>
-
-        <!-- Stats -->
-        <div v-if="clusterStore.clusters.length > 0" class="stats">
-          <div class="stat">
-            <span class="stat-label">Clusters:</span>
-            <span class="stat-value">{{ clusterStore.clusterStats.total }}</span>
+          <div class="groups-header">
+            <span data-testid="groups-count">
+              {{ allRows.length }} {{ listKind === 'community' ? 'groups' : 'clusters' }}
+              <template v-if="listKind === 'community' && communityStore.modularity != null">
+                · <span title="Modularity">Q {{ communityStore.modularity.toFixed(2) }}</span>
+              </template>
+            </span>
+            <select v-model="sortBy" class="sort-select" aria-label="Sort groups">
+              <option value="size">by size</option>
+              <option value="name">by name</option>
+            </select>
           </div>
-          <div class="stat">
-            <span class="stat-label">Nodes:</span>
-            <span class="stat-value">{{ clusterStore.clusterStats.totalNodes }}</span>
+
+          <input
+            v-if="allRows.length > SEARCH_FROM"
+            v-model="search"
+            type="search"
+            class="groups-search"
+            placeholder="Find a group…"
+            data-testid="groups-search"
+          />
+
+          <div v-if="isolating" class="groups-showing" data-testid="groups-showing">
+            Showing {{ graphStore.isolation?.kind === listKind ? shownCount : 0 }} of {{ allRows.length }}
+            <template v-if="graphStore.isolation?.kind === 'value'">({{ graphStore.isolation.label }})</template>
+            · <button class="btn-link" data-testid="groups-show-all" @click="graphStore.clearIsolation()">show all</button>
           </div>
-        </div>
+          <p v-else class="help-text groups-hint">
+            Click a group to show only it; Shift+click or the eye to add or hide one.
+          </p>
 
-        <!-- Programs List -->
-        <div v-if="clusterStore.programs.length === 0" class="empty-state">
-          <p>No cluster programs yet.</p>
-          <p>Create a program to group nodes into clusters programmatically.</p>
-        </div>
-
-        <div v-else class="programs-list">
-          <div
-            v-for="program in clusterStore.programs"
-            :key="program.program_id"
-            class="program-item"
-            :class="{ expanded: expandedProgramId === program.program_id }"
-          >
-            <div class="program-header" @click="toggleExpand(program.program_id)">
-              <div class="program-info">
-                <h4>
-                  {{ program.program_name }}
-                  <span class="scope-badge" :class="`scope-${scopeLabel(program)}`">
-                    {{ scopeLabel(program) }}
-                  </span>
-                </h4>
-                <p v-if="program.description" class="program-description">
-                  {{ program.description }}
-                </p>
-                <small class="program-meta">
-                  Updated: {{ formatDate(program.updated_at) }}
-                  <template v-if="(program.parameters?.length ?? 0) > 0">
-                    · Params: {{ program.parameters!.length }}
-                  </template>
-                </small>
-              </div>
-              <div class="program-actions" @click.stop>
+          <ul class="community-list" role="list">
+            <li
+              v-for="row in visibleRows"
+              :key="row.key"
+              class="community-item"
+              :class="{ hidden: !groups.isShown(row), solo: groups.isSolo(row) }"
+              :data-testid="`group-row-${row.key}`"
+            >
+              <button
+                class="eye btn-icon-only"
+                :aria-pressed="groups.isShown(row)"
+                :aria-label="groups.isShown(row) ? `Hide ${row.label}` : `Show ${row.label}`"
+                :data-testid="`group-eye-${row.key}`"
+                @click="groups.toggleShown(row)"
+              >
+                <Eye v-if="groups.isShown(row)" :size="13" />
+                <EyeOff v-else :size="13" />
+              </button>
+              <button
+                class="group-name"
+                :title="groups.isSolo(row) ? 'Show every node' : `Show only ${row.label} (Shift+click: add to what is shown)`"
+                :data-testid="`group-name-${row.key}`"
+                @click="groups.clickRow(row, $event)"
+              >
+                <span class="color-swatch" :style="{ backgroundColor: row.color }"></span>
+                <span class="community-name">{{ row.label }}</span>
+              </button>
+              <button
+                v-if="row.collapsed !== undefined"
+                class="collapse-toggle"
+                :title="row.collapsed ? 'Expand: show its nodes' : 'Collapse into one cluster node'"
+                :data-testid="`group-collapse-${row.key}`"
+                @click="groups.toggleCollapsed(row)"
+              >
+                {{ row.collapsed ? 'collapsed' : 'open' }}
+              </button>
+              <span class="community-count">{{ row.count }}</span>
+              <div class="row-menu">
                 <button
-                  class="btn-execute"
-                  :data-testid="`cluster-program-run-${program.program_id}`"
-                  @click="handleExecute(program)"
-                  title="Execute program"
-                  :disabled="clusterStore.loading"
+                  class="btn-icon-only"
+                  :aria-label="`More on ${row.label}`"
+                  :aria-expanded="menuFor === row.key"
+                  :data-testid="`group-menu-${row.key}`"
+                  @click="toggleMenu(row)"
                 >
-                  <Play :size="12" /> Run
+                  <MoreHorizontal :size="14" />
                 </button>
-                <button
-                  class="btn-edit"
-                  @click="handleEdit(program)"
-                  title="Edit program"
-                >
-                  ✏️
-                </button>
-                <button
-                  v-if="!isDefaultProgramId(program.program_id)"
-                  class="btn-delete"
-                  @click="handleDelete(program.program_id)"
-                  title="Delete program"
-                >
-                  🗑️
-                </button>
-              </div>
-            </div>
-
-            <!-- Expanded Details -->
-            <div v-if="expandedProgramId === program.program_id" class="program-details">
-              <div class="code-preview">
-                <h5>Code:</h5>
-                <pre>{{ program.code }}</pre>
-              </div>
-
-              <div class="execution-history">
-                <h5>Recent Executions:</h5>
-                <div v-if="getExecutionHistory(program.program_id).length === 0" class="no-history">
-                  Never executed
-                </div>
-                <div v-else class="history-list">
-                  <div
-                    v-for="(exec, index) in getExecutionHistory(program.program_id)"
-                    :key="index"
-                    class="history-item"
-                    :class="{ error: exec.error }"
+                <div v-if="menuFor === row.key" class="row-menu-list" role="menu">
+                  <button role="menuitem" @click="menuAction(() => groups.selectMembers(row))">Select its nodes</button>
+                  <button
+                    v-if="row.kind === 'community'"
+                    role="menuitem"
+                    :data-testid="`group-members-${row.key}`"
+                    @click="menuAction(() => (membersCommunityId = row.id as number))"
                   >
-                    <div class="history-time">{{ formatDate(exec.executed_at) }}</div>
-                    <div class="history-result">
-                      <span v-if="exec.error" class="error-badge">❌ Failed</span>
-                      <span v-else class="success-badge">✅ Success</span>
-                      <span class="clusters-count">
-                        {{ exec.clusters_generated }} cluster{{ exec.clusters_generated !== 1 ? 's' : '' }}
-                      </span>
-                      <span v-if="exec.duration_ms" class="duration">
-                        ({{ exec.duration_ms }}ms)
-                      </span>
-                    </div>
-                    <div v-if="exec.error" class="error-message">{{ exec.error }}</div>
-                  </div>
+                    Members table
+                  </button>
+                  <button
+                    v-if="row.kind === 'cluster'"
+                    role="menuitem"
+                    class="danger"
+                    @click="menuAction(() => deleteCluster(row))"
+                  >
+                    Delete cluster
+                  </button>
                 </div>
               </div>
+            </li>
+          </ul>
+        </template>
+
+        <!-- ── Display ─────────────────────────────────────────────── -->
+        <div v-if="allRows.length" class="display-section">
+          <button class="display-toggle" :aria-expanded="displayOpen" data-testid="groups-display-toggle" @click="displayOpen = !displayOpen">
+            <ChevronDown v-if="displayOpen" :size="13" /><ChevronRight v-else :size="13" /> Display
+          </button>
+          <div v-if="displayOpen" class="community-toggles">
+            <template v-if="communityStore.hasResults">
+              <label class="toggle-row">
+                <input v-model="communityStore.colorEnabled" type="checkbox" />
+                <span>Color by group</span>
+              </label>
+              <label class="toggle-row">
+                <input v-model="communityStore.tableColumnEnabled" type="checkbox" data-testid="community-table-toggle" />
+                <span>Group column in the Data Table</span>
+              </label>
+              <label class="toggle-row layout-select-row">
+                <span>Layout</span>
+                <select
+                  class="community-layout-select"
+                  data-testid="community-layout-select"
+                  :value="communityLayout"
+                  @change="setCommunityLayout(($event.target as HTMLSelectElement).value as CommunityLayout)"
+                >
+                  <option value="none">None (force)</option>
+                  <option value="radial">Radial</option>
+                  <option value="hive">Hive plot</option>
+                </select>
+              </label>
+            </template>
+            <div class="clear-row">
+              <button v-if="communityStore.hasResults" class="btn-clear-community" @click="clearCommunities">Clear groups</button>
+              <button v-if="groups.clusterRows.value.length" class="btn-clear-community" data-testid="groups-clear-clusters" @click="clearProgramClusters">Clear program clusters</button>
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- ================================================================ -->
-      <!-- Similarity Tab -->
-      <!-- ================================================================ -->
-      <div v-if="activeTab === 'results'" class="tab-pane" data-testid="clusters-results-pane">
-        <ClusterListPanel embedded />
       </div>
 
       <div v-if="activeTab === 'similarity'" class="tab-pane">
         <SimilarityPanel />
       </div>
-
     </div>
 
-    <!-- AI skill helper modal -->
     <ClusterProgramSkillModal v-model="showSkillModal" />
-
-    <!-- Create/Edit program modal -->
-    <ClusterProgramEditorModal
-      v-if="showEditor"
-      :program="editorProgram"
-      @close="showEditor = false"
+    <ClusterProgramLibraryModal
+      v-if="showLibrary"
+      @close="showLibrary = false"
+      @use="useProgram"
     />
-
-    <!-- Parameter-fill modal for programs with declared parameters -->
-    <ClusterProgramRunModal
-      v-if="runProgram"
-      :program="runProgram"
-      @close="runProgram = null"
+    <CommunityNodeModal
+      v-if="membersCommunityId !== null"
+      :community-id="membersCommunityId"
+      @close="membersCommunityId = null"
     />
   </div>
 </template>
@@ -915,19 +935,61 @@ button {
 .community-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  max-height: 200px;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: min(46vh, 420px);
   overflow-y: auto;
 }
 
 .community-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
+  gap: 4px;
+  padding: 2px 4px;
   background: white;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 12px;
+  border: 1px solid transparent;
+}
+
+.community-item.solo {
+  border-color: var(--primary-color, #42b883);
+}
+
+.community-item.hidden .group-name,
+.community-item.hidden .community-count {
+  opacity: 0.45;
+}
+
+.group-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  background: none;
+  text-align: left;
+  font-size: 12px;
+}
+
+.group-name:hover {
+  background: #f2f7f5;
+}
+
+.eye {
+  padding: 3px;
+  background: none;
+  color: #777;
+}
+
+.collapse-toggle {
+  padding: 1px 6px;
+  font-size: 10px;
+  background: #eef3f1;
+  color: #555;
 }
 
 .color-swatch {
@@ -940,28 +1002,108 @@ button {
 .community-name {
   flex: 1;
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .community-count {
   color: #999;
   font-size: 11px;
+  min-width: 24px;
+  text-align: right;
+}
+
+.row-menu {
+  position: relative;
+}
+
+.row-menu > button {
+  padding: 3px;
+  background: none;
+  color: #777;
+}
+
+.row-menu-list {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.row-menu-list button {
+  background: none;
+  text-align: left;
+  font-size: 12px;
+}
+
+.row-menu-list button:hover {
+  background: #f5f5f5;
+}
+
+.row-menu-list .danger {
+  color: #d64545;
 }
 
 /* ====================================================================
-   Programs Tab
+   Run bar, groups header, display
    ==================================================================== */
-.programs-toolbar {
+.run-bar {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #e6e6e6;
 }
 
-.btn-create {
-  background: #42b883;
-  color: white;
+.run-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #e6e6e6;
+  font-size: 12px;
 }
 
-.btn-create:hover {
-  background: #35a372;
+.run-summary-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.btn-link {
+  padding: 0;
+  background: none;
+  color: var(--primary-color, #42b883);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.btn-secondary-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: white;
+  border: 1px solid #d0d0d0;
+  color: #444;
+}
+
+.btn-secondary-sm:hover {
+  background: #f5f5f5;
 }
 
 .btn-skill-help {
@@ -978,206 +1120,86 @@ button {
   color: #3a8ee6;
 }
 
-.btn-clear {
-  background: #f56c6c;
-  color: white;
-}
-
-.btn-clear:hover {
-  background: #e54545;
-}
-
-.params-missing-hint {
-  color: #f56c6c;
-}
-
-.programs-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.program-item {
-  background: white;
-  border-radius: 4px;
+.segmented {
+  display: inline-flex;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
   overflow: hidden;
 }
 
-.program-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 10px;
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.program-header:hover {
-  background: #f5f5f5;
-}
-
-.program-info {
+.segmented button {
   flex: 1;
-}
-
-.program-info h4 {
-  margin: 0 0 2px 0;
-  font-size: 13px;
-}
-
-.scope-badge {
-  margin-left: 4px;
-  padding: 1px 5px;
-  border-radius: 8px;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  vertical-align: middle;
-}
-
-.scope-context {
-  background: #e7f6ef;
-  color: #2f9e6e;
-}
-
-.scope-exploration {
-  background: #ecf5ff;
-  color: #409eff;
-}
-
-.scope-built-in {
-  background: #f0f0f0;
-  color: #888;
-}
-
-.program-description {
-  margin: 2px 0;
+  border-radius: 0;
+  background: white;
+  color: #555;
   font-size: 12px;
-  color: #666;
 }
 
-.program-meta {
-  font-size: 11px;
-  color: #999;
-}
-
-.program-actions {
-  display: flex;
-  gap: 3px;
-}
-
-.program-actions button {
-  padding: 3px 6px;
-  font-size: 11px;
-}
-
-.btn-execute {
-  background: #409eff;
+.segmented button.active {
+  background: var(--primary-color, #42b883);
   color: white;
 }
 
-.btn-execute:hover {
-  background: #3a8ee6;
-}
-
-.btn-execute:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-}
-
-.btn-edit {
-  background: #e6a23c;
-  color: white;
-}
-
-.btn-edit:hover {
-  background: #d89b33;
-}
-
-.btn-delete {
-  background: #f56c6c;
-  color: white;
-}
-
-.btn-delete:hover {
-  background: #e54545;
-}
-
-.program-details {
-  border-top: 1px solid #eee;
-  padding: 10px;
-}
-
-.code-preview {
-  margin-bottom: 12px;
-}
-
-.code-preview h5 {
-  margin: 0 0 6px 0;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.code-preview pre {
-  background: #f5f5f5;
-  padding: 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  overflow-x: auto;
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-.execution-history h5 {
-  margin: 0 0 6px 0;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.no-history {
-  color: #999;
-  font-size: 11px;
-  font-style: italic;
-}
-
-.history-list {
+.kind-switch {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
-.history-item {
-  padding: 6px;
-  background: #f9f9f9;
-  border-radius: 4px;
-  font-size: 11px;
-}
-
-.history-item.error {
-  background: #fef0f0;
-}
-
-.history-time {
-  color: #666;
-  margin-bottom: 3px;
-}
-
-.history-result {
+.groups-header {
   display: flex;
-  gap: 6px;
   align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #555;
 }
 
-.success-badge { color: #67c23a; }
-.error-badge { color: #f56c6c; }
-.clusters-count { font-weight: 600; }
-.duration { color: #999; }
+.sort-select {
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
 
-.error-message {
-  margin-top: 3px;
-  color: #f56c6c;
-  font-size: 10px;
+.groups-search {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.groups-showing {
+  font-size: 12px;
+  color: #333;
+}
+
+.groups-hint {
+  margin: 0;
+}
+
+.display-section {
+  border-top: 1px solid #e6e6e6;
+  padding-top: 6px;
+}
+
+.display-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  background: none;
+  color: #555;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.clear-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.params-missing-hint {
+  color: #e6a23c;
 }
 
 /* ====================================================================

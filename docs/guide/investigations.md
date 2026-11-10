@@ -250,8 +250,10 @@ version, and any version can be pinned.
   (what the case decided), else the **exploration's own** (a live reference
   follows it, a restyle lands at the next refresh), else the **style a frozen
   item embeds** (a pinned snapshot, a saved selection or a sketch keeps the
-  look it was made on), else the stock look. On a unified canvas the first
-  graph with a look sets it for all. **Look** in the strip opens the same
+  look it was made on), else the **default look of the graph's context**
+  (see [Style Presets](./style-presets.md#a-context-s-default-look)), else the
+  stock look. On a unified canvas the first graph with a look of its own sets
+  it for all; with one context on the canvas, its default behaviors apply too. **Look** in the strip opens the same
   panel the explorer has — Style, Labels, Behaviors and the **Presets** of the
   graph's context — and **Save look** stores what is on screen on that graph
   item, so it opens like that for everyone (one graph on the canvas, write
@@ -272,13 +274,19 @@ version, and any version can be pinned.
   anchored on the edge, and **Follow the money** in either direction. Several
   edges selected show their composition and total amount.
 - **Canvas tools** sit in the strip over the canvas, next to the filter chips:
-  Filters, Table, Layout, Look, Advanced (cluster programs), Fit, Export PNG,
-  3D/2D and Fullscreen — the explorer's bottom bar, in the same words. The
-  right-click menu is the explorer's too: the context's configured actions,
-  cluster programs and the community table.
+  Filters, Table, Layout, Look, **Clusters**, Fit, Export PNG, 3D/2D and
+  Fullscreen — the explorer's bottom bar, in the same words. **Clusters** is
+  the explorer's panel ([Cluster Programs](./clusters.md)): group the nodes
+  (Louvain, components, or one of the context's programs when one graph is on
+  the canvas), then click a group to **show only** it. While the panel is
+  closed the groups sit as chips under the filters. The right-click menu is
+  the explorer's too: the context's configured actions (including **Show only
+  nodes with…**), cluster programs, the community table and **Show only this
+  community / cluster**.
 - **Filter chips** over the canvas (source, role, tag, group, type, time
-  window) filter visually; **views** saves the chips, the layout and the
-  closed groups as a `graph/view` item.
+  window) filter visually; **views** saves the chips, the layout, the closed
+  groups and any **show only** as a `graph/view` item. *Clear* also ends a
+  show only.
 - The **analysis bar** opens each analysis with its parameters; every run is
   an item with its provenance, shown in the bottom strip and pinnable.
 - The bottom strip has the **Dated edges** timeline, the **Journal** (newest

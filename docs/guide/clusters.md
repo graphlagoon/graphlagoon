@@ -33,10 +33,29 @@ terminated, and the page stays responsive while a program runs. The
 clusters it returns are validated back on the page before anything is
 drawn — return plain data only (no functions).
 
-Open the panel from the toolbar **Clusters** button; cluster programs live
-in its **Programs** tab.
+Open the panel from the toolbar **Clusters** button (on a case, the
+**Clusters** button of the canvas toolbar). It reads top to bottom:
 
-![Cluster programs](/screenshots/clusters-programs.png)
+1. **Run bar** — **Group by** picks Louvain, weak/strong components or any
+   cluster program, with its parameters inline; **Output** is **Color** (each
+   group gets a color, nodes stay where they are) or **Collapse** (each group
+   becomes one cluster node you can open from the list); **Run**. Once there
+   is a result the bar folds into one line (`Louvain · resolution 1.0 ·
+   Color`) — **change** opens it again.
+2. **Groups** — what the run made, as layers: click a group to **show only
+   it**, click it again to show every node; **Shift+click** or the eye adds a
+   group to what is shown or hides it. The **⋯** menu selects its nodes,
+   opens the members table, or deletes a program's cluster.
+3. **Display** (folded) — color by group, radial or hive layout, the group
+   column in the Data Table, and clearing the results.
+
+The program library is behind **Programs…**: create, import, export, edit,
+delete, or **Use** one (it becomes the run bar's *Group by*). **Similarity**
+(it adds edges, not groups) is the panel's second tab.
+
+![The Clusters panel: run bar, groups, display](/screenshots/clusters-panel.png)
+
+![The program library](/screenshots/clusters-programs.png)
 
 ## Writing a program
 
@@ -104,6 +123,33 @@ A parameter can also be **bound to a node** — its id, its type, a
 property, or a session-computed metric (`metric:<name>`). That's what
 powers the next section.
 
+You don't have to type parameters one card at a time: **Import JSON** in
+the program editor fills the name, description, code, the right-click flag
+and every parameter from one JSON object:
+
+```json
+{
+  "program_name": "Same city",
+  "description": "Nodes that share the clicked node's city",
+  "show_in_context_menu": true,
+  "code": "return [{ cluster_name: params.city, node_ids: nodes.filter(n => n.properties?.city === params.city).map(n => n.node_id) }]",
+  "parameters": [
+    { "id": "city", "type": "text", "label": "City", "node_binding": "prop:city" },
+    { "id": "minSize", "type": "number", "default": 3, "required": false },
+    { "id": "mode", "type": "select", "options": ["strict", "loose"], "default": "strict" }
+  ]
+}
+```
+
+`type` is `text`, `number`, `boolean` or `select` (a `select` needs
+`options`); `required` defaults to `true`; `node_binding` is `node_id`,
+`node_type`, `prop:<name>` or `metric:<name>`. The box also takes a list of
+programs, a ```` ```json ```` fence, or a file written by **Export JSON**. In an
+existing program the button reads **Edit as JSON** and starts from the
+program as it is. **Manage programs…** in the Clusters panel has
+**Import…** (several programs at once) and **Export all** (your programs,
+not the built-ins) for moving a library between contexts.
+
 ## Running from the right-click menu
 
 Check **"Show in node right-click menu"** and the program appears as an
@@ -120,6 +166,11 @@ running with a hole in the inputs. A `metric:` binding aborts the same way
 when the metric has no value for the clicked node — including after a
 reload, since metrics are session-computed; the toast says to recompute it
 in the Metrics panel.
+
+When a parameter is **required, has no default and no node binding**, the
+menu can't fill it, so the run dialog opens pre-filled with the defaults and
+the node-bound values; you type the rest and **Run** colors the graph the
+same way.
 
 ## Where programs are saved
 
@@ -160,14 +211,29 @@ throws `Start node "…" not found in the graph`). There's no step debugger
 The **robot** button generates a copy-paste prompt containing the
 execution contract, the rules above, a worked example, and *this graph's
 real node types, edge types and properties* — paste it into any assistant
-and describe the grouping you want. The same workflow exists for
+and describe the grouping you want. The assistant answers with **one JSON
+object** (name, description, code and parameters, in the format shown under
+[Parameters](#parameters)); paste it into **Import JSON** and every field is
+filled. The robot button inside the editor of an existing program builds a
+prompt that embeds that program, so the assistant changes it instead of
+starting over. The same workflow exists for
 [labels](./labels.md) and [context-menu actions](./context-menu-actions.md).
 
 ## Managing the results
 
-Once clusters exist, the Clusters panel's **Results** tab lists them — the
-tab shows how many, and the status bar under the graph gains an **N
-clusters** chip that opens it. The list filters by state and class, toggles
-each cluster open/closed (or all at once), and shows per-cluster stats.
-**Clear Clusters** in the Programs tab wipes the current groups without
+Running a program from the library (**Programs… → Run**) collapses its
+clusters into cluster nodes; they show in the panel's group list — with
+**Colors | Clusters** to switch when a coloring exists too — and the status
+bar under the graph gains an **N clusters** chip that opens it. Each row
+opens or collapses its cluster, and **show only** works the same as for
+communities. **Display → Clear program clusters** removes them without
 touching the programs.
+
+## Showing only some groups
+
+Clicking a group (in the panel, in the legend over the canvas while the
+panel is closed, or **right-click → Show only this community / cluster**)
+hides every other node. The layout stays; the status bar says
+**Showing only: …** and its **✕** shows every node again. What is shown is
+saved with the [exploration](./explorations.md) and with a case's saved
+views, as a rule ("community 3"), so it applies again when they open.

@@ -170,10 +170,11 @@
                 <option value="open-url">Open URL</option>
                 <option value="copy-text">Copy text</option>
                 <option value="run-query-template">Run query template</option>
+                <option value="show-same-value">Show only nodes with…</option>
               </select>
 
               <label>Applies to</label>
-              <select v-model="editing.match.target">
+              <select v-model="editing.match.target" :disabled="editing.kind === 'show-same-value'">
                 <option value="node">Nodes</option>
                 <option value="edge">Edges</option>
                 <option value="both">Nodes and edges</option>
@@ -276,6 +277,30 @@
               />
               <p class="hint">Available: {{ placeholderHint }}</p>
               <p v-if="textTemplateError" class="field-error">{{ textTemplateError }}</p>
+            </div>
+
+            <div v-else-if="editing.kind === 'show-same-value'" class="kind-fields" data-testid="menu-action-same-value">
+              <label>Field</label>
+              <input
+                v-model="editingField"
+                type="text"
+                list="menu-action-fields"
+                data-testid="menu-action-field"
+                placeholder="community_id, node_type, metric:degree…"
+              />
+              <datalist id="menu-action-fields">
+                <option value="node_type" />
+                <option v-for="p in availableConditionRefs" :key="p" :value="p" />
+              </datalist>
+              <div class="radio-row" data-testid="menu-action-mode">
+                <label><input type="radio" value="same" v-model="editingMode" /> the same value as the clicked node</label>
+                <label><input type="radio" value="has" v-model="editingMode" /> any value (the field is set)</label>
+              </div>
+              <p class="hint">
+                Hides every other node — the layout stays. "Showing only" in the status
+                bar says what is shown; its ✕ shows every node again. Saved with the
+                exploration and with a case's saved views.
+              </p>
             </div>
 
             <div v-else class="kind-fields">
@@ -422,6 +447,13 @@ const editingOpenIn = ref<'new-tab' | 'same-tab'>('new-tab');
 const editingTextTemplate = ref('');
 const editingTemplateId = ref('');
 const editingBindings = ref<Record<string, string>>({});
+const editingField = ref('');
+const editingMode = ref<'same' | 'has'>('same');
+
+// Isolating by a node's value: an edge has nothing to isolate by.
+watch(() => editing.value?.kind, (kind) => {
+  if (kind === 'show-same-value' && editing.value) editing.value.match.target = 'node';
+});
 
 const selectedTemplate = computed(() =>
   templatesStore.templates.find((t) => t.id === editingTemplateId.value),
@@ -467,16 +499,20 @@ const formValid = computed(() => {
   if (draft.kind === 'copy-text') {
     return editingTextTemplate.value.trim() !== '' && !textTemplateError.value;
   }
+  if (draft.kind === 'show-same-value') return editingField.value.trim() !== '';
   return editingTemplateId.value !== '';
 });
 
 function kindIconFallback(kind: ContextMenuActionConfig['kind']): string {
-  return kind === 'open-url' ? '🔗' : kind === 'copy-text' ? '📋' : '▶';
+  return kind === 'open-url' ? '🔗' : kind === 'copy-text' ? '📋' : kind === 'show-same-value' ? '◎' : '▶';
 }
 
 function actionSummary(config: ContextMenuActionConfig): string {
   if (config.kind === 'open-url') return config.urlTemplate;
   if (config.kind === 'copy-text') return config.textTemplate;
+  if (config.kind === 'show-same-value') {
+    return config.mode === 'has' ? `show only: ${config.field} is set` : `show only: same ${config.field}`;
+  }
   return config.templateName || config.templateId;
 }
 
@@ -498,6 +534,8 @@ function startCreate() {
   editingTextTemplate.value = '';
   editingTemplateId.value = '';
   editingBindings.value = {};
+  editingField.value = '';
+  editingMode.value = 'same';
 }
 
 function startEdit(config: ContextMenuActionConfig) {
@@ -519,6 +557,8 @@ function startEdit(config: ContextMenuActionConfig) {
   editingTemplateId.value = config.kind === 'run-query-template' ? config.templateId : '';
   editingBindings.value =
     config.kind === 'run-query-template' ? { ...config.paramBindings } : {};
+  editingField.value = config.kind === 'show-same-value' ? config.field : '';
+  editingMode.value = config.kind === 'show-same-value' ? config.mode : 'same';
 }
 
 function addCondition() {
@@ -556,6 +596,9 @@ function buildConfig(): ContextMenuActionConfig | null {
   }
   if (draft.kind === 'copy-text') {
     return { ...base, kind: 'copy-text', textTemplate: editingTextTemplate.value };
+  }
+  if (draft.kind === 'show-same-value') {
+    return { ...base, kind: 'show-same-value', field: editingField.value.trim(), mode: editingMode.value };
   }
   return {
     ...base,

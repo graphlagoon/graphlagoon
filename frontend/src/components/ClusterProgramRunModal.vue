@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useClusterStore } from '@/stores/cluster'
+import { useCommunityStore } from '@/stores/community'
 import type { ClusterProgram, ClusterProgramParamValues } from '@/types/cluster'
 import {
   defaultParamValues,
@@ -10,15 +11,27 @@ import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
 import { X, Play, Loader2 } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   program: ClusterProgram
-}>()
+  /**
+   * 'clusters' runs the program into cluster nodes (Programs list);
+   * 'community' runs it as the community algorithm (right-click menu), which
+   * colors nodes and creates no cluster geometry.
+   */
+  mode?: 'clusters' | 'community'
+  /** Values to start from (e.g. node-bound ones), over the declared defaults */
+  initialValues?: ClusterProgramParamValues
+}>(), { mode: 'clusters', initialValues: undefined })
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const clusterStore = useClusterStore()
+const communityStore = useCommunityStore()
 const toast = useToast()
 
-const values = ref<ClusterProgramParamValues>(defaultParamValues(props.program.parameters))
+const values = ref<ClusterProgramParamValues>({
+  ...defaultParamValues(props.program.parameters),
+  ...(props.initialValues ?? {}),
+})
 const running = ref(false)
 const errorMsg = ref<string | null>(null)
 
@@ -34,6 +47,21 @@ async function runNow() {
   running.value = true
   errorMsg.value = null
   try {
+    if (props.mode === 'community') {
+      const id = props.program.program_id
+      communityStore.programParams[id] = { ...values.value }
+      communityStore.algorithm = `cluster-program:${id}`
+      await communityStore.runDetection()
+      if (communityStore.error) {
+        errorMsg.value = communityStore.error
+        return
+      }
+      emit('close')
+      const labels = communityStore.communitiesSorted.map(c => c.label)
+      const shown = labels.slice(0, 4).join(', ') + (labels.length > 4 ? ', …' : '')
+      toast.success(`${communityStore.communityCount} communities: ${shown}`)
+      return
+    }
     const result = await clusterStore.executeProgram(props.program.program_id, values.value)
 
     if (result.success) {

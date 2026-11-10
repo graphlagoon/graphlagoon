@@ -143,4 +143,27 @@ test.describe('Graph context menu', () => {
 
     await expect(page.getByTestId('graph-context-menu')).toHaveCount(0);
   });
+
+  test('"Show only this community" hides the other groups', async ({ authenticatedPage: page }) => {
+    // Group the nodes by type (two communities: Person, Company), coloring only.
+    await page.getByTitle('Clusters', { exact: true }).click();
+    await page.getByTestId('community-algorithm-select').selectOption('cluster-program:default-group-by-node-type');
+    await page.getByTestId('cluster-run').click();
+    await expect(page.locator('[data-testid^="group-row-community:"]')).toHaveCount(2);
+    await page.getByTitle('Clusters', { exact: true }).click();
+
+    const menu = page.getByTestId('graph-context-menu');
+    let opened = false;
+    for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      await hoverNode(page, 'n1');
+      await page.mouse.down({ button: 'right' });
+      await page.mouse.up({ button: 'right' });
+      opened = await menu.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false);
+    }
+    expect(opened).toBe(true);
+
+    await page.getByTestId('context-menu-action-isolate-community').click();
+    await expect(page.getByTestId('status-isolation')).toContainText('Person');
+  });
 });
+

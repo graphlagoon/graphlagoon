@@ -20,7 +20,11 @@ export interface SkillProperty {
   description?: string
 }
 
+import type { ImportedClusterProgram } from './clusterProgramImport'
+
 export interface ClusterProgramSkillInput {
+  /** The program being edited — embedded so the AI changes it instead of starting over */
+  program?: ImportedClusterProgram | null
   /** Session-computed node metrics (readable via `metric(<name>, node_id)`) */
   nodeMetrics?: SkillMetric[]
   /** Session-computed edge metrics */
@@ -74,15 +78,36 @@ export function buildClusterProgramSkill(input: ClusterProgramSkillInput): strin
   const { nodeTypes, edgeTypes, nodeProperties, edgeProperties } = input
   const nodeMetrics = input.nodeMetrics ?? []
   const edgeMetrics = input.edgeMetrics ?? []
+  const program = input.program ?? null
 
-  return `# Task: write a "cluster program" for a graph visualization tool
+  const intro = program
+    ? `You are helping me change an existing **cluster program** for Graph Lagoon Studio.
+A cluster program is a small JavaScript snippet that groups nodes of a graph into
+clusters. Its current definition is in "The program to change" below. I will paste
+your answer into the tool's **Import JSON** box, which fills the program editor.
 
-You are helping me write a **cluster program** for Graph Lagoon Studio. A cluster
+**Start by asking me what I want to change** before rewriting anything.`
+    : `You are helping me write a **cluster program** for Graph Lagoon Studio. A cluster
 program is a small JavaScript snippet that groups nodes of a graph into clusters.
-I will paste your code into the tool's program editor and run it.
+I will paste your answer into the tool's **Import JSON** box, which fills the
+program editor (name, code and parameters) in one go.
 
 I don't know exactly what I want yet, so **start by asking me questions** (see the
-"How to help me" section at the end) before writing any code.
+"How to help me" section at the end) before writing any code.`
+
+  const current = program
+    ? `
+## The program to change
+
+\`\`\`json
+${JSON.stringify(program, null, 2)}
+\`\`\`
+`
+    : ''
+
+  return `# Task: ${program ? 'change' : 'write'} a "cluster program" for a graph visualization tool
+
+${intro}
 
 ## How a cluster program runs
 
@@ -91,10 +116,11 @@ I don't know exactly what I want yet, so **start by asking me questions** (see t
   \`nodes\`, \`edges\`, \`selectedNodeIds\`, \`selectedEdgeIds\`, \`params\`,
   \`metric\`, \`metrics\`. (Do not declare your own top-level \`const\` with any
   of these names.)
-- Programs can declare **parameters** in the editor UI (text, number, boolean, or
-  dropdown). Their values arrive already typed in \`params\` and are read as
-  \`params.<id>\` (e.g. \`params.threshold\`). Prefer a parameter over a hardcoded
-  constant when a value is likely to be tweaked between runs.
+- Programs can declare **parameters** (text, number, boolean, or dropdown) in the
+  \`parameters\` list of your answer (see "Answer format"). Their values arrive
+  already typed in \`params\` and are read as \`params.<id>\` (e.g.
+  \`params.threshold\`). Prefer a parameter over a hardcoded constant when a value
+  is likely to be tweaked between runs.
 - Your code MUST \`return\` an **array of cluster objects**. Returning anything
   else is an error.
 - Do NOT wrap the code in a function, do NOT use \`import\`/\`require\`, and do NOT
@@ -117,7 +143,7 @@ edges: Array<{
 }>
 selectedNodeIds: string[]
 selectedEdgeIds: string[]
-params: Record<string, string | number | boolean>  // values of parameters declared in the editor UI
+params: Record<string, string | number | boolean>  // values of parameters declared in "parameters"
 // Session-computed metrics (Metrics panel). ref = metric name or id; returns
 // undefined when not computed / no value for the item. A name shared by a
 // node and an edge metric resolves node-first.
@@ -129,9 +155,9 @@ Example: \`const pr = metric('PageRank', node.node_id) ?? 0\`. Metrics only
 exist while computed in the session — guard for \`undefined\`, and prefer
 \`node.properties\` when an equivalent column exists.
 
-A parameter can also be bound to the right-clicked node's metric with the
-editor's node binding \`metric:<name>\` (like \`prop:<name>\`); the run aborts
-with a message when the metric has no value for that node.
+A parameter can also be bound to the right-clicked node's metric with the node
+binding \`metric:<name>\` (like \`prop:<name>\`); the run aborts with a message
+when the metric has no value for that node.
 
 ## Output shape (return value) — array of clusters
 
@@ -179,6 +205,34 @@ ${metricList(nodeMetrics, 'none computed in this session')}
 **Edge metrics (session-computed, via \`metric('<name>', edge.edge_id)\`):**
 ${metricList(edgeMetrics, 'none computed in this session')}
 
+## Answer format — ONE JSON object
+
+\`\`\`js
+{
+  "program_name": string,          // REQUIRED, short label shown in the tool
+  "description": string,           // optional, one sentence
+  "code": string,                  // REQUIRED, the JavaScript body (newlines as \\n)
+  "show_in_context_menu": boolean, // optional: also offer it on a node's right-click menu
+  "parameters": [                  // optional, values arrive as params.<id>
+    {
+      "id": string,                // REQUIRED, a JavaScript identifier, e.g. "threshold"
+      "type": "text" | "number" | "boolean" | "select",
+      "label": string,             // optional, shown in the form
+      "description": string,       // optional, help text under the input
+      "default": string | number | boolean,  // optional, typed like "type"
+      "options": string[],         // REQUIRED for "select": the allowed values
+      "required": boolean,         // default true (ignored for boolean)
+      "node_binding": "node_id" | "node_type" | "prop:<name>" | "metric:<name>"
+                                   // optional: on a right-click run, take the value
+                                   // from the clicked node
+    }
+  ]
+}
+\`\`\`
+
+A required parameter with no default and no node binding makes the right-click
+run ask for its value first; give a default when a sensible one exists.
+${current}
 ## Worked example (group nodes by their type)
 
 \`\`\`js
@@ -209,7 +263,12 @@ return clusters;
 \`\`\`
 
 ## How to help me
-
+${program ? `
+I want to change the program above. **Do NOT rewrite it immediately.** First ask
+me what should change (the grouping, a parameter, the right-click behaviour…),
+one topic at a time, using the real node/edge types and properties listed above.
+Keep everything I don't ask to change.
+` : ''}
 I don't know exactly how I want to group the graph yet.
 **Do NOT write code immediately.** First, **ask me questions, one topic at a time**,
 to figure out the grouping I want. Use the node types, edge types and properties
@@ -233,10 +292,12 @@ understand, **then** write me the cluster program.
 
 ## When you write the program
 
-- Return ONLY the JavaScript body (what goes inside the function), ending with
+- Answer with ONE JSON object in a \`\`\`json fence, in the "Answer format" above.
+  Its \`code\` is the JavaScript body (what goes inside the function), ending with
   \`return clusters;\` (or \`return [...]\`).
+- Declare every \`params.<id>\` the code reads in \`parameters\`.
 - Follow the input/output shapes and the enforced rules above.
-- Briefly explain, in one or two sentences, what the program does.
+- Before the JSON, briefly explain, in one or two sentences, what the program does.
 
 Start by asking me your first question.
 `

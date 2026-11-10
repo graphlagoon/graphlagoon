@@ -87,4 +87,29 @@ describe('buildClusterProgramSkill', () => {
     const text = buildClusterProgramSkill(fullInput)
     expect(text).toContain('(none computed in this session)')
   })
+
+  it('asks for one JSON object the Import JSON box can take, with the parameter schema', () => {
+    const text = buildClusterProgramSkill(fullInput)
+    expect(text).toContain('Import JSON')
+    expect(text).toContain('Answer format — ONE JSON object')
+    expect(text).toContain('"program_name"')
+    expect(text).toContain('"parameters"')
+    expect(text).toContain('"node_binding"')
+    expect(text).toContain('"options": string[]')
+    expect(text).not.toContain('Return ONLY the JavaScript body')
+  })
+
+  it('embeds the program being edited and asks what to change', () => {
+    const program = {
+      program_name: 'By city',
+      code: 'return []',
+      parameters: [{ id: 'city', type: 'text' as const, required: true }],
+    }
+    const text = buildClusterProgramSkill({ ...fullInput, program })
+    expect(text).toContain('# Task: change a "cluster program"')
+    expect(text).toContain('## The program to change')
+    expect(text).toContain('"program_name": "By city"')
+    expect(text).toContain('"id": "city"')
+    expect(text).toContain('me what should change')
+  })
 })

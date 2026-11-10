@@ -329,6 +329,47 @@ describe('useConfigurableMenuActions', () => {
       expect(last?.message).toContain('no longer exists');
     });
   });
+
+  describe('show-same-value handler', () => {
+    function sameValue(mode: 'same' | 'has', field = 'symbol'): ContextMenuActionConfig {
+      return {
+        id: 'cfg-same', label: 'Same symbol', enabled: true, kind: 'show-same-value',
+        field, mode, match: { target: 'node' },
+      };
+    }
+
+    it('same: shows only the nodes with the clicked node\'s value', async () => {
+      const graphStore = seedGraph();
+      useContextMenuActionsStore().hydrateFromContext([sameValue('same')]);
+      useConfigurableMenuActions().register();
+      await configuredActions()[0].handler(nodeTarget('n1'));
+      expect(graphStore.isolation).toEqual({
+        kind: 'value', field: 'symbol', value: 'BRCA1', mode: 'same', label: 'symbol = BRCA1',
+      });
+      // n1 kept; n2 (no symbol) and n3 (properties not loaded) hidden.
+      expect([...(graphStore.searchHiddenNodeIds ?? [])].sort()).toEqual(['n2', 'n3']);
+    });
+
+    it('has: shows only the nodes where the field is set, node_type included', async () => {
+      const graphStore = seedGraph();
+      useContextMenuActionsStore().hydrateFromContext([sameValue('has', 'name')]);
+      useConfigurableMenuActions().register();
+      await configuredActions()[0].handler(nodeTarget('n2'));
+      expect(graphStore.isolation).toMatchObject({ kind: 'value', field: 'name', mode: 'has', value: null });
+      expect([...(graphStore.searchHiddenNodeIds ?? [])].sort()).toEqual(['n1', 'n3']);
+    });
+
+    it('same on a node without the field: error toast, no isolation', async () => {
+      const graphStore = seedGraph();
+      useContextMenuActionsStore().hydrateFromContext([sameValue('same')]);
+      useConfigurableMenuActions().register();
+      await configuredActions()[0].handler(nodeTarget('n3'));
+      expect(graphStore.isolation).toBeNull();
+      const last = useToast().toasts.value.at(-1);
+      expect(last?.type).toBe('error');
+      expect(last?.message).toContain('no symbol');
+    });
+  });
 });
 
 describe('resolveTemplateParamValues', () => {

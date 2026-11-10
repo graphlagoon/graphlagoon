@@ -11360,7 +11360,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Default Behaviors",
-            "description": "Default graph behavior settings applied when this context is opened (e.g. {'viewMode': '3d'}). Passed through opaquely; the frontend validates keys against its own schema. A saved exploration overrides these."
+            "description": "Default graph behavior settings applied when this context is opened (e.g. {'viewMode': '3d'}). Passed through opaquely; the frontend validates keys against its own schema. A saved exploration overrides these. The reserved key 'look' holds the context's default look (a style-preset settings block: colors, icons, labels, layout), applied when the context opens with no exploration and on a case canvas whose item has no look."
           },
           "cluster_programs": {
             "items": {
@@ -11378,7 +11378,7 @@
             },
             "type": "array",
             "title": "Context Menu Actions",
-            "description": "Context-level configurable context-menu actions (open-url, copy-text, run-query-template). Passed through opaquely; the frontend owns the shape."
+            "description": "Context-level configurable context-menu actions (open-url, copy-text, run-query-template, show-same-value). Passed through opaquely; the frontend owns the shape."
           },
           "metric_definitions": {
             "items": {

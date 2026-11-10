@@ -11,7 +11,7 @@ the item bound as a parameter.
   a Claude Code session in the right repo — or when a curated query from
   *this* node should be one click away.
 - **Not the tool for** bulk operations (an action sees exactly one
-  clicked item); logic beyond the three kinds — for arbitrary JavaScript
+  clicked item); logic beyond the four kinds — for arbitrary JavaScript
   over the graph, use a [cluster program](./clusters.md) with a node
   binding. Configuring needs write access to the context; readers still
   get and use the menu.
@@ -111,6 +111,35 @@ usually just `{prop:account_id}` or `{node_id}`.
 - A `private` template is only ever sent to its owner — an action referencing
   it simply does not appear for anyone else. Prefer `shared` templates; the
   editor warns about this.
+
+### Show only nodes with… {#show-only-nodes-with}
+
+Nodes only. Hides every node except those whose **field** — a node property,
+`node_type`, or `metric:<name>` — has:
+
+- **the same value as the clicked node** (`"mode": "same"`) — right-click an
+  account, see only the accounts of its `branch_id`;
+- **any value** (`"mode": "has"`) — only the nodes where the field is set.
+
+It is a [show only](./exploring-the-graph.md#show-only): the layout stays,
+the status bar's **Showing only: branch_id = 12 ✕** brings everything back,
+and it is saved with the exploration (and a case's saved views). Values are
+read the way labels read them, so a node whose properties are still loading
+joins once they arrive.
+
+```json
+{
+  "kind": "show-same-value",
+  "label": "Show only this branch",
+  "match": { "target": "node", "nodeTypes": ["Account"] },
+  "field": "branch_id",
+  "mode": "same"
+}
+```
+
+For communities and clusters you need no configuration: right-click a node
+that belongs to one → **Show only this community** / **Show only this
+cluster** (built in).
 
 ## Templates {#templates}
 

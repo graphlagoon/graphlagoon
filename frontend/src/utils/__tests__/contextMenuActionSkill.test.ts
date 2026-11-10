@@ -40,8 +40,11 @@ describe('buildContextMenuActionSkill', () => {
     expect(skill).toContain('depth');
   });
 
-  it('documents the three kinds and the JSON contract', () => {
+  it('documents the four kinds and the JSON contract', () => {
     const skill = buildContextMenuActionSkill(INPUT);
+    expect(skill).toContain('the four kinds');
+    expect(skill).toContain('show-same-value');
+    expect(skill).toContain('"mode": "same"');
     expect(skill).toContain('open-url');
     expect(skill).toContain('copy-text');
     expect(skill).toContain('run-query-template');

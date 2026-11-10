@@ -95,6 +95,8 @@ describe('CaseFilterChips (05 §3)', () => {
     const graph = useGraphStore()
     filters.toggle('roles', 'mula')
     graph.applyFilters({ node_types: ['Pessoa'] })
+    const rule = { kind: 'value' as const, field: 'role', value: 'mula', mode: 'same' as const, label: 'role = mula' }
+    graph.isolate(rule)
     const { getByTestId, emitted } = render(CaseFilterChips, { props: { canEdit: true } })
     await fireEvent.click(getByTestId('chip-views'))
     await fireEvent.update(getByTestId('view-name'), 'Mulas')
@@ -102,18 +104,21 @@ describe('CaseFilterChips (05 §3)', () => {
     await flushPromises()
     expect(api.createInvestigationItem).toHaveBeenCalledWith('inv-1', expect.objectContaining({
       kind: 'graph', subkind: 'view', title: 'Mulas',
-      content_json: { filters: { sources: [], roles: ['mula'], tags: [], groups: [], types: ['Pessoa'], window: null }, layout: 'force', groups_closed: [], canvas_items: 'all' },
+      content_json: { filters: { sources: [], roles: ['mula'], tags: [], groups: [], types: ['Pessoa'], window: null }, layout: 'force', groups_closed: [], canvas_items: 'all', isolation: rule },
     }))
     expect(inv.views.map((v) => v.title)).toEqual(['Mulas'])
 
     filters.clear()
     await flushPromises()
     expect(filters.roles).toEqual([])
+    // "Clear all" also ends a "show only".
+    expect(graph.isolation).toBeNull()
     await fireEvent.click(getByTestId('chip-views'))
     await fireEvent.click(getByTestId('view-apply-view-1'))
     await flushPromises()
     expect(filters.roles).toEqual(['mula'])
     expect(graph.filters.node_types).toEqual(['Pessoa'])
+    expect(graph.isolation).toEqual(rule)
     expect(emitted('apply-view')).toBeTruthy()
   })
 })

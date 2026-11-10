@@ -27,7 +27,7 @@ export const useCaseFilters = defineStore('caseFilters', () => {
 
   const types = computed(() => graph.filters.node_types);
   const activeCount = computed(
-    () => sources.value.length + roles.value.length + tags.value.length + groups.value.length + types.value.length + (window.value ? 1 : 0),
+    () => sources.value.length + roles.value.length + tags.value.length + groups.value.length + types.value.length + (window.value ? 1 : 0) + (graph.isolation ? 1 : 0),
   );
 
   /** Nodes failing any active chip. A node with no dated edge is not touched by the window. */
@@ -76,6 +76,7 @@ export const useCaseFilters = defineStore('caseFilters', () => {
     groups.value = [];
     window.value = null;
     graph.applyFilters({ node_types: [] });
+    graph.clearIsolation();
   }
 
   /** Chips of a saved view (05 §5). */
