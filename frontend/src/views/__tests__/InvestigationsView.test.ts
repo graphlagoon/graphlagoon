@@ -164,6 +164,18 @@ describe('InvestigationsView', () => {
     expect(replace).toHaveBeenLastCalledWith({ query: { scope: 'owned', sort: 'assignee' } })
   })
 
+  it('restoring the list from the URL is not a user change: no reset to page 1, no second fetch', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
+    vi.useFakeTimers()
+    routeQuery.value = { q: 'mule', page: '2' }
+    await renderView()
+    await vi.advanceTimersByTimeAsync(300)
+    const calls = vi.mocked(api.getInvestigationPage).mock.calls.map(([p]) => p!.offset)
+    expect(calls).toEqual([50])
+    expect(replace).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
   it('a filter with no match offers to clear the filters; a failed load offers Retry', async () => {
     window.__GRAPH_LAGOON_CONFIG__ = { dev_mode: true }
     vi.useFakeTimers()

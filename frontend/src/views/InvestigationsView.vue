@@ -7,7 +7,7 @@
  * the same list; `?new=1` opens the new-case form. "My tasks" lists the open tasks
  * assigned to the caller across cases.
  */
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, nextTick, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '@/services/api';
 import { useInvestigationStore } from '@/stores/investigation';
@@ -94,7 +94,11 @@ function fromQuery(q: Record<string, unknown>) {
     Object.entries(q).filter(([k]) => k.startsWith('f.')).map(([k, v]) => [k.slice(2), one(v) ?? '']),
   );
   offset.value = Math.max(0, (Number(one(q.page)) || 1) - 1) * PAGE;
-  restoring = false;
+  // Watchers run on the next flush, not here: clearing the flag now let them
+  // see the restore as a user change — back to page 1 and a second, late fetch.
+  void nextTick(() => {
+    restoring = false;
+  });
 }
 function toQuery(): Record<string, string> {
   const q: Record<string, string> = {};
