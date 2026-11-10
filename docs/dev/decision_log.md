@@ -13947,3 +13947,22 @@ The Playwright step could not run in the authoring container (no Chromium for th
 **Known limitations:** stale corrections found and fixed in the skill text only — the pre-commit `vitest-related`
 hook itself still has the `.vue` parse problem; `docs/dev/README.md` still lists a `skill_feature_creation.md`
 that does not exist.
+
+## [2026-11-10 12:00] - Feature Implemented: seed "Demo ·" (vitrine) para testar look padrão, presets, cluster programs e "mostrar só"
+
+**Relato:** pedido para subir o ambiente completo e ter estilos e behaviors no gerador, com nomes que digam qual
+contexto/exploração testa cada funcionalidade.
+**Decisões:** módulo próprio `graphlagoon/dev/seed_showcase.py` (o seed em massa é aleatório e não diz onde clicar),
+rodado por último em `make dev` (`_seed-after-dev`) e sozinho por `make dev-seed-showcase`. Um grafo pequeno
+(`demo_showcase`, 160 nós Person/Company/Account com `city`, `branch`, `risk_tier`) e títulos `Demo · <o que mostra>`:
+contexto com look padrão + behaviors padrão (auto-load, 2D, busca esconde) e 3 presets (nomes de arquivo `demo.*`, título
+na descrição — nomes de preset só aceitam `[A-Za-z0-9_.-]`); explorações com estilo próprio, mostrar-só por valor,
+grupos por cidade com um só visível, uma "para importar" (estilo roxo + behaviors 3D) e uma sem estilo; contexto com 3
+cluster programs (um no menu com binding do nó, um que pede valor) e 4 ações `show-same-value`; contexto sem nada para
+comparar; um caso com as duas referências. Idempotente pelo tag `demo-showcase` com o último contexto como marca de
+"terminou"; uma execução interrompida apaga os parciais e recomeça.
+**Arquivos:** `api/graphlagoon/dev/seed_showcase.py`, `Makefile` (`dev-seed-showcase`, help, `_seed-after-dev`).
+**Testes:** `api/tests/test_dev_seed_showcase.py` (payloads validam nos modelos: presets, look padrão no validador do
+contexto, programas, isolamento salvo na exploração e na view); execução real contra `make dev`.
+**Public docs:** `docs/guide/getting-started.md` (tabela "Open / To try" em Sample data).
+**Admin-area impact:** nenhum.

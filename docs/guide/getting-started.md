@@ -85,6 +85,25 @@ agents on (`GRAPH_LAGOON_AGENTS_ENABLED=true`), so an agent token writes the
 agent's suggestions in the seeded cases. When `api/.env` exists, it is the
 configuration instead; `DEV_API_ENV=` (empty) starts the API with neither.
 
+Last comes the **showcase**: a few hand-made items whose titles start with
+**Demo ·** and say what each one is there to show, owned by
+`dev@graphlagoon.local`. They all share one small graph (people, companies and
+accounts with `city`, `branch` and `risk_tier`):
+
+| Open | To try |
+|---|---|
+| Context **Demo · Default look & behaviors** (open it with no exploration) | The context's [default look](./style-presets.md#a-context-s-default-look) (colors, icons, names) and default behaviors (2D, search hides); **Edit** it for the *Default Look* section; **Look → Presets** has three presets, ★ makes one the default |
+| Its exploration **Demo · Own style: risk palette** | An exploration's own style wins over the context default |
+| **Demo · Show only Lisbon** | A saved [show only](./exploring-the-graph.md#show-only) by value; ✕ in the status bar shows everything |
+| **Demo · Groups by city, Berlin shown alone** | The [Clusters panel](./clusters.md): groups as layers, click / Shift+click / eye, the legend over the canvas |
+| **Demo · Import me into the context** | Edit the context → *Default Look → Import from…* this exploration, then *Import behaviors* |
+| Context **Demo · Cluster programs & right-click actions** and its **Programs playground** | Context programs in *Group by* and *Programs…*; right-click → *Demo · Show only this branch / city / type*, a program bound to the clicked node, and one that asks for a missing value |
+| Context **Demo · Stock look** | The same graph with nothing set, to compare |
+| Case **Demo · Case canvas: context default look & Clusters** | A graph with no style of its own wears its context's default look on the case canvas; the **Clusters** button and the right-click actions of that context |
+
+`make dev-seed-showcase` adds them to a running stack (a rerun that finds them
+does nothing).
+
 `SEED_DATA=0 make dev` starts empty. On a running stack, `make dev-seed`
 reseeds users, contexts and explorations and `make dev-seed-investigations`
 adds the cases (`SEED_ARGS=--reset` replaces them). With the in-memory API,

@@ -2,7 +2,7 @@
         dev dev-db dev-gsql2rsql dev-gsql2rsql-db \
         dev-databricks dev-databricks-db dev-databricks-lakebase \
         dev-neptune dev-neptune-db \
-        dev-stop dev-logs dev-logs-follow dev-seed dev-seed-big dev-seed-investigations dev-reset \
+        dev-stop dev-logs dev-logs-follow dev-seed dev-seed-big dev-seed-investigations dev-seed-showcase dev-reset \
         lint lint-frontend lint-api format \
         test test-unit test-coverage test-e2e test-e2e-headed test-e2e-ui test-e2e-report \
         test-integration test-integration-headed test-all \
@@ -55,6 +55,7 @@ help:
 	@echo "  make dev-seed              Seed users/contexts/explorations (auto after dev*, with the cases; SEED_DATA=0 skips)"
 	@echo "  make dev-seed-big          Large seed (200 users / 500 contexts / 2000 explorations)"
 	@echo "  make dev-seed-investigations  ~20 demo investigation cases (SEED_ARGS=--reset replaces them)"
+	@echo "  make dev-seed-showcase  the \"Demo ·\" contexts: default look, presets, cluster programs, show only"
 	@echo "  make dev-reset             Wipe the dev environment and seed it from scratch"
 	@echo ""
 	@echo "$(GREEN)Quality$(RESET)"
@@ -281,6 +282,12 @@ dev-seed-big:
 # Demo cases with files, evidence, artifacts and proposals; agent-authored when
 # the API runs with GRAPH_LAGOON_AGENTS_ENABLED=true.
 SEED_CASES ?= 20
+# A few hand-made "Demo ·" contexts, explorations, styles, behaviors, cluster
+# programs and right-click actions, named after the feature each one shows.
+dev-seed-showcase:
+	@echo "$(CYAN)Seeding the Demo · showcase...$(RESET)"
+	@cd api && uv run python -m graphlagoon.dev.seed_showcase --api $(SEED_API)
+
 dev-seed-investigations:
 	@echo "$(CYAN)Seeding $(SEED_CASES) investigation cases (seed $(SEED))...$(RESET)"
 	@cd api && uv run python -m graphlagoon.dev.seed_investigations --api $(SEED_API) \
@@ -296,7 +303,8 @@ dev-reset:
 
 _seed-after-dev:
 	@if [ "$(SEED_DATA)" != "0" ]; then \
-		$(MAKE) --no-print-directory dev-seed && $(MAKE) --no-print-directory dev-seed-investigations; \
+		$(MAKE) --no-print-directory dev-seed && $(MAKE) --no-print-directory dev-seed-investigations \
+		&& $(MAKE) --no-print-directory dev-seed-showcase; \
 	else echo "$(DIM)seed skipped (SEED_DATA=0)$(RESET)"; fi
 
 dev-stop:
