@@ -1,0 +1,1043 @@
+{
+  "tab-walk": {
+    "steps": [
+      {
+        "i": 1,
+        "tag": "A",
+        "testid": "",
+        "text": "",
+        "aria": "Graph Lagoon home",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 2,
+        "tag": "A",
+        "testid": "nav-contexts",
+        "text": "Contexts",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgba(200, 232, 240, 0.55)",
+        "boxShadow": "rgba(20, 184, 166, 0.3) 0px 0px 0px 3px",
+        "visible": true
+      },
+      {
+        "i": 3,
+        "tag": "A",
+        "testid": "nav-explorations",
+        "text": "Explorations",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgba(200, 232, 240, 0.55)",
+        "boxShadow": "rgba(20, 184, 166, 0.3) 0px 0px 0px 3px",
+        "visible": true
+      },
+      {
+        "i": 4,
+        "tag": "A",
+        "testid": "nav-investigations",
+        "text": "Investigations",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgba(200, 232, 240, 0.55)",
+        "boxShadow": "rgba(20, 184, 166, 0.3) 0px 0px 0px 3px",
+        "visible": true
+      },
+      {
+        "i": 5,
+        "tag": "BUTTON",
+        "testid": "current-case-chip",
+        "text": "●Mule network · two banks · #i",
+        "aria": "",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 6,
+        "tag": "BUTTON",
+        "testid": "",
+        "text": "",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgba(200, 232, 240, 0.55)",
+        "boxShadow": "rgba(20, 184, 166, 0.3) 0px 0px 0px 3px",
+        "visible": true
+      },
+      {
+        "i": 7,
+        "tag": "BUTTON",
+        "testid": "user-menu-btn",
+        "text": "",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgba(200, 232, 240, 0.55)",
+        "boxShadow": "rgba(20, 184, 166, 0.3) 0px 0px 0px 3px",
+        "visible": true
+      },
+      {
+        "i": 8,
+        "tag": "A",
+        "testid": "",
+        "text": "← Queue",
+        "aria": "",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 9,
+        "tag": "H1",
+        "testid": "investigation-title",
+        "text": "Mule network · two banks",
+        "aria": "",
+        "outlineStyle": "solid",
+        "outlineWidth": "2px",
+        "outlineColor": "rgb(15, 118, 110)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 10,
+        "tag": "SELECT",
+        "testid": "case-status",
+        "text": "In analysisOpen",
+        "aria": "Status",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 11,
+        "tag": "A",
+        "testid": "dossier-link",
+        "text": "Dossier",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgb(44, 62, 80)",
+        "boxShadow": "rgba(20, 184, 166, 0.294) 0px 0px 0px 2.90843px",
+        "visible": true
+      },
+      {
+        "i": 12,
+        "tag": "BUTTON",
+        "testid": "case-decide",
+        "text": "Decide",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgb(255, 255, 255)",
+        "boxShadow": "rgba(20, 184, 166, 0.224) 0px 0px 0px 2.22185px",
+        "visible": true
+      },
+      {
+        "i": 13,
+        "tag": "BUTTON",
+        "testid": "case-settings-btn",
+        "text": "⚙",
+        "aria": "Case settings",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgb(44, 62, 80)",
+        "boxShadow": "rgba(20, 184, 166, 0.224) 0px 0px 0px 2.22429px",
+        "visible": true
+      },
+      {
+        "i": 14,
+        "tag": "BUTTON",
+        "testid": "case-share",
+        "text": "Share",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgb(44, 62, 80)",
+        "boxShadow": "rgba(20, 184, 166, 0.173) 0px 0px 0px 1.72759px",
+        "visible": true
+      },
+      {
+        "i": 15,
+        "tag": "BUTTON",
+        "testid": "case-menu",
+        "text": "…",
+        "aria": "More actions",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgb(44, 62, 80)",
+        "boxShadow": "rgba(20, 184, 166, 0.173) 0px 0px 0px 1.72759px",
+        "visible": true
+      },
+      {
+        "i": 16,
+        "tag": "BUTTON",
+        "testid": "case-assignee",
+        "text": "ana@test.com",
+        "aria": "",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 17,
+        "tag": "BUTTON",
+        "testid": "case-description",
+        "text": "Add a description…",
+        "aria": "",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 18,
+        "tag": "ASIDE",
+        "testid": "case-items-panel",
+        "text": "Material2 suggested Add★ Brief",
+        "aria": "",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 19,
+        "tag": "BUTTON",
+        "testid": "items-add",
+        "text": "Add",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgb(255, 255, 255)",
+        "boxShadow": "rgba(20, 184, 166, 0.26) 0px 0px 0px 2.55792px",
+        "visible": true
+      },
+      {
+        "i": 20,
+        "tag": "BUTTON",
+        "testid": "items-upload",
+        "text": "",
+        "aria": "",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgb(44, 62, 80)",
+        "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+        "visible": true
+      },
+      {
+        "i": 21,
+        "tag": "BUTTON",
+        "testid": "brief-edit",
+        "text": "Write",
+        "aria": "",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 22,
+        "tag": "INPUT",
+        "testid": "items-search",
+        "text": "",
+        "aria": "Search the material",
+        "outlineStyle": "none",
+        "outlineWidth": "0px",
+        "outlineColor": "rgb(44, 62, 80)",
+        "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+        "visible": true
+      },
+      {
+        "i": 23,
+        "tag": "BUTTON",
+        "testid": "",
+        "text": "▾ Graphs 2",
+        "aria": "",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 24,
+        "tag": "DIV",
+        "testid": "item-g-a",
+        "text": "Bank A transfersG1youonly×",
+        "aria": "Bank A transfers (G1)",
+        "outlineStyle": "solid",
+        "outlineWidth": "2px",
+        "outlineColor": "rgb(15, 118, 110)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 25,
+        "tag": "INPUT",
+        "testid": "item-canvas-g-a",
+        "text": "",
+        "aria": "Bank A transfers on canvas",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 26,
+        "tag": "A",
+        "testid": "item-open-exploration-g-a",
+        "text": "",
+        "aria": "Open the exploration Bank A transfers",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 27,
+        "tag": "BUTTON",
+        "testid": "item-only-g-a",
+        "text": "only",
+        "aria": "Show only Bank A transfers on the canvas",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 28,
+        "tag": "BUTTON",
+        "testid": "item-pin-g-a",
+        "text": "",
+        "aria": "Pin Bank A transfers as evidence",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 29,
+        "tag": "BUTTON",
+        "testid": "item-remove-g-a",
+        "text": "×",
+        "aria": "Remove Bank A transfers",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 30,
+        "tag": "DIV",
+        "testid": "item-g-b",
+        "text": "Bank B transfersG2youonly×",
+        "aria": "Bank B transfers (G2)",
+        "outlineStyle": "solid",
+        "outlineWidth": "2px",
+        "outlineColor": "rgb(15, 118, 110)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 31,
+        "tag": "INPUT",
+        "testid": "item-canvas-g-b",
+        "text": "",
+        "aria": "Bank B transfers on canvas",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 32,
+        "tag": "A",
+        "testid": "item-open-exploration-g-b",
+        "text": "",
+        "aria": "Open the exploration Bank B transfers",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 33,
+        "tag": "BUTTON",
+        "testid": "item-only-g-b",
+        "text": "only",
+        "aria": "Show only Bank B transfers on the canvas",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 34,
+        "tag": "BUTTON",
+        "testid": "item-pin-g-b",
+        "text": "",
+        "aria": "Pin Bank B transfers as evidence",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 35,
+        "tag": "BUTTON",
+        "testid": "item-remove-g-b",
+        "text": "×",
+        "aria": "Remove Bank B transfers",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 36,
+        "tag": "BUTTON",
+        "testid": "",
+        "text": "▾ Queries 1",
+        "aria": "",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 37,
+        "tag": "DIV",
+        "testid": "item-q-1",
+        "text": "Accounts above 10kQ1you▸▶×neve",
+        "aria": "Accounts above 10k (Q1)",
+        "outlineStyle": "solid",
+        "outlineWidth": "2px",
+        "outlineColor": "rgb(15, 118, 110)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 38,
+        "tag": "BUTTON",
+        "testid": "item-expand-q-1",
+        "text": "▸",
+        "aria": "Parameters and history of Accounts above 10k",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 39,
+        "tag": "BUTTON",
+        "testid": "item-run-q-1",
+        "text": "▶",
+        "aria": "Run Accounts above 10k again",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      },
+      {
+        "i": 40,
+        "tag": "BUTTON",
+        "testid": "item-pin-q-1",
+        "text": "",
+        "aria": "Pin Accounts above 10k as evidence",
+        "outlineStyle": "auto",
+        "outlineWidth": "1px",
+        "outlineColor": "rgb(16, 16, 16)",
+        "boxShadow": "none",
+        "visible": true
+      }
+    ],
+    "withVisibleRing": 40,
+    "total": 40,
+    "inspectorTabsReached": false,
+    "stripTabsReached": false,
+    "focusVisibleRule": 16
+  },
+  "focus-visible-keyboard": {
+    "tag": "A",
+    "testid": "dossier-link",
+    "text": "Dossier",
+    "aria": "",
+    "outlineStyle": "none",
+    "outlineWidth": "0px",
+    "outlineColor": "rgb(44, 62, 80)",
+    "boxShadow": "rgba(20, 184, 166, 0.26) 0px 0px 0px 2.55631px",
+    "visible": true
+  },
+  "inspector-tabs-keyboard": {
+    "reached": [
+      "case-decide",
+      "case-settings-btn",
+      "case-share",
+      "case-menu",
+      "case-assignee",
+      "case-description",
+      "case-items-panel",
+      "items-add",
+      "items-upload",
+      "brief-edit",
+      "items-search",
+      "item-g-a",
+      "item-canvas-g-a",
+      "item-open-exploration-g-a",
+      "item-only-g-a",
+      "item-pin-g-a",
+      "item-remove-g-a",
+      "item-g-b",
+      "item-canvas-g-b",
+      "item-open-exploration-g-b",
+      "item-only-g-b",
+      "item-pin-g-b",
+      "item-remove-g-b"
+    ],
+    "tabsHaveRole": null,
+    "tabsAriaSelected": null
+  },
+  "escape": {
+    "settings": true,
+    "addPopover": true,
+    "decisionPanel": false
+  },
+  "contrast": {
+    "text": [
+      {
+        "sel": ".muted",
+        "text": "Type",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(245, 245, 245)",
+        "bgFrom": "BODY.",
+        "ratio": 4.3,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA-large-only"
+      },
+      {
+        "sel": ".muted",
+        "text": "Assignee",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(245, 245, 245)",
+        "bgFrom": "BODY.",
+        "ratio": 4.3,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA-large-only"
+      },
+      {
+        "sel": ".muted",
+        "text": "Tags",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(245, 245, 245)",
+        "bgFrom": "BODY.",
+        "ratio": 4.3,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA-large-only"
+      },
+      {
+        "sel": ".muted",
+        "text": "No brief yet.",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "ASIDE.material",
+        "ratio": 4.69,
+        "fontSize": "13px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=workspace-status]",
+        "text": "10 nodes9 edges1 source● 2 suggestionsJo",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "DIV.status-bar",
+        "ratio": 4.69,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=workspace-status] *",
+        "text": "10 nodes",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "DIV.status-bar",
+        "ratio": 4.69,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=workspace-status] *",
+        "text": "9 edges",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "DIV.status-bar",
+        "ratio": 4.69,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=workspace-status] *",
+        "text": "1 source",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "DIV.status-bar",
+        "ratio": 4.69,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=workspace-status] *",
+        "text": "● 2 suggestions",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "DIV.status-bar",
+        "ratio": 4.69,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": ".meta",
+        "text": "TypeGeneralAssigneeana@test.comTagsMEDAd",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(245, 245, 245)",
+        "bgFrom": "BODY.",
+        "ratio": 10.07,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": ".deadline",
+        "text": "⏱ analysis · 6 d",
+        "fg": "rgb(255, 255, 255)",
+        "bg": "rgb(154, 52, 18)",
+        "bgFrom": "SPAN.badge",
+        "ratio": 7.31,
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=workspace-deadline]",
+        "text": "⏱ analysis · 6 d",
+        "fg": "rgb(255, 255, 255)",
+        "bg": "rgb(154, 52, 18)",
+        "bgFrom": "SPAN.badge",
+        "ratio": 7.31,
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": ".badge",
+        "text": "⏱ analysis · 6 d",
+        "fg": "rgb(255, 255, 255)",
+        "bg": "rgb(154, 52, 18)",
+        "bgFrom": "SPAN.badge",
+        "ratio": 7.31,
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": ".badge",
+        "text": "● 2 suggestions",
+        "fg": "rgb(180, 83, 9)",
+        "bg": "rgb(255, 251, 235)",
+        "bgFrom": "SPAN.badge",
+        "ratio": 4.84,
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=case-timeline] button",
+        "text": "Dated edges",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "SECTION.strip",
+        "ratio": 10.98,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=case-timeline] button",
+        "text": "Journal · 0",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "SECTION.strip",
+        "ratio": 10.98,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=case-timeline] button",
+        "text": "Tasks · 2",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "SECTION.strip",
+        "ratio": 10.98,
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=case-timeline] button",
+        "text": "● 2 suggestions",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "SECTION.strip",
+        "ratio": 10.98,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": ".group-head",
+        "text": "▾ Graphs 2",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "ASIDE.material",
+        "ratio": 10.98,
+        "fontSize": "13px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": ".group-head",
+        "text": "▾ Queries 1",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "ASIDE.material",
+        "ratio": 10.98,
+        "fontSize": "13px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": ".group-head",
+        "text": "▾ Tables 1",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "ASIDE.material",
+        "ratio": 10.98,
+        "fontSize": "13px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": ".group-head",
+        "text": "▾ Documents 2",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "ASIDE.material",
+        "ratio": 10.98,
+        "fontSize": "13px",
+        "fontWeight": "600",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=analysis-bar] button",
+        "text": "Follow the money",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "BUTTON.btn",
+        "ratio": 10.98,
+        "fontSize": "13px",
+        "fontWeight": "500",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=analysis-bar] button",
+        "text": "Paths",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "BUTTON.btn",
+        "ratio": 10.98,
+        "fontSize": "13px",
+        "fontWeight": "500",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=analysis-bar] button",
+        "text": "Groups",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "BUTTON.btn",
+        "ratio": 10.98,
+        "fontSize": "13px",
+        "fontWeight": "500",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=analysis-bar] button",
+        "text": "Links",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "BUTTON.btn",
+        "ratio": 10.98,
+        "fontSize": "13px",
+        "fontWeight": "500",
+        "pass": "AA"
+      },
+      {
+        "sel": ".chip",
+        "text": "General",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(245, 245, 245)",
+        "bgFrom": "BODY.",
+        "ratio": 10.07,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": ".chip",
+        "text": "ana@test.com",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(245, 245, 245)",
+        "bgFrom": "BODY.",
+        "ratio": 10.07,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": ".chip",
+        "text": "Add a description…",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(245, 245, 245)",
+        "bgFrom": "BODY.",
+        "ratio": 4.3,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA-large-only"
+      },
+      {
+        "sel": ".chip",
+        "text": "you",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(222, 226, 230)",
+        "bgFrom": "SPAN.chip",
+        "ratio": 8.43,
+        "fontSize": "11px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=decision-effect]",
+        "text": "The case stays open. The decision is has",
+        "fg": "rgb(108, 117, 125)",
+        "bg": "rgb(255, 255, 255)",
+        "bgFrom": "ASIDE.inspector",
+        "ratio": 4.69,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      },
+      {
+        "sel": "[data-testid=case-assignee]",
+        "text": "ana@test.com",
+        "fg": "rgb(44, 62, 80)",
+        "bg": "rgb(245, 245, 245)",
+        "bgFrom": "BODY.",
+        "ratio": 10.07,
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "pass": "AA"
+      }
+    ],
+    "placeholders": [
+      {
+        "ph": "Search titles, tags and text…",
+        "color": "rgb(44, 62, 80)",
+        "bg": "rgb(255, 255, 255)"
+      },
+      {
+        "ph": "+ tag",
+        "color": "rgb(0, 0, 0)",
+        "bg": "rgb(255, 255, 255)"
+      },
+      {
+        "ph": "New task",
+        "color": "rgb(0, 0, 0)",
+        "bg": "rgb(255, 255, 255)"
+      },
+      {
+        "ph": "person@company.com",
+        "color": "rgb(0, 0, 0)",
+        "bg": "rgb(255, 255, 255)"
+      }
+    ],
+    "tokens": {
+      "muted": "#6c757d",
+      "text": "#2c3e50",
+      "surface": "#ffffff",
+      "bg": "#f5f5f5",
+      "secondary": ""
+    }
+  },
+  "drag": {
+    "graph": {
+      "x": 290,
+      "y": 240,
+      "w": 830,
+      "h": 422,
+      "bottom": 661,
+      "right": 1120
+    },
+    "leftBorder": {
+      "tag": "CANVAS",
+      "cls": "clickable",
+      "cursor": "pointer",
+      "resize": "none"
+    },
+    "itemsBefore": {
+      "x": 0,
+      "y": 126,
+      "w": 290,
+      "h": 535,
+      "bottom": 661,
+      "right": 290
+    },
+    "itemsAfter": {
+      "x": 0,
+      "y": 126,
+      "w": 290,
+      "h": 535,
+      "bottom": 661,
+      "right": 290
+    },
+    "rightBorder": {
+      "tag": "ASIDE",
+      "cls": "inspector",
+      "cursor": "auto",
+      "resize": "none"
+    },
+    "inspBefore": {
+      "x": 1120,
+      "y": 126,
+      "w": 320,
+      "h": 535,
+      "bottom": 661,
+      "right": 1440
+    },
+    "inspAfter": {
+      "x": 1120,
+      "y": 126,
+      "w": 320,
+      "h": 535,
+      "bottom": 661,
+      "right": 1440
+    },
+    "panelEdge": {
+      "tag": "CANVAS",
+      "cls": "clickable",
+      "cursor": "pointer",
+      "resize": "none"
+    },
+    "panelBefore": {
+      "x": 302,
+      "y": 252,
+      "w": 320,
+      "h": 361,
+      "bottom": 612,
+      "right": 622
+    },
+    "panelAfterEdgeDrag": {
+      "x": 302,
+      "y": 252,
+      "w": 320,
+      "h": 361,
+      "bottom": 612,
+      "right": 622
+    },
+    "panelHead": {
+      "tag": "DIV",
+      "cls": "filter-panel",
+      "cursor": "auto",
+      "resize": "none"
+    },
+    "panelAfterHeadDrag": {
+      "x": 302,
+      "y": 252,
+      "w": 320,
+      "h": 361,
+      "bottom": 612,
+      "right": 622
+    },
+    "stripEdge": {
+      "tag": "CANVAS",
+      "cls": "clickable",
+      "cursor": "pointer",
+      "resize": "none"
+    },
+    "stripBefore": {
+      "x": 0,
+      "y": 661,
+      "w": 1440,
+      "h": 207,
+      "bottom": 868,
+      "right": 1440
+    },
+    "stripAfter": {
+      "x": 0,
+      "y": 661,
+      "w": 1440,
+      "h": 207,
+      "bottom": 868,
+      "right": 1440
+    },
+    "resizables": [
+      "A.brand",
+      "A.nav-link",
+      "A.nav-link",
+      "A.nav-link",
+      "A.back",
+      "A.router-link-active",
+      "A.badge",
+      "A.badge"
+    ]
+  }
+}

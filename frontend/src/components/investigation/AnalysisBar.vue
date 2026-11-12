@@ -8,7 +8,7 @@
  * queries (06 §3c): analyses that are data, opened in the inspector to run.
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Banknote, GitBranch, Link2, Radar, Route, Sigma, Terminal, Users } from 'lucide-vue-next';
+import { Banknote, Link2, Radar, Route, Sigma, Users } from 'lucide-vue-next';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useCaseFilters } from '@/stores/caseFilters';
@@ -21,7 +21,7 @@ import GroupsPanel from '@/components/investigation/GroupsPanel.vue';
 import type { CaseItem } from '@/types/investigation';
 
 export type CasePanel = 'filters' | 'table' | 'metrics' | 'layout' | 'look' | 'clusters';
-export type Popover = 'trace' | 'paths' | 'groups' | 'links' | 'enrich' | 'metrics' | 'detectors';
+export type Popover = 'trace' | 'paths' | 'groups' | 'links' | 'metrics' | 'detectors';
 
 const props = defineProps<{
   canEdit: boolean;
@@ -35,8 +35,6 @@ const emit = defineEmits<{
   /** The height of the button row, so the panels over the canvas stop above it. */
   height: [px: number];
   settings: [];
-  console: [];
-  upload: [];
   activate: [item: CaseItem];
   'select-item': [item: CaseItem];
   'update:paintByGroup': [on: boolean];
@@ -206,11 +204,6 @@ async function saveMetrics() {
   await finish(await analyses.saveMetricsTable(), 'Metrics');
 }
 
-const enrichmentSources = computed(() => [
-  ...Object.values(store.contexts).flatMap((c) => (c.enrichment_tables ?? []).map((t) => `${c.title ?? c.id} · ${t.label ?? t.name}`)),
-  ...store.items.filter((i) => i.kind === 'table' && i.mapping?.as === 'enrichment').map((i) => `case · ${i.title}`),
-]);
-
 const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value === p });
 </script>
 
@@ -221,10 +214,8 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
       <button :class="btn('paths')" data-testid="analysis-paths" @click="toggle('paths')"><Route :size="14" /> Paths</button>
       <button :class="btn('groups')" data-testid="analysis-groups" @click="toggle('groups')"><Users :size="14" /> Groups</button>
       <button :class="btn('links')" data-testid="analysis-links" @click="toggle('links')"><Link2 :size="14" /> Links</button>
-      <button :class="btn('enrich')" data-testid="analysis-enrich" @click="toggle('enrich')"><GitBranch :size="14" /> Enrich</button>
       <button :class="btn('metrics')" data-testid="analysis-metrics" @click="toggle('metrics')"><Sigma :size="14" /> Metrics</button>
       <button v-if="detectors.length" :class="btn('detectors')" data-testid="analysis-detectors" @click="toggle('detectors')"><Radar :size="14" /> Detectors · {{ detectors.length }}</button>
-      <button class="btn btn-outline btn-sm" data-testid="analysis-console" title="Write a query of the case: run it here and keep each result as a version" @click="emit('console')"><Terminal :size="14" /> Console</button>
     </div>
 
     <!-- Detectors: the case type's starter queries -->
@@ -337,16 +328,6 @@ const btn = (p: Popover) => ({ 'btn btn-outline btn-sm': true, on: open.value ==
         <button class="btn btn-primary btn-sm" :disabled="!canEdit || !!analyses.running.value" data-testid="links-run" @click="runLinks">
           {{ rerunTarget('links') ? 'Link again (new version)' : 'Link entities' }}
         </button>
-      </div>
-    </div>
-
-    <!-- Enrich -->
-    <div v-if="open === 'enrich'" class="popover" data-testid="popover-enrich">
-      <p class="muted">Enrichment joins a table to the canvas's entities by key; the data shows in the inspector's Enrichment section of each entity.</p>
-      <ul v-if="enrichmentSources.length" class="list"><li v-for="s in enrichmentSources" :key="s">{{ s }}</li></ul>
-      <p v-else class="muted">No enrichment table yet.</p>
-      <div class="actions">
-        <button class="btn btn-outline btn-sm" :disabled="!canEdit" data-testid="enrich-upload" @click="emit('upload')">Add a file as enrichment…</button>
       </div>
     </div>
 

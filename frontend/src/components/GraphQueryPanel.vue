@@ -259,9 +259,8 @@ async function handleAction() {
         const sql = await graphStore.executeCypherQuery(cypherQuery.value);
         // Keep the SQL tab in sync with what actually ran (fallback included).
         if (sql) sqlQuery.value = sql;
-        if (graphStore.queryError) {
-          toast.error(`Query failed: ${graphStore.queryError.message}`);
-        } else {
+        // A failure opens the query-error modal; a toast too said it twice.
+        if (!graphStore.queryError) {
           toast.success(`Loaded ${graphStore.nodes.length} nodes and ${graphStore.edges.length} edges`);
         }
       } else {
@@ -286,9 +285,8 @@ async function handleAction() {
       if (sqlQuery.value === graphStore.lastTranspiledSql && cypherQuery.value.trim()) {
         const sql = await graphStore.executeCypherQuery(cypherQuery.value);
         if (sql) sqlQuery.value = sql;
-        if (graphStore.queryError) {
-          toast.error(`Query failed: ${graphStore.queryError.message}`);
-        } else {
+        // A failure opens the query-error modal; a toast too said it twice.
+        if (!graphStore.queryError) {
           toast.success(`Loaded ${graphStore.nodes.length} nodes and ${graphStore.edges.length} edges`);
         }
       } else {
@@ -304,9 +302,7 @@ async function handleAction() {
       // queryError, not error — query failures land in queryError; `error` is
       // the context-load error and stays null here, which made the old check
       // report success for failed runs.
-      if (graphStore.queryError) {
-        toast.error(`Query failed: ${graphStore.queryError.message}`);
-      } else {
+      if (!graphStore.queryError) {
         toast.success(`Loaded ${graphStore.nodes.length} nodes and ${graphStore.edges.length} edges`);
       }
     }

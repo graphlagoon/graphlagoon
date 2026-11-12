@@ -102,6 +102,32 @@ sequence on a task that is not sequential, and hides the shape of the whole
 form) and **collapsible sections** (they organise a form whose real problem was
 the control, not the grouping).
 
+## 2i. Case workspace and graph panels (2026-11-10)
+
+Screenshots at 1440 and 1024 px, the five analyst tasks walked step by step;
+the full evaluation, inventory and before/after sketch are in
+[plans/investigation/08-ux-paineis.md](./plans/investigation/08-ux-paineis.md)
+(its finding ids C1–C13, G1–G15 are given in brackets).
+
+| # | Finding | Status |
+|---|---------|--------|
+| 31 | [C1] The case's Layout panel grew upward out of the canvas (y −82 at 1024) over the header and its own toolbar: the view's `.layout-panel` wrapper class also landed on the panel root (a child root gets the parent's scoped attribute), so the panel was absolutely positioned inside a zero-height box. | **fixed**: a `layout-host` wrapper from the canvas top to the analysis bar; the panel scrolls inside it |
+| 32 | [C2] Fixed `290px 1fr 320px` columns left a 414×349 canvas at 1024 (216 px tall with 8 graph chips wrapping into 160 px). | **fixed**: the material folds into a 40 px rail (remembered; folded by default below 1200 px), the side columns narrow below 1200 px, the graph chips are one scrolling row |
+| 33 | [C3, G7] A filter matching nothing left a blank canvas while the status bar still said "10 nodes"; "show only" said "24 of 46" while the counter said 46. | **fixed**: one visible count (`graphStore.visibleNodeCount`) — `0 of 10 nodes`; a "No node matches the filters · Clear" overlay on both pages; case Clear reads "Clear (N)" and offers Undo |
+| 34 | [C4] Recording a decision gave no feedback; Escape did not cancel. | **fixed**: toast "Recorded D2 · … — the case stays open/is closed/waiting for review", the inspector shows "Decisions so far"; Escape cancels |
+| 35 | [C5] A graph whose snapshot failed: blank canvas, "0 nodes", a 12 px ⚠ with no label. | **fixed**: `canvas-error` overlay naming the graph and the error, with Retry and Open the exploration |
+| 36 | [G1] The Filters panel kept its hidden types in local state with a shallow, non-immediate watcher: reopened, it showed every type ticked over a filtered canvas. | **fixed**: deep + immediate watcher; a "Filtered: N types hidden ✕" status chip; Reset also ends a show only |
+| 37 | [G2] A fresh graph settled at 12 % of the canvas and was never framed. | **fixed**: the canvas frames once its first layout settles (saved camera and default focus still win). Refit on drawer resize left out: it would undo the person's zoom |
+| 38 | [G3] At 1024 the top bar's centre toggles painted over the context title and *Unsaved* shrank to 8 px. | **fixed**: the left group clips, the save state does not shrink and becomes an icon under 1100 px, the case chip narrows |
+| 39 | [G4] Layout and Context Info float in the same corner; Info covered Layout's close button. | **fixed**: the two floaters are exclusive |
+| 40 | [G5, G6] "Add selection to case" vanished from the menu without a current case; node details never offered it; no selection count; the toast had no "view" (no router in a menu handler). | **fixed**: the item is always there and opens the case picker when none is set; **Add to case / Add N to case** in node details with "· N selected"; the toast names the item and has **View** |
+| 41 | [C7] "Confirm all" confirmed agent suggestions without showing them. | **fixed**: each suggestion listed (entity, value, reason) with ✓ / ✕; the header badge is the one count and opens the tab (the material and status-bar copies are gone) |
+| 42 | [C6] "Pin" meant "make it evidence"; the toast showed a hash. | **fixed**: "Pin as evidence", toast "Pinned as evidence E3 (v1)" |
+| 43 | [T5] Exports only in the dossier; the canvas's "Export" was a PNG. | **fixed**: JSON / CSV and "Report and print (dossier)" in the header's … menu; the canvas button reads "PNG" |
+| 44 | [G8, G9, G10, G11, G12] Clusters dock width jumped 360→177 px; drawers took 63 % of a 700 px window and forgot their height; Escape never closed a docked panel; a failed query showed modal + toast "Query failed: Query failed: …"; load errors had no way out. | **fixed**: fixed 320 px full-height Clusters panel; drawer height remembered and capped by default; Escape inside the dock closes it; no toast when the modal shows; "← Back to contexts" |
+| 45 | [C8, C9, C10, C11, C12, G14, G15] Queue column of one word per line; 34 targets under 24 px in the material; raw "boom" errors far from the button; strip state lost on reload; `.muted` 4.3:1; node details title wrapping; captions at 2.7–3.5:1. | **fixed**: case column 240–420 px and clickable rows; row actions 24 px, author chip only for others' work, the duplicate 🔗 removed; inspector errors say what failed and toast; strip state remembered; `--color-text-muted` #5f6b76 (5:1); title on its own row; hint colours on the token |
+| 46 | [B, C, F of plan 08] One panel model for both pages (debt #41), a filter history beyond Undo-on-Clear, Similarity out of the Clusters panel, the header in two tiers and "About the case" in the empty inspector. | backlog — structural, see plan 08 §6.3 |
+
 ## 3. Remaining backlog, in order
 
 1. **Colour lint** (#14) — stylelint `color-no-hex` over `src/**/*.vue`, then remove the `var(--x, #ddd)` fallbacks file by file.
@@ -110,7 +136,7 @@ the control, not the grouping).
 Done since this review was written: #9 (confirm dialog), #4 (panel exclusivity),
 #15–#17 (phone-width responsiveness of the list pages, modals and toolbar),
 #6 (save state as a control, rename in the list), #18–#21 (panel chrome found
-by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals), #25 (status bar dimmed by overlays), #3 (one Clusters surface), #26 (focus into modals), #27 (undo instead of confirm for client-side deletes).
+by looking at every panel), #22–#23 (interaction states), #24 (Escape closes modals), #25 (status bar dimmed by overlays), #3 (one Clusters surface), #26 (focus into modals), #27 (undo instead of confirm for client-side deletes), #31–#45 (case workspace and graph panels, plan 08).
 
 ## 4. Structural proposal (bigger change, needs a design pass)
 

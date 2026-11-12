@@ -13,7 +13,7 @@ import { useCaseAnalyses } from '@/composables/useCaseAnalyses';
 import { useToast } from '@/composables/useToast';
 import { confirmAction } from '@/composables/useConfirm';
 import { useAuthStore } from '@/stores/auth';
-import { describeEvent, eventTargets, isQuietEvent } from '@/utils/investigationEvents';
+import { describeAnnotation, describeEvent, eventTargets, isQuietEvent } from '@/utils/investigationEvents';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { formatDate } from '@/utils/format';
 import { annotationKindLabel, itemKindLabel } from '@/utils/investigationStatus';
@@ -127,19 +127,37 @@ const itemOf = (e: InvestigationEvent) => {
 
 // --- suggestions -------------------------------------------------------------------
 const bySource = computed(() => {
-  const groups = new Map<string, { label: string; annotations: string[]; items: string[] }>();
+  const groups = new Map<string, { label: string; annotations: string[]; items: string[]; rows: SuggestionRow[] }>();
   for (const s of store.suggestions) {
     if (s.kind === 'annotation' && s.annotation.kind === 'decision_proposal') continue; // reviewed in the decision panel
     const key = s.kind === 'annotation' ? `${s.annotation.kind}:${s.annotation.value?.tool ?? s.annotation.author_kind}` : `${s.item.provenance?.tool ?? s.item.subkind}:${s.item.author_kind}`;
     const label = s.kind === 'annotation' ? `${annotationKindLabel(s.annotation.kind)} · ${s.annotation.author_kind === 'agent' ? 'agent' : s.annotation.author_email}` : `${itemKindLabel(s.item.kind)}/${s.item.subkind} · ${s.item.author_kind === 'agent' ? 'agent' : s.item.author_email}`;
-    const g = groups.get(key) ?? { label, annotations: [], items: [] };
-    if (s.kind === 'annotation') g.annotations.push(s.annotation.id);
-    else g.items.push(s.item.id);
+    const g = groups.get(key) ?? { label, annotations: [], items: [], rows: [] };
+    // Each suggestion is listed: confirming agent output in bulk without seeing it defeats the review.
+    if (s.kind === 'annotation') {
+      g.annotations.push(s.annotation.id);
+      g.rows.push({ id: s.annotation.id, kind: 'annotation', text: describeAnnotation(s.annotation.kind, s.annotation as unknown as Record<string, unknown>, nameOf), reason: s.annotation.reason ?? null, entity: s.annotation.targets?.[0] ?? null });
+    } else {
+      g.items.push(s.item.id);
+      g.rows.push({ id: s.item.id, kind: 'item', text: s.item.title, reason: s.item.description ?? null, entity: null });
+    }
     groups.set(key, g);
   }
   return [...groups.entries()];
 });
+interface SuggestionRow { id: string; kind: 'annotation' | 'item'; text: string; reason: string | null; entity: string | null }
 const busy = ref(false);
+async function decideOne(row: SuggestionRow, status: 'confirmed' | 'rejected') {
+  busy.value = true;
+  try {
+    if (row.kind === 'annotation') await store.setAnnotationsStatus([row.id], status);
+    else await store.setItemStatus(row.id, status);
+  } catch (e) {
+    toast.error(getErrorMessage(e, 'Failed to update the suggestion'));
+  } finally {
+    busy.value = false;
+  }
+}
 async function decideAll(g: { label: string; annotations: string[]; items: string[] }, status: 'confirmed' | 'rejected') {
   const n = g.annotations.length + g.items.length;
   const ok = await confirmAction({
@@ -241,6 +259,17 @@ const tabs = computed<{ id: TimelineTab; label: string }[]>(() => [
             <button class="link-btn ok" :disabled="busy" :data-testid="`suggestions-confirm-${key}`" @click="decideAll(g, 'confirmed')">✓ Confirm all</button>
             <button class="link-btn danger" :disabled="busy" :data-testid="`suggestions-reject-${key}`" @click="decideAll(g, 'rejected')">✕ Reject all</button>
           </span>
+          <ul class="sugg-rows">
+            <li v-for="r in g.rows" :key="r.id" :data-testid="`suggestion-row-${r.id}`">
+              <button v-if="r.entity" class="link-btn" title="Show the entity on the canvas" @click="emit('focus-entity', r.entity)">{{ r.text }}</button>
+              <span v-else>{{ r.text }}</span>
+              <span v-if="r.reason" class="muted"> — {{ r.reason }}</span>
+              <span v-if="canEdit" class="row">
+                <button class="link-btn ok" :disabled="busy" :aria-label="`Confirm: ${r.text}`" :data-testid="`suggestion-row-confirm-${r.id}`" @click="decideOne(r, 'confirmed')">✓</button>
+                <button class="link-btn danger" :disabled="busy" :aria-label="`Reject: ${r.text}`" :data-testid="`suggestion-row-reject-${r.id}`" @click="decideOne(r, 'rejected')">✕</button>
+              </span>
+            </li>
+          </ul>
         </div>
         <p v-if="!bySource.length" class="muted">No suggestions to review.</p>
       </div>
@@ -384,6 +413,7 @@ const tabs = computed<{ id: TimelineTab; label: string }[]>(() => [
 
 .sugg-group {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 4px 0;
@@ -411,5 +441,27 @@ const tabs = computed<{ id: TimelineTab; label: string }[]>(() => [
 
 .link-btn.danger {
   color: var(--color-error);
+}
+
+.sugg-rows {
+  flex-basis: 100%;
+  list-style: none;
+  margin: 4px 0 8px;
+  padding: 0 0 0 12px;
+  font-size: 12px;
+}
+
+.sugg-rows li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+
+.sugg-rows .link-btn.ok,
+.sugg-rows .link-btn.danger {
+  min-width: 24px;
+  min-height: 24px;
 }
 </style>

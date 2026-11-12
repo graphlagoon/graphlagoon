@@ -118,4 +118,22 @@ describe('FilterPanel', () => {
 
     expect(emitted().close).toBeTruthy()
   })
+
+  it('reopened over a filtered canvas, it shows what is hidden (the store mutates filters in place)', async () => {
+    const store = setupStore()
+    store.applyFilters({ node_types: ['Person', 'Location'] })
+    const { getByText } = renderFilterPanel()
+    const company = getByText('Company').closest('label')!.querySelector('input') as HTMLInputElement
+    const person = getByText('Person').closest('label')!.querySelector('input') as HTMLInputElement
+    expect(company.checked).toBe(false)
+    expect(person.checked).toBe(true)
+  })
+
+  it('Reset also ends a "show only", so the canvas really shows everything', async () => {
+    const store = setupStore()
+    store.isolate({ kind: 'cluster', ids: ['c1'], label: 'one' })
+    const { getByText } = renderFilterPanel()
+    await fireEvent.click(getByText('Reset'))
+    expect(store.isolation).toBeNull()
+  })
 })

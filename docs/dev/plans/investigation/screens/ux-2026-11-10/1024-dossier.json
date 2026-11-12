@@ -1,0 +1,63 @@
+{
+  "dossier": {
+    "url": "http://localhost:3000/investigations/inv-p?mode=dossier",
+    "sections": [
+      "Summary built from the case and the evidence · review before deciding",
+      "Hypotheses",
+      "Evidence pinned versions, immutable",
+      "Notes and documents the case's writing · latest version",
+      "Findings",
+      "Tasks open follow-ups · the canvas's Tasks tab has them all",
+      "Journal recorded automatically · not editable",
+      "Material",
+      "Decisions"
+    ],
+    "overflow": {
+      "scrollWidth": 1024,
+      "clientWidth": 1024,
+      "overflows": false,
+      "offenders": []
+    },
+    "toggleLabel": "Canvas",
+    "exports": [
+      "JSON package",
+      "CSV",
+      "Print report"
+    ],
+    "exportsSmall": [
+      {
+        "root": "[data-testid=dossier-exports]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "export-json",
+        "w": 156,
+        "h": 23
+      },
+      {
+        "root": "[data-testid=dossier-exports]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "export-csv",
+        "w": 156,
+        "h": 23
+      },
+      {
+        "root": "[data-testid=dossier-exports]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "export-laudo",
+        "w": 156,
+        "h": 23
+      }
+    ],
+    "decisionText": "Decisions\n\nD1 · Keep monitoring\n\nAbout Ana Souza\n\nPattern looks like layering (E1).\n\nana@test.com · 10/11/2026 10:43\n\n0 pinned version(s) · hash ffff…beef\n\nRecord another decision\nJSON package\nCSV\nPrint report",
+    "reportTemplate": false,
+    "draftLabel": "absent",
+    "jsonDownload": "investigation-inv-p.json",
+    "toastAfterExport": [],
+    "csvDownload": "investigation-inv-p.csv",
+    "printIntercepted": true,
+    "toastAfterPrint": [],
+    "fullPageHeight": 700
+  }
+}

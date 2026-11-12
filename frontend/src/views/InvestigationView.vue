@@ -34,6 +34,7 @@ import { provenanceRingColors, roleColorMap } from '@/utils/graphAppearance';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { traceColumns, traceFlows } from '@/utils/traceView';
 import { baseSourceId, nodeSourceIds, type NodeOrigin, type UnifiedNode } from '@/utils/unifyGraph';
+import { explorationUrl } from '@/utils/investigationLinks';
 import { layoutBlockChanged, mapLookToCanvas, mapLookToItem, resolveCanvasLook, toUnifiedId } from '@/utils/caseLook';
 import { LAYOUT_ALGORITHMS, type LayoutAlgorithm } from '@/types/graph';
 import GraphCanvas3D from '@/components/GraphCanvas3D.vue';
@@ -161,8 +162,28 @@ const entityPage = ref<UnifiedNode | null>(null);
 const activeItem = ref<CaseItem | null>(null);
 const activeAnalysis = ref<CaseItem | null>(null);
 const traceView = ref<TraceView>('layers');
-const timelineTab = ref<TimelineTab>('timeline');
-const timelineCollapsed = ref(true);
+// The bottom strip remembers whether it was open and on which tab (per browser), like the material groups.
+const STRIP_KEY = 'graphlagoon.case.strip';
+function storedStrip(): { tab: TimelineTab; collapsed: boolean } {
+  try {
+    const v = JSON.parse(localStorage.getItem(STRIP_KEY) ?? 'null');
+    if (v && typeof v.collapsed === 'boolean' && typeof v.tab === 'string' && v.tab !== 'result') return v;
+  } catch {
+    /* storage blocked or garbage */
+  }
+  return { tab: 'timeline', collapsed: true };
+}
+const initialStrip = storedStrip();
+const timelineTab = ref<TimelineTab>(initialStrip.tab);
+const timelineCollapsed = ref(initialStrip.collapsed);
+watch([timelineTab, timelineCollapsed], ([tab, collapsed]) => {
+  try {
+    // An analysis result is not something to reopen on the next visit.
+    localStorage.setItem(STRIP_KEY, JSON.stringify({ tab: tab === 'result' ? 'timeline' : tab, collapsed }));
+  } catch {
+    /* storage blocked */
+  }
+});
 const paintByGroup = ref(false);
 const selectedClusterId = ref<string | null>(null);
 const panels = ref<Record<CasePanel, boolean>>({ filters: false, table: false, metrics: false, layout: false, look: false, clusters: false });
@@ -229,12 +250,49 @@ function onDecide() {
   if (mode.value === 'dossier') void dossierRef.value?.startDecision();
   else decideMode.value = true;
 }
+/** After recording: the inspector shows "Decisions so far" with the new one, not the old selection. */
+function onDecided() {
+  decideMode.value = false;
+  activeItem.value = null;
+  graphStore.clearSelection();
+}
 // A decision started on one side does not reopen on the other.
 watch(mode, () => (decideMode.value = false));
 const analysisBar = ref<InstanceType<typeof AnalysisBar> | null>(null);
 
 const sourceTitle = (sourceId: string) => store.itemTitle(baseSourceId(sourceId));
 const contextTitle = (contextId: string) => store.contexts[contextId]?.title ?? store.itemTitle(contextId);
+/**
+ * The material column folds into a rail to give the canvas room: on a 1024 px screen the
+ * fixed columns left it 414 px wide. The choice is the person's, kept per browser; with
+ * none saved, narrow screens start folded.
+ */
+const MATERIAL_KEY = 'graphlagoon.case.materialCollapsed';
+function storedMaterialCollapsed(): boolean {
+  try {
+    const v = localStorage.getItem(MATERIAL_KEY);
+    if (v !== null) return v === '1';
+  } catch {
+    /* storage blocked */
+  }
+  return typeof window !== 'undefined' && window.innerWidth < 1200;
+}
+const materialCollapsed = ref(storedMaterialCollapsed());
+function setMaterialCollapsed(on: boolean) {
+  materialCollapsed.value = on;
+  try {
+    localStorage.setItem(MATERIAL_KEY, on ? '1' : '0');
+  } catch {
+    /* storage blocked */
+  }
+}
+
+/** Graphs on the canvas whose snapshot failed: the canvas says so instead of staying blank. */
+const failedCanvasItems = computed(() => store.canvasItems.filter((i) => store.sourceErrors[i.id]));
+const failedExplorationLink = computed(() => {
+  const item = failedCanvasItems.value.find((i) => i.subkind === 'exploration_ref');
+  return item && store.current ? explorationUrl(item, store.current.id) : null;
+});
 const canEdit = computed(() => !!store.current?.has_write_access && store.current.status !== 'closed');
 
 // --- context picker for expanding a node that exists in several contexts ---
@@ -619,6 +677,13 @@ async function reloadCase() {
   await loadWorkspace();
 }
 
+/** The header's suggestion count opens the list to review (on the canvas: the strip lives there). */
+function openSuggestions() {
+  timelineTab.value = 'suggestions';
+  timelineCollapsed.value = false;
+  if (mode.value === 'dossier') void router.push({ query: {} });
+}
+
 function openJournal() {
   timelineTab.value = 'activity';
   timelineCollapsed.value = false;
@@ -667,13 +732,17 @@ onUnmounted(() => {
       <RouterLink to="/investigations" class="btn btn-outline btn-sm">← Queue</RouterLink>
     </div>
     <template v-else-if="store.current">
-      <CaseHeader :mode="mode" @decide="onDecide" @settings="showSettings = true" />
+      <CaseHeader :mode="mode" @decide="onDecide" @settings="showSettings = true" @suggestions="openSuggestions" />
 
       <CaseDossier v-if="mode === 'dossier'" :id="id" ref="dossierRef" />
 
       <template v-else>
-        <div class="ws-body">
-          <CaseItemsPanel :can-edit="canEdit" :active-item="activeItem?.id" @add="showAdd = true" @upload="openUpload()" @select="onMaterialSelect" />
+        <div class="ws-body" :class="{ 'material-collapsed': materialCollapsed }">
+          <div v-if="materialCollapsed" class="material-rail" data-testid="material-rail">
+            <button class="rail-btn" aria-label="Show the material" title="Show the material" data-testid="material-expand" @click="setMaterialCollapsed(false)">»</button>
+            <span class="rail-label">Material · {{ store.items.length }}</span>
+          </div>
+          <CaseItemsPanel v-else :can-edit="canEdit" :active-item="activeItem?.id" @add="showAdd = true" @upload="openUpload()" @select="onMaterialSelect" @collapse="setMaterialCollapsed(true)" />
 
           <div class="center">
             <div class="strip">
@@ -711,6 +780,17 @@ onUnmounted(() => {
               <div v-else-if="!store.canvasItems.length && store.readableGraphItems.length" class="overlay empty-canvas" data-testid="canvas-none-selected">
                 <p>No graph on the canvas. Pick one in the legend or tick it in the material list.</p>
                 <button class="btn btn-outline btn-sm" @click="showAllOnCanvas">Show all graphs</button>
+              </div>
+              <div v-else-if="failedCanvasItems.length && !graphStore.nodes.length" class="overlay empty-canvas" data-testid="canvas-error">
+                <p v-for="i in failedCanvasItems" :key="i.id"><strong>{{ i.title }}</strong> could not be loaded: {{ store.sourceErrors[i.id] }}</p>
+                <span class="overlay-actions">
+                  <button class="btn btn-primary btn-sm" data-testid="canvas-error-retry" @click="reloadCase">Retry</button>
+                  <RouterLink v-if="failedExplorationLink" :to="failedExplorationLink" class="btn btn-outline btn-sm">Open the exploration ↗</RouterLink>
+                </span>
+              </div>
+              <div v-else-if="graphStore.nodes.length && graphStore.visibleNodeCount === 0" class="overlay empty-canvas" data-testid="canvas-no-match">
+                <p>No node matches the filters.</p>
+                <button class="btn btn-outline btn-sm" data-testid="canvas-no-match-clear" @click="filters.clear()">Clear filters</button>
               </div>
               <GraphCanvas3D ref="canvasRef" @cluster-node-click="selectedClusterId = $event" />
 
@@ -754,7 +834,7 @@ onUnmounted(() => {
                   </template>
                 </LookPanel>
               </div>
-              <div v-if="panels.layout" class="layout-panel">
+              <div v-if="panels.layout" class="layout-host" data-testid="panel-layout">
                 <LayoutPanel
                   :is-layout-running="canvasRef?.isLayoutRunning ?? false"
                   @start-layout="canvasRef?.startLayout()"
@@ -775,8 +855,6 @@ onUnmounted(() => {
                 @toggle="togglePanel"
                 @height="bottomBarHeight = $event"
                 @settings="showSettings = true"
-                @console="addTab = 'query'; showAdd = true"
-                @upload="openUpload('enrichment')"
                 @activate="activateAnalysis"
                 @select-item="selectItem"
               />
@@ -793,7 +871,7 @@ onUnmounted(() => {
             @open-entity="entityPage = $event"
             @select-item="selectItem($event)"
             @activate="activateAnalysis"
-            @decided="decideMode = false"
+            @decided="onDecided"
             @cancel-decide="decideMode = false"
             @trace="(t, d) => followMoney({ ...t, label: '' }, d)"
             @path-from="analysisBar?.startPath($event)"
@@ -818,6 +896,7 @@ onUnmounted(() => {
           :nodes="graphStore.nodes.length"
           :edges="graphStore.edges.length"
           test-id="workspace-status"
+          :filter-chip="false"
           @open-behaviors="openLook('behaviors')"
           @show-clusters="panels.clusters = true"
         >
@@ -825,7 +904,6 @@ onUnmounted(() => {
             {{ store.canvasItems.length }} {{ store.canvasItems.length === 1 ? 'source' : 'sources' }}<template v-if="store.restrictedItems.length"> + {{ store.restrictedItems.length }} restricted</template>
           </span>
           <span v-if="store.groups.length" data-testid="status-groups">{{ store.groups.length }} {{ store.groups.length === 1 ? 'group' : 'groups' }}</span>
-          <span v-if="store.suggestions.length" data-testid="status-suggestions">● {{ store.suggestions.length }} {{ store.suggestions.length === 1 ? 'suggestion' : 'suggestions' }}</span>
           <AgentsIndicator v-if="store.current" :investigation-id="store.current.id" /><!-- F5 hook -->
           <button class="link-btn journal-btn" data-testid="journal-toggle" @click="openJournal">Journal</button>
         </GraphStatusBar>
@@ -928,6 +1006,53 @@ onUnmounted(() => {
   grid-template-columns: 290px 1fr 320px;
 }
 
+.ws-body.material-collapsed {
+  grid-template-columns: 40px 1fr 320px;
+}
+
+@media (max-width: 1199px) {
+  .ws-body {
+    grid-template-columns: 260px 1fr 280px;
+  }
+
+  .ws-body.material-collapsed {
+    grid-template-columns: 40px 1fr 280px;
+  }
+}
+
+
+.material-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  border-right: 1px solid var(--border-color);
+  background: var(--color-surface);
+}
+
+.rail-label {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rail-btn {
+  min-width: 28px;
+  min-height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+.rail-btn:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+
 .center {
   display: flex;
   flex-direction: column;
@@ -995,8 +1120,14 @@ onUnmounted(() => {
   text-align: center;
 }
 
-.empty-canvas button {
+.empty-canvas button,
+.empty-canvas a {
   pointer-events: auto;
+}
+
+.overlay-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .error-banner {
@@ -1028,11 +1159,20 @@ onUnmounted(() => {
   right: 12px;
 }
 
-.layout-panel {
+/* Inside the canvas, top to just above the analysis bar, like the other panels. The panel
+   scrolls inside it: its own max-height is the viewport's, which overflowed this box. */
+.layout-host {
   position: absolute;
-  bottom: calc(var(--canvas-bottom-bar, 48px) + 20px);
+  top: 12px;
+  bottom: calc(var(--canvas-bottom-bar, 48px) + 24px);
   left: 12px;
   z-index: 7;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-host > :deep(.layout-panel) {
+  max-height: 100%;
 }
 
 .look-host {

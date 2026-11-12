@@ -49,18 +49,19 @@ function createBuiltInActions(): ContextMenuAction[] {
     },
     {
       // The selection (plus the clicked node) as a graph/selection item of the current case (05 §4).
+      // Always offered on a node: hidden without a current case, nobody found the way in.
+      // With none picked it opens the top-bar picker instead.
       id: 'add-selection-to-case',
       label: 'Add selection to case',
       icon: Briefcase,
-      visible: (t: ContextMenuTarget) => {
-        if (t.type !== 'node') return false;
-        try {
-          return useCurrentCaseStore().hasCase;
-        } catch {
-          return false; // no pinia (unit tests of the menu alone)
-        }
-      },
+      visible: (t: ContextMenuTarget) => t.type === 'node',
       handler: async (t: ContextMenuTarget) => {
+        const current = useCurrentCaseStore();
+        if (!current.hasCase) {
+          current.requestPick();
+          useToast().info('Pick the case in the top bar, then add the selection again.');
+          return;
+        }
         const graph = useGraphStore();
         const nodeIds = new Set([...graph.selectedNodeIds, t.id]);
         await useAddToCase().addSelection(nodeIds, graph.selectedEdgeIds);

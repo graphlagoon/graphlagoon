@@ -53,7 +53,10 @@ watch(
       hiddenEdgeTypes.value.clear();
     }
     searchQuery.value = filters.search_query || '';
-  }
+  },
+  // The panel unmounts with the dock and the store mutates `filters` in place:
+  // without these, reopening it showed every type ticked over a filtered canvas.
+  { deep: true, immediate: true },
 );
 
 function isNodeTypeVisible(type: string): boolean {
@@ -104,6 +107,8 @@ function resetFilters() {
   hiddenEdgeTypes.value.clear();
   searchQuery.value = '';
   graphStore.resetFilters();
+  // Reset means "show me everything": a "show only" left behind would contradict it.
+  graphStore.clearIsolation();
 }
 </script>
 

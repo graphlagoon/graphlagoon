@@ -398,10 +398,10 @@ test.describe('Investigations', () => {
     await seedInvestigations(page, [{ ...CASE, deadline: null }], { 'inv-1': [suggestion] });
     await page.goto('/investigations/inv-1');
     const panel = page.getByTestId('case-items-panel');
-    await expect(panel.getByTestId('suggested-count')).toContainText('1 suggested');
+    await expect(page.getByTestId('suggested-badge')).toContainText('1 suggestion');
     await expect(page.getByTestId('item-author-item-agent')).toContainText('agent');
     await page.getByTestId('item-confirm-item-agent').click();
-    await expect(panel.getByTestId('suggested-count')).toHaveCount(0);
+    await expect(page.getByTestId('suggested-badge')).toHaveCount(0);
     await expect(page.getByTestId('item-item-agent')).not.toHaveClass(/suggested/);
 
     await page.getByTestId('brief-edit').click();
@@ -416,7 +416,7 @@ test.describe('Investigations', () => {
     const doc = page.getByTestId('items-group-document').getByText('KYC da 4471-0');
     await expect(doc).toBeVisible();
     await page.getByTestId('item-pin-item-1').click();
-    await expect(page.getByText(/Pinned v1 · hash/)).toBeVisible();
+    await expect(page.getByText(/Pinned as evidence E1 \(v1\)/)).toBeVisible();
     await expect(page.getByTestId('item-pinned-item-1')).toContainText('v1');
     await page.getByTestId('journal-toggle').click();
     await expect(page.getByTestId('journal')).toContainText('pinned “KYC da 4471-0” v1');

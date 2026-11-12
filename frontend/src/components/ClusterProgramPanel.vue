@@ -608,12 +608,15 @@ const displayOpen = ref(false)
 /* ====================================================================
    Panel Shell
    ==================================================================== */
+/* A fixed width and the dock's full height: sized by its content, it jumped from 360 to
+   177 px when switching tabs and left a two-tone dock under it. */
 .cluster-panel {
+  box-sizing: border-box;
+  width: 320px;
+  max-width: 100%;
+  height: 100%;
   padding: 12px;
-  background: #f9f9f9;
-  border-radius: 8px;
-  max-height: 80vh;
-  max-width: min(360px, 30vw);
+  background: var(--color-surface);
   overflow-y: auto;
 }
 
@@ -741,7 +744,7 @@ button {
   display: block;
   margin-top: 2px;
   font-size: 11px;
-  color: #999;
+  color: var(--text-muted);
 }
 
 .empty-state {

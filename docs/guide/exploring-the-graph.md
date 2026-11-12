@@ -31,8 +31,12 @@ Toolbar → **Filters**. Three sections:
 **Filtering hides; it never re-runs the layout.** Hidden nodes keep their
 positions, counts and tables update, and re-checking the box brings
 everything back exactly where it was. All boxes checked means no filter at
-all. **Reset** clears types and search in one click. An edge hides
-whenever either of its endpoints is hidden.
+all. **Reset** clears types, search and any [show only](#show-only) in one
+click. An edge hides whenever either of its endpoints is hidden. Closing the
+panel keeps the filter: the status bar says **Filtered: N types hidden ✕**,
+and reopening the panel shows which boxes are unchecked. If the filters hide
+every node, the canvas says so and offers **Clear filters**. **Escape** inside
+any panel of the left dock closes it.
 
 What search does with matches is a choice — **Behaviors → Search
 Behavior**:
@@ -61,7 +65,8 @@ brings everything back. It is saved with the exploration.
 ## Query Console
 
 Canvas footer → **Console** opens a resizable bottom drawer for *tabular*
-results — any projection is allowed, unlike the graph query path which
+results (drag its top edge; the Console and the Data Table each remember their
+height in this browser, and start at no more than half the window) — any projection is allowed, unlike the graph query path which
 must return edges. Run with the **▶** button or **Ctrl/⌘ + Enter**.
 
 - **OpenCypher | SQL tabs.** After a Cypher run, the SQL tab always shows
@@ -248,7 +253,11 @@ Toolbar → **Export**:
 
 The strip under the canvas is the graph's honesty panel:
 
-- `N nodes · M edges` — counts of what's visible (filters applied).
+- `N nodes · M edges` — counts of what's visible (filters applied). When the
+  filters or a show only hide part of what was loaded it reads
+  `shown of loaded nodes` (for example `24 of 46 nodes`).
+- `Filtered: … ✕` — the Filters panel hides some node or edge types (or, in
+  *Hide* search mode, the non-matches); ✕ clears it.
 - `loading properties…` — the graph drew before node properties finished
   loading; [tooltips](./labels.md#hover-tooltips) may briefly show `[prop:x]`
   sentinels. Hovering or clicking a node prioritizes it.
@@ -263,3 +272,14 @@ The strip under the canvas is the graph's honesty panel:
 - `precomputed: <name>`, `template: <name>`, `style: <name>`, and layout
   chips report which URL parameters shaped this view — each links to its
   own guide.
+
+## Adding to a case from the graph
+
+With a **current case** picked in the top bar (the case chip), right-click a
+node → **Add selection to case**, or **Add to case** in the node's details
+panel (it reads **Add N to case** when several nodes are selected, and the
+panel title shows **· N selected**). The selection, its edges and the look on
+screen become one item of the case; the message names what went in and
+**View** opens the case. With no current case the same actions open the case
+chip's picker instead of doing nothing. See [Investigations](./investigations.md).
+

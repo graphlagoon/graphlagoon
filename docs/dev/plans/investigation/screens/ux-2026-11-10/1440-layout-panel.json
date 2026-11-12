@@ -1,0 +1,50 @@
+{
+  "inner": {
+    "x": 314,
+    "y": -20,
+    "w": 240,
+    "h": 750,
+    "bottom": 730,
+    "right": 554
+  },
+  "panel": {
+    "x": 314,
+    "y": -20,
+    "w": 240,
+    "h": 750,
+    "bottom": 730,
+    "position": "absolute",
+    "top": "-795px",
+    "left": "12px",
+    "zIndex": "7"
+  },
+  "nav": {
+    "x": 0,
+    "y": 52,
+    "w": 1440,
+    "h": 74,
+    "bottom": 126,
+    "right": 1440
+  },
+  "hdr": {
+    "x": 0,
+    "y": 52,
+    "w": 1440,
+    "h": 74,
+    "bottom": 126,
+    "right": 1440
+  },
+  "covered": {
+    "navInvestigationsLink": "A.nav-link",
+    "headerDeadline": "SPAN.layout-label",
+    "headerTitle": "H1.editable"
+  },
+  "graph": {
+    "x": 290,
+    "y": 240,
+    "w": 830,
+    "h": 580,
+    "bottom": 820,
+    "right": 1120
+  }
+}

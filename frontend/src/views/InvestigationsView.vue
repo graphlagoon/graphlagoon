@@ -269,6 +269,12 @@ async function create() {
     creating.value = false;
   }
 }
+
+/** A click anywhere on a row opens the case, except on a link or button of its own. */
+function openRow(id: string, event: MouseEvent) {
+  if ((event.target as HTMLElement).closest('a, button, input, select')) return;
+  void router.push(`/investigations/${id}`);
+}
 </script>
 
 <template>
@@ -426,8 +432,8 @@ async function create() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="inv in store.investigations" :key="inv.id" :data-testid="`investigation-row-${inv.id}`">
-            <td>
+          <tr v-for="inv in store.investigations" :key="inv.id" class="queue-row" :data-testid="`investigation-row-${inv.id}`" @click="openRow(inv.id, $event)">
+            <td class="case-cell">
               <RouterLink :to="`/investigations/${inv.id}`" class="case-title">{{ inv.title }}</RouterLink>
               <span v-if="accessMark(inv)" class="pill access" data-testid="access-mark">{{ accessMark(inv) }}</span>
               <div class="muted">{{ caseNumber(inv.id) }}<template v-if="inv.tags?.length"> · {{ inv.tags.join(', ') }}</template></div>
@@ -440,7 +446,7 @@ async function create() {
               <span v-else class="muted">—</span>
             </td>
             <td><span class="status" :class="`status-${inv.status}`">{{ STATUS_LABELS[inv.status] ?? inv.status }}</span><span v-if="inv.stage" class="stage muted" data-testid="row-stage">{{ inv.stage }}</span></td>
-            <td>{{ who(responsible(inv)) }}</td>
+            <td class="who-cell" :title="responsible(inv) ?? undefined">{{ who(responsible(inv)) }}</td>
             <td>
               <template v-if="deadlineOf(inv)">
                 <span :class="{ late: deadlineOf(inv)!.urgent }" :title="`due ${formatDate(deadlineOf(inv)!.dueAt)}`" data-testid="deadline">
@@ -686,6 +692,29 @@ async function create() {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-color);
   vertical-align: middle;
+}
+
+/* A long title wraps inside a readable column instead of one word per line. */
+.case-cell {
+  min-width: 240px;
+  max-width: 420px;
+  overflow-wrap: anywhere;
+}
+
+.who-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The whole row opens the case; the title link stays the keyboard and screen-reader way in. */
+.queue-row {
+  cursor: pointer;
+}
+
+.queue-row:hover td {
+  background: var(--bg-secondary);
 }
 
 .case-title {
