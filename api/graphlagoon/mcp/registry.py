@@ -118,6 +118,10 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
         "authoring help for people writing case types and library docs; agents read the same "
         "through get_case_type, get_playbook and the tool descriptions"
     ),
+    ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/run"): (
+        "enrichment queries decorate the graph on a person's screen and are never saved; an agent "
+        "reads saved explorations and cases, and adds data through lookup_enrichment / enrich_exploration"
+    ),
     ("GET", f"{_ITEM}/content"): (
         "binary never reaches the agent (05 §6) through REST; read_item returns the text extraction, "
         "and images up to agent_image_max_bytes as MCP image content (06 P8)"
