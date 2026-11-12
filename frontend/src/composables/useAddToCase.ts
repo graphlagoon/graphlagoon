@@ -96,8 +96,9 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
   function notify(item: CaseItem, id: string) {
     // Say what went in ("Selection · 3 nodes"), not only where.
     const message = targetTitle.value ? `Added to case ${targetTitle.value}: ${item.title}` : `Added to case: ${item.title}`;
-    const path = `/investigations/${id}`;
-    const onCase = router ? router.currentRoute.value.name === 'investigation' : window.location.pathname.endsWith(path);
+    // A graph item opens shown on the case's canvas (`?show=`): added from the graph, it is what the person wants to see.
+    const path = `/investigations/${id}${item.kind === 'graph' ? `?show=${encodeURIComponent(item.id)}` : ''}`;
+    const onCase = router ? router.currentRoute.value.name === 'investigation' : window.location.pathname.endsWith(`/investigations/${id}`);
     if (onCase) {
       toast.success(message);
       return;
