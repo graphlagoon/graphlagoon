@@ -70,6 +70,8 @@ const allowedProperties = computed(() => {
   // Values the user's layer (BYOD-2) set: marked, so they never pass for the context's.
   const data = item.value.data as { node_id?: string; edge_id?: string };
   const fromLayer = graphStore.overlayKeysFor(kind, (kind === 'node' ? data.node_id : data.edge_id) ?? '');
+  // Values an enrichment query wrote (context's Databricks tables): marked with the query.
+  const fromQuery = graphStore.enrichedKeysFor(kind, (kind === 'node' ? data.node_id : data.edge_id) ?? '');
   return Object.entries(itemProps)
     .filter(([key]) => graphStore.isPropertyVisible(kind, key))
     .map(([key, value]) => {
@@ -81,6 +83,7 @@ const allowedProperties = computed(() => {
         isJson: jsonResult.isJson,
         parsedJson: jsonResult.isJson ? jsonResult.parsed : null,
         fromLayer: fromLayer.has(key),
+        fromQuery: fromQuery.get(key) ?? null,
         conflicts: props.conflicts?.[key] ?? null,
       };
     });
@@ -224,6 +227,7 @@ const endpointLabel = (id: string) => props.labelOf?.(id) ?? id;
           <span class="value prop-value-text" :title="String(prop.rawValue)">
             {{ prop.value }}
             <span v-if="prop.fromLayer" class="layer-chip" title="From your data on this exploration, not from the context" data-testid="prop-from-layer">your data</span>
+            <span v-if="prop.fromQuery" class="layer-chip query-chip" :title="`Added after the query by the enrichment query '${prop.fromQuery}' (Databricks tables)`" data-testid="prop-from-query">from {{ prop.fromQuery }}</span>
             <span v-if="prop.conflicts" class="conflict" title="Other items disagree">≠ {{ prop.conflicts.map((c) => c.value).join(', ') }}</span>
           </span>
         </div>
@@ -357,6 +361,10 @@ const endpointLabel = (id: string) => props.labelOf?.(id) ?? id;
   font-size: 10px;
   background: color-mix(in srgb, #f59e0b 18%, transparent);
   color: var(--text-muted);
+}
+
+.query-chip {
+  background: color-mix(in srgb, #3b82f6 18%, transparent);
 }
 
 .conflict {

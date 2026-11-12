@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 from graphlagoon.db.database import is_database_available, get_session_maker
 from graphlagoon.db.memory_store import get_memory_store, MemoryGraphContext
 from graphlagoon.models.schemas import (
+    EnrichmentRunRequest,
+    EnrichmentRunResponse,
     DEFAULT_DATASOURCE_TYPE,
     EnrichmentLookupRequest,
     GraphContextCreate,
@@ -141,7 +143,7 @@ async def _check_enrichment_tables(request: Request, new, stored, context) -> No
     if not changed:
         return
     await require_permission("context.create")(request)
-    problem = scope_problem(changed, context)
+    problem = scope_problem(changed, context, all_tables=new)
     if problem:
         raise HTTPException(
             status_code=403,
@@ -974,6 +976,47 @@ async def lookup_enrichment(
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
     return await run_enrichment_lookup(warehouse, context, name, body.keys, user_email)
+
+
+@router.post("/{context_id}/enrichment/{name}/run", response_model=EnrichmentRunResponse)
+async def run_enrichment_query(
+    context_id: UUID,
+    name: str,
+    body: EnrichmentRunRequest,
+    request: Request,
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """Run enrichment query ``name`` over a batch of the loaded graph: the edges
+    (and their endpoint nodes) or the nodes (and the edges between them) it
+    targets. Anyone who can read the context may run it; writing the query is
+    the author's."""
+    from graphlagoon.services import enrichment
+    from graphlagoon.utils.context_access import get_context_with_access
+
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    try:
+        result = await enrichment.run_query(warehouse, context, name, body.edges, body.nodes)
+    except enrichment.EnrichmentError as e:
+        raise HTTPException(
+            status_code=e.status,
+            detail={"error": {"code": e.code, "message": e.message, "details": {}}},
+        )
+    await audit.record(
+        user_email,
+        AuditAction.ENRICHMENT_RUN,
+        resource_type="graph_context",
+        resource_id=context.id,
+        metadata={
+            "query": name,
+            "target": result["target"],
+            "edges": len(body.edges),
+            "nodes": len(body.nodes),
+            "rows": len(result["rows"]),
+            "truncated": result["truncated"],
+        },
+    )
+    return result
 
 
 async def run_enrichment_lookup(warehouse, context, name, keys, user_email) -> dict:

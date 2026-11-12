@@ -479,16 +479,60 @@ class PromoteSpec(BaseModel):
     edge_type: str = Field(min_length=1, max_length=100)
 
 
+# Enrichment queries: an author's SQL over the loaded graph (virtual tables
+# ``graph_edges`` / ``graph_nodes``) and the context's authorized tables; it returns
+# ``edge_id`` (target edges) or ``node_id`` (target nodes) plus the columns that become
+# properties of those edges or nodes.
+ENRICHMENT_VIRTUAL_TABLES = ("graph_edges", "graph_nodes")
+
+
+class EnrichmentQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sql: str = Field(min_length=1, max_length=20_000)
+    target: Literal["edges", "nodes"] = "edges"
+    run: Literal["auto", "manual"] = "manual"
+    overwrite: bool = False
+    node_props: bool = False
+
+    @model_validator(mode="after")
+    def _read_only(self) -> "EnrichmentQuery":
+        import sqlglot
+        from sqlglot import exp
+
+        from graphlagoon.services.sql_validation import validate_sql_query
+
+        ok, message = validate_sql_query(self.sql)
+        if not ok:
+            raise ValueError(f"query: {message}")
+        statement = sqlglot.parse_one(self.sql, dialect="spark")
+        shadowed = {
+            (c.alias_or_name or "").lower() for c in statement.find_all(exp.CTE)
+        } & set(ENRICHMENT_VIRTUAL_TABLES)
+        if shadowed:
+            raise ValueError(
+                f"query: {', '.join(sorted(shadowed))} is reserved for the loaded graph"
+            )
+        return self
+
+
 class EnrichmentTable(BaseModel):
+    """One authorized table of a context. Optionally a node-key lookup
+    (``key_column`` set) and/or an edge enrichment ``query``."""
+
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,40}$")
     label: str = Field(min_length=1, max_length=100)
     table: str = Field(min_length=1, max_length=400)
-    key_column: str = Field(min_length=1, max_length=200)
-    match_node_types: list[str] = Field(min_length=1, max_length=50)
+    key_column: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    match_node_types: list[str] = Field(default_factory=list, max_length=50)
     match_source: Union[Literal["node_id"], PropRef] = "node_id"
     cardinality: Literal["one", "many"] = "one"
-    columns: list[str] = Field(min_length=1, max_length=50)
+    columns: list[str] = Field(default_factory=list, max_length=50)
     promote: Optional[PromoteSpec] = None
+    query: Optional[EnrichmentQuery] = None
+
+    @property
+    def has_lookup(self) -> bool:
+        return self.key_column is not None
 
     @model_validator(mode="after")
     def _identifiers(self) -> "EnrichmentTable":
@@ -498,6 +542,16 @@ class EnrichmentTable(BaseModel):
         )
 
         qualified_from_dotted(self.table)
+        if self.table.split(".")[-1].strip("`").lower() in ENRICHMENT_VIRTUAL_TABLES:
+            raise ValueError(f"{self.table} uses a reserved name")
+        if self.key_column is None:
+            if self.match_node_types or self.columns or self.promote:
+                raise ValueError(
+                    "node types, columns and promote need a key column (the lookup)"
+                )
+            return self
+        if not self.match_node_types or not self.columns:
+            raise ValueError("a lookup needs node types and at least one column")
         for column in [self.key_column, *self.columns]:
             validate_identifier_part(column)
         if self.promote and self.promote.id_column not in self.columns:
@@ -533,6 +587,38 @@ class EdgeSemantics(BaseModel):
 
 class EnrichmentLookupRequest(BaseModel):
     keys: list[str] = Field(min_length=1)
+
+
+class EnrichmentRunEdge(BaseModel):
+    edge_id: str
+    src: str
+    dst: str
+    relationship_type: str = ""
+    properties: Optional[dict[str, Any]] = None
+
+
+class EnrichmentRunNode(BaseModel):
+    node_id: str
+    node_type: str = ""
+    properties: Optional[dict[str, Any]] = None
+
+
+class EnrichmentRunRequest(BaseModel):
+    """The batch: the edges or nodes to enrich (the query's target), plus the rest of the
+    loaded graph around them that the query may read."""
+
+    edges: list[EnrichmentRunEdge] = Field(default_factory=list)
+    nodes: list[EnrichmentRunNode] = Field(default_factory=list)
+
+
+class EnrichmentRunResponse(BaseModel):
+    name: str
+    label: Optional[str] = None
+    target: Literal["edges", "nodes"] = "edges"
+    columns: list[str]
+    rows: dict[str, dict[str, Any]]
+    truncated: bool = False
+    query_ms: Optional[float] = None
 
 
 # Graph Context models

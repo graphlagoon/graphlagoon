@@ -116,6 +116,7 @@ describe('describeAudit', () => {
   it('renders each known action', () => {
     expect(describeAudit(entry('context.transfer', { title: 'T', from: 'a', to: 'b' }))).toBe('"T" from a to b');
     expect(describeAudit(entry('context.share', { with: '*', permission: 'read' }))).toBe('with * (read)');
+    expect(describeAudit(entry('enrichment.run', { query: 'tx_risk', edges: 500, rows: 12, truncated: true }))).toBe('query tx_risk: 500 edge(s) sent, 12 enriched (truncated)');
     expect(describeAudit(entry('context.share', { with: 'x', permission: 'write', updated: true }))).toContain('updated');
     expect(describeAudit(entry('exploration.unshare', { with: 'x' }))).toBe('removed x');
     expect(describeAudit(entry('context.delete', { title: 'T', owner: 'o' }))).toBe('"T" (owner o)');

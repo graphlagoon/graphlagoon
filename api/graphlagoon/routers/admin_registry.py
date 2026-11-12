@@ -177,6 +177,7 @@ AUDITED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/investigations/{investigation_id}/decisions/{decision_id}/review"),
         ("POST", "/api/investigations/{investigation_id}/reopen"),
         ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"),
+        ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/run"),
     }
 )
 

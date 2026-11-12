@@ -1489,6 +1489,69 @@
         }
       }
     },
+    "/graphlagoon/api/graph-contexts/{context_id}/enrichment/{name}/run": {
+      "post": {
+        "tags": [
+          "graph-contexts"
+        ],
+        "summary": "Run Enrichment Query",
+        "description": "Run enrichment query ``name`` over a batch of the loaded graph: the edges\n(and their endpoint nodes) or the nodes (and the edges between them) it\ntargets. Anyone who can read the context may run it; writing the query is\nthe author's.",
+        "operationId": "graph_contexts_run_enrichment_query",
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Context Id"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrichmentRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/explorations": {
       "get": {
         "tags": [
@@ -10135,6 +10198,207 @@
         ],
         "title": "EnrichmentLookupRequest"
       },
+      "EnrichmentQuery": {
+        "properties": {
+          "sql": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Sql"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "edges",
+              "nodes"
+            ],
+            "title": "Target",
+            "default": "edges"
+          },
+          "run": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "title": "Run",
+            "default": "manual"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "default": false
+          },
+          "node_props": {
+            "type": "boolean",
+            "title": "Node Props",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sql"
+        ],
+        "title": "EnrichmentQuery"
+      },
+      "EnrichmentRunEdge": {
+        "properties": {
+          "edge_id": {
+            "type": "string",
+            "title": "Edge Id"
+          },
+          "src": {
+            "type": "string",
+            "title": "Src"
+          },
+          "dst": {
+            "type": "string",
+            "title": "Dst"
+          },
+          "relationship_type": {
+            "type": "string",
+            "title": "Relationship Type",
+            "default": ""
+          },
+          "properties": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "edge_id",
+          "src",
+          "dst"
+        ],
+        "title": "EnrichmentRunEdge"
+      },
+      "EnrichmentRunNode": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "node_type": {
+            "type": "string",
+            "title": "Node Type",
+            "default": ""
+          },
+          "properties": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id"
+        ],
+        "title": "EnrichmentRunNode"
+      },
+      "EnrichmentRunRequest": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/EnrichmentRunEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/EnrichmentRunNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          }
+        },
+        "type": "object",
+        "title": "EnrichmentRunRequest",
+        "description": "The batch: the edges or nodes to enrich (the query's target), plus the rest of the\nloaded graph around them that the query may read."
+      },
+      "EnrichmentRunResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "edges",
+              "nodes"
+            ],
+            "title": "Target",
+            "default": "edges"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "rows": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Rows"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "query_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "columns",
+          "rows"
+        ],
+        "title": "EnrichmentRunResponse"
+      },
       "EnrichmentTable": {
         "properties": {
           "name": {
@@ -10155,9 +10419,16 @@
             "title": "Table"
           },
           "key_column": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Key Column"
           },
           "match_node_types": {
@@ -10166,7 +10437,6 @@
             },
             "type": "array",
             "maxItems": 50,
-            "minItems": 1,
             "title": "Match Node Types"
           },
           "match_source": {
@@ -10197,7 +10467,6 @@
             },
             "type": "array",
             "maxItems": 50,
-            "minItems": 1,
             "title": "Columns"
           },
           "promote": {
@@ -10209,18 +10478,26 @@
                 "type": "null"
               }
             ]
+          },
+          "query": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrichmentQuery"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
           "name",
           "label",
-          "table",
-          "key_column",
-          "match_node_types",
-          "columns"
+          "table"
         ],
-        "title": "EnrichmentTable"
+        "title": "EnrichmentTable",
+        "description": "One authorized table of a context. Optionally a node-key lookup\n(``key_column`` set) and/or an edge enrichment ``query``."
       },
       "EntityCase": {
         "properties": {

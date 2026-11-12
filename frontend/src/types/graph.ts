@@ -152,20 +152,52 @@ export interface IdentityKey {
   pattern?: string;
 }
 
-/** A side table looked up by a node's key and shown in the inspector (investigations). */
+/**
+ * An enrichment query: the author's SELECT over the virtual tables `graph_edges` /
+ * `graph_nodes` (the loaded graph) and the context's authorized tables. It returns `edge_id`
+ * (target `edges`) or `node_id` (target `nodes`); every other column becomes a property.
+ */
+export interface EnrichmentQuery {
+  sql: string;
+  target?: 'edges' | 'nodes';
+  /** `auto` runs after every query, expand and load; `manual` only from Your data. */
+  run?: 'auto' | 'manual';
+  /** A returned value replaces one the edge already has. */
+  overwrite?: boolean;
+  /** Send node properties in `graph_nodes.props` (off: id and type only). */
+  node_props?: boolean;
+}
+
+/**
+ * One authorized table of a context. Being listed authorizes it; it may also be looked up
+ * by a node's key (`key_column` set, shown in the investigation inspector) and/or carry an
+ * enrichment `query` (edges or nodes).
+ */
 export interface EnrichmentTable {
-  /** Slug, unique in the context; used in the lookup URL. */
+  /** Slug, unique in the context; used in the lookup and run URLs. */
   name: string;
   label: string;
   /** catalog.schema.table */
   table: string;
-  key_column: string;
-  match_node_types: string[];
-  match_source: 'node_id' | { kind: 'prop'; name: string };
-  cardinality: 'one' | 'many';
+  key_column?: string | null;
+  match_node_types?: string[];
+  match_source?: 'node_id' | { kind: 'prop'; name: string };
+  cardinality?: 'one' | 'many';
   /** The only columns a lookup returns. */
-  columns: string[];
+  columns?: string[];
   promote?: { node_type: string; id_column: string; edge_type: string } | null;
+  query?: EnrichmentQuery | null;
+}
+
+/** POST /graph-contexts/{id}/enrichment/{name}/run: the first row per edge (or node) sent. */
+export interface EnrichmentRunResult {
+  name: string;
+  label: string | null;
+  target: 'edges' | 'nodes';
+  columns: string[];
+  rows: Record<string, Record<string, unknown>>;
+  truncated: boolean;
+  query_ms?: number | null;
 }
 
 /** Which edge properties carry the amount and the time (investigations F3.1). */

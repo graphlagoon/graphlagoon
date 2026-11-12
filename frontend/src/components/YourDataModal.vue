@@ -13,6 +13,8 @@ import { useSketch } from '@/composables/useSketch';
 import { useToast } from '@/composables/useToast';
 import MappingStep from '@/components/investigation/MappingStep.vue';
 import EnrichmentSkillModal from '@/components/EnrichmentSkillModal.vue';
+import DatabricksEnrichmentTab from '@/components/DatabricksEnrichmentTab.vue';
+import { usePermissions } from '@/composables/usePermissions';
 import HelpTip from '@/components/admin/HelpTip.vue';
 import { guideUrl } from '@/utils/docsLinks';
 import { encodingFor, genericSpec } from '@/utils/fileImport';
@@ -38,8 +40,11 @@ const graph = useGraphStore();
 const sketch = useSketch();
 const toast = useToast();
 
-type Tab = 'enrich' | 'graph' | 'draw';
-const tab = ref<Tab>('enrich');
+type Tab = 'enrich' | 'graph' | 'draw' | 'databricks';
+const { can } = usePermissions();
+/** The layer tabs need write access; the context's Databricks queries only need to read it. */
+const canEditLayer = computed(() => graph.canEditOverlay && can('exploration.edit_graph'));
+const tab = ref<Tab>(canEditLayer.value ? 'enrich' : 'databricks');
 const busy = ref(false);
 const error = ref<string | null>(null);
 const maxBytes = window.__GRAPH_LAGOON_CONFIG__?.exploration_overlay_max_bytes ?? 5 * 1024 * 1024;
@@ -364,16 +369,19 @@ function drawNode() {
           <h2>Your data</h2>
           <button class="modal-close" aria-label="Close" @click="emit('close')">&times;</button>
         </div>
-        <p class="hint">
+        <p v-if="canEditLayer && tab !== 'databricks'" class="hint">
           Add your own data to this graph. It is saved with the exploration, beside the context's data, and comes back
           after every query and expand. Others who open the exploration see it; the context does not change.
           <a :href="guideUrl('bring-your-own-data')" target="_blank" rel="noopener" data-testid="your-data-guide">Full guide</a>
         </p>
 
         <div class="tabs" role="tablist">
-          <button role="tab" :class="{ active: tab === 'enrich' }" data-testid="your-data-tab-enrich" @click="tab = 'enrich'">Enrich from a file</button>
-          <button role="tab" :class="{ active: tab === 'graph' }" data-testid="your-data-tab-graph" @click="tab = 'graph'">Nodes and edges from a file</button>
-          <button role="tab" :class="{ active: tab === 'draw' }" data-testid="your-data-tab-draw" @click="tab = 'draw'">Draw</button>
+          <template v-if="canEditLayer">
+            <button role="tab" :class="{ active: tab === 'enrich' }" data-testid="your-data-tab-enrich" @click="tab = 'enrich'">Enrich from a file</button>
+            <button role="tab" :class="{ active: tab === 'graph' }" data-testid="your-data-tab-graph" @click="tab = 'graph'">Nodes and edges from a file</button>
+            <button role="tab" :class="{ active: tab === 'draw' }" data-testid="your-data-tab-draw" @click="tab = 'draw'">Draw</button>
+          </template>
+          <button role="tab" :class="{ active: tab === 'databricks' }" data-testid="your-data-tab-databricks" @click="tab = 'databricks'">From Databricks tables</button>
         </div>
 
         <section v-if="tab === 'enrich'">
@@ -518,6 +526,8 @@ function drawNode() {
           </template>
         </section>
 
+        <DatabricksEnrichmentTab v-else-if="tab === 'databricks'" />
+
         <section v-else>
           <p class="hint">
             Right-click a node for <strong>Add a linked node</strong>. Select one node, then right-click another for
@@ -534,7 +544,7 @@ function drawNode() {
         <p v-if="error" class="error-message" data-testid="your-data-error">{{ error }}</p>
         <p v-if="graph.overlayError" class="warn">{{ graph.overlayError }}</p>
 
-        <section class="layer" data-testid="your-data-layer">
+        <section v-if="canEditLayer && tab !== 'databricks'" class="layer" data-testid="your-data-layer">
           <h3>In this exploration
             <HelpTip title="Your layer" testid="your-data-layer">
               <span>Everything here is saved beside the exploration, not in its snapshot: the context's data stays as the context gave it.</span>

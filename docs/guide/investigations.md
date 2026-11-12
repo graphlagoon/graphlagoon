@@ -338,12 +338,18 @@ entities into one on the canvas and in every server analysis.
 
 ## Enrichment tables
 
-A context can attach side tables (KYC, devices, chargebacks) in the context
-form. The inspector's **Enrichment** tab looks a table up for the selected
-entity; a table can **promote** a column to nodes (each distinct value becomes
+A context lists its **authorized tables** (KYC, devices, chargebacks) under
+Enrichment Tables in the context form. An entry with a **key column** is a
+lookup: the inspector's **Enrichment** tab looks it up for the selected
+entity, and it can **promote** a column to nodes (each distinct value becomes
 a node linked to the entities that share it). Lookups are by key, return only
 the listed columns, are capped (`GRAPH_LAGOON_ENRICHMENT_MAX_KEYS`,
 `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS`) and are audited (`enrichment.read`).
+An entry may instead (or also) carry an **enrichment query** that adds
+properties to the edges or the nodes of an exploration after every query; it
+can join any of the listed tables. The list can be imported as YAML or written
+with an AI prompt
+([Bring your own data](./bring-your-own-data.md#enrich-from-databricks-tables)).
 
 A case can upload its own as an **Enrichment** file: the key column, how keys
 are normalized, the node types it applies to (every type by default) or, for

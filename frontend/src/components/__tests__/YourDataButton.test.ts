@@ -28,6 +28,19 @@ describe('YourDataButton (BYOD-2)', () => {
     expect(mountButton().find('[data-testid="toolbar-your-data"]').exists()).toBe(false);
   });
 
+  it('shows to a reader when the context has edge enrichment queries, never on a case canvas', () => {
+    const graphStore = useGraphStore();
+    graphStore.currentContext = {
+      id: 'ctx-1', title: 'Ctx',
+      enrichment_tables: [{ name: 'q', label: 'Q', table: 'm.s.t', query: { sql: 'SELECT 1', run: 'auto' } }],
+    } as never;
+    graphStore.currentExploration = { id: 'exp-1', title: 'Shared', has_write_access: false, state: {} } as never;
+    window.__GRAPH_LAGOON_CONFIG__ = { permissions: [] } as never;
+    expect(mountButton().find('[data-testid="toolbar-your-data"]').exists()).toBe(true);
+    graphStore.loadInvestigationGraph({ rings: new Map() } as never, [], []);
+    expect(mountButton().find('[data-testid="toolbar-your-data"]').exists()).toBe(false);
+  });
+
   it('opens the dialog', async () => {
     useGraphStore().currentContext = { id: 'ctx-1', title: 'Ctx' } as never;
     const wrapper = mountButton();

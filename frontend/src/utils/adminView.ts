@@ -150,6 +150,8 @@ function describeAuditBody(entry: AuditEntry): string {
       return `MCP ${m.tool ?? '?'}`;
     case 'enrichment.read':
       return `${m.table ?? '?'}: ${m.keys ?? 0} key(s), ${m.rows ?? 0} row(s)`;
+    case 'enrichment.run':
+      return `query ${m.query ?? '?'}: ${m.edges ?? 0} edge(s) sent, ${m.rows ?? 0} enriched${m.truncated ? ' (truncated)' : ''}`;
     case 'agent_token.revoke':
       return `token ${entry.resource_id}${m.by_admin ? ' — by an admin' : ''}`;
     case 'admin.clear_all':

@@ -49,6 +49,9 @@ import type {
 import type {
   DatasetsResponse,
   EnrichmentLookupResult,
+  EnrichmentRunResult,
+  Edge,
+  Node,
   GraphContext,
   GraphResponse,
   NodeBatchResponse,
@@ -259,6 +262,16 @@ class ApiService {
   /** Declared columns of a context's enrichment table for a batch of node keys. */
   async lookupEnrichment(contextId: string, name: string, keys: string[]): Promise<EnrichmentLookupResult> {
     const response = await this.client.post(`/api/graph-contexts/${contextId}/enrichment/${name}/lookup`, { keys });
+    return response.data;
+  }
+
+  /** Run a context's edge enrichment query over a batch of the loaded edges. */
+  async runEnrichmentQuery(
+    contextId: string,
+    name: string,
+    body: { edges: Edge[]; nodes: Pick<Node, 'node_id' | 'node_type' | 'properties'>[] },
+  ): Promise<EnrichmentRunResult> {
+    const response = await this.client.post(`/api/graph-contexts/${contextId}/enrichment/${name}/run`, body);
     return response.data;
   }
 
