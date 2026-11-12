@@ -280,3 +280,72 @@ export function scopeLabel(spec: FileEnrichmentSpec): string {
   const types = (onNodes ? spec.match_node_types : spec.match_edge_types)?.filter((t) => t !== '*') ?? [];
   return `${types.length ? `${types.join(', ')} ` : ''}${onNodes ? 'nodes' : 'edges'}`;
 }
+
+export interface KeyGuideType {
+  type: string;
+  count: number;
+  /** One real node of the type, for the example. */
+  sample: { id: string; name: string | null };
+  /** Properties that can be a key: text or number, (almost) one value per node. */
+  keys: { name: string; example: string }[];
+}
+
+export interface KeyGuide {
+  types: KeyGuideType[];
+  /** One real edge, for the endpoints example. */
+  edge: { src: string; dst: string; type: string } | null;
+  /** The canvas has nodes but none carries a property (not loaded, or none in the context). */
+  idsOnly: boolean;
+}
+
+/** Property names that say they identify something (`tax_id`, `email`, `doc_number`, `cnpj`). */
+const ID_LIKE = /(^|_)(id|key|code|doc|document|cpf|cnpj|ssn|tax|email|e_?mail|phone|account|iban|number|no|registry|uuid)(_|$)/i;
+const NAME_PROPS = ['name', 'display_name', 'full_name', 'legal_name', 'title', 'label'];
+
+/**
+ * What a row can join on this canvas, from its real nodes: per type (most nodes first)
+ * a node to show, and the properties that identify a node. Drives the help of the Enrich tab.
+ */
+export function canvasKeyGuide(graph: PlainGraph, maxTypes = 4, maxKeys = 3): KeyGuide {
+  const byType = new Map<string, PlainGraph['nodes']>();
+  for (const n of graph.nodes) (byType.get(n.node_type) ?? byType.set(n.node_type, []).get(n.node_type)!).push(n);
+  const types = [...byType.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .slice(0, maxTypes)
+    .map(([type, nodes]): KeyGuideType => {
+      const values = new Map<string, Set<string>>();
+      const seen = new Map<string, number>();
+      for (const n of nodes) {
+        for (const [k, v] of Object.entries(n.properties ?? {})) {
+          if (typeof v !== 'string' && typeof v !== 'number') continue;
+          const s = String(v).trim();
+          if (!s) continue;
+          (values.get(k) ?? values.set(k, new Set()).get(k)!).add(s);
+          seen.set(k, (seen.get(k) ?? 0) + 1);
+        }
+      }
+      const rank = (k: string) => (ID_LIKE.test(k) ? 0 : NAME_PROPS.includes(k) ? 2 : 1);
+      const keys = [...values.entries()]
+        .filter(([k, set]) => {
+          const n = seen.get(k) ?? 0;
+          // Present on most nodes and (almost) unique: an id, not a category.
+          if (n < 0.8 * nodes.length || set.size < 0.9 * n) return false;
+          // A short number (an age, a count) is unique by chance, never a key.
+          if ([...set].every((v) => /^-?\d{1,3}(\.\d+)?$/.test(v))) return false;
+          // On a handful of nodes anything is unique: trust the property's name instead.
+          return nodes.length >= 10 || rank(k) !== 1;
+        })
+        .sort((a, b) => rank(a[0]) - rank(b[0]) || b[1].size - a[1].size)
+        .slice(0, maxKeys)
+        .map(([name, set]) => ({ name, example: [...set][0].slice(0, 40) }));
+      const first = nodes[0];
+      const nameKey = NAME_PROPS.find((k) => first.properties?.[k] !== undefined && first.properties?.[k] !== null);
+      return { type, count: nodes.length, sample: { id: first.node_id, name: nameKey ? String(first.properties![nameKey]) : null }, keys };
+    });
+  const e = graph.edges[0];
+  return {
+    types,
+    edge: e ? { src: e.src, dst: e.dst, type: e.relationship_type } : null,
+    idsOnly: graph.nodes.length > 0 && graph.nodes.every((n) => !Object.keys(n.properties ?? {}).length),
+  };
+}

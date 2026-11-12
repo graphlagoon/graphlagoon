@@ -20,7 +20,7 @@ import { guideUrl } from '@/utils/docsLinks';
 import { encodingFor, genericSpec } from '@/utils/fileImport';
 import { interpretMapping, suggestPresets, type MappingSpec } from '@/utils/fileMapping';
 import { fileEnrichmentRows, matchFileRows, tableContentOf } from '@/utils/enrichment';
-import { describeMatch, fallbackSpec, readTable, scopeLabel, suggestEnrichmentMatches, type MatchSuggestion, type ReadTable } from '@/utils/enrichmentAutoMatch';
+import { canvasKeyGuide, describeMatch, fallbackSpec, readTable, scopeLabel, suggestEnrichmentMatches, type MatchSuggestion, type ReadTable } from '@/utils/enrichmentAutoMatch';
 import {
   firstRows,
   importEdgeId,
@@ -154,6 +154,22 @@ function choose(s: MatchSuggestion) {
 const pickedSuggestion = computed(() => {
   const e = enrichment.value;
   return e ? suggestions.value.findIndex((s) => describeMatch(s.spec) === describeMatch(e) && scopeLabel(s.spec) === scopeLabel(e)) : -1;
+});
+
+/** What a row can join on this canvas, from its real nodes (the help, the example, the guard). */
+const guide = computed(() => {
+  void graph.overlayVersion;
+  return canvasKeyGuide(graph.baseGraph());
+});
+/** A two-line CSV that would really join: the top type's first id-like property, or its node id. */
+const example = computed(() => {
+  const t = guide.value.types[0];
+  if (!t) return null;
+  const key = t.keys[0];
+  const node = graph.baseGraph().nodes.find((n) => n.node_id === t.sample.id);
+  const value = key ? String(node?.properties?.[key.name] ?? key.example) : t.sample.id;
+  const column = key ? key.name : 'node_id';
+  return { csv: `${column},risk\n${value},high`, column, type: t.type, id: t.sample.id, name: t.sample.name };
 });
 
 /** The first rows, to see what the file holds; the key columns are marked. */
@@ -385,15 +401,41 @@ function drawNode() {
         </div>
 
         <section v-if="tab === 'enrich'">
+          <p v-if="!guide.types.length" class="nomatch" data-testid="your-data-enrich-empty-canvas">
+            There is nothing on the canvas to add data to yet. Run a query or open an exploration first: each row of
+            your file then finds its node on the graph.
+          </p>
+          <template v-else>
           <p class="hint">
-            A CSV with a key column: each row adds its columns as properties to the node (or edge) with that key. Values already on a node win unless you tick "Replace".
+            Each row finds one node (or edge) by a <strong>key column</strong> and adds its other columns as properties.
+            Values already on a node stay unless you tick "Replace" in Adjust.
             <HelpTip title="Enrich from a file" testid="your-data-enrich">
-              <span>Example: <code>account,risk</code> then <code>4471-0,high</code> sets <code>risk = high</code> on the node <code>4471-0</code>.</span>
-              <span>The key column is guessed from the ids on the canvas; the line under the settings says how many nodes match before you apply.</span>
+              <span>The join is found for you: every column is tried against the node ids and the properties below, as they are and normalized (<code>123.456.789-01</code> meets <code>12345678901</code>, <code>ACME</code> meets <code>Acme</code>).</span>
               <span>Nodes that arrive later (another query, an expand) get their row too.</span>
+              <span>Nothing joins? <strong>Ask an AI to clean this file</strong> rewrites the key the way the canvas writes it.</span>
               <a :href="guideUrl('bring-your-own-data', 'enrich-nodes-or-edges-from-a-file')" target="_blank" rel="noopener">More in the guide</a>
             </HelpTip>
           </p>
+          <div v-if="!source" class="key-guide" data-testid="your-data-enrich-guide">
+            <h4>On this graph, a key can be</h4>
+            <ul>
+              <li v-for="t in guide.types" :key="t.type">
+                <strong>{{ t.type }}</strong> <span class="hint">({{ t.count }})</span>:
+                node id, e.g. <code>{{ t.sample.id }}</code><template v-for="k in t.keys" :key="k.name"> · <code class="prop">{{ k.name }}</code>, e.g. <code>{{ k.example }}</code></template>
+              </li>
+              <li v-if="guide.edge" class="hint">
+                <strong>{{ guide.edge.type }}</strong> edges: two columns with both ends, e.g. <code>{{ guide.edge.src }}</code> and <code>{{ guide.edge.dst }}</code> (either order).
+              </li>
+            </ul>
+            <p v-if="guide.idsOnly" class="warn" data-testid="your-data-enrich-ids-only">
+              The nodes on the canvas carry no properties, so rows can only join by node id. A file keyed by a document,
+              a name or an e-mail will not join until those properties are on the nodes.
+            </p>
+            <div v-if="example" class="example">
+              <pre data-testid="your-data-enrich-example">{{ example.csv }}</pre>
+              <span>sets <code>risk = high</code> on {{ example.type }} <code>{{ example.id }}</code><template v-if="example.name"> ({{ example.name }})</template>.</span>
+            </div>
+          </div>
           <div
             class="drop"
             :class="{ dragging, compact: !!source }"
@@ -414,7 +456,7 @@ function drawNode() {
             <button class="btn btn-sm btn-outline" data-testid="your-data-enrich-ask-fill" @click="skill = 'fill'"><Bot :size="14" /> Ask an AI to fill in data</button>
           </div>
           <div v-if="showPaste" class="paste">
-            <textarea v-model="pasteText" rows="5" class="form-control mono" placeholder="Copy the cells from a spreadsheet (with the header row) and paste them here" data-testid="your-data-enrich-paste"></textarea>
+            <textarea v-model="pasteText" rows="5" class="form-control mono" :placeholder="`Copy the cells from a spreadsheet, with the header row, and paste them here. For example:\n${example?.csv.replaceAll(',', '\t') ?? 'node_id\trisk'}`" data-testid="your-data-enrich-paste"></textarea>
             <div class="actions">
               <button class="btn btn-sm btn-primary" :disabled="!pasteText.trim()" data-testid="your-data-enrich-paste-use" @click="usePasted">Use these rows</button>
             </div>
@@ -484,6 +526,7 @@ function drawNode() {
               <p v-else-if="!enrichValid" class="warn">Pick a key column and at least one column to add (Adjust the matching).</p>
               <button class="btn btn-primary" :disabled="busy || !enrichPreview?.matched" data-testid="your-data-enrich-apply" @click="applyEnrichment">Apply</button>
             </div>
+          </template>
           </template>
         </section>
 
@@ -583,6 +626,44 @@ function drawNode() {
 </template>
 
 <style scoped>
+.key-guide {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.key-guide h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.key-guide ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.key-guide code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.key-guide code.prop {
+  font-weight: 600;
+}
+.example {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.example pre {
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 12px;
+}
 .drop {
   display: flex;
   flex-wrap: wrap;

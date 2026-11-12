@@ -82,6 +82,12 @@ test.describe('Your data on an exploration', () => {
     await page.goto(`/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
     await page.getByTestId('toolbar-your-data').click();
+    // The help is this graph's: its types, a real node, its id-like properties, an example that joins.
+    const guide = page.getByTestId('your-data-enrich-guide');
+    await expect(guide).toContainText('Person (3): node id, e.g. n1');
+    await expect(guide).toContainText('name, e.g. Acme Corp');
+    await expect(guide).toContainText('KNOWS edges');
+    await expect(page.getByTestId('your-data-enrich-example')).toContainText(',risk');
     await page.getByTestId('your-data-enrich-paste-toggle').click();
     await page.getByTestId('your-data-enrich-paste').fill('company\tsector\nACME CORP\tRetail\nglobex\tBanking\n');
     await page.getByTestId('your-data-enrich-paste-use').click();
