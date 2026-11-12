@@ -60,6 +60,16 @@ import {
   type OverlayState,
 } from '@/utils/graphOverlay';
 import { edgeValue, type EdgeValue } from '@/utils/edgeSemantics';
+import {
+  enrichedKeys,
+  targetOf,
+  queryEntries,
+  recordProvenance,
+  runPatch,
+  runPayloads,
+  stripEnriched,
+  type EnrichmentProvenance,
+} from '@/utils/queryEnrichment';
 import { aggregateParallelEdges } from '@/utils/parallelEdges';
 import type { TraceColumns } from '@/utils/traceView';
 import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
@@ -368,6 +378,21 @@ function recordGraphLoad(
   }
 }
 
+/** What one enrichment query did on the graph on screen. */
+export interface QueryEnrichmentRun {
+  status: 'running' | 'done' | 'error';
+  label: string;
+  target: 'edges' | 'nodes';
+  /** Edges (or nodes) the query returned a row for, of `total` sent. */
+  matched: number;
+  /** Edges (or nodes) that got at least one new property. */
+  written: number;
+  total: number;
+  truncated: boolean;
+  error: string | null;
+  at: number;
+}
+
 export const useGraphStore = defineStore('graph', () => {
   // Current graph data
   const nodes = ref<Node[]>([]);
@@ -443,6 +468,27 @@ export const useGraphStore = defineStore('graph', () => {
   const truncated = ref(false);
   // Bumped on every load/clear so stale batches abandon their patches.
   let enrichmentToken = 0;
+
+  // Enrichment queries (context `enrichment_tables[].query`): what each one did on the
+  // graph on screen, and which edge and node keys it wrote, so the details panel can mark
+  // them and a saved snapshot leaves them out (they are re-run, never stored).
+  const queryEnrichmentRuns = ref<Record<string, QueryEnrichmentRun>>({});
+  let edgeProvenance: EnrichmentProvenance = new Map();
+  let nodeProvenance: EnrichmentProvenance = new Map();
+  // Node values a query wrote, put back when background property loading replaces a node's dict.
+  let nodeQueryValues = new Map<string, Map<string, { value: unknown; overwrite: boolean }>>();
+  const queryEnrichmentVersion = ref(0);
+  // Bumped when the graph is replaced or cleared: a run still in flight drops its rows.
+  let queryEnrichmentToken = 0;
+
+  function resetQueryEnrichment() {
+    queryEnrichmentToken++;
+    edgeProvenance = new Map();
+    nodeProvenance = new Map();
+    nodeQueryValues = new Map();
+    queryEnrichmentRuns.value = {};
+    queryEnrichmentVersion.value++;
+  }
   // The same idea for precomputed graph resolutions: editing `?seed=` in the
   // address bar makes overlapping requests routine, so a slow answer must not
   // overwrite a fast one that started later.
@@ -1312,12 +1358,112 @@ export const useGraphStore = defineStore('graph', () => {
       // visible to anything holding the node. `merge` builds a NEW object for
       // the same reason.
       node.properties = merge ? { ...node.properties, ...props } : props;
+      const fromQuery = nodeQueryValues.get(node.node_id);
+      if (fromQuery) {
+        const withQuery = { ...(node.properties ?? {}) };
+        for (const [k, { value, overwrite }] of fromQuery) {
+          if (overwrite || withQuery[k] === undefined || withQuery[k] === null) withQuery[k] = value;
+        }
+        node.properties = withQuery;
+      }
       if (clearPending) pendingPropertyNodeIds.value.delete(node.node_id);
       patched++;
     }
     afterPatch(targets, overlay.value, overlayState);
 
     if (patched > 0) nodePatchVersion.value++;
+  }
+
+  /** Replaces the properties of the edges in `patch` (same rules as patchNodeProperties). */
+  function patchEdgeProperties(patch: Map<string, Record<string, unknown>>) {
+    if (patch.size === 0) return;
+    let patched = 0;
+    for (const edge of edges.value) {
+      const props = patch.get(edge.edge_id);
+      if (!props) continue;
+      edge.properties = props;
+      patched++;
+    }
+    if (patched > 0) nodePatchVersion.value++;
+  }
+
+  /**
+   * Runs the context's enrichment queries over the graph on screen (or only the `only` ids,
+   * after an expand): the `auto` ones by default, or the entries named. Each writes the
+   * properties of the edges or the nodes it targets. Best-effort like the node property
+   * load: the graph is already usable; an auto run that fails says so once in a toast.
+   */
+  async function runQueryEnrichment(
+    options: { names?: string[]; only?: { edges: Set<string>; nodes: Set<string> } } = {},
+  ): Promise<Record<string, QueryEnrichmentRun>> {
+    const ctx = currentContext.value;
+    if (!ctx || investigationMode.value) return {};
+    const entries = options.names
+      ? queryEntries(ctx).filter((t) => options.names!.includes(t.name))
+      : queryEntries(ctx, 'auto');
+    if (!entries.length) return {};
+    const base = savedGraph();
+    const token = queryEnrichmentToken;
+    const done: Record<string, QueryEnrichmentRun> = {};
+    let failed = 0;
+    for (const entry of entries) {
+      const target = targetOf(entry);
+      const payloads = runPayloads(base.nodes, base.edges, entry, undefined, options.only);
+      const total = payloads.reduce((n, p) => n + (target === 'nodes' ? p.nodes.length : p.edges.length), 0);
+      if (!total) continue;
+      const run: QueryEnrichmentRun = {
+        status: 'running', label: entry.label, target, matched: 0, written: 0, total,
+        truncated: false, error: null, at: Date.now(),
+      };
+      queryEnrichmentRuns.value = { ...queryEnrichmentRuns.value, [entry.name]: { ...run } };
+      const overwrite = !!entry.query?.overwrite;
+      try {
+        for (const payload of payloads) {
+          const result = await api.runEnrichmentQuery(ctx.id, entry.name, payload);
+          if (token !== queryEnrichmentToken || currentContext.value?.id !== ctx.id) return done;
+          if (target === 'nodes') {
+            const reached = nodes.value.filter((n) => result.rows[n.node_id]);
+            const { patch, written, matched } = runPatch(reached, (n) => n.node_id, result, overwrite);
+            for (const [id, keys] of written) {
+              const kept = nodeQueryValues.get(id) ?? new Map();
+              for (const key of keys) kept.set(key, { value: patch.get(id)![key], overwrite });
+              nodeQueryValues.set(id, kept);
+            }
+            patchNodeProperties(patch, { clearPending: false });
+            recordProvenance(nodeProvenance, entry.label, written);
+            run.matched += matched;
+            run.written += written.size;
+          } else {
+            const reached = edges.value.filter((e) => result.rows[e.edge_id]);
+            const { patch, written, matched } = runPatch(reached, (e) => e.edge_id, result, overwrite);
+            patchEdgeProperties(patch);
+            recordProvenance(edgeProvenance, entry.label, written);
+            run.matched += matched;
+            run.written += written.size;
+          }
+          run.truncated ||= result.truncated;
+        }
+        run.status = 'done';
+      } catch (e: unknown) {
+        if (token !== queryEnrichmentToken) return done;
+        run.status = 'error';
+        run.error = extractErrorDetails(e, 'The enrichment query failed').message;
+        failed++;
+      }
+      done[entry.name] = { ...run };
+      queryEnrichmentRuns.value = { ...queryEnrichmentRuns.value, [entry.name]: { ...run } };
+      queryEnrichmentVersion.value++;
+    }
+    if (failed && !options.names) {
+      useToast().warning(`${failed === 1 ? 'An enrichment query' : `${failed} enrichment queries`} failed. Your data → From Databricks tables shows why.`);
+    }
+    return done;
+  }
+
+  /** key → query label of the properties an enrichment query wrote on an edge or node. */
+  function enrichedKeysFor(kind: 'node' | 'edge', id: string): Map<string, string> {
+    void queryEnrichmentVersion.value;
+    return enrichedKeys(kind === 'node' ? nodeProvenance : edgeProvenance, id);
   }
 
   /**
@@ -1497,8 +1643,10 @@ export const useGraphStore = defineStore('graph', () => {
       // Success: request a fresh layout only now (not before the await), so a
       // failed request never leaves the flag set to contaminate a later update.
       freshLayoutRequested.value = true;
+      resetQueryEnrichment();
       [nodes.value, edges.value] = withOverlay(response.nodes, response.edges);
       truncated.value = response.truncated === true;
+      void runQueryEnrichment();
       recordGraphLoad('subgraph', response, tFetched - t0, performance.now() - tFetched);
       recordChainRecompute('subgraph');
       adjustGravityForConnectivity();
@@ -1571,7 +1719,9 @@ export const useGraphStore = defineStore('graph', () => {
       if (token !== precomputedToken) return payload;
 
       freshLayoutRequested.value = true;
+      resetQueryEnrichment();
       [nodes.value, edges.value] = withOverlay(payload.graph.nodes, payload.graph.edges);
+      void runQueryEnrichment();
       truncated.value = payload.graph.truncated === true;
       currentPrecomputedGraph.value = payload;
       // Show where the graph came from, so the query panel is not blank.
@@ -1633,7 +1783,7 @@ export const useGraphStore = defineStore('graph', () => {
     }
 
     // A published graph is the context's: the user's layer stays with the exploration.
-    const base = baseGraph();
+    const base = savedGraph();
     return api.putPrecomputedGraph(currentContext.value.id, name, {
       graph: {
         nodes: base.nodes,
@@ -1697,6 +1847,11 @@ export const useGraphStore = defineStore('graph', () => {
 
       // The layer re-applies: new nodes get their enrichment, layer edges whose endpoint just arrived are drawn.
       [nodes.value, edges.value] = withOverlay([...nodes.value, ...newNodes], [...edges.value, ...newEdges]);
+      if (newEdges.length || newNodes.length) {
+        void runQueryEnrichment({
+          only: { edges: new Set(newEdges.map((e) => e.edge_id)), nodes: new Set(newNodes.map((n) => n.node_id)) },
+        });
+      }
     } catch (e: unknown) {
       queryError.value = extractErrorDetails(e, 'Failed to expand node');
     } finally {
@@ -1797,6 +1952,7 @@ export const useGraphStore = defineStore('graph', () => {
 
     if (isPartial) {
       freshLayoutRequested.value = true;
+      resetQueryEnrichment();
       [nodes.value, edges.value] = withOverlay(response.nodes, response.edges);
       partialNodeIds = new Set(response.nodes.map((n) => n.node_id));
       return;
@@ -1813,9 +1969,11 @@ export const useGraphStore = defineStore('graph', () => {
       patchNodeProperties(patch);
     } else {
       freshLayoutRequested.value = true;
+      resetQueryEnrichment();
       [nodes.value, edges.value] = withOverlay(response.nodes, response.edges);
     }
     partialNodeIds = null;
+    void runQueryEnrichment();
   }
 
   const graphJob = useCancellableQuery({
@@ -2419,8 +2577,17 @@ export const useGraphStore = defineStore('graph', () => {
     return baseGraphOf(nodes.value, edges.value, overlayState);
   }
 
-  function buildGraphSnapshot() {
+  /** The context's answer as it should be saved: no layer, no edge enrichment (re-run on open). */
+  function savedGraph(): { nodes: Node[]; edges: Edge[] } {
     const base = baseGraph();
+    return {
+      nodes: stripEnriched(base.nodes, (n) => n.node_id, nodeProvenance),
+      edges: stripEnriched(base.edges, (e) => e.edge_id, edgeProvenance),
+    };
+  }
+
+  function buildGraphSnapshot() {
+    const base = savedGraph();
     return {
       nodes: base.nodes.map((n) => ({
         id: n.node_id,
@@ -2879,6 +3046,7 @@ export const useGraphStore = defineStore('graph', () => {
       patchNodeProperties(merged.patch, { merge: false });
       overlay.value = layer;
       [nodes.value, edges.value] = withOverlay(merged.nodes, merged.edges);
+      void runQueryEnrichment();
       liveBase = fingerprints(snapshot);
       const nodeIds = new Set(nodes.value.map((n) => n.node_id));
       const edgeIds = new Set(edges.value.map((e) => e.edge_id));
@@ -3015,7 +3183,9 @@ export const useGraphStore = defineStore('graph', () => {
           const tFetched = performance.now();
           liveBase = fingerprints(snapshot);
           const graph = snapshotToGraph(snapshot);
+          resetQueryEnrichment();
           [nodes.value, edges.value] = withOverlay(graph.nodes, graph.edges);
+          void runQueryEnrichment();
           recordGraphLoad(
             'snapshot',
             { nodes: snapshot.nodes, edges: snapshot.edges },
@@ -3247,6 +3417,7 @@ export const useGraphStore = defineStore('graph', () => {
     // Abandon in-flight enrichment: its patches would target a graph that no
     // longer exists.
     enrichmentToken++;
+    resetQueryEnrichment();
     pendingPropertyNodeIds.value.clear();
     enriching.value = false;
     enrichmentError.value = null;
@@ -3306,6 +3477,9 @@ export const useGraphStore = defineStore('graph', () => {
     canEditOverlay,
     overlayKeysFor,
     baseGraph,
+    queryEnrichmentRuns,
+    runQueryEnrichment,
+    enrichedKeysFor,
     persistOverlay,
     setOverlayEnrichment,
     removeOverlayEnrichment,

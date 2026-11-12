@@ -67,6 +67,7 @@ class AuditAction:
     CASE_TYPE_WRITE = "case_type.write"
     CASE_TYPE_DELETE = "case_type.delete"
     ENRICHMENT_READ = "enrichment.read"
+    ENRICHMENT_RUN = "enrichment.run"
     AGENT_READ = "agent.read"  # every MCP read tool call (03 §8.6)
 
     @classmethod

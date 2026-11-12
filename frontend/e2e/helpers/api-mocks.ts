@@ -327,6 +327,33 @@ export async function seedContexts(page: Page, contexts: any[]) {
  * setupAPIMocks (later routes take precedence). Used by the docs screenshot
  * generator to serve a denser, curated graph than MOCK_GRAPH_RESPONSE.
  */
+/**
+ * Edge enrichment queries (`POST …/enrichment/{name}/run`): answers each sent edge with
+ * `rowFor(edge_id)` (null = no row), and records every request body.
+ */
+export async function seedEnrichmentRun(
+  page: Page,
+  rowFor: (edgeId: string, query: string) => Record<string, unknown> | null,
+  calls: { name: string; body: any }[] = [],
+) {
+  await page.route('**/graphlagoon/api/graph-contexts/*/enrichment/*/run', (route) => {
+    const name = route.request().url().split('/enrichment/')[1].split('/')[0];
+    const body = route.request().postDataJSON();
+    calls.push({ name, body });
+    const rows: Record<string, unknown> = {};
+    for (const e of body.edges ?? []) {
+      const row = rowFor(e.edge_id, name);
+      if (row) rows[e.edge_id] = row;
+    }
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ name, label: name, target: 'edges', columns: [], rows, truncated: false, query_ms: 12 }),
+    });
+  });
+  return calls;
+}
+
 export async function seedGraphResponse(page: Page, graph: any) {
   const body = JSON.stringify(graph);
   for (const endpoint of ['subgraph', 'expand', 'query']) {

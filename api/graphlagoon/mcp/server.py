@@ -1031,10 +1031,11 @@ def build_server():
             context = await get_context_with_access(loaded.context_id, user)
         except HTTPException as exc:
             raise _http_tool_error(exc) from exc
-        spec = next((t for t in context.enrichment_tables or [] if t["name"] == table), None)
+        lookups = [t for t in context.enrichment_tables or [] if t.get("key_column")]
+        spec = next((t for t in lookups if t["name"] == table), None)
         if spec is None:
-            names = [t["name"] for t in context.enrichment_tables or []]
-            raise _tool_error("ENRICHMENT_TABLE_NOT_FOUND", f"No enrichment table '{table}' in this context; it has {names}")
+            names = [t["name"] for t in lookups]
+            raise _tool_error("ENRICHMENT_TABLE_NOT_FOUND", f"No enrichment table '{table}' with a lookup in this context; it has {names}")
         if promote and not spec.get("promote"):
             raise _tool_error("NOT_PROMOTABLE", f"Table '{table}' declares no promote column")
         graph = exploration_graph.effective_graph(loaded.snapshot, loaded.overlay)
@@ -1343,7 +1344,7 @@ def build_server():
                 if origin["source_id"] not in context_of:
                     continue
                 context = await get_context_with_access(context_of[origin["source_id"]], user)
-                spec = next((t for t in context.enrichment_tables or [] if t["name"] == table and node["type"] in t["match_node_types"]), None)
+                spec = next((t for t in context.enrichment_tables or [] if t["name"] == table and node["type"] in (t.get("match_node_types") or [])), None)
                 if spec is None:
                     continue
                 src = spec.get("match_source", "node_id")

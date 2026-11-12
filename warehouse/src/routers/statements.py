@@ -194,7 +194,8 @@ def substitute_parameters(sql: str, params: list[StatementParameter]) -> str:
         if param.value is None:
             replacement = "NULL"
         elif param.type and param.type.upper() in ("STRING", "CHAR", "VARCHAR"):
-            escaped = param.value.replace("'", "''")
+            # Spark string literals unescape backslashes, so escape them too.
+            escaped = param.value.replace("\\", "\\\\").replace("'", "\\'")
             replacement = f"'{escaped}'"
         elif param.type and param.type.upper() in ("DATE", "TIMESTAMP"):
             replacement = f"'{param.value}'"

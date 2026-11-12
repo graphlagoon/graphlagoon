@@ -538,8 +538,8 @@ stream to disk while their sha256 is computed.
 | `GRAPH_LAGOON_EXPLORATION_OVERLAY_MAX_BYTES` | `5242880` | Largest [user layer](./bring-your-own-data.md#in-an-exploration-your-layer) of one exploration (its own nodes, edges and enrichment rows, as JSON), 5 MB; larger ones get 413. |
 | `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Ceiling of edges in a case's working graph in the browser: a graph built from a case file keeps only this many edges. |
 | `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a case closed by a decision is retained when its case type sets no `retention_years`: it cannot be deleted before then, except by a superuser with a reason. |
-| `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` | `500` | Node keys per enrichment lookup (a context's enrichment tables). |
-| `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` | `5000` | Rows one enrichment lookup returns; more are cut and flagged `truncated`. |
+| `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` | `500` | Node keys per enrichment lookup (a context's enrichment tables), and edges or nodes per [enrichment query](./bring-your-own-data.md#enrich-from-databricks-tables) batch. |
+| `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` | `5000` | Rows one enrichment lookup or one enrichment query batch returns; more are cut and flagged `truncated`. |
 
 Deadlines are not settings: each **case type** (admin area → *Case types*)
 has its SLA hours per phase (open, analysis), and a case may change its own.

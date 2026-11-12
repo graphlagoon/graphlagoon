@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT, MOCK_EXPLORATION, MOCK_GRAPH_RESPONSE } from '../fixtures/mock-data';
-import { seedContexts, seedExplorations, seedGraphResponse } from '../helpers/api-mocks';
+import { seedContexts, seedEnrichmentRun, seedExplorations, seedGraphResponse } from '../helpers/api-mocks';
 
 /**
  * "Your data" on an exploration (BYOD-2): enrich the nodes on the canvas from a CSV and
@@ -131,5 +131,38 @@ test.describe('Your data on an exploration', () => {
     await page.goto(`/graph/${MOCK_CONTEXT.id}?exploration=${shared.id}`);
     await expect(page.getByTestId('toolbar-exploration-name')).toContainText('Test Exploration', { timeout: 15_000 });
     await expect(page.getByTestId('toolbar-your-data')).toHaveCount(0);
+  });
+
+  test('Databricks queries of the context enrich the edges after the graph loads, and by hand', async ({ authenticatedPage: page }) => {
+    const context = {
+      ...MOCK_CONTEXT,
+      enrichment_tables: [
+        { name: 'tx_risk', label: 'Tx risk', table: 'main.fraud.tx', query: { sql: 'SELECT e.edge_id, t.risk FROM graph_edges e JOIN main.fraud.tx t ON t.id = e.edge_id', run: 'auto' } },
+        { name: 'audit', label: 'Audit trail', table: 'main.fraud.audit', query: { sql: 'SELECT edge_id, reviewer FROM graph_edges', run: 'manual' } },
+      ],
+    };
+    await seedContexts(page, [context]);
+    await seedExplorations(page, [MOCK_EXPLORATION]);
+    const calls = await seedEnrichmentRun(page, (id) => (id === 'e1' || id === 'e2' ? { risk: id === 'e1' ? 'high' : 'low' } : null));
+
+    await page.goto(`/graph/${context.id}?exploration=${MOCK_EXPLORATION.id}`);
+    await expect(page.getByTestId('toolbar-exploration-name')).toContainText('Test Exploration', { timeout: 15_000 });
+    // Only the auto query ran, over the edges on screen with their endpoints.
+    await expect.poll(() => calls.length).toBe(1);
+    expect(calls[0].name).toBe('tx_risk');
+    expect(calls[0].body.edges.map((e: { edge_id: string }) => e.edge_id)).toContain('e1');
+    expect(calls[0].body.nodes.length).toBeGreaterThan(0);
+
+    await page.getByTestId('toolbar-your-data').click();
+    await page.getByTestId('your-data-tab-databricks').click();
+    await expect(page.getByTestId('your-data-databricks-tables')).toContainText('main.fraud.tx, main.fraud.audit');
+    const [auto, manual] = await page.getByTestId('your-data-databricks-query').all();
+    await expect(auto).toContainText('after every query');
+    await expect(auto.getByTestId('your-data-databricks-outcome')).toContainText(/2 of \d+ edges matched a row · 2 got new values/);
+    await expect(manual).toContainText('by hand');
+    await manual.getByTestId('your-data-databricks-run').click();
+    await expect.poll(() => calls.length).toBe(2);
+    expect(calls[1].name).toBe('audit');
+    await expect(manual.getByTestId('your-data-databricks-outcome')).toContainText('2 of');
   });
 });

@@ -7,6 +7,7 @@ import {
   seedContexts,
   seedExplorations,
   seedGraphResponse,
+  seedEnrichmentRun,
   seedStylePresets,
   seedQueryTemplates,
   seedPrecomputedGraphs,
@@ -353,7 +354,7 @@ async function setupPage(page: Page) {
   await setupAPIMocks(page);
 
   const contexts = [
-    { ...SCREENSHOT_CONTEXT, identity_keys: COMPANY_KEY },
+    { ...SCREENSHOT_CONTEXT, identity_keys: COMPANY_KEY, enrichment_tables: DEMO_ENRICHMENT_TABLES },
     {
       ...SCREENSHOT_CONTEXT,
       identity_keys: COMPANY_KEY,
@@ -382,6 +383,12 @@ async function setupPage(page: Page) {
   ];
 
   await seedContexts(page, contexts);
+  // Edge enrichment queries answer for most edges, so "Your data → From Databricks tables" has numbers.
+  await seedEnrichmentRun(page, (id, query) => {
+    const n = Number(id.slice(1));
+    if (query === 'deals') return n % 4 === 0 ? { deal_size: 1000 + n * 37 } : null;
+    return n % 5 === 4 ? null : { hiring_source: ['referral', 'job board', 'agency'][n % 3] };
+  });
   await seedExplorations(page, explorations);
   await seedGraphResponse(page, SCREENSHOT_GRAPH_RESPONSE);
   await seedStylePresets(page, SCREENSHOT_CONTEXT.id, DEMO_PRESETS);
@@ -422,6 +429,25 @@ async function setupPage(page: Page) {
     MOCK_REST_CONNECTION,
   ]);
 }
+
+const DEMO_ENRICHMENT_TABLES = [
+  { name: 'hr_hires', label: 'Hiring source', table: 'main.hr.hires' },
+  {
+    name: 'hiring',
+    label: 'Hiring source of each job',
+    table: 'main.hr.offers',
+    query: {
+      sql: "SELECT e.edge_id, h.source AS hiring_source\nFROM graph_edges e\nJOIN main.hr.offers o ON o.person_id = e.src AND o.company_id = e.dst\nJOIN main.hr.hires h ON h.offer_id = o.id",
+      run: 'auto',
+    },
+  },
+  {
+    name: 'deals',
+    label: 'Deal size of each purchase',
+    table: 'main.sales.orders',
+    query: { sql: "SELECT e.edge_id, sum(o.amount) AS deal_size\nFROM graph_edges e\nJOIN main.sales.orders o ON o.buyer_id = e.src AND o.product_id = e.dst\nGROUP BY e.edge_id", run: 'manual' },
+  },
+];
 
 interface Scene {
   /** docs/guide/ page slug this image belongs to (`index` for the landing page). */
@@ -548,6 +574,34 @@ const SCENES: Scene[] = [
         buffer: Buffer.from(['person_id;risk;segment;customer_since', ...rows].join('\n')),
       });
       await expect(page.getByTestId('your-data-enrich-preview')).toBeVisible();
+      await page.waitForTimeout(300);
+    },
+  },
+  {
+    // The context form's Enrichment Tables: authorized tables, a query on edges, YAML import and "Ask an AI".
+    guide: 'bring-your-own-data',
+    scene: 'enrichment-tables',
+    path: '/contexts',
+    prepare: async (page) => {
+      await page.getByTestId('edit-context-btn').first().click();
+      await page.getByTestId('enrichment-query-block').nth(1).scrollIntoViewIfNeeded();
+      await page.getByTestId('enrichment-section').evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      await page.waitForTimeout(300);
+    },
+  },
+  {
+    // Enrichment queries of the context: one ran after the query, one is run by hand.
+    guide: 'bring-your-own-data',
+    scene: 'databricks',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await page.getByTestId('toolbar-your-data').click();
+      await page.getByTestId('your-data-tab-databricks').click();
+      const manual = page.getByTestId('your-data-databricks-query').nth(1);
+      await manual.getByTestId('your-data-databricks-run').click();
+      await expect(manual.getByTestId('your-data-databricks-outcome')).toBeVisible();
+      await page.getByTestId('your-data-databricks-query').first().locator('summary').click();
       await page.waitForTimeout(300);
     },
   },

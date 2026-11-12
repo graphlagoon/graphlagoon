@@ -21,10 +21,11 @@ const targetId = (t: EnrichmentTarget) => `${t.contextId}:${t.table.name}`;
 
 /** The lookup key of `node` for `target`, or null when the node does not match it. */
 export function enrichmentKey(node: UnifiedNode, target: EnrichmentTarget): string | null {
-  if (!target.table.match_node_types.includes(node.node_type)) return null;
+  // An entry without a key column is an authorized table or an edge query, not a lookup.
+  if (!target.table.key_column || !target.table.match_node_types?.includes(node.node_type)) return null;
   const origin = node.__sources.find((o) => o.contextId === target.contextId);
   if (!origin) return null;
-  const src = target.table.match_source;
+  const src = target.table.match_source ?? 'node_id';
   const raw = src === 'node_id' ? origin.nodeId : node.properties?.[src.name];
   return raw === null || raw === undefined || raw === '' ? null : String(raw);
 }

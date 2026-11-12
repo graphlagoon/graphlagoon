@@ -430,6 +430,133 @@ describe('GraphContextFormModal', () => {
       ])
     })
 
+    it('attaches a table with only an edge enrichment query', async () => {
+      const context = createGraphContext({ id: 'ctx-edit' })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      await fireEvent.click(getByTestId('enrichment-add'))
+      await fireEvent.update(getByTestId('enrichment-label'), 'Tx risk')
+      await fireEvent.update(getByTestId('enrichment-table'), 'main.fraud.transactions')
+      await fireEvent.update(getByTestId('enrichment-query-sql'), '  SELECT e.edge_id, t.risk FROM graph_edges e JOIN main.fraud.transactions t ON t.id = e.edge_id ')
+      await fireEvent.update(getByTestId('enrichment-query-run'), 'manual')
+      await fireEvent.click(getByTestId('enrichment-query-overwrite'))
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+      expect(payload.enrichment_tables).toEqual([
+        {
+          name: 'tx_risk',
+          label: 'Tx risk',
+          table: 'main.fraud.transactions',
+          query: {
+            sql: 'SELECT e.edge_id, t.risk FROM graph_edges e JOIN main.fraud.transactions t ON t.id = e.edge_id',
+            target: 'edges',
+            run: 'manual',
+            overwrite: true,
+            node_props: false,
+          },
+        },
+      ])
+    })
+
+    it('keeps a stored lookup and query, and holds back an unfinished lookup', async () => {
+      const stored = {
+        name: 'devices', label: 'Devices', table: 'main.risk.devices', key_column: 'account_id',
+        match_node_types: ['Conta'], match_source: 'node_id' as const, cardinality: 'one' as const,
+        columns: ['ip'], promote: null,
+        query: { sql: 'SELECT node_id FROM graph_nodes', target: 'nodes' as const, run: 'auto' as const, overwrite: false, node_props: true },
+      }
+      const context = createGraphContext({ id: 'ctx-edit', enrichment_tables: [stored] })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+
+      const { getByTestId, getAllByTestId, queryByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      expect(queryByTestId('enrichment-lookup-incomplete')).toBeNull()
+      await fireEvent.click(getByTestId('enrichment-add'))
+      await fireEvent.update(getAllByTestId('enrichment-table')[1], 'main.risk.kyc')
+      await fireEvent.update(getAllByTestId('enrichment-key')[1], 'cpf')
+      expect(getByTestId('enrichment-lookup-incomplete')).toBeTruthy()
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+      expect(payload.enrichment_tables).toEqual([stored])
+    })
+
+    it('imports entries from YAML, replacing by name, and shows what is wrong', async () => {
+      const stored = { name: 'kyc', label: 'KYC', table: 'main.risk.kyc' }
+      const context = createGraphContext({ id: 'ctx-edit', enrichment_tables: [stored] })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+
+      const { getByTestId, getAllByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      await fireEvent.click(getByTestId('enrichment-import-toggle'))
+      await fireEvent.update(
+        getByTestId('enrichment-import-text'),
+        [
+          'enrichment_tables:',
+          '  - {name: kyc, label: KYC v2, table: main.risk.kyc2}',
+          '  - name: activity',
+          '    label: Account activity',
+          '    table: main.risk.ledger',
+          '    query: {target: nodes, sql: "SELECT node_id, count(*) AS n FROM graph_nodes GROUP BY node_id"}',
+          '  - {label: broken, table: ledger}',
+        ].join('\n'),
+      )
+      await fireEvent.click(getByTestId('enrichment-import-apply'))
+      expect(getByTestId('enrichment-import-done').textContent).toContain('1 added, 1 replaced')
+      expect(getByTestId('enrichment-import-errors').textContent).toContain('catalog.schema.table')
+      expect(getAllByTestId('enrichment-row')).toHaveLength(2)
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+      expect(payload.enrichment_tables).toEqual([
+        { name: 'kyc', label: 'KYC v2', table: 'main.risk.kyc2' },
+        {
+          name: 'activity', label: 'Account activity', table: 'main.risk.ledger',
+          query: { sql: 'SELECT node_id, count(*) AS n FROM graph_nodes GROUP BY node_id', target: 'nodes', run: 'auto', overwrite: false, node_props: false },
+        },
+      ])
+    })
+
+    it('the AI prompt knows the context and its current entries', async () => {
+      const context = createGraphContext({
+        id: 'ctx-edit',
+        enrichment_tables: [{ name: 'kyc', label: 'KYC', table: 'main.risk.kyc' }],
+      })
+      const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      await fireEvent.click(getByTestId('enrichment-ask-ai'))
+      const text = getByTestId('enrichment-skill-text').textContent ?? ''
+      expect(text).toContain(context.title)
+      expect(text).toContain(`Edge table \`${context.edge_table_name}\``)
+      expect(text).toContain('table: main.risk.kyc')
+    })
+
+    it('adds a second query on the same table, for the nodes', async () => {
+      const stored = { name: 'tx', label: 'Tx', table: 'main.fraud.tx', query: { sql: 'SELECT edge_id FROM graph_edges', target: 'edges' as const, run: 'auto' as const, overwrite: false, node_props: false } }
+      const context = createGraphContext({ id: 'ctx-edit', enrichment_tables: [stored] })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+
+      const { getByTestId, getAllByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      await fireEvent.click(getByTestId('enrichment-add-query'))
+      await fireEvent.update(getAllByTestId('enrichment-query-sql')[1], 'SELECT node_id FROM graph_nodes')
+      await fireEvent.update(getAllByTestId('enrichment-query-target')[1], 'nodes')
+      await fireEvent.click(getByTestId('create-context-submit'))
+      await flush()
+
+      const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+      expect(payload.enrichment_tables).toEqual([
+        stored,
+        { name: 'tx_2', label: 'Tx (2)', table: 'main.fraud.tx', query: { sql: 'SELECT node_id FROM graph_nodes', target: 'nodes', run: 'auto', overwrite: false, node_props: false } },
+      ])
+    })
+
     it('saves the edge amount and time semantics', async () => {
       const context = createGraphContext({ id: 'ctx-edit', edge_semantics: { amount_prop: 'valor', currency: 'BRL' } })
       vi.mocked(api.updateGraphContext).mockResolvedValue(context)

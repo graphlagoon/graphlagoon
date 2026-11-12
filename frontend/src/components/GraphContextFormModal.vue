@@ -24,6 +24,8 @@ import type {
 } from '@/types/graph';
 import { describeIdentityKey } from '@/utils/identityKeys';
 import ContextDefaultLookField from '@/components/ContextDefaultLookField.vue';
+import EnrichmentQueryField from '@/components/EnrichmentQueryField.vue';
+import EnrichmentTablesTools from '@/components/EnrichmentTablesTools.vue';
 import { storedDefaultLook, withDefaultLook, type DefaultLook } from '@/composables/useContextDefaultLook';
 
 /**
@@ -112,6 +114,11 @@ interface EnrichmentRow {
   promote_node_type: string;
   promote_id_column: string;
   promote_edge_type: string;
+  query_sql: string;
+  query_target: 'edges' | 'nodes';
+  query_run: 'auto' | 'manual';
+  query_overwrite: boolean;
+  query_node_props: boolean;
 }
 
 function rowFromEnrichment(t: EnrichmentTable): EnrichmentRow {
@@ -119,14 +126,19 @@ function rowFromEnrichment(t: EnrichmentTable): EnrichmentRow {
     name: t.name,
     label: t.label,
     table: t.table,
-    key_column: t.key_column,
-    match_node_types: t.match_node_types.join(', '),
-    prop: t.match_source === 'node_id' ? '' : t.match_source.name,
-    cardinality: t.cardinality,
-    columns: t.columns.join(', '),
+    key_column: t.key_column ?? '',
+    match_node_types: (t.match_node_types ?? []).join(', '),
+    prop: !t.match_source || t.match_source === 'node_id' ? '' : t.match_source.name,
+    cardinality: t.cardinality ?? 'one',
+    columns: (t.columns ?? []).join(', '),
     promote_node_type: t.promote?.node_type || '',
     promote_id_column: t.promote?.id_column || '',
     promote_edge_type: t.promote?.edge_type || '',
+    query_sql: t.query?.sql ?? '',
+    query_target: t.query?.target ?? 'edges',
+    query_run: t.query?.run ?? 'auto',
+    query_overwrite: !!t.query?.overwrite,
+    query_node_props: !!t.query?.node_props,
   };
 }
 
@@ -144,17 +156,37 @@ function enrichmentFromRow(row: EnrichmentRow): EnrichmentTable {
         edge_type: row.promote_edge_type.trim() || 'RELATED_TO',
       }
     : null;
-  return {
+  const entry: EnrichmentTable = {
     name: row.name.trim() || slug(row.label || row.table.split('.').pop() || ''),
     label: row.label.trim() || row.table.trim(),
     table: row.table.trim(),
-    key_column: row.key_column.trim(),
-    match_node_types: splitCsv(row.match_node_types),
-    match_source: prop ? { kind: 'prop', name: prop } : 'node_id',
-    cardinality: row.cardinality,
-    columns: splitCsv(row.columns),
-    promote,
   };
+  // The lookup is optional: an entry without a key column only authorizes its table.
+  if (row.key_column.trim()) {
+    Object.assign(entry, {
+      key_column: row.key_column.trim(),
+      match_node_types: splitCsv(row.match_node_types),
+      match_source: prop ? { kind: 'prop', name: prop } : 'node_id',
+      cardinality: row.cardinality,
+      columns: splitCsv(row.columns),
+      promote,
+    });
+  }
+  if (row.query_sql.trim()) {
+    entry.query = {
+      sql: row.query_sql.trim(),
+      target: row.query_target,
+      run: row.query_run,
+      overwrite: row.query_overwrite,
+      node_props: row.query_node_props,
+    };
+  }
+  return entry;
+}
+
+/** A row with a key column but no node types or columns is an unfinished lookup. */
+function lookupIncomplete(row: EnrichmentRow): boolean {
+  return !!row.key_column.trim() && !(splitCsv(row.columns).length && splitCsv(row.match_node_types).length);
 }
 
 /** Editable identity-key row: `prop` empty means the node id is the source. */
@@ -594,10 +626,52 @@ const edgePropertyOptions = computed(() =>
 
 /** Complete rows only, like identity keys. */
 const enrichmentTables = computed(() =>
-  form.value.enrichment_tables
-    .filter((r) => r.table.trim() && r.key_column.trim() && splitCsv(r.columns).length && splitCsv(r.match_node_types).length)
-    .map(enrichmentFromRow),
+  form.value.enrichment_tables.filter((r) => r.table.trim() && !lookupIncomplete(r)).map(enrichmentFromRow),
 );
+/** A new entry on the same table, right below it: a table can feed several queries (edges and nodes). */
+function addQueryOn(index: number) {
+  addEnrichmentTable();
+  const row = form.value.enrichment_tables.pop()!;
+  const source = form.value.enrichment_tables[index];
+  row.table = source.table;
+  row.label = `${source.label || source.table.split('.').pop()} (${form.value.enrichment_tables.filter((r) => r.table === source.table).length + 1})`;
+  form.value.enrichment_tables.splice(index + 1, 0, row);
+}
+
+/** Imported entries replace the rows with the same name; the others are added. */
+function importEnrichmentTables(imported: EnrichmentTable[]) {
+  const rows = form.value.enrichment_tables;
+  for (const entry of imported) {
+    const row = rowFromEnrichment(entry);
+    const at = rows.findIndex((r) => enrichmentFromRow(r).name === entry.name);
+    if (at >= 0) rows.splice(at, 1, row);
+    else rows.push(row);
+  }
+}
+
+/** What the "Ask an AI" prompt knows about this context. */
+const enrichmentSkillInput = computed(() => ({
+  title: form.value.title || props.context?.title || 'this context',
+  datasourceType: form.value.datasource_type,
+  edgeTable: form.value.edge_table_name || props.context?.edge_table_name || null,
+  nodeTable: form.value.noNodeTable ? null : form.value.node_table_name || props.context?.node_table_name || null,
+  edgeColumns: {
+    edge_id: form.value.edge_id_col,
+    src: form.value.src_col,
+    dst: form.value.dst_col,
+    relationship_type: form.value.relationship_type_col,
+  },
+  nodeColumns: { node_id: form.value.node_id_col, node_type: form.value.node_type_col },
+  edgeProperties: edgePropertyOptions.value,
+  nodeProperties: nodePropertyOptions.value,
+  nodeTypes: nodeTypeOptions.value,
+  relationshipTypes: splitCsv(form.value.relationship_types),
+}));
+
+/** Every table the rows authorize: what a query may join. */
+const authorizedTableNames = computed(() => [
+  ...new Set(form.value.enrichment_tables.map((r) => r.table.trim()).filter(Boolean)),
+]);
 
 function addEnrichmentTable() {
   form.value.enrichment_tables.push({
@@ -605,13 +679,18 @@ function addEnrichmentTable() {
     label: '',
     table: '',
     key_column: '',
-    match_node_types: nodeTypeOptions.value[0] || '',
+    match_node_types: '',
     prop: '',
     cardinality: 'one',
     columns: '',
     promote_node_type: '',
     promote_id_column: '',
     promote_edge_type: '',
+    query_sql: '',
+    query_target: 'edges',
+    query_run: 'auto',
+    query_overwrite: false,
+    query_node_props: false,
   });
 }
 
@@ -1202,25 +1281,27 @@ async function submit() {
           </datalist>
         </div>
 
-        <!-- Enrichment tables (investigations): side tables looked up by a node's key
-             and shown in the inspector. -->
+        <!-- Enrichment tables: the context's authorized Databricks tables, each optionally a
+             node lookup (investigation inspector) and/or an enrichment query (edges or nodes). -->
         <div class="column-config-section" data-testid="enrichment-section">
           <div class="section-header-row">
             <h4>Enrichment Tables</h4>
-            <button
-              type="button"
-              class="btn btn-sm btn-outline"
-              data-testid="enrichment-add"
-              @click="addEnrichmentTable"
-            >
-              + Attach table
-            </button>
+            <EnrichmentTablesTools
+              :tables="enrichmentTables"
+              :skill="enrichmentSkillInput"
+              @add="addEnrichmentTable"
+              @import="importEnrichmentTables"
+            />
           </div>
           <p class="enrichment-warning" data-testid="enrichment-warning">
-            Attaching a table widens what this context's readers can query, so it needs
-            the "Create graph contexts" permission and a table in an allowed catalog.
-            Lookups are always by key, only the listed columns come out, and every read
-            is audited.
+            A table listed here is authorized for this context: enrichment queries, node lookups
+            and readers' SQL may read it. Adding or changing one needs the "Create graph
+            contexts" permission and a table in an allowed catalog. Every read is audited.
+          </p>
+          <p v-if="!form.enrichment_tables.length" class="hint" data-testid="enrichment-empty">
+            No authorized tables. Attach one, import a YAML list, or ask an AI to write it: a table can
+            enrich the edges or the nodes with a query after every graph query, and look nodes up by key
+            in the investigation inspector.
           </p>
           <div
             v-for="(row, i) in form.enrichment_tables"
@@ -1230,7 +1311,7 @@ async function submit() {
           >
             <div class="form-row">
               <div class="form-group">
-                <label>Name in the inspector</label>
+                <label>Name</label>
                 <input v-model="row.label" type="text" class="form-control" placeholder="Login devices" data-testid="enrichment-label" />
               </div>
               <div class="form-group">
@@ -1246,47 +1327,73 @@ async function submit() {
                 &times;
               </button>
             </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Key column</label>
-                <input v-model="row.key_column" type="text" class="form-control" data-testid="enrichment-key" />
+            <details class="enrichment-block" :open="!!row.key_column" data-testid="enrichment-lookup">
+              <summary>Node lookup in the investigation inspector <span class="muted">{{ row.key_column.trim() ? `· by ${row.key_column.trim()}` : '(optional)' }}</span></summary>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Key column</label>
+                  <input v-model="row.key_column" type="text" class="form-control" data-testid="enrichment-key" />
+                </div>
+                <div class="form-group">
+                  <label>Node types</label>
+                  <input v-model="row.match_node_types" type="text" class="form-control" list="identity-node-types" :placeholder="nodeTypeOptions[0] || ''" data-testid="enrichment-node-types" />
+                </div>
+                <div class="form-group">
+                  <label>Matches node property</label>
+                  <input v-model="row.prop" type="text" class="form-control" list="identity-node-props" placeholder="(node id)" />
+                </div>
               </div>
-              <div class="form-group">
-                <label>Node types</label>
-                <input v-model="row.match_node_types" type="text" class="form-control" list="identity-node-types" data-testid="enrichment-node-types" />
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Columns that may leave</label>
+                  <input v-model="row.columns" type="text" class="form-control" placeholder="device_id, ip, seen_at" data-testid="enrichment-columns" />
+                </div>
+                <div class="form-group">
+                  <label>Rows per node</label>
+                  <select v-model="row.cardinality" class="form-control" data-testid="enrichment-cardinality">
+                    <option value="one">one (columns become node properties)</option>
+                    <option value="many">many (table in the inspector)</option>
+                  </select>
+                </div>
               </div>
-              <div class="form-group">
-                <label>Matches node property</label>
-                <input v-model="row.prop" type="text" class="form-control" list="identity-node-props" placeholder="(node id)" />
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Promote to nodes of type</label>
+                  <input v-model="row.promote_node_type" type="text" class="form-control" placeholder="(optional) Dispositivo" />
+                </div>
+                <div class="form-group">
+                  <label>by column</label>
+                  <input v-model="row.promote_id_column" type="text" class="form-control" placeholder="device_id" />
+                </div>
+                <div class="form-group">
+                  <label>edge type</label>
+                  <input v-model="row.promote_edge_type" type="text" class="form-control" placeholder="USOU" />
+                </div>
               </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Columns that may leave</label>
-                <input v-model="row.columns" type="text" class="form-control" placeholder="device_id, ip, seen_at" data-testid="enrichment-columns" />
-              </div>
-              <div class="form-group">
-                <label>Rows per node</label>
-                <select v-model="row.cardinality" class="form-control" data-testid="enrichment-cardinality">
-                  <option value="one">one (columns become node properties)</option>
-                  <option value="many">many (table in the inspector)</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Promote to nodes of type</label>
-                <input v-model="row.promote_node_type" type="text" class="form-control" placeholder="(optional) Dispositivo" />
-              </div>
-              <div class="form-group">
-                <label>by column</label>
-                <input v-model="row.promote_id_column" type="text" class="form-control" placeholder="device_id" />
-              </div>
-              <div class="form-group">
-                <label>edge type</label>
-                <input v-model="row.promote_edge_type" type="text" class="form-control" placeholder="USOU" />
-              </div>
-            </div>
+              <p v-if="lookupIncomplete(row)" class="field-error" data-testid="enrichment-lookup-incomplete">
+                A lookup needs node types and at least one column; this row is not saved until then.
+              </p>
+            </details>
+            <details class="enrichment-block" :open="!!row.query_sql" data-testid="enrichment-query-block">
+              <summary>Enrich with a query <span class="muted" data-testid="enrichment-query-state">{{ row.query_sql.trim() ? `· ${row.query_target} · ${row.query_run === 'auto' ? 'runs after every query' : 'runs from Your data'}` : '(edges or nodes, optional)' }}</span></summary>
+              <EnrichmentQueryField
+                v-model:sql="row.query_sql"
+                v-model:target="row.query_target"
+                v-model:run="row.query_run"
+                v-model:overwrite="row.query_overwrite"
+                v-model:node-props="row.query_node_props"
+                :tables="authorizedTableNames"
+              />
+            </details>
+            <button
+              v-if="row.table.trim()"
+              type="button"
+              class="btn btn-sm btn-link add-query"
+              data-testid="enrichment-add-query"
+              @click="addQueryOn(i)"
+            >
+              + Another query on this table
+            </button>
           </div>
         </div>
 
@@ -1488,6 +1595,28 @@ async function submit() {
   border-top: 1px solid var(--border-color, #d0d7de);
 }
 
+.add-query {
+  margin-top: 4px;
+  padding-left: 0;
+}
+.enrichment-block {
+  margin-top: 6px;
+}
+.enrichment-block > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.enrichment-block .muted {
+  font-weight: 400;
+  color: var(--text-secondary, #666);
+}
+.field-error {
+  color: var(--error-color, #c0392b);
+  font-size: 0.8rem;
+  margin: 4px 0 0;
+}
 .enrichment-row .form-row {
   align-items: flex-end;
 }

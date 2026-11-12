@@ -13,6 +13,7 @@ feature. This one makes a small, fixed set — every title starts with
 - a context with **cluster programs** (one in the right-click menu, one asking
   for a value when run) and **right-click actions** of the *Show only nodes
   with…* kind;
+- a context whose edges and nodes are enriched from Databricks tables after every query;
 - a context with no default look, to compare with;
 - a case whose graphs fall back to the context's default look and offer that
   context's programs in the Clusters panel.
@@ -398,14 +399,51 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
         )
         made["explorations"].append(playground["title"])
 
-        # 3. Stock look, to compare ---------------------------------------------------
+        # 3. Edge enrichment from Databricks tables --------------------------------
+        enrich_ctx = await new_context(
+            client, edge, node, "Demo · Edge enrichment from Databricks tables",
+            "After every query two queries (Edit → Enrichment Tables) run on Databricks: 'Demo · Cities on both "
+            "ends' adds src_city, dst_city and same_city to each edge, 'Demo · Outgoing edges per node' adds "
+            "edges_out_in_table to each node. Click one to see them marked 'from …'. "
+            "Your data → From Databricks tables runs it by hand.",
+            enrichment_tables=[{
+                "name": "node_cities",
+                "label": "Demo · Cities on both ends",
+                "table": node,
+                "query": {
+                    "sql": (
+                        "SELECT e.edge_id, s.city AS src_city, d.city AS dst_city, "
+                        "s.city = d.city AS same_city\n"
+                        f"FROM graph_edges e\nJOIN {node} s ON s.node_id = e.src\n"
+                        f"JOIN {node} d ON d.node_id = e.dst"
+                    ),
+                    "run": "auto",
+                },
+            }, {
+                "name": "node_out_degree",
+                "label": "Demo · Outgoing edges per node",
+                "table": edge,
+                "query": {
+                    "sql": (
+                        "SELECT n.node_id, count(x.src) AS edges_out_in_table\n"
+                        f"FROM graph_nodes n\nLEFT JOIN {edge} x ON x.src = n.node_id\n"
+                        "GROUP BY n.node_id"
+                    ),
+                    "target": "nodes",
+                    "run": "auto",
+                },
+            }],
+        )
+        made["contexts"].append(enrich_ctx["title"])
+
+        # 4. Stock look, to compare ---------------------------------------------------
         stock_ctx = await new_context(
             client, edge, node, STOCK_TITLE,
             "The same graph with no default look or behaviors: what any context looks like before you set one.",
         )
         made["contexts"].append(stock_ctx["title"])
 
-        # 4. A case on those graphs ---------------------------------------------------
+        # 5. A case on those graphs ---------------------------------------------------
         try:
             case = (await client.request("POST", "/api/investigations", OWNER, json={
                 "title": "Demo · Case canvas: context default look & Clusters",

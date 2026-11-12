@@ -1,19 +1,26 @@
 <script setup lang="ts">
 /**
  * "Your data" (BYOD-2) in the canvas's bottom bar, beside Table and Console: shown on a graph
- * the person can write and with `exploration.edit_graph` (hide, never disable). Opens the
- * dialog that adds the user's layer to the exploration.
+ * the person can write and with `exploration.edit_graph` (hide, never disable), or when the
+ * context has enrichment queries (readers get only that tab). Opens the dialog that adds
+ * the user's layer to the exploration.
  */
 import { computed, ref } from 'vue';
 import { FilePlus2 } from 'lucide-vue-next';
 import { useGraphStore } from '@/stores/graph';
 import { usePermissions } from '@/composables/usePermissions';
 import YourDataModal from '@/components/YourDataModal.vue';
+import { queryEntries } from '@/utils/queryEnrichment';
 
 const graphStore = useGraphStore();
 const { can } = usePermissions();
 const open = ref(false);
-const visible = computed(() => graphStore.canEditOverlay && can('exploration.edit_graph'));
+// Readers also get it when the context has enrichment queries (a read, nothing saved).
+const visible = computed(
+  () =>
+    (graphStore.canEditOverlay && can('exploration.edit_graph')) ||
+    (!graphStore.investigationMode && queryEntries(graphStore.currentContext).length > 0),
+);
 </script>
 
 <template>
@@ -21,7 +28,7 @@ const visible = computed(() => graphStore.canEditOverlay && can('exploration.edi
     v-if="visible"
     class="toolbar-btn"
     :class="{ active: open }"
-    title="Your data: enrich nodes from a file, add nodes and edges, draw by hand"
+    title="Your data: enrich from a file or the context's Databricks tables, add nodes and edges, draw by hand"
     data-testid="toolbar-your-data"
     @click="open = true"
   >

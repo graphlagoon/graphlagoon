@@ -8,7 +8,8 @@ canvas from a CSV, **add** nodes and edges from a file or JSON, or **draw** them
 - **Use it when** the data lives in a spreadsheet, an export or a script's output: a risk list keyed by account,
   a channel per transfer, a CRM export, the phone a customer gave on a call.
 - **Not the tool for** data that every exploration of a context should see. Add that to the context as an
-  enrichment table or a new table (see [what it is not](#what-it-is-not)).
+  enrichment table, or as an [enrichment query](#enrich-from-databricks-tables) over Databricks
+  tables that runs after every query (see [what it is not](#what-it-is-not)).
 - **Needs** write access to the case or the exploration. In a case, a file also needs the `investigation.upload`
   permission; in an exploration, everything needs `exploration.edit_graph`.
 :::
@@ -19,6 +20,7 @@ canvas from a CSV, **add** nodes and edges from a file or JSON, or **draw** them
 |---|---|---|
 | Add properties to nodes already on the canvas | [Enrichment file](#enrich-nodes-or-edges-from-a-file) (import wizard, role **Enrichment**) | **Your data → Enrich from a file**: a file, pasted rows, or [an AI's answer](#ask-an-ai) |
 | Add properties to edges already on the canvas | Enrichment file, **edges** | **Your data → Enrich from a file**, **edges** |
+| Add properties to edges or nodes from the context's Databricks tables | — | [Enrichment queries](#enrich-from-databricks-tables): after every query, or **Your data → From Databricks tables** |
 | Add nodes and edges from a CSV | [File with a mapping](#a-file-with-a-mapping), or [a promoted table](#a-table-promoted-to-the-graph) | **Your data → Nodes and edges from a file** |
 | Add nodes and edges from JSON | [Snapshot item](#a-snapshot-as-json) | **Your data → Nodes and edges from a file** (a `.json`) |
 | Draw a node or an edge | [Right-click → Add a linked node](#drawn-by-hand), stored in **Manual additions** | Right-click → **Add a linked node**, stored in the exploration's layer |
@@ -130,6 +132,132 @@ same window, and it goes through the same automatic join.
 Both prompts carry real data: node ids and names, or the first lines of your file. The window says so before you
 copy. Paste them only into an assistant your organization allows for this data.
 :::
+
+## Enrich from Databricks tables
+
+A context can carry **enrichment queries**: SQL its author writes once, which runs on the Databricks SQL
+warehouse right after the graph answers, and adds properties to the edges or to the nodes on the canvas. The graph itself can
+come from anywhere (Delta tables, Neptune, a REST connection, a precomputed graph such as a Lakebase BFS); the
+enrichment always reads Delta tables.
+
+Use it when the value you want needs joins the graph query does not do: the risk score of the transaction
+behind an edge, the channel from a second table, an account's activity in the last 90 days.
+
+### Which tables a query may read
+
+The context's **Enrichment Tables** list (context form) is its list of **authorized tables**. It may be empty or
+hold many. Being listed is what authorizes a table: a query may read only the listed tables and the context's
+own edge and node tables, nothing else. Each entry can carry a query, and can also look nodes up by key for
+the [investigation inspector](./investigations.md#enrichment-tables) (**Node lookup in the investigation
+inspector**, a different, older feature: it reads one table by a node key, with no SQL). Both parts are
+optional, so an entry can just authorize a table for a sibling's join.
+
+| Rule | Why |
+|---|---|
+| Adding or changing an entry (its table, its lookup or its query) needs the **Create graph contexts** permission, and the table must be in an allowed catalog | Listing a table widens what the context's readers can read, so it is an author's decision. A writer without the permission may only remove entries. |
+| The query is one read-only `SELECT` | It runs with the app's warehouse access. |
+| Every table it names is checked against the list when you save **and** on every run | A table removed from the list stops every query that joined it. |
+| Running a query only needs read access to the context | Like a lookup; every run is audited as `enrichment.run`. |
+
+### Writing the query
+
+In the context form, open an entry and **Enrich with a query**, and choose what it **enriches**: the edges or
+the nodes. The query reads the graph on screen from two virtual tables. A query on edges returns an `edge_id`
+column, a query on nodes a `node_id` column, one row per id. Every other column becomes a property.
+
+| Virtual table | Columns |
+|---|---|
+| `graph_edges` | `edge_id`, `src`, `dst`, `relationship_type`, `props` (a `MAP<STRING,STRING>` of the edge's properties) |
+| `graph_nodes` | `node_id`, `node_type`, `props` (empty unless **Send node properties** is on) |
+
+```sql
+SELECT e.edge_id, t.risk_score, c.channel
+FROM graph_edges e
+JOIN main.fraud.transactions t ON t.tx_id = e.props['tx_id']
+JOIN main.fraud.channels c ON c.id = t.channel_id
+```
+
+Here both `main.fraud.transactions` and `main.fraud.channels` must be in the list. A query on nodes reads
+`graph_nodes` (and `graph_edges` holds the edges that touch them):
+
+```sql
+SELECT n.node_id, count(*) AS tx_90d, sum(l.amount) AS volume_90d
+FROM graph_nodes n
+JOIN main.fraud.ledger l ON l.account_id = n.node_id
+WHERE l.booked_at >= current_date() - INTERVAL 90 DAYS
+GROUP BY n.node_id
+```
+
+The query may define its own CTEs, but not ones named `graph_edges` or `graph_nodes`.
+
+### Import YAML, or ask an AI
+
+The **Enrichment Tables** header has three helpers:
+
+- **Import YAML** takes a list pasted or from a `.yaml` / `.json` file. Entries with the same `name` replace
+  the ones in the form; the others are added; an entry that is wrong is skipped and says why. Nothing is saved
+  until you save the context.
+- **Export YAML** shows the current entries as YAML (and copies them), to edit, review or move to another
+  context.
+- **Ask an AI** builds a prompt for any AI assistant with this context's tables, columns, properties, types and
+  current entries, plus the rules above. Describe what you want at the end; paste the YAML it answers into
+  **Import YAML**. The prompt holds table and column names, no data.
+
+![The context form: Enrichment Tables with Import YAML and Ask an AI](/screenshots/bring-your-own-data-enrichment-tables.png)
+
+```yaml
+enrichment_tables:
+  - name: channels              # only authorizes the table for the join below
+    label: Payment channels
+    table: main.fraud.channels
+  - name: tx_risk
+    label: Transaction risk
+    table: main.fraud.transactions
+    query:
+      target: edges             # edges | nodes
+      run: auto                 # auto | manual
+      overwrite: false
+      node_props: false
+      sql: |
+        SELECT e.edge_id, t.risk_score, c.name AS channel
+        FROM graph_edges e
+        JOIN main.fraud.transactions t ON t.tx_id = e.props['tx_id']
+        JOIN main.fraud.channels c ON c.id = t.channel_id
+```
+
+| Setting | Effect |
+|---|---|
+| **Enriches: the edges / the nodes** | What the returned ids are and what gets the properties. |
+| **Runs: after every query and expand** | Runs by itself when a query, a subgraph, an expand, a precomputed graph or a saved exploration lands. An expand sends only the new edges and nodes. |
+| **Runs: only from Your data** | Runs when someone clicks **Run** in **Your data → From Databricks tables**. |
+| **Replace values the edge (node) already has** | Off: a value already there wins, and the query's is ignored. On: the query's value wins. |
+| **Send node properties** | Off: `graph_nodes` holds ids and types only, so node data does not travel. |
+
+### What a reader sees
+
+- The new properties appear on the edges or nodes. In the details panel each one carries a
+  **from &lt;query name&gt;** chip, so it never passes for the graph's own data. On nodes they stay when the
+  rest of the node's properties load in the background.
+- **Your data → From Databricks tables** lists the context's queries and the authorized tables, runs one by
+  hand, shows the SQL, and says what the last run did: *2 of 40 edges matched a row · 2 got new values*. A reader
+  of a shared exploration gets this tab even without write access.
+- Nothing is saved. A saved exploration leaves the values out of its snapshot, and opening it runs the
+  **after every query** ones again, so the values are always current.
+
+![Your data: from Databricks tables](/screenshots/bring-your-own-data-databricks.png)
+
+### When something is wrong
+
+| You see | Cause |
+|---|---|
+| *An edge enrichment query failed* (toast) | An automatic run failed. The graph is fine; the tab says why. |
+| `ENRICHMENT_SCOPE_DENIED` when saving or running | The query names a table that is not in the list (or no longer is). Add it, or change the query. |
+| `ENRICHMENT_RESULT_NO_KEY` | The query returned no `edge_id` column (a query on edges) or no `node_id` column (on nodes). |
+| `ENRICHMENT_QUERY_FAILED` | The warehouse refused the query (a missing column, a type error); its message is shown. |
+| *the result hit the row limit* | More rows than `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` came back for one batch; some edges may be missing values. |
+
+Edges travel in batches of `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` (500 by default), each with its endpoint nodes;
+nodes travel the same way, each batch with the edges that touch it. Only the first row per id is used.
 
 ## Add nodes and edges
 
@@ -325,8 +453,9 @@ Whatever the way in, the item is **case material**:
 
 - **Not a change to the context.** Neither a case file nor an exploration's layer writes to the database the
   context reads. Other explorations of the context do not see it, and no context or exploration is created for
-  a file. For data every exploration should see, add an enrichment table to the context (context form) or a
-  table to the warehouse.
+  a file. For data every exploration should see, add an enrichment table or an
+  [enrichment query](#enrich-from-databricks-tables) to the context (context form), or a table to
+  the warehouse.
 - **Not a way around access rules.** A case's data follows the case's sharing; an exploration's layer follows
   the exploration's. An item taken from a context you cannot read stays restricted, and anything joined or
   promoted from it keeps the restriction.

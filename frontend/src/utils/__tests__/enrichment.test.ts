@@ -35,6 +35,22 @@ describe('enrichment', () => {
     expect(enrichmentTargets(pessoa, contexts)).toEqual([])
   })
 
+  it('skips entries without a lookup (an authorized table or an edge query)', () => {
+    const withQuery = {
+      c1: {
+        identity_keys: [],
+        enrichment_tables: [
+          { name: 'tx', label: 'Tx', table: 'main.risk.tx', query: { sql: 'SELECT edge_id FROM graph_edges' } },
+          { name: 'bare', label: 'Bare', table: 'main.risk.bare' },
+          devices,
+        ],
+      },
+    }
+    const { nodes } = unifyGraph([pix], withQuery)
+    const conta = nodes.find((n) => n.node_id === '4471@c1')!
+    expect(enrichmentTargets(conta, withQuery).map((t) => t.table.name)).toEqual(['devices'])
+  })
+
   it('promotes a shared device to one node linking both accounts', () => {
     const { nodes } = unifyGraph([pix], contexts)
     const [target] = enrichmentTargets(nodes[0], contexts)
