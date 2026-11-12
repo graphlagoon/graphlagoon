@@ -12,11 +12,49 @@ import {
   capabilitiesFor,
   resolveDatasourceType,
 } from '@/composables/useDatasourceCapabilities';
+import { useToast } from '@/composables/useToast';
 import { substituteTemplateParams } from '@/utils/templateSubstitution';
+import { resolveTemplateAfterRun } from '@/utils/templateAfterRun';
 import type { QueryTemplate } from '@/types/graph';
 
 export function useTemplateExecution() {
   const graphStore = useGraphStore();
+  const toast = useToast();
+
+  /**
+   * Apply the template's `options.after_run` (layout, ego settings, focus) to
+   * the graph that just loaded. Fail-open: the query already ran, so a bad
+   * field or a focus node missing from the result is skipped with a warning.
+   */
+  function applyTemplateAfterRun(
+    template: QueryTemplate,
+    values: Record<string, string>,
+  ): void {
+    const paramIds = template.parameters.map((parameter) => parameter.id);
+    const resolved = resolveTemplateAfterRun(template.options?.after_run, paramIds, values);
+    if (!resolved) return;
+    const issues = [...resolved.issues];
+    const inGraph = (id: string) => graphStore.nodes.some((node) => node.node_id === id);
+
+    const { algorithm, modeConfig } = resolved.layout;
+    const egoCentre = modeConfig.ego?.focusNodeId;
+    if (egoCentre && !inGraph(egoCentre)) {
+      issues.push(`The ego centre “${egoCentre}” is not in the result, so the ego layout was not applied.`);
+    } else {
+      // Same pair, same order as the `?layout=` path: synchronous and adjacent,
+      // so the canvas never sees ego switched on without its centre.
+      if (algorithm) graphStore.setLayoutAlgorithm(algorithm);
+      if (Object.keys(modeConfig).length > 0) graphStore.updateLayoutModeConfig(modeConfig);
+    }
+
+    const focus = resolved.focusNodeId;
+    if (focus && inGraph(focus)) graphStore.pendingFocusNodeId = focus;
+    else if (focus) issues.push(`The focus node “${focus}” is not in the result.`);
+
+    if (issues.length > 0) {
+      toast.warning(`“${template.name}” ran, but after the run: ${issues.join(' ')}`, 6000);
+    }
+  }
 
   /**
    * Substitute `values` into the template and load the result as the graph.
@@ -28,6 +66,9 @@ export function useTemplateExecution() {
   async function executeTemplateAsGraph(
     template: QueryTemplate,
     values: Record<string, string>,
+    // The `?template=` link applies after-run itself, between `?style=` and
+    // `?layout.*`, so the link's own layout keys win over the template's.
+    { afterRun = true }: { afterRun?: boolean } = {},
   ): Promise<void> {
     const capabilities = capabilitiesFor(
       resolveDatasourceType(graphStore.currentContext),
@@ -61,7 +102,8 @@ export function useTemplateExecution() {
     } else {
       await graphStore.executeGraphQuery(substituted, { preserveGraphQuery: true });
     }
+    if (afterRun && graphStore.queryError === null) applyTemplateAfterRun(template, values);
   }
 
-  return { executeTemplateAsGraph };
+  return { executeTemplateAsGraph, applyTemplateAfterRun };
 }

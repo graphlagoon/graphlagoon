@@ -626,6 +626,22 @@ const SCENES: Scene[] = [
     },
   },
   {
+    guide: 'query-templates',
+    scene: 'after-run',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openPanel(page, 'Query Templates');
+      await page.getByTitle('New Template').click();
+      const afterRun = page.getByTestId('template-after-run');
+      await afterRun.getByTestId('template-after-run-layout').selectOption('ego');
+      await afterRun.getByTestId('template-after-run-focus').fill('$node_id');
+      await afterRun.getByTestId('template-after-run-hops').fill('2');
+      await afterRun.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+    },
+  },
+  {
     guide: 'labels',
     scene: 'panel',
     path: GRAPH_URL,

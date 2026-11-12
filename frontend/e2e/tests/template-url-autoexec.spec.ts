@@ -253,3 +253,78 @@ test.describe('Template URL auto-execution — precedence', () => {
     expect(transpiled).toEqual([]);
   });
 });
+
+/** Same query, plus what the canvas does once the graph loads. */
+const EGO_TEMPLATE = {
+  ...NEIGHBORS_TEMPLATE,
+  id: 'tpl-ego',
+  name: 'EgoAround',
+  options: {
+    ...NEIGHBORS_TEMPLATE.options,
+    after_run: { layout: 'ego', focus: '$node_id', 'layout.ego.maxHops': '2' },
+  },
+};
+
+test.describe('Template after-run (layout and focus)', () => {
+  test.beforeEach(async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedQueryTemplates(page, MOCK_CONTEXT.id, [
+      EGO_TEMPLATE,
+      {
+        ...NEIGHBORS_TEMPLATE,
+        id: 'tpl-missing',
+        name: 'FocusMissing',
+        options: { ...NEIGHBORS_TEMPLATE.options, after_run: { focus: 'n-999' } },
+      },
+    ]);
+  });
+
+  async function openLayoutPanel(page: Page) {
+    await page.getByTestId('graph-toolbar-layout').click();
+    await expect(page.getByTestId('ego-max-hops')).toBeVisible();
+  }
+
+  test('switches to ego centred on the parameter value and focuses that node', async ({
+    authenticatedPage: page,
+  }) => {
+    await mockTranspile(page);
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?template=EgoAround&template.node_id=n3`);
+    await expect(page.getByTestId('graph-status-template')).toContainText('EgoAround', {
+      timeout: 15_000,
+    });
+
+    // The focus lands once the node is in the scene: selected, nothing pending.
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__GRAPH_PENDING_FOCUS__?.()), { timeout: 30_000 })
+      .toBeNull();
+    await openLayoutPanel(page);
+    await expect(page.getByTestId('ego-focus-label')).toContainText('n3');
+    await expect(page.getByTestId('ego-max-hops')).toHaveValue('2');
+  });
+
+  test("the link's own ?layout.* keys beat the template's", async ({
+    authenticatedPage: page,
+  }) => {
+    await mockTranspile(page);
+    await page.goto(
+      `/graph/${MOCK_CONTEXT.id}?template=EgoAround&template.node_id=n3&layout.ego.maxHops=4`,
+    );
+    await expect(page.getByTestId('graph-status-template')).toBeVisible({ timeout: 15_000 });
+
+    await openLayoutPanel(page);
+    await expect(page.getByTestId('ego-focus-label')).toContainText('n3');
+    await expect(page.getByTestId('ego-max-hops')).toHaveValue('4');
+  });
+
+  test('a focus node missing from the result is reported and the graph stays', async ({
+    authenticatedPage: page,
+  }) => {
+    await mockTranspile(page);
+    await page.goto(`/graph/${MOCK_CONTEXT.id}?template=FocusMissing&template.node_id=n1`);
+
+    await expect(page.getByText('The focus node “n-999” is not in the result.')).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByTestId('graph-status-bar')).toContainText('5 nodes');
+  });
+});

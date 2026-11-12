@@ -1,3 +1,4 @@
+import re
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from typing import Optional, Any, Literal, TypeAlias, Union
 from uuid import UUID
@@ -1112,6 +1113,28 @@ class TemplateOptions(BaseModel):
     # templates saved before the field existed stay linkable; the default is
     # filled at rehydration (TemplateOptions(**raw_options)), never migrated.
     allow_url_execution: bool = True
+    # What the canvas does once the graph loads, in the `?layout=` link grammar
+    # plus `focus` (select + camera), e.g. {"layout": "ego", "focus": "$account"}.
+    # Values may carry `$param` placeholders; the frontend substitutes and
+    # validates each field at run time. Lives in the same JSON column: no migration.
+    after_run: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("after_run")
+    @classmethod
+    def _after_run_keys(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > 20:
+            raise ValueError("after_run accepts at most 20 entries")
+        for key, item in value.items():
+            if key not in ("layout", "focus") and not _AFTER_RUN_LAYOUT_KEY.fullmatch(key):
+                raise ValueError(
+                    f"after_run key {key!r} is not 'layout', 'focus' or 'layout.<mode>.<field>'"
+                )
+            if len(item) > 500:
+                raise ValueError(f"after_run value for {key!r} is longer than 500 characters")
+        return value
+
+
+_AFTER_RUN_LAYOUT_KEY = re.compile(r"layout\.[A-Za-z]+\.[A-Za-z]+")
 
 
 class QueryTemplateCreate(BaseModel):

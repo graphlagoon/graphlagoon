@@ -46,6 +46,7 @@ import PrecomputedGraphPanel from '@/components/PrecomputedGraphPanel.vue';
 import SchemaDriftModal from '@/components/SchemaDriftModal.vue';
 import { TerminalSquare, AlertCircle, Network } from 'lucide-vue-next';
 import { useToast } from '@/composables/useToast';
+import type { QueryTemplate } from '@/types/graph';
 import { useLiveRevision } from '@/composables/useLiveRevision';
 import { describeSummary } from '@/utils/liveMerge';
 import {
@@ -166,7 +167,10 @@ const supportsQuery = computed(
   () => capabilitiesFor(resolveDatasourceType(graphStore.currentContext)).supportsQuery,
 );
 const queryTemplatesStore = useQueryTemplatesStore();
-const { executeTemplateAsGraph } = useTemplateExecution();
+const { executeTemplateAsGraph, applyTemplateAfterRun } = useTemplateExecution();
+// A `?template=` run's after-run, held until `?style=` has applied: the
+// template's layout beats the preset, the link's `?layout.*` beats both.
+let pendingTemplateAfterRun: { template: QueryTemplate; values: Record<string, string> } | null = null;
 
 const showFilters = ref(false);
 const showLayoutPanel = ref(false);
@@ -407,6 +411,10 @@ async function loadFromRoute(contextId: string) {
 
   await loadGraphFromRoute(contextId, name, params, explorationId, templateParsed);
   await applyStyleFromRoute(contextId);
+  if (pendingTemplateAfterRun) {
+    applyTemplateAfterRun(pendingTemplateAfterRun.template, pendingTemplateAfterRun.values);
+    pendingTemplateAfterRun = null;
+  }
   applyLayoutOverridesFromRoute();
   validateLayoutOverridesAgainstGraph();
 }
@@ -596,6 +604,7 @@ async function loadGraphFromRoute(
 async function runTemplateFromRoute(contextId: string, parsed: ParsedTemplateUrl) {
   const token = ++templateRunToken;
   activeUrlTemplate.value = null;
+  pendingTemplateAfterRun = null;
 
   if (parsed.issues.length > 0) {
     templateIssues.value = parsed.issues;
@@ -632,8 +641,11 @@ async function runTemplateFromRoute(contextId: string, parsed: ParsedTemplateUrl
   }
 
   try {
-    await executeTemplateAsGraph(resolution.template, resolution.values);
+    await executeTemplateAsGraph(resolution.template, resolution.values, { afterRun: false });
     if (token === templateRunToken) {
+      if (graphStore.queryError === null) {
+        pendingTemplateAfterRun = { template: resolution.template, values: resolution.values };
+      }
       templateIssues.value = [];
       activeUrlTemplate.value = {
         name: resolution.template.name,

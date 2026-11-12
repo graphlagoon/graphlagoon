@@ -117,6 +117,8 @@ The full load order for one page open is:
    (see [Query Templates](./query-templates.md#preset-precomputed-template-or-exploration)
    for the full precedence table).
 2. `?style=` — the saved look, including its own layout block.
+   A `?template=` with [After running](./query-templates.md#after-running-layout-and-focus)
+   settings applies them right after this step.
 3. `?layout=` / `?layout.<mode>.<field>=` — field-by-field overrides on top
    of whatever step 2 restored.
 

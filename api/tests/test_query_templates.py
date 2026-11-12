@@ -181,6 +181,64 @@ class TestAllowUrlExecution:
         assert listed[0]["options"]["allow_url_execution"] is True
 
 
+class TestAfterRun:
+    """What the canvas does after a run rides in the options JSON — no migration."""
+
+    AFTER_RUN = {"layout": "ego", "focus": "$account", "layout.ego.maxHops": "2"}
+
+    def test_round_trips_through_create_update_and_list(self, client, context):
+        resp = client.post(
+            _templates_url(context),
+            json={
+                "name": "ego-on-account",
+                "query_type": "cypher",
+                "query": "MATCH (n) RETURN n",
+                "options": {"after_run": self.AFTER_RUN},
+            },
+            headers=_headers(OWNER),
+        )
+        assert resp.status_code == 201
+        assert resp.json()["options"]["after_run"] == self.AFTER_RUN
+
+        resp = client.put(
+            _templates_url(context, resp.json()["id"]),
+            json={"options": {"after_run": {"layout": "hive"}}},
+            headers=_headers(OWNER),
+        )
+        assert resp.status_code == 200
+        listed = client.get(_templates_url(context), headers=_headers(OWNER)).json()
+        assert listed[0]["options"]["after_run"] == {"layout": "hive"}
+
+    def test_pre_existing_row_without_the_key_reads_back_empty(self, client, context, store):
+        template_id = _create(client, context, OWNER).json()["id"]
+        store.get_query_template(UUID(template_id)).options.pop("after_run", None)
+        listed = client.get(_templates_url(context), headers=_headers(OWNER)).json()
+        assert listed[0]["options"]["after_run"] == {}
+
+    @pytest.mark.parametrize(
+        "after_run",
+        [
+            {"style": "x"},
+            {"layout.ego": "x"},
+            {"layout.ego.focusNodeId.extra": "x"},
+            {"focus": "x" * 501},
+            {"layout.ego." + "a" * (i + 1): "1" for i in range(21)},
+        ],
+    )
+    def test_rejects_unknown_keys_and_oversized_values(self, client, context, after_run):
+        resp = client.post(
+            _templates_url(context),
+            json={
+                "name": "bad",
+                "query_type": "cypher",
+                "query": "MATCH (n) RETURN n",
+                "options": {"after_run": after_run},
+            },
+            headers=_headers(OWNER),
+        )
+        assert resp.status_code == 422
+
+
 class TestCreate:
     def test_owner_creates_shared(self, client, context):
         resp = _create(client, context, OWNER, "shared")
