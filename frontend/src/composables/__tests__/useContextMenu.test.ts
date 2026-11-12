@@ -154,3 +154,72 @@ describe('useContextMenu — drawing by hand (BYOD-2)', () => {
     expect(current.pickRequest).toBe(before + 1)
   })
 })
+
+describe('useContextMenu — Delete from graph', () => {
+  async function setup() {
+    const { setActivePinia, createPinia } = await import('pinia')
+    const { useGraphStore } = await import('@/stores/graph')
+    setActivePinia(createPinia())
+    window.__GRAPH_LAGOON_CONFIG__ = {} as never
+    const graph = useGraphStore()
+    graph.currentContext = { id: 'c1', title: 'Bank' } as never
+    graph.nodes = [
+      { node_id: 'a', node_type: 'Account', properties: {} },
+      { node_id: 'b', node_type: 'Account', properties: {} },
+      { node_id: 'c', node_type: 'Account', properties: {} },
+    ]
+    graph.edges = [
+      { edge_id: 'ab', src: 'a', dst: 'b', relationship_type: 'PIX' },
+      { edge_id: 'bc', src: 'b', dst: 'c', relationship_type: 'PIX' },
+    ]
+    const ctx = useContextMenu()
+    ctx.resetActions()
+    const action = () => {
+      ctx.show(new MouseEvent('contextmenu'), { type: 'node', id: 'a', label: 'a' })
+      return ctx.getVisibleActions().find((x) => x.id === 'delete-from-graph')!
+    }
+    return { graph, action }
+  }
+
+  it('deletes the clicked node with its edges, and Undo puts them back', async () => {
+    const { graph, action } = await setup()
+    const { useToast } = await import('@/composables/useToast')
+    useToast().toasts.value.splice(0)
+
+    await action().handler({ type: 'node', id: 'a', label: 'a' })
+    expect(graph.nodes.map((n) => n.node_id)).toEqual(['b', 'c'])
+    expect(graph.edges.map((e) => e.edge_id)).toEqual(['bc'])
+
+    const toast = useToast().toasts.value.at(-1)!
+    expect(toast.message).toBe('Deleted 1 node and 1 edge.')
+    toast.action!.onClick()
+    expect(graph.nodes.map((n) => n.node_id).sort()).toEqual(['a', 'b', 'c'])
+    expect(graph.edges.map((e) => e.edge_id).sort()).toEqual(['ab', 'bc'])
+  })
+
+  it('deletes the whole selection when the clicked node is part of it', async () => {
+    const { graph, action } = await setup()
+    graph.selectedNodeIds = new Set(['a', 'c'])
+    await action().handler({ type: 'node', id: 'a', label: 'a' })
+    expect(graph.nodes.map((n) => n.node_id)).toEqual(['b'])
+    expect(graph.edges).toEqual([])
+    expect(graph.selectedNodeIds.size).toBe(0)
+  })
+
+  it('marks an open exploration as changed, and back after Undo', async () => {
+    const { graph } = await setup()
+    graph.currentExploration = { id: 'x', title: 'X', state: {}, has_write_access: true } as never
+    graph.markExplorationSaved()
+    expect(graph.isExplorationDirty).toBe(false)
+    const { undo } = await graph.deleteFromGraph([], ['ab'])
+    expect(graph.isExplorationDirty).toBe(true)
+    undo!()
+    expect(graph.isExplorationDirty).toBe(false)
+  })
+
+  it('is not offered on a case canvas', async () => {
+    const { graph, action } = await setup()
+    graph.investigationMode = { rings: new Map() } as never
+    expect(action()).toBeUndefined()
+  })
+})

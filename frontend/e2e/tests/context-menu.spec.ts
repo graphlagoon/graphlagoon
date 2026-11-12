@@ -165,5 +165,24 @@ test.describe('Graph context menu', () => {
     await page.getByTestId('context-menu-action-isolate-community').click();
     await expect(page.getByTestId('status-isolation')).toContainText('Person');
   });
-});
 
+  test('Delete from graph removes the node and its edges; Undo brings them back', async ({ authenticatedPage: page }) => {
+    const menu = page.getByTestId('graph-context-menu');
+    let opened = false;
+    for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      await hoverNode(page, 'n1');
+      await page.mouse.down({ button: 'right' });
+      await page.mouse.up({ button: 'right' });
+      opened = await menu.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false);
+    }
+    expect(opened).toBe(true);
+
+    await page.getByTestId('context-menu-action-delete-from-graph').click();
+    const statusBar = page.getByTestId('graph-status-bar');
+    await expect(statusBar).toContainText('4 nodes');
+    await expect(page.getByText(/^Deleted 1 node and \d+ edges?\.$/)).toBeVisible();
+
+    await page.getByTestId('toast-action-undo').click();
+    await expect(statusBar).toContainText('5 nodes');
+  });
+});

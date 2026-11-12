@@ -170,3 +170,55 @@ def test_a_case_sees_the_exploration_with_its_layer(env):
     assert r.status_code in (200, 201), r.text
     frozen = client.get(f"{url}/items/{item}/content", params={"version": r.json()["version"]}, headers=h(OWNER))
     assert frozen.status_code == 200 and b"sketch:p1" in frozen.content and b"retail" in frozen.content
+
+
+# -- POST /api/explorations/{id}/remove: deleting nodes and edges by REST ------------------
+
+
+def test_remove_deletes_nodes_with_their_edges_from_the_snapshot_and_the_layer(env):
+    client, _, eid, _ = env
+    url = f"/api/explorations/{eid}"
+    assert client.put(f"{url}/overlay", json=OVERLAY, headers=h(OWNER)).status_code == 200
+    revision = client.get(url, headers=h(OWNER)).json()["state"]["revision"]
+
+    r = client.post(f"{url}/remove", json={"node_ids": ["A1"], "expected_revision": revision}, headers=h(OWNER))
+    assert r.status_code == 200, r.text
+    # a1 matched case-insensitively; e1 (a1→a2) and the layer's sketch:x1 (→a1) went with it.
+    assert r.json() == {"removed_nodes": 1, "removed_edges": 2, "revision": revision + 1}
+    served = client.get(f"{url}/snapshot", headers=h(OWNER)).json()
+    assert [n["id"] for n in served["nodes"]] == ["a2"] and served["edges"] == []
+    assert client.get(f"{url}/overlay", headers=h(OWNER)).json()["edges"] == []
+    state = client.get(url, headers=h(OWNER)).json()["state"]
+    assert state["last_change"]["by"] == OWNER and state["last_change"]["summary"]["removed_nodes"] == 1
+
+
+def test_remove_an_edge_only(env):
+    client, _, eid, _ = env
+    r = client.post(f"/api/explorations/{eid}/remove", json={"edge_ids": ["e1"]}, headers=h(OWNER))
+    assert r.status_code == 200 and r.json()["removed_edges"] == 1 and r.json()["removed_nodes"] == 0
+    served = client.get(f"/api/explorations/{eid}/snapshot", headers=h(OWNER)).json()
+    assert len(served["nodes"]) == 2 and served["edges"] == []
+
+
+@pytest.mark.parametrize(
+    ("body", "status", "code"),
+    [
+        ({"node_ids": ["nope"]}, 422, "NODE_NOT_FOUND"),
+        ({"edge_ids": ["nope"]}, 422, "EDGE_NOT_FOUND"),
+        ({"node_ids": ["a1"], "expected_revision": 99}, 409, "EXPLORATION_CHANGED"),
+    ],
+)
+def test_remove_refuses_and_changes_nothing(env, body, status, code):
+    client, _, eid, _ = env
+    r = client.post(f"/api/explorations/{eid}/remove", json=body, headers=h(OWNER))
+    assert r.status_code == status, r.text
+    assert r.json()["detail"]["error"]["code"] == code
+    assert len(client.get(f"/api/explorations/{eid}/snapshot", headers=h(OWNER)).json()["nodes"]) == 2
+
+
+def test_remove_needs_something_and_write_access(env):
+    client, _, eid, _ = env
+    url = f"/api/explorations/{eid}"
+    assert client.post(f"{url}/remove", json={}, headers=h(OWNER)).status_code == 422
+    client.post(f"{url}/share", json={"email": READER, "permission": "read"}, headers=h(OWNER))
+    assert client.post(f"{url}/remove", json={"node_ids": ["a1"]}, headers=h(READER)).status_code == 403

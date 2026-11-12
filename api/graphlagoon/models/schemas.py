@@ -1072,6 +1072,28 @@ class ExplorationUpdate(BaseModel):
     expected_revision: Optional[int] = None
 
 
+class ExplorationRemoveRequest(BaseModel):
+    """Nodes (with their edges) and edges to delete from a saved exploration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_ids: list[str] = Field(default_factory=list, max_length=10_000)
+    edge_ids: list[str] = Field(default_factory=list, max_length=10_000)
+    expected_revision: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _something_to_remove(self) -> "ExplorationRemoveRequest":
+        if not self.node_ids and not self.edge_ids:
+            raise ValueError("give node_ids and/or edge_ids")
+        return self
+
+
+class ExplorationRemoveResponse(BaseModel):
+    removed_nodes: int
+    removed_edges: int
+    revision: int
+
+
 class ExplorationResponse(BaseModel):
     id: UUID
     graph_context_id: UUID

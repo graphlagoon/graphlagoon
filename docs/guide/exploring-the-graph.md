@@ -237,6 +237,32 @@ nodes and edges are added. On sources that can't expand (some REST
 connections), the affordances are hidden rather than disabled. A failure
 leaves the graph untouched and reports through the error modal.
 
+## Deleting nodes and edges
+
+Right-click a node or an edge → **Delete from graph**. If the clicked item
+is part of the selection, the whole selection goes: its nodes, its edges,
+and every edge touching a deleted node. A toast says what went and offers
+**Undo**.
+
+The deletion only changes what's on the canvas. On an exploration, the
+toolbar marks it as changed and **Save** makes it stick; reopening without
+saving brings the nodes back. Items you drew or imported yourself
+(**your data**) keep their own **Remove from your data** item, which saves
+right away. A case's canvas doesn't offer this, because a case has its own
+items.
+
+A saved exploration can also lose nodes and edges without opening it:
+
+- **REST** — `POST /api/explorations/{id}/remove` with
+  `{"node_ids": [...], "edge_ids": [...], "expected_revision": N}`. It needs
+  write access to the exploration and the `exploration.save` permission. See
+  [REST API](./rest-api.md#delete-nodes-and-edges-from-an-exploration).
+- **MCP** — `edit_exploration` with `remove_node_ids` / `remove_edge_ids`
+  (see [Agents & MCP](./agents-mcp.md)).
+
+Both delete for good, from the saved graph and from your layer. A page that
+has the exploration open picks up the change within seconds.
+
 ## Export
 
 Toolbar → **Export**:

@@ -119,6 +119,22 @@ curl -s -X PATCH "$API/api/investigations/$CASE/items/$ITEM" \
 Uploads need the `investigation.upload` permission of the token's owner and stop at
 `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES`.
 
+### Delete nodes and edges from an exploration
+
+```bash
+curl -s -X POST "$API/api/explorations/$EXPLORATION/remove" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"node_ids": ["acct-9931"], "edge_ids": [], "expected_revision": 7}'
+# {"removed_nodes": 1, "removed_edges": 3, "revision": 8}
+```
+
+A node takes every edge touching it. Ids match exactly, else
+case-insensitively. An unknown id refuses the whole request
+(`NODE_NOT_FOUND` / `EDGE_NOT_FOUND`) and nothing changes. A stale
+`expected_revision` is a 409 `EXPLORATION_CHANGED`. Deleting an item of your
+own layer also needs `exploration.edit_graph`. An agent does the same with
+`edit_exploration`.
+
 ### Pick up the work assigned to you
 
 ```bash

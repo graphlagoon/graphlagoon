@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import type { Component } from 'vue';
 import { useToast } from '@/composables/useToast';
-import { Briefcase, CirclePlus, Copy, Eraser, Spline } from 'lucide-vue-next';
+import { Briefcase, CirclePlus, Copy, Eraser, Spline, Trash2 } from 'lucide-vue-next';
 import { useCurrentCaseStore } from '@/stores/currentCase';
 import { useGraphStore } from '@/stores/graph';
 import { useAddToCase } from '@/composables/useAddToCase';
@@ -96,7 +96,43 @@ function createBuiltInActions(): ContextMenuAction[] {
         if (failed) error(`Removed here, but not saved: ${failed}`);
       },
     },
+    {
+      // Off the canvas: the clicked node or edge, or the whole selection when it is part of it.
+      // Undo puts it back; saving the exploration makes it stick. A case's canvas has its own
+      // items, and the layer's own elements already have "Remove from your data".
+      id: 'delete-from-graph',
+      label: 'Delete from graph',
+      icon: Trash2,
+      visible: (t: ContextMenuTarget) => {
+        let graph;
+        try {
+          graph = useGraphStore();
+        } catch {
+          return false; // no pinia (unit tests of the menu alone)
+        }
+        if (graph.investigationMode) return false;
+        const own = t.type === 'node' ? graph.overlayAddedNodeIds : graph.overlayAddedEdgeIds;
+        return !own.has(t.id);
+      },
+      handler: async (t: ContextMenuTarget) => {
+        const graph = useGraphStore();
+        const selected = t.type === 'node' ? graph.selectedNodeIds : graph.selectedEdgeIds;
+        const [nodeIds, edgeIds] = selected.has(t.id)
+          ? [[...graph.selectedNodeIds], [...graph.selectedEdgeIds]]
+          : t.type === 'node' ? [[t.id], []] : [[], [t.id]];
+        const result = await graph.deleteFromGraph(nodeIds, edgeIds);
+        if (result.error) error(`Deleted here, but your data layer was not saved: ${result.error}`);
+        const what = deletedSummary(result.removedNodes, result.removedEdges);
+        if (result.undo) useToast().undoable(`Deleted ${what}.`, result.undo);
+        else success(`Deleted ${what}.`);
+      },
+    },
   ];
+}
+
+function deletedSummary(nodes: number, edges: number): string {
+  const part = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  return [nodes ? part(nodes, 'node') : '', edges ? part(edges, 'edge') : ''].filter(Boolean).join(' and ');
 }
 
 /** Whether drawing applies here (a writable exploration or case); false without pinia. */
