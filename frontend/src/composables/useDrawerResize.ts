@@ -2,20 +2,41 @@ import { ref, onUnmounted } from 'vue';
 
 /**
  * Composable for resizable bottom drawer (drag handle).
- * Returns reactive height and mouse handlers.
+ * Returns reactive height and mouse handlers. With `storageKey` the height the
+ * person dragged to is kept per browser; without one saved, the default never
+ * takes more than `defaultRatio` of the window (a 440 px console left a 208 px
+ * canvas on a 700 px screen).
  */
 export function useDrawerResize(options: {
   initialHeight?: number;
   minHeight?: number;
   maxHeightRatio?: number;
+  defaultRatio?: number;
+  storageKey?: string;
 }) {
   const {
     initialHeight = 250,
     minHeight = 120,
     maxHeightRatio = 0.6,
+    defaultRatio = 0.4,
+    storageKey,
   } = options;
 
-  const height = ref(initialHeight);
+  const viewport = typeof window !== 'undefined' ? window.innerHeight : 900;
+  const clamp = (h: number) => Math.min(viewport * maxHeightRatio, Math.max(minHeight, h));
+  function startHeightFor(): number {
+    if (storageKey) {
+      try {
+        const saved = Number(localStorage.getItem(storageKey));
+        if (saved > 0) return clamp(saved);
+      } catch {
+        /* storage blocked */
+      }
+    }
+    return clamp(Math.min(initialHeight, viewport * defaultRatio));
+  }
+
+  const height = ref(startHeightFor());
   const isResizing = ref(false);
 
   let startY = 0;
@@ -42,6 +63,13 @@ export function useDrawerResize(options: {
 
   function onMouseUp() {
     isResizing.value = false;
+    if (storageKey) {
+      try {
+        localStorage.setItem(storageKey, String(Math.round(height.value)));
+      } catch {
+        /* storage blocked */
+      }
+    }
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
     document.body.style.cursor = '';

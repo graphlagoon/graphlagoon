@@ -94,13 +94,17 @@ export function useAddToCase(caseId?: MaybeRef<string | null | undefined>) {
   }
 
   function notify(item: CaseItem, id: string) {
-    const title = targetTitle.value || item.title;
-    const message = `Added to case ${title}`;
-    if (router && router.currentRoute.value.name !== 'investigation') {
-      toast.show(message, 'success', 6000, { label: 'view', onClick: () => void router!.push(`/investigations/${id}`) });
-    } else {
+    // Say what went in ("Selection · 3 nodes"), not only where.
+    const message = targetTitle.value ? `Added to case ${targetTitle.value}: ${item.title}` : `Added to case: ${item.title}`;
+    const path = `/investigations/${id}`;
+    const onCase = router ? router.currentRoute.value.name === 'investigation' : window.location.pathname.endsWith(path);
+    if (onCase) {
       toast.success(message);
+      return;
     }
+    // From a context-menu handler there is no component setup: the app router is loaded on click.
+    const go = () => (router ? void router.push(path) : void import('@/router').then((m) => m.default.push(path)));
+    toast.show(message, 'success', 6000, { label: 'View', onClick: go });
   }
 
   async function create(data: CreateItemRequest): Promise<CaseItem | null> {

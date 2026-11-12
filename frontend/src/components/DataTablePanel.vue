@@ -43,6 +43,7 @@ const graphStore = useGraphStore();
 const metricsStore = useMetricsStore();
 const communityStore = useCommunityStore();
 const { height, isResizing, onMouseDown } = useDrawerResize({
+  storageKey: 'graphlagoon.drawer.table',
   initialHeight: 280,
   minHeight: 120,
   maxHeightRatio: 0.6,

@@ -442,7 +442,7 @@ function deleteRule(ruleId: string) {
 .section-hint {
   font-size: 0.72rem;
   line-height: 1.4;
-  color: var(--vt-c-text-2, #888);
+  color: var(--text-muted);
   margin: -4px 0 10px;
 }
 

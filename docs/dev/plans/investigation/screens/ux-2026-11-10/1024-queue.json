@@ -1,0 +1,164 @@
+{
+  "empty": {
+    "text": "No cases\n\nCreate a case and add explorations, queries and files from any context to it.",
+    "overflow": {
+      "scrollWidth": 1024,
+      "clientWidth": 1024,
+      "overflows": false,
+      "offenders": []
+    }
+  },
+  "populated": {
+    "overflow": {
+      "scrollWidth": 1024,
+      "clientWidth": 1024,
+      "overflows": false,
+      "offenders": []
+    },
+    "small": [
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "sort-title",
+        "w": 28,
+        "h": 18
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "sort-type",
+        "w": 28,
+        "h": 18
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "sort-status",
+        "w": 39,
+        "h": 18
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "sort-assignee",
+        "w": 53,
+        "h": 18
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "sort-deadline",
+        "w": 54,
+        "h": 18
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "sort-updated",
+        "w": 62,
+        "h": 18
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "sort-created",
+        "w": 49,
+        "h": 18
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "A",
+        "type": "",
+        "label": "Case 1 · Pix scam",
+        "w": 101,
+        "h": 14
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "A",
+        "type": "",
+        "label": "Case 3 · Mule ring",
+        "w": 107,
+        "h": 14
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "A",
+        "type": "",
+        "label": "Case 5 · Pix scam",
+        "w": 101,
+        "h": 14
+      },
+      {
+        "root": "[data-testid=investigations-table]",
+        "tag": "A",
+        "type": "",
+        "label": "Case 7 · Mule ring",
+        "w": 107,
+        "h": 14
+      }
+    ],
+    "tableRect": {
+      "x": 20,
+      "y": 398,
+      "w": 984,
+      "h": 646,
+      "bottom": 1044,
+      "right": 1004
+    },
+    "headerText": "CASE\tTYPE\tMATERIAL\tSUGGESTIONS\tSTATUS\tASSIGNEE\tDEADLINE\tUPDATED ▼\tCREATED\n"
+  },
+  "many": {
+    "rowsPage1": 10,
+    "pagerRectBeforeScroll": {
+      "x": 20,
+      "y": 4427,
+      "w": 984,
+      "h": 45,
+      "bottom": 4472,
+      "right": 1004
+    },
+    "viewportH": 700,
+    "range": "1–50 of 60",
+    "range2": "51–60 of 60",
+    "url": "http://localhost:3000/investigations?page=2",
+    "scrollYAfterNext": 638
+  },
+  "long": {
+    "overflow": {
+      "scrollWidth": 1024,
+      "clientWidth": 1024,
+      "overflows": false,
+      "offenders": [
+        "TABLE.queue#investigations-table",
+        "THEAD.",
+        "TR.",
+        "TH.",
+        "BUTTON.sort#sort-updated",
+        "TH.",
+        "BUTTON.sort#sort-created",
+        "TBODY."
+      ]
+    },
+    "clipped": [],
+    "rowH": {
+      "x": 20,
+      "y": 436,
+      "w": 1157,
+      "h": 495,
+      "bottom": 932,
+      "right": 1177
+    }
+  },
+  "error": {
+    "text": "boom Retry",
+    "countersVisible": true
+  }
+}

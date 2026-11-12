@@ -14,6 +14,7 @@
  */
 import { computed, ref } from 'vue';
 import { confirmAction } from '@/composables/useConfirm';
+import { useToast } from '@/composables/useToast';
 import { useAuthStore } from '@/stores/auth';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
@@ -25,6 +26,7 @@ const emit = defineEmits<{ decided: []; cancel: [] }>();
 
 const store = useInvestigationStore();
 const graph = useGraphStore();
+const toast = useToast();
 
 const outcomes = computed(() => store.caseType?.outcomes ?? []);
 const actions = computed(() => store.caseType?.actions ?? []);
@@ -132,6 +134,12 @@ async function record() {
   };
   try {
     await store.recordDecision(body);
+    // The primary action of a case must say it happened: which decision, and what it did.
+    const all = store.current?.decisions ?? [];
+    const d = all[all.length - 1];
+    const label = d?.outcome_label ?? (body.outcome_label || 'Decision');
+    const effect = d?.review === 'pending' ? 'waiting for review' : store.current?.status === 'closed' ? 'the case is closed' : 'the case stays open';
+    toast.success(`Recorded D${all.length || 1} · ${label} — ${effect}`);
     emit('decided');
   } catch (e) {
     error.value = getErrorMessage(e, 'Failed to record the decision');
@@ -142,7 +150,7 @@ async function record() {
 </script>
 
 <template>
-  <form class="decide" data-testid="decision-form" @submit.prevent="record">
+  <form class="decide" data-testid="decision-form" @submit.prevent="record" @keydown.esc.stop="emit('cancel')">
     <div v-if="proposal" class="proposal" data-testid="decision-proposal">
       <strong>Proposed by {{ proposal.author_kind === 'agent' ? 'the agent' : proposal.author_email }}</strong>
       <span class="muted">Review it, change what you disagree with, and record it — or dismiss it.</span>

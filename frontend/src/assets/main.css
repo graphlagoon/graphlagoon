@@ -37,6 +37,8 @@
 
   /* Color – Semantic */
   --color-success: #28a745;
+  /* Success as text: #28a745 is 3:1 on white, too light for 12 px links. */
+  --color-success-text: #15803d;
   --color-success-border: #2ecc71;
   --color-warning: #f59e0b;
   --color-warning-border: #f39c12;
@@ -54,7 +56,8 @@
   --color-border: #dee2e6;
   --color-border-subtle: #e9ecef;
   --color-text: #2c3e50;
-  --color-text-muted: #6c757d;
+  /* 5:1 on the #f5f5f5 page (the old #6c757d was 4.3:1, under AA for 12 px captions). */
+  --color-text-muted: #5f6b76;
   --color-text-subtle: #9ca3af;
 
   /* Color – Toolbar (dark ocean) */

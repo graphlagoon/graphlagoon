@@ -126,3 +126,18 @@ describe('CaseTimeline · Journal (UX-1)', () => {
     expect(queryByTestId('journal-older')).toBeNull()
   })
 })
+
+describe('CaseTimeline · Suggestions', () => {
+  it('lists each suggestion (who, what, why) under its group, not only "Confirm all"', () => {
+    const store = useInvestigationStore()
+    store.current = { id: CASE_ID, title: 'Golpe Pix', status: 'analysis', settings: {}, tags: [] } as any
+    store.annotations = [
+      { id: 's1', kind: 'role', targets: ['acc-1'], value: { role: 'mula' }, status: 'suggested', author_kind: 'agent', author_email: 'ana@x.com', reason: 'Receives from 6 accounts' },
+    ] as any
+    const { getByTestId } = render(CaseTimeline, { props: { ...props, tab: 'suggestions' }, global: { stubs } })
+    const row = getByTestId('suggestion-row-s1')
+    expect(row.textContent).toContain('acc-1 as mula')
+    expect(row.textContent).toContain('Receives from 6 accounts')
+    expect(getByTestId('suggestion-row-confirm-s1')).toBeTruthy()
+  })
+})

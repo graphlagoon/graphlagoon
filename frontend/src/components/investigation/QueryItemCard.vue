@@ -110,7 +110,7 @@ async function compareRuns() {
 async function pinRun(version: number) {
   try {
     const v = await store.pinItem(props.item.id, { version });
-    if (v) toast.success(`Pinned v${v.version} · ${v.sha256.slice(0, 8)}`);
+    if (v) toast.success(`Pinned as evidence ${store.evidenceLabel(v.item_id ?? props.item.id, v.version)} (v${v.version})`);
     await loadHistory();
   } catch (e) {
     toast.error(getErrorMessage(e, 'Failed to pin'));
@@ -192,7 +192,7 @@ async function promote(as: 'graph' | 'enrichment') {
         <span v-if="runOf(v)?.statement_id" class="muted" :title="runOf(v)?.statement_id">stmt</span>
         <span class="muted">{{ runOf(v)?.author_kind === 'agent' ? 'agent' : runOf(v)?.run_by }} · {{ when(v.created_at) }}</span>
         <span v-if="v.pinned_at" class="muted">📌</span>
-        <button v-else-if="canEdit" class="link-btn" @click="pinRun(v.version)">Pin</button>
+        <button v-else-if="canEdit" class="link-btn" title="Pin this run as evidence" @click="pinRun(v.version)">Pin as evidence</button>
       </div>
       <button v-if="history.length >= 2" class="btn btn-outline btn-sm" :disabled="picked.length !== 2" :data-testid="`query-compare-runs-${item.id}`" @click="compareRuns">
         Compare 2 runs

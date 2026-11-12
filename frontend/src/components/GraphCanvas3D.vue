@@ -339,7 +339,13 @@ function frame() {
 /** Whether an automatic fit may run now (nothing pending, no fresh focus). */
 const canAutoFit = () => !recentlyFocused() && !graphStore.pendingFocusNodeId && !graphStore.pendingViewport;
 
-watch(initialLayoutDone, (done) => { if (done) settleFocus(); });
+// A fresh graph is framed once its first layout settles: the nodes start bunched in the
+// middle and the force spreads them out, so a fit before that frames a fraction of the canvas.
+watch(initialLayoutDone, (done) => {
+  if (!done) return;
+  if (settleFocus()) return;
+  requestAnimationFrame(() => frame()); // the saved camera wins, else fit
+});
 watch(isLayoutRunning, (running) => { if (!running) settleFocus(); });
 watch(() => graphStore.pendingFocusNodeId, (id) => {
   if (id && initialLayoutDone.value && !isLayoutRunning.value) settleFocus();

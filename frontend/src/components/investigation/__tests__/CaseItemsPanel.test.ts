@@ -72,7 +72,7 @@ describe('CaseItemsPanel', () => {
     expect(getByTestId('item-pinned-d1').textContent).toContain('v1')
     expect(getByTestId('item-suggested-n1')).toBeTruthy()
     expect(getByTestId('item-n1').classList).toContain('suggested')
-    expect(getByTestId('suggested-count').textContent).toContain('1 suggested')
+    expect(queryByTestId('suggested-count')).toBeNull() // the header's badge is the one count
     expect(getByTestId('item-canvas-g1')).toBeTruthy()
     expect(queryByTestId('item-canvas-q1')).toBeNull() // a table query is not on the canvas
   })

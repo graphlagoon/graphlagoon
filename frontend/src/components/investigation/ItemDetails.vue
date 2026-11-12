@@ -126,7 +126,7 @@ async function pin(v: CaseItemVersion) {
   const label = pinLabel.value.trim();
   const ok = await act(async () => {
     const pinned = await store.pinItem(props.item.id, { version: v.version, ...(label ? { label } : {}) });
-    if (pinned) toast.success(`Pinned v${pinned.version} · hash ${pinned.sha256.slice(0, 8)}`);
+    if (pinned) toast.success(`Pinned as evidence ${store.evidenceLabel(pinned.item_id ?? props.item.id, pinned.version)} (v${pinned.version})`);
   }, 'Failed to pin');
   if (ok) {
     pinning.value = null;

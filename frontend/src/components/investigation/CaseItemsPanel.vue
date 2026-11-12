@@ -40,7 +40,7 @@ function writeFlag(key: string, on: boolean) {
 import type { CaseItem, ItemKind } from '@/types/investigation';
 
 const props = defineProps<{ canEdit: boolean; activeItem?: string | null }>();
-const emit = defineEmits<{ add: []; upload: []; select: [item: CaseItem] }>();
+const emit = defineEmits<{ add: []; upload: []; select: [item: CaseItem]; collapse: [] }>();
 
 const store = useInvestigationStore();
 const viewer = useItemViewerStore();
@@ -156,7 +156,6 @@ const groups = computed(() =>
   GROUPS.map((g) => ({ ...g, items: visible.value.filter((i) => i.kind === g.kind) })).filter((g) => g.items.length || !search.value),
 );
 const showRemoved = ref(false);
-const suggestedCount = computed(() => store.suggestions.length);
 /** `G3`, `Q2`, `D1`: stable short ids (05 §3: never a raw UUID; see `caseShortIds`). */
 const shortIds = computed(() => store.shortIds);
 
@@ -233,7 +232,7 @@ function decide(item: CaseItem, status: 'confirmed' | 'rejected') {
 function pin(item: CaseItem) {
   run(item.id, async () => {
     const v = await store.pinItem(item.id);
-    if (v) toast.success(`Pinned v${v.version} · hash ${v.sha256.slice(0, 8)}`);
+    if (v) toast.success(`Pinned as evidence ${store.evidenceLabel(v.item_id ?? item.id, v.version)} (v${v.version})`);
   }, 'Failed to pin');
 }
 
@@ -266,7 +265,7 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
     </div>
     <header class="head">
       <h2>Material</h2>
-      <span v-if="suggestedCount" class="suggested-count" data-testid="suggested-count">{{ suggestedCount }} suggested</span>
+      <!-- No suggestion count here: the header's badge is the one place it shows (and opens the list). -->
       <span class="spacer"></span>
       <template v-if="canEdit">
         <button class="btn btn-primary btn-sm" data-testid="items-add" @click="emit('add')"><Plus :size="14" /> Add</button>
@@ -274,6 +273,7 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           <Upload :size="14" />
         </button>
       </template>
+      <button class="btn btn-outline btn-sm fold" aria-label="Hide the material" title="Hide the material (more room for the canvas)" data-testid="material-collapse" @click="emit('collapse')">«</button>
     </header>
 
     <section class="brief" data-testid="case-brief">
@@ -362,7 +362,8 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           <span v-if="isGraphItem(item)" class="ring" :style="{ borderColor: store.sourceColors[item.id] }"></span>
           <span class="title" :title="item.title">{{ item.title }}</span>
           <span class="short muted">{{ shortIds.get(item.id) }}</span>
-          <span class="chip" :class="item.author_kind" :title="item.author_email" :data-testid="`item-author-${item.id}`">
+          <!-- Only an agent's work is marked: "you" on every row said nothing and took the title's room. -->
+          <span v-if="item.author_kind === 'agent' || item.author_email !== auth.email" class="chip" :class="item.author_kind" :title="item.author_email" :data-testid="`item-author-${item.id}`">
             <Bot v-if="item.author_kind === 'agent'" :size="11" /><User v-else :size="11" />{{ authorChip(item) }}
           </span>
           <span v-if="item.pinned.length" class="badge pin" :title="`${item.pinned.length} pinned version(s)`" :data-testid="`item-pinned-${item.id}`">
@@ -378,7 +379,6 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
             :data-testid="`item-open-exploration-${item.id}`"
             @click.stop
           ><ExternalLink :size="10" /></RouterLink>
-          <span v-else-if="item.subkind === 'exploration_ref'" class="badge live" title="Live reference to the exploration">🔗</span>
           <span v-if="item.status === 'suggested'" class="badge suggested-badge" :data-testid="`item-suggested-${item.id}`">suggested</span>
           <span class="actions" @click.stop>
             <button
@@ -531,13 +531,11 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
   flex: 1;
 }
 
-.suggested-count {
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--color-suggested-bg);
-  border: 1px solid var(--color-suggested-fg);
-  color: var(--color-suggested-fg);
-  font-size: 11px;
+
+/* The fold button shares the header with Add and Upload: kept narrow so nothing wraps. */
+.head .fold {
+  min-width: 24px;
+  padding-inline: 6px;
 }
 
 .brief {
@@ -742,8 +740,21 @@ a.badge.live {
   cursor: pointer;
 }
 
+/* Row actions are small glyphs: the hit area is not (WCAG 2.5.8, 24 px). */
+.actions .link-btn,
+.actions input[type='checkbox'] {
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.item > input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+}
+
 .link-btn.ok {
-  color: #15803d;
+  color: var(--color-success-text);
 }
 
 .link-btn.danger {

@@ -67,6 +67,20 @@ const windowLabel = computed(() => {
   return `${f(w[0])} – ${f(w[1])}`;
 });
 
+/** Chips worth showing: one with nothing to pick is noise (source needs two graphs to mean anything). */
+const shownChips = computed(() => chips.value.filter((c) => c.selected.length || c.options.length > (c.id === 'sources' ? 1 : 0)));
+
+/** Clearing is one click and easily regretted: it offers to put the filters back. */
+function clearAll() {
+  const before = filters.snapshot();
+  const isolation = graph.isolation;
+  filters.clear();
+  toast.undoable('Filters cleared', () => {
+    filters.restore(before);
+    if (isolation) graph.isolate(isolation);
+  });
+}
+
 function summary(c: Chip): string {
   if (!c.selected.length) return c.label;
   const names = c.selected.map((v) => c.options.find((o) => o.value === v)?.label ?? v);
@@ -107,7 +121,7 @@ async function applyView(item: CaseItem) {
 
 <template>
   <div class="chips" data-testid="case-filter-chips" @keydown.esc="open = null">
-    <template v-for="c in chips" :key="c.id">
+    <template v-for="c in shownChips" :key="c.id">
       <span class="chip-wrap">
         <button
           class="chip"
@@ -132,8 +146,8 @@ async function applyView(item: CaseItem) {
       ⏱ {{ windowLabel }} ✕
     </button>
 
-    <button v-if="filters.activeCount" class="chip clear" data-testid="chips-clear" title="Clear every filter" @click="filters.clear()">
-      <X :size="13" /> {{ filters.activeCount }}
+    <button v-if="filters.activeCount" class="chip clear" data-testid="chips-clear" title="Clear every filter (Undo in the message)" @click="clearAll">
+      <X :size="13" /> Clear ({{ filters.activeCount }})
     </button>
 
     <span class="chip-wrap views">

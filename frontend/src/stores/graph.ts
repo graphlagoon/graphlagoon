@@ -920,6 +920,27 @@ export const useGraphStore = defineStore('graph', () => {
     return result;
   });
 
+  /**
+   * Nodes actually drawn: the type and search filters, minus what the case chips
+   * and "show only" hide visually. The status bar counts this against the nodes
+   * loaded, so a filter that matches nothing reads "0 of 10", not "10".
+   */
+  const visibleNodeCount = computed(() => {
+    const hidden = searchHiddenNodeIds.value;
+    if (!hidden || hidden.size === 0) return filteredNodes.value.length;
+    let n = 0;
+    for (const node of filteredNodes.value) if (!hidden.has(node.node_id)) n++;
+    return n;
+  });
+
+  /** How many node and edge types the Filters panel hides (0 = none). */
+  const hiddenTypeCount = computed(() => {
+    const f = filters.value;
+    const nodesHidden = f.node_types.length ? nodeTypes.value.filter((t) => !f.node_types.includes(t)).length : 0;
+    const edgesHidden = f.edge_types.length ? edgeTypes.value.filter((t) => !f.edge_types.includes(t)).length : 0;
+    return nodesHidden + edgesHidden;
+  });
+
   const filteredEdges = computed(() => {
     const nodeIdSet = new Set(filteredNodes.value.map((n) => n.node_id));
     let result = edges.value.filter(
@@ -3319,6 +3340,8 @@ export const useGraphStore = defineStore('graph', () => {
     queryError,
     clearQueryError,
     filters,
+    visibleNodeCount,
+    hiddenTypeCount,
     viewport,
     layoutAlgorithm,
     layoutModeConfig,

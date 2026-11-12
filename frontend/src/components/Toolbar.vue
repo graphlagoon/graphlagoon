@@ -235,7 +235,8 @@ function handleExportPng(options: ExportPNGOptions) {
           title="This view is not saved. Click to save it as an exploration."
           @click="openSaveModal"
         >
-          Unsaved
+          <Save :size="14" class="exploration-icon" aria-hidden="true" />
+          <span class="exploration-label">Unsaved</span>
         </button>
       </template>
     </div>
@@ -610,7 +611,7 @@ function handleExportPng(options: ExportPNGOptions) {
    and never asked the left group — 874px wide with DEV and Admin showing — for
    anything. The measured result was Filters and Query clipped away even at
    1920px. */
-.toolbar-left { flex-shrink: 1; min-width: 0; }
+.toolbar-left { flex-shrink: 1; min-width: 0; overflow: hidden; }
 .toolbar-right { flex-shrink: 0; }
 .toolbar-center {
   flex: 1;
@@ -713,6 +714,7 @@ function handleExportPng(options: ExportPNGOptions) {
    with a hidden scrollbar, so the panel toggles just left the screen. */
 .exploration-state {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   min-width: 0;
   max-width: 200px;
@@ -1059,7 +1061,7 @@ function handleExportPng(options: ExportPNGOptions) {
 @media (max-width: 1100px) {
   .toolbar-center { gap: 2px; }
   .btn-group-sep { margin: 0; }
-  .context-title { max-width: 140px; }
+  .context-title { max-width: 140px; min-width: 40px; }
   /* Below this the exploration name cannot show enough of itself to be worth
      the width — the chip keeps the dirty dot and the click-to-save, and the
      title attribute keeps the name. */

@@ -61,6 +61,9 @@ let created = 0
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  // jsdom is 1024 px wide: below 1200 the material starts folded unless the person chose otherwise.
+  localStorage.clear()
+  localStorage.setItem('graphlagoon.case.materialCollapsed', '0')
   created = 0
   vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: {}, shared_with: [], tags: [] } as any)
   vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1'), item('s2', 'c2')] as any)
@@ -194,7 +197,7 @@ describe('InvestigationView', () => {
     vi.mocked(api.setInvestigationAnnotationStatus).mockResolvedValue({ id: 's9', status: 'confirmed' } as any)
     const { getByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
     await flushPromises()
-    expect(getByTestId('status-suggestions').textContent).toContain('1 suggestion')
+    expect(getByTestId('suggested-badge').textContent).toContain('1 suggestion')
     await fireEvent.click(getByTestId('timeline-tab-suggestions'))
     vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
     await fireEvent.click(getByTestId('suggestions-confirm-role:agent'))
@@ -382,5 +385,31 @@ describe('InvestigationView', () => {
       expect((getByTestId('style-save-look') as HTMLButtonElement).disabled).toBe(true)
       expect(getByTestId('style-save-look-reason').textContent).toContain('one graph')
     })
+  })
+
+  it('a graph whose snapshot fails says so on the canvas, with Retry', async () => {
+    vi.mocked(api.getInvestigationItemSnapshot).mockRejectedValue(new Error('boom'))
+    const { findByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    const overlay = await findByTestId('canvas-error')
+    expect(overlay.textContent).toContain('could not be loaded')
+    expect(overlay.querySelector('[data-testid="canvas-error-retry"]')).toBeTruthy()
+  })
+
+  it('a filter that matches nothing says so, and the count reads "0 of N"', async () => {
+    const { getByTestId, findByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    useGraphStore().applyFilters({ node_types: ['Nope'] })
+    expect(await findByTestId('canvas-no-match')).toBeTruthy()
+    expect(getByTestId('graph-status-nodes').textContent).toMatch(/^0 of \d+ nodes/)
+  })
+
+  it('the material folds into a rail and the choice is remembered', async () => {
+    const { getByTestId, queryByTestId } = render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    await fireEvent.click(getByTestId('material-collapse'))
+    expect(queryByTestId('case-items-panel')).toBeNull()
+    expect(getByTestId('material-rail')).toBeTruthy()
+    expect(localStorage.getItem('graphlagoon.case.materialCollapsed')).toBe('1')
   })
 })

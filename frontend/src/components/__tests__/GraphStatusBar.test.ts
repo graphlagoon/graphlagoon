@@ -54,4 +54,27 @@ describe('GraphStatusBar', () => {
     await nextTick();
     expect(queryByTestId('status-isolation')).toBeNull();
   });
+
+  it('counts the nodes drawn against the nodes loaded, and names a Filters-panel filter with its ✕', async () => {
+    const store = useGraphStore();
+    store.nodes = [
+      { node_id: 'a', node_type: 'Person' },
+      { node_id: 'b', node_type: 'Company' },
+    ] as any;
+    store.applyFilters({ node_types: ['Person'] });
+    const { getByTestId } = render(GraphStatusBar, { props: { nodes: 1, edges: 0 } });
+    expect(getByTestId('graph-status-nodes').textContent).toContain('1 of 2 nodes');
+    expect(getByTestId('status-filtered').textContent).toContain('1 type hidden');
+    await fireEvent.click(getByTestId('status-filtered-clear'));
+    await nextTick();
+    expect(store.filters.node_types).toEqual([]);
+  });
+
+  it('a case turns the Filters chip off (its own chips have a Clear)', () => {
+    const store = useGraphStore();
+    store.nodes = [{ node_id: 'a', node_type: 'P' }, { node_id: 'b', node_type: 'Q' }] as any;
+    store.applyFilters({ node_types: ['P'] });
+    const { queryByTestId } = render(GraphStatusBar, { props: { nodes: 1, edges: 0, filterChip: false } });
+    expect(queryByTestId('status-filtered')).toBeNull();
+  });
 });

@@ -55,7 +55,10 @@ async function run(action: () => Promise<unknown>, fallback: string) {
   try {
     await action();
   } catch (e) {
-    actionError.value = getErrorMessage(e, fallback);
+    // Say what failed, not only the server's words; the toast is seen wherever the button was.
+    const msg = getErrorMessage(e, fallback);
+    actionError.value = msg === fallback ? msg : `${fallback}: ${msg}`;
+    toast.error(actionError.value);
   }
 }
 
@@ -579,8 +582,8 @@ const formatTime = (iso: string) => formatDate(iso);
           data-testid="item-open-exploration"
         >Open exploration ↗</RouterLink>
         <button v-if="isAnalysis" class="btn btn-outline btn-sm" data-testid="item-show-analysis" @click="emit('activate', item)">Show analysis</button>
-        <button v-if="canEdit && item.current_version" class="btn btn-outline btn-sm" :disabled="itemPinned" data-testid="item-pin" @click="run(async () => { const v = await store.pinItem(item!.id); if (v) toast.success(`Pinned · hash ${v.sha256.slice(0, 8)}`); }, 'Failed to pin')">
-          {{ itemPinned ? '📌 Pinned' : 'Pin' }}
+        <button v-if="canEdit && item.current_version" class="btn btn-outline btn-sm" :disabled="itemPinned" title="Freeze this version as evidence (E1, E2… in the dossier)" data-testid="item-pin" @click="run(async () => { const v = await store.pinItem(item!.id); if (v) toast.success(`Pinned as evidence ${store.evidenceLabel(v.item_id ?? item!.id, v.version)} (v${v.version})`); }, 'Failed to pin')">
+          {{ itemPinned ? '📌 Pinned as evidence' : 'Pin as evidence' }}
         </button>
         <button v-if="canEdit && isTabular(item)" class="btn btn-outline btn-sm" :class="{ on: inDossier }" data-testid="item-dossier" @click="run(() => store.setInDossier(item!, !inDossier), 'Failed to update')">
           {{ inDossier ? '✓ In the dossier' : 'Use in the dossier' }}

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
-import { Crosshair, X } from 'lucide-vue-next';
+import { Briefcase, Crosshair, X } from 'lucide-vue-next';
+import { useCurrentCaseStore } from '@/stores/currentCase';
+import { useAddToCase } from '@/composables/useAddToCase';
+import { useToast } from '@/composables/useToast';
 import SelectionDetails from './SelectionDetails.vue';
 
 // Props for different display modes
@@ -16,6 +19,27 @@ const emit = defineEmits<{
 }>();
 
 const graphStore = useGraphStore();
+const currentCase = useCurrentCaseStore();
+const addToCase = useAddToCase();
+const toast = useToast();
+
+/** Nodes the add takes: the selection (plus the one shown). Said on the button, so N is never a surprise. */
+const selectedCount = computed(() => {
+  const ids = new Set(graphStore.selectedNodeIds);
+  if (graphStore.selectedNode) ids.add(graphStore.selectedNode.node_id);
+  return ids.size;
+});
+const canAddToCase = computed(() => !graphStore.investigationMode && selectedItem.value?.type === 'node');
+async function addSelectionToCase() {
+  if (!currentCase.hasCase) {
+    currentCase.requestPick();
+    toast.info('Pick the case in the top bar, then add the selection again.');
+    return;
+  }
+  const ids = new Set(graphStore.selectedNodeIds);
+  if (graphStore.selectedNode) ids.add(graphStore.selectedNode.node_id);
+  await addToCase.addSelection(ids, graphStore.selectedEdgeIds);
+}
 
 const hasSelection = computed(() => {
   return graphStore.selectedNode || graphStore.selectedEdge;
@@ -55,6 +79,7 @@ function toggleDefaultFocus() {
       <div class="panel-header">
         <h3>
           {{ selectedItem.type === 'node' ? 'Node Details' : 'Edge Details' }}
+          <span v-if="selectedCount > 1" class="selected-count" data-testid="side-panel-selected-count">· {{ selectedCount }} selected</span>
         </h3>
         <div class="panel-header-actions">
           <button
@@ -67,6 +92,15 @@ function toggleDefaultFocus() {
             @click="toggleDefaultFocus"
           >
             <Crosshair :size="13" /> {{ isDefaultFocus ? 'Default focus ✓' : 'Default focus' }}
+          </button>
+          <button
+            v-if="canAddToCase"
+            class="btn btn-outline btn-sm"
+            :title="currentCase.hasCase ? `Add the selected nodes to ${currentCase.title || 'the current case'}` : 'Pick a current case in the top bar first'"
+            data-testid="side-panel-add-to-case"
+            @click="addSelectionToCase"
+          >
+            <Briefcase :size="13" /> {{ selectedCount > 1 ? `Add ${selectedCount} to case` : 'Add to case' }}
           </button>
           <button
             class="btn btn-outline btn-sm"
@@ -116,16 +150,27 @@ function toggleDefaultFocus() {
   flex: 1;
 }
 
+/* The title on its own line, the actions under it: side by side in 267 px the title wrapped. */
 .panel-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   margin-bottom: 16px;
 }
 
 .panel-header h3 {
+  flex: 1 0 100%;
   font-size: 16px;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.selected-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 .panel-header-actions {

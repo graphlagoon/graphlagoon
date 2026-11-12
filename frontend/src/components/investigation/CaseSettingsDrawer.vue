@@ -73,6 +73,8 @@ function load() {
   }));
   form.labels = Object.entries((s.label_templates as Record<string, string> | undefined) ?? {}).map(([node_type, template]) => ({ node_type, template }));
 }
+/** Same rule as the header: the type holds the decision catalog, so a decision fixes it. */
+const typeLocked = computed(() => (store.current?.decisions ?? []).length > 0);
 /** The form as loaded: closing with changes asks first (Escape, the backdrop, ×). */
 let loaded = '';
 watch(() => props.open, (o) => {
@@ -182,7 +184,13 @@ async function save() {
           <h3>General</h3>
           <label>Name <input v-model="form.title" :disabled="!canEdit" data-testid="settings-title" /></label>
           <label>Type
-            <select v-model="form.case_type" :disabled="!canEdit" data-testid="settings-type" @change="applyType">
+            <select
+              v-model="form.case_type"
+              :disabled="!canEdit || typeLocked"
+              :title="typeLocked ? 'The case has a decision: its type no longer changes' : undefined"
+              data-testid="settings-type"
+              @change="applyType"
+            >
               <option v-for="t in store.caseTypes" :key="t.slug" :value="t.slug">{{ t.label }}</option>
             </select>
           </label>
@@ -271,7 +279,7 @@ async function save() {
           <button type="button" class="link-btn" :disabled="!canEdit" data-testid="settings-add-label" @click="form.labels.push({ node_type: '', template: '' })">+ template</button>
         </section>
         <footer>
-          <button type="button" class="btn btn-outline" @click="emit('close')">Cancel</button>
+          <button type="button" class="btn btn-outline" @click="requestClose">Cancel</button>
           <button type="submit" class="btn btn-primary" :disabled="!canEdit || busy" data-testid="settings-save">{{ busy ? 'Saving…' : 'Save settings' }}</button>
         </footer>
       </form>

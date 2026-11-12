@@ -1,0 +1,650 @@
+{
+  "empty": {
+    "canvasText": "Nothing on the canvas yet. Add a recent exploration, start a new one from a context, or upload a file with a mapping.\n\nAdd exploration",
+    "itemsEmpty": "Nothing in the case yet. Add a recent exploration, upload a file, or write a note.\n\nAdd exploration",
+    "inspector": "n/a",
+    "overflow": {
+      "scrollWidth": 1440,
+      "clientWidth": 1440,
+      "overflows": false,
+      "offenders": []
+    }
+  },
+  "populated": {
+    "header": "← Queue\n#invp\nMule network · two banks\nIn analysis\nOpen\n⏱ analysis · 6 d\n● 2 suggestions\nDossier\nDecide\n⚙\nShare\n…\nType\nGeneral\nAssignee\nana@test.com\nTags\nMED\nAdd a description…",
+    "status": "10 nodes\n9 edges\n1 source\n● 2 suggestions\nJournal\n?\nShortcuts",
+    "overflow": {
+      "scrollWidth": 1440,
+      "clientWidth": 1440,
+      "overflows": false,
+      "offenders": []
+    },
+    "graph": {
+      "x": 290,
+      "y": 240,
+      "w": 830,
+      "h": 580,
+      "bottom": 820,
+      "right": 1120
+    },
+    "itemsPanel": {
+      "x": 0,
+      "y": 126,
+      "w": 290,
+      "h": 694,
+      "bottom": 820,
+      "right": 290
+    },
+    "inspector": {
+      "x": 1120,
+      "y": 126,
+      "w": 320,
+      "h": 694,
+      "bottom": 820,
+      "right": 1440
+    },
+    "strip": {
+      "x": 0,
+      "y": 820,
+      "w": 1440,
+      "h": 48,
+      "bottom": 868,
+      "right": 1440
+    },
+    "chips": {
+      "x": 290,
+      "y": 199,
+      "w": 830,
+      "h": 40,
+      "bottom": 240,
+      "right": 1120
+    },
+    "analysisBar": {
+      "x": 302,
+      "y": 783,
+      "w": 806,
+      "h": 25,
+      "bottom": 808,
+      "right": 1108
+    },
+    "clipped": [
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 96,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Bank A transfers"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 96,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Bank B transfers"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 116,
+        "clientWidth": 98,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Accounts above 10k"
+      }
+    ],
+    "small": [
+      {
+        "root": "[data-testid=case-header]",
+        "tag": "A",
+        "type": "",
+        "label": "← Queue",
+        "w": 49,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-header]",
+        "tag": "SELECT",
+        "type": "select-one",
+        "label": "case-status",
+        "w": 97,
+        "h": 23
+      },
+      {
+        "root": "[data-testid=case-header]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "case-decide",
+        "w": 61,
+        "h": 23
+      },
+      {
+        "root": "[data-testid=case-header]",
+        "tag": "SELECT",
+        "type": "select-one",
+        "label": "case-type",
+        "w": 80,
+        "h": 21
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "items-add",
+        "w": 59,
+        "h": 23
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "brief-edit",
+        "w": 34,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "item-canvas-g-a",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "A",
+        "type": "",
+        "label": "item-open-exploration-g-a",
+        "w": 26,
+        "h": 14
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-pin-g-a",
+        "w": 16,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-remove-g-a",
+        "w": 11,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "item-canvas-g-b",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "A",
+        "type": "",
+        "label": "item-open-exploration-g-b",
+        "w": 26,
+        "h": 14
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-pin-g-b",
+        "w": 16,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-remove-g-b",
+        "w": 11,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-expand-q-1",
+        "w": 10,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-run-q-1",
+        "w": 13,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-pin-q-1",
+        "w": 16,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-remove-q-1",
+        "w": 11,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "item-select-t-1",
+        "w": 13,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-pin-t-1",
+        "w": 16,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-remove-t-1",
+        "w": 11,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-pin-d-1",
+        "w": 16,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-remove-d-1",
+        "w": 11,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-pin-d-2",
+        "w": 16,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-remove-d-2",
+        "w": 11,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-pin-n-1",
+        "w": 16,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-remove-n-1",
+        "w": 11,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-pin-n-2",
+        "w": 16,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "item-remove-n-2",
+        "w": 11,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "compose-note",
+        "w": 46,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "compose-markdown",
+        "w": 76,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "A",
+        "type": "",
+        "label": "inspector-decisions-dossier",
+        "w": 205,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=workspace-status]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "journal-toggle",
+        "w": 41,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-status]",
+        "tag": "BUTTON",
+        "type": "button",
+        "label": "graph-status-shortcuts",
+        "w": 70,
+        "h": 19
+      }
+    ],
+    "stripCollapsedClass": "strip collapsed"
+  },
+  "many": {
+    "status": "48 nodes\n40 edges\n8 sources\nJournal\n?\nShortcuts",
+    "stripOverCanvas": {
+      "x": 290,
+      "y": 258,
+      "w": 830,
+      "h": 40,
+      "bottom": 298,
+      "right": 1120
+    },
+    "legendStrip": {
+      "x": 302,
+      "y": 132,
+      "w": 806,
+      "h": 86,
+      "bottom": 218,
+      "right": 1108
+    },
+    "graph": {
+      "x": 290,
+      "y": 298,
+      "w": 830,
+      "h": 522,
+      "bottom": 820,
+      "right": 1120
+    },
+    "legendItems": 8,
+    "chipsText": "source ▾\nrole ▾\ntag ▾\ngroup ▾\ntype ▾\nviews ▾",
+    "overflow": {
+      "scrollWidth": 1440,
+      "clientWidth": 1440,
+      "overflows": false,
+      "offenders": []
+    },
+    "clipped": [
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 136,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Source graph 1 · bank A"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 136,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Source graph 2 · bank B"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 136,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Source graph 3 · bank C"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 137,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Source graph 4 · bank D"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 135,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Source graph 5 · bank E"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 135,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Source graph 6 · bank F"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 136,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Source graph 7 · bank G"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 137,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Source graph 8 · bank H"
+      }
+    ],
+    "panelFilters": {
+      "x": 302,
+      "y": 310,
+      "w": 320,
+      "h": 461,
+      "bottom": 771,
+      "right": 622
+    },
+    "itemsPanelScrollH": {
+      "scrollH": 1705,
+      "clientH": 694
+    }
+  },
+  "long": {
+    "overflow": {
+      "scrollWidth": 1440,
+      "clientWidth": 1440,
+      "overflows": false,
+      "offenders": []
+    },
+    "clipped": [
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 646,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "statement_2026_q3_consolidated_export_from_core_ba"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 601,
+        "clientWidth": 78,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Consolidated statement export from the core bankin"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 601,
+        "clientWidth": 130,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "Consolidated statement export from the core bankin"
+      },
+      {
+        "root": "[data-testid=case-items-panel]",
+        "tag": "SPAN",
+        "cls": "title",
+        "testid": "",
+        "scrollWidth": 646,
+        "clientWidth": 130,
+        "overflowX": "hidden",
+        "textOverflow": "ellipsis",
+        "text": "statement_2026_q3_consolidated_export_from_core_ba"
+      }
+    ],
+    "header": {
+      "x": 0,
+      "y": 52,
+      "w": 1440,
+      "h": 114,
+      "bottom": 166,
+      "right": 1440
+    },
+    "titleRect": {
+      "x": 121,
+      "y": 60,
+      "w": 1221,
+      "h": 30,
+      "bottom": 90,
+      "right": 1342
+    },
+    "graph": {
+      "x": 290,
+      "y": 279,
+      "w": 830,
+      "h": 540,
+      "bottom": 820,
+      "right": 1120
+    }
+  },
+  "error-case": {
+    "text": "boom\nRetry\n← Queue",
+    "retry": true
+  },
+  "error-snapshot": {
+    "legendErrorVisible": true,
+    "legendErrorTitle": null,
+    "legendErrorText": "",
+    "itemErrorVisible": true,
+    "itemErrorTitle": "boom",
+    "itemErrorBox": {
+      "x": 189.21875,
+      "y": 344.5625,
+      "width": 12,
+      "height": 12
+    },
+    "legendErrorBox": {
+      "x": 557.890625,
+      "y": 139.578125,
+      "width": 12,
+      "height": 12
+    },
+    "itemErrorText": "",
+    "canvasError": "none",
+    "status": "0 nodes\n0 edges\n1 source\n● 2 suggestions\nJournal\n?\nShortcuts"
+  },
+  "error-save-title": {
+    "toast": [
+      "boom"
+    ],
+    "titleNow": "Mule network · two banks",
+    "inputStillOpen": false
+  },
+  "error-save-note": {
+    "toast": [],
+    "draftKept": "A note that will not save"
+  },
+  "readonly-closed": {
+    "banner": "Closed by a decision: read only. Reopen it from the … menu to change it.",
+    "decideVisible": false,
+    "addVisible": false,
+    "reopen": false,
+    "header": "← Queue\n#invc\nMule network · two banks\nClosed\nDossier\n⚙\nShare\n…\nType\nGeneral\nAssignee\nana@test.com\nTags\nMED\n\nClosed by a decision: read only. Reopen it from the … menu to change it."
+  },
+  "readonly-reader": {
+    "banner": "Read only: shared with you as a viewer.",
+    "decideVisible": false,
+    "addVisible": false,
+    "shareVisible": false,
+    "settingsVisible": true,
+    "noteInput": false,
+    "roleDisabled": true,
+    "header": "← Queue\n#invr\nMule network · two banks\nIn analysis\nOpen\n⏱ analysis · 6 d\nDossier\n⚙\n…\nType\nGeneral\nAssignee\nana@test.com\nTags\nMED\n\nRead only: shared with you as a viewer."
+  }
+}

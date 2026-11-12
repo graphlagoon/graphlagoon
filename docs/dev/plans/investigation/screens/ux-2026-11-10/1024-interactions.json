@@ -1,0 +1,1315 @@
+{
+  "T1": {
+    "case-status": {
+      "inViewport": true,
+      "rect": {
+        "x": 348,
+        "y": 64,
+        "w": 97,
+        "h": 23
+      },
+      "text": "In analysis\nOpen",
+      "title": null,
+      "aria": "Status"
+    },
+    "case-stage": "absent",
+    "deadline": "absent",
+    "workspace-deadline": {
+      "inViewport": true,
+      "rect": {
+        "x": 455,
+        "y": 63,
+        "w": 120,
+        "h": 26
+      },
+      "text": "⏱ analysis · 6 d",
+      "title": "Due 16/11/2026 10:40 (2160 h of SLA since the alert)",
+      "aria": null
+    },
+    "case-assignee": {
+      "inViewport": true,
+      "rect": {
+        "x": 198,
+        "y": 95,
+        "w": 96,
+        "h": 25
+      },
+      "text": "ana@test.com",
+      "title": null,
+      "aria": null
+    },
+    "suggested-badge": {
+      "inViewport": true,
+      "rect": {
+        "x": 585,
+        "y": 64,
+        "w": 109,
+        "h": 23
+      },
+      "text": "● 2 suggestions",
+      "title": null,
+      "aria": null
+    },
+    "case-decide": {
+      "inViewport": true,
+      "rect": {
+        "x": 813,
+        "y": 64,
+        "w": 61,
+        "h": 23
+      },
+      "text": "Decide",
+      "title": null,
+      "aria": null
+    },
+    "dossier-link": {
+      "inViewport": true,
+      "rect": {
+        "x": 745,
+        "y": 60,
+        "w": 63,
+        "h": 31
+      },
+      "text": "Dossier",
+      "title": null,
+      "aria": null
+    },
+    "case-share": {
+      "inViewport": true,
+      "rect": {
+        "x": 916,
+        "y": 63,
+        "w": 55,
+        "h": 25
+      },
+      "text": "Share",
+      "title": null,
+      "aria": null
+    },
+    "case-settings-btn": {
+      "inViewport": true,
+      "rect": {
+        "x": 880,
+        "y": 63,
+        "w": 30,
+        "h": 25
+      },
+      "text": "⚙",
+      "title": "Case settings",
+      "aria": "Case settings"
+    },
+    "case-menu": {
+      "inViewport": true,
+      "rect": {
+        "x": 977,
+        "y": 63,
+        "w": 31,
+        "h": 25
+      },
+      "text": "…",
+      "title": "More actions",
+      "aria": "More actions"
+    },
+    "case-brief": {
+      "inViewport": true,
+      "rect": {
+        "x": 12,
+        "y": 168,
+        "w": 265,
+        "h": 60
+      },
+      "text": "★ Brief\nWrite\n\nNo brief yet.",
+      "title": null,
+      "aria": null
+    },
+    "brief-text": "absent",
+    "workspace-status": {
+      "inViewport": true,
+      "rect": {
+        "x": 0,
+        "y": 668,
+        "w": 1024,
+        "h": 32
+      },
+      "text": "10 nodes\n9 edges\n1 source\n● 2 suggestions\nJournal\n?\nShortcuts",
+      "title": null,
+      "aria": null
+    },
+    "case-filter-chips": {
+      "inViewport": true,
+      "rect": {
+        "x": 290,
+        "y": 231,
+        "w": 414,
+        "h": 40
+      },
+      "text": "source ▾\nrole ▾\ntag ▾\ngroup ▾\ntype ▾\nviews ▾",
+      "title": null,
+      "aria": null
+    },
+    "case-timeline": {
+      "inViewport": true,
+      "rect": {
+        "x": 0,
+        "y": 620,
+        "w": 1024,
+        "h": 48
+      },
+      "text": "Dated edges\nJournal · 0\nTasks · 2\n● 2 suggestions\n▴",
+      "title": null,
+      "aria": null
+    },
+    "canvas-none-selected": "absent",
+    "analysis-bar": {
+      "inViewport": true,
+      "rect": {
+        "x": 302,
+        "y": 552,
+        "w": 390,
+        "h": 56
+      },
+      "text": "Follow the money\nPaths\nGroups\nLinks\nEnrich\nMetrics\nConsole",
+      "title": null,
+      "aria": null
+    },
+    "provenance-legend": {
+      "inViewport": true,
+      "rect": {
+        "x": 302,
+        "y": 132,
+        "w": 361,
+        "h": 27
+      },
+      "text": "Bank A transfers\nBank B transfers\nAll graphs (2)",
+      "title": null,
+      "aria": null
+    },
+    "canvas-all": {
+      "inViewport": true,
+      "rect": {
+        "x": 570,
+        "y": 132,
+        "w": 93,
+        "h": 27
+      },
+      "text": "All graphs (2)",
+      "title": "Unify every graph on one canvas, one ring per source",
+      "aria": null
+    },
+    "investigation-title": {
+      "inViewport": true,
+      "rect": {
+        "x": 121,
+        "y": 61,
+        "w": 217,
+        "h": 30
+      },
+      "text": "Mule network · two banks",
+      "title": "Click to rename",
+      "aria": null
+    },
+    "case-description": {
+      "inViewport": true,
+      "rect": {
+        "x": 382,
+        "y": 95,
+        "w": 626,
+        "h": 25
+      },
+      "text": "Add a description…",
+      "title": null,
+      "aria": null
+    },
+    "stripTabs": [
+      "Dated edges",
+      "Journal · 0",
+      "Tasks · 2",
+      "● 2 suggestions"
+    ],
+    "header": "← Queue\n#invp\nMule network · two banks\nIn analysis\nOpen\n⏱ analysis · 6 d\n● 2 suggestions\nDossier\nDecide\n⚙\nShare\n…\nType\nGeneral\nAssignee\nana@test.com\nTags\nMED\nAdd a description…"
+  },
+  "panel-filters": {
+    "navRect": {
+      "x": 311,
+      "y": 627,
+      "w": 401,
+      "h": 34,
+      "bottom": 661,
+      "right": 713
+    },
+    "headerRect": {
+      "x": 0,
+      "y": 52,
+      "w": 1024,
+      "h": 74,
+      "bottom": 126,
+      "right": 1024
+    },
+    "overlapsHeader": false,
+    "btnLabel": "Filters",
+    "btnTitle": "Filters",
+    "btnPressed": "true",
+    "btnRect": {
+      "x": 302,
+      "y": 165.171875,
+      "width": 71.453125,
+      "height": 27.1875
+    },
+    "panelRect": {
+      "x": 302,
+      "y": 283,
+      "w": 320,
+      "h": 257,
+      "bottom": 540,
+      "right": 622
+    },
+    "graph": {
+      "x": 290,
+      "y": 271,
+      "w": 414,
+      "h": 349,
+      "bottom": 620,
+      "right": 704
+    },
+    "analysisBar": {
+      "x": 302,
+      "y": 552,
+      "w": 390,
+      "h": 56,
+      "bottom": 608,
+      "right": 692
+    },
+    "overlapsAnalysisBar": false,
+    "panelTitle": "Filters",
+    "hasClose": true,
+    "overflow": {
+      "scrollWidth": 1024,
+      "clientWidth": 1024,
+      "overflows": false,
+      "offenders": []
+    },
+    "small": [
+      {
+        "root": "[data-testid=panel-filters]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "INPUT",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-filters]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "INPUT",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-filters]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "INPUT",
+        "w": 13,
+        "h": 13
+      }
+    ]
+  },
+  "panel-look": {
+    "navRect": {
+      "x": 311,
+      "y": 627,
+      "w": 401,
+      "h": 34,
+      "bottom": 661,
+      "right": 713
+    },
+    "headerRect": {
+      "x": 0,
+      "y": 52,
+      "w": 1024,
+      "h": 74,
+      "bottom": 126,
+      "right": 1024
+    },
+    "overlapsHeader": false,
+    "btnLabel": "Look",
+    "btnTitle": "Look: style, labels, behaviors and presets",
+    "btnPressed": "true",
+    "btnRect": {
+      "x": 527.25,
+      "y": 165.171875,
+      "width": 64.21875,
+      "height": 27.1875
+    },
+    "panelRect": {
+      "x": 372,
+      "y": 283,
+      "w": 320,
+      "h": 257,
+      "bottom": 540,
+      "right": 692
+    },
+    "graph": {
+      "x": 290,
+      "y": 271,
+      "w": 414,
+      "h": 349,
+      "bottom": 620,
+      "right": 704
+    },
+    "analysisBar": {
+      "x": 302,
+      "y": 552,
+      "w": 390,
+      "h": 56,
+      "bottom": 608,
+      "right": 692
+    },
+    "overlapsAnalysisBar": false,
+    "panelTitle": "Look",
+    "hasClose": true,
+    "overflow": {
+      "scrollWidth": 1024,
+      "clientWidth": 1024,
+      "overflows": false,
+      "offenders": []
+    },
+    "small": [
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "INPUT",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 286,
+        "h": 4
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 286,
+        "h": 4
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 286,
+        "h": 4
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "sum-parallel-edges",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "edge-width-by-amount",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 286,
+        "h": 4
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 286,
+        "h": 4
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "color",
+        "label": "INPUT",
+        "w": 28,
+        "h": 22
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "No icon",
+        "w": 28,
+        "h": 22
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "color",
+        "label": "INPUT",
+        "w": 28,
+        "h": 22
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "No icon",
+        "w": 28,
+        "h": 22
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "color",
+        "label": "INPUT",
+        "w": 28,
+        "h": 22
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "No icon",
+        "w": 28,
+        "h": 22
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "INPUT",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 286,
+        "h": 4
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 286,
+        "h": 4
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "INPUT",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 286,
+        "h": 4
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "hide-empty-values-toggle",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "property-visibility-node-toggle",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "property-visibility-edge-toggle",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=panel-look]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "style-save-look",
+        "w": 80,
+        "h": 23
+      }
+    ]
+  },
+  "panel-layout": {
+    "navRect": {
+      "x": 311,
+      "y": 627,
+      "w": 401,
+      "h": 34,
+      "bottom": 661,
+      "right": 713
+    },
+    "headerRect": {
+      "x": 0,
+      "y": 52,
+      "w": 1024,
+      "h": 74,
+      "bottom": 126,
+      "right": 1024
+    },
+    "overlapsHeader": false,
+    "btnLabel": "Layout",
+    "btnTitle": "Layout Settings",
+    "btnPressed": "true",
+    "btnRect": {
+      "x": 448.625,
+      "y": 165.171875,
+      "width": 74.625,
+      "height": 27.1875
+    },
+    "panelRect": {
+      "x": 302,
+      "y": 544,
+      "w": 0,
+      "h": 0,
+      "bottom": 544,
+      "right": 302
+    },
+    "graph": {
+      "x": 290,
+      "y": 271,
+      "w": 414,
+      "h": 349,
+      "bottom": 620,
+      "right": 704
+    },
+    "analysisBar": {
+      "x": 302,
+      "y": 552,
+      "w": 390,
+      "h": 56,
+      "bottom": 608,
+      "right": 692
+    },
+    "overlapsAnalysisBar": false,
+    "panelTitle": "Layout",
+    "hasClose": true,
+    "overflow": {
+      "scrollWidth": 1024,
+      "clientWidth": 1024,
+      "overflows": false,
+      "offenders": []
+    },
+    "small": []
+  },
+  "panel-clusters": {
+    "navRect": {
+      "x": 311,
+      "y": 627,
+      "w": 401,
+      "h": 34,
+      "bottom": 661,
+      "right": 713
+    },
+    "headerRect": {
+      "x": 0,
+      "y": 52,
+      "w": 1024,
+      "h": 74,
+      "bottom": 126,
+      "right": 1024
+    },
+    "overlapsHeader": false,
+    "btnLabel": "Clusters",
+    "btnTitle": "Communities and cluster programs: group the nodes, show only a group",
+    "btnPressed": "true",
+    "btnRect": {
+      "x": 595.46875,
+      "y": 165.171875,
+      "width": 81.640625,
+      "height": 27.1875
+    },
+    "panelRect": {
+      "x": 372,
+      "y": 283,
+      "w": 320,
+      "h": 257,
+      "bottom": 540,
+      "right": 692
+    },
+    "graph": {
+      "x": 290,
+      "y": 271,
+      "w": 414,
+      "h": 349,
+      "bottom": 620,
+      "right": 704
+    },
+    "analysisBar": {
+      "x": 302,
+      "y": 552,
+      "w": 390,
+      "h": 56,
+      "bottom": 608,
+      "right": 692
+    },
+    "overlapsAnalysisBar": false,
+    "panelTitle": "Clusters",
+    "hasClose": true,
+    "overflow": {
+      "scrollWidth": 1024,
+      "clientWidth": 1024,
+      "overflows": false,
+      "offenders": []
+    },
+    "small": [
+      {
+        "root": "[data-testid=panel-clusters]",
+        "tag": "INPUT",
+        "type": "range",
+        "label": "INPUT",
+        "w": 225,
+        "h": 4
+      }
+    ]
+  },
+  "panel-table": "ERROR: locator.click: Timeout 10000ms exceeded.",
+  "strip-activity": {
+    "label": "Journal · 0",
+    "strip": {
+      "x": 0,
+      "y": 553,
+      "w": 1024,
+      "h": 115,
+      "bottom": 668,
+      "right": 1024
+    },
+    "graph": {
+      "x": 290,
+      "y": 271,
+      "w": 414,
+      "h": 283,
+      "bottom": 553,
+      "right": 704
+    },
+    "body": "All\nPerson\nAgent\nSystem\nAll kinds\n\nNothing recorded yet.",
+    "small": []
+  },
+  "strip-tasks": {
+    "label": "Tasks · 2",
+    "strip": {
+      "x": 0,
+      "y": 461,
+      "w": 1024,
+      "h": 207,
+      "bottom": 668,
+      "right": 1024
+    },
+    "graph": {
+      "x": 290,
+      "y": 271,
+      "w": 414,
+      "h": 191,
+      "bottom": 461,
+      "right": 704
+    },
+    "body": "All\nMine\nAgents\nOverdue\nRequest KYC file from Bank A\ne2e@test.com · due 12/11/2026 10:40 · from D1\ncancel\nCheck device fingerprint\nunassigned\ncancel\nfor a person\nfor an agent\nAdd",
+    "small": [
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "task-done-tk-1",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "task-cancel-tk-1",
+        "w": 34,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "task-done-tk-2",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "task-cancel-tk-2",
+        "w": 34,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "SELECT",
+        "type": "select-one",
+        "label": "task-for",
+        "w": 100,
+        "h": 23
+      },
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "task-add",
+        "w": 41,
+        "h": 23
+      }
+    ]
+  },
+  "strip-suggestions": {
+    "label": "● 2 suggestions",
+    "strip": {
+      "x": 0,
+      "y": 540,
+      "w": 1024,
+      "h": 128,
+      "bottom": 668,
+      "right": 1024
+    },
+    "graph": {
+      "x": 290,
+      "y": 271,
+      "w": 414,
+      "h": 269,
+      "bottom": 540,
+      "right": 704
+    },
+    "body": "role · agent\n1\n✓ Confirm all\n✕ Reject all\ntag · agent\n1\n✓ Confirm all\n✕ Reject all",
+    "small": [
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "suggestions-confirm-role:agent",
+        "w": 70,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "suggestions-reject-role:agent",
+        "w": 62,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "suggestions-confirm-tag:agent",
+        "w": 70,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=case-timeline]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "suggestions-reject-tag:agent",
+        "w": 62,
+        "h": 19
+      }
+    ]
+  },
+  "strip-timeline": {
+    "label": "Dated edges",
+    "strip": {
+      "x": 0,
+      "y": 570,
+      "w": 1024,
+      "h": 97,
+      "bottom": 668,
+      "right": 1024
+    },
+    "graph": {
+      "x": 290,
+      "y": 271,
+      "w": 414,
+      "h": 300,
+      "bottom": 570,
+      "right": 704
+    },
+    "body": "No dated edge on the canvas. Set the time column of the edge types in the case preferences (⚙).",
+    "small": []
+  },
+  "strip-collapse-persist": {
+    "afterCollapseClick": "strip collapsed",
+    "afterJournalToggle": "strip",
+    "collapsedAgain": "strip collapsed",
+    "afterReloadFromCollapsed": "strip collapsed",
+    "expandedBeforeReload": "strip",
+    "afterReloadFromExpanded": "strip collapsed",
+    "tabAfterReload": []
+  },
+  "node-selected": {
+    "title": "Ana Souza",
+    "inspectorText": "Person · a1\nAna Souza\nBank A transfers\ntask\nRole\n— none —\nmule\nvictim\nbeneficiary\nTags\nrole: mule · suggested by agent — Receives from 6 accounts and forwards within 2 minutes\n✓ Confirm\n✕ Reject\nFollow the money →\nPath to…\nFull profile\nOpen details\nDefault focus\nData\nItems (2)\nEnrichment\nNotes (1)\nOrigin\nProperties\nname\nAna Souza\namount\n100\nComputed Metrics\nDegree\n1.00",
+    "small": [
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "SELECT",
+        "type": "select-one",
+        "label": "inspector-role",
+        "w": 259,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "INPUT",
+        "type": "text",
+        "label": "inspector-tag-input",
+        "w": 90,
+        "h": 18
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "suggestion-confirm-sg-1",
+        "w": 55,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "suggestion-reject-sg-1",
+        "w": 47,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "inspector-trace",
+        "w": 109,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "inspector-path-from",
+        "w": 51,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "inspector-open-entity",
+        "w": 58,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "inspector-open-details",
+        "w": 68,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "inspector-default-focus",
+        "w": 73,
+        "h": 19
+      }
+    ],
+    "clipped": [],
+    "tab-items": "Person · a1\nAna Souza\nBank A transfers\ntask\nRole\n— none —\nmule\nvictim\nbeneficiary\nTags\nrole: mule · suggested by agent — Receives from 6 accounts and forwards within 2 minutes\n✓ Confirm\n✕ Reject\nFollow the money →\nPath to…\nFull profile\nOpen details\nDefault focus\nData\nItems (2)\nEnrichment\nNotes (1)\nO",
+    "tab-enrichment": "Person · a1\nAna Souza\nBank A transfers\ntask\nRole\n— none —\nmule\nvictim\nbeneficiary\nTags\nrole: mule · suggested by agent — Receives from 6 accounts and forwards within 2 minutes\n✓ Confirm\n✕ Reject\nFollow the money →\nPath to…\nFull profile\nOpen details\nDefault focus\nData\nItems (2)\nEnrichment\nNotes (1)\nO",
+    "tab-notes": "Person · a1\nAna Souza\nBank A transfers\ntask\nRole\n— none —\nmule\nvictim\nbeneficiary\nTags\nrole: mule · suggested by agent — Receives from 6 accounts and forwards within 2 minutes\n✓ Confirm\n✕ Reject\nFollow the money →\nPath to…\nFull profile\nOpen details\nDefault focus\nData\nItems (2)\nEnrichment\nNotes (1)\nO",
+    "tab-origin": "Person · a1\nAna Souza\nBank A transfers\ntask\nRole\n— none —\nmule\nvictim\nbeneficiary\nTags\nrole: mule · suggested by agent — Receives from 6 accounts and forwards within 2 minutes\n✓ Confirm\n✕ Reject\nFollow the money →\nPath to…\nFull profile\nOpen details\nDefault focus\nData\nItems (2)\nEnrichment\nNotes (1)\nO"
+  },
+  "T3": {
+    "addLabel": "Add note",
+    "addDisabledEmpty": true,
+    "placeholder": "Add a note…",
+    "noteInputRect": {
+      "x": 719,
+      "y": 552.265625,
+      "width": 291,
+      "height": 47
+    },
+    "inViewport": true,
+    "toastAfterAdd": [],
+    "notesTabLabel": "Notes (2)",
+    "inspectorNotes": "Same **phone** as the mule\n\ne2e@test.com · 10/11/2026 10:40 delete\n\nEvidence: receives from six accounts within two minutes\n\ne2e@test.com · 10/11/2026 10:42 delete\nAdd note",
+    "noteInputAfter": "",
+    "noteItemsInList": 1,
+    "pinInInspectorVisible": false,
+    "itemDetails": "Note / anchored\nEvidence: receives from six accounts within two minutes\n\nEvidence: receives from six accounts within two minutes\n\nAuthor\ne2e@test.com\nStatus\nconfirmed\nVersions\n1\nHash\neeeeeeeeeeee…\nPin\nPreview\n⤢ Expand\nDownload\nEdit\n↑\n↓\nEdit text\n▸ Versions (1)",
+    "pinVisible": true,
+    "pinLabel": "Pin",
+    "pinTitle": null,
+    "pinDisabled": false,
+    "pinRect": {
+      "x": 719,
+      "y": 363.921875,
+      "width": 38,
+      "height": 25
+    },
+    "toastAfterPin": [
+      "Pinned · hash eeeeeeee"
+    ],
+    "afterPin": "Note / anchored\nEvidence: receives from six accounts within two minutes\n\nEvidence: receives from six accounts within two minutes\n\nAuthor\ne2e@test.com\nStatus\nconfirmed\nVersions\n1 · 1 pinned\nHash\neeeeeeeeeeee…\n📌 Pinned\nPreview\n⤢ Expand\nDownload\nEdit\n↑\n↓\nEdit text\n▸ Versions (1)",
+    "linkControls": [
+      "📌 Pinned",
+      "Preview",
+      "⤢ Expand",
+      "Download",
+      "Edit",
+      "↑",
+      "↓",
+      "Edit text",
+      "▸ Versions (1)"
+    ]
+  },
+  "edge-selected": {
+    "title": "Ana Souza\n→\nBia Lima",
+    "text": "TRANSFER · e1\nAna Souza\n→\nBia Lima\nBank A transfers\nFollow the money →\n← Follow back\nOpen details\nData\nNotes\nID (edge_id)\ng-a:e1\nType (relationship_type)\nTRANSFER\nSource (src)\nAna Souza\nTarget (dst)\nBia Lima\nProperties\namount\n500\nat\n2026-11-10T14:40:23.485Z",
+    "small": [
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "inspector-edge-trace-forward",
+        "w": 109,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "inspector-edge-trace-backward",
+        "w": 76,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "inspector-edge-open-details",
+        "w": 68,
+        "h": 19
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "selection-details-src",
+        "w": 207,
+        "h": 21
+      },
+      {
+        "root": "[data-testid=workspace-inspector]",
+        "tag": "BUTTON",
+        "type": "submit",
+        "label": "selection-details-dst",
+        "w": 209,
+        "h": 21
+      }
+    ]
+  },
+  "T4": {
+    "chipsText": "source ▾\nrole ▾\ntag ▾\ngroup ▾\ntype ▾\nviews ▾",
+    "chipIds": [
+      "chip-sources",
+      "chip-roles",
+      "chip-tags",
+      "chip-groups",
+      "chip-types",
+      "chip-views"
+    ],
+    "clearVisibleBefore": false,
+    "roleMenu": "mule\nvictim\nbeneficiary",
+    "firstOpt": "chip-opt-roles-mule",
+    "statusFiltered": "10 nodes\n9 edges\n1 source\n● 2 suggestions\nJournal\n?\nShortcuts",
+    "chipsAfter": "source ▾\nrole: mule ▾\ntag ▾\ngroup ▾\ntype ▾\n1\nviews ▾",
+    "clearVisibleAfter": true,
+    "clearLabel": "1",
+    "showingOnlyText": [],
+    "showOnlyCount": 2,
+    "onlyVisibleOnHover": true,
+    "onlyTitle": "Show only this graph on the canvas",
+    "onlyRect": {
+      "x": 210.328125,
+      "y": 133.171875,
+      "width": 24.890625,
+      "height": 19.1875
+    },
+    "statusAfterClear": "10 nodes\n9 edges\n1 source\n● 2 suggestions\nJournal\n?\nShortcuts",
+    "viewsChip": "views ▾"
+  },
+  "T5-decide": {
+    "decideRect": {
+      "x": 813,
+      "y": 63.890625,
+      "width": 61,
+      "height": 23
+    },
+    "decideLabel": "Decide",
+    "panelVisible": true,
+    "panelText": "Decision\nRecord the decision",
+    "panelRect": {
+      "x": 719,
+      "y": 140,
+      "w": 291,
+      "h": 47,
+      "bottom": 187,
+      "right": 1010
+    },
+    "formRect": {
+      "x": 719,
+      "y": 195,
+      "w": 291,
+      "h": 484,
+      "bottom": 679,
+      "right": 1010
+    },
+    "recordRect": {
+      "x": 892,
+      "y": 605.671875,
+      "width": 118,
+      "height": 25
+    },
+    "recordInViewport": true,
+    "recordDisabledEmpty": true,
+    "fieldsSmall": [],
+    "labels": [],
+    "escapeCloses": false,
+    "recordDisabledAfterFill": false,
+    "ownWordsHint": "none",
+    "effectText": "The case stays open. The decision is hashed with the record so far and stays in it.",
+    "confirmAsked": false,
+    "toast": [],
+    "panelAfter": false,
+    "inspectorAfter": "TRANSFER · e1\nAna Souza\n→\nBia Lima\nBank A transfers\nFollow the money →\n← Follow back\nOpen details\nData\nNotes\n\nNo notes on this edge yet.\n\nAdd note",
+    "stripJournalLabel": "Journal · 3",
+    "headerAfter": "← Queue\n#invp\nMule network · two banks\nIn analysis\nOpen\n⏱ analysis · 6 d\n● 2 suggestions\nDossier\nDecide\n⚙\nShare\n…\nType\nGeneral\nAssignee\nana@test.com\nTags\nMED\nAdd a description…"
+  },
+  "settings-drawer": {
+    "rect": {
+      "x": 304,
+      "y": 0,
+      "w": 720,
+      "h": 700,
+      "bottom": 700,
+      "right": 1024
+    },
+    "title": "Case settings",
+    "text": "Case settings\n×\nGENERAL\nName\nType\nGeneral\nDescription\nDEADLINES\nAlert at\nOccurred at\nHours · open\nHours · analysis\n\nCounted from the alert (else the occurrence, else the creation). The case type sets them; a case may change its own.\n\nMEMBERS\n\nOwner e2e@test.com · assignee ana@test.com\n\nShare…\nAGENT\n\nWrites of these kinds by an agent arrive as suggestions to confirm; everything else applies directly with the agent's chip.\n\nrole\ntag\nhypothesis_status\nsame_as\nstatus_change\ntask\ngroup\nhypothesis\nnote\ndocument\ntable\nquery\ngraph\nVOCABULARIES from the case type; never imposed\nRoles\nTags\nLink attributes\nIDENTITY KEYS override a context's key for the same node type\nNode type\tEntity\tProperty (empty = ",
+    "small": [
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-role",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-tag",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-hypothesis_status",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-same_as",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-status_change",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-task",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-group",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-hypothesis",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-note",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-document",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-table",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-query",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "INPUT",
+        "type": "checkbox",
+        "label": "settings-suggest-graph",
+        "w": 13,
+        "h": 13
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "BUTTON",
+        "type": "button",
+        "label": "settings-add-key",
+        "w": 30,
+        "h": 21
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "BUTTON",
+        "type": "button",
+        "label": "settings-add-semantics",
+        "w": 109,
+        "h": 21
+      },
+      {
+        "root": "[data-testid=case-settings]",
+        "tag": "BUTTON",
+        "type": "button",
+        "label": "settings-add-label",
+        "w": 64,
+        "h": 21
+      }
+    ],
+    "focusOnOpen": {
+      "tag": "BUTTON",
+      "testid": "case-settings-btn",
+      "text": "⚙",
+      "aria": "Case settings",
+      "outlineStyle": "none",
+      "outlineWidth": "0px",
+      "outlineColor": "rgb(44, 62, 80)",
+      "boxShadow": "none",
+      "visible": true
+    },
+    "saveRect": {
+      "x": 878,
+      "y": 1136.59375,
+      "width": 126,
+      "height": 34
+    },
+    "escapeCloses": true
+  },
+  "add-popover": {
+    "rect": {
+      "x": 62,
+      "y": 212,
+      "w": 900,
+      "h": 277,
+      "bottom": 488,
+      "right": 962
+    },
+    "tabs": [
+      "My recent",
+      "New exploration",
+      "Query",
+      "File",
+      "Paste / link"
+    ],
+    "text": "Add to the case “Mule network · two banks”\n×\nMy recent\nNew exploration\nQuery\nFile\nPaste / link\nMine\n\nNo explorations of yours yet. Start one in “New exploration”.\n\n0 new explorations, from 0 contexts · live reference (pin a version in the material to freeze it)\nAdd 0",
+    "focusOnOpen": {
+      "tag": "BUTTON",
+      "testid": "add-tab-recent",
+      "text": "My recent",
+      "aria": "",
+      "outlineStyle": "none",
+      "outlineWidth": "0px",
+      "outlineColor": "rgb(44, 62, 80)",
+      "boxShadow": "none",
+      "visible": true
+    },
+    "small": [],
+    "escapeCloses": true
+  }
+}

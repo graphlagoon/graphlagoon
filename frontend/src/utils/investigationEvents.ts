@@ -23,7 +23,7 @@ const status = (s: string) => STATUS_LABELS[s as InvestigationStatus] ?? s;
 const short = (sha?: string) => String(sha ?? '').slice(0, 8);
 
 /** One line for an annotation's content, by kind. */
-function describeAnnotation(kind: string, p: Record<string, any>, nameOf: (id: string) => string): string {
+export function describeAnnotation(kind: string, p: Record<string, any>, nameOf: (id: string) => string): string {
   const v = (p.value ?? {}) as Record<string, any>;
   const targets: string[] = p.targets ?? [];
   const first = targets[0] ? nameOf(targets[0]) : 'the case';

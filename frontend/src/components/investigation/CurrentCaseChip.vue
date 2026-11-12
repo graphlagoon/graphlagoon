@@ -23,6 +23,8 @@ const { can } = usePermissions();
 const toast = useToast();
 
 const open = ref(false);
+// An "add to case" with no case picked asks for one here instead of failing.
+watch(() => store.pickRequest, () => (open.value = true));
 const search = ref('');
 const found = ref<Investigation[]>([]);
 const loading = ref(false);
@@ -282,5 +284,12 @@ watch(
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+}
+
+/* At laptop widths the top bar has no room for a 240 px chip: the title keeps the full name. */
+@media (max-width: 1100px) {
+  .case-chip {
+    max-width: 160px;
+  }
 }
 </style>

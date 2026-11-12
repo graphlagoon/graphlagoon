@@ -137,4 +137,20 @@ describe('useContextMenu — drawing by hand (BYOD-2)', () => {
     expect(ids({ type: 'node', id: 'a' }).filter((x) => x.startsWith('sketch-'))).toEqual([])
     window.__GRAPH_LAGOON_CONFIG__ = {} as never
   })
+
+  it('"Add selection to case" is offered on a node with no current case, and asks for one', async () => {
+    const { setActivePinia, createPinia } = await import('pinia')
+    setActivePinia(createPinia())
+    const { useCurrentCaseStore } = await import('@/stores/currentCase')
+    const current = useCurrentCaseStore()
+    current.setCurrentCase(null)
+    const ctx = useContextMenu()
+    ctx.resetActions()
+    ctx.show(new MouseEvent('contextmenu'), { type: 'node', id: 'n1', label: 'n1' })
+    const action = ctx.getVisibleActions().find((a) => a.id === 'add-selection-to-case')
+    expect(action).toBeTruthy()
+    const before = current.pickRequest
+    await action!.handler({ type: 'node', id: 'n1', label: 'n1' })
+    expect(current.pickRequest).toBe(before + 1)
+  })
 })

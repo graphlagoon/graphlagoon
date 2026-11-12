@@ -581,4 +581,20 @@ test.describe('Graph Visualization', () => {
       await expect(page.getByTestId('transpile-settings-modal')).toBeVisible();
     });
   });
+
+  test('Info and Layout float in the same corner, so one closes the other (#39); Escape closes a docked panel', async ({ authenticatedPage: page }) => {
+    await page.goto(`/graph/${MOCK_CONTEXT.id}`);
+    await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId('graph-toolbar-layout').click();
+    await expect(page.getByTestId('layout-panel-close')).toBeVisible();
+    await page.getByTestId('canvas-toolbar-info').click();
+    await expect(page.getByText('Context Info')).toBeVisible();
+    await expect(page.getByTestId('layout-panel-close')).toHaveCount(0);
+
+    await page.getByTestId('toolbar-look').click();
+    await expect(page.getByTestId('look-close')).toBeVisible();
+    await page.getByTestId('look-tab-labels').focus();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('look-close')).toHaveCount(0);
+  });
 });

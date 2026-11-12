@@ -81,6 +81,8 @@ onUnmounted(() => {
 });
 
 const { height, isResizing, onMouseDown } = useDrawerResize({
+  storageKey: 'graphlagoon.drawer.console',
+  defaultRatio: 0.5,
   initialHeight: 440,
   minHeight: 240,
   maxHeightRatio: 0.8,

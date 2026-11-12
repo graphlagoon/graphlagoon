@@ -46,7 +46,8 @@ const META: Record<CanvasToolbarButton, { label: string; title: string; icon: Co
   table: { label: 'Table', title: 'Data Table', icon: Table2, action: 'toggle' },
   clusters: { label: 'Clusters', title: 'Communities and cluster programs: group the nodes, show only a group', icon: Layers, action: 'toggle' },
   fit: { label: 'Fit', title: 'Fit the graph in the view', icon: Scan, action: 'fit' },
-  export: { label: 'Export', title: 'Export the canvas as PNG', icon: Download, action: 'export' },
+  // "PNG", not "Export": in a case, exporting means the case's JSON/CSV/report.
+  export: { label: 'PNG', title: 'Save the canvas as a PNG image', icon: Download, action: 'export' },
 };
 
 const items = computed(() => props.buttons.map((id) => ({ id, ...META[id], testId: props.testIds[id] ?? `canvas-toolbar-${id}` })));

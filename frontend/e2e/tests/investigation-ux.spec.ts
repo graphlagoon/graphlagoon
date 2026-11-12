@@ -273,5 +273,23 @@ test.describe('Investigation workspace UX (UX-1)', () => {
     await page.getByTestId('group-legend-show-all').click();
     await expect(page.getByTestId('status-isolation')).toHaveCount(0);
   });
-});
 
+  test('1024 px: the Layout panel stays inside the canvas and the folded material gives the canvas room (#31, #32)', async ({ authenticatedPage: page }) => {
+    await page.setViewportSize({ width: 1024, height: 700 });
+    await seedInvestigations(page, [structuredClone(CASE)], { 'inv-u': structuredClone(ITEMS) }, [], SNAPSHOTS);
+    await page.goto('/investigations/inv-u');
+    await expect(page.getByTestId('workspace-status')).toContainText('3 nodes', { timeout: 15_000 });
+    // Below 1200 px the material starts folded: the canvas is far wider than the 414 px it had.
+    await expect(page.getByTestId('material-rail')).toBeVisible();
+    const canvas = (await page.getByTestId('graph-container').boundingBox())!;
+    expect(canvas.width).toBeGreaterThan(600);
+
+    await page.getByTestId('workspace-layout-btn').click();
+    const panel = (await page.getByTestId('panel-layout').boundingBox())!;
+    expect(panel.y).toBeGreaterThanOrEqual(canvas.y);
+    expect(panel.y + panel.height).toBeLessThanOrEqual(canvas.y + canvas.height);
+    // The toolbar it used to cover still answers.
+    await page.getByTestId('workspace-table-btn').click();
+    await expect(page.getByTestId('panel-table')).toBeVisible();
+  });
+});

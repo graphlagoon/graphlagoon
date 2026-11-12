@@ -16,8 +16,10 @@ const props = withDefaults(
     nodes: number;
     edges: number;
     testId?: string;
+    /** The Filters-panel chip; a case has its own filter chips with their own Clear. */
+    filterChip?: boolean;
   }>(),
-  { testId: 'graph-status-bar' },
+  { testId: 'graph-status-bar', filterChip: true },
 );
 
 const emit = defineEmits<{
@@ -32,6 +34,22 @@ const clusterStore = useClusterStore();
 const toolbarStore = useToolbarStore();
 
 const clusterCount = computed(() => clusterStore.clusters.length);
+
+/** Nodes drawn, when filters or "show only" hide some of the nodes loaded. */
+const shownOf = computed(() => {
+  const total = graphStore.nodes.length;
+  const shown = graphStore.visibleNodeCount;
+  return shown < total ? `${shown} of ${total}` : null;
+});
+
+/** What the Filters panel hides, in words (types, and the search in hide mode). */
+const filterLabel = computed(() => {
+  const parts: string[] = [];
+  const n = graphStore.hiddenTypeCount;
+  if (n) parts.push(`${n} ${n === 1 ? 'type' : 'types'} hidden`);
+  if (graphStore.filters.search_query && graphStore.behaviors.searchMode === 'hide') parts.push(`search “${graphStore.filters.search_query}”`);
+  return parts.join(' · ');
+});
 
 /** How many nodes "show only" keeps, against the nodes loaded. */
 const isolationTitle = computed(() => {
@@ -48,7 +66,7 @@ const isolationTitle = computed(() => {
 
 <template>
   <div class="status-bar" :data-testid="props.testId">
-    <span>{{ nodes }} nodes</span>
+    <span data-testid="graph-status-nodes">{{ shownOf ?? nodes }} nodes</span>
     <span>{{ edges }} edges</span>
     <!-- Progressive load: the graph is already interactive here; this only
          explains why some tooltips are still empty. -->
@@ -97,6 +115,17 @@ const isolationTitle = computed(() => {
         data-testid="status-isolation-clear"
         aria-label="Show every node"
         @click="graphStore.clearIsolation()"
+      >✕</button>
+    </span>
+
+    <span v-if="filterChip && filterLabel" class="status-isolation" data-testid="status-filtered" title="The Filters panel hides part of the graph. Click ✕ to show every type.">
+      Filtered: <strong>{{ filterLabel }}</strong>
+      <button
+        type="button"
+        class="status-isolation-clear"
+        data-testid="status-filtered-clear"
+        aria-label="Clear the filters"
+        @click="graphStore.resetFilters()"
       >✕</button>
     </span>
 
@@ -164,6 +193,8 @@ const isolationTitle = computed(() => {
   border: none;
   background: none;
   padding: 0 4px;
+  min-width: 24px;
+  min-height: 24px;
   cursor: pointer;
   color: inherit;
   font: inherit;

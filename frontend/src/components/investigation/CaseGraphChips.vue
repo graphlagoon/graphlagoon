@@ -30,21 +30,24 @@ const hasFillLegend = computed(() => (props.paintByGroup ? store.groups.length >
 
 <template>
   <div v-if="store.readableGraphItems.length" class="graph-chips" data-testid="provenance-legend" @keydown.esc="open = false">
-    <button
-      v-for="s in store.readableGraphItems"
-      :key="s.id"
-      type="button"
-      class="chip graph"
-      :class="{ off: !store.canvasIds.has(s.id) }"
-      :aria-pressed="store.canvasIds.has(s.id)"
-      :title="store.sourceErrors[s.id] ?? 'Show only this graph · Shift+click adds or removes it'"
-      :data-testid="`legend-item-${s.id}`"
-      @click="emit('pick', s.id, $event)"
-    >
-      <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
-      <span class="name">{{ s.title }}</span>
-      <AlertTriangle v-if="store.sourceErrors[s.id]" :size="12" class="warn" :data-testid="`legend-error-${s.id}`" />
-    </button>
+    <!-- One scrolling row: eight graphs used to wrap into a 160 px block over a 1024 px canvas. -->
+    <div class="graph-scroll">
+      <button
+        v-for="s in store.readableGraphItems"
+        :key="s.id"
+        type="button"
+        class="chip graph"
+        :class="{ off: !store.canvasIds.has(s.id) }"
+        :aria-pressed="store.canvasIds.has(s.id)"
+        :title="store.sourceErrors[s.id] ?? 'Show only this graph · Shift+click adds or removes it'"
+        :data-testid="`legend-item-${s.id}`"
+        @click="emit('pick', s.id, $event)"
+      >
+        <span class="ring" :style="{ borderColor: store.sourceColors[s.id] }"></span>
+        <span class="name">{{ s.title }}</span>
+        <AlertTriangle v-if="store.sourceErrors[s.id]" :size="14" class="warn" :aria-label="`Could not load: ${store.sourceErrors[s.id]}`" :data-testid="`legend-error-${s.id}`" />
+      </button>
+    </div>
 
     <button
       v-if="store.readableGraphItems.length > 1"
@@ -88,6 +91,19 @@ const hasFillLegend = computed(() => (props.paintByGroup ? store.groups.length >
 </template>
 
 <style scoped>
+.graph-scroll {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.graph-scroll > .chip {
+  flex-shrink: 0;
+}
+
 .graph-chips {
   display: flex;
   flex-wrap: wrap;

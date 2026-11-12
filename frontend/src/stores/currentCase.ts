@@ -52,6 +52,11 @@ export const useCurrentCaseStore = defineStore('currentCase', () => {
     () => !!investigation.value && investigation.value.has_write_access && investigation.value.status !== 'closed',
   );
   const recentCases = computed(() => recent.value.slice(0, MAX_RECENT));
+  /** Bumped by an "add to case" with no case picked: the top-bar chip opens its picker. */
+  const pickRequest = ref(0);
+  function requestPick() {
+    pickRequest.value++;
+  }
 
   function remember(inv: RecentCase) {
     recent.value = [inv, ...recent.value.filter((r) => r.id !== inv.id)].slice(0, MAX_RECENT);
@@ -108,5 +113,7 @@ export const useCurrentCaseStore = defineStore('currentCase', () => {
     return refresh();
   }
 
-  return { caseId, title, investigation, recent, recentCases, hasCase, shortId, canAdd, setCurrentCase, refresh, ensureLoaded };
+  return {
+    pickRequest,
+    requestPick, caseId, title, investigation, recent, recentCases, hasCase, shortId, canAdd, setCurrentCase, refresh, ensureLoaded };
 });

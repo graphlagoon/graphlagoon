@@ -68,3 +68,22 @@ describe('DecisionPanel · an agent proposal (06 P8)', () => {
     expect(api.recordInvestigationDecision.mock.calls[0][1]).not.toHaveProperty('proposal_id')
   })
 })
+
+describe('DecisionPanel · feedback', () => {
+  it('says which decision was recorded and what it did; Escape cancels', async () => {
+    const { useToast } = await import('@/composables/useToast')
+    api.recordInvestigationDecision.mockResolvedValueOnce({
+      id: 'inv-1', status: 'analysis', has_write_access: true,
+      decisions: [{ id: 'd1', outcome_label: 'Keep monitoring', review: null }],
+    } as any)
+    useInvestigationStore().current!.decisions = []
+    const { getByTestId, emitted } = render(DecisionPanel)
+    await fireEvent.click(getByTestId('decision-outcome-monitor'))
+    await fireEvent.update(getByTestId('decision-rationale'), 'Same phone as the mule, in my words.')
+    await fireEvent.click(getByTestId('decision-record'))
+    await flushPromises()
+    expect(useToast().toasts.value.map((t) => t.message)).toContain('Recorded D1 · Keep monitoring — the case stays open')
+    await fireEvent.keyDown(getByTestId('decision-form'), { key: 'Escape' })
+    expect(emitted('cancel')).toHaveLength(1)
+  })
+})

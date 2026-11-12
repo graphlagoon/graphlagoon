@@ -252,13 +252,19 @@ function setViewMode(mode: '3d' | '2d-proj') {
 
 /** The shared canvas toolbar's toggles that are this page's own panels. */
 function onCanvasToolbarToggle(id: CanvasToolbarButton) {
-  if (id === 'info') showContextInfo.value = !showContextInfo.value;
-  else if (id === 'layout') showLayoutPanel.value = !showLayoutPanel.value;
+  // Info and Layout float in the same corner: one at a time, or Info covers Layout's close button.
+  if (id === 'info') {
+    showContextInfo.value = !showContextInfo.value;
+    if (showContextInfo.value) showLayoutPanel.value = false;
+  } else if (id === 'layout') {
+    showLayoutPanel.value = !showLayoutPanel.value;
+    if (showLayoutPanel.value) showContextInfo.value = false;
+  }
   else if (id === 'table') toggleDataTable();
 }
 
 /**
- * The nine top-bar panels share ONE dock on the left of the canvas: opening
+ * The seven top-bar panels share ONE dock on the left of the canvas: opening
  * a panel closes whichever was open. They used to be independent booleans,
  * so Filters + Style + Labels could stack to ~780px and squeeze the canvas
  * into a strip; nobody edits three panels at once, and the floating panels
@@ -282,6 +288,16 @@ function setDocked(id: PanelId, open: boolean) {
       toolbarStore.setPanelActive(key, next);
     }
   }
+}
+
+/** Escape inside a docked panel closes it (on the canvas it keeps clearing the selection). */
+function onDockEscape(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null;
+  if (!target || target.closest('[data-testid="graph-container"]')) return;
+  const open = (Object.keys(dockedPanels) as PanelId[]).find((k) => dockedPanels[k].value);
+  if (!open) return;
+  setDocked(open, false);
+  event.stopPropagation();
 }
 
 function toggleDocked(id: PanelId) {
@@ -807,7 +823,7 @@ watch(
       <RouterLink :to="`/investigations/${caseReturnId}`" class="case-breadcrumb-link">← Case {{ currentCaseStore.title || currentCaseStore.shortId }}</RouterLink>
       <span class="case-breadcrumb-hint">Saving the exploration attaches it to the case and goes back.</span>
     </div>
-    <div class="main-content">
+    <div class="main-content" @keydown.esc="onDockEscape">
       <FilterPanel v-if="showFilters" @close="showFilters = false; toolbarStore.setPanelActive('filters', false)" />
       <LookPanel
         v-if="showLookPanel"
@@ -875,6 +891,14 @@ watch(
             <AlertCircle :size="32" class="error-state-icon" />
             <p class="error-state-title">Failed to load graph</p>
             <p class="error-state-message">{{ graphStore.error }}</p>
+            <RouterLink to="/contexts" class="btn btn-outline btn-sm" data-testid="graph-error-back">← Back to contexts</RouterLink>
+          </div>
+        </div>
+
+        <div v-else-if="!graphStore.loading && graphStore.nodes.length > 0 && graphStore.filteredNodes.length === 0" class="empty-overlay" data-testid="graph-no-match">
+          <div class="empty-state">
+            <p class="empty-state-title">No node matches the filters</p>
+            <button class="btn btn-outline btn-sm" data-testid="graph-no-match-clear" @click="graphStore.resetFilters(); graphStore.clearIsolation()">Clear filters</button>
           </div>
         </div>
 
@@ -1025,7 +1049,7 @@ watch(
             class="status-chip status-layout-error"
             data-testid="graph-status-layout-error"
             :title="layoutOverrideIssuesTitle + '\nClick to open Layout.'"
-            @click="showLayoutPanel = true"
+            @click="showLayoutPanel = true; showContextInfo = false"
           >
             {{ layoutOverrideIssues.length === 1
               ? 'layout setting not applied'
@@ -1178,7 +1202,9 @@ watch(
  * that MUST receive clicks — re-enable pointer events on it, or the click falls
  * through to the 3D canvas and cancellation silently no-ops.
  */
-.loading-overlay :deep(.cancel-btn) {
+.loading-overlay :deep(.cancel-btn),
+.error-overlay .btn,
+.empty-overlay .btn {
   pointer-events: auto;
 }
 

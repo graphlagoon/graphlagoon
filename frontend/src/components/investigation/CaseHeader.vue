@@ -29,6 +29,8 @@ import { formatDate } from '@/utils/format';
 import { fieldInput as fieldValue, fieldText } from '@/utils/caseFields';
 import type { CaseTypeField, InvestigationStatus, UpdateInvestigationRequest } from '@/types/investigation';
 import ShareDialog from '@/components/investigation/ShareDialog.vue';
+import { api } from '@/services/api';
+import { downloadBlob } from '@/utils/portableExport';
 
 const props = defineProps<{
   /** Extra line after the title (e.g. "› Follow the money"). */
@@ -36,7 +38,7 @@ const props = defineProps<{
   /** `dossier` shows the way back to the canvas (05 §2: one screen, two modes). */
   mode?: 'canvas' | 'dossier';
 }>();
-const emit = defineEmits<{ decide: []; settings: [] }>();
+const emit = defineEmits<{ decide: []; settings: []; suggestions: [] }>();
 
 const store = useInvestigationStore();
 const router = useRouter();
@@ -72,6 +74,18 @@ const typeLocked = computed(() => (inv.value.decisions ?? []).length > 0);
 const retained = computed(() => (inv.value.decisions ?? []).some((d) => d.closed_at));
 const canDelete = computed(() => inv.value.can_manage && (!retained.value || isSuperuser.value));
 const deleteReason = ref('');
+
+/** The exports, reachable from the canvas too: deciding and exporting are one task. */
+async function exportCase(format: 'json' | 'csv') {
+  showMenu.value = false;
+  try {
+    const { blob, filename } = await api.exportInvestigation(inv.value.id, format);
+    downloadBlob(filename, blob);
+    toast.success(`Exported ${filename}`);
+  } catch (e) {
+    toast.error(getErrorMessage(e, 'Could not export the case'));
+  }
+}
 
 async function save(patch: UpdateInvestigationRequest, fallback: string) {
   busy.value = true;
@@ -299,7 +313,14 @@ onBeforeUnmount(() => {
         title="Four eyes: another person approves it in the dossier"
       >Decision waiting for review</RouterLink>
 
-      <span v-if="suggested" class="badge suggested" data-testid="suggested-badge">● {{ suggested }} {{ suggested === 1 ? 'suggestion' : 'suggestions' }}</span>
+      <button
+        v-if="suggested"
+        type="button"
+        class="badge suggested"
+        title="Review them in the Suggestions tab"
+        data-testid="suggested-badge"
+        @click="emit('suggestions')"
+      >● {{ suggested }} {{ suggested === 1 ? 'suggestion' : 'suggestions' }}</button>
 
       <span class="actions">
         <RouterLink
@@ -339,6 +360,9 @@ onBeforeUnmount(() => {
             …
           </button>
           <div v-if="showMenu" class="menu" role="menu" data-testid="case-menu-list">
+            <button class="menu-item" role="menuitem" data-testid="menu-export-json" @click="exportCase('json')">Export JSON package</button>
+            <button class="menu-item" role="menuitem" data-testid="menu-export-csv" @click="exportCase('csv')">Export CSV</button>
+            <RouterLink :to="`/investigations/${inv.id}?mode=dossier#decisions`" class="menu-item" role="menuitem" data-testid="menu-report" @click="showMenu = false">Report and print (dossier)…</RouterLink>
             <RouterLink to="/settings/agents" class="menu-item" role="menuitem" data-testid="agents-link" @click="showMenu = false">Agent tokens…</RouterLink>
             <button
               v-if="inv.status === 'closed' && inv.has_write_access"
@@ -711,5 +735,13 @@ h1.editable:hover {
   background: var(--color-suggested-bg);
   border: 1px solid var(--color-suggested-fg);
   color: var(--color-suggested-fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.badge.suggested:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
 }
 </style>

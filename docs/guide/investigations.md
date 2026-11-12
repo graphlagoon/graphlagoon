@@ -137,7 +137,8 @@ report templates are read live from the type.
 a field to edit it in place; the type and its stage are selects. The status
 moves between *Open* and *In analysis*; only a decision closes a case and only
 **Reopen** (the **…** menu, people only) brings it back to analysis.
-**Decide**, **Share**, **⚙** (settings) and **Dossier** are next to it. The
+**Decide**, **Share**, **⚙** (settings) and **Dossier** are next to it; the
+**● N suggestions** badge opens the Suggestions tab. The
 header only offers what you may do: **Decide** needs the *Decide* permission,
 **Share** and the assignee need manage rights, the type no longer changes after
 a decision (and asks before changing), and a case a decision closed is kept
@@ -284,16 +285,23 @@ version, and any version can be pinned.
   nodes with…**), cluster programs, the community table and **Show only this
   community / cluster**.
 - **Filter chips** over the canvas (source, role, tag, group, type, time
-  window) filter visually; **views** saves the chips, the layout, the closed
-  groups and any **show only** as a `graph/view` item. *Clear* also ends a
-  show only.
-- The **analysis bar** opens each analysis with its parameters; every run is
+  window) filter visually; a chip with nothing to pick is not shown (source
+  needs two graphs on the canvas). **views** saves the chips, the layout, the
+  closed groups and any **show only** as a `graph/view` item. **Clear (N)**
+  also ends a show only, and its message offers **Undo**. A filter that
+  matches nothing says so on the canvas, and the status bar counts what is
+  shown against what is loaded (`0 of 10 nodes`).
+- The **analysis bar** (Follow the money, Paths, Groups, Links, Metrics,
+  Detectors) opens each analysis with its parameters; enrichment files and
+  case queries are added from **+ Add** (File, Query). Every run is
   an item with its provenance, shown in the bottom strip and pinnable.
 - The bottom strip has the **Dated edges** timeline, the **Journal** (newest
   first, *Load older events* for the rest; filter person / agent / system,
   event kind, *since my last visit*, or search its text; a line about an item
   opens it, one about an entity shows it on the canvas), **Tasks**,
-  **Suggestions** to confirm in bulk (asked first, sent at once), and the
+  **Suggestions** — each one listed with its entity, value and the agent's
+  reason, to confirm or reject one by one or in bulk (asked first, sent at
+  once); the **● N suggestions** badge in the header opens it — and the
   active analysis result.
 - **⚙** edits the case settings: deadlines, the agent's suggest kinds,
   vocabularies, identity keys, edge semantics by relationship type and label
@@ -402,8 +410,9 @@ done afterwards.
 ## Evidence
 
 Evidence is a **pinned version** of an item: immutable, with its sha256,
-author and time. **📌** on a material row pins the current version (a live
-exploration is frozen first); **Pin evidence** on the canvas freezes what it
+author and time. **📌** on a material row (or **Pin as evidence** on a selected item) pins the
+current version (a live exploration is frozen first), and the message names the
+evidence it became (`Pinned as evidence E3 (v1)`); **Pin evidence** on the canvas freezes what it
 shows; **Save as evidence** on a trace keeps the result with its method stamp.
 The dossier numbers pinned versions E1, E2, … by pin order.
 
@@ -456,6 +465,8 @@ one decision:
   evidence — the pre-fill alone is not enough: add your own words;
   **reviewer** (an editor of the case, never the author; the people on the
   case are suggested). A decision that closes the case asks before recording.
+  Escape cancels the panel; recording says which decision it was and what it
+  did (`Recorded D2 · Keep monitoring — the case stays open`).
 
 Recording appends the decision with the **hash** of the journal up to it
 (sha256 of the canonical journal, which carries the pinned versions' hashes
@@ -494,7 +505,9 @@ records. Deleting a case removes its rows and every blob of the case.
 
 Each export is a download, generated on request from what you can read, in
 any status, and recorded in the audit log with its format and sha256.
-Exporting adds nothing to the journal. Every format **recomputes each
+Exporting adds nothing to the journal. The buttons are in the dossier's
+Decisions card; **JSON package** and **CSV** are also in the header's **…**
+menu, so the canvas does not have to switch to the dossier. Every format **recomputes each
 decision's hash** and checks the bytes of the versions it rests on:
 `integrity: {decisions: [{id, hash, verified}], verified}` (`verified: null`
 without decisions).
@@ -564,8 +577,10 @@ SLA left the case is *urgent*.
   signature.
 - **Uploads** go in one request, so a proxy limit below
   `GRAPH_LAGOON_INVESTIGATION_FILE_MAX_BYTES` wins.
-- **Workspace layout**: the three columns have fixed widths and do not
-  collapse; on a narrow screen use the dossier. Cases are not archived (a case
+- **Workspace layout**: the material column folds into a rail (« in its
+  header, » to open it again), remembered in this browser; below 1200 px wide
+  it starts folded and the side columns are narrower. The bottom strip
+  remembers whether it was open and on which tab. Cases are not archived (a case
   is open, in analysis or closed), and removing a role, tag or group is final.
 - **Expanded neighbors** and nodes promoted from enrichment tables last the
   session (the journal records them); save the exploration to keep them.
