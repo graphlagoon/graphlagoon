@@ -276,8 +276,9 @@ statement=f"SELECT * FROM {full_table_name} LIMIT {limit}"
 > `docs/guide/databricks-apps.md` agora manda conceder **só `SELECT`** nos
 > catálogos visualizados, com o aviso explícito de que os grants do SP são
 > o perímetro externo e a única camada que segura um script `BEGIN...END`.
-> No app, o escopo de leitura deixou de depender só da credencial: dois
-> tiers por `context.create` + allowlist de `catalog.schema` (ver A4).
+> No app, o escopo de leitura deixou de depender só da credencial: toda
+> query lê só as tabelas que o contexto declara (grafo + enriquecimento
+> dentro das fontes permitidas), para qualquer usuário (ver A4).
 > Clamp opcional `max_query_rows` (Databricks `row_limit`) no choke point
 > do warehouse. (c) — OBO com `sql:restricted-query` — segue como evolução
 > futura: resolveria A5 e tornaria script seguro por construção (a query
@@ -446,7 +447,7 @@ tratado, camada por camada:
 |---|---|---|---|
 | App — validação | `validate_sql_query` (sqlglot, SELECT-only, single-statement) + `BEGIN...END` recusado no caminho raw por default (`SCRIPT_NOT_ALLOWED`, flag `allow_raw_sql_scripts` para reabrir) | DML/DDL | ✅ |
 | App — validação | `services/sql_identifiers.py` (regex + backtick-escape) em todo f-string de identificador | Injeção via URL params e via config de contexto armazenada | ✅ |
-| App — escopo | `services/sql_scope.py`: tabelas extraídas do statement e checadas contra 2 tiers (`context.create` ⇒ allowlist de catalog.schema; senão ⇒ só as tabelas do contexto aberto) | **Leitura de tabela fora do contexto/allowlist** | ✅ enforced |
+| App — escopo | `services/sql_scope.py`: tabelas extraídas do statement e checadas contra uma regra única: só as tabelas do contexto aberto (edge/node + enrichment tables ainda dentro de `catalog_schemas` ∪ `enrichment_sources`), qualquer que seja a permissão | **Leitura de tabela fora do contexto** | ✅ enforced |
 | App — autorização | `context.create` gateia criar contexto, navegar catálogo e o tier largo de query | Quem autora e quem só explora | ✅ |
 | App — contenção | `max_query_rows` (Databricks `row_limit`) no choke point do warehouse | Exfiltração em massa / custo | ✅ opcional, default off |
 | Databricks — credencial | Grants **read-only** (`SELECT` + `CAN USE`) só nos catálogos visualizados | Neutraliza qualquer bypass de escrita no nível do warehouse | 📖 guia em `databricks-apps.md`; responsabilidade do operador |

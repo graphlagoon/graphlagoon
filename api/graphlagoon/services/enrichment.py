@@ -1,6 +1,9 @@
 """Enrichment from a context's authorized tables (investigations F2.1, 03 §2.1).
 
 A context lists tables (``enrichment_tables``); being listed authorizes a table.
+Only a table inside the deployment's ``SourceScope`` (the catalog.schema pairs
+allowed for graphs plus ``enrichment_sources``) may be listed, checked on save
+and again on every lookup and query run.
 An entry may declare a **lookup** keyed by a node value: it reads only the
 declared columns for a batch of keys (identifiers quoted, keys as named
 parameters, key and row counts capped). An entry may also declare an
@@ -25,10 +28,12 @@ from graphlagoon.services.sql_identifiers import (
     validate_identifier_part,
 )
 from graphlagoon.services.sql_scope import (
-    check_scope,
+    SourceScope,
     context_tables,
+    current_source_scope,
     extract_table_refs,
     normalize_ref,
+    normalize_table_name,
 )
 
 MAX_KEY_LENGTH = 200
@@ -90,34 +95,47 @@ def changed_tables(new: list[dict], old: Optional[list[dict]]) -> list[dict]:
     return [t for t in new if t not in stored]
 
 
+def source_problem(table: str, context, sources: Optional[SourceScope] = None) -> Optional[str]:
+    """Why ``table`` may not be an enrichment table of ``context``, or None.
+    Allowed: the context's own edge/node table, or a table inside the
+    deployment's sources (graph catalog.schema pairs + ``enrichment_sources``)."""
+    settings = get_settings()
+    sources = sources or current_source_scope()
+    ref = normalize_table_name(table, settings.default_catalog, settings.default_schema)
+    if ref is None:
+        return f"'{table}' is not a valid table name."
+    own = context_tables(
+        SimpleNamespace(
+            edge_table_name=getattr(context, "edge_table_name", None),
+            node_table_name=getattr(context, "node_table_name", None),
+        ),
+        settings.default_catalog,
+        settings.default_schema,
+    )
+    if ref in own or sources.allows(ref):
+        return None
+    return (
+        f"{'.'.join(ref)} is not allowed as an enrichment source. Allowed: "
+        f"{sources.describe()}. An administrator adds schemas or tables with "
+        "GRAPH_LAGOON_ENRICHMENT_SOURCES."
+    )
+
+
 def scope_problem(
     tables: list[dict], context, all_tables: Optional[list[dict]] = None
 ) -> Optional[str]:
-    """Why an author may not attach these tables, or None. Same rule as an
-    author's query (``check_scope``): the catalog.schema allowlist plus the
-    schemas of the context's own edge/node tables. An entry's query may read
-    only the virtual tables and the tables listed in ``all_tables`` (the whole
-    new list) or the context's own."""
-    settings = get_settings()
-    # Without the enrichment tables: a stored one must not vouch for itself.
-    base = SimpleNamespace(
-        edge_table_name=getattr(context, "edge_table_name", None),
-        node_table_name=getattr(context, "node_table_name", None),
-    )
+    """Why an author may not attach these tables, or None. Each table must be a
+    source the deployment allows (``source_problem``); an entry's query may
+    read only the virtual tables, the context's own tables and the tables of
+    ``all_tables`` (the whole new list)."""
+    sources = current_source_scope()
     for spec in tables:
-        problem = check_scope(
-            f"SELECT 1 FROM {spec['table']}",
-            base,
-            is_author=True,
-            allowed_pairs=settings.catalog_schema_pairs,
-            default_catalog=settings.default_catalog,
-            default_schema=settings.default_schema,
-        )
+        problem = source_problem(spec["table"], context, sources)
         if problem:
             return problem
     authorized = SimpleNamespace(
-        edge_table_name=base.edge_table_name,
-        node_table_name=base.node_table_name,
+        edge_table_name=getattr(context, "edge_table_name", None),
+        node_table_name=getattr(context, "node_table_name", None),
         enrichment_tables=all_tables if all_tables is not None else tables,
     )
     for spec in tables:
@@ -130,7 +148,8 @@ def scope_problem(
 
 def query_scope_problem(sql: str, context) -> Optional[str]:
     """None when ``sql`` reads only the virtual tables and the context's
-    authorized tables (edge, node and every listed enrichment table)."""
+    authorized tables (edge, node and every listed enrichment table still
+    inside the deployment's sources)."""
     settings = get_settings()
     # Dummy CTEs so the virtual names are skipped like any query-local name.
     refs = extract_table_refs(
@@ -138,7 +157,9 @@ def query_scope_problem(sql: str, context) -> Optional[str]:
     )
     if refs is None:
         return "the query could not be parsed, so the tables it reads cannot be verified."
-    allowed = context_tables(context, settings.default_catalog, settings.default_schema)
+    allowed = context_tables(
+        context, settings.default_catalog, settings.default_schema, current_source_scope()
+    )
     outside = {
         normalize_ref(r, settings.default_catalog, settings.default_schema) for r in refs
     } - allowed
@@ -146,7 +167,7 @@ def query_scope_problem(sql: str, context) -> Optional[str]:
         listed = ", ".join(sorted(".".join(t) for t in outside))
         return (
             f"it reads {listed}, which is not an authorized table of this context. "
-            "Add it to the enrichment tables first."
+            "Add it to the enrichment tables first (it must be an allowed source)."
         )
     return None
 
@@ -195,6 +216,10 @@ async def lookup(warehouse, context, name: str, keys: list[Any]) -> dict:
     """``{name, key_column, columns, cardinality, rows: {key: [row]}, truncated}``;
     each row holds only the declared ``columns``."""
     spec = find_table(context, name, needs="lookup")
+    # Re-proved on every lookup: the allowed sources may have changed since saving.
+    problem = source_problem(spec["table"], context)
+    if problem:
+        raise EnrichmentError(403, "ENRICHMENT_SCOPE_DENIED", problem)
     cleaned = clean_keys(keys)
     max_rows = get_settings().enrichment_max_rows
     sql, params = build_query(spec, cleaned, max_rows + 1)
@@ -318,8 +343,10 @@ async def run_query(warehouse, context, name: str, edges: list, nodes: list) -> 
         raise EnrichmentError(
             400, "TOO_MANY_KEYS", f"At most {settings.enrichment_max_keys} {noun} per run"
         )
-    # Re-proved on every run: the allowlist or the list may have changed since saving.
-    problem = query_scope_problem(spec["query"]["sql"], context)
+    # Re-proved on every run: the allowed sources or the list may have changed since saving.
+    problem = source_problem(spec["table"], context) or query_scope_problem(
+        spec["query"]["sql"], context
+    )
     if problem:
         raise EnrichmentError(403, "ENRICHMENT_SCOPE_DENIED", problem)
     sql, params = build_run_statement(spec, edges, nodes)

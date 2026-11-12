@@ -336,6 +336,7 @@ async function setupPage(page: Page) {
     (window as any).__GRAPH_LAGOON_CONFIG__ = {
       dev_mode: true,
       database_enabled: false,
+      enrichment_sources: ['main.graphs', 'main.hr', 'main.sales.orders'],
     };
     // Disables the stats-gl FPS overlay (see useDevPerf.ts) — the generator
     // runs against the dev server, where the overlay would otherwise show up.

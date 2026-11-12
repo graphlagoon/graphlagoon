@@ -1,13 +1,15 @@
 """Which tables a query is allowed to touch.
 
-Two tiers, keyed on the ``context.create`` permission:
+One rule for everyone: a query may read only the tables its context declares,
+the graph's edge and node tables and the context's authorized enrichment
+tables. Nobody reaches a table no context names, whatever their permissions.
+The scope is *proved* by parsing the statement, not trusted.
 
-* **Authors** (hold ``context.create``) may read any table inside the
-  configured ``catalog.schema`` allowlist — they can already point a new
-  context at any of those tables, so a query reaching them is not an
-  escalation.
-* **Everyone else** is restricted to the tables of the context they have
-  open. Their scope is *proved* by parsing the statement, not trusted.
+Which tables a context may authorize for enrichment is a deployment setting
+(``SourceScope``): the catalog.schema pairs allowed for graphs
+(``catalog_schemas``) plus the extra schemas and tables allowed for enrichment
+only (``enrichment_sources``). An enrichment table that falls outside it, for
+example after the settings changed, stops being part of the context's scope.
 
 Cypher needs no check here: the transpiler renders against the context's own
 schema provider, so its SQL can only name that context's tables. This module
@@ -21,6 +23,7 @@ enabling it requires read-only warehouse grants (see the deploy guide).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 
 import sqlglot
@@ -104,18 +107,76 @@ def normalize_table_name(
     return None
 
 
-def context_tables(context, default_catalog: str, default_schema: str) -> set:
-    """The normalized tables a context declares (edge, node and enrichment)."""
+@dataclass(frozen=True)
+class SourceScope:
+    """The tables a context may authorize for enrichment: whole
+    ``(catalog, schema)`` pairs and single ``(catalog, schema, table)``s."""
+
+    schemas: frozenset = frozenset()
+    tables: frozenset = frozenset()
+
+    def allows(self, ref: TableRef) -> bool:
+        return (ref[0], ref[1]) in self.schemas or ref in self.tables
+
+    def describe(self) -> str:
+        names = sorted(f"{c}.{s}.*" for c, s in self.schemas)
+        names += sorted(".".join(t) for t in self.tables)
+        return ", ".join(names) or "nothing"
+
+
+def source_scope(
+    graph_pairs, enrichment_sources, default_catalog: str, default_schema: str
+) -> SourceScope:
+    """``graph_pairs`` are the catalog.schema pairs allowed for graphs;
+    ``enrichment_sources`` are ``catalog.schema`` or ``catalog.schema.table``
+    strings allowed for enrichment only."""
+    schemas = {(_bare(c), _bare(s)) for c, s in graph_pairs}
+    tables = set()
+    for source in enrichment_sources:
+        parts = [p.strip() for p in source.strip().split(".")]
+        if len(parts) == 2 and all(parts):
+            schemas.add((_bare(parts[0]), _bare(parts[1])))
+        elif len(parts) == 3 and all(parts):
+            ref = normalize_table_name(".".join(parts), default_catalog, default_schema)
+            if ref:
+                tables.add(ref)
+    return SourceScope(frozenset(schemas), frozenset(tables))
+
+
+def current_source_scope() -> SourceScope:
+    """``source_scope`` from the running settings."""
+    from graphlagoon.config import get_settings
+
+    settings = get_settings()
+    return source_scope(
+        settings.catalog_schema_pairs,
+        settings.enrichment_source_list,
+        settings.default_catalog,
+        settings.default_schema,
+    )
+
+
+def context_tables(
+    context,
+    default_catalog: str,
+    default_schema: str,
+    sources: Optional[SourceScope] = None,
+) -> set:
+    """The normalized tables a context declares (edge, node and enrichment).
+    With ``sources``, an enrichment table outside it is left out: it is listed
+    but no longer authorized."""
     tables = set()
     for name in (
         getattr(context, "edge_table_name", None),
         getattr(context, "node_table_name", None),
-        *(t.get("table") for t in getattr(context, "enrichment_tables", None) or []),
     ):
-        if not name:
-            continue
-        normalized = normalize_table_name(name, default_catalog, default_schema)
+        normalized = normalize_table_name(name, default_catalog, default_schema) if name else None
         if normalized:
+            tables.add(normalized)
+    for spec in getattr(context, "enrichment_tables", None) or []:
+        name = spec.get("table")
+        normalized = normalize_table_name(name, default_catalog, default_schema) if name else None
+        if normalized and (sources is None or sources.allows(normalized)):
             tables.add(normalized)
     return tables
 
@@ -140,17 +201,12 @@ def cte_prefilter_as_statement(cte_text: str, context) -> str:
 def check_scope(
     sql: str,
     context,
-    is_author: bool,
-    allowed_pairs,
+    sources: Optional[SourceScope],
     default_catalog: str,
     default_schema: str,
 ) -> Optional[str]:
-    """``None`` when every table in ``sql`` is in scope, else why it is not.
-
-    ``allowed_pairs`` is the configured ``(catalog, schema)`` allowlist; the
-    context's own schemas are always in scope on top of it, so a context
-    pointing outside the configured pairs keeps working.
-    """
+    """``None`` when every table in ``sql`` is one the context declares (see
+    ``context_tables``), else why it is not. Same rule for every caller."""
     refs = extract_table_refs(sql)
     if refs is None:
         return (
@@ -158,28 +214,15 @@ def check_scope(
             "verified."
         )
 
-    own_tables = context_tables(context, default_catalog, default_schema)
+    own_tables = context_tables(context, default_catalog, default_schema, sources)
     normalized = {normalize_ref(r, default_catalog, default_schema) for r in refs}
-
-    if not is_author:
-        outside = normalized - own_tables
-        if outside:
-            listed = ", ".join(sorted(".".join(t) for t in outside))
-            return (
-                f"This query reads tables outside the current context: "
-                f'{listed}. Without the "Create graph contexts" permission '
-                f"a query may only read the context's own tables."
-            )
-        return None
-
-    allowed_scopes = {(_bare(c), _bare(s)) for c, s in allowed_pairs}
-    allowed_scopes |= {(c, s) for c, s, _ in own_tables}
-    outside = {t for t in normalized if (t[0], t[1]) not in allowed_scopes}
+    outside = normalized - own_tables
     if outside:
         listed = ", ".join(sorted(".".join(t) for t in outside))
-        scopes = ", ".join(sorted(f"{c}.{s}" for c, s in allowed_scopes))
         return (
-            f"This query reads tables outside the permitted catalogs: "
-            f"{listed}. Allowed: {scopes}."
+            f"This query reads tables outside the current context: {listed}. "
+            "A query may only read the context's graph tables and its "
+            "authorized enrichment tables; a context author can add a table "
+            "under Enrichment tables."
         )
     return None

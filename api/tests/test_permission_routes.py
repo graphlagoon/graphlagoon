@@ -486,28 +486,46 @@ class TestReaderTierScope:
         assert _scope_error(response) is None, response.text
 
 
-class TestAuthorTierScope:
-    """With context.create ⇒ anything inside the configured allowlist."""
+class TestAuthorsHaveNoWiderScope:
+    """context.create widens nothing: a query reads only tables a context names."""
 
     @pytest.fixture
     def author_env(self, monkeypatch, store):
         monkeypatch.setenv("GRAPH_LAGOON_CATALOG_SCHEMAS", "main.graphs,main.staging")
+        monkeypatch.setenv("GRAPH_LAGOON_ENRICHMENT_SOURCES", "main.kyc")
         get_settings.cache_clear()
-        yield store.create_graph_context(
+        context = store.create_graph_context(
             "t", "main.graphs.edges", "main.graphs.nodes", MEMBER
         )
+        context.enrichment_tables = [
+            {"name": "devices", "label": "Devices", "table": "main.kyc.devices"},
+            {"name": "old", "label": "Old", "table": "hr.private.salaries"},
+        ]
+        yield context
         get_settings.cache_clear()
 
-    def test_other_table_inside_allowlist_allowed(self, query_client, author_env):
+    def test_other_table_inside_allowlist_denied(self, query_client, author_env):
         response = _run_sql(
             query_client,
             author_env.id,
             "SELECT * FROM main.staging.other_edges",
             MEMBER,
         )
+        error = _scope_error(response)
+        assert error is not None, response.text
+        assert "main.staging.other_edges" in error["message"]
+
+    def test_authorized_enrichment_table_allowed(self, query_client, author_env):
+        response = _run_sql(
+            query_client,
+            author_env.id,
+            "SELECT * FROM main.graphs.edges e JOIN main.kyc.devices d ON 1=1",
+            MEMBER,
+        )
         assert _scope_error(response) is None, response.text
 
-    def test_table_outside_allowlist_denied(self, query_client, author_env):
+    def test_listed_table_outside_the_sources_denied(self, query_client, author_env):
+        # Listed before the settings changed: no longer authorized.
         response = _run_sql(
             query_client, author_env.id, "SELECT * FROM hr.private.salaries", MEMBER
         )

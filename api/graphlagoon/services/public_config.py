@@ -57,6 +57,11 @@ async def build_public_config(
         # Whether a hand-written BEGIN...END script may run on the raw-SQL
         # path — the editor offers to run one only when the server accepts it.
         "allow_raw_sql_scripts": settings.allow_raw_sql_scripts,
+        # What a context may authorize as an enrichment table: the graph
+        # catalog.schema pairs plus the enrichment-only schemas and tables.
+        "enrichment_sources": [
+            f"{c}.{s}" for c, s in settings.catalog_schema_pairs
+        ] + settings.enrichment_source_list,
         # Personal agent tokens (Bearer glt_…) and their admin list.
         "agents_enabled": settings.agents_enabled,
         "investigation_file_max_bytes": settings.investigation_file_max_bytes,

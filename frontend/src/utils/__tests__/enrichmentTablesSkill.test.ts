@@ -33,6 +33,13 @@ describe('buildEnrichmentTablesSkill', () => {
     expect(text).toContain('Nothing yet.');
   });
 
+  it('names the allowed sources when the server announced them', () => {
+    const text = buildEnrichmentTablesSkill({ ...input, allowedSources: ['main.pix', 'ext.kyc.people'] });
+    expect(text).toContain('must come from these allowed sources');
+    expect(text).toContain('`main.pix`, `ext.kyc.people`');
+    expect(buildEnrichmentTablesSkill(input)).toContain('sources the administrator allows');
+  });
+
   it('its YAML example is what the form imports', () => {
     const text = buildEnrichmentTablesSkill(input);
     const example = text.split('## YAML format')[1].split('```yaml\n')[1].split('```')[0];

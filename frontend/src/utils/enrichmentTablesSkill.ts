@@ -16,6 +16,8 @@ export interface EnrichmentTablesSkillInput {
   nodeProperties: string[];
   nodeTypes: string[];
   relationshipTypes: string[];
+  /** What a table may come from (catalog.schema or catalog.schema.table); null when unknown. */
+  allowedSources?: string[] | null;
   /** The entries in the form now, as YAML (empty when there are none). */
   currentYaml: string;
 }
@@ -93,7 +95,12 @@ The SQL reads two virtual tables holding the graph on screen (a batch of up to 5
 - Every table it names must be an entry of this list (or the context's own table above).
 - No CTE may be named \`graph_edges\` or \`graph_nodes\`; no entry's table may be either name.
 - \`name\`: lowercase letters, digits and _ (starts with a letter), unique. \`label\` is what people see.
-- Tables must be in a catalog the administrator allows; saving needs the "Create graph contexts" permission.
+- ${
+    input.allowedSources?.length
+      ? `Every entry's table must come from these allowed sources (a \`catalog.schema\` allows any table in it, a \`catalog.schema.table\` only that table): ${list(input.allowedSources)}. Never propose a table outside them; if the data I need lives elsewhere, say that an administrator must add it to \`GRAPH_LAGOON_ENRICHMENT_SOURCES\`.`
+      : 'Tables must come from the sources the administrator allows; saving needs the "Create graph contexts" permission.'
+  }
+- No query may read a table that is not in this list or the context's own tables, for anyone.
 
 ## YAML format
 

@@ -421,7 +421,7 @@ class TestRouterErrorHandling:
         request.state.user_email = "test@example.com"
 
         data = MagicMock()
-        data.query = "SELECT * FROM edges"
+        data.query = "SELECT * FROM cat.schema.edges"
         data.cte_prefilter = None
         data.use_external_links = False
 
@@ -479,7 +479,7 @@ class TestRouterErrorHandling:
         request.state.user_email = "test@example.com"
 
         data = MagicMock()
-        data.query = "SELECT * FROM edges"
+        data.query = "SELECT * FROM cat.schema.edges"
         data.cte_prefilter = None
         data.use_external_links = False
 
@@ -507,7 +507,7 @@ class TestRouterErrorHandling:
                 side_effect=QueryExecutionError(
                     "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or "
                     "function parameter with name `email` cannot be resolved.",
-                    query="SELECT * FROM edges",
+                    query="SELECT * FROM cat.schema.edges",
                 ),
             ),
         ):
@@ -538,7 +538,7 @@ class TestRouterErrorHandling:
         request.state.user_email = "test@example.com"
 
         data = MagicMock()
-        data.query = "SELECT * FROM edges"
+        data.query = "SELECT * FROM cat.schema.edges"
         data.cte_prefilter = None
         data.use_external_links = False
 
@@ -584,7 +584,7 @@ class TestRouterErrorHandling:
             assert error["details"]["exception_type"] == "RuntimeError"
             assert "traceback" in error["details"]
             assert isinstance(error["details"]["traceback"], list)
-            assert error["details"]["query"] == "SELECT * FROM edges"
+            assert error["details"]["query"] == "SELECT * FROM cat.schema.edges"
 
     @pytest.mark.asyncio
     async def test_query_endpoint_catches_httpx_error_with_traceback(
@@ -599,7 +599,7 @@ class TestRouterErrorHandling:
         request.state.user_email = "test@example.com"
 
         data = MagicMock()
-        data.query = "SELECT * FROM edges"
+        data.query = "SELECT * FROM cat.schema.edges"
         data.cte_prefilter = None
         data.use_external_links = False
 

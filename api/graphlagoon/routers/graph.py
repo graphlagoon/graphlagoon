@@ -139,9 +139,9 @@ async def enforce_query_scope(
     tables to name and its own system owns access control, so passing its
     Cypher through a SQL parser would deny every query.
 
-    The tier comes from ``context.create``: holders read anything in the
-    configured catalog.schema allowlist, everyone else only the open
-    context's own tables (see services.sql_scope).
+    One rule for every caller, whatever their permissions: only the open
+    context's graph tables and its authorized enrichment tables (see
+    services.sql_scope).
 
     Two things are checked, and both matter:
 
@@ -154,8 +154,11 @@ async def enforce_query_scope(
       parseable, so a foreign table cannot ride into an opaque script.
     """
     from graphlagoon.services.datasource.sql_warehouse import _is_script
-    from graphlagoon.services.permissions import check_permission
-    from graphlagoon.services.sql_scope import check_scope, cte_prefilter_as_statement
+    from graphlagoon.services.sql_scope import (
+        check_scope,
+        cte_prefilter_as_statement,
+        current_source_scope,
+    )
 
     if datasource is not None and not getattr(
         datasource.capabilities, "supports_sql", False
@@ -171,13 +174,12 @@ async def enforce_query_scope(
     if not to_check:
         return
 
-    decision = await check_permission(user_email, "context.create")
+    sources = current_source_scope()
     for statement in to_check:
         problem = check_scope(
             statement,
             context,
-            is_author=decision.allowed,
-            allowed_pairs=settings.catalog_schema_pairs,
+            sources,
             default_catalog=settings.default_catalog,
             default_schema=settings.default_schema,
         )

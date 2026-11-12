@@ -506,3 +506,65 @@ def test_several_queries_for_edges_and_nodes_on_one_table(env):
     assert [(t["name"], t["query"]["target"]) for t in saved] == [
         ("risk", "edges"), ("risk_manual", "edges"), ("activity", "nodes"),
     ]
+
+
+# --- Allowed sources: graph schemas + GRAPH_LAGOON_ENRICHMENT_SOURCES -------------
+
+
+def test_enrichment_sources_add_schemas_and_tables_for_enrichment_only(env, monkeypatch):
+    client, store, _ = env
+    monkeypatch.setenv("GRAPH_LAGOON_ENRICHMENT_SOURCES", "main.kyc, ext.risk.scores")
+    get_settings.cache_clear()
+    ctx = store.create_graph_context("pix", "main.graphs.e", "main.graphs.n", OWNER)
+    url = f"/api/graph-contexts/{ctx.id}"
+    kyc = {"name": "kyc", "label": "KYC", "table": "main.kyc.people"}
+    scores = {"name": "scores", "label": "Scores", "table": "ext.risk.scores"}
+    r = client.put(url, json={"enrichment_tables": [kyc, scores]}, headers=_h(OWNER))
+    assert r.status_code == 200, r.text
+    # One table of ext.risk is listed, not the whole schema.
+    other = {"name": "other", "label": "Other", "table": "ext.risk.other"}
+    r = client.put(url, json={"enrichment_tables": [kyc, scores, other]}, headers=_h(OWNER))
+    assert r.status_code == 403
+    error = r.json()["detail"]["error"]
+    assert error["code"] == "ENRICHMENT_SCOPE_DENIED" and "ext.risk.other" in error["message"]
+    assert "GRAPH_LAGOON_ENRICHMENT_SOURCES" in error["message"]
+
+
+def test_the_contexts_own_schema_is_not_a_source(env):
+    client, store, _ = env
+    # The graph lives outside catalog_schemas; its own tables stay readable,
+    # a neighbour in its schema does not.
+    ctx = store.create_graph_context("pix", "legacy.zone.e", "legacy.zone.n", OWNER)
+    url = f"/api/graph-contexts/{ctx.id}"
+    neighbour = {"name": "nb", "label": "Neighbour", "table": "legacy.zone.other"}
+    r = client.put(url, json={"enrichment_tables": [neighbour]}, headers=_h(OWNER))
+    assert r.status_code == 403
+    own = {"name": "own", "label": "Own", "table": "legacy.zone.e"}
+    r = client.put(url, json={"enrichment_tables": [own]}, headers=_h(OWNER))
+    assert r.status_code == 200, r.text
+
+
+def test_runs_refused_once_a_table_leaves_the_sources(env, monkeypatch):
+    client, store, warehouse = env
+    monkeypatch.setenv("GRAPH_LAGOON_ENRICHMENT_SOURCES", "main.fraud")
+    get_settings.cache_clear()
+    devices = {**DEVICES, "table": "main.fraud.devices"}
+    tx = {**TX_QUERY, "table": "main.fraud.tx", "query": {
+        "sql": "SELECT e.edge_id, t.risk FROM graph_edges e JOIN main.fraud.tx t ON t.id = e.edge_id",
+    }}
+    ctx = store.create_graph_context(
+        "pix", "main.graphs.e", "main.graphs.n", OWNER, enrichment_tables=[devices, tx],
+    )
+    base = f"/api/graph-contexts/{ctx.id}/enrichment"
+    assert client.post(f"{base}/devices/lookup", json={"keys": ["1"]}, headers=_h(OWNER)).status_code == 200
+    # An administrator removes the schema: nothing reads it any more.
+    monkeypatch.delenv("GRAPH_LAGOON_ENRICHMENT_SOURCES")
+    get_settings.cache_clear()
+    calls = len(warehouse.calls)
+    for r in (
+        client.post(f"{base}/devices/lookup", json={"keys": ["1"]}, headers=_h(OWNER)),
+        client.post(f"{base}/tx_risk/run", json=BATCH, headers=_h(OWNER)),
+    ):
+        assert r.status_code == 403, r.text
+        assert r.json()["detail"]["error"]["code"] == "ENRICHMENT_SCOPE_DENIED"
+    assert len(warehouse.calls) == calls

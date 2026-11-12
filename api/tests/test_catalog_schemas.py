@@ -40,6 +40,18 @@ from graphlagoon.models.schemas import (  # noqa: E402
 )
 
 
+# ── Settings.enrichment_source_list ───────────────────────────────
+
+
+def test_enrichment_sources_keep_schemas_and_tables_only():
+    settings = Settings(
+        databricks_mode=False,
+        enrichment_sources=" main.kyc , ext.risk.scores,bad,a.b.c.d,",
+    )
+    assert settings.enrichment_source_list == ["main.kyc", "ext.risk.scores"]
+    assert Settings(databricks_mode=False).enrichment_source_list == []
+
+
 # ── Settings.catalog_schema_pairs ─────────────────────────────────
 
 

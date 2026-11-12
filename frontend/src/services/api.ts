@@ -132,6 +132,11 @@ declare global {
        * opaque to both the SELECT-only validator and the table-scope check.
        */
       allow_raw_sql_scripts?: boolean;
+      /**
+       * What a context may list as an enrichment table: the graph catalog.schema pairs plus
+       * GRAPH_LAGOON_ENRICHMENT_SOURCES (catalog.schema or catalog.schema.table entries).
+       */
+      enrichment_sources?: string[];
       /** Personal agent tokens (GRAPH_LAGOON_AGENTS_ENABLED). */
       agents_enabled?: boolean;
       /** Upload ceiling for case files, in bytes (413 above it). */

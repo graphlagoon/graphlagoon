@@ -14080,3 +14080,18 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `docs/guide/context-menu-actions.md` ("Hiding built-in entries").
 **Permissão (2.4b):** nenhuma; preferência de exibição.
 **No admin-area impact:** sem rota, tabela, setting ou auditoria.
+
+## [2026-11-12 19:20] - Feature Implemented: One query scope for everyone, enrichment limited to allowed sources
+
+**Feature:** No query reads a table its context does not declare (edge, node and enrichment tables), whatever the user's permissions. A context may list an enrichment table only from an allowed source: the graph `catalog.schema` pairs (`GRAPH_LAGOON_CATALOG_SCHEMAS`) or the new `GRAPH_LAGOON_ENRICHMENT_SOURCES` (`catalog.schema` or `catalog.schema.table`, enrichment only).
+**Decisions:**
+1. **The `context.create` tier is gone from the raw-SQL scope:** before, authors read anything in the catalog allowlist. Now the permission only lets them *list* a table in a context; reading it goes through the context like everyone else. `check_scope` lost `is_author`/`allowed_pairs` and takes a `SourceScope`.
+2. **Sources re-proved on every read:** `context_tables(..., sources)` leaves out a listed enrichment table that is no longer inside the sources, so raw SQL, lookups (`source_problem` in `lookup`) and enrichment runs stop reading it as soon as an administrator narrows the settings, with no context edit.
+3. **The context's own schema is no longer a source:** an enrichment table next to a graph that lives outside `catalog_schemas` is refused; the graph's own edge/node tables stay listable.
+4. **`enrichment_sources` in `/api/config`** (graph pairs + extra sources): the form names them, warns per row on a full `catalog.schema.table` outside them, and the Ask-an-AI prompt tells the model to stay inside them. The server still decides.
+**Rejected:** a per-context source list — the point is that the deployment, not a context author, bounds what can be read.
+**Files:** new `frontend/src/utils/enrichmentSources.ts`; changed `api/graphlagoon/{config.py,services/sql_scope.py,services/enrichment.py,services/public_config.py,routers/graph.py,routers/admin_registry.py}`, `frontend/src/{services/api.ts,utils/enrichmentTablesSkill.ts,components/GraphContextFormModal.vue}`, `frontend/e2e/screenshots/generate.ts`.
+**Tests:** pytest `test_sql_scope.py`, `test_permission_routes.py::TestAuthorsHaveNoWiderScope`, `test_enrichment.py` (sources, own schema, runtime refusal), `test_catalog_schemas.py`, `test_graph_error_handling.py` (queries name the context's table); vitest `enrichmentSources`, `enrichmentTablesSkill`, `GraphContextFormModal`.
+**Public docs:** `permissions.md` (Query scope rewritten), `configuration.md`, `databricks-apps.md`, `bring-your-own-data.md`, `investigations.md`; screenshot `bring-your-own-data-enrichment-tables.png`.
+**Admin-area impact:** `enrichment_sources` classified `public` in `CONFIG_FIELD_KINDS`.
+**Known limitations:** a two-part `schema.table` is only warned about by the server (the browser does not know the default catalog). Authors who used to query allowlisted tables directly must now list them in the context.
