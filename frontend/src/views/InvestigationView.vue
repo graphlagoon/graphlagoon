@@ -563,6 +563,22 @@ watch(
 );
 
 watch(() => store.graphItems.map((s) => `${s.id}:${s.current_version}:${s.mapping?.as ?? ''}`).join(','), loadWorkspace);
+
+/**
+ * `?show=<item>`: open with that graph alone on the canvas (the "View" of an "Added to case" message).
+ * Consumed once the item is in the case, then dropped from the address so a reload keeps the case's own choice.
+ */
+watch(
+  [() => route.query.show, () => store.readableGraphItems.map((i) => i.id).join(',')],
+  ([show]) => {
+    if (typeof show !== 'string' || !show) return;
+    if (!store.readableGraphItems.some((i) => i.id === show)) return;
+    if (!(store.canvasItems.length === 1 && store.canvasIds.has(show))) switchCanvas(() => store.showOnly(show));
+    const { show: _show, ...rest } = route.query;
+    void router.replace({ query: rest });
+  },
+  { immediate: true },
+);
 // Enrichment files (BYOD-2) add properties to the canvas: a new file or version is fetched, nothing reloads.
 watch(
   () => store.items.filter((i) => i.kind === 'table' && i.mapping?.as === 'enrichment').map((i) => `${i.id}:${i.current_version}`).join(','),

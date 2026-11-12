@@ -9,7 +9,8 @@ import { useContextMenu } from '@/composables/useContextMenu'
 import fixture from '@/__tests__/fixtures/trace/flow-chain.json'
 import { roleColor } from '@/utils/graphAppearance'
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
+const routeState = vi.hoisted(() => ({ query: {} as Record<string, string> }))
+vi.mock('vue-router', () => ({ useRoute: () => routeState, useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock('@/services/api', () => ({
   api: {
     getInvestigation: vi.fn(),
@@ -64,6 +65,7 @@ beforeEach(() => {
   // jsdom is 1024 px wide: below 1200 the material starts folded unless the person chose otherwise.
   localStorage.clear()
   localStorage.setItem('graphlagoon.case.materialCollapsed', '0')
+  routeState.query = {}
   created = 0
   vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv', title: 'Case', status: 'analysis', has_write_access: true, settings: {}, state: {}, shared_with: [], tags: [] } as any)
   vi.mocked(api.getInvestigationItems).mockResolvedValue([item('s1', 'c1'), item('s2', 'c2')] as any)
@@ -411,5 +413,13 @@ describe('InvestigationView', () => {
     expect(queryByTestId('case-items-panel')).toBeNull()
     expect(getByTestId('material-rail')).toBeTruthy()
     expect(localStorage.getItem('graphlagoon.case.materialCollapsed')).toBe('1')
+  })
+
+  it('?show=<item> opens the case with that graph alone on the canvas (the "View" of "Added to case")', async () => {
+    routeState.query = { show: 's2' }
+    render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    const store = useInvestigationStore()
+    expect(store.canvasItems.map((i) => i.id)).toEqual(['s2'])
   })
 })
