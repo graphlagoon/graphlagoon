@@ -6,16 +6,19 @@
  * never written to the context. Reuses the case wizard's mapping step.
  */
 import { computed, onMounted, ref, watch } from 'vue';
+import { Bot } from 'lucide-vue-next';
 import { api } from '@/services/api';
 import { useGraphStore } from '@/stores/graph';
 import { useSketch } from '@/composables/useSketch';
 import { useToast } from '@/composables/useToast';
 import MappingStep from '@/components/investigation/MappingStep.vue';
+import EnrichmentSkillModal from '@/components/EnrichmentSkillModal.vue';
 import HelpTip from '@/components/admin/HelpTip.vue';
 import { guideUrl } from '@/utils/docsLinks';
-import { decoderLabel, encodingFor, genericSpec, guessDelimiter } from '@/utils/fileImport';
-import { interpretMapping, lines, parseLine, suggestPresets, type MappingSpec } from '@/utils/fileMapping';
+import { encodingFor, genericSpec } from '@/utils/fileImport';
+import { interpretMapping, suggestPresets, type MappingSpec } from '@/utils/fileMapping';
 import { fileEnrichmentRows, matchFileRows, tableContentOf } from '@/utils/enrichment';
+import { describeMatch, fallbackSpec, readTable, scopeLabel, suggestEnrichmentMatches, type MatchSuggestion, type ReadTable } from '@/utils/enrichmentAutoMatch';
 import {
   firstRows,
   importEdgeId,
@@ -54,59 +57,108 @@ async function onFile(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = '';
+  if (file) await takeFile(file);
+}
+
+async function takeFile(file: File) {
   error.value = null;
-  if (!file) return;
   if (file.size > maxBytes * 4) {
     error.value = `The file is ${Math.round(file.size / 1024)} KB; an exploration keeps about ${Math.round(maxBytes / 1024)} KB of your data. Keep only the rows and columns you need.`;
     return;
   }
-  picked.value = { name: file.name, buffer: await file.arrayBuffer() };
-  if (tab.value === 'enrich') startEnrichment();
-  else startGraph();
+  const buffer = await file.arrayBuffer();
+  if (tab.value === 'enrich') {
+    startEnrichment(file.name, decode(buffer));
+    return;
+  }
+  picked.value = { name: file.name, buffer };
+  startGraph();
+}
+
+const dragging = ref(false);
+function onDrop(event: DragEvent) {
+  dragging.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (file) void takeFile(file);
+}
+
+/** UTF-8, or Windows-1252 when the bytes are not UTF-8 (a spreadsheet export from Excel). */
+function decode(buffer: ArrayBuffer): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder('windows-1252').decode(buffer);
+  }
 }
 
 watch(tab, () => {
   picked.value = null;
+  source.value = null;
   error.value = null;
 });
 
 // --- enrich -------------------------------------------------------------------
+/** The rows to enrich from: a file, rows pasted from a spreadsheet, or an AI's answer. */
+interface Source {
+  name: string;
+  /** As it came (what the "clean this file" prompt shows). */
+  raw: string;
+  table: ReadTable;
+}
+const source = ref<Source | null>(null);
 const enrichment = ref<FileEnrichmentSpec | null>(null);
 const enrichValid = ref(false);
-const enrichText = computed(() =>
-  picked.value && enrichment.value ? new TextDecoder(decoderLabel(enrichment.value.input.encoding)).decode(picked.value.buffer) : '',
-);
+const enrichText = computed(() => source.value?.table.text ?? '');
+const suggestions = ref<MatchSuggestion[]>([]);
+const showPaste = ref(false);
+const pasteText = ref('');
+const showAdjust = ref(false);
+const skill = ref<'fill' | 'clean' | null>(null);
 
-/** The column whose values match the most node ids: a sensible first key. */
-function likelyKey(header: string[], text: string, delimiter: string): string {
-  const ids = new Set(graph.nodes.map((n) => n.node_id));
-  const sample = lines(text).slice(1, 200).map((l) => parseLine(l, delimiter));
-  let best = header[0] ?? '';
-  let score = 0;
-  header.forEach((col, i) => {
-    const hits = sample.filter((row) => ids.has((row[i] ?? '').trim())).length;
-    if (hits > score) [best, score] = [col, hits];
-  });
-  return best;
+/** Reads the rows and picks how they join the canvas (enrichmentAutoMatch): no setting needed. */
+function startEnrichment(name: string, raw: string) {
+  const table = readTable(raw);
+  if (!table.header.length || !table.rows.length) {
+    error.value = 'No rows to read: the first line should name the columns, and each line after it is one row.';
+    return;
+  }
+  const title = name.replace(/\.[^.]+$/, '');
+  source.value = { name, raw, table };
+  suggestions.value = suggestEnrichmentMatches(graph.baseGraph(), table, title);
+  enrichment.value = suggestions.value[0]?.spec ?? fallbackSpec(title, table);
+  showAdjust.value = false;
+  showPaste.value = false;
 }
 
-function startEnrichment() {
-  const raw = new TextDecoder('utf-8').decode(picked.value!.buffer);
-  const delimiter = guessDelimiter(raw);
-  const header = parseLine(lines(raw)[0] ?? '', delimiter);
-  const key = likelyKey(header, raw, delimiter);
-  enrichment.value = {
-    name: picked.value!.name.replace(/\.[^.]+$/, ''),
-    input: { delimiter, header: true },
-    target: 'nodes',
-    key_column: key,
-    columns: header.filter((c) => c !== key).slice(0, 20),
-    match_node_types: [],
-    match_source: 'node_id',
-    normalize: 'none',
-    overwrite: false,
-  };
+function usePasted() {
+  error.value = null;
+  startEnrichment('pasted rows', pasteText.value);
 }
+
+function onAnswer(text: string) {
+  skill.value = null;
+  error.value = null;
+  startEnrichment('AI answer', text);
+}
+
+function choose(s: MatchSuggestion) {
+  enrichment.value = { ...s.spec, overwrite: enrichment.value?.overwrite ?? false };
+}
+
+/** Which suggestion the current settings are (none once the person adjusted them). */
+const pickedSuggestion = computed(() => {
+  const e = enrichment.value;
+  return e ? suggestions.value.findIndex((s) => describeMatch(s.spec) === describeMatch(e) && scopeLabel(s.spec) === scopeLabel(e)) : -1;
+});
+
+/** The first rows, to see what the file holds; the key columns are marked. */
+const sampleRows = computed(() => source.value?.table.rows.slice(0, 5) ?? []);
+const keyColumns = computed(() => {
+  const e = enrichment.value;
+  if (!e) return new Set<string>();
+  if (e.target === 'edges' && e.edge_key?.by === 'endpoints') return new Set([e.edge_key.source_column, e.edge_key.target_column].filter((c): c is string => !!c));
+  return new Set(e.key_column ? [e.key_column] : []);
+});
 
 const enrichRows = computed(() => {
   if (!enrichment.value || !enrichText.value || !enrichValid.value) return null;
@@ -125,7 +177,11 @@ const enrichPreview = computed(() => {
   const base = graph.baseGraph();
   const matches = matchFileRows(base, spec, rows);
   const onNodes = (spec.target ?? 'nodes') === 'nodes';
-  const pool = onNodes ? base.nodes.map((n) => [n.node_id, n.properties] as const) : base.edges.map((e) => [e.edge_id, e.properties] as const);
+  const types = (onNodes ? spec.match_node_types : spec.match_edge_types)?.filter((t) => t !== '*') ?? [];
+  const inScope = (t: string) => !types.length || types.includes(t);
+  const pool = onNodes
+    ? base.nodes.filter((n) => inScope(n.node_type)).map((n) => [n.node_id, n.properties] as const)
+    : base.edges.filter((e) => inScope(e.relationship_type)).map((e) => [e.edge_id, e.properties] as const);
   const props = new Map(pool);
   let kept = 0;
   for (const [id, row] of matches) {
@@ -138,7 +194,8 @@ const enrichPreview = computed(() => {
   return {
     matched: matches.size,
     total: pool.length,
-    what: onNodes ? 'nodes' : 'edges',
+    what: scopeLabel(spec),
+    how: describeMatch(spec),
     kept,
     hidden: allow ? spec.columns.filter((c) => !allow.includes(c)) : [],
     keys: Object.keys(rows).length,
@@ -148,15 +205,16 @@ const enrichPreview = computed(() => {
 async function applyEnrichment() {
   const spec = enrichment.value;
   const rows = enrichRows.value;
-  if (!spec || !rows || !picked.value) return;
+  const src = source.value;
+  if (!spec || !rows || !src) return;
   // JSON copy: the spec comes from a form (Vue proxies), the layer is plain JSON.
-  const entry = { id: newOverlayId(), filename: picked.value.name, spec: JSON.parse(JSON.stringify(spec)) as FileEnrichmentSpec, rows: firstRows(rows), row_count: Object.keys(rows).length };
+  const entry = { id: newOverlayId(), filename: src.name, spec: JSON.parse(JSON.stringify(spec)) as FileEnrichmentSpec, rows: firstRows(rows), row_count: Object.keys(rows).length };
   if (JSON.stringify(entry).length > maxBytes) {
     error.value = 'This file is too large for an exploration layer. Keep only the columns you need, or the rows whose key is on the canvas.';
     return;
   }
-  await run(() => graph.setOverlayEnrichment(entry), `${enrichPreview.value?.matched ?? 0} ${enrichPreview.value?.what ?? 'nodes'} enriched from ${picked.value.name}`);
-  picked.value = null;
+  await run(() => graph.setOverlayEnrichment(entry), `${enrichPreview.value?.matched ?? 0} ${enrichPreview.value?.what ?? 'nodes'} enriched from ${src.name}`);
+  if (!error.value) source.value = null;
 }
 
 // --- nodes and edges from a file ------------------------------------------------
@@ -328,33 +386,94 @@ function drawNode() {
               <a :href="guideUrl('bring-your-own-data', 'enrich-nodes-or-edges-from-a-file')" target="_blank" rel="noopener">More in the guide</a>
             </HelpTip>
           </p>
-          <input type="file" accept=".csv,.tsv,.txt" data-testid="your-data-enrich-file" @change="onFile" />
-          <template v-if="picked && enrichment">
-            <MappingStep
-              role="enrichment"
-              :texts="{ [picked.name]: enrichText }"
-              :file-names="[picked.name]"
-              :detected="null"
-              spec-text=""
-              :enrichment="enrichment"
-              title=""
-              :scope-note="SCOPE"
-              for-layer
-              @update:enrichment="enrichment = $event"
-              @update:valid="enrichValid = $event"
-            />
-            <p v-if="enrichPreview" class="preview" data-testid="your-data-enrich-preview">
-              <strong>{{ enrichPreview.matched }} of {{ enrichPreview.total }} {{ enrichPreview.what }}</strong> match a row
-              ({{ enrichPreview.keys }} keys in the file).
-              <template v-if="enrichPreview.kept">
-                {{ enrichPreview.kept }} value{{ enrichPreview.kept === 1 ? ' is' : 's are' }} already set{{ enrichment.overwrite ? ' and will be replaced' : ' and stay as they are' }}.
-              </template>
-              <template v-if="enrichPreview.hidden.length"> Hidden by your property visibility: {{ enrichPreview.hidden.join(', ') }}.</template>
-            </p>
-            <p v-if="enrichPreview && !enrichPreview.matched" class="warn">
-              Nothing matches. Check the key column, the node types, and "Normalize keys" (a document with dots against digits only).
-            </p>
+          <div
+            class="drop"
+            :class="{ dragging, compact: !!source }"
+            data-testid="your-data-enrich-drop"
+            @dragover.prevent="dragging = true"
+            @dragleave="dragging = false"
+            @drop.prevent="onDrop"
+          >
+            <template v-if="source">
+              <span><strong>{{ source.name }}</strong> · {{ source.table.rows.length }} row{{ source.table.rows.length === 1 ? '' : 's' }} · {{ source.table.header.length }} column{{ source.table.header.length === 1 ? '' : 's' }}<template v-if="source.table.skipped"> · {{ source.table.skipped }} line{{ source.table.skipped === 1 ? '' : 's' }} above the header skipped</template></span>
+              <label class="btn btn-sm btn-outline file-btn">Another file<input type="file" accept=".csv,.tsv,.txt" @change="onFile" /></label>
+            </template>
+            <template v-else>
+              <span>Drop a CSV here, or</span>
+              <label class="btn btn-sm btn-outline file-btn">Choose a file<input type="file" accept=".csv,.tsv,.txt" data-testid="your-data-enrich-file" @change="onFile" /></label>
+            </template>
+            <button class="btn btn-sm btn-outline" :aria-expanded="showPaste" data-testid="your-data-enrich-paste-toggle" @click="showPaste = !showPaste">Paste rows</button>
+            <button class="btn btn-sm btn-outline" data-testid="your-data-enrich-ask-fill" @click="skill = 'fill'"><Bot :size="14" /> Ask an AI to fill in data</button>
+          </div>
+          <div v-if="showPaste" class="paste">
+            <textarea v-model="pasteText" rows="5" class="form-control mono" placeholder="Copy the cells from a spreadsheet (with the header row) and paste them here" data-testid="your-data-enrich-paste"></textarea>
             <div class="actions">
+              <button class="btn btn-sm btn-primary" :disabled="!pasteText.trim()" data-testid="your-data-enrich-paste-use" @click="usePasted">Use these rows</button>
+            </div>
+          </div>
+
+          <template v-if="source && enrichment">
+            <div v-if="suggestions.length > 1" class="alternatives" data-testid="your-data-enrich-alternatives">
+              <span class="hint">Ways the rows join:</span>
+              <button
+                v-for="(s, i) in suggestions"
+                :key="i"
+                class="chip-btn"
+                :class="{ active: pickedSuggestion === i }"
+                :aria-pressed="pickedSuggestion === i"
+                @click="choose(s)"
+              >{{ s.matched }} {{ scopeLabel(s.spec) }} · {{ describeMatch(s.spec) }}</button>
+            </div>
+            <div v-if="!suggestions.length" class="nomatch" data-testid="your-data-enrich-nomatch">
+              <span>No column of these rows meets the canvas: not as a node id, not as a property, under any normalization.
+                The key may be inside text, split across columns, or the ids may come from another system.</span>
+              <button class="btn btn-sm btn-outline" data-testid="your-data-enrich-ask-clean" @click="skill = 'clean'"><Bot :size="14" /> Ask an AI to clean this file</button>
+            </div>
+
+            <div class="sample-wrap">
+              <table class="sample" data-testid="your-data-enrich-sample">
+                <thead>
+                  <tr><th v-for="c in source.table.header" :key="c" :class="{ key: keyColumns.has(c) }">{{ c }}<span v-if="keyColumns.has(c)" class="key-tag">key</span></th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(r, i) in sampleRows" :key="i">
+                    <td v-for="(c, j) in source.table.header" :key="j" :class="{ key: keyColumns.has(c) }">{{ r[j] }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <details class="adjust" :open="showAdjust" @toggle="showAdjust = ($event.target as HTMLDetailsElement).open">
+              <summary data-testid="your-data-enrich-adjust">Adjust the matching and the columns</summary>
+              <MappingStep
+                role="enrichment"
+                :texts="{ [source.name]: enrichText }"
+                :file-names="[source.name]"
+                :detected="null"
+                spec-text=""
+                :enrichment="enrichment"
+                title=""
+                :scope-note="SCOPE"
+                for-layer
+                @update:enrichment="enrichment = $event"
+                @update:valid="enrichValid = $event"
+              />
+            </details>
+            <p v-if="suggestions.length" class="hint">
+              Joined automatically: the rows were tried against the node ids and every property, as they are and normalized.
+              Not the right join? <button class="link-btn" @click="skill = 'clean'">Ask an AI to clean this file</button>
+            </p>
+
+            <div class="footer">
+              <p v-if="enrichPreview" class="preview" data-testid="your-data-enrich-preview">
+                <strong>{{ enrichPreview.matched }} of {{ enrichPreview.total }} {{ enrichPreview.what }}</strong> match a row
+                ({{ enrichPreview.keys }} key{{ enrichPreview.keys === 1 ? '' : 's' }} in the file) · {{ enrichPreview.how }}.
+                <template v-if="enrichPreview.kept">
+                  {{ enrichPreview.kept }} value{{ enrichPreview.kept === 1 ? ' is' : 's are' }} already set{{ enrichment.overwrite ? ' and will be replaced' : ' and stay as they are' }}.
+                </template>
+                <template v-if="enrichPreview.hidden.length"> Hidden by your property visibility: {{ enrichPreview.hidden.join(', ') }}.</template>
+              </p>
+              <p v-else-if="!enrichValid" class="warn">Pick a key column and at least one column to add (Adjust the matching).</p>
               <button class="btn btn-primary" :disabled="busy || !enrichPreview?.matched" data-testid="your-data-enrich-apply" @click="applyEnrichment">Apply</button>
             </div>
           </template>
@@ -442,10 +561,139 @@ function drawNode() {
         </section>
       </div>
     </div>
+    <EnrichmentSkillModal
+      v-if="skill"
+      :mode="skill"
+      :file-name="source?.name"
+      :file-text="source?.raw"
+      @close="skill = null"
+      @answer="onAnswer"
+    />
   </Teleport>
 </template>
 
 <style scoped>
+.drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.drop.compact {
+  padding: 8px 10px;
+  border-style: solid;
+}
+.drop.dragging {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.drop > span {
+  flex: 1 1 200px;
+}
+.file-btn input {
+  display: none;
+}
+.paste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.alternatives {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.chip-btn {
+  border: 1px solid var(--border-color);
+  background: none;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-color);
+}
+.chip-btn.active {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+.nomatch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+}
+.nomatch span {
+  flex: 1 1 300px;
+}
+.sample-wrap {
+  overflow-x: auto;
+}
+.sample {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+.sample th,
+.sample td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sample .key {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+.key-tag {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-transform: uppercase;
+}
+.adjust summary {
+  cursor: pointer;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+}
+.footer {
+  position: sticky;
+  bottom: calc(-1 * var(--space-6, 24px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0 12px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--border-color);
+  z-index: 1;
+}
+.footer p {
+  flex: 1;
+}
 .your-data {
   width: min(960px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
