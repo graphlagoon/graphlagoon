@@ -135,6 +135,15 @@ function deletedSummary(nodes: number, edges: number): string {
   return [nodes ? part(nodes, 'node') : '', edges ? part(edges, 'edge') : ''].filter(Boolean).join(' and ');
 }
 
+/** Built-in items the person hid (Behaviors → Context Menu); none without pinia. */
+function hiddenMenuActions(): string[] {
+  try {
+    return useGraphStore().behaviors.hiddenMenuActions;
+  } catch {
+    return []; // no pinia (unit tests of the menu alone)
+  }
+}
+
 /** Whether drawing applies here (a writable exploration or case); false without pinia. */
 function sketchAllowed(): boolean {
   try {
@@ -183,8 +192,9 @@ export function useContextMenu() {
 
   function getVisibleActions(): ContextMenuAction[] {
     if (!target.value) return [];
+    const hidden = new Set(hiddenMenuActions());
     return actions.value.filter(
-      a => !a.visible || a.visible(target.value!),
+      a => !hidden.has(a.id) && (!a.visible || a.visible(target.value!)),
     );
   }
 

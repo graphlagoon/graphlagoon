@@ -14066,3 +14066,17 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `docs/guide/exploring-the-graph.md` ("Deleting nodes and edges"), `rest-api.md` (fluxo com curl), `agents-mcp-tools.md` e `openapi.json` regenerados.
 **Permissão (2.4b):** nenhuma nova; rota usa `exploration.save` (+ `exploration.edit_graph` para a camada); o clique só muda a tela.
 **Admin-area impact:** rota nova em `AUDIT_EXEMPT_ROUTES` (motivo: edição por dono/escritor, como o PUT) e em `TOOL_ROUTES`; sem tabela, setting ou ação de auditoria nova.
+
+## [2026-11-12 16:00] - Feature Implemented: ocultar itens embutidos do menu de contexto (behavior, sem migração)
+
+**Pedido (TODO.md):** permitir ocultar elementos do context menu que são mostrados por padrão, fixos.
+**Decisões:**
+1. **Behavior `hiddenMenuActions: string[]`** (ids das ações). Pessoal como os outros behaviors (exploração, preset) e padrão do contexto via `default_behaviors` (coluna JSON existente) — sem migração. Rejeitado: entrada especial na lista `context_menu_actions` (é do contexto, só escritores, e `isKnownActionKind` a descartaria).
+2. **`applyBehaviorOverrides`** passa a validar behaviors lista: `typeof` não distingue array de objeto; aceita só lista de strings.
+3. **Filtro único em `getVisibleActions`** (antes do `visible` de cada ação): vale para qualquer id, inclusive os registrados por componentes (`expand-neighbors`, `ego-layout-focus`, comunidade, caso). O catálogo do painel (`utils/builtInMenuItems.ts`) lista os embutidos da página do grafo; ações configuráveis e cluster programs já têm liga/desliga próprio e ficam fora.
+4. **UI:** seção Context Menu do BehaviorPanel agora aparece para todos (o botão "Configure actions…" continua só para escritores) com "Built-in items" recolhível, checkbox = mostrado, contador "(N hidden)".
+**Files:** new `frontend/src/utils/builtInMenuItems.ts`; changed `stores/graph.ts`, `composables/useContextMenu.ts`, `components/BehaviorPanel.vue`, `composables/__tests__/useContextMenu.test.ts`, `e2e/tests/context-menu.spec.ts`.
+**Tests:** vitest +2 (id oculto sai do menu; default do contexto que não é lista de strings é ignorado); e2e +1 (desmarcar Copy ID no painel e o menu não o mostra).
+**Public docs:** `docs/guide/context-menu-actions.md` ("Hiding built-in entries").
+**Permissão (2.4b):** nenhuma; preferência de exibição.
+**No admin-area impact:** sem rota, tabela, setting ou auditoria.

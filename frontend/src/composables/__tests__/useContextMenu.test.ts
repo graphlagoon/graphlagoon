@@ -223,3 +223,29 @@ describe('useContextMenu — Delete from graph', () => {
     expect(action()).toBeUndefined()
   })
 })
+
+describe('useContextMenu — hidden built-in items (Behaviors → Context Menu)', () => {
+  it('leaves out the ids in behaviors.hiddenMenuActions', async () => {
+    const { setActivePinia, createPinia } = await import('pinia')
+    const { useGraphStore } = await import('@/stores/graph')
+    setActivePinia(createPinia())
+    window.__GRAPH_LAGOON_CONFIG__ = {} as never
+    const graph = useGraphStore()
+    const ctx = useContextMenu()
+    ctx.resetActions()
+    ctx.show(new MouseEvent('contextmenu'), { type: 'node', id: 'n1', label: 'n1' })
+    expect(ctx.getVisibleActions().map((a) => a.id)).toContain('copy-id')
+
+    graph.updateBehaviors({ hiddenMenuActions: ['copy-id'] })
+    expect(ctx.getVisibleActions().map((a) => a.id)).not.toContain('copy-id')
+  })
+
+  it('a context default that is not a list of strings is ignored', async () => {
+    const { resolveInitialBehaviors } = await import('@/stores/graph')
+    window.__GRAPH_LAGOON_CONFIG__ = {} as never
+    expect(resolveInitialBehaviors({ hiddenMenuActions: ['copy-id'] }).hiddenMenuActions).toEqual(['copy-id'])
+    expect(resolveInitialBehaviors({ hiddenMenuActions: 'copy-id' }).hiddenMenuActions).toEqual([])
+    expect(resolveInitialBehaviors({ hiddenMenuActions: { a: 1 } }).hiddenMenuActions).toEqual([])
+    expect(resolveInitialBehaviors({ hiddenMenuActions: [1] }).hiddenMenuActions).toEqual([])
+  })
+})

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { useGraphStore, resolveInitialBehaviors, type ProgressiveLoadMode } from '@/stores/graph';
 import { useClusterStore } from '@/stores/cluster';
+import { BUILT_IN_MENU_ITEMS } from '@/utils/builtInMenuItems';
 import { ChevronDown, ChevronRight, X, MousePointerClick } from 'lucide-vue-next';
 
 const showAdvanced = ref(false);
@@ -22,6 +23,14 @@ const canEditMenuActions = computed(() => graphStore.currentContext?.has_write_a
 const behaviors = computed(() => graphStore.behaviors);
 const clusterStore = useClusterStore();
 const clusterPrograms = computed(() => clusterStore.programs);
+
+const showMenuItems = ref(false);
+const hiddenMenuCount = computed(() => behaviors.value.hiddenMenuActions.length);
+
+function toggleMenuItem(id: string, shown: boolean) {
+  const hidden = behaviors.value.hiddenMenuActions.filter((x) => x !== id);
+  graphStore.updateBehaviors({ hiddenMenuActions: shown ? hidden : [...hidden, id] });
+}
 
 function setAfterQueryCommunities(value: string) {
   graphStore.updateBehaviors({ afterQueryCommunities: value });
@@ -141,18 +150,46 @@ function resetBehaviors() {
       </div>
     </div>
 
-    <div v-if="canEditMenuActions" class="behavior-section">
+    <div class="behavior-section" data-testid="behavior-context-menu">
       <h4>Context Menu</h4>
+      <template v-if="canEditMenuActions">
+        <button
+          class="btn btn-outline btn-sm"
+          data-testid="behavior-open-menu-actions"
+          @click="emit('open-menu-actions')"
+        >
+          <MousePointerClick :size="14" /> Configure actions…
+        </button>
+        <p class="behavior-desc">
+          Custom right-click actions on nodes and edges (open URLs, copy text, run query templates)
+        </p>
+      </template>
+
       <button
-        class="btn btn-outline btn-sm"
-        data-testid="behavior-open-menu-actions"
-        @click="emit('open-menu-actions')"
+        class="advanced-toggle"
+        data-testid="behavior-menu-items-toggle"
+        :aria-expanded="showMenuItems"
+        @click="showMenuItems = !showMenuItems"
       >
-        <MousePointerClick :size="14" /> Configure actions…
+        <ChevronDown v-if="showMenuItems" :size="14" />
+        <ChevronRight v-else :size="14" />
+        Built-in items
+        <span v-if="hiddenMenuCount" class="behavior-desc">({{ hiddenMenuCount }} hidden)</span>
       </button>
-      <p class="behavior-desc">
-        Custom right-click actions on nodes and edges (open URLs, copy text, run query templates)
-      </p>
+      <div v-if="showMenuItems" class="checkbox-list" data-testid="behavior-menu-items">
+        <label v-for="item in BUILT_IN_MENU_ITEMS" :key="item.id" class="checkbox-item">
+          <input
+            type="checkbox"
+            :data-testid="`behavior-menu-item-${item.id}`"
+            :checked="!behaviors.hiddenMenuActions.includes(item.id)"
+            @change="toggleMenuItem(item.id, ($event.target as HTMLInputElement).checked)"
+          />
+          {{ item.label }}
+        </label>
+        <p class="behavior-desc">
+          Unchecked items stay out of the right-click menu. Items only show where they apply
+        </p>
+      </div>
     </div>
 
     <div class="behavior-section" data-testid="behavior-after-query">
@@ -753,6 +790,12 @@ function resetBehaviors() {
   color: var(--text-muted, #666);
   user-select: none;
   transition: color 0.15s;
+}
+
+button.advanced-toggle {
+  border: none;
+  background: none;
+  margin-top: 6px;
 }
 
 .advanced-toggle:hover {
