@@ -186,6 +186,12 @@ class Settings(BaseSettings):
         description="Comma-separated catalog.schema pairs (e.g. 'cat1.schema1,cat2.schema2'). "
         "When set, list_datasets searches all specified pairs instead of just default_catalog/default_schema.",
     )
+    enrichment_sources: Optional[str] = Field(
+        default=None,
+        description="Comma-separated catalog.schema or catalog.schema.table entries a "
+        "context may also authorize as enrichment tables, on top of catalog_schemas "
+        "(e.g. 'main.kyc,main.fraud.transactions'). Not offered for graph tables.",
+    )
     allow_raw_sql_scripts: bool = Field(
         default=False,
         description="Allow BEGIN...END compound statements on the raw-SQL "
@@ -620,6 +626,15 @@ class Settings(BaseSettings):
             )
             return {}
         return parsed
+
+    @property
+    def enrichment_source_list(self) -> list[str]:
+        """``enrichment_sources`` as a list of ``catalog.schema[.table]`` strings."""
+        return [
+            item.strip()
+            for item in (self.enrichment_sources or "").split(",")
+            if len(item.strip().split(".")) in (2, 3)
+        ]
 
     @property
     def catalog_schema_pairs(self) -> list[tuple[str, str]]:

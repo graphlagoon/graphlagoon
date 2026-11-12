@@ -26,6 +26,7 @@ import { describeIdentityKey } from '@/utils/identityKeys';
 import ContextDefaultLookField from '@/components/ContextDefaultLookField.vue';
 import EnrichmentQueryField from '@/components/EnrichmentQueryField.vue';
 import EnrichmentTablesTools from '@/components/EnrichmentTablesTools.vue';
+import { configuredEnrichmentSources, isAllowedEnrichmentSource } from '@/utils/enrichmentSources';
 import { storedDefaultLook, withDefaultLook, type DefaultLook } from '@/composables/useContextDefaultLook';
 
 /**
@@ -650,6 +651,9 @@ function importEnrichmentTables(imported: EnrichmentTable[]) {
 }
 
 /** What the "Ask an AI" prompt knows about this context. */
+/** What the deployment lets a context list (null: the server did not say). */
+const enrichmentSources = configuredEnrichmentSources();
+
 const enrichmentSkillInput = computed(() => ({
   title: form.value.title || props.context?.title || 'this context',
   datasourceType: form.value.datasource_type,
@@ -666,7 +670,13 @@ const enrichmentSkillInput = computed(() => ({
   nodeProperties: nodePropertyOptions.value,
   nodeTypes: nodeTypeOptions.value,
   relationshipTypes: splitCsv(form.value.relationship_types),
+  allowedSources: enrichmentSources,
 }));
+
+function outsideSources(row: EnrichmentRow): boolean {
+  const own = [form.value.edge_table_name, form.value.noNodeTable ? '' : form.value.node_table_name].filter(Boolean);
+  return !!row.table.trim() && !isAllowedEnrichmentSource(row.table, enrichmentSources, own);
+}
 
 /** Every table the rows authorize: what a query may join. */
 const authorizedTableNames = computed(() => [
@@ -1295,8 +1305,11 @@ async function submit() {
           </div>
           <p class="enrichment-warning" data-testid="enrichment-warning">
             A table listed here is authorized for this context: enrichment queries, node lookups
-            and readers' SQL may read it. Adding or changing one needs the "Create graph
-            contexts" permission and a table in an allowed catalog. Every read is audited.
+            and readers' SQL may read it; no query reads a table the context does not list. Adding or
+            changing one needs the "Create graph contexts" permission and a table from an allowed
+            source<template v-if="enrichmentSources?.length">
+              (<span data-testid="enrichment-sources">{{ enrichmentSources.join(', ') }}</span>)</template>.
+            Every read is audited.
           </p>
           <p v-if="!form.enrichment_tables.length" class="hint" data-testid="enrichment-empty">
             No authorized tables. Attach one, import a YAML list, or ask an AI to write it: a table can
@@ -1317,6 +1330,10 @@ async function submit() {
               <div class="form-group">
                 <label>Table</label>
                 <input v-model="row.table" type="text" class="form-control" placeholder="catalog.schema.table" data-testid="enrichment-table" />
+                <p v-if="outsideSources(row)" class="field-error" data-testid="enrichment-outside-sources">
+                  Not an allowed source: saving will be refused. An administrator can add it to
+                  GRAPH_LAGOON_ENRICHMENT_SOURCES.
+                </p>
               </div>
               <button
                 type="button"

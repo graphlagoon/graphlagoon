@@ -39,9 +39,14 @@ GRAPH_LAGOON_DATABRICKS_CATALOG=main
 # TLS verification on the OAuth token exchange. Leave true; with an internal
 # CA, point SSL_CERT_FILE at your bundle instead of disabling this.
 GRAPH_LAGOON_DATABRICKS_TLS_VERIFY=true
-# Which catalog.schema pairs any query may read (see "Query scope" in the
-# permissions guide). Also the search scope for dataset listing.
+# Which catalog.schema pairs graph contexts are built from: the search scope
+# for dataset listing, and an allowed source for enrichment tables. A query
+# still reads only the tables its context declares (see "Query scope" in the
+# permissions guide).
 # GRAPH_LAGOON_CATALOG_SCHEMAS=main.graphs,main.staging
+# Extra schemas (catalog.schema) or single tables (catalog.schema.table) a
+# context may list as enrichment tables only, never as graph tables.
+# GRAPH_LAGOON_ENRICHMENT_SOURCES=main.kyc,main.fraud.transactions
 # Allow hand-written BEGIN...END scripts on the raw-SQL path. Off by default:
 # a script body is opaque to both the read-only validator and the table-scope
 # check. Enable ONLY with read-only Unity Catalog grants.

@@ -1,4 +1,4 @@
-"""Table-scope extraction and the two-tier scope decision.
+"""Table-scope extraction and the one-rule scope decision.
 
 Route-level enforcement lives in test_permission_routes.py; this is the pure
 core: which tables a statement really names, and whether they are in scope.
@@ -13,6 +13,7 @@ from graphlagoon.services.sql_scope import (
     context_tables,
     extract_table_refs,
     normalize_table_name,
+    source_scope,
 )
 
 DEFAULTS = ("spark_catalog", "default")
@@ -23,12 +24,14 @@ def make_context(edge="main.graphs.edges", node="main.graphs.nodes"):
     return SimpleNamespace(edge_table_name=edge, node_table_name=node)
 
 
-def _scope(sql, is_author, context=None):
+SOURCES = source_scope(ALLOWED, ["main.kyc", "ext.risk.scores"], *DEFAULTS)
+
+
+def _scope(sql, context=None, sources=SOURCES):
     return check_scope(
         sql,
         context or make_context(),
-        is_author=is_author,
-        allowed_pairs=ALLOWED,
+        sources,
         default_catalog=DEFAULTS[0],
         default_schema=DEFAULTS[1],
     )
@@ -83,7 +86,7 @@ class TestNormalization:
         }
 
 
-class TestReaderTier:
+class TestOneRuleForEveryone:
     @pytest.mark.parametrize(
         "sql",
         [
@@ -93,7 +96,7 @@ class TestReaderTier:
         ],
     )
     def test_context_tables_allowed(self, sql):
-        assert _scope(sql, is_author=False) is None
+        assert _scope(sql) is None
 
     @pytest.mark.parametrize(
         "sql",
@@ -105,27 +108,44 @@ class TestReaderTier:
         ],
     )
     def test_anything_else_denied(self, sql):
-        assert _scope(sql, is_author=False) is not None
+        assert _scope(sql) is not None
 
     def test_case_insensitive_match(self):
-        assert _scope("SELECT * FROM MAIN.GRAPHS.EDGES", is_author=False) is None
+        assert _scope("SELECT * FROM MAIN.GRAPHS.EDGES") is None
+
+    def test_allowed_schema_is_not_enough(self):
+        # main.staging is allowed for graphs, but no context names this table.
+        problem = _scope("SELECT * FROM main.staging.other")
+        assert problem is not None and "main.staging.other" in problem
+
+    def test_enrichment_table_inside_sources_is_in_scope(self):
+        context = make_context()
+        context.enrichment_tables = [{"table": "main.kyc.devices"}, {"table": "ext.risk.scores"}]
+        assert _scope("SELECT * FROM main.kyc.devices d JOIN ext.risk.scores s ON 1=1", context) is None
+
+    def test_enrichment_table_outside_sources_drops_out(self):
+        # Listed before the settings changed: no longer authorized.
+        context = make_context()
+        context.enrichment_tables = [{"table": "hr.private.salaries"}]
+        assert _scope("SELECT * FROM hr.private.salaries", context) is not None
 
 
-class TestAuthorTier:
-    def test_other_table_inside_allowlist(self):
-        assert _scope("SELECT * FROM main.staging.other", is_author=True) is None
+class TestSourceScope:
+    def test_schemas_and_tables(self):
+        assert SOURCES.allows(("main", "graphs", "anything"))
+        assert SOURCES.allows(("main", "kyc", "devices"))
+        assert SOURCES.allows(("ext", "risk", "scores"))
+        assert not SOURCES.allows(("ext", "risk", "other"))
+        assert not SOURCES.allows(("hr", "private", "salaries"))
 
-    def test_outside_allowlist_denied(self):
-        problem = _scope("SELECT * FROM hr.private.salaries", is_author=True)
-        assert problem is not None and "hr.private.salaries" in problem
+    def test_backticks_and_case(self):
+        sources = source_scope([("`My-Cat`", "graphs")], ["`X`.Y.Z"], *DEFAULTS)
+        assert sources.allows(("my-cat", "graphs", "t"))
+        assert sources.allows(("x", "y", "z"))
 
-    def test_context_schema_always_in_scope(self):
-        # A context pointing outside the configured pairs keeps working.
-        context = make_context(edge="other.zone.edges", node=None)
-        assert (
-            _scope("SELECT * FROM other.zone.edges", is_author=True, context=context)
-            is None
-        )
+    def test_malformed_entries_ignored(self):
+        sources = source_scope([], ["", "onlyone", "a.b.c.d"], *DEFAULTS)
+        assert sources.schemas == frozenset() and sources.tables == frozenset()
 
 
 class TestBacktickedNames:
@@ -146,26 +166,14 @@ class TestBacktickedNames:
             "SELECT * FROM `my-cat`.`graphs`.`edges`",
         ],
     )
-    def test_reader_reads_own_quoted_tables(self, sql):
+    def test_reads_own_quoted_tables(self, sql):
         context = make_context(edge="`my-cat`.graphs.edges", node=None)
-        assert _scope(sql, is_author=False, context=context) is None
-
-    def test_author_allowlist_with_backticks(self):
-        problem = check_scope(
-            "SELECT * FROM `my-cat`.graphs.other",
-            make_context(),
-            is_author=True,
-            allowed_pairs=[("`my-cat`", "graphs")],
-            default_catalog=DEFAULTS[0],
-            default_schema=DEFAULTS[1],
-        )
-        assert problem is None
+        assert _scope(sql, context=context) is None
 
 
 class TestFailClosed:
-    def test_unparseable_is_refused_for_both_tiers(self):
+    def test_unparseable_is_refused(self):
         # Defensive: in the routers the SELECT-only validator runs first, so
         # anything reaching check_scope already parsed. If that ever changes,
         # an unparseable statement must not slip through as "no tables".
-        assert _scope("SELECT FROM", is_author=False) is not None
-        assert _scope("SELECT FROM", is_author=True) is not None
+        assert _scope("SELECT FROM") is not None

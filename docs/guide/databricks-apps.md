@@ -55,9 +55,10 @@ are. Two consequences to decide before you ship:
    *impossible* rather than merely rejected, and they are the only thing
    guarding [`GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS`](./configuration.md) if you
    ever turn it on.
-2. **Scope what it can reach** with `GRAPH_LAGOON_CATALOG_SCHEMAS`: whatever
-   the principal can read, an app user with the "Create graph contexts"
-   permission can reach through a query (see
+2. **Scope what it can reach** with `GRAPH_LAGOON_CATALOG_SCHEMAS` and
+   `GRAPH_LAGOON_ENRICHMENT_SOURCES`: a query only ever reads tables a context
+   declares, and an author with the "Create graph contexts" permission can
+   only list tables from those sources (see
    [Query scope](./permissions.md#query-scope)).
 
 The M2M exchange itself requests the `all-apis` scope, so the credential is

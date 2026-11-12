@@ -430,6 +430,23 @@ describe('GraphContextFormModal', () => {
       ])
     })
 
+    it('names the allowed sources and warns on a table outside them', async () => {
+      window.__GRAPH_LAGOON_CONFIG__ = { enrichment_sources: ['main.graphs', 'main.risk', 'ext.kyc.people'] }
+      try {
+        const context = createGraphContext({ id: 'ctx-edit' })
+        const { getByTestId, queryByTestId } = renderModal({ open: true, mode: 'edit', context })
+        await flush()
+        expect(getByTestId('enrichment-sources').textContent).toBe('main.graphs, main.risk, ext.kyc.people')
+        await fireEvent.click(getByTestId('enrichment-add'))
+        await fireEvent.update(getByTestId('enrichment-table'), 'main.risk.devices')
+        expect(queryByTestId('enrichment-outside-sources')).toBeNull()
+        await fireEvent.update(getByTestId('enrichment-table'), 'ext.kyc.other')
+        expect(getByTestId('enrichment-outside-sources')).toBeTruthy()
+      } finally {
+        delete window.__GRAPH_LAGOON_CONFIG__
+      }
+    })
+
     it('attaches a table with only an edge enrichment query', async () => {
       const context = createGraphContext({ id: 'ctx-edit' })
       vi.mocked(api.updateGraphContext).mockResolvedValue(context)

@@ -42,14 +42,22 @@ the default: **until an admin writes a rule, nothing changes for anyone.**
 ## Query scope
 
 Querying itself is never denied — what changes is **which tables a query may
-read**. The tier is decided by `context.create`, because a holder can already
-point a new context at any table in the allowlist; letting them query those
-tables directly is not an escalation.
+read**, and the rule is the same for everyone, whatever their permissions: a
+query reads **only the tables its context declares**.
 
-| Tier | May read |
+| A query on a context may read | Who decides it |
 |---|---|
-| **Holds `context.create`** | Any table inside the configured `catalog.schema` allowlist (`GRAPH_LAGOON_CATALOG_SCHEMAS`, plus the open context's own schemas). |
-| **Everyone else** | Only the tables of the context they have open (its edge and node tables). |
+| The context's edge and node tables | Whoever creates or edits the context. |
+| The context's [enrichment tables](./bring-your-own-data.md#enrich-from-databricks-tables) | A context author with `context.create`, and only among the **allowed sources** below. |
+
+The **allowed sources** are a deployment setting: the `catalog.schema` pairs
+allowed for graphs (`GRAPH_LAGOON_CATALOG_SCHEMAS`) plus the schemas or single
+tables allowed for enrichment only (`GRAPH_LAGOON_ENRICHMENT_SOURCES`, for
+example `main.kyc,main.fraud.transactions`). A table in an allowed schema that
+no context lists is not readable: `context.create` lets you *list* it in a
+context, not query it directly. When an administrator removes a source, every
+context that listed a table from it stops reading that table at once (raw SQL,
+lookups and enrichment queries alike), without anyone editing the context.
 
 Enforcement parses the statement, so a table smuggled in through a `JOIN`, a
 subquery or a `UNION` is caught the same as one in the `FROM` clause; CTE
@@ -156,6 +164,6 @@ How it resolves:
 | Banner: *Databricks membership lookups are failing* | SCIM is unreachable or the principal lacks the read grant. Rules keep using each user's **last-known-good** membership; users never resolved simply don't match Databricks-kind members. | Fix the grant/connectivity; **Refresh cache** re-resolves on the next check. Critical **deny** rules should use email members — they never depend on SCIM. |
 | Someone kept access after leaving a Databricks group | The per-user cache (default 10 min) hasn't expired. | Wait out the TTL or hit **Refresh cache**. |
 | Everyone (but superusers) lost an action | Its mode is `restricted` with no allow rule — the matrix warns about exactly this. | Add an allow rule or set the mode back to `everyone`. |
-| A query returns `QUERY_SCOPE_DENIED` | It reads a table outside the caller's tier: outside the open context (no `context.create`) or outside the configured allowlist. | Widen `GRAPH_LAGOON_CATALOG_SCHEMAS`, grant `context.create`, or query the context's own tables. |
+| A query returns `QUERY_SCOPE_DENIED` | It reads a table the open context does not declare (its edge and node tables, and its enrichment tables still inside the allowed sources). | Query the context's tables, or ask a context author to list the table under **Enrichment tables** (an administrator may first need to add it to `GRAPH_LAGOON_ENRICHMENT_SOURCES`). |
 | `SCRIPT_NOT_ALLOWED` on a hand-written `BEGIN…END` | Raw scripts are off by default — they cannot be validated or scoped. | Run the Cypher it came from, or enable `GRAPH_LAGOON_ALLOW_RAW_SQL_SCRIPTS` with read-only warehouse grants. |
 | Admin locked themselves out? | Impossible via rules: superusers bypass all of them, and the superuser list is an env var, not data. | — |

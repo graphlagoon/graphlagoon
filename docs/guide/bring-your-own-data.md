@@ -159,7 +159,7 @@ optional, so an entry can just authorize a table for a sibling's join.
 
 | Rule | Why |
 |---|---|
-| Adding or changing an entry (its table, its lookup or its query) needs the **Create graph contexts** permission, and the table must be in an allowed catalog | Listing a table widens what the context's readers can read, so it is an author's decision. A writer without the permission may only remove entries. |
+| Adding or changing an entry (its table, its lookup or its query) needs the **Create graph contexts** permission, and the table must be an **allowed source**: inside a `catalog.schema` of `GRAPH_LAGOON_CATALOG_SCHEMAS`, or a schema or table of `GRAPH_LAGOON_ENRICHMENT_SOURCES` (for enrichment only) | Listing a table widens what the context's readers can read, so it is an author's decision. A writer without the permission may only remove entries. |
 | The query is one read-only `SELECT` | It runs with the app's warehouse access. |
 | Every table it names is checked against the list when you save **and** on every run | A table removed from the list stops every query that joined it. |
 | Running a query only needs read access to the context | Like a lookup; every run is audited as `enrichment.run`. |
@@ -256,7 +256,7 @@ enrichment_tables:
 | You see | Cause |
 |---|---|
 | *An edge enrichment query failed* (toast) | An automatic run failed. The graph is fine; the tab says why. |
-| `ENRICHMENT_SCOPE_DENIED` when saving or running | The query names a table that is not in the list (or no longer is). Add it, or change the query. |
+| `ENRICHMENT_SCOPE_DENIED` when saving or running | The table is not an allowed source (or no longer is, after an administrator changed `GRAPH_LAGOON_ENRICHMENT_SOURCES` or `GRAPH_LAGOON_CATALOG_SCHEMAS`), or the query names a table that is not in the list. The message names the table and the allowed sources. Ask an administrator to allow it, list it, or change the query. |
 | `ENRICHMENT_RESULT_NO_KEY` | The query returned no `edge_id` column (a query on edges) or no `node_id` column (on nodes). |
 | `ENRICHMENT_QUERY_FAILED` | The warehouse refused the query (a missing column, a type error); its message is shown. |
 | *the result hit the row limit* | More rows than `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` came back for one batch; some edges may be missing values. |

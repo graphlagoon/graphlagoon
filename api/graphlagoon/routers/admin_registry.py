@@ -56,6 +56,7 @@ CONFIG_FIELD_KINDS: dict[str, ConfigKind] = {
     "databricks_catalog": "public",
     "databricks_schema": "public",
     "catalog_schemas": "public",
+    "enrichment_sources": "public",
     "allow_raw_sql_scripts": "public",
     "databricks_tls_verify": "public",
     "max_query_rows": "public",

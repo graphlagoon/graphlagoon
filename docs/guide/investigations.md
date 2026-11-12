@@ -339,7 +339,10 @@ entities into one on the canvas and in every server analysis.
 ## Enrichment tables
 
 A context lists its **authorized tables** (KYC, devices, chargebacks) under
-Enrichment Tables in the context form. An entry with a **key column** is a
+Enrichment Tables in the context form. Only an **allowed source** may be
+listed: a table in a `catalog.schema` of `GRAPH_LAGOON_CATALOG_SCHEMAS`, or a
+schema or table of `GRAPH_LAGOON_ENRICHMENT_SOURCES` (see
+[Query scope](./permissions.md#query-scope)). An entry with a **key column** is a
 lookup: the inspector's **Enrichment** tab looks it up for the selected
 entity, and it can **promote** a column to nodes (each distinct value becomes
 a node linked to the entities that share it). Lookups are by key, return only
@@ -555,6 +558,7 @@ All optional. Details in [Configuration](./configuration.md#investigation-storag
 | `GRAPH_LAGOON_INVESTIGATION_MAX_WORKING_EDGES` | `50000` | Edges kept from a file graph |
 | `GRAPH_LAGOON_INVESTIGATION_RETENTION_YEARS` | `10` | Years a closed case cannot be deleted, when its type sets none |
 | `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` / `_MAX_ROWS` | `500` / `5000` | Keys per enrichment lookup / rows it returns |
+| `GRAPH_LAGOON_ENRICHMENT_SOURCES` | unset | Schemas (`catalog.schema`) or tables (`catalog.schema.table`) a context may list as enrichment tables, on top of `GRAPH_LAGOON_CATALOG_SCHEMAS` |
 | `GRAPH_LAGOON_AGENTS_ENABLED` | `false` | Agent tokens and the `/mcp` server |
 | `GRAPH_LAGOON_AGENT_TOKEN_MAX_DAYS` | `90` | Longest token validity |
 | `GRAPH_LAGOON_AGENT_RATE_LIMIT_PER_MINUTE` | `120` | Requests per minute per agent token |
