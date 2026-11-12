@@ -2874,12 +2874,15 @@ export const useGraphStore = defineStore('graph', () => {
    * that only re-runs when one of the settings it reads actually changes.
    */
   const savedStateFingerprint = ref<string | null>(null);
+  /** Deletions on the canvas since load (undo takes one back): the dirty marker counts them. */
+  const graphEdits = ref(0);
 
   function fingerprintExplorationState(): string {
     try {
       // Moving the camera is not a change worth a dirty marker: the viewport
       // is captured at save time, never edited.
-      return JSON.stringify({ ...getExplorationState(), viewport: undefined });
+      // Nodes and edges are not in the state; a deletion on the canvas still is a change.
+      return JSON.stringify({ ...getExplorationState(), viewport: undefined, graphEdits: graphEdits.value });
     } catch {
       // Never let a serialisation problem break the toolbar: an empty
       // fingerprint just means "cannot tell", handled as not-dirty below.
@@ -3398,6 +3401,56 @@ export const useGraphStore = defineStore('graph', () => {
     });
   }
 
+  /**
+   * Deletes nodes (with every edge touching them) and edges from the canvas. The context's
+   * answer changes in memory (saved with the exploration, the dirty marker says so); the
+   * layer's own nodes and edges go through the layer and are saved at once.
+   * `undo` puts the context's part back; null when only the layer changed.
+   */
+  async function deleteFromGraph(nodeIds: string[], edgeIds: string[] = []): Promise<{
+    removedNodes: number;
+    removedEdges: number;
+    undo: (() => void) | null;
+    error: string | null;
+  }> {
+    const goneNodes = new Set(nodeIds);
+    const goneEdges = new Set(edgeIds);
+    const isGoneEdge = (e: Edge) => goneEdges.has(e.edge_id) || goneNodes.has(e.src) || goneNodes.has(e.dst);
+    const layerNodes = overlayAddedNodeIds.value;
+    const layerEdges = overlayAddedEdgeIds.value;
+    const removedNodes = nodes.value.filter((n) => goneNodes.has(n.node_id));
+    const removedEdges = edges.value.filter(isGoneEdge);
+    const layerNodeIds = removedNodes.filter((n) => layerNodes.has(n.node_id)).map((n) => n.node_id);
+    const layerEdgeIds = removedEdges.filter((e) => layerEdges.has(e.edge_id)).map((e) => e.edge_id);
+    const ownNodes = removedNodes.filter((n) => !layerNodes.has(n.node_id));
+    const ownEdges = removedEdges.filter((e) => !layerEdges.has(e.edge_id));
+    if (removedNodes.length === 0 && removedEdges.length === 0) {
+      return { removedNodes: 0, removedEdges: 0, undo: null, error: null };
+    }
+
+    nodes.value = nodes.value.filter((n) => !goneNodes.has(n.node_id));
+    edges.value = edges.value.filter((e) => !isGoneEdge(e));
+    for (const n of removedNodes) selectedNodeIds.value.delete(n.node_id);
+    for (const e of removedEdges) selectedEdgeIds.value.delete(e.edge_id);
+    const touchedContext = ownNodes.length > 0 || ownEdges.length > 0;
+    if (touchedContext) graphEdits.value++;
+
+    const error = layerNodeIds.length || layerEdgeIds.length ? await removeOverlayElements(layerNodeIds, layerEdgeIds) : null;
+    const undo = touchedContext
+      ? () => {
+          const haveNodes = new Set(nodes.value.map((n) => n.node_id));
+          const back = ownNodes.filter((n) => !haveNodes.has(n.node_id));
+          const present = new Set([...haveNodes, ...back.map((n) => n.node_id)]);
+          const haveEdges = new Set(edges.value.map((e) => e.edge_id));
+          const backEdges = ownEdges.filter((e) => !haveEdges.has(e.edge_id) && present.has(e.src) && present.has(e.dst));
+          nodes.value = [...nodes.value, ...back];
+          edges.value = [...edges.value, ...backEdges];
+          graphEdits.value = Math.max(0, graphEdits.value - 1);
+        }
+      : null;
+    return { removedNodes: removedNodes.length, removedEdges: removedEdges.length, undo, error };
+  }
+
   /** Removes nodes and edges of the layer (and the layer's edges touching those nodes). */
   function removeOverlayElements(nodeIds: string[], edgeIds: string[] = []) {
     return changeOverlay((o) => {
@@ -3516,6 +3569,7 @@ export const useGraphStore = defineStore('graph', () => {
     focusNodeId,
     pendingFocusNodeId,
     queryRunSeq,
+    deleteFromGraph,
     pendingViewport,
     // Progressive load
     pendingPropertyNodeIds,

@@ -2120,6 +2120,60 @@
         }
       }
     },
+    "/graphlagoon/api/explorations/{exploration_id}/remove": {
+      "post": {
+        "tags": [
+          "explorations"
+        ],
+        "summary": "Remove Exploration Elements",
+        "description": "Delete nodes (with every edge touching them) and edges from a saved\nexploration, for good: from its saved graph and from the person's layer.\nIds match exactly, else case-insensitively; an unknown id refuses the whole\nrequest (``NODE_NOT_FOUND`` / ``EDGE_NOT_FOUND``) and nothing changes. Give\nthe ``revision`` you read as ``expected_revision`` to get a 409\n``EXPLORATION_CHANGED`` instead of editing a newer save. A page with the\nexploration open picks the change up within seconds. Agents do the same\nwith the MCP tool ``edit_exploration`` (``remove_node_ids`` /\n``remove_edge_ids``).",
+        "operationId": "explorations_remove_exploration_elements",
+        "parameters": [
+          {
+            "name": "exploration_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Exploration Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplorationRemoveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplorationRemoveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/graph-contexts/{context_id}/query-templates": {
       "get": {
         "tags": [
@@ -10752,6 +10806,64 @@
           "state"
         ],
         "title": "ExplorationCreate"
+      },
+      "ExplorationRemoveRequest": {
+        "properties": {
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10000,
+            "title": "Node Ids"
+          },
+          "edge_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10000,
+            "title": "Edge Ids"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExplorationRemoveRequest",
+        "description": "Nodes (with their edges) and edges to delete from a saved exploration."
+      },
+      "ExplorationRemoveResponse": {
+        "properties": {
+          "removed_nodes": {
+            "type": "integer",
+            "title": "Removed Nodes"
+          },
+          "removed_edges": {
+            "type": "integer",
+            "title": "Removed Edges"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "removed_nodes",
+          "removed_edges",
+          "revision"
+        ],
+        "title": "ExplorationRemoveResponse"
       },
       "ExplorationResponse": {
         "properties": {

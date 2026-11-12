@@ -190,6 +190,9 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ): "edit by owner/writer; not destructive",
     ("POST", "/api/graph-contexts/{context_id}/explorations"): "owner-scoped create",
     ("PUT", "/api/explorations/{exploration_id}"): "edit by owner/writer",
+    ("POST", "/api/explorations/{exploration_id}/remove"): (
+        "edit by owner/writer, like PUT on the exploration; stamps last_change with who removed what"
+    ),
     ("PUT", "/api/explorations/{exploration_id}/overlay"): (
         "edit by owner/writer, like the exploration; replaces the user's layer only"
     ),

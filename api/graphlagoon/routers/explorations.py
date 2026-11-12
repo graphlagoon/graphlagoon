@@ -18,6 +18,8 @@ from graphlagoon.db.memory_store import (
 from graphlagoon.models.schemas import (
     ExplorationCreate,
     ExplorationUpdate,
+    ExplorationRemoveRequest,
+    ExplorationRemoveResponse,
     ExplorationResponse,
     ExplorationState,
     GraphOverlay,
@@ -1075,3 +1077,52 @@ async def unshare_exploration(exploration_id: UUID, email: str, request: Request
         )
 
     return {"status": "removed"}
+
+
+@router.post("/api/explorations/{exploration_id}/remove", response_model=ExplorationRemoveResponse)
+async def remove_exploration_elements(
+    exploration_id: UUID,
+    data: ExplorationRemoveRequest,
+    user_email: str = Depends(require_permission("exploration.save")),
+):
+    """Delete nodes (with every edge touching them) and edges from a saved
+    exploration, for good: from its saved graph and from the person's layer.
+    Ids match exactly, else case-insensitively; an unknown id refuses the whole
+    request (``NODE_NOT_FOUND`` / ``EDGE_NOT_FOUND``) and nothing changes. Give
+    the ``revision`` you read as ``expected_revision`` to get a 409
+    ``EXPLORATION_CHANGED`` instead of editing a newer save. A page with the
+    exploration open picks the change up within seconds. Agents do the same
+    with the MCP tool ``edit_exploration`` (``remove_node_ids`` /
+    ``remove_edge_ids``)."""
+    from graphlagoon.services import exploration_graph
+    from graphlagoon.services.permissions import check_permission
+
+    def fail(exc: exploration_graph.ExplorationEditError) -> HTTPException:
+        return HTTPException(status_code=exc.status, detail={"error": {"code": exc.code, "message": exc.message}})
+
+    try:
+        loaded = await exploration_graph.load(exploration_id, user_email, write=True)
+        _check_revision(loaded.state, data.expected_revision)
+        if not loaded.state.get("has_snapshot"):
+            # Never saved with a graph: the page would run its query; do the same.
+            query = loaded.state.get("graph_query")
+            if not query:
+                raise exploration_graph.ExplorationEditError(
+                    "EXPLORATION_NOT_MATERIALIZED", "Nothing is saved in this exploration yet", 409
+                )
+            loaded.snapshot, _ = await exploration_graph.run_graph_query(loaded.context_id, user_email, query)
+        snapshot, overlay, report = exploration_graph.apply_edit(
+            loaded.snapshot, loaded.overlay, {"remove_node_ids": data.node_ids, "remove_edge_ids": data.edge_ids}
+        )
+        if overlay is not None and not (await check_permission(user_email, "exploration.edit_graph")).allowed:
+            raise exploration_graph.ExplorationEditError(
+                "PERMISSION_DENIED", "Removing from your data layer needs exploration.edit_graph", 403
+            )
+        change = {"by": user_email, "author_kind": "person", "tool": "remove",
+                  "summary": exploration_graph.summary(report)}
+        saved = await exploration_graph.save(loaded, user_email, snapshot=snapshot, overlay=overlay, last_change=change)
+    except exploration_graph.ExplorationEditError as exc:
+        raise fail(exc) from exc
+    return ExplorationRemoveResponse(
+        removed_nodes=report["removed_nodes"], removed_edges=report["removed_edges"], revision=saved.state.revision
+    )

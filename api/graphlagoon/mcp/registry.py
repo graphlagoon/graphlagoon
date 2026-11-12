@@ -44,7 +44,7 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "list_explorations": [("GET", "/api/explorations"), ("GET", _CONTEXT_EXPLORATIONS)],
     "get_exploration": [("GET", _EXPLORATION), ("GET", f"{_EXPLORATION}/snapshot"), ("GET", f"{_EXPLORATION}/overlay")],
     "create_exploration": [("POST", _CONTEXT_EXPLORATIONS), ("POST", f"{_CASE}/items")],
-    "edit_exploration": [("PUT", _EXPLORATION), ("PUT", f"{_EXPLORATION}/overlay")],
+    "edit_exploration": [("PUT", _EXPLORATION), ("PUT", f"{_EXPLORATION}/overlay"), ("POST", f"{_EXPLORATION}/remove")],
     "expand_exploration": [("POST", "/api/graph-contexts/{context_id}/expand"), ("PUT", _EXPLORATION)],
     "query_into_exploration": [("POST", "/api/graph-contexts/{context_id}/cypher"), ("PUT", _EXPLORATION)],
     "enrich_exploration": [("POST", _ENRICHMENT), ("PUT", _EXPLORATION)],

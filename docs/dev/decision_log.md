@@ -14053,3 +14053,16 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `docs/guide/communities-metrics.md` ("Running them after every query").
 **Permissão (2.4b):** nenhuma; leitura/análise local.
 **No admin-area impact:** sem rota, tabela, setting de servidor ou auditoria.
+
+## [2026-11-12 15:00] - Feature Implemented: deletar nó ou aresta (clique, REST, MCP)
+
+**Pedido (TODO.md):** permitir deletar um nó ou aresta via clique, API e MCP.
+**Decisões:**
+1. **MCP já existia** (`edit_exploration` com `remove_node_ids`/`remove_edge_ids`, via `exploration_graph.apply_edit`); nada novo no MCP além do registro.
+2. **REST:** `POST /api/explorations/{id}/remove` `{node_ids, edge_ids, expected_revision?}` reaproveita `exploration_graph.load/apply_edit/save` (os dois modos de persistência, revisão, `last_change` com `author_kind: person`, live refresh da página aberta). Mesmo comportamento do MCP: nó leva as arestas, id exato senão case-insensitive, id desconhecido recusa tudo, exploração nunca salva roda seu `graph_query` antes, mexer na camada exige `exploration.edit_graph`. Permissão `exploration.save` (a do PUT). Mapeada em `TOOL_ROUTES["edit_exploration"]`; isenta de auditoria como o PUT ("edit by owner/writer"), o `last_change` registra quem e quanto.
+3. **Clique:** ação embutida `delete-from-graph` ("Delete from graph") no menu de nó e aresta; se o alvo está na seleção, apaga a seleção. `graphStore.deleteFromGraph` tira do canvas em memória (resposta do contexto) e manda o que é da camada para `removeOverlayElements` (salvo na hora); toast com **Undo** (só a parte do contexto). Não salva sozinho: um contador `graphEdits` entra no fingerprint do dirty, então a exploração aparece alterada e o Save grava o snapshot sem os itens; Undo desfaz o dirty. Oculta no canvas do caso e em itens da própria camada (já têm "Remove from your data"). Apagar troca `nodes`, então comunidades/clusters calculados são limpos como em qualquer mudança de nós.
+**Files:** `api/graphlagoon/{models/schemas.py,routers/explorations.py,routers/admin_registry.py,mcp/registry.py}`, `api/tests/test_exploration_overlay.py`; `frontend/src/{stores/graph.ts,composables/useContextMenu.ts}`, `composables/__tests__/useContextMenu.test.ts`, `e2e/tests/context-menu.spec.ts`.
+**Tests:** pytest +6 (nó com arestas no snapshot e na camada, só aresta, 3 recusas sem mudança, corpo vazio e leitor 403) + registries; vitest +4 (nó+arestas e Undo, seleção inteira, dirty e Undo, oculto no caso); e2e +1 (apagar pelo menu, 4 nodes, Undo volta a 5).
+**Public docs:** `docs/guide/exploring-the-graph.md` ("Deleting nodes and edges"), `rest-api.md` (fluxo com curl), `agents-mcp-tools.md` e `openapi.json` regenerados.
+**Permissão (2.4b):** nenhuma nova; rota usa `exploration.save` (+ `exploration.edit_graph` para a camada); o clique só muda a tela.
+**Admin-area impact:** rota nova em `AUDIT_EXEMPT_ROUTES` (motivo: edição por dono/escritor, como o PUT) e em `TOOL_ROUTES`; sem tabela, setting ou ação de auditoria nova.

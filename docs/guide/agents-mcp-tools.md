@@ -350,7 +350,7 @@ Human twin: `POST /api/graph-contexts/{context_id}/explorations`, `POST /api/inv
 
 Change an exploration's graph in place, in one atomic batch, in this order: ``replace`` (drop every node and edge, the person's layer too: a brand-new graph under the same id) → ``remove_node_ids`` (deleted, with their edges; for good, from the saved graph and the layer) → ``remove_edge_ids`` → ``add_nodes`` [{id, type, properties}] (an id already there gets the type and properties given) → ``add_edges`` [{id?, source, target, type, properties}] (both ends must exist after the batch) → ``set_properties`` [{id, kind: node|edge, properties, unset: [keys]}]. Ids match exactly, else case-insensitively. Give the ``revision`` you read as ``expected_revision`` to be refused (EXPLORATION_CHANGED) instead of overwriting a newer save. A page with the exploration open picks the change up within seconds. ``focus_node_id`` sets the node the page opens on ("" clears it). ``look`` changes how it is drawn — the same keys as in create_exploration (colors, icons, ``textFormat`` for the labels, layout, behaviors, …): only the keys given change, a key given as null goes back to its default; the graph may stay as it is. A case showing the exploration takes the new look at its next refresh.
 
-Human twin: `PUT /api/explorations/{exploration_id}`, `PUT /api/explorations/{exploration_id}/overlay`
+Human twin: `PUT /api/explorations/{exploration_id}`, `PUT /api/explorations/{exploration_id}/overlay`, `POST /api/explorations/{exploration_id}/remove`
 
 | Parameter | Type | Required | Default |
 |---|---|---|---|
