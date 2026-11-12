@@ -122,6 +122,13 @@ export type ProgressiveLoadMode = 'auto' | 'always' | 'never';
  */
 export const PROGRESSIVE_LOAD_MIN_PROPERTIES = 10;
 
+export interface QueryRunOptions {
+  preserveGraphQuery?: boolean;
+  preserveSelections?: boolean;
+  /** Replaying a saved exploration: its own analysis state is restored, so the after-query behaviors stay off. */
+  fromRestore?: boolean;
+}
+
 const DEFAULT_BEHAVIORS = {
   edgeLensMode: 'dim' as 'off' | 'hide' | 'dim',  // off = no focus, hide = hide non-focused, dim = dim non-focused edges
   edgeLensDimOpacity: 0.08,  // Opacity for dimmed edges in 'dim' mode (0.01-0.3)
@@ -147,6 +154,8 @@ const DEFAULT_BEHAVIORS = {
   enableNodeDrag: false,           // When true, allow dragging nodes by click-drag (pins node after release)
   mapStylePan: true,               // When true (default), right-drag pans Google-Maps-style: the point grabbed stays locked under the cursor. When false, TrackballControls' pan (panSpeed 0.3, so the world lags the mouse; its ortho branch also mis-scales the vertical axis by the aspect ratio).
   autoLoadOnOpen: false,           // When true, opening a context immediately fetches an initial subgraph (all nodes, edge_limit 1000). Default false: open empty and let the user run a query — the implicit fetch is expensive on large graphs. Opening a saved exploration is unaffected; it always loads its own data.
+  afterQueryCommunities: '',      // After a query you run: '' (off), 'louvain', 'weak-components', 'strong-components' or 'cluster-program:<id>' — colors communities. Not on restore.
+  afterQueryClusterProgram: '',   // After a query you run: '' (off) or a cluster program id to draw its clusters. Not on restore.
   progressiveLoad: 'auto' as ProgressiveLoadMode, // 'auto' (default) uses progressive loading only when the node table is wide enough to pay for it — see shouldLoadProgressively(). 'always' forces it, 'never' fetches everything in one request. Progressive load trades a HIGHER TOTAL cost for a much faster first paint: measured on a 100-column table it cut first paint by 79% while raising total work by 76%, and on a narrow table it was simply slower. 'auto' exists so neither extreme is the default.
 };
 
@@ -722,6 +731,8 @@ export const useGraphStore = defineStore('graph', () => {
    * the graph.
    */
   const pendingFocusNodeId = ref<string | null>(null);
+  /** Bumped when a query the user ran (not a restore) loads: the after-query behaviors watch it. */
+  const queryRunSeq = ref(0);
 
   // Computed
   const selectedNode = computed(() => {
@@ -2017,7 +2028,7 @@ export const useGraphStore = defineStore('graph', () => {
     loading.value = false;
   }
 
-  async function executeGraphQuery(query: string, options?: { preserveGraphQuery?: boolean; preserveSelections?: boolean }) {
+  async function executeGraphQuery(query: string, options?: QueryRunOptions) {
     if (!currentContext.value) return;
 
     loading.value = true;
@@ -2053,6 +2064,7 @@ export const useGraphStore = defineStore('graph', () => {
       recordGraphLoad('query', response, tAssign - t0, assignMs);
       recordChainRecompute('query');
       adjustGravityForConnectivity();
+      if (!options?.fromRestore) queryRunSeq.value++;
       // Clear selections (unless preserving for exploration restore)
       if (!options?.preserveSelections) {
         selectedNodeIds.value.clear();
@@ -2085,7 +2097,7 @@ export const useGraphStore = defineStore('graph', () => {
 
   async function executeCypherQuery(
     query: string,
-    options?: { preserveGraphQuery?: boolean; preserveSelections?: boolean },
+    options?: QueryRunOptions,
   ): Promise<string | null> {
     if (!currentContext.value) return null;
 
@@ -2130,6 +2142,7 @@ export const useGraphStore = defineStore('graph', () => {
       recordGraphLoad('cypher', response, tAssign - t0, performance.now() - tAssign);
       recordChainRecompute('cypher');
       adjustGravityForConnectivity();
+      if (!options?.fromRestore) queryRunSeq.value++;
       if (status.transpiled_sql) lastTranspiledSql.value = status.transpiled_sql;
       // Clear selections (unless preserving for exploration restore)
       if (!options?.preserveSelections) {
@@ -2950,12 +2963,12 @@ export const useGraphStore = defineStore('graph', () => {
       const query = exploration.state.graph_query.trim();
       if (!contextTranspiles()) {
         // Native-Cypher and REST backends run the saved query directly.
-        await executeCypherQuery(query);
+        await executeCypherQuery(query, { fromRestore: true });
       } else if (query.toUpperCase().startsWith('MATCH')) {
         // Cypher replays through the Cypher endpoint: the server transpiles
         // and executes (scripts included) — the backend rejects transpiled
         // scripts posted back as raw SQL.
-        await executeCypherQuery(query, { preserveGraphQuery: true, preserveSelections: true });
+        await executeCypherQuery(query, { preserveGraphQuery: true, preserveSelections: true, fromRestore: true });
       } else if (isSqlScript(query)) {
         // A saved BEGIN…END script is transpiler output whose Cypher was
         // lost; the raw-SQL endpoint refuses scripts, so surface that
@@ -2966,7 +2979,7 @@ export const useGraphStore = defineStore('graph', () => {
             + 'be replayed directly. Re-run its original Cypher query and save again.',
         };
       } else {
-        await executeGraphQuery(query, { preserveGraphQuery: true, preserveSelections: true });
+        await executeGraphQuery(query, { preserveGraphQuery: true, preserveSelections: true, fromRestore: true });
       }
     } else if (supportsSubgraph.value) {
       await loadSubgraph({});
@@ -3502,6 +3515,7 @@ export const useGraphStore = defineStore('graph', () => {
     positionsResetRequested,
     focusNodeId,
     pendingFocusNodeId,
+    queryRunSeq,
     pendingViewport,
     // Progressive load
     pendingPropertyNodeIds,

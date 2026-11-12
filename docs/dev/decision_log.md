@@ -14039,3 +14039,17 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `docs/guide/query-templates.md` (seção "After running"), `layout-url-overrides.md` (ordem de carga), screenshot `query-templates-after-run.png`, `openapi.json` regenerado.
 **Permissão (2.4b):** nenhuma nova; faz parte de criar/editar template, já controlado.
 **No admin-area impact:** sem rota, tabela, setting ou ação de auditoria nova.
+
+## [2026-11-12 14:00] - Feature Implemented: comunidades e cluster program depois de cada consulta (behavior, sem migração)
+
+**Pedido (TODO.md):** comunidades e clusters configuráveis para rodar após a execução de uma consulta de grafo, como parâmetro de behavior, sem migração.
+**Decisões:**
+1. **Dois behaviors string** em `DEFAULT_BEHAVIORS`: `afterQueryCommunities` (`''`, `louvain`, `weak-components`, `strong-components`, `cluster-program:<id>`) e `afterQueryClusterProgram` (`''` ou id). Viajam pelo caminho já validado (`applyBehaviorOverrides`): `default_behaviors` do contexto (coluna JSON existente), presets e explorações. Sem enum em `BEHAVIOR_ENUMS` porque os ids de programa são abertos; a validação contra o que existe fica em `utils/afterQueryAnalysis.ts` (`planAfterQueryAnalysis`), com motivo por item pulado.
+2. **Gatilho = consulta executada, não restore:** `graphStore.queryRunSeq` sobe no sucesso de `executeGraphQuery`/`executeCypherQuery`, exceto com `fromRestore` (as três chamadas de `_executeQueryFallback`): a exploração restaura sua própria análise. Auto-load/subgraph/precomputed não contam ("após uma query").
+3. **Ordem:** `useAfterQueryAnalysis` (montado em `GraphVisualizationView`) espera `loading`/`enriching` caírem e um `nextTick`, porque os watchers de `nodes` nas stores de comunidade e cluster limpam resultados; descarta se outra consulta começou (seq). Programa com parâmetro obrigatório sem default é pulado (no modo comunidade usa valores já preenchidos pelo usuário).
+4. **UI:** seção "After a query" no BehaviorPanel com os dois selects (programas do contexto listados).
+**Files:** `frontend/src/stores/graph.ts` (`QueryRunOptions`, `queryRunSeq`, behaviors), new `utils/afterQueryAnalysis.ts`, `composables/useAfterQueryAnalysis.ts`, `utils/__tests__/afterQueryAnalysis.test.ts`, `e2e/tests/after-query-analysis.spec.ts`; changed `components/BehaviorPanel.vue`, `views/GraphVisualizationView.vue`.
+**Tests:** vitest `afterQueryAnalysis` (5); e2e `after-query-analysis.spec.ts` (2: consulta rodada gera comunidades + 2 clusters e o auto-load não; desligar no painel).
+**Public docs:** `docs/guide/communities-metrics.md` ("Running them after every query").
+**Permissão (2.4b):** nenhuma; leitura/análise local.
+**No admin-area impact:** sem rota, tabela, setting de servidor ou auditoria.

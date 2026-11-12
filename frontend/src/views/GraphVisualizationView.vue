@@ -71,6 +71,7 @@ import {
 } from '@/utils/templateUrlParams';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useTemplateExecution } from '@/composables/useTemplateExecution';
+import { useAfterQueryAnalysis } from '@/composables/useAfterQueryAnalysis';
 import { uuidOrNull } from '@/utils/uuid';
 import {
   capabilitiesFor,
@@ -143,6 +144,7 @@ function reviewContextSchema() {
 const graphStore = useGraphStore();
 
 // What an agent (or another tab) saves into the open exploration shows up in place.
+useAfterQueryAnalysis();
 useLiveRevision({
   targets: () => ({ exploration: graphStore.currentExploration?.id }),
   paused: () => graphStore.loading,
