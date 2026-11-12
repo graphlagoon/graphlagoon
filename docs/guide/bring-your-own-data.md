@@ -104,6 +104,11 @@ Open **Your data** in the bar under the graph (next to **Table**) and choose **E
 in one of three ways: drop a CSV on the box, **Choose a file**, or **Paste rows** copied from a spreadsheet (the
 header row included). A title line above the header is skipped.
 
+Before you bring anything, the tab lists what a row can join **on this graph**: each node type with a real node id
+and the properties that identify a node (`tax_id`, `email`, `name`…, with a value from the canvas), the edges by
+their two ends, and a two-line CSV that would set `risk = high` on a real node. When the nodes carry no property,
+it says that only node ids can join. On an empty canvas it asks you to run a query first.
+
 You do not have to set the join. Every column is tried against the node ids and against every node property,
 as it is and under each normalizer (lowercase, digits, phone, e-mail, account, card…), and the join that reaches
 the most nodes is picked. The line above **Apply** says what it found, for example *12 of 24 Person nodes match a

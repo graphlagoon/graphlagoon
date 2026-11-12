@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeMatch, readTable, scopeLabel, suggestEnrichmentMatches } from '@/utils/enrichmentAutoMatch';
+import { canvasKeyGuide, describeMatch, readTable, scopeLabel, suggestEnrichmentMatches } from '@/utils/enrichmentAutoMatch';
 import type { PlainGraph } from '@/utils/enrichment';
 
 const graph: PlainGraph = {
@@ -85,5 +85,47 @@ describe('suggestEnrichmentMatches', () => {
 
   it('returns nothing when no column meets the canvas', () => {
     expect(suggestEnrichmentMatches(graph, readTable('k,v\nnope,1\nnada,2\n'), 'x')).toEqual([]);
+  });
+});
+
+describe('canvasKeyGuide', () => {
+  it('names each type with a real node and its id-like properties, not its categories', () => {
+    const g = canvasKeyGuide({
+      nodes: [
+        ...graph.nodes,
+        { node_id: 'c4', node_type: 'Company', properties: { tax_id: '22222222000122', name: 'Delta', sector: 'Retail' } },
+        { node_id: 'c5', node_type: 'Company', properties: { tax_id: '33333333000133', name: 'Eta', sector: 'Retail' } },
+      ],
+      edges: graph.edges,
+    });
+    expect(g.types.map((t) => [t.type, t.count])).toEqual([['Company', 5], ['Person', 2]]);
+    const company = g.types[0];
+    expect(company.sample).toEqual({ id: 'c1', name: 'Acme' });
+    expect(company.keys.map((k) => k.name)).toEqual(['tax_id', 'name']);
+    expect(company.keys[0].example).toBe('12345678000190');
+    expect(g.edge).toEqual({ src: 'p1', dst: 'c1', type: 'WORKS_AT' });
+    expect(g.idsOnly).toBe(false);
+  });
+
+  it('does not offer short numbers or, on a few nodes, a property whose name is not an id', () => {
+    const g = canvasKeyGuide({
+      nodes: [
+        { node_id: 'a', node_type: 'P', properties: { age: 30, city: 'Rio', email: 'a@x.io', name: 'Ana' } },
+        { node_id: 'b', node_type: 'P', properties: { age: 25, city: 'SP', email: 'b@x.io', name: 'Bia' } },
+      ],
+      edges: [],
+    });
+    expect(g.types[0].keys.map((k) => k.name)).toEqual(['email', 'name']);
+  });
+
+  it('says when the nodes carry no property (only ids can join)', () => {
+    const g = canvasKeyGuide({ nodes: [{ node_id: 'a', node_type: 'T' }], edges: [] });
+    expect(g.idsOnly).toBe(true);
+    expect(g.types[0].keys).toEqual([]);
+    expect(g.edge).toBeNull();
+  });
+
+  it('is empty on an empty canvas', () => {
+    expect(canvasKeyGuide({ nodes: [], edges: [] }).types).toEqual([]);
   });
 });
