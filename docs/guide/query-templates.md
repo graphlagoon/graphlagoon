@@ -63,6 +63,47 @@ Open the **Templates** panel from the toolbar and hit **+ New**. A template is:
   `?template=` URL grammar for this template: existing links do not vanish,
   they fail with the explaining status chip, and the execute modal's Copy link
   button disables itself. The template itself stays runnable from the panel.
+- **After running** — what the canvas does once the graph loads (see below).
+
+### After running: layout and focus
+
+![The After running section of the template editor: ego layout, focus on $node_id, max hops 2](/screenshots/query-templates-after-run.png)
+
+A template can set up the view as well as fetch the data. At the bottom of
+the editor:
+
+- **Layout** — switch to Force, Ego, Hive or Hierarchical after the run, or
+  *Keep current*.
+- **Focus node** — select this node and move the camera to it. With the Ego
+  layout it is also the centre of the rings.
+- **Max hops** (Ego only) — how many rings to draw around the centre; empty
+  means all.
+
+Each value is either fixed text (`acct-9931`) or a parameter placeholder
+(`$node_id`), substituted the same way as in the query. So "ego around the
+account I asked for" is: Layout *Ego*, Focus node `$node_id`. If an optional
+parameter is left empty, its field is skipped for that run.
+
+This applies however the template runs: **Use**, a right-click action, or a
+`?template=` link. It applies only after the query succeeds. If the focus
+node is not in the result, or a value is invalid (`maxHops=many`), that part
+is skipped with a warning and the graph stays as loaded; the ego layout is
+only switched on when its centre is in the result.
+
+On a link, the template's layout settles between `?style=` and the link's own
+`?layout.*` keys: `?template=EgoAround&template.node_id=n3&layout.ego.maxHops=4`
+runs the template's ego view but with 4 hops.
+
+The settings are stored in the template's `options.after_run`, keyed by the
+[layout link grammar](./layout-url-overrides.md) plus `focus`:
+
+```json
+{ "layout": "ego", "focus": "$node_id", "layout.ego.maxHops": "2" }
+```
+
+Through the API you can set any link-settable layout field this way, for
+example `layout.ego.direction` or `layout.hierarchical.direction`. The editor
+shows the three common ones and keeps the rest when you save.
 
 You can also save the query you just ran: the Query Console offers **Save as
 template** with the current text pre-filled.

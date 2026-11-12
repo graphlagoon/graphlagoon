@@ -92,6 +92,31 @@ const largeResultsMode = ref(props.template?.options?.large_results_mode ?? true
 // Absent ⇒ true: templates saved before the flag existed stay linkable.
 const allowUrlExecution = ref(props.template?.options?.allow_url_execution ?? true);
 
+// After running: the form edits these three keys; any other after_run key
+// (set through the API) is carried over untouched.
+const storedAfterRun = props.template?.options?.after_run ?? {};
+const afterLayout = ref(storedAfterRun.layout ?? '');
+const afterFocus = ref(storedAfterRun.focus ?? '');
+const afterEgoHops = ref(storedAfterRun['layout.ego.maxHops'] ?? '');
+const paramTokens = computed(() =>
+  parameters.value.map((p) => p.id.trim()).filter(Boolean).map((id) => `$${id}`),
+);
+
+function buildAfterRun(): Record<string, string> {
+  const out: Record<string, string> = { ...storedAfterRun };
+  const fields: [string, string][] = [
+    ['layout', afterLayout.value],
+    ['focus', afterFocus.value],
+    // Hidden unless ego is chosen, so it is not saved behind the author's back.
+    ['layout.ego.maxHops', afterLayout.value === 'ego' ? String(afterEgoHops.value) : ''],
+  ];
+  for (const [key, value] of fields) {
+    if (value.trim()) out[key] = value.trim();
+    else Reflect.deleteProperty(out, key);
+  }
+  return out;
+}
+
 const saving = ref(false);
 const errorMsg = ref<string | null>(null);
 
@@ -183,6 +208,7 @@ async function handleSave() {
             cte_prefilter: ctePrefilterEnabled.value ? ctePrefilterText.value.trim() || undefined : undefined,
             large_results_mode: largeResultsMode.value,
             allow_url_execution: allowUrlExecution.value,
+            after_run: buildAfterRun(),
           }
         : {
             ...(props.template?.options ?? {
@@ -190,6 +216,7 @@ async function handleSave() {
               large_results_mode: true,
             }),
             allow_url_execution: allowUrlExecution.value,
+            after_run: buildAfterRun(),
           },
       visibility: visibility.value,
     };
@@ -418,6 +445,53 @@ async function handleSave() {
             </div>
           </div>
 
+          <div class="after-run" data-testid="template-after-run">
+            <span class="field-label" style="margin-bottom: 4px">After running</span>
+            <span class="field-hint" style="display: block; margin-bottom: 8px">
+              What the canvas does once the graph loads. Type a fixed node id, or
+              <code>$param</code> to use a parameter's value.
+            </span>
+            <div class="param-row">
+              <div class="param-field param-field--type">
+                <label class="param-field-label">Layout</label>
+                <select v-model="afterLayout" class="field-input" data-testid="template-after-run-layout">
+                  <option value="">Keep current</option>
+                  <option value="force">Force</option>
+                  <option value="ego">Ego</option>
+                  <option value="hive">Hive</option>
+                  <option value="hierarchical">Hierarchical</option>
+                </select>
+              </div>
+              <div class="param-field">
+                <label class="param-field-label">Focus node</label>
+                <input
+                  v-model="afterFocus"
+                  type="text"
+                  class="field-input"
+                  list="template-after-run-params"
+                  :placeholder="paramTokens[0] ?? 'node id'"
+                  data-testid="template-after-run-focus"
+                />
+                <datalist id="template-after-run-params">
+                  <option v-for="token in paramTokens" :key="token" :value="token" />
+                </datalist>
+              </div>
+              <div v-if="afterLayout === 'ego'" class="param-field param-field--type">
+                <label class="param-field-label">Max hops</label>
+                <input
+                  v-model="afterEgoHops"
+                  type="text"
+                  class="field-input"
+                  placeholder="all"
+                  data-testid="template-after-run-hops"
+                />
+              </div>
+            </div>
+            <span v-if="afterLayout === 'ego' && !afterFocus.trim()" class="field-hint-sm">
+              Ego centres on the focus node — set one, or the layout has nothing to centre on.
+            </span>
+          </div>
+
           <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
         </div>
 
@@ -591,6 +665,12 @@ async function handleSave() {
   border: 1px solid var(--border-color, #ddd);
   border-radius: 8px;
   background: var(--bg-secondary, #f8f8f8);
+}
+
+.after-run {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .option-hint {

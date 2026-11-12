@@ -14023,3 +14023,19 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Permissão (2.4b):** nenhuma nova; autoria reaproveita `context.create`, execução é leitura.
 **Admin-area impact:** rota `POST /api/graph-contexts/{id}/enrichment/{name}/run` em `AUDITED_ROUTES`, `AuditAction.ENRICHMENT_RUN`, `describeAudit('enrichment.run')`. Sem setting, tabela ou coleção nova.
 **Known limitations:** um lote = até `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` ids (500) e 1 MiB; rótulos de aresta já desenhados não são recalculados quando a consulta chega (mesmo comportamento das camadas de arquivo); consultas não rodam no canvas do caso; novas arestas/nós vindos de consulta ficam para depois (`target` aberto para isso).
+
+## [2026-11-12 13:00] - Feature Implemented: "After running" do template de consulta (layout, foco, ego) sem migração
+
+**Pedido (TODO.md):** ao executar um template, poder definir o layout (ex.: ego) e focar um nó, fixo ou vindo de um parâmetro do template, sem migração de banco.
+**Decisões:**
+1. **Sem migração:** `TemplateOptions.after_run: dict[str, str]` dentro da coluna JSON `query_templates.options`; linhas antigas leem `{}` na reidratação (`TemplateOptions(**raw)`), mesmo padrão de `allow_url_execution`. O backend valida só a forma (chaves `layout`, `focus`, `layout.<mode>.<field>`; ≤ 20 entradas; valor ≤ 500 chars) porque `$param` só resolve no frontend.
+2. **Gramática do link reaproveitada:** as chaves são as de `?layout=`/`?layout.<mode>.<field>` + `focus`, julgadas pelo mesmo `parseLayoutOverrides` (mesma allowlist de campos semânticos); `utils/templateAfterRun.ts` substitui `$param` com `substituteTemplateParams` (passe único) e parseia. Ego sem centro explícito centra no `focus` (um campo resolve o caso comum).
+3. **Fail-open, diferente do link do template:** a consulta já rodou; campo inválido ou nó ausente do resultado é pulado com toast; o ego só liga se o centro está no resultado; nada aplica se `queryError`. Parâmetro opcional vazio pula o campo sem aviso.
+4. **Um caminho:** `executeTemplateAsGraph` aplica depois da carga (Use, ação de menu, case). O link passa `{ afterRun: false }` e a view aplica entre `?style=` e `?layout.*` — preset < template < link (o `applyStylePreset` troca o `layoutModeConfig` inteiro, então antes dele seria apagado). Foco usa `pendingFocusNodeId` (o `settleFocus` do canvas seleciona e move a câmera).
+5. **Editor:** seção "After running" com Layout, Focus node (datalist com os `$param`) e Max hops (só ego); chaves extras vindas da API são preservadas ao salvar.
+**Fora do escopo:** rodar comunidades/clusters depois da consulta (outro item do TODO).
+**Files:** `api/graphlagoon/models/schemas.py`, `api/tests/test_query_templates.py`; new `frontend/src/utils/templateAfterRun.ts`, `utils/__tests__/templateAfterRun.test.ts`, `composables/__tests__/useTemplateExecution.afterRun.test.ts`; changed `composables/useTemplateExecution.ts`, `views/GraphVisualizationView.vue`, `components/TemplateEditorModal.vue`, `types/graph.ts`, `e2e/tests/template-url-autoexec.spec.ts`, `e2e/screenshots/generate.ts`.
+**Tests:** pytest `TestAfterRun` (round-trip, linha antiga, 5 rejeições); vitest util (6) e composable (4: aplica, query falhou, nó ausente, `afterRun:false`); e2e +3 (ego centrado no parâmetro e foco assentado, `?layout.*` do link vence, nó ausente avisa).
+**Public docs:** `docs/guide/query-templates.md` (seção "After running"), `layout-url-overrides.md` (ordem de carga), screenshot `query-templates-after-run.png`, `openapi.json` regenerado.
+**Permissão (2.4b):** nenhuma nova; faz parte de criar/editar template, já controlado.
+**No admin-area impact:** sem rota, tabela, setting ou ação de auditoria nova.

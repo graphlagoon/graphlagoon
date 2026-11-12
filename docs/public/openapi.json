@@ -17232,6 +17232,13 @@
             "type": "boolean",
             "title": "Allow Url Execution",
             "default": true
+          },
+          "after_run": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "After Run"
           }
         },
         "type": "object",

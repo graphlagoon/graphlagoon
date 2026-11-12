@@ -687,6 +687,11 @@ export interface TemplateOptions {
   large_results_mode: boolean;
   /** Whether a ?template= link may auto-execute this template. Absent ⇒ true. */
   allow_url_execution?: boolean;
+  /**
+   * What the canvas does once the graph loads: `layout`, `layout.<mode>.<field>`
+   * (the `?layout=` link grammar) and `focus`. Values may hold `$param`s.
+   */
+  after_run?: Record<string, string>;
 }
 
 // 'shared': visible to everyone with context access, mutable by context writers.
