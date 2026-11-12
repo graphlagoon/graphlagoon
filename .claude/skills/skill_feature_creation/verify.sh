@@ -164,8 +164,8 @@ if [ -n "$(changed '^(api/graphlagoon|frontend/src)/')" ]; then
   else
     ADDED="$(git diff "$MERGE_BASE" -- docs/dev/decision_log.md | grep '^+' || true)"
     MISSING=""
-    printf '%s' "$ADDED" | grep -qi 'public docs' || MISSING="$MISSING 'Public docs'"
-    printf '%s' "$ADDED" | grep -qi 'admin-area'  || MISSING="$MISSING 'Admin-area impact'"
+    grep -qi 'public docs' <<<"$ADDED" || MISSING="$MISSING 'Public docs'"
+    grep -qi 'admin-area' <<<"$ADDED" || MISSING="$MISSING 'Admin-area impact'"
     if [ -n "$MISSING" ]; then
       echo "FAIL  decision log (new entry is missing the statement(s):$MISSING)"; FAILED=1
     else
