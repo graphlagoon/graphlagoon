@@ -156,6 +156,7 @@ const DEFAULT_BEHAVIORS = {
   autoLoadOnOpen: false,           // When true, opening a context immediately fetches an initial subgraph (all nodes, edge_limit 1000). Default false: open empty and let the user run a query — the implicit fetch is expensive on large graphs. Opening a saved exploration is unaffected; it always loads its own data.
   afterQueryCommunities: '',      // After a query you run: '' (off), 'louvain', 'weak-components', 'strong-components' or 'cluster-program:<id>' — colors communities. Not on restore.
   afterQueryClusterProgram: '',   // After a query you run: '' (off) or a cluster program id to draw its clusters. Not on restore.
+  hiddenMenuActions: [] as string[], // Ids of built-in right-click items to hide (utils/builtInMenuItems.ts). Always replaced, never mutated in place.
   progressiveLoad: 'auto' as ProgressiveLoadMode, // 'auto' (default) uses progressive loading only when the node table is wide enough to pay for it — see shouldLoadProgressively(). 'always' forces it, 'never' fetches everything in one request. Progressive load trades a HIGHER TOTAL cost for a much faster first paint: measured on a 100-column table it cut first paint by 79% while raising total work by 76%, and on a narrow table it was simply slower. 'auto' exists so neither extreme is the default.
 };
 
@@ -303,6 +304,11 @@ function applyBehaviorOverrides(
       console.warn(
         `[graph] Ignoring ${source} behaviors."${key}": expected ${typeof target[k]}, got ${typeof value}`
       );
+      continue;
+    }
+    // `typeof` calls arrays and objects both 'object': a list behavior takes a list of strings only.
+    if (Array.isArray(target[k]) && !(Array.isArray(value) && value.every((v) => typeof v === 'string'))) {
+      console.warn(`[graph] Ignoring ${source} behaviors."${key}": expected a list of strings`);
       continue;
     }
     const allowed = BEHAVIOR_ENUMS[k];

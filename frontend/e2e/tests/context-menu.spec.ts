@@ -185,4 +185,25 @@ test.describe('Graph context menu', () => {
     await page.getByTestId('toast-action-undo').click();
     await expect(statusBar).toContainText('5 nodes');
   });
+
+  test('a built-in item hidden in Behaviors stays out of the menu', async ({ authenticatedPage: page }) => {
+    await page.getByTestId('toolbar-look').click();
+    await page.getByTestId('look-tab-behaviors').click();
+    await page.getByTestId('behavior-menu-items-toggle').click();
+    await page.getByTestId('behavior-menu-item-copy-id').uncheck();
+    await expect(page.getByTestId('behavior-menu-items-toggle')).toContainText('1 hidden');
+    await page.getByTestId('toolbar-look').click();
+
+    const menu = page.getByTestId('graph-context-menu');
+    let opened = false;
+    for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      await hoverNode(page, 'n1');
+      await page.mouse.down({ button: 'right' });
+      await page.mouse.up({ button: 'right' });
+      opened = await menu.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false);
+    }
+    expect(opened).toBe(true);
+    await expect(page.getByTestId('context-menu-action-delete-from-graph')).toBeVisible();
+    await expect(page.getByTestId('context-menu-action-copy-id')).toHaveCount(0);
+  });
 });

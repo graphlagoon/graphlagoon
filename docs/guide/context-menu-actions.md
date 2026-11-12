@@ -32,6 +32,30 @@ opens the context gets the same right-click menu.
 
 ![The right-click context menu open on a node](/screenshots/context-menu-actions-menu.png)
 
+## Hiding built-in entries
+
+Some of the menu's own entries may be ones you never use, such as **Copy
+ID**, **Ego layout from here** or **Delete from graph**. Open **Look →
+Behaviors → Context Menu → Built-in items** and uncheck them. Anyone can do
+this; it needs no write access to the context.
+
+The choice is a behavior (`hiddenMenuActions`, a list of entry ids), so it is
+saved the same way as the other behaviors:
+
+- in your [explorations](./explorations.md) and
+  [style presets](./style-presets.md);
+- for everyone opening the context, in its `default_behaviors`, which uses
+  the existing column, so nothing needs migrating:
+
+```json
+{ "hiddenMenuActions": ["copy-id", "ego-layout-focus", "delete-from-graph"] }
+```
+
+An entry only appears where it applies (for example, **Show only this
+community** only after a detection run), and hiding takes priority over
+that. Custom actions have their own on/off switch (below), and cluster
+programs have *Show in context menu* (see [Cluster Programs](./clusters.md)).
+
 ## Configuring
 
 Open the **Behaviors** panel and hit **Configure actions…** under *Context
