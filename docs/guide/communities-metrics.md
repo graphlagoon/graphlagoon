@@ -74,6 +74,30 @@ Community assignments and colors are saved with an
 [exploration](./explorations.md) and restored when it reopens. Loading new
 graph data clears them — the node set changed, so the answer did too.
 
+### Running them after every query
+
+**Look → Behaviors → After a query** re-runs the analysis for you:
+
+- **Detect communities** — Off, Louvain, Connected / Strongly connected
+  components, or any cluster program (as communities).
+- **Run cluster program** — Off, or a program whose clusters are drawn.
+
+Both run each time a query you run loads, whether from the Query panel, a
+[template](./query-templates.md) or a right-click action. They don't run when
+the context auto-loads on open or when a saved exploration reopens, because
+the exploration restores its own communities and clusters. A program that
+needs a parameter value with no default is skipped with a warning that names
+the parameter.
+
+Like every behavior, the choice is saved in style presets and explorations.
+To make it the context's default, set it in the context's
+`default_behaviors`, which is stored in the existing column, so nothing needs
+migrating:
+
+```json
+{ "afterQueryCommunities": "louvain", "afterQueryClusterProgram": "default-group-by-node-type" }
+```
+
 ## Metrics
 
 ![Metrics panel](/screenshots/communities-metrics-metrics.png)

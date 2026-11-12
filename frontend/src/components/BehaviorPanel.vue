@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useGraphStore, resolveInitialBehaviors, type ProgressiveLoadMode } from '@/stores/graph';
+import { useClusterStore } from '@/stores/cluster';
 import { ChevronDown, ChevronRight, X, MousePointerClick } from 'lucide-vue-next';
 
 const showAdvanced = ref(false);
@@ -19,6 +20,16 @@ const graphStore = useGraphStore();
 const canEditMenuActions = computed(() => graphStore.currentContext?.has_write_access === true);
 
 const behaviors = computed(() => graphStore.behaviors);
+const clusterStore = useClusterStore();
+const clusterPrograms = computed(() => clusterStore.programs);
+
+function setAfterQueryCommunities(value: string) {
+  graphStore.updateBehaviors({ afterQueryCommunities: value });
+}
+
+function setAfterQueryClusterProgram(value: string) {
+  graphStore.updateBehaviors({ afterQueryClusterProgram: value });
+}
 const force3D = computed(() => graphStore.force3DSettings);
 const hasSelection = computed(() => graphStore.selectedNodeIds.size > 0);
 const maxDegree = computed(() => graphStore.maxDegree);
@@ -141,6 +152,46 @@ function resetBehaviors() {
       </button>
       <p class="behavior-desc">
         Custom right-click actions on nodes and edges (open URLs, copy text, run query templates)
+      </p>
+    </div>
+
+    <div class="behavior-section" data-testid="behavior-after-query">
+      <h4>After a query</h4>
+      <div class="form-group">
+        <label for="after-query-communities">Detect communities</label>
+        <select
+          id="after-query-communities"
+          class="form-control"
+          data-testid="behavior-after-query-communities"
+          :value="behaviors.afterQueryCommunities"
+          @change="setAfterQueryCommunities(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">Off</option>
+          <option value="louvain">Louvain</option>
+          <option value="weak-components">Connected components</option>
+          <option value="strong-components">Strongly connected components</option>
+          <option v-for="p in clusterPrograms" :key="p.program_id" :value="`cluster-program:${p.program_id}`">
+            Program: {{ p.program_name }}
+          </option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="after-query-clusters">Run cluster program</label>
+        <select
+          id="after-query-clusters"
+          class="form-control"
+          data-testid="behavior-after-query-clusters"
+          :value="behaviors.afterQueryClusterProgram"
+          @change="setAfterQueryClusterProgram(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">Off</option>
+          <option v-for="p in clusterPrograms" :key="p.program_id" :value="p.program_id">
+            {{ p.program_name }}
+          </option>
+        </select>
+      </div>
+      <p class="behavior-desc">
+        Runs each time a query you run loads (Query panel, templates, menu actions) — not when a saved exploration reopens
       </p>
     </div>
 
