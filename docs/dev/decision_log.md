@@ -13986,3 +13986,20 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `docs/guide/exploring-the-graph.md` (Filters, status bar, drawers, nova seção "Adding to a case from the graph"), `docs/guide/investigations.md` (chips, Clear/Undo, análises, sugestões, pin, decisão, exportações, layout do workspace); screenshots `investigations-*` e `exploring-the-graph-*` regeneradas.
 **Admin-area impact:** No admin-area impact (só chaves de `localStorage` por navegador; nenhuma rota, setting ou tabela).
 **Known limitations:** 390 px não foi avaliado; a seleção adicionada ao caso ainda não entra sozinha no canvas do caso; Metrics continua na barra de análises.
+
+## [2026-11-12 11:00] - Feature Implemented: Your data → Enrich com junção automática e "Ask an AI" (preencher / limpar)
+
+**Relato:** enriquecer uma exploração com dados externos exigia acertar sozinho a coluna-chave, a propriedade e a normalização; com 0 matches a tela só dizia "Nothing matches", e o resultado e o Apply ficavam abaixo da dobra.
+**Decisões:**
+1. **Pipeline no front, não no backend** (`utils/enrichmentAutoMatch.ts`): `readTable` escolhe o delimitador pela largura mais estável das 30 primeiras linhas (um título acima do header não engana), pula as linhas de título e o BOM; `suggestEnrichmentMatches` testa coluna × (node_id | propriedade texto/número, até 40) × (`none`, `lower`, `KEY_NORMALIZERS`) numa amostra de 300 linhas e ordena por **chaves distintas** que casaram (um id vence uma categoria compartilhada). A contagem final usa `fileEnrichmentRows` + `matchFileRows`, a mesma função que aplica.
+2. **Chave normalizada com menos de 4 caracteres não conta** para o palpite (`p1` → `1` como digits casava com tudo); continua permitida manualmente.
+3. **Restrição de tipo automática** quando ≥ 95 % dos matches são de um tipo e o canvas tem mais de um: o arquivo não se espalha em expands posteriores. **Arestas por endpoints** quando duas colunas casam com os ids e ≥ 50 % das linhas com as duas pontas no canvas são arestas dele.
+4. **"Ask an AI" sem chamada de LLM no app**, no padrão copiar/colar (`utils/enrichmentSkill.ts`, `EnrichmentSkillModal.vue`): *fill* lista id/tipo/nome de até 500 nós (selecionados ou todos) e pede CSV com `node_id`; *clean* leva as 15 primeiras linhas do arquivo e amostras de ids/propriedades por tipo e pede CSV limpo (ou script Python para arquivo grande) — o spec de enrichment não tem conversores, então não se pede spec. A resposta volta no próprio modal (`stripCodeFence`) e passa pela junção automática. Por decisão do usuário, os prompts levam dados reais com aviso explícito no modal e no guia (sem setting de admin).
+5. **MappingStep inalterado**, dentro de `<details>` "Adjust the matching and the columns"; preview + Apply num rodapé sticky; amostra de 5 linhas com a chave marcada; alternativas como chips.
+**Rejeitado:** pedir à IA um spec de enrichment (não resolve chave dentro de texto nem decimais); download de template de ids; levar ao wizard do caso agora (o util já serve).
+**Arquivos:** novos `frontend/src/utils/enrichmentAutoMatch.ts`, `utils/enrichmentSkill.ts`, `components/EnrichmentSkillModal.vue` e testes; alterado `components/YourDataModal.vue` (aba Enrich: drop, colar, Ask AI, `likelyKey` removido, preview com tipos e "como").
+**Testes:** vitest `enrichmentAutoMatch.test.ts` (9), `enrichmentSkill.test.ts` (8); e2e `your-data.spec.ts` (+3: colar TSV casa por propriedade em minúsculas sem tocar em controle e Apply visível; fill com aviso e resposta em fence; sem match oferece o clean com a cabeça do arquivo).
+**Public docs:** `docs/guide/bring-your-own-data.md` ("In an exploration", nova seção "Ask an AI" com aviso do que sai da plataforma); screenshot `bring-your-own-data-enrich.png` regenerada.
+**Permissão (2.4b):** nenhuma ação nova; aplicar segue exigindo `exploration.edit_graph`, copiar prompt é leitura.
+**Admin-area impact:** No admin-area impact (sem rota, setting, tabela ou auditoria).
+**Known limitations:** prefixo de N dígitos não é testado automaticamente (só em Adjust); a junção roda só na aba Enrich da exploração, não no wizard do caso.

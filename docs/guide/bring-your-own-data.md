@@ -17,7 +17,7 @@ canvas from a CSV, **add** nodes and edges from a file or JSON, or **draw** them
 
 | You want to | In a case | In an exploration |
 |---|---|---|
-| Add properties to nodes already on the canvas | [Enrichment file](#enrich-nodes-or-edges-from-a-file) (import wizard, role **Enrichment**) | **Your data → Enrich from a file** |
+| Add properties to nodes already on the canvas | [Enrichment file](#enrich-nodes-or-edges-from-a-file) (import wizard, role **Enrichment**) | **Your data → Enrich from a file**: a file, pasted rows, or [an AI's answer](#ask-an-ai) |
 | Add properties to edges already on the canvas | Enrichment file, **edges** | **Your data → Enrich from a file**, **edges** |
 | Add nodes and edges from a CSV | [File with a mapping](#a-file-with-a-mapping), or [a promoted table](#a-table-promoted-to-the-graph) | **Your data → Nodes and edges from a file** |
 | Add nodes and edges from JSON | [Snapshot item](#a-snapshot-as-json) | **Your data → Nodes and edges from a file** (a `.json`) |
@@ -98,11 +98,38 @@ curl -s -X POST "$API/api/investigations/$CASE/items/promote" -H "Authorization:
 
 ### In an exploration
 
-Open **Your data** in the bar under the graph (next to **Table**) and choose **Enrich from a file**. The key column is guessed from the ids
-on the canvas, and a preview tells you how many nodes match and how many values already set will stay as they
-are. **Apply** draws it at once.
+Open **Your data** in the bar under the graph (next to **Table**) and choose **Enrich from a file**. Bring the rows
+in one of three ways: drop a CSV on the box, **Choose a file**, or **Paste rows** copied from a spreadsheet (the
+header row included). A title line above the header is skipped.
+
+You do not have to set the join. Every column is tried against the node ids and against every node property,
+as it is and under each normalizer (lowercase, digits, phone, e-mail, account, card…), and the join that reaches
+the most nodes is picked. The line above **Apply** says what it found, for example *12 of 24 Person nodes match a
+row · column person_id = the node id*. A file whose rows all land on one type is kept to that type. Two columns
+that hold both ends of the canvas's edges enrich those edges instead. When more than one join works, the others
+are listed above the rows: click one to use it. **Adjust the matching and the columns** opens every setting from
+[the table above](#how-a-row-finds-its-node). **Apply** draws it at once.
 
 ![Your data: enrich from a file](/screenshots/bring-your-own-data-enrich.png)
+
+#### Ask an AI
+
+The two buttons copy a prompt for any AI assistant (ChatGPT, Claude, …). You paste the CSV it answers into the
+same window, and it goes through the same automatic join.
+
+- **Ask an AI to fill in data**: the AI is the source. The prompt lists the nodes (the selected ones, or every
+  node on the canvas, up to 500) with their id, type and name, and asks for a CSV whose first column is
+  `node_id`. Use it for what a model knows or for a document you give it in the chat ("the sector and country of
+  each company").
+- **Ask an AI to clean this file**: shown when no column meets the canvas, and under the result. The prompt holds
+  the first 15 lines of your file and a few ids and property values of each node type. The AI rewrites the key the
+  way the canvas writes it (a key inside text, split across columns, with another mask), fixes decimal commas and
+  dates, and answers a clean CSV. For a file too large to paste, it writes a short script that does it.
+
+::: warning What leaves Graph Lagoon
+Both prompts carry real data: node ids and names, or the first lines of your file. The window says so before you
+copy. Paste them only into an assistant your organization allows for this data.
+:::
 
 ## Add nodes and edges
 
