@@ -14139,3 +14139,15 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `bring-your-own-data.md` ("What a reader sees"), screenshot `bring-your-own-data-table.png`.
 **Admin-area impact:** No admin-area impact
 **Known limitations:** layer ("your data") columns are not marked in the table yet; queued auto queries show no spinner until their turn.
+
+## [2026-11-13 20:30] - Feature Implemented: Data Table shows where each value came from (queries, your data, queued runs)
+
+**Feature:** Cells an enrichment query filled get a light blue background (amber for the person's own data), with the source on hover; columns from your data get an amber mark like the query ones; a query waiting for the ones before it shows as queued (tab spinner, "Waiting…" in Your data).
+**Decisions:**
+1. **Per-cell origin only for visible cells:** `propertyOrigin` reads the provenance map by id (queries) and the layer bookkeeping by object; the table builds its id → item index only while a layer is on screen, and the virtual scroller renders only the visible rows.
+2. **`queued` run status:** every query that will run is marked before the first starts, so a slow first query no longer hides that others are coming.
+3. **Bug fixed:** a node enrichment query patched the whole property dict, so the layer lost track of the values it had written on that node (its chip vanished and the values would have been saved as the context's). It now merges only the keys the query wrote, letting the layer come off and go back on around the patch.
+**Files:** changed `frontend/src/stores/graph.ts` (`propertyOrigin`, `overlayColumns`, queued runs, node patch as a merge), `frontend/src/components/DataTablePanel.vue`, `frontend/src/components/DatabricksEnrichmentTab.vue`.
+**Tests:** vitest `graph.queryEnrichment` (queued state, layer kept across a node query), `DataTablePanel.patch` (layer column mark, cell origins).
+**Public docs:** `bring-your-own-data.md` ("What a reader sees").
+**Admin-area impact:** No admin-area impact

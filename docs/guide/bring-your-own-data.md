@@ -245,7 +245,10 @@ enrichment_tables:
   rest of the node's properties load in the background.
 - In the **Data Table** they become columns as soon as the values arrive. A column a query wrote has a blue
   database mark in its header; hover it for the query and how many rows it filled (*'Risk' (12 of 40 rows)*).
-  While a query runs, the **Nodes** or **Edges** tab shows a spinner: its columns are still coming.
+  Each cell a query filled has a light blue background (hover: which query), so a column that mixes the
+  graph's own values with enriched ones shows which is which. Columns and cells from **your data** get the
+  same marks in amber. While a query runs or waits for the ones before it, the **Nodes** or **Edges** tab
+  shows a spinner: its columns are still coming.
 - **Your data → From Databricks tables** lists the context's queries and the authorized tables, runs one by
   hand, shows the SQL, and says what the last run did: *2 of 40 edges matched a row · 2 got new values*. A reader
   of a shared exploration gets this tab even without write access.

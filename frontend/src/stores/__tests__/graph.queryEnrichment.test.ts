@@ -139,6 +139,31 @@ describe('enrichment queries in the graph store', () => {
     expect(store.nodes[0].properties).toEqual({ name: 'Ana', tier: 'gold' });
   });
 
+  it('the queries after the first wait as queued, and the table can tell', async () => {
+    const store = useGraphStore();
+    store.currentContext = {
+      ...context,
+      enrichment_tables: [
+        { name: 'risk', label: 'Risk', table: 'main.bank.tx', query: { sql: 's', run: 'auto' } },
+        { name: 'tier', label: 'Tier', table: 'main.bank.tx', query: { sql: 's', run: 'auto', target: 'nodes' } },
+      ],
+    } as GraphContext;
+    let answerFirst!: (r: EnrichmentRunResult) => void;
+    vi.spyOn(api, 'runEnrichmentQuery')
+      .mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }))
+      .mockResolvedValue({ ...result({}), name: 'tier', target: 'nodes' });
+    vi.spyOn(api, 'getSubgraph').mockResolvedValue(answer());
+    await store.loadSubgraph();
+    await flushPromises();
+    expect(store.queryEnrichmentRuns.risk.status).toBe('running');
+    expect(store.queryEnrichmentRuns.tier.status).toBe('queued');
+    expect(store.runningQueryLabels('node')).toEqual(['Tier']);
+    expect(store.runningQueryLabels('edge')).toEqual(['Risk']);
+    answerFirst(result({}));
+    await flushPromises();
+    expect(store.runningQueryLabels('node')).toEqual([]);
+  });
+
   it('runs every auto query, for edges and for nodes, one after the other', async () => {
     const store = useGraphStore();
     store.currentContext = {
@@ -159,8 +184,36 @@ describe('enrichment queries in the graph store', () => {
     await store.loadSubgraph();
     await flushPromises();
     expect(run.mock.calls.map((c) => c[1])).toEqual(['risk', 'channel', 'tier']);
+    expect(Object.values(store.queryEnrichmentRuns).map((r) => r.status)).toEqual(['done', 'done', 'done']);
     expect(store.edges[0].properties).toEqual({ amount: 5, channel: 'web', score: 1 });
     expect(store.nodes[1].properties).toEqual({ tier: 'gold' });
     expect([...store.enrichedKeysFor('edge', 'e1')]).toEqual([['score', 'Risk'], ['channel', 'Channel']]);
+  });
+});
+
+describe('enrichment queries and the person\'s layer', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.restoreAllMocks();
+  });
+
+  it('a node query keeps the layer knowing its own values, so the snapshot leaves both out', async () => {
+    const store = useGraphStore();
+    store.currentContext = {
+      ...context,
+      enrichment_tables: [{ name: 'tier', label: 'Tier', table: 'main.bank.accts', query: { sql: 's', run: 'manual', target: 'nodes' } }],
+    } as GraphContext;
+    store.nodes = [{ node_id: 'b', node_type: 'Account', properties: { name: 'Bia' } }];
+    await store.setOverlayEnrichment({
+      id: 'f1', filename: 'r.csv', row_count: 1,
+      spec: { name: 'R', input: { delimiter: ',', header: true }, key_column: 'id', columns: ['segment'], match_node_types: [], match_source: 'node_id' },
+      rows: { b: [{ segment: 'corp' }] },
+    } as never);
+    vi.spyOn(api, 'runEnrichmentQuery').mockResolvedValue({ ...result({ b: { tier: 'gold' } }), name: 'tier', target: 'nodes' });
+    await store.runQueryEnrichment({ names: ['tier'] });
+    expect(store.nodes[0].properties).toEqual({ name: 'Bia', segment: 'corp', tier: 'gold' });
+    expect(store.overlayKeysFor('node', 'b')).toEqual(new Set(['segment']));
+    // The layer's value comes off what is saved (the query's value is stripped after it).
+    expect(store.baseGraph().nodes[0].properties).toEqual({ name: 'Bia', tier: 'gold' });
   });
 });
