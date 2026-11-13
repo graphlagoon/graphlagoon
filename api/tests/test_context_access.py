@@ -113,6 +113,29 @@ class TestMemoryBranch:
         store.share_exploration(exploration.id, "*@example.com", permission="read")
         assert _get(context.id, STRANGER).id == context.id
 
+    def test_group_exploration_share_grants_access_to_members_only(
+        self, store, context, exploration
+    ):
+        """The gate resolves group membership itself (nothing primed it before)."""
+        from graphlagoon.utils.sharing import group_share_value
+
+        group = store.create_group("g", members=[{"kind": "email", "value": STRANGER}])
+        store.share_exploration(exploration.id, group_share_value(group.id), permission="read")
+        assert _get(context.id, STRANGER).id == context.id
+        with pytest.raises(HTTPException) as exc:
+            _get(context.id, "other@example.com")
+        assert exc.value.status_code == 403
+
+    def test_group_context_share_follows_membership(self, store, context):
+        from graphlagoon.utils.sharing import group_share_value
+
+        group = store.create_group("g", members=[])
+        store.share_graph_context(context.id, group_share_value(group.id), permission="read")
+        with pytest.raises(HTTPException):
+            _get(context.id, STRANGER)
+        store.update_group(group.id, members=[{"kind": "email", "value": STRANGER}])
+        assert _get(context.id, STRANGER).id == context.id
+
 
 class _CapturingResult:
     """Stands in for a SQLAlchemy Result; always reports "nothing found"."""
@@ -193,3 +216,22 @@ class TestDatabaseShareConditions:
 
         for value in share_match_emails(STRANGER):
             assert email_matches_share(STRANGER, value) is True
+
+    def test_primed_group_sentinels_join_the_in_clause(self):
+        """Once the request resolved membership, the SQL IN list and the memory
+        predicate agree on the group sentinel too."""
+        from graphlagoon.utils.sharing import (
+            email_matches_share,
+            reset_group_shares,
+            set_group_shares,
+            share_match_emails,
+        )
+
+        sentinel = "group:12345678-1234-5678-1234-567812345678"
+        set_group_shares(STRANGER, frozenset({sentinel}))
+        values = share_match_emails(STRANGER)
+        assert sentinel in values
+        for value in values:
+            assert email_matches_share(STRANGER, value) is True
+        reset_group_shares()
+        assert sentinel not in share_match_emails(STRANGER)

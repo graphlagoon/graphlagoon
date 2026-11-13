@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, Deque, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from graphlagoon.utils.sharing import email_matches_share
+from graphlagoon.utils.sharing import email_matches_share, group_share_value
 
 
 @dataclass
@@ -787,6 +787,26 @@ class InMemoryStore:
             if rule.group_id != group_id
         }
         return group
+
+    def remove_group_shares(self, group_id: UUID) -> int:
+        """Drop every ``group:<uuid>`` share of a deleted group (contexts,
+        explorations, investigations); the DB path does the same in
+        ``services.groups.delete_group``. Returns how many were removed."""
+        sentinel = group_share_value(group_id)
+        removed = 0
+        for context in self.graph_contexts.values():
+            before = len(context.shares)
+            context.shares = [s for s in context.shares if s.shared_with_email != sentinel]
+            removed += before - len(context.shares)
+        for exp in self.explorations.values():
+            before = len(exp.shares)
+            exp.shares = [s for s in exp.shares if s.shared_with_email != sentinel]
+            removed += before - len(exp.shares)
+        for inv in self.investigations.values():
+            before = len(inv.shares)
+            inv.shares = [s for s in inv.shares if s.email != sentinel]
+            removed += before - len(inv.shares)
+        return removed
 
     def set_permission(
         self, permission_id: str, mode: str, rules: List[Dict[str, Any]]

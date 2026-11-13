@@ -111,7 +111,7 @@ function describeAuditBody(entry: AuditEntry): string {
     case 'context.share':
     case 'exploration.share':
     case 'investigation.share':
-      return `with ${m.with} (${m.permission})${m.updated ? ' — updated' : ''}`;
+      return `with ${m.group_name ? `group ${m.group_name}` : m.with} (${m.permission ?? m.role})${m.updated ? ' — updated' : ''}`;
     case 'context.unshare':
     case 'exploration.unshare':
     case 'investigation.unshare':

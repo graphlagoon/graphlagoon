@@ -124,7 +124,8 @@ async def update_group(
 async def delete_group(
     group_id: UUID, admin_email: str = Depends(require_superuser)
 ):
-    """Delete a group; its permission rules cascade away with it."""
+    """Delete a group; its permission rules and the ``group:<uuid>`` shares of
+    contexts, explorations and investigations go with it."""
     try:
         deleted = await groups_service.delete_group(group_id)
     except groups_service.GroupNotFound as exc:
@@ -137,6 +138,7 @@ async def delete_group(
         metadata={
             "name": deleted["name"],
             "rules_removed": deleted.get("rules_removed", 0),
+            "shares_removed": deleted.get("shares_removed", 0),
         },
     )
     return {"status": "deleted"}

@@ -15,7 +15,7 @@ from uuid import UUID
 
 from graphlagoon.db.database import get_session_maker, is_database_available
 from graphlagoon.db.memory_store import get_memory_store
-from graphlagoon.utils.sharing import validate_owner_email
+from graphlagoon.utils.sharing import group_share_value, validate_owner_email
 
 logger = logging.getLogger(__name__)
 
@@ -215,13 +215,22 @@ async def update_group(
 
 
 async def delete_group(group_id: UUID) -> dict:
-    """Deletes the group (rules cascade); returns the deleted payload for
-    the audit entry. Raises ``GroupNotFound``."""
+    """Deletes the group (rules cascade; the ``group:<uuid>`` share rows of
+    contexts, explorations and investigations are removed here because the
+    sentinel has no FK); returns the deleted payload for the audit entry.
+    Raises ``GroupNotFound``."""
+    sentinel = group_share_value(group_id)
     if is_database_available():
-        from sqlalchemy import select
+        from sqlalchemy import delete, select
         from sqlalchemy.orm import selectinload
 
-        from graphlagoon.db.models import Group, PermissionRule
+        from graphlagoon.db.models import (
+            ExplorationShare,
+            GraphContextShare,
+            Group,
+            InvestigationShare,
+            PermissionRule,
+        )
 
         session_maker = get_session_maker()
         async with session_maker() as session:
@@ -238,6 +247,15 @@ async def delete_group(group_id: UUID) -> dict:
             )
             payload = _serialize(group, group.members)
             payload["rules_removed"] = len(rules.scalars().all())
+            shares_removed = 0
+            for model, column in (
+                (GraphContextShare, GraphContextShare.shared_with_email),
+                (ExplorationShare, ExplorationShare.shared_with_email),
+                (InvestigationShare, InvestigationShare.email),
+            ):
+                result = await session.execute(delete(model).where(column == sentinel))
+                shares_removed += result.rowcount or 0
+            payload["shares_removed"] = shares_removed
             await session.delete(group)
             await session.commit()
             return payload
@@ -251,6 +269,7 @@ async def delete_group(group_id: UUID) -> dict:
         raise GroupNotFound("Group not found")
     payload = _serialize(group, group.members)
     payload["rules_removed"] = rules_removed
+    payload["shares_removed"] = store.remove_group_shares(group_id)
     return payload
 
 

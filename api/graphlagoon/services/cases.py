@@ -28,8 +28,16 @@ from graphlagoon.db.database import get_session_maker, is_database_available
 from graphlagoon.db.memory_store import get_memory_store
 from graphlagoon.middleware.auth import get_current_actor
 from graphlagoon.services import case_types
+from graphlagoon.services import groups as groups_service
+from graphlagoon.services.share_groups import group_shares_if_needed, prime_group_shares
 from graphlagoon.utils.authz import can_manage, is_superuser
-from graphlagoon.utils.sharing import validate_owner_email
+from graphlagoon.utils.sharing import (
+    email_matches_share,
+    group_share_value,
+    is_group_share,
+    parse_group_share,
+    validate_owner_email,
+)
 
 
 class InvestigationError(Exception):
@@ -51,9 +59,18 @@ def _not_found(investigation_id: UUID) -> InvestigationError:
 # ---------------------------------------------------------------------------
 
 
+def _share_names(share_email: str, user_email: str) -> bool:
+    """Exact e-mail, or a ``group:<uuid>`` the user belongs to (membership is
+    primed per request by ``services.share_groups``; wildcards never reach a case)."""
+    if is_group_share(share_email):
+        return email_matches_share(user_email, share_email)
+    return share_email == user_email
+
+
 def _shared(inv: Any, user_email: str, *, write: bool = False) -> bool:
     return any(
-        s.email == user_email and (not write or s.role == "editor") for s in inv.shares
+        _share_names(s.email, user_email) and (not write or s.role == "editor")
+        for s in inv.shares
     )
 
 
@@ -96,6 +113,20 @@ def nominal_email(email: str) -> str:
     if not ok:
         raise InvestigationError(422, "INVALID_EMAIL", message)
     return candidate
+
+
+async def share_target(email: str) -> str:
+    """A share target: a named e-mail (``nominal_email``) or an existing
+    admin-managed group, returned as its canonical ``group:<uuid>`` sentinel."""
+    candidate = (email or "").strip()
+    if not is_group_share(candidate.lower()):
+        return nominal_email(candidate)
+    group_id = parse_group_share(candidate.lower())
+    if group_id is None:
+        raise InvestigationError(422, "INVALID_GROUP_SHARE", f"Invalid group share target: {candidate}")
+    if await groups_service.get_group(group_id) is None:
+        raise InvestigationError(422, "GROUP_NOT_FOUND", f"Group not found: {group_id}")
+    return group_share_value(group_id)
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +358,8 @@ async def load_case(session, investigation_id: UUID, user_email: str, need: str 
         )
         inv = result.scalar_one_or_none()
 
+    if inv is not None:
+        await group_shares_if_needed(user_email, inv.shares)
     if inv is None or not can_read_case(inv, user_email):
         raise _not_found(investigation_id)
     if need == "write" and not can_write_case(inv, user_email):
@@ -566,6 +599,8 @@ def _sort_key(sort: str):
 
 
 async def _readable_cases(session, user_email: str, exploration_id: Optional[UUID]) -> list:
+    # Also for superusers: `serialize` reports has_write_access from the shares.
+    sentinels = await prime_group_shares(user_email)
     if session is None:
         store = get_memory_store()
         with_exp = {
@@ -590,7 +625,9 @@ async def _readable_cases(session, user_email: str, exploration_id: Optional[UUI
                 Investigation.owner_email == user_email,
                 Investigation.assignee_email == user_email,
                 Investigation.id.in_(
-                    select(InvestigationShare.investigation_id).where(InvestigationShare.email == user_email)
+                    select(InvestigationShare.investigation_id).where(
+                        InvestigationShare.email.in_([user_email, *sorted(sentinels)])
+                    )
                 ),
             )
         )
@@ -923,8 +960,8 @@ async def delete_investigation(investigation_id: UUID, user_email: str, reason: 
 
 
 async def share_investigation(investigation_id: UUID, user_email: str, email: str, role: str) -> str:
-    """Returns the normalized e-mail that was shared."""
-    email = nominal_email(email)
+    """Returns the normalized share target (an e-mail or ``group:<uuid>``)."""
+    email = await share_target(email)
     async with _session() as session:
         inv = await load_case(session, investigation_id, user_email, "manage")
         await append_event(session, investigation_id, user_email, "case.shared", {"with": email, "role": role})
@@ -1075,6 +1112,8 @@ async def record_decision(investigation_id: UUID, user_email: str, data: dict) -
         reviewer = nominal_email(data["reviewer_email"]) if data.get("reviewer_email") else None
         if reviewer == user_email:
             raise InvestigationError(422, "FOUR_EYES", "The reviewer is another person")
+        if reviewer:
+            await group_shares_if_needed(reviewer, inv.shares)  # they may be an editor through a group
         if reviewer and not can_write_case(inv, reviewer):
             # Else the decision would wait forever for someone who cannot open the case.
             raise InvestigationError(

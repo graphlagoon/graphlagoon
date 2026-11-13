@@ -628,3 +628,83 @@ superuserTest.describe('Superuser', () => {
     await expect(page.getByText(OTHER_USER)).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Share with a group (group:<uuid> in shared_with)
+// ---------------------------------------------------------------------------
+test.describe('Share with a group', () => {
+  const GROUP_ID = '12345678-1234-5678-1234-567812345678';
+  const GROUPS = {
+    items: [
+      { id: GROUP_ID, name: 'analysts', description: 'Fraud analysts' },
+      { id: '22222222-2222-2222-2222-222222222222', name: 'builders', description: null },
+    ],
+  };
+
+  async function seedGroups(page: Page) {
+    await page.route('**/graphlagoon/api/groups', (route) => {
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(GROUPS) });
+    });
+  }
+
+  test('modal lists a group share by name with a Group badge', async ({ authenticatedPage: page }) => {
+    await seedGroups(page);
+    await seedContexts(page, [{ ...MOCK_CONTEXT, shared_with: [`group:${GROUP_ID}`, 'bob@test.com'] }]);
+    await page.goto('/contexts');
+    await page.getByRole('button', { name: 'Share' }).click();
+
+    const sharedList = page.locator('.shared-list');
+    await expect(sharedList.getByText('analysts')).toBeVisible();
+    await expect(sharedList.getByText('Group', { exact: true })).toBeVisible();
+    await expect(sharedList.getByText(`group:${GROUP_ID}`)).not.toBeVisible();
+    await expect(sharedList.getByText('bob@test.com')).toBeVisible();
+  });
+
+  test('choosing a group posts its group:<uuid> value', async ({ authenticatedPage: page }) => {
+    await seedGroups(page);
+    const sharedWith: string[] = [];
+    await page.route('**/graphlagoon/api/graph-contexts', (route) => {
+      if (route.request().method() === 'GET') {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{ ...MOCK_CONTEXT, shared_with: [...sharedWith] }]),
+        });
+      } else {
+        route.fallback();
+      }
+    });
+    let sharePayload: any = null;
+    await page.route(`**/graphlagoon/api/graph-contexts/${MOCK_CONTEXT.id}/share`, (route) => {
+      if (route.request().method() === 'POST') {
+        sharePayload = JSON.parse(route.request().postData() || '{}');
+        sharedWith.push(sharePayload.email);
+        route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        route.fallback();
+      }
+    });
+
+    await page.goto('/contexts');
+    await page.getByRole('button', { name: 'Share' }).click();
+    await expect(page.getByTestId('share-kind')).toBeVisible();
+    await page.getByTestId('share-kind').getByLabel('A group').check();
+    // The e-mail field makes way for the group picker.
+    await expect(page.locator('.share-modal input[type="text"]')).not.toBeVisible();
+    await page.getByTestId('share-group').selectOption({ label: 'analysts' });
+    await page.getByTestId('share-permission').selectOption('write');
+    await page.locator('.modal-footer').getByRole('button', { name: 'Share' }).click();
+
+    expect(sharePayload).toEqual({ email: `group:${GROUP_ID}`, permission: 'write' });
+    await expect(page.getByText(`Share "${MOCK_CONTEXT.title}"`)).not.toBeVisible();
+  });
+
+  test('without groups the Person/Group choice is hidden', async ({ authenticatedPage: page }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await page.goto('/contexts');
+    await page.getByRole('button', { name: 'Share' }).click();
+    await expect(page.getByText(`Share "${MOCK_CONTEXT.title}"`)).toBeVisible();
+    await expect(page.getByTestId('share-kind')).not.toBeVisible();
+    await expect(page.locator('.share-modal input[type="text"]')).toBeVisible();
+  });
+});

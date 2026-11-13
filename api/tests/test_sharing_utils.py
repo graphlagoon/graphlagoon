@@ -266,3 +266,85 @@ def test_share_request_public_coerces_write_to_read():
 def test_share_request_regular_write_untouched():
     req = ShareRequest(email="joao@stone.com.br", permission="write")
     assert req.permission == "write"
+
+
+# --- group shares (group:<uuid>) ---
+
+
+def test_group_share_helpers():
+    from uuid import UUID
+
+    from graphlagoon.utils.sharing import (
+        group_share_value,
+        is_group_share,
+        parse_group_share,
+        validate_owner_email,
+    )
+
+    gid = UUID("12345678-1234-5678-1234-567812345678")
+    sentinel = group_share_value(gid)
+    assert sentinel == "group:12345678-1234-5678-1234-567812345678"
+    assert group_share_value(str(gid).upper()) == sentinel
+    assert is_group_share(sentinel) and not is_group_share("joao@stone.com.br")
+    assert parse_group_share(sentinel) == gid
+    assert parse_group_share("group:nope") is None and parse_group_share("*") is None
+    assert validate_owner_email(sentinel)[0] is False
+
+
+def test_group_share_matches_only_primed_membership():
+    from graphlagoon.utils.sharing import (
+        current_group_shares,
+        reset_group_shares,
+        set_group_shares,
+    )
+
+    sentinel = "group:12345678-1234-5678-1234-567812345678"
+    other = "group:00000000-0000-0000-0000-000000000000"
+    # Explicit membership wins over the request cache.
+    assert email_matches_share("joao@stone.com.br", sentinel, frozenset({sentinel})) is True
+    assert email_matches_share("joao@stone.com.br", sentinel, frozenset()) is False
+    # Unprimed request: fail closed.
+    reset_group_shares()
+    assert current_group_shares("joao@stone.com.br") is None
+    assert email_matches_share("joao@stone.com.br", sentinel) is False
+    assert user_has_share_access("joao@stone.com.br", [FakeShare(sentinel)]) is False
+    # Primed for this user (case-insensitive key); a group never matches another user.
+    set_group_shares("Joao@stone.com.br", frozenset({sentinel}))
+    assert email_matches_share("joao@stone.com.br", sentinel) is True
+    assert email_matches_share("joao@stone.com.br", other) is False
+    assert email_matches_share("maria@stone.com.br", sentinel) is False
+    assert user_has_write_access("joao@stone.com.br", [FakeShare(sentinel, "write")]) is True
+    assert user_has_write_access("joao@stone.com.br", [FakeShare(sentinel, "read")]) is False
+    reset_group_shares()
+
+
+def test_share_match_emails_carries_primed_group_sentinels():
+    from graphlagoon.utils.sharing import reset_group_shares, set_group_shares
+
+    sentinel = "group:12345678-1234-5678-1234-567812345678"
+    assert sentinel not in share_match_emails("joao@stone.com.br")
+    assert sentinel in share_match_emails("joao@stone.com.br", frozenset({sentinel}))
+    set_group_shares("joao@stone.com.br", frozenset({sentinel}))
+    values = share_match_emails("joao@stone.com.br")
+    assert values[:3] == ["joao@stone.com.br", "*", "*@stone.com.br"] and values[3] == sentinel
+    for value in values:
+        assert email_matches_share("joao@stone.com.br", value) is True
+    reset_group_shares()
+
+
+def test_validate_share_email_group_target():
+    assert validate_share_email("group:12345678-1234-5678-1234-567812345678", []) == (True, "")
+    valid, msg = validate_share_email("group:nope", [])
+    assert valid is False and "Invalid group share target" in msg
+
+
+def test_share_request_group_keeps_write_and_canonicalizes():
+    req = ShareRequest(email="GROUP:12345678-1234-5678-1234-567812345678", permission="write")
+    assert req.email == "group:12345678-1234-5678-1234-567812345678"
+    assert req.permission == "write"
+
+
+def test_share_request_accepts_unhyphenated_group_id_as_the_canonical_row():
+    req = ShareRequest(email="group:12345678123456781234567812345678")
+    assert req.email == "group:12345678-1234-5678-1234-567812345678"
+    assert ShareRequest(email="group:nope").email == "group:nope"  # refused later by validate_share_email

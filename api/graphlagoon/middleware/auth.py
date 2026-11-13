@@ -12,6 +12,7 @@ import secrets
 import time
 
 from graphlagoon.config import get_settings
+from graphlagoon.utils.sharing import reset_group_shares
 from graphlagoon.services.session import (
     REQUESTED_WITH_HEADER,
     REQUESTED_WITH_VALUE,
@@ -407,6 +408,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         settings = get_settings()
         _current_actor.set(None)
+        reset_group_shares()  # group-share membership is resolved per request
 
         # An agent token wins over proxy headers: the agent acts *for* its
         # owner, and every write must say so.

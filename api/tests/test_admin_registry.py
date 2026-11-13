@@ -124,6 +124,7 @@ ROUTER_MODULES = (
     "explorations",
     "graph",
     "graph_contexts",
+    "groups",
     "investigations",
     "live",
     "org",
