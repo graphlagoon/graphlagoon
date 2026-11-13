@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { substituteTemplateParams } from '@/utils/templateSubstitution';
+import { seedTemplateValues, substituteTemplateParams } from '@/utils/templateSubstitution';
 
 describe('substituteTemplateParams', () => {
   it('substitutes a declared parameter', () => {
@@ -95,5 +95,31 @@ describe('substituteTemplateParams', () => {
     expect(substituteTemplateParams('$real $sneaky', ['real', 'sneaky'], values)).toBe(
       'R $sneaky',
     );
+  });
+});
+
+describe('seedTemplateValues', () => {
+  const input = { id: 'a', type: 'input' as const, default: 'dflt' };
+  const select = { id: 's', type: 'select' as const, default: 'x', options: ['x', 'y'] };
+
+  it('falls back to the default when nothing was run or bound', () => {
+    expect(seedTemplateValues([input, { id: 'b', type: 'input' }], undefined, undefined)).toEqual({
+      a: 'dflt',
+      b: '',
+    });
+  });
+
+  it('prefers the last-run value over the default, even when it was cleared', () => {
+    expect(seedTemplateValues([input], undefined, { a: 'last' })).toEqual({ a: 'last' });
+    expect(seedTemplateValues([input], undefined, { a: '' })).toEqual({ a: '' });
+  });
+
+  it('prefers a caller-bound value over the last-run one', () => {
+    expect(seedTemplateValues([input], { a: 'bound' }, { a: 'last' })).toEqual({ a: 'bound' });
+  });
+
+  it('drops a remembered select value that is no longer an option', () => {
+    expect(seedTemplateValues([select], undefined, { s: 'y' })).toEqual({ s: 'y' });
+    expect(seedTemplateValues([select], undefined, { s: 'gone' })).toEqual({ s: 'x' });
   });
 });

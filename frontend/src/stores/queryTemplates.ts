@@ -8,6 +8,15 @@ export const useQueryTemplatesStore = defineStore('queryTemplates', () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
+  // What each template was last run with, so reopening it does not fall back
+  // to the defaults. Session-only on purpose: values are often identifiers of
+  // people or accounts and do not belong in browser storage.
+  const lastRunValues = ref<Record<string, Record<string, string>>>({});
+
+  function rememberRunValues(templateId: string, values: Record<string, string>): void {
+    lastRunValues.value[templateId] = { ...values };
+  }
+
   async function loadTemplates(contextId: string): Promise<void> {
     loading.value = true;
     error.value = null;
@@ -42,6 +51,7 @@ export const useQueryTemplatesStore = defineStore('queryTemplates', () => {
   async function deleteTemplate(contextId: string, templateId: string): Promise<void> {
     await api.deleteQueryTemplate(contextId, templateId);
     templates.value = templates.value.filter((t) => t.id !== templateId);
+    delete lastRunValues.value[templateId];
   }
 
   function clear(): void {
@@ -53,6 +63,8 @@ export const useQueryTemplatesStore = defineStore('queryTemplates', () => {
     templates,
     loading,
     error,
+    lastRunValues,
+    rememberRunValues,
     loadTemplates,
     createTemplate,
     updateTemplate,

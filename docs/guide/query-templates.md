@@ -129,6 +129,12 @@ literal text replacement of each `$param_id`, longest id first, in a single
 pass — a value is never itself re-scanned for placeholders, so a value that
 happens to contain `$something` is inert text.
 
+Opening a template again shows the values you last ran it with, not the
+defaults, so a second run only needs the one value you want to change. The
+values are kept until you reload the page, and a parameter filled by a
+[right-click action](./context-menu-actions.md#run-query-template) still takes
+the clicked item's value.
+
 ## Running a template from a link
 
 `?template=<name>` names the template; each `?template.<param>=<value>` fills
