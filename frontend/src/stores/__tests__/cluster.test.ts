@@ -926,11 +926,60 @@ describe('cluster store', () => {
       expect(updateSpy.mock.calls[0][1].cluster_programs).toHaveLength(0)
     })
 
-    it('deleteProgram refuses to delete a built-in default', () => {
+    it('deleteProgram refuses to delete a built-in without context write access', async () => {
+      useGraphStore().currentContext = makeContext({ has_write_access: false })
       const store = useClusterStore()
       expect(store.deleteProgram('default-bfs-from-node')).toBe(false)
       expect(store.getProgram('default-bfs-from-node')).toBeDefined()
-      expect(store.error).toBe('Default programs cannot be deleted')
+      expect(store.error).toBe('Built-in programs can only be deleted with write access to the context')
+      await flushDebounce(store)
+      expect(updateSpy).not.toHaveBeenCalled()
+    })
+
+    it('a context writer deletes a built-in: persisted as a marker, gone after rehydration', async () => {
+      useGraphStore().currentContext = makeContext()
+      const store = useClusterStore()
+      store.hydrateProgramsFromContext([makeContextProgram('cp-1')])
+
+      expect(store.deleteProgram('default-bfs-from-node')).toBe(true)
+      expect(store.getProgram('default-bfs-from-node')).toBeUndefined()
+      await flushDebounce(store)
+
+      expect(updateSpy).toHaveBeenCalledTimes(1)
+      const sent = updateSpy.mock.calls[0][1].cluster_programs!
+      expect(sent).toEqual([
+        expect.objectContaining({ program_id: 'cp-1' }),
+        { program_id: 'default-bfs-from-node', deleted: true },
+      ])
+
+      // Reload: the marker keeps the built-in away, the other built-ins stay
+      store.hydrateProgramsFromContext(sent)
+      expect(store.getProgram('default-bfs-from-node')).toBeUndefined()
+      expect(store.getProgram('default-orphan-clusters')).toBeDefined()
+      expect(store.getProgram('cp-1')).toBeDefined()
+      expect(store.deletedDefaultIds).toEqual(['default-bfs-from-node'])
+      expect(store.programs).toHaveLength(3)
+    })
+
+    it('restoreDefaultPrograms brings deleted built-ins back and persists without markers', async () => {
+      useGraphStore().currentContext = makeContext()
+      const store = useClusterStore()
+      store.hydrateProgramsFromContext([
+        makeContextProgram('cp-1'),
+        { program_id: 'default-orphan-clusters', deleted: true },
+      ])
+      store.createProgram({ program_name: 'Local', code: 'return []', scope: 'exploration' })
+      expect(store.getProgram('default-orphan-clusters')).toBeUndefined()
+
+      expect(store.restoreDefaultPrograms()).toBe(true)
+      expect(store.getProgram('default-orphan-clusters')).toBeDefined()
+      expect(store.deletedDefaultIds).toEqual([])
+      expect(store.programs.map(p => p.program_name)).toContain('Local')
+      expect(store.getProgram('cp-1')?.scope).toBe('context')
+
+      await flushDebounce(store)
+      const sent = updateSpy.mock.calls.at(-1)![1].cluster_programs!
+      expect(sent.map(p => p.program_id)).toEqual(['cp-1'])
     })
 
     it('no persist without a current context', async () => {

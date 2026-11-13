@@ -88,7 +88,7 @@ describe('useClusterProgramMenuActions', () => {
       await nextTick()
       expect(programActions()[0].label).toBe('Renamed BFS')
 
-      // Built-in defaults cannot be deleted — the action stays
+      // Without context write access a built-in cannot be deleted — the action stays
       clusterStore.deleteProgram(BFS_ID)
       await nextTick()
       expect(programActions()).toHaveLength(1)

@@ -121,6 +121,22 @@ export type ClusterProgramParamValues = Record<string, string | number | boolean
 export type ClusterProgramScope = 'context' | 'exploration';
 
 /**
+ * Marker stored in `graph_contexts.cluster_programs` when a context writer
+ * deletes a built-in program: the built-in is not recreated for that context.
+ */
+export interface DeletedBuiltInProgram {
+  program_id: string;
+  deleted: true;
+}
+
+/** An entry of a context's `cluster_programs` list. */
+export type ContextClusterProgramEntry = ClusterProgram | DeletedBuiltInProgram;
+
+export function isDeletedBuiltIn(entry: ContextClusterProgramEntry): entry is DeletedBuiltInProgram {
+  return (entry as DeletedBuiltInProgram).deleted === true;
+}
+
+/**
  * A cluster program is JavaScript code that generates clusters
  *
  * The program receives a context object with { nodes, edges, selectedNodeIds }

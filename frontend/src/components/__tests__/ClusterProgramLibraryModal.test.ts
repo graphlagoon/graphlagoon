@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, fireEvent } from '@testing-library/vue'
 import { setActivePinia, createPinia } from 'pinia'
+import { nextTick } from 'vue'
 import ClusterProgramLibraryModal from '@/components/ClusterProgramLibraryModal.vue'
 import { useClusterStore } from '@/stores/cluster'
+import { useGraphStore } from '@/stores/graph'
+import { api } from '@/services/api'
+import type { GraphContext } from '@/types/graph'
 import * as confirm from '@/composables/useConfirm'
 import * as portable from '@/utils/portableExport'
 
@@ -69,7 +73,7 @@ describe('ClusterProgramLibraryModal', () => {
     expect(exec).toHaveBeenCalledWith(plain.program_id)
   })
 
-  it('deletes after confirmation; built-ins have no delete button', async () => {
+  it('deletes after confirmation; built-ins have no delete button without context write access', async () => {
     const store = useClusterStore()
     store.createProgram({ program_id: 'default-group-by-node-type', program_name: 'Built', code: 'return []' })
     const p = store.createProgram({ program_name: 'Mine', code: 'return []', scope: 'exploration' })
@@ -79,6 +83,28 @@ describe('ClusterProgramLibraryModal', () => {
     await fireEvent.click(q(`[data-testid="cluster-program-delete-${p.program_id}"]`)!)
     await Promise.resolve()
     expect(store.programs.some(x => x.program_id === p.program_id)).toBe(false)
+  })
+
+  it('a context writer deletes a built-in and restores it', async () => {
+    const graphStore = useGraphStore()
+    graphStore.currentContext = { id: 'ctx-1', has_write_access: true } as GraphContext
+    vi.spyOn(api, 'updateGraphContext').mockResolvedValue(graphStore.currentContext)
+    const store = useClusterStore()
+    store.hydrateProgramsFromContext([])
+    vi.spyOn(confirm, 'confirmAction').mockResolvedValue(true)
+    mount()
+    expect(q('[data-testid="cluster-program-library-restore-builtins"]')).toBeNull()
+
+    await fireEvent.click(q('[data-testid="cluster-program-delete-default-bfs-from-node"]')!)
+    await Promise.resolve()
+    expect(store.getProgram('default-bfs-from-node')).toBeUndefined()
+    await nextTick()
+
+    const restore = q('[data-testid="cluster-program-library-restore-builtins"]')!
+    expect(restore.textContent).toContain('(1)')
+    await fireEvent.click(restore)
+    expect(store.getProgram('default-bfs-from-node')).toBeDefined()
+    expect(q('[data-testid="cluster-program-library-restore-builtins"]')).toBeNull()
   })
 
   it('imports several programs at once, with their parameters', async () => {

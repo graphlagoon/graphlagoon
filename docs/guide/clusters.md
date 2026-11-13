@@ -109,8 +109,11 @@ members with CSV export.
 The editor (New → **JavaScript Code**) has syntax highlighting,
 autocomplete for the injected variables, and insertable snippets. Three
 built-in programs double as worked examples — **Group by Node Type**,
-**Orphan Clusters** (leaves grouped per hub), and **BFS from Node** — they
-can't be deleted, and edits to them last only until reload.
+**Orphan Clusters** (leaves grouped per hub), and **BFS from Node**. Edits
+to them last only until reload. Anyone with write access to the context can
+delete a built-in from the library: it disappears for everyone using that
+context, and **Restore built-ins** in the library toolbar brings the deleted
+ones back. Read-only users see no delete button on built-ins.
 
 ## Parameters
 
@@ -178,7 +181,7 @@ same way.
 |---|---|---|
 | **Context** | The graph context, immediately | Everyone who can open the context, in every exploration |
 | **Exploration** | The exploration's saved state | Whoever opens that exploration |
-| Built-in | Nowhere — recreated from code | Everyone |
+| Built-in | Nowhere — recreated from code (a deletion is saved to the context) | Everyone, unless a context writer deleted it |
 
 The "Save to" choice appears only if you have write access to the context;
 read-only users' programs are exploration-scoped automatically. The

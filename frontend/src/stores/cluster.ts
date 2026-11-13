@@ -12,7 +12,10 @@ import type {
   CreateClusterProgramInput,
   UpdateClusterProgramInput,
   CreateClusterInput,
+  ContextClusterProgramEntry,
+  DeletedBuiltInProgram,
 } from '@/types/cluster'
+import { isDeletedBuiltIn } from '@/types/cluster'
 import { resolveParamValues } from '@/utils/clusterProgramParams'
 import { runClusterProgramInWorker } from '@/services/clusterProgramRunner'
 import { programUsesMetricLookup } from '@/workers/clusterProgramEvaluate'
@@ -52,6 +55,8 @@ export const useClusterStore = defineStore('cluster', () => {
   const programs = ref<ClusterProgram[]>([])
   const clusters = ref<Cluster[]>([])
   const executions = ref<ClusterProgramExecution[]>([])
+  /** Built-in program ids the current context's writers deleted. */
+  const deletedDefaultIds = ref<string[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -220,11 +225,13 @@ export const useClusterStore = defineStore('cluster', () => {
   }
 
   /**
-   * Delete a cluster program (built-in defaults cannot be deleted)
+   * Delete a cluster program. A built-in is deleted for the whole context, so
+   * only a context writer can delete one.
    */
   function deleteProgram(programId: string): boolean {
-    if (isDefaultProgramId(programId)) {
-      error.value = 'Default programs cannot be deleted'
+    const isDefault = isDefaultProgramId(programId)
+    if (isDefault && !contextWritable()) {
+      error.value = 'Built-in programs can only be deleted with write access to the context'
       return false
     }
 
@@ -238,9 +245,26 @@ export const useClusterStore = defineStore('cluster', () => {
     // Also remove execution history for this program
     executions.value = executions.value.filter(e => e.program_id !== programId)
 
-    if (removed.scope === 'context') {
+    if (isDefault) {
+      if (!deletedDefaultIds.value.includes(programId)) deletedDefaultIds.value.push(programId)
+      persistProgramsToContext()
+    } else if (removed.scope === 'context') {
       persistProgramsToContext()
     }
+    return true
+  }
+
+  /**
+   * Bring back the built-ins deleted from the current context (writers only).
+   */
+  function restoreDefaultPrograms(): boolean {
+    if (!contextWritable() || deletedDefaultIds.value.length === 0) return false
+    const contextPrograms = programs.value.filter(p => p.scope === 'context')
+    const explorationPrograms = programs.value.filter(p => p.scope === 'exploration')
+    deletedDefaultIds.value = []
+    hydrateProgramsFromContext(contextPrograms)
+    programs.value.push(...explorationPrograms)
+    persistProgramsToContext()
     return true
   }
 
@@ -630,9 +654,10 @@ export const useClusterStore = defineStore('cluster', () => {
     const context = graphStore.currentContext
     if (!context || !context.has_write_access) return
 
-    const payload = programs.value.filter(
-      p => p.scope === 'context' && !isDefaultProgramId(p.program_id)
-    )
+    const payload: ContextClusterProgramEntry[] = [
+      ...programs.value.filter(p => p.scope === 'context' && !isDefaultProgramId(p.program_id)),
+      ...deletedDefaultIds.value.map((id): DeletedBuiltInProgram => ({ program_id: id, deleted: true })),
+    ]
 
     try {
       const updated = await api.updateGraphContext(context.id, {
@@ -665,14 +690,22 @@ export const useClusterStore = defineStore('cluster', () => {
   /**
    * Rebuild the program list from the built-in defaults plus the given
    * context-level programs. A context program with a default's id replaces the
-   * built-in (defensive; persist filters defaults out). Exploration-scoped
-   * programs are dropped — callers re-add them via loadState.
+   * built-in (defensive; persist filters defaults out); a deleted-built-in
+   * marker removes it. Exploration-scoped programs are dropped — callers
+   * re-add them via loadState.
    */
-  function hydrateProgramsFromContext(contextPrograms?: ClusterProgram[]) {
+  function hydrateProgramsFromContext(contextPrograms?: ContextClusterProgramEntry[]) {
     isHydrating = true
     try {
       createDefaultPrograms()
-      for (const program of contextPrograms ?? []) {
+      const entries = contextPrograms ?? []
+      deletedDefaultIds.value = entries
+        .filter(isDeletedBuiltIn)
+        .map(e => e.program_id)
+        .filter(isDefaultProgramId)
+      programs.value = programs.value.filter(p => !deletedDefaultIds.value.includes(p.program_id))
+      for (const program of entries) {
+        if (isDeletedBuiltIn(program)) continue
         const normalized: ClusterProgram = { ...program, scope: 'context' }
         const index = programs.value.findIndex(p => p.program_id === program.program_id)
         if (index === -1) {
@@ -1103,6 +1136,7 @@ return clusters;`,
     programs,
     clusters,
     executions,
+    deletedDefaultIds,
     loading,
     error,
 
@@ -1118,6 +1152,7 @@ return clusters;`,
     createProgram,
     updateProgram,
     deleteProgram,
+    restoreDefaultPrograms,
     getProgram,
     executeProgram,
     computeClustersFromProgram,

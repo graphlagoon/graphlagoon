@@ -1,4 +1,4 @@
-import type { ClusterProgram } from './cluster';
+import type { ContextClusterProgramEntry } from './cluster';
 import type { ContextMenuActionConfig } from './contextMenuActions';
 import type { CustomMetricDefinition } from './customMetrics';
 import type { IsolationRule } from '@/utils/isolation';
@@ -249,8 +249,8 @@ export interface GraphContext {
    * read it with `contextDefaultLook` / `contextDefaultBehaviors` (utils/caseLook).
    */
   default_behaviors?: Record<string, unknown>;
-  /** Context-level cluster programs, shared by all explorations. Built-in defaults are never stored here. */
-  cluster_programs?: ClusterProgram[];
+  /** Context-level cluster programs, shared by all explorations, plus a marker per deleted built-in. */
+  cluster_programs?: ContextClusterProgramEntry[];
   /** User-configurable right-click menu actions, shared by all explorations. */
   context_menu_actions?: ContextMenuActionConfig[];
   /** Writer-authored custom metrics; the backend returns [] to read-only users. */
@@ -868,7 +868,7 @@ export interface CreateGraphContextRequest {
   node_types?: string[];
   relationship_types?: string[];
   default_behaviors?: Record<string, unknown>;
-  cluster_programs?: ClusterProgram[];
+  cluster_programs?: ContextClusterProgramEntry[];
   context_menu_actions?: ContextMenuActionConfig[];
   metric_definitions?: CustomMetricDefinition[];
   identity_keys?: IdentityKey[];
