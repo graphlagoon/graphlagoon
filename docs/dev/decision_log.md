@@ -14165,3 +14165,18 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Tests:** vitest `graph.queryEnrichment` (queued state, layer kept across a node query), `DataTablePanel.patch` (layer column mark, cell origins).
 **Public docs:** `bring-your-own-data.md` ("What a reader sees").
 **Admin-area impact:** No admin-area impact
+
+## [2026-11-13 21:00] - Feature Implemented: Execute modal reopens with the last-run parameter values
+
+**Feature:** Running a query template and opening it again shows the values it was last run with instead of resetting every field to its default.
+**Decisions:**
+1. **Remembered on run, not on typing:** `rememberRunValues` is called by Execute (graph and table) and "Run and add to case"; closing the modal without running keeps the previous values.
+2. **Session-only, in `stores/queryTemplates.ts` (`lastRunValues`, keyed by template id):** parameter values are often identifiers of people or accounts, so they are not written to browser storage. Deleting the template drops its entry; `clear()` does not, ids are unique across contexts.
+3. **Precedence in `seedTemplateValues`: caller value → last run → default.** A context-menu action passes `bound || default` as `initialValues`, so its modal behaves as before. A remembered empty string is kept (the field was cleared on purpose); a remembered select value no longer among the options falls back to the default.
+**Rejected:** localStorage / exploration state — persistence across reload was not asked for and would store query inputs outside the session.
+**Files:** changed `frontend/src/utils/templateSubstitution.ts`, `frontend/src/stores/queryTemplates.ts`, `frontend/src/components/TemplateExecuteModal.vue`.
+**Tests:** vitest `templateSubstitution.test.ts` (`seedTemplateValues`), `TemplateExecuteModal.datasource.test.ts` ("reopening a template").
+**Permissão (2.4b):** nenhuma nova — no new action.
+**Public docs:** `docs/guide/query-templates.md` ("Running a template").
+**Admin-area impact:** No admin-area impact
+**Known limitations:** runs that skip the modal (a `?template=` link, a context-menu action with every required parameter bound) are not remembered.

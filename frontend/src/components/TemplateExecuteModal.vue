@@ -10,7 +10,7 @@ import { useTemplateExecution } from '@/composables/useTemplateExecution';
 import { useToast } from '@/composables/useToast';
 import { useAddToCase } from '@/composables/useAddToCase';
 import { useCurrentCaseStore } from '@/stores/currentCase';
-import { substituteTemplateParams } from '@/utils/templateSubstitution';
+import { seedTemplateValues, substituteTemplateParams } from '@/utils/templateSubstitution';
 import { SAFE_VALUE_RE, TEMPLATE_PARAM_PREFIX } from '@/utils/templateUrlParams';
 import type { QueryTemplate } from '@/types/graph';
 import { X } from 'lucide-vue-next';
@@ -59,6 +59,7 @@ async function saveAsCaseQuery() {
 /** Runs in table mode and adds the rows as a table of the case. */
 async function runAndAddResult() {
   if (!canExecute.value || caseBusy.value) return;
+  templatesStore.rememberRunValues(props.template.id, values.value);
   caseBusy.value = true;
   try {
     const substituted = substituteTemplateParams(props.template.query, paramIds.value, values.value);
@@ -90,14 +91,13 @@ const capabilities = useDatasourceCapabilities(
 // template. Default: Graph (loads the visualization, the historical behavior).
 const resultMode = ref<'graph' | 'table'>('graph');
 
-// Build initial values: caller-provided value first, then the template's
-// default, otherwise empty string
+// Caller-provided value first, then what this template was last run with,
+// then the template's default.
 const values = ref<Record<string, string>>(
-  Object.fromEntries(
-    props.template.parameters.map((p) => [
-      p.id,
-      props.initialValues?.[p.id] || p.default || '',
-    ]),
+  seedTemplateValues(
+    props.template.parameters,
+    props.initialValues,
+    templatesStore.lastRunValues[props.template.id],
   ),
 );
 
@@ -117,6 +117,7 @@ const queryPreview = computed(() =>
 
 async function executeNow() {
   if (!canExecute.value) return;
+  templatesStore.rememberRunValues(props.template.id, values.value);
 
   // Table mode runs in the Query Console (arbitrary projection allowed),
   // NOT through the graph path (which assumes the query returns edges).

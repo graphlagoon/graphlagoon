@@ -150,6 +150,48 @@ describe('native graph context', () => {
   })
 })
 
+describe('reopening a template', () => {
+  const template = createTemplate({
+    query: 'MATCH (n) WHERE id(n) = $node_id RETURN n',
+    parameters: [
+      { id: 'node_id', type: 'input', label: 'node_id', default: 'abc-123', required: true },
+    ],
+  })
+  const input = () => document.body.querySelector('#param-node_id') as HTMLInputElement
+
+  it('shows the values it was last run with, not the defaults', async () => {
+    const graphStore = useGraphStore()
+    graphStore.currentContext = createNeptuneGraphContext()
+    vi.spyOn(graphStore, 'executeCypherQuery').mockResolvedValue(null)
+
+    const first = render(TemplateExecuteModal, { props: { template } })
+    await flush()
+    expect(input().value).toBe('abc-123')
+    await fireEvent.update(input(), 'xyz-9')
+    await fireEvent.click(
+      document.body.querySelector('.execute-modal button.btn-primary') as HTMLButtonElement,
+    )
+    await flush()
+    first.unmount()
+
+    render(TemplateExecuteModal, { props: { template } })
+    await flush()
+    expect(input().value).toBe('xyz-9')
+  })
+
+  it('keeps the defaults when the modal was closed without running', async () => {
+    useGraphStore().currentContext = createNeptuneGraphContext()
+    const first = render(TemplateExecuteModal, { props: { template } })
+    await flush()
+    await fireEvent.update(input(), 'typed-but-not-run')
+    first.unmount()
+
+    render(TemplateExecuteModal, { props: { template } })
+    await flush()
+    expect(input().value).toBe('abc-123')
+  })
+})
+
 describe('template editor', () => {
   async function renderEditor(context: GraphContext) {
     const graphStore = useGraphStore()
