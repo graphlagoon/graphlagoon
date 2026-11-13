@@ -25,3 +25,38 @@ describe('DataTablePanel — properties patched in place', () => {
     expect(container.textContent).toContain('risk');
   });
 });
+
+describe('DataTablePanel — enrichment provenance', () => {
+  it('marks a column an enrichment query wrote and shows the run while it is going', async () => {
+    const { api } = await import('@/services/api');
+    const { vi } = await import('vitest');
+    const { flushPromises } = await import('@vue/test-utils');
+    const graphStore = useGraphStore();
+    graphStore.currentContext = {
+      id: 'c1', title: 'Bank', edge_table_name: 'main.bank.edges',
+      enrichment_tables: [{ name: 'tier', label: 'Tier', table: 'main.bank.accts', query: { sql: 's', run: 'manual', target: 'nodes' } }],
+    } as never;
+    graphStore.nodes = [
+      { node_id: 'a', node_type: 'Account', properties: { name: 'Ana' } },
+      { node_id: 'b', node_type: 'Account', properties: { name: 'Bia' } },
+    ];
+    let answer!: (r: unknown) => void;
+    vi.spyOn(api, 'runEnrichmentQuery').mockImplementation(() => new Promise((resolve) => { answer = resolve as never; }));
+    const { container, queryByTestId, getByTestId } = render(DataTablePanel, { global: { plugins: [[PrimeVue, { theme: 'none' }]] } });
+
+    const run = graphStore.runQueryEnrichment({ names: ['tier'] });
+    await nextTick();
+    expect(getByTestId('data-table-enriching-nodes').getAttribute('title')).toContain('Tier');
+    expect(queryByTestId('data-table-enriched-col')).toBeNull();
+
+    answer({ name: 'tier', label: 'Tier', target: 'nodes', columns: ['tier'], rows: { a: { tier: 'gold' } }, truncated: false });
+    await run;
+    await flushPromises();
+    expect(queryByTestId('data-table-enriching-nodes')).toBeNull();
+    expect(container.textContent).toContain('tier');
+    const marks = container.querySelectorAll('[data-testid="data-table-enriched-col"]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].getAttribute('title')).toContain("'Tier' (1 of 2 rows)");
+    vi.restoreAllMocks();
+  });
+});

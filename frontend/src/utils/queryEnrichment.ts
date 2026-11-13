@@ -135,6 +135,24 @@ export function enrichedKeys(prov: EnrichmentProvenance, id: string): Map<string
   return out;
 }
 
+/**
+ * property → (query label → how many items it wrote that property on), over every item: what
+ * the data table marks in a column header. Several labels when several queries wrote the key.
+ */
+export function enrichedColumns(prov: EnrichmentProvenance): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const byLabel of prov.values()) {
+    for (const [label, keys] of byLabel) {
+      for (const k of keys) {
+        const counts = out.get(k) ?? new Map<string, number>();
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+        out.set(k, counts);
+      }
+    }
+  }
+  return out;
+}
+
 /** Items without the properties a query wrote: what a saved snapshot keeps. */
 export function stripEnriched<T extends { properties?: Record<string, unknown> }>(
   items: T[],

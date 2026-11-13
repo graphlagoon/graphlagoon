@@ -607,6 +607,20 @@ const SCENES: Scene[] = [
     },
   },
   {
+    // The Data Table marks the edge columns an enrichment query wrote (blue database mark).
+    guide: 'bring-your-own-data',
+    scene: 'table',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await page.getByTitle('Data Table').click();
+      await page.waitForSelector('.data-table-drawer', { timeout: 10_000 });
+      await page.locator('.data-table-drawer .tab-btn', { hasText: 'Edges' }).click();
+      await page.getByTestId('data-table-enriched-col').first().waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(400);
+    },
+  },
+  {
     guide: 'style-presets',
     scene: 'modal',
     path: GRAPH_URL,
