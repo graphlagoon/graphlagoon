@@ -146,28 +146,63 @@ def scope_problem(
     return None
 
 
-def query_scope_problem(sql: str, context) -> Optional[str]:
-    """None when ``sql`` reads only the virtual tables and the context's
-    authorized tables (edge, node and every listed enrichment table still
-    inside the deployment's sources)."""
+def _unauthorized_tables(sql: str, context) -> Optional[set]:
+    """The tables ``sql`` reads that ``context`` does not authorize (None: unparseable)."""
     settings = get_settings()
     # Dummy CTEs so the virtual names are skipped like any query-local name.
     refs = extract_table_refs(
         f"WITH graph_edges AS (SELECT 1), graph_nodes AS (SELECT 1) {sql}"
     )
     if refs is None:
-        return "the query could not be parsed, so the tables it reads cannot be verified."
+        return None
     allowed = context_tables(
         context, settings.default_catalog, settings.default_schema, current_source_scope()
     )
-    outside = {
+    return {
         normalize_ref(r, settings.default_catalog, settings.default_schema) for r in refs
     } - allowed
+
+
+def query_scope_problem(sql: str, context) -> Optional[str]:
+    """None when ``sql`` reads only the virtual tables and the context's
+    authorized tables (edge, node and every listed enrichment table still
+    inside the deployment's sources)."""
+    outside = _unauthorized_tables(sql, context)
+    if outside is None:
+        return "the query could not be parsed, so the tables it reads cannot be verified."
     if outside:
         listed = ", ".join(sorted(".".join(t) for t in outside))
         return (
             f"it reads {listed}, which is not an authorized table of this context. "
             "Add it to the enrichment tables first (it must be an allowed source)."
+        )
+    return None
+
+
+def orphan_problem(new: list[dict], stored: Optional[list[dict]], context) -> Optional[str]:
+    """Why this save would break a query it keeps, or None: a query that read
+    only authorized tables before and reads a table this save removes. A query
+    already broken (for example by a settings change) does not block the save."""
+
+    def with_list(tables):
+        return SimpleNamespace(
+            edge_table_name=getattr(context, "edge_table_name", None),
+            node_table_name=getattr(context, "node_table_name", None),
+            enrichment_tables=tables or [],
+        )
+
+    before, after = with_list(stored), with_list(new)
+    for spec in new:
+        sql = (spec.get("query") or {}).get("sql")
+        if not sql:
+            continue
+        lost = _unauthorized_tables(sql, after)
+        if not lost or _unauthorized_tables(sql, before) != set():
+            continue
+        listed = ", ".join(sorted(".".join(t) for t in lost))
+        return (
+            f"The query '{spec.get('label') or spec['name']}' reads {listed}, which this "
+            "change removes from the enrichment tables. Remove that query too, or keep the table."
         )
     return None
 

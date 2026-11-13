@@ -28,3 +28,16 @@ export function isAllowedEnrichmentSource(table: string, sources: string[] | nul
     return s.length === 2 ? s[0] === parts[0] && s[1] === parts[1] : s.join('.') === full;
   });
 }
+
+/**
+ * The `removed` tables that `sql` names (catalog.schema.table as written in the list). A kept
+ * query reading one would break: the server refuses that save (ENRICHMENT_QUERY_ORPHANED).
+ * A text match, so a reference by a shorter name is left to the server.
+ */
+export function removedTablesReadBy(sql: string, removed: string[]): string[] {
+  const text = sql.replace(/`/g, '').toLowerCase();
+  return removed.filter((table) => {
+    const name = bare(table.split('.').map(bare).join('.')).replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+    return name && new RegExp(`(^|[^\\w.])${name}($|[^\\w.])`).test(text);
+  });
+}

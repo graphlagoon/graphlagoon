@@ -26,7 +26,7 @@ import { describeIdentityKey } from '@/utils/identityKeys';
 import ContextDefaultLookField from '@/components/ContextDefaultLookField.vue';
 import EnrichmentQueryField from '@/components/EnrichmentQueryField.vue';
 import EnrichmentTablesTools from '@/components/EnrichmentTablesTools.vue';
-import { configuredEnrichmentSources, isAllowedEnrichmentSource } from '@/utils/enrichmentSources';
+import { configuredEnrichmentSources, isAllowedEnrichmentSource, removedTablesReadBy } from '@/utils/enrichmentSources';
 import { storedDefaultLook, withDefaultLook, type DefaultLook } from '@/composables/useContextDefaultLook';
 
 /**
@@ -672,6 +672,19 @@ const enrichmentSkillInput = computed(() => ({
   relationshipTypes: splitCsv(form.value.relationship_types),
   allowedSources: enrichmentSources,
 }));
+
+/** Tables the saved context listed that no row lists any more. */
+const removedTables = computed(() => {
+  const kept = new Set(form.value.enrichment_tables.map((r) => r.table.trim().replace(/`/g, '').toLowerCase()));
+  return [...new Set((props.context?.enrichment_tables ?? []).map((t) => t.table))].filter(
+    (t) => !kept.has(t.replace(/`/g, '').toLowerCase()),
+  );
+});
+
+/** Removed tables this row's query still reads: saving would be refused. */
+function orphanedBy(row: EnrichmentRow): string[] {
+  return row.query_sql.trim() && removedTables.value.length ? removedTablesReadBy(row.query_sql, removedTables.value) : [];
+}
 
 function outsideSources(row: EnrichmentRow): boolean {
   const own = [form.value.edge_table_name, form.value.noNodeTable ? '' : form.value.node_table_name].filter(Boolean);
@@ -1402,6 +1415,10 @@ async function submit() {
                 :tables="authorizedTableNames"
               />
             </details>
+            <p v-if="orphanedBy(row).length" class="field-error" data-testid="enrichment-query-orphaned">
+              This query reads {{ orphanedBy(row).join(', ') }}, which you removed from this list: saving
+              will be refused. Remove the query too, or keep the table.
+            </p>
             <button
               v-if="row.table.trim()"
               type="button"

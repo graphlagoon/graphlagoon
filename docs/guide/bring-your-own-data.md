@@ -257,6 +257,7 @@ enrichment_tables:
 |---|---|
 | *An edge enrichment query failed* (toast) | An automatic run failed. The graph is fine; the tab says why. |
 | `ENRICHMENT_SCOPE_DENIED` when saving or running | The table is not an allowed source (or no longer is, after an administrator changed `GRAPH_LAGOON_ENRICHMENT_SOURCES` or `GRAPH_LAGOON_CATALOG_SCHEMAS`), or the query names a table that is not in the list. The message names the table and the allowed sources. Ask an administrator to allow it, list it, or change the query. |
+| `ENRICHMENT_QUERY_ORPHANED` when saving | You removed a table that a query you kept still reads (the form warns under that query first). Remove the query too, or keep the table. |
 | `ENRICHMENT_RESULT_NO_KEY` | The query returned no `edge_id` column (a query on edges) or no `node_id` column (on nodes). |
 | `ENRICHMENT_QUERY_FAILED` | The warehouse refused the query (a missing column, a type error); its message is shown. |
 | *the result hit the row limit* | More rows than `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` came back for one batch; some edges may be missing values. |

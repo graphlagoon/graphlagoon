@@ -568,3 +568,29 @@ def test_runs_refused_once_a_table_leaves_the_sources(env, monkeypatch):
         assert r.status_code == 403, r.text
         assert r.json()["detail"]["error"]["code"] == "ENRICHMENT_SCOPE_DENIED"
     assert len(warehouse.calls) == calls
+
+
+def test_removing_a_table_a_kept_query_reads_is_refused(env):
+    client, store, _ = env
+    _restrict_context_create_to(store, OWNER)
+    ctx = _query_context(store)  # tx_risk joins channels
+    store.share_graph_context(ctx.id, WRITER, "write")
+    url = f"/api/graph-contexts/{ctx.id}"
+    r = client.put(url, json={"enrichment_tables": [TX_QUERY]}, headers=_h(WRITER))
+    assert r.status_code == 400
+    error = r.json()["detail"]["error"]
+    assert error["code"] == "ENRICHMENT_QUERY_ORPHANED"
+    assert "Transaction risk" in error["message"] and "main.graphs.channels" in error["message"]
+    # Removing the query along with the table is fine, for a writer too.
+    r = client.put(url, json={"enrichment_tables": []}, headers=_h(WRITER))
+    assert r.status_code == 200, r.text
+
+
+def test_a_query_already_broken_does_not_block_other_edits(env):
+    client, store, _ = env
+    # Stored broken (channels never listed): saving the context unchanged still works.
+    ctx = store.create_graph_context(
+        "pix", "main.graphs.e", "main.graphs.n", OWNER, enrichment_tables=[TX_QUERY],
+    )
+    r = client.put(f"/api/graph-contexts/{ctx.id}", json={"enrichment_tables": [TX_QUERY]}, headers=_h(OWNER))
+    assert r.status_code == 200, r.text
