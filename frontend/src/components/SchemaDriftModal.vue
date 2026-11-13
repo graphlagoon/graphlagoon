@@ -10,6 +10,7 @@ import {
   type PropertyReference,
 } from '@/utils/contextReferences';
 import type { GraphContext, PropertyColumn, SchemaDriftFinding, Exploration } from '@/types/graph';
+import { isDeletedBuiltIn, type ClusterProgram } from '@/types/cluster';
 
 /**
  * Review-and-apply UI for a context's schema drift.
@@ -106,7 +107,10 @@ const removedColumns = computed(() => {
 });
 
 const clusterPrograms = computed(
-  () => contextsStore.contexts.find((c) => c.id === props.contextId)?.cluster_programs ?? [],
+  () =>
+    (contextsStore.contexts.find((c) => c.id === props.contextId)?.cluster_programs ?? []).filter(
+      (p): p is ClusterProgram => !isDeletedBuiltIn(p),
+    ),
 );
 
 interface ExplorationDangling {

@@ -14140,6 +14140,20 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Admin-area impact:** No admin-area impact
 **Known limitations:** layer ("your data") columns are not marked in the table yet; queued auto queries show no spinner until their turn.
 
+## [2026-11-13 20:00] - Feature Implemented: Context writers can delete built-in cluster programs
+
+**Feature:** The cluster-program library shows the delete button on the three built-ins (Group by Node Type, Orphan Clusters, BFS from Node) to users with write access to the context. The deletion holds for everyone using that context; **Restore built-ins (N)** in the library toolbar brings them back. Read-only users still see no delete button, and the store refuses the deletion without write access.
+**Decisions:**
+1. **Saved as a marker in `graph_contexts.cluster_programs`** (`{program_id, deleted: true}`), not a new column: the list is already free-form JSON written through the write-gated context PUT, so no migration, no memory-store change, and the backend's existing `can_write` check is the enforcement.
+2. **Context-level, not per user:** a built-in is part of the context's program set, so deleting it follows the same rule as deleting a context-scoped program.
+3. **`ContextClusterProgramEntry` union type** on `GraphContext.cluster_programs`, so every reader of the raw list (hydration, `SchemaDriftModal`) must skip markers with `isDeletedBuiltIn`.
+**Files:** changed `frontend/src/types/cluster.ts`, `frontend/src/types/graph.ts`, `frontend/src/stores/cluster.ts` (`deletedDefaultIds`, `restoreDefaultPrograms`), `frontend/src/components/ClusterProgramLibraryModal.vue`, `frontend/src/components/SchemaDriftModal.vue`.
+**Tests:** vitest `cluster.test.ts` (writer delete persists marker and survives rehydration, read-only refused, restore), `ClusterProgramLibraryModal.test.ts` (delete + restore buttons), `useClusterProgramMenuActions.test.ts` comment.
+**Permissão (2.4b):** nenhuma nova — gated by context write access, enforced by the existing context update route.
+**Public docs:** `docs/guide/clusters.md` (built-ins paragraph, "Where programs are saved" table).
+**Admin-area impact:** No admin-area impact
+**Known limitations:** edits to a built-in still last only until reload; a behavior that names a deleted built-in (auto-run, community source) falls back the same way as for any deleted program.
+
 ## [2026-11-13 20:30] - Feature Implemented: Data Table shows where each value came from (queries, your data, queued runs)
 
 **Feature:** Cells an enrichment query filled get a light blue background (amber for the person's own data), with the source on hover; columns from your data get an amber mark like the query ones; a query waiting for the ones before it shows as queued (tab spinner, "Waiting…" in Your data).

@@ -43,14 +43,31 @@ function handleEdit(program: ClusterProgram) {
   showEditor.value = true
 }
 
+const contextWritable = computed(() => graphStore.currentContext?.has_write_access === true)
+
+// A built-in is deleted for the whole context, so only its writers see the button.
+function canDelete(program: ClusterProgram): boolean {
+  return !isDefaultProgramId(program.program_id) || contextWritable.value
+}
+
 async function handleDelete(program: ClusterProgram) {
+  const builtIn = isDefaultProgramId(program.program_id)
   const ok = await confirmAction({
     title: `Delete "${program.program_name}"?`,
-    message: 'Clusters it already produced stay on the graph; the program itself is gone.',
+    message: builtIn
+      ? 'This built-in disappears for everyone using this context. Restore built-ins brings it back.'
+      : 'Clusters it already produced stay on the graph; the program itself is gone.',
     confirmLabel: 'Delete',
     danger: true,
   })
   if (ok) clusterStore.deleteProgram(program.program_id)
+}
+
+function restoreBuiltIns() {
+  const n = clusterStore.deletedDefaultIds.length
+  if (clusterStore.restoreDefaultPrograms()) {
+    toast.success(`Restored ${n} built-in program${n !== 1 ? 's' : ''}`)
+  }
 }
 
 async function handleExecute(program: ClusterProgram) {
@@ -176,6 +193,15 @@ function exportAll() {
             <Download :size="13" /> Export all
           </button>
           <button
+            v-if="contextWritable && clusterStore.deletedDefaultIds.length > 0"
+            class="btn btn-outline"
+            data-testid="cluster-program-library-restore-builtins"
+            title="Bring back the built-in programs deleted from this context"
+            @click="restoreBuiltIns"
+          >
+            Restore built-ins ({{ clusterStore.deletedDefaultIds.length }})
+          </button>
+          <button
             class="btn btn-outline btn-icon"
             data-testid="cluster-skill-help"
             title="Not sure how? Get an AI prompt to write a cluster program"
@@ -281,7 +307,7 @@ function exportAll() {
                     <Pencil :size="14" />
                   </button>
                   <button
-                    v-if="!isDefaultProgramId(program.program_id)"
+                    v-if="canDelete(program)"
                     class="btn-icon-only btn-danger-icon"
                     :data-testid="`cluster-program-delete-${program.program_id}`"
                     :aria-label="`Delete ${program.program_name}`"
