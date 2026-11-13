@@ -28,6 +28,7 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
   const r = graph.queryEnrichmentRuns[name];
   if (!r) return null;
   if (r.status === 'running') return { kind: 'running', text: 'Running…' };
+  if (r.status === 'queued') return { kind: 'running', text: 'Waiting for the queries before it…' };
   if (r.status === 'error') return { kind: 'error', text: r.error ?? 'The query failed' };
   const parts = [`${r.matched} of ${r.total} ${r.target} matched a row`, `${r.written} got new values`];
   if (r.truncated) parts.push('the result hit the row limit, so some edges may be missing');

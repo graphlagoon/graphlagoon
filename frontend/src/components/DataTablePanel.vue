@@ -3,7 +3,7 @@ import { ref, computed, watch, onUnmounted, toRaw } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import InputText from 'primevue/inputtext';
-import { X, DatabaseZap, Loader2 } from 'lucide-vue-next';
+import { X, DatabaseZap, FilePlus2, Loader2 } from 'lucide-vue-next';
 import InputNumber from 'primevue/inputnumber';
 import MultiSelect from 'primevue/multiselect';
 import Popover from 'primevue/popover';
@@ -237,6 +237,44 @@ function enrichedTitle(field: string): string {
   return `Added after the query by the enrichment ${parts.length > 1 ? 'queries' : 'query'} ${parts.join(', ')}, from Databricks tables. Not saved with the exploration.`;
 }
 
+// The person's own data (Your data layer) gets the same treatment, in its own color.
+const layerCols = computed(() =>
+  graphStore.overlayColumns(activeTab.value === 'nodes' ? rawNodes.value : rawEdges.value),
+);
+
+function layerCount(field: string): number {
+  return field.startsWith('prop_') ? layerCols.value.get(field.slice(5)) ?? 0 : 0;
+}
+
+function layerTitle(field: string): string {
+  const rows = activeTab.value === 'nodes' ? rawNodes.value.length : rawEdges.value.length;
+  return `From your data on this exploration (${layerCount(field)} of ${rows} rows), not from the context.`;
+}
+
+// A cell's origin needs the item itself for the layer (its bookkeeping keys on the object),
+// so the id → item index is built only while a layer is on screen.
+const itemsById = computed(() => {
+  if (!layerCols.value.size) return null;
+  const m = new Map<string, object>();
+  if (activeTab.value === 'nodes') for (const n of rawNodes.value) m.set(n.node_id, n);
+  else for (const e of rawEdges.value) m.set(e.edge_id, e);
+  return m;
+});
+
+function cellOrigin(field: string, row: Record<string, unknown>): string | null {
+  if (!field.startsWith('prop_')) return null;
+  const key = field.slice(5);
+  if (!enrichedBy(field) && !layerCount(field)) return null;
+  const kind = activeTab.value === 'nodes' ? 'node' : 'edge';
+  const id = String(row[kind === 'node' ? 'node_id' : 'edge_id'] ?? '');
+  const item = itemsById.value?.get(id) ?? (kind === 'node' ? { node_id: id } : { edge_id: id });
+  return graphStore.propertyOrigin(kind, item, key);
+}
+
+function cellTitle(origin: string): string {
+  return origin === 'layer' ? 'From your data on this exploration' : `From the enrichment query '${origin}'`;
+}
+
 const runningNodeQueries = computed(() => graphStore.runningQueryLabels('node'));
 const runningEdgeQueries = computed(() => graphStore.runningQueryLabels('edge'));
 
@@ -417,7 +455,7 @@ async function addRowsToCase() {
           <span
             v-if="runningNodeQueries.length"
             class="enriching"
-            :title="`Enrichment running: ${runningNodeQueries.join(', ')}. Its columns appear when it finishes.`"
+            :title="`Enrichment running or waiting: ${runningNodeQueries.join(', ')}. Its columns appear when it finishes.`"
             data-testid="data-table-enriching-nodes"
           ><Loader2 :size="12" /></span>
         </button>
@@ -426,7 +464,7 @@ async function addRowsToCase() {
           <span
             v-if="runningEdgeQueries.length"
             class="enriching"
-            :title="`Enrichment running: ${runningEdgeQueries.join(', ')}. Its columns appear when it finishes.`"
+            :title="`Enrichment running or waiting: ${runningEdgeQueries.join(', ')}. Its columns appear when it finishes.`"
             data-testid="data-table-enriching-edges"
           ><Loader2 :size="12" /></span>
         </button>
@@ -485,13 +523,27 @@ async function addRowsToCase() {
           :showFilterMatchModes="col.type !== 'categorical'"
           :style="{ minWidth: col.field.endsWith('_id') ? '180px' : col.type === 'date' ? '160px' : '120px' }"
         >
-          <template v-if="enrichedBy(col.field)" #header>
-            <span class="enriched-mark" :title="enrichedTitle(col.field)" data-testid="data-table-enriched-col">
+          <template v-if="enrichedBy(col.field) || layerCount(col.field)" #header>
+            <span v-if="enrichedBy(col.field)" class="enriched-mark" :title="enrichedTitle(col.field)" data-testid="data-table-enriched-col">
               <DatabaseZap :size="12" />
+            </span>
+            <span v-if="layerCount(col.field)" class="enriched-mark layer-mark" :title="layerTitle(col.field)" data-testid="data-table-layer-col">
+              <FilePlus2 :size="12" />
             </span>
           </template>
           <template #body="{ data }">
             <span
+              v-if="cellOrigin(col.field, data)"
+              class="cell-text cell-origin"
+              :class="cellOrigin(col.field, data) === 'layer' ? 'from-layer' : 'from-query'"
+              :title="cellTitle(cellOrigin(col.field, data)!)"
+              data-testid="data-table-cell-origin"
+              @dblclick="onCellDblClick($event, data[col.field])"
+            >
+              {{ formatCell(data[col.field]) }}
+            </span>
+            <span
+              v-else
               class="cell-text"
               @dblclick="onCellDblClick($event, data[col.field])"
             >
@@ -635,6 +687,23 @@ async function addRowsToCase() {
   background: color-mix(in srgb, #3b82f6 18%, transparent);
   color: var(--text-muted);
   cursor: help;
+}
+
+.layer-mark {
+  background: color-mix(in srgb, #f59e0b 18%, transparent);
+}
+
+.cell-origin {
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.cell-origin.from-query {
+  background: color-mix(in srgb, #3b82f6 12%, transparent);
+}
+
+.cell-origin.from-layer {
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
 }
 
 .enriching {

@@ -396,7 +396,8 @@ function recordGraphLoad(
 
 /** What one enrichment query did on the graph on screen. */
 export interface QueryEnrichmentRun {
-  status: 'running' | 'done' | 'error';
+  /** `queued`: waiting for the queries before it (they run one after the other). */
+  status: 'queued' | 'running' | 'done' | 'error';
   label: string;
   target: 'edges' | 'nodes';
   /** Edges (or nodes) the query returned a row for, of `total` sent. */
@@ -1424,11 +1425,24 @@ export const useGraphStore = defineStore('graph', () => {
     const token = queryEnrichmentToken;
     const done: Record<string, QueryEnrichmentRun> = {};
     let failed = 0;
-    for (const entry of entries) {
-      const target = targetOf(entry);
-      const payloads = runPayloads(base.nodes, base.edges, entry, undefined, options.only);
-      const total = payloads.reduce((n, p) => n + (target === 'nodes' ? p.nodes.length : p.edges.length), 0);
-      if (!total) continue;
+    const plans = entries
+      .map((entry) => {
+        const target = targetOf(entry);
+        const payloads = runPayloads(base.nodes, base.edges, entry, undefined, options.only);
+        const total = payloads.reduce((n, p) => n + (target === 'nodes' ? p.nodes.length : p.edges.length), 0);
+        return { entry, target, payloads, total };
+      })
+      .filter((p) => p.total > 0);
+    // Every query that will run shows as waiting until its turn: the table and the tab say so.
+    const queued = { ...queryEnrichmentRuns.value };
+    for (const { entry, target, total } of plans) {
+      queued[entry.name] = {
+        status: 'queued', label: entry.label, target, matched: 0, written: 0, total,
+        truncated: false, error: null, at: Date.now(),
+      };
+    }
+    queryEnrichmentRuns.value = queued;
+    for (const { entry, target, payloads, total } of plans) {
       const run: QueryEnrichmentRun = {
         status: 'running', label: entry.label, target, matched: 0, written: 0, total,
         truncated: false, error: null, at: Date.now(),
@@ -1442,12 +1456,20 @@ export const useGraphStore = defineStore('graph', () => {
           if (target === 'nodes') {
             const reached = nodes.value.filter((n) => result.rows[n.node_id]);
             const { patch, written, matched } = runPatch(reached, (n) => n.node_id, result, overwrite);
+            // Only the keys the query wrote, merged: the layer's values come off and go back on
+            // around the patch, so the layer keeps knowing which values are its own.
+            const delta = new Map<string, Record<string, unknown>>();
             for (const [id, keys] of written) {
               const kept = nodeQueryValues.get(id) ?? new Map();
-              for (const key of keys) kept.set(key, { value: patch.get(id)![key], overwrite });
+              const values: Record<string, unknown> = {};
+              for (const key of keys) {
+                values[key] = patch.get(id)![key];
+                kept.set(key, { value: values[key], overwrite });
+              }
               nodeQueryValues.set(id, kept);
+              delta.set(id, values);
             }
-            patchNodeProperties(patch, { clearPending: false });
+            patchNodeProperties(delta, { clearPending: false, merge: true });
             recordProvenance(nodeProvenance, entry.label, written);
             run.matched += matched;
             run.written += written.size;
@@ -1494,12 +1516,34 @@ export const useGraphStore = defineStore('graph', () => {
     return enrichedColumns(edgeProvenance);
   });
 
-  /** Labels of the enrichment queries running now on nodes or on edges. */
+  /** Labels of the enrichment queries running or waiting their turn, on nodes or on edges. */
   function runningQueryLabels(kind: 'node' | 'edge'): string[] {
     const target = kind === 'node' ? 'nodes' : 'edges';
     return Object.values(queryEnrichmentRuns.value)
-      .filter((r) => r.status === 'running' && r.target === target)
+      .filter((r) => (r.status === 'running' || r.status === 'queued') && r.target === target)
       .map((r) => r.label);
+  }
+
+  /**
+   * Where the value of `key` on this node or edge came from, for the data table's cells:
+   * the label of the enrichment query that wrote it, 'layer' (the person's own data), or null.
+   */
+  function propertyOrigin(kind: 'node' | 'edge', item: object & { node_id?: string; edge_id?: string }, key: string): string | null {
+    void queryEnrichmentVersion.value;
+    void overlayVersion.value;
+    const prov = kind === 'node' ? nodeProvenance : edgeProvenance;
+    const id = (kind === 'node' ? item.node_id : item.edge_id) ?? '';
+    for (const [label, keys] of prov.get(id) ?? []) if (keys.includes(key)) return label;
+    return overlayState.active && overlayKeysOf(item, overlayState).has(key) ? 'layer' : null;
+  }
+
+  /** property → items the person's own data (the layer) wrote it on, for the column headers. */
+  function overlayColumns(items: object[]): Map<string, number> {
+    void overlayVersion.value;
+    const out = new Map<string, number>();
+    if (!overlayState.active) return out;
+    for (const item of items) for (const k of overlayKeysOf(item, overlayState)) out.set(k, (out.get(k) ?? 0) + 1);
+    return out;
   }
 
   /**
@@ -3574,6 +3618,8 @@ export const useGraphStore = defineStore('graph', () => {
     enrichedNodeColumns,
     enrichedEdgeColumns,
     runningQueryLabels,
+    propertyOrigin,
+    overlayColumns,
     persistOverlay,
     setOverlayEnrichment,
     removeOverlayEnrichment,
