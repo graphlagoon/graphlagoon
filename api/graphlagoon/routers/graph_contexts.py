@@ -142,9 +142,26 @@ async def _validate_or_400(
 
 async def _check_enrichment_tables(request: Request, new, stored, context) -> None:
     """Attaching or changing an enrichment table takes ``context.create`` and a
-    table inside the author's scope; a writer without it may only remove."""
-    from graphlagoon.services.enrichment import changed_tables, scope_problem
+    table inside the author's scope; a writer without it may only remove, and
+    not a table a kept query still reads."""
+    from graphlagoon.services.enrichment import (
+        changed_tables,
+        orphan_problem,
+        scope_problem,
+    )
 
+    orphan = orphan_problem(new, stored, context)
+    if orphan:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "ENRICHMENT_QUERY_ORPHANED",
+                    "message": orphan,
+                    "details": {},
+                }
+            },
+        )
     changed = changed_tables(new, stored)
     if not changed:
         return

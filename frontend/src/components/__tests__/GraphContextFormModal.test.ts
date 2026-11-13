@@ -447,6 +447,20 @@ describe('GraphContextFormModal', () => {
       }
     })
 
+    it('warns when a removed table is still read by a kept query', async () => {
+      const channels = { name: 'channels', label: 'Channels', table: 'main.fraud.channels' }
+      const risk = {
+        name: 'risk', label: 'Risk', table: 'main.fraud.tx',
+        query: { sql: 'SELECT e.edge_id, c.name FROM graph_edges e JOIN main.fraud.channels c ON c.id = e.src', target: 'edges' as const, run: 'auto' as const, overwrite: false, node_props: false },
+      }
+      const context = createGraphContext({ id: 'ctx-edit', enrichment_tables: [channels, risk] })
+      const { getAllByTitle, getByTestId, queryByTestId } = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      expect(queryByTestId('enrichment-query-orphaned')).toBeNull()
+      await fireEvent.click(getAllByTitle('Remove table')[0])
+      expect(getByTestId('enrichment-query-orphaned').textContent).toContain('main.fraud.channels')
+    })
+
     it('attaches a table with only an edge enrichment query', async () => {
       const context = createGraphContext({ id: 'ctx-edit' })
       vi.mocked(api.updateGraphContext).mockResolvedValue(context)

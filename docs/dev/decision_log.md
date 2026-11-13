@@ -14114,3 +14114,15 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Revisão (1 rodada, sem bug de acesso):** `ShareRequest` passou a canonicalizar também o uuid sem hífens (antes virava linha inerte que `delete_group` não limparia); casos aceitam `GROUP:` maiúsculo; `can_read`/`can_write` testam superusuário antes dos shares e `_readable_cases` resolve membership também para superusuário (sem warning falso, `has_write_access` coerente entre lista e detalhe); o datalist de revisor não oferece a sentinela; rótulo "Group xxxxxxxx…" enquanto a lista não carrega e retry do `GET /api/groups` após falha; o modal volta para "A person" ao abrir.
 **UX (ux-reviewer, 1 rodada):** rótulo do share de grupo diz o estado ("Loading group…", "Group (no longer exists)", "groups could not be loaded"); `fieldset`/`legend` "Share with"; descrição do grupo no `title` da opção; toast "Shared with … (read only)" nos modais de contexto/exploração; grupos carregados no mount da página (modal abre no tamanho final); `ShareDialog` empilha o formulário abaixo de 480 px. Não feito (pré-existente, fora do escopo): confirmação/undo no unshare dos modais de contexto/exploração; `.badge-group` compartilhado no `main.css`.
 **Known limitations:** membro via grupo Databricks muda só quando o cache SCIM renova (`GRAPH_LAGOON_GROUP_CACHE_TTL_SECONDS`); um call site novo de predicado sem priming nega membros de grupo (fail-closed, com warning).
+
+## [2026-11-13 19:00] - Feature Implemented: Removing an enrichment table a kept query reads is refused
+
+**Feature:** Saving a context that removes a table one of its kept enrichment queries reads now fails with 400 `ENRICHMENT_QUERY_ORPHANED` naming the query and the table, instead of saving and failing on the next run. The form warns under that query before saving.
+**Decisions:**
+1. **Checked on every save, for every kept query, before the permission gate:** removals need no `context.create`, so the check cannot live in the changed-entries pass.
+2. **Only breakage caused by this save blocks it:** a query that was already unauthorized against the stored list (a settings change, hand-written data) does not prevent unrelated edits; the run still refuses it with `ENRICHMENT_SCOPE_DENIED`.
+3. **Frontend warning is a text match** on the full `catalog.schema.table` of removed tables (backticks and case ignored); the server's parse decides.
+**Files:** changed `api/graphlagoon/services/enrichment.py` (`orphan_problem`, `_unauthorized_tables`), `api/graphlagoon/routers/graph_contexts.py`, `frontend/src/utils/enrichmentSources.ts` (`removedTablesReadBy`), `frontend/src/components/GraphContextFormModal.vue`.
+**Tests:** pytest `test_enrichment.py` (orphan refused, broken query does not block); vitest `enrichmentSources`, `GraphContextFormModal`.
+**Public docs:** `bring-your-own-data.md` error table.
+**Admin-area impact:** No admin-area impact
