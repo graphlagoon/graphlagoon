@@ -94,3 +94,16 @@ describe('provenance', () => {
     expect(stripEnriched(enriched, (e) => e.edge_id, new Map())).toBe(enriched);
   });
 });
+
+describe('enrichedColumns', () => {
+  it('counts, per property, the items each query wrote it on', async () => {
+    const { enrichedColumns } = await import('@/utils/queryEnrichment');
+    const prov = new Map([
+      ['e1', new Map([['Risk', ['score']], ['Channel', ['channel']]])],
+      ['e2', new Map([['Risk', ['score', 'channel']]])],
+    ]);
+    const cols = enrichedColumns(prov);
+    expect([...cols.get('score')!]).toEqual([['Risk', 2]]);
+    expect([...cols.get('channel')!]).toEqual([['Channel', 1], ['Risk', 1]]);
+  });
+});

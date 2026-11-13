@@ -14126,3 +14126,16 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Tests:** pytest `test_enrichment.py` (orphan refused, broken query does not block); vitest `enrichmentSources`, `GraphContextFormModal`.
 **Public docs:** `bring-your-own-data.md` error table.
 **Admin-area impact:** No admin-area impact
+
+## [2026-11-13 19:30] - Feature Implemented: Data Table marks columns written by enrichment queries
+
+**Feature:** In the exploration's Data Table, a property column an enrichment query wrote carries a blue database mark; its tooltip names the queries and how many rows each filled. While a query runs, the Nodes or Edges tab shows a spinner.
+**Decisions:**
+1. **Column-level mark, not per cell:** answers "where does this come from?" without per-cell lookups on 200k-row tables; the per-item origin stays in the details panel chip.
+2. **Derived from the provenance the store already keeps** (`enrichedColumns` over the edge/node provenance maps, recomputed on `queryEnrichmentVersion`); nothing new on the server, CSV export unchanged.
+3. **Running state comes from `queryEnrichmentRuns`:** queries run one after the other, so the spinner names the one in flight.
+**Files:** changed `frontend/src/utils/queryEnrichment.ts`, `frontend/src/stores/graph.ts` (`enrichedNodeColumns`, `enrichedEdgeColumns`, `runningQueryLabels`), `frontend/src/components/DataTablePanel.vue`, `frontend/e2e/screenshots/generate.ts`.
+**Tests:** vitest `queryEnrichment`, `DataTablePanel.patch`.
+**Public docs:** `bring-your-own-data.md` ("What a reader sees"), screenshot `bring-your-own-data-table.png`.
+**Admin-area impact:** No admin-area impact
+**Known limitations:** layer ("your data") columns are not marked in the table yet; queued auto queries show no spinner until their turn.

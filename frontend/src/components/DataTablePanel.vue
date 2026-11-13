@@ -3,7 +3,7 @@ import { ref, computed, watch, onUnmounted, toRaw } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import InputText from 'primevue/inputtext';
-import { X } from 'lucide-vue-next';
+import { X, DatabaseZap, Loader2 } from 'lucide-vue-next';
 import InputNumber from 'primevue/inputnumber';
 import MultiSelect from 'primevue/multiselect';
 import Popover from 'primevue/popover';
@@ -217,6 +217,29 @@ const edgeCols = computed<ColMeta[]>(() =>
 
 const currentCols = computed(() => activeTab.value === 'nodes' ? nodeCols.value : edgeCols.value);
 
+// ─── Enrichment provenance ───
+// A property column some enrichment query wrote gets a mark in its header; its tooltip names
+// the queries and how many rows each filled. Queries running now show next to the tab.
+
+const enrichedCols = computed(() =>
+  activeTab.value === 'nodes' ? graphStore.enrichedNodeColumns : graphStore.enrichedEdgeColumns,
+);
+
+function enrichedBy(field: string): Map<string, number> | undefined {
+  return field.startsWith('prop_') ? enrichedCols.value.get(field.slice(5)) : undefined;
+}
+
+function enrichedTitle(field: string): string {
+  const by = enrichedBy(field);
+  if (!by) return '';
+  const rows = activeTab.value === 'nodes' ? rawNodes.value.length : rawEdges.value.length;
+  const parts = [...by].map(([label, n]) => `'${label}' (${n} of ${rows} rows)`);
+  return `Added after the query by the enrichment ${parts.length > 1 ? 'queries' : 'query'} ${parts.join(', ')}, from Databricks tables. Not saved with the exploration.`;
+}
+
+const runningNodeQueries = computed(() => graphStore.runningQueryLabels('node'));
+const runningEdgeQueries = computed(() => graphStore.runningQueryLabels('edge'));
+
 // ─── Filters (matching PrimeVue menu format) ───
 
 const nodeFilters = ref(initFilters(nodeCols.value));
@@ -391,9 +414,21 @@ async function addRowsToCase() {
       <div class="header-left">
         <button class="tab-btn" :class="{ active: activeTab === 'nodes' }" @click="activeTab = 'nodes'">
           Nodes ({{ graphStore.filteredNodes.length }})
+          <span
+            v-if="runningNodeQueries.length"
+            class="enriching"
+            :title="`Enrichment running: ${runningNodeQueries.join(', ')}. Its columns appear when it finishes.`"
+            data-testid="data-table-enriching-nodes"
+          ><Loader2 :size="12" /></span>
         </button>
         <button class="tab-btn" :class="{ active: activeTab === 'edges' }" @click="activeTab = 'edges'">
           Edges ({{ graphStore.filteredEdges.length }})
+          <span
+            v-if="runningEdgeQueries.length"
+            class="enriching"
+            :title="`Enrichment running: ${runningEdgeQueries.join(', ')}. Its columns appear when it finishes.`"
+            data-testid="data-table-enriching-edges"
+          ><Loader2 :size="12" /></span>
         </button>
       </div>
       <div class="header-center">
@@ -450,6 +485,11 @@ async function addRowsToCase() {
           :showFilterMatchModes="col.type !== 'categorical'"
           :style="{ minWidth: col.field.endsWith('_id') ? '180px' : col.type === 'date' ? '160px' : '120px' }"
         >
+          <template v-if="enrichedBy(col.field)" #header>
+            <span class="enriched-mark" :title="enrichedTitle(col.field)" data-testid="data-table-enriched-col">
+              <DatabaseZap :size="12" />
+            </span>
+          </template>
           <template #body="{ data }">
             <span
               class="cell-text"
@@ -584,6 +624,35 @@ async function addRowsToCase() {
   align-items: center;
   flex-shrink: 0;
   margin-left: auto;
+}
+
+.enriched-mark {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: color-mix(in srgb, #3b82f6 18%, transparent);
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.enriching {
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: -1px;
+}
+
+.enriching svg {
+  animation: enriching-spin 1s linear infinite;
+}
+
+@keyframes enriching-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enriching svg { animation: none; }
 }
 
 .tab-btn {

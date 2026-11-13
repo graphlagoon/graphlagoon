@@ -62,6 +62,7 @@ import {
 import { edgeValue, type EdgeValue } from '@/utils/edgeSemantics';
 import {
   enrichedKeys,
+  enrichedColumns,
   targetOf,
   queryEntries,
   recordProvenance,
@@ -1481,6 +1482,24 @@ export const useGraphStore = defineStore('graph', () => {
   function enrichedKeysFor(kind: 'node' | 'edge', id: string): Map<string, string> {
     void queryEnrichmentVersion.value;
     return enrichedKeys(kind === 'node' ? nodeProvenance : edgeProvenance, id);
+  }
+
+  /** property → (query label → items it wrote it on), for the data table's column headers. */
+  const enrichedNodeColumns = computed(() => {
+    void queryEnrichmentVersion.value;
+    return enrichedColumns(nodeProvenance);
+  });
+  const enrichedEdgeColumns = computed(() => {
+    void queryEnrichmentVersion.value;
+    return enrichedColumns(edgeProvenance);
+  });
+
+  /** Labels of the enrichment queries running now on nodes or on edges. */
+  function runningQueryLabels(kind: 'node' | 'edge'): string[] {
+    const target = kind === 'node' ? 'nodes' : 'edges';
+    return Object.values(queryEnrichmentRuns.value)
+      .filter((r) => r.status === 'running' && r.target === target)
+      .map((r) => r.label);
   }
 
   /**
@@ -3552,6 +3571,9 @@ export const useGraphStore = defineStore('graph', () => {
     queryEnrichmentRuns,
     runQueryEnrichment,
     enrichedKeysFor,
+    enrichedNodeColumns,
+    enrichedEdgeColumns,
+    runningQueryLabels,
     persistOverlay,
     setOverlayEnrichment,
     removeOverlayEnrichment,

@@ -243,6 +243,9 @@ enrichment_tables:
 - The new properties appear on the edges or nodes. In the details panel each one carries a
   **from &lt;query name&gt;** chip, so it never passes for the graph's own data. On nodes they stay when the
   rest of the node's properties load in the background.
+- In the **Data Table** they become columns as soon as the values arrive. A column a query wrote has a blue
+  database mark in its header; hover it for the query and how many rows it filled (*'Risk' (12 of 40 rows)*).
+  While a query runs, the **Nodes** or **Edges** tab shows a spinner: its columns are still coming.
 - **Your data → From Databricks tables** lists the context's queries and the authorized tables, runs one by
   hand, shows the SQL, and says what the last run did: *2 of 40 edges matched a row · 2 got new values*. A reader
   of a shared exploration gets this tab even without write access.
@@ -250,6 +253,8 @@ enrichment_tables:
   **after every query** ones again, so the values are always current.
 
 ![Your data: from Databricks tables](/screenshots/bring-your-own-data-databricks.png)
+
+![Data Table: the hiring_source column marked as written by an enrichment query](/screenshots/bring-your-own-data-table.png)
 
 ### When something is wrong
 
