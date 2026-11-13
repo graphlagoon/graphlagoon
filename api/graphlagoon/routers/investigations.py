@@ -304,6 +304,8 @@ async def share_investigation(
     data: InvestigationShareRequest,
     user_email: str = Depends(require_permission("investigation.share")),
 ):
+    """Share the case with a named e-mail or an admin-managed group
+    (``group:<uuid>``, see ``GET /api/groups``). Wildcards are refused."""
     try:
         email = await service.share_investigation(investigation_id, user_email, data.email, data.role)
     except service.InvestigationError as exc:

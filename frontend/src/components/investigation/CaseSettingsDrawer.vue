@@ -10,6 +10,7 @@ import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { shareKind } from '@/utils/shareTargets';
 import { confirmAction } from '@/composables/useConfirm';
 import { NORMALIZER_LABELS } from '@/utils/identityKeys';
 import { DEFAULT_SUGGEST_KINDS, SUGGEST_KINDS } from '@/utils/caseVocabulary';
@@ -210,7 +211,7 @@ async function save() {
           <h3>Members</h3>
           <p>
             Owner {{ inv.owner_email }}<template v-if="inv.assignee_email"> · assignee {{ inv.assignee_email }}</template>
-            <template v-if="inv.shared_with.length"> · shared with {{ inv.shared_with.map((s) => `${s.email} (${s.role})`).join(', ') }}</template>
+            <template v-if="inv.shared_with.length"> · shared with {{ inv.shared_with.map((s) => `${shareKind(s.email) === 'group' ? 'a group' : s.email} (${s.role})`).join(', ') }}</template>
           </p>
           <button type="button" class="btn btn-outline btn-sm" :disabled="!inv.can_manage" data-testid="settings-share" @click="emit('share')">Share…</button>
         </section>

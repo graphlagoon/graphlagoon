@@ -210,6 +210,33 @@ class TestGroupCrud:
         entry = next(p for p in perms["items"] if p["id"] == "context.create")
         assert entry["rules"] == []
 
+    def test_delete_removes_the_group_shares(self, client, store):
+        """``group:<uuid>`` share rows have no FK: the service drops them."""
+        from graphlagoon.utils.sharing import group_share_value
+
+        group = _create_group(client, members=[{"kind": "email", "value": STRANGER}])
+        context = store.create_graph_context(
+            title="ctx", edge_table_name="e", node_table_name="n", owner_email=SUPERUSER
+        )
+        exploration = store.create_exploration(
+            graph_context_id=context.id, title="exp", owner_email=SUPERUSER, state={}
+        )
+        sentinel = group_share_value(group["id"])
+        store.share_graph_context(context.id, sentinel, permission="read")
+        store.share_graph_context(context.id, STRANGER, permission="read")
+        store.share_exploration(exploration.id, sentinel, permission="write")
+        assert (
+            client.delete(
+                f"/api/admin/groups/{group['id']}", headers=_headers(SUPERUSER)
+            ).status_code
+            == 200
+        )
+        assert [s.shared_with_email for s in context.shares] == [STRANGER]
+        assert exploration.shares == []
+        audit = client.get("/api/admin/audit", headers=_headers(SUPERUSER)).json()
+        deleted = next(e for e in audit["items"] if e["action"] == "group.delete")
+        assert deleted["metadata"]["shares_removed"] == 2
+
     def test_unknown_group_404(self, client):
         response = client.delete(
             "/api/admin/groups/00000000-0000-0000-0000-000000000000",

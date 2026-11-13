@@ -27,7 +27,13 @@ from graphlagoon.models.schemas import (
     ShareRequest,
 )
 from graphlagoon.middleware.auth import get_current_user
+from graphlagoon.services.share_groups import (
+    group_shares_if_needed,
+    prime_group_shares,
+    validate_group_share_target,
+)
 from graphlagoon.utils.sharing import (
+    is_group_share,
     user_has_share_access,
     validate_share_email,
 )
@@ -173,6 +179,16 @@ def exploration_to_response(
     )
 
 
+async def _group_share_name(target: str) -> Optional[str]:
+    """The group's name for a ``group:<uuid>`` share target (400 if it does not exist)."""
+    if not is_group_share(target):
+        return None
+    ok, message, name = await validate_group_share_target(target)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return name
+
+
 async def check_context_access_db(session, context_id: UUID, user_email: str):
     """Check if user has access to a graph context (database mode).
 
@@ -199,10 +215,11 @@ async def check_context_access_db(session, context_id: UUID, user_email: str):
     if context.owner_email == user_email:
         return context
 
+    await prime_group_shares(user_email)  # a group share may be the only grant
     if user_has_share_access(user_email, context.shares):
         return context
 
-    # Check exploration-level shares (exact, domain wildcard or public)
+    # Check exploration-level shares (exact, domain wildcard, public or group)
     exp_share_result = await session.execute(
         select(ExplorationShare.id)
         .join(Exploration, ExplorationShare.exploration_id == Exploration.id)
@@ -218,7 +235,7 @@ async def check_context_access_db(session, context_id: UUID, user_email: str):
     raise HTTPException(status_code=403, detail="No access to this context")
 
 
-def check_context_access_memory(
+async def check_context_access_memory(
     context_id: UUID, user_email: str
 ) -> MemoryGraphContext:
     """Check if user has access to a graph context (memory mode).
@@ -237,6 +254,7 @@ def check_context_access_memory(
     if context.owner_email == user_email:
         return context
 
+    await prime_group_shares(user_email)  # a group share may be the only grant
     if user_has_share_access(user_email, context.shares):
         return context
 
@@ -289,6 +307,8 @@ async def list_all_explorations(
     ``q`` (title), ``mine`` (owner = caller), ``limit``/``offset`` narrow it.
     """
     user_email = get_current_user(request)
+    if not is_superuser(user_email):
+        await prime_group_shares(user_email)  # group shares count as grants below
 
     if is_database_available():
         from sqlalchemy import select, or_
@@ -412,16 +432,18 @@ async def list_explorations(context_id: UUID, request: Request):
                 .order_by(Exploration.updated_at.desc())
             )
             explorations = result.scalars().all()
+            await group_shares_if_needed(user_email, [s for e in explorations for s in e.shares])
             return [exploration_to_response(e, user_email) for e in explorations]
     else:
         # Check context access
-        check_context_access_memory(context_id, user_email)
+        await check_context_access_memory(context_id, user_email)
 
         store = get_memory_store()
         explorations = [
             e for e in store.explorations.values() if e.graph_context_id == context_id
         ]
         explorations.sort(key=lambda e: e.updated_at, reverse=True)
+        await group_shares_if_needed(user_email, [s for e in explorations for s in e.shares])
         return [exploration_to_response(e, user_email) for e in explorations]
 
 
@@ -483,7 +505,7 @@ async def create_exploration(
             return exploration_to_response(exploration, user_email)
     else:
         # Check context access
-        check_context_access_memory(context_id, user_email)
+        await check_context_access_memory(context_id, user_email)
 
         store = get_memory_store()
 
@@ -532,6 +554,7 @@ async def get_exploration(exploration_id: UUID, request: Request):
 
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
+            await group_shares_if_needed(user_email, exploration.shares)
 
             # Allow if user owns the exploration, has a direct share, or is superuser
             if can_read(exploration.owner_email, exploration.shares, user_email):
@@ -546,6 +569,7 @@ async def get_exploration(exploration_id: UUID, request: Request):
 
         if exploration is None:
             raise HTTPException(status_code=404, detail="Exploration not found")
+        await group_shares_if_needed(user_email, exploration.shares)
 
         # Allow if user owns the exploration, has a direct share, or is superuser
         if can_read(exploration.owner_email, exploration.shares, user_email):
@@ -581,6 +605,7 @@ async def update_exploration(
 
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
+            await group_shares_if_needed(user_email, exploration.shares)
 
             if not can_write(exploration.owner_email, exploration.shares, user_email):
                 raise HTTPException(
@@ -630,6 +655,7 @@ async def update_exploration(
 
         if exploration is None:
             raise HTTPException(status_code=404, detail="Exploration not found")
+        await group_shares_if_needed(user_email, exploration.shares)
 
         if not can_write(exploration.owner_email, exploration.shares, user_email):
             raise HTTPException(
@@ -716,6 +742,7 @@ async def delete_exploration(exploration_id: UUID, request: Request):
 
         if exploration is None:
             raise HTTPException(status_code=404, detail="Exploration not found")
+        await group_shares_if_needed(user_email, exploration.shares)
 
         if not can_manage(exploration.owner_email, user_email):
             raise HTTPException(status_code=403, detail="Only owner can delete")
@@ -752,6 +779,7 @@ async def _readable_state(exploration_id: UUID, user_email: str) -> dict:
             exploration = result.scalar_one_or_none()
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
+            await group_shares_if_needed(user_email, exploration.shares)
 
             if not can_read(exploration.owner_email, exploration.shares, user_email):
                 await check_context_access_db(
@@ -762,9 +790,10 @@ async def _readable_state(exploration_id: UUID, user_email: str) -> dict:
     exploration = store.get_exploration(exploration_id)
     if exploration is None:
         raise HTTPException(status_code=404, detail="Exploration not found")
+    await group_shares_if_needed(user_email, exploration.shares)
 
     if not can_read(exploration.owner_email, exploration.shares, user_email):
-        check_context_access_memory(exploration.graph_context_id, user_email)
+        await check_context_access_memory(exploration.graph_context_id, user_email)
     return exploration.state or {}
 
 
@@ -883,6 +912,7 @@ async def put_exploration_overlay(
             exploration = result.scalar_one_or_none()
             if exploration is None:
                 raise HTTPException(status_code=404, detail="Exploration not found")
+            await group_shares_if_needed(user_email, exploration.shares)
             if not can_write(exploration.owner_email, exploration.shares, user_email):
                 raise HTTPException(status_code=403, detail="No write access to this exploration")
             # The file first: a failed write leaves the flag as it was.
@@ -897,6 +927,7 @@ async def put_exploration_overlay(
     exploration = store.get_exploration(exploration_id)
     if exploration is None:
         raise HTTPException(status_code=404, detail="Exploration not found")
+    await group_shares_if_needed(user_email, exploration.shares)
     if not can_write(exploration.owner_email, exploration.shares, user_email):
         raise HTTPException(status_code=403, detail="No write access to this exploration")
     await write_file(exploration.state or {})
@@ -940,8 +971,11 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
             )
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error_msg)
+            group_name = await _group_share_name(data.email)
 
             audit_meta = {"with": data.email, "permission": data.permission}
+            if group_name:
+                audit_meta["group_name"] = group_name
             # Check if already shared
             for share in exploration.shares:
                 if share.shared_with_email == data.email:
@@ -991,6 +1025,7 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
         )
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
+        group_name = await _group_share_name(data.email)
 
         store.share_exploration(exploration_id, data.email, data.permission)
         await audit.record(
@@ -998,7 +1033,11 @@ async def share_exploration(exploration_id: UUID, data: ShareRequest, request: R
             AuditAction.EXPLORATION_SHARE,
             resource_type="exploration",
             resource_id=exploration_id,
-            metadata={"with": data.email, "permission": data.permission},
+            metadata={
+                "with": data.email,
+                "permission": data.permission,
+                **({"group_name": group_name} if group_name else {}),
+            },
         )
 
     return {"status": "shared"}

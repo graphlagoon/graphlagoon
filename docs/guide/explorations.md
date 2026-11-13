@@ -134,6 +134,13 @@ on restart and has no sharing UI — see
 - **Share with a person** — an email plus `Read only` or `Read & Write`.
   Write access lets them overwrite the exploration in place; they can
   always *Save* under a new title instead, which creates their own copy.
+- **Share with a group** — pick **A group** and one of the
+  [groups](./permissions.md#groups-as-share-targets) an administrator
+  manages; every member gets the chosen permission. Membership is checked
+  on every request: someone removed from the group loses access at once,
+  someone added gains it (Databricks-group members follow the group cache
+  TTL). The choice only appears when at least one group exists. The entry
+  shows the group's name with a **Group** badge; remove it like any other.
 - **Share with my domain** (`*@your-company.com`) — one entry for
   everyone at a domain. Wildcard domains must be allow-listed by the
   operator via `GRAPH_LAGOON_ALLOWED_SHARE_DOMAINS` (see
@@ -149,6 +156,9 @@ parent context — a shared link works even for someone the context was
 never shared with.
 
 ### Who can do what
+
+A group share counts as the share it carries — a member of a group shared
+`Read & Write` is a *write share* below.
 
 | Action | Owner | Write share | Read share / public | Superuser |
 |---|---|---|---|---|

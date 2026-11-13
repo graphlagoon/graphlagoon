@@ -31,6 +31,7 @@ import type {
   AdminGroup,
   AdminGroupPayload,
   AdminGroupsResponse,
+  ShareableGroupsResponse,
   AdminHealth,
   AdminOverview,
   AdminPermission,
@@ -320,6 +321,12 @@ class ApiService {
     await this.client.delete(
       `/api/graph-contexts/${id}/share/${encodeURIComponent(email)}`
     );
+  }
+
+  /** Groups any signed-in person may share with (names only). */
+  async listGroups(): Promise<ShareableGroupsResponse> {
+    const response = await this.client.get('/api/groups');
+    return response.data;
   }
 
   // Explorations

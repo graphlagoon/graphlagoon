@@ -140,6 +140,17 @@ export interface AdminGroup {
   updated_at?: string | null;
 }
 
+/** A group as a share target (`GET /api/groups`): the label, never its members. */
+export interface ShareableGroup {
+  id: string;
+  name: string;
+  description?: string | null;
+}
+
+export interface ShareableGroupsResponse {
+  items: ShareableGroup[];
+}
+
 export interface AdminGroupPayload {
   name: string;
   description?: string | null;

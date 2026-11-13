@@ -18,6 +18,7 @@ vi.mock('@/services/api', () => ({
     getInvestigationEvents: vi.fn(async () => []),
     recordInvestigationDecision: vi.fn(),
     getInvestigationItems: vi.fn(async () => []),
+    listGroups: vi.fn(async () => ({ items: [] })),
   },
 }))
 
@@ -230,5 +231,34 @@ describe('ShareDialog', () => {
     await flushPromises()
     expect(api.unshareInvestigation).toHaveBeenCalledWith(CASE.id, 'bob@x.com')
     expect(queryByTestId('share-row-bob@x.com')).toBeNull()
+  })
+
+  it('offers the groups the API lists and shares with group:<uuid>', async () => {
+    const GROUP = '12345678-1234-5678-1234-567812345678'
+    vi.mocked(api.listGroups).mockResolvedValueOnce({ items: [{ id: GROUP, name: 'analysts', description: null }] })
+    const store = useInvestigationStore()
+    store.current = { ...CASE, shared_with: [{ email: `group:${GROUP}`, role: 'reader' }] } as any
+    const { getByTestId, getByText, queryByTestId } = render(ShareDialog, { props: { open: true } })
+    await flushPromises()
+    // An existing group share shows its name, not the sentinel.
+    expect(getByText('analysts')).toBeTruthy()
+    expect(getByTestId(`share-row-group:${GROUP}`).textContent).toContain('Group')
+
+    await fireEvent.click(getByTestId('share-kind').querySelector('input[value="group"]')!)
+    expect(queryByTestId('share-email')).toBeNull()
+    await fireEvent.update(getByTestId('share-group'), GROUP)
+    await fireEvent.update(getByTestId('share-permission'), 'editor')
+    await fireEvent.click(getByTestId('share-submit'))
+    await flushPromises()
+    expect(api.shareInvestigation).toHaveBeenLastCalledWith(CASE.id, `group:${GROUP}`, 'editor')
+  })
+
+  it('hides the Person/Group choice when there are no groups', async () => {
+    const store = useInvestigationStore()
+    store.current = { ...CASE } as any
+    const { queryByTestId, getByTestId } = render(ShareDialog, { props: { open: true } })
+    await flushPromises()
+    expect(queryByTestId('share-kind')).toBeNull()
+    expect(getByTestId('share-email')).toBeTruthy()
   })
 })

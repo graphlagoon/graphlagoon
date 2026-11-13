@@ -34,6 +34,11 @@ export async function setupAPIMocks(page: Page) {
     });
   });
 
+  // Groups a share modal may offer (default: none, so the Person/Group choice stays hidden)
+  await page.route('**/graphlagoon/api/groups', (route) => {
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+  });
+
   // --- Graph Context CRUD (default: empty) ---
   await page.route('**/graphlagoon/api/graph-contexts', (route) => {
     if (route.request().method() === 'GET') {

@@ -12,8 +12,9 @@ exporting and handing agents an [investigation](./investigations.md).
   capabilities, or a set of users must be blocked from an action without
   enumerating everyone else.
 - **Not the tool for** per-resource access — who can *open or edit a
-  specific* context or exploration is decided by ownership and
-  [sharing](./explorations.md), which stays email-based; or for managing
+  specific* context, exploration or case is decided by ownership and
+  [sharing](./explorations.md) (with a person, a domain, everyone, or
+  [a group](#groups-as-share-targets)); or for managing
   superusers, who come from
   [`GRAPH_LAGOON_SUPERUSER_EMAILS`](./configuration.md) and bypass every
   rule here.
@@ -127,6 +128,28 @@ Everything lives in **Admin → Groups & permissions** (superusers only):
 Every mutation lands in the [audit trail](./configuration.md) as
 `group.create/update/delete` and `permission.update`.
 
+## Groups as share targets
+
+A group is also something a context, an exploration or an investigation can
+be shared with. In any share modal, choose **A group** (the option appears
+when at least one group exists), pick the group and the permission; the
+entry shows the group's name with a **Group** badge. The REST value is
+`group:<uuid>` in the same `email` field as a person (`GET /api/groups`
+lists the ids and names; it is open to every signed-in person, the members
+stay in the admin area). A case accepts a group too: its members are named,
+so need-to-know holds.
+
+What follows from "membership is read on every request":
+
+- Removing someone from the group takes their access to everything shared
+  with it on their next request; adding someone grants it. There is nothing
+  to re-share. Databricks-group members change when the
+  [group cache](#databricks-groups) refreshes.
+- Deleting the group removes its shares everywhere (the audit entry says how
+  many); renaming it changes nothing.
+- A group share never makes anyone an owner: sharing, unsharing and deleting
+  stay with the owner and superusers.
+
 ## What a blocked user sees
 
 The UI hides what you cannot do: no **Create New** button on Contexts, no
@@ -151,7 +174,9 @@ How it resolves:
   principal permission to read workspace SCIM Users, or lookups 403 (see
   [Deploy as a Databricks App](./databricks-apps.md)).
 - Results are cached per user for `GRAPH_LAGOON_GROUP_CACHE_TTL_SECONDS`
-  (default 600 s).
+  (default 600 s) — this is also how long a Databricks-group member keeps,
+  or waits for, access to something [shared with the group](#groups-as-share-targets)
+  after their workspace membership changes.
 - **Direct membership only**: nested Databricks groups are not expanded.
 - In local dev (`databricks_mode=false`) there is no SCIM — only email
   members resolve.

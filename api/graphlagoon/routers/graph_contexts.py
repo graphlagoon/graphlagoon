@@ -26,7 +26,13 @@ from graphlagoon.models.schemas import (
     PropertyColumn,
 )
 from graphlagoon.middleware.auth import get_current_user
+from graphlagoon.services.share_groups import (
+    group_shares_if_needed,
+    prime_group_shares,
+    validate_group_share_target,
+)
 from graphlagoon.utils.sharing import (
+    is_group_share,
     share_match_emails,
     user_has_share_access,
     validate_share_email,
@@ -210,6 +216,16 @@ def _reject_metric_definitions_if_disabled(
         )
 
 
+async def _group_share_name(target: str) -> Optional[str]:
+    """The group's name for a ``group:<uuid>`` share target (400 if it does not exist)."""
+    if not is_group_share(target):
+        return None
+    ok, message, name = await validate_group_share_target(target)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return name
+
+
 def context_to_response(
     context: Union["GraphContext", MemoryGraphContext],
     user_email: str = "",
@@ -303,6 +319,8 @@ async def list_graph_contexts(request: Request):
     - Has an exploration-level share (ExplorationShare) for any exploration in the context
     """
     user_email = get_current_user(request)
+    if not is_superuser(user_email):
+        await prime_group_shares(user_email)  # group shares count as grants below
 
     if is_database_available():
         from sqlalchemy import select, or_
@@ -490,6 +508,7 @@ async def get_graph_context(context_id: UUID, request: Request):
             },
         )
 
+    await group_shares_if_needed(user_email, context.shares)
     return context_to_response(context, user_email)
 
 
@@ -522,6 +541,7 @@ async def update_graph_context(
                 raise HTTPException(status_code=404, detail="Graph context not found")
 
             # Check write access
+            await group_shares_if_needed(user_email, context.shares)
             if not can_write(context.owner_email, context.shares, user_email):
                 raise HTTPException(status_code=403, detail="No write access")
             if data.enrichment_tables is not None:
@@ -612,6 +632,7 @@ async def update_graph_context(
             raise HTTPException(status_code=404, detail="Graph context not found")
 
         # Check write access
+        await group_shares_if_needed(user_email, context.shares)
         if not can_write(context.owner_email, context.shares, user_email):
             raise HTTPException(status_code=403, detail="No write access")
         if data.enrichment_tables is not None:
@@ -832,8 +853,11 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
             )
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error_msg)
+            group_name = await _group_share_name(data.email)
 
             audit_meta = {"with": data.email, "permission": data.permission}
+            if group_name:
+                audit_meta["group_name"] = group_name
             # Check if already shared
             for share in context.shares:
                 if share.shared_with_email == data.email:
@@ -883,6 +907,7 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
         )
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
+        group_name = await _group_share_name(data.email)
 
         store.share_graph_context(context_id, data.email, data.permission)
         await audit.record(
@@ -890,7 +915,11 @@ async def share_graph_context(context_id: UUID, data: ShareRequest, request: Req
             AuditAction.CONTEXT_SHARE,
             resource_type="graph_context",
             resource_id=context_id,
-            metadata={"with": data.email, "permission": data.permission},
+            metadata={
+                "with": data.email,
+                "permission": data.permission,
+                **({"group_name": group_name} if group_name else {}),
+            },
         )
 
     return {"status": "shared"}

@@ -130,7 +130,7 @@ async def list_query_templates(context_id: UUID, request: Request):
             templates = result.scalars().all()
             return [template_to_response(t) for t in templates]
     else:
-        check_context_access_memory(context_id, user_email)
+        await check_context_access_memory(context_id, user_email)
         store = get_memory_store()
         templates = [
             t
@@ -188,7 +188,7 @@ async def create_query_template(
             await session.refresh(template)
             return template_to_response(template)
     else:
-        context = check_context_access_memory(context_id, user_email)
+        context = await check_context_access_memory(context_id, user_email)
 
         if data.visibility == "shared" and not user_has_context_write(
             context, user_email
@@ -270,7 +270,7 @@ async def update_query_template(
             await session.refresh(template)
             return template_to_response(template)
     else:
-        context = check_context_access_memory(context_id, user_email)
+        context = await check_context_access_memory(context_id, user_email)
         store = get_memory_store()
         template = store.get_query_template(template_id)
 
@@ -328,7 +328,7 @@ async def delete_query_template(context_id: UUID, template_id: UUID, request: Re
             await session.delete(template)
             await session.commit()
     else:
-        context = check_context_access_memory(context_id, user_email)
+        context = await check_context_access_memory(context_id, user_email)
         store = get_memory_store()
         template = store.get_query_template(template_id)
 

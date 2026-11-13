@@ -20,6 +20,7 @@ import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { caseNodeLabel, shortId } from '@/utils/caseLabels';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { shareKind } from '@/utils/shareTargets';
 import type { DecisionRequest, DecisionTaskRequest } from '@/types/investigation';
 
 const emit = defineEmits<{ decided: []; cancel: [] }>();
@@ -65,7 +66,9 @@ const reviewers = computed(() => {
   const inv = store.current;
   if (!inv) return [];
   const me = (auth.email ?? '').toLowerCase();
-  return [...new Set([inv.owner_email, ...(inv.shared_with ?? []).map((s) => s.email)])].filter((e) => e && e.toLowerCase() !== me);
+  // A group share is not a person: its members pick themselves by e-mail.
+  const people = (inv.shared_with ?? []).map((s) => s.email).filter((e) => shareKind(e) === 'person');
+  return [...new Set([inv.owner_email, ...people])].filter((e) => e && e.toLowerCase() !== me);
 });
 const busy = ref(false);
 const error = ref<string | null>(null);

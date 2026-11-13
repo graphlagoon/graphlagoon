@@ -926,7 +926,7 @@
           "admin"
         ],
         "summary": "Delete Group",
-        "description": "Delete a group; its permission rules cascade away with it.",
+        "description": "Delete a group; its permission rules and the ``group:<uuid>`` shares of\ncontexts, explorations and investigations go with it.",
         "operationId": "admin_delete_group",
         "parameters": [
           {
@@ -1116,6 +1116,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/graphlagoon/api/groups": {
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "List Shareable Groups",
+        "description": "Groups a context, exploration or investigation can be shared with.\n\nNames and descriptions only (sorted by name); who belongs to a group is\nvisible only in the admin area.",
+        "operationId": "groups_list_shareable_groups",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareableGroupsResponse"
                 }
               }
             }
@@ -4809,6 +4831,7 @@
           "cases"
         ],
         "summary": "Share Investigation",
+        "description": "Share the case with a named e-mail or an admin-managed group\n(``group:<uuid>``, see ``GET /api/groups``). Wildcards are refused.\n\n**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (sharing a case with new people (05 §6)).",
         "operationId": "cases_share_investigation",
         "parameters": [
           {
@@ -4851,8 +4874,7 @@
               }
             }
           }
-        },
-        "description": "**People only**: an agent token gets 403 `AGENT_FORBIDDEN` (sharing a case with new people (05 §6))."
+        }
       }
     },
     "/graphlagoon/api/investigations/{investigation_id}/share/{email}": {
@@ -16219,7 +16241,54 @@
         "required": [
           "email"
         ],
-        "title": "ShareRequest"
+        "title": "ShareRequest",
+        "description": "``email`` is a share target: an e-mail, ``*`` (public), ``*@domain`` or\n``group:<uuid>`` (an admin-managed group; members gain the share's\npermission, write included)."
+      },
+      "ShareableGroup": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ShareableGroup",
+        "description": "A group as a share target (``GET /api/groups``): the label only, never\nits members."
+      },
+      "ShareableGroupsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ShareableGroup"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ShareableGroupsResponse"
       },
       "SnapshotEdge": {
         "properties": {

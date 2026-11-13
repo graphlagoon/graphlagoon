@@ -86,10 +86,13 @@ On a given case:
 | AI agent | What its owner sees (or only the cases of a case-scoped token) | What its owner edits; the type's suggest kinds arrive **suggested** | Never (it proposes) | Never |
 | Anyone else | "Not found": a case's existence does not leak | — | — | — |
 
-- **Sharing is nominal.** A case is shared with named e-mails, never with
-  `*` or `*@domain`: a case is need-to-know. The case type's **notice** (for
-  example, "do not tell the people under investigation") shows in the share
-  dialog and the decision panel.
+- **Sharing is nominal.** A case is shared with named e-mails or with a
+  [group](./permissions.md#groups-as-share-targets) an administrator
+  manages (**A group** in the share dialog; its members are explicit, and
+  leaving the group ends the access), never with `*` or `*@domain`: a case
+  is need-to-know. The case type's **notice** (for example, "do not tell the
+  people under investigation") shows in the share dialog and the decision
+  panel.
 - **Restricted sources.** If a case includes an exploration or a query from
   a context you can't read, you see a locked placeholder with the context and
   its owner, and none of its nodes; you can't preview, download, pin, join or

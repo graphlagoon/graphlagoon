@@ -414,6 +414,9 @@ async def _check_access(session, row, user_email: str, write: bool) -> None:
 
     if row is None:
         raise ExplorationEditError("EXPLORATION_NOT_FOUND", "Exploration not found", 404)
+    from graphlagoon.services.share_groups import group_shares_if_needed
+
+    await group_shares_if_needed(user_email, row.shares)
     if write:
         if not can_write(row.owner_email, row.shares, user_email):
             raise ExplorationEditError("FORBIDDEN", "No write access to this exploration", 403)
@@ -422,7 +425,7 @@ async def _check_access(session, row, user_email: str, write: bool) -> None:
         return
     try:
         if session is None:
-            check_context_access_memory(row.graph_context_id, user_email)
+            await check_context_access_memory(row.graph_context_id, user_email)
         else:
             await check_context_access_db(session, row.graph_context_id, user_email)
     except HTTPException as exc:

@@ -27,8 +27,8 @@ def can_write(owner_email: str, shares: list, user_email: str) -> bool:
     """Write power: owner, write-share, or superuser."""
     return (
         owner_email == user_email
-        or user_has_write_access(user_email, shares)
         or is_superuser(user_email)
+        or user_has_write_access(user_email, shares)
     )
 
 
@@ -36,8 +36,8 @@ def can_read(owner_email: str, shares: list, user_email: str) -> bool:
     """Read power: owner, any share, or superuser."""
     return (
         owner_email == user_email
-        or user_has_share_access(user_email, shares)
         or is_superuser(user_email)
+        or user_has_share_access(user_email, shares)
     )
 
 

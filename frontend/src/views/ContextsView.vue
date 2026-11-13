@@ -10,6 +10,8 @@ import { api } from '@/services/api';
 import { fuzzyMatch, parseTag } from '@/utils/contextForm';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { useSchemaDrift } from '@/composables/useSchemaDrift';
+import { useShareableGroups } from '@/composables/useShareableGroups';
+import { groupShareValue, shareKind, shareLabel } from '@/utils/shareTargets';
 import {
   capabilitiesFor,
   resolveDatasourceDescriptor,
@@ -97,6 +99,7 @@ function onFormSaved() {
 }
 
 onMounted(async () => {
+  if (sharingEnabled.value) void loadShareableGroups(); // the share modal opens in its final shape
   await contextsStore.fetchContexts();
 
   // Check if we came from DEV Generator with prefilled data
@@ -166,10 +169,9 @@ async function deleteContext(context: GraphContext) {
 // Share modal state
 const showShareModal = ref(false);
 const shareContextRef = ref<GraphContext | null>(null);
-const shareForm = ref({
-  email: '',
-  permission: 'read' as 'read' | 'write',
-});
+const EMPTY_SHARE_FORM = { email: '', permission: 'read' as 'read' | 'write', kind: 'person' as 'person' | 'group', groupId: '' };
+const shareForm = ref({ ...EMPTY_SHARE_FORM });
+const { groups: shareableGroups, state: shareableGroupsState, load: loadShareableGroups, nameOf } = useShareableGroups();
 
 const allowedShareDomains = computed<string[]>(
   () => window.__GRAPH_LAGOON_CONFIG__?.allowed_share_domains ?? []
@@ -178,15 +180,26 @@ const allowedShareDomains = computed<string[]>(
 function openShare(context: GraphContext) {
   shareContextRef.value = context;
   showShareModal.value = true;
+  shareForm.value = { ...EMPTY_SHARE_FORM };
+  void loadShareableGroups();
+}
+
+/** The value to send: a group's canonical `group:<uuid>` or the typed e-mail. */
+function shareTarget(): string {
+  const form = shareForm.value;
+  return form.kind === 'group' ? (form.groupId ? groupShareValue(form.groupId) : '') : form.email.trim();
 }
 
 async function share() {
   if (!shareContextRef.value) return;
+  const target = shareTarget();
+  if (!target) return;
 
   try {
-    await contextsStore.shareContext(shareContextRef.value.id, shareForm.value.email, shareForm.value.permission);
+    await contextsStore.shareContext(shareContextRef.value.id, target, shareForm.value.permission);
     showShareModal.value = false;
-    shareForm.value = { email: '', permission: 'read' };
+    toast.success(`Shared with ${shareLabel(target, nameOf)} (${shareForm.value.permission === 'write' ? 'read & write' : 'read only'})`);
+    shareForm.value = { ...EMPTY_SHARE_FORM };
   } catch (e) {
     console.error('Failed to share context:', e);
     toast.error(getErrorMessage(e, 'Failed to share context'));
@@ -397,9 +410,10 @@ async function quickShare(email: string) {
           <ul>
             <li v-for="email in shareContextRef.shared_with" :key="email">
               <span class="shared-email">
-                <span v-if="email === PUBLIC_SHARE_EMAIL" class="badge badge-public">Public</span>
-                <span v-else-if="email.startsWith('*@')" class="badge badge-domain">Domain</span>
-                {{ email === PUBLIC_SHARE_EMAIL ? 'Everyone (public)' : email }}
+                <span v-if="shareKind(email) === 'public'" class="badge badge-public">Public</span>
+                <span v-else-if="shareKind(email) === 'domain'" class="badge badge-domain">Domain</span>
+                <span v-else-if="shareKind(email) === 'group'" class="badge badge-group">Group</span>
+                {{ shareLabel(email, nameOf, shareableGroupsState) }}
               </span>
               <button class="btn-remove" @click="unshare(shareContextRef!.id, email)">&times;</button>
             </li>
@@ -436,7 +450,25 @@ async function quickShare(email: string) {
         </div>
 
         <form @submit.prevent="share">
-          <div class="form-group">
+          <fieldset v-if="shareableGroups.length" class="form-group share-kind" data-testid="share-kind">
+            <legend>Share with</legend>
+            <label><input v-model="shareForm.kind" type="radio" value="person" /> A person</label>
+            <label><input v-model="shareForm.kind" type="radio" value="group" /> A group</label>
+          </fieldset>
+          <p v-else-if="shareableGroupsState === 'failed'" class="form-hint">
+            Groups could not be loaded; you can still share with a person.
+          </p>
+
+          <div v-if="shareForm.kind === 'group'" class="form-group">
+            <label>Group</label>
+            <select v-model="shareForm.groupId" class="form-control" data-testid="share-group" required>
+              <option value="" disabled>Choose a group…</option>
+              <option v-for="g in shareableGroups" :key="g.id" :value="g.id" :title="g.description ?? ''">{{ g.name }}</option>
+            </select>
+            <p class="form-hint">Everyone in the group gets this access; membership is managed by an admin.</p>
+          </div>
+
+          <div v-else class="form-group">
             <label>Email</label>
             <input
               v-model="shareForm.email"
@@ -452,7 +484,7 @@ async function quickShare(email: string) {
 
           <div class="form-group">
             <label>Permission</label>
-            <select v-model="shareForm.permission" class="form-control">
+            <select v-model="shareForm.permission" class="form-control" data-testid="share-permission">
               <option value="read">Read only</option>
               <option value="write">Read & Write</option>
             </select>
@@ -613,6 +645,34 @@ code {
   background: #2e7d32;
   color: white;
   margin-right: 4px;
+}
+
+.badge-group {
+  background: #6a1b9a;
+  color: white;
+  margin-right: 4px;
+}
+
+.share-kind {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.share-kind legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.share-kind label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+  cursor: pointer;
 }
 
 .share-modal {

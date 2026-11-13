@@ -17,6 +17,7 @@ import pytest
 
 from graphlagoon.config import get_settings
 from graphlagoon.services import warehouse as warehouse_module
+from graphlagoon.utils.sharing import reset_group_shares
 
 # RFC 863 discard port: nothing listens, so a stray call fails immediately
 # instead of reaching a warehouse someone is using.
@@ -31,3 +32,11 @@ def never_touch_a_live_warehouse(monkeypatch):
     yield
     warehouse_module._warehouse_client = None
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def no_group_shares_leak_between_tests():
+    """Group-share membership is request-scoped; never let one test prime the next."""
+    reset_group_shares()
+    yield
+    reset_group_shares()

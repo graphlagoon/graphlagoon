@@ -1,5 +1,7 @@
 import re
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+
+from graphlagoon.utils.sharing import GROUP_SHARE_PREFIX, group_share_value, parse_group_share
 from typing import Optional, Any, Literal, TypeAlias, Union
 from uuid import UUID
 from datetime import datetime
@@ -1199,6 +1201,10 @@ class QueryTemplateResponse(BaseModel):
 
 # Share models
 class ShareRequest(BaseModel):
+    """``email`` is a share target: an e-mail, ``*`` (public), ``*@domain`` or
+    ``group:<uuid>`` (an admin-managed group; members gain the share's
+    permission, write included)."""
+
     email: str
     permission: str = "read"
 
@@ -1209,6 +1215,12 @@ class ShareRequest(BaseModel):
         # to write.
         if self.email == "*":
             self.permission = "read"
+        # One canonical spelling per group (lowercase, hyphenated uuid) so the
+        # stored row matches the membership sentinels, upsert and unshare.
+        candidate = self.email.strip()
+        if candidate.lower().startswith(GROUP_SHARE_PREFIX):
+            group_id = parse_group_share(candidate.lower())
+            self.email = group_share_value(group_id) if group_id else candidate.lower()
         return self
 
 
@@ -1955,6 +1967,19 @@ class ResolverStatus(BaseModel):
 class AdminGroupsResponse(BaseModel):
     items: list[AdminGroupOut]
     resolver: ResolverStatus
+
+
+class ShareableGroup(BaseModel):
+    """A group as a share target (``GET /api/groups``): the label only, never
+    its members."""
+
+    id: str
+    name: str
+    description: Optional[str] = None
+
+
+class ShareableGroupsResponse(BaseModel):
+    items: list[ShareableGroup]
 
 
 class PermissionRuleIn(BaseModel):

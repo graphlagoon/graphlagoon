@@ -33,6 +33,7 @@ async def get_context_with_access(
     - Has a context-level share (GraphContextShare), OR
     - Has an exploration-level share (ExplorationShare) for any exploration in this context
     """
+    from graphlagoon.services.share_groups import prime_group_shares
     from graphlagoon.utils.authz import is_superuser
     from graphlagoon.utils.sharing import user_has_share_access, share_match_emails
 
@@ -77,6 +78,9 @@ async def get_context_with_access(
             if context.owner_email == user_email or is_superuser(user_email):
                 return context
 
+            # A group share (context or exploration level) is the only grant some
+            # users have: resolve membership before any predicate below.
+            await prime_group_shares(user_email)
             if user_has_share_access(user_email, context.shares):
                 return context
 
@@ -111,6 +115,7 @@ async def get_context_with_access(
         if context.owner_email == user_email or is_superuser(user_email):
             return context
 
+        await prime_group_shares(user_email)
         if user_has_share_access(user_email, context.shares):
             return context
 

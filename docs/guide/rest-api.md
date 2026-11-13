@@ -135,6 +135,26 @@ case-insensitively. An unknown id refuses the whole request
 own layer also needs `exploration.edit_graph`. An agent does the same with
 `edit_exploration`.
 
+### Share with a group (people only)
+
+```bash
+curl -s "$API/api/groups" -H "X-Forwarded-Email: $ME"
+# {"items": [{"id": "9b2e…", "name": "analysts", "description": null}]}
+curl -s -X POST "$API/api/investigations/$CASE/share" \
+  -H "X-Forwarded-Email: $ME" -H "Content-Type: application/json" \
+  -d '{"email": "group:9b2e…", "role": "editor"}'
+# same shape on /api/graph-contexts/{id}/share and /api/explorations/{id}/share
+# ({"email": "group:<uuid>", "permission": "read" | "write"}); unshare with
+# DELETE …/share/group:<uuid>
+```
+
+The `email` field takes a person, `*` or `*@domain` (contexts and
+explorations only) or `group:<uuid>`, an
+[admin-managed group](./permissions.md#groups-as-share-targets) whose
+members are checked on every request. An unknown group is a 400 (contexts,
+explorations) or a 422 `GROUP_NOT_FOUND` (cases); agent tokens cannot share
+or list groups.
+
 ### Pick up the work assigned to you
 
 ```bash
