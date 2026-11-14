@@ -103,6 +103,8 @@ export function useGraphLabels(
     normalizedHeight: number;
   }
   let candidates: NodeLabelCandidate[] = [];
+  /** Fraction of labelSizeThreshold from which a node's label may enter the density grid. */
+  const LABEL_REVEAL_FLOOR = 0.4;
 
   function initRenderer(scene: THREE.Scene) {
     if (labelRenderer) labelRenderer.dispose();
@@ -205,7 +207,11 @@ export function useGraphLabels(
 
           const worldRadius = Math.cbrt(node.size ?? 1) * relSize;
           const screenRadius = worldRadius * pixelsPerUnit;
-          if (screenRadius < labelSizeThreshold) return;
+          // Below the size threshold a node may still compete for its grid
+          // cell's budget (which grows with zoom²): many same-size nodes are
+          // then revealed a few at a time while zooming in, instead of all
+          // crossing the threshold in one step. Only far smaller nodes are cut.
+          if (screenRadius < labelSizeThreshold * LABEL_REVEAL_FLOOR) return;
 
           if (!projectToScreenInline(node.x, node.y, node.z, camera, halfW, halfH, _screenCoords)) return;
           labelGrid.add(`node-${node.id}`, node.size ?? 1, _screenCoords.sx, _screenCoords.sy);

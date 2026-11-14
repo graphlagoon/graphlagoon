@@ -278,7 +278,7 @@ describe('computeRingGuideSpec', () => {
 
     expect(spec.rings.map((r) => r.radius)).toEqual([60, 145, 210]);
     // Labels carry ring population — "where is the mass?" without counting dots
-    expect(spec.rings.map((r) => r.label)).toEqual(['1 · 1', '2 · 1', '3 · 1']);
+    expect(spec.rings.map((r) => r.label)).toEqual(['1 (1)', '2 (1)', '3 (1)']);
     expect(spec.rings.every((r) => !r.dashed)).toBe(true);
   });
 
@@ -289,7 +289,7 @@ describe('computeRingGuideSpec', () => {
     });
 
     expect(spec.rings[1].dashed).toBe(true);
-    expect(spec.rings[1].label).toBe('unreachable · 1');
+    expect(spec.rings[1].label).toBe('unreachable (1)');
   });
 
   it('omits the count when a level is empty', () => {
@@ -318,7 +318,7 @@ describe('computeRingGuideSpec', () => {
 
   it('labels every ring by default (hideLabels is opt-in)', () => {
     const spec = computeRingGuideSpec({ levelStats: stats([[1, 60, false]]), maxHops: null });
-    expect(spec.rings[0].label).toBe('1 · 1');
+    expect(spec.rings[0].label).toBe('1 (1)');
   });
 
   it('drops the captions but keeps the rings when hideLabels is on', () => {
@@ -1453,5 +1453,101 @@ describe('computeHivePositions metric keys', () => {
       { ...deps, nodeDegrees: new Map([['a', 1], ['b', 1], ['c', 1]]) },
     );
     expect(result.axes.sort()).toEqual(['(missing)', 'gold', 'silver']);
+  });
+});
+
+describe('computeTreeLayout ringWrap (crowded ego rings)', () => {
+  // focus + 300 leaves; 15 of them also link to one of 3 holdings (ring 2)
+  function qsa() {
+    const nodes = [{ node_id: 'f', node_type: 'Company' }];
+    const edges: { src: string; dst: string; relationship_type: string }[] = [];
+    for (let i = 0; i < 300; i++) {
+      nodes.push({ node_id: `p${String(i).padStart(3, '0')}`, node_type: i % 3 ? 'Person' : 'Company' });
+      edges.push({ src: `p${String(i).padStart(3, '0')}`, dst: 'f', relationship_type: 'SOCIO_DE' });
+    }
+    for (let h = 0; h < 3; h++) nodes.push({ node_id: `h${h}`, node_type: 'Company' });
+    for (let i = 0; i < 300; i += 20) edges.push({ src: `p${String(i).padStart(3, '0')}`, dst: `h${i % 3}`, relationship_type: 'SOCIO_DE' });
+    return { nodes, edges };
+  }
+  const opts = {
+    mode: 'radial' as const, focusNodeId: 'f', direction: 'both' as const, edgeTypes: null,
+    levelSpacing: 60, nodeSpacing: 26, orphanPolicy: 'outer-ring' as const,
+  };
+  const r = (p: { x: number; y: number }) => Math.hypot(p.x, p.y);
+  const angle = (p: { x: number; y: number }) => Math.atan2(p.y, p.x);
+
+  it('off: identical to the historical geometry', () => {
+    const { nodes, edges } = qsa();
+    const a = computeTreeLayout(nodes, edges, opts);
+    const b = computeTreeLayout(nodes, edges, { ...opts, ringWrap: false });
+    expect([...b.positions]).toEqual([...a.positions]);
+  });
+
+  it('on: ring 1 shrinks to a band, angles unchanged, linked nodes on the inner band', () => {
+    const { nodes, edges } = qsa();
+    const off = computeTreeLayout(nodes, edges, opts);
+    const on = computeTreeLayout(nodes, edges, { ...opts, ringWrap: true });
+    const ring1 = on.levelStats.find((s) => s.level === 1)!;
+    const ring1Off = off.levelStats.find((s) => s.level === 1)!;
+    expect(ring1.bands).toBeGreaterThan(1);
+    expect(ring1.offset).toBeLessThan(ring1Off.offset / 2);
+    for (const [id, p] of on.positions) {
+      if (id === 'f') continue;
+      expect(angle(p)).toBeCloseTo(angle(off.positions.get(id)!), 9);
+    }
+    // p000 links to a holding: inner band; p001 is a leaf: outer bands
+    expect(r(on.positions.get('p000')!)).toBeCloseTo(ring1.innerOffset!, 6);
+    expect(r(on.positions.get('p001')!)).toBeGreaterThan(ring1.innerOffset! + 1);
+    // ring 2 starts outside the outer band
+    expect(r(on.positions.get('h0')!)).toBeGreaterThan(ring1.offset);
+  });
+
+  it('on: every pair on ring 1 stays at least ~one band apart and the result is deterministic', () => {
+    const { nodes, edges } = qsa();
+    const on = computeTreeLayout(nodes, edges, { ...opts, ringWrap: true });
+    const again = computeTreeLayout([...nodes].reverse(), [...edges].reverse(), { ...opts, ringWrap: true });
+    expect([...again.positions].sort()).toEqual([...on.positions].sort());
+    const pts = [...on.positions].filter(([id]) => id.startsWith('p')).map(([, p]) => p);
+    let min = Infinity;
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+      min = Math.min(min, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
+    }
+    expect(min).toBeGreaterThan(26 * 0.8 - 1e-6);
+  });
+
+  it('small rings are left alone', () => {
+    const nodes = [{ node_id: 'f' }, { node_id: 'a' }, { node_id: 'b' }];
+    const edges = [{ src: 'a', dst: 'f', relationship_type: 'X' }, { src: 'b', dst: 'f', relationship_type: 'X' }];
+    const on = computeTreeLayout(nodes, edges, { ...opts, ringWrap: true });
+    expect(on.levelStats[0].bands).toBeUndefined();
+  });
+
+  it('sector ordering reports ring-1 sectors with counts, missing last', () => {
+    const { nodes, edges } = qsa();
+    const on = computeTreeLayout(nodes, edges, { ...opts, ringWrap: true, ringOrdering: 'node-type' });
+    expect(on.sectors.map((x) => x.key)).toEqual(['Company', 'Person']);
+    expect(on.sectors.reduce((n, x) => n + x.count, 0)).toBe(300);
+    expect(computeTreeLayout(nodes, edges, opts).sectors).toEqual([]);
+  });
+});
+
+describe('computeRingGuideSpec sectors and bands', () => {
+  const ring = { level: 1, offset: 200, count: 300, unreachable: false, innerOffset: 150, bands: 3 };
+  it('labels a wrapped ring with its bands and places sector captions outside ring 1', () => {
+    const spec = computeRingGuideSpec({
+      levelStats: [ring],
+      maxHops: null,
+      sectors: [{ key: 'Socio', count: 200, midAngle: 0 }, { key: 'Diretor', count: 100, midAngle: Math.PI }],
+    });
+    expect(spec.rings[0].label).toBe('1 (300, 3 bands)');
+    expect(spec.sectors.map((s) => s.label)).toEqual(['Socio (200)', 'Diretor (100)']);
+    expect(spec.sectors[0].x).toBeGreaterThan(200);
+    expect(spec.sectors[1].x).toBeLessThan(-200);
+  });
+  it('no captions for a single sector or with labels hidden', () => {
+    const one = [{ key: 'A', count: 3, midAngle: 0 }];
+    expect(computeRingGuideSpec({ levelStats: [ring], maxHops: null, sectors: one }).sectors).toEqual([]);
+    const two = [...one, { key: 'B', count: 1, midAngle: 1 }];
+    expect(computeRingGuideSpec({ levelStats: [ring], maxHops: null, sectors: two, hideLabels: true }).sectors).toEqual([]);
   });
 });

@@ -275,7 +275,8 @@ What to expect:
   draws them again, so a screenshot never passes them off as absent.
 - **2D only.** In 3D the panel offers to switch.
 - **Force layout only.** Ego, hive and the layered layouts place every node
-  themselves.
+  themselves. The ego layout has its own answer, below; the *Don't draw
+  hub–leaf edges* setting and its threshold apply there too.
 - **Leaves follow their hub.** Dragging the hub carries its leaves; a leaf
   dragged away goes back to its place.
 - **"Leaf" means in what is loaded.** A partner that is a leaf here may have
@@ -284,6 +285,38 @@ What to expect:
   [style preset](./style-presets.md), and a context can turn it on for
   everyone with `default_behaviors`, for example
   `{"hubLeaves": "petals", "hubLeavesKey": "edge:role"}`.
+
+## Ego layout with a crowded ring
+
+![Ego layout of a company with 300 partners, sectored by type](/screenshots/exploring-the-graph-ego-crowded.png)
+
+When the focus of an [ego layout](./layout-url-overrides.md) has hundreds of
+direct neighbours, ring 1 used to grow into one huge circle of tiny nodes.
+Now:
+
+- **Crowded rings wrap into bands** (*Wrap crowded rings into bands* in the
+  Layout panel, on by default). Neighbours with further links take the inner
+  band, nodes linked only to their parent go to the outer bands. The angle of
+  every node is unchanged, so ring ordering and sectors mean the same thing;
+  only the radius changes. The ring caption says how many bands it has —
+  `1 (380, 12 bands)`.
+- **Sectors get a caption with their count** when *Ring ordering* is *Sector
+  by type* or *by property* (`Socio (153)`), so the ring answers "how many of
+  each" at a glance. A crowded ring 1 shows a hint in the panel with a
+  shortcut to sector it.
+- **Spokes to the focus's leaves are not drawn** when *Don't draw hub–leaf
+  edges* is on (the default) and the focus has at least as many leaves as the
+  hub threshold — the ring already says they are one hop away. The status bar
+  says how many (`356 hub edges not drawn ✕`); hover or select a node to see
+  its spoke, or ✕ to draw them all.
+- A focus hidden inside a closed [cluster](./clusters.md) centres the rings on
+  the cluster; a closed cluster takes one slot on its ring.
+
+The layout stays deterministic: the same graph and settings always give the
+same picture.
+
+Labels of same-size nodes now appear a few at a time as you zoom in, the
+largest and closest first, instead of all at once at one zoom level.
 
 ## Deleting nodes and edges
 

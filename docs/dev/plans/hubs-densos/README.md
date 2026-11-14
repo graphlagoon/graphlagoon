@@ -1,6 +1,6 @@
 # Hubs densos: um nó com centenas de vizinhos diretos
 
-> Status: **fase FV implementada** em 2026-11-14 (arranjo das folhas em coroa ou pétalas, arestas implícitas, rótulos de região; ver `decision_log`). FZ, F0–F4 e F6 continuam propostas. Análise de 2026-11-13, branch `feature/context-look-clusters`.
+> Status (2026-11-14): **FV implementada** (arranjo das folhas em coroa ou pétalas, arestas implícitas, rótulos de região). **Ego E1–E6 implementado**: raios implícitos, ego lê o que o canvas desenha (F0.1), anéis em faixas e legendas de setor (F4), aviso de anel lotado, revelação gradual de rótulos (parte de FZ). Continuam propostas: F0.2–F0.5, F1–F3, revelar nós por zoom (D7) e F6. Análise de 2026-11-13, branch `feature/context-look-clusters`.
 > Pasta fora do site VitePress (`srcExclude: dev/**`).
 > Incorpora e amplia [ego-crowded-rings-qsa.md](../ego-crowded-rings-qsa.md) (2026-08-28), que tratava só do layout ego e não foi implementado.
 

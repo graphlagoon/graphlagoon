@@ -3,6 +3,7 @@ import { ref, shallowRef, onMounted, onUnmounted, watch, computed } from 'vue';
 import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
 import { useGraphStore } from '@/stores/graph';
+import { useClusterStore } from '@/stores/cluster';
 import { useMetricsStore } from '@/stores/metrics';
 import { useCommunityStore } from '@/stores/community';
 import { useSimilarityStore } from '@/stores/similarity';
@@ -114,6 +115,8 @@ function effectiveForceSettings() {
 
 // Min arc length between ring neighbors in the ego layout (ring radii adapt to this)
 const EGO_MIN_NODE_ARC = 26;
+/** Ring 1 from this many nodes gets the crowded-ring hint in the Layout panel. */
+const EGO_CROWDED_RING = 80;
 
 // Hover debounce state
 let hoverRAF: number | null = null;
@@ -192,6 +195,9 @@ let _onMouseUp: ((e: MouseEvent) => void) | null = null;
 
 // Hub leaf arrangement on screen (utils/hubLeaves.ts); null when off or nothing qualifies.
 const hubLeavesPlan = shallowRef<HubLeavesPlan | null>(null);
+// Ego layout: spokes from the focus to its ring-1 leaves, drawn implicitly
+// (same "hub–leaf edges" behavior as the force arrangement); null when none.
+const egoImplicitSpokes = shallowRef<{ edgeIds: Set<string>; leaves: number; leafIds: Set<string> } | null>(null);
 
 // Pre-computed set of non-hub nodes connected to hubs (for node dimming)
 const degreeDimmedNodeIds = computed(() => {
@@ -238,6 +244,9 @@ const degreeDimmedNodeIds = computed(() => {
   // Arranged leaves are the subject of the picture, not noise around a hub.
   if (hubLeavesPlan.value) {
     for (const id of hubLeavesPlan.value.offsets.keys()) dimmed.delete(id);
+  }
+  if (egoImplicitSpokes.value) {
+    for (const id of egoImplicitSpokes.value.leafIds) dimmed.delete(id);
   }
 
   return dimmed.size > 0 ? dimmed : null;
@@ -461,7 +470,7 @@ function collectAppearanceContext(): AppearanceContext {
     communityColorMap: communityStore.communityColorMap,
     roleColorMap: graphStore.roleColors,
 
-    implicitEdgeIds: graphStore.behaviors.hubLeavesImplicitEdges ? hubLeavesPlan.value?.implicitEdgeIds ?? null : null,
+    implicitEdgeIds: graphStore.behaviors.hubLeavesImplicitEdges ? implicitEdgeIds() : null,
     hoveredNodeId: graphStore.hoveredNodeId,
   };
 }
@@ -655,6 +664,7 @@ function updateOverlays() {
   rings.updateRings();
   hubRegions.rescale();
   hubRegions.update();
+  guides.rescale();
 }
 
 function updateVisuals() {
@@ -1482,6 +1492,7 @@ async function initGraph() {
     // Update clipping plane normal when camera rotates + refresh labels
     controls.addEventListener('change', () => {
       hubRegions.rescale();
+      guides.rescale();
       if (isClippingActive.value && graph3d) {
         const cam = graph3d.camera() as THREE.Camera;
         const dir = new THREE.Vector3();
@@ -1846,9 +1857,14 @@ watch(
 );
 
 watch(
-  () => graphStore.behaviors.hubLeavesImplicitEdges,
+  () => [graphStore.behaviors.hubLeavesImplicitEdges, graphStore.behaviors.hubLeavesMinLeaves] as const,
   () => {
     if (!graph3d) return;
+    // Ego spokes are computed with the ego layout.
+    if (graphStore.layoutAlgorithm === 'ego') {
+      applyLayoutMode();
+      return;
+    }
     applyHubLeaves();
     updateVisuals();
   },
@@ -1939,6 +1955,14 @@ function hubLeavesActive(): boolean {
     && graphStore.behaviors.hubLeaves !== 'free';
 }
 
+/** Edges the arrangement or the ego spokes let position imply (null when none). */
+function implicitEdgeIds(): Set<string> | null {
+  const plan = hubLeavesPlan.value?.implicitEdgeIds ?? null;
+  const ego = egoImplicitSpokes.value?.edgeIds ?? null;
+  if (plan && ego) return new Set([...plan, ...ego]);
+  return plan ?? ego;
+}
+
 /** Distance between two leaf centres: a node diameter plus a gap, scaling with node size. */
 function hubLeafSpacing(): number {
   return graphStore.aesthetics.nodeSize * 1.75;
@@ -2017,7 +2041,10 @@ function applyHubLeaves() {
   graph3d.d3Force('hubLeaves', null);
   if (!hubLeavesPlan.value) {
     hubRegions.clear();
-    graphStore.hubLeavesStats = null;
+    const spokes = egoImplicitSpokes.value;
+    graphStore.hubLeavesStats = spokes
+      ? { hubs: 1, leaves: spokes.leaves, implicitEdges: graphStore.hubLeavesStats?.implicitEdges ?? 0 }
+      : null;
     return;
   }
   // Deleted then re-added, so it runs after every other force.
@@ -2056,6 +2083,36 @@ function keepHubLeavesForceLast() {
   graph3d.d3Force('hubLeaves', force);
 }
 
+/**
+ * Ring-1 leaves of the ego focus (their only neighbour is the focus): their
+ * spokes are left to position, like hub–leaf edges in the force arrangement.
+ * Same behavior and threshold (hubLeavesImplicitEdges, hubLeavesMinLeaves).
+ */
+function computeEgoImplicitSpokes(focusId: string, levels: Map<string, number>, edges: Edge[]) {
+  if (!graphStore.behaviors.hubLeavesImplicitEdges) return null;
+  const neighbours = new Map<string, Set<string>>();
+  for (const e of edges) {
+    if (e.src === e.dst) continue;
+    let a = neighbours.get(e.src);
+    if (!a) neighbours.set(e.src, (a = new Set()));
+    a.add(e.dst);
+    let b = neighbours.get(e.dst);
+    if (!b) neighbours.set(e.dst, (b = new Set()));
+    b.add(e.src);
+  }
+  const leaves = new Set<string>();
+  for (const [id, level] of levels) {
+    const n = neighbours.get(id);
+    if (level === 1 && n?.size === 1 && n.has(focusId)) leaves.add(id);
+  }
+  if (leaves.size < Math.max(2, graphStore.behaviors.hubLeavesMinLeaves)) return null;
+  const edgeIds = new Set<string>();
+  for (const e of edges) {
+    if ((leaves.has(e.src) && e.dst === focusId) || (leaves.has(e.dst) && e.src === focusId)) edgeIds.add(e.edge_id);
+  }
+  return { edgeIds, leaves: leaves.size, leafIds: leaves };
+}
+
 /** Pin every laid-out node at its computed position (static layouts). */
 function pinPositions(positions: Map<string, { x: number; y: number }>) {
   if (!graph3d) return;
@@ -2089,6 +2146,7 @@ function applyModeConstraints() {
   if (mode !== 'ego') {
     layoutHiddenNodeIds.value = null;
     graphStore.egoLayoutStats = null;
+    egoImplicitSpokes.value = null;
   }
   // Both hive and ego override curvatures; restore before a mode that doesn't
   if (mode !== 'hive' && mode !== 'ego') {
@@ -2099,8 +2157,17 @@ function applyModeConstraints() {
   }
 
   if (mode === 'ego') {
-    const focusId = cfg.ego.focusNodeId;
-    const hasFocus = !!focusId && graphStore.nodes.some((n) => n.node_id === focusId);
+    // Lay out what the canvas draws: a closed cluster is one node on its ring,
+    // its members are not there. A focus inside a closed cluster → the cluster.
+    const drawnNodes = filteredNodes.value;
+    const drawnEdges = filteredEdges.value;
+    const drawnIds = new Set(drawnNodes.map((n) => n.node_id));
+    let focusId = cfg.ego.focusNodeId;
+    if (focusId && !drawnIds.has(focusId)) {
+      focusId = useClusterStore().nodeToClosedClusters.get(focusId)?.[0] ?? focusId;
+    }
+    const hasFocus = !!focusId && drawnIds.has(focusId);
+    egoImplicitSpokes.value = null;
     if (!hasFocus) {
       // Inert until the user picks a focus node (no silent fallback)
       layoutHiddenNodeIds.value = null;
@@ -2108,7 +2175,7 @@ function applyModeConstraints() {
       guides.clear();
       return;
     }
-    const result = computeTreeLayout(graphStore.nodes, graphStore.edges, {
+    const result = computeTreeLayout(drawnNodes, drawnEdges, {
       mode: 'radial',
       focusNodeId: focusId!,
       direction: cfg.ego.direction,
@@ -2121,13 +2188,24 @@ function applyModeConstraints() {
       crossingHeuristic: cfg.ego.crossingHeuristic,
       crossingSweeps: cfg.ego.crossingSweeps,
       communityMap: cfg.ego.ringOrdering === 'community' ? communityStore.communityMap : null,
+      ringWrap: cfg.ego.ringWrap !== false,
     });
     pinPositions(result.positions);
+    egoImplicitSpokes.value = computeEgoImplicitSpokes(focusId!, result.levels, drawnEdges);
     graphStore.egoLayoutStats = {
       nonTreeEdgeCount: result.nonTreeEdgeCount,
       sameRingEdgeCount: result.sameRingEdgeCount,
       siftingSkippedLargeRing: result.siftingSkippedLargeRing,
+      crowdedRing: null,
     };
+    const ring1 = result.levelStats.find((st) => st.level === 1 && !st.unreachable);
+    if (ring1 && ring1.count >= EGO_CROWDED_RING && graphStore.egoLayoutStats) {
+      graphStore.egoLayoutStats.crowdedRing = {
+        count: ring1.count,
+        bands: ring1.bands ?? 1,
+        leaves: egoImplicitSpokes.value?.leaves ?? 0,
+      };
+    }
 
     // Same-ring edges arc along their ring instead of chording across the
     // interior, freeing it for the radial tree. Mirrors the hive curvature path.
@@ -2172,11 +2250,12 @@ function applyModeConstraints() {
         levelStats: result.levelStats,
         maxHops: cfg.ego.maxHops,
         hideLabels: cfg.ego.hideRingLabels,
+        sectors: result.sectors,
       }),
       { focusHalo: true, ringSpacing: cfg.ego.ringSpacing },
     );
   } else if (mode === 'hierarchical') {
-    const result = computeTreeLayout(graphStore.nodes, graphStore.edges, {
+    const result = computeTreeLayout(filteredNodes.value, filteredEdges.value, {
       mode: 'layered',
       focusNodeId: null,
       direction: cfg.hierarchical.traversal,
@@ -2266,6 +2345,8 @@ function applyLayoutMode() {
   const hasFocus = mode === 'ego' && !!focusId && graphStore.nodes.some((n) => n.node_id === focusId);
 
   applyLayoutModeForces();
+  // Implicit spokes and leaf edges depend on the layout just applied.
+  updateVisuals();
 
   // Camera refit — the layout can land far outside the previous framing
   const myToken = initToken;

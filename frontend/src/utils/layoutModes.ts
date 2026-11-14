@@ -165,6 +165,17 @@ export interface TreeLayoutOptions {
   /** Guard for 'sifting': hard ceiling on ring size (default 150). */
   siftingMaxRingSize?: number;
   /**
+   * Radial only: wrap a crowded ring into concentric bands instead of growing
+   * one huge circle. Angles are untouched (they come from slots); only the
+   * radius per node changes, so sectors, ordering and crossings stay as they
+   * were. Nodes with further structure (children, or any edge besides the one
+   * to their parent) take the inner band; leaves fill the outer bands.
+   * Default false (callers opt in; the old geometry stays byte-identical).
+   */
+  ringWrap?: boolean;
+  /** Distance between two bands of a wrapped ring. Default 0.8 × nodeSpacing. */
+  subRingSpacing?: number;
+  /**
    * Guard for 'sifting': budget in (ring size × ring chords), since cost depends
    * on density as much as size. Default 10000 ≈ 90ms worst case.
    */
@@ -181,10 +192,22 @@ export const RING_SECTOR_MISSING = '(no value)';
 
 export interface TreeLevelStat {
   level: number;
-  /** Radial: ring radius. Layered: offset along the level axis. */
+  /** Radial: ring radius (the OUTER band of a wrapped ring). Layered: offset along the level axis. */
   offset: number;
   count: number;
   unreachable: boolean;
+  /** Radial, wrapped ring only: radius of the inner band. */
+  innerOffset?: number;
+  /** Radial, wrapped ring only: number of concentric bands (> 1). */
+  bands?: number;
+}
+
+/** A contiguous run of one sector value on ring 1 (sector ring orderings only). */
+export interface RingSector {
+  key: string;
+  count: number;
+  /** Angle at the middle of the run, radians. */
+  midAngle: number;
 }
 
 export interface TreeLayoutResult {
@@ -212,6 +235,8 @@ export interface TreeLayoutResult {
   nonTreeEdgeCount: number;
   /** Non-tree edges joining two nodes on the SAME ring — what arc routing affects. */
   sameRingEdgeCount: number;
+  /** Ring-1 sectors in angular order (node-type / community / property orderings), else []. */
+  sectors: RingSector[];
   /**
    * Set when 'sifting' was requested but a sibling group exceeded
    * `siftingMaxRingSize`, so it kept the cheaper sweep result. Surfaced in the UI
@@ -529,6 +554,8 @@ export function computeTreeLayout(
   // ring's angle carries one meaning at a time, so two runs stay comparable.
   let ringOrderingDegraded = false;
   let siftingSkippedLargeRing = false;
+  /** nodeId → the sector it was placed in (sector strategies only). */
+  let sectorOfNode: Map<string, string> | null = null;
 
   if (mode === 'radial' && ringOrdering !== 'id') {
     // Post-order (children before parents), computed once and reused per sweep
@@ -707,6 +734,7 @@ export function computeTreeLayout(
           subtreeSector.set(id, best);
         }
 
+        sectorOfNode = subtreeSector;
         // Missing-value sector always sorts last, as one contiguous block
         const sectorRank = (id: string) => {
           const sector = subtreeSector.get(id) ?? RING_SECTOR_MISSING;
@@ -737,6 +765,7 @@ export function computeTreeLayout(
 
   const positions = new Map<string, { x: number; y: number }>();
   const levelStats: TreeLevelStat[] = [];
+  const sectors: { key: string; count: number; start: number; end: number }[] = [];
 
   if (mode === 'radial') {
     // Angles depend only on slots, never on radius — so they can be resolved
@@ -761,23 +790,81 @@ export function computeTreeLayout(
     // rather than an average. Bounded by nodeSpacing·totalSlots/2π, since two
     // nodes on a ring are always at least one slot apart.
     const radiusByLevel = new Map<number, number>();
+    /** Wrapped rings: nodeId → band index (0 = inner). */
+    const bandOfNode = new Map<string, number>();
+    const bandSpacing = options.subRingSpacing ?? nodeSpacing * 0.8;
+    const nodesByLevel = new Map<number, string[]>();
+    for (const [id, level] of levels) {
+      const list = nodesByLevel.get(level);
+      if (list) list.push(id);
+      else nodesByLevel.set(level, [id]);
+    }
+    // "Linked": anything besides the edge to its parent. Undirected on purpose —
+    // a partner that also holds another company is linked whatever the direction.
+    const degree = new Map<string, Set<string>>();
+    for (const e of edges) {
+      if (e.src === e.dst || !idSet.has(e.src) || !idSet.has(e.dst)) continue;
+      let a = degree.get(e.src);
+      if (!a) degree.set(e.src, (a = new Set()));
+      a.add(e.dst);
+      let b = degree.get(e.dst);
+      if (!b) degree.set(e.dst, (b = new Set()));
+      b.add(e.src);
+    }
+    const isLinked = (id: string) =>
+      (children.get(id)?.length ?? 0) > 0 || (degree.get(id)?.size ?? 0) > 1;
+
     let prevRadius = 0;
     for (let level = 0; level <= maxLevel; level++) {
       const count = countByLevel.get(level) ?? 0;
       const capacityRadius = (count * nodeSpacing) / (2 * Math.PI);
       const spacingRadius = nodeSpacing / minCircularGap(anglesByLevel.get(level) ?? []);
-      const radius = level === 0
-        ? 0
-        : Math.max(prevRadius + levelSpacing, capacityRadius, spacingRadius);
+      const base = prevRadius + levelSpacing;
+      if (level === 0) {
+        radiusByLevel.set(0, 0);
+        continue;
+      }
+      let radius = Math.max(base, capacityRadius, spacingRadius);
+      let outer = radius;
+      let bands = 1;
+      if (options.ringWrap && count >= 2 && radius > base + levelSpacing) {
+        const wrapped = wrapRing(nodesByLevel.get(level) ?? [], angleOfNode, isLinked, {
+          base, nodeSpacing, bandSpacing,
+        });
+        if (wrapped.outer < radius) {
+          radius = wrapped.inner;
+          outer = wrapped.outer;
+          bands = wrapped.bands;
+          for (const [id, band] of wrapped.bandOf) bandOfNode.set(id, band);
+        }
+      }
       radiusByLevel.set(level, radius);
-      prevRadius = radius;
-      if (level > 0) levelStats.push({ level, offset: radius, count, unreachable: false });
+      prevRadius = outer;
+      levelStats.push(bands > 1
+        ? { level, offset: outer, count, unreachable: false, innerOffset: radius, bands }
+        : { level, offset: radius, count, unreachable: false });
     }
 
     for (const [id, level] of levels) {
       const angle = angleOfNode.get(id) ?? 0;
-      const radius = radiusByLevel.get(level) ?? 0;
+      const radius = (radiusByLevel.get(level) ?? 0) + (bandOfNode.get(id) ?? 0) * bandSpacing;
       positions.set(id, { x: radius * Math.cos(angle), y: radius * Math.sin(angle) });
+    }
+
+    // Ring-1 sectors in angular order, for their labels.
+    if (sectorOfNode) {
+      const ring1 = (nodesByLevel.get(1) ?? [])
+        .map((id) => ({ id, angle: angleOfNode.get(id) ?? 0, key: sectorOfNode!.get(id) ?? RING_SECTOR_MISSING }))
+        .sort((a, b) => a.angle - b.angle || a.id.localeCompare(b.id));
+      for (const node of ring1) {
+        const last = sectors[sectors.length - 1];
+        if (last && last.key === node.key) {
+          last.count++;
+          last.end = node.angle;
+        } else {
+          sectors.push({ key: node.key, count: 1, start: node.angle, end: node.angle });
+        }
+      }
     }
 
     // Unreachable nodes ('outer-ring' policy): dedicated outermost ring, spread by id order
@@ -897,7 +984,71 @@ export function computeTreeLayout(
     nonTreeEdgeCount,
     sameRingEdgeCount,
     siftingSkippedLargeRing,
+    sectors: sectors.map(({ key, count, start, end }) => ({ key, count, midAngle: (start + end) / 2 })),
   };
+}
+
+/**
+ * Bands for one crowded ring. Nodes are taken in angular order; linked nodes
+ * (see computeTreeLayout) own band 0 when the ring has both kinds, leaves go
+ * round-robin over the remaining bands — angular neighbours land in different
+ * bands, so each band's tightest gap grows with the band count. Linked nodes may
+ * need several inner bands themselves (adjacent slots). Picks the split that
+ * gives the smallest outer radius (ties → fewer bands).
+ * Each band j needs radius ≥ its own spacing requirement; band j sits at
+ * inner + j·bandSpacing.
+ */
+function wrapRing(
+  ids: string[],
+  angleOf: Map<string, number>,
+  isLinked: (id: string) => boolean,
+  opts: { base: number; nodeSpacing: number; bandSpacing: number },
+): { inner: number; outer: number; bands: number; bandOf: Map<string, number> } {
+  const ordered = [...ids].sort((a, b) => (angleOf.get(a)! - angleOf.get(b)!) || a.localeCompare(b));
+  const linked = ordered.filter(isLinked);
+  const leaves = ordered.filter((id) => !isLinked(id));
+  const split = linked.length > 0 && leaves.length > 0;
+  if (ordered.length < 2) return { inner: opts.base, outer: opts.base, bands: 1, bandOf: new Map() };
+  // Bands are filled in angular order, so their angles are already sorted.
+  const sortedGap = (band: string[]) => {
+    if (band.length < 2) return Infinity;
+    let min = angleOf.get(band[0])! + 2 * Math.PI - angleOf.get(band[band.length - 1])!;
+    for (let i = 1; i < band.length; i++) min = Math.min(min, angleOf.get(band[i])! - angleOf.get(band[i - 1])!);
+    return min > 1e-9 ? min : Infinity;
+  };
+  const required = (band: string[]) => Math.max(
+    (band.length * opts.nodeSpacing) / (2 * Math.PI),
+    opts.nodeSpacing / sortedGap(band),
+  );
+
+  let best: { inner: number; outer: number; bands: number; bandOf: Map<string, number> } | null = null;
+  const consider = (k: number, assign: (bandOf: Map<string, number>, groups: string[][]) => void) => {
+    const groups: string[][] = Array.from({ length: k }, () => []);
+    const bandOf = new Map<string, number>();
+    assign(bandOf, groups);
+    let inner = opts.base;
+    groups.forEach((g, j) => { if (g.length) inner = Math.max(inner, required(g) - j * opts.bandSpacing); });
+    const outer = inner + (k - 1) * opts.bandSpacing;
+    if (!best || outer < best.outer - 1e-9) best = { inner, outer, bands: k, bandOf };
+  };
+  const roundRobin = (ids: string[], first: number, count: number) => (bandOf: Map<string, number>, groups: string[][]) => {
+    ids.forEach((id, i) => { const b = first + (i % count); groups[b].push(id); bandOf.set(id, b); });
+  };
+  const maxBands = Math.min(24, ordered.length);
+  for (let k = 1; k <= maxBands; k++) {
+    if (!split) {
+      consider(k, roundRobin(ordered, 0, k));
+      continue;
+    }
+    // Linked nodes on the first m bands, leaves on the k − m outer ones.
+    for (let m = 1; m < k; m++) {
+      consider(k, (bandOf, groups) => {
+        roundRobin(linked, 0, m)(bandOf, groups);
+        roundRobin(leaves, m, k - m)(bandOf, groups);
+      });
+    }
+  }
+  return best!;
 }
 
 // ---------------------------------------------------------------------------
@@ -907,6 +1058,8 @@ export function computeTreeLayout(
 export interface RingGuideSpec {
   /** `label: null` means "draw this ring without a caption". */
   rings: { hop: number; radius: number; dashed: boolean; label: string | null }[];
+  /** Ring-1 sector captions ("Socio (131)"), just outside the ring, centred on the sector. */
+  sectors: { label: string; x: number; y: number }[];
 }
 
 /**
@@ -921,6 +1074,9 @@ export function computeRingGuideSpec(opts: {
   levelStats: TreeLevelStat[];
   maxHops: number | null;
   hideLabels?: boolean;
+  sectors?: RingSector[];
+  /** Gap between ring 1 and its sector captions. */
+  sectorLabelGap?: number;
 }): RingGuideSpec {
   const { levelStats, maxHops, hideLabels = false } = opts;
   const rings: RingGuideSpec['rings'] = [];
@@ -931,16 +1087,32 @@ export function computeRingGuideSpec(opts: {
     // Ring population is the first thing an analyst reads off an ego view
     // ("where is the mass?"), so it belongs in the guide label rather than
     // requiring them to count dots.
+    // ASCII only: the label atlas has no "·" (FastLabelRenderer covers 32–126).
     const name = stat.unreachable ? 'unreachable' : String(stat.level);
+    // A band count tells something only on a populated ring.
+    const bands = stat.bands && stat.count >= 10 ? `, ${stat.bands} bands` : '';
     rings.push({
       hop: stat.level,
       radius: stat.offset,
       dashed: stat.unreachable,
-      label: hideLabels ? null : stat.count > 0 ? `${name} · ${stat.count}` : name,
+      label: hideLabels ? null : stat.count > 0 ? `${name} (${stat.count}${bands})` : name,
     });
   }
 
-  return { rings };
+  const sectors: RingGuideSpec['sectors'] = [];
+  const ring1 = levelStats.find((s) => s.level === 1 && !s.unreachable);
+  if (!hideLabels && ring1 && (opts.sectors?.length ?? 0) > 1 && (maxHops === null || maxHops >= 1)) {
+    const r = ring1.offset + (opts.sectorLabelGap ?? 24);
+    for (const sector of opts.sectors!) {
+      sectors.push({
+        label: `${sector.key} (${sector.count})`,
+        x: r * Math.cos(sector.midAngle),
+        y: r * Math.sin(sector.midAngle),
+      });
+    }
+  }
+
+  return { rings, sectors };
 }
 
 // ---------------------------------------------------------------------------
