@@ -14198,3 +14198,16 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Files:** new `docs/dev/plans/hubs-densos/` (README, 00–04, `screens/`); changed `docs/dev/README.md` (index row), `docs/dev/plans/ego-crowded-rings-qsa.md` (pointer).
 **Public docs:** No public docs impact (planning only; each phase lists its guide pages).
 **Admin-area impact:** No admin-area impact (F3 will add one `AUDIT_EXEMPT_ROUTES` row).
+
+## [2026-11-13 22:00] - Feature Planning (revision): hub neighbourhoods without clustering — leaf arrangement first
+
+**Context:** The owner pointed out that the package of 21:30 made a cluster the prerequisite, while the question is about visualization strategies that may or may not group and may or may not hide. Revised in [plans/hubs-densos/05-estrategias-de-visualizacao.md](plans/hubs-densos/05-estrategias-de-visualizacao.md); where it conflicts with 02–04 of the package, 05 wins.
+**Decisions (proposed, not built):**
+1. **No cluster is needed for the first delivery.** Hub and leaf come from node degree, which the store already computes. A second probe pinned the 285 leaves of a 300-partner hub around it with a pure function ("crown" spiral, or "petals": one disc per role) and stopped drawing hub–leaf edges: readable with every node still on screen (screenshots 12–14).
+2. **Order reversed:** FV (leaf arrangement + implicit hub–leaf edges with a visible mark + region labels with counts) and FZ (zoom) come before collections. A collection becomes "a collapsed petal"; the former packed-state phase (F5) is absorbed by FV.
+3. **Reveal-by-zoom without clusters is viable** and was wrongly rejected: the earlier objection (scene rebuild, layout shift) applies to opening and closing clusters, not to flipping the visual `hidden` flag on nodes that stay in the layout. It hides nodes, so it needs an explicit product decision (D7) against the 2026-07-20 rule and ships off by default with a "+N" mark.
+4. **Measured:** label level-of-detail already reveals leaf labels on zoom, but in one step (none at camera zoom 6.4, all at 11.4; Fit caps at 6) and at 20% opacity under degree dim. Making it gradual is part of FZ.
+**Known risk:** the arrangement needs a custom force in both `utils/forceConfig3D.ts` and `utils/headlessLayout.ts`, which mirror each other by hand.
+**Files:** new `docs/dev/plans/hubs-densos/05-estrategias-de-visualizacao.md`, five screenshots; changed `README.md`, `00`, `02`, `04` of the package.
+**Public docs:** No public docs impact (planning only).
+**Admin-area impact:** No admin-area impact
