@@ -14248,3 +14248,13 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `docs/guide/exploring-the-graph.md` ("Ego layout with a crowded ring"); screenshots `exploring-the-graph-ego-crowded.png` (new), `layout-url-overrides-ego.png` (regenerated: new ring captions).
 **Admin-area impact:** No admin-area impact
 **Known limitations:** `make docs-build` still stops at the stale `docs/public/openapi.json` check on this branch (pre-existing; `vitepress build` alone passes). The intermittent `investigations.spec.ts` "follow the money" failure (trace starts from a neighbouring node) also occurs without these changes.
+
+## [2026-11-14 19:30] - Bug Fix: saved clusters survive reopening an exploration and expanding; ego cutoff no longer wastes angle
+
+**Bugs:** (1) A watcher in `stores/cluster.ts` cleared every cluster whenever `graphStore.nodes` was reassigned. `loadExploration` restores clusters *before* it loads the snapshot's nodes, so saved clusters were lost on every reopen; *Expand neighbors* wiped them too (plan item F0.2). (2) In the ego layout, nodes beyond `maxHops` were hidden but still took slots, so a hidden subtree (380 partners at hop 3) squeezed ring 1 into a third of the circle.
+**Fix:** (1) Clusters clear only when a query you run bumps `queryRunSeq`; any other node change keeps them and drops members that are gone (a cluster left empty goes). (2) The ego branch leaves nodes beyond the cutoff out of `computeTreeLayout` (they stay hidden), so the visible rings use the whole circle.
+**Files:** `frontend/src/stores/cluster.ts`, `frontend/src/components/GraphCanvas3D.vue`.
+**Tests:** vitest `graph.clusterIntegration.test.ts` (expand keeps and prunes, restore order keeps, query clears); e2e `layout-url-overrides`, `hub-leaves`, `context-menu`.
+**Public docs:** No public docs impact (behaviour now matches what the guides already describe).
+**Admin-area impact:** No admin-area impact
+**Known limitations:** graph loads that do not count as a query you run (subgraph auto-load, precomputed graphs) prune clusters instead of clearing them — a cluster whose ids happen to exist in the new graph would stay.
