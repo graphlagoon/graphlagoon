@@ -173,3 +173,37 @@ A fase correspondente no plano é a **FV**, no [04](04-plano-de-implementacao.md
 - **D3** (construir o estado empacotado) deixa de ser decisão: vira a primeira entrega, sem cluster.
 - **D7 (nova): ocultar nós conforme o zoom é aceitável se houver uma marca "+N" sempre visível?** Sim libera E5. Não mantém E3 como teto.
 - **D8 (nova): arestas hub–folha não desenhadas por padrão no arranjo?** Recomendação: sim, com marca e botão.
+
+## Escopo: liga e desliga, 2D e 3D, quais layouts
+
+| Pergunta | Resposta |
+|---|---|
+| Configurável? | Sim. `hubLeaves: 'free' \| 'crown' \| 'petals'` no painel de layout, **padrão `free`** (o comportamento de hoje). Junto: propriedade das pétalas, limiar de hub, arestas implícitas sim/não (D8), revelar por zoom sim/não (D7, desligado). Fica em `layout_mode_config`, por exploração e no look do contexto, sem migração |
+| Só 2D? | Na primeira versão, sim. Em 3D a coroa precisa de um plano ou de uma casca de esfera, e a esfera esconde a metade de trás. Opção para depois: disco voltado para a câmera, recalculado na câmera parada. Os estudos de 3D sem estéreo [43 do 01] não dão motivo para priorizar |
+| Rótulos graduais (FZ) em 3D? | Sim: o gatilho é o raio em tela, que o LOD de rótulos já calcula nos dois modos |
+
+| Layout | Arranjo das folhas | Como |
+|---|---|---|
+| Force | Sim | Força própria que prende a folha a `hub + deslocamento`, ao vivo e no settle headless |
+| Ego | Sim, sem força | O anel 1 já é determinístico: pétalas = setores por `ringOrdering: 'property'` + sub-anéis (F4); coroa = sub-anéis |
+| Hierárquico (camadas) | Parcial | Já quebra linhas lotadas em sublinhas; arestas implícitas e rótulo de região se aplicam, arranjo próprio não |
+| Hive | Não | A posição no eixo é o significado do hive; mover folhas o quebra |
+| Trace layers | Não | Mesma razão: a posição codifica tempo ou camada |
+| Arestas implícitas, rótulos graduais | Todos | São aparência, não posição |
+
+## Base na literatura, peça por peça
+
+Honestidade primeiro: **a combinação coroa/pétalas + arestas implícitas não vem de um artigo.** É uma composição de peças com base separada, e nenhuma foi testada com usuários nesta forma.
+
+| Peça | Base | Força da evidência |
+|---|---|---|
+| Tratar as folhas de um hub como unidade | Leque de Dunne & Shneiderman 2013 [3]; *matching neighbours* de Dwyer et al. 2013 [4] | Medida: melhora visão geral e busca; piora comparar contagens. Eles trocam as folhas por um glifo; nós as mantemos |
+| Espiral de girassol | PhylloTrees 2004 [21] | Propriedade geométrica (sem sobreposição, sem saber N antes); sem estudo para estrelas ego |
+| Pétalas por atributo | *Group-in-a-Box* [20], *semantic substrates* [8], PivotGraph [7]; arranjos de combo aberto do KeyLines [31] | Prática de produto; estudo específico não encontrado |
+| Contornos sem sobreposição | Jianu et al. 2014 [26]: contornos sobrepostos custam até 25% de acerto | Medida (fonte secundária) |
+| Aresta implícita pela posição | Codificação implícita de hierarquia (contenção, adjacência), como em treemaps; Schulz, Hadlak & Schumann, *The design space of implicit hierarchy visualization*, TVCG 2011 (de memória, **não conferido** nesta pesquisa) | Bem estabelecido para árvores; para a estrela de um grafo é extrapolação |
+| Rótulos graduais por zoom | Sigma.js [40] (grade e limiar em tela); Cosmograph [41] | Prática de produto |
+| Revelar nós por zoom | GraphMaps [17]; DOI de Furnas [1] e van Ham & Perer [2]; orçamento de entidades de Elmqvist & Fekete [10] | Modelos publicados; ganho medido não encontrado |
+| 2D primeiro | Ware & Mitchell 2008; Greffard et al. 2011 [43] | Medida |
+
+Consequência para o plano: a FV deve terminar com uma checagem com usuário (achar os sócios com outro vínculo; dizer quantos são de cada papel) comparando *free* e *petals* na fixture, antes de virar padrão em qualquer contexto.
