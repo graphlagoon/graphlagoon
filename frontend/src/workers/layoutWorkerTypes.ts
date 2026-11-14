@@ -5,6 +5,7 @@
  */
 import type { SettleNode, SettleLink } from '@/utils/headlessLayout';
 import type { Force3DSettings } from '@/utils/forceConfig3D';
+import type { SerializedHubLeavesPlan } from '@/utils/hubLeaves';
 
 export interface LayoutWorkerInput {
   type: 'SETTLE';
@@ -13,6 +14,7 @@ export interface LayoutWorkerInput {
   settings: Force3DSettings;
   numDimensions: 2 | 3;
   nodeRelSize: number;
+  hubLeaves?: { plan: SerializedHubLeavesPlan; spacing: number };
 }
 
 export type LayoutWorkerOutput =

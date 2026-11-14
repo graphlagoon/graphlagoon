@@ -38,6 +38,8 @@ Fora de escopo em todas as fases: clusters aninhados, histogramas e facetas, mat
 
 ## FV · Arranjo visual das folhas (sem agrupamento)
 
+> **Implementada em 2026-11-14.** Diferenças do desenho abaixo: a configuração ficou em `behaviors` (`hubLeaves`, `hubLeavesKey`, `hubLeavesMinLeaves`, `hubLeavesImplicitEdges`), não em `layout_mode_config`, porque behaviors já são validados, salvos na exploração, no preset e no `default_behaviors` do contexto; o hub é definido por número de folhas, não por grau; uma folha arrastada volta ao arranjo quando o layout roda (critério 5 da tabela de riscos ficou assim).
+
 Estratégias E1, E2 e E4 do [05](05-estrategias-de-visualizacao.md).
 
 **Irmãs a ler antes:** `computeTreeLayout` e seus testes (`utils/layoutModes.ts`), `applyCommunityRadialForce` e `applyEdgeTypeLayoutForce` (`utils/forceConfig3D.ts`), `utils/headlessLayout.ts` (espelha as forças para o settle em worker), `computeLinkAppearance` (`utils/graphAppearance.ts`), rótulos forçados em `composables/useGraphLabels.ts:187`.

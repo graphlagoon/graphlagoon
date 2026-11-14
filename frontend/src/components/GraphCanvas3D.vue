@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
+import { ref, shallowRef, onMounted, onUnmounted, watch, computed } from 'vue';
 import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
 import { useGraphStore } from '@/stores/graph';
@@ -41,6 +41,8 @@ import { settleLayoutAuto } from '@/utils/settleLayoutClient';
 import { seedNewNodePositions } from '@/utils/seedNewNodePositions';
 import { useDevPerf } from '@/composables/useDevPerf';
 import { useGraphRings } from '@/composables/useGraphRings';
+import { useHubLeafRegions } from '@/composables/useHubLeafRegions';
+import { computeHubLeavesPlan, forceHubLeaves, serializeHubLeavesPlan, snapHubLeaves, type HubLeavesPlan } from '@/utils/hubLeaves';
 
 const emit = defineEmits<{
   'cluster-node-click': [clusterId: string]
@@ -188,6 +190,9 @@ let _onMouseDown: ((e: MouseEvent) => void) | null = null;
 let _onMouseMove: ((e: MouseEvent) => void) | null = null;
 let _onMouseUp: ((e: MouseEvent) => void) | null = null;
 
+// Hub leaf arrangement on screen (utils/hubLeaves.ts); null when off or nothing qualifies.
+const hubLeavesPlan = shallowRef<HubLeavesPlan | null>(null);
+
 // Pre-computed set of non-hub nodes connected to hubs (for node dimming)
 const degreeDimmedNodeIds = computed(() => {
   const hubs = graphStore.hubNodeIds;
@@ -228,6 +233,11 @@ const degreeDimmedNodeIds = computed(() => {
         }
       }
     }
+  }
+
+  // Arranged leaves are the subject of the picture, not noise around a hub.
+  if (hubLeavesPlan.value) {
+    for (const id of hubLeavesPlan.value.offsets.keys()) dimmed.delete(id);
   }
 
   return dimmed.size > 0 ? dimmed : null;
@@ -279,6 +289,7 @@ const layout = useGraphLayout(
 );
 
 const guides = useLayoutGuides(getGraph3d);
+const hubRegions = useHubLeafRegions(getGraph3d);
 const toast = useToast();
 
 const camera = useGraphCamera(getGraph3d, containerRef, initialLayoutDone, {
@@ -449,6 +460,9 @@ function collectAppearanceContext(): AppearanceContext {
 
     communityColorMap: communityStore.communityColorMap,
     roleColorMap: graphStore.roleColors,
+
+    implicitEdgeIds: graphStore.behaviors.hubLeavesImplicitEdges ? hubLeavesPlan.value?.implicitEdgeIds ?? null : null,
+    hoveredNodeId: graphStore.hoveredNodeId,
   };
 }
 
@@ -639,6 +653,8 @@ function updateOverlays() {
   icons.updateIcons();
   edgeIcons.updateIcons();
   rings.updateRings();
+  hubRegions.rescale();
+  hubRegions.update();
 }
 
 function updateVisuals() {
@@ -694,6 +710,7 @@ function updateVisuals() {
 
   const t1 = performance.now();
 
+  let implicitHidden = 0;
   currentData.links.forEach((link: GraphLink) => {
     const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
     const targetId = typeof link.target === 'string' ? link.target : link.target.id;
@@ -705,7 +722,11 @@ function updateVisuals() {
     link.color = appearance.color;
     link.hidden = appearance.hidden;
     link.width = appearance.width ?? undefined;
+    if (appearance.implicit) implicitHidden++;
   });
+  if (graphStore.hubLeavesStats && graphStore.hubLeavesStats.implicitEdges !== implicitHidden) {
+    graphStore.hubLeavesStats = { ...graphStore.hubLeavesStats, implicitEdges: implicitHidden };
+  }
 
   const t2 = performance.now();
 
@@ -996,6 +1017,7 @@ async function updateGraph() {
           nodeRelSize: graphStore.aesthetics.nodeSize / 2,
           onProgress: (f) => { settleProgress.value = f; },
           shouldAbort: () => initToken !== myToken,
+          hubLeaves: settleHubLeaves(graphData.nodes, graphData.links),
         },
       );
       recordPerf('headlessSettle', performance.now() - tSettle, {
@@ -1183,6 +1205,7 @@ async function initGraph() {
           nodeRelSize: aesthetics.nodeSize / 2,
           onProgress: (f) => { settleProgress.value = f; },
           shouldAbort: () => initToken !== myToken,
+          hubLeaves: settleHubLeaves(graphData.nodes, graphData.links),
         },
       );
       recordPerf('headlessSettle', performance.now() - tSettle, {
@@ -1297,11 +1320,17 @@ async function initGraph() {
     .backgroundColor(backgroundColor)
     .showNavInfo(false)
     .enableNodeDrag(graphStore.behaviors.enableNodeDrag)
+    .onNodeDrag((node: GraphNode) => {
+      // A dragged hub carries its leaves, also on a stopped layout.
+      if (hubLeavesPlan.value?.hubRadius.has(node.id)) snapHubLeavesNow();
+    })
     .onNodeDragEnd((node: GraphNode) => {
       // Pin node at drop position so it stays fixed after drag
       node.fx = node.x;
       node.fy = node.y;
       node.fz = node.z;
+      // Arranged leaves follow their hub: a dragged leaf goes back to its slot.
+      if (hubLeavesPlan.value?.offsets.has(node.id) || hubLeavesPlan.value?.hubRadius.has(node.id)) snapHubLeavesNow();
     })
     .onNodeClick((node: GraphNode, event: MouseEvent) => {
       if (node.isCluster) {
@@ -1408,6 +1437,7 @@ async function initGraph() {
   pointerRepulsionForce.range(screenToWorldRange(graphStore.force3DSettings.pointerRepulsionRange));
   pointerRepulsionForce.sizeInertia(graphStore.force3DSettings.pointerSizeInertia);
   graph3d.d3Force('pointerRepulsion', pointerRepulsionForce);
+  keepHubLeavesForceLast();
 
   isWarmingUp.value = false;
 
@@ -1417,6 +1447,7 @@ async function initGraph() {
     icons.updateIcons();
     edgeIcons.updateIcons();
     rings.updateRings();
+    hubRegions.update();
   });
 
   graph3d.onEngineStop(() => {
@@ -1450,6 +1481,7 @@ async function initGraph() {
 
     // Update clipping plane normal when camera rotates + refresh labels
     controls.addEventListener('change', () => {
+      hubRegions.rescale();
       if (isClippingActive.value && graph3d) {
         const cam = graph3d.camera() as THREE.Camera;
         const dir = new THREE.Vector3();
@@ -1755,6 +1787,16 @@ watch(
   { deep: true }
 );
 
+// Leaf spacing and the hub's radius follow the node size.
+watch(
+  () => graphStore.aesthetics.nodeSize,
+  () => {
+    if (!graph3d || !hubLeavesPlan.value) return;
+    applyHubLeaves();
+    updateVisuals();
+  },
+);
+
 // Width by amount (F3.2): widths only, no rebuild.
 watch(
   () => graphStore.aesthetics.edgeWidthByAmount,
@@ -1775,8 +1817,41 @@ watch(
   () => {
     if (!graph3d) return;
     applyForceConfig(graph3d, effectiveForceSettings(), graphStore.aesthetics.nodeSize / 2, graphStore.behaviors.viewMode === '2d-proj');
+    keepHubLeavesForceLast();
   },
   { deep: true }
+);
+
+// Hub leaf arrangement: a new shape re-runs the free layout around it (the
+// leaves leave or join the simulation); the implicit-edge toggle is visual only.
+watch(
+  () => [graphStore.behaviors.hubLeaves, graphStore.behaviors.hubLeavesKey, graphStore.behaviors.hubLeavesMinLeaves] as const,
+  () => {
+    if (!graph3d) return;
+    applyHubLeaves();
+    updateVisuals();
+    if (graphStore.layoutAlgorithm === 'force' && !communityStore.radialLayoutEnabled) {
+      const is2D = graphStore.behaviors.viewMode === '2d-proj';
+      unpinAllNodes(is2D);
+      layout.startLayout();
+      // A pre-settled graph runs with cooldownTicks 0 (no animation): give it a
+      // short, size-bounded run so the rest of the layout adapts (on) or the
+      // leaves are released (off) instead of freezing where the switch left them.
+      if (graphStore.layoutExecution.cooldownTicks === 0) {
+        const data = graph3d.graphData();
+        graph3d.cooldownTicks(Math.max(30, Math.min(200, Math.floor(2_000_000 / Math.max(1, data.nodes.length + data.links.length)))));
+      }
+    }
+  },
+);
+
+watch(
+  () => graphStore.behaviors.hubLeavesImplicitEdges,
+  () => {
+    if (!graph3d) return;
+    applyHubLeaves();
+    updateVisuals();
+  },
 );
 
 // Auto-switch to 2D projection for planar layouts (community radial, ego, hive),
@@ -1819,6 +1894,7 @@ watch(
       communityStore.communityRadialConfig,
       is2D,
     );
+    keepHubLeavesForceLast();
 
     // Unpin nodes so the radial forces can move them, then restart simulation
     unpinAllNodes(is2D);
@@ -1853,6 +1929,133 @@ function restoreModeCurvatures() {
   if (touched) graph3d.linkCurvature((l: GraphLink) => l.curvature ?? 0);
 }
 
+// ---------------------------------------------------------------------------
+// Hub leaf arrangement (force layout, 2D) — utils/hubLeaves.ts
+// ---------------------------------------------------------------------------
+
+function hubLeavesActive(): boolean {
+  return graphStore.layoutAlgorithm === 'force'
+    && graphStore.behaviors.viewMode === '2d-proj'
+    && graphStore.behaviors.hubLeaves !== 'free';
+}
+
+/** Distance between two leaf centres: a node diameter plus a gap, scaling with node size. */
+function hubLeafSpacing(): number {
+  return graphStore.aesthetics.nodeSize * 1.75;
+}
+
+function linkEndId(end: string | { id: string }): string {
+  return typeof end === 'string' ? end : end.id;
+}
+
+function normalizeKeyValue(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  return String(value);
+}
+
+function buildHubLeavesPlan(
+  nodes: { id: string; size?: number; nodeType?: string }[],
+  links: GraphLink[],
+): HubLeavesPlan | null {
+  if (!hubLeavesActive()) return null;
+  const b = graphStore.behaviors;
+  const relSize = graphStore.aesthetics.nodeSize / 2;
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const slim = links.map((l) => ({ id: l.id, source: linkEndId(l.source), target: linkEndId(l.target) }));
+
+  // Links between a leaf and its hub, for the 'rel' and 'edge:' keys.
+  const key = b.hubLeavesKey;
+  const byPair = new Map<string, GraphLink[]>();
+  if (key === 'rel' || key.startsWith('edge:')) {
+    links.forEach((l, i) => {
+      const { source, target } = slim[i];
+      for (const pair of [`${source}\u0000${target}`, `${target}\u0000${source}`]) {
+        const list = byPair.get(pair);
+        if (list) list.push(l);
+        else byPair.set(pair, [l]);
+      }
+    });
+  }
+
+  const keyOf = (leaf: string, hub: string): string | null => {
+    if (key === '') return normalizeKeyValue(nodeById.get(leaf)?.nodeType);
+    if (key.startsWith('node:')) return normalizeKeyValue(nodeDataMap.value.get(leaf)?.properties?.[key.slice(5)]);
+    const between = (byPair.get(`${leaf}\u0000${hub}`) ?? []).slice().sort((x, y) => (x.id < y.id ? -1 : 1));
+    if (key === 'rel') return normalizeKeyValue([...new Set(between.map((l) => l.relationshipType))].sort().join(' + '));
+    // edge:<prop> — the first edge (by id) that carries the property.
+    const prop = key.slice(5);
+    for (const l of between) {
+      const v = normalizeKeyValue(edgeDataMap.value.get(l.id)?.properties?.[prop]);
+      if (v !== null) return v;
+    }
+    return null;
+  };
+
+  return computeHubLeavesPlan(slim, {
+    mode: b.hubLeaves as 'crown' | 'petals',
+    minLeaves: Math.max(2, b.hubLeavesMinLeaves),
+    spacing: hubLeafSpacing(),
+    hubRadiusOf: (id) => Math.cbrt(nodeById.get(id)?.size ?? 1) * relSize,
+    keyOf,
+  });
+}
+
+/** The arrangement as a settle option, so a headless settle reserves its space too. */
+function settleHubLeaves(nodes: GraphNode[], links: GraphLink[]) {
+  const plan = buildHubLeavesPlan(nodes, links);
+  return plan && plan.offsets.size > 0
+    ? { plan: serializeHubLeavesPlan(plan), spacing: hubLeafSpacing() }
+    : undefined;
+}
+
+/** (Re)apply the arrangement to the engine: force, immediate snap, regions, stats. */
+function applyHubLeaves() {
+  if (!graph3d) return;
+  const data = graph3d.graphData();
+  const plan = buildHubLeavesPlan(data.nodes as GraphNode[], data.links as GraphLink[]);
+  hubLeavesPlan.value = plan && plan.offsets.size > 0 ? plan : null;
+  graph3d.d3Force('hubLeaves', null);
+  if (!hubLeavesPlan.value) {
+    hubRegions.clear();
+    graphStore.hubLeavesStats = null;
+    return;
+  }
+  // Deleted then re-added, so it runs after every other force.
+  graph3d.d3Force('hubLeaves', forceHubLeaves(serializeHubLeavesPlan(hubLeavesPlan.value), hubLeafSpacing()));
+  snapHubLeavesNow();
+  hubRegions.show(hubLeavesPlan.value.regions);
+  // implicitEdges is counted by updateVisuals: the edges actually left undrawn.
+  graphStore.hubLeavesStats = {
+    hubs: hubLeavesPlan.value.hubRadius.size,
+    leaves: hubLeavesPlan.value.offsets.size,
+    implicitEdges: graphStore.hubLeavesStats?.implicitEdges ?? 0,
+  };
+}
+
+/**
+ * Place the leaves on the nodes the engine holds NOW. The force alone is not
+ * enough: after graphData() the simulation picks the new nodes up only on its
+ * (debounced) digest, and a stopped or pre-settled layout runs no tick at all.
+ * A stopped layout has cooldownTicks 0 (stopLayout), so a reheat runs one
+ * layoutTick that only redraws positions — no simulation step. (The engine's
+ * resetCountdown is not exposed by 3d-force-graph.) Every later run starts
+ * with its own reheat, so the alpha it leaves behind is never used as is.
+ */
+function snapHubLeavesNow() {
+  if (!graph3d || !hubLeavesPlan.value) return;
+  snapHubLeaves(graph3d.graphData().nodes, serializeHubLeavesPlan(hubLeavesPlan.value), hubLeafSpacing());
+  if (!isLayoutRunning.value && graph3d.cooldownTicks() === 0) graph3d.d3ReheatSimulation();
+  hubRegions.update();
+}
+
+/** Forces registered after ours would move leaves after placement: put ours back at the end. */
+function keepHubLeavesForceLast() {
+  const force = graph3d?.d3Force('hubLeaves');
+  if (!force) return;
+  graph3d.d3Force('hubLeaves', null);
+  graph3d.d3Force('hubLeaves', force);
+}
+
 /** Pin every laid-out node at its computed position (static layouts). */
 function pinPositions(positions: Map<string, { x: number; y: number }>) {
   if (!graph3d) return;
@@ -1874,6 +2077,11 @@ function pinPositions(positions: Map<string, { x: number; y: number }>) {
 }
 
 function applyLayoutModeForces() {
+  applyModeConstraints();
+  applyHubLeaves();
+}
+
+function applyModeConstraints() {
   if (!graph3d) return;
   const mode = graphStore.layoutAlgorithm;
   const cfg = graphStore.layoutModeConfig;
@@ -2277,7 +2485,9 @@ watch(
 watch(
   () => graphStore.hoveredNodeId,
   () => {
-    if (graphStore.behaviors.edgeLensMode === 'off' || camera.getIsCameraMoving()) return;
+    // Hover reveals the lens and the implicit hub–leaf edges.
+    const implicitEdges = !!hubLeavesPlan.value && graphStore.behaviors.hubLeavesImplicitEdges;
+    if ((graphStore.behaviors.edgeLensMode === 'off' && !implicitEdges) || camera.getIsCameraMoving()) return;
     if (lensHoverTimeout) clearTimeout(lensHoverTimeout);
     lensHoverTimeout = setTimeout(() => {
       updateVisuals();
@@ -2770,6 +2980,7 @@ onUnmounted(() => {
   rings.dispose();
   axisRotation.dispose();
   guides.dispose();
+  hubRegions.dispose();
   if (hoverRAF) {
     cancelAnimationFrame(hoverRAF);
     hoverRAF = null;

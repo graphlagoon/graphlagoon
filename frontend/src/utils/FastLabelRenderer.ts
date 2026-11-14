@@ -314,13 +314,17 @@ export class FastLabelRenderer {
    */
   removeLabel(id: string): void {
     this.labels.delete(id);
+    // Still waiting for the atlas: drop it there too, or it would appear once loaded.
+    if (!this.ready) this.pendingLabels = this.pendingLabels.filter((l) => l.id !== id);
   }
 
   /**
    * Update label position
    */
   updatePosition(id: string, position: THREE.Vector3): void {
-    const label = this.labels.get(id);
+    // Before the atlas loads the label is still pending: move it there, or it
+    // would appear at the position it was added with.
+    const label = this.labels.get(id) ?? (this.ready ? undefined : this.pendingLabels.find((l) => l.id === id));
     if (label) {
       label.position.copy(position);
     }

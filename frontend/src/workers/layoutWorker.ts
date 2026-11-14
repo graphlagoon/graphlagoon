@@ -27,6 +27,7 @@ self.onmessage = async (event: MessageEvent<LayoutWorkerInput>) => {
     const ticks = await settleLayoutHeadless(msg.nodes, msg.links, msg.settings, {
       numDimensions: msg.numDimensions,
       nodeRelSize: msg.nodeRelSize,
+      hubLeaves: msg.hubLeaves,
       // No UI in a worker: use big time chunks so we don't yield too often;
       // yielding still lets a terminate() land between chunks promptly enough.
       tickBudgetMs: 250,

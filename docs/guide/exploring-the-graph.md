@@ -237,6 +237,54 @@ nodes and edges are added. On sources that can't expand (some REST
 connections), the affordances are hidden rather than disabled. A failure
 leaves the graph untouched and reports through the error modal.
 
+## Hubs with many leaves
+
+::: tip TL;DR
+**Layout → Hubs with many leaves** lays the nodes linked only to a hub right
+next to it, in a crown or in one petal per group, each with a count.
+**Use it when** one node has hundreds of direct neighbours (a company's
+partner register, an account with many counterparties) and the force layout
+turns them into an unreadable disc. **Not the tool for** reducing what is
+drawn — every node stays on the canvas; to fold a group into one node, use
+[clusters](./clusters.md).
+:::
+
+![A company with 300 partners, petals by role](/screenshots/exploring-the-graph-hub-leaves.png)
+
+A **leaf** is a node whose only neighbour, among the nodes loaded, is the hub.
+Leaves carry no structure of their own, so the simulation has nothing to say
+about where they go: they end up as a disc around the hub that hides how many
+there are and of what kind. The partners that also hold *another* company are
+not leaves; they stay where the simulation puts them, and with this option on
+their edges are the only ones left around the hub — usually exactly the ones
+the investigation is about.
+
+| Setting | What it does |
+|---|---|
+| **Free** (default) | Nothing changes. |
+| **Crown around the hub** | All leaves on one spiral around the hub, labelled `N leaves`. |
+| **Petals, one per group** | One disc per value of **Group leaves by**: node type, relationship type, a node property, or a property of the edge to the hub (a partner's role, for example). Largest group first; leaves without the value form their own `(no value)` petal. Edge properties are only there when the edges came from a Cypher query: opening a context and *Expand neighbors* load edges without their properties, so every leaf would land in `(no value)` — group by a node property instead. |
+| **Hub: at least this many leaves** | A node counts as a hub from this many leaves on (10 by default). |
+| **Don't draw hub–leaf edges** | On by default: the position already says who the leaf belongs to. The edges come back when you hover or select the leaf or the hub. |
+
+What to expect:
+
+- **Nothing is hidden.** The node count does not change and every leaf is
+  selectable, coloured and sized like any other node. While the hub edges are
+  not drawn the status bar says so — `292 hub edges not drawn ✕` — and ✕
+  draws them again, so a screenshot never passes them off as absent.
+- **2D only.** In 3D the panel offers to switch.
+- **Force layout only.** Ego, hive and the layered layouts place every node
+  themselves.
+- **Leaves follow their hub.** Dragging the hub carries its leaves; a leaf
+  dragged away goes back to its place.
+- **"Leaf" means in what is loaded.** A partner that is a leaf here may have
+  other links in the source that you have not expanded yet.
+- The setting is a behavior: it is saved with the exploration and in a
+  [style preset](./style-presets.md), and a context can turn it on for
+  everyone with `default_behaviors`, for example
+  `{"hubLeaves": "petals", "hubLeavesKey": "edge:role"}`.
+
 ## Deleting nodes and edges
 
 Right-click a node or an edge → **Delete from graph**. If the clicked item
@@ -290,6 +338,9 @@ The strip under the canvas is the graph's honesty panel:
   This progressive load is controlled in **Look → Behaviors → property loading**
   (`auto`, the default, uses it only when the node table is wide enough to
   pay off).
+- `N hub edges not drawn ✕` — [hubs with many leaves](#hubs-with-many-leaves)
+  has its leaves next to the hub and their edges to it left out of the
+  drawing; ✕ draws them.
 - `Showing only: <group> ✕` — a [show only](#show-only) is hiding the other
   nodes; ✕ shows them again. Hover it for how many nodes it keeps.
 - `⚠ truncated` — the edge limit was hit and this is a **partial view**;

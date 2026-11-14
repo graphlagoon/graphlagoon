@@ -547,6 +547,21 @@ describe('computeLinkAppearance', () => {
     expect(r.hidden).toBe(false);
   });
 
+  it('implicit hub–leaf edge is not drawn until an endpoint is selected or hovered', () => {
+    const implicitEdgeIds = new Set(['e1']);
+    const at = (overrides: Partial<AppearanceContext>) =>
+      computeLinkAppearance('e1', 'KNOWS', 'leaf', 'hub', new Set(), makeCtx({ implicitEdgeIds, ...overrides })).hidden;
+    expect(at({})).toBe(true);
+    expect(at({ selectedNodeIds: new Set(['hub']) })).toBe(false);
+    expect(at({ selectedNodeIds: new Set(['leaf']) })).toBe(false);
+    expect(at({ hoveredNodeId: 'leaf' })).toBe(false);
+    expect(computeLinkAppearance('e2', 'KNOWS', 'a', 'hub', new Set(), makeCtx({ implicitEdgeIds })).hidden).toBe(false);
+    // Counted as implicit only when nothing else hides it (the status bar count).
+    expect(computeLinkAppearance('e1', 'KNOWS', 'leaf', 'hub', new Set(), makeCtx({ implicitEdgeIds })).implicit).toBe(true);
+    expect(computeLinkAppearance('e1', 'KNOWS', 'leaf', 'hub', new Set(['leaf']), makeCtx({ implicitEdgeIds })).implicit).toBe(false);
+    expect(computeLinkAppearance('e1', 'KNOWS', 'leaf', 'hub', new Set(), makeCtx({ implicitEdgeIds, selectedNodeIds: new Set(['hub']) })).implicit).toBe(false);
+  });
+
   it('hides link when source node is hidden', () => {
     const ctx = makeCtx();
     const r = computeLinkAppearance('e1', 'KNOWS', 'a', 'b', new Set(['a']), ctx);

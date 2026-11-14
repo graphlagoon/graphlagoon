@@ -102,6 +102,24 @@ const isolationTitle = computed(() => {
       {{ clusterCount }} clusters
     </button>
 
+    <!-- Hub leaf arrangement: hub–leaf edges are left out of the drawing. Said
+         here so a screenshot never passes them off as absent. -->
+    <span
+      v-if="graphStore.hubLeavesStats && graphStore.hubLeavesStats.implicitEdges > 0"
+      class="status-isolation"
+      data-testid="status-hub-edges-implied"
+      :title="`${graphStore.hubLeavesStats.leaves} nodes linked only to a hub are laid out next to it; their edges to the hub are shown on hover and selection. Click ✕ to draw them.`"
+    >
+      <strong>{{ graphStore.hubLeavesStats.implicitEdges }}</strong> hub edges not drawn
+      <button
+        type="button"
+        class="status-isolation-clear"
+        data-testid="status-hub-edges-draw"
+        aria-label="Draw the hub edges"
+        @click="graphStore.updateBehaviors({ hubLeavesImplicitEdges: false })"
+      >✕</button>
+    </span>
+
     <span
       v-if="graphStore.isolation"
       class="status-isolation"

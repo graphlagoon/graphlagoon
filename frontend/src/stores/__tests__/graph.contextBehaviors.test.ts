@@ -84,6 +84,17 @@ describe('per-context default behaviors', () => {
       // The string "false" is truthy — it must not become the boolean.
       expect(resolveInitialBehaviors({ mapStylePan: 'false' }).mapStylePan).toBe(true)
     })
+
+    it('hub leaf arrangement: off by default, a context can turn it on, unknown shapes are rejected', () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      expect(resolveInitialBehaviors(undefined).hubLeaves).toBe('free')
+      const on = resolveInitialBehaviors({ hubLeaves: 'petals', hubLeavesKey: 'edge:qualificacao' })
+      expect(on.hubLeaves).toBe('petals')
+      expect(on.hubLeavesKey).toBe('edge:qualificacao')
+      expect(on.hubLeavesImplicitEdges).toBe(true)
+      expect(resolveInitialBehaviors({ hubLeaves: 'sunflower' }).hubLeaves).toBe('free')
+    })
   })
 
   describe('loadContext seeding', () => {
