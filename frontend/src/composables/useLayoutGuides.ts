@@ -16,7 +16,8 @@ const GUIDE_COLOR = 0x888888;
 const FOCUS_HALO_COLOR = 0xf59e0b;
 const CIRCLE_SEGMENTS = 128;
 const GUIDE_RENDER_ORDER = 998; // under the rotation axis line (999), over the graph
-const LABEL_SCALE = 1.4;
+/** Text height in world units at camera zoom 1 (2D view); kept readable on screen by rescale(). */
+const LABEL_SCALE = 28;
 const LABEL_COLOR = new THREE.Color(0.55, 0.55, 0.55);
 
 function circlePoints(radius: number, segments = CIRCLE_SEGMENTS): THREE.Vector3[] {
@@ -92,10 +93,28 @@ export function useLayoutGuides(
       text,
       position: new THREE.Vector3(x, y, 0),
       color: LABEL_COLOR.clone(),
-      scale: LABEL_SCALE,
+      scale: 1,
       textAlign,
     });
     labelIds.push(id);
+  }
+
+  /**
+   * Keep guide captions readable: constant size on screen when zoomed out,
+   * slow growth when zoomed in (same rule as hub leaf region labels).
+   */
+  function rescale() {
+    if (!labelRenderer) return;
+    const graph3d = getGraph3d();
+    const cam = graph3d?.camera?.() as (THREE.Camera & { zoom?: number; isOrthographicCamera?: boolean }) | undefined;
+    if (!cam) return;
+    let zoom = 1;
+    if (cam.isOrthographicCamera && cam.zoom) zoom = cam.zoom;
+    else {
+      const target = graph3d.controls?.()?.target;
+      if (target) zoom = Math.max(0.1, 1000 / cam.position.distanceTo(target));
+    }
+    labelRenderer.setBaseScale(LABEL_SCALE * (zoom >= 1 ? Math.pow(zoom, -0.75) : 1 / zoom));
   }
 
   function clear() {
@@ -123,9 +142,15 @@ export function useLayoutGuides(
       addLine(scene, circlePoints(ring.radius), { dashed: ring.dashed, loop: true });
       // null label = captions suppressed by the layout config; ring still drawn
       if (ring.label !== null) {
-        addLabel(scene, `ego-ring-${ring.hop}`, ring.label, ring.radius + 6, 6);
+        // Staggered downward by hop: rings can be closer than a caption is long.
+        const angle = -0.16 * Math.max(0, ring.hop - 1);
+        addLabel(scene, `ego-ring-${ring.hop}`, ring.label, (ring.radius + 6) * Math.cos(angle), (ring.radius + 6) * Math.sin(angle) + 6);
       }
     }
+    spec.sectors.forEach((sector, i) => {
+      // Left half of the circle: right-align so the caption grows away from the ring.
+      addLabel(scene, `ego-sector-${i}`, sector.label, sector.x, sector.y, sector.x < -1 ? 'right' : sector.x > 1 ? 'left' : 'center');
+    });
 
     if (opts.focusHalo) {
       addLine(scene, circlePoints(Math.max(8, 0.35 * opts.ringSpacing), 64), {
@@ -136,6 +161,7 @@ export function useLayoutGuides(
     }
 
     labelRenderer?.updateMesh();
+    rescale();
   }
 
   /**
@@ -169,6 +195,7 @@ export function useLayoutGuides(
     }
 
     labelRenderer?.updateMesh();
+    rescale();
   }
 
   /** Axis lines with category labels just beyond the outer radius. */
@@ -190,6 +217,7 @@ export function useLayoutGuides(
     });
 
     labelRenderer?.updateMesh();
+    rescale();
   }
 
   function dispose() {
@@ -199,5 +227,5 @@ export function useLayoutGuides(
     cachedScene = null;
   }
 
-  return { showEgoRings, showHiveAxes, showLayerLines, clear, dispose };
+  return { showEgoRings, showHiveAxes, showLayerLines, clear, dispose, rescale };
 }

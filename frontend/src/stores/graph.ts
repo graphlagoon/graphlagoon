@@ -248,6 +248,7 @@ export function defaultLayoutModeConfig(): LayoutModeConfig {
       crossingSweeps: 3,
       arcIntraRingEdges: true,
       hideRingLabels: false,
+      ringWrap: true,
     },
     hive: {
       axisKey: 'node_type',
@@ -589,6 +590,8 @@ export const useGraphStore = defineStore('graph', () => {
     nonTreeEdgeCount: number;
     sameRingEdgeCount: number;
     siftingSkippedLargeRing: boolean;
+    /** Ring 1 when it holds many nodes: its population and how many bands it was wrapped into (1 = not wrapped). */
+    crowdedRing?: { count: number; bands: number; leaves: number } | null;
   } | null>(null);
 
   /** Columns of the `trace-layers` layout (T5), set by the trace screen; not persisted. */

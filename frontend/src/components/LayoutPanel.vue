@@ -486,6 +486,35 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
           <label class="checkbox-item">
             <input
               type="checkbox"
+              data-testid="ego-ring-wrap"
+              :checked="egoConfig.ringWrap !== false"
+              @change="graphStore.updateLayoutModeConfig({ ego: { ringWrap: ($event.target as HTMLInputElement).checked } })"
+            />
+            <span class="setting-label">Wrap crowded rings into bands</span>
+          </label>
+          <span class="setting-hint">
+            A ring with many nodes becomes a few concentric bands instead of one huge circle.
+            Nodes with more links take the inner band; nodes linked only to their parent go outside.
+          </span>
+          <span
+            v-if="graphStore.egoLayoutStats?.crowdedRing"
+            class="setting-hint setting-hint-warn"
+            data-testid="ego-crowded-ring-hint"
+          >
+            Ring 1 has {{ graphStore.egoLayoutStats.crowdedRing.count }} nodes<template v-if="graphStore.egoLayoutStats.crowdedRing.bands > 1">
+            in {{ graphStore.egoLayoutStats.crowdedRing.bands }} bands</template><template v-if="graphStore.egoLayoutStats.crowdedRing.leaves">,
+            {{ graphStore.egoLayoutStats.crowdedRing.leaves }} of them linked only to the focus</template>.
+            <template v-if="egoConfig.ringOrdering !== 'property' && egoConfig.ringOrdering !== 'node-type'">
+              <button type="button" class="inline-action" data-testid="ego-crowded-sector-type" @click="graphStore.updateLayoutModeConfig({ ego: { ringOrdering: 'node-type' } })">Sector by type</button>
+              or by a property (Ring ordering above) to see how many of each.
+            </template>
+          </span>
+        </div>
+
+        <div class="setting-item">
+          <label class="checkbox-item">
+            <input
+              type="checkbox"
               data-testid="ego-hide-ring-labels"
               :checked="egoConfig.hideRingLabels"
               @change="graphStore.updateLayoutModeConfig({ ego: { hideRingLabels: ($event.target as HTMLInputElement).checked } })"

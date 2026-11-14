@@ -557,6 +557,11 @@ export interface EgoLayoutConfig {
    * Off by default: the caption is how a reader tells ring 2 from ring 3.
    */
   hideRingLabels: boolean;
+  /**
+   * Wrap a crowded ring into concentric bands (linked nodes inner, leaves
+   * outer) instead of one huge circle. Absent = on.
+   */
+  ringWrap?: boolean;
 }
 
 export interface HiveLayoutConfig {

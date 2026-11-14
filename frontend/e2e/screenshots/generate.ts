@@ -898,6 +898,22 @@ const SCENES: Scene[] = [
   },
   {
     guide: 'exploring-the-graph',
+    scene: 'ego-crowded',
+    path: `${GRAPH_URL}&layout=ego&layout.ego.focusNodeId=hub`,
+    prepare: async (page) => {
+      await seedGraphResponse(page, partnerRegister(300, [0, 1, 2, 3, 4, 5, 6, 7]));
+      await page.reload();
+      await expect(page.getByTestId('graph-status-bar')).toContainText('303 nodes', { timeout: 15_000 });
+      await page.getByTestId('graph-toolbar-layout').click();
+      await page.getByTestId('ego-ring-ordering').selectOption('node-type');
+      await page.waitForTimeout(2500);
+      await page.getByTestId('graph-toolbar-layout').click();
+      await page.getByTestId('canvas-toolbar-fit').click({ timeout: 30_000 });
+      await page.waitForTimeout(2000);
+    },
+  },
+  {
+    guide: 'exploring-the-graph',
     scene: 'hub-leaves',
     path: GRAPH_URL,
     prepare: async (page) => {
