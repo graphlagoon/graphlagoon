@@ -17,6 +17,7 @@ import {
   caseType,
   enableDatasources,
 } from '../helpers/api-mocks';
+import { partnerRegister } from '../fixtures/partner-register';
 import { MOCK_EXPLORATION, MOCK_REST_CONNECTION } from '../fixtures/mock-data';
 import {
   SCREENSHOT_CONTEXT,
@@ -893,6 +894,24 @@ const SCENES: Scene[] = [
       await page.selectOption('#sim-endpoint', 'embedding-cosine');
       await page.selectOption('#sim-node-type', { label: 'Person' });
       await page.waitForTimeout(300);
+    },
+  },
+  {
+    guide: 'exploring-the-graph',
+    scene: 'hub-leaves',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      // A partner register replaces the demo graph: 300 partners of one company.
+      await seedGraphResponse(page, partnerRegister(300, [0, 1, 2, 3, 4, 5, 6, 7]));
+      await page.reload();
+      await expect(page.getByTestId('graph-status-bar')).toContainText('303 nodes', { timeout: 15_000 });
+      await page.getByTestId('graph-toolbar-layout').click();
+      await page.getByTestId('hub-leaves-mode').selectOption('petals');
+      await page.getByTestId('hub-leaves-key').selectOption('edge:role');
+      await page.waitForTimeout(6000);
+      await page.getByTestId('graph-toolbar-layout').click();
+      await page.getByTestId('canvas-toolbar-fit').click({ timeout: 30_000 });
+      await page.waitForTimeout(2500);
     },
   },
   {

@@ -22,6 +22,7 @@ import {
   forceCollide as _forceCollide,
 } from 'd3-force-3d';
 import type { Force3DSettings } from './forceConfig3D';
+import { forceHubLeaves, type SerializedHubLeavesPlan } from './hubLeaves';
 
 // d3-force-3d ships no type declarations (vite aliases it to the JS submodule),
 // so the imports come in as `unknown`. Re-type them loosely to call them.
@@ -71,6 +72,8 @@ export interface SettleOptions {
   yieldToEventLoop?: () => Promise<void>;
   /** Abort signal: if it returns true between chunks, settling stops early. */
   shouldAbort?: () => boolean;
+  /** Hub leaf arrangement (2D only), so the settle reserves its space like the live engine does. */
+  hubLeaves?: { plan: SerializedHubLeavesPlan; spacing: number };
 }
 
 /**
@@ -169,6 +172,11 @@ export async function settleLayoutHeadless(
         .strength(settings.d3CollideStrength)
         .iterations(settings.d3CollideIterations),
     );
+  }
+
+  // Registered last: it overwrites leaf positions after every other force.
+  if (opts.hubLeaves && numDim === 2) {
+    sim.force('hubLeaves', forceHubLeaves(opts.hubLeaves.plan, opts.hubLeaves.spacing));
   }
 
   // Estimate total ticks for progress: alpha *= (1 - alphaDecay) each tick,

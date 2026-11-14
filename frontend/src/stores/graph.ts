@@ -72,6 +72,7 @@ import {
   type EnrichmentProvenance,
 } from '@/utils/queryEnrichment';
 import { aggregateParallelEdges } from '@/utils/parallelEdges';
+import type { HubLeavesMode } from '@/utils/hubLeaves';
 import type { TraceColumns } from '@/utils/traceView';
 import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
 import { useToast } from '@/composables/useToast';
@@ -158,6 +159,10 @@ const DEFAULT_BEHAVIORS = {
   afterQueryCommunities: '',      // After a query you run: '' (off), 'louvain', 'weak-components', 'strong-components' or 'cluster-program:<id>' — colors communities. Not on restore.
   afterQueryClusterProgram: '',   // After a query you run: '' (off) or a cluster program id to draw its clusters. Not on restore.
   hiddenMenuActions: [] as string[], // Ids of built-in right-click items to hide (utils/builtInMenuItems.ts). Always replaced, never mutated in place.
+  hubLeaves: 'free' as HubLeavesMode, // Force layout, 2D: 'free' (default) leaves the simulation alone; 'crown' lays a hub's leaves (nodes whose only neighbour is that hub) on a spiral around it; 'petals' in one disc per value of hubLeavesKey. Nothing is grouped or hidden — see utils/hubLeaves.ts.
+  hubLeavesKey: '',               // Petals key: '' = node type, 'rel' = relationship type, 'node:<prop>' / 'edge:<prop>' = a node or hub-edge property.
+  hubLeavesMinLeaves: 10,         // A node is a hub when it has at least this many leaves.
+  hubLeavesImplicitEdges: true,   // With an arrangement on, hub–leaf edges are not drawn (position carries the link); they come back on hover and selection.
   progressiveLoad: 'auto' as ProgressiveLoadMode, // 'auto' (default) uses progressive loading only when the node table is wide enough to pay for it — see shouldLoadProgressively(). 'always' forces it, 'never' fetches everything in one request. Progressive load trades a HIGHER TOTAL cost for a much faster first paint: measured on a 100-column table it cut first paint by 79% while raising total work by 76%, and on a narrow table it was simply slower. 'auto' exists so neither extreme is the default.
 };
 
@@ -274,6 +279,7 @@ const BEHAVIOR_ENUMS: Partial<Record<keyof GraphBehaviors, readonly string[]>> =
   searchMode: ['hide', 'highlight'],
   viewMode: ['3d', '2d-proj'],
   progressiveLoad: ['auto', 'always', 'never'],
+  hubLeaves: ['free', 'crown', 'petals'],
 };
 
 /**
@@ -576,6 +582,9 @@ export const useGraphStore = defineStore('graph', () => {
    * crossing reduction has nothing to do in a pure convergence star — instead of
    * leaving the user toggling something with no visible effect.
    */
+  /** What the hub leaf arrangement did on the canvas (derived, NOT persisted); null when off. */
+  const hubLeavesStats = ref<{ hubs: number; leaves: number; implicitEdges: number } | null>(null);
+
   const egoLayoutStats = ref<{
     nonTreeEdgeCount: number;
     sameRingEdgeCount: number;
@@ -3567,6 +3576,7 @@ export const useGraphStore = defineStore('graph', () => {
     layoutAlgorithm.value = 'force';
     layoutModeConfig.value = defaultLayoutModeConfig();
     egoLayoutStats.value = null;
+    hubLeavesStats.value = null;
     force3DSettings.value = defaultForce3DSettings();
     propertyVisibility.value = { nodeProperties: null, edgeProperties: null };
     // The look belongs to the graph being left: a context switch or a case
@@ -3662,6 +3672,7 @@ export const useGraphStore = defineStore('graph', () => {
     layoutAlgorithm,
     layoutModeConfig,
     egoLayoutStats,
+    hubLeavesStats,
     traceLayers,
     force3DSettings,
     layoutExecution,

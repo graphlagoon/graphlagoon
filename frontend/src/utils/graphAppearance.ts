@@ -205,6 +205,11 @@ export interface AppearanceContext {
 
   // Investigation role fill (nodeId -> hex color); wins over community and type.
   roleColorMap?: Map<string, string> | null;
+
+  // Hub leaf arrangement (utils/hubLeaves.ts): edges whose link the position
+  // already shows. Not drawn unless an endpoint is selected or hovered.
+  implicitEdgeIds?: Set<string> | null;
+  hoveredNodeId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +344,8 @@ export interface LinkAppearanceResult {
    *  Null (rather than a baked-in base) keeps unmapped links responsive to
    *  later aesthetic width changes without a visuals pass. */
   width: number | null;
+  /** Not drawn only because the hub leaf arrangement implies it (counted in the status bar). */
+  implicit?: boolean;
 }
 
 /**
@@ -371,7 +378,14 @@ export function computeLinkAppearance(
     ctx.tableVisibleEdgeIds !== null &&
     !edgeId.startsWith('cluster_') &&
     !ctx.tableVisibleEdgeIds.has(edgeId);
+  const isImplicit =
+    !!ctx.implicitEdgeIds?.has(edgeId) &&
+    !ctx.selectedNodeIds.has(sourceId) &&
+    !ctx.selectedNodeIds.has(targetId) &&
+    ctx.hoveredNodeId !== sourceId &&
+    ctx.hoveredNodeId !== targetId;
   const hidden =
+    isImplicit ||
     isEdgeTypeHidden ||
     hiddenNodeIds.has(sourceId) ||
     hiddenNodeIds.has(targetId) ||
@@ -425,7 +439,8 @@ export function computeLinkAppearance(
     if (amount !== undefined) width = amountWidth(amount, ctx.edgeAmounts.max);
   }
 
-  return { color, hidden, width };
+  const implicit = isImplicit && !(isEdgeTypeHidden || hiddenNodeIds.has(sourceId) || hiddenNodeIds.has(targetId) || isTableHidden);
+  return { color, hidden, width, implicit };
 }
 
 export const AMOUNT_MAX_WIDTH = 8;

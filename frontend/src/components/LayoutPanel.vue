@@ -51,6 +51,16 @@ const LAYOUT_OPTIONS: { id: LayoutAlgorithm; label: string; icon: string }[] = [
 ];
 
 const layoutMode = computed(() => graphStore.layoutAlgorithm);
+
+// Hub leaf arrangement (utils/hubLeaves.ts). Keys are read from the loaded
+// graph, not the context schema: a native graph source declares no columns.
+const hubLeavesKeyOptions = computed(() => {
+  const nodeKeys = new Set<string>();
+  const edgeKeys = new Set<string>();
+  for (const n of graphStore.nodes.slice(0, 2000)) for (const k of Object.keys(n.properties ?? {})) nodeKeys.add(k);
+  for (const e of graphStore.edges.slice(0, 2000)) for (const k of Object.keys(e.properties ?? {})) edgeKeys.add(k);
+  return { node: [...nodeKeys].sort(), edge: [...edgeKeys].sort() };
+});
 const egoConfig = computed(() => graphStore.layoutModeConfig.ego);
 const hiveConfig = computed(() => graphStore.layoutModeConfig.hive);
 
@@ -845,6 +855,90 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         </template>
 
         <!-- Blower + Clipping Plane moved to BehaviorPanel (they are behaviors, not layout) -->
+      </div>
+
+      <div v-if="layoutMode === 'force'" class="settings-divider"></div>
+
+      <!-- Hubs with many leaves: arrangement next to the hub, nothing grouped or hidden -->
+      <div v-if="layoutMode === 'force'" class="settings-group" data-testid="hub-leaves-section">
+        <p class="settings-group-title">Hubs with many leaves</p>
+        <span class="setting-hint">
+          Lay the nodes linked only to a hub right next to it. Every node stays on the canvas.
+        </span>
+        <select
+          data-testid="hub-leaves-mode"
+          :value="graphStore.behaviors.hubLeaves"
+          @change="graphStore.updateBehaviors({ hubLeaves: ($event.target as HTMLSelectElement).value as 'free' | 'crown' | 'petals' })"
+        >
+          <option value="free">Free (the simulation places them)</option>
+          <option value="crown">Crown around the hub</option>
+          <option value="petals">Petals, one per group</option>
+        </select>
+
+        <template v-if="graphStore.behaviors.hubLeaves !== 'free'">
+          <span
+            v-if="graphStore.behaviors.viewMode === '3d'"
+            class="setting-hint setting-hint-warn"
+            data-testid="hub-leaves-3d-hint"
+          >
+            Leaves are arranged in 2D only.
+            <button type="button" class="inline-action" data-testid="hub-leaves-to-2d" @click="graphStore.updateBehaviors({ viewMode: '2d-proj' })">Switch to 2D</button>
+          </span>
+
+          <label v-if="graphStore.behaviors.hubLeaves === 'petals'" class="setting-item">
+            <span class="setting-label">Group leaves by</span>
+            <select
+              data-testid="hub-leaves-key"
+              :value="graphStore.behaviors.hubLeavesKey"
+              @change="graphStore.updateBehaviors({ hubLeavesKey: ($event.target as HTMLSelectElement).value })"
+            >
+              <option value="">Node type</option>
+              <option value="rel">Relationship type</option>
+              <optgroup v-if="hubLeavesKeyOptions.node.length" label="Node property">
+                <option v-for="k in hubLeavesKeyOptions.node" :key="`node:${k}`" :value="`node:${k}`">{{ k }}</option>
+              </optgroup>
+              <optgroup v-if="hubLeavesKeyOptions.edge.length" label="Property of the edge to the hub">
+                <option v-for="k in hubLeavesKeyOptions.edge" :key="`edge:${k}`" :value="`edge:${k}`">{{ k }}</option>
+              </optgroup>
+            </select>
+          </label>
+
+          <div class="setting-item">
+            <label>
+              <span class="setting-label">Hub: at least this many leaves</span>
+              <span class="setting-value">{{ graphStore.behaviors.hubLeavesMinLeaves }}</span>
+            </label>
+            <input
+              type="range"
+              min="3"
+              max="100"
+              step="1"
+              data-testid="hub-leaves-min"
+              :value="graphStore.behaviors.hubLeavesMinLeaves"
+              @change="graphStore.updateBehaviors({ hubLeavesMinLeaves: parseInt(($event.target as HTMLInputElement).value, 10) })"
+            />
+          </div>
+
+          <label class="checkbox-item">
+            <input
+              type="checkbox"
+              data-testid="hub-leaves-implicit"
+              :checked="graphStore.behaviors.hubLeavesImplicitEdges"
+              @change="graphStore.updateBehaviors({ hubLeavesImplicitEdges: ($event.target as HTMLInputElement).checked })"
+            />
+            <span>Don't draw hub–leaf edges (shown on hover and selection)</span>
+          </label>
+
+          <span class="setting-hint" data-testid="hub-leaves-stats">
+            <template v-if="graphStore.hubLeavesStats">
+              {{ graphStore.hubLeavesStats.hubs }} {{ graphStore.hubLeavesStats.hubs === 1 ? 'hub' : 'hubs' }} ·
+              {{ graphStore.hubLeavesStats.leaves }} leaves arranged
+            </template>
+            <template v-else-if="graphStore.behaviors.viewMode !== '3d'">
+              No node has {{ graphStore.behaviors.hubLeavesMinLeaves }} or more leaves on this graph.
+            </template>
+          </span>
+        </template>
       </div>
 
       <div v-if="layoutMode === 'force'" class="settings-divider"></div>

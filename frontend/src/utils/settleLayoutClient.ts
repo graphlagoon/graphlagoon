@@ -88,6 +88,7 @@ function settleInWorker(
       settings,
       numDimensions: opts.numDimensions ?? 2,
       nodeRelSize: opts.nodeRelSize ?? 4,
+      hubLeaves: opts.hubLeaves,
     });
   });
 }
