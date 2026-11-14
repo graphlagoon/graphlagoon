@@ -23,7 +23,7 @@ import {
   type AppearanceContext,
 } from '@/utils/graphAppearance';
 import { applyForceConfig, applyCommunityRadialForce, applyEdgeTypeLayoutForce, computeAdaptiveLayoutParams } from '@/utils/forceConfig3D';
-import { computeTreeLayout, computeHivePositions, computeRingGuideSpec, computeHiveAxesSpec, computeHiveLinkCurvatures, computeEgoLinkCurvatures, computeTraceLayerPositions } from '@/utils/layoutModes';
+import { computeEgoHops, computeTreeLayout, computeHivePositions, computeRingGuideSpec, computeHiveAxesSpec, computeHiveLinkCurvatures, computeEgoLinkCurvatures, computeTraceLayerPositions } from '@/utils/layoutModes';
 import { useLayoutGuides } from '@/composables/useLayoutGuides';
 import { useToast } from '@/composables/useToast';
 import { forcePointerRepulsion, type PointerRepulsionForce } from '@/utils/forcePointerRepulsion';
@@ -2175,7 +2175,25 @@ function applyModeConstraints() {
       guides.clear();
       return;
     }
-    const result = computeTreeLayout(drawnNodes, drawnEdges, {
+    // Nodes beyond the hop cutoff are hidden: they must not take angle on the
+    // inner rings either (a hidden 380-node subtree squeezed ring 1 into a third).
+    let beyondHops: Set<string> | null = null;
+    let layoutNodes = drawnNodes;
+    let layoutEdges = drawnEdges;
+    if (cfg.ego.maxHops !== null) {
+      const maxHops = cfg.ego.maxHops;
+      const { hops, unreachable } = computeEgoHops(drawnNodes, drawnEdges, {
+        focusNodeId: focusId!, direction: cfg.ego.direction, edgeTypes: cfg.ego.edgeTypes,
+      });
+      beyondHops = new Set(drawnNodes
+        .filter((n) => !unreachable.has(n.node_id) && (hops.get(n.node_id) ?? 0) > maxHops)
+        .map((n) => n.node_id));
+      if (beyondHops.size > 0) {
+        layoutNodes = drawnNodes.filter((n) => !beyondHops!.has(n.node_id));
+        layoutEdges = drawnEdges.filter((e) => !beyondHops!.has(e.src) && !beyondHops!.has(e.dst));
+      }
+    }
+    const result = computeTreeLayout(layoutNodes, layoutEdges, {
       mode: 'radial',
       focusNodeId: focusId!,
       direction: cfg.ego.direction,
@@ -2236,7 +2254,7 @@ function applyModeConstraints() {
     }
 
     if (cfg.ego.maxHops !== null) {
-      const hidden = new Set<string>();
+      const hidden = new Set<string>(beyondHops ?? []);
       for (const [nodeId, level] of result.levels) {
         if (level > cfg.ego.maxHops) hidden.add(nodeId);
       }

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { useGraphStore } from '@/stores/graph'
 import { useClusterStore } from '@/stores/cluster'
@@ -220,5 +221,42 @@ describe('enhancedMultiEdgeStats', () => {
     expect(graphStore.enhancedMultiEdgeStats.hasMultiEdges).toBe(true)
     // c-persons->n3 has 2 edges (from e2 and e3)
     expect(graphStore.enhancedMultiEdgeStats.multiEdgePairCount).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('clusters across node changes', () => {
+  const cluster = (node_ids: string[], id = 'c1') => ({
+    cluster_id: id, cluster_name: id, cluster_class: 'test', figure: 'circle' as const, state: 'closed' as const, node_ids,
+  })
+
+  it('an expand (new node list, no query) keeps clusters; gone members are dropped, empty clusters go', async () => {
+    const graphStore = setupGraph()
+    const clusterStore = useClusterStore()
+    clusterStore.createCluster(cluster(['n1', 'n2']))
+    clusterStore.createCluster(cluster(['n5'], 'c2'))
+
+    graphStore.nodes = [...graphStore.nodes.filter(n => n.node_id !== 'n2' && n.node_id !== 'n5'), { node_id: 'n6', node_type: 'Person' }]
+    await nextTick()
+
+    expect(clusterStore.clusters.map(c => [c.cluster_id, c.node_ids])).toEqual([['c1', ['n1']]])
+  })
+
+  it('a restored exploration loads clusters before its nodes and keeps them', async () => {
+    const graphStore = useGraphStore()
+    const clusterStore = useClusterStore()
+    clusterStore.loadState({ programs: [], executions: [], clusters: [cluster(['n1', 'n2'])] } as any)
+    setupGraph()
+    await nextTick()
+    expect(clusterStore.clusters).toHaveLength(1)
+    expect(graphStore.enhancedNodes.map(n => n.node_id)).toContain('c1')
+  })
+
+  it('a query you run clears them', async () => {
+    const graphStore = setupGraph()
+    const clusterStore = useClusterStore()
+    clusterStore.createCluster(cluster(['n1', 'n2']))
+    graphStore.queryRunSeq++
+    await nextTick()
+    expect(clusterStore.clusters).toHaveLength(0)
   })
 })

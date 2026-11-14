@@ -1116,14 +1116,31 @@ return clusters;`,
   // Create default programs if this is the first time
   createDefaultPrograms()
 
-  // Clear clusters when graph data changes (query executed, subgraph loaded, etc.)
-  // Clusters reference node_ids that may no longer exist after a new query.
+  // A query you run starts over: its clusters described the previous result.
+  watch(
+    () => useGraphStore().queryRunSeq,
+    () => {
+      if (clusters.value.length > 0) clearClusters()
+    },
+  )
+
+  // Any other change of the node list (expand, delete, a restored exploration
+  // whose clusters were loaded just before its nodes) keeps the clusters and
+  // only drops members that are gone; a cluster left empty goes too.
   watch(
     () => useGraphStore().nodes,
-    () => {
-      if (clusters.value.length > 0) {
-        clearClusters()
+    (nodes) => {
+      if (clusters.value.length === 0) return
+      const present = new Set(nodes.map(n => n.node_id))
+      let changed = false
+      const kept: Cluster[] = []
+      for (const cluster of clusters.value) {
+        const ids = cluster.node_ids.filter(id => present.has(id))
+        if (ids.length !== cluster.node_ids.length) changed = true
+        if (ids.length === 0) continue
+        kept.push(ids.length === cluster.node_ids.length ? cluster : { ...cluster, node_ids: ids })
       }
+      if (changed) clusters.value = kept
     },
   )
 
