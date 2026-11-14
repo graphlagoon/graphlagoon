@@ -20,7 +20,7 @@ Viewport 1440×900, configuração padrão do app (2D, force layout, degree dim 
 | # | Cena | Captura | O que a tela mostra |
 |---|---|---|---|
 | 1 | Force, 300 sócios, zoom de encaixe | [01](screens/01-force-300.png) | Os 15 sócios com outro vínculo são puxados para fora do disco e ficam visíveis. Os 285 restantes formam um disco quase invisível (degree dim a 0,2). Nenhum rótulo além do hub. **A tela não diz quantos são nem de que tipo.** |
-| 2 | Force, 300, aproximado | [02](screens/02-force-300-zoom.png) | Mesmo de perto os sócios-folha não ganham rótulo legível: o rótulo herda o esmaecimento de 0,2 (`useGraphLabels.ts:309`) e o nó encolhido pode ficar abaixo do limiar de tamanho. Só rótulos de aresta soltos. O zoom não revela nada novo. |
+| 2 | Force, 300, aproximado | [02](screens/02-force-300-zoom.png) | No zoom 6,4 nenhum sócio-folha tem rótulo. Medido depois (ver [05](05-estrategias-de-visualizacao.md#e3--glifo-por-zoom-não-agrupa-não-oculta)): os rótulos de folha só aparecem por volta do zoom 11, todos de uma vez, e com o degree dim ligado saem a 20% de opacidade (`useGraphLabels.ts:309`). |
 | 3 | Force, 300, 3D | [03](screens/03-force3d-300.png) | Bola de folhas em volta do hub. Oclusão: folhas da frente tapam as de trás e o hub. |
 | 4 | Force, 300, programa *Orphan Clusters* | [04](screens/04-force-300-orphan-clusters.png) | 307 nós viram 22 objetos: 1 nó-cluster de 285 + os 15 sócios com outro vínculo + holdings. **Estruturalmente é a resposta certa.** Mas o cluster chama `cluster_orphan_hub`, não mostra a contagem no canvas, e mistura PF, PJ e todas as qualificações num saco só. |
 | 5 | Force, 300, protótipo de "coleções" | [05](screens/05-force-300-colecoes.png) | Programa de cluster escrito na sonda (anexo do [03](03-design.md#anexo-programa-de-coleções-usado-na-sonda)): folhas agrupadas por (tipo de aresta, tipo de nó, qualificação). 8 coleções. Sem tocar no código do app. Sem rótulo no zoom de encaixe; todas roxas; entre cada coleção e o hub há ~100 arestas paralelas sobrepostas. |
@@ -38,7 +38,7 @@ Tempo do programa de cluster no worker (inclui clonar o grafo): 0,35 s com 300 f
 1. **O force layout já separa o sinal do ruído por acaso** (quem tem dois vínculos é puxado para fora) e o degree dim reforça isso. O que falta é o ruído ser *resumido* em vez de só apagado: quantos, de que tipo, com que papel.
 2. **A agregação explícita já existe e funciona** (clusters fechados, capturas 4, 5 e 11). O que falta é ela ser *apresentável*: nome, contagem no nó, uma aresta só, cor, e um jeito de abrir e fechar sem perder o grupo de vista.
 3. **O ego layout é o pior caso** e tem um bug de integração com clusters já descrito em [ego-crowded-rings-qsa.md](../ego-crowded-rings-qsa.md) (fase B1, não implementada).
-4. **O zoom hoje só controla rótulos.** Aproximar não revela nós nem detalhe.
+4. **O zoom hoje só controla rótulos, e num degrau só.** Entre o zoom 6,4 e o 11,4 passa-se de nenhum rótulo de folha para todos. Aproximar não revela nós nem outro detalhe.
 5. Antes de tudo isso há o problema de **chegar** aos 300 vizinhos: a expansão pelo clique traz no máximo 100 arestas arbitrárias, sem avisar.
 
 ## O que já existe e será reutilizado
@@ -81,6 +81,8 @@ Tempo do programa de cluster no worker (inclui clonar o grafo): 0,35 s com 300 f
 | L14 | Forças iguais para todos: carga, distância e colisão globais; clusters grandes se sobrepõem ao hub | `utils/forceConfig3D.ts:141-214`; captura 11 |
 | L15 | Painel do nó não lista vizinhos nem resume por tipo (só existe em `EntityPage.vue` do caso) | `components/SelectionDetails.vue` |
 | L16 | `circular` e `grid` estão declarados mas não implementados | `utils/layoutUrlOverrides.ts:33-40` |
+| L17 | Rótulos de folha aparecem todos de uma vez (zoom ≈ 11), sem ordem de prioridade entre nós do mesmo tamanho | capturas [15](screens/15-rotulos-zoom-6.png) e [16](screens/16-rotulos-zoom-11.png) |
+| L18 | Não há arranjo determinístico das folhas de um hub fora do ego layout, nem como deixar de desenhar as arestas hub–folha | protótipo nas capturas [12](screens/12-sem-cluster-coroa-300.png) e [13](screens/13-sem-cluster-petalas-300.png) |
 
 ## Restrições de produto que valem para qualquer solução
 

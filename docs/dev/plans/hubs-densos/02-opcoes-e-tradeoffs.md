@@ -1,7 +1,9 @@
 # 02 · Opções e trade-offs, caso a caso
 
 > Cada seção responde: que pergunta do investigador a opção atende, o que ela esconde ou distorce, quanto custa no código de hoje, e o veredito.
-> As lacunas L1…L16 estão em [00-diagnostico.md](00-diagnostico.md); as fontes [n], em [01-referencias.md](01-referencias.md).
+> As lacunas L1…L18 estão em [00-diagnostico.md](00-diagnostico.md); as fontes [n], em [01-referencias.md](01-referencias.md).
+>
+> **Revisto em [05](05-estrategias-de-visualizacao.md).** Este documento parte da coleção (um cluster) como núcleo. O 05 mostra que o arranjo das folhas, as arestas implícitas e o revelar por zoom não precisam de cluster, e reverte dois vereditos daqui: 4D (revelar por zoom com ocultação) passa a viável, dependendo da decisão D7; 2D (empacotar) passa a ser a primeira entrega, sem cluster. Onde houver conflito, vale o 05.
 
 ## As sete famílias, julgadas para este produto
 
