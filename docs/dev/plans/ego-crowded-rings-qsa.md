@@ -1,6 +1,6 @@
 # Anéis lotados no layout ego (QSA: empresa com centenas de sócios)
 
-> Status: **proposta** (não implementada). Análise de 2026-08-28. Pasta `docs/dev/` está fora do site VitePress (`srcExclude: dev/**`).
+> Status: **proposta** (não implementada). Análise de 2026-08-28. Em 2026-11-13 foi incorporada ao pacote [hubs-densos/](hubs-densos/README.md), que cobre também force layout, expansão e zoom; este arquivo segue valendo como especificação dos sub-anéis (fase F4 de lá). Os números de linha abaixo envelheceram. Pasta `docs/dev/` está fora do site VitePress (`srcExclude: dev/**`).
 
 ## Contexto
 

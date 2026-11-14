@@ -14180,3 +14180,21 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `docs/guide/query-templates.md` ("Running a template").
 **Admin-area impact:** No admin-area impact
 **Known limitations:** runs that skip the modal (a `?template=` link, a context-menu action with every required parameter bound) are not remembered.
+
+## [2026-11-13 21:30] - Feature Planning: Hubs with hundreds of direct neighbours (leaf collections, selective expand, zoom reveal)
+
+**Context:** An ego graph whose centre links directly to hundreds of nodes (a large company's partner register) is unreadable under every layout. No code changed; this is a planning package at [plans/hubs-densos/](plans/hubs-densos/README.md): diagnosis from a throwaway Playwright probe (hub + 300 and 1500 partners, 5% with a second link; 11 screenshots), literature and product survey, trade-offs per case, design and a phased plan (F0–F6).
+**Decisions (proposed, not built):**
+1. **A collection is a `Cluster`, not a new concept.** Neighbours whose only neighbour is the hub are grouped per (edge type, direction, node type[, property]) into closed clusters with a name and a count; anything with a second link stays loose. A prototype cluster program run in the probe turned 1507 nodes into 11 collections + 75 linked partners with no app change, which is the evidence for reusing the cluster model.
+2. **Leaves only.** Grouping neighbours that have other links puts edges across the group boundary, which is where measured accuracy drops (Dwyer et al. 2013) and where a remapped edge stops saying which member it belongs to. Maltego, GraphXR and Dunne & Shneiderman's fan glyph all collect only equivalent nodes.
+3. **A live rule, not a snapshot.** The rule is re-evaluated when data is merged (expand, delete), so a member that gains a second link leaves its collection. Needs stable cluster ids and an exclusion list. Implemented as a pure util rather than a worker program: the probe measured 0.35–2.3 s per program run (graph clone), too slow to re-run on every expand.
+4. **Three states: closed, packed, open.** "Packed" (members laid out on a sunflower spiral under a labelled outline) is the answer to "zoom reveals more nodes": the members are real nodes, so zooming changes no data, triggers no rebuild and hides nothing.
+5. **Suggested, not automatic.** A hint with a button; automatic grouping is available per context and off by default.
+6. **Prerequisite fixes found by the probe (F0):** ego and hierarchical layouts ignore clusters (the cluster node floats off the rings); a watcher on `graphStore.nodes` wipes every cluster on expand; cluster edges are not summed (≈100 parallel edges per collection); the cluster label is culled at fit zoom and its size saturates at 64 members; expand ignores `truncated`.
+7. **Selective expand (F3):** a neighbour-count endpoint (group by edge type and direction) and a dialog above 50 edges; depth-1 expand to return the node's own edges first, in a stable order (today `LIMIT` with no `ORDER BY` also counts edges among neighbours).
+**Rejected:** degree filter, density fade, edge bundling, fisheye (already vetoed 2026-07-20 / 2026-08-28). Opening and closing collections automatically by zoom: each switch changes the node count, which rebuilds the scene synchronously and moves the layout under the user; a perspective camera has no stable zoom level; the saved state becomes ambiguous. Kept as an experiment with an exit criterion. Nested clusters, matrix view, facets: out of scope.
+**Supersedes:** [plans/ego-crowded-rings-qsa.md](plans/ego-crowded-rings-qsa.md) is folded in (its phase B1 = F0.1, phases A and C = F4) and stays as the sub-ring specification.
+**Open decisions:** D1–D6 in the package README (trigger, click gesture on a collection, whether to build the packed state, grouping by property, what a collection claims about unloaded links, initial thresholds).
+**Files:** new `docs/dev/plans/hubs-densos/` (README, 00–04, `screens/`); changed `docs/dev/README.md` (index row), `docs/dev/plans/ego-crowded-rings-qsa.md` (pointer).
+**Public docs:** No public docs impact (planning only; each phase lists its guide pages).
+**Admin-area impact:** No admin-area impact (F3 will add one `AUDIT_EXEMPT_ROUTES` row).
