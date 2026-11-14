@@ -2567,7 +2567,7 @@ watch(
   () => graphStore.hoveredNodeId,
   () => {
     // Hover reveals the lens and the implicit hub–leaf edges.
-    const implicitEdges = !!hubLeavesPlan.value && graphStore.behaviors.hubLeavesImplicitEdges;
+    const implicitEdges = !!(hubLeavesPlan.value || egoImplicitSpokes.value) && graphStore.behaviors.hubLeavesImplicitEdges;
     if ((graphStore.behaviors.edgeLensMode === 'off' && !implicitEdges) || camera.getIsCameraMoving()) return;
     if (lensHoverTimeout) clearTimeout(lensHoverTimeout);
     lensHoverTimeout = setTimeout(() => {
