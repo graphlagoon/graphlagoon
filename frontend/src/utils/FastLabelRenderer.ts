@@ -540,7 +540,7 @@ const _resolvedCharCache = new Map<string, FontChar | null>();
 
 /**
  * Resolve glyph data for a character. The atlas covers ASCII, Latin-1 and a few
- * symbols (· × – — … quotes, ≤ ≥ ≠, €; scripts/gen-label-font.cjs; Roboto has no ← →), so other
+ * symbols (· × – — … quotes, ≤ ≥ ≠, €; assets/fonts/gen-label-font.cjs; Roboto has no ← →), so other
  * characters fall back to their de-accented base (e-acute → 'e') and
  * finally to '?' — instead of silently vanishing. Control characters ('\n' is
  * handled by the line splitter before reaching here) resolve to '?' too.
