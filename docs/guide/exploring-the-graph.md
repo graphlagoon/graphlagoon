@@ -255,6 +255,30 @@ Counting needs the source to support it: SQL warehouse, Neptune and file
 contexts do. On a REST connection expanding works as before, and still warns
 when it was cut.
 
+## A node's neighbours
+
+Selecting a node shows a **Neighbors** section in the side panel, counted
+from what is loaded:
+
+- one row per relationship type, direction and neighbour type —
+  `SOCIO_DE <- Person  269` — with **select** (select them on the canvas) and
+  **group** (fold them into one closed [cluster](./clusters.md));
+- `Linked to nothing else: 356 · with another link: 24 select` — the second
+  number is usually the one the investigation is about, and **select** puts
+  exactly those on the canvas selection;
+- after a cut [expand](#expanding-neighbors), how many of the node's edges in
+  the source are loaded (`380 of 1 200 edges loaded`);
+- **Group leaf neighbors** (also on the node's right-click menu): one closed
+  cluster per kind of neighbour linked to nothing else, from 5 members up.
+  Neighbours with another link stay on the canvas. A member that later gains
+  another link (an expand brought it) leaves its collection and a toast says
+  so; **Pull out** in the cluster's member table takes one out by hand, and it
+  stays out if you group again. **Ungroup leaf neighbors** puts them all back.
+  Collections are saved with the exploration.
+
+"Linked to nothing else" means among the loaded nodes: a neighbour may have
+links you have not expanded yet.
+
 ## Hubs with many leaves
 
 ::: tip TL;DR
@@ -308,6 +332,11 @@ What to expect:
 - **Force layout only.** Ego, hive and the layered layouts place every node
   themselves. The ego layout has its own answer, below; the *Don't draw
   hub–leaf edges* setting and its threshold apply there too.
+- **Far away, an icon node is a dot.** Below about 7 pixels on screen the
+  icon's glyph would be noise, so the node is drawn as a plain disc of its
+  colour; the icon comes back above about 9 pixels (two thresholds, so a
+  camera resting in between does not make it flicker). This applies to every
+  node with an icon, not only to leaves.
 - **Leaves follow their hub.** Dragging the hub carries its leaves; a leaf
   dragged away goes back to its place.
 - **"Leaf" means in what is loaded.** A partner that is a leaf here may have

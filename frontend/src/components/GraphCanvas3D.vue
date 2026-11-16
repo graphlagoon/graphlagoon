@@ -44,6 +44,8 @@ import { useDevPerf } from '@/composables/useDevPerf';
 import { useGraphRings } from '@/composables/useGraphRings';
 import { useHubLeafRegions } from '@/composables/useHubLeafRegions';
 import { useNodeBadges } from '@/composables/useNodeBadges';
+import { pixelsPerWorldUnit } from '@/utils/screenScale';
+import { leafCollections, summarizeNeighbors } from '@/utils/neighborSummary';
 import { computeHubLeavesPlan, forceHubLeaves, serializeHubLeavesPlan, snapHubLeaves, zoomHiddenLeaves, type HubLeavesKeyCandidate, type HubLeavesPlan } from '@/utils/hubLeaves';
 
 const emit = defineEmits<{
@@ -71,6 +73,7 @@ function nodeLabelOf(node: Node): string {
   return formatNodeLabel(node, textFormatRules, textFormatDefaults.nodeTemplate, labelOptions);
 }
 const communityStore = useCommunityStore();
+const clusterStore = useClusterStore();
 const similarityStore = useSimilarityStore();
 
 const backgroundColor = '#fafafa';
@@ -630,7 +633,7 @@ async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | 
     const ownLabel = formatEdgeLabel(
       edge, graphStore.textFormatRules, graphStore.textFormatDefaults.edgeTemplate, labelOptions,
     );
-    // A summed group says how many edges it stands for (ASCII: the label atlas has no "×").
+    // A summed group says how many edges it stands for.
     const edgeLabel = edge.__agg ? (ownLabel ? `${ownLabel} (${edge.__agg.count})` : `${edge.__agg.count} edges`) : ownLabel;
 
     const isSimilarity = edge.relationship_type === '__similarity__';
@@ -2140,14 +2143,7 @@ function updateZoomReveal(redraw = true) {
   let hidden: Set<string> | null = null;
   let byRegion: number[] = [];
   if (graphStore.behaviors.hubLeavesRevealByZoom) {
-    const cam = graph3d.camera() as THREE.Camera & { zoom?: number; isOrthographicCamera?: boolean; fov?: number };
-    const vh = graph3d.renderer?.()?.domElement?.clientHeight ?? 600;
-    let ppu = 1;
-    if (cam.isOrthographicCamera && cam.zoom) ppu = (vh * cam.zoom) / 2000; // ORTHO_FRUSTUM
-    else {
-      const target = graph3d.controls?.()?.target;
-      if (target && cam.fov) ppu = vh / 2 / (cam.position.distanceTo(target) * Math.tan(((cam.fov / 2) * Math.PI) / 180));
-    }
+    const ppu = pixelsPerWorldUnit(graph3d);
     const keep = new Set(graphStore.selectedNodeIds);
     if (graphStore.hoveredNodeId) keep.add(graphStore.hoveredNodeId);
     const r = zoomHiddenLeaves(plan.regions, hubLeafSpacing() * ppu, keep);
@@ -2960,6 +2956,33 @@ onMounted(() => {
     disabled: () => graphStore.loading,
     handler: async (t) => {
       await graphStore.requestExpand(t.id);
+    },
+  });
+
+  // Leaf collections (hubs-densos F1): fold a hub's leaf neighbours into closed
+  // clusters, one per kind; neighbours with another link stay on the canvas.
+  contextMenu.addAction({
+    id: 'group-leaf-neighbors',
+    label: 'Group leaf neighbors',
+    icon: Network,
+    visible: (t) =>
+      t.type === 'node' &&
+      !t.id.startsWith('collection:') &&
+      clusterStore.collectionsOf(t.id).length === 0 &&
+      leafCollections(summarizeNeighbors(t.id, graphStore.edges, (id) => nodeDataMap.value.get(id)?.node_type ?? 'Node'), 5).length > 0,
+    handler: (t) => {
+      const node = nodeDataMap.value.get(t.id);
+      const made = clusterStore.groupLeafNeighbors(t.id, node ? nodeLabelOf(node) || t.id : t.id, 5);
+      toast.success(`${made.length} ${made.length === 1 ? 'collection' : 'collections'} of leaf neighbours.`);
+    },
+  });
+  contextMenu.addAction({
+    id: 'ungroup-leaf-neighbors',
+    label: 'Ungroup leaf neighbors',
+    icon: Network,
+    visible: (t) => t.type === 'node' && clusterStore.collectionsOf(t.id).length > 0,
+    handler: (t) => {
+      clusterStore.ungroupLeafNeighbors(t.id);
     },
   });
 

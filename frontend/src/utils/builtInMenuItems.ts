@@ -8,6 +8,8 @@
 export const BUILT_IN_MENU_ITEMS: readonly { id: string; label: string }[] = [
   { id: 'copy-id', label: 'Copy ID' },
   { id: 'expand-neighbors', label: 'Expand neighbors' },
+  { id: 'group-leaf-neighbors', label: 'Group leaf neighbors' },
+  { id: 'ungroup-leaf-neighbors', label: 'Ungroup leaf neighbors' },
   { id: 'ego-layout-focus', label: 'Ego layout from here' },
   { id: 'view-community-table', label: 'View community members' },
   { id: 'isolate-community', label: 'Show only this community' },

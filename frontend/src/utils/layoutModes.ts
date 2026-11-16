@@ -1087,7 +1087,7 @@ export function computeRingGuideSpec(opts: {
     // Ring population is the first thing an analyst reads off an ego view
     // ("where is the mass?"), so it belongs in the guide label rather than
     // requiring them to count dots.
-    // ASCII only: the label atlas has no "·" (FastLabelRenderer covers 32–126).
+    // Plain ASCII separators: these captions predate the Latin-1 label atlas.
     const name = stat.unreachable ? 'unreachable' : String(stat.level);
     // A band count tells something only on a populated ring.
     const bands = stat.bands && stat.count >= 10 ? `, ${stat.bands} bands` : '';

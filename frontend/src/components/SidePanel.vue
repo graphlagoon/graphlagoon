@@ -6,6 +6,7 @@ import { useCurrentCaseStore } from '@/stores/currentCase';
 import { useAddToCase } from '@/composables/useAddToCase';
 import { useToast } from '@/composables/useToast';
 import SelectionDetails from './SelectionDetails.vue';
+import NeighborSummaryPanel from './NeighborSummaryPanel.vue';
 
 // Props for different display modes
 const props = withDefaults(defineProps<{
@@ -114,6 +115,10 @@ function toggleDefaultFocus() {
       </div>
 
       <SelectionDetails :item="selectedItem" />
+      <NeighborSummaryPanel
+        v-if="selectedItem.type === 'node' && selectedItem.data.node_type !== '__cluster__'"
+        :node-id="selectedItem.data.node_id"
+      />
     </template>
   </div>
 </template>

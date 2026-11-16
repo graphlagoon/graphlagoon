@@ -36,12 +36,12 @@ describe('computeNormalizedTextMetrics', () => {
     expect(computeNormalizedTextMetrics('ab\n').width).toBe(computeNormalizedTextMetrics('ab').width)
   })
 
-  it('measures accented characters as their de-accented base glyph', () => {
-    expect(computeNormalizedTextMetrics('José').width).toBe(computeNormalizedTextMetrics('Jose').width)
+  it('measures a character outside the atlas (Latin Extended-A) as its de-accented base glyph', () => {
+    expect(computeNormalizedTextMetrics('Erdős').width).toBe(computeNormalizedTextMetrics('Erdos').width)
   })
 
   it('measures unsupported characters as the ? fallback glyph instead of dropping them', () => {
-    const withEllipsis = computeNormalizedTextMetrics('ab…').width
+    const withEllipsis = computeNormalizedTextMetrics('ab∞').width
     const withQuestion = computeNormalizedTextMetrics('ab?').width
     expect(withEllipsis).toBe(withQuestion)
     expect(withEllipsis).toBeGreaterThan(computeNormalizedTextMetrics('ab').width)

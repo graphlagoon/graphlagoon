@@ -51,6 +51,13 @@ export interface Cluster {
 
   /** ID of the program that created this cluster (for merge logic) */
   source_program_id?: string;
+
+  /**
+   * A collection of a hub's leaf neighbours (hubs-densos F1, "Group leaf
+   * neighbors"). Members that gain another link leave it on their own;
+   * `excluded` are members the user pulled out, never put back by regrouping.
+   */
+  collection?: { hub: string; row: string; excluded?: string[] };
 }
 
 /**

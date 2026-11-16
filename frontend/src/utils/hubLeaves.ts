@@ -261,8 +261,7 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
 }
 
 /**
- * Text of a region label ("Person (114)", or "285 leaves" for a crown). ASCII
- * punctuation only: the label atlas covers ASCII 32–126 (FastLabelRenderer).
+ * Text of a region label ("Person (114)", or "285 leaves" for a crown).
  */
 export function regionLabel(region: HubLeafRegion, hidden = 0): string {
   let text: string;

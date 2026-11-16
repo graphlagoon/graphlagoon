@@ -11,6 +11,7 @@ import { useGraphStore } from '@/stores/graph';
 import { IconAtlas } from '@/utils/IconAtlas';
 import { FastIconRenderer } from '@/utils/FastIconRenderer';
 import type { GraphNode } from '@/types/graph3d';
+import { drawAsDot, pixelsPerWorldUnit } from '@/utils/screenScale';
 
 // Reusable objects (avoid GC pressure)
 const _bgColor = new THREE.Color();
@@ -59,6 +60,8 @@ export function useGraphIcons(
   const graphStore = useGraphStore();
   let iconRenderer: FastIconRenderer | null = null;
   let atlas: IconAtlas | null = null;
+  /** Nodes drawn as a plain dot last time (hysteresis in drawAsDot). */
+  let dots = new Set<string>();
 
   function initRenderer(scene: THREE.Scene) {
     if (iconRenderer) iconRenderer.dispose();
@@ -90,6 +93,10 @@ export function useGraphIcons(
 
     // Clear and rebuild all icons
     iconRenderer.clear();
+    // Far away a glyph is a few pixels of noise: the disk alone (glyph in the
+    // disk's colour) reads as a dot, and the icon comes back up close (FZ).
+    const ppu = pixelsPerWorldUnit(graph3d);
+    const nextDots = new Set<string>();
 
     for (const node of currentData.nodes as GraphNode[]) {
       // Skip hidden nodes (respects type filters, search, lens hide)
@@ -107,11 +114,13 @@ export function useGraphIcons(
       const { r, g, b, alpha } = parseColorAndAlpha(colorStr);
 
       _bgColor.setRGB(r, g, b);
-      const iconColor = contrastIconColor(r, g, b);
-
       // Match sphere size: radius = cbrt(val) * relSize, diameter = radius * 2
       const radius = Math.cbrt(node.size || 1) * nodeRelSize;
       const diameter = radius * 2;
+
+      const dot = drawAsDot(diameter * ppu, dots.has(node.id));
+      if (dot) nextDots.add(node.id);
+      const iconColor = dot ? _iconColor.setRGB(r, g, b) : contrastIconColor(r, g, b);
 
       _position.set(node.x || 0, node.y || 0, node.z || 0);
 
@@ -126,6 +135,7 @@ export function useGraphIcons(
       });
     }
 
+    dots = nextDots;
     iconRenderer.updateMesh();
   }
 

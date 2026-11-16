@@ -107,7 +107,11 @@ A closed cluster's node is labelled with its name and member count —
 of 39 and one of 570 look different. Its edges are summed: members linked
 the same way to the same neighbour draw **one** edge per relationship type,
 labelled with how many it stands for (hover it for the count, and the total
-amount when the context defines one), even with *Sum parallel edges* off. A
+amount when the context defines one), even with *Sum parallel edges* off.
+Every row of a cluster's member table has **Pull out**, which takes that
+node out of the cluster. To fold a hub's leaf neighbours into clusters
+without writing a program, use **Group leaf neighbors** on the hub
+([a node's neighbours](./exploring-the-graph.md#a-node-s-neighbours)). A
 node may belong to several clusters — it stays visible if any of them is
 open. Click a collapsed cluster node to open a searchable table of its
 members with CSV export.

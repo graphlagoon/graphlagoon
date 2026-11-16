@@ -10,7 +10,7 @@ part out of messy columns, per type, with live preview.
   labels.
 - **Not the tool for** colors, sizes or icons (that's the
   [Style panel](./style-presets.md)); rich text or emoji **in labels** (the
-  canvas font is ASCII-only — [tooltips](#hover-tooltips) take both); or long
+  canvas font covers Latin text, not emoji — [tooltips](#hover-tooltips) take both); or long
   descriptions — labels over ~30 characters get culled when the graph is
   crowded, though a [tooltip](#hover-tooltips) can carry them.
 :::
@@ -280,9 +280,10 @@ it is drawn:
 - **Nothing is drawn until the initial layout finishes** — if you see no
   labels right after loading, wait for the layout to settle before
   suspecting your template.
-- The label font covers **basic ASCII only**. Accents are stripped
-  (`José` → `Jose`); anything else — emoji, `…`, `→` — draws as `?`. Use
-  `...` and `->`. Keep labels around 20–30 characters and at most 2–3
+- The label font covers **ASCII and Latin-1**: accents and `ç` are drawn
+  (`José`, `Conceição`, `nº`), and so are `·`, `×`, `–`, `—`, `…`, curly
+  quotes and `€` (no arrows: write `->`). Anything else — emoji, other scripts — draws as
+  `?`. Keep labels around 20–30 characters and at most 2–3
   lines: the overlap filter hides crowded labels, and taller labels get
   hidden first.
 - **Style panel → Labels**: show/hide node and edge labels, size, position
