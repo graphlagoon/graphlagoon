@@ -1,6 +1,6 @@
 # Hubs densos: um nó com centenas de vizinhos diretos
 
-> Status (2026-11-16): **FV, ego E1–E6, F0.1–F0.5, F3 e FZ (itens 1 e 4) implementados**, mais escolha automática da chave das pétalas e pétala "Outros" (acima de 8 grupos). D7 decidida: **sim, como opção desligada por padrão** (*Reveal leaves on zoom*). Continuam propostas: FZ itens 2–3 (opacidade do rótulo, ponto longe e ícone perto), F1 (colapsar pétala num nó), F2 (resumo de vizinhos no painel do nó) e F6. Análise de 2026-11-13, branch `feature/context-look-clusters`.
+> Status (2026-11-16, tarde): **todas as fases implementadas** — FV, ego E1–E6, F0.1–F0.5, F1 (coleções de folhas, sem o aviso por hub), F2 (resumo de vizinhos no painel), F3 (expansão seletiva), FZ (inclui revelar por zoom, D7 = opção desligada) e, de F6, a fonte Latin-1. Chave automática e pétala "Outros" além do plano. Continuam como experimentos de F6: coleções no servidor, motivo de conectores, pétalas em 3D, grau real por membro (D5). Análise de 2026-11-13, branch `feature/context-look-clusters`.
 > Pasta fora do site VitePress (`srcExclude: dev/**`).
 > Incorpora e amplia [ego-crowded-rings-qsa.md](../ego-crowded-rings-qsa.md) (2026-08-28), que tratava só do layout ego e não foi implementado.
 

@@ -101,7 +101,7 @@ const slides = [
       { template: '{relationship_type}', result: 'FOLLOWS', note: 'Edge type' },
       { template: '{src}', result: 'user_1', note: 'Source node ID' },
       { template: '{dst}', result: 'user_2', note: 'Destination node ID' },
-      { template: '{src} -> {dst}', result: 'user_1 -> user_2', note: 'Combined format (canvas font is ASCII-only)' },
+      { template: '{src} -> {dst}', result: 'user_1 -> user_2', note: 'Combined format' },
     ],
   },
   {
@@ -186,7 +186,7 @@ const slides = [
     examples: [
       { template: '{prop:name|upper} ({node_type})', result: 'JOHN DOE (Person)', note: 'Name with type' },
       { template: '{prop:name|truncate:10} - {prop:role|capitalize}', result: 'John Doe... - Admin', note: 'Multiple fields' },
-      { template: '{if:prop:verified==true|OK|--} {prop:email}', result: 'OK john@example.com', note: 'Status indicator (canvas font is ASCII-only)' },
+      { template: '{if:prop:verified==true|OK|--} {prop:email}', result: 'OK john@example.com', note: 'Status indicator (no emoji on the canvas)' },
       { template: '[{prop:status|upper}] {prop:title|truncate:20}', result: '[ACTIVE] Meeting tomorrow...', note: 'Formatted status' },
     ],
   },

@@ -23,6 +23,7 @@ import { useGraphStore } from '@/stores/graph'
 import { useMetricsStore } from '@/stores/metrics'
 import { api } from '@/services/api'
 import { useToast } from '@/composables/useToast'
+import { leafCollections, membersNoLongerLeaves, neighborRowLabel, summarizeNeighbors } from '@/utils/neighborSummary'
 
 const STORAGE_KEY = 'graphlagoon-studio-clusters'
 
@@ -581,6 +582,66 @@ export const useClusterStore = defineStore('cluster', () => {
     // Don't auto-save to localStorage - clusters are saved as part of exploration state
 
     return true
+  }
+
+  // ============================================================================
+  // Leaf collections (hubs-densos F1)
+  // ============================================================================
+
+  /** Collections of one hub. */
+  function collectionsOf(hubId: string): Cluster[] {
+    return clusters.value.filter(c => c.collection?.hub === hubId)
+  }
+
+  /**
+   * Fold a hub's leaf neighbours into closed clusters, one per (relationship
+   * type, direction, node type) with at least `min` leaves. Regrouping keeps
+   * what the user pulled out. Returns the clusters made.
+   */
+  function groupLeafNeighbors(hubId: string, hubLabel: string, min = 5): Cluster[] {
+    const graphStore = useGraphStore()
+    const typeOf = new Map(graphStore.nodes.map(n => [n.node_id, n.node_type]))
+    const summary = summarizeNeighbors(hubId, graphStore.edges, id => typeOf.get(id) ?? 'Node')
+    const previous = collectionsOf(hubId)
+    const excluded = new Set(previous.flatMap(c => c.collection?.excluded ?? []))
+    const kept = clusters.value.filter(c => c.collection?.hub !== hubId)
+    const made: Cluster[] = []
+    for (const row of leafCollections(summary, min)) {
+      const ids = row.leafIds.filter(id => !excluded.has(id))
+      if (ids.length < min) continue
+      made.push({
+        cluster_id: `collection:${hubId}:${row.key.replace(/\u0000/g, ':')}`,
+        // Short: it is drawn next to the hub, and the description names the hub.
+        cluster_name: neighborRowLabel(row),
+        cluster_class: 'leaf-collection',
+        figure: 'circle',
+        state: 'closed',
+        node_ids: ids,
+        color: '#8b5cf6',
+        description: `${ids.length} neighbours of ${hubLabel} linked to nothing else among the loaded nodes`,
+        collection: { hub: hubId, row: row.key, excluded: previous.find(c => c.collection?.row === row.key)?.collection?.excluded },
+      })
+    }
+    clusters.value = [...kept, ...made]
+    return made
+  }
+
+  function ungroupLeafNeighbors(hubId: string): number {
+    const n = collectionsOf(hubId).length
+    if (n) clusters.value = clusters.value.filter(c => c.collection?.hub !== hubId)
+    return n
+  }
+
+  /** Take a member out of a cluster; in a collection it stays out (`excluded`). */
+  function pullOut(clusterId: string, nodeId: string): boolean {
+    const cluster = clusters.value.find(c => c.cluster_id === clusterId)
+    if (!cluster || !cluster.node_ids.includes(nodeId)) return false
+    const node_ids = cluster.node_ids.filter(id => id !== nodeId)
+    const collection = cluster.collection
+      ? { ...cluster.collection, excluded: [...new Set([...(cluster.collection.excluded ?? []), nodeId])] }
+      : undefined
+    if (node_ids.length === 0) return deleteCluster(clusterId)
+    return updateCluster(clusterId, { node_ids, ...(collection ? { collection } : {}) })
   }
 
   /**
@@ -1144,11 +1205,45 @@ return clusters;`,
     },
   )
 
+  // A collection member that gained another link (an expand brought it) is no
+  // longer a leaf: it leaves the collection, and the user is told.
+  watch(
+    () => useGraphStore().edges,
+    (edges) => {
+      if (!clusters.value.some(c => c.collection)) return
+      let changed = false
+      const notes: string[] = []
+      const next: Cluster[] = []
+      for (const cluster of clusters.value) {
+        if (!cluster.collection) {
+          next.push(cluster)
+          continue
+        }
+        const gone = new Set(membersNoLongerLeaves(cluster.collection.hub, cluster.node_ids, edges))
+        if (gone.size === 0) {
+          next.push(cluster)
+          continue
+        }
+        changed = true
+        notes.push(`${gone.size} left "${cluster.cluster_name}"`)
+        const ids = cluster.node_ids.filter(id => !gone.has(id))
+        if (ids.length) next.push({ ...cluster, node_ids: ids })
+      }
+      if (!changed) return
+      clusters.value = next
+      useToast().info(`${notes.join('; ')}: linked to something else now.`, 5000)
+    },
+  )
+
   // ============================================================================
   // Return
   // ============================================================================
 
   return {
+    collectionsOf,
+    groupLeafNeighbors,
+    ungroupLeafNeighbors,
+    pullOut,
     // State
     programs,
     clusters,

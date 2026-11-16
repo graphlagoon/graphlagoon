@@ -178,15 +178,24 @@ function exportCSV() {
                     {{ sortField === col.field ? (sortAsc ? '\u2191' : '\u2193') : '' }}
                   </span>
                 </th>
+                <th />
               </tr>
             </thead>
             <tbody>
               <tr v-if="filteredRows.length === 0">
-                <td :colspan="cols.length" class="no-data">No nodes found</td>
+                <td :colspan="cols.length + 1" class="no-data">No nodes found</td>
               </tr>
               <tr v-for="row in filteredRows" :key="row.node_id as string">
                 <td v-for="col in cols" :key="col.field" :class="{ mono: col.field === 'node_id' }">
                   {{ formatCell(row[col.field]) }}
+                </td>
+                <td class="row-actions">
+                  <button
+                    class="action-btn"
+                    title="Take this node out of the cluster: it is drawn on its own again"
+                    :data-testid="`cluster-pull-out-${row.node_id}`"
+                    @click="clusterStore.pullOut(cluster.cluster_id, String(row.node_id))"
+                  >Pull out</button>
                 </td>
               </tr>
             </tbody>
@@ -364,6 +373,11 @@ function exportCSV() {
   font-size: 13px;
   color: var(--text-muted, #666);
   white-space: nowrap;
+}
+
+.row-actions {
+  white-space: nowrap;
+  text-align: right;
 }
 
 .action-btn {

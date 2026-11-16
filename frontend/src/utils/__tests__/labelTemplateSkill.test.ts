@@ -96,11 +96,10 @@ describe('buildLabelTemplateSkill', () => {
     expect(text).toContain('multiple lines')
   })
 
-  it('warns about the ASCII-only label font and avoids non-ASCII in examples', () => {
+  it('says what the label font covers and avoids emoji in examples', () => {
     const text = buildLabelTemplateSkill(fullInput)
-    expect(text).toContain('basic ASCII')
+    expect(text).toContain('ASCII and Latin-1')
     // The worked examples must not recommend characters the font cannot draw
-    expect(text).not.toContain('…')
     expect(text).not.toContain('🔥')
   })
 
