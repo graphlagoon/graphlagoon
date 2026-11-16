@@ -189,6 +189,10 @@ export function useGraphLabels(
       const forcedNodeIds = new Set<string>();
       for (const id of graphStore.selectedNodeIds) forcedNodeIds.add(id);
       if (graphStore.hoveredNodeId) forcedNodeIds.add(graphStore.hoveredNodeId);
+      // A closed cluster's label (name and count) is what it is for: shown at
+      // any zoom, past the grid budget, but still subject to the overlap
+      // filter, which places larger clusters first (F0.4).
+      const clusterIds: string[] = [];
 
       // Phase 1: populate grid with visible node labels
       if (aesthetics.showNodeLabels3D && canShowLabels) {
@@ -204,6 +208,10 @@ export function useGraphLabels(
             if (!_frustum.containsPoint(_point)) return;
           }
           if (forcedNodeIds.has(node.id)) return;
+          if (node.isCluster) {
+            clusterIds.push(node.id);
+            return;
+          }
 
           const worldRadius = Math.cbrt(node.size ?? 1) * relSize;
           const screenRadius = worldRadius * pixelsPerUnit;
@@ -250,6 +258,7 @@ export function useGraphLabels(
       for (const id of forcedNodeIds) {
         allowedLabels.add(`node-${id}`);
       }
+      for (const id of clusterIds) allowedLabels.add(`node-${id}`);
     }
 
     // Zoom compensation

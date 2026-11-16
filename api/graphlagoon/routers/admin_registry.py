@@ -233,6 +233,7 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/graph-contexts/{context_id}/cypher/transpile"): "no side effects",
     ("POST", "/api/graph-contexts/{context_id}/subgraph"): "read-only fetch",
     ("POST", "/api/graph-contexts/{context_id}/expand"): "read-only fetch",
+    ("POST", "/api/graph-contexts/{context_id}/neighbor-summary"): "read-only count",
     ("POST", "/api/graph-contexts/{context_id}/nodes/batch"): "read-only fetch",
     (
         "POST",

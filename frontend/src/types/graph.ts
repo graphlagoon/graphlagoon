@@ -750,6 +750,21 @@ export interface SubgraphRequest {
   nodes_mode?: 'full' | 'types';
 }
 
+/** Edges touching a node per (relationship type, direction), counted before expanding. */
+export interface NeighborSummaryBucket {
+  relationship_type: string;
+  /** 'out' when the node is the edge's source. */
+  direction: 'in' | 'out';
+  edges: number;
+}
+
+export interface NeighborSummaryResponse {
+  /** False when the datasource cannot count; expand then runs as before. */
+  supported: boolean;
+  total_edges: number;
+  buckets: NeighborSummaryBucket[];
+}
+
 export interface ExpandRequest {
   node_id: string;
   depth?: number;  // 1-2, default 2

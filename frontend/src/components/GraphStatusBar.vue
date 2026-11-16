@@ -121,6 +121,22 @@ const isolationTitle = computed(() => {
     </span>
 
     <span
+      v-if="graphStore.hubLeavesStats?.zoomHidden"
+      class="status-isolation"
+      data-testid="status-hub-leaves-zoom-hidden"
+      title="Zoomed out, each hub region shows only its inner leaves; zoom in to see the rest. Click ✕ to show every leaf at any zoom."
+    >
+      <strong>{{ graphStore.hubLeavesStats.zoomHidden }}</strong> leaves hidden until you zoom in
+      <button
+        type="button"
+        class="status-isolation-clear"
+        data-testid="status-hub-leaves-zoom-show"
+        aria-label="Show every leaf"
+        @click="graphStore.updateBehaviors({ hubLeavesRevealByZoom: false })"
+      >✕</button>
+    </span>
+
+    <span
       v-if="graphStore.isolation"
       class="status-isolation"
       data-testid="status-isolation"

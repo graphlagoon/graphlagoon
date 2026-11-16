@@ -101,7 +101,13 @@ return Object.entries(clusters).map(([type, node_ids], i) => ({
 
 `nodes` and `edges` are the **full loaded graph**, not the filtered view.
 A **closed** cluster collapses its members into a single shaped node (its
-edges are re-pointed there); an **open** cluster keeps members visible. A
+edges are re-pointed there); an **open** cluster keeps members visible.
+A closed cluster's node is labelled with its name and member count —
+`Orphan Nodes (570)` — at any zoom, and grows with the count, so a cluster
+of 39 and one of 570 look different. Its edges are summed: members linked
+the same way to the same neighbour draw **one** edge per relationship type,
+labelled with how many it stands for (hover it for the count, and the total
+amount when the context defines one), even with *Sum parallel edges* off. A
 node may belong to several clusters — it stays visible if any of them is
 open. Click a collapsed cluster node to open a searchable table of its
 members with CSV export.

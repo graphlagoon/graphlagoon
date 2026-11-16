@@ -59,6 +59,7 @@ import type {
   Exploration,
   SubgraphRequest,
   ExpandRequest,
+  NeighborSummaryResponse,
   RandomGraphRequest,
   RandomGraphResponse,
   CreateGraphContextRequest,
@@ -525,6 +526,14 @@ class ApiService {
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/nodes/batch`,
       { node_ids: nodeIds, ...(columns ? { columns } : {}) }
+    );
+    return response.data;
+  }
+
+  async neighborSummary(contextId: string, nodeId: string): Promise<NeighborSummaryResponse> {
+    const response = await this.client.post(
+      `/api/graph-contexts/${contextId}/neighbor-summary`,
+      { node_id: nodeId }
     );
     return response.data;
   }

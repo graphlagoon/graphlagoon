@@ -20,6 +20,8 @@ from graphlagoon.models.schemas import (
     ColumnConfig,
     CypherQueryRequest,
     ExpandRequest,
+    NeighborSummaryRequest,
+    NeighborSummaryResponse,
     GraphQueryRequest,
     GraphResponse,
     Node,
@@ -42,8 +44,10 @@ from graphlagoon.services.datasource.base import (
     GraphExecutionFailure,
     PreparedGraphQuery,
     invalid_request as _invalid,
+    summary_from_rows,
 )
 from graphlagoon.services.graph_operations import (
+    DEFAULT_RELATIONSHIP_TYPE,
     QueryExecutionError,
     execute_graph_query_with_nodes,
     fetch_nodes_by_ids,
@@ -516,6 +520,9 @@ class SqlWarehouseDatasource(GraphDatasource):
                     {edge_type_filter}
             """
 
+            # The node's own edges come first, in a stable order, so a limit
+            # below its degree still returns only edges that touch it; edges
+            # between its neighbours fill whatever room is left.
             query = f"""
             WITH visited_nodes AS (
                 SELECT '{safe_node_id}' AS node_id
@@ -527,6 +534,9 @@ class SqlWarehouseDatasource(GraphDatasource):
             WHERE e.`{src_col}` IN (SELECT node_id FROM visited_nodes)
               AND e.`{dst_col}` IN (SELECT node_id FROM visited_nodes)
               {final_edge_filter}
+            ORDER BY
+              CASE WHEN e.`{src_col}` = '{safe_node_id}' OR e.`{dst_col}` = '{safe_node_id}' THEN 0 ELSE 1 END,
+              e.`{src_col}`, e.`{dst_col}`
             LIMIT {data.edge_limit}
         """
         else:
@@ -610,6 +620,40 @@ class SqlWarehouseDatasource(GraphDatasource):
         """
 
         return await self._execute(context, query, limit=data.edge_limit)
+
+    def neighbor_summary_sql(self, context, data: NeighborSummaryRequest) -> str:
+        column_config = self._column_config(context)
+        src_col = escape_identifier(column_config.src_col)
+        dst_col = escape_identifier(column_config.dst_col)
+        rel_type_col = escape_identifier(column_config.relationship_type_col)
+        safe_node_id = sanitize_string_literal(data.node_id)
+        rel_expr = (
+            f"e.`{rel_type_col}`"
+            if rel_type_col
+            else f"'{sanitize_string_literal(DEFAULT_RELATIONSHIP_TYPE)}'"
+        )
+        return f"""
+            SELECT {rel_expr} AS relationship_type,
+                   CASE WHEN e.`{src_col}` = '{safe_node_id}' THEN 'out' ELSE 'in' END AS direction,
+                   COUNT(*) AS edges
+            FROM {_safe_table_name(context.edge_table_name)} e
+            WHERE e.`{src_col}` = '{safe_node_id}' OR e.`{dst_col}` = '{safe_node_id}'
+            GROUP BY 1, 2
+        """
+
+    async def neighbor_summary(
+        self, context, data: NeighborSummaryRequest
+    ) -> NeighborSummaryResponse:
+        query = self.neighbor_summary_sql(context, data)
+        try:
+            result = await self.warehouse.execute_statement(statement=query)
+        except Exception as e:
+            raise GraphExecutionFailure(e, statement=query)
+        if result.status.state != "SUCCEEDED":
+            message = result.status.error.message if result.status.error else "Unknown error"
+            raise QueryExecutionError(message, query=query)
+        rows = (result.result.data_array if result.result else None) or []
+        return summary_from_rows(rows)
 
     async def fetch_nodes(
         self,

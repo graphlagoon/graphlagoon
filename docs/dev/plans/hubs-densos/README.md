@@ -1,6 +1,6 @@
 # Hubs densos: um nó com centenas de vizinhos diretos
 
-> Status (2026-11-14): **FV implementada** (arranjo das folhas em coroa ou pétalas, arestas implícitas, rótulos de região). **Ego E1–E6 implementado**: raios implícitos, ego lê o que o canvas desenha (F0.1), anéis em faixas e legendas de setor (F4), aviso de anel lotado, revelação gradual de rótulos (parte de FZ). Continuam propostas: F0.2–F0.5, F1–F3, revelar nós por zoom (D7) e F6. Análise de 2026-11-13, branch `feature/context-look-clusters`.
+> Status (2026-11-16): **FV, ego E1–E6, F0.1–F0.5, F3 e FZ (itens 1 e 4) implementados**, mais escolha automática da chave das pétalas e pétala "Outros" (acima de 8 grupos). D7 decidida: **sim, como opção desligada por padrão** (*Reveal leaves on zoom*). Continuam propostas: FZ itens 2–3 (opacidade do rótulo, ponto longe e ícone perto), F1 (colapsar pétala num nó), F2 (resumo de vizinhos no painel do nó) e F6. Análise de 2026-11-13, branch `feature/context-look-clusters`.
 > Pasta fora do site VitePress (`srcExclude: dev/**`).
 > Incorpora e amplia [ego-crowded-rings-qsa.md](../ego-crowded-rings-qsa.md) (2026-08-28), que tratava só do layout ego e não foi implementado.
 
@@ -37,8 +37,6 @@ O protótipo também expôs o que falta para isso ser produto: sem rótulo no zo
 
 ## Resposta por caso
 
-| Caso | Resposta recomendada | Fase |
-|---|---|---|
 | Caso | Resposta recomendada | Agrupa? | Oculta? | Fase |
 |---|---|---|---|---|
 | **Force layout** com a estrela carregada | Folhas arranjadas junto ao hub (coroa ou pétalas por papel); arestas hub–folha implícitas, com marca; rótulo de região com contagem | Só na aparência | Só tinta | FV |
@@ -77,7 +75,7 @@ Cada uma tem recomendação; o plano segue a recomendação até alguém decidir
 | D4 | Agrupar também por propriedade (papel do sócio) | (a) só tipo de vínculo e de nó; (b) propriedade escolhida no painel de vizinhos; (c) propriedade padrão por contexto | **(a) em F1, (b) em F2.** No protótipo, a propriedade foi o que deu significado aos grupos | F2 |
 | D5 | O que a coleção afirma | (a) "ligados só ao hub **entre os nós carregados**"; (b) consultar o grau real de cada membro na base | **(a) agora**; (b) como experimento de F6. Um membro-folha pode ter dezenas de vínculos que ainda não vieram | F1 |
 | D6 | Limiares iniciais | hub = grau > 30; coleção ≥ 5 membros; diálogo de expansão > 50 arestas | Começar com esses e calibrar olhando a tela com dado real | F1, F3 |
-| **D7** | Ocultar nós conforme o zoom | (a) não: longe, a folha vira ponto, mas nunca some; (b) sim, com marca "+N" sempre visível, inclusive em captura | **É sua.** A regra de 2026-07-20 ("nada escondido em silêncio") foi escrita para filtros; (b) só entra se a marca for aceita como aviso suficiente. Sem resposta, o plano fica em (a) | FZ |
+| ~~D7~~ | Ocultar nós conforme o zoom | — | **Decidida (2026-11-16): (b), como opção desligada por padrão.** Marca "+N hidden" no rótulo da região e chip no status bar | — |
 | **D8** | Arestas hub–folha não desenhadas no arranjo | (a) implícitas por padrão, com marca e botão para desenhar; (b) sempre desenhadas, esmaecidas | **(a)**. São 285 de 323 arestas na fixture, e a posição já diz a ligação | FV |
 
 ## Regras de trabalho

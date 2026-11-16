@@ -20,6 +20,8 @@ from typing import Any, ClassVar, Optional
 from graphlagoon.models.schemas import (
     CypherQueryRequest,
     ExpandRequest,
+    NeighborSummaryRequest,
+    NeighborSummaryResponse,
     GraphResponse,
     Node,
     QueryMetadata,
@@ -36,6 +38,7 @@ from graphlagoon.services.datasource.base import (
     PreparedGraphQuery,
     invalid_request,
     require_capability,
+    summary_from_rows,
 )
 from graphlagoon.services.datasource.neptune.client import (
     NeptuneClient,
@@ -247,6 +250,21 @@ class NeptuneDatasource(GraphDatasource):
         )
         rows, query_ms = await self._run(query, {"node_id": data.node_id})
         return await self._to_graph(rows, query=query, query_ms=query_ms, limit=limit)
+
+    async def neighbor_summary(
+        self, context, data: NeighborSummaryRequest
+    ) -> NeighborSummaryResponse:
+        """Two aggregate queries (out, then in); a self-loop counts once, as out."""
+        rows: list[tuple[str, str, int]] = []
+        for direction, pattern in (("out", "(s)-[r]->(m)"), ("in", "(s)<-[r]-(m)")):
+            loop_guard = " AND id(m) <> id(s)" if direction == "in" else ""
+            query = (
+                f"MATCH {pattern} WHERE id(s) = $node_id{loop_guard} "
+                "RETURN type(r) AS t, count(r) AS n"
+            )
+            result, _ = await self._run(query, {"node_id": data.node_id})
+            rows.extend((row.get("t"), direction, row.get("n")) for row in result)
+        return summary_from_rows(rows)
 
     async def fetch_nodes(
         self,

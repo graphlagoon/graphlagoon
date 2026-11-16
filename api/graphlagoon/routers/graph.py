@@ -11,6 +11,8 @@ from graphlagoon.models.schemas import (
     NodeBatchRequest,
     NodeBatchResponse,
     ExpandRequest,
+    NeighborSummaryRequest,
+    NeighborSummaryResponse,
     RandomGraphRequest,
     RandomGraphResponse,
     GraphQueryRequest,
@@ -419,6 +421,33 @@ async def expand_from_node(
 
     try:
         return await datasource.expand(context, data)
+    except QueryExecutionError as e:
+        raise query_execution_http_error(e, context_id)
+    except GraphExecutionFailure as e:
+        raise execution_failure_http_error(e)
+
+
+@router.post(
+    "/graph-contexts/{context_id}/neighbor-summary",
+    response_model=NeighborSummaryResponse,
+)
+async def neighbor_summary(
+    context_id: UUID,
+    data: NeighborSummaryRequest,
+    request: Request,
+):
+    """Count a node's edges per relationship type and direction, before expanding.
+
+    Lets the client ask what to load when a node has many neighbours.
+    ``supported`` is false when the datasource cannot count; the client then
+    expands as before.
+    """
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    datasource = resolve_datasource_or_400(context)
+
+    try:
+        return await datasource.neighbor_summary(context, data)
     except QueryExecutionError as e:
         raise query_execution_http_error(e, context_id)
     except GraphExecutionFailure as e:

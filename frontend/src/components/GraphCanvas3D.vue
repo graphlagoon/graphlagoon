@@ -43,7 +43,8 @@ import { seedNewNodePositions } from '@/utils/seedNewNodePositions';
 import { useDevPerf } from '@/composables/useDevPerf';
 import { useGraphRings } from '@/composables/useGraphRings';
 import { useHubLeafRegions } from '@/composables/useHubLeafRegions';
-import { computeHubLeavesPlan, forceHubLeaves, serializeHubLeavesPlan, snapHubLeaves, type HubLeavesPlan } from '@/utils/hubLeaves';
+import { useNodeBadges } from '@/composables/useNodeBadges';
+import { computeHubLeavesPlan, forceHubLeaves, serializeHubLeavesPlan, snapHubLeaves, zoomHiddenLeaves, type HubLeavesKeyCandidate, type HubLeavesPlan } from '@/utils/hubLeaves';
 
 const emit = defineEmits<{
   'cluster-node-click': [clusterId: string]
@@ -258,6 +259,10 @@ const allEdges = computed(() => graphStore.edges);
 
 // Nodes hidden by the active layout mode (ego maxHops cutoff); additive with filters
 const layoutHiddenNodeIds = ref<Set<string> | null>(null);
+/** Hub leaves hidden while zoomed out (behaviors.hubLeavesRevealByZoom). */
+const zoomHiddenNodeIds = shallowRef<Set<string> | null>(null);
+/** Per-region hidden counts last drawn, as a string: redraw only when it changes. */
+let zoomRevealSignature: string | null = null;
 
 // Hidden sets for visual hiding (preserves positions unlike filtering)
 const searchHiddenNodeIds = computed(() => graphStore.searchHiddenNodeIds);
@@ -299,6 +304,14 @@ const layout = useGraphLayout(
 
 const guides = useLayoutGuides(getGraph3d);
 const hubRegions = useHubLeafRegions(getGraph3d);
+/** "N of M loaded" under a node whose expand did not bring every edge (hubs-densos F3). */
+const expandBadges = useNodeBadges(getGraph3d, (n) => Math.cbrt(n.size ?? 1) * (graphStore.aesthetics.nodeSize / 2));
+function showExpandBadges() {
+  const badges = new Map<string, string>();
+  for (const [id, p] of graphStore.expandProgress) badges.set(id, `${p.loaded} of ${p.total} loaded`);
+  expandBadges.show(badges);
+}
+watch(() => graphStore.expandProgress, showExpandBadges);
 const toast = useToast();
 
 const camera = useGraphCamera(getGraph3d, containerRef, initialLayoutDone, {
@@ -433,6 +446,7 @@ function collectAppearanceContext(): AppearanceContext {
     isHighlightMode: graphStore.behaviors.searchMode === 'highlight' && searchMatched !== null,
 
     layoutHiddenNodeIds: layoutHiddenNodeIds.value,
+    zoomHiddenNodeIds: zoomHiddenNodeIds.value,
 
     tableVisibleNodeIds: graphStore.tableFilteredNodeIds,
     tableVisibleEdgeIds: graphStore.tableFilteredEdgeIds,
@@ -532,7 +546,9 @@ async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | 
     }
     const isCluster = node.node_type === '__cluster__';
     const clusterNodeCount = isCluster ? ((node.properties?.node_count as number) || 1) : 0;
-    const clusterBaseSize = isCluster ? Math.min(Math.sqrt(clusterNodeCount) * 5 + 10, 50) : 0;
+    // Grows with the member count well past the old cap of 50 (reached at 256
+    // members), so a cluster of 39 and one of 570 look different (F0.4).
+    const clusterBaseSize = isCluster ? Math.min(10 + 4 * Math.sqrt(clusterNodeCount), 400) : 0;
     const clusterColor = isCluster ? (node.properties?.color as string || null) : null;
 
     const appearance = computeNodeAppearance(
@@ -540,7 +556,7 @@ async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | 
     );
 
     const nodeLabel = isCluster
-      ? (node.properties?.cluster_name as string || 'Cluster')
+      ? `${(node.properties?.cluster_name as string) || 'Cluster'} (${clusterNodeCount})`
       : nodeLabelOf(node);
 
     // Compute property-based icon override (if configured for this node type)
@@ -611,9 +627,11 @@ async function buildGraphData(shouldAbort?: () => boolean): Promise<GraphData | 
     }
     if (!nodeIds.has(edge.src) || !nodeIds.has(edge.dst)) continue;
 
-    const edgeLabel = formatEdgeLabel(
+    const ownLabel = formatEdgeLabel(
       edge, graphStore.textFormatRules, graphStore.textFormatDefaults.edgeTemplate, labelOptions,
     );
+    // A summed group says how many edges it stands for (ASCII: the label atlas has no "×").
+    const edgeLabel = edge.__agg ? (ownLabel ? `${ownLabel} (${edge.__agg.count})` : `${edge.__agg.count} edges`) : ownLabel;
 
     const isSimilarity = edge.relationship_type === '__similarity__';
     const edgeScore = isSimilarity ? (edge.properties?.score as number | undefined) : undefined;
@@ -664,7 +682,11 @@ function updateOverlays() {
   rings.updateRings();
   hubRegions.rescale();
   hubRegions.update();
+  expandBadges.rescale();
   guides.rescale();
+  // Runs when the camera comes to rest (useGraphCamera): the right moment to
+  // reveal or hide leaves, so they do not blink while zooming.
+  if (graphStore.behaviors.hubLeavesRevealByZoom) updateZoomReveal();
 }
 
 function updateVisuals() {
@@ -1351,7 +1373,7 @@ async function initGraph() {
       // The context does not know the user's own nodes (BYOD-2): nothing to expand there.
       if (event.altKey && !graphStore.loading && graphStore.supportsExpand && !graphStore.overlayAddedNodeIds.has(node.id)) {
         graphStore.selectNode(node.id);
-        void graphStore.expandFromNode(node.id, 1);
+        void graphStore.requestExpand(node.id);
         return;
       }
       // When graph lens is active, clicking the already-selected node pauses/resumes the lens
@@ -1458,6 +1480,7 @@ async function initGraph() {
     edgeIcons.updateIcons();
     rings.updateRings();
     hubRegions.update();
+    expandBadges.update();
   });
 
   graph3d.onEngineStop(() => {
@@ -1479,6 +1502,7 @@ async function initGraph() {
     if (atlas) {
       edgeIcons.initRenderer(scene, atlas);
     }
+    showExpandBadges();
   }
 
   const controls = graph3d.controls();
@@ -1492,6 +1516,7 @@ async function initGraph() {
     // Update clipping plane normal when camera rotates + refresh labels
     controls.addEventListener('change', () => {
       hubRegions.rescale();
+      expandBadges.rescale();
       guides.rescale();
       if (isClippingActive.value && graph3d) {
         const cam = graph3d.camera() as THREE.Camera;
@@ -1857,6 +1882,19 @@ watch(
 );
 
 watch(
+  () => graphStore.behaviors.hubLeavesRevealByZoom,
+  () => updateZoomReveal(),
+);
+// A leaf selected while hidden (search, table) comes back.
+watch(
+  () => graphStore.selectedNodeIds,
+  () => {
+    if (graphStore.behaviors.hubLeavesRevealByZoom) updateZoomReveal();
+  },
+  { deep: true },
+);
+
+watch(
   () => [graphStore.behaviors.hubLeavesImplicitEdges, graphStore.behaviors.hubLeavesMinLeaves] as const,
   () => {
     if (!graph3d) return;
@@ -1989,8 +2027,9 @@ function buildHubLeavesPlan(
 
   // Links between a leaf and its hub, for the 'rel' and 'edge:' keys.
   const key = b.hubLeavesKey;
+  const auto = key === 'auto';
   const byPair = new Map<string, GraphLink[]>();
-  if (key === 'rel' || key.startsWith('edge:')) {
+  if (auto || key === 'rel' || key.startsWith('edge:')) {
     links.forEach((l, i) => {
       const { source, target } = slim[i];
       for (const pair of [`${source}\u0000${target}`, `${target}\u0000${source}`]) {
@@ -2001,7 +2040,7 @@ function buildHubLeavesPlan(
     });
   }
 
-  const keyOf = (leaf: string, hub: string): string | null => {
+  const keyOfFor = (key: string) => (leaf: string, hub: string): string | null => {
     if (key === '') return normalizeKeyValue(nodeById.get(leaf)?.nodeType);
     if (key.startsWith('node:')) return normalizeKeyValue(nodeDataMap.value.get(leaf)?.properties?.[key.slice(5)]);
     const between = (byPair.get(`${leaf}\u0000${hub}`) ?? []).slice().sort((x, y) => (x.id < y.id ? -1 : 1));
@@ -2015,12 +2054,37 @@ function buildHubLeavesPlan(
     return null;
   };
 
+  // Automatic: every key the loaded graph offers; each hub takes the one that
+  // splits its leaves best (scoreKey). The panel says which one it took.
+  let keyCandidates: HubLeavesKeyCandidate[] | undefined;
+  if (auto) {
+    const nodeKeys = new Set<string>();
+    const edgeKeys = new Set<string>();
+    let seen = 0;
+    for (const n of nodeDataMap.value.values()) {
+      if (++seen > 2000) break;
+      for (const k of Object.keys(n.properties ?? {})) nodeKeys.add(k);
+    }
+    seen = 0;
+    for (const e of edgeDataMap.value.values()) {
+      if (++seen > 2000) break;
+      for (const k of Object.keys(e.properties ?? {})) edgeKeys.add(k);
+    }
+    keyCandidates = [
+      { name: 'node type', keyOf: keyOfFor('') },
+      { name: 'relationship type', keyOf: keyOfFor('rel') },
+      ...[...nodeKeys].sort().map((k) => ({ name: k, keyOf: keyOfFor(`node:${k}`) })),
+      ...[...edgeKeys].sort().map((k) => ({ name: `edge ${k}`, keyOf: keyOfFor(`edge:${k}`) })),
+    ];
+  }
+
   return computeHubLeavesPlan(slim, {
     mode: b.hubLeaves as 'crown' | 'petals',
     minLeaves: Math.max(2, b.hubLeavesMinLeaves),
     spacing: hubLeafSpacing(),
     hubRadiusOf: (id) => Math.cbrt(nodeById.get(id)?.size ?? 1) * relSize,
-    keyOf,
+    keyOf: auto ? undefined : keyOfFor(key),
+    keyCandidates,
   });
 }
 
@@ -2041,6 +2105,8 @@ function applyHubLeaves() {
   graph3d.d3Force('hubLeaves', null);
   if (!hubLeavesPlan.value) {
     hubRegions.clear();
+    zoomRevealSignature = null;
+    zoomHiddenNodeIds.value = null;
     const spokes = egoImplicitSpokes.value;
     graphStore.hubLeavesStats = spokes
       ? { hubs: 1, leaves: spokes.leaves, implicitEdges: graphStore.hubLeavesStats?.implicitEdges ?? 0 }
@@ -2050,15 +2116,52 @@ function applyHubLeaves() {
   // Deleted then re-added, so it runs after every other force.
   graph3d.d3Force('hubLeaves', forceHubLeaves(serializeHubLeavesPlan(hubLeavesPlan.value), hubLeafSpacing()));
   snapHubLeavesNow();
-  hubRegions.show(hubLeavesPlan.value.regions);
+  zoomRevealSignature = null;
+  updateZoomReveal(false);
   // implicitEdges is counted by updateVisuals: the edges actually left undrawn.
   graphStore.hubLeavesStats = {
     hubs: hubLeavesPlan.value.hubRadius.size,
     leaves: hubLeavesPlan.value.offsets.size,
     implicitEdges: graphStore.hubLeavesStats?.implicitEdges ?? 0,
+    autoKeys: [...new Set(hubLeavesPlan.value.keyByHub.values())],
+    zoomHidden: zoomHiddenNodeIds.value?.size ?? 0,
   };
 }
 
+/**
+ * Reveal on zoom (D7): far away, each region keeps its inner leaves and its
+ * label says how many are hidden; zooming in brings them back. Positions never
+ * change. Selected and hovered leaves always stay. `redraw` re-runs the
+ * appearance pass when the hidden set changed.
+ */
+function updateZoomReveal(redraw = true) {
+  const plan = hubLeavesPlan.value;
+  if (!graph3d || !plan) return;
+  let hidden: Set<string> | null = null;
+  let byRegion: number[] = [];
+  if (graphStore.behaviors.hubLeavesRevealByZoom) {
+    const cam = graph3d.camera() as THREE.Camera & { zoom?: number; isOrthographicCamera?: boolean; fov?: number };
+    const vh = graph3d.renderer?.()?.domElement?.clientHeight ?? 600;
+    let ppu = 1;
+    if (cam.isOrthographicCamera && cam.zoom) ppu = (vh * cam.zoom) / 2000; // ORTHO_FRUSTUM
+    else {
+      const target = graph3d.controls?.()?.target;
+      if (target && cam.fov) ppu = vh / 2 / (cam.position.distanceTo(target) * Math.tan(((cam.fov / 2) * Math.PI) / 180));
+    }
+    const keep = new Set(graphStore.selectedNodeIds);
+    if (graphStore.hoveredNodeId) keep.add(graphStore.hoveredNodeId);
+    const r = zoomHiddenLeaves(plan.regions, hubLeafSpacing() * ppu, keep);
+    hidden = r.hidden.size ? r.hidden : null;
+    byRegion = r.hiddenByRegion;
+  }
+  const signature = byRegion.join(',');
+  if (signature === zoomRevealSignature) return;
+  zoomRevealSignature = signature;
+  zoomHiddenNodeIds.value = hidden;
+  if (graphStore.hubLeavesStats) graphStore.hubLeavesStats = { ...graphStore.hubLeavesStats, zoomHidden: hidden?.size ?? 0 };
+  hubRegions.show(plan.regions, byRegion);
+  if (redraw) updateVisuals();
+}
 /**
  * Place the leaves on the nodes the engine holds NOW. The force alone is not
  * enough: after graphData() the simulation picks the new nodes up only on its
@@ -2856,7 +2959,7 @@ onMounted(() => {
     visible: (t) => t.type === 'node' && graphStore.supportsExpand && !graphStore.overlayAddedNodeIds.has(t.id),
     disabled: () => graphStore.loading,
     handler: async (t) => {
-      await graphStore.expandFromNode(t.id, 1);
+      await graphStore.requestExpand(t.id);
     },
   });
 
@@ -3080,6 +3183,7 @@ onUnmounted(() => {
   axisRotation.dispose();
   guides.dispose();
   hubRegions.dispose();
+  expandBadges.dispose();
   if (hoverRAF) {
     cancelAnimationFrame(hoverRAF);
     hoverRAF = null;

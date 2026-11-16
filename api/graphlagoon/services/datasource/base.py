@@ -29,6 +29,8 @@ from fastapi import HTTPException
 from graphlagoon.models.schemas import (
     CypherQueryRequest,
     ExpandRequest,
+    NeighborSummaryRequest,
+    NeighborSummaryResponse,
     GraphQueryRequest,
     GraphResponse,
     Node,
@@ -179,6 +181,16 @@ class GraphDatasource(ABC):
     async def expand(self, context, data: ExpandRequest) -> GraphResponse:
         """BFS expansion from a starting node, depth 1-2."""
 
+    async def neighbor_summary(
+        self, context, data: NeighborSummaryRequest
+    ) -> NeighborSummaryResponse:
+        """Count a node's edges per (relationship type, direction) without loading them.
+
+        Optional: the default says the backend cannot count, and the client
+        falls back to a plain expand that warns when it was cut.
+        """
+        return NeighborSummaryResponse(supported=False)
+
     @abstractmethod
     async def fetch_nodes(
         self,
@@ -221,6 +233,25 @@ class GraphDatasource(ABC):
     def prepare_sql(self, context, data: GraphQueryRequest) -> PreparedGraphQuery:
         """Validate a raw SQL graph query. Only SQL backends implement this."""
         raise NotImplementedError(f"{self.type_name} does not execute raw SQL queries")
+
+
+def summary_from_rows(rows) -> NeighborSummaryResponse:
+    """(relationship_type, direction, count) rows → summary, largest bucket first."""
+    from graphlagoon.models.schemas import NeighborSummaryBucket
+
+    buckets = [
+        NeighborSummaryBucket(
+            relationship_type=str(rel) if rel is not None else "",
+            direction="out" if direction == "out" else "in",
+            edges=int(count or 0),
+        )
+        for rel, direction, count in rows
+    ]
+    buckets = [b for b in buckets if b.edges > 0]
+    buckets.sort(key=lambda b: (-b.edges, b.relationship_type, b.direction))
+    return NeighborSummaryResponse(
+        supported=True, total_edges=sum(b.edges for b in buckets), buckets=buckets
+    )
 
 
 def invalid_request(

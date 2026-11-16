@@ -921,6 +921,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
               :value="graphStore.behaviors.hubLeavesKey"
               @change="graphStore.updateBehaviors({ hubLeavesKey: ($event.target as HTMLSelectElement).value })"
             >
+              <option value="auto">Automatic (best split per hub)</option>
               <option value="">Node type</option>
               <option value="rel">Relationship type</option>
               <optgroup v-if="hubLeavesKeyOptions.node.length" label="Node property">
@@ -958,10 +959,25 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
             <span>Don't draw hub–leaf edges (shown on hover and selection)</span>
           </label>
 
+          <label class="checkbox-item">
+            <input
+              type="checkbox"
+              data-testid="hub-leaves-reveal-zoom"
+              :checked="graphStore.behaviors.hubLeavesRevealByZoom"
+              @change="graphStore.updateBehaviors({ hubLeavesRevealByZoom: ($event.target as HTMLInputElement).checked })"
+            />
+            <span>Reveal leaves on zoom (far away, show the inner ones and "+N hidden")</span>
+          </label>
+
           <span class="setting-hint" data-testid="hub-leaves-stats">
             <template v-if="graphStore.hubLeavesStats">
               {{ graphStore.hubLeavesStats.hubs }} {{ graphStore.hubLeavesStats.hubs === 1 ? 'hub' : 'hubs' }} ·
               {{ graphStore.hubLeavesStats.leaves }} leaves arranged
+              <template v-if="graphStore.behaviors.hubLeaves === 'petals' && graphStore.behaviors.hubLeavesKey === 'auto'">
+                <span data-testid="hub-leaves-auto-keys">
+                  · grouped by {{ graphStore.hubLeavesStats.autoKeys?.length ? graphStore.hubLeavesStats.autoKeys.join(', ') : 'nothing (no key splits the leaves)' }}
+                </span>
+              </template>
             </template>
             <template v-else-if="graphStore.behaviors.viewMode !== '3d'">
               No node has {{ graphStore.behaviors.hubLeavesMinLeaves }} or more leaves on this graph.

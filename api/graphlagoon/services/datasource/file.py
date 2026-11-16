@@ -15,6 +15,8 @@ from graphlagoon.models.schemas import (
     CypherQueryRequest,
     Edge,
     ExpandRequest,
+    NeighborSummaryRequest,
+    NeighborSummaryResponse,
     GraphResponse,
     Node,
     SchemaDiscoveryResponse,
@@ -28,6 +30,7 @@ from graphlagoon.services.datasource.base import (
     GraphDatasource,
     PreparedGraphQuery,
     invalid_request,
+    summary_from_rows,
 )
 
 
@@ -140,6 +143,21 @@ class FileDatasource(GraphDatasource):
             frontier = nxt
         out = list(picked.values())
         return _response(nodes, out[: data.edge_limit], len(out) > data.edge_limit)
+
+    async def neighbor_summary(
+        self, context, data: NeighborSummaryRequest
+    ) -> NeighborSummaryResponse:
+        _, edges = await _load(context)
+        counts: dict[tuple[str, str], int] = {}
+        for e in edges:
+            if e.src == data.node_id:
+                key = (e.relationship_type, "out")
+            elif e.dst == data.node_id:
+                key = (e.relationship_type, "in")
+            else:
+                continue
+            counts[key] = counts.get(key, 0) + 1
+        return summary_from_rows((rel, d, n) for (rel, d), n in counts.items())
 
     async def fetch_nodes(
         self, context, node_ids: list[str], columns: Optional[list[str]] = None

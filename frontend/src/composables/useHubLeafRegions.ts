@@ -57,10 +57,12 @@ export function useHubLeafRegions(getGraph3d: () => any) {
     }
   }
 
-  function show(regions: HubLeafRegion[]) {
+  /** hiddenByRegion: leaves reveal-on-zoom hides, per region (the "+N hidden" mark). */
+  function show(regions: HubLeafRegion[], hiddenByRegion: number[] = []) {
     clear();
     if (!scene || regions.length === 0) return;
-    const glyphs = regions.reduce((n, r) => n + regionLabel(r).length, 0);
+    const texts = regions.map((r, i) => regionLabel(r, hiddenByRegion[i] ?? 0));
+    const glyphs = texts.reduce((n, t) => n + t.length, 0);
     if (labels && labelCapacity < glyphs) dropLabels();
     if (!labels) {
       labelCapacity = Math.max(1024, Math.ceil(glyphs * 1.5));
@@ -82,7 +84,7 @@ export function useHubLeafRegions(getGraph3d: () => any) {
       const labelId = `hub-region-${i}`;
       labels!.addLabel({
         id: labelId,
-        text: regionLabel(region),
+        text: texts[i],
         position: new THREE.Vector3(0, 0, 0),
         color: LABEL_COLOR.clone(),
         scale: 1,
