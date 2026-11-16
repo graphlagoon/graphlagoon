@@ -332,6 +332,9 @@ What to expect:
 - **Force layout only.** Ego, hive and the layered layouts place every node
   themselves. The ego layout has its own answer, below; the *Don't draw
   hub–leaf edges* setting and its threshold apply there too.
+- **Far away, a hub's petals share one label** — `356 leaves, 5 groups` —
+  because one label per petal would overlap; zoom in and each petal gets its
+  own again.
 - **Far away, an icon node is a dot.** Below about 7 pixels on screen the
   icon's glyph would be noise, so the node is drawn as a plain disc of its
   colour; the icon comes back above about 9 pixels (two thresholds, so a

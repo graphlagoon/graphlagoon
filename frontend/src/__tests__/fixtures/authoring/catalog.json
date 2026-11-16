@@ -1102,7 +1102,7 @@
   },
   {
    "name": "get_exploration",
-   "summary": "One exploration: title, context, graph_query, revision, last_change and its graph as the person sees it (the saved snapshot with their own layer on top), each node and edge with ``origin`` snapshot | layer."
+   "summary": "One exploration: title, context, graph_query, revision, last_change, ``look`` (its style, labels and layout: the style-preset keys it carries) and its graph as the person sees it (the saved snapshot with their own layer on top), each node and edge with ``origin`` snapshot | layer."
   },
   {
    "name": "get_graph",
