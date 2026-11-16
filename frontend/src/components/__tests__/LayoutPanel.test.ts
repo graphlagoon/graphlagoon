@@ -231,10 +231,12 @@ describe('LayoutPanel — ego ring ordering and edge arcs', () => {
     return { store, openAdvanced, ...utils }
   }
 
-  it('defaults to crossing reduction with same-ring arcs on', async () => {
+  it('defaults to automatic ordering (crossing reduction until ring 1 is crowded) with same-ring arcs on', async () => {
     const { getByTestId, openAdvanced } = await renderEgoPanel()
 
-    expect((getByTestId('ego-ring-ordering') as HTMLSelectElement).value).toBe('barycenter')
+    expect((getByTestId('ego-ring-ordering') as HTMLSelectElement).value).toBe('auto')
+    // No layout has run in this test: the hint says what Automatic will do.
+    expect(getByTestId('ego-ring-ordering-auto').textContent).toContain('sectors when ring 1 is crowded')
 
     await openAdvanced()
     expect((getByTestId('ego-arc-intra-ring') as HTMLInputElement).checked).toBe(true)

@@ -1,6 +1,6 @@
 # Hubs densos: um nó com centenas de vizinhos diretos
 
-> Status (2026-11-16, tarde): **todas as fases implementadas** — FV, ego E1–E6, F0.1–F0.5, F1 (coleções de folhas, sem o aviso por hub), F2 (resumo de vizinhos no painel), F3 (expansão seletiva), FZ (inclui revelar por zoom, D7 = opção desligada) e, de F6, a fonte Latin-1. Chave automática e pétala "Outros" além do plano. Continuam como experimentos de F6: coleções no servidor, motivo de conectores, pétalas em 3D, grau real por membro (D5). Análise de 2026-11-13, branch `feature/context-look-clusters`.
+> Status (2026-11-16, tarde): **todas as fases implementadas** — FV, ego E1–E6, F0.1–F0.5, F1 (coleções de folhas, sem o aviso por hub), F2 (resumo de vizinhos no painel), F3 (expansão seletiva), FZ (inclui revelar por zoom, D7 = opção desligada) e, de F6, a fonte Latin-1. Chave automática e pétala "Outros" além do plano. Desde 2026-11-16 o arranjo, o ocultar por zoom e os setores do ego decidem sozinhos por padrão (*Automatic adjustments*, `utils/autoAdjust.ts`), com chave geral para desligar. Continuam como experimentos de F6: coleções no servidor, motivo de conectores, pétalas em 3D, grau real por membro (D5). Análise de 2026-11-13, branch `feature/context-look-clusters`.
 > Pasta fora do site VitePress (`srcExclude: dev/**`).
 > Incorpora e amplia [ego-crowded-rings-qsa.md](../ego-crowded-rings-qsa.md) (2026-08-28), que tratava só do layout ego e não foi implementado.
 

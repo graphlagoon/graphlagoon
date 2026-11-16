@@ -46,6 +46,7 @@ import { useHubLeafRegions } from '@/composables/useHubLeafRegions';
 import { useNodeBadges } from '@/composables/useNodeBadges';
 import { pixelsPerWorldUnit } from '@/utils/screenScale';
 import { leafCollections, summarizeNeighbors } from '@/utils/neighborSummary';
+import { chooseEgoOrdering, EGO_CROWDED_RING, resolveHubLeavesMode, revealRegions } from '@/utils/autoAdjust';
 import { computeHubLeavesPlan, forceHubLeaves, serializeHubLeavesPlan, snapHubLeaves, zoomHiddenLeaves, type HubLeavesKeyCandidate, type HubLeavesPlan } from '@/utils/hubLeaves';
 
 const emit = defineEmits<{
@@ -120,7 +121,6 @@ function effectiveForceSettings() {
 // Min arc length between ring neighbors in the ego layout (ring radii adapt to this)
 const EGO_MIN_NODE_ARC = 26;
 /** Ring 1 from this many nodes gets the crowded-ring hint in the Layout panel. */
-const EGO_CROWDED_RING = 80;
 
 // Hover debounce state
 let hoverRAF: number | null = null;
@@ -689,7 +689,7 @@ function updateOverlays() {
   guides.rescale();
   // Runs when the camera comes to rest (useGraphCamera): the right moment to
   // reveal or hide leaves, so they do not blink while zooming.
-  if (graphStore.behaviors.hubLeavesRevealByZoom) updateZoomReveal();
+  if (graphStore.behaviors.hubLeavesRevealByZoom !== 'off') updateZoomReveal();
 }
 
 function updateVisuals() {
@@ -1864,7 +1864,7 @@ watch(
 // Hub leaf arrangement: a new shape re-runs the free layout around it (the
 // leaves leave or join the simulation); the implicit-edge toggle is visual only.
 watch(
-  () => [graphStore.behaviors.hubLeaves, graphStore.behaviors.hubLeavesKey, graphStore.behaviors.hubLeavesMinLeaves] as const,
+  () => [graphStore.behaviors.hubLeaves, graphStore.behaviors.hubLeavesKey, graphStore.behaviors.hubLeavesMinLeaves, graphStore.behaviors.autoAdjust] as const,
   () => {
     if (!graph3d) return;
     applyHubLeaves();
@@ -1885,14 +1885,21 @@ watch(
 );
 
 watch(
-  () => graphStore.behaviors.hubLeavesRevealByZoom,
+  () => [graphStore.behaviors.hubLeavesRevealByZoom, graphStore.behaviors.autoAdjust] as const,
   () => updateZoomReveal(),
+);
+// The master switch also governs the ego ring ordering.
+watch(
+  () => graphStore.behaviors.autoAdjust,
+  () => {
+    if (graph3d && graphStore.layoutAlgorithm === 'ego') applyLayoutMode();
+  },
 );
 // A leaf selected while hidden (search, table) comes back.
 watch(
   () => graphStore.selectedNodeIds,
   () => {
-    if (graphStore.behaviors.hubLeavesRevealByZoom) updateZoomReveal();
+    if (graphStore.behaviors.hubLeavesRevealByZoom !== 'off') updateZoomReveal();
   },
   { deep: true },
 );
@@ -1993,7 +2000,7 @@ function restoreModeCurvatures() {
 function hubLeavesActive(): boolean {
   return graphStore.layoutAlgorithm === 'force'
     && graphStore.behaviors.viewMode === '2d-proj'
-    && graphStore.behaviors.hubLeaves !== 'free';
+    && resolveHubLeavesMode(graphStore.behaviors) !== 'free';
 }
 
 /** Edges the arrangement or the ego spokes let position imply (null when none). */
@@ -2081,12 +2088,19 @@ function buildHubLeavesPlan(
     ];
   }
 
+  const mode = resolveHubLeavesMode(b) as 'auto' | 'crown' | 'petals';
+  // Automatic shape with a fixed key: that key is the only candidate (petals if it splits the leaves, else crown).
+  if (mode === 'auto' && !keyCandidates) {
+    const name = key === '' ? 'node type' : key === 'rel' ? 'relationship type' : key.replace(/^node:/, '').replace(/^edge:/, 'edge ');
+    keyCandidates = [{ name, keyOf: keyOfFor(key) }];
+  }
+
   return computeHubLeavesPlan(slim, {
-    mode: b.hubLeaves as 'crown' | 'petals',
+    mode,
     minLeaves: Math.max(2, b.hubLeavesMinLeaves),
     spacing: hubLeafSpacing(),
     hubRadiusOf: (id) => Math.cbrt(nodeById.get(id)?.size ?? 1) * relSize,
-    keyOf: auto ? undefined : keyOfFor(key),
+    keyOf: keyCandidates ? undefined : keyOfFor(key),
     keyCandidates,
   });
 }
@@ -2097,6 +2111,17 @@ function settleHubLeaves(nodes: GraphNode[], links: GraphLink[]) {
   return plan && plan.offsets.size > 0
     ? { plan: serializeHubLeavesPlan(plan), spacing: hubLeafSpacing() }
     : undefined;
+}
+
+/** How many hubs the automatic mode put in petals and in a crown. */
+function autoShapes(plan: HubLeavesPlan): { petals: number; crown: number } {
+  let petals = 0;
+  let crown = 0;
+  for (const shape of plan.shapeByHub.values()) {
+    if (shape === 'petals') petals++;
+    else crown++;
+  }
+  return { petals, crown };
 }
 
 /** (Re)apply the arrangement to the engine: force, immediate snap, regions, stats. */
@@ -2128,6 +2153,7 @@ function applyHubLeaves() {
     implicitEdges: graphStore.hubLeavesStats?.implicitEdges ?? 0,
     autoKeys: [...new Set(hubLeavesPlan.value.keyByHub.values())],
     zoomHidden: zoomHiddenNodeIds.value?.size ?? 0,
+    auto: resolveHubLeavesMode(graphStore.behaviors) === 'auto' ? autoShapes(hubLeavesPlan.value) : undefined,
   };
 }
 
@@ -2142,13 +2168,17 @@ function updateZoomReveal(redraw = true) {
   if (!graph3d || !plan) return;
   let hidden: Set<string> | null = null;
   let byRegion: number[] = [];
-  if (graphStore.behaviors.hubLeavesRevealByZoom) {
+  // 'on': every hub; 'auto': only hubs large enough that far-away leaves are noise.
+  const applies = revealRegions(plan.regions, graphStore.behaviors.hubLeavesRevealByZoom, graphStore.behaviors.autoAdjust);
+  if (applies.some(Boolean)) {
     const ppu = pixelsPerWorldUnit(graph3d);
     const keep = new Set(graphStore.selectedNodeIds);
     if (graphStore.hoveredNodeId) keep.add(graphStore.hoveredNodeId);
-    const r = zoomHiddenLeaves(plan.regions, hubLeafSpacing() * ppu, keep);
+    const r = zoomHiddenLeaves(plan.regions.filter((_, i) => applies[i]), hubLeafSpacing() * ppu, keep);
     hidden = r.hidden.size ? r.hidden : null;
-    byRegion = r.hiddenByRegion;
+    // Back to plan.regions order (the labels are per region).
+    let k = 0;
+    byRegion = applies.map((on) => (on ? r.hiddenByRegion[k++] : 0));
   }
   const signature = byRegion.join(',');
   if (signature === zoomRevealSignature) return;
@@ -2210,6 +2240,31 @@ function computeEgoImplicitSpokes(focusId: string, levels: Map<string, number>, 
     if ((leaves.has(e.src) && e.dst === focusId) || (leaves.has(e.dst) && e.src === focusId)) edgeIds.add(e.edge_id);
   }
   return { edgeIds, leaves: leaves.size, leafIds: leaves };
+}
+
+/** Ring 1 of the ego layout (one hop from the focus) and which of its nodes are leaves, for chooseEgoOrdering. */
+function egoRing1(
+  focusId: string,
+  nodes: Node[],
+  edges: Edge[],
+  ego: { direction: 'both' | 'out' | 'in'; edgeTypes: string[] | null },
+) {
+  const { hops } = computeEgoHops(nodes, edges, { focusNodeId: focusId, direction: ego.direction, edgeTypes: ego.edgeTypes });
+  const degree = new Map<string, Set<string>>();
+  for (const e of edges) {
+    if (e.src === e.dst) continue;
+    let a = degree.get(e.src);
+    if (!a) degree.set(e.src, (a = new Set()));
+    a.add(e.dst);
+    let b = degree.get(e.dst);
+    if (!b) degree.set(e.dst, (b = new Set()));
+    b.add(e.src);
+  }
+  const ring1 = nodes
+    .filter((n) => hops.get(n.node_id) === 1)
+    .map((n) => ({ id: n.node_id, nodeType: n.node_type, properties: n.properties }));
+  const leafIds = new Set(ring1.filter((r) => degree.get(r.id)?.size === 1).map((r) => r.id));
+  return { ring1, leafIds };
 }
 
 /** Pin every laid-out node at its computed position (static layouts). */
@@ -2292,6 +2347,20 @@ function applyModeConstraints() {
         layoutEdges = drawnEdges.filter((e) => !beyondHops!.has(e.src) && !beyondHops!.has(e.dst));
       }
     }
+    // Ring ordering 'auto': sectors when ring 1 is crowded with leaves, else fewest crossings.
+    let ordering = cfg.ego.ringOrdering;
+    let orderingKey = cfg.ego.ringOrderingKey;
+    let autoOrdering: NonNullable<typeof graphStore.egoLayoutStats>['autoOrdering'] = null;
+    if (ordering === 'auto') {
+      if (graphStore.behaviors.autoAdjust) {
+        const choice = chooseEgoOrdering(egoRing1(focusId!, layoutNodes, layoutEdges, cfg.ego));
+        ordering = choice.ordering;
+        orderingKey = choice.ordering === 'property' ? choice.key : null;
+        autoOrdering = { ordering: choice.ordering, key: choice.ordering === 'property' ? choice.key : undefined, reason: choice.reason };
+      } else {
+        ordering = 'barycenter';
+      }
+    }
     const result = computeTreeLayout(layoutNodes, layoutEdges, {
       mode: 'radial',
       focusNodeId: focusId!,
@@ -2300,8 +2369,8 @@ function applyModeConstraints() {
       levelSpacing: cfg.ego.ringSpacing,
       nodeSpacing: EGO_MIN_NODE_ARC,
       orphanPolicy: 'outer-ring',
-      ringOrdering: cfg.ego.ringOrdering,
-      ringOrderingKey: cfg.ego.ringOrderingKey,
+      ringOrdering: ordering,
+      ringOrderingKey: orderingKey,
       crossingHeuristic: cfg.ego.crossingHeuristic,
       crossingSweeps: cfg.ego.crossingSweeps,
       communityMap: cfg.ego.ringOrdering === 'community' ? communityStore.communityMap : null,
@@ -2314,6 +2383,7 @@ function applyModeConstraints() {
       sameRingEdgeCount: result.sameRingEdgeCount,
       siftingSkippedLargeRing: result.siftingSkippedLargeRing,
       crowdedRing: null,
+      autoOrdering,
     };
     const ring1 = result.levelStats.find((st) => st.level === 1 && !st.unreachable);
     if (ring1 && ring1.count >= EGO_CROWDED_RING && graphStore.egoLayoutStats) {

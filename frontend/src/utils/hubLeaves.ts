@@ -13,7 +13,17 @@
  * it runs both on the live engine and in the headless settle worker.
  */
 
-export type HubLeavesMode = 'free' | 'crown' | 'petals';
+/**
+ * 'auto' decides per hub: petals when some key splits its leaves well enough
+ * (AUTO_PETALS_MIN_SCORE), else a crown. See utils/autoAdjust.ts.
+ */
+export type HubLeavesMode = 'auto' | 'free' | 'crown' | 'petals';
+/**
+ * Automatic shape: a key must score at least this (bits, see scoreKey) for
+ * petals; 0.5 is about an 89/11 split of two values. Below it a petal layout
+ * would be one big disc and a sliver, and a crown says the same more simply.
+ */
+export const AUTO_PETALS_MIN_SCORE = 0.5;
 
 /** Golden angle: successive points never line up radially (Vogel 1979). */
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -58,6 +68,8 @@ export interface HubLeavesPlan {
   implicitEdgeIds: Set<string>;
   /** Automatic key (keyCandidates): the candidate chosen for each hub. */
   keyByHub: Map<string, string>;
+  /** The shape each hub got (in 'auto' mode it differs per hub). */
+  shapeByHub: Map<string, 'crown' | 'petals'>;
 }
 
 /** A key the automatic choice may pick: its name (shown to the user) and how it reads a leaf. */
@@ -76,7 +88,11 @@ export interface HubLeavesOptions {
   hubRadiusOf: (hubId: string) => number;
   /** Group key of a leaf (petals). null → MISSING_KEY. Ignored in crown mode. */
   keyOf?: (leafId: string, hubId: string) => string | null;
-  /** Petals, automatic key: each hub picks the best candidate (scoreKey). Wins over keyOf. */
+  /**
+   * Petals, automatic key: each hub picks the best candidate (scoreKey). Wins
+   * over keyOf. Required in 'auto' mode, where a hub whose best candidate
+   * scores under AUTO_PETALS_MIN_SCORE gets a crown instead.
+   */
   keyCandidates?: HubLeavesKeyCandidate[];
   /** Most petals per hub; the smallest groups beyond it share one OTHER_KEY petal. Default 8. */
   maxPetals?: number;
@@ -109,13 +125,13 @@ export function scoreKey(values: (string | null)[], maxPetals = DEFAULT_MAX_PETA
   return (present / values.length) * info * Math.min(1, (maxPetals / k) ** 2);
 }
 
-/** The best candidate for one hub's leaves (first one wins a tie); null when none splits them. */
-export function chooseKey(
+/** The best candidate for one hub's leaves and its score (first one wins a tie); null when none splits them. */
+export function chooseKeyScored(
   leaves: string[],
   hub: string,
   candidates: HubLeavesKeyCandidate[],
   maxPetals = DEFAULT_MAX_PETALS,
-): HubLeavesKeyCandidate | null {
+): { candidate: HubLeavesKeyCandidate; score: number } | null {
   let best: HubLeavesKeyCandidate | null = null;
   let bestScore = 0;
   for (const c of candidates) {
@@ -125,7 +141,17 @@ export function chooseKey(
       bestScore = score;
     }
   }
-  return best;
+  return best ? { candidate: best, score: bestScore } : null;
+}
+
+/** The best candidate for one hub's leaves; null when none splits them. */
+export function chooseKey(
+  leaves: string[],
+  hub: string,
+  candidates: HubLeavesKeyCandidate[],
+  maxPetals = DEFAULT_MAX_PETALS,
+): HubLeavesKeyCandidate | null {
+  return chooseKeyScored(leaves, hub, candidates, maxPetals)?.candidate ?? null;
 }
 
 /** Leaves per hub: a leaf's distinct neighbours, self-loops ignored, are exactly {hub}. */
@@ -189,6 +215,7 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
     regions: [],
     implicitEdgeIds: new Set(),
     keyByHub: new Map(),
+    shapeByHub: new Map(),
   };
   const maxPetals = Math.max(2, opts.maxPetals ?? DEFAULT_MAX_PETALS);
   const d = opts.spacing;
@@ -197,7 +224,13 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
 
   for (const [hub, leaves] of byHub) {
     const inner = opts.hubRadiusOf(hub) + d;
-    if (opts.mode === 'crown') {
+    // Candidates are scored once per hub; 'auto' also uses the score to pick the shape.
+    const scored = opts.mode !== 'crown' && opts.keyCandidates
+      ? chooseKeyScored(leaves, hub, opts.keyCandidates, maxPetals)
+      : null;
+    const crown = opts.mode === 'crown' || (opts.mode === 'auto' && (scored?.score ?? 0) < AUTO_PETALS_MIN_SCORE);
+    plan.shapeByHub.set(hub, crown ? 'crown' : 'petals');
+    if (crown) {
       const offs = spiralOffsets(leaves.length, d, inner);
       leaves.forEach((leaf, i) => plan.offsets.set(leaf, { hub, ...offs[i] }));
       const radius = spiralRadius(leaves.length, d, inner);
@@ -208,9 +241,8 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
 
     let keyOf = opts.keyOf;
     if (opts.keyCandidates) {
-      const chosen = chooseKey(leaves, hub, opts.keyCandidates, maxPetals);
-      keyOf = chosen?.keyOf;
-      if (chosen) plan.keyByHub.set(hub, chosen.name);
+      keyOf = scored?.candidate.keyOf;
+      if (scored) plan.keyByHub.set(hub, scored.candidate.name);
     }
     const groups = new Map<string, string[]>();
     for (const leaf of leaves) {

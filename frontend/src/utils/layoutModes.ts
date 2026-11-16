@@ -455,7 +455,8 @@ export function computeTreeLayout(
   options: TreeLayoutOptions
 ): TreeLayoutResult {
   const { mode, focusNodeId, direction, edgeTypes, levelSpacing, nodeSpacing, orphanPolicy } = options;
-  const ringOrdering: RingOrdering = options.ringOrdering ?? 'id';
+  // 'auto' is resolved by the caller (utils/autoAdjust.ts); unresolved it means its fallback.
+  const ringOrdering: RingOrdering = options.ringOrdering === 'auto' ? 'barycenter' : (options.ringOrdering ?? 'id');
   const adjacency = buildAdjacency(edges, direction, edgeTypes);
   const allIds = nodes.map((n) => n.node_id).sort();
   const idSet = new Set(allIds);

@@ -442,6 +442,24 @@ function resetBehaviors() {
             want. Opening a saved exploration always loads its own data regardless.
           </p>
 
+          <h4>Automatic adjustments</h4>
+          <label class="checkbox-item">
+            <input
+              type="checkbox"
+              data-testid="behavior-auto-adjust"
+              :checked="behaviors.autoAdjust"
+              @change="graphStore.updateBehaviors({ autoAdjust: !behaviors.autoAdjust })"
+            />
+            Let the layout adapt to the graph
+          </label>
+          <p class="behavior-desc">
+            Settings left on <em>Automatic</em> decide from the loaded graph: a hub with many
+            leaves gets them laid out next to it (force layout), a crowded first ring is
+            ordered in sectors (ego layout), and a hub with thousands of leaves hides the outer
+            ones when zoomed out. The status bar says when one of them acted. Off: nothing is
+            arranged, sectored or hidden unless you set it yourself in the Layout panel.
+          </p>
+
           <h4>Property Loading</h4>
           <div class="radio-list">
             <label class="radio-item">
