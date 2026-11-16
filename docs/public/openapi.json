@@ -3,7 +3,7 @@
   "info": {
     "title": "Graph Lagoon Studio",
     "description": "Graph visualization, exploration and investigations",
-    "version": "0.42.0"
+    "version": "0.43.0"
   },
   "paths": {
     "/graphlagoon/api/config": {
@@ -2631,6 +2631,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GraphResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/graphlagoon/api/graph-contexts/{context_id}/neighbor-summary": {
+      "post": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "Neighbor Summary",
+        "description": "Count a node's edges per relationship type and direction, before expanding.\n\nLets the client ask what to load when a node has many neighbours.\n``supported`` is false when the datasource cannot count; the client then\nexpands as before.",
+        "operationId": "graph_neighbor_summary",
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Context Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NeighborSummaryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeighborSummaryResponse"
                 }
               }
             }
@@ -14558,6 +14612,71 @@
         ],
         "title": "MetricDefinition",
         "description": "A writer-authored JavaScript metric evaluated per node/edge.\n\nThe code runs only in the frontend, inside a sandboxed Web Worker with a\nhard timeout. The server never executes it — it stores the definition and\nvalidates its shape. Definitions are returned only to users with write\naccess on the context (see routers.graph_contexts.context_to_response), so\nread-only users never receive, let alone run, another user's code."
+      },
+      "NeighborSummaryBucket": {
+        "properties": {
+          "relationship_type": {
+            "type": "string",
+            "title": "Relationship Type"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out"
+            ],
+            "title": "Direction",
+            "description": "'out' when the node is the edge's source (self-loops count as out)"
+          },
+          "edges": {
+            "type": "integer",
+            "title": "Edges"
+          }
+        },
+        "type": "object",
+        "required": [
+          "relationship_type",
+          "direction",
+          "edges"
+        ],
+        "title": "NeighborSummaryBucket"
+      },
+      "NeighborSummaryRequest": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id"
+        ],
+        "title": "NeighborSummaryRequest"
+      },
+      "NeighborSummaryResponse": {
+        "properties": {
+          "supported": {
+            "type": "boolean",
+            "title": "Supported",
+            "default": true
+          },
+          "total_edges": {
+            "type": "integer",
+            "title": "Total Edges",
+            "default": 0
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/NeighborSummaryBucket"
+            },
+            "type": "array",
+            "title": "Buckets"
+          }
+        },
+        "type": "object",
+        "title": "NeighborSummaryResponse",
+        "description": "How many edges touch a node, per relationship type and direction.\n\n``supported=False`` means the context's datasource cannot count before\nloading; the client then expands as before and warns if the result was cut."
       },
       "Node": {
         "properties": {
