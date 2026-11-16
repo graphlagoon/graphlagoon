@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import font from '@/assets/fonts/Roboto-Regular.json'
 
-// The canvas label atlas (scripts/gen-label-font.cjs): Portuguese and Spanish
+// The canvas label atlas (assets/fonts/gen-label-font.cjs): Portuguese and Spanish
 // names must draw with their accents, and the symbols labels use must exist.
 describe('label font atlas', () => {
   const chars = new Set((font as { chars: { char: string }[] }).chars.map((c) => c.char))
