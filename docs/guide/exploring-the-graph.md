@@ -237,6 +237,24 @@ nodes and edges are added. On sources that can't expand (some REST
 connections), the affordances are hidden rather than disabled. A failure
 leaves the graph untouched and reports through the error modal.
 
+**A node with many edges asks first.** Expanding counts the node's edges in
+the source before loading anything. Up to 50, they all load at once. Above
+that a dialog lists them by relationship type, incoming and outgoing, with a
+**Load up to** limit (at most 1000): untick the types you don't need, then
+**Expand**. The node's own edges load first; whatever room the limit leaves
+goes to links among its neighbours.
+
+When an expand stops before every edge of the node is on the canvas:
+
+- a toast says where it stopped — `Expand stopped at 150 edges (150 of its
+  380 edges are on the canvas)`;
+- the node carries a mark under it, `150 of 380 loaded`, until the rest
+  arrives (expand it again) or you run a new query.
+
+Counting needs the source to support it: SQL warehouse, Neptune and file
+contexts do. On a REST connection expanding works as before, and still warns
+when it was cut.
+
 ## Hubs with many leaves
 
 ::: tip TL;DR
@@ -263,16 +281,29 @@ the investigation is about.
 |---|---|
 | **Free** (default) | Nothing changes. |
 | **Crown around the hub** | All leaves on one spiral around the hub, labelled `N leaves`. |
-| **Petals, one per group** | One disc per value of **Group leaves by**: node type, relationship type, a node property, or a property of the edge to the hub (a partner's role, for example). Largest group first; leaves without the value form their own `(no value)` petal. Edge properties are only there when the edges came from a Cypher query: opening a context and *Expand neighbors* load edges without their properties, so every leaf would land in `(no value)` — group by a node property instead. |
+| **Petals, one per group** | One disc per value of **Group leaves by**: **Automatic** (the default; see below), node type, relationship type, a node property, or a property of the edge to the hub (a partner's role, for example). Largest group first; leaves without the value form their own `(no value)` petal. At most 8 petals: past that, the smallest groups share one, labelled `N other values (count)`. Edge properties are only there when the edges came from a Cypher query: opening a context and *Expand neighbors* load edges without their properties, so every leaf would land in `(no value)` — group by a node property instead. |
 | **Hub: at least this many leaves** | A node counts as a hub from this many leaves on (10 by default). |
 | **Don't draw hub–leaf edges** | On by default: the position already says who the leaf belongs to. The edges come back when you hover or select the leaf or the hub. |
+| **Reveal leaves on zoom** | Off by default. Zoomed out, each region keeps only its inner leaves and its label adds `+N hidden`; zooming in brings the rest back, a step at a time. No node moves, and a selected leaf always stays. |
+
+**Automatic grouping** looks, for each hub, at every key the loaded graph
+offers — node type, relationship type, each node property, each property of
+the edge to the hub — and takes the one that splits that hub's leaves best:
+most leaves with a value, split as evenly as possible into at most about 8
+groups. A property with one value per leaf (a name, a document number) never
+wins, nor one that puts almost every leaf in the same group. Two hubs may be
+grouped by different keys; the panel says which ones it took (`grouped by
+qualificacao`).
 
 What to expect:
 
-- **Nothing is hidden.** The node count does not change and every leaf is
-  selectable, coloured and sized like any other node. While the hub edges are
-  not drawn the status bar says so — `292 hub edges not drawn ✕` — and ✕
-  draws them again, so a screenshot never passes them off as absent.
+- **Nothing is hidden** unless you turn on *Reveal leaves on zoom*. The node
+  count does not change and every leaf is selectable, coloured and sized
+  like any other node. While the hub edges are not drawn the status bar says
+  so — `292 hub edges not drawn ✕` — and ✕ draws them again, so a screenshot
+  never passes them off as absent. With *Reveal leaves on zoom* on, the
+  regions say `+N hidden` and the status bar `N leaves hidden until you zoom
+  in ✕`; ✕ turns it off.
 - **2D only.** In 3D the panel offers to switch.
 - **Force layout only.** Ego, hive and the layered layouts place every node
   themselves. The ego layout has its own answer, below; the *Don't draw
@@ -284,7 +315,8 @@ What to expect:
 - The setting is a behavior: it is saved with the exploration and in a
   [style preset](./style-presets.md), and a context can turn it on for
   everyone with `default_behaviors`, for example
-  `{"hubLeaves": "petals", "hubLeavesKey": "edge:role"}`.
+  `{"hubLeaves": "petals", "hubLeavesKey": "edge:role"}` (`"auto"` for
+  automatic grouping; `"hubLeavesRevealByZoom": true` to reveal on zoom).
 
 ## Ego layout with a crowded ring
 
@@ -374,6 +406,9 @@ The strip under the canvas is the graph's honesty panel:
 - `N hub edges not drawn ✕` — [hubs with many leaves](#hubs-with-many-leaves)
   has its leaves next to the hub and their edges to it left out of the
   drawing; ✕ draws them.
+- `N leaves hidden until you zoom in ✕` — *Reveal leaves on zoom* is on and
+  the camera is far enough to hide the outer leaves of each hub region; ✕
+  shows them all.
 - `Showing only: <group> ✕` — a [show only](#show-only) is hiding the other
   nodes; ✕ shows them again. Hover it for how many nodes it keeps.
 - `⚠ truncated` — the edge limit was hit and this is a **partial view**;

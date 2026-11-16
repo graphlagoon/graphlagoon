@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
+  chooseKey,
   computeHubLeavesPlan,
+  OTHER_KEY,
+  scoreKey,
   findHubLeaves,
   forceHubLeaves,
   MISSING_KEY,
@@ -121,6 +124,66 @@ describe('computeHubLeavesPlan', () => {
   });
 });
 
+describe('automatic key and the Other petal', () => {
+  const role = (i: number) => ['Socio', 'Administrador', 'Diretor', 'Conselheiro'][i % 4]
+
+  it('scoreKey: an even split beats a skewed one; one value, or one value per leaf, scores ~0', () => {
+    const n = 100
+    const even = Array.from({ length: n }, (_, i) => role(i))
+    const skewed = Array.from({ length: n }, (_, i) => (i < 97 ? 'Person' : 'Company'))
+    const unique = Array.from({ length: n }, (_, i) => `name-${i}`)
+    expect(scoreKey(even)).toBeGreaterThan(scoreKey(skewed))
+    expect(scoreKey(Array(n).fill('Person'))).toBe(0)
+    expect(scoreKey(unique)).toBeLessThan(scoreKey(skewed))
+    expect(scoreKey(unique)).toBeLessThan(scoreKey(even) / 4)
+    // Missing values cost coverage.
+    expect(scoreKey(even.map((v, i) => (i % 2 ? null : v)))).toBeLessThan(scoreKey(even))
+  })
+
+  it('chooseKey picks per hub; the plan reports the choice', () => {
+    const links = [...star(40, false)]
+    for (let i = 0; i < 40; i++) links.push({ id: `f${i}`, source: `far-${i}`, target: 'hub2' })
+    const typeOf = (l: string) => (l.startsWith('leaf') ? 'Person' : ['Person', 'Company'][Number(l.split('-')[1]) % 2])
+    const roleOf = (l: string) => (l.startsWith('leaf') ? role(Number(l.split('-')[1])) : 'Socio')
+    const candidates = [
+      { name: 'node type', keyOf: typeOf },
+      { name: 'qualificacao', keyOf: roleOf },
+    ]
+    expect(chooseKey(['leaf-0', 'leaf-1', 'leaf-2'], 'hub', candidates)?.name).toBe('qualificacao')
+    const plan = computeHubLeavesPlan(links, { ...base, mode: 'petals', keyCandidates: candidates })
+    expect(plan.keyByHub.get('hub')).toBe('qualificacao')
+    expect(plan.keyByHub.get('hub2')).toBe('node type')
+    expect(plan.regions.filter((r) => r.hub === 'hub').map((r) => r.key).sort()).toEqual(['Administrador', 'Conselheiro', 'Diretor', 'Socio'])
+  })
+
+  it('no candidate splits the leaves: one petal of missing values, no key reported', () => {
+    const plan = computeHubLeavesPlan(star(20, false), { ...base, mode: 'petals', keyCandidates: [{ name: 'x', keyOf: () => 'same' }] })
+    expect(plan.keyByHub.size).toBe(0)
+    expect(plan.regions).toHaveLength(1)
+  })
+
+  it('more values than maxPetals: the largest keep a petal, the rest share Other with its value count', () => {
+    // 12 values: value-0 has 12 leaves, value-1 11, … value-11 1 (78 leaves)
+    const links: { id: string; source: string; target: string }[] = []
+    const keyByLeaf = new Map<string, string>()
+    let i = 0
+    for (let v = 0; v < 12; v++) {
+      for (let j = 0; j < 12 - v; j++, i++) {
+        links.push({ id: `e${i}`, source: `l${i}`, target: 'hub' })
+        keyByLeaf.set(`l${i}`, `value-${v}`)
+      }
+    }
+    const plan = computeHubLeavesPlan(links, { ...base, mode: 'petals', keyOf: (l) => keyByLeaf.get(l)!, maxPetals: 8 })
+    expect(plan.regions).toHaveLength(8)
+    const other = plan.regions[7]
+    expect(other.key).toBe(OTHER_KEY)
+    expect(other.values).toBe(5)
+    expect(other.count).toBe(5 + 4 + 3 + 2 + 1)
+    expect(regionLabel(other)).toBe('5 other values (15)')
+    expect(plan.offsets.size).toBe(78)
+  })
+})
+
 describe('forceHubLeaves', () => {
   it('puts leaves at hub + offset (also when pinned) and pushes other nodes out of the arrangement', () => {
     const plan = computeHubLeavesPlan(star(30), { ...base, mode: 'crown' });
@@ -198,3 +261,29 @@ describe('snapHubLeaves', () => {
     expect(Math.hypot(nodes[3].x, nodes[3].y)).toBeGreaterThanOrEqual(plan.hubRadius.get('hub')!);
   });
 });
+
+describe('reveal on zoom (D7)', () => {
+  it('revealCount: all when leaves are far enough apart on screen; fewer, in powers of 2, when closer', async () => {
+    const { revealCount, REVEAL_MIN_PX, REVEAL_MIN_LEAVES } = await import('../hubLeaves')
+    expect(revealCount(300, REVEAL_MIN_PX)).toBe(300)
+    expect(revealCount(300, REVEAL_MIN_PX * 0.75)).toBe(150) // (0.75)² = 0.56 → 1/2
+    expect(revealCount(300, REVEAL_MIN_PX * 0.5)).toBe(75) // 1/4
+    expect(revealCount(300, 0.01)).toBe(REVEAL_MIN_LEAVES)
+    expect(revealCount(2, 0.01)).toBe(2)
+    // A small zoom change inside one step does not change the count.
+    expect(revealCount(300, REVEAL_MIN_PX * 0.72)).toBe(revealCount(300, REVEAL_MIN_PX * 0.74))
+  })
+
+  it('zoomHiddenLeaves hides the outer leaves of each region, never a kept one, and counts per region', async () => {
+    const { zoomHiddenLeaves, REVEAL_MIN_PX } = await import('../hubLeaves')
+    const plan = computeHubLeavesPlan(star(100, false), { ...base, mode: 'crown' })
+    const region = plan.regions[0]
+    const outer = region.members[region.members.length - 1]
+    const { hidden, hiddenByRegion } = zoomHiddenLeaves(plan.regions, REVEAL_MIN_PX * 0.5, new Set([outer]))
+    expect(hidden.has(region.members[0])).toBe(false)
+    expect(hidden.has(outer)).toBe(false)
+    expect(hiddenByRegion).toEqual([100 - 25 - 1])
+    expect(regionLabel(region, hiddenByRegion[0])).toBe('100 leaves +74 hidden')
+    expect(zoomHiddenLeaves(plan.regions, REVEAL_MIN_PX).hidden.size).toBe(0)
+  })
+})

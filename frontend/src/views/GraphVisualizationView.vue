@@ -25,6 +25,7 @@ import QueryErrorModal from '@/components/QueryErrorModal.vue';
 import QueryRunningState from '@/components/QueryRunningState.vue';
 import ClusterProgramPanel, { type ClustersTab } from '@/components/ClusterProgramPanel.vue';
 import ClusterNodeModal from '@/components/ClusterNodeModal.vue';
+import ExpandNeighborsDialog from '@/components/ExpandNeighborsDialog.vue';
 import CommunityNodeModal from '@/components/CommunityNodeModal.vue';
 import ClusterProgramRunHost from '@/components/ClusterProgramRunHost.vue';
 import { resetMetricsCalculator } from '@/services/metricsCalculator';
@@ -1111,6 +1112,9 @@ watch(
       @close="schemaDriftModalOpen = false"
       @applied="schemaDriftModalOpen = false"
     />
+
+    <!-- Selective expand: what to load from a node with many edges -->
+    <ExpandNeighborsDialog />
 
     <!-- Cluster Node Modal -->
     <ClusterNodeModal

@@ -158,6 +158,8 @@ export interface AppearanceContext {
   // Layout-mode hiding (e.g. ego layout's maxHops cutoff). Additive with all
   // other hide sources — a node hidden by a filter stays hidden here too.
   layoutHiddenNodeIds: Set<string> | null;
+  /** Hub leaves hidden while zoomed out (reveal on zoom, utils/hubLeaves.ts zoomHiddenLeaves). */
+  zoomHiddenNodeIds?: Set<string> | null;
 
   // Table filter (DataTablePanel sync). KEEP-sets: null = no table filter;
   // non-null = only ids in the set stay visible. Applied visually (like
@@ -268,7 +270,7 @@ export function computeNodeAppearance(
   // Visibility checks
   const isTypeHidden = ctx.hasNodeTypeFilter && !ctx.nodeTypeFilterSet.has(nodeType);
   const isSearchHidden = ctx.searchHiddenIds?.has(nodeId) ?? false;
-  const isLayoutHidden = ctx.layoutHiddenNodeIds?.has(nodeId) ?? false;
+  const isLayoutHidden = (ctx.layoutHiddenNodeIds?.has(nodeId) ?? false) || (ctx.zoomHiddenNodeIds?.has(nodeId) ?? false);
   const isFocusHidden =
     ctx.edgeLensMode === 'hide' &&
     ctx.focusedNodeIds !== null &&

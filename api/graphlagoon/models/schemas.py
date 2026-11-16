@@ -1291,6 +1291,30 @@ class ExpandRequest(BaseModel):
     )
 
 
+class NeighborSummaryRequest(BaseModel):
+    node_id: str
+
+
+class NeighborSummaryBucket(BaseModel):
+    relationship_type: str
+    direction: Literal["in", "out"] = Field(
+        description="'out' when the node is the edge's source (self-loops count as out)"
+    )
+    edges: int
+
+
+class NeighborSummaryResponse(BaseModel):
+    """How many edges touch a node, per relationship type and direction.
+
+    ``supported=False`` means the context's datasource cannot count before
+    loading; the client then expands as before and warns if the result was cut.
+    """
+
+    supported: bool = True
+    total_edges: int = 0
+    buckets: list[NeighborSummaryBucket] = Field(default_factory=list)
+
+
 class GraphQueryRequest(BaseModel):
     """Request to execute a graph query (SQL).
 

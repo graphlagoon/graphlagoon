@@ -14,6 +14,7 @@ import type {
   PropertyColumn,
   SubgraphRequest,
   ExpandRequest,
+  NeighborSummaryResponse,
   ExplorationState,
   TextFormatRule,
   TextFormatState,
@@ -124,6 +125,9 @@ export type ProgressiveLoadMode = 'auto' | 'always' | 'never';
  */
 export const PROGRESSIVE_LOAD_MIN_PROPERTIES = 10;
 
+/** Above this many edges, expanding asks what to load (Linkurious uses the same 50). */
+export const EXPAND_DIALOG_THRESHOLD = 50;
+
 export interface QueryRunOptions {
   preserveGraphQuery?: boolean;
   preserveSelections?: boolean;
@@ -160,8 +164,9 @@ const DEFAULT_BEHAVIORS = {
   afterQueryClusterProgram: '',   // After a query you run: '' (off) or a cluster program id to draw its clusters. Not on restore.
   hiddenMenuActions: [] as string[], // Ids of built-in right-click items to hide (utils/builtInMenuItems.ts). Always replaced, never mutated in place.
   hubLeaves: 'free' as HubLeavesMode, // Force layout, 2D: 'free' (default) leaves the simulation alone; 'crown' lays a hub's leaves (nodes whose only neighbour is that hub) on a spiral around it; 'petals' in one disc per value of hubLeavesKey. Nothing is grouped or hidden — see utils/hubLeaves.ts.
-  hubLeavesKey: '',               // Petals key: '' = node type, 'rel' = relationship type, 'node:<prop>' / 'edge:<prop>' = a node or hub-edge property.
+  hubLeavesKey: 'auto',           // Petals key: 'auto' = per hub, the key that splits its leaves best; '' = node type, 'rel' = relationship type, 'node:<prop>' / 'edge:<prop>' = a node or hub-edge property.
   hubLeavesMinLeaves: 10,         // A node is a hub when it has at least this many leaves.
+  hubLeavesRevealByZoom: false,   // With an arrangement on: zoomed out, each region shows only its inner leaves and says "+N hidden"; zooming in reveals the rest. Nothing moves (D7, off by default).
   hubLeavesImplicitEdges: true,   // With an arrangement on, hub–leaf edges are not drawn (position carries the link); they come back on hover and selection.
   progressiveLoad: 'auto' as ProgressiveLoadMode, // 'auto' (default) uses progressive loading only when the node table is wide enough to pay for it — see shouldLoadProgressively(). 'always' forces it, 'never' fetches everything in one request. Progressive load trades a HIGHER TOTAL cost for a much faster first paint: measured on a 100-column table it cut first paint by 79% while raising total work by 76%, and on a narrow table it was simply slower. 'auto' exists so neither extreme is the default.
 };
@@ -584,7 +589,8 @@ export const useGraphStore = defineStore('graph', () => {
    * leaving the user toggling something with no visible effect.
    */
   /** What the hub leaf arrangement did on the canvas (derived, NOT persisted); null when off. */
-  const hubLeavesStats = ref<{ hubs: number; leaves: number; implicitEdges: number } | null>(null);
+  /** autoKeys: with the automatic key, the keys the hubs chose (utils/hubLeaves.ts chooseKey); zoomHidden: leaves hidden until zoom in (hubLeavesRevealByZoom). */
+  const hubLeavesStats = ref<{ hubs: number; leaves: number; implicitEdges: number; autoKeys?: string[]; zoomHidden?: number } | null>(null);
 
   const egoLayoutStats = ref<{
     nonTreeEdgeCount: number;
@@ -1155,6 +1161,8 @@ export const useGraphStore = defineStore('graph', () => {
     const clusterStore = useClusterStore();
 
     const result: Edge[] = [];
+    /** Edges redrawn to a closed cluster: always summed per (src, dst, type) (hubs-densos F0.3). */
+    const remapped: Edge[] = [];
 
     // Build map of node -> cluster for closed clusters
     const nodeToCluster = clusterStore.nodeToClosedClusters;
@@ -1180,7 +1188,7 @@ export const useGraphStore = defineStore('graph', () => {
       const srcCluster = srcClusters[0];
       const dstCluster = dstClusters[0];
 
-      result.push({
+      remapped.push({
         ...edge,
         src: srcCluster || edge.src,
         dst: dstCluster || edge.dst,
@@ -1192,8 +1200,11 @@ export const useGraphStore = defineStore('graph', () => {
       });
     });
 
-    // Display only: the store's edges stay one per transaction.
-    return aesthetics.value.sumParallelEdges ? aggregateParallelEdges(result, edgeValueOf) : result;
+    // Display only: the store's edges stay one per transaction. A cluster's
+    // edges are summed even with "Sum parallel edges" off: 300 members linked
+    // to one hub would otherwise draw a fan of 300 parallel edges.
+    if (aesthetics.value.sumParallelEdges) return aggregateParallelEdges([...result, ...remapped], edgeValueOf);
+    return remapped.length ? [...result, ...aggregateParallelEdges(remapped, edgeValueOf)] : result;
   });
 
   // Multi-edge detection for enhanced edges (includes cluster-created multi-edges)
@@ -1902,6 +1913,67 @@ export const useGraphStore = defineStore('graph', () => {
       resolveDatasourceDescriptor(currentContext.value).restOps?.subgraph !== false,
   );
 
+  // ── Selective expand: count before loading, "N of M loaded" ─────────
+  /** Every edge a node has in the source, from its last neighbour summary. */
+  const expandTotals = ref(new Map<string, number>());
+  /** A summary waiting for the user to choose what to load (ExpandNeighborsDialog). */
+  const expandChoice = shallowRef<{ nodeId: string; summary: NeighborSummaryResponse } | null>(null);
+
+  function ownEdgeCount(nodeId: string): number {
+    let n = 0;
+    for (const e of edges.value) if (e.src === nodeId || e.dst === nodeId) n++;
+    return n;
+  }
+
+  /** Nodes whose source has more edges than the canvas holds: {loaded, total}. */
+  const expandProgress = computed(() => {
+    const out = new Map<string, { loaded: number; total: number }>();
+    if (expandTotals.value.size === 0) return out;
+    const loaded = new Map<string, number>();
+    for (const e of edges.value) {
+      if (expandTotals.value.has(e.src)) loaded.set(e.src, (loaded.get(e.src) ?? 0) + 1);
+      if (e.dst !== e.src && expandTotals.value.has(e.dst)) loaded.set(e.dst, (loaded.get(e.dst) ?? 0) + 1);
+    }
+    for (const [id, total] of expandTotals.value) {
+      const n = loaded.get(id) ?? 0;
+      if (n < total && nodes.value.some((x) => x.node_id === id)) out.set(id, { loaded: n, total });
+    }
+    return out;
+  });
+
+  // A new query starts a new picture: counts from the previous one do not apply.
+  watch(queryRunSeq, () => {
+    if (expandTotals.value.size) expandTotals.value = new Map();
+  });
+
+  /**
+   * The canvas's "Expand neighbors" (context menu, Alt+click): counts the
+   * node's edges first; up to EXPAND_DIALOG_THRESHOLD loads them all, above
+   * it opens a dialog to choose relationship types. A datasource that cannot
+   * count expands as before.
+   */
+  async function requestExpand(nodeId: string) {
+    if (investigationMode.value || !currentContext.value || !supportsExpand.value) {
+      return expandFromNode(nodeId, 1);
+    }
+    let summary: NeighborSummaryResponse | null = null;
+    loading.value = true;
+    loadingMessage.value = 'Counting neighbors…';
+    try {
+      summary = await api.neighborSummary(currentContext.value.id, nodeId);
+    } catch {
+      summary = null; // counting is a courtesy; expanding still works without it
+    } finally {
+      loading.value = false;
+    }
+    if (!summary?.supported) return expandFromNode(nodeId, 1);
+    expandTotals.value = new Map(expandTotals.value).set(nodeId, summary.total_edges);
+    if (summary.total_edges <= EXPAND_DIALOG_THRESHOLD) {
+      return expandFromNode(nodeId, 1, [], Math.max(100, summary.total_edges));
+    }
+    expandChoice.value = { nodeId, summary };
+  }
+
   async function expandFromNode(
     nodeId: string,
     depth: number = 2,
@@ -1943,6 +2015,16 @@ export const useGraphStore = defineStore('graph', () => {
         void runQueryEnrichment({
           only: { edges: new Set(newEdges.map((e) => e.edge_id)), nodes: new Set(newNodes.map((n) => n.node_id)) },
         });
+      }
+      // Nothing hidden silently: a cut expansion says so. When the node's own
+      // edges are all here (known from its summary), only links among its
+      // neighbours were cut, which is not worth a warning.
+      if (response.truncated) {
+        const total = expandTotals.value.get(nodeId);
+        if (total === undefined || ownEdgeCount(nodeId) < total) {
+          const of = total !== undefined ? ` (${ownEdgeCount(nodeId)} of its ${total} edges are on the canvas)` : '';
+          useToast().warning(`Expand stopped at ${request.edge_limit} edges${of}.`, 6000);
+        }
       }
     } catch (e: unknown) {
       queryError.value = extractErrorDetails(e, 'Failed to expand node');
@@ -3570,6 +3652,8 @@ export const useGraphStore = defineStore('graph', () => {
     enrichmentError.value = null;
     schemaDriftSuspected.value = false;
     truncated.value = false;
+    expandTotals.value = new Map();
+    expandChoice.value = null;
     selectedNodeIds.value.clear();
     selectedEdgeIds.value.clear();
     nodePositions.value.clear();
@@ -3747,6 +3831,10 @@ export const useGraphStore = defineStore('graph', () => {
     defaultAesthetics,
     expandFromNode,
     supportsExpand,
+    requestExpand,
+    expandChoice,
+    expandTotals,
+    expandProgress,
     investigationMode,
     roleColors,
     loadInvestigationGraph,

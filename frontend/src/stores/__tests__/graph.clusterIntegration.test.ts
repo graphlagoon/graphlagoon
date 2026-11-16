@@ -203,12 +203,13 @@ describe('enhancedEdges', () => {
 // enhancedMultiEdgeStats
 // ============================================================================
 
-describe('enhancedMultiEdgeStats', () => {
-  it('detects multi-edges created by cluster aggregation', () => {
+describe('cluster edges are summed (hubs-densos F0.3)', () => {
+  it('members linked the same way to one neighbour draw one edge with the count, even with Sum parallel edges off', () => {
     const graphStore = setupGraph()
     const clusterStore = useClusterStore()
+    expect(graphStore.aesthetics.sumParallelEdges).toBeFalsy()
 
-    // n1->n3 (e2) and n2->n3 (e3) both become c-persons->n3
+    // n1->n3 (e2) and n2->n3 (e3), both WORKS_AT, become one c-persons->n3
     clusterStore.createCluster({
       cluster_id: 'c-persons',
       cluster_name: 'Persons',
@@ -218,9 +219,29 @@ describe('enhancedMultiEdgeStats', () => {
       node_ids: ['n1', 'n2'],
     })
 
+    const toN3 = graphStore.enhancedEdges.filter(e => e.src === 'c-persons' && e.dst === 'n3')
+    expect(toN3).toHaveLength(1)
+    expect(toN3[0].__agg?.count).toBe(2)
+    expect(toN3[0].__agg?.edgeIds.sort()).toEqual(['cluster_c-persons_n3_e2', 'cluster_c-persons_n3_e3'])
+    // Edges that do not touch a cluster are not summed.
+    expect(graphStore.enhancedEdges.find(e => e.edge_id === 'e4')?.__agg).toBeUndefined()
+    expect(graphStore.enhancedMultiEdgeStats.hasMultiEdges).toBe(false)
+  })
+
+  it('different relationship types stay separate edges', () => {
+    const graphStore = setupGraph()
+    graphStore.edges = [...graphStore.edges, { edge_id: 'e6', src: 'n2', dst: 'n3', relationship_type: 'OWNS' }]
+    useClusterStore().createCluster({
+      cluster_id: 'c-persons',
+      cluster_name: 'Persons',
+      cluster_class: 'test',
+      figure: 'circle',
+      state: 'closed',
+      node_ids: ['n1', 'n2'],
+    })
+    const toN3 = graphStore.enhancedEdges.filter(e => e.src === 'c-persons' && e.dst === 'n3')
+    expect(toN3.map(e => e.relationship_type).sort()).toEqual(['OWNS', 'WORKS_AT'])
     expect(graphStore.enhancedMultiEdgeStats.hasMultiEdges).toBe(true)
-    // c-persons->n3 has 2 edges (from e2 and e3)
-    expect(graphStore.enhancedMultiEdgeStats.multiEdgePairCount).toBeGreaterThanOrEqual(1)
   })
 })
 

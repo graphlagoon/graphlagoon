@@ -21,6 +21,10 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const SPIRAL_FACTOR = 1 / 1.75;
 /** Bucket for leaves the key does not resolve on. Sorted last, never scattered. */
 export const MISSING_KEY = '(no value)';
+/** Petal that gathers the smallest groups when a key has more values than maxPetals. */
+export const OTHER_KEY = 'Other';
+/** More petals than this stop reading as groups; the smallest go to OTHER_KEY. */
+export const DEFAULT_MAX_PETALS = 8;
 
 export interface HubLeavesLink {
   id: string;
@@ -38,6 +42,10 @@ export interface HubLeafRegion {
   dy: number;
   /** Radius of the region's disc. */
   radius: number;
+  /** OTHER_KEY only: how many values it gathers. */
+  values?: number;
+  /** Leaf ids from the centre of the disc outwards (spiral order). */
+  members: string[];
 }
 
 export interface HubLeavesPlan {
@@ -48,6 +56,14 @@ export interface HubLeavesPlan {
   regions: HubLeafRegion[];
   /** Edge ids between a leaf and its hub (drawn implicitly by position). */
   implicitEdgeIds: Set<string>;
+  /** Automatic key (keyCandidates): the candidate chosen for each hub. */
+  keyByHub: Map<string, string>;
+}
+
+/** A key the automatic choice may pick: its name (shown to the user) and how it reads a leaf. */
+export interface HubLeavesKeyCandidate {
+  name: string;
+  keyOf: (leafId: string, hubId: string) => string | null;
 }
 
 export interface HubLeavesOptions {
@@ -60,6 +76,56 @@ export interface HubLeavesOptions {
   hubRadiusOf: (hubId: string) => number;
   /** Group key of a leaf (petals). null → MISSING_KEY. Ignored in crown mode. */
   keyOf?: (leafId: string, hubId: string) => string | null;
+  /** Petals, automatic key: each hub picks the best candidate (scoreKey). Wins over keyOf. */
+  keyCandidates?: HubLeavesKeyCandidate[];
+  /** Most petals per hub; the smallest groups beyond it share one OTHER_KEY petal. Default 8. */
+  maxPetals?: number;
+}
+
+/**
+ * How well a key splits a hub's leaves into petals, 0 when it does not.
+ * coverage × information, where information is the Shannon entropy of the
+ * values (bits, at most log2(maxPetals)), discounted by (maxPetals/k)² when the
+ * key has more values than petals. So an even split by role (5 values) beats
+ * node type when almost every leaf is a Person, and a name or an id (one value
+ * per leaf) scores near zero.
+ */
+export function scoreKey(values: (string | null)[], maxPetals = DEFAULT_MAX_PETALS): number {
+  const counts = new Map<string, number>();
+  let present = 0;
+  for (const v of values) {
+    if (v === null) continue;
+    present++;
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  const k = counts.size;
+  if (k < 2 || present === 0) return 0;
+  let h = 0;
+  for (const c of counts.values()) {
+    const p = c / present;
+    h -= p * Math.log2(p);
+  }
+  const info = Math.min(h, Math.log2(maxPetals));
+  return (present / values.length) * info * Math.min(1, (maxPetals / k) ** 2);
+}
+
+/** The best candidate for one hub's leaves (first one wins a tie); null when none splits them. */
+export function chooseKey(
+  leaves: string[],
+  hub: string,
+  candidates: HubLeavesKeyCandidate[],
+  maxPetals = DEFAULT_MAX_PETALS,
+): HubLeavesKeyCandidate | null {
+  let best: HubLeavesKeyCandidate | null = null;
+  let bestScore = 0;
+  for (const c of candidates) {
+    const score = scoreKey(leaves.map((l) => c.keyOf(l, hub)), maxPetals);
+    if (score > bestScore + 1e-9) {
+      best = c;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 /** Leaves per hub: a leaf's distinct neighbours, self-loops ignored, are exactly {hub}. */
@@ -122,7 +188,9 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
     hubRadius: new Map(),
     regions: [],
     implicitEdgeIds: new Set(),
+    keyByHub: new Map(),
   };
+  const maxPetals = Math.max(2, opts.maxPetals ?? DEFAULT_MAX_PETALS);
   const d = opts.spacing;
   const byHub = findHubLeaves(links, opts.minLeaves);
   if (byHub.size === 0) return plan;
@@ -134,18 +202,32 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
       leaves.forEach((leaf, i) => plan.offsets.set(leaf, { hub, ...offs[i] }));
       const radius = spiralRadius(leaves.length, d, inner);
       plan.hubRadius.set(hub, radius);
-      plan.regions.push({ hub, key: '', count: leaves.length, dx: 0, dy: 0, radius });
+      plan.regions.push({ hub, key: '', count: leaves.length, dx: 0, dy: 0, radius, members: leaves });
       continue;
     }
 
+    let keyOf = opts.keyOf;
+    if (opts.keyCandidates) {
+      const chosen = chooseKey(leaves, hub, opts.keyCandidates, maxPetals);
+      keyOf = chosen?.keyOf;
+      if (chosen) plan.keyByHub.set(hub, chosen.name);
+    }
     const groups = new Map<string, string[]>();
     for (const leaf of leaves) {
-      const key = opts.keyOf?.(leaf, hub) ?? MISSING_KEY;
+      const key = keyOf?.(leaf, hub) ?? MISSING_KEY;
       let g = groups.get(key);
       if (!g) groups.set(key, (g = []));
       g.push(leaf);
     }
-    const ordered = [...groups.entries()].sort(compareGroups);
+    let ordered = [...groups.entries()].sort(compareGroups);
+    // Too many petals: the largest keep theirs, the rest share one "Other".
+    let otherValues = 0;
+    if (ordered.length > maxPetals) {
+      const kept = ordered.slice(0, maxPetals - 1);
+      const rest = ordered.slice(maxPetals - 1);
+      otherValues = rest.length;
+      ordered = [...kept, [OTHER_KEY, rest.flatMap(([, m]) => m)]];
+    }
     const radii = ordered.map(([, members]) => spiralRadius(members.length, d));
     const gap = d;
     const circumference = radii.reduce((s, r) => s + 2 * r + gap, 0);
@@ -162,7 +244,9 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
       const cy = ring * Math.sin(angle);
       const offs = spiralOffsets(members.length, d);
       members.forEach((leaf, i) => plan.offsets.set(leaf, { hub, dx: cx + offs[i].dx, dy: cy + offs[i].dy }));
-      plan.regions.push({ hub, key, count: members.length, dx: cx, dy: cy, radius: R });
+      const region: HubLeafRegion = { hub, key, count: members.length, dx: cx, dy: cy, radius: R, members };
+      if (otherValues && gi === ordered.length - 1) region.values = otherValues;
+      plan.regions.push(region);
       outer = Math.max(outer, ring + R);
     });
     plan.hubRadius.set(hub, outer);
@@ -180,8 +264,59 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
  * Text of a region label ("Person (114)", or "285 leaves" for a crown). ASCII
  * punctuation only: the label atlas covers ASCII 32–126 (FastLabelRenderer).
  */
-export function regionLabel(region: HubLeafRegion): string {
-  return region.key === '' ? `${region.count} leaves` : `${region.key} (${region.count})`;
+export function regionLabel(region: HubLeafRegion, hidden = 0): string {
+  let text: string;
+  if (region.key === '') text = `${region.count} leaves`;
+  else if (region.values) text = `${region.values} other values (${region.count})`;
+  else text = `${region.key} (${region.count})`;
+  return hidden > 0 ? `${text} +${hidden} hidden` : text;
+}
+
+// ---------------------------------------------------------------------------
+// Reveal on zoom (D7, opt-in): far away a region shows only its inner leaves
+// ---------------------------------------------------------------------------
+
+/** Below this distance on screen between two leaf centres, leaves start to be hidden. */
+export const REVEAL_MIN_PX = 6;
+/** A region never shows fewer leaves than this (or all, if it has fewer). */
+export const REVEAL_MIN_LEAVES = 3;
+
+/**
+ * How many of a region's n leaves to show when two neighbouring leaves are
+ * `spacingPx` apart on screen. Keeps the shown leaves about REVEAL_MIN_PX apart
+ * (density ∝ spacing²), quantized to powers of 2 so a small zoom does not
+ * redraw and the count does not flicker around a threshold.
+ */
+export function revealCount(n: number, spacingPx: number): number {
+  if (!(spacingPx > 0) || spacingPx >= REVEAL_MIN_PX) return n;
+  const frac = (spacingPx / REVEAL_MIN_PX) ** 2;
+  const q = 2 ** Math.floor(Math.log2(frac));
+  return Math.min(n, Math.max(REVEAL_MIN_LEAVES, Math.ceil(n * q)));
+}
+
+/**
+ * Leaves hidden at this zoom: the outer part of each region (inner leaves stay,
+ * so nothing moves), never one in `keep` (selected, hovered). `hiddenByRegion`
+ * is in plan.regions order, for the "+N hidden" marks.
+ */
+export function zoomHiddenLeaves(
+  regions: HubLeafRegion[],
+  spacingPx: number,
+  keep: Set<string> = new Set(),
+): { hidden: Set<string>; hiddenByRegion: number[] } {
+  const hidden = new Set<string>();
+  const hiddenByRegion = regions.map((r) => {
+    const shown = revealCount(r.members.length, spacingPx);
+    let n = 0;
+    for (let i = shown; i < r.members.length; i++) {
+      const id = r.members[i];
+      if (keep.has(id)) continue;
+      hidden.add(id);
+      n++;
+    }
+    return n;
+  });
+  return { hidden, hiddenByRegion };
 }
 
 // ---------------------------------------------------------------------------
