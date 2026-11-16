@@ -35,6 +35,25 @@ const toolbarStore = useToolbarStore();
 
 const clusterCount = computed(() => clusterStore.clusters.length);
 
+/** Why the automatic leaf arrangement acted, for the chip's tooltip. */
+const autoHubLeavesTitle = computed(() => {
+  const stats = graphStore.hubLeavesStats;
+  if (!stats?.auto) return '';
+  const shapes = [
+    stats.auto.petals ? `${stats.auto.petals} in petals${stats.autoKeys?.length ? ` by ${stats.autoKeys.join(', ')}` : ''}` : '',
+    stats.auto.crown ? `${stats.auto.crown} in a crown` : '',
+  ].filter(Boolean).join(', ');
+  return `Leaves are on Automatic: ${stats.hubs === 1 ? 'a node has' : `${stats.hubs} nodes have`} ${graphStore.behaviors.hubLeavesMinLeaves} or more neighbours linked to nothing else, so those are laid out next to ${stats.hubs === 1 ? 'it' : 'them'} (${shapes}). Click ✕ to leave them to the simulation (Layout → Hubs with many leaves).`;
+});
+
+/** The ego ring ordering on Automatic chose sectors (not its fallback). */
+const autoEgoSectors = computed(() => {
+  if (graphStore.layoutAlgorithm !== 'ego' || graphStore.layoutModeConfig.ego.ringOrdering !== 'auto') return null;
+  const auto = graphStore.egoLayoutStats?.autoOrdering;
+  if (!auto || auto.ordering === 'barycenter') return null;
+  return { by: auto.ordering === 'node-type' ? 'node type' : auto.key ?? '', reason: auto.reason };
+});
+
 /** Nodes drawn, when filters or "show only" hide some of the nodes loaded. */
 const shownOf = computed(() => {
   const total = graphStore.nodes.length;
@@ -102,6 +121,39 @@ const isolationTitle = computed(() => {
       {{ clusterCount }} clusters
     </button>
 
+    <!-- Automatic adjustments that acted (utils/autoAdjust.ts): what and why on
+         hover, ✕ turns that one off. -->
+    <span
+      v-if="graphStore.hubLeavesStats?.auto"
+      class="status-isolation"
+      data-testid="status-auto-hub-leaves"
+      :title="autoHubLeavesTitle"
+    >
+      Auto: <strong>{{ graphStore.hubLeavesStats.hubs }}</strong> {{ graphStore.hubLeavesStats.hubs === 1 ? 'hub' : 'hubs' }} arranged
+      <button
+        type="button"
+        class="status-isolation-clear"
+        data-testid="status-auto-hub-leaves-off"
+        aria-label="Stop arranging leaves automatically"
+        @click="graphStore.updateBehaviors({ hubLeaves: 'free' })"
+      >✕</button>
+    </span>
+    <span
+      v-if="autoEgoSectors"
+      class="status-isolation"
+      data-testid="status-auto-ego-ordering"
+      :title="`Ring ordering is on Automatic: ${autoEgoSectors.reason}, so the ring is in sectors by ${autoEgoSectors.by}. Click ✕ for fewest crossings (Layout → Ring ordering).`"
+    >
+      Auto: ring 1 in sectors by <strong>{{ autoEgoSectors.by }}</strong>
+      <button
+        type="button"
+        class="status-isolation-clear"
+        data-testid="status-auto-ego-ordering-off"
+        aria-label="Order the rings by fewest crossings"
+        @click="graphStore.updateLayoutModeConfig({ ego: { ringOrdering: 'barycenter' } })"
+      >✕</button>
+    </span>
+
     <!-- Hub leaf arrangement: hub–leaf edges are left out of the drawing. Said
          here so a screenshot never passes them off as absent. -->
     <span
@@ -132,7 +184,7 @@ const isolationTitle = computed(() => {
         class="status-isolation-clear"
         data-testid="status-hub-leaves-zoom-show"
         aria-label="Show every leaf"
-        @click="graphStore.updateBehaviors({ hubLeavesRevealByZoom: false })"
+        @click="graphStore.updateBehaviors({ hubLeavesRevealByZoom: 'off' })"
       >✕</button>
     </span>
 

@@ -85,15 +85,32 @@ describe('per-context default behaviors', () => {
       expect(resolveInitialBehaviors({ mapStylePan: 'false' }).mapStylePan).toBe(true)
     })
 
-    it('hub leaf arrangement: off by default, a context can turn it on, unknown shapes are rejected', () => {
+    it('hub leaf arrangement: automatic by default, a context can fix it or turn it off, unknown shapes are rejected', () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-      expect(resolveInitialBehaviors(undefined).hubLeaves).toBe('free')
+      const defaults = resolveInitialBehaviors(undefined)
+      expect(defaults.hubLeaves).toBe('auto')
+      expect(defaults.hubLeavesMinLeaves).toBe(30)
+      expect(defaults.hubLeavesRevealByZoom).toBe('auto')
+      expect(defaults.autoAdjust).toBe(true)
       const on = resolveInitialBehaviors({ hubLeaves: 'petals', hubLeavesKey: 'edge:qualificacao' })
       expect(on.hubLeaves).toBe('petals')
       expect(on.hubLeavesKey).toBe('edge:qualificacao')
       expect(on.hubLeavesImplicitEdges).toBe(true)
-      expect(resolveInitialBehaviors({ hubLeaves: 'sunflower' }).hubLeaves).toBe('free')
+      expect(resolveInitialBehaviors({ hubLeaves: 'free' }).hubLeaves).toBe('free')
+      expect(resolveInitialBehaviors({ hubLeaves: 'sunflower' }).hubLeaves).toBe('auto')
+    })
+
+    it('the master switch and reveal-on-zoom: a context sets them; the two-day boolean form still loads', () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      expect(resolveInitialBehaviors({ autoAdjust: false }).autoAdjust).toBe(false)
+      expect(resolveInitialBehaviors({ autoAdjust: 'false' }).autoAdjust).toBe(true)
+      expect(resolveInitialBehaviors({ hubLeavesRevealByZoom: 'on' }).hubLeavesRevealByZoom).toBe('on')
+      // Saved between 2026-11-16 and the enum: true/false.
+      expect(resolveInitialBehaviors({ hubLeavesRevealByZoom: true }).hubLeavesRevealByZoom).toBe('on')
+      expect(resolveInitialBehaviors({ hubLeavesRevealByZoom: false }).hubLeavesRevealByZoom).toBe('off')
+      expect(resolveInitialBehaviors({ hubLeavesRevealByZoom: 'sometimes' }).hubLeavesRevealByZoom).toBe('auto')
     })
   })
 

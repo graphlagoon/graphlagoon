@@ -279,11 +279,52 @@ from what is loaded:
 "Linked to nothing else" means among the loaded nodes: a neighbour may have
 links you have not expanded yet.
 
+## Automatic adjustments
+
+Some layout settings decide by themselves, from the shape of the graph you
+loaded, whether to act. Each one is an ordinary setting whose value is
+**Automatic** by default; pick any other value and that setting stops
+deciding.
+
+| Setting on Automatic | Acts when | What it does | You can tell by |
+|---|---|---|---|
+| Layout → [Hubs with many leaves](#hubs-with-many-leaves) | Force layout, 2D, and a node has 30 or more leaves (the *Hub: at least this many leaves* slider) | Lays that hub's leaves next to it: in petals when a type or property splits them reasonably (about 90/10 or better), otherwise in a crown. Decided per hub. | `Auto: 2 hubs arranged ✕` in the status bar; hover it for the reason |
+| Layout → Hubs with many leaves → *Reveal leaves on zoom* | An arranged hub has 2,000 or more leaves | Zoomed out, hides that hub's outer leaves and says `+N hidden`. Smaller hubs keep every leaf drawn. | `N leaves hidden until you zoom in ✕` |
+| Layout → Ego → [*Ring ordering*](#ego-layout-with-a-crowded-ring) | Ring 1 has 80 or more nodes and at least half are linked only to the focus | Orders the ring in sectors by the type or property that splits it best; otherwise *Fewest crossings*, as before. | `Auto: ring 1 in sectors by qualificacao ✕` |
+
+How to turn it off:
+
+- **One of them:** the ✕ on its status-bar chip, or pick a fixed value in the
+  Layout panel (*Free*, *Never*, *Fewest crossings*).
+- **All of them:** Behaviors → **Automatic adjustments → Let the layout adapt
+  to the graph**. Off, every setting on *Automatic* does nothing; the settings
+  themselves are not changed, so turning it back on restores them.
+- **For everyone on a context** (or a whole server), in `default_behaviors`:
+  `{"autoAdjust": false}`, or a single one, for example
+  `{"hubLeaves": "free"}`.
+
+What to expect:
+
+- **A decision is never saved as if you had made it.** The exploration stores
+  *Automatic*, not "petals by role": reopen it after expanding more nodes and
+  it decides again from what is loaded then. To freeze a look, pick the fixed
+  value.
+- **Explorations saved before this existed keep their look.** They stored
+  *Free* (and *Fewest crossings*) explicitly; only new views, and saved ones
+  with no value stored, start on *Automatic*.
+- **The same graph gives the same decision.** No randomness, no dependence on
+  the camera — except *Reveal leaves on zoom*, whose whole point is the zoom.
+- Nothing here groups nodes into [clusters](./clusters.md) or removes data;
+  folding a hub's leaves into one node stays a manual step
+  ([Group leaf neighbors](#a-node-s-neighbours)).
+
 ## Hubs with many leaves
 
 ::: tip TL;DR
 **Layout → Hubs with many leaves** lays the nodes linked only to a hub right
-next to it, in a crown or in one petal per group, each with a count.
+next to it, in a crown or in one petal per group, each with a count. On
+*Automatic* (the default) it does so by itself for hubs with 30 or more
+leaves — see [Automatic adjustments](#automatic-adjustments).
 **Use it when** one node has hundreds of direct neighbours (a company's
 partner register, an account with many counterparties) and the force layout
 turns them into an unreadable disc. **Not the tool for** reducing what is
@@ -303,12 +344,13 @@ the investigation is about.
 
 | Setting | What it does |
 |---|---|
-| **Free** (default) | Nothing changes. |
+| **Automatic** (default) | For each hub with enough leaves: petals when a type or property splits its leaves, otherwise a crown. The panel says what each hub got (`petals (1), crown (1) · grouped by qualificacao`). With a fixed **Group leaves by**, that key is the only one tried. |
+| **Free** | Nothing changes: the simulation places the leaves. |
 | **Crown around the hub** | All leaves on one spiral around the hub, labelled `N leaves`. |
 | **Petals, one per group** | One disc per value of **Group leaves by**: **Automatic** (the default; see below), node type, relationship type, a node property, or a property of the edge to the hub (a partner's role, for example). Largest group first; leaves without the value form their own `(no value)` petal. At most 8 petals: past that, the smallest groups share one, labelled `N other values (count)`. Edge properties are only there when the edges came from a Cypher query: opening a context and *Expand neighbors* load edges without their properties, so every leaf would land in `(no value)` — group by a node property instead. |
-| **Hub: at least this many leaves** | A node counts as a hub from this many leaves on (10 by default). |
+| **Hub: at least this many leaves** | A node counts as a hub from this many leaves on (30 by default). |
 | **Don't draw hub–leaf edges** | On by default: the position already says who the leaf belongs to. The edges come back when you hover or select the leaf or the hub. |
-| **Reveal leaves on zoom** | Off by default. Zoomed out, each region keeps only its inner leaves and its label adds `+N hidden`; zooming in brings the rest back, a step at a time. No node moves, and a selected leaf always stays. |
+| **Reveal leaves on zoom** | *Automatic* (default): only for hubs with 2,000 or more leaves. *Always*: every arranged hub. *Never*: every leaf drawn at any zoom. When it applies: zoomed out, each region keeps only its inner leaves and its label adds `+N hidden`; zooming in brings the rest back, a step at a time. No node moves, and a selected leaf always stays. |
 
 **Automatic grouping** looks, for each hub, at every key the loaded graph
 offers — node type, relationship type, each node property, each property of
@@ -321,11 +363,12 @@ qualificacao`).
 
 What to expect:
 
-- **Nothing is hidden** unless you turn on *Reveal leaves on zoom*. The node
+- **Nothing is hidden** unless *Reveal leaves on zoom* applies (by default,
+  only on hubs with thousands of leaves). The node
   count does not change and every leaf is selectable, coloured and sized
   like any other node. While the hub edges are not drawn the status bar says
   so — `292 hub edges not drawn ✕` — and ✕ draws them again, so a screenshot
-  never passes them off as absent. With *Reveal leaves on zoom* on, the
+  never passes them off as absent. Where *Reveal leaves on zoom* applies, the
   regions say `+N hidden` and the status bar `N leaves hidden until you zoom
   in ✕`; ✕ turns it off.
 - **2D only.** In 3D the panel offers to switch.
@@ -347,8 +390,10 @@ What to expect:
 - The setting is a behavior: it is saved with the exploration and in a
   [style preset](./style-presets.md), and a context can turn it on for
   everyone with `default_behaviors`, for example
-  `{"hubLeaves": "petals", "hubLeavesKey": "edge:role"}` (`"auto"` for
-  automatic grouping; `"hubLeavesRevealByZoom": true` to reveal on zoom).
+  `{"hubLeaves": "petals", "hubLeavesKey": "edge:role"}`. Values:
+  `hubLeaves` `"auto"` | `"free"` | `"crown"` | `"petals"`; `hubLeavesKey`
+  `"auto"`, `""` (node type), `"rel"`, `"node:<prop>"`, `"edge:<prop>"`;
+  `hubLeavesRevealByZoom` `"auto"` | `"on"` | `"off"`.
 
 ## Ego layout with a crowded ring
 
@@ -366,8 +411,13 @@ Now:
   `1 (380, 12 bands)`.
 - **Sectors get a caption with their count** when *Ring ordering* is *Sector
   by type* or *by property* (`Socio (153)`), so the ring answers "how many of
-  each" at a glance. A crowded ring 1 shows a hint in the panel with a
-  shortcut to sector it.
+  each" at a glance. On *Automatic* (the default) a ring 1 with 80 or more
+  nodes, most of them linked only to the focus, is sectored by itself by the
+  type or property that splits it best; any other ring keeps *Fewest
+  crossings*. The panel says which it chose and why, and so does the status
+  bar ([Automatic adjustments](#automatic-adjustments)). With a fixed
+  ordering, a crowded ring 1 shows a hint in the panel with a shortcut to
+  sector it.
 - **Spokes to the focus's leaves are not drawn** when *Don't draw hub–leaf
   edges* is on (the default) and the focus has at least as many leaves as the
   hub threshold — the ring already says they are one hop away. The status bar
@@ -438,7 +488,10 @@ The strip under the canvas is the graph's honesty panel:
 - `N hub edges not drawn ✕` — [hubs with many leaves](#hubs-with-many-leaves)
   has its leaves next to the hub and their edges to it left out of the
   drawing; ✕ draws them.
-- `N leaves hidden until you zoom in ✕` — *Reveal leaves on zoom* is on and
+- `Auto: N hubs arranged ✕` and `Auto: ring 1 in sectors by <key> ✕` — an
+  [automatic adjustment](#automatic-adjustments) acted; hover for the reason,
+  ✕ turns that one off.
+- `N leaves hidden until you zoom in ✕` — *Reveal leaves on zoom* applies and
   the camera is far enough to hide the outer leaves of each hub region; ✕
   shows them all.
 - `Showing only: <group> ✕` — a [show only](#show-only) is hiding the other

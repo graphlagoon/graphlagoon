@@ -6,6 +6,7 @@ import { useMetricsStore } from '@/stores/metrics';
 import { useSimilarityStore } from '@/stores/similarity';
 import type { LayoutAlgorithm, RingOrdering, CrossingHeuristic } from '@/types/graph';
 import { Play, Square, Flame, Shuffle, ChevronDown, ChevronRight, HelpCircle, X } from 'lucide-vue-next';
+import { AUTO_REVEAL_MIN_LEAVES } from '@/utils/autoAdjust';
 
 const graphStore = useGraphStore();
 const communityStore = useCommunityStore();
@@ -114,13 +115,27 @@ function setEgoMaxHops(raw: number) {
   graphStore.updateLayoutModeConfig({ ego: { maxHops: raw === 0 ? null : raw } });
 }
 
+// Ring ordering 'auto' resolves, with the layout, to a concrete strategy
+// (utils/autoAdjust.ts); the hints below describe the one in force.
+const egoAutoOrdering = computed(() =>
+  egoConfig.value.ringOrdering === 'auto' ? graphStore.egoLayoutStats?.autoOrdering ?? null : null,
+);
+const egoOrdering = computed<RingOrdering>(() =>
+  egoConfig.value.ringOrdering === 'auto' ? egoAutoOrdering.value?.ordering ?? 'barycenter' : egoConfig.value.ringOrdering,
+);
+const egoOrderingKey = computed(() =>
+  egoConfig.value.ringOrdering === 'auto' ? egoAutoOrdering.value?.key ?? null : egoConfig.value.ringOrderingKey,
+);
+const autoOff = computed(() => !graphStore.behaviors.autoAdjust);
+const hubLeavesMode = computed(() => graphStore.behaviors.hubLeaves);
+
 /**
  * How many nodes actually carry the attribute the chosen sector strategy groups
  * by. Graphs here are heterogeneous — a node may simply not have the field — so
  * the panel reports coverage instead of letting the layout degrade silently.
  */
 const egoSectorCoverage = computed(() => {
-  const ordering = egoConfig.value.ringOrdering;
+  const ordering = egoOrdering.value;
   const nodes = graphStore.nodes;
   if (ordering === 'id' || ordering === 'barycenter' || nodes.length === 0) return null;
 
@@ -130,7 +145,7 @@ const egoSectorCoverage = computed(() => {
     if (ordering === 'node-type') value = node.node_type;
     else if (ordering === 'community') value = communityStore.communityMap.get(node.node_id);
     else {
-      const key = (egoConfig.value.ringOrderingKey ?? '').replace(/^prop:/, '');
+      const key = (egoOrderingKey.value ?? '').replace(/^prop:/, '');
       value = key ? node.properties?.[key] : undefined;
     }
     if (value !== undefined && value !== null && value !== '') withValue++;
@@ -150,7 +165,7 @@ const egoOrderingDegraded = computed(
  */
 const egoCrossingReductionIsNoop = computed(
   () =>
-    egoConfig.value.ringOrdering === 'barycenter' &&
+    egoOrdering.value === 'barycenter' &&
     graphStore.egoLayoutStats !== null &&
     graphStore.egoLayoutStats.nonTreeEdgeCount === 0
 );
@@ -158,7 +173,7 @@ const egoCrossingReductionIsNoop = computed(
 /** Sifting was requested but a ring exceeded the interaction-time budget. */
 const egoSiftingSkipped = computed(
   () =>
-    egoConfig.value.ringOrdering === 'barycenter' &&
+    egoOrdering.value === 'barycenter' &&
     egoConfig.value.crossingHeuristic === 'sifting' &&
     graphStore.egoLayoutStats?.siftingSkippedLargeRing === true
 );
@@ -335,12 +350,23 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
           :value="egoConfig.ringOrdering"
           @change="graphStore.updateLayoutModeConfig({ ego: { ringOrdering: ($event.target as HTMLSelectElement).value as RingOrdering } })"
         >
+          <option value="auto">Automatic{{ autoOff ? ' (disabled in Behaviors)' : '' }}</option>
           <option value="barycenter">Fewest crossings</option>
           <option value="node-type">Sector by node type</option>
           <option value="community">Sector by community</option>
           <option value="property">Sector by property</option>
           <option value="id">None (by id)</option>
         </select>
+
+        <span v-if="egoConfig.ringOrdering === 'auto'" class="setting-hint" data-testid="ego-ring-ordering-auto">
+          <template v-if="autoOff">Automatic adjustments are off (Behaviors): fewest crossings.</template>
+          <template v-else-if="egoAutoOrdering">
+            Automatic:
+            {{ egoAutoOrdering.ordering === 'barycenter' ? 'fewest crossings' : egoAutoOrdering.ordering === 'node-type' ? 'sectors by node type' : `sectors by ${egoAutoOrdering.key}` }}
+            — {{ egoAutoOrdering.reason }}.
+          </template>
+          <template v-else>Automatic: sectors when ring 1 is crowded with leaves, else fewest crossings.</template>
+        </span>
 
         <select
           v-if="egoConfig.ringOrdering === 'property'"
@@ -388,7 +414,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
       </div>
 
       <template v-if="showEgoAdvanced">
-        <div v-if="egoConfig.ringOrdering === 'barycenter'" class="setting-item">
+        <div v-if="egoOrdering === 'barycenter'" class="setting-item">
           <label>
             <span class="setting-label">Crossing heuristic</span>
           </label>
@@ -424,7 +450,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         </div>
 
         <div
-          v-if="egoConfig.ringOrdering === 'barycenter' && egoConfig.crossingHeuristic !== 'sifting'"
+          v-if="egoOrdering === 'barycenter' && egoConfig.crossingHeuristic !== 'sifting'"
           class="setting-item"
         >
           <label>
@@ -504,7 +530,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
             Ring 1 has {{ graphStore.egoLayoutStats.crowdedRing.count }} nodes<template v-if="graphStore.egoLayoutStats.crowdedRing.bands > 1">
             in {{ graphStore.egoLayoutStats.crowdedRing.bands }} bands</template><template v-if="graphStore.egoLayoutStats.crowdedRing.leaves">,
             {{ graphStore.egoLayoutStats.crowdedRing.leaves }} of them linked only to the focus</template>.
-            <template v-if="egoConfig.ringOrdering !== 'property' && egoConfig.ringOrdering !== 'node-type'">
+            <template v-if="egoOrdering !== 'property' && egoOrdering !== 'node-type'">
               <button type="button" class="inline-action" data-testid="ego-crowded-sector-type" @click="graphStore.updateLayoutModeConfig({ ego: { ringOrdering: 'node-type' } })">Sector by type</button>
               or by a property (Ring ordering above) to see how many of each.
             </template>
@@ -895,28 +921,40 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
           Lay the nodes linked only to a hub right next to it. Every node stays on the canvas.
         </span>
         <select
+          class="setting-select"
           data-testid="hub-leaves-mode"
           :value="graphStore.behaviors.hubLeaves"
-          @change="graphStore.updateBehaviors({ hubLeaves: ($event.target as HTMLSelectElement).value as 'free' | 'crown' | 'petals' })"
+          @change="graphStore.updateBehaviors({ hubLeaves: ($event.target as HTMLSelectElement).value as 'auto' | 'free' | 'crown' | 'petals' })"
         >
+          <option value="auto">Automatic{{ autoOff ? ' (disabled in Behaviors)' : '' }}</option>
           <option value="free">Free (the simulation places them)</option>
           <option value="crown">Crown around the hub</option>
           <option value="petals">Petals, one per group</option>
         </select>
 
-        <template v-if="graphStore.behaviors.hubLeaves !== 'free'">
+        <span v-if="hubLeavesMode === 'auto'" class="setting-hint" data-testid="hub-leaves-auto-hint">
+          <template v-if="autoOff">Automatic adjustments are off (Behaviors): leaves are left to the simulation.</template>
+          <template v-else>
+            Automatic: a hub with {{ graphStore.behaviors.hubLeavesMinLeaves }} or more leaves gets petals when a
+            property splits its leaves, otherwise a crown.
+          </template>
+        </span>
+
+        <template v-if="hubLeavesMode !== 'free' && !(hubLeavesMode === 'auto' && autoOff)">
           <span
             v-if="graphStore.behaviors.viewMode === '3d'"
-            class="setting-hint setting-hint-warn"
+            class="setting-hint"
+            :class="{ 'setting-hint-warn': hubLeavesMode !== 'auto' }"
             data-testid="hub-leaves-3d-hint"
           >
             Leaves are arranged in 2D only.
             <button type="button" class="inline-action" data-testid="hub-leaves-to-2d" @click="graphStore.updateBehaviors({ viewMode: '2d-proj' })">Switch to 2D</button>
           </span>
 
-          <label v-if="graphStore.behaviors.hubLeaves === 'petals'" class="setting-item">
+          <label v-if="hubLeavesMode === 'petals' || hubLeavesMode === 'auto'" class="setting-item">
             <span class="setting-label">Group leaves by</span>
             <select
+              class="setting-select"
               data-testid="hub-leaves-key"
               :value="graphStore.behaviors.hubLeavesKey"
               @change="graphStore.updateBehaviors({ hubLeavesKey: ($event.target as HTMLSelectElement).value })"
@@ -959,21 +997,35 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
             <span>Don't draw hub–leaf edges (shown on hover and selection)</span>
           </label>
 
-          <label class="checkbox-item">
-            <input
-              type="checkbox"
+          <label class="setting-item">
+            <span class="setting-label">Reveal leaves on zoom</span>
+            <span class="setting-hint">Far away, show only each group's inner leaves and "+N hidden"; zooming in brings the rest back. Automatic: only for hubs with that many leaves.</span>
+            <select
+              class="setting-select"
               data-testid="hub-leaves-reveal-zoom"
-              :checked="graphStore.behaviors.hubLeavesRevealByZoom"
-              @change="graphStore.updateBehaviors({ hubLeavesRevealByZoom: ($event.target as HTMLInputElement).checked })"
-            />
-            <span>Reveal leaves on zoom (far away, show the inner ones and "+N hidden")</span>
+              :value="graphStore.behaviors.hubLeavesRevealByZoom"
+              @change="graphStore.updateBehaviors({ hubLeavesRevealByZoom: ($event.target as HTMLSelectElement).value as 'auto' | 'on' | 'off' })"
+            >
+              <option value="auto">Automatic ({{ AUTO_REVEAL_MIN_LEAVES.toLocaleString() }}+ leaves){{ autoOff ? ' — disabled' : '' }}</option>
+              <option value="on">Always</option>
+              <option value="off">Never</option>
+            </select>
           </label>
 
           <span class="setting-hint" data-testid="hub-leaves-stats">
             <template v-if="graphStore.hubLeavesStats">
               {{ graphStore.hubLeavesStats.hubs }} {{ graphStore.hubLeavesStats.hubs === 1 ? 'hub' : 'hubs' }} ·
               {{ graphStore.hubLeavesStats.leaves }} leaves arranged
-              <template v-if="graphStore.behaviors.hubLeaves === 'petals' && graphStore.behaviors.hubLeavesKey === 'auto'">
+              <template v-if="graphStore.hubLeavesStats.auto">
+                <span data-testid="hub-leaves-auto-shapes">
+                  ·
+                  <template v-if="graphStore.hubLeavesStats.auto.petals">petals ({{ graphStore.hubLeavesStats.auto.petals }})</template><template v-if="graphStore.hubLeavesStats.auto.petals && graphStore.hubLeavesStats.auto.crown">, </template><template v-if="graphStore.hubLeavesStats.auto.crown">crown ({{ graphStore.hubLeavesStats.auto.crown }})</template>
+                </span>
+                <span v-if="graphStore.hubLeavesStats.autoKeys?.length" data-testid="hub-leaves-auto-keys">
+                  · grouped by {{ graphStore.hubLeavesStats.autoKeys.join(', ') }}
+                </span>
+              </template>
+              <template v-else-if="graphStore.behaviors.hubLeaves === 'petals' && graphStore.behaviors.hubLeavesKey === 'auto'">
                 <span data-testid="hub-leaves-auto-keys">
                   · grouped by {{ graphStore.hubLeavesStats.autoKeys?.length ? graphStore.hubLeavesStats.autoKeys.join(', ') : 'nothing (no key splits the leaves)' }}
                 </span>

@@ -262,6 +262,32 @@ describe('snapHubLeaves', () => {
   });
 });
 
+describe("mode 'auto': the shape is decided per hub", () => {
+  it('petals where a key splits the leaves, a crown where none does; nothing below the threshold', () => {
+    const links = [...star(40, false)]
+    for (let i = 0; i < 40; i++) links.push({ id: `f${i}`, source: `far-${i}`, target: 'hub2' })
+    for (let i = 0; i < 4; i++) links.push({ id: `s${i}`, source: `tiny-${i}`, target: 'hub3' })
+    const role = (l: string) => ['Socio', 'Administrador', 'Diretor'][Number(l.split('-')[1]) % 3]
+    const candidates = [
+      // hub: three even roles; hub2: 39 Person + 1 Company (0.17 bits, under the minimum)
+      { name: 'qualificacao', keyOf: (l: string) => (l.startsWith('leaf') ? role(l) : null) },
+      { name: 'node type', keyOf: (l: string) => (l === 'far-0' ? 'Company' : 'Person') },
+    ]
+    const plan = computeHubLeavesPlan(links, { ...base, minLeaves: 30, mode: 'auto', keyCandidates: candidates })
+    expect([...plan.shapeByHub]).toEqual([['hub', 'petals'], ['hub2', 'crown']])
+    expect(plan.keyByHub.get('hub')).toBe('qualificacao')
+    expect(plan.regions.filter((r) => r.hub === 'hub')).toHaveLength(3)
+    expect(plan.regions.filter((r) => r.hub === 'hub2')).toEqual([expect.objectContaining({ key: '', count: 40 })])
+    expect(plan.offsets.size).toBe(80)
+    expect(plan.implicitEdgeIds.size).toBe(80)
+  })
+
+  it('fixed modes report their shape too', () => {
+    expect([...computeHubLeavesPlan(star(20, false), { ...base, mode: 'crown' }).shapeByHub.values()]).toEqual(['crown'])
+    expect([...computeHubLeavesPlan(star(20, false), { ...base, mode: 'petals', keyOf: () => 'x' }).shapeByHub.values()]).toEqual(['petals'])
+  })
+})
+
 describe('reveal on zoom (D7)', () => {
   it('revealCount: all when leaves are far enough apart on screen; fewer, in powers of 2, when closer', async () => {
     const { revealCount, REVEAL_MIN_PX, REVEAL_MIN_LEAVES } = await import('../hubLeaves')

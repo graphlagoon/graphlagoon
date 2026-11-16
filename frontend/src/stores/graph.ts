@@ -74,6 +74,7 @@ import {
 } from '@/utils/queryEnrichment';
 import { aggregateParallelEdges } from '@/utils/parallelEdges';
 import type { HubLeavesMode } from '@/utils/hubLeaves';
+import { AUTO_HUB_MIN_LEAVES, type RevealByZoomMode } from '@/utils/autoAdjust';
 import type { TraceColumns } from '@/utils/traceView';
 import { LABEL_TEMPLATE_SYNTAX_VERSION } from '@/utils/labelModifiers';
 import { useToast } from '@/composables/useToast';
@@ -163,10 +164,11 @@ const DEFAULT_BEHAVIORS = {
   afterQueryCommunities: '',      // After a query you run: '' (off), 'louvain', 'weak-components', 'strong-components' or 'cluster-program:<id>' — colors communities. Not on restore.
   afterQueryClusterProgram: '',   // After a query you run: '' (off) or a cluster program id to draw its clusters. Not on restore.
   hiddenMenuActions: [] as string[], // Ids of built-in right-click items to hide (utils/builtInMenuItems.ts). Always replaced, never mutated in place.
-  hubLeaves: 'free' as HubLeavesMode, // Force layout, 2D: 'free' (default) leaves the simulation alone; 'crown' lays a hub's leaves (nodes whose only neighbour is that hub) on a spiral around it; 'petals' in one disc per value of hubLeavesKey. Nothing is grouped or hidden — see utils/hubLeaves.ts.
+  autoAdjust: true,                // Master switch of the automatic adjustments (utils/autoAdjust.ts): when false, every setting on 'auto' (hubLeaves, hubLeavesRevealByZoom, ego ringOrdering) behaves as its fallback — nothing is arranged, hidden or sectored unless set explicitly.
+  hubLeaves: 'auto' as HubLeavesMode, // Force layout, 2D: 'auto' (default) arranges hubs with hubLeavesMinLeaves+ leaves, per hub in petals when a key splits its leaves, else in a crown; 'free' leaves the simulation alone; 'crown' lays a hub's leaves (nodes whose only neighbour is that hub) on a spiral around it; 'petals' in one disc per value of hubLeavesKey. Nothing is grouped or hidden — see utils/hubLeaves.ts.
   hubLeavesKey: 'auto',           // Petals key: 'auto' = per hub, the key that splits its leaves best; '' = node type, 'rel' = relationship type, 'node:<prop>' / 'edge:<prop>' = a node or hub-edge property.
-  hubLeavesMinLeaves: 10,         // A node is a hub when it has at least this many leaves.
-  hubLeavesRevealByZoom: false,   // With an arrangement on: zoomed out, each region shows only its inner leaves and says "+N hidden"; zooming in reveals the rest. Nothing moves (D7, off by default).
+  hubLeavesMinLeaves: AUTO_HUB_MIN_LEAVES, // A node is a hub when it has at least this many leaves (30).
+  hubLeavesRevealByZoom: 'auto' as RevealByZoomMode, // With an arrangement on: zoomed out, each region shows only its inner leaves and says "+N hidden"; zooming in reveals the rest. Nothing moves. 'auto' (default) does it only for hubs with AUTO_REVEAL_MIN_LEAVES+ leaves; 'on' for every hub; 'off' never.
   hubLeavesImplicitEdges: true,   // With an arrangement on, hub–leaf edges are not drawn (position carries the link); they come back on hover and selection.
   progressiveLoad: 'auto' as ProgressiveLoadMode, // 'auto' (default) uses progressive loading only when the node table is wide enough to pay for it — see shouldLoadProgressively(). 'always' forces it, 'never' fetches everything in one request. Progressive load trades a HIGHER TOTAL cost for a much faster first paint: measured on a 100-column table it cut first paint by 79% while raising total work by 76%, and on a narrow table it was simply slower. 'auto' exists so neither extreme is the default.
 };
@@ -243,7 +245,9 @@ export function defaultLayoutModeConfig(): LayoutModeConfig {
       edgeTypes: null,
       maxHops: null,
       ringSpacing: 60,
-      ringOrdering: 'barycenter',
+      // 'auto': fewest crossings, unless ring 1 is crowded with leaves — then
+      // sectors by the key that splits it best (utils/autoAdjust.ts).
+      ringOrdering: 'auto',
       ringOrderingKey: null,
       // Barycenter by default — the cheapest option, and the one already in
       // production. Median and sifting uncross more (sifting far more), but
@@ -285,7 +289,18 @@ const BEHAVIOR_ENUMS: Partial<Record<keyof GraphBehaviors, readonly string[]>> =
   searchMode: ['hide', 'highlight'],
   viewMode: ['3d', '2d-proj'],
   progressiveLoad: ['auto', 'always', 'never'],
-  hubLeaves: ['free', 'crown', 'petals'],
+  hubLeaves: ['auto', 'free', 'crown', 'petals'],
+  hubLeavesRevealByZoom: ['auto', 'on', 'off'],
+};
+
+/**
+ * Values saved under an older shape of a behavior, mapped to the current one
+ * before validation. hubLeavesRevealByZoom was a boolean for two days
+ * (2026-11-16): without this an exploration saved with it on would silently
+ * become 'auto'.
+ */
+const BEHAVIOR_LEGACY: Partial<Record<keyof GraphBehaviors, (value: unknown) => unknown>> = {
+  hubLeavesRevealByZoom: (v) => (v === true ? 'on' : v === false ? 'off' : v),
 };
 
 /**
@@ -307,12 +322,13 @@ function applyBehaviorOverrides(
 ): GraphBehaviors {
   if (!overrides) return target;
 
-  for (const [key, value] of Object.entries(overrides)) {
+  for (const [key, rawValue] of Object.entries(overrides)) {
     if (!(key in target)) {
       console.warn(`[graph] Ignoring unknown ${source} behaviors key: "${key}"`);
       continue;
     }
     const k = key as keyof GraphBehaviors;
+    const value = BEHAVIOR_LEGACY[k] ? BEHAVIOR_LEGACY[k]!(rawValue) : rawValue;
     if (typeof value !== typeof target[k]) {
       console.warn(
         `[graph] Ignoring ${source} behaviors."${key}": expected ${typeof target[k]}, got ${typeof value}`
@@ -590,7 +606,10 @@ export const useGraphStore = defineStore('graph', () => {
    */
   /** What the hub leaf arrangement did on the canvas (derived, NOT persisted); null when off. */
   /** autoKeys: with the automatic key, the keys the hubs chose (utils/hubLeaves.ts chooseKey); zoomHidden: leaves hidden until zoom in (hubLeavesRevealByZoom). */
-  const hubLeavesStats = ref<{ hubs: number; leaves: number; implicitEdges: number; autoKeys?: string[]; zoomHidden?: number } | null>(null);
+  const hubLeavesStats = ref<{ hubs: number; leaves: number; implicitEdges: number; autoKeys?: string[]; zoomHidden?: number;
+    /** Set when hubLeaves is 'auto' and it acted: how many hubs got each shape. */
+    auto?: { petals: number; crown: number };
+  } | null>(null);
 
   const egoLayoutStats = ref<{
     nonTreeEdgeCount: number;
@@ -598,6 +617,8 @@ export const useGraphStore = defineStore('graph', () => {
     siftingSkippedLargeRing: boolean;
     /** Ring 1 when it holds many nodes: its population and how many bands it was wrapped into (1 = not wrapped). */
     crowdedRing?: { count: number; bands: number; leaves: number } | null;
+    /** ringOrdering 'auto': what it resolved to and why (utils/autoAdjust.ts chooseEgoOrdering). Null when the ordering is fixed. */
+    autoOrdering?: { ordering: 'barycenter' | 'node-type' | 'property'; key?: string; reason: string } | null;
   } | null>(null);
 
   /** Columns of the `trace-layers` layout (T5), set by the trace screen; not persisted. */

@@ -508,8 +508,10 @@ export type EgoDirection = "both" | "out" | "in";
  * - 'id': sorted-id order (purely structural baseline)
  * - 'barycenter': radial-Sugiyama crossing reduction (Bachmaier, IEEE TVCG 2007)
  * - 'node-type' | 'community' | 'property': contiguous angular sectors by attribute
+ * - 'auto': 'barycenter', unless ring 1 is crowded with leaves — then sectors
+ *   by the best key (utils/autoAdjust.ts). Resolved before the layout runs.
  */
-export type RingOrdering = "id" | "barycenter" | "node-type" | "community" | "property";
+export type RingOrdering = "auto" | "id" | "barycenter" | "node-type" | "community" | "property";
 
 /**
  * Heuristic behind the "fewest crossings" ordering. All deterministic; they
