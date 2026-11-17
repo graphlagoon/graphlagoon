@@ -60,6 +60,7 @@ import type {
   SubgraphRequest,
   ExpandRequest,
   NeighborSummaryResponse,
+  NodeDegreesResponse,
   RandomGraphRequest,
   RandomGraphResponse,
   CreateGraphContextRequest,
@@ -534,6 +535,14 @@ class ApiService {
     const response = await this.client.post(
       `/api/graph-contexts/${contextId}/neighbor-summary`,
       { node_id: nodeId }
+    );
+    return response.data;
+  }
+
+  async nodeDegrees(contextId: string, nodeIds: string[]): Promise<NodeDegreesResponse> {
+    const response = await this.client.post(
+      `/api/graph-contexts/${contextId}/node-degrees`,
+      { node_ids: nodeIds }
     );
     return response.data;
   }

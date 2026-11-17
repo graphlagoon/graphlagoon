@@ -30,6 +30,9 @@ const rows = computed<Row[]>(() => {
   return [...byType.values()].sort((a, b) => b.inEdges + b.outEdges - (a.inEdges + a.outEdges));
 });
 
+/** Hide the Out column when nothing goes out (and In when nothing comes in): an empty column reads as "unknown". */
+const hasIn = computed(() => rows.value.some((r) => r.inEdges > 0));
+const hasOut = computed(() => rows.value.some((r) => r.outEdges > 0));
 const checked = ref(new Set<string>());
 const limit = ref(100);
 const limitTouched = ref(false);
@@ -123,8 +126,8 @@ function onKeydown(e: KeyboardEvent) {
             <tr>
               <th />
               <th>Relationship</th>
-              <th class="num">In</th>
-              <th class="num">Out</th>
+              <th v-if="hasIn" class="num">In</th>
+              <th v-if="hasOut" class="num">Out</th>
             </tr>
           </thead>
           <tbody>
@@ -139,8 +142,8 @@ function onKeydown(e: KeyboardEvent) {
                 >
               </td>
               <td><label :for="`expand-type-${r.type}`">{{ r.type || '(no type)' }}</label></td>
-              <td class="num">{{ r.inEdges ? r.inEdges.toLocaleString() : '' }}</td>
-              <td class="num">{{ r.outEdges ? r.outEdges.toLocaleString() : '' }}</td>
+              <td v-if="hasIn" class="num">{{ r.inEdges.toLocaleString() }}</td>
+              <td v-if="hasOut" class="num">{{ r.outEdges.toLocaleString() }}</td>
             </tr>
           </tbody>
         </table>
@@ -164,8 +167,8 @@ function onKeydown(e: KeyboardEvent) {
             The node will show how many are loaded.
           </template>
           <template v-else>
-            All {{ selectedEdges.toLocaleString() }} selected edges load first; the rest of the limit goes to links
-            among the neighbours.
+            Loads the {{ selectedEdges.toLocaleString() }} selected edges, then up to
+            {{ Math.max(0, effectiveLimit - selectedEdges).toLocaleString() }} links between those neighbours.
           </template>
         </p>
 

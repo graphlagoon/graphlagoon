@@ -1315,6 +1315,21 @@ class NeighborSummaryResponse(BaseModel):
     buckets: list[NeighborSummaryBucket] = Field(default_factory=list)
 
 
+MAX_DEGREE_IDS = 5000
+
+
+class NodeDegreesRequest(BaseModel):
+    node_ids: list[str] = Field(max_length=MAX_DEGREE_IDS)
+
+
+class NodeDegreesResponse(BaseModel):
+    """Edges each node has in the source (self-loops once). Ids absent from the
+    source are absent here. ``supported=False``: the datasource cannot count."""
+
+    supported: bool = True
+    degrees: dict[str, int] = Field(default_factory=dict)
+
+
 class GraphQueryRequest(BaseModel):
     """Request to execute a graph query (SQL).
 

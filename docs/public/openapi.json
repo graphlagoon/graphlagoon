@@ -2702,6 +2702,60 @@
         }
       }
     },
+    "/graphlagoon/api/graph-contexts/{context_id}/node-degrees": {
+      "post": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "Node Degrees",
+        "description": "How many edges each node has in the source, without loading them.\n\nAnswers whether a node that looks like a leaf on the canvas has links that\nwere not loaded. At most 5000 ids. ``supported`` is false when the\ndatasource cannot count.",
+        "operationId": "graph_node_degrees",
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Context Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeDegreesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeDegreesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/graph-contexts/{context_id}/query": {
       "post": {
         "tags": [
@@ -14768,6 +14822,42 @@
           "nodes"
         ],
         "title": "NodeBatchResponse"
+      },
+      "NodeDegreesRequest": {
+        "properties": {
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Node Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_ids"
+        ],
+        "title": "NodeDegreesRequest"
+      },
+      "NodeDegreesResponse": {
+        "properties": {
+          "supported": {
+            "type": "boolean",
+            "title": "Supported",
+            "default": true
+          },
+          "degrees": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Degrees"
+          }
+        },
+        "type": "object",
+        "title": "NodeDegreesResponse",
+        "description": "Edges each node has in the source (self-loops once). Ids absent from the\nsource are absent here. ``supported=False``: the datasource cannot count."
       },
       "NodeState": {
         "properties": {

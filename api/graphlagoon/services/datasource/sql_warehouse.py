@@ -21,6 +21,8 @@ from graphlagoon.models.schemas import (
     CypherQueryRequest,
     ExpandRequest,
     NeighborSummaryRequest,
+    NodeDegreesRequest,
+    NodeDegreesResponse,
     NeighborSummaryResponse,
     GraphQueryRequest,
     GraphResponse,
@@ -640,6 +642,36 @@ class SqlWarehouseDatasource(GraphDatasource):
             WHERE e.`{src_col}` = '{safe_node_id}' OR e.`{dst_col}` = '{safe_node_id}'
             GROUP BY 1, 2
         """
+
+    def node_degrees_sql(self, context, data: NodeDegreesRequest) -> str:
+        column_config = self._column_config(context)
+        src_col = escape_identifier(column_config.src_col)
+        dst_col = escape_identifier(column_config.dst_col)
+        ids = ", ".join(f"'{sanitize_string_literal(i)}'" for i in dict.fromkeys(data.node_ids))
+        table = _safe_table_name(context.edge_table_name)
+        return f"""
+            SELECT node_id, COUNT(*) AS edges FROM (
+                SELECT e.`{src_col}` AS node_id FROM {table} e WHERE e.`{src_col}` IN ({ids})
+                UNION ALL
+                SELECT e.`{dst_col}` AS node_id FROM {table} e
+                WHERE e.`{dst_col}` IN ({ids}) AND e.`{dst_col}` <> e.`{src_col}`
+            ) t
+            GROUP BY node_id
+        """
+
+    async def node_degrees(self, context, data: NodeDegreesRequest) -> NodeDegreesResponse:
+        if not data.node_ids:
+            return NodeDegreesResponse()
+        query = self.node_degrees_sql(context, data)
+        try:
+            result = await self.warehouse.execute_statement(statement=query, row_limit=len(data.node_ids) + 1)
+        except Exception as e:
+            raise GraphExecutionFailure(e, statement=query)
+        if result.status.state != "SUCCEEDED":
+            message = result.status.error.message if result.status.error else "Unknown error"
+            raise QueryExecutionError(message, query=query)
+        rows = (result.result.data_array if result.result else None) or []
+        return NodeDegreesResponse(degrees={str(r[0]): int(r[1]) for r in rows})
 
     async def neighbor_summary(
         self, context, data: NeighborSummaryRequest

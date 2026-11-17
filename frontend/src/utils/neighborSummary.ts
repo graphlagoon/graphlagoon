@@ -125,3 +125,52 @@ export function membersNoLongerLeaves(
   }
   return memberIds.filter((id) => elsewhere.has(id) || !touchesHub.has(id));
 }
+
+/**
+ * Connector groups (Dunne & Shneiderman 2013, "connector motif"): neighbours of
+ * the node that are linked to exactly the same set of other nodes besides it —
+ * e.g. 8 partners of Aurora who are all partners of Holding 3 as well. Only
+ * neighbours with another link qualify (leaves are the other answer), groups of
+ * at least `min`, largest first.
+ */
+export interface ConnectorGroup {
+  /** The nodes they all share, besides the node itself (sorted). */
+  sharedIds: string[];
+  /** The neighbours in the group (sorted). */
+  memberIds: string[];
+}
+
+export function connectorGroups(
+  nodeId: string,
+  edges: readonly Pick<Edge, 'src' | 'dst'>[],
+  min = 3,
+): ConnectorGroup[] {
+  const neighbours = new Set<string>();
+  for (const e of edges) {
+    if (e.src === e.dst) continue;
+    if (e.src === nodeId) neighbours.add(e.dst);
+    else if (e.dst === nodeId) neighbours.add(e.src);
+  }
+  const others = new Map<string, Set<string>>();
+  for (const e of edges) {
+    if (e.src === e.dst) continue;
+    for (const [a, b] of [[e.src, e.dst], [e.dst, e.src]] as const) {
+      if (!neighbours.has(a) || b === nodeId) continue;
+      let set = others.get(a);
+      if (!set) others.set(a, (set = new Set()));
+      set.add(b);
+    }
+  }
+  const groups = new Map<string, ConnectorGroup>();
+  for (const [member, set] of others) {
+    const shared = [...set].sort();
+    const key = shared.join('\u0000');
+    let g = groups.get(key);
+    if (!g) groups.set(key, (g = { sharedIds: shared, memberIds: [] }));
+    g.memberIds.push(member);
+  }
+  return [...groups.values()]
+    .filter((g) => g.memberIds.length >= min)
+    .map((g) => ({ ...g, memberIds: g.memberIds.sort() }))
+    .sort((a, b) => b.memberIds.length - a.memberIds.length || a.sharedIds.join().localeCompare(b.sharedIds.join()));
+}

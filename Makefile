@@ -7,7 +7,7 @@
         test test-unit test-coverage test-e2e test-e2e-headed test-e2e-ui test-e2e-report \
         test-integration test-integration-headed test-all \
         build build-pypi build-frontend build-wheel-only build-verify \
-        docs docs-build docs-api docs-preview docs-screenshots \
+        docs docs-build docs-api docs-preview docs-screenshots dev-seed-qsa \
         install setup-gsql2rsql \
         run-api run-api-no-debug run-api-db run-warehouse run-warehouse-no-debug run-frontend \
         db-up db-down db-logs migrate migrate-create \
@@ -56,6 +56,7 @@ help:
 	@echo "  make dev-seed-big          Large seed (200 users / 500 contexts / 2000 explorations)"
 	@echo "  make dev-seed-investigations  ~20 demo investigation cases (SEED_ARGS=--reset replaces them)"
 	@echo "  make dev-seed-showcase  the \"Demo ·\" contexts: default look, presets, cluster programs, show only"
+	@echo "  make dev-seed-qsa        the \"Demo · QSA\" partner register: two hubs with hundreds of partners (tables + explorations)"
 	@echo "  make dev-reset             Wipe the dev environment and seed it from scratch"
 	@echo ""
 	@echo "$(GREEN)Quality$(RESET)"
@@ -288,6 +289,12 @@ dev-seed-showcase:
 	@echo "$(CYAN)Seeding the Demo · showcase...$(RESET)"
 	@cd api && uv run python -m graphlagoon.dev.seed_showcase --api $(SEED_API)
 
+# The "Demo · QSA" partner register: two hubs with hundreds of direct
+# neighbours (graphlagoon/dev/qsa_demo.py). Creates its warehouse tables too.
+dev-seed-qsa:
+	@echo "$(CYAN)Seeding the Demo · QSA partner register...$(RESET)"
+	@cd api && uv run python -m graphlagoon.dev.qsa_demo --api $(SEED_API)
+
 dev-seed-investigations:
 	@echo "$(CYAN)Seeding $(SEED_CASES) investigation cases (seed $(SEED))...$(RESET)"
 	@cd api && uv run python -m graphlagoon.dev.seed_investigations --api $(SEED_API) \
@@ -304,7 +311,7 @@ dev-reset:
 _seed-after-dev:
 	@if [ "$(SEED_DATA)" != "0" ]; then \
 		$(MAKE) --no-print-directory dev-seed && $(MAKE) --no-print-directory dev-seed-investigations \
-		&& $(MAKE) --no-print-directory dev-seed-showcase; \
+		&& $(MAKE) --no-print-directory dev-seed-showcase && $(MAKE) --no-print-directory dev-seed-qsa; \
 	else echo "$(DIM)seed skipped (SEED_DATA=0)$(RESET)"; fi
 
 dev-stop:

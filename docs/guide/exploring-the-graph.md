@@ -237,6 +237,8 @@ nodes and edges are added. On sources that can't expand (some REST
 connections), the affordances are hidden rather than disabled. A failure
 leaves the graph untouched and reports through the error modal.
 
+![Expanding a company with 380 edges: choose the relationship types and a limit](/screenshots/exploring-the-graph-expand-dialog.png)
+
 **A node with many edges asks first.** Expanding counts the node's edges in
 the source before loading anything. Up to 50, they all load at once. Above
 that a dialog lists them by relationship type, incoming and outgoing, with a
@@ -257,13 +259,16 @@ when it was cut.
 
 ## A node's neighbours
 
+![The Neighbors section of a company with 380 partners](/screenshots/exploring-the-graph-neighbors.png)
+
 Selecting a node shows a **Neighbors** section in the side panel, counted
 from what is loaded:
 
 - one row per relationship type, direction and neighbour type —
   `SOCIO_DE <- Person  269` — with **select** (select them on the canvas) and
-  **group** (fold them into one closed [cluster](./clusters.md));
-- `Linked to nothing else: 356 · with another link: 24 select` — the second
+  **group** (fold the ones with no other link into one closed
+  [cluster](./clusters.md); those with another link stay on the canvas);
+- `No other link loaded 356` / `Other links 24`, each with **select** — the second
   number is usually the one the investigation is about, and **select** puts
   exactly those on the canvas selection;
 - after a cut [expand](#expanding-neighbors), how many of the node's edges in
@@ -276,10 +281,22 @@ from what is loaded:
   stays out if you group again. **Ungroup leaf neighbors** puts them all back.
   Collections are saved with the exploration.
 
-"Linked to nothing else" means among the loaded nodes: a neighbour may have
-links you have not expanded yet.
+- **Connector groups** — `7 also linked to Holding 3 select`: neighbours with
+  another link that share exactly the same other nodes, three or more of
+  them. In a partner register these are often the people the investigation is
+  about: several partners of one company who also hold the same second one.
+
+"No other link loaded" means among the loaded edges: a neighbour may have
+links you have not expanded yet. **check the source** answers that without
+loading anything: one query counts, in the source, the links of every leaf
+listed (up to 5,000), and the line then says `In the source, 12 of these 356
+have links not loaded select` (or `Checked in the source: none of the 356 has
+another link`) — select them and expand to see the rest.
+Counting needs a SQL warehouse, Neptune or file context.
 
 ## Automatic adjustments
+
+![A partner register opened as is: both companies' partners arranged by role](/screenshots/exploring-the-graph-auto-adjust.png)
 
 Some layout settings decide by themselves, from the shape of the graph you
 loaded, whether to act. Each one is an ordinary setting whose value is
@@ -288,7 +305,7 @@ deciding.
 
 | Setting on Automatic | Acts when | What it does | You can tell by |
 |---|---|---|---|
-| Layout → [Hubs with many leaves](#hubs-with-many-leaves) | Force layout, 2D, and a node has 30 or more leaves (the *Hub: at least this many leaves* slider) | Lays that hub's leaves next to it: in petals when a type or property splits them reasonably (about 90/10 or better), otherwise in a crown. Decided per hub. | `Auto: 2 hubs arranged ✕` in the status bar; hover it for the reason |
+| Layout → [Hubs with many leaves](#hubs-with-many-leaves) | Force layout, 2D, and a node has 30 or more leaves (the *Hub: at least this many leaves* slider) | Lays that hub's leaves next to it: in petals when a type or property splits them reasonably (about 90/10 or better), otherwise in a crown. Decided per hub. | `Auto: 2 hubs arranged, petals by qualificacao ✕` in the status bar; hover it for the reason |
 | Layout → Hubs with many leaves → *Reveal leaves on zoom* | An arranged hub has 2,000 or more leaves | Zoomed out, hides that hub's outer leaves and says `+N hidden`. Smaller hubs keep every leaf drawn. | `N leaves hidden until you zoom in ✕` |
 | Layout → Ego → [*Ring ordering*](#ego-layout-with-a-crowded-ring) | Ring 1 has 80 or more nodes and at least half are linked only to the focus | Orders the ring in sectors by the type or property that splits it best; otherwise *Fewest crossings*, as before. | `Auto: ring 1 in sectors by qualificacao ✕` |
 

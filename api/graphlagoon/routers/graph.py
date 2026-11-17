@@ -12,6 +12,8 @@ from graphlagoon.models.schemas import (
     NodeBatchResponse,
     ExpandRequest,
     NeighborSummaryRequest,
+    NodeDegreesRequest,
+    NodeDegreesResponse,
     NeighborSummaryResponse,
     RandomGraphRequest,
     RandomGraphResponse,
@@ -448,6 +450,33 @@ async def neighbor_summary(
 
     try:
         return await datasource.neighbor_summary(context, data)
+    except QueryExecutionError as e:
+        raise query_execution_http_error(e, context_id)
+    except GraphExecutionFailure as e:
+        raise execution_failure_http_error(e)
+
+
+@router.post(
+    "/graph-contexts/{context_id}/node-degrees",
+    response_model=NodeDegreesResponse,
+)
+async def node_degrees(
+    context_id: UUID,
+    data: NodeDegreesRequest,
+    request: Request,
+):
+    """How many edges each node has in the source, without loading them.
+
+    Answers whether a node that looks like a leaf on the canvas has links that
+    were not loaded. At most 5000 ids. ``supported`` is false when the
+    datasource cannot count.
+    """
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    datasource = resolve_datasource_or_400(context)
+
+    try:
+        return await datasource.node_degrees(context, data)
     except QueryExecutionError as e:
         raise query_execution_http_error(e, context_id)
     except GraphExecutionFailure as e:

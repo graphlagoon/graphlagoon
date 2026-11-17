@@ -46,6 +46,15 @@ const autoHubLeavesTitle = computed(() => {
   return `Leaves are on Automatic: ${stats.hubs === 1 ? 'a node has' : `${stats.hubs} nodes have`} ${graphStore.behaviors.hubLeavesMinLeaves} or more neighbours linked to nothing else, so those are laid out next to ${stats.hubs === 1 ? 'it' : 'them'} (${shapes}). Click ✕ to leave them to the simulation (Layout → Hubs with many leaves).`;
 });
 
+/** "petals by qualificacao" / "crown": what the automatic arrangement did, said on the chip itself. */
+const autoHubLeavesShort = computed(() => {
+  const stats = graphStore.hubLeavesStats;
+  if (!stats?.auto) return '';
+  if (stats.auto.petals && !stats.auto.crown) return stats.autoKeys?.length ? `, petals by ${stats.autoKeys.join(', ')}` : ', petals';
+  if (stats.auto.crown && !stats.auto.petals) return ', crown';
+  return '';
+});
+
 /** The ego ring ordering on Automatic chose sectors (not its fallback). */
 const autoEgoSectors = computed(() => {
   if (graphStore.layoutAlgorithm !== 'ego' || graphStore.layoutModeConfig.ego.ringOrdering !== 'auto') return null;
@@ -129,7 +138,7 @@ const isolationTitle = computed(() => {
       data-testid="status-auto-hub-leaves"
       :title="autoHubLeavesTitle"
     >
-      Auto: <strong>{{ graphStore.hubLeavesStats.hubs }}</strong> {{ graphStore.hubLeavesStats.hubs === 1 ? 'hub' : 'hubs' }} arranged
+      Auto: <strong>{{ graphStore.hubLeavesStats.hubs }}</strong> {{ graphStore.hubLeavesStats.hubs === 1 ? 'hub' : 'hubs' }} arranged{{ autoHubLeavesShort }}
       <button
         type="button"
         class="status-isolation-clear"
