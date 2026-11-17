@@ -6,7 +6,7 @@
  * then applies greedy AABB overlap detection to prevent depth-based stacking.
  */
 import * as THREE from 'three';
-import type { Ref } from 'vue';
+import { ref, type Ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { FastLabelRenderer, computeNormalizedTextMetrics, LABEL_BASE_SCALE } from '@/utils/FastLabelRenderer';
 import { LabelGrid, ScreenAABBFilter } from '@/utils/LabelGrid';
@@ -71,12 +71,24 @@ function pixelsPerUnitAtDepth(
   return 1;
 }
 
+/** Emphasised labels are this much larger than their node size alone would make them. */
+const EMPHASIS_SCALE = 1.5;
+/** Packed nodes get labels once their spacing on screen reaches this. */
+const PACKED_LABEL_MIN_PX = 24;
+
 export function useGraphLabels(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getGraph3d: () => any,
   initialLayoutDone: Ref<boolean>,
   degreeDimmedNodeIds: Ref<Set<string> | null>,
   focusedNodeIds: Ref<Set<string> | null>,
+  /** Labels that win over their neighbours' (hub neighbours with another link); still overlap-checked. */
+  emphasizedNodeIds: Ref<Set<string> | null> = ref(null),
+  /**
+   * Nodes packed at a fixed spacing (hub leaves in petals): no label while the
+   * spacing is too small on screen for one, so names do not pile on the dots.
+   */
+  packedNodes: Ref<{ ids: Set<string>; spacing: number } | null> = ref(null),
 ) {
   const graphStore = useGraphStore();
   let labelRenderer: FastLabelRenderer | null = null;
@@ -95,6 +107,7 @@ export function useGraphLabels(
     labelScale: number;
     alpha: number;
     nodeSize: number;
+    emphasized: boolean;
     screenSx: number;
     screenSy: number;
     screenSz: number; // NDC depth for priority
@@ -124,6 +137,8 @@ export function useGraphLabels(
     const hubs = graphStore.hubNodeIds;
     const dimmedByDegree = degreeDimmedNodeIds.value;
     const dimAlpha = graphStore.behaviors.degreeDimOpacity;
+    const emphasized = emphasizedNodeIds.value;
+    const packed = packedNodes.value;
     const focusFilter = focusedNodeIds.value;
     const { edgeLensMode, edgeLensDimOpacity } = graphStore.behaviors;
 
@@ -208,10 +223,12 @@ export function useGraphLabels(
             if (!_frustum.containsPoint(_point)) return;
           }
           if (forcedNodeIds.has(node.id)) return;
-          if (node.isCluster) {
+          if (node.isCluster || emphasized?.has(node.id)) {
             clusterIds.push(node.id);
             return;
           }
+
+          if (packed?.ids.has(node.id) && packed.spacing * pixelsPerUnit < PACKED_LABEL_MIN_PX) return;
 
           const worldRadius = Math.cbrt(node.size ?? 1) * relSize;
           const screenRadius = worldRadius * pixelsPerUnit;
@@ -328,9 +345,9 @@ export function useGraphLabels(
           const visualRadius = Math.cbrt(node.size) * relSize;
           const scaledOffset = labelOffset + visualRadius * 0.15;
 
-          const importance = labelDensityCulling
-            ? Math.pow(node.size ?? 1, 1 / 6)
-            : 1;
+          const isEmphasized = !!emphasized?.has(node.id);
+          const importance = (labelDensityCulling ? Math.pow(node.size ?? 1, 1 / 6) : 1) *
+            (isEmphasized ? EMPHASIS_SCALE : 1);
           const labelScale = baseLabelScale * zoomCompensation * importance;
 
           // Compute label position into scratch vector
@@ -383,6 +400,7 @@ export function useGraphLabels(
             labelScale,
             alpha,
             nodeSize: node.size ?? 1,
+            emphasized: isEmphasized,
             screenSx,
             screenSy,
             screenSz,
@@ -397,6 +415,7 @@ export function useGraphLabels(
       // Sort by priority: forced first, larger nodes, closer to camera, deterministic tiebreak
       candidates.sort((a, b) => {
         if (a.forced !== b.forced) return a.forced ? -1 : 1;
+        if (a.emphasized !== b.emphasized) return a.emphasized ? -1 : 1;
         if (a.nodeSize !== b.nodeSize) return b.nodeSize - a.nodeSize;
         if (a.screenSz !== b.screenSz) return a.screenSz - b.screenSz;
         // Deterministic tiebreak by id to prevent flickering

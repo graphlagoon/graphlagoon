@@ -37,6 +37,11 @@ test.describe('Hubs with many leaves', () => {
     await expect(page.getByTestId('hub-leaves-mode')).toHaveValue('free');
     await expect(page.getByTestId('status-auto-hub-leaves')).toHaveCount(0);
     await expect(page.getByTestId('status-hub-edges-implied')).toHaveCount(0);
+
+    // The chip's verb changed the layout, so the toast can put it back.
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(page.getByTestId('hub-leaves-mode')).toHaveValue('auto');
+    await expect(page.getByTestId('status-auto-hub-leaves')).toBeVisible();
   });
 
   test('the master switch in Behaviors turns the automatic arrangement off without changing the setting', async ({ authenticatedPage: page }) => {

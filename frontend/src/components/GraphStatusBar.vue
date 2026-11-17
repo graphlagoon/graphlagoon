@@ -10,6 +10,8 @@ import { computed } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useClusterStore } from '@/stores/cluster';
 import { useToolbarStore } from '@/stores/toolbar';
+import { useToast } from '@/composables/useToast';
+import type { GraphBehaviors } from '@/stores/graph';
 
 const props = withDefaults(
   defineProps<{
@@ -32,6 +34,24 @@ const emit = defineEmits<{
 const graphStore = useGraphStore();
 const clusterStore = useClusterStore();
 const toolbarStore = useToolbarStore();
+const toast = useToast();
+
+/**
+ * The layout chips change the picture, so they name what their button does
+ * ("Free layout", "Draw") instead of a ✕ that reads as "dismiss", and the
+ * change can be undone from the toast. ✕ stays on the chips that remove a
+ * restriction (Showing only, Filtered).
+ */
+function setBehavior<K extends keyof GraphBehaviors>(key: K, value: GraphBehaviors[K], done: string) {
+  const before = graphStore.behaviors[key];
+  graphStore.updateBehaviors({ [key]: value } as Partial<GraphBehaviors>);
+  toast.undoable(done, () => graphStore.updateBehaviors({ [key]: before } as Partial<GraphBehaviors>));
+}
+function egoFewestCrossings() {
+  const before = graphStore.layoutModeConfig.ego.ringOrdering;
+  graphStore.updateLayoutModeConfig({ ego: { ringOrdering: 'barycenter' } });
+  toast.undoable('Ring 1 ordered by fewest crossings.', () => graphStore.updateLayoutModeConfig({ ego: { ringOrdering: before } }));
+}
 
 const clusterCount = computed(() => clusterStore.clusters.length);
 
@@ -43,7 +63,7 @@ const autoHubLeavesTitle = computed(() => {
     stats.auto.petals ? `${stats.auto.petals} in petals${stats.autoKeys?.length ? ` by ${stats.autoKeys.join(', ')}` : ''}` : '',
     stats.auto.crown ? `${stats.auto.crown} in a crown` : '',
   ].filter(Boolean).join(', ');
-  return `Leaves are on Automatic: ${stats.hubs === 1 ? 'a node has' : `${stats.hubs} nodes have`} ${graphStore.behaviors.hubLeavesMinLeaves} or more neighbours linked to nothing else, so those are laid out next to ${stats.hubs === 1 ? 'it' : 'them'} (${shapes}). Click ✕ to leave them to the simulation (Layout → Hubs with many leaves).`;
+  return `Leaves are on Automatic: ${stats.hubs === 1 ? 'a node has' : `${stats.hubs} nodes have`} ${graphStore.behaviors.hubLeavesMinLeaves} or more neighbours linked to nothing else, so those are laid out next to ${stats.hubs === 1 ? 'it' : 'them'} (${shapes}). Free layout leaves them to the simulation (Layout → Hubs with many leaves).`;
 });
 
 /** "petals by qualificacao" / "crown": what the automatic arrangement did, said on the chip itself. */
@@ -131,7 +151,7 @@ const isolationTitle = computed(() => {
     </button>
 
     <!-- Automatic adjustments that acted (utils/autoAdjust.ts): what and why on
-         hover, ✕ turns that one off. -->
+         hover; the verb turns that one off, with Undo in the toast. -->
     <span
       v-if="graphStore.hubLeavesStats?.auto"
       class="status-isolation"
@@ -141,26 +161,26 @@ const isolationTitle = computed(() => {
       Auto: <strong>{{ graphStore.hubLeavesStats.hubs }}</strong> {{ graphStore.hubLeavesStats.hubs === 1 ? 'hub' : 'hubs' }} arranged{{ autoHubLeavesShort }}
       <button
         type="button"
-        class="status-isolation-clear"
+        class="status-verb"
         data-testid="status-auto-hub-leaves-off"
-        aria-label="Stop arranging leaves automatically"
-        @click="graphStore.updateBehaviors({ hubLeaves: 'free' })"
-      >✕</button>
+        title="Leave the leaves to the simulation"
+        @click="setBehavior('hubLeaves', 'free', 'Leaves left to the simulation.')"
+      >Free layout</button>
     </span>
     <span
       v-if="autoEgoSectors"
       class="status-isolation"
       data-testid="status-auto-ego-ordering"
-      :title="`Ring ordering is on Automatic: ${autoEgoSectors.reason}, so the ring is in sectors by ${autoEgoSectors.by}. Click ✕ for fewest crossings (Layout → Ring ordering).`"
+      :title="`Ring ordering is on Automatic: ${autoEgoSectors.reason}, so the ring is in sectors by ${autoEgoSectors.by}. Fewest crossings orders it to minimise edge crossings instead (Layout → Ring ordering).`"
     >
       Auto: ring 1 in sectors by <strong>{{ autoEgoSectors.by }}</strong>
       <button
         type="button"
-        class="status-isolation-clear"
+        class="status-verb"
         data-testid="status-auto-ego-ordering-off"
-        aria-label="Order the rings by fewest crossings"
-        @click="graphStore.updateLayoutModeConfig({ ego: { ringOrdering: 'barycenter' } })"
-      >✕</button>
+        title="Order the ring by fewest edge crossings"
+        @click="egoFewestCrossings"
+      >Fewest crossings</button>
     </span>
 
     <!-- Hub leaf arrangement: hub–leaf edges are left out of the drawing. Said
@@ -169,32 +189,32 @@ const isolationTitle = computed(() => {
       v-if="graphStore.hubLeavesStats && graphStore.hubLeavesStats.implicitEdges > 0"
       class="status-isolation"
       data-testid="status-hub-edges-implied"
-      :title="`${graphStore.hubLeavesStats.leaves} nodes linked only to a hub are laid out next to it; their edges to the hub are shown on hover and selection. Click ✕ to draw them.`"
+      :title="`${graphStore.hubLeavesStats.leaves} nodes linked only to a hub are laid out next to it; their edges to the hub are shown on hover and selection.`"
     >
       <strong>{{ graphStore.hubLeavesStats.implicitEdges }}</strong> hub edges not drawn
       <button
         type="button"
-        class="status-isolation-clear"
+        class="status-verb"
         data-testid="status-hub-edges-draw"
-        aria-label="Draw the hub edges"
-        @click="graphStore.updateBehaviors({ hubLeavesImplicitEdges: false })"
-      >✕</button>
+        title="Draw every hub edge"
+        @click="setBehavior('hubLeavesImplicitEdges', false, 'Hub edges drawn.')"
+      >Draw</button>
     </span>
 
     <span
       v-if="graphStore.hubLeavesStats?.zoomHidden"
       class="status-isolation"
       data-testid="status-hub-leaves-zoom-hidden"
-      title="Zoomed out, each hub region shows only its inner leaves; zoom in to see the rest. Click ✕ to show every leaf at any zoom."
+      title="Zoomed out, each hub region shows only its inner leaves; zoom in to see the rest."
     >
       <strong>{{ graphStore.hubLeavesStats.zoomHidden }}</strong> leaves hidden until you zoom in
       <button
         type="button"
-        class="status-isolation-clear"
+        class="status-verb"
         data-testid="status-hub-leaves-zoom-show"
-        aria-label="Show every leaf"
-        @click="graphStore.updateBehaviors({ hubLeavesRevealByZoom: 'off' })"
-      >✕</button>
+        title="Show every leaf at any zoom"
+        @click="setBehavior('hubLeavesRevealByZoom', 'off', 'Every leaf shown at any zoom.')"
+      >Show all</button>
     </span>
 
     <span
@@ -294,6 +314,19 @@ const isolationTitle = computed(() => {
   color: inherit;
   font: inherit;
 }
+
+.status-verb {
+  border: none;
+  background: none;
+  padding: 0 6px;
+  min-height: 24px;
+  cursor: pointer;
+  color: var(--color-primary, var(--primary-color));
+  font: inherit;
+  font-weight: 500;
+}
+.status-verb:hover { text-decoration: underline; }
+.status-verb:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 2px; }
 
 .status-isolation-clear:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 2px; }
 

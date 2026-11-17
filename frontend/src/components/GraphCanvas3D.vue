@@ -201,7 +201,29 @@ let _onMouseUp: ((e: MouseEvent) => void) | null = null;
 const hubLeavesPlan = shallowRef<HubLeavesPlan | null>(null);
 // Ego layout: spokes from the focus to its ring-1 leaves, drawn implicitly
 // (same "hub–leaf edges" behavior as the force arrangement); null when none.
-const egoImplicitSpokes = shallowRef<{ edgeIds: Set<string>; leaves: number; leafIds: Set<string> } | null>(null);
+const egoImplicitSpokes = shallowRef<{ edgeIds: Set<string>; leaves: number; leafIds: Set<string>; focusId: string } | null>(null);
+
+/** Above this, emphasising them would emphasise nothing. */
+const MAX_CONNECTOR_EMPHASIS = 150;
+/**
+ * Neighbours of an arranged hub (or of the ego focus) that have another link:
+ * what an investigator reads such a picture for, while the leaves are the
+ * bulk. Their labels get priority and a larger size (useGraphLabels).
+ */
+const connectorNodeIds = computed<Set<string> | null>(() => {
+  const plan = hubLeavesPlan.value;
+  const ego = egoImplicitSpokes.value;
+  if (!plan && !ego) return null;
+  const centers = new Set<string>(plan ? plan.hubRadius.keys() : []);
+  if (ego) centers.add(ego.focusId);
+  const isLeaf = (id: string) => !!plan?.offsets.has(id) || !!ego?.leafIds.has(id);
+  const out = new Set<string>();
+  for (const e of graphStore.edges) {
+    if (centers.has(e.src) && !centers.has(e.dst) && !isLeaf(e.dst)) out.add(e.dst);
+    if (centers.has(e.dst) && !centers.has(e.src) && !isLeaf(e.src)) out.add(e.src);
+  }
+  return out.size > 0 && out.size <= MAX_CONNECTOR_EMPHASIS ? out : null;
+});
 
 // Pre-computed set of non-hub nodes connected to hubs (for node dimming)
 const degreeDimmedNodeIds = computed(() => {
@@ -287,7 +309,12 @@ const aggregatedEdges = computed(
 // Composables
 // ---------------------------------------------------------------------------
 
-const labels = useGraphLabels(getGraph3d, initialLayoutDone, degreeDimmedNodeIds, focusedNodeIds);
+/** Leaves packed in their hub's regions: labelled only when zoomed in enough. */
+const packedLeaves = computed(() => {
+  const plan = hubLeavesPlan.value;
+  return plan ? { ids: new Set(plan.offsets.keys()), spacing: hubLeafSpacing() } : null;
+});
+const labels = useGraphLabels(getGraph3d, initialLayoutDone, degreeDimmedNodeIds, focusedNodeIds, connectorNodeIds, packedLeaves);
 const icons = useGraphIcons(getGraph3d, initialLayoutDone);
 const edgeIcons = useGraphEdgeIcons(getGraph3d, initialLayoutDone);
 const rings = useGraphRings(getGraph3d);
@@ -1864,7 +1891,7 @@ watch(
 // Hub leaf arrangement: a new shape re-runs the free layout around it (the
 // leaves leave or join the simulation); the implicit-edge toggle is visual only.
 watch(
-  () => [graphStore.behaviors.hubLeaves, graphStore.behaviors.hubLeavesKey, graphStore.behaviors.hubLeavesMinLeaves, graphStore.behaviors.autoAdjust] as const,
+  () => [graphStore.behaviors.hubLeaves, graphStore.behaviors.hubLeavesKey, graphStore.behaviors.hubLeavesMinLeaves, graphStore.behaviors.autoAdjust, hubLabelAngle()] as const,
   () => {
     if (!graph3d) return;
     applyHubLeaves();
@@ -2102,7 +2129,16 @@ function buildHubLeavesPlan(
     hubRadiusOf: (id) => Math.cbrt(nodeById.get(id)?.size ?? 1) * relSize,
     keyOf: keyCandidates ? undefined : keyOfFor(key),
     keyCandidates,
+    hubLabelAngle: hubLabelAngle(),
   });
+}
+
+/** Direction of node labels in the 2D view, so petals keep off a hub's name; undefined without labels. */
+function hubLabelAngle(): number | undefined {
+  const a = graphStore.aesthetics;
+  if (!a.showNodeLabels3D) return undefined;
+  const pos = a.nodeLabelPosition3D ?? 'right';
+  return pos === 'left' ? Math.PI : pos === 'top' ? Math.PI / 2 : 0;
 }
 
 /** The arrangement as a settle option, so a headless settle reserves its space too. */
@@ -2239,7 +2275,7 @@ function computeEgoImplicitSpokes(focusId: string, levels: Map<string, number>, 
   for (const e of edges) {
     if ((leaves.has(e.src) && e.dst === focusId) || (leaves.has(e.dst) && e.src === focusId)) edgeIds.add(e.edge_id);
   }
-  return { edgeIds, leaves: leaves.size, leafIds: leaves };
+  return { edgeIds, leaves: leaves.size, leafIds: leaves, focusId };
 }
 
 /** Ring 1 of the ego layout (one hop from the focus) and which of its nodes are leaves, for chooseEgoOrdering. */
@@ -2438,6 +2474,7 @@ function applyModeConstraints() {
         maxHops: cfg.ego.maxHops,
         hideLabels: cfg.ego.hideRingLabels,
         sectors: result.sectors,
+        obstacles: result.positions.values(),
       }),
       { focusHalo: true, ringSpacing: cfg.ego.ringSpacing },
     );
