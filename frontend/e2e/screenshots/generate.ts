@@ -18,6 +18,7 @@ import {
   enableDatasources,
 } from '../helpers/api-mocks';
 import { partnerRegister } from '../fixtures/partner-register';
+import { qsaDemo } from '../fixtures/qsa-demo';
 import { MOCK_EXPLORATION, MOCK_REST_CONNECTION } from '../fixtures/mock-data';
 import {
   SCREENSHOT_CONTEXT,
@@ -910,6 +911,74 @@ const SCENES: Scene[] = [
       await page.getByTestId('graph-toolbar-layout').click();
       await page.getByTestId('canvas-toolbar-fit').click({ timeout: 30_000 });
       await page.waitForTimeout(2000);
+    },
+  },
+  {
+    // The QSA demo opened as is: the automatic adjustments arrange both hubs.
+    guide: 'exploring-the-graph',
+    scene: 'auto-adjust',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await seedGraphResponse(page, qsaDemo());
+      await page.reload();
+      await expect(page.getByTestId('graph-status-bar')).toContainText('485 nodes', { timeout: 15_000 });
+      await expect(page.getByTestId('status-auto-hub-leaves')).toBeVisible({ timeout: 20_000 });
+      await page.waitForTimeout(5000);
+      await page.getByTestId('canvas-toolbar-fit').click({ timeout: 30_000 });
+      await page.waitForTimeout(2500);
+    },
+  },
+  {
+    // A node's neighbours: the side panel on the big hub.
+    guide: 'exploring-the-graph',
+    scene: 'neighbors',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await seedGraphResponse(page, qsaDemo());
+      await page.reload();
+      await expect(page.getByTestId('graph-status-bar')).toContainText('485 nodes', { timeout: 15_000 });
+      await page.waitForTimeout(5000);
+      await page.evaluate(() => {
+        const g = (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$pinia._s.get('graph');
+        g.selectNode('aurora');
+      });
+      await expect(page.getByTestId('neighbor-summary')).toBeVisible();
+      await page.getByTestId('canvas-toolbar-fit').click({ timeout: 30_000 });
+      await page.waitForTimeout(2500);
+    },
+  },
+  {
+    // Expanding a node with 380 edges asks what to load.
+    guide: 'exploring-the-graph',
+    scene: 'expand-dialog',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      const qsa = qsaDemo();
+      await seedGraphResponse(page, { ...qsa, nodes: qsa.nodes.filter((n) => n.node_id === 'aurora' || n.node_id === 'boreal'), edges: [] });
+      await page.route('**/graphlagoon/api/graph-contexts/*/neighbor-summary', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            supported: true,
+            total_edges: 380,
+            buckets: [
+              { relationship_type: 'SOCIO_DE', direction: 'in', edges: 304 },
+              { relationship_type: 'ADMINISTRA', direction: 'in', edges: 76 },
+            ],
+          }),
+        }),
+      );
+      await page.reload();
+      await expect(page.getByTestId('graph-status-bar')).toContainText('2 nodes', { timeout: 15_000 });
+      await page.waitForTimeout(2000);
+      await page.evaluate(() => {
+        const g = (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$pinia._s.get('graph');
+        void g.requestExpand('aurora');
+      });
+      await expect(page.getByTestId('expand-dialog')).toBeVisible();
+      await page.getByTestId('expand-type-ADMINISTRA').uncheck();
+      await page.waitForTimeout(300);
     },
   },
   {

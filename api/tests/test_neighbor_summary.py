@@ -161,3 +161,40 @@ class TestFile:
         s = await ds.neighbor_summary(SimpleNamespace(id="c"), NeighborSummaryRequest(node_id="hub"))
         assert s.total_edges == 6
         assert (s.buckets[0].relationship_type, s.buckets[0].direction, s.buckets[0].edges) == ("SOCIO_DE", "in", 5)
+
+
+class TestNodeDegrees:
+    def test_sql_counts_both_ends_once_per_edge(self):
+        from graphlagoon.models.schemas import NodeDegreesRequest
+
+        sql = _ds().node_degrees_sql(make_context(), NodeDegreesRequest(node_ids=["a'b", "c", "c"]))
+        assert "IN ('a''b', 'c')" in sql  # deduplicated, quoted
+        assert "e.`dst` <> e.`src`" in sql  # a self-loop counts once
+        assert "GROUP BY node_id" in sql
+
+    def test_request_is_capped(self):
+        from pydantic import ValidationError
+
+        from graphlagoon.models.schemas import MAX_DEGREE_IDS, NodeDegreesRequest
+
+        with pytest.raises(ValidationError):
+            NodeDegreesRequest(node_ids=[str(i) for i in range(MAX_DEGREE_IDS + 1)])
+
+    @pytest.mark.asyncio
+    async def test_file_datasource(self, monkeypatch):
+        import graphlagoon.services.datasource.file as file_ds
+        from graphlagoon.models.schemas import NodeDegreesRequest
+
+        edges = [
+            Edge(edge_id="1", src="a", dst="hub", relationship_type="R", properties={}),
+            Edge(edge_id="2", src="a", dst="other", relationship_type="R", properties={}),
+            Edge(edge_id="3", src="b", dst="hub", relationship_type="R", properties={}),
+            Edge(edge_id="4", src="b", dst="b", relationship_type="R", properties={}),
+        ]
+
+        async def fake_load(context):
+            return [], edges
+
+        monkeypatch.setattr(file_ds, "_load", fake_load)
+        r = await file_ds.FileDatasource().node_degrees(SimpleNamespace(id="c"), NodeDegreesRequest(node_ids=["a", "b", "zz"]))
+        assert r.degrees == {"a": 2, "b": 2}

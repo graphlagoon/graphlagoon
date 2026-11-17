@@ -21,6 +21,8 @@ from graphlagoon.models.schemas import (
     CypherQueryRequest,
     ExpandRequest,
     NeighborSummaryRequest,
+    NodeDegreesRequest,
+    NodeDegreesResponse,
     NeighborSummaryResponse,
     GraphResponse,
     Node,
@@ -250,6 +252,13 @@ class NeptuneDatasource(GraphDatasource):
         )
         rows, query_ms = await self._run(query, {"node_id": data.node_id})
         return await self._to_graph(rows, query=query, query_ms=query_ms, limit=limit)
+
+    async def node_degrees(self, context, data: NodeDegreesRequest) -> NodeDegreesResponse:
+        if not data.node_ids:
+            return NodeDegreesResponse()
+        query = "MATCH (n)-[r]-() WHERE id(n) IN $ids RETURN id(n) AS id, count(DISTINCT r) AS n"
+        rows, _ = await self._run(query, {"ids": list(dict.fromkeys(data.node_ids))})
+        return NodeDegreesResponse(degrees={str(r.get("id")): int(r.get("n") or 0) for r in rows})
 
     async def neighbor_summary(
         self, context, data: NeighborSummaryRequest

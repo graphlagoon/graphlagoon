@@ -1,6 +1,6 @@
 # Hubs densos: um nó com centenas de vizinhos diretos
 
-> Status (2026-11-16, tarde): **todas as fases implementadas** — FV, ego E1–E6, F0.1–F0.5, F1 (coleções de folhas, sem o aviso por hub), F2 (resumo de vizinhos no painel), F3 (expansão seletiva), FZ (inclui revelar por zoom, D7 = opção desligada) e, de F6, a fonte Latin-1. Chave automática e pétala "Outros" além do plano. Desde 2026-11-16 o arranjo, o ocultar por zoom e os setores do ego decidem sozinhos por padrão (*Automatic adjustments*, `utils/autoAdjust.ts`), com chave geral para desligar. Continuam como experimentos de F6: coleções no servidor, motivo de conectores, pétalas em 3D, grau real por membro (D5). Análise de 2026-11-13, branch `feature/context-look-clusters`.
+> Status (2026-11-16, tarde): **todas as fases implementadas** — FV, ego E1–E6, F0.1–F0.5, F1 (coleções de folhas, sem o aviso por hub), F2 (resumo de vizinhos no painel), F3 (expansão seletiva), FZ (inclui revelar por zoom, D7 = opção desligada) e, de F6, a fonte Latin-1. Chave automática e pétala "Outros" além do plano. Desde 2026-11-16 o arranjo, o ocultar por zoom e os setores do ego decidem sozinhos por padrão (*Automatic adjustments*, `utils/autoAdjust.ts`), com chave geral para desligar. F6 encerrado: atlas Latin-1, motivo de conectores e grau real por membro (D5, sob demanda) feitos; auto empacotar superado pelo revelar por zoom; coleções no servidor e pétalas em 3D sem gatilho (ver o fim do [04](04-plano-de-implementacao.md)). Demo e fixture únicos: `make dev-seed-qsa` / `api/graphlagoon/dev/qsa_demo.py`. Análise de 2026-11-13, branch `feature/context-look-clusters`.
 > Pasta fora do site VitePress (`srcExclude: dev/**`).
 > Incorpora e amplia [ego-crowded-rings-qsa.md](../ego-crowded-rings-qsa.md) (2026-08-28), que tratava só do layout ego e não foi implementado.
 
@@ -78,7 +78,18 @@ Cada uma tem recomendação; o plano segue a recomendação até alguém decidir
 | ~~D7~~ | Ocultar nós conforme o zoom | — | **Decidida (2026-11-16): (b), como opção desligada por padrão.** Marca "+N hidden" no rótulo da região e chip no status bar | — |
 | **D8** | Arestas hub–folha não desenhadas no arranjo | (a) implícitas por padrão, com marca e botão para desenhar; (b) sempre desenhadas, esmaecidas | **(a)**. São 285 de 323 arestas na fixture, e a posição já diz a ligação | FV |
 
-## Regras de trabalho
+## Pendências de UX (revisão de 2026-11-16)
+
+Corrigidas na hora: divisão "No other link loaded / Other links" em linhas da tabela, com a ressalva curta; o "group" de uma linha só dobra as folhas; o chip diz a forma (`petals by qualificacao`); colunas In/Out vazias somem do diálogo e a nota diz quantas arestas entram; "Turn on" ao lado de "Automatic adjustments are off".
+
+Ficam (cada uma é trabalho de canvas, não de texto):
+
+1. Rótulos de pétala cobrem o nome do hub e se sobrepõem entre si: pôr o rótulo do lado de fora da pétala e deixar o do hub ganhar.
+2. Os sócios com outro vínculo (o que interessa) são os menores rótulos da tela: tamanho normal ou halo para nós ligados a 2+ hubs.
+3. Ego: as faixas do anel 1 parecem anéis de distância: sombrear o anel como uma coroa só e pôr a legenda num ângulo livre.
+4. ✕ nos chips muda o layout em vez de dispensar: trocar por verbos ("Free layout", "Draw") com toast de desfazer — padrão compartilhado com os outros chips da barra, decidir para todos.
+
+
 
 - Nada de dado escondido em silêncio. Toda agregação mostra contagem e pode ser aberta. (`decision_log`, 2026-07-20.)
 - O arranjo das folhas não cria entidade nenhuma: é posição e aparência derivadas do grau. Quando houver colapso num nó, a coleção é um `Cluster`; não criar um segundo conceito de grupo.

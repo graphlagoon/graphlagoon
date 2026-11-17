@@ -359,7 +359,10 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         </select>
 
         <span v-if="egoConfig.ringOrdering === 'auto'" class="setting-hint" data-testid="ego-ring-ordering-auto">
-          <template v-if="autoOff">Automatic adjustments are off (Behaviors): fewest crossings.</template>
+          <template v-if="autoOff">
+            Automatic adjustments are off: fewest crossings.
+            <button type="button" class="inline-action" @click="graphStore.updateBehaviors({ autoAdjust: true })">Turn on</button>
+          </template>
           <template v-else-if="egoAutoOrdering">
             Automatic:
             {{ egoAutoOrdering.ordering === 'barycenter' ? 'fewest crossings' : egoAutoOrdering.ordering === 'node-type' ? 'sectors by node type' : `sectors by ${egoAutoOrdering.key}` }}
@@ -933,7 +936,10 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         </select>
 
         <span v-if="hubLeavesMode === 'auto'" class="setting-hint" data-testid="hub-leaves-auto-hint">
-          <template v-if="autoOff">Automatic adjustments are off (Behaviors): leaves are left to the simulation.</template>
+          <template v-if="autoOff">
+            Automatic adjustments are off: leaves are left to the simulation.
+            <button type="button" class="inline-action" data-testid="hub-leaves-auto-on" @click="graphStore.updateBehaviors({ autoAdjust: true })">Turn on</button>
+          </template>
           <template v-else>
             Automatic: a hub with {{ graphStore.behaviors.hubLeavesMinLeaves }} or more leaves gets petals when a
             property splits its leaves, otherwise a crown.

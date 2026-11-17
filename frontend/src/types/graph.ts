@@ -767,6 +767,12 @@ export interface NeighborSummaryResponse {
   buckets: NeighborSummaryBucket[];
 }
 
+/** Edges each node has in the source (POST /node-degrees, at most 5000 ids). */
+export interface NodeDegreesResponse {
+  supported: boolean;
+  degrees: Record<string, number>;
+}
+
 export interface ExpandRequest {
   node_id: string;
   depth?: number;  // 1-2, default 2

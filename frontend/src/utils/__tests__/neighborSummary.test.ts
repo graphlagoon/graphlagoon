@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { leafCollections, membersNoLongerLeaves, neighborRowLabel, summarizeNeighbors } from '../neighborSummary'
+import { connectorGroups, leafCollections, membersNoLongerLeaves, neighborRowLabel, summarizeNeighbors } from '../neighborSummary'
 
 const e = (src: string, dst: string, relationship_type = 'SOCIO_DE') => ({ src, dst, relationship_type })
 const typeOf = (id: string) => (id.startsWith('c') ? 'Company' : 'Person')
@@ -39,5 +39,23 @@ describe('summarizeNeighbors', () => {
 
   it('membersNoLongerLeaves: gained another link, or no longer touch the hub', () => {
     expect(membersNoLongerLeaves('hub', ['p0', 'p2', 'gone'], edges)).toEqual(['p0', 'gone'])
+  })
+})
+
+describe('connectorGroups', () => {
+  it('neighbours linked to exactly the same other nodes, groups of 3+, largest first; leaves never', () => {
+    const edges = [
+      ...['a', 'b', 'c', 'd'].map((p) => e(p, 'hub')),
+      ...['a', 'b', 'c', 'd'].map((p) => e(p, 'h1')),
+      ...['f', 'g', 'h'].map((p) => e(p, 'hub')),
+      ...['f', 'g', 'h'].flatMap((p) => [e(p, 'h1'), e(p, 'h2')]),
+      e('x', 'hub'), e('x', 'h3'), // alone with h3
+      e('leaf', 'hub'),
+    ]
+    expect(connectorGroups('hub', edges)).toEqual([
+      { sharedIds: ['h1'], memberIds: ['a', 'b', 'c', 'd'] },
+      { sharedIds: ['h1', 'h2'], memberIds: ['f', 'g', 'h'] },
+    ])
+    expect(connectorGroups('hub', edges, 4)).toHaveLength(1)
   })
 })

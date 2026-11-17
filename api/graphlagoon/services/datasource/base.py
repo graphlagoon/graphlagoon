@@ -30,6 +30,8 @@ from graphlagoon.models.schemas import (
     CypherQueryRequest,
     ExpandRequest,
     NeighborSummaryRequest,
+    NodeDegreesRequest,
+    NodeDegreesResponse,
     NeighborSummaryResponse,
     GraphQueryRequest,
     GraphResponse,
@@ -190,6 +192,11 @@ class GraphDatasource(ABC):
         falls back to a plain expand that warns when it was cut.
         """
         return NeighborSummaryResponse(supported=False)
+
+    async def node_degrees(self, context, data: NodeDegreesRequest) -> NodeDegreesResponse:
+        """Edges each node has in the source, without loading them (D5: is a
+        leaf on the canvas a leaf in the source?). Optional, like neighbor_summary."""
+        return NodeDegreesResponse(supported=False)
 
     @abstractmethod
     async def fetch_nodes(

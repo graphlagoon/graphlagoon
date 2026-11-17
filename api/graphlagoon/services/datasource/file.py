@@ -16,6 +16,8 @@ from graphlagoon.models.schemas import (
     Edge,
     ExpandRequest,
     NeighborSummaryRequest,
+    NodeDegreesRequest,
+    NodeDegreesResponse,
     NeighborSummaryResponse,
     GraphResponse,
     Node,
@@ -143,6 +145,16 @@ class FileDatasource(GraphDatasource):
             frontier = nxt
         out = list(picked.values())
         return _response(nodes, out[: data.edge_limit], len(out) > data.edge_limit)
+
+    async def node_degrees(self, context, data: NodeDegreesRequest) -> NodeDegreesResponse:
+        _, edges = await _load(context)
+        wanted = set(data.node_ids)
+        degrees: dict[str, int] = {}
+        for e in edges:
+            for end in {e.src, e.dst}:
+                if end in wanted:
+                    degrees[end] = degrees.get(end, 0) + 1
+        return NodeDegreesResponse(degrees=degrees)
 
     async def neighbor_summary(
         self, context, data: NeighborSummaryRequest

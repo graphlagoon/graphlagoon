@@ -334,6 +334,19 @@ Paralelizável: backend e frontend com o contrato acima fixado (`reference/orche
 | Grau real por membro (decisão D5) | Saber quais folhas têm vínculo não carregado muda a investigação | Consulta em lote de grau para 5 mil ids responder em tempo aceitável no warehouse real |
 | `circular` e `grid` (L16) | — | Não fazer aqui: remover da lista ou implementar é limpeza separada |
 
+### Resultado (2026-11-16)
+
+| Experimento | Resultado |
+|---|---|
+| Atlas Latin-1 | **Feito.** Atlas regerado (`frontend/src/assets/fonts/gen-label-font.cjs`), mesmas métricas; Roboto não tem ← →, que ficam de fora |
+| Auto empacotar por zoom | **Superado** por *Reveal leaves on zoom* (D7 = sim, opção): esconde as folhas de fora por zoom sem trocar o estado de nenhuma coleção. Não fazer |
+| Coleção preguiçosa no servidor | **Não disparou.** Critério depende de um contexto de produção com hub acima de 5 mil vizinhos, que ninguém trouxe. A expansão seletiva (F3) já limita o que entra |
+| Motivo conector | **Feito**, no painel de vizinhos (`connectorGroups`, `utils/neighborSummary.ts`): no demo QSA os 24 sócios com outro vínculo caem em 4 grupos (7/6/6/5) — 100 % em grupos de 3+. Falta medir em dado real, mas o custo é só de exibição |
+| Empacotado em 3D | **Não fazer agora.** O arranjo continua 2D; em 3D o painel oferece trocar. Sem demanda nem protótipo avaliado |
+| Grau real por membro (D5) | **Feito, sob demanda**: `POST /graph-contexts/{id}/node-degrees` (até 5 mil ids, warehouse/Neptune/file) e "check the source" no painel de vizinhos. No warehouse local: 2.526 ids em ~1,5 s. Falta medir no warehouse real antes de pensar em fazer automático |
+| `circular` e `grid` | Fora deste pacote |
+
+
 ---
 
 ## Verificação comum a todas as fases
