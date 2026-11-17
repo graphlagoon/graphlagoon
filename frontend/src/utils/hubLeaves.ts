@@ -96,7 +96,15 @@ export interface HubLeavesOptions {
   keyCandidates?: HubLeavesKeyCandidate[];
   /** Most petals per hub; the smallest groups beyond it share one OTHER_KEY petal. Default 8. */
   maxPetals?: number;
+  /**
+   * Petals: the direction of the hub's own label (0 = right, π/2 = above).
+   * Petals keep clear of it so they do not cover the hub's name.
+   * Omitted: petals go all the way round.
+   */
+  hubLabelAngle?: number;
 }
+
+
 
 /**
  * How well a key splits a hub's leaves into petals, 0 when it does not.
@@ -208,6 +216,48 @@ function compareGroups(a: [string, string[]], b: [string, string[]]): number {
   return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
 }
 
+/**
+ * Ring radius and centre angle of each petal. Without a label direction the
+ * petals share the whole circle, largest first from the top. With one, the
+ * first and last petal stop short of the label's line by two spacings (the
+ * label is a horizontal strip through the hub), and the ring grows until the
+ * petals fit in what is left.
+ */
+export function petalAngles(
+  radii: number[],
+  gap: number,
+  inner: number,
+  circumference: number,
+  labelAngle?: number,
+): { ring: number; angles: number[] } {
+  let ring = Math.max(circumference / (2 * Math.PI), inner + Math.max(...radii));
+  const n = radii.length;
+  if (labelAngle === undefined) {
+    let along = 0;
+    const angles = radii.map((R) => {
+      const a = -Math.PI / 2 + ((along + R + gap / 2) / circumference) * 2 * Math.PI;
+      along += 2 * R + gap;
+      return a;
+    });
+    return { ring, angles };
+  }
+  if (n === 1) return { ring, angles: [labelAngle + Math.PI] };
+  // Arc length from the first centre to each centre, side by side.
+  const at = [0];
+  for (let i = 1; i < n; i++) at.push(at[i - 1] + radii[i - 1] + gap + radii[i]);
+  const need = at[n - 1];
+  for (let iter = 0; iter < 60; iter++) {
+    const a1 = Math.asin(Math.min(1, (radii[0] + 2 * gap) / ring));
+    const a2 = Math.asin(Math.min(1, (radii[n - 1] + 2 * gap) / ring));
+    const span = 2 * Math.PI - a1 - a2;
+    if (span * ring >= need || iter === 59) {
+      return { ring, angles: at.map((s) => labelAngle + a1 + (need > 0 ? (s / need) * span : 0)) };
+    }
+    ring *= 1.05;
+  }
+  return { ring, angles: [] }; // unreachable
+}
+
 export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOptions): HubLeavesPlan {
   const plan: HubLeavesPlan = {
     offsets: new Map(),
@@ -263,15 +313,11 @@ export function computeHubLeavesPlan(links: HubLeavesLink[], opts: HubLeavesOpti
     const radii = ordered.map(([, members]) => spiralRadius(members.length, d));
     const gap = d;
     const circumference = radii.reduce((s, r) => s + 2 * r + gap, 0);
-    // Ring that fits every disc side by side, and clears the hub.
-    const ring = Math.max(circumference / (2 * Math.PI), inner + Math.max(...radii));
-    let along = 0;
+    const { ring, angles } = petalAngles(radii, gap, inner, circumference, opts.hubLabelAngle);
     let outer = 0;
     ordered.forEach(([key, members], gi) => {
       const R = radii[gi];
-      // Start at the top (−π/2) and go clockwise on screen, largest first.
-      const angle = -Math.PI / 2 + ((along + R + gap / 2) / circumference) * 2 * Math.PI;
-      along += 2 * R + gap;
+      const angle = angles[gi];
       const cx = ring * Math.cos(angle);
       const cy = ring * Math.sin(angle);
       const offs = spiralOffsets(members.length, d);

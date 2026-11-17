@@ -82,12 +82,12 @@ Cada uma tem recomendação; o plano segue a recomendação até alguém decidir
 
 Corrigidas na hora: divisão "No other link loaded / Other links" em linhas da tabela, com a ressalva curta; o "group" de uma linha só dobra as folhas; o chip diz a forma (`petals by qualificacao`); colunas In/Out vazias somem do diálogo e a nota diz quantas arestas entram; "Turn on" ao lado de "Automatic adjustments are off".
 
-Ficam (cada uma é trabalho de canvas, não de texto):
+As quatro de canvas, feitas depois (`decision_log` 2026-11-16 22:00):
 
-1. Rótulos de pétala cobrem o nome do hub e se sobrepõem entre si: pôr o rótulo do lado de fora da pétala e deixar o do hub ganhar.
-2. Os sócios com outro vínculo (o que interessa) são os menores rótulos da tela: tamanho normal ou halo para nós ligados a 2+ hubs.
-3. Ego: as faixas do anel 1 parecem anéis de distância: sombrear o anel como uma coroa só e pôr a legenda num ângulo livre.
-4. ✕ nos chips muda o layout em vez de dispensar: trocar por verbos ("Free layout", "Draw") com toast de desfazer — padrão compartilhado com os outros chips da barra, decidir para todos.
+1. Rótulo de pétala fora da pétala, do lado oposto ao hub; as pétalas deixam livre a faixa do rótulo do hub.
+2. Vizinhos com outro vínculo ganham rótulo maior e prioridade; folhas empacotadas só ganham rótulo com zoom.
+3. Ego: anel em faixas sombreado como uma coroa; legendas dos anéis no ângulo livre mais próximo.
+4. Chips de layout com verbos (*Free layout*, *Fewest crossings*, *Draw*, *Show all*) e Undo no toast; ✕ só onde remove uma restrição.
 
 
 

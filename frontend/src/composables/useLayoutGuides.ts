@@ -10,7 +10,7 @@
  */
 import * as THREE from 'three';
 import { FastLabelRenderer } from '@/utils/FastLabelRenderer';
-import type { RingGuideSpec, HiveAxesSpec } from '@/utils/layoutModes';
+import { ringCaptionPlacement, type RingGuideSpec, type HiveAxesSpec } from '@/utils/layoutModes';
 
 const GUIDE_COLOR = 0x888888;
 const FOCUS_HALO_COLOR = 0xf59e0b;
@@ -19,6 +19,9 @@ const GUIDE_RENDER_ORDER = 998; // under the rotation axis line (999), over the 
 /** Text height in world units at camera zoom 1 (2D view); kept readable on screen by rescale(). */
 const LABEL_SCALE = 28;
 const LABEL_COLOR = new THREE.Color(0.55, 0.55, 0.55);
+/** A banded ring's shading: visible on white and on the dark theme, under every node and edge. */
+const BAND_OPACITY = 0.07;
+const BAND_RENDER_ORDER = -1;
 
 function circlePoints(radius: number, segments = CIRCLE_SEGMENTS): THREE.Vector3[] {
   const points: THREE.Vector3[] = [];
@@ -86,6 +89,23 @@ export function useLayoutGuides(
     return line;
   }
 
+  /**
+   * A ring wrapped into bands, shaded as one crown from its inner band to its
+   * outer one: without it the bands read as more hops.
+   */
+  function addBand(scene: THREE.Scene, inner: number, outer: number, ringSpacing: number) {
+    const pad = Math.min(ringSpacing * 0.25, (outer - inner) * 0.5 + 6);
+    const mesh = new THREE.Mesh(
+      new THREE.RingGeometry(Math.max(0, inner - pad), outer, CIRCLE_SEGMENTS),
+      new THREE.MeshBasicMaterial({ color: GUIDE_COLOR, transparent: true, opacity: BAND_OPACITY, depthWrite: false }),
+    );
+    // Just behind the plane of the nodes, so they cover it.
+    mesh.position.z = -1;
+    mesh.renderOrder = BAND_RENDER_ORDER;
+    scene.add(mesh);
+    objects.push(mesh);
+  }
+
   function addLabel(scene: THREE.Scene, id: string, text: string, x: number, y: number, textAlign: 'left' | 'right' | 'center' = 'left') {
     const renderer = ensureLabelRenderer(scene);
     renderer.addLabel({
@@ -139,12 +159,12 @@ export function useLayoutGuides(
     clear();
 
     for (const ring of spec.rings) {
+      if (ring.innerRadius !== null) addBand(scene, ring.innerRadius, ring.radius, opts.ringSpacing);
       addLine(scene, circlePoints(ring.radius), { dashed: ring.dashed, loop: true });
       // null label = captions suppressed by the layout config; ring still drawn
       if (ring.label !== null) {
-        // Staggered downward by hop: rings can be closer than a caption is long.
-        const angle = -0.16 * Math.max(0, ring.hop - 1);
-        addLabel(scene, `ego-ring-${ring.hop}`, ring.label, (ring.radius + 6) * Math.cos(angle), (ring.radius + 6) * Math.sin(angle) + 6);
+        const at = ringCaptionPlacement(ring.radius, ring.labelAngle);
+        addLabel(scene, `ego-ring-${ring.hop}`, ring.label, at.x, at.y, at.align);
       }
     }
     spec.sectors.forEach((sector, i) => {

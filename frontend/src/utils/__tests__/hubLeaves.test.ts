@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   chooseKey,
   computeHubLeavesPlan,
+  petalAngles,
   OTHER_KEY,
   scoreKey,
   findHubLeaves,
@@ -313,3 +314,34 @@ describe('reveal on zoom (D7)', () => {
     expect(zoomHiddenLeaves(plan.regions, REVEAL_MIN_PX).hidden.size).toBe(0)
   })
 })
+
+describe('petalAngles: petals keep off the hub label', () => {
+  const radii = [40, 30, 20, 10];
+  const gap = 5;
+  const circumference = radii.reduce((s, r) => s + 2 * r + gap, 0);
+
+  it('without a label direction, the whole circle from the top (as before)', () => {
+    const { angles } = petalAngles(radii, gap, 20, circumference);
+    expect(angles[0]).toBeGreaterThan(-Math.PI / 2);
+    expect(angles[3]).toBeLessThan((3 * Math.PI) / 2);
+  });
+
+  it('with the label on the right, no petal crosses the strip right of the hub', () => {
+    const { ring, angles } = petalAngles(radii, gap, 20, circumference, 0);
+    angles.forEach((a, i) => {
+      const cx = ring * Math.cos(a);
+      const cy = ring * Math.sin(a);
+      // A petal right of the hub stays at least one gap above or below its centre line.
+      if (cx + radii[i] > 0) expect(Math.abs(cy) - radii[i]).toBeGreaterThanOrEqual(gap - 1e-6);
+    });
+    // Neighbouring petals do not overlap.
+    for (let i = 1; i < angles.length; i++) {
+      const d = 2 * ring * Math.sin((angles[i] - angles[i - 1]) / 2);
+      expect(d).toBeGreaterThanOrEqual(radii[i] + radii[i - 1] - 1e-6);
+    }
+  });
+
+  it('a single petal goes opposite the label', () => {
+    expect(petalAngles([30], gap, 20, 65, 0).angles).toEqual([Math.PI]);
+  });
+});

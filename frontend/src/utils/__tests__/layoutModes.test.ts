@@ -6,6 +6,8 @@ import {
   computeEgoLinkCurvatures,
   computeHivePositions,
   computeRingGuideSpec,
+  pickCaptionAngle,
+  ringCaptionPlacement,
   computeHiveAxesSpec,
   computeHiveLinkCurvatures,
   computeTreeLayout,
@@ -1549,5 +1551,40 @@ describe('computeRingGuideSpec sectors and bands', () => {
     expect(computeRingGuideSpec({ levelStats: [ring], maxHops: null, sectors: one }).sectors).toEqual([]);
     const two = [...one, { key: 'B', count: 1, midAngle: 1 }];
     expect(computeRingGuideSpec({ levelStats: [ring], maxHops: null, sectors: two, hideLabels: true }).sectors).toEqual([]);
+  });
+});
+
+describe('ring guide: banded crown and caption placement', () => {
+  const ring = { level: 1, offset: 200, count: 300, unreachable: false, innerOffset: 150, bands: 3 };
+
+  it('a ring wrapped into bands spans from its inner band (one crown, not more hops)', () => {
+    const spec = computeRingGuideSpec({ levelStats: [ring, { level: 2, offset: 300, count: 2, unreachable: false }], maxHops: null });
+    expect(spec.rings[0].innerRadius).toBe(150);
+    expect(spec.rings[1].innerRadius).toBeNull();
+  });
+
+  it('keeps the preferred angle when nothing is under the caption', () => {
+    expect(pickCaptionAngle(200, 0, 10, [{ x: -300, y: 0 }])).toBe(0);
+  });
+
+  it('moves the caption off a node sitting where it would go', () => {
+    const at = ringCaptionPlacement(200, 0);
+    const angle = pickCaptionAngle(200, 0, 10, [{ x: at.x + 20, y: at.y }]);
+    expect(angle).not.toBe(0);
+    // …to the nearest free angle, deterministically.
+    expect(Math.abs(angle)).toBeLessThan(0.5);
+    expect(pickCaptionAngle(200, 0, 10, [{ x: at.x + 20, y: at.y }])).toBe(angle);
+  });
+
+  it('captions grow away from the ring', () => {
+    expect(ringCaptionPlacement(200, 0).align).toBe('left');
+    expect(ringCaptionPlacement(200, Math.PI).align).toBe('right');
+    expect(ringCaptionPlacement(200, Math.PI / 2).align).toBe('center');
+  });
+
+  it('with obstacles, ring captions avoid the nodes', () => {
+    const blocked = ringCaptionPlacement(200, 0);
+    const spec = computeRingGuideSpec({ levelStats: [ring], maxHops: null, obstacles: [{ x: blocked.x + 10, y: blocked.y }] });
+    expect(spec.rings[0].labelAngle).not.toBe(0);
   });
 });

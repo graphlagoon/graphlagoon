@@ -1057,8 +1057,13 @@ function wrapRing(
 // ---------------------------------------------------------------------------
 
 export interface RingGuideSpec {
-  /** `label: null` means "draw this ring without a caption". */
-  rings: { hop: number; radius: number; dashed: boolean; label: string | null }[];
+  /**
+   * `label: null` means "draw this ring without a caption". `innerRadius`: a
+   * ring wrapped into bands spans innerRadius..radius and is shaded as one
+   * crown, so its bands do not read as more hops. `labelAngle`: where the
+   * caption goes, chosen away from nodes and the other captions.
+   */
+  rings: { hop: number; radius: number; dashed: boolean; label: string | null; innerRadius: number | null; labelAngle: number }[];
   /** Ring-1 sector captions ("Socio (131)"), just outside the ring, centred on the sector. */
   sectors: { label: string; x: number; y: number }[];
 }
@@ -1078,6 +1083,8 @@ export function computeRingGuideSpec(opts: {
   sectors?: RingSector[];
   /** Gap between ring 1 and its sector captions. */
   sectorLabelGap?: number;
+  /** Drawn node positions: ring captions avoid them. */
+  obstacles?: Iterable<{ x: number; y: number }>;
 }): RingGuideSpec {
   const { levelStats, maxHops, hideLabels = false } = opts;
   const rings: RingGuideSpec['rings'] = [];
@@ -1097,6 +1104,10 @@ export function computeRingGuideSpec(opts: {
       radius: stat.offset,
       dashed: stat.unreachable,
       label: hideLabels ? null : stat.count > 0 ? `${name} (${stat.count}${bands})` : name,
+      // Same rule as the caption: a few nodes in bands do not make a crown.
+      innerRadius: stat.bands && stat.bands > 1 && stat.count >= 10 && stat.innerOffset !== undefined ? stat.innerOffset : null,
+      // Staggered by hop: rings can be closer than a caption is long.
+      labelAngle: -0.16 * Math.max(0, stat.level - 1),
     });
   }
 
@@ -1113,7 +1124,74 @@ export function computeRingGuideSpec(opts: {
     }
   }
 
+  if (opts.obstacles) {
+    const points = [...opts.obstacles, ...sectors];
+    const taken: { x: number; y: number }[] = [];
+    for (const ring of rings) {
+      if (ring.label === null) continue;
+      ring.labelAngle = pickCaptionAngle(ring.radius, ring.labelAngle, ring.label.length, [...points, ...taken]);
+      taken.push(...captionSamples(ring.radius, ring.labelAngle, ring.label.length));
+    }
+  }
+
   return { rings, sectors };
+}
+
+/** Gap between a ring and its caption. */
+const RING_CAPTION_GAP = 6;
+/** Rough caption character width and clearance, in world units at camera zoom 1. */
+const CAPTION_CHAR_WIDTH = 7;
+const CAPTION_CLEARANCE = 14;
+const CAPTION_CANDIDATES = 36;
+
+/** Where a ring caption anchors and how it aligns: it grows away from the ring. */
+export function ringCaptionPlacement(radius: number, angle: number): { x: number; y: number; align: 'left' | 'right' | 'center' } {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const r = radius + RING_CAPTION_GAP;
+  return { x: r * c, y: r * s + RING_CAPTION_GAP * Math.sign(s || 1), align: c > 0.3 ? 'left' : c < -0.3 ? 'right' : 'center' };
+}
+
+/** Points along a caption's extent, to test it against nodes. */
+function captionSamples(radius: number, angle: number, chars: number): { x: number; y: number }[] {
+  const { x, y, align } = ringCaptionPlacement(radius, angle);
+  const width = chars * CAPTION_CHAR_WIDTH;
+  const start = align === 'left' ? x : align === 'right' ? x - width : x - width / 2;
+  const out: { x: number; y: number }[] = [];
+  for (let t = 0; t <= width; t += CAPTION_CLEARANCE) out.push({ x: start + t, y });
+  return out;
+}
+
+/**
+ * The caption angle with the fewest nodes under the caption, the preferred
+ * angle when it is free (ties → closest to it). Deterministic.
+ */
+export function pickCaptionAngle(radius: number, preferred: number, chars: number, obstacles: { x: number; y: number }[]): number {
+  const near2 = CAPTION_CLEARANCE * CAPTION_CLEARANCE;
+  const hits = (angle: number) => {
+    let n = 0;
+    for (const p of captionSamples(radius, angle, chars)) {
+      for (const o of obstacles) {
+        const dx = o.x - p.x;
+        const dy = o.y - p.y;
+        if (dx * dx + dy * dy < near2) n++;
+      }
+    }
+    return n;
+  };
+  let best = preferred;
+  let bestHits = hits(preferred);
+  for (let k = 1; k <= CAPTION_CANDIDATES / 2 && bestHits > 0; k++) {
+    for (const sign of [1, -1]) {
+      const angle = preferred + (sign * k * 2 * Math.PI) / CAPTION_CANDIDATES;
+      const h = hits(angle);
+      if (h < bestHits) {
+        best = angle;
+        bestHits = h;
+      }
+    }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------
