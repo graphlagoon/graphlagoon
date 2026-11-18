@@ -355,6 +355,10 @@ function handleExportPNG(options: { scale: number; background: 'white' | 'transp
 
 // Track canvas dimensions for the export modal
 let canvasResizeObserver: ResizeObserver | null = null;
+/** Height of the bottom toolbar (it wraps on narrow canvases): the layout panel stops above it. */
+const toolbarHostRef = ref<HTMLElement | null>(null);
+const toolbarHeight = ref(40);
+let toolbarResizeObserver: ResizeObserver | null = null;
 
 function updateCanvasDimensions() {
   if (graphContainerRef.value) {
@@ -686,6 +690,12 @@ onMounted(async () => {
 
   // Track canvas dimensions for the export modal
   const graphContainer = graphContainerRef.value?.querySelector('.graph-container');
+  if (toolbarHostRef.value) {
+    toolbarResizeObserver = new ResizeObserver(() => {
+      toolbarHeight.value = toolbarHostRef.value?.offsetHeight ?? 40;
+    });
+    toolbarResizeObserver.observe(toolbarHostRef.value);
+  }
   if (graphContainer) {
     canvasResizeObserver = new ResizeObserver(updateCanvasDimensions);
     canvasResizeObserver.observe(graphContainer);
@@ -706,6 +716,8 @@ onUnmounted(() => {
   toolbarStore.unregisterHandlers();
   canvasResizeObserver?.disconnect();
   canvasResizeObserver = null;
+  toolbarResizeObserver?.disconnect();
+  toolbarResizeObserver = null;
   // Terminate background workers: the metrics pool outlives the view as a
   // module singleton, and the community worker keeps running when it has no
   // results yet (the nodes-watcher only clears when hasResults is true).
@@ -891,7 +903,7 @@ watch(
         @close="pendingTemplateExecution = null"
       />
 
-      <div class="graph-container" data-testid="graph-container">
+      <div class="graph-container" data-testid="graph-container" :style="{ '--toolbar-height': `${toolbarHeight}px` }">
         <div v-if="graphStore.loading" class="loading-overlay" data-testid="graph-loading">
           <QueryRunningState
             :label="graphStore.loadingMessage || 'Loading…'"
@@ -934,7 +946,7 @@ watch(
         />
 
         <!-- Layout Panel -->
-        <div v-if="showLayoutPanel" class="panel-wrapper panel-left">
+        <div v-if="showLayoutPanel" class="layout-panel-host">
           <LayoutPanel
             :is-layout-running="graphCanvas3DRef?.isLayoutRunning ?? false"
             @start-layout="graphCanvas3DRef?.startLayout()"
@@ -960,7 +972,7 @@ watch(
         />
 
         <!-- Bottom toolbar: the chrome shared with the case, plus this page's drawers -->
-        <div class="graph-toolbar-host">
+        <div ref="toolbarHostRef" class="graph-toolbar-host">
           <GraphCanvasToolbar
             :buttons="['info', 'layout', 'table', 'fit']"
             :active="{ info: showContextInfo, layout: showLayoutPanel, table: showDataTable }"
@@ -1333,18 +1345,24 @@ watch(
   font-weight: 600;
 }
 
-.panel-wrapper {
+/* From the top of the canvas to just above the bottom toolbar (whatever its
+   height): the panel scrolls inside this box instead of running under the
+   toolbar or the header on a short window. The box itself lets clicks through
+   below the panel. */
+.layout-panel-host {
   position: absolute;
-  bottom: 80px;
-  z-index: 20;
-}
-
-.panel-wrapper.panel-left {
+  top: 12px;
   left: 16px;
+  bottom: calc(48px + var(--toolbar-height, 40px) + 8px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
 }
 
-.panel-wrapper.panel-right {
-  right: 16px;
+.layout-panel-host > :deep(.layout-panel) {
+  max-height: 100%;
+  pointer-events: auto;
 }
 
 .graph-toolbar-host {

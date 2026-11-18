@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, type Component } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useMetricsStore } from '@/stores/metrics';
 import { useSimilarityStore } from '@/stores/similarity';
 import type { LayoutAlgorithm, RingOrdering, CrossingHeuristic } from '@/types/graph';
-import { Play, Square, Flame, Shuffle, ChevronDown, ChevronRight, HelpCircle, X } from 'lucide-vue-next';
+import { Play, Square, Flame, Shuffle, ChevronDown, ChevronRight, HelpCircle, X, Orbit, Target, Hexagon, Network } from 'lucide-vue-next';
 import { AUTO_REVEAL_MIN_LEAVES } from '@/utils/autoAdjust';
 
 const graphStore = useGraphStore();
@@ -44,11 +44,12 @@ function toggleLayout() {
 // Layout mode selector
 // ---------------------------------------------------------------------------
 
-const LAYOUT_OPTIONS: { id: LayoutAlgorithm; label: string; icon: string }[] = [
-  { id: 'force', label: 'Force', icon: '🌀' },
-  { id: 'ego', label: 'Ego Network', icon: '🎯' },
-  { id: 'hive', label: 'Hive Plot', icon: '🕸️' },
-  { id: 'hierarchical', label: 'Hierarchical', icon: '🌳' },
+// Icons from the app's icon set: emoji depend on the OS font and render as boxes without one.
+const LAYOUT_OPTIONS: { id: LayoutAlgorithm; label: string; icon: Component }[] = [
+  { id: 'force', label: 'Force', icon: Orbit },
+  { id: 'ego', label: 'Ego Network', icon: Target },
+  { id: 'hive', label: 'Hive Plot', icon: Hexagon },
+  { id: 'hierarchical', label: 'Hierarchical', icon: Network },
 ];
 
 const layoutMode = computed(() => graphStore.layoutAlgorithm);
@@ -254,12 +255,13 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         :data-testid="`layout-option-${opt.id}`"
         @click="selectLayout(opt.id)"
       >
-        <span class="layout-icon">{{ opt.icon }}</span>
+        <component :is="opt.icon" :size="14" class="layout-icon" aria-hidden="true" />
         <span class="layout-label">{{ opt.label }}</span>
       </button>
     </div>
 
-    <div class="settings-divider"></div>
+    <!-- Everything below the mode picker scrolls; the header and the picker stay put. -->
+    <div class="panel-body">
 
     <!-- Ego network controls -->
     <div v-if="layoutMode === 'ego'" class="settings-group">
@@ -837,10 +839,9 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         </button>
       </div>
 
-      <div v-if="layoutMode === 'force'" class="settings-divider"></div>
-
       <!-- Basic controls with friendly names -->
-      <div v-if="layoutMode === 'force'" class="settings-group">
+      <details v-if="layoutMode === 'force'" class="panel-section" open>
+        <summary class="panel-section-title">Forces</summary>
         <div class="setting-item">
           <label>
             <span class="setting-label">Repulsion</span>
@@ -913,13 +914,11 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         </template>
 
         <!-- Blower + Clipping Plane moved to BehaviorPanel (they are behaviors, not layout) -->
-      </div>
-
-      <div v-if="layoutMode === 'force'" class="settings-divider"></div>
+      </details>
 
       <!-- Hubs with many leaves: arrangement next to the hub, nothing grouped or hidden -->
-      <div v-if="layoutMode === 'force'" class="settings-group" data-testid="hub-leaves-section">
-        <p class="settings-group-title">Hubs with many leaves</p>
+      <details v-if="layoutMode === 'force'" class="panel-section" open data-testid="hub-leaves-section">
+        <summary class="panel-section-title">Hubs with many leaves</summary>
         <span class="setting-hint">
           Lay the nodes linked only to a hub right next to it. Every node stays on the canvas.
         </span>
@@ -1042,12 +1041,11 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
             </template>
           </span>
         </template>
-      </div>
-
-      <div v-if="layoutMode === 'force'" class="settings-divider"></div>
+      </details>
 
       <!-- Execution controls with friendly names -->
-      <div v-if="layoutMode === 'force'" class="settings-group">
+      <details v-if="layoutMode === 'force'" class="panel-section">
+        <summary class="panel-section-title">Simulation run</summary>
         <div class="setting-item">
           <label>
             <span class="setting-label">Layout Iterations</span>
@@ -1095,13 +1093,11 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
             @input="graphStore.updateLayoutExecution({ warmupTicks: parseInt(($event.target as HTMLInputElement).value) })"
           />
         </div>
-      </div>
-
-      <div v-if="layoutMode === 'force'" class="settings-divider"></div>
+      </details>
 
       <!-- Layout by Edge Type (force mode only — it would fight other modes' constraints) -->
-      <div v-if="layoutMode === 'force'" class="settings-group">
-        <p class="settings-group-title">Layout by Edge Type</p>
+      <details v-if="layoutMode === 'force'" class="panel-section">
+        <summary class="panel-section-title">Layout by Edge Type</summary>
 
         <div class="setting-item">
           <label>
@@ -1145,9 +1141,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         >
           <Play :size="13" /> Apply Edge Layout
         </button>
-      </div>
-
-      <div class="settings-divider"></div>
+      </details>
 
       <!-- Advanced toggle (simulation params — not applicable to hive) -->
       <div v-if="layoutMode === 'force'" class="advanced-toggle" @click="showAdvanced = !showAdvanced">
@@ -1310,6 +1304,8 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
         </div>
       </template>
 
+    </div>
+
     <!-- Help Modal for 3D Layout Parameters -->
     <Teleport to="body">
       <div v-if="showHelpModal" class="modal-overlay" @click.self="showHelpModal = false">
@@ -1433,22 +1429,90 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 
 <style scoped>
 .layout-panel {
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  width: 264px;
+  max-width: calc(100vw - 32px);
+  /* The host bounds it to the canvas; this is only the fallback. */
+  max-height: calc(100vh - 150px);
+  min-height: 0;
   background: var(--card-background, white);
   border: 1px solid var(--border-color, #ddd);
   border-radius: 8px;
-  min-width: 200px;
-  max-width: 240px;
-  max-height: calc(100vh - 150px);
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-color, #333);
+  overflow: hidden;
 }
 
 .panel-header {
-  margin-bottom: 12px;
+  flex: none;
+  padding: 10px 12px 8px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* Only this part scrolls: header and mode picker stay in view on a short window. */
+.panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 10px 8px 12px 12px;
+  border-top: 1px solid var(--border-color, #ddd);
+}
+
+/* Collapsible blocks of the force layout: the first two open. */
+.panel-section {
+  border-bottom: 1px solid var(--border-color, #eee);
+  padding: 2px 0 10px;
+  margin-bottom: 4px;
+}
+.panel-section:not([open]) {
+  padding-bottom: 2px;
+}
+.panel-section:last-of-type {
+  border-bottom: none;
+}
+.panel-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted, #666);
+  user-select: none;
+}
+.panel-section-title::-webkit-details-marker {
+  display: none;
+}
+.panel-section-title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+  flex: none;
+}
+.panel-section[open] > .panel-section-title::before {
+  transform: rotate(45deg);
+}
+.panel-section-title:hover {
+  color: var(--text-color, #333);
+}
+.panel-section-title:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 2px;
 }
 
 .panel-header-actions {
@@ -1465,11 +1529,14 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 }
 
 .help-btn {
-  width: 20px;
-  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 50%;
+  border: none;
+  border-radius: 4px;
   background: var(--card-background, white);
   color: var(--text-muted, #666);
   font-size: 12px;
@@ -1479,30 +1546,35 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 }
 
 .help-btn:hover {
-  background: var(--primary-color, #42b883);
-  color: white;
-  border-color: var(--primary-color, #42b883);
+  background: var(--bg-secondary, #f0f0f0);
+  color: var(--text-color, #333);
 }
 
+/* Four modes as a 2×2 grid: half the height of a list of four. */
 .layout-selector {
-  display: flex;
-  flex-direction: column;
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 4px;
-  margin-bottom: 12px;
+  padding: 0 12px 10px;
 }
 
 .layout-option {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
   background: transparent;
   border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-color, #333);
   text-align: left;
-  transition: all 0.15s;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
 }
 
 .layout-option:hover {
@@ -1516,11 +1588,14 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 }
 
 .layout-icon {
-  font-size: 14px;
+  flex: none;
 }
 
 .layout-label {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .edge-type-item {
@@ -1529,20 +1604,34 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 }
 
 .fa2-controls {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.fa2-controls .run-btn,
+.fa2-controls .apply-btn {
+  padding: 6px 4px;
 }
 
 .run-btn,
 .apply-btn {
-  flex: 1;
-  padding: 8px 12px;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 8px;
   border: 1px solid var(--border-color, #ddd);
   border-radius: 6px;
   cursor: pointer;
+  font: inherit;
   font-size: 12px;
-  transition: all 0.15s;
+  color: var(--text-color, #333);
+  white-space: nowrap;
+  transition: background 0.15s;
   background: var(--card-background, white);
 }
 
@@ -1577,7 +1666,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 }
 
 .settings-group-title {
-  margin: 0 0 8px 0;
+  margin: 4px 0 8px 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted, #666);
@@ -1597,22 +1686,43 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   margin-bottom: 4px;
-  font-size: 11px;
+}
+
+/* label.setting-item (a select with its caption) stacks them. */
+label.setting-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .setting-label {
-  color: var(--text-muted, #666);
+  font-size: 12px;
+  color: var(--text-color, #333);
 }
 
 .setting-value {
-  font-family: monospace;
-  color: var(--text-color, #333);
-  font-size: 11px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted, #666);
+}
+
+/* A checkbox inside a setting row is not a caption/value pair. */
+.setting-item label.checkbox-item {
+  justify-content: flex-start;
+  margin: 0 0 4px;
+}
+
+.setting-item > .apply-btn {
+  width: 100%;
+  margin-top: 2px;
 }
 
 .setting-item input[type="range"] {
+  display: block;
   width: 100%;
+  margin: 6px 0 2px;
   height: 4px;
   border-radius: 2px;
   appearance: none;
@@ -1637,8 +1747,9 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 
 .checkbox-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+  margin: 8px 0;
   font-size: 12px;
   cursor: pointer;
   color: var(--text-color, #333);
@@ -1646,12 +1757,16 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 
 .checkbox-item input {
   cursor: pointer;
+  margin: 1px 0 0;
+  flex: none;
 }
 
 .setting-select {
   width: 100%;
-  padding: 6px 8px;
-  font-size: 11px;
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-color, #333);
   border: 1px solid var(--border-color, #ddd);
   border-radius: 4px;
   background: var(--card-background, white);
@@ -1679,9 +1794,10 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
 
 .setting-hint {
   display: block;
-  font-size: 10px;
-  color: var(--text-muted, #999);
-  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted, #777);
+  margin: 4px 0 6px;
 }
 
 .setting-hint-warn {
@@ -1698,7 +1814,7 @@ function toggleHierarchicalEdgeType(edgeType: string, checked: boolean) {
   padding: 0;
   margin-left: 4px;
   color: var(--primary-color, #42b883);
-  font-size: 10px;
+  font: inherit;
   cursor: pointer;
   text-decoration: underline;
 }
