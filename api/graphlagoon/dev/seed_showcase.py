@@ -405,7 +405,7 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
             "After every query two queries (Edit → Enrichment Tables) run on Databricks: 'Demo · Cities on both "
             "ends' adds src_city, dst_city and same_city to each edge, 'Demo · Outgoing edges per node' adds "
             "edges_out_in_table to each node. Click one to see them marked 'from …'. "
-            "Your data → From Databricks tables runs it by hand.",
+            "Your data → Context enrichments runs it by hand.",
             enrichment_tables=[{
                 "name": "node_cities",
                 "label": "Demo · Cities on both ends",
@@ -435,6 +435,36 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
             }],
         )
         made["contexts"].append(enrich_ctx["title"])
+
+        # 3b. Enrichment by a provider registered in Python (graphlagoon/dev/enrichment_demo.py)
+        try:
+            provider_ctx = await new_context(
+                client, edge, node, "Demo · Provider enrichment and a program that waits",
+                "After every query the provider 'Demo · KYC profile (Python)' adds kyc_tier and "
+                "kyc_score to each node (in a real deployment it would read Lakebase). The chip under the "
+                "graph shows it running, done or failed. The cluster program 'Demo · Group by KYC tier "
+                "(waits)' runs after the query only once that enrichment succeeded.",
+                enrichment_tables=[{
+                    "name": "risk_profile",
+                    "label": "Demo · KYC profile (Python)",
+                    "provider": {"name": "demo-kyc", "target": "nodes", "run": "auto"},
+                }],
+                cluster_programs=[{
+                    "program_id": "demo-kyc-tier-waits",
+                    "program_name": "Demo · Group by KYC tier (waits)",
+                    "description": "Groups nodes by kyc_tier, which the provider adds after the query.",
+                    "code": _GROUP_BY_PROP,
+                    "parameters": [{"id": "property", "type": "text", "label": "Property", "default": "kyc_tier"}],
+                    "wait_for_enrichment": True,
+                    "scope": "context",
+                    "created_at": NOW,
+                    "updated_at": NOW,
+                }],
+                default_behaviors={"afterQueryClusterProgram": "demo-kyc-tier-waits"},
+            )
+            made["contexts"].append(provider_ctx["title"])
+        except SeedError as exc:  # a server built without the demo provider
+            log(f"provider enrichment demo skipped: {exc}")
 
         # 4. Stock look, to compare ---------------------------------------------------
         stock_ctx = await new_context(

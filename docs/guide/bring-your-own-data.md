@@ -20,7 +20,7 @@ canvas from a CSV, **add** nodes and edges from a file or JSON, or **draw** them
 |---|---|---|
 | Add properties to nodes already on the canvas | [Enrichment file](#enrich-nodes-or-edges-from-a-file) (import wizard, role **Enrichment**) | **Your data → Enrich from a file**: a file, pasted rows, or [an AI's answer](#ask-an-ai) |
 | Add properties to edges already on the canvas | Enrichment file, **edges** | **Your data → Enrich from a file**, **edges** |
-| Add properties to edges or nodes from the context's Databricks tables | — | [Enrichment queries](#enrich-from-databricks-tables): after every query, or **Your data → From Databricks tables** |
+| Add properties to edges or nodes from the context's Databricks tables, or from a provider the deployment registered (Lakebase, a service) | — | [Enrichment queries and providers](#enrich-from-databricks-tables): after every query, or **Your data → Context enrichments** |
 | Add nodes and edges from a CSV | [File with a mapping](#a-file-with-a-mapping), or [a promoted table](#a-table-promoted-to-the-graph) | **Your data → Nodes and edges from a file** |
 | Add nodes and edges from JSON | [Snapshot item](#a-snapshot-as-json) | **Your data → Nodes and edges from a file** (a `.json`) |
 | Draw a node or an edge | [Right-click → Add a linked node](#drawn-by-hand), stored in **Manual additions** | Right-click → **Add a linked node**, stored in the exploration's layer |
@@ -142,8 +142,9 @@ copy. Paste them only into an assistant your organization allows for this data.
 
 A context can carry **enrichment queries**: SQL its author writes once, which runs on the Databricks SQL
 warehouse right after the graph answers, and adds properties to the edges or to the nodes on the canvas. The graph itself can
-come from anywhere (Delta tables, Neptune, a REST connection, a precomputed graph such as a Lakebase BFS); the
-enrichment always reads Delta tables.
+come from anywhere (Delta tables, Neptune, a REST connection, a precomputed graph such as a Lakebase BFS); a
+query always reads Delta tables. To enrich from somewhere else (a Lakebase table, an internal service), the
+deployment registers an [enrichment provider](#enrich-from-a-provider) and the context's author picks it.
 
 Use it when the value you want needs joins the graph query does not do: the risk score of the transaction
 behind an edge, the channel from a second table, an account's activity in the last 90 days.
@@ -195,6 +196,30 @@ GROUP BY n.node_id
 
 The query may define its own CTEs, but not ones named `graph_edges` or `graph_nodes`.
 
+### Enrich from a provider
+
+A **provider** is code the deployment registered in Python (see
+[Python API → Enrichment providers](./python-api.md#enrichment-providers)): it gets the same batches a query
+gets and returns new properties per edge or node id, reading whatever the server can reach, typically a
+Lakebase table. When the server has any, the **Enrichment Tables** header shows **+ Attach provider**: pick
+the provider, what it enriches (only the targets it supports are offered), when it runs, and the same
+**Replace values** and **Send node properties** switches as a query. A provider entry has no table and no SQL.
+
+```yaml
+enrichment_tables:
+  - name: kyc
+    label: KYC profile
+    provider:
+      name: lakebase-kyc        # a provider registered on this server
+      target: nodes
+      run: auto
+```
+
+Attaching one needs the same **Create graph contexts** permission; running it needs read access to the
+context, and every run is audited as `enrichment.run`, like a query. A context whose provider is later removed
+from the server still opens: the entry says *not registered on this server* and its runs fail with
+`ENRICHMENT_PROVIDER_NOT_REGISTERED`.
+
 ### Import YAML, or ask an AI
 
 The **Enrichment Tables** header has three helpers:
@@ -234,7 +259,7 @@ enrichment_tables:
 |---|---|
 | **Enriches: the edges / the nodes** | What the returned ids are and what gets the properties. |
 | **Runs: after every query and expand** | Runs by itself when a query, a subgraph, an expand, a precomputed graph or a saved exploration lands. An expand sends only the new edges and nodes. |
-| **Runs: only from Your data** | Runs when someone clicks **Run** in **Your data → From Databricks tables**. |
+| **Runs: only from Your data** | Runs when someone clicks **Run** in **Your data → Context enrichments**. |
 | **Replace values the edge (node) already has** | Off: a value already there wins, and the query's is ignored. On: the query's value wins. |
 | **Send node properties** | Off: `graph_nodes` holds ids and types only, so node data does not travel. |
 
@@ -249,13 +274,23 @@ enrichment_tables:
   graph's own values with enriched ones shows which is which. Columns and cells from **your data** get the
   same marks in amber. While a query runs or waits for the ones before it, the **Nodes** or **Edges** tab
   shows a spinner: its columns are still coming.
-- **Your data → From Databricks tables** lists the context's queries and the authorized tables, runs one by
-  hand, shows the SQL, and says what the last run did: *2 of 40 edges matched a row · 2 got new values*. A reader
-  of a shared exploration gets this tab even without write access.
+- The **status bar** under the graph has an **Enrichment** chip while the graph has any: *Enriching 1 of 3*
+  while it runs, *Enrichment: 1 failed* when one failed, *Enriched · 3* when every one finished. Click it for
+  each run: when it started, how long it took, how many edges or nodes it matched, the batch it is on, and for
+  a failure the error code and message with **Retry** (**Retry failed** retries them all). It also lists a
+  [cluster program waiting for the enrichment](./clusters.md#run-only-after-enrichment), and opens
+  **Your data → Context enrichments**.
+- **Your data → Context enrichments** lists the context's queries and providers and the authorized tables,
+  runs one by hand, shows the SQL, and says what the last run did: *2 of 40 edges matched a row · 2 got new
+  values · 1.2s at 14:02:11*. A reader of a shared exploration gets this tab even without write access.
+- An expand runs the automatic ones over the new edges and nodes only; it never turns an earlier failure
+  into a success. Only a run over the whole graph (a new query, **Retry**) does.
 - Nothing is saved. A saved exploration leaves the values out of its snapshot, and opening it runs the
   **after every query** ones again, so the values are always current.
 
-![Your data: from Databricks tables](/screenshots/bring-your-own-data-databricks.png)
+![The Enrichment chip in the status bar: one provider failed, with its reason and Retry](/screenshots/bring-your-own-data-enrichment-status.png)
+
+![Your data: Context enrichments](/screenshots/bring-your-own-data-databricks.png)
 
 ![Data Table: the hiring_source column marked as written by an enrichment query](/screenshots/bring-your-own-data-table.png)
 
@@ -263,11 +298,14 @@ enrichment_tables:
 
 | You see | Cause |
 |---|---|
-| *An edge enrichment query failed* (toast) | An automatic run failed. The graph is fine; the tab says why. |
+| *An enrichment failed* (toast), and the chip says *Enrichment: 1 failed* | An automatic run failed. The graph is fine; the chip's list says why and retries. A cluster program that waits for enrichment is skipped until a Retry succeeds. |
 | `ENRICHMENT_SCOPE_DENIED` when saving or running | The table is not an allowed source (or no longer is, after an administrator changed `GRAPH_LAGOON_ENRICHMENT_SOURCES` or `GRAPH_LAGOON_CATALOG_SCHEMAS`), or the query names a table that is not in the list. The message names the table and the allowed sources. Ask an administrator to allow it, list it, or change the query. |
 | `ENRICHMENT_QUERY_ORPHANED` when saving | You removed a table that a query you kept still reads (the form warns under that query first). Remove the query too, or keep the table. |
 | `ENRICHMENT_RESULT_NO_KEY` | The query returned no `edge_id` column (a query on edges) or no `node_id` column (on nodes). |
 | `ENRICHMENT_QUERY_FAILED` | The warehouse refused the query (a missing column, a type error); its message is shown. |
+| `ENRICHMENT_PROVIDER_FAILED` | The provider raised an error; its message is shown when the provider wrote one for you, otherwise *The provider failed* (the server log names it). |
+| `ENRICHMENT_PROVIDER_TIMEOUT` | The provider did not answer within its timeout (set by whoever registered it). |
+| `ENRICHMENT_PROVIDER_NOT_REGISTERED`, `ENRICHMENT_PROVIDER_TARGET` | The provider is not on this server (any more), or does not enrich the target the entry asks for. |
 | *the result hit the row limit* | More rows than `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` came back for one batch; some edges may be missing values. |
 
 Edges travel in batches of `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` (500 by default), each with its endpoint nodes;

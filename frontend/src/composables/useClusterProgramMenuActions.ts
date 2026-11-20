@@ -12,6 +12,7 @@ import {
   resolveNodeBoundValues,
 } from '@/utils/clusterProgramParams';
 import { useClusterProgramRunRequest } from './useClusterProgramRunRequest';
+import { enrichmentHoldReason } from '@/utils/enrichmentStatus';
 
 export const CLUSTER_PROGRAM_ACTION_PREFIX = 'cluster-program-action:';
 
@@ -112,7 +113,8 @@ export function useClusterProgramMenuActions() {
     // Defaults + node-bound values, replacing any panel-edited values so the
     // Communities tab shows exactly what this run used.
     const runValues = { ...defaultParamValues(program.parameters), ...values };
-    if (missingRequiredParams(program.parameters, runValues).length > 0) {
+    if (missingRequiredParams(program.parameters, runValues).length > 0
+      || enrichmentHoldReason(program, graphStore.queryEnrichmentRuns, graphStore.queryEnrichmentInFlight)) {
       requestRun({ program, mode: 'community', initialValues: runValues });
       return;
     }

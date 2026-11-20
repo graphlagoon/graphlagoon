@@ -186,6 +186,12 @@ describe('cluster store', () => {
       })
       expect(store.getProgram(prog.program_id)!.show_in_context_menu).toBe(true)
     })
+
+    it('createProgram persists wait_for_enrichment', () => {
+      const store = useClusterStore()
+      const prog = store.createProgram({ program_name: 'After enrichment', code: 'return []', wait_for_enrichment: true })
+      expect(store.getProgram(prog.program_id)!.wait_for_enrichment).toBe(true)
+    })
   })
 
   // ==========================================================================

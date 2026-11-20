@@ -34,6 +34,7 @@ import { getErrorMessage } from '@/utils/errorMessage';
 import type { FileEnrichmentSpec } from '@/types/investigation';
 import type { GraphSnapshot } from '@/types/graph';
 
+const props = defineProps<{ initialTab?: 'enrich' | 'graph' | 'draw' | 'databricks' }>();
 const emit = defineEmits<{ close: [] }>();
 
 const graph = useGraphStore();
@@ -44,7 +45,7 @@ type Tab = 'enrich' | 'graph' | 'draw' | 'databricks';
 const { can } = usePermissions();
 /** The layer tabs need write access; the context's Databricks queries only need to read it. */
 const canEditLayer = computed(() => graph.canEditOverlay && can('exploration.edit_graph'));
-const tab = ref<Tab>(canEditLayer.value ? 'enrich' : 'databricks');
+const tab = ref<Tab>(props.initialTab ?? (canEditLayer.value ? 'enrich' : 'databricks'));
 const busy = ref(false);
 const error = ref<string | null>(null);
 const maxBytes = window.__GRAPH_LAGOON_CONFIG__?.exploration_overlay_max_bytes ?? 5 * 1024 * 1024;
@@ -397,7 +398,7 @@ function drawNode() {
             <button role="tab" :class="{ active: tab === 'graph' }" data-testid="your-data-tab-graph" @click="tab = 'graph'">Nodes and edges from a file</button>
             <button role="tab" :class="{ active: tab === 'draw' }" data-testid="your-data-tab-draw" @click="tab = 'draw'">Draw</button>
           </template>
-          <button role="tab" :class="{ active: tab === 'databricks' }" data-testid="your-data-tab-databricks" @click="tab = 'databricks'">From Databricks tables</button>
+          <button role="tab" :class="{ active: tab === 'databricks' }" data-testid="your-data-tab-databricks" @click="tab = 'databricks'">Context enrichments</button>
         </div>
 
         <section v-if="tab === 'enrich'">

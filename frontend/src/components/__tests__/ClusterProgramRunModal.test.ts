@@ -126,4 +126,16 @@ describe('ClusterProgramRunModal', () => {
     expect(community.algorithm).toBe(`cluster-program:${program.program_id}`)
     expect(community.programParams[program.program_id]).toEqual({ n: 1, name: 'A' })
   })
+  it('warns and says "Run anyway" when the program waits for enrichment that failed', async () => {
+    seedGraph()
+    const graphStore = useGraphStore()
+    graphStore.queryEnrichmentRuns = {
+      risk: { status: 'error', label: 'Risk', target: 'nodes', matched: 0, written: 0, total: 2, truncated: false, error: 'down', at: 0 },
+    }
+    const store = useClusterStore()
+    const program = store.createProgram({ program_name: 'Gated', code: 'return []', wait_for_enrichment: true })
+    render(ClusterProgramRunModal, { props: { program } })
+    expect(q('[data-testid="run-program-enrichment-warning"]').textContent).toMatch(/failed/)
+    expect(q('[data-testid="run-program"]').textContent).toContain('Run anyway')
+  })
 })

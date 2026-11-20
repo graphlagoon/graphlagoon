@@ -15,7 +15,12 @@ const PROGRAM_PREFIX = 'cluster-program:';
 
 export interface AfterQueryPlan {
   community?: CommunityAlgorithm;
-  clusterProgram?: { id: string; params: ClusterProgramParamValues };
+  /** The community algorithm is a program that runs only after enrichment succeeded. */
+  communityWaits?: boolean;
+  /** `waits`: the program runs only after enrichment succeeded (`wait_for_enrichment`). */
+  clusterProgram?: { id: string; name: string; params: ClusterProgramParamValues; waits: boolean };
+  /** Name of the program run as communities, for messages. */
+  communityName?: string;
   /** One sentence per setting that was skipped. */
   problems: string[];
 }
@@ -51,7 +56,11 @@ export function planAfterQueryAnalysis(
     const values = { ...defaultParamValues(program?.parameters), ...communityProgramParams[id] };
     const problem = programProblem(program, id, values);
     if (problem) plan.problems.push(`Communities skipped: ${problem}.`);
-    else plan.community = algorithm as CommunityAlgorithm;
+    else {
+      plan.community = algorithm as CommunityAlgorithm;
+      plan.communityWaits = !!program!.wait_for_enrichment;
+      plan.communityName = program!.program_name;
+    }
   } else if (algorithm) {
     plan.problems.push(`Communities skipped: “${algorithm}” is not a community algorithm.`);
   }
@@ -61,7 +70,7 @@ export function planAfterQueryAnalysis(
     const params = defaultParamValues(program?.parameters);
     const problem = programProblem(program, programId, params);
     if (problem) plan.problems.push(`Clusters skipped: ${problem}.`);
-    else plan.clusterProgram = { id: programId, params };
+    else plan.clusterProgram = { id: programId, name: program!.program_name, params, waits: !!program!.wait_for_enrichment };
   }
   return plan;
 }

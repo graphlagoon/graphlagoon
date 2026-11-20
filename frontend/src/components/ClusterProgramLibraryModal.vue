@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useClusterStore, isDefaultProgramId } from '@/stores/cluster'
 import { useGraphStore } from '@/stores/graph'
+import { enrichmentHoldReason } from '@/utils/enrichmentStatus'
 import type { ClusterProgram } from '@/types/cluster'
 import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
 import ClusterProgramEditorModal from './ClusterProgramEditorModal.vue'
@@ -71,8 +72,9 @@ function restoreBuiltIns() {
 }
 
 async function handleExecute(program: ClusterProgram) {
-  // Programs with parameters prompt for values first
-  if ((program.parameters?.length ?? 0) > 0) {
+  // Programs with parameters prompt for values first; so does one whose enrichment is not ready
+  if ((program.parameters?.length ?? 0) > 0
+    || enrichmentHoldReason(program, graphStore.queryEnrichmentRuns, graphStore.queryEnrichmentInFlight)) {
     runProgram.value = program
     return
   }

@@ -1517,7 +1517,7 @@
           "graph-contexts"
         ],
         "summary": "Run Enrichment Query",
-        "description": "Run enrichment query ``name`` over a batch of the loaded graph: the edges\n(and their endpoint nodes) or the nodes (and the edges between them) it\ntargets. Anyone who can read the context may run it; writing the query is\nthe author's.",
+        "description": "Run enrichment query ``name`` over a batch of the loaded graph: the edges\n(and their endpoint nodes) or the nodes (and the edges between them) it\ntargets. Anyone who can read the context may run it; writing the query is\nthe author's. An entry with a ``provider`` runs the deployer's registered\nprovider instead of SQL, with the same result shape.",
         "operationId": "graph_contexts_run_enrichment_query",
         "parameters": [
           {
@@ -10382,6 +10382,50 @@
         ],
         "title": "EnrichmentLookupRequest"
       },
+      "EnrichmentProviderRef": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,49}$",
+            "title": "Name"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "edges",
+              "nodes"
+            ],
+            "title": "Target",
+            "default": "edges"
+          },
+          "run": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "title": "Run",
+            "default": "manual"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "default": false
+          },
+          "node_props": {
+            "type": "boolean",
+            "title": "Node Props",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "EnrichmentProviderRef",
+        "description": "An enrichment computed by a provider the deployer registered in Python\n(``services/enrichment_providers.py``); same run settings as a query."
+      },
       "EnrichmentQuery": {
         "properties": {
           "sql": {
@@ -10597,9 +10641,16 @@
             "title": "Label"
           },
           "table": {
-            "type": "string",
-            "maxLength": 400,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 400,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Table"
           },
           "key_column": {
@@ -10672,16 +10723,25 @@
                 "type": "null"
               }
             ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrichmentProviderRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
           "name",
-          "label",
-          "table"
+          "label"
         ],
         "title": "EnrichmentTable",
-        "description": "One authorized table of a context. Optionally a node-key lookup\n(``key_column`` set) and/or an edge enrichment ``query``."
+        "description": "One authorized table of a context. Optionally a node-key lookup\n(``key_column`` set) and/or an edge enrichment ``query``. Or, with no table,\nan enrichment by a registered ``provider``."
       },
       "EntityCase": {
         "properties": {

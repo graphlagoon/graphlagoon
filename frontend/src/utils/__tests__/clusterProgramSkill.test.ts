@@ -112,4 +112,17 @@ describe('buildClusterProgramSkill', () => {
     expect(text).toContain('"id": "city"')
     expect(text).toContain('me what should change')
   })
+
+  it('documents wait_for_enrichment and when to set it', () => {
+    const text = buildClusterProgramSkill(fullInput)
+    expect(text).toContain('"wait_for_enrichment": boolean')
+    expect(text).toContain('when the code reads a property that enrichment')
+    expect(text).not.toContain('Not listed above')
+  })
+
+  it('names the enrichments that have not run, whose properties are not listed', () => {
+    const text = buildClusterProgramSkill({ ...fullInput, pendingEnrichments: ['Risk', 'KYC'] })
+    expect(text).toContain('**Not listed above:** the properties added by the enrichments "Risk", "KYC", which have not run on the loaded graph')
+    expect(buildClusterProgramSkill({ ...fullInput, pendingEnrichments: ['Risk'] })).toContain('the enrichment "Risk", which has not run')
+  })
 })

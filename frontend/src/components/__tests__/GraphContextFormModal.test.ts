@@ -430,6 +430,38 @@ describe('GraphContextFormModal', () => {
       ])
     })
 
+    it('attaches an enrichment by a registered provider, offered only when one is registered', async () => {
+      const context = createGraphContext({ id: 'ctx-edit' })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+      const first = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      expect(first.queryByTestId('enrichment-add-provider')).toBeNull()
+      first.unmount()
+
+      window.__GRAPH_LAGOON_CONFIG__ = {
+        enrichment_providers: [{ name: 'kyc-demo', label: 'KYC (demo)', description: 'Risk from Lakebase', targets: ['nodes'] }],
+      }
+      try {
+        const { getByTestId } = renderModal({ open: true, mode: 'edit', context })
+        await flush()
+        await fireEvent.click(getByTestId('enrichment-add-provider'))
+        expect((getByTestId('enrichment-label') as HTMLInputElement).value).toBe('KYC (demo)')
+        await fireEvent.update(getByTestId('enrichment-provider-run'), 'manual')
+        await fireEvent.click(getByTestId('create-context-submit'))
+        await flush()
+        const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+        expect(payload.enrichment_tables).toEqual([
+          {
+            name: 'kyc_demo',
+            label: 'KYC (demo)',
+            provider: { name: 'kyc-demo', target: 'nodes', run: 'manual', overwrite: false, node_props: false },
+          },
+        ])
+      } finally {
+        delete window.__GRAPH_LAGOON_CONFIG__
+      }
+    })
+
     it('names the allowed sources and warns on a table outside them', async () => {
       window.__GRAPH_LAGOON_CONFIG__ = { enrichment_sources: ['main.graphs', 'main.risk', 'ext.kyc.people'] }
       try {

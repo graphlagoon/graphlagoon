@@ -40,6 +40,10 @@ from graphlagoon.services.precomputed import (
     uses_default_store,
     volume_provider,
 )
+from graphlagoon.services.enrichment_providers import (
+    clear_enrichment_provider_registry,
+    register_enrichment_provider,
+)
 from graphlagoon.services.style_presets import configure_style_preset_service
 from graphlagoon.services.investigation_storage import configure_investigation_storage
 from graphlagoon.services.group_resolution import configure_group_resolution
@@ -507,6 +511,7 @@ def create_mountable_app(
     similarity_endpoints: Optional[list] = None,
     rest_connections: Optional[list] = None,
     precomputed_graph_providers: Optional[list] = None,
+    enrichment_providers: Optional[list] = None,
 ) -> FastAPI:
     """Create a Graph Lagoon Studio app that can be mounted under a prefix.
 
@@ -651,6 +656,10 @@ def create_mountable_app(
     )
     for _provider in _providers:
         register_precomputed_graph_provider(_provider)
+    # Enrichment providers: the complete list, replacing any earlier app's.
+    clear_enrichment_provider_registry()
+    for _enricher in enrichment_providers or []:
+        register_enrichment_provider(_enricher)
 
     @asynccontextmanager
     async def mountable_lifespan(app: FastAPI):
@@ -740,6 +749,7 @@ def create_app(
     similarity_endpoints: Optional[list] = None,
     rest_connections: Optional[list] = None,
     precomputed_graph_providers: Optional[list] = None,
+    enrichment_providers: Optional[list] = None,
 ) -> FastAPI:
     """Create a standalone Graph Lagoon Studio FastAPI application.
 
@@ -819,6 +829,10 @@ def create_app(
     )
     for _provider in _providers:
         register_precomputed_graph_provider(_provider)
+    # Enrichment providers: the complete list, replacing any earlier app's.
+    clear_enrichment_provider_registry()
+    for _enricher in enrichment_providers or []:
+        register_enrichment_provider(_enricher)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

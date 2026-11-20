@@ -186,6 +186,7 @@ export const useClusterStore = defineStore('cluster', () => {
       code: input.code,
       parameters: input.parameters,
       show_in_context_menu: input.show_in_context_menu,
+      wait_for_enrichment: input.wait_for_enrichment,
       scope,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

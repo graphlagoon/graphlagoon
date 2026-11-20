@@ -219,11 +219,29 @@ Anything your own code throws surfaces with its message (the built-in BFS
 throws `Start node "…" not found in the graph`). There's no step debugger
 — for anything intricate, develop with the browser DevTools console open.
 
+## Run only after enrichment
+
+A program that reads a property the context's [enrichment](./bring-your-own-data.md#enrich-from-databricks-tables)
+adds (a query or a provider) would find nothing if it ran before those values arrived. Tick **Run only after
+enrichment succeeded** in the program's editor (`"wait_for_enrichment": true` in its JSON):
+
+- As the **After a query** cluster program, or as the community algorithm there, it waits until every
+  enrichment of that query has finished. If all succeeded, it runs. If one failed, it is skipped and says so;
+  the [Enrichment chip](./bring-your-own-data.md#what-a-reader-sees) lists it as waiting, and once a
+  **Retry** leaves every enrichment green it runs by itself.
+- Run by hand while enrichment is still running or after one failed, its run dialog (or the Clusters panel)
+  warns and the button reads **Run anyway**.
+
+An expand runs the enrichment on the new items but does not rerun the program.
+
 ## Asking an AI to write one
 
 The **robot** button generates a copy-paste prompt containing the
 execution contract, the rules above, a worked example, and *this graph's
-real node types, edge types and properties* — paste it into any assistant
+real node types, edge types and properties* — including the properties
+enrichment added to the loaded graph, marked *added by enrichment …* (an
+enrichment that has not run yet is named, since its properties cannot be
+listed) — paste it into any assistant
 and describe the grouping you want. The assistant answers with **one JSON
 object** (name, description, code and parameters, in the format shown under
 [Parameters](#parameters)); paste it into **Import JSON** and every field is

@@ -175,6 +175,12 @@ from graphlagoon.services.precomputed import (
     register_precomputed_graph_provider,
     volume_provider,
 )
+from graphlagoon.services.enrichment_providers import (
+    EnrichmentProvider,
+    EnrichmentProviderError,
+    EnrichmentProviderRequest,
+    register_enrichment_provider,
+)
 
 __all__ = [
     "create_app",
@@ -210,6 +216,10 @@ __all__ = [
     "PrecomputedGraphUI",
     "register_precomputed_graph_provider",
     "volume_provider",
+    "EnrichmentProvider",
+    "EnrichmentProviderError",
+    "EnrichmentProviderRequest",
+    "register_enrichment_provider",
 ]
 
 

@@ -339,6 +339,9 @@ async function setupPage(page: Page) {
       dev_mode: true,
       database_enabled: false,
       enrichment_sources: ['main.graphs', 'main.hr', 'main.sales.orders'],
+      enrichment_providers: [{
+        name: 'lakebase-risk', label: 'Company risk (Lakebase)', description: 'risk_tier of each company, from the KYC table in Lakebase', targets: ['nodes'],
+      }],
     };
     // Disables the stats-gl FPS overlay (see useDevPerf.ts) — the generator
     // runs against the dev server, where the overlay would otherwise show up.
@@ -386,7 +389,7 @@ async function setupPage(page: Page) {
   ];
 
   await seedContexts(page, contexts);
-  // Edge enrichment queries answer for most edges, so "Your data → From Databricks tables" has numbers.
+  // Edge enrichment queries answer for most edges, so "Your data → Context enrichments" has numbers.
   await seedEnrichmentRun(page, (id, query) => {
     const n = Number(id.slice(1));
     if (query === 'deals') return n % 4 === 0 ? { deal_size: 1000 + n * 37 } : null;
@@ -450,6 +453,7 @@ const DEMO_ENRICHMENT_TABLES = [
     table: 'main.sales.orders',
     query: { sql: "SELECT e.edge_id, sum(o.amount) AS deal_size\nFROM graph_edges e\nJOIN main.sales.orders o ON o.buyer_id = e.src AND o.product_id = e.dst\nGROUP BY e.edge_id", run: 'manual' },
   },
+  { name: 'company_risk', label: 'Company risk (Lakebase)', provider: { name: 'lakebase-risk', target: 'nodes', run: 'manual' } },
 ];
 
 interface Scene {
@@ -605,6 +609,31 @@ const SCENES: Scene[] = [
       await manual.getByTestId('your-data-databricks-run').click();
       await expect(manual.getByTestId('your-data-databricks-outcome')).toBeVisible();
       await page.getByTestId('your-data-databricks-query').first().locator('summary').click();
+      await page.waitForTimeout(300);
+    },
+  },
+  {
+    // The Enrichment chip after a provider failed: its reason, and Retry.
+    guide: 'bring-your-own-data',
+    scene: 'enrichment-status',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await page.route('**/graphlagoon/api/graph-contexts/*/enrichment/company_risk/run', (route) =>
+        route.fulfill({
+          status: 502,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: { error: { code: 'ENRICHMENT_PROVIDER_FAILED', message: 'The KYC table could not be read', details: {} } } }),
+        }),
+      );
+      await page.getByTestId('toolbar-your-data').click();
+      await page.getByTestId('your-data-tab-databricks').click();
+      const provider = page.getByTestId('your-data-databricks-query').nth(2);
+      await provider.getByTestId('your-data-databricks-run').click();
+      await expect(provider.getByTestId('your-data-databricks-outcome')).toContainText('ENRICHMENT_PROVIDER_FAILED');
+      await page.keyboard.press('Escape');
+      await page.getByTestId('enrichment-status-chip').click();
+      await page.getByTestId('enrichment-status-panel').waitFor();
       await page.waitForTimeout(300);
     },
   },

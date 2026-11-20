@@ -11,6 +11,7 @@ import { useGraphStore } from '@/stores/graph';
 import { useClusterStore } from '@/stores/cluster';
 import { useToolbarStore } from '@/stores/toolbar';
 import { useToast } from '@/composables/useToast';
+import EnrichmentStatusChip from '@/components/EnrichmentStatusChip.vue';
 import type { GraphBehaviors } from '@/stores/graph';
 
 const props = withDefaults(
@@ -126,6 +127,7 @@ const isolationTitle = computed(() => {
     >
       loading properties…
     </span>
+    <EnrichmentStatusChip />
     <!-- The edge result hit its cap, so this graph is a slice of a larger
          one. Worth stating plainly: a truncated graph looks exactly like
          a complete one, and conclusions drawn from it may not hold. -->

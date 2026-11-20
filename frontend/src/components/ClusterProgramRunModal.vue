@@ -10,6 +10,8 @@ import {
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
 import { X, Play, Loader2 } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
+import { useGraphStore } from '@/stores/graph'
+import { enrichmentHoldReason } from '@/utils/enrichmentStatus'
 
 const props = withDefaults(defineProps<{
   program: ClusterProgram
@@ -27,6 +29,12 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const clusterStore = useClusterStore()
 const communityStore = useCommunityStore()
 const toast = useToast()
+const graphStore = useGraphStore()
+
+/** The program waits for enrichment that is still running or failed: warn, and say "Run anyway". */
+const holdReason = computed(() =>
+  enrichmentHoldReason(props.program, graphStore.queryEnrichmentRuns, graphStore.queryEnrichmentInFlight)
+)
 
 const values = ref<ClusterProgramParamValues>({
   ...defaultParamValues(props.program.parameters),
@@ -98,6 +106,8 @@ async function runNow() {
             Required: {{ missingRequired.map(p => p.label || p.id).join(', ') }}
           </div>
 
+          <div v-if="holdReason" class="validation-hint" data-testid="run-program-enrichment-warning">{{ holdReason }}</div>
+
           <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
         </div>
 
@@ -111,7 +121,7 @@ async function runNow() {
           >
             <Loader2 v-if="running" :size="12" class="spin" />
             <Play v-else :size="12" />
-            {{ running ? 'Running...' : 'Run' }}
+            {{ running ? 'Running...' : holdReason ? 'Run anyway' : 'Run' }}
           </button>
         </div>
       </div>

@@ -287,6 +287,17 @@ describe('SchemaDriftModal', () => {
       expect(queryByTestId('schema-drift-dangling-panel')).toBeNull()
     })
 
+    it('does not flag a property the context never declared (enrichment, the person\'s own data)', async () => {
+      vi.mocked(api.getSchemaDrift).mockResolvedValue(DRIFT_DROPS_EMAIL)
+      vi.mocked(api.getExplorations).mockResolvedValue([explorationReferencing('risk_score')] as any)
+
+      const { queryByTestId, getByTestId } = render(SchemaDriftModal, { props: { open: true, contextId: 'ctx-1', hasWriteAccess: true } })
+      await flush()
+
+      expect(queryByTestId('schema-drift-dangling-panel')).toBeNull()
+      expect((getByTestId('schema-drift-apply') as HTMLButtonElement).disabled).toBe(false)
+    })
+
     it('requires the acknowledgement checkbox before Apply is enabled', async () => {
       vi.mocked(api.getSchemaDrift).mockResolvedValue(DRIFT_DROPS_EMAIL)
       vi.mocked(api.getExplorations).mockResolvedValue([explorationReferencing('email')] as any)

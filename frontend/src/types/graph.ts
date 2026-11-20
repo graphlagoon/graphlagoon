@@ -169,16 +169,36 @@ export interface EnrichmentQuery {
 }
 
 /**
+ * An enrichment computed by a provider the deployer registered in Python (for example a
+ * Lakebase lookup). Same run settings as a query; listed in /api/config `enrichment_providers`.
+ */
+export interface EnrichmentProviderRef {
+  name: string;
+  target?: 'edges' | 'nodes';
+  run?: 'auto' | 'manual';
+  overwrite?: boolean;
+  node_props?: boolean;
+}
+
+/** A registered provider as /api/config describes it. */
+export interface EnrichmentProviderInfo {
+  name: string;
+  label: string;
+  description: string;
+  targets: ('edges' | 'nodes')[];
+}
+
+/**
  * One authorized table of a context. Being listed authorizes it; it may also be looked up
  * by a node's key (`key_column` set, shown in the investigation inspector) and/or carry an
- * enrichment `query` (edges or nodes).
+ * enrichment `query` (edges or nodes). Or, with no table, an enrichment by a `provider`.
  */
 export interface EnrichmentTable {
   /** Slug, unique in the context; used in the lookup and run URLs. */
   name: string;
   label: string;
-  /** catalog.schema.table */
-  table: string;
+  /** catalog.schema.table; null on a provider entry. */
+  table?: string | null;
   key_column?: string | null;
   match_node_types?: string[];
   match_source?: 'node_id' | { kind: 'prop'; name: string };
@@ -187,6 +207,7 @@ export interface EnrichmentTable {
   columns?: string[];
   promote?: { node_type: string; id_column: string; edge_type: string } | null;
   query?: EnrichmentQuery | null;
+  provider?: EnrichmentProviderRef | null;
 }
 
 /** POST /graph-contexts/{id}/enrichment/{name}/run: the first row per edge (or node) sent. */

@@ -4,7 +4,7 @@
  * `edges`) or node id (target `nodes`), columns that become properties. The graph travels in
  * batches of its targets plus what is around them. Pure: the graph store owns the requests.
  */
-import type { Edge, EnrichmentRunResult, EnrichmentTable, GraphContext, Node } from '@/types/graph';
+import type { Edge, EnrichmentProviderRef, EnrichmentQuery, EnrichmentRunResult, EnrichmentTable, GraphContext, Node } from '@/types/graph';
 
 /** Targets per request: the server's default `enrichment_max_keys`. */
 export const RUN_BATCH = 500;
@@ -19,21 +19,27 @@ export interface RunPayload {
 /** Which keys of an edge (or node) each query wrote: id → query label → keys. */
 export type EnrichmentProvenance = Map<string, Map<string, string[]>>;
 
-export const targetOf = (entry: EnrichmentTable): EnrichmentTarget => entry.query?.target ?? 'edges';
+/** The run settings of an entry that enriches: its SQL query, or its registered provider. */
+export function runSpec(entry: EnrichmentTable): EnrichmentQuery | EnrichmentProviderRef | null {
+  return entry.query?.sql ? entry.query : entry.provider?.name ? entry.provider : null;
+}
 
-/** The context's entries that carry a query; `run` keeps only auto or manual ones. */
+export const targetOf = (entry: EnrichmentTable): EnrichmentTarget => runSpec(entry)?.target ?? 'edges';
+
+/** The context's entries that run (a query or a provider); `run` keeps only auto or manual ones. */
 export function queryEntries(
   context: Pick<GraphContext, 'enrichment_tables'> | null | undefined,
   run?: 'auto' | 'manual',
 ): EnrichmentTable[] {
-  return (context?.enrichment_tables ?? []).filter(
-    (t) => !!t.query?.sql && (!run || (t.query.run ?? 'manual') === run),
-  );
+  return (context?.enrichment_tables ?? []).filter((t) => {
+    const spec = runSpec(t);
+    return !!spec && (!run || (spec.run ?? 'manual') === run);
+  });
 }
 
 /** The tables a query can read: every table the context authorizes. */
 export function authorizedTables(context: Pick<GraphContext, 'enrichment_tables'> | null | undefined): string[] {
-  return [...new Set((context?.enrichment_tables ?? []).map((t) => t.table))];
+  return [...new Set((context?.enrichment_tables ?? []).flatMap((t) => (t.table ? [t.table] : [])))];
 }
 
 const plainEdge = (e: Edge): Edge => ({
@@ -56,7 +62,7 @@ export function runPayloads(
   batch = RUN_BATCH,
   only?: { edges?: Set<string>; nodes?: Set<string> },
 ): RunPayload[] {
-  const withProps = !!entry.query?.node_props;
+  const withProps = !!runSpec(entry)?.node_props;
   const plainNode = (n: Node) => ({ node_id: n.node_id, node_type: n.node_type, properties: withProps ? n.properties ?? {} : {} });
   const out: RunPayload[] = [];
   if (targetOf(entry) === 'nodes') {
