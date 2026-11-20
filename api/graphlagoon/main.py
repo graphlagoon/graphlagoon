@@ -20,6 +20,7 @@ from graphlagoon.app import create_mountable_app, add_mount_redirect
 from graphlagoon.middleware.auth import AuthMiddleware
 from graphlagoon.similarity import SimilarityEndpointSpec, SimilarityEndpointParam
 from graphlagoon.rest_demo import register_rest_demo
+from graphlagoon.dev.enrichment_demo import demo_enrichment_providers
 from graphlagoon.config import get_settings
 
 # Enable debugpy for VSCode debugging
@@ -162,6 +163,7 @@ graphlagoon_app = create_mountable_app(
         ),
     ],
     rest_connections=_REST_DEMO_CONNECTIONS,
+    enrichment_providers=demo_enrichment_providers(),
 )
 
 add_mount_redirect(app, "/graphlagoon")

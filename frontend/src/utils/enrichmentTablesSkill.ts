@@ -114,7 +114,7 @@ enrichment_tables:
     table: main.fraud.transactions
     query:
       target: edges           # edges | nodes
-      run: auto               # auto (after every query) | manual (Your data → From Databricks tables)
+      run: auto               # auto (after every query) | manual (Your data → Context enrichments)
       overwrite: false
       node_props: false
       sql: |

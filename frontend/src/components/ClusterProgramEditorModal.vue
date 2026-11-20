@@ -69,6 +69,7 @@ return clusters;
 const name = ref(props.program?.program_name ?? '')
 const description = ref(props.program?.description ?? '')
 const showInContextMenu = ref(props.program?.show_in_context_menu ?? false)
+const waitForEnrichment = ref(props.program?.wait_for_enrichment ?? false)
 const code = ref(props.program?.code ?? DEFAULT_CODE)
 const parameters = ref<ClusterProgramParameter[]>(
   (props.program?.parameters ?? []).map(p => ({ ...p, options: p.options ? [...p.options] : undefined }))
@@ -222,6 +223,7 @@ function draft() {
     code: code.value,
     parameters: parameters.value.map(p => ({ ...p, id: p.id.trim() })),
     show_in_context_menu: showInContextMenu.value,
+    wait_for_enrichment: waitForEnrichment.value,
   })
 }
 
@@ -267,6 +269,7 @@ function applyImport() {
   description.value = first.description ?? ''
   code.value = first.code
   showInContextMenu.value = first.show_in_context_menu === true
+  waitForEnrichment.value = first.wait_for_enrichment === true
   parameters.value = (first.parameters ?? []).map(p => ({ ...p, options: p.options ? [...p.options] : undefined }))
   optionsText.value = {}
   if (rest.length > 0) {
@@ -303,6 +306,7 @@ function handleSave() {
       ? parameters.value.map(p => ({ ...p, id: p.id.trim() }))
       : undefined,
     show_in_context_menu: showInContextMenu.value || undefined,
+    wait_for_enrichment: waitForEnrichment.value || undefined,
     scope: canChooseScope.value ? scope.value : ('exploration' as ClusterProgramScope),
   }
 
@@ -396,6 +400,21 @@ function handleSave() {
             <span class="field-hint">
               Runs this program as a community algorithm on the clicked node.
               Parameters with a node binding take their value from that node.
+            </span>
+          </div>
+
+          <div class="field-group">
+            <label class="checkbox-label">
+              <input
+                v-model="waitForEnrichment"
+                type="checkbox"
+                data-testid="cluster-program-wait-enrichment"
+              />
+              Run only after enrichment succeeded
+            </label>
+            <span class="field-hint">
+              When this context has enrichment that runs after every query, the program
+              waits for it and is skipped if one fails.
             </span>
           </div>
 

@@ -80,3 +80,20 @@ describe('export and merge', () => {
     expect([out.added, out.replaced]).toEqual([1, 1]);
   });
 });
+
+describe('provider entries', () => {
+  it('round-trips an entry enriched by a registered provider', () => {
+    const entry = {
+      name: 'kyc', label: 'KYC risk',
+      provider: { name: 'kyc-demo', target: 'nodes' as const, run: 'auto' as const, overwrite: false, node_props: true },
+    };
+    const parsed = parseEnrichmentTablesYaml(enrichmentTablesToYaml([entry]));
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.tables).toEqual([entry]);
+  });
+
+  it('refuses a provider entry that also names a table', () => {
+    const parsed = parseEnrichmentTablesYaml('- {name: kyc, label: K, table: a.b.c, provider: kyc-demo}');
+    expect(parsed.errors[0]).toMatch(/no table/);
+  });
+});

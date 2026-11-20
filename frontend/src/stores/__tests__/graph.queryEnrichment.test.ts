@@ -189,6 +189,52 @@ describe('enrichment queries in the graph store', () => {
     expect(store.nodes[1].properties).toEqual({ tier: 'gold' });
     expect([...store.enrichedKeysFor('edge', 'e1')]).toEqual([['score', 'Risk'], ['channel', 'Channel']]);
   });
+  it('an expand that succeeds does not hide a failure over the whole graph; a Retry clears it', async () => {
+    const run = vi.spyOn(api, 'runEnrichmentQuery').mockRejectedValue(
+      Object.assign(new Error('x'), { response: { data: { detail: { error: { code: 'ENRICHMENT_PROVIDER_TIMEOUT', message: 'took too long' } } } } }),
+    );
+    const store = await loaded();
+    expect(store.queryEnrichmentRuns.risk).toMatchObject({ status: 'error', errorCode: 'ENRICHMENT_PROVIDER_TIMEOUT' });
+    expect(store.queryEnrichmentRuns.risk.finishedAt).toBeGreaterThanOrEqual(store.queryEnrichmentRuns.risk.at);
+    run.mockResolvedValue(result({}));
+    vi.spyOn(api, 'expandFromNode').mockResolvedValue({
+      nodes: [{ node_id: 'c', node_type: 'Account', properties: {} }],
+      edges: [{ edge_id: 'e2', src: 'b', dst: 'c', relationship_type: 'PIX', properties: {} }],
+    } as never);
+    await store.expandFromNode('b', 1);
+    await flushPromises();
+    expect(store.queryEnrichmentRuns.risk.status).toBe('error');
+    await store.runQueryEnrichment({ names: ['risk'] });
+    expect(store.queryEnrichmentRuns.risk).toMatchObject({ status: 'done', errorCode: null, batchesDone: 1, batchesTotal: 1 });
+  });
+
+  it('counts the calls in flight, so a waiting caller knows planning is not over', async () => {
+    let answerRun!: (r: EnrichmentRunResult) => void;
+    vi.spyOn(api, 'runEnrichmentQuery').mockImplementation(() => new Promise((resolve) => { answerRun = resolve; }));
+    const store = await loaded();
+    expect(store.queryEnrichmentInFlight).toBe(1);
+    answerRun(result({}));
+    await flushPromises();
+    expect(store.queryEnrichmentInFlight).toBe(0);
+  });
+
+  it('runs a provider entry like a query', async () => {
+    const run = vi.spyOn(api, 'runEnrichmentQuery').mockResolvedValue({
+      ...result({ a: { kyc: 'high' } }), name: 'kyc_p', label: 'KYC provider', target: 'nodes',
+    });
+    const store = useGraphStore();
+    store.currentContext = {
+      ...context,
+      enrichment_tables: [{ name: 'kyc_p', label: 'KYC provider', provider: { name: 'kyc-demo', target: 'nodes', run: 'auto' } }],
+    } as GraphContext;
+    vi.spyOn(api, 'getSubgraph').mockResolvedValue(answer());
+    await store.loadSubgraph();
+    await flushPromises();
+    expect(run.mock.calls[0][1]).toBe('kyc_p');
+    expect(run.mock.calls[0][2].nodes.map((n) => n.node_id)).toEqual(['a', 'b']);
+    expect(store.nodes.find((n) => n.node_id === 'a')?.properties).toMatchObject({ kyc: 'high' });
+    expect(store.queryEnrichmentRuns.kyc_p.status).toBe('done');
+  });
 });
 
 describe('enrichment queries and the person\'s layer', () => {

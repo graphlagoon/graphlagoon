@@ -518,13 +518,26 @@ class EnrichmentQuery(BaseModel):
         return self
 
 
+class EnrichmentProviderRef(BaseModel):
+    """An enrichment computed by a provider the deployer registered in Python
+    (``services/enrichment_providers.py``); same run settings as a query."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,49}$")
+    target: Literal["edges", "nodes"] = "edges"
+    run: Literal["auto", "manual"] = "manual"
+    overwrite: bool = False
+    node_props: bool = False
+
+
 class EnrichmentTable(BaseModel):
     """One authorized table of a context. Optionally a node-key lookup
-    (``key_column`` set) and/or an edge enrichment ``query``."""
+    (``key_column`` set) and/or an edge enrichment ``query``. Or, with no table,
+    an enrichment by a registered ``provider``."""
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,40}$")
     label: str = Field(min_length=1, max_length=100)
-    table: str = Field(min_length=1, max_length=400)
+    table: Optional[str] = Field(default=None, min_length=1, max_length=400)
     key_column: Optional[str] = Field(default=None, min_length=1, max_length=200)
     match_node_types: list[str] = Field(default_factory=list, max_length=50)
     match_source: Union[Literal["node_id"], PropRef] = "node_id"
@@ -532,6 +545,9 @@ class EnrichmentTable(BaseModel):
     columns: list[str] = Field(default_factory=list, max_length=50)
     promote: Optional[PromoteSpec] = None
     query: Optional[EnrichmentQuery] = None
+    # Whether the provider is registered is checked on save and on run, not here:
+    # responses validate this model too, and one removed later must not break reads.
+    provider: Optional[EnrichmentProviderRef] = None
 
     @property
     def has_lookup(self) -> bool:
@@ -544,6 +560,13 @@ class EnrichmentTable(BaseModel):
             validate_identifier_part,
         )
 
+        if self.provider is not None:
+            if self.table or self.query or self.key_column or self.match_node_types \
+                    or self.columns or self.promote:
+                raise ValueError("a provider entry has no table, query or lookup")
+            return self
+        if not self.table:
+            raise ValueError("an enrichment entry needs a table or a provider")
         qualified_from_dotted(self.table)
         if self.table.split(".")[-1].strip("`").lower() in ENRICHMENT_VIRTUAL_TABLES:
             raise ValueError(f"{self.table} uses a reserved name")

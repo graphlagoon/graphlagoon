@@ -6,6 +6,7 @@ import type {
   Node,
   Edge,
   GraphContext,
+  EnrichmentTable,
   Exploration,
   FilterState,
   ViewportState,
@@ -69,6 +70,7 @@ import {
   recordProvenance,
   runPatch,
   runPayloads,
+  runSpec,
   stripEnriched,
   type EnrichmentProvenance,
 } from '@/utils/queryEnrichment';
@@ -435,7 +437,13 @@ export interface QueryEnrichmentRun {
   total: number;
   truncated: boolean;
   error: string | null;
+  /** Error code from the server (ENRICHMENT_PROVIDER_TIMEOUT, …), when it sent one. */
+  errorCode?: string | null;
+  /** When it started (or was queued) and when it finished, ms since the epoch. */
   at: number;
+  finishedAt?: number | null;
+  batchesDone?: number;
+  batchesTotal?: number;
 }
 
 export const useGraphStore = defineStore('graph', () => {
@@ -525,6 +533,8 @@ export const useGraphStore = defineStore('graph', () => {
   const queryEnrichmentVersion = ref(0);
   // Bumped when the graph is replaced or cleared: a run still in flight drops its rows.
   let queryEnrichmentToken = 0;
+  // runQueryEnrichment calls still running (a load's and an expand's may overlap).
+  const queryEnrichmentInFlight = ref(0);
 
   function resetQueryEnrichment() {
     queryEnrichmentToken++;
@@ -1465,6 +1475,19 @@ export const useGraphStore = defineStore('graph', () => {
       ? queryEntries(ctx).filter((t) => options.names!.includes(t.name))
       : queryEntries(ctx, 'auto');
     if (!entries.length) return {};
+    queryEnrichmentInFlight.value++;
+    try {
+      return await runQueryEnrichmentEntries(ctx, entries, options);
+    } finally {
+      queryEnrichmentInFlight.value--;
+    }
+  }
+
+  async function runQueryEnrichmentEntries(
+    ctx: GraphContext,
+    entries: EnrichmentTable[],
+    options: { names?: string[]; only?: { edges: Set<string>; nodes: Set<string> } },
+  ): Promise<Record<string, QueryEnrichmentRun>> {
     const base = savedGraph();
     const token = queryEnrichmentToken;
     const done: Record<string, QueryEnrichmentRun> = {};
@@ -1478,21 +1501,31 @@ export const useGraphStore = defineStore('graph', () => {
       })
       .filter((p) => p.total > 0);
     // Every query that will run shows as waiting until its turn: the table and the tab say so.
+    // An expand runs over the new items only: it must not turn an earlier failure over the
+    // whole graph into a success. Only a run over the whole graph (load, Retry) clears it.
+    const keepsError = (name: string) => !!options.only && queryEnrichmentRuns.value[name]?.status === 'error';
     const queued = { ...queryEnrichmentRuns.value };
-    for (const { entry, target, total } of plans) {
+    for (const { entry, target, total, payloads } of plans) {
+      if (keepsError(entry.name)) continue;
       queued[entry.name] = {
         status: 'queued', label: entry.label, target, matched: 0, written: 0, total,
-        truncated: false, error: null, at: Date.now(),
+        truncated: false, error: null, errorCode: null, at: Date.now(), finishedAt: null,
+        batchesDone: 0, batchesTotal: payloads.length,
       };
     }
     queryEnrichmentRuns.value = queued;
     for (const { entry, target, payloads, total } of plans) {
+      const stickyError = keepsError(entry.name) ? queryEnrichmentRuns.value[entry.name] : null;
       const run: QueryEnrichmentRun = {
         status: 'running', label: entry.label, target, matched: 0, written: 0, total,
-        truncated: false, error: null, at: Date.now(),
+        truncated: false, error: null, errorCode: null, at: Date.now(), finishedAt: null,
+        batchesDone: 0, batchesTotal: payloads.length,
       };
-      queryEnrichmentRuns.value = { ...queryEnrichmentRuns.value, [entry.name]: { ...run } };
-      const overwrite = !!entry.query?.overwrite;
+      const publish = () => {
+        if (!stickyError) queryEnrichmentRuns.value = { ...queryEnrichmentRuns.value, [entry.name]: { ...run } };
+      };
+      publish();
+      const overwrite = !!runSpec(entry)?.overwrite;
       try {
         for (const payload of payloads) {
           const result = await api.runEnrichmentQuery(ctx.id, entry.name, payload);
@@ -1526,20 +1559,25 @@ export const useGraphStore = defineStore('graph', () => {
             run.written += written.size;
           }
           run.truncated ||= result.truncated;
+          run.batchesDone = (run.batchesDone ?? 0) + 1;
+          publish();
         }
         run.status = 'done';
       } catch (e: unknown) {
         if (token !== queryEnrichmentToken) return done;
+        const details = extractErrorDetails(e, 'The enrichment failed');
         run.status = 'error';
-        run.error = extractErrorDetails(e, 'The enrichment query failed').message;
+        run.error = details.message;
+        run.errorCode = details.code ?? null;
         failed++;
       }
+      run.finishedAt = Date.now();
       done[entry.name] = { ...run };
-      queryEnrichmentRuns.value = { ...queryEnrichmentRuns.value, [entry.name]: { ...run } };
+      publish();
       queryEnrichmentVersion.value++;
     }
     if (failed && !options.names) {
-      useToast().warning(`${failed === 1 ? 'An enrichment query' : `${failed} enrichment queries`} failed. Your data → From Databricks tables shows why.`);
+      useToast().warning(`${failed === 1 ? 'An enrichment' : `${failed} enrichments`} failed. The Enrichment chip under the graph shows why and retries.`);
     }
     return done;
   }
@@ -3731,6 +3769,7 @@ export const useGraphStore = defineStore('graph', () => {
     overlayKeysFor,
     baseGraph,
     queryEnrichmentRuns,
+    queryEnrichmentInFlight,
     runQueryEnrichment,
     enrichedKeysFor,
     enrichedNodeColumns,

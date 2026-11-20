@@ -192,6 +192,25 @@ describe('ClusterProgramEditorModal', () => {
     expect(store.getProgram(program.program_id)?.parameters?.[0].node_binding).toBeUndefined()
   })
 
+  it('the wait-for-enrichment flag is saved on create, pre-filled on edit and cleared when unchecked', async () => {
+    const store = useClusterStore()
+    renderModal(null)
+    await fireEvent.update(q<HTMLInputElement>('[data-testid="program-name-input"]'), 'Gated')
+    expect(q<HTMLInputElement>('[data-testid="cluster-program-wait-enrichment"]').checked).toBe(false)
+    await fireEvent.click(q<HTMLInputElement>('[data-testid="cluster-program-wait-enrichment"]'))
+    await fireEvent.click(q<HTMLButtonElement>('[data-testid="save-program"]'))
+    const created = store.programs[store.programs.length - 1]
+    expect(created.wait_for_enrichment).toBe(true)
+
+    document.body.innerHTML = ''
+    renderModal(created)
+    const flag = q<HTMLInputElement>('[data-testid="cluster-program-wait-enrichment"]')
+    expect(flag.checked).toBe(true)
+    await fireEvent.click(flag)
+    await fireEvent.click(q<HTMLButtonElement>('[data-testid="save-program"]'))
+    expect(store.getProgram(created.program_id)!.wait_for_enrichment).toBeUndefined()
+  })
+
   it('node_id binding round-trips through save', async () => {
     const store = useClusterStore()
     renderModal(null)

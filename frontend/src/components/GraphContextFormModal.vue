@@ -26,7 +26,7 @@ import { describeIdentityKey } from '@/utils/identityKeys';
 import ContextDefaultLookField from '@/components/ContextDefaultLookField.vue';
 import EnrichmentQueryField from '@/components/EnrichmentQueryField.vue';
 import EnrichmentTablesTools from '@/components/EnrichmentTablesTools.vue';
-import { configuredEnrichmentSources, isAllowedEnrichmentSource, removedTablesReadBy } from '@/utils/enrichmentSources';
+import { configuredEnrichmentProviders, configuredEnrichmentSources, isAllowedEnrichmentSource, removedTablesReadBy } from '@/utils/enrichmentSources';
 import { storedDefaultLook, withDefaultLook, type DefaultLook } from '@/composables/useContextDefaultLook';
 
 /**
@@ -120,13 +120,15 @@ interface EnrichmentRow {
   query_run: 'auto' | 'manual';
   query_overwrite: boolean;
   query_node_props: boolean;
+  /** Registered provider name: a provider row (no table, uses the query_* run settings); null = table row. */
+  provider: string | null;
 }
 
 function rowFromEnrichment(t: EnrichmentTable): EnrichmentRow {
   return {
     name: t.name,
     label: t.label,
-    table: t.table,
+    table: t.table ?? '',
     key_column: t.key_column ?? '',
     match_node_types: (t.match_node_types ?? []).join(', '),
     prop: !t.match_source || t.match_source === 'node_id' ? '' : t.match_source.name,
@@ -136,10 +138,11 @@ function rowFromEnrichment(t: EnrichmentTable): EnrichmentRow {
     promote_id_column: t.promote?.id_column || '',
     promote_edge_type: t.promote?.edge_type || '',
     query_sql: t.query?.sql ?? '',
-    query_target: t.query?.target ?? 'edges',
-    query_run: t.query?.run ?? 'auto',
-    query_overwrite: !!t.query?.overwrite,
-    query_node_props: !!t.query?.node_props,
+    query_target: (t.query ?? t.provider)?.target ?? 'edges',
+    query_run: (t.query ?? t.provider)?.run ?? 'auto',
+    query_overwrite: !!(t.query ?? t.provider)?.overwrite,
+    query_node_props: !!(t.query ?? t.provider)?.node_props,
+    provider: t.provider?.name ?? null,
   };
 }
 
@@ -149,6 +152,20 @@ function slug(text: string): string {
 }
 
 function enrichmentFromRow(row: EnrichmentRow): EnrichmentTable {
+  if (row.provider !== null) {
+    const info = enrichmentProviders.find((p) => p.name === row.provider);
+    return {
+      name: row.name.trim() || slug(row.label || row.provider),
+      label: row.label.trim() || info?.label || row.provider,
+      provider: {
+        name: row.provider,
+        target: row.query_target,
+        run: row.query_run,
+        overwrite: row.query_overwrite,
+        node_props: row.query_node_props,
+      },
+    };
+  }
   const prop = row.prop.trim();
   const promote = row.promote_node_type.trim() && row.promote_id_column.trim()
     ? {
@@ -627,7 +644,9 @@ const edgePropertyOptions = computed(() =>
 
 /** Complete rows only, like identity keys. */
 const enrichmentTables = computed(() =>
-  form.value.enrichment_tables.filter((r) => r.table.trim() && !lookupIncomplete(r)).map(enrichmentFromRow),
+  form.value.enrichment_tables
+    .filter((r) => (r.provider !== null ? !!r.provider : r.table.trim() && !lookupIncomplete(r)))
+    .map(enrichmentFromRow),
 );
 /** A new entry on the same table, right below it: a table can feed several queries (edges and nodes). */
 function addQueryOn(index: number) {
@@ -676,7 +695,7 @@ const enrichmentSkillInput = computed(() => ({
 /** Tables the saved context listed that no row lists any more. */
 const removedTables = computed(() => {
   const kept = new Set(form.value.enrichment_tables.map((r) => r.table.trim().replace(/`/g, '').toLowerCase()));
-  return [...new Set((props.context?.enrichment_tables ?? []).map((t) => t.table))].filter(
+  return [...new Set((props.context?.enrichment_tables ?? []).flatMap((t) => (t.table ? [t.table] : [])))].filter(
     (t) => !kept.has(t.replace(/`/g, '').toLowerCase()),
   );
 });
@@ -696,6 +715,23 @@ const authorizedTableNames = computed(() => [
   ...new Set(form.value.enrichment_tables.map((r) => r.table.trim()).filter(Boolean)),
 ]);
 
+/** Enrichment providers the deployer registered (none: the "Attach provider" button stays hidden). */
+const enrichmentProviders = configuredEnrichmentProviders();
+
+/** Targets the row's provider can enrich (both when it is not registered here). */
+function providerTargets(row: EnrichmentRow): ('edges' | 'nodes')[] {
+  return enrichmentProviders.find((p) => p.name === row.provider)?.targets ?? ['edges', 'nodes'];
+}
+
+function addProviderRow() {
+  addEnrichmentTable();
+  const row = form.value.enrichment_tables[form.value.enrichment_tables.length - 1];
+  const first = enrichmentProviders[0];
+  row.provider = first?.name ?? '';
+  row.label = first?.label ?? '';
+  row.query_target = first?.targets[0] ?? 'edges';
+}
+
 function addEnrichmentTable() {
   form.value.enrichment_tables.push({
     name: '',
@@ -714,6 +750,7 @@ function addEnrichmentTable() {
     query_run: 'auto',
     query_overwrite: false,
     query_node_props: false,
+    provider: null,
   });
 }
 
@@ -1315,6 +1352,16 @@ async function submit() {
               @add="addEnrichmentTable"
               @import="importEnrichmentTables"
             />
+            <button
+              v-if="enrichmentProviders.length"
+              type="button"
+              class="btn btn-sm btn-outline"
+              data-testid="enrichment-add-provider"
+              title="Enrich with code the deployment registered (for example a Lakebase lookup)"
+              @click="addProviderRow"
+            >
+              + Attach provider
+            </button>
           </div>
           <p class="enrichment-warning" data-testid="enrichment-warning">
             A table listed here is authorized for this context: enrichment queries, node lookups
@@ -1335,6 +1382,56 @@ async function submit() {
             class="enrichment-row"
             data-testid="enrichment-row"
           >
+            <template v-if="row.provider !== null">
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Name</label>
+                  <input v-model="row.label" type="text" class="form-control" placeholder="KYC risk" data-testid="enrichment-label" />
+                </div>
+                <div class="form-group">
+                  <label>Provider</label>
+                  <select v-model="row.provider" class="form-control" data-testid="enrichment-provider">
+                    <option v-for="p in enrichmentProviders" :key="p.name" :value="p.name">{{ p.label }}</option>
+                    <option v-if="row.provider && !enrichmentProviders.some((p) => p.name === row.provider)" :value="row.provider">
+                      {{ row.provider }} (not registered on this server)
+                    </option>
+                  </select>
+                  <p class="hint">{{ enrichmentProviders.find((p) => p.name === row.provider)?.description }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline identity-key-remove"
+                  title="Remove provider"
+                  @click="form.enrichment_tables.splice(i, 1)"
+                >
+                  &times;
+                </button>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Enriches</label>
+                  <select v-model="row.query_target" class="form-control" data-testid="enrichment-provider-target">
+                    <option v-for="t in providerTargets(row)" :key="t" :value="t">the {{ t }}</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Runs</label>
+                  <select v-model="row.query_run" class="form-control" data-testid="enrichment-provider-run">
+                    <option value="auto">after every query and expand</option>
+                    <option value="manual">only from Your data</option>
+                  </select>
+                </div>
+              </div>
+              <label class="checkbox-label">
+                <input v-model="row.query_overwrite" type="checkbox" />
+                Replace values {{ row.query_target === 'nodes' ? 'the node' : 'the edge' }} already has
+              </label>
+              <label class="checkbox-label">
+                <input v-model="row.query_node_props" type="checkbox" />
+                Send node properties to the provider (otherwise id and type only)
+              </label>
+            </template>
+            <template v-else>
             <div class="form-row">
               <div class="form-group">
                 <label>Name</label>
@@ -1428,6 +1525,7 @@ async function submit() {
             >
               + Another query on this table
             </button>
+            </template>
           </div>
         </div>
 

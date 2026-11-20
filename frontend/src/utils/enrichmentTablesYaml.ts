@@ -33,6 +33,7 @@ const strings = (v: unknown): string[] | null =>
 function entryOf(raw: unknown, where: string): EnrichmentTable | string {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return `${where}: expected a mapping with name, label and table`;
   const r = raw as Record<string, unknown>;
+  if (r.provider !== undefined && r.provider !== null) return providerEntryOf(r, where);
   const table = typeof r.table === 'string' ? r.table.trim() : '';
   const parts = table.split('.');
   if (parts.length < 2 || parts.length > 3 || !parts.every((p) => IDENT.test(p))) {
@@ -89,6 +90,30 @@ function entryOf(raw: unknown, where: string): EnrichmentTable | string {
   return entry;
 }
 
+/** An entry with no table, enriched by a provider the deployment registered (a name or a mapping). */
+function providerEntryOf(r: Record<string, unknown>, where: string): EnrichmentTable | string {
+  if (r.table || r.query || r.key_column) return `${where}: a provider entry has no table, query or lookup`;
+  const p: Record<string, unknown> = typeof r.provider === 'string' ? { name: r.provider } : (r.provider as Record<string, unknown>);
+  const providerName = typeof p.name === 'string' ? p.name.trim() : '';
+  if (!/^[a-z0-9][a-z0-9_-]{0,49}$/.test(providerName)) return `${where}: provider.name must be a registered provider's name`;
+  if (p.run !== undefined && p.run !== 'auto' && p.run !== 'manual') return `${where}: provider.run is auto or manual`;
+  if (p.target !== undefined && p.target !== 'edges' && p.target !== 'nodes') return `${where}: provider.target is edges or nodes`;
+  const label = (typeof r.label === 'string' && r.label.trim()) || providerName;
+  const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : slug(label);
+  if (!NAME.test(name)) return `${where}: name "${name}" must be lowercase letters, digits and _ (starting with a letter)`;
+  return {
+    name,
+    label,
+    provider: {
+      name: providerName,
+      target: p.target === 'nodes' ? 'nodes' : 'edges',
+      run: p.run === 'manual' ? 'manual' : 'auto',
+      overwrite: p.overwrite === true,
+      node_props: p.node_props === true,
+    },
+  };
+}
+
 /** `enrichment_tables: [...]`, a bare list, or one entry. Names must be unique. */
 export function parseEnrichmentTablesYaml(text: string): ParsedEnrichmentTables {
   let doc: unknown;
@@ -120,6 +145,10 @@ export function parseEnrichmentTablesYaml(text: string): ParsedEnrichmentTables 
 /** The entries as YAML, SQL as a block, in the API's field names. */
 export function enrichmentTablesToYaml(tables: EnrichmentTable[]): string {
   const clean = tables.map((t) => {
+    if (t.provider?.name) {
+      const p = t.provider;
+      return { name: t.name, label: t.label, provider: { name: p.name, target: p.target ?? 'edges', run: p.run ?? 'manual', overwrite: !!p.overwrite, node_props: !!p.node_props } };
+    }
     const out: Record<string, unknown> = { name: t.name, label: t.label, table: t.table };
     if (t.key_column) {
       Object.assign(out, {

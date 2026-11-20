@@ -168,6 +168,9 @@ export interface ClusterProgram {
   /** Show this program as a node right-click menu item (runs as community algorithm) */
   show_in_context_menu?: boolean;
 
+  /** Run only once the context's automatic enrichment has finished without a failure */
+  wait_for_enrichment?: boolean;
+
   /**
    * Persistence scope. Absent on legacy programs (saved before scopes existed);
    * those are normalized on load — imported into the context when the user has

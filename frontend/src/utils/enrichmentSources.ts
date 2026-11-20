@@ -4,6 +4,7 @@
  * enrichment-only schemas and tables). The server decides on save and on every run; this only
  * lets the form warn early. Pure.
  */
+import type { EnrichmentProviderInfo } from '@/types/graph';
 
 const bare = (part: string) => part.trim().replace(/`/g, '').toLowerCase();
 
@@ -11,6 +12,12 @@ const bare = (part: string) => part.trim().replace(/`/g, '').toLowerCase();
 export function configuredEnrichmentSources(): string[] | null {
   const sources = window.__GRAPH_LAGOON_CONFIG__?.enrichment_sources;
   return Array.isArray(sources) ? sources : null;
+}
+
+/** Enrichment providers the deployment registered (/api/config `enrichment_providers`). */
+export function configuredEnrichmentProviders(): EnrichmentProviderInfo[] {
+  const providers = window.__GRAPH_LAGOON_CONFIG__?.enrichment_providers;
+  return Array.isArray(providers) ? providers : [];
 }
 
 /**

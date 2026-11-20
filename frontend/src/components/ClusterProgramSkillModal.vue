@@ -43,6 +43,8 @@ import { useGraphStore } from '@/stores/graph'
 import { useMetricsStore } from '@/stores/metrics'
 import { buildClusterProgramSkill } from '@/utils/clusterProgramSkill'
 import type { ImportedClusterProgram } from '@/utils/clusterProgramImport'
+import { withEnrichedProperties } from '@/utils/enrichedProperties'
+import { queryEntries } from '@/utils/queryEnrichment'
 
 const props = defineProps<{
   modelValue: boolean
@@ -61,8 +63,15 @@ const skillText = computed(() =>
   buildClusterProgramSkill({
     nodeTypes: graphStore.nodeTypes,
     edgeTypes: graphStore.edgeTypes,
-    nodeProperties: graphStore.currentContext?.node_properties ?? [],
-    edgeProperties: graphStore.currentContext?.edge_properties ?? [],
+    nodeProperties: withEnrichedProperties(
+      graphStore.currentContext?.node_properties ?? [], graphStore.nodes, graphStore.enrichedNodeColumns,
+    ),
+    edgeProperties: withEnrichedProperties(
+      graphStore.currentContext?.edge_properties ?? [], graphStore.edges, graphStore.enrichedEdgeColumns,
+    ),
+    pendingEnrichments: queryEntries(graphStore.currentContext)
+      .filter((t) => graphStore.queryEnrichmentRuns[t.name]?.status !== 'done')
+      .map((t) => t.label),
     nodeMetrics: metricsStore.nodeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
     edgeMetrics: metricsStore.edgeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
     program: props.program ?? null,

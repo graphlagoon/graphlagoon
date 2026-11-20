@@ -214,7 +214,7 @@ and [Query scope](/guide/permissions#query-scope).
 
 ## Extension registries
 
-Three registries let the parent app plug custom capabilities in. Each has
+Four registries let the parent app plug custom capabilities in. Each has
 a dedicated guide; the signatures and registration gotchas are summarized
 here.
 
@@ -269,6 +269,74 @@ registration), `delete` requires `save`, and the param names `precomputed`,
 `volume_provider(writable=False)` is the right shape for a store fed by a
 batch job. Chain semantics, guarantees, and six worked examples:
 [Precomputed Graphs](/guide/precomputed-graphs#writing-a-provider).
+
+### Enrichment providers
+
+An enrichment provider adds properties to the edges or nodes on screen after a query, like a context's
+[enrichment query](/guide/bring-your-own-data#enrich-from-databricks-tables), but computed by your code instead
+of SQL on the warehouse — typically a lookup in Lakebase. You register it; a context author picks it by name in
+the context form ([Enrich from a provider](/guide/bring-your-own-data#enrich-from-a-provider)).
+
+```python
+from graphlagoon import (
+    EnrichmentProvider, EnrichmentProviderError, EnrichmentProviderRequest, create_mountable_app,
+)
+
+async def kyc_profile(request: EnrichmentProviderRequest) -> dict[str, dict]:
+    # request.target is "nodes" or "edges"; request.nodes / request.edges are plain dicts
+    # ({node_id, node_type, properties} / {edge_id, src, dst, relationship_type, properties}).
+    ids = [n["node_id"] for n in request.nodes]
+    ...  # read your source, binding `ids` as a parameter
+    return {"acc-1": {"kyc_tier": "high", "kyc_score": 0.91}}   # id -> new properties
+
+app = create_mountable_app(
+    enrichment_providers=[EnrichmentProvider(
+        name="lakebase-kyc",            # lowercase slug; what contexts store
+        enrich=kyc_profile,             # must be async def
+        targets=("nodes",),             # what it can enrich
+        label="KYC profile (Lakebase)",
+        description="kyc_tier and kyc_score from the KYC table",
+        timeout_seconds=15,
+    )],
+)
+```
+
+**The framework guarantees** that the caller can read the context, that at most
+`GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` targets arrive per call, and that the target is one you declared. It drops
+returned ids that were not sent, keeps at most `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` rows (marking the result
+truncated), coerces values to JSON scalars (anything else becomes its `str`), and cancels the call after
+`timeout_seconds` (`ENRICHMENT_PROVIDER_TIMEOUT`).
+
+**You owe**: binding ids as parameters, never interpolating them into SQL; row-level authorization narrower
+than the context (`request.user_email` is given); never blocking the event loop — a synchronous driver call
+inside `enrich` cannot be cancelled by the timeout, so use an async driver or `asyncio.to_thread`. Raise
+`EnrichmentProviderError("…")` for a message the user should read; any other exception reaches the user as
+*The provider failed* and is logged with the provider's name.
+
+A Lakebase lookup, as a starting point (not shipped, not tested here; adapt the connection to how your app
+reaches Lakebase):
+
+```python
+import asyncpg
+
+async def kyc_profile(request: EnrichmentProviderRequest) -> dict[str, dict]:
+    ids = [n["node_id"] for n in request.nodes]
+    conn = await asyncpg.connect(LAKEBASE_DSN)   # e.g. a token from generate_database_credential
+    try:
+        rows = await conn.fetch(
+            "SELECT account_id, tier, score FROM kyc.profiles WHERE account_id = ANY($1::text[])", ids,
+        )
+    except asyncpg.PostgresError as e:
+        raise EnrichmentProviderError("The KYC table could not be read") from e
+    finally:
+        await conn.close()
+    return {r["account_id"]: {"kyc_tier": r["tier"], "kyc_score": float(r["score"])} for r in rows}
+```
+
+`enrichment_providers` is the complete list: each `create_mountable_app` / `create_app` call replaces the
+providers registered before. Registered providers are listed in `/api/config` (`enrichment_providers`: name,
+label, description, targets — never anything operational). The dev server registers a pure-Python demo,
+`graphlagoon/dev/enrichment_demo.py`.
 
 ::: tip Registries are process-wide
 Similarity, REST, and precomputed registrations — like the auth provider —

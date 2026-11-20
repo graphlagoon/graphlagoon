@@ -1,12 +1,14 @@
 <script setup lang="ts">
 /**
- * "Your data → From Databricks tables": the context's enrichment queries, run by hand over
- * the edges or nodes on screen. The `auto` ones also run after every query and expand; this is
- * where an author tests one and where a failure says why. Results stay on the canvas only.
+ * "Your data → Context enrichments": the context's enrichment queries and providers, run by
+ * hand over the edges or nodes on screen. The `auto` ones also run after every query and
+ * expand; this is where an author tests one and where a failure says why. Results stay on the
+ * canvas only.
  */
 import { computed, ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
-import { authorizedTables, queryEntries, targetOf } from '@/utils/queryEnrichment';
+import { authorizedTables, queryEntries, runSpec, targetOf } from '@/utils/queryEnrichment';
+import { describeRun } from '@/utils/enrichmentStatus';
 import { guideUrl } from '@/utils/docsLinks';
 
 const graph = useGraphStore();
@@ -27,38 +29,36 @@ async function run(name: string) {
 function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string } | null {
   const r = graph.queryEnrichmentRuns[name];
   if (!r) return null;
-  if (r.status === 'running') return { kind: 'running', text: 'Running…' };
-  if (r.status === 'queued') return { kind: 'running', text: 'Waiting for the queries before it…' };
-  if (r.status === 'error') return { kind: 'error', text: r.error ?? 'The query failed' };
-  const parts = [`${r.matched} of ${r.total} ${r.target} matched a row`, `${r.written} got new values`];
-  if (r.truncated) parts.push('the result hit the row limit, so some edges may be missing');
-  return { kind: 'ok', text: parts.join(' · ') };
+  const kind = r.status === 'error' ? 'error' : r.status === 'done' ? 'ok' : 'running';
+  return { kind, text: describeRun(r) };
 }
 </script>
 
 <template>
   <section data-testid="your-data-databricks">
     <p class="hint">
-      Queries the context's author wrote over this context's authorized Databricks tables. Each one adds properties
+      Queries the context's author wrote over this context's authorized Databricks tables, and providers the
+      deployment registered (for example a Lakebase lookup). Each one adds properties
       to the edges or the nodes on the canvas; <strong>after every query</strong> ones also run by themselves. Nothing is saved:
       opening the graph again runs them again.
       <a :href="guideUrl('bring-your-own-data', 'enrich-from-databricks-tables')" target="_blank" rel="noopener">More in the guide</a>
     </p>
 
     <div v-if="!entries.length" class="nomatch" data-testid="your-data-databricks-empty">
-      This context has no enrichment query yet. Someone with the "Create graph contexts" permission adds one in the
+      This context has no enrichment query or provider yet. Someone with the "Create graph contexts" permission adds one in the
       context form, under <strong>Enrichment Tables → Enrich with a query</strong>.
     </div>
 
     <template v-else>
-      <p class="tables" data-testid="your-data-databricks-tables">Authorized tables: {{ tables.join(', ') }}</p>
+      <p v-if="tables.length" class="tables" data-testid="your-data-databricks-tables">Authorized tables: {{ tables.join(', ') }}</p>
       <p v-if="!edgeCount && !graph.nodes.length" class="nomatch">Run a query first: the canvas is empty.</p>
       <ul class="queries">
         <li v-for="q in entries" :key="q.name" data-testid="your-data-databricks-query">
           <div class="head">
             <strong>{{ q.label }}</strong>
             <span class="chip">{{ targetOf(q) === 'nodes' ? 'nodes' : 'edges' }}</span>
-            <span class="chip">{{ (q.query?.run ?? 'manual') === 'auto' ? 'after every query' : 'by hand' }}</span>
+            <span v-if="q.provider" class="chip">provider {{ q.provider.name }}</span>
+            <span class="chip">{{ (runSpec(q)?.run ?? 'manual') === 'auto' ? 'after every query' : 'by hand' }}</span>
             <button
               class="btn btn-sm btn-primary"
               :disabled="!!running || (!edgeCount && !graph.nodes.length)"
@@ -76,7 +76,7 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
           >
             {{ outcome(q.name)!.text }}
           </p>
-          <details>
+          <details v-if="q.query?.sql">
             <summary>Show the query</summary>
             <pre class="sql">{{ q.query?.sql }}</pre>
           </details>

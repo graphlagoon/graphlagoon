@@ -124,6 +124,9 @@ const danglingByExploration = computed<ExplorationDangling[]>(() => {
     ...effectiveProperties('node').map((p) => p.name),
     ...effectiveProperties('edge').map((p) => p.name),
   ]);
+  // Only a column the stored context declared can dangle: a property that enrichment
+  // or the person's own data adds was never in the schema, so no fix removes it.
+  const declared = new Set(findingsOfCode('PROPERTY_COLUMN_MISSING').map((f) => f.name));
 
   const results: ExplorationDangling[] = [];
   for (const exploration of explorations.value) {
@@ -132,7 +135,10 @@ const danglingByExploration = computed<ExplorationDangling[]>(() => {
       { location: 'graph_query', text: exploration.state.graph_query },
       { location: 'cte_prefilter', text: exploration.state.cte_prefilter },
     ]);
-    const dangling = [...findDanglingReferences(structuredRefs, known), ...rawRefs];
+    const dangling = [
+      ...findDanglingReferences(structuredRefs, known).filter((r) => declared.has(r.property)),
+      ...rawRefs,
+    ];
     if (dangling.length > 0) results.push({ exploration, refs: dangling });
   }
   return results;

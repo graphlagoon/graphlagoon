@@ -12,6 +12,7 @@ import { useCommunityStore } from '@/stores/community'
 import { useSimilarityStore } from '@/stores/similarity'
 import { useGraphStore } from '@/stores/graph'
 import { missingRequiredParams } from '@/utils/clusterProgramParams'
+import { enrichmentHoldReason } from '@/utils/enrichmentStatus'
 import { useGroupRows, type GroupKind, type GroupRow } from '@/composables/useGroupRows'
 import SimilarityPanel from './SimilarityPanel.vue'
 import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
@@ -90,6 +91,13 @@ const communityMissingParams = computed(() => {
     communityStore.programParams[program.program_id] ?? {}
   )
 })
+
+/** The selected program waits for enrichment that is still running or failed. */
+const communityHoldReason = computed(() =>
+  selectedCommunityProgram.value
+    ? enrichmentHoldReason(selectedCommunityProgram.value, graphStore.queryEnrichmentRuns, graphStore.queryEnrichmentInFlight)
+    : null
+)
 
 function setCommunityProgramParams(values: Record<string, string | number | boolean>) {
   if (!communityStore.selectedProgramId) return
@@ -373,6 +381,9 @@ const displayOpen = ref(false)
             </div>
           </div>
 
+          <small v-if="communityHoldReason" class="help-text params-missing-hint" data-testid="cluster-run-enrichment-warning">
+            {{ communityHoldReason }}
+          </small>
           <div class="community-actions">
             <button
               class="btn-detect"
@@ -382,7 +393,7 @@ const displayOpen = ref(false)
             >
               <Loader2 v-if="communityStore.computing" :size="12" class="spin" />
               <Play v-else :size="12" />
-              {{ communityStore.computing ? 'Running…' : 'Run' }}
+              {{ communityStore.computing ? 'Running…' : communityHoldReason ? 'Run anyway' : 'Run' }}
             </button>
             <button
               class="btn-secondary-sm"

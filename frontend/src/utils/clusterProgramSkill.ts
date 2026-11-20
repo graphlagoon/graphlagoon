@@ -37,6 +37,8 @@ export interface ClusterProgramSkillInput {
   nodeProperties: SkillProperty[]
   /** Edge property columns from the current context */
   edgeProperties: SkillProperty[]
+  /** Labels of the context's enrichments that have not run on the loaded graph: their properties are not listed */
+  pendingEnrichments?: string[]
 }
 
 /** Render a list of values as a bullet list, or a placeholder when empty. */
@@ -79,6 +81,12 @@ export function buildClusterProgramSkill(input: ClusterProgramSkillInput): strin
   const nodeMetrics = input.nodeMetrics ?? []
   const edgeMetrics = input.edgeMetrics ?? []
   const program = input.program ?? null
+  const pending = input.pendingEnrichments ?? []
+  const pendingNote = pending.length
+    ? `
+**Not listed above:** the properties added by ${pending.length === 1 ? 'the enrichment' : 'the enrichments'} ${pending.map((l) => `"${l}"`).join(', ')}, which ${pending.length === 1 ? 'has' : 'have'} not run on the loaded graph. Ask me for their names if the program needs them.
+`
+    : ''
 
   const intro = program
     ? `You are helping me change an existing **cluster program** for Graph Lagoon Studio.
@@ -198,6 +206,8 @@ ${propertyList(nodeProperties, 'none declared')}
 
 **Edge properties (available under \`edge.properties\`):**
 ${propertyList(edgeProperties, 'none declared')}
+${pendingNote}
+Properties marked "added by enrichment" arrive a moment after the graph loads.
 
 **Node metrics (session-computed, via \`metric('<name>', node.node_id)\`):**
 ${metricList(nodeMetrics, 'none computed in this session')}
@@ -213,6 +223,7 @@ ${metricList(edgeMetrics, 'none computed in this session')}
   "description": string,           // optional, one sentence
   "code": string,                  // REQUIRED, the JavaScript body (newlines as \\n)
   "show_in_context_menu": boolean, // optional: also offer it on a node's right-click menu
+  "wait_for_enrichment": boolean,  // optional: run only after the enrichment succeeded
   "parameters": [                  // optional, values arrive as params.<id>
     {
       "id": string,                // REQUIRED, a JavaScript identifier, e.g. "threshold"
@@ -232,6 +243,9 @@ ${metricList(edgeMetrics, 'none computed in this session')}
 
 A required parameter with no default and no node binding makes the right-click
 run ask for its value first; give a default when a sensible one exists.
+
+Set \`wait_for_enrichment\` to true when the code reads a property that enrichment
+adds: the automatic run after a query then waits for those values.
 ${current}
 ## Worked example (group nodes by their type)
 

@@ -129,6 +129,7 @@ def scope_problem(
     read only the virtual tables, the context's own tables and the tables of
     ``all_tables`` (the whole new list)."""
     sources = current_source_scope()
+    tables = [t for t in tables if not t.get("provider")]  # no table to scope
     for spec in tables:
         problem = source_problem(spec["table"], context, sources)
         if problem:
@@ -423,5 +424,132 @@ async def run_query(warehouse, context, name: str, edges: list, nodes: list) -> 
         "columns": columns,
         "rows": rows,
         "truncated": len(data) > max_rows,
+        "query_ms": query_ms,
+    }
+
+
+# --- Enrichment by a registered provider --------------------------------------
+
+
+def provider_problem(spec: dict) -> Optional[EnrichmentError]:
+    """Why a provider entry cannot run here, or None: its provider is not
+    registered in this deployment, or does not enrich the entry's target."""
+    from graphlagoon.services.enrichment_providers import get_enrichment_provider
+
+    ref = spec.get("provider") or {}
+    provider = get_enrichment_provider(ref.get("name", ""))
+    if provider is None:
+        return EnrichmentError(
+            400,
+            "ENRICHMENT_PROVIDER_NOT_REGISTERED",
+            f"No enrichment provider '{ref.get('name')}' is registered on this server",
+        )
+    target = ref.get("target", "edges")
+    if target not in provider.targets:
+        return EnrichmentError(
+            400,
+            "ENRICHMENT_PROVIDER_TARGET",
+            f"The provider '{provider.name}' does not enrich {target}",
+        )
+    return None
+
+
+def _scalar(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
+async def run_provider(
+    context, name: str, edges: list, nodes: list, user_email: Optional[str]
+) -> dict:
+    """Same result as ``run_query``, computed by the entry's registered provider."""
+    import asyncio
+    import logging
+
+    from graphlagoon.services.enrichment_providers import (
+        EnrichmentProviderError,
+        EnrichmentProviderRequest,
+        get_enrichment_provider,
+    )
+
+    spec = find_table(context, name)
+    problem = provider_problem(spec)
+    if problem:
+        raise problem
+    ref = spec["provider"]
+    provider = get_enrichment_provider(ref["name"])
+    settings = get_settings()
+    target = ref.get("target", "edges")
+    key, targets = ("node_id", nodes) if target == "nodes" else ("edge_id", edges)
+    noun = "nodes" if target == "nodes" else "edges"
+    if not targets:
+        raise EnrichmentError(400, "INVALID_KEY", f"Send at least one of the {noun} to enrich")
+    if len(targets) > settings.enrichment_max_keys:
+        raise EnrichmentError(
+            400, "TOO_MANY_KEYS", f"At most {settings.enrichment_max_keys} {noun} per run"
+        )
+    request = EnrichmentProviderRequest(
+        context_id=context.id,
+        user_email=user_email,
+        target=target,
+        edges=[
+            {
+                "edge_id": e.edge_id,
+                "src": e.src,
+                "dst": e.dst,
+                "relationship_type": e.relationship_type,
+                "properties": e.properties or {},
+            }
+            for e in edges
+        ],
+        nodes=[
+            {
+                "node_id": n.node_id,
+                "node_type": n.node_type,
+                "properties": (n.properties or {}) if ref.get("node_props") else {},
+            }
+            for n in nodes
+        ],
+    )
+    t0 = time.perf_counter()
+    try:
+        answer = await asyncio.wait_for(provider.enrich(request), provider.timeout_seconds)
+    except asyncio.TimeoutError:
+        raise EnrichmentError(
+            504,
+            "ENRICHMENT_PROVIDER_TIMEOUT",
+            f"The provider took longer than {provider.timeout_seconds:g}s",
+        )
+    except EnrichmentProviderError as e:
+        raise EnrichmentError(502, "ENRICHMENT_PROVIDER_FAILED", str(e) or "The provider failed")
+    except Exception:  # never leak the provider's internals
+        logging.getLogger(__name__).exception("Enrichment provider '%s' failed", provider.name)
+        raise EnrichmentError(502, "ENRICHMENT_PROVIDER_FAILED", "The provider failed")
+    if not isinstance(answer, dict):
+        logging.getLogger(__name__).error(
+            "Enrichment provider '%s' returned %s, not a dict", provider.name, type(answer).__name__
+        )
+        raise EnrichmentError(502, "ENRICHMENT_PROVIDER_FAILED", "The provider failed")
+    query_ms = round((time.perf_counter() - t0) * 1000, 2)
+    sent = {getattr(t, key) for t in targets}
+    rows: dict[str, dict] = {}
+    columns: list[str] = []
+    kept = 0
+    for ident, row in answer.items():
+        if str(ident) not in sent or not isinstance(row, dict):
+            continue
+        kept += 1
+        if kept > settings.enrichment_max_rows:
+            break
+        rows[str(ident)] = {str(c): _scalar(v) for c, v in row.items()}
+        columns.extend(c for c in rows[str(ident)] if c not in columns)
+    return {
+        "name": spec["name"],
+        "label": spec.get("label"),
+        "target": target,
+        "columns": columns,
+        "rows": rows,
+        "truncated": kept > settings.enrichment_max_rows,
         "query_ms": query_ms,
     }

@@ -81,4 +81,18 @@ describe('parseImportedClusterPrograms', () => {
     const r = parseImportedClusterPrograms(JSON.stringify(portable))
     expect(r.ok && r.programs[0]).toEqual(portable)
   })
+
+  it('wait_for_enrichment survives export and import, and is left out when off', () => {
+    const portable = portableClusterProgram({ program_name: 'P', code: 'return []', wait_for_enrichment: true })
+    expect(portable).toEqual({ program_name: 'P', code: 'return []', wait_for_enrichment: true })
+    const r = parseImportedClusterPrograms(JSON.stringify(portable))
+    expect(r.ok && r.programs[0]).toEqual(portable)
+
+    expect(portableClusterProgram({ program_name: 'P', code: 'return []', wait_for_enrichment: false })).toEqual({ program_name: 'P', code: 'return []' })
+    const off = parseImportedClusterPrograms(JSON.stringify({ program_name: 'P', code: 'return []', wait_for_enrichment: false }))
+    expect(off.ok && off.programs[0]).toEqual({ program_name: 'P', code: 'return []' })
+    expect(parseImportedClusterPrograms(JSON.stringify({ program_name: 'P', code: 'return []', wait_for_enrichment: 'yes' }))).toEqual({
+      ok: false, error: '"wait_for_enrichment" must be a boolean',
+    })
+  })
 })

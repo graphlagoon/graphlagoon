@@ -147,6 +147,7 @@ async def _check_enrichment_tables(request: Request, new, stored, context) -> No
     from graphlagoon.services.enrichment import (
         changed_tables,
         orphan_problem,
+        provider_problem,
         scope_problem,
     )
 
@@ -166,6 +167,13 @@ async def _check_enrichment_tables(request: Request, new, stored, context) -> No
     if not changed:
         return
     await require_permission("context.create")(request)
+    for spec in changed:
+        refused = spec.get("provider") and provider_problem(spec)
+        if refused:
+            raise HTTPException(
+                status_code=refused.status,
+                detail={"error": {"code": refused.code, "message": refused.message, "details": {}}},
+            )
     problem = scope_problem(changed, context, all_tables=new)
     if problem:
         raise HTTPException(
@@ -1035,14 +1043,20 @@ async def run_enrichment_query(
     """Run enrichment query ``name`` over a batch of the loaded graph: the edges
     (and their endpoint nodes) or the nodes (and the edges between them) it
     targets. Anyone who can read the context may run it; writing the query is
-    the author's."""
+    the author's. An entry with a ``provider`` runs the deployer's registered
+    provider instead of SQL, with the same result shape."""
     from graphlagoon.services import enrichment
     from graphlagoon.utils.context_access import get_context_with_access
 
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
     try:
-        result = await enrichment.run_query(warehouse, context, name, body.edges, body.nodes)
+        if enrichment.find_table(context, name).get("provider"):
+            result = await enrichment.run_provider(
+                context, name, body.edges, body.nodes, user_email
+            )
+        else:
+            result = await enrichment.run_query(warehouse, context, name, body.edges, body.nodes)
     except enrichment.EnrichmentError as e:
         raise HTTPException(
             status_code=e.status,

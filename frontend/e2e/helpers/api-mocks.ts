@@ -333,27 +333,40 @@ export async function seedContexts(page: Page, contexts: any[]) {
  * generator to serve a denser, curated graph than MOCK_GRAPH_RESPONSE.
  */
 /**
- * Edge enrichment queries (`POST …/enrichment/{name}/run`): answers each sent edge with
- * `rowFor(edge_id)` (null = no row), and records every request body.
+ * Enrichment runs (`POST …/enrichment/{name}/run`, queries and providers): answers each sent
+ * edge (or node, for the names in `opts.nodes`) with `rowFor(id, name)` (null = no row), and
+ * records every request body. `opts.fail(name, attempt)` true answers that call with a 502.
  */
 export async function seedEnrichmentRun(
   page: Page,
-  rowFor: (edgeId: string, query: string) => Record<string, unknown> | null,
+  rowFor: (id: string, query: string) => Record<string, unknown> | null,
   calls: { name: string; body: any }[] = [],
+  opts: { nodes?: string[]; fail?: (name: string, attempt: number) => boolean } = {},
 ) {
   await page.route('**/graphlagoon/api/graph-contexts/*/enrichment/*/run', (route) => {
     const name = route.request().url().split('/enrichment/')[1].split('/')[0];
     const body = route.request().postDataJSON();
     calls.push({ name, body });
+    const attempt = calls.filter((c) => c.name === name).length;
+    if (opts.fail?.(name, attempt)) {
+      route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: { error: { code: 'ENRICHMENT_PROVIDER_FAILED', message: 'Lakebase is down', details: {} } } }),
+      });
+      return;
+    }
+    const target = opts.nodes?.includes(name) ? 'nodes' : 'edges';
     const rows: Record<string, unknown> = {};
-    for (const e of body.edges ?? []) {
-      const row = rowFor(e.edge_id, name);
-      if (row) rows[e.edge_id] = row;
+    for (const item of (target === 'nodes' ? body.nodes : body.edges) ?? []) {
+      const id = target === 'nodes' ? item.node_id : item.edge_id;
+      const row = rowFor(id, name);
+      if (row) rows[id] = row;
     }
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ name, label: name, target: 'edges', columns: [], rows, truncated: false, query_ms: 12 }),
+      body: JSON.stringify({ name, label: name, target, columns: [], rows, truncated: false, query_ms: 12 }),
     });
   });
   return calls;

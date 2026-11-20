@@ -140,6 +140,7 @@ declare global {
        * GRAPH_LAGOON_ENRICHMENT_SOURCES (catalog.schema or catalog.schema.table entries).
        */
       enrichment_sources?: string[];
+      enrichment_providers?: import('@/types/graph').EnrichmentProviderInfo[];
       /** Personal agent tokens (GRAPH_LAGOON_AGENTS_ENABLED). */
       agents_enabled?: boolean;
       /** Upload ceiling for case files, in bytes (413 above it). */

@@ -15,6 +15,7 @@ const programs: Record<string, ClusterProgram> = {
   plain: program('plain'),
   needsSeed: program('needsSeed', [{ id: 'seed', type: 'text', required: true }]),
   seeded: program('seeded', [{ id: 'k', type: 'number', required: true, default: 3 }]),
+  gated: { ...program('gated'), wait_for_enrichment: true },
 };
 const get = (id: string) => programs[id];
 const off = { afterQueryCommunities: '', afterQueryClusterProgram: '' };
@@ -30,8 +31,18 @@ describe('planAfterQueryAnalysis', () => {
       get,
     );
     expect(plan.community).toBe('louvain');
-    expect(plan.clusterProgram).toEqual({ id: 'seeded', params: { k: 3 } });
+    expect(plan.clusterProgram).toEqual({ id: 'seeded', name: 'Program seeded', params: { k: 3 }, waits: false });
     expect(plan.problems).toEqual([]);
+  });
+
+  it('marks programs that wait for enrichment, as clusters and as communities', () => {
+    const plan = planAfterQueryAnalysis(
+      { afterQueryCommunities: 'cluster-program:gated', afterQueryClusterProgram: 'gated' },
+      get,
+    );
+    expect(plan.clusterProgram?.waits).toBe(true);
+    expect(plan.communityWaits).toBe(true);
+    expect(plan.communityName).toBe('Program gated');
   });
 
   it('accepts a cluster program as the community algorithm', () => {

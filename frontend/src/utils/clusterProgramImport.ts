@@ -4,7 +4,7 @@
  *
  * Accepts, in order of what people actually paste:
  *   - the bare object an LLM answers with:
- *     { program_name, description?, code, parameters?, show_in_context_menu? }
+ *     { program_name, description?, code, parameters?, show_in_context_menu?, wait_for_enrichment? }
  *   - an array of such objects
  *   - the portable envelope written by Export JSON
  *     ({ graphlagoon_export: 'cluster-programs', programs: [...] })
@@ -30,6 +30,7 @@ export interface ImportedClusterProgram {
   code: string;
   parameters?: ClusterProgramParameter[];
   show_in_context_menu?: boolean;
+  wait_for_enrichment?: boolean;
 }
 
 export type ClusterProgramImportResult =
@@ -157,6 +158,8 @@ function parseOne(raw: unknown, index: number, total: number): ImportedClusterPr
 
   const menu = raw.show_in_context_menu ?? raw.showInContextMenu;
   if (menu !== undefined && typeof menu !== 'boolean') return `${label}"show_in_context_menu" must be a boolean`;
+  const wait = raw.wait_for_enrichment ?? raw.waitForEnrichment;
+  if (wait !== undefined && typeof wait !== 'boolean') return `${label}"wait_for_enrichment" must be a boolean`;
 
   let parameters: ClusterProgramParameter[] | undefined;
   if (raw.parameters != null) {
@@ -176,6 +179,7 @@ function parseOne(raw: unknown, index: number, total: number): ImportedClusterPr
   if (description) program.description = description;
   if (parameters && parameters.length > 0) program.parameters = parameters;
   if (menu === true) program.show_in_context_menu = true;
+  if (wait === true) program.wait_for_enrichment = true;
   return program;
 }
 
@@ -224,5 +228,6 @@ export function portableClusterProgram(program: Pick<ClusterProgram, 'program_na
       });
   }
   if (program.show_in_context_menu) out.show_in_context_menu = true;
+  if (program.wait_for_enrichment) out.wait_for_enrichment = true;
   return out;
 }
