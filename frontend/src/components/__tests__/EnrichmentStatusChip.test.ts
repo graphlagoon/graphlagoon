@@ -42,6 +42,7 @@ describe('EnrichmentStatusChip', () => {
     const details = (await findAllByTestId('enrichment-status-detail')).map((d) => d.textContent);
     expect(details[1]).toContain('ENRICHMENT_PROVIDER_FAILED: Lakebase is down');
     expect((await findByTestId('enrichment-status-waiting')).textContent).toContain('Clusters “By risk”');
+    expect(getByTestId('enrichment-status-chip').textContent).toContain('1 analysis skipped');
 
     const retry = vi.spyOn(graph, 'runQueryEnrichment').mockResolvedValue({});
     await fireEvent.click(await findByTestId('enrichment-status-retry'));

@@ -335,10 +335,15 @@ export interface SnapshotEdge {
   properties: Record<string, unknown>;
 }
 
+/** Which property keys enrichment wrote, kept with a snapshot: id → enrichment label → keys. */
+export type SnapshotEnrichedKeys = Record<string, Record<string, string[]>>;
+
 export interface GraphSnapshot {
   nodes: SnapshotNode[];
   edges: SnapshotEdge[];
   snapshot_version?: number;
+  /** The enriched values are saved in `properties`; this says which they are, so a reopen can mark and refresh them. */
+  enriched?: { nodes?: SnapshotEnrichedKeys; edges?: SnapshotEnrichedKeys } | null;
 }
 
 // Precomputed graphs — named graph resources resolved server-side by a provider.

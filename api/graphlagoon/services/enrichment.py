@@ -512,9 +512,15 @@ async def run_provider(
             for n in nodes
         ],
     )
+    async def call():
+        try:
+            return await provider.enrich(request)
+        except TimeoutError as e:  # the provider's own timeout is a failure, not ours
+            raise RuntimeError("the provider raised TimeoutError") from e
+
     t0 = time.perf_counter()
     try:
-        answer = await asyncio.wait_for(provider.enrich(request), provider.timeout_seconds)
+        answer = await asyncio.wait_for(call(), provider.timeout_seconds)
     except asyncio.TimeoutError:
         raise EnrichmentError(
             504,

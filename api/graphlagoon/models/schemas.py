@@ -990,6 +990,9 @@ class GraphSnapshot(BaseModel):
     nodes: list[SnapshotNode]
     edges: list[SnapshotEdge]
     snapshot_version: int = 1
+    # Which property keys enrichment wrote (the values are in ``properties``):
+    # ``{"nodes"|"edges": {id: {enrichment label: [keys]}}}``. The UI marks and refreshes them.
+    enriched: Optional[dict[Literal["nodes", "edges"], dict[str, dict[str, list[str]]]]] = None
 
 
 class OverlayEnrichment(BaseModel):

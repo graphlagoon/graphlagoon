@@ -5,10 +5,10 @@
  * (`graphStore.queryRunSeq` only moves on a run, see QueryRunOptions.fromRestore).
  *
  * A program marked `wait_for_enrichment` waits for the context's enrichment of that
- * query: it runs once every enrichment finished without a failure, is skipped (and said
- * so) when one failed, and runs then by itself if a Retry leaves everything green.
+ * query: it runs once every enrichment finished without a failure, is skipped (the status
+ * chip says so) when one failed, and runs then by itself if a Retry leaves everything green.
  */
-import { nextTick, ref, watch } from 'vue';
+import { nextTick, onScopeDispose, ref, watch } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useCommunityStore } from '@/stores/community';
 import { useClusterStore } from '@/stores/cluster';
@@ -33,7 +33,13 @@ export function useAfterQueryAnalysis() {
   const toast = useToast();
 
   /** The gated part of the current query's plan, until it runs or another query replaces it. */
-  let held: { seq: number; plan: AfterQueryPlan } | null = null;
+  let held: { seq: number; epoch: number; plan: AfterQueryPlan } | null = null;
+
+  function drop() {
+    held = null;
+    waitingOnEnrichment.value = null;
+  }
+  onScopeDispose(drop);
 
   /** Resolve once the graph and its progressive properties have landed. */
   function settled(): Promise<void> {
@@ -73,7 +79,13 @@ export function useAfterQueryAnalysis() {
 
   /** Runs, keeps waiting, or reports the held analyses as the enrichment stands now. */
   async function release() {
-    if (!held || held.seq !== graphStore.queryRunSeq) return;
+    if (!held) return;
+    // Another query, or another graph altogether (context, exploration, precomputed, clear):
+    // what was held belonged to a graph that is gone.
+    if (held.seq !== graphStore.queryRunSeq || held.epoch !== graphStore.queryEnrichmentEpoch || graphStore.nodes.length === 0) {
+      drop();
+      return;
+    }
     const runs = graphStore.queryEnrichmentRuns;
     const labels = heldLabels(held.plan);
     if (!enrichmentSettled(runs, graphStore.queryEnrichmentInFlight)) {
@@ -81,22 +93,18 @@ export function useAfterQueryAnalysis() {
       return;
     }
     if (!enrichmentSucceeded(runs)) {
-      if (waitingOnEnrichment.value?.reason !== 'failed') {
-        toast.warning(`After the query: ${labels.join(' and ')} skipped — an enrichment failed. Retry it from the Enrichment chip under the graph and ${labels.length === 1 ? 'it runs' : 'they run'} then.`, 8000);
-      }
+      // No toast of its own: the store already says an enrichment failed, and the chip says what waits.
       waitingOnEnrichment.value = { labels, reason: 'failed' };
       return;
     }
     const { plan } = held;
-    held = null;
-    waitingOnEnrichment.value = null;
+    drop();
     const problems = await execute(plan);
     if (problems.length > 0) toast.warning(`After the query: ${problems.join(' ')}`, 6000);
   }
 
   async function run(seq: number) {
-    held = null;
-    waitingOnEnrichment.value = null;
+    drop();
     const behaviors = graphStore.behaviors;
     if (!behaviors.afterQueryCommunities && !behaviors.afterQueryClusterProgram) return;
     await settled();
@@ -117,8 +125,9 @@ export function useAfterQueryAnalysis() {
 
     const problems = [...plan.problems, ...(await execute(now))];
     if (problems.length > 0) toast.warning(`After the query: ${problems.join(' ')}`, 6000);
-    if (later.community || later.clusterProgram) {
-      held = { seq, plan: later };
+    // A newer query may have landed while the part above ran: its own run() holds what it needs.
+    if ((later.community || later.clusterProgram) && seq === graphStore.queryRunSeq) {
+      held = { seq, epoch: graphStore.queryEnrichmentEpoch, plan: later };
       await release();
     }
   }
@@ -126,7 +135,7 @@ export function useAfterQueryAnalysis() {
   watch(() => graphStore.queryRunSeq, (seq) => void run(seq));
   // Enrichment finishing (or a Retry) is what releases a held analysis.
   watch(
-    () => [graphStore.queryEnrichmentRuns, graphStore.queryEnrichmentInFlight] as const,
+    () => [graphStore.queryEnrichmentRuns, graphStore.queryEnrichmentInFlight, graphStore.queryEnrichmentEpoch] as const,
     () => void release(),
   );
 }

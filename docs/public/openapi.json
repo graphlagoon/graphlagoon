@@ -12857,6 +12857,35 @@
             "type": "integer",
             "title": "Snapshot Version",
             "default": 1
+          },
+          "enriched": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "additionalProperties": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "type": "object"
+                  },
+                  "type": "object"
+                },
+                "propertyNames": {
+                  "enum": [
+                    "nodes",
+                    "edges"
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enriched"
           }
         },
         "type": "object",

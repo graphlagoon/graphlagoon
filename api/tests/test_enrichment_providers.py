@@ -277,3 +277,46 @@ def test_caps_keys_and_rows(env, monkeypatch):
     assert len(body["rows"]) == 1 and body["truncated"] is True
     r = _run(client, ctx, body={"edges": BATCH["edges"], "nodes": []})
     assert r.json()["detail"]["error"]["code"] == "INVALID_KEY"
+
+
+def test_a_snapshot_keeps_which_values_enrichment_wrote():
+    from graphlagoon.models.schemas import GraphSnapshot
+
+    snapshot = GraphSnapshot.model_validate({
+        "nodes": [{"id": "a", "type": "Conta", "properties": {"kyc_tier": "high"}}],
+        "edges": [],
+        "enriched": {"nodes": {"a": {"KYC": ["kyc_tier"]}}},
+    })
+    dumped = snapshot.model_dump()
+    assert dumped["enriched"] == {"nodes": {"a": {"KYC": ["kyc_tier"]}}}
+    assert GraphSnapshot.model_validate({"nodes": [], "edges": []}).enriched is None
+
+
+def test_a_timeout_raised_by_the_provider_itself_is_a_failure_not_our_timeout(env):
+    client, store = env
+    ctx = _ctx(store)
+    register_enrichment_provider(_provider(_Recorder(error=TimeoutError("socket"))))
+    r = _run(client, ctx)
+    assert r.status_code == 502
+    assert r.json()["detail"]["error"]["code"] == "ENRICHMENT_PROVIDER_FAILED"
+
+
+def test_an_agent_edit_takes_a_key_from_enrichment():
+    from graphlagoon.services.exploration_graph import apply_edit
+
+    before = {
+        "nodes": [
+            {"id": "a", "type": "Conta", "properties": {"kyc_tier": "high", "kyc_score": 0.9}},
+            {"id": "b", "type": "Conta", "properties": {"kyc_tier": "low"}},
+        ],
+        "edges": [],
+        "enriched": {"nodes": {"a": {"KYC": ["kyc_tier", "kyc_score"]}, "b": {"KYC": ["kyc_tier"]}}},
+    }
+    after, _, _ = apply_edit(before, None, {
+        "set_properties": [{"id": "a", "kind": "node", "properties": {"kyc_tier": "reviewed"}}],
+        "remove_node_ids": ["b"],
+    })
+    # The value the agent set is its own now; the untouched one is still enrichment's.
+    assert after["enriched"] == {"nodes": {"a": {"KYC": ["kyc_score"]}}}
+    fresh, _, _ = apply_edit(before, None, {"replace": True, "add_nodes": [{"id": "a", "type": "Conta"}]})
+    assert "enriched" not in fresh

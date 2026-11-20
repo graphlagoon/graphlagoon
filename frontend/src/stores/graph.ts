@@ -67,7 +67,9 @@ import {
   enrichedColumns,
   targetOf,
   queryEntries,
+  provenanceToJson,
   recordProvenance,
+  restoreProvenance,
   runPatch,
   runPayloads,
   runSpec,
@@ -524,7 +526,7 @@ export const useGraphStore = defineStore('graph', () => {
 
   // Enrichment queries (context `enrichment_tables[].query`): what each one did on the
   // graph on screen, and which edge and node keys it wrote, so the details panel can mark
-  // them and a saved snapshot leaves them out (they are re-run, never stored).
+  // them and a saved snapshot records which values they are (kept, and refreshed on reopen).
   const queryEnrichmentRuns = ref<Record<string, QueryEnrichmentRun>>({});
   let edgeProvenance: EnrichmentProvenance = new Map();
   let nodeProvenance: EnrichmentProvenance = new Map();
@@ -535,9 +537,19 @@ export const useGraphStore = defineStore('graph', () => {
   let queryEnrichmentToken = 0;
   // runQueryEnrichment calls still running (a load's and an expand's may overlap).
   const queryEnrichmentInFlight = ref(0);
+  // Moves each time the graph is replaced or cleared: what waited on the old graph's enrichment is void.
+  const queryEnrichmentEpoch = ref(0);
+
+  /** Marks the values a saved snapshot says enrichment wrote: shown as such, and refreshed by a re-run. */
+  function restoreEnriched(snapshot: GraphSnapshot, graph: { nodes: Node[]; edges: Edge[] }) {
+    restoreProvenance(nodeProvenance, snapshot.enriched?.nodes, new Set(graph.nodes.map((n) => n.node_id)));
+    restoreProvenance(edgeProvenance, snapshot.enriched?.edges, new Set(graph.edges.map((e) => e.edge_id)));
+    queryEnrichmentVersion.value++;
+  }
 
   function resetQueryEnrichment() {
     queryEnrichmentToken++;
+    queryEnrichmentEpoch.value++;
     edgeProvenance = new Map();
     nodeProvenance = new Map();
     nodeQueryValues = new Map();
@@ -1515,14 +1527,14 @@ export const useGraphStore = defineStore('graph', () => {
     }
     queryEnrichmentRuns.value = queued;
     for (const { entry, target, payloads, total } of plans) {
-      const stickyError = keepsError(entry.name) ? queryEnrichmentRuns.value[entry.name] : null;
       const run: QueryEnrichmentRun = {
         status: 'running', label: entry.label, target, matched: 0, written: 0, total,
         truncated: false, error: null, errorCode: null, at: Date.now(), finishedAt: null,
         batchesDone: 0, batchesTotal: payloads.length,
       };
+      // Asked at each publish: a whole-graph run may fail on this entry while the expand's is in flight.
       const publish = () => {
-        if (!stickyError) queryEnrichmentRuns.value = { ...queryEnrichmentRuns.value, [entry.name]: { ...run } };
+        if (!keepsError(entry.name)) queryEnrichmentRuns.value = { ...queryEnrichmentRuns.value, [entry.name]: { ...run } };
       };
       publish();
       const overwrite = !!runSpec(entry)?.overwrite;
@@ -1532,7 +1544,7 @@ export const useGraphStore = defineStore('graph', () => {
           if (token !== queryEnrichmentToken || currentContext.value?.id !== ctx.id) return done;
           if (target === 'nodes') {
             const reached = nodes.value.filter((n) => result.rows[n.node_id]);
-            const { patch, written, matched } = runPatch(reached, (n) => n.node_id, result, overwrite);
+            const { patch, written, matched } = runPatch(reached, (n) => n.node_id, result, overwrite, (id) => nodeProvenance.get(id)?.get(entry.label));
             // Only the keys the query wrote, merged: the layer's values come off and go back on
             // around the patch, so the layer keeps knowing which values are its own.
             const delta = new Map<string, Record<string, unknown>>();
@@ -1552,7 +1564,7 @@ export const useGraphStore = defineStore('graph', () => {
             run.written += written.size;
           } else {
             const reached = edges.value.filter((e) => result.rows[e.edge_id]);
-            const { patch, written, matched } = runPatch(reached, (e) => e.edge_id, result, overwrite);
+            const { patch, written, matched } = runPatch(reached, (e) => e.edge_id, result, overwrite, (id) => edgeProvenance.get(id)?.get(entry.label));
             patchEdgeProperties(patch);
             recordProvenance(edgeProvenance, entry.label, written);
             run.matched += matched;
@@ -1577,7 +1589,7 @@ export const useGraphStore = defineStore('graph', () => {
       queryEnrichmentVersion.value++;
     }
     if (failed && !options.names) {
-      useToast().warning(`${failed === 1 ? 'An enrichment' : `${failed} enrichments`} failed. The Enrichment chip under the graph shows why and retries.`);
+      useToast().warning(`${failed === 1 ? 'An enrichment' : `${failed} enrichments`} failed. The Enrichment chip under the graph shows why and retries.`, 5000);
     }
     return done;
   }
@@ -2812,7 +2824,11 @@ export const useGraphStore = defineStore('graph', () => {
     return baseGraphOf(nodes.value, edges.value, overlayState);
   }
 
-  /** The context's answer as it should be saved: no layer, no edge enrichment (re-run on open). */
+  /**
+   * The context's own answer: no layer, no enriched values. What an enrichment run reads and
+   * what a published precomputed graph holds. A snapshot keeps the enriched values instead
+   * (buildGraphSnapshot), so a saved exploration and a case show what was on screen.
+   */
   function savedGraph(): { nodes: Node[]; edges: Edge[] } {
     const base = baseGraph();
     return {
@@ -2822,8 +2838,13 @@ export const useGraphStore = defineStore('graph', () => {
   }
 
   function buildGraphSnapshot() {
-    const base = savedGraph();
+    const base = baseGraph();
+    const enriched = {
+      nodes: provenanceToJson(nodeProvenance, new Set(base.nodes.map((n) => n.node_id))),
+      edges: provenanceToJson(edgeProvenance, new Set(base.edges.map((e) => e.edge_id))),
+    };
     return {
+      ...(enriched.nodes || enriched.edges ? { enriched } : {}),
       nodes: base.nodes.map((n) => ({
         id: n.node_id,
         type: n.node_type,
@@ -3283,6 +3304,7 @@ export const useGraphStore = defineStore('graph', () => {
       const merged = applyDiff(nodes.value, edges.value, diff);
       patchNodeProperties(merged.patch, { merge: false });
       overlay.value = layer;
+      restoreEnriched(snapshot, merged);
       [nodes.value, edges.value] = withOverlay(merged.nodes, merged.edges);
       void runQueryEnrichment();
       liveBase = fingerprints(snapshot);
@@ -3422,6 +3444,7 @@ export const useGraphStore = defineStore('graph', () => {
           liveBase = fingerprints(snapshot);
           const graph = snapshotToGraph(snapshot);
           resetQueryEnrichment();
+          restoreEnriched(snapshot, graph);
           [nodes.value, edges.value] = withOverlay(graph.nodes, graph.edges);
           void runQueryEnrichment();
           recordGraphLoad(
@@ -3770,6 +3793,7 @@ export const useGraphStore = defineStore('graph', () => {
     baseGraph,
     queryEnrichmentRuns,
     queryEnrichmentInFlight,
+    queryEnrichmentEpoch,
     runQueryEnrichment,
     enrichedKeysFor,
     enrichedNodeColumns,

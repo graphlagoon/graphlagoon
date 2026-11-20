@@ -100,6 +100,8 @@ export function runPatch<T extends { properties?: Record<string, unknown> }>(
   idOf: (item: T) => string,
   result: Pick<EnrichmentRunResult, 'rows'>,
   overwrite: boolean,
+  /** Keys this same enrichment wrote before on an item: a re-run refreshes them. */
+  own?: (id: string) => string[] | undefined,
 ): { patch: Map<string, Record<string, unknown>>; written: Map<string, string[]>; matched: number } {
   const patch = new Map<string, Record<string, unknown>>();
   const written = new Map<string, string[]>();
@@ -111,9 +113,10 @@ export function runPatch<T extends { properties?: Record<string, unknown> }>(
     matched++;
     const props = { ...(item.properties ?? {}) };
     const keys: string[] = [];
+    const mine = own?.(id);
     for (const [k, v] of Object.entries(row)) {
       if (v === null || v === undefined) continue;
-      if (!overwrite && props[k] !== undefined && props[k] !== null) continue;
+      if (!overwrite && !mine?.includes(k) && props[k] !== undefined && props[k] !== null) continue;
       props[k] = v;
       keys.push(k);
     }
@@ -131,6 +134,27 @@ export function recordProvenance(prov: EnrichmentProvenance, label: string, writ
     const byLabel = prov.get(id) ?? new Map<string, string[]>();
     byLabel.set(label, [...new Set([...(byLabel.get(label) ?? []), ...keys])]);
     prov.set(id, byLabel);
+  }
+}
+
+/** The provenance as a snapshot keeps it (only the ids in `ids`), or undefined when empty. */
+export function provenanceToJson(prov: EnrichmentProvenance, ids: Set<string>): Record<string, Record<string, string[]>> | undefined {
+  const out: Record<string, Record<string, string[]>> = {};
+  for (const [id, byLabel] of prov) if (ids.has(id)) out[id] = Object.fromEntries(byLabel);
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Adds what a snapshot recorded to `prov`, for the ids in `ids`. */
+export function restoreProvenance(
+  prov: EnrichmentProvenance,
+  saved: Record<string, Record<string, string[]>> | null | undefined,
+  ids: Set<string>,
+): void {
+  for (const [id, byLabel] of Object.entries(saved ?? {})) {
+    if (!ids.has(id)) continue;
+    for (const [label, keys] of Object.entries(byLabel ?? {})) {
+      if (Array.isArray(keys)) recordProvenance(prov, label, new Map([[id, keys.filter((k) => typeof k === 'string')]]));
+    }
   }
 }
 

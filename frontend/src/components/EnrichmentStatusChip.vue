@@ -44,7 +44,7 @@ function openYourData() {
       <Loader2 v-if="summary.state === 'running'" :size="12" class="spin" aria-hidden="true" />
       <AlertTriangle v-else-if="summary.state === 'error'" :size="12" aria-hidden="true" />
       <CheckCircle2 v-else :size="12" aria-hidden="true" />
-      {{ summary.text }}
+      {{ summary.text }}<template v-if="waitingOnEnrichment?.reason === 'failed'"> · {{ waitingOnEnrichment.labels.length === 1 ? '1 analysis' : `${waitingOnEnrichment.labels.length} analyses` }} skipped</template>
     </button>
     <Popover ref="panel" class="enrichment-popover">
       <div class="enrichment-panel" data-testid="enrichment-status-panel">
@@ -145,6 +145,9 @@ ul {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.row svg {
+  flex-shrink: 0;
 }
 .row strong {
   overflow-wrap: anywhere;

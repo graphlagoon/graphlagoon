@@ -3,8 +3,10 @@ import type { Edge, EnrichmentTable, Node } from '@/types/graph';
 import {
   authorizedTables,
   enrichedKeys,
+  provenanceToJson,
   queryEntries,
   recordProvenance,
+  restoreProvenance,
   runPatch,
   runPayloads,
   stripEnriched,
@@ -105,5 +107,25 @@ describe('enrichedColumns', () => {
     const cols = enrichedColumns(prov);
     expect([...cols.get('score')!]).toEqual([['Risk', 2]]);
     expect([...cols.get('channel')!]).toEqual([['Channel', 1], ['Risk', 1]]);
+  });
+});
+
+describe('what a snapshot keeps about enrichment', () => {
+  it('round-trips provenance for the ids still on the graph', () => {
+    const prov: EnrichmentProvenance = new Map();
+    recordProvenance(prov, 'Risk', new Map([['e1', ['score']], ['e9', ['score']]]));
+    const saved = provenanceToJson(prov, new Set(['e1']));
+    expect(saved).toEqual({ e1: { Risk: ['score'] } });
+    const back: EnrichmentProvenance = new Map();
+    restoreProvenance(back, { ...saved, gone: { Risk: ['score'] } }, new Set(['e1']));
+    expect([...enrichedKeys(back, 'e1')]).toEqual([['score', 'Risk']]);
+    expect(back.has('gone')).toBe(false);
+    expect(provenanceToJson(new Map(), new Set(['e1']))).toBeUndefined();
+  });
+
+  it('a re-run refreshes a value the same enrichment wrote, and still keeps the graph\'s own', () => {
+    const items = [{ id: 'e1', properties: { score: 1, channel: 'app' } }];
+    const { patch } = runPatch(items, (i) => i.id, { rows: { e1: { score: 2, channel: 'web' } } }, false, () => ['score']);
+    expect(patch.get('e1')).toEqual({ score: 2, channel: 'app' });
   });
 });

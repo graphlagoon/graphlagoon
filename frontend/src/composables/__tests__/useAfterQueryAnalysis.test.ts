@@ -79,12 +79,11 @@ describe('useAfterQueryAnalysis and enrichment', () => {
     await enrichmentEnds('error');
     expect(execute).not.toHaveBeenCalled();
     expect(waitingOnEnrichment.value?.reason).toBe('failed');
-    expect(toast.warning).toHaveBeenCalledTimes(1);
-    expect(toast.warning.mock.calls[0][0]).toMatch(/skipped.*Retry/);
+    // The store's toast says an enrichment failed; the chip says what waits. No second toast here.
+    expect(toast.warning).not.toHaveBeenCalled();
     // The Retry runs: running, then done.
     graph.queryEnrichmentRuns = { risk: record('running') };
     await flushPromises();
-    expect(toast.warning).toHaveBeenCalledTimes(1);
     await enrichmentEnds('done');
     expect(execute).toHaveBeenCalledTimes(1);
   });
@@ -98,5 +97,32 @@ describe('useAfterQueryAnalysis and enrichment', () => {
     await enrichmentEnds('done');
     expect(execute).not.toHaveBeenCalled();
     expect(waitingOnEnrichment.value).toBeNull();
+  });
+
+  it('does not run on another graph: replacing the graph drops what was held', async () => {
+    setup(true);
+    await queryLanded();
+    await enrichmentEnds('error');
+    // Another context, exploration or precomputed graph: enrichment starts over, no new query ran.
+    graph.queryEnrichmentEpoch++;
+    graph.queryEnrichmentRuns = {};
+    await flushPromises();
+    expect(waitingOnEnrichment.value).toBeNull();
+    await enrichmentEnds('done');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('stays skipped, without a toast, however many expands run while the failure stands', async () => {
+    setup(true);
+    await queryLanded();
+    await enrichmentEnds('error');
+    for (let i = 0; i < 2; i++) {
+      graph.queryEnrichmentInFlight = 1; // an expand's run over the new items
+      await flushPromises();
+      graph.queryEnrichmentInFlight = 0;
+      await flushPromises();
+    }
+    expect(toast.warning).not.toHaveBeenCalled();
+    expect(waitingOnEnrichment.value?.reason).toBe('failed');
   });
 });
