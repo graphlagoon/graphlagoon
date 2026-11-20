@@ -381,7 +381,7 @@ const displayOpen = ref(false)
             </div>
           </div>
 
-          <small v-if="communityHoldReason" class="help-text params-missing-hint" data-testid="cluster-run-enrichment-warning">
+          <small v-if="communityHoldReason" class="help-text hold-warning" data-testid="cluster-run-enrichment-warning">
             {{ communityHoldReason }}
           </small>
           <div class="community-actions">
@@ -1214,6 +1214,10 @@ button {
 
 .params-missing-hint {
   color: #e6a23c;
+}
+
+.hold-warning {
+  color: var(--color-error);
 }
 
 /* ====================================================================

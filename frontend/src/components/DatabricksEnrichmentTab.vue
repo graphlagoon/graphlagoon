@@ -2,8 +2,8 @@
 /**
  * "Your data → Context enrichments": the context's enrichment queries and providers, run by
  * hand over the edges or nodes on screen. The `auto` ones also run after every query and
- * expand; this is where an author tests one and where a failure says why. Results stay on the
- * canvas only.
+ * expand; this is where an author tests one and where a failure says why. A saved snapshot keeps the
+ * values and which enrichment wrote them.
  */
 import { computed, ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
@@ -39,8 +39,8 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
     <p class="hint">
       Queries the context's author wrote over this context's authorized Databricks tables, and providers the
       deployment registered (for example a Lakebase lookup). Each one adds properties
-      to the edges or the nodes on the canvas; <strong>after every query</strong> ones also run by themselves. Nothing is saved:
-      opening the graph again runs them again.
+      to the edges or the nodes on the canvas; <strong>after every query</strong> ones also run by themselves. A saved
+      exploration keeps the values it had, and opening it runs those again to refresh them.
       <a :href="guideUrl('bring-your-own-data', 'enrich-from-databricks-tables')" target="_blank" rel="noopener">More in the guide</a>
     </p>
 
@@ -65,7 +65,7 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
               data-testid="your-data-databricks-run"
               @click="run(q.name)"
             >
-              {{ running === q.name ? 'Running…' : 'Run' }}
+              {{ running === q.name ? 'Running…' : graph.queryEnrichmentRuns[q.name]?.status === 'error' ? 'Retry' : 'Run' }}
             </button>
           </div>
           <p

@@ -119,8 +119,9 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
         "through get_case_type, get_playbook and the tool descriptions"
     ),
     ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/run"): (
-        "enrichment queries decorate the graph on a person's screen and are never saved; an agent "
-        "reads saved explorations and cases, and adds data through lookup_enrichment / enrich_exploration"
+        "enrichment queries and providers run from a person's screen; a saved exploration keeps the "
+        "values they wrote, which an agent reads there and in cases, and it adds data through "
+        "lookup_enrichment / enrich_exploration"
     ),
     ("GET", f"{_ITEM}/content"): (
         "binary never reaches the agent (05 §6) through REST; read_item returns the text extraction, "

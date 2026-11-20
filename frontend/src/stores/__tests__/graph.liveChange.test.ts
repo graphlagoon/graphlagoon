@@ -97,3 +97,38 @@ describe('graph store — live refresh of the open exploration', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('graph store — a saved exploration keeps what enrichment wrote', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.restoreAllMocks();
+  });
+
+  it('reopens with the saved values marked, and the automatic run refreshes them', async () => {
+    const store = useGraphStore();
+    store.currentContext = {
+      id: 'c1', title: 'Bank',
+      enrichment_tables: [{ name: 'kyc', label: 'KYC', provider: { name: 'kyc-demo', target: 'nodes', run: 'auto' } }],
+    } as GraphContext;
+    let answer!: (r: never) => void;
+    const run = vi.spyOn(api, 'runEnrichmentQuery').mockImplementation(() => new Promise((resolve) => { answer = resolve as never; }));
+    vi.spyOn(api, 'getExploration').mockResolvedValueOnce(exploration(0));
+    vi.spyOn(api, 'getExplorationSnapshot').mockResolvedValueOnce({
+      ...structuredClone(SAVED),
+      nodes: [{ id: 'a', type: 'Conta', properties: { titular: 'Ana', tier: 'low' } }, SAVED.nodes[1]],
+      enriched: { nodes: { a: { KYC: ['tier'] }, gone: { KYC: ['tier'] } } },
+    });
+    await store.loadExploration('x1');
+
+    // Before the run answers: the saved value is there and known as enrichment's.
+    expect(store.nodes.find((n) => n.node_id === 'a')?.properties).toMatchObject({ tier: 'low' });
+    expect([...store.enrichedKeysFor('node', 'a')]).toEqual([['tier', 'KYC']]);
+    // The run reads the context's own answer, without the saved enrichment.
+    expect(run.mock.calls[0][2].nodes.map((n) => n.node_id)).toEqual(['a', 'b']);
+
+    answer({ name: 'kyc', label: 'KYC', target: 'nodes', columns: ['tier'], rows: { a: { tier: 'high' } }, truncated: false } as never);
+    await vi.waitFor(() => expect(store.queryEnrichmentRuns.kyc?.status).toBe('done'));
+    // Not "a value already there wins": it was this enrichment's own value.
+    expect(store.nodes.find((n) => n.node_id === 'a')?.properties).toMatchObject({ titular: 'Ana', tier: 'high' });
+  });
+});

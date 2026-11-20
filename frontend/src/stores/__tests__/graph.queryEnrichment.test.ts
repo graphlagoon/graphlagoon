@@ -8,7 +8,7 @@ import type { EnrichmentRunResult, GraphContext, GraphResponse } from '@/types/g
 const toast = { warning: vi.fn(), success: vi.fn(), info: vi.fn(), error: vi.fn() };
 vi.mock('@/composables/useToast', () => ({ useToast: () => toast }));
 
-/** Enrichment queries run after a query lands, and never reach the saved snapshot. */
+/** Enrichment queries run after a query lands; a saved snapshot keeps their values and says which they are. */
 
 const context = {
   id: 'c1',
@@ -67,7 +67,7 @@ describe('enrichment queries in the graph store', () => {
     expect(store.queryEnrichmentRuns.risk).toMatchObject({ status: 'done', matched: 1, written: 1, total: 1 });
   });
 
-  it('a manual run takes the named query; the saved snapshot leaves enriched values out', async () => {
+  it('a manual run takes the named query; the saved snapshot keeps enriched values and their origin', async () => {
     const run = vi.spyOn(api, 'runEnrichmentQuery').mockResolvedValue(result({}));
     const store = await loaded();
     run.mockResolvedValue({ ...result({ e1: { reviewed: 'yes' } }), name: 'audit', label: 'Audit' });
@@ -77,8 +77,10 @@ describe('enrichment queries in the graph store', () => {
 
     vi.spyOn(api, 'createExploration').mockResolvedValue({ id: 'new', title: 'T', has_write_access: true, state: {} } as never);
     await store.saveExploration('T');
-    const created = vi.mocked(api.createExploration).mock.calls[0][1] as { snapshot: { edges: { properties: object }[] } };
-    expect(created.snapshot.edges[0].properties).toEqual({ amount: 5, channel: 'app' });
+    const created = vi.mocked(api.createExploration).mock.calls[0][1] as { snapshot: { edges: { properties: object }[]; enriched: object } };
+    // What a case (or anyone opening the exploration) sees is what was on screen.
+    expect(created.snapshot.edges[0].properties).toEqual({ amount: 5, channel: 'app', reviewed: 'yes' });
+    expect(created.snapshot.enriched).toEqual({ edges: { e1: { Audit: ['reviewed'] } } });
   });
 
   it('a failing auto query warns once and leaves the graph usable', async () => {
@@ -243,7 +245,7 @@ describe('enrichment queries and the person\'s layer', () => {
     vi.restoreAllMocks();
   });
 
-  it('a node query keeps the layer knowing its own values, so the snapshot leaves both out', async () => {
+  it('a node query keeps the layer knowing its own values, so the value of the layer stays out of the snapshot', async () => {
     const store = useGraphStore();
     store.currentContext = {
       ...context,
@@ -259,7 +261,7 @@ describe('enrichment queries and the person\'s layer', () => {
     await store.runQueryEnrichment({ names: ['tier'] });
     expect(store.nodes[0].properties).toEqual({ name: 'Bia', segment: 'corp', tier: 'gold' });
     expect(store.overlayKeysFor('node', 'b')).toEqual(new Set(['segment']));
-    // The layer's value comes off what is saved (the query's value is stripped after it).
+    // The layer's value comes off what is saved; the query's value stays (the snapshot keeps it).
     expect(store.baseGraph().nodes[0].properties).toEqual({ name: 'Bia', tier: 'gold' });
   });
 });

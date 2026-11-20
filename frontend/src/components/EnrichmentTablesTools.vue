@@ -14,8 +14,10 @@ const props = defineProps<{
   /** The complete entries in the form now. */
   tables: EnrichmentTable[];
   skill: Omit<EnrichmentTablesSkillInput, 'currentYaml'>;
+  /** The server has enrichment providers registered: offer to attach one. */
+  providers?: boolean;
 }>();
-const emit = defineEmits<{ import: [EnrichmentTable[]]; add: [] }>();
+const emit = defineEmits<{ import: [EnrichmentTable[]]; add: []; 'add-provider': [] }>();
 
 const open = ref(false);
 const text = ref('');
@@ -64,6 +66,16 @@ function apply() {
 <template>
   <div class="tools">
     <button type="button" class="btn btn-sm btn-outline" data-testid="enrichment-add" @click="emit('add')">+ Attach table</button>
+    <button
+      v-if="providers"
+      type="button"
+      class="btn btn-sm btn-outline"
+      title="Enrich with code the deployment registered (for example a Lakebase lookup)"
+      data-testid="enrichment-add-provider"
+      @click="emit('add-provider')"
+    >
+      + Attach provider
+    </button>
     <button type="button" class="btn btn-sm btn-outline" :aria-expanded="open" data-testid="enrichment-import-toggle" @click="toggle">
       <FileUp :size="14" /> Import YAML
     </button>

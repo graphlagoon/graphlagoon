@@ -285,8 +285,11 @@ enrichment_tables:
   values · 1.2s at 14:02:11*. A reader of a shared exploration gets this tab even without write access.
 - An expand runs the automatic ones over the new edges and nodes only; it never turns an earlier failure
   into a success. Only a run over the whole graph (a new query, **Retry**) does.
-- Nothing is saved. A saved exploration leaves the values out of its snapshot, and opening it runs the
-  **after every query** ones again, so the values are always current.
+- A **saved exploration keeps the values** that were on screen, and which enrichment wrote each one. So a
+  [case](./investigations.md) that holds the exploration, an agent reading it, or anyone opening it sees the
+  same properties you saw. Opening it in the graph view runs the **after every query** ones again and
+  replaces the saved values with the current ones; a case shows the saved values and does not rerun them.
+  A graph you publish as a precomputed graph leaves them out.
 
 ![The Enrichment chip in the status bar: one provider failed, with its reason and Retry](/screenshots/bring-your-own-data-enrichment-status.png)
 

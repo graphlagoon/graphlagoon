@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import WarehouseTablePicker from '@/components/WarehouseTablePicker.vue';
 import { usePersistence } from '@/composables/usePersistence';
 import { usePermissions } from '@/composables/usePermissions';
@@ -650,12 +650,13 @@ const enrichmentTables = computed(() =>
 );
 /** A new entry on the same table, right below it: a table can feed several queries (edges and nodes). */
 function addQueryOn(index: number) {
-  addEnrichmentTable();
+  addEnrichmentTable(false);
   const row = form.value.enrichment_tables.pop()!;
   const source = form.value.enrichment_tables[index];
   row.table = source.table;
   row.label = `${source.label || source.table.split('.').pop()} (${form.value.enrichment_tables.filter((r) => r.table === source.table).length + 1})`;
   form.value.enrichment_tables.splice(index + 1, 0, row);
+  revealEnrichmentRow(index + 1);
 }
 
 /** Imported entries replace the rows with the same name; the others are added. */
@@ -724,15 +725,16 @@ function providerTargets(row: EnrichmentRow): ('edges' | 'nodes')[] {
 }
 
 function addProviderRow() {
-  addEnrichmentTable();
+  addEnrichmentTable(false);
   const row = form.value.enrichment_tables[form.value.enrichment_tables.length - 1];
   const first = enrichmentProviders[0];
   row.provider = first?.name ?? '';
   row.label = first?.label ?? '';
   row.query_target = first?.targets[0] ?? 'edges';
+  revealEnrichmentRow(form.value.enrichment_tables.length - 1);
 }
 
-function addEnrichmentTable() {
+function addEnrichmentTable(reveal = true) {
   form.value.enrichment_tables.push({
     name: '',
     label: '',
@@ -751,6 +753,16 @@ function addEnrichmentTable() {
     query_overwrite: false,
     query_node_props: false,
     provider: null,
+  });
+  if (reveal) revealEnrichmentRow(form.value.enrichment_tables.length - 1);
+}
+
+/** A new row lands below the fold of a long form: bring it into view and start typing there. */
+function revealEnrichmentRow(index: number) {
+  void nextTick(() => {
+    const row = document.querySelectorAll<HTMLElement>('[data-testid="enrichment-row"]')[index];
+    row?.scrollIntoView?.({ block: 'nearest' });
+    row?.querySelector<HTMLInputElement>('[data-testid="enrichment-label"]')?.focus();
   });
 }
 
@@ -1349,19 +1361,11 @@ async function submit() {
             <EnrichmentTablesTools
               :tables="enrichmentTables"
               :skill="enrichmentSkillInput"
-              @add="addEnrichmentTable"
+              :providers="enrichmentProviders.length > 0"
+              @add="addEnrichmentTable()"
+              @add-provider="addProviderRow"
               @import="importEnrichmentTables"
             />
-            <button
-              v-if="enrichmentProviders.length"
-              type="button"
-              class="btn btn-sm btn-outline"
-              data-testid="enrichment-add-provider"
-              title="Enrich with code the deployment registered (for example a Lakebase lookup)"
-              @click="addProviderRow"
-            >
-              + Attach provider
-            </button>
           </div>
           <p class="enrichment-warning" data-testid="enrichment-warning">
             A table listed here is authorized for this context: enrichment queries, node lookups
@@ -1383,7 +1387,7 @@ async function submit() {
             data-testid="enrichment-row"
           >
             <template v-if="row.provider !== null">
-              <div class="form-row">
+              <div class="form-row provider-row">
                 <div class="form-group">
                   <label>Name</label>
                   <input v-model="row.label" type="text" class="form-control" placeholder="KYC risk" data-testid="enrichment-label" />
@@ -1396,7 +1400,10 @@ async function submit() {
                       {{ row.provider }} (not registered on this server)
                     </option>
                   </select>
-                  <p class="hint">{{ enrichmentProviders.find((p) => p.name === row.provider)?.description }}</p>
+                  <p v-if="row.provider && !enrichmentProviders.some((p) => p.name === row.provider)" class="field-error" data-testid="enrichment-provider-missing">
+                    Not registered on this server: this enrichment cannot run until the deployment registers it.
+                  </p>
+                  <p v-else class="hint">{{ enrichmentProviders.find((p) => p.name === row.provider)?.description }}</p>
                 </div>
                 <button
                   type="button"
@@ -1749,6 +1756,10 @@ async function submit() {
   font-size: 0.8rem;
   margin: 4px 0 0;
 }
+.enrichment-row .provider-row {
+  align-items: flex-start;
+}
+
 .enrichment-row .form-row {
   align-items: flex-end;
 }

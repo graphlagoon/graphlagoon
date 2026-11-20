@@ -256,7 +256,38 @@ def apply_edit(snapshot: Optional[dict], overlay: Optional[dict], ops: dict) -> 
             f"{MAX_NODES} nodes and {MAX_EDGES} edges",
         )
     report.update(node_count=nodes, edge_count=edges)
+    _prune_enriched(snap, snapshot)
     return snap, (layer if layer_changed else None), report
+
+
+def _prune_enriched(snap: dict, before: Optional[dict]) -> None:
+    """Keeps ``snap["enriched"]`` (which keys enrichment wrote) true after an edit: a key
+    whose value the edit changed or removed is the editor's now, not enrichment's, so a
+    later enrichment run does not replace it as if it were its own."""
+    enriched = snap.get("enriched")
+    if not isinstance(enriched, dict):
+        return
+    out: dict = {}
+    for kind in ("nodes", "edges"):
+        was = {str(i.get("id")): i.get("properties") or {} for i in (before or {}).get(kind) or []}
+        now = {str(i.get("id")): i.get("properties") or {} for i in snap.get(kind) or []}
+        kept: dict = {}
+        for ident, by_label in (enriched.get(kind) or {}).items():
+            if ident not in now or ident not in was:
+                continue
+            labels = {
+                label: [k for k in keys if k in now[ident] and now[ident][k] == was[ident].get(k)]
+                for label, keys in (by_label or {}).items()
+            }
+            labels = {label: keys for label, keys in labels.items() if keys}
+            if labels:
+                kept[ident] = labels
+        if kept:
+            out[kind] = kept
+    if out:
+        snap["enriched"] = out
+    else:
+        snap.pop("enriched", None)
 
 
 def summary(report: dict) -> dict:
