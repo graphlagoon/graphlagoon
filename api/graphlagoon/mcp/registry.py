@@ -19,6 +19,7 @@ _ITEM = f"{_CASE}/items/{{item_id}}"
 _ANNOTATION = f"{_CASE}/annotations/{{annotation_id}}"
 _ENRICHMENT = "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"
 _EXPLORATION = "/api/explorations/{exploration_id}"
+_MENU_TABLE = "/api/graph-contexts/{context_id}/menu-actions/{action_id}/table"
 _CONTEXT_EXPLORATIONS = "/api/graph-contexts/{context_id}/explorations"
 
 # tool name (``mcp/server.py``) → the human actions it is the twin of.
@@ -65,6 +66,10 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "search_entities": [("GET", f"{_CASE}/graph")],
     "get_entity": [("GET", f"{_CASE}/graph"), ("GET", f"{_CASE}/annotations")],
     "lookup_enrichment": [("POST", _ENRICHMENT)],
+    # The right-click table actions people configured: listing reads the context's
+    # actions (its GET), running is the menu's twin.
+    "list_entity_actions": [("GET", "/api/graph-contexts/{context_id}")],
+    "run_entity_action": [("POST", _MENU_TABLE), ("POST", f"{_CASE}/items")],
     "run_analysis": [
         ("POST", f"{_CASE}/analysis/trace"),
         ("POST", f"{_CASE}/analysis/paths"),

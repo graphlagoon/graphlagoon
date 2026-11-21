@@ -21,6 +21,9 @@ import { onMounted, onUnmounted } from 'vue';
  * underneath it. `ConfirmDialog` owns its own Escape (it has to resolve a
  * promise) and uses a different class, so it is left alone.
  */
+const PRIMEVUE_OVERLAYS =
+  '.p-datatable-filter-overlay, .p-popover, .p-select-overlay, .p-multiselect-overlay, .p-datepicker-panel';
+
 export function useEscapeToCloseModals() {
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -31,6 +34,9 @@ export function useEscapeToCloseModals() {
     // So does anything open over a modal that closes on Escape by itself (a help
     // popover): Escape closes that first, the modal on the next press.
     if (document.querySelector('[data-escape-owner]')) return;
+    // A PrimeVue overlay open over a modal's grid (a column filter, a select, a date
+    // picker) is the top-most thing: Escape is its, not the modal's.
+    if (document.querySelector(PRIMEVUE_OVERLAYS)) return;
 
     const overlays = document.querySelectorAll<HTMLElement>('.modal-overlay, .drawer-overlay');
     const top = overlays[overlays.length - 1];

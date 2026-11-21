@@ -8,7 +8,7 @@ outline: [2, 3]
 
 ::: v-pre
 
-Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (47 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
+Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (49 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
 
 | Group | Tools |
 |---|---|
@@ -19,7 +19,7 @@ Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/li
 | Queries and tables | [`run_query`](#run-query), [`join_tables`](#join-tables), [`compare_tables`](#compare-tables), [`promote_tables`](#promote-tables) |
 | Annotations and evidence | [`annotate`](#annotate), [`group`](#group), [`list_annotations`](#list-annotations), [`pin_evidence`](#pin-evidence) |
 | Tasks | [`list_tasks`](#list-tasks), [`add_task`](#add-task), [`update_task`](#update-task) |
-| Graph and entities | [`get_graph`](#get-graph), [`search_entities`](#search-entities), [`get_entity`](#get-entity), [`lookup_enrichment`](#lookup-enrichment), [`find_entity_cases`](#find-entity-cases) |
+| Graph and entities | [`get_graph`](#get-graph), [`search_entities`](#search-entities), [`get_entity`](#get-entity), [`lookup_enrichment`](#lookup-enrichment), [`list_entity_actions`](#list-entity-actions), [`run_entity_action`](#run-entity-action), [`find_entity_cases`](#find-entity-cases) |
 | Analyses | [`run_analysis`](#run-analysis) |
 | Reports and decisions | [`render_report`](#render-report), [`propose_decision`](#propose-decision) |
 | Journal | [`list_events`](#list-events), [`changes_since`](#changes-since) |
@@ -620,6 +620,34 @@ Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`
 | `investigation_id` | uuid | yes |  |
 | `uid` | string | yes |  |
 | `table` | string | yes |  |
+
+### list_entity_actions
+
+The table actions people configured on the right-click menu of the entity's contexts (e.g. "Transactions of the linked accounts, last 30 days"): each with its parameters, the value each one would take for this entity, and what is still missing. Run one with run_entity_action.
+
+Human twin: `GET /api/graph-contexts/{context_id}`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `investigation_id` | uuid | yes |  |
+| `uid` | string | yes |  |
+
+### run_entity_action
+
+Runs a table action of list_entity_actions for one entity and returns its rows (columns, rows, truncated). ``parameters`` override the values the action binds from the entity (e.g. {"days": "90"}); a ``needs_parameters`` status lists what is missing and nothing ran. ``context_id`` picks the context when the entity comes from several. ``save=true`` keeps the rows as a table item of the case (table/result) with the action, template and values as provenance.
+
+Human twin: `POST /api/graph-contexts/{context_id}/menu-actions/{action_id}/table`, `POST /api/investigations/{investigation_id}/items`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `investigation_id` | uuid | yes |  |
+| `uid` | string | yes |  |
+| `action_id` | string | yes |  |
+| `parameters` | object |  | null |
+| `row_limit` | integer |  | `1000` |
+| `context_id` | uuid |  | null |
+| `save` | boolean |  | `false` |
+| `title` | string |  | null |
 
 ### find_entity_cases
 

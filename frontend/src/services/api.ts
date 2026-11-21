@@ -85,6 +85,8 @@ import type {
   TableQueryRequest,
   TableQueryResponse,
   TableQueryStatusResponse,
+  MenuActionTarget,
+  MenuActionTableResponse,
   GraphJobSubmitResponse,
   GraphJobStatusResponse,
   CatalogListResponse,
@@ -643,6 +645,22 @@ class ApiService {
     const response = await this.client.get(
       `/api/graph-contexts/${contextId}/query/table/${statementId}`,
       { params: rowLimit != null ? { row_limit: rowLimit } : undefined },
+    );
+    return response.data;
+  }
+
+  /**
+   * Run a table action of the right-click menu for one node or edge. A
+   * `running` result is polled and cancelled like a table query.
+   */
+  async runMenuActionTable(
+    contextId: string,
+    actionId: string,
+    body: { target: MenuActionTarget; parameters?: Record<string, string>; row_limit?: number },
+  ): Promise<MenuActionTableResponse> {
+    const response = await this.client.post(
+      `/api/graph-contexts/${contextId}/menu-actions/${encodeURIComponent(actionId)}/table`,
+      body,
     );
     return response.data;
   }

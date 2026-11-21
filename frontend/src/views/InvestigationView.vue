@@ -22,6 +22,7 @@ import { useCommunityMenuActions } from '@/composables/useCommunityMenuActions';
 import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
 import { useConfigurableMenuActions } from '@/composables/useConfigurableMenuActions';
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
+import { isTableAction, type ContextMenuActionConfig } from '@/types/contextMenuActions';
 import { useCanvasFullscreen } from '@/composables/useCanvasFullscreen';
 import type { LookTab } from '@/stores/toolbar';
 import { useToast } from '@/composables/useToast';
@@ -51,6 +52,7 @@ import LookPanel from '@/components/LookPanel.vue';
 import GraphCanvasToolbar, { type CanvasToolbarButton } from '@/components/GraphCanvasToolbar.vue';
 import GraphStatusBar from '@/components/GraphStatusBar.vue';
 import TemplateExecuteModal from '@/components/TemplateExecuteModal.vue';
+import MenuActionTableModal from '@/components/MenuActionTableModal.vue';
 import CaseGraphChips from '@/components/investigation/CaseGraphChips.vue';
 import GroupLegend from '@/components/GroupLegend.vue';
 import CaseHeader from '@/components/investigation/CaseHeader.vue';
@@ -220,29 +222,51 @@ function exportPng() {
 
 // Right-click: the context's configured actions (open a URL, copy), cluster
 // programs and the community table — the same menu the exploration has.
-// Query-template actions are the exploration's: running one replaces the graph.
+// Query-template actions that replace the graph are the exploration's; table actions
+// run here too, on the source node of the canvas's context.
 const communityTable = useCommunityMenuActions();
 const clusterProgramActions = useClusterProgramMenuActions();
-const configurableMenuActions = useConfigurableMenuActions();
-const { pendingTemplateExecution } = configurableMenuActions;
+/** The source node of the canvas's context behind a unified node. */
+function sourceNodeOf(uid: string, contextId: string | null): string | null {
+  const node = store.unified.nodes.find((n) => n.node_id === uid);
+  return node?.__sources.find((o) => o.contextId === contextId)?.nodeId ?? null;
+}
+const configurableMenuActions = useConfigurableMenuActions({
+  contextId: () => canvasContextId.value,
+  sourceNodeId: (node) => sourceNodeOf(node.node_id, canvasContextId.value),
+});
+const { pendingTemplateExecution, pendingTable } = configurableMenuActions;
+const caseMenuActions = (configs: ContextMenuActionConfig[]) =>
+  configs.filter((c) => c.kind !== 'run-query-template' || isTableAction(c));
+/** A row's node id (a source id of the canvas's context) focuses its unified node. */
+function focusTableNode(payload: { id: string; multi: boolean }) {
+  const ctx = canvasContextId.value;
+  const node = store.unified.nodes.find((n) => n.__sources.some((o) => o.contextId === ctx && o.nodeId === payload.id));
+  if (!node) {
+    toast.info('That node is not on the canvas.');
+    return;
+  }
+  pendingTable.value = null;
+  graphStore.selectNode(node.node_id, payload.multi);
+  canvasRef.value?.focusOnNode?.(node.node_id);
+}
 const menuActionsStore = useContextMenuActionsStore();
+// The canvas's context usually arrives after the canvas item does, and the store adds
+// it by key (`contexts[id] = c`): watch the context itself, not the map.
 watch(
-  canvasContextId,
-  (id) => {
-    const configs = id ? (store.contexts[id]?.context_menu_actions ?? []) : [];
-    menuActionsStore.hydrateFromContext(configs.filter((c) => c.kind !== 'run-query-template'));
+  () => {
+    const id = canvasContextId.value;
+    const context = id ? store.contexts[id] : undefined;
+    return [id, context?.context_menu_actions, context?.cluster_programs] as const;
+  },
+  ([id, actions, programs]) => {
+    menuActionsStore.hydrateFromContext(caseMenuActions(actions ?? []));
     // The Clusters panel offers that context's programs (the built-ins only on
     // a canvas with several graphs: a program is written for one schema).
-    clusterStore.hydrateProgramsFromContext(id ? store.contexts[id]?.cluster_programs : undefined);
+    clusterStore.hydrateProgramsFromContext(id ? programs : undefined);
   },
   { immediate: true },
 );
-watch(() => store.contexts, () => {
-  const id = canvasContextId.value;
-  if (!id) return;
-  menuActionsStore.hydrateFromContext((store.contexts[id]?.context_menu_actions ?? []).filter((c) => c.kind !== 'run-query-template'));
-  clusterStore.hydrateProgramsFromContext(store.contexts[id]?.cluster_programs);
-});
 const dossierRef = ref<InstanceType<typeof CaseDossier> | null>(null);
 
 /** Decide: the inspector's panel on the canvas, the dossier's own panel in the dossier. */
@@ -947,6 +971,14 @@ onUnmounted(() => {
       :template="pendingTemplateExecution.template"
       :initial-values="pendingTemplateExecution.initialValues"
       @close="pendingTemplateExecution = null"
+    />
+    <MenuActionTableModal
+      v-if="pendingTable"
+      :request="pendingTable"
+      :case-id="store.current?.id"
+      :node-id-columns="[store.contexts[pendingTable.contextId]?.node_structure?.node_id_col, 'node_id'].filter((c): c is string => !!c)"
+      @close="pendingTable = null"
+      @focus-node="focusTableNode"
     />
 
     <div v-if="pickerOrigins" class="modal-overlay" @click.self="pick(null)">

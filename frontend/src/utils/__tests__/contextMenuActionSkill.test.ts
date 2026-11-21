@@ -50,6 +50,7 @@ describe('buildContextMenuActionSkill', () => {
     expect(skill).toContain('run-query-template');
     expect(skill).toContain('"urlTemplate"');
     expect(skill).toContain('paramBindings');
+    expect(skill).toContain('"resultMode": "table"');
     expect(skill).toContain('http://');
   });
 

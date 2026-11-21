@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures/test-fixtures';
 import { MOCK_CONTEXT } from '../fixtures/mock-data';
-import { seedContexts } from '../helpers/api-mocks';
+import { mockMenuActionTable, seedContexts } from '../helpers/api-mocks';
 
 /**
  * Regression tests for the intermittent right-click context menu (the 3D graph
@@ -205,5 +205,51 @@ test.describe('Graph context menu', () => {
     expect(opened).toBe(true);
     await expect(page.getByTestId('context-menu-action-delete-from-graph')).toBeVisible();
     await expect(page.getByTestId('context-menu-action-copy-id')).toHaveCount(0);
+  });
+
+  test('a table action opens the rows of the clicked node and leaves the graph as it was', async ({ authenticatedPage: page }) => {
+    const seen = await mockMenuActionTable(page, {
+      columns: ['account', 'amount', 'at'],
+      rows: [['acc-1', '120.50', '2026-11-02'], ['acc-2', '80.00', '2026-10-28']],
+      templateName: 'Transactions of the linked accounts',
+      parameters: [{ id: 'person', label: 'Person', value: '' }, { id: 'days', label: 'Days', value: '30' }],
+    });
+    // The context carries a table action for Person nodes (reload so it hydrates).
+    await seedContexts(page, [{
+      ...MOCK_CONTEXT,
+      context_menu_actions: [{
+        id: 'tx', label: 'Transactions (30 days)', enabled: true, kind: 'run-query-template',
+        templateId: 'tpl', resultMode: 'table', paramBindings: { person: '{node_id}' },
+        match: { target: 'node', nodeTypes: ['Person'] },
+      }],
+    }]);
+    await page.reload();
+    const statusBar = page.getByTestId('graph-status-bar');
+    await expect(statusBar).toContainText('5 nodes', { timeout: 15_000 });
+    await freezeLayout(page);
+
+    const menu = page.getByTestId('graph-context-menu');
+    let opened = false;
+    for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+      await hoverNode(page, 'n1');
+      await page.mouse.down({ button: 'right' });
+      await page.mouse.up({ button: 'right' });
+      opened = await menu.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false);
+    }
+    expect(opened).toBe(true);
+    await menu.getByText('Transactions (30 days)').click();
+
+    const modal = page.getByTestId('menu-action-table-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal).toContainText('acc-1');
+    expect(seen[0]).toMatchObject({ target: { type: 'node', id: 'n1', node_type: 'Person' }, parameters: { person: 'n1' } });
+    // Edit the filter and run again.
+    await page.getByTestId('menu-action-param-days').fill('90');
+    await page.getByTestId('menu-action-table-run').click();
+    await expect.poll(() => seen.length).toBe(2);
+    expect(seen[1].parameters).toMatchObject({ person: 'n1', days: '90' });
+    await modal.getByRole('button', { name: 'Close' }).last().click();
+    await expect(modal).toHaveCount(0);
+    await expect(statusBar).toContainText('5 nodes');
   });
 });

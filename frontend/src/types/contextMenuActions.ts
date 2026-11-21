@@ -80,6 +80,13 @@ export interface RunQueryTemplateActionConfig extends MenuActionBase {
    * the execute modal opens pre-filled instead of running directly.
    */
   paramBindings: Record<string, string>;
+  /**
+   * `graph` (default, also when absent): the result replaces the graph.
+   * `table`: the server runs the template for the clicked item and the rows
+   * open in a modal; the graph stays. Table actions also run on a case canvas
+   * and are tools for agents (MCP `list_entity_actions` / `run_entity_action`).
+   */
+  resultMode?: 'graph' | 'table';
 }
 
 export interface ShowSameValueActionConfig extends MenuActionBase {
@@ -113,4 +120,9 @@ export const CONTEXT_MENU_ACTION_KINDS = [
 /** Skip configs whose kind this build doesn't know (forward compatibility). */
 export function isKnownActionKind(kind: string): boolean {
   return (CONTEXT_MENU_ACTION_KINDS as readonly string[]).includes(kind);
+}
+
+/** A run-query-template action whose rows open in a table instead of replacing the graph. */
+export function isTableAction(config: ContextMenuActionConfig): boolean {
+  return config.kind === 'run-query-template' && config.resultMode === 'table';
 }

@@ -615,6 +615,61 @@ class EnrichmentLookupRequest(BaseModel):
     keys: list[str] = Field(min_length=1)
 
 
+class MenuActionTarget(BaseModel):
+    """The clicked node or edge. ``id`` is the datasource's id (on a case canvas,
+    the source node id, not the unified one); ``properties`` feed bindings the
+    caller did not resolve itself."""
+
+    type: Literal["node", "edge"] = "node"
+    id: str = Field(min_length=1, max_length=1000)
+    node_type: Optional[str] = Field(default=None, max_length=200)
+    relationship_type: Optional[str] = Field(default=None, max_length=200)
+    src: Optional[str] = Field(default=None, max_length=1000)
+    dst: Optional[str] = Field(default=None, max_length=1000)
+    properties: Optional[dict[str, Any]] = None
+
+
+class MenuActionTableRequest(BaseModel):
+    target: MenuActionTarget
+    parameters: dict[str, Optional[str]] = Field(default_factory=dict)
+    row_limit: int = Field(default=1000, ge=1, le=100000)
+
+
+class MenuActionParameter(BaseModel):
+    id: str
+    label: str
+    type: Literal["input", "select"] = "input"
+    options: Optional[list[str]] = None
+    required: bool = True
+    description: Optional[str] = None
+    binding: Optional[str] = None
+    value: str = ""
+    source: Literal["given", "binding", "default"] = "default"
+
+
+class MenuActionTableResponse(BaseModel):
+    """``status``: ``needs_parameters`` (nothing ran; ``problems`` per parameter),
+    ``running`` (poll ``GET .../query/table/{statement_id}``), ``succeeded`` or
+    ``failed`` (``error``: the warehouse's code and message)."""
+
+    action_id: str
+    label: Optional[str] = None
+    template_id: str
+    template_name: str
+    query_type: str
+    parameters: list[MenuActionParameter]
+    problems: dict[str, str] = Field(default_factory=dict)
+    status: Literal["needs_parameters", "running", "succeeded", "failed"]
+    statement_id: Optional[str] = None
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[Optional[str]]] = Field(default_factory=list)
+    row_count: int = 0
+    row_limit: int
+    truncated: bool = False
+    error: Optional[dict[str, str]] = None
+    duration_ms: Optional[float] = None
+
+
 class EnrichmentRunEdge(BaseModel):
     edge_id: str
     src: str
@@ -713,7 +768,8 @@ class GraphContextCreate(BaseModel):
         default_factory=list,
         description="Context-level configurable context-menu actions (open-url, "
         "copy-text, run-query-template, show-same-value). Passed through opaquely; the frontend "
-        "owns the shape.",
+        "owns the shape. A run-query-template action with resultMode 'table' also runs on the "
+        "server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table.",
     )
     metric_definitions: list[MetricDefinition] = Field(
         default_factory=list,

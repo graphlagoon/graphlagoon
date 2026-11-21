@@ -134,6 +134,20 @@ describe('InvestigationView', () => {
     expect(api.getInvestigationItemSnapshot).toHaveBeenCalledTimes(2) // switching graphs never reloads them
   })
 
+  it('the canvas context\'s menu actions arrive with the context; graph-replacing template actions stay out, table ones come in', async () => {
+    const actions = [
+      { id: 'url', kind: 'open-url', label: 'Open', enabled: true, match: { target: 'node' }, urlTemplate: 'https://x/{node_id}', openIn: 'new-tab' },
+      { id: 'graph', kind: 'run-query-template', label: 'Expand', enabled: true, match: { target: 'node' }, templateId: 't', paramBindings: {} },
+      { id: 'table', kind: 'run-query-template', label: 'Transactions', enabled: true, match: { target: 'node' }, templateId: 't', paramBindings: {}, resultMode: 'table' },
+    ]
+    // The context answers after the canvas item is known (it is added to the store by key).
+    vi.mocked(api.getGraphContext).mockImplementation(async (id) => ({ id, title: id, identity_keys: [], context_menu_actions: id === 'c1' ? actions : [] }) as any)
+    render(InvestigationView, { props: { id: 'inv' }, global: { stubs } })
+    await flushPromises()
+    const { useContextMenuActionsStore } = await import('@/stores/contextMenuActions')
+    expect(useContextMenuActionsStore().actionConfigs.map((a) => a.id)).toEqual(['url', 'table'])
+  })
+
   it('a graph item that loads nothing says why, in the legend and the material list', async () => {
     vi.mocked(api.getInvestigationItemSnapshot).mockImplementation(async (_i, sid) =>
       (sid === 's1' ? snapshot(['a']) : { ...snapshot([]), snapshot: null }) as any,

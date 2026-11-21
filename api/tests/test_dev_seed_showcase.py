@@ -57,3 +57,21 @@ def test_a_grouping_by_city_saves_as_communities_with_a_show_only():
     CaseViewIsolation.model_validate(rule)
     saved = ExplorationState.model_validate({"community": state, "isolation": rule})
     assert saved.model_dump()["isolation"] == rule
+
+
+def test_the_table_action_binds_its_template_and_reads_only_the_context_tables():
+    from graphlagoon.models.schemas import QueryTemplateCreate
+    from graphlagoon.services.menu_action_tables import is_table_action, substitute
+    from graphlagoon.services.sql_validation import validate_sql_query
+
+    edge, node = "dev_catalog.graphs.edges_demo_showcase", "dev_catalog.graphs.nodes_demo_showcase"
+    template = showcase.neighbors_template(edge, node)
+    QueryTemplateCreate(**template)  # the seed POSTs it
+    action = showcase.table_action("tpl-id")
+    assert is_table_action(action) and action["label"].startswith("Demo · ")
+    declared = {p["id"] for p in template["parameters"]}
+    assert set(action["paramBindings"]) <= declared
+    sql = substitute(template["query"], {"node": "n1", "max_hops": "2", "type": "Account"})
+    ok, message = validate_sql_query(sql)
+    assert ok, message
+    assert "$" not in sql

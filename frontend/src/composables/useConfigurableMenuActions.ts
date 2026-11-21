@@ -1,5 +1,5 @@
 import { ref, computed, watch } from 'vue';
-import { ExternalLink, Copy, Play, Focus } from 'lucide-vue-next';
+import { ExternalLink, Copy, Play, Focus, Table } from 'lucide-vue-next';
 import type { Component } from 'vue';
 import { useContextMenu, type ContextMenuTarget } from './useContextMenu';
 import { useToast } from './useToast';
@@ -8,6 +8,7 @@ import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
 import { useMetricsStore } from '@/stores/metrics';
 import { useQueryTemplatesStore } from '@/stores/queryTemplates';
 import { useTemplateExecution } from './useTemplateExecution';
+import type { MenuActionTableRequest } from './useMenuActionTable';
 import { matchesAction } from '@/utils/menuActionMatcher';
 import { nodeFieldValue } from '@/utils/isolation';
 import { buildUrlFromTemplate, openUrl } from '@/utils/safeUrl';
@@ -24,7 +25,7 @@ import type {
   ContextMenuActionConfig,
   RunQueryTemplateActionConfig,
 } from '@/types/contextMenuActions';
-import { isKnownActionKind } from '@/types/contextMenuActions';
+import { isKnownActionKind, isTableAction } from '@/types/contextMenuActions';
 
 export const CONFIGURABLE_ACTION_PREFIX = 'configurable-action:';
 
@@ -73,6 +74,36 @@ export function resolveTemplateParamValues(
 }
 
 /**
+ * The table action's parameter values the browser can resolve from the clicked
+ * item: each binding whose placeholders all resolve (properties, enriched
+ * values, metrics, modifiers). The rest go to the server, which falls back to
+ * the template defaults.
+ */
+export function resolveBoundValues(
+  bindings: Record<string, string>,
+  targetType: 'node' | 'edge',
+  item: Node | Edge,
+  options?: FormatOptions,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [id, binding] of Object.entries(bindings)) {
+    if (!binding) continue;
+    const unresolved =
+      extractTemplateProperties(binding).some((property) => resolveItemValue(targetType, item, property) === '') ||
+      extractTemplateMetrics(binding).some((ref) => resolveItemMetricValue(targetType, item, ref, options?.metrics) === '');
+    if (!unresolved) out[id] = formatLabel(binding, targetType, item, options);
+  }
+  return out;
+}
+
+/** Where the actions run: the exploration's context, or a case canvas's. */
+export interface MenuActionHost {
+  contextId: () => string | null | undefined;
+  /** The datasource id of a clicked node (on a case canvas: the source node, not the unified one). */
+  sourceNodeId?: (node: Node) => string | null | undefined;
+}
+
+/**
  * Registers the user-configurable context-menu actions (from the current
  * context's `context_menu_actions`) into the shared context-menu registry.
  *
@@ -84,7 +115,7 @@ export function resolveTemplateParamValues(
  * view: it is set when a run-query-template action cannot run directly
  * because a required parameter is still unbound.
  */
-export function useConfigurableMenuActions() {
+export function useConfigurableMenuActions(host?: MenuActionHost) {
   const contextMenu = useContextMenu();
   const graphStore = useGraphStore();
   const actionsStore = useContextMenuActionsStore();
@@ -98,6 +129,10 @@ export function useConfigurableMenuActions() {
 
   const registered = ref(false);
   let registeredIds: string[] = [];
+
+  /** Drives a MenuActionTableModal in the owning view. */
+  const pendingTable = ref<MenuActionTableRequest | null>(null);
+  const contextIdOf = () => (host ? host.contextId() : graphStore.currentContext?.id) ?? null;
 
   const pendingTemplateExecution = ref<{
     template: QueryTemplate;
@@ -127,7 +162,11 @@ export function useConfigurableMenuActions() {
     if (!matchesAction(config, target.type, item, metricsStore.metricResolver)) return false;
     // A dangling/invisible template (deleted, or private to another user and
     // therefore never sent to this client) hides the action entirely.
-    if (config.kind === 'run-query-template' && !findTemplate(config.templateId)) {
+    // A table action runs on the server, which reports a template that is gone; a case
+    // canvas has no templates store to look in.
+    // On a case canvas edge ids are the case's (`<item>:<edge>`), not the warehouse's.
+    if (isTableAction(config) && target.type === 'edge' && host?.sourceNodeId) return false;
+    if (config.kind === 'run-query-template' && !isTableAction(config) && !findTemplate(config.templateId)) {
       return false;
     }
     return true;
@@ -163,6 +202,10 @@ export function useConfigurableMenuActions() {
         return;
       }
       case 'run-query-template': {
+        if (isTableAction(config)) {
+          openTable(config, target, item);
+          return;
+        }
         const template = findTemplate(config.templateId);
         if (!template) {
           error(`Query template for "${config.label}" no longer exists`);
@@ -201,6 +244,37 @@ export function useConfigurableMenuActions() {
     }
   }
 
+  function openTable(config: RunQueryTemplateActionConfig, target: ContextMenuTarget, item: Node | Edge) {
+    const contextId = contextIdOf();
+    if (!contextId) {
+      error(`"${config.label}" needs a graph context`);
+      return;
+    }
+    let target_: MenuActionTableRequest['target'];
+    let bindingItem: Node | Edge = item;
+    if (target.type === 'node') {
+      const node = item as Node;
+      const sourceId = host?.sourceNodeId ? host.sourceNodeId(node) : node.node_id;
+      if (!sourceId) {
+        error(`"${config.label}": this node does not come from this context`);
+        return;
+      }
+      // Bindings read the datasource id: {node_id} must be what the template's tables hold.
+      bindingItem = { ...node, node_id: sourceId };
+      target_ = { type: 'node', id: sourceId, node_type: node.node_type };
+    } else {
+      const edge = item as Edge;
+      target_ = { type: 'edge', id: edge.edge_id, relationship_type: edge.relationship_type, src: edge.src, dst: edge.dst };
+    }
+    pendingTable.value = {
+      contextId,
+      actionId: config.id,
+      label: config.label,
+      target: target_,
+      parameters: resolveBoundValues(config.paramBindings ?? {}, target.type, bindingItem, labelOptions),
+    };
+  }
+
   /** Drop all our actions and re-add from the current eligible list. */
   function reconcile() {
     for (const actionId of registeredIds) {
@@ -214,7 +288,7 @@ export function useConfigurableMenuActions() {
       contextMenu.addAction({
         id: actionId,
         label: config.label,
-        icon: config.icon || KIND_ICONS[config.kind],
+        icon: config.icon || (isTableAction(config) ? Table : KIND_ICONS[config.kind]),
         visible: (t) => isVisible(config, t),
         handler: (t) => runAction(config, t),
       });
@@ -234,5 +308,5 @@ export function useConfigurableMenuActions() {
     reconcile();
   }
 
-  return { register, unregister, pendingTemplateExecution, runAction, isVisible };
+  return { register, unregister, pendingTemplateExecution, pendingTable, runAction, isVisible };
 }

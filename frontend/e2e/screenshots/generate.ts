@@ -16,6 +16,7 @@ import {
   seedCaseTypes,
   caseType,
   enableDatasources,
+  mockMenuActionTable,
 } from '../helpers/api-mocks';
 import { partnerRegister } from '../fixtures/partner-register';
 import { qsaDemo } from '../fixtures/qsa-demo';
@@ -360,7 +361,12 @@ async function setupPage(page: Page) {
   await setupAPIMocks(page);
 
   const contexts = [
-    { ...SCREENSHOT_CONTEXT, identity_keys: COMPANY_KEY, enrichment_tables: DEMO_ENRICHMENT_TABLES },
+    {
+      ...SCREENSHOT_CONTEXT,
+      identity_keys: COMPANY_KEY,
+      enrichment_tables: DEMO_ENRICHMENT_TABLES,
+      context_menu_actions: [TABLE_ACTION],
+    },
     {
       ...SCREENSHOT_CONTEXT,
       identity_keys: COMPANY_KEY,
@@ -454,6 +460,22 @@ const DEMO_ENRICHMENT_TABLES = [
     query: { sql: "SELECT e.edge_id, sum(o.amount) AS deal_size\nFROM graph_edges e\nJOIN main.sales.orders o ON o.buyer_id = e.src AND o.product_id = e.dst\nGROUP BY e.edge_id", run: 'manual' },
   },
   { name: 'company_risk', label: 'Company risk (Lakebase)', provider: { name: 'lakebase-risk', target: 'nodes', run: 'manual' } },
+];
+
+// A right-click table action and what its query answers (context-menu-actions/table).
+const TABLE_ACTION = {
+  id: 'people-2-hops', label: 'People within 2 hops', enabled: true, kind: 'run-query-template',
+  templateId: 'tpl-neighbors', templateName: 'Neighbors within N hops', resultMode: 'table',
+  paramBindings: { node: '{node_id}' }, match: { target: 'node', nodeTypes: ['Company'] },
+};
+const TABLE_ROWS: (string | null)[][] = [
+  ['person-3', 'Person', 'Ana Souza', 'Lisbon', '1'],
+  ['person-11', 'Person', 'Bruno Lima', 'Berlin', '1'],
+  ['person-14', 'Person', 'Carla Dias', 'Lisbon', '1'],
+  ['person-22', 'Person', 'Diego Alves', 'Tokyo', '2'],
+  ['person-27', 'Person', 'Elisa Rocha', 'São Paulo', '2'],
+  ['person-31', 'Person', 'Fábio Nunes', 'Berlin', '2'],
+  ['person-40', 'Person', 'Gabriela Reis', 'Tokyo', '2'],
 ];
 
 interface Scene {
@@ -897,6 +919,35 @@ const SCENES: Scene[] = [
       }
       await expect(menu).toBeVisible();
       await page.waitForTimeout(200);
+    },
+  },
+  {
+    guide: 'context-menu-actions',
+    scene: 'table',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await mockMenuActionTable(page, {
+        columns: ['node_id', 'node_type', 'name', 'city', 'hop'],
+        rows: TABLE_ROWS,
+        templateName: 'Neighbors within N hops',
+        parameters: [
+          { id: 'node', label: 'Node', value: 'company-0' },
+          { id: 'max_hops', label: 'Hops', value: '2' },
+          { id: 'type', label: 'Node type', value: 'Person' },
+        ],
+      });
+      await waitForGraphSettled(page);
+      const menu = page.getByTestId('graph-context-menu');
+      let opened = false;
+      for (let attempt = 0; attempt < 5 && !opened; attempt++) {
+        await hoverNode(page, 'company-0');
+        await page.mouse.down({ button: 'right' });
+        await page.mouse.up({ button: 'right' });
+        opened = await menu.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false);
+      }
+      await menu.getByText('People within 2 hops').click();
+      await page.getByTestId('menu-action-table-modal').locator('.p-datatable').waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(400);
     },
   },
   {

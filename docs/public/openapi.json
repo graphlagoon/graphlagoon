@@ -1511,6 +1511,69 @@
         }
       }
     },
+    "/graphlagoon/api/graph-contexts/{context_id}/menu-actions/{action_id}/table": {
+      "post": {
+        "tags": [
+          "graph-contexts"
+        ],
+        "summary": "Run Menu Action Table",
+        "description": "Run a table action of the right-click menu (a ``run-query-template``\naction with ``resultMode: \"table\"``) for one node or edge and return its rows,\nwithout touching the graph. Anyone who can read the context may run it; the\nquery is scoped and read-only like the Query Console's. ``running`` is polled\nand cancelled on ``.../query/table/{statement_id}``.",
+        "operationId": "graph_contexts_run_menu_action_table",
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Context Id"
+            }
+          },
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuActionTableRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuActionTableResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/graph-contexts/{context_id}/enrichment/{name}/run": {
       "post": {
         "tags": [
@@ -11957,7 +12020,7 @@
             },
             "type": "array",
             "title": "Context Menu Actions",
-            "description": "Context-level configurable context-menu actions (open-url, copy-text, run-query-template, show-same-value). Passed through opaquely; the frontend owns the shape."
+            "description": "Context-level configurable context-menu actions (open-url, copy-text, run-query-template, show-same-value). Passed through opaquely; the frontend owns the shape. A run-query-template action with resultMode 'table' also runs on the server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table."
           },
           "metric_definitions": {
             "items": {
@@ -14683,6 +14746,348 @@
           "created_by"
         ],
         "title": "ItemVersionResponse"
+      },
+      "MenuActionParameter": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "input",
+              "select"
+            ],
+            "title": "Type",
+            "default": "input"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "binding": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binding"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "default": ""
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "given",
+              "binding",
+              "default"
+            ],
+            "title": "Source",
+            "default": "default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "MenuActionParameter"
+      },
+      "MenuActionTableRequest": {
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/MenuActionTarget"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Parameters"
+          },
+          "row_limit": {
+            "type": "integer",
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Row Limit",
+            "default": 1000
+          }
+        },
+        "type": "object",
+        "required": [
+          "target"
+        ],
+        "title": "MenuActionTableRequest"
+      },
+      "MenuActionTableResponse": {
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "title": "Action Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "template_id": {
+            "type": "string",
+            "title": "Template Id"
+          },
+          "template_name": {
+            "type": "string",
+            "title": "Template Name"
+          },
+          "query_type": {
+            "type": "string",
+            "title": "Query Type"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/MenuActionParameter"
+            },
+            "type": "array",
+            "title": "Parameters"
+          },
+          "problems": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Problems"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "needs_parameters",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "statement_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement Id"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count",
+            "default": 0
+          },
+          "row_limit": {
+            "type": "integer",
+            "title": "Row Limit"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action_id",
+          "template_id",
+          "template_name",
+          "query_type",
+          "parameters",
+          "status",
+          "row_limit"
+        ],
+        "title": "MenuActionTableResponse",
+        "description": "``status``: ``needs_parameters`` (nothing ran; ``problems`` per parameter),\n``running`` (poll ``GET .../query/table/{statement_id}``), ``succeeded`` or\n``failed`` (``error``: the warehouse's code and message)."
+      },
+      "MenuActionTarget": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "node",
+              "edge"
+            ],
+            "title": "Type",
+            "default": "node"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "node_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Type"
+          },
+          "relationship_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Type"
+          },
+          "src": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Src"
+          },
+          "dst": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dst"
+          },
+          "properties": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "MenuActionTarget",
+        "description": "The clicked node or edge. ``id`` is the datasource's id (on a case canvas,\nthe source node id, not the unified one); ``properties`` feed bindings the\ncaller did not resolve itself."
       },
       "MetricDefinition": {
         "properties": {

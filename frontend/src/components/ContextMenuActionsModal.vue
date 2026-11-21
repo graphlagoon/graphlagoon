@@ -311,6 +311,17 @@
                   {{ t.name }}{{ t.visibility === 'private' ? ' (private)' : '' }}
                 </option>
               </select>
+              <label>Result</label>
+              <div class="radio-row" data-testid="menu-action-result-mode">
+                <label><input v-model="editingResultMode" type="radio" value="graph" /> Graph — replaces the canvas</label>
+                <label><input v-model="editingResultMode" type="radio" value="table" data-testid="menu-action-result-table" /> Table — rows in a window, the graph stays</label>
+              </div>
+              <p v-if="editingResultMode === 'table'" class="hint">
+                Runs on the server for the clicked item: the query may return any columns
+                (e.g. the transactions of the accounts linked to this company). Its
+                parameters can be edited in the window and run again. Also offered on a
+                case canvas, and to agents as a tool (<code>run_entity_action</code>).
+              </p>
               <p v-if="selectedTemplate?.visibility === 'private'" class="hint warning">
                 This template is private: the action will be invisible to everyone
                 who cannot see the template. Prefer a shared template.
@@ -447,6 +458,7 @@ const editingOpenIn = ref<'new-tab' | 'same-tab'>('new-tab');
 const editingTextTemplate = ref('');
 const editingTemplateId = ref('');
 const editingBindings = ref<Record<string, string>>({});
+const editingResultMode = ref<'graph' | 'table'>('graph');
 const editingField = ref('');
 const editingMode = ref<'same' | 'has'>('same');
 
@@ -513,7 +525,8 @@ function actionSummary(config: ContextMenuActionConfig): string {
   if (config.kind === 'show-same-value') {
     return config.mode === 'has' ? `show only: ${config.field} is set` : `show only: same ${config.field}`;
   }
-  return config.templateName || config.templateId;
+  const name = config.templateName || config.templateId;
+  return config.resultMode === 'table' ? `${name} · table` : name;
 }
 
 function startCreate() {
@@ -534,6 +547,7 @@ function startCreate() {
   editingTextTemplate.value = '';
   editingTemplateId.value = '';
   editingBindings.value = {};
+  editingResultMode.value = 'graph';
   editingField.value = '';
   editingMode.value = 'same';
 }
@@ -557,6 +571,7 @@ function startEdit(config: ContextMenuActionConfig) {
   editingTemplateId.value = config.kind === 'run-query-template' ? config.templateId : '';
   editingBindings.value =
     config.kind === 'run-query-template' ? { ...config.paramBindings } : {};
+  editingResultMode.value = config.kind === 'run-query-template' && config.resultMode === 'table' ? 'table' : 'graph';
   editingField.value = config.kind === 'show-same-value' ? config.field : '';
   editingMode.value = config.kind === 'show-same-value' ? config.mode : 'same';
 }
@@ -608,6 +623,8 @@ function buildConfig(): ContextMenuActionConfig | null {
     paramBindings: Object.fromEntries(
       Object.entries(editingBindings.value).filter(([, v]) => v.trim() !== ''),
     ),
+    // Absent means graph: configs saved before table results stay as they were.
+    ...(editingResultMode.value === 'table' ? { resultMode: 'table' as const } : {}),
   };
 }
 

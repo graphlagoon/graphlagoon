@@ -463,3 +463,71 @@ describe('resolveTemplateParamValues', () => {
     }
   });
 });
+
+describe('table actions (resultMode: table)', () => {
+  function tableConfig(overrides: Record<string, unknown> = {}): ContextMenuActionConfig {
+    return {
+      id: 'cfg-table',
+      label: 'Transactions',
+      enabled: true,
+      kind: 'run-query-template',
+      templateId: 'tpl-gone-from-store',
+      paramBindings: { person: '{node_id}', name: '{prop:name}', missing: '{prop:nope}' },
+      resultMode: 'table',
+      match: { target: 'node', nodeTypes: ['Person'] },
+      ...overrides,
+    } as ContextMenuActionConfig;
+  }
+
+  it('opens the table with the bound values instead of replacing the graph', async () => {
+    seedGraph();
+    useGraphStore().currentContext = { id: 'ctx-1' } as never;
+    useContextMenuActionsStore().hydrateFromContext([tableConfig()]);
+    const menu = useConfigurableMenuActions();
+    menu.register();
+    // A table action runs on the server: it shows even when the templates store
+    // does not list the template (a case canvas has no such store).
+    expect(menu.isVisible(tableConfig(), nodeTarget('n2'))).toBe(true);
+    await menu.runAction(tableConfig(), nodeTarget('n2'));
+    expect(executeTemplateAsGraph).not.toHaveBeenCalled();
+    expect(menu.pendingTable.value).toEqual({
+      contextId: 'ctx-1',
+      actionId: 'cfg-table',
+      label: 'Transactions',
+      target: { type: 'node', id: 'n2', node_type: 'Person' },
+      // An unresolved binding is left to the server (its default or a prompt).
+      parameters: { person: 'n2', name: 'Ada' },
+    });
+  });
+
+  it('on a case canvas reads the source node id of the host context', async () => {
+    seedGraph();
+    const menu = useConfigurableMenuActions({
+      contextId: () => 'ctx-case',
+      sourceNodeId: (node) => (node.node_id === 'n2' ? 'person-42' : null),
+    });
+    await menu.runAction(tableConfig(), nodeTarget('n2'));
+    expect(menu.pendingTable.value?.contextId).toBe('ctx-case');
+    expect(menu.pendingTable.value?.target.id).toBe('person-42');
+    expect(menu.pendingTable.value?.parameters.person).toBe('person-42');
+    // A node that does not come from that context cannot run it.
+    menu.pendingTable.value = null;
+    await menu.runAction(tableConfig({ match: { target: 'node' } }), nodeTarget('n1'));
+    expect(menu.pendingTable.value).toBeNull();
+    expect(useToast().toasts.value.at(-1)?.message).toContain('does not come from this context');
+  });
+
+  it('on a case canvas an edge table action is not offered (edge ids are the case\'s)', () => {
+    seedGraph();
+    const edgeAction = tableConfig({ match: { target: 'edge' } });
+    const caseMenu = useConfigurableMenuActions({ contextId: () => 'ctx-case', sourceNodeId: () => 'x' });
+    expect(caseMenu.isVisible(edgeAction, { type: 'edge', id: 'e1', label: 'e1' })).toBe(false);
+    expect(useConfigurableMenuActions().isVisible(edgeAction, { type: 'edge', id: 'e1', label: 'e1' })).toBe(true);
+  });
+
+  it('a graph-mode action still needs its template in the store', () => {
+    seedGraph();
+    const menu = useConfigurableMenuActions();
+    expect(menu.isVisible(tableConfig({ resultMode: undefined }), nodeTarget('n2'))).toBe(false);
+  });
+});
