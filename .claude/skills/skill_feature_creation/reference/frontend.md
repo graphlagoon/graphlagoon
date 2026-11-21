@@ -92,5 +92,13 @@ change needs its own review and release order.
 
 ```bash
 cd frontend && npx vitest run src/<path>/__tests__/<name>.test.ts
-cd frontend && npx vue-tsc --noEmit
+cd frontend && flock /tmp/graphlagoon-heavy-checks.lock npm run typecheck
 ```
+
+The type check is the slow, memory-heavy one (vue-tsc 1.8: ~2 min warm, ~4 min
+cold, ~1.5 GB). Run it once per change set (before `verify.sh` or a commit),
+not after every edit — vitest is the inner loop. `typecheck` is incremental
+(cache in `node_modules/.cache`), and the lock keeps two sessions from running
+it (or Playwright) at the same time, which OOM-kills on a small machine. To see
+whether one is already running: `ps -eo pid,args | grep "[n]ode .*bin/vue-tsc"`
+(never `pgrep -f vue-tsc`: it matches its own shell).
