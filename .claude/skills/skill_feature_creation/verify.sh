@@ -47,6 +47,10 @@ rel() { changed "$1" | sed "s|^$2||" | tr '\n' ' '; }
 HEAD_LINES=15
 TAIL_LINES=25
 LOG_DIR="${TMPDIR:-/tmp}/graphlagoon-verify"
+# vue-tsc (Volar 1) peaks at ~1.5 GB and Playwright starts a browser: on a small
+# machine two of them at once (two sessions, or a session and its dev stack) get
+# OOM-killed. HEAVY runs them one at a time across processes, heap capped.
+HEAVY="flock /tmp/graphlagoon-heavy-checks.lock env NODE_OPTIONS=--max-old-space-size=1536"
 mkdir -p "$LOG_DIR"
 FAILED=0
 
@@ -126,7 +130,8 @@ if [ -n "$(changed '^frontend/(src|e2e)/')" ]; then
   if [ ! -d frontend/node_modules ]; then
     echo "FAIL  frontend checks (frontend/node_modules missing: run 'make install')"; FAILED=1
   else
-    run "vue-tsc" "cd frontend && npx vue-tsc --noEmit"
+    # Incremental (cache in node_modules/.cache): a rerun takes about half the time.
+    run "vue-tsc" "cd frontend && $HEAVY npm run --silent typecheck"
     if [ "$FULL" = 1 ]; then
       run "vitest (full suite)" "cd frontend && npx vitest run --reporter=dot"
     elif [ -n "$FE_TESTS" ]; then
@@ -136,7 +141,7 @@ if [ -n "$(changed '^frontend/(src|e2e)/')" ]; then
     fi
     if [ -n "$E2E_SPECS" ]; then
       run "playwright changed specs" \
-        "cd frontend && npx playwright test -c e2e/playwright.config.ts $E2E_SPECS --reporter=line --trace off"
+        "cd frontend && $HEAVY npx playwright test -c e2e/playwright.config.ts $E2E_SPECS --reporter=line --trace off"
     elif [ -n "$(changed '^frontend/src/(components|views)/.*\.vue$')" ]; then
       skip "playwright" "components or views changed but no e2e spec did; does a user workflow need one?"
     fi
