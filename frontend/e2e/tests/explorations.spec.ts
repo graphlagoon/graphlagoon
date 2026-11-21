@@ -116,8 +116,20 @@ test.describe('Explorations', () => {
     await expect(page.getByText('Test Exploration')).toBeVisible();
 
     // Click the exploration title/open to navigate to the graph
-    await page.getByRole('button', { name: 'Open' }).click();
+    await page.getByRole('link', { name: 'Open', exact: true }).click();
     await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}**`);
     await expect(page).toHaveURL(new RegExp(`/graph/${MOCK_CONTEXT.id}`));
+  });
+
+  test('ctrl-click on Open opens the exploration in a new tab', async ({ authenticatedPage: page, context }) => {
+    await seedContexts(page, [MOCK_CONTEXT]);
+    await seedExplorations(page, [MOCK_EXPLORATION]);
+
+    await page.goto('/explorations');
+    const popup = context.waitForEvent('page');
+    await page.getByRole('link', { name: 'Open', exact: true }).click({ modifiers: ['Control'] });
+    const tab = await popup;
+    await expect(tab).toHaveURL(new RegExp(`/graph/${MOCK_CONTEXT.id}\\?.*exploration=`));
+    await expect(page).toHaveURL(/\/explorations/);
   });
 });

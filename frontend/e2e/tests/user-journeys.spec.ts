@@ -22,7 +22,7 @@ test.describe('User Journeys', () => {
     await expect(page.getByText('Test Context')).toBeVisible();
 
     // Click Open button to navigate to graph
-    await page.getByRole('button', { name: 'Open' }).click();
+    await page.getByRole('link', { name: 'Open', exact: true }).click();
     await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}`);
 
     // Verify graph loaded with correct data
@@ -137,7 +137,7 @@ test.describe('User Journeys', () => {
     await expect(page.getByText('Test Exploration')).toBeVisible();
 
     // Open the exploration
-    await page.getByRole('button', { name: 'Open' }).click();
+    await page.getByRole('link', { name: 'Open', exact: true }).click();
     await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}**`);
 
     // Verify graph page loaded
@@ -168,7 +168,7 @@ test.describe('User Journeys', () => {
     // Go to contexts, open graph
     await page.getByTestId('nav-contexts').click();
     await page.waitForURL('**/contexts');
-    await page.getByRole('button', { name: 'Open' }).click();
+    await page.getByRole('link', { name: 'Open', exact: true }).click();
     await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}`);
 
     // Graph toolbar appears
@@ -251,7 +251,7 @@ test.describe('User Journeys', () => {
     await expect(page.getByTestId('schema-drift-modal')).not.toBeVisible();
 
     // Then continue on to open the graph — the fixed context loads normally
-    await page.getByRole('button', { name: 'Open' }).click();
+    await page.getByRole('link', { name: 'Open', exact: true }).click();
     await page.waitForURL(`**/graph/${MOCK_CONTEXT.id}`);
     await expect(page.getByTestId('graph-status-bar')).toBeVisible({ timeout: 15_000 });
   });
