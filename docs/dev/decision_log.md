@@ -14364,7 +14364,7 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Tests:** vitest `graph.liveChange.test.ts` (reopen: marked, then refreshed), `queryEnrichment.test.ts` (provenance round trip, own keys), `graph.queryEnrichment.test.ts` (snapshot keeps values + origin), `useAfterQueryAnalysis.test.ts` (graph replaced, no toast of its own), `EnrichmentStatusChip.test.ts`; pytest `test_enrichment_providers.py` (snapshot field, agent edit prunes, provider TimeoutError). Full runs: vitest 3133 passed; pytest 1721 passed, 16 failed (the known alembic and gsql2rsql ones). E2E enrichment-status, your-data, after-query-analysis, contexts: 20 passed.
 **Public docs:** `bring-your-own-data.md` ("What a reader sees": saved values); screenshots regenerated; `openapi.json` and `agents-mcp-tools.md` regenerated.
 **Admin-area impact:** No admin-area impact (one optional field in the snapshot blob; no table, route, setting or audit action).
-**Known limitations:** in a live refresh between two people, a manually run enrichment can fall back to the saved value until it is run again; the form heading still says "Enrichment Tables" though it also holds providers; an expand does not rerun a waiting program.
+**Known limitations:** the form heading still says "Enrichment Tables" though it also holds providers; an expand does not rerun a waiting program.
 
 ## [2026-11-21 10:00] - Feature Implemented: right-click table actions (rows of a query for the clicked item), on the case canvas and as agent tools
 
@@ -14382,3 +14382,7 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Public docs:** `context-menu-actions.md` (Show the result as a table, two SQL recipes, permissions), screenshot `context-menu-actions-table` (new) and `-menu`; `agents-mcp-tools.md` and `openapi.json` regenerated.
 **Admin-area impact:** one new POST route, listed in `AUDIT_EXEMPT_ROUTES` (read-only query like `/query/table`; an agent's run is audited as `agent.read`) and in the MCP registry; no setting, table, permission or audit action.
 **Known limitations:** edge table actions are not offered on a case canvas (edge ids there are the case's); a binding with label modifiers or metrics is resolved only by the browser (agents pass the value); on a case canvas only the one-context canvas offers context actions (unchanged rule).
+
+## [2026-11-21 12:00] - Fix: a live refresh keeps this session's enriched values; a case sees them
+
+**Fix:** a live refresh no longer puts an older saved enriched node value back over the one this session's run wrote (`patchNodeProperties` treats keys enrichment owns as replaceable by the session's values; `graph.liveChange.test.ts`). Edges have no per-session value store, so a manual edge enrichment still shows the saved value after a live refresh until it is run again. A server test proves a case built from the exploration shows the enriched values (`test_exploration_overlay.py`).

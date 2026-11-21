@@ -1446,8 +1446,11 @@ export const useGraphStore = defineStore('graph', () => {
       const fromQuery = nodeQueryValues.get(node.node_id);
       if (fromQuery) {
         const withQuery = { ...(node.properties ?? {}) };
+        // A key enrichment owns came back from a saved snapshot (live refresh): the value
+        // this session's run wrote is the fresher one.
+        const owned = enrichedKeys(nodeProvenance, node.node_id);
         for (const [k, { value, overwrite }] of fromQuery) {
-          if (overwrite || withQuery[k] === undefined || withQuery[k] === null) withQuery[k] = value;
+          if (overwrite || owned.has(k) || withQuery[k] === undefined || withQuery[k] === null) withQuery[k] = value;
         }
         node.properties = withQuery;
       }
