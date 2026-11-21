@@ -75,3 +75,16 @@ def test_the_table_action_binds_its_template_and_reads_only_the_context_tables()
     ok, message = validate_sql_query(sql)
     assert ok, message
     assert "$" not in sql
+
+
+def test_the_edge_table_action_binds_both_ends():
+    from graphlagoon.models.schemas import QueryTemplateCreate
+    from graphlagoon.services.menu_action_tables import substitute
+    from graphlagoon.services.sql_validation import validate_sql_query
+
+    template = showcase.links_template("c.s.edges", "c.s.nodes")
+    QueryTemplateCreate(**template)
+    action = showcase.links_action("tpl")
+    assert action["match"]["target"] == "edge" and action["paramBindings"] == {"a": "{src}", "b": "{dst}"}
+    ok, message = validate_sql_query(substitute(template["query"], {"a": "n1", "b": "n2"}))
+    assert ok, message

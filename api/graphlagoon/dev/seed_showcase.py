@@ -282,6 +282,34 @@ def neighbors_template(edge: str, node: str) -> dict:
     }
 
 
+def links_template(edge: str, node: str) -> dict:
+    """An edge table action's template: every edge between the clicked edge's two ends."""
+    return {
+        "name": "Demo · Links between two nodes",
+        "description": "All edges between two nodes, both directions, with the ends' names.",
+        "query_type": "sql",
+        "query": (
+            "SELECT e.edge_id, e.relationship_type, s.display_name AS from_name, d.display_name AS to_name\n"
+            f"FROM {edge} e\nJOIN {node} s ON s.node_id = e.src\nJOIN {node} d ON d.node_id = e.dst\n"
+            "WHERE (e.src = '$a' AND e.dst = '$b') OR (e.src = '$b' AND e.dst = '$a')\n"
+            "ORDER BY e.relationship_type"
+        ),
+        "parameters": [
+            {"id": "a", "type": "input", "label": "One end", "required": True},
+            {"id": "b", "type": "input", "label": "Other end", "required": True},
+        ],
+        "visibility": "shared",
+    }
+
+
+def links_action(template_id: str) -> dict:
+    return {"id": "demo-links-between", "kind": "run-query-template",
+            "label": "Demo · All links between these two (table)", "icon": "🔗", "enabled": True,
+            "match": {"target": "edge"},
+            "templateId": template_id, "templateName": "Demo · Links between two nodes",
+            "paramBindings": {"a": "{src}", "b": "{dst}"}, "resultMode": "table"}
+
+
 def table_action(template_id: str) -> dict:
     return {"id": "demo-neighbor-accounts", "kind": "run-query-template",
             "label": "Demo · Accounts within 2 hops (table)", "icon": "🧾", "enabled": True,
@@ -430,7 +458,8 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
             "Right-click a node: 'Demo · Show only this branch/city/type', 'Show only nodes with a risk tier', "
             "'Demo · Same branch as this node' (program, value from the node) and 'Demo · Groups of at least N' "
             "(asks for the missing value). On a Company or Person, 'Demo · Accounts within 2 hops (table)' "
-            "opens the accounts 1–2 hops away as rows (edit Hops / Node type in the window and run again).",
+            "opens the accounts 1–2 hops away as rows (edit Hops / Node type in the window and run again); on an "
+            "edge, 'Demo · All links between these two (table)' lists every edge between its ends.",
             cluster_programs=CLUSTER_PROGRAMS,
             context_menu_actions=MENU_ACTIONS,
         )
@@ -440,8 +469,12 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
             "POST", f"/api/graph-contexts/{programs_ctx['id']}/query-templates", OWNER,
             json=neighbors_template(edge, node),
         )).json()
+        links = (await client.request(
+            "POST", f"/api/graph-contexts/{programs_ctx['id']}/query-templates", OWNER,
+            json=links_template(edge, node),
+        )).json()
         await client.request("PUT", f"/api/graph-contexts/{programs_ctx['id']}", OWNER, json={
-            "context_menu_actions": [*MENU_ACTIONS, table_action(template["id"])],
+            "context_menu_actions": [*MENU_ACTIONS, table_action(template["id"]), links_action(links["id"])],
         })
         programs_graph = await subgraph(client, programs_ctx["id"])
         playground = await new_exploration(

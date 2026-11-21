@@ -101,6 +101,12 @@ export interface MenuActionHost {
   contextId: () => string | null | undefined;
   /** The datasource id of a clicked node (on a case canvas: the source node, not the unified one). */
   sourceNodeId?: (node: Node) => string | null | undefined;
+  /**
+   * The datasource ids of a clicked edge (on a case canvas the edge id is the case's
+   * `<item>:<edge>` and its ends are merged uids). Null: the edge is not this context's.
+   * A host that maps nodes but not edges offers no edge table actions.
+   */
+  sourceEdge?: (edge: Edge) => { id: string; src: string; dst: string } | null | undefined;
 }
 
 /**
@@ -160,12 +166,14 @@ export function useConfigurableMenuActions(host?: MenuActionHost) {
     const item = lookupItem(target);
     if (!item) return false;
     if (!matchesAction(config, target.type, item, metricsStore.metricResolver)) return false;
+    // A table action on an edge needs the edge's datasource ids.
+    if (isTableAction(config) && target.type === 'edge' && host?.sourceNodeId && !host.sourceEdge?.(item as Edge)) {
+      return false;
+    }
     // A dangling/invisible template (deleted, or private to another user and
     // therefore never sent to this client) hides the action entirely.
     // A table action runs on the server, which reports a template that is gone; a case
     // canvas has no templates store to look in.
-    // On a case canvas edge ids are the case's (`<item>:<edge>`), not the warehouse's.
-    if (isTableAction(config) && target.type === 'edge' && host?.sourceNodeId) return false;
     if (config.kind === 'run-query-template' && !isTableAction(config) && !findTemplate(config.templateId)) {
       return false;
     }
@@ -264,7 +272,14 @@ export function useConfigurableMenuActions(host?: MenuActionHost) {
       target_ = { type: 'node', id: sourceId, node_type: node.node_type };
     } else {
       const edge = item as Edge;
-      target_ = { type: 'edge', id: edge.edge_id, relationship_type: edge.relationship_type, src: edge.src, dst: edge.dst };
+      const ids = host?.sourceNodeId ? host.sourceEdge?.(edge) : { id: edge.edge_id, src: edge.src, dst: edge.dst };
+      if (!ids) {
+        error(`"${config.label}": this edge does not come from this context`);
+        return;
+      }
+      // Bindings read the datasource ids too: {edge_id}, {src}, {dst}.
+      bindingItem = { ...edge, edge_id: ids.id, src: ids.src, dst: ids.dst };
+      target_ = { type: 'edge', id: ids.id, relationship_type: edge.relationship_type, src: ids.src, dst: ids.dst };
     }
     pendingTable.value = {
       contextId,

@@ -34,7 +34,7 @@ import { caseNodeLabel } from '@/utils/caseLabels';
 import { provenanceRingColors, roleColorMap } from '@/utils/graphAppearance';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { traceColumns, traceFlows } from '@/utils/traceView';
-import { baseSourceId, nodeSourceIds, type NodeOrigin, type UnifiedNode } from '@/utils/unifyGraph';
+import { baseSourceId, nodeSourceIds, sourceEdgeIds, type NodeOrigin, type UnifiedNode } from '@/utils/unifyGraph';
 import { explorationUrl } from '@/utils/investigationLinks';
 import { layoutBlockChanged, mapLookToCanvas, mapLookToItem, resolveCanvasLook, toUnifiedId } from '@/utils/caseLook';
 import { LAYOUT_ALGORITHMS, type LayoutAlgorithm } from '@/types/graph';
@@ -234,6 +234,10 @@ function sourceNodeOf(uid: string, contextId: string | null): string | null {
 const configurableMenuActions = useConfigurableMenuActions({
   contextId: () => canvasContextId.value,
   sourceNodeId: (node) => sourceNodeOf(node.node_id, canvasContextId.value),
+  sourceEdge: (edge) => {
+    const unified = store.unified.edges.find((e) => e.edge_id === edge.edge_id);
+    return unified ? sourceEdgeIds(unified, store.unified.nodes, canvasContextId.value) : null;
+  },
 });
 const { pendingTemplateExecution, pendingTable } = configurableMenuActions;
 const caseMenuActions = (configs: ContextMenuActionConfig[]) =>

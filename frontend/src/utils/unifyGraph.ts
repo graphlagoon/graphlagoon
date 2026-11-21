@@ -180,6 +180,25 @@ export function unifyGraph(
 }
 
 /**
+ * The ids a unified edge had in its source graph, when that source is of `contextId`:
+ * its id without the `<source>:` prefix and each end's node id in that same source.
+ * Null when the edge is not that context's (what a query on the context could not find).
+ */
+export function sourceEdgeIds(
+  edge: Pick<UnifiedEdge, 'edge_id' | 'src' | 'dst' | '__source'>,
+  nodes: Pick<UnifiedNode, 'node_id' | '__sources'>[],
+  contextId: string | null | undefined,
+): { id: string; src: string; dst: string } | null {
+  const source = edge.__source;
+  if (!source || !contextId || !edge.edge_id.startsWith(`${source}:`)) return null;
+  const end = (uid: string) =>
+    nodes.find((n) => n.node_id === uid)?.__sources.find((o) => o.sourceId === source && o.contextId === contextId)?.nodeId ?? null;
+  const src = end(edge.src);
+  const dst = end(edge.dst);
+  return src && dst ? { id: edge.edge_id.slice(source.length + 1), src, dst } : null;
+}
+
+/**
  * Distinct real sources of a node: an expansion (`expansion:<id>`) or derived nodes
  * (`derived:<id>:<table>`, promoted from an enrichment table) count as their source.
  */
