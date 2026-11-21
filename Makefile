@@ -382,7 +382,7 @@ lint: lint-frontend lint-api
 lint-frontend:
 	@echo "$(CYAN)Linting frontend...$(RESET)"
 	cd frontend && npm run lint
-	cd frontend && npx vue-tsc --noEmit
+	cd frontend && flock /tmp/graphlagoon-heavy-checks.lock npm run --silent typecheck
 
 lint-api:
 	@echo "$(CYAN)Linting API...$(RESET)"

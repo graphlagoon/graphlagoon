@@ -1,7 +1,7 @@
 ---
 name: Add Context Menu Action
 
-description: This skill guides you through adding a new action to the graph context menu (right-click on nodes/edges). Use this when adding new actions like "Copy ID", "Expand Neighbors", "Pin Node", etc.
+description: This skill guides you through adding or changing graph context menu actions (right-click on nodes/edges) — built-in or code-registered ones like "Copy ID", "Expand Neighbors", "Pin Node", and the per-context configurable actions (open URL, copy text, run a query template as a graph or as a table, show only nodes with a value), including how they work on a case canvas and as agent (MCP) tools.
 ---
 
 ## Architecture Overview
@@ -45,19 +45,41 @@ interface ContextMenuAction {
 
 ### User-Configurable Actions (no code needed)
 
-Besides code-registered actions, users can define actions per context (persisted in `graph_contexts.context_menu_actions`, opaque JSON): `open-url` (safe URL from item properties), `copy-text`, and `run-query-template` (bind properties to template params). Key files:
+Besides code-registered actions, users configure actions per context (persisted in `graph_contexts.context_menu_actions`, opaque `list[dict]` on the backend — no schema, no migration for a new field). Kinds (`CONTEXT_MENU_ACTION_KINDS`; unknown kinds are skipped at runtime and on import):
+
+| Kind | Does |
+|------|------|
+| `open-url` | Safe URL from the item's values (web or desktop-app scheme) |
+| `copy-text` | Label-template text to the clipboard |
+| `run-query-template` | Binds item values to a query template's params. `resultMode` absent/`graph`: the result replaces the graph (execute modal when a required param is unbound). `resultMode: 'table'`: runs **on the server** for the item and opens the rows in `MenuActionTableModal` — the graph stays |
+| `show-same-value` | Isolates nodes with the same (or any) value of a field |
+
+Key files:
 
 | File | Purpose |
 |------|---------|
-| `frontend/src/types/contextMenuActions.ts` | Config shape (discriminated union on `kind`) |
-| `frontend/src/utils/menuActionMatcher.ts` | Visibility matcher (type lists + property conditions) |
+| `frontend/src/types/contextMenuActions.ts` | Config shape (discriminated union on `kind`), `isTableAction` |
+| `frontend/src/utils/menuActionMatcher.ts` | Visibility matcher (type lists + property conditions, `metric:` refs) |
 | `frontend/src/utils/safeUrl.ts` | URL build/validate/open (literal scheme, any app scheme but never in-browser ones like `javascript:`; per-value encoding; app links hand off via `location.assign`) |
 | `frontend/src/stores/contextMenuActions.ts` | Hydrate/persist (debounced PUT, write-access gated) |
-| `frontend/src/composables/useConfigurableMenuActions.ts` | Reconciles configs → menu actions (`configurable-action:` prefix) |
+| `frontend/src/composables/useConfigurableMenuActions.ts` | Reconciles configs → menu actions (`configurable-action:` prefix); dispatch per kind; `pendingTemplateExecution` / `pendingTable` refs the views bind to modals; **host adapter** (below) |
 | `frontend/src/components/ContextMenuActionsModal.vue` | Editor UI (+ Import JSON + Ask-AI skill modal) |
-| `frontend/src/utils/contextMenuActionSkill.ts` | Ask-AI prompt builder (robot button) |
+| `frontend/src/utils/contextMenuActionImport.ts` | Import validation, one branch per kind |
+| `frontend/src/utils/contextMenuActionSkill.ts` | Ask-AI prompt builder (robot button): describes every kind with a JSON example |
+| `frontend/src/composables/useMenuActionTable.ts`, `components/MenuActionTableModal.vue` | Table actions: submit / poll / cancel, editable params, Add to case |
+| `api/graphlagoon/services/menu_action_tables.py` | Table actions on the server: find action, server-side match and plain-placeholder bindings, template visibility, value rule, scoped read-only run |
+| `api/graphlagoon/mcp/server.py` (`list_entity_actions`, `run_entity_action`) | The same table actions as agent tools |
 
-When a requested action fits one of these kinds, prefer configuring it (or extending the config union) over hardcoding a new action.
+**Where actions run.** Both `GraphVisualizationView` and `InvestigationView` call `register()`/`unregister()` and mount the modals. On a case canvas:
+- only the actions of the one canvas context apply (`canvasContextId`); graph-replacing `run-query-template` actions are filtered out (`caseMenuActions`), table actions stay;
+- ids are the case's (node `<id>@<ctx>` or identity-merged, edge `<source>:<edge_id>`), so the view passes a host adapter `useConfigurableMenuActions({ contextId, sourceNodeId, sourceEdge })` that maps back to the source graph's ids (`sourceEdgeIds` in `utils/unifyGraph.ts`). Anything that sends an id to the warehouse must go through it;
+- hydration watches the canvas context's fields, not the `contexts` map (contexts are added by key and arrive after the canvas item).
+
+**Agent-first.** A behavior people configure that reads data should also be reachable by agents: the table action's server route has MCP twins (registered in `mcp/registry.py`, docs generated by `make docs-api`). New REST routes need a tool or an `AGENT_EXEMPT_ROUTES` reason, and an `AUDITED_ROUTES` / `AUDIT_EXEMPT_ROUTES` entry.
+
+**Adding a kind or a field to a kind** touches, at least: the type union, `useConfigurableMenuActions` (dispatch, icon, visibility), the editor (draft ref, `startEdit`, `buildConfig`, `actionSummary`, form block), `contextMenuActionImport.ts` (explicit branch — the last `else` is run-query-template), `contextMenuActionSkill.ts`, the `context_menu_actions` description in `models/schemas.py` + `make docs-api`, `docs/guide/context-menu-actions.md` (+ screenshot scene in `frontend/e2e/screenshots/generate.ts`), the case view filter if the kind replaces the graph, and the showcase seed (`api/graphlagoon/dev/seed_showcase.py`) when a demo helps. The decision log has the precedents (`show-same-value`, table result).
+
+When a requested action fits one of these kinds, prefer configuring it (or extending the config union) over hardcoding a new action. For "show data about the clicked item", a query template in table mode usually covers it: filters are template parameters, neighbors are joins on the context's edge table, enriched data is any authorized table.
 
 ## How to Add a New Action
 
@@ -176,9 +198,16 @@ it('your-action is only visible for nodes', () => {
 # Run context menu tests
 cd frontend && npx vitest run src/composables/__tests__/useContextMenu.test.ts src/components/__tests__/GraphContextMenu.test.ts
 
-# Run full suite to check for regressions
-npm run test:run
+# Configurable actions (kinds, dispatch, table mode, editor, import, prompt)
+cd frontend && npx vitest run src/composables/__tests__/useConfigurableMenuActions.test.ts src/utils/__tests__/contextMenuActionImport.test.ts src/utils/__tests__/contextMenuActionSkill.test.ts src/components/__tests__/MenuActionTableModal.test.ts
+cd api && uv run pytest tests/test_menu_action_tables.py -q -p no:cacheprovider
+
+# Right-click in a real browser (mocked API)
+cd frontend && npx playwright test -c e2e/playwright.config.ts tests/context-menu.spec.ts --reporter=line --trace off
 ```
+
+Then the type check once (slow; see `skill_feature_creation/reference/frontend.md`):
+`cd frontend && flock /tmp/graphlagoon-heavy-checks.lock npm run typecheck`.
 
 ### Step 5: Verify Manually
 
@@ -191,6 +220,7 @@ make dev
 3. Right-click an edge — verify visibility filtering works
 4. Click the action — verify the handler runs
 5. Switch to 3D mode — repeat steps 2-4
+6. If the action reads ids or data: repeat on a case canvas (`/investigations/<id>` with the exploration as a graph item)
 
 ## Key Files Reference
 
@@ -198,7 +228,9 @@ make dev
 |------|---------|
 | `frontend/src/composables/useContextMenu.ts` | Singleton state, action registry, built-in actions |
 | `frontend/src/components/GraphContextMenu.vue` | UI component (Teleport, positioning, dismiss) |
-| `frontend/src/components/GraphCanvas3D.vue` | 3D integration (onNodeRightClick/onLinkRightClick) |
+| `frontend/src/components/GraphCanvas3D.vue` | 3D integration (app-level `mouseup` → `maybeOpenContextMenu`) |
+| `frontend/src/utils/contextMenuTrigger.ts` | Stationary right-click guard, node-over-link target |
+| `frontend/e2e/tests/context-menu.spec.ts` | Real right-click in the browser (retry loop: the raycast runs per frame) |
 | `frontend/src/composables/__tests__/useContextMenu.test.ts` | Composable tests |
 | `frontend/src/components/__tests__/GraphContextMenu.test.ts` | Component tests |
 

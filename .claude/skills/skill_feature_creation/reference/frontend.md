@@ -95,8 +95,8 @@ cd frontend && npx vitest run src/<path>/__tests__/<name>.test.ts
 cd frontend && flock /tmp/graphlagoon-heavy-checks.lock npm run typecheck
 ```
 
-The type check is the slow, memory-heavy one (vue-tsc 1.8: ~2 min warm, ~4 min
-cold, ~1.5 GB). Run it once per change set (before `verify.sh` or a commit),
+The type check is the heaviest check (vue-tsc 2: ~30 s and ~1.35 GB cold, ~11 s
+and ~1 GB warm). Run it once per change set (before `verify.sh` or a commit),
 not after every edit — vitest is the inner loop. `typecheck` is incremental
 (cache in `node_modules/.cache`), and the lock keeps two sessions from running
 it (or Playwright) at the same time, which OOM-kills on a small machine. To see

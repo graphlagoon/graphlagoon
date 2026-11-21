@@ -47,7 +47,7 @@ rel() { changed "$1" | sed "s|^$2||" | tr '\n' ' '; }
 HEAD_LINES=15
 TAIL_LINES=25
 LOG_DIR="${TMPDIR:-/tmp}/graphlagoon-verify"
-# vue-tsc (Volar 1) peaks at ~1.5 GB and Playwright starts a browser: on a small
+# vue-tsc peaks at ~1–1.35 GB and Playwright starts a browser: on a small
 # machine two of them at once (two sessions, or a session and its dev stack) get
 # OOM-killed. HEAVY runs them one at a time across processes, heap capped.
 HEAVY="flock /tmp/graphlagoon-heavy-checks.lock env NODE_OPTIONS=--max-old-space-size=1536"
@@ -130,7 +130,7 @@ if [ -n "$(changed '^frontend/(src|e2e)/')" ]; then
   if [ ! -d frontend/node_modules ]; then
     echo "FAIL  frontend checks (frontend/node_modules missing: run 'make install')"; FAILED=1
   else
-    # Incremental (cache in node_modules/.cache): a rerun takes about half the time.
+    # Incremental (cache in node_modules/.cache): a rerun takes ~11 s instead of ~30 s.
     run "vue-tsc" "cd frontend && $HEAVY npm run --silent typecheck"
     if [ "$FULL" = 1 ]; then
       run "vitest (full suite)" "cd frontend && npx vitest run --reporter=dot"

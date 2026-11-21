@@ -14402,3 +14402,10 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Tests:** vitest `openRoute.test.ts`; e2e `explorations.spec.ts` (ctrl-click opens `/graph/<ctx>?exploration=` in a new tab), and the Open selectors in contexts/explorations/user-journeys specs moved from button to link.
 **Public docs:** No public docs impact. **Admin-area impact:** No admin-area impact.
 **Known limitations:** other in-graph click actions (canvas, Toolbar case chip) were not audited in this pass.
+
+## [2026-11-21 16:00] - Tooling: vue-tsc 2, incremental type check, heavy checks serialized; context-menu skill brought up to date
+
+**Problem:** type checks were OOM-killed (exit 137) on the ~3.9 GB dev box: vue-tsc 1.8 peaked at ~1.5 GB and took 80–230 s, and two sessions (or one plus Playwright, beside the dev stack's Spark JVM) ran them at once.
+**Change:** `vue-tsc` 1.8.27 → 2.2.12 (no new type errors; `npm run build` passes): cold ~30 s / 1.35 GB, warm ~11 s / 0.95 GB. New `npm run typecheck` (incremental, cache in `node_modules/.cache`; a warm run still catches a new error — checked). `verify.sh` and `make lint-frontend` run it, and Playwright, under one `flock` (`/tmp/graphlagoon-heavy-checks.lock`) with a capped heap; CI keeps a fresh `npx vue-tsc --noEmit`. `skill_feature_creation` says to type-check once per change set (vitest is the inner loop) and how to see a running one without `pgrep -f` (it matches its own shell). `skill_context_menu_action` was stale (three kinds, an old 3D trigger): it now lists the four kinds and the table result, the case-canvas host adapter and hydration rule, the agent twins, and the touch list for a new kind or field.
+**Rejected:** dropping the type check from verify.sh (it caught three real errors in the table-action work that tests did not); excluding test files from it (they are 45 % of `src` and only vue-tsc checks their types).
+**Public docs:** No public docs impact. **Admin-area impact:** No admin-area impact.
