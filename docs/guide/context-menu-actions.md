@@ -169,8 +169,9 @@ accounts around a company.
   backslash, backtick, `;` or `$` is refused (the template splices values as
   text), and the parameter is marked so you can change it.
 - **On a case canvas** table actions work too (graph-replacing template
-  actions do not) on nodes: the node id sent is the one of the source graph,
-  not the case's merged id. Edge table actions are offered in explorations only.
+  actions do not): the ids sent are those of the source graph, not the case's
+  merged ones — a node's id, and an edge's id and both ends. An edge or node
+  that does not come from the canvas's context does not offer them.
 - **Agents** can run them as well: the MCP tools
   [`list_entity_actions`](./agents-mcp-tools.md#list-entity-actions) and
   [`run_entity_action`](./agents-mcp-tools.md#run-entity-action) list the
@@ -211,7 +212,8 @@ ORDER BY t.at DESC
 
 The dev showcase (`make dev-seed-showcase`) has one ready: right-click a
 Company or Person in *Demo · Cluster programs & right-click actions* →
-*Demo · Accounts within 2 hops (table)*.
+*Demo · Accounts within 2 hops (table)*, or an edge → *Demo · All links
+between these two (table)* (binds `{src}` and `{dst}`).
 
 ### Show only nodes with… {#show-only-nodes-with}
 

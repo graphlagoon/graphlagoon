@@ -517,12 +517,28 @@ describe('table actions (resultMode: table)', () => {
     expect(useToast().toasts.value.at(-1)?.message).toContain('does not come from this context');
   });
 
-  it('on a case canvas an edge table action is not offered (edge ids are the case\'s)', () => {
+  it('on a case canvas an edge table action sends the edge\'s source ids, and hides when it has none', async () => {
     seedGraph();
-    const edgeAction = tableConfig({ match: { target: 'edge' } });
-    const caseMenu = useConfigurableMenuActions({ contextId: () => 'ctx-case', sourceNodeId: () => 'x' });
-    expect(caseMenu.isVisible(edgeAction, { type: 'edge', id: 'e1', label: 'e1' })).toBe(false);
-    expect(useConfigurableMenuActions().isVisible(edgeAction, { type: 'edge', id: 'e1', label: 'e1' })).toBe(true);
+    const edgeAction = tableConfig({ match: { target: 'edge' }, paramBindings: { from: '{src}', id: '{edge_id}' } });
+    const edge = { type: 'edge' as const, id: 'e1', label: 'e1' };
+    const caseMenu = useConfigurableMenuActions({
+      contextId: () => 'ctx-case',
+      sourceNodeId: () => 'x',
+      sourceEdge: (e) => (e.edge_id === 'e1' ? { id: 'tx-9', src: 'acc-1', dst: 'acc-2' } : null),
+    });
+    expect(caseMenu.isVisible(edgeAction, edge)).toBe(true);
+    await caseMenu.runAction(edgeAction, edge);
+    expect(caseMenu.pendingTable.value?.target).toEqual({
+      type: 'edge', id: 'tx-9', relationship_type: 'MENTIONS', src: 'acc-1', dst: 'acc-2',
+    });
+    expect(caseMenu.pendingTable.value?.parameters).toEqual({ from: 'acc-1', id: 'tx-9' });
+
+    const noEdges = useConfigurableMenuActions({ contextId: () => 'ctx-case', sourceNodeId: () => 'x' });
+    expect(noEdges.isVisible(edgeAction, edge)).toBe(false);
+    const elsewhere = useConfigurableMenuActions({ contextId: () => 'ctx-case', sourceNodeId: () => 'x', sourceEdge: () => null });
+    expect(elsewhere.isVisible(edgeAction, edge)).toBe(false);
+    // An exploration sends the edge as it is.
+    expect(useConfigurableMenuActions().isVisible(edgeAction, edge)).toBe(true);
   });
 
   it('a graph-mode action still needs its template in the store', () => {

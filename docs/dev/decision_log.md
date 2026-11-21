@@ -14381,8 +14381,24 @@ contexto, programas, isolamento salvo na exploração e na view); execução rea
 **Tests:** pytest new `test_menu_action_tables.py` (run, bindings, given values, unsafe value, stale id, refusals incl. another user's private template, warehouse error, Cypher as CTE, helpers), `test_mcp_server.py` (agent lists and runs with the source id, saves a case table), `test_dev_seed_showcase.py`, `test_agent_registry.py` (menu-action routes covered). Vitest: new `MenuActionTableModal.test.ts`, `ContextMenuActionsModal.tableResult.test.ts`; extended `useConfigurableMenuActions`, `useEscapeToCloseModals`, import, skill and `InvestigationView` (hydration) tests. E2E `context-menu.spec.ts` (right-click → rows → edit filter → run again → graph intact). Checked in the real app against the local warehouse (exploration and case canvas, Add to case), plus a code review and a UX review whose findings were fixed (edge actions hidden on a case canvas, stale ids, cancel on close, truncation on the polled path, ran-with labels, Add to case always offered, Added state, CSV).
 **Public docs:** `context-menu-actions.md` (Show the result as a table, two SQL recipes, permissions), screenshot `context-menu-actions-table` (new) and `-menu`; `agents-mcp-tools.md` and `openapi.json` regenerated.
 **Admin-area impact:** one new POST route, listed in `AUDIT_EXEMPT_ROUTES` (read-only query like `/query/table`; an agent's run is audited as `agent.read`) and in the MCP registry; no setting, table, permission or audit action.
-**Known limitations:** edge table actions are not offered on a case canvas (edge ids there are the case's); a binding with label modifiers or metrics is resolved only by the browser (agents pass the value); on a case canvas only the one-context canvas offers context actions (unchanged rule).
+**Known limitations:** a binding with label modifiers or metrics is resolved only by the browser (agents pass the value); on a case canvas only the one-context canvas offers context actions (unchanged rule).
+
+## [2026-11-21 14:00] - Feature extended: edge table actions on the case canvas
+
+**Feature:** right-click table actions now work on edges of a case canvas too (were hidden: the case's edge id is `<source>:<edge_id>` and its ends are merged uids, so `{edge_id}`, `{src}`, `{dst}` named nothing the warehouse holds).
+**Decisions:** a pure `sourceEdgeIds(edge, nodes, contextId)` in `utils/unifyGraph.ts` gives back the source ids: the id without the source prefix and, for each end, the node id that end has *in that same source* (an end merged with other sources by an identity key still maps to this source's node). An edge whose source is not the canvas's context returns null and does not offer the action. The host adapter of `useConfigurableMenuActions` gains `sourceEdge`; bindings and the target both use the source ids. Showcase demo: *Demo · All links between these two (table)* (`{src}`/`{dst}`).
+**Tests:** vitest `unifyGraph.test.ts` (merged two-source graph: CRM edge maps for c-crm, null for c-bank), `useConfigurableMenuActions.test.ts` (mapped target and bindings; hidden without a mapping or outside the context); pytest `test_dev_seed_showcase.py`. Checked on a case canvas in the real app.
+**Public docs:** `context-menu-actions.md` (case canvas bullet, edge demo).
+**Admin-area impact:** No admin-area impact.
 
 ## [2026-11-21 12:00] - Fix: a live refresh keeps this session's enriched values; a case sees them
 
 **Fix:** a live refresh no longer puts an older saved enriched node value back over the one this session's run wrote (`patchNodeProperties` treats keys enrichment owns as replaceable by the session's values; `graph.liveChange.test.ts`). Edges have no per-session value store, so a manual edge enrichment still shows the saved value after a live refresh until it is run again. A server test proves a case built from the exploration shows the enriched values (`test_exploration_overlay.py`).
+
+## [2026-11-21 15:00] - Fix: Open on contexts and explorations behaves like a link
+
+**Fix:** "Open" on the Contexts and Explorations lists was a `<button>` calling `router.push`, so Ctrl/Cmd/middle-click did nothing special. It is now a `RouterLink`, and the exploration title is a link too. A click on the rest of an exploration row or a case-queue row goes through the new `openRoute` (`utils/openRoute.ts`): Ctrl/Cmd/Shift or middle-click opens a new tab, a plain click navigates in place.
+**Decisions:** real links where there is a destination (free right-click menu, status-bar URL); `openRoute` only for whole-row click targets that cannot be an anchor.
+**Tests:** vitest `openRoute.test.ts`; e2e `explorations.spec.ts` (ctrl-click opens `/graph/<ctx>?exploration=` in a new tab), and the Open selectors in contexts/explorations/user-journeys specs moved from button to link.
+**Public docs:** No public docs impact. **Admin-area impact:** No admin-area impact.
+**Known limitations:** other in-graph click actions (canvas, Toolbar case chip) were not audited in this pass.

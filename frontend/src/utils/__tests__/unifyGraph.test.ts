@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergedEntityCounts, unifyGraph, type UnifySource } from '@/utils/unifyGraph';
+import { mergedEntityCounts, sourceEdgeIds, unifyGraph, type UnifySource } from '@/utils/unifyGraph';
 import type { IdentityKey } from '@/types/graph';
 
 const docKey = (node_type: string, prop: string): IdentityKey => ({
@@ -66,5 +66,20 @@ describe('unifyGraph', () => {
       ['s-bank:e1', 'Person:12345678901', 'a1@c-bank', 's-bank'],
       ['s-crm:e1', 'Person:12345678901', 'a1@c-crm', 's-crm'],
     ]);
+  });
+});
+
+describe('sourceEdgeIds', () => {
+  it('gives back the ids an edge had in its source, for that source\'s context only', () => {
+    const g = unifyGraph([bank, crm], contexts);
+    // Ana is merged across both sources by her document; the CRM edge keeps its own ids.
+    const owns = g.edges.find((e) => e.relationship_type === 'OWNS')!;
+    expect(owns.edge_id).toBe('s-crm:e1');
+    expect(sourceEdgeIds(owns, g.nodes, 'c-crm')).toEqual({ id: 'e1', src: '9', dst: 'a1' });
+    // Not the bank's edge: a query on the bank context could not find it.
+    expect(sourceEdgeIds(owns, g.nodes, 'c-bank')).toBeNull();
+    const holds = g.edges.find((e) => e.relationship_type === 'HOLDS')!;
+    expect(sourceEdgeIds(holds, g.nodes, 'c-bank')).toEqual({ id: 'e1', src: 'p1', dst: 'a1' });
+    expect(sourceEdgeIds(holds, g.nodes, null)).toBeNull();
   });
 });
