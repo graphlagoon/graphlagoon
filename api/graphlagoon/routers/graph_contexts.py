@@ -16,6 +16,8 @@ from graphlagoon.models.schemas import (
     EnrichmentRunResponse,
     DEFAULT_DATASOURCE_TYPE,
     EnrichmentLookupRequest,
+    MenuActionTableRequest,
+    MenuActionTableResponse,
     GraphContextCreate,
     GraphContextUpdate,
     GraphContextResponse,
@@ -1030,6 +1032,43 @@ async def lookup_enrichment(
     user_email = get_current_user(request)
     context = await get_context_with_access(context_id, user_email)
     return await run_enrichment_lookup(warehouse, context, name, body.keys, user_email)
+
+
+@router.post(
+    "/{context_id}/menu-actions/{action_id}/table",
+    response_model=MenuActionTableResponse,
+)
+async def run_menu_action_table(
+    context_id: UUID,
+    action_id: str,
+    body: MenuActionTableRequest,
+    request: Request,
+):
+    """Run a table action of the right-click menu (a ``run-query-template``
+    action with ``resultMode: "table"``) for one node or edge and return its rows,
+    without touching the graph. Anyone who can read the context may run it; the
+    query is scoped and read-only like the Query Console's. ``running`` is polled
+    and cancelled on ``.../query/table/{statement_id}``."""
+    from graphlagoon.services import menu_action_tables
+    from graphlagoon.utils.context_access import get_context_with_access
+
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    try:
+        return await menu_action_tables.run(
+            context,
+            user_email,
+            action_id,
+            body.target.model_dump(),
+            body.parameters,
+            body.row_limit,
+            check_match=False,
+        )
+    except menu_action_tables.MenuActionError as e:
+        raise HTTPException(
+            status_code=e.status,
+            detail={"error": {"code": e.code, "message": e.message, "details": {}}},
+        )
 
 
 @router.post("/{context_id}/enrichment/{name}/run", response_model=EnrichmentRunResponse)

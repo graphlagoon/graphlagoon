@@ -606,3 +606,40 @@ async def test_an_agent_sets_the_look_of_a_graph_item(env):
             assert failed.is_error and "INVALID_CONTENT" in failed.content[0].text
         part = (await rest.get(f"/api/investigations/{cid}/items/{sel['id']}/snapshot")).json()
         assert part["look"] == style
+
+
+@pytest.mark.asyncio
+async def test_an_agent_lists_and_runs_the_table_actions_people_configured(env):
+    """The right-click table actions of an entity's context are tools for the
+    agent: listed with the value each parameter takes for that entity, run with
+    the source node id (not the unified one), and kept as a case table on save."""
+    app, exploration = env
+    store = InMemoryStore.get_instance()
+    context = store.get_graph_context(exploration.graph_context_id)
+    template = store.create_query_template(
+        context.id, OWNER, "Transactions", "sql",
+        "SELECT * FROM tx WHERE account = '$account' AND at >= date_sub(current_date(), $days)",
+        parameters=[{"id": "account", "label": "Account"}, {"id": "days", "label": "Days", "default": "30"}],
+    )
+    context.context_menu_actions = [{
+        "id": "tx", "label": "Transactions", "enabled": True, "kind": "run-query-template",
+        "templateId": str(template.id), "resultMode": "table", "paramBindings": {"account": "{node_id}"},
+        "match": {"target": "node", "nodeTypes": ["Account"]},
+    }]
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        cid = (await rest.post("/api/investigations", json={"title": "x"})).json()["id"]
+        await rest.post(f"/api/investigations/{cid}/items", json={
+            "kind": "graph", "subkind": "exploration_ref", "exploration_id": str(exploration.id)})
+        account = f"c1@{context.id}"
+        async with _mcp(app, token) as client:
+            listed = (await _tool(client, "list_entity_actions", investigation_id=cid, uid=account))["actions"]
+            assert [a["action_id"] for a in listed] == ["tx"] and listed[0]["missing"] == {}
+            assert listed[0]["parameters"][0]["value"] == "c1"
+            out = await _tool(client, "run_entity_action", investigation_id=cid, uid=account, action_id="tx",
+                              parameters={"days": "90"}, save=True)
+            assert out["status"] == "succeeded" and out["row_count"] == 2 and out["item_id"]
+            item = (await rest.get(f"/api/investigations/{cid}/items/{out['item_id']}")).json()
+            assert item["kind"] == "table" and item["provenance"]["params"] == {"account": "c1", "days": "90"}
+            bad = await client.call_tool("run_entity_action", {"investigation_id": cid, "uid": account, "action_id": "nope"})
+            assert bad.is_error and "MENU_ACTION_NOT_FOUND" in bad.content[0].text

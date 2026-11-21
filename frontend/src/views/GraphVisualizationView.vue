@@ -38,6 +38,7 @@ import { useConfigurableMenuActions } from '@/composables/useConfigurableMenuAct
 import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
 import ContextMenuActionsModal from '@/components/ContextMenuActionsModal.vue';
 import TemplateExecuteModal from '@/components/TemplateExecuteModal.vue';
+import MenuActionTableModal from '@/components/MenuActionTableModal.vue';
 import DetailModal from '@/components/DetailModal.vue';
 import DataTablePanel from '@/components/DataTablePanel.vue';
 import YourDataButton from '@/components/YourDataButton.vue';
@@ -215,7 +216,17 @@ const clusterProgramActions = useClusterProgramMenuActions();
 const configurableMenuActions = useConfigurableMenuActions();
 // Ref driving the pre-filled TemplateExecuteModal opened by run-query-template
 // actions whose required parameters could not all be bound from the click.
-const { pendingTemplateExecution } = configurableMenuActions;
+const { pendingTemplateExecution, pendingTable } = configurableMenuActions;
+// A row's node id focuses that node when it is on the canvas.
+function focusTableNode(payload: { id: string; multi: boolean }) {
+  if (!graphStore.nodes.some((n) => n.node_id === payload.id)) {
+    toast.info('That node is not on the canvas.');
+    return;
+  }
+  pendingTable.value = null;
+  graphStore.selectNode(payload.id, payload.multi);
+  handleFocusNode(payload.id);
+}
 const showDetailModal = ref(false);
 const showDataTable = ref(false);
 
@@ -901,6 +912,13 @@ watch(
         :template="pendingTemplateExecution.template"
         :initial-values="pendingTemplateExecution.initialValues"
         @close="pendingTemplateExecution = null"
+      />
+      <MenuActionTableModal
+        v-if="pendingTable"
+        :request="pendingTable"
+        :node-id-columns="[graphStore.currentContext?.node_structure?.node_id_col, 'node_id'].filter((c): c is string => !!c)"
+        @close="pendingTable = null"
+        @focus-node="focusTableNode"
       />
 
       <div class="graph-container" data-testid="graph-container" :style="{ '--toolbar-height': `${toolbarHeight}px` }">

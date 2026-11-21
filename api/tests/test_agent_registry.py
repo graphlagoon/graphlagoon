@@ -54,9 +54,14 @@ def _routes(router) -> dict[tuple[str, str], object]:
 
 
 ALL_ROUTES = {k: v for router in COVERED_ROUTERS for k, v in _routes(router).items()}
-# Of the graph-context routes, only the enrichment ones are case tooling (F2.1).
+# Of the graph-context routes, the enrichment ones are case tooling (F2.1), and
+# so are the right-click table actions and the context read that lists them.
 ALL_ROUTES |= {
-    k: v for k, v in _routes(graph_contexts.router).items() if "/enrichment/" in k[1]
+    k: v
+    for k, v in _routes(graph_contexts.router).items()
+    if "/enrichment/" in k[1]
+    or "/menu-actions/" in k[1]
+    or k == ("GET", "/api/graph-contexts/{context_id}")
 }
 # Of the graph routes, the two that change an exploration's graph through a tool.
 ALL_ROUTES |= {

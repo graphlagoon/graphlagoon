@@ -201,6 +201,13 @@ ${adaptSection}
 3. \`run-query-template\` — run one of this context's saved query templates,
    with the clicked item's properties bound to the template's parameters.
    Example: right-click a Person node runs a "neighbors of $person" template.
+   By default the result replaces the graph. With \`"resultMode": "table"\`
+   the rows open in a window instead and the graph stays: use it for
+   one-to-many data about the clicked item, e.g. "the transactions of the
+   accounts linked to this company in the last $days days" (the template joins
+   the edge table to reach neighbors 1 or 2 hops away; filters are template
+   parameters the user can edit in the window). Table actions also work on a
+   case canvas and agents can run them.
 4. \`show-same-value\` — nodes only: hide every node except those whose
    \`field\` (a node property, \`node_type\`, or \`metric:<name>\`) equals the
    clicked node's (\`"mode": "same"\`) or is set at all (\`"mode": "has"\`).
@@ -243,6 +250,16 @@ Output a JSON array of action objects:
     "templateId": "<uuid from the template list below>",
     "templateName": "Account transactions",
     "paramBindings": { "account": "{prop:account_id}" }
+  },
+  {
+    "kind": "run-query-template",
+    "label": "Transactions of the linked accounts",
+    "enabled": true,
+    "match": { "target": "node", "nodeTypes": ["Company"] },
+    "templateId": "<uuid from the template list below>",
+    "templateName": "Company accounts transactions",
+    "paramBindings": { "company": "{node_id}" },
+    "resultMode": "table"
   },
   {
     "kind": "show-same-value",

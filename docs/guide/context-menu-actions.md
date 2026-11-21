@@ -3,15 +3,16 @@
 ::: tip TL;DR
 Custom entries in the right-click menu, configured once per context: open
 a URL built from the clicked item's data (a web page, or a desktop app such
-as VS Code or Claude Code), copy formatted text, or run a query template with
-the item bound as a parameter.
+as VS Code or Claude Code), copy formatted text, run a query template with
+the item bound as a parameter, or show what a query returns for the item as
+a table (its transactions, the accounts 2 hops away) without leaving the graph.
 
 - **Use it when** the clicked node should bridge to another system —
   PubMed for a gene, your CRM for an account, the source file in VS Code,
   a Claude Code session in the right repo — or when a curated query from
   *this* node should be one click away.
 - **Not the tool for** bulk operations (an action sees exactly one
-  clicked item); logic beyond the four kinds — for arbitrary JavaScript
+  clicked item); logic beyond the kinds below — for arbitrary JavaScript
   over the graph, use a [cluster program](./clusters.md) with a node
   binding. Configuring needs write access to the context; readers still
   get and use the menu.
@@ -25,6 +26,8 @@ do something with *that* item's data:
 - open a PubMed search for the gene you clicked,
 - copy `name <email>` of a person to the clipboard,
 - run a saved query template with the clicked account bound as its parameter,
+- list the transactions of the accounts linked to the company you clicked,
+  in a table, with the period as a filter you can change,
 - re-open the current exploration with the ego layout centred on that node.
 
 Actions are configured once per context and stored with it, so everyone who
@@ -135,6 +138,80 @@ usually just `{prop:account_id}` or `{node_id}`.
 - A `private` template is only ever sent to its owner — an action referencing
   it simply does not appear for anyone else. Prefer `shared` templates; the
   editor warns about this.
+
+### Show the result as a table {#table-result}
+
+A query template action has a **Result** choice: *Graph* (the default above)
+or *Table*. A table action runs the template for the clicked item on the
+server and opens the rows in a window; the graph on the canvas stays as it is.
+Use it for data that has many rows per item, which a node property cannot
+hold: an account's transactions, a person's addresses over time, the
+accounts around a company.
+
+![A table action: the accounts 2 hops from the clicked company](/screenshots/context-menu-actions-table.png)
+
+- **Filters are the template's parameters.** The window shows them with the
+  values the click bound, and you change one (the period, a minimum amount,
+  the node type) and press *Run*. Nothing is special about dates: anything the
+  template's `WHERE` reads from a parameter is a filter.
+- **Neighbors are reached in the query**, with the context's own edge table,
+  so the result includes every neighbor in the warehouse, not only the nodes
+  loaded on the canvas. Data from enrichment tables works the same way: the
+  template may read any table the context authorizes.
+- **Rows that are node ids** (the context's node id column, or `node_id`)
+  are links: clicking one selects and focuses that node when it is on the
+  canvas.
+- **The grid** sorts, filters per column, searches and exports CSV. It shows
+  up to 10,000 rows; when there are more, it says so and offers to load up to
+  100,000. *Add to case* keeps the rows as a table of the current case, with
+  the action, the template and the values as provenance.
+- **Values from the item must be plain**: a bound value with a quote,
+  backslash, backtick, `;` or `$` is refused (the template splices values as
+  text), and the parameter is marked so you can change it.
+- **On a case canvas** table actions work too (graph-replacing template
+  actions do not) on nodes: the node id sent is the one of the source graph,
+  not the case's merged id. Edge table actions are offered in explorations only.
+- **Agents** can run them as well: the MCP tools
+  [`list_entity_actions`](./agents-mcp-tools.md#list-entity-actions) and
+  [`run_entity_action`](./agents-mcp-tools.md#run-entity-action) list the
+  table actions that apply to an entity of a case and run one, so what you
+  configure for people is a tool for the agent too.
+
+Two recipes, as SQL templates (`$name` is a parameter):
+
+```sql
+-- "Transactions of this account, last N days": bind account to {node_id}
+SELECT t.at, t.amount, t.counterparty, t.channel
+FROM main.payments.transactions t
+WHERE t.account_id = '$account'
+  AND t.at >= date_sub(current_date(), CAST('$days' AS INT))
+ORDER BY t.at DESC
+```
+
+```sql
+-- "Transactions of the accounts linked to this company (1 or 2 hops)"
+WITH hop1 AS (
+  SELECT CASE WHEN e.src = '$company' THEN e.dst ELSE e.src END AS node_id, 1 AS hop
+  FROM main.graph.edges e WHERE '$company' IN (e.src, e.dst)
+), hop2 AS (
+  SELECT CASE WHEN e.src = h.node_id THEN e.dst ELSE e.src END AS node_id, 2 AS hop
+  FROM main.graph.edges e JOIN hop1 h ON h.node_id IN (e.src, e.dst)
+), accounts AS (
+  SELECT r.node_id, min(r.hop) AS hop
+  FROM (SELECT * FROM hop1 UNION ALL SELECT * FROM hop2) r
+  JOIN main.graph.nodes n ON n.node_id = r.node_id AND n.node_type = 'Account'
+  WHERE r.hop <= CAST('$hops' AS INT)
+  GROUP BY r.node_id
+)
+SELECT a.node_id AS account, a.hop, t.at, t.amount, t.counterparty
+FROM accounts a JOIN main.payments.transactions t ON t.account_id = a.node_id
+WHERE t.at >= date_sub(current_date(), CAST('$days' AS INT))
+ORDER BY t.at DESC
+```
+
+The dev showcase (`make dev-seed-showcase`) has one ready: right-click a
+Company or Person in *Demo · Cluster programs & right-click actions* →
+*Demo · Accounts within 2 hops (table)*.
 
 ### Show only nodes with… {#show-only-nodes-with}
 
@@ -313,6 +390,10 @@ cluster programs), so they follow the context's sharing:
 | --- | --- | --- |
 | Owner / write share | yes | yes |
 | Read share | yes | no |
+
+Running a table action needs only read access: its query goes through the same
+read-only check and table scope as the [Query Console](./exploring-the-graph.md#query-console), so
+it can read nothing a reader could not query there.
 
 Edits save automatically (debounced) and survive reloads in both the
 in-memory dev setup and the PostgreSQL one — `make migrate` applies the

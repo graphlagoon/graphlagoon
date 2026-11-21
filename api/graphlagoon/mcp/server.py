@@ -1359,6 +1359,110 @@ def build_server():
             raise _tool_error(error.get("code", "FORBIDDEN"), error.get("message", str(exc.detail))) from exc
         raise _tool_error("ENRICHMENT_TABLE_NOT_FOUND", f"No enrichment table '{table}' applies to this entity")
 
+    async def _entity_contexts(investigation_id: UUID, user: str, uid: str):
+        """The entity and, per source context it came from, ``(context, target)``
+        with the source node id: what a table action of that context runs on."""
+        from fastapi import HTTPException
+
+        from graphlagoon.utils.context_access import get_context_with_access
+
+        graph = await _graph(investigation_id, user)
+        real = resolve_uid(graph, uid)
+        node = next((n for n in graph["nodes"] if n["uid"] == real), None)
+        if node is None:
+            raise _tool_error("ENTITY_NOT_FOUND", f"No entity '{uid}' in this case")
+        items = await _call(case_items.list_items(investigation_id, user, "graph"))
+        context_of = {str(i["id"]): i["context_id"] for i in items if i["context_id"]}
+        seen, out = set(), []
+        for origin in node["sources"]:
+            context_id = context_of.get(origin["source_id"])
+            if not context_id or str(context_id) in seen:
+                continue
+            seen.add(str(context_id))
+            try:
+                context = await get_context_with_access(context_id, user)
+            except HTTPException:
+                continue  # a source this agent cannot read offers nothing; the others still do
+            target = {"type": "node", "id": origin["node_id"], "node_type": node["type"],
+                      "properties": node.get("properties") or {}}
+            out.append((context, target))
+        return real, out
+
+    @tool("list_entity_actions")
+    async def list_entity_actions(ctx: Context, investigation_id: UUID, uid: str) -> dict:
+        """The table actions people configured on the right-click menu of the
+        entity's contexts (e.g. "Transactions of the linked accounts, last 30
+        days"): each with its parameters, the value each one would take for this
+        entity, and what is still missing. Run one with run_entity_action."""
+        from graphlagoon.services import menu_action_tables as mat
+
+        user = _agent(ctx)
+        _, contexts = await _entity_contexts(investigation_id, user, uid)
+        actions = []
+        for context, target in contexts:
+            for action in mat.table_actions(context):
+                if not mat.matches(action, target):
+                    continue
+                try:
+                    template = await mat.load_template(context.id, action.get("templateId", ""), user)
+                except mat.MenuActionError:
+                    continue  # a template this user cannot see offers nothing
+                parameters, problems = mat.bind_parameters(template, action, target, {})
+                actions.append({
+                    "context_id": str(context.id), "action_id": action["id"], "label": action.get("label"),
+                    "template": template["name"], "description": template.get("description"),
+                    "query_type": template["query_type"], "parameters": parameters, "missing": problems,
+                })
+        await _audit_read(user, "list_entity_actions", investigation_id)
+        return _out({"actions": actions})
+
+    @tool("run_entity_action")
+    async def run_entity_action(ctx: Context, investigation_id: UUID, uid: str, action_id: str,
+                                parameters: Optional[dict[str, str]] = None, row_limit: int = 1000,
+                                context_id: Optional[UUID] = None, save: bool = False,
+                                title: Optional[str] = None) -> dict:
+        """Runs a table action of list_entity_actions for one entity and returns
+        its rows (columns, rows, truncated). ``parameters`` override the values
+        the action binds from the entity (e.g. {"days": "90"}); a
+        ``needs_parameters`` status lists what is missing and nothing ran.
+        ``context_id`` picks the context when the entity comes from several.
+        ``save=true`` keeps the rows as a table item of the case (table/result)
+        with the action, template and values as provenance."""
+        from fastapi import HTTPException
+
+        from graphlagoon.services import menu_action_tables as mat
+
+        user = _agent(ctx)
+        real, contexts = await _entity_contexts(investigation_id, user, uid)
+        candidates = [(c, t) for c, t in contexts if context_id is None or str(c.id) == str(context_id)]
+        found = next(((c, t) for c, t in candidates
+                      if any(a.get("id") == action_id for a in mat.table_actions(c))), None)
+        if found is None:
+            raise _tool_error("MENU_ACTION_NOT_FOUND", f"No table action '{action_id}' applies to this entity")
+        context, target = found
+        try:
+            result = await mat.run(context, user, action_id, target, parameters or {},
+                                   max(1, min(row_limit, 100000)), wait=True)
+        except mat.MenuActionError as exc:
+            raise _tool_error(exc.code, exc.message) from exc
+        except HTTPException as exc:
+            error = (exc.detail or {}).get("error", {}) if isinstance(exc.detail, dict) else {}
+            raise _tool_error(error.get("code", "FORBIDDEN"), error.get("message", str(exc.detail))) from exc
+        await _audit_read(user, "run_entity_action", investigation_id)
+        if save and result["status"] == "succeeded":
+            values = {p["id"]: p["value"] for p in result["parameters"]}
+            data = dict(kind="table", subkind="result",
+                        title=title or f"{result['label']} · {real}",
+                        description=f"{result['template_name']} for {real}",
+                        provenance={"tool": "menu_action", "context_id": str(context.id),
+                                    "action": action_id, "template": result["template_name"],
+                                    "params": values, "entity": real})
+            item = await _create(investigation_id, user, data, None, {
+                "columns": result["columns"], "rows": result["rows"],
+                "row_count": result["row_count"], "truncated": result["truncated"]})
+            result = {**result, "item_id": item.get("id")}
+        return _out(result)
+
     # -- analyses ----------------------------------------------------------------------
 
     @tool("run_analysis")

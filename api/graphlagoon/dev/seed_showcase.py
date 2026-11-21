@@ -246,6 +246,49 @@ MENU_ACTIONS = [
      "enabled": True, "match": {"target": "node"}, "field": "risk_tier", "mode": "has"},
 ]
 
+
+
+def neighbors_template(edge: str, node: str) -> dict:
+    """A table action's template: the nodes 1 or 2 hops from the clicked one,
+    read from the context's own tables (every neighbor, not only the loaded)."""
+    return {
+        "name": "Demo · Neighbors within N hops",
+        "description": "Nodes 1 or 2 hops from a node, with the hop, filtered by type.",
+        "query_type": "sql",
+        "query": (
+            "WITH hop1 AS (\n"
+            "  SELECT CASE WHEN e.src = '$node' THEN e.dst ELSE e.src END AS node_id, 1 AS hop\n"
+            f"  FROM {edge} e WHERE e.src = '$node' OR e.dst = '$node'\n"
+            "), hop2 AS (\n"
+            "  SELECT CASE WHEN e.src = h.node_id THEN e.dst ELSE e.src END AS node_id, 2 AS hop\n"
+            f"  FROM {edge} e JOIN hop1 h ON e.src = h.node_id OR e.dst = h.node_id\n"
+            "), reached AS (\n"
+            "  SELECT node_id, min(hop) AS hop FROM (SELECT * FROM hop1 UNION ALL SELECT * FROM hop2)\n"
+            "  WHERE node_id <> '$node' GROUP BY node_id\n"
+            ")\n"
+            "SELECT n.node_id, n.node_type, n.display_name, n.city, n.branch, n.risk_tier, r.hop\n"
+            f"FROM reached r JOIN {node} n ON n.node_id = r.node_id\n"
+            "WHERE r.hop <= $max_hops AND ('$type' = 'any' OR n.node_type = '$type')\n"
+            "ORDER BY r.hop, n.node_type, n.display_name"
+        ),
+        "parameters": [
+            {"id": "node", "type": "input", "label": "Node", "required": True},
+            {"id": "max_hops", "type": "select", "label": "Hops", "default": "2",
+             "options": ["1", "2"], "required": True},
+            {"id": "type", "type": "select", "label": "Node type", "default": "Account",
+             "options": ["any", *NODE_TYPES], "required": True},
+        ],
+        "visibility": "shared",
+    }
+
+
+def table_action(template_id: str) -> dict:
+    return {"id": "demo-neighbor-accounts", "kind": "run-query-template",
+            "label": "Demo · Accounts within 2 hops (table)", "icon": "🧾", "enabled": True,
+            "match": {"target": "node", "nodeTypes": ["Company", "Person"]},
+            "templateId": template_id, "templateName": "Demo · Neighbors within N hops",
+            "paramBindings": {"node": "{node_id}"}, "resultMode": "table"}
+
 # ---------------------------------------------------------------------------
 
 
@@ -386,11 +429,20 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
             "Clusters → Group by lists the 'Demo ·' programs; Programs… holds the library (Import/Export JSON). "
             "Right-click a node: 'Demo · Show only this branch/city/type', 'Show only nodes with a risk tier', "
             "'Demo · Same branch as this node' (program, value from the node) and 'Demo · Groups of at least N' "
-            "(asks for the missing value).",
+            "(asks for the missing value). On a Company or Person, 'Demo · Accounts within 2 hops (table)' "
+            "opens the accounts 1–2 hops away as rows (edit Hops / Node type in the window and run again).",
             cluster_programs=CLUSTER_PROGRAMS,
             context_menu_actions=MENU_ACTIONS,
         )
         made["contexts"].append(programs_ctx["title"])
+        # A table action needs its template's id: the template first, then the action.
+        template = (await client.request(
+            "POST", f"/api/graph-contexts/{programs_ctx['id']}/query-templates", OWNER,
+            json=neighbors_template(edge, node),
+        )).json()
+        await client.request("PUT", f"/api/graph-contexts/{programs_ctx['id']}", OWNER, json={
+            "context_menu_actions": [*MENU_ACTIONS, table_action(template["id"])],
+        })
         programs_graph = await subgraph(client, programs_ctx["id"])
         playground = await new_exploration(
             client, programs_ctx["id"], "Demo · Programs playground (run, collapse, show only)", programs_graph,

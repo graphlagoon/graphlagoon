@@ -1042,6 +1042,50 @@ export interface TableQueryResponse {
   metadata?: QueryMetadata;
 }
 
+/** The clicked item a menu table action runs for (`id`: the datasource's id). */
+export interface MenuActionTarget {
+  type: 'node' | 'edge';
+  id: string;
+  node_type?: string;
+  relationship_type?: string;
+  src?: string;
+  dst?: string;
+  properties?: Record<string, unknown>;
+}
+
+export interface MenuActionParameter {
+  id: string;
+  label: string;
+  type: 'input' | 'select';
+  options?: string[] | null;
+  required: boolean;
+  description?: string | null;
+  binding?: string | null;
+  value: string;
+  source: 'given' | 'binding' | 'default';
+}
+
+/** `POST /api/graph-contexts/{id}/menu-actions/{action_id}/table`. */
+export interface MenuActionTableResponse {
+  action_id: string;
+  label?: string | null;
+  template_id: string;
+  template_name: string;
+  query_type: string;
+  parameters: MenuActionParameter[];
+  /** Parameter id → why nothing ran (status `needs_parameters`). */
+  problems: Record<string, string>;
+  status: 'needs_parameters' | 'running' | 'succeeded' | 'failed';
+  statement_id?: string | null;
+  columns: string[];
+  rows: (string | null)[][];
+  row_count: number;
+  row_limit: number;
+  truncated: boolean;
+  error?: { code: string; message: string } | null;
+  duration_ms?: number | null;
+}
+
 export interface TableQueryStatusResponse {
   status: 'running' | 'succeeded' | 'canceled';
   statement_id: string;

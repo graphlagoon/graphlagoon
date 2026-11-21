@@ -35,7 +35,7 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("Queries and tables", ["run_query", "join_tables", "compare_tables", "promote_tables"]),
     ("Annotations and evidence", ["annotate", "group", "list_annotations", "pin_evidence"]),
     ("Tasks", ["list_tasks", "add_task", "update_task"]),
-    ("Graph and entities", ["get_graph", "search_entities", "get_entity", "lookup_enrichment", "find_entity_cases"]),
+    ("Graph and entities", ["get_graph", "search_entities", "get_entity", "lookup_enrichment", "list_entity_actions", "run_entity_action", "find_entity_cases"]),
     ("Analyses", ["run_analysis"]),
     ("Reports and decisions", ["render_report", "propose_decision"]),
     ("Journal", ["list_events", "changes_since"]),

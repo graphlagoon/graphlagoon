@@ -120,6 +120,18 @@ describe('parseImportedActionConfigs', () => {
     }
   });
 
+  it('keeps resultMode table and drops any other value (absent = graph)', () => {
+    const action = (resultMode: unknown) => ({
+      kind: 'run-query-template', label: 'Tx', match: { target: 'node' }, templateId: 'u', resultMode,
+    });
+    const result = parseImportedActionConfigs(JSON.stringify([action('table'), action('graph'), action('nope')]));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.configs.map((c) => (c.kind === 'run-query-template' ? c.resultMode : 'x'))).toEqual([
+      'table', undefined, undefined,
+    ]);
+  });
+
   it('rejects run-query-template without templateId and copy-text without textTemplate', () => {
     expect(
       parseImportedActionConfigs(

@@ -64,3 +64,26 @@ describe('useEscapeToCloseModals', () => {
     expect(wrapper.find('[data-testid="drawer"]').exists()).toBe(false);
   });
 });
+
+describe('useEscapeToCloseModals with a PrimeVue overlay open', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('leaves Escape to a grid column filter open over the modal', async () => {
+    const wrapper = mount(Host, { attachTo: document.body });
+    // PrimeVue teleports its overlays to body.
+    const overlay = document.createElement('div');
+    overlay.className = 'p-datatable-filter-overlay';
+    document.body.appendChild(overlay);
+    escape();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="modal"]').exists()).toBe(true);
+
+    overlay.remove();
+    escape();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="modal"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+});

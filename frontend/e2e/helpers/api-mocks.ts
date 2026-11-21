@@ -606,6 +606,37 @@ export async function seedExplorations(page: Page, explorations: any[]) {
 }
 
 /**
+ * Answer the right-click table actions (`POST .../menu-actions/{id}/table`) with
+ * rows, and record each request body so a test can check what the click sent.
+ * Call AFTER setupAPIMocks.
+ */
+export async function mockMenuActionTable(
+  page: Page,
+  answer: { columns: string[]; rows: (string | null)[][]; templateName?: string; parameters?: { id: string; label: string; value: string }[] },
+): Promise<any[]> {
+  const seen: any[] = [];
+  await page.route('**/graphlagoon/api/graph-contexts/*/menu-actions/*/table', (route) => {
+    const body = route.request().postDataJSON();
+    seen.push(body);
+    const actionId = decodeURIComponent(route.request().url().split('/menu-actions/')[1].split('/')[0]);
+    const parameters = (answer.parameters ?? []).map((p) => ({
+      ...p, type: 'input', required: true, source: 'default', value: body.parameters?.[p.id] ?? p.value,
+    }));
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        action_id: actionId, label: actionId, template_id: 'tpl', template_name: answer.templateName ?? 'Template',
+        query_type: 'sql', parameters, problems: {}, status: 'succeeded', statement_id: null,
+        columns: answer.columns, rows: answer.rows, row_count: answer.rows.length,
+        row_limit: body.row_limit ?? 10000, truncated: false, error: null, duration_ms: 12,
+      }),
+    });
+  });
+  return seen;
+}
+
+/**
  * Override the tabular query endpoint (Query Console). Call AFTER setupAPIMocks.
  * Pass `{ status, body }` to simulate an error response.
  */

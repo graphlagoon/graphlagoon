@@ -185,6 +185,7 @@ export function parseImportedActionConfigs(json: string): ImportResult {
         templateId: raw.templateId.trim(),
         templateName: typeof raw.templateName === 'string' ? raw.templateName : undefined,
         paramBindings: bindings,
+        ...(raw.resultMode === 'table' ? { resultMode: 'table' as const } : {}),
       });
     }
   }
