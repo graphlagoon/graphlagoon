@@ -7,6 +7,7 @@ import { usePersistence } from '@/composables/usePersistence';
 import { useToast } from '@/composables/useToast';
 import { api } from '@/services/api';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { openRoute } from '@/utils/openRoute';
 import { useShareableGroups } from '@/composables/useShareableGroups';
 import { groupShareValue, shareKind, shareLabel } from '@/utils/shareTargets';
 import type { Exploration } from '@/types/graph';
@@ -155,11 +156,14 @@ const explorationsByContext = computed(() => {
     .sort((a, b) => a[1].contextTitle.localeCompare(b[1].contextTitle));
 });
 
-function openExploration(exploration: Exploration) {
-  router.push({
-    path: `/graph/${exploration.graph_context_id}`,
-    query: { exploration: exploration.id },
-  });
+function explorationLink(exploration: Exploration) {
+  return { path: `/graph/${exploration.graph_context_id}`, query: { exploration: exploration.id } };
+}
+
+/** A click on the row opens it; a real link inside the row handles itself. */
+function openExploration(exploration: Exploration, event: MouseEvent) {
+  if ((event.target as HTMLElement).closest('a, button')) return;
+  openRoute(router, explorationLink(exploration), event);
 }
 
 async function deleteExploration(exploration: Exploration) {
@@ -353,8 +357,8 @@ async function quickShare(email: string) {
           :key="exploration.id"
           class="list-item"
         >
-          <div class="list-item-content" @click="openExploration(exploration)">
-            <div class="list-item-title">{{ exploration.title }}</div>
+          <div class="list-item-content" @click="openExploration(exploration, $event)" @auxclick.middle="openExploration(exploration, $event)">
+            <RouterLink :to="explorationLink(exploration)" class="list-item-title">{{ exploration.title }}</RouterLink>
             <div class="list-item-subtitle">
               Updated {{ new Date(exploration.updated_at).toLocaleDateString() }}
               <span v-if="!isOwner(exploration)" class="badge" :class="exploration.has_write_access ? 'badge-write' : 'badge-readonly'">
@@ -364,9 +368,9 @@ async function quickShare(email: string) {
             </div>
           </div>
           <div class="list-item-actions">
-            <button class="btn btn-outline btn-sm" @click="openExploration(exploration)">
+            <RouterLink :to="explorationLink(exploration)" class="btn btn-outline btn-sm">
               Open
-            </button>
+            </RouterLink>
             <button
               class="btn btn-outline btn-sm"
               :data-testid="`exploration-add-to-investigation-${exploration.id}`"
@@ -626,8 +630,11 @@ async function quickShare(email: string) {
 }
 
 .list-item-title {
+  display: block;
   font-weight: 500;
   margin-bottom: 4px;
+  color: inherit;
+  text-decoration: none;
 }
 
 .list-item-subtitle {

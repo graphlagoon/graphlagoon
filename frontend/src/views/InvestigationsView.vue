@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
+import { openRoute } from '@/utils/openRoute';
 import { STATUS_LABELS, caseNumber, deadlineElapsed, deadlineOf, deadlineText } from '@/utils/investigationStatus';
 import { formatDate, plural } from '@/utils/format';
 import { fieldText } from '@/utils/caseFields';
@@ -273,7 +274,7 @@ async function create() {
 /** A click anywhere on a row opens the case, except on a link or button of its own. */
 function openRow(id: string, event: MouseEvent) {
   if ((event.target as HTMLElement).closest('a, button, input, select')) return;
-  void router.push(`/investigations/${id}`);
+  openRoute(router, `/investigations/${id}`, event);
 }
 </script>
 
@@ -432,7 +433,7 @@ function openRow(id: string, event: MouseEvent) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="inv in store.investigations" :key="inv.id" class="queue-row" :data-testid="`investigation-row-${inv.id}`" @click="openRow(inv.id, $event)">
+          <tr v-for="inv in store.investigations" :key="inv.id" class="queue-row" :data-testid="`investigation-row-${inv.id}`" @click="openRow(inv.id, $event)" @auxclick.middle="openRow(inv.id, $event)">
             <td class="case-cell">
               <RouterLink :to="`/investigations/${inv.id}`" class="case-title">{{ inv.title }}</RouterLink>
               <span v-if="accessMark(inv)" class="pill access" data-testid="access-mark">{{ accessMark(inv) }}</span>

@@ -145,10 +145,6 @@ function onDriftApplied() {
   void contextsStore.fetchContexts();
 }
 
-function openGraph(context: GraphContext) {
-  router.push(`/graph/${context.id}`);
-}
-
 async function deleteContext(context: GraphContext) {
   const ok = await confirmAction({
     title: `Delete context “${context.title}”?`,
@@ -362,9 +358,9 @@ async function quickShare(email: string) {
           />
         </div>
         <div class="list-item-actions">
-          <button class="btn btn-outline" @click="openGraph(context)">
+          <RouterLink :to="`/graph/${context.id}`" class="btn btn-outline">
             Open
-          </button>
+          </RouterLink>
           <button
             v-if="capabilitiesFor(resolveDatasourceType(context)).supportsDrift"
             class="btn btn-outline"
