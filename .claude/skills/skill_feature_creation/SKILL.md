@@ -102,6 +102,10 @@ Rules that have bitten before:
   structured-detail helper in routers, factory fixtures in tests.
 - Smallest diff that works. No wrapper, option or config "for later".
   Finish everything the change breaks: callers, fixtures, mocks, types.
+- The type check (`npm run typecheck`, ~1–1.35 GB) is not the inner
+  loop: run it once per change set, under the shared lock
+  (`reference/frontend.md`). Two at once, or one beside Playwright, get
+  OOM-killed on a small machine.
 - Loop: edit → run the one relevant test → fix, until it passes. A failing
   check is fixed at its cause; never skip, loosen or delete a test to get
   green. After three different failed attempts, stop and report the output.
