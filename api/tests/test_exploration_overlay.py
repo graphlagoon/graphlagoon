@@ -222,3 +222,25 @@ def test_remove_needs_something_and_write_access(env):
     assert client.post(f"{url}/remove", json={}, headers=h(OWNER)).status_code == 422
     client.post(f"{url}/share", json={"email": READER, "permission": "read"}, headers=h(OWNER))
     assert client.post(f"{url}/remove", json={"node_ids": ["a1"]}, headers=h(READER)).status_code == 403
+
+
+def test_a_case_sees_what_enrichment_wrote_on_the_saved_exploration(env):
+    """One to one: the case shows the enriched values the author saw, not the bare answer."""
+    client, _, eid, _ = env
+    enriched = {
+        "nodes": [
+            {"id": "a1", "type": "Account", "properties": {"risk": "low", "kyc_tier": "high"}},
+            {"id": "a2", "type": "Account", "properties": {}},
+        ],
+        "edges": SNAPSHOT["edges"],
+        "enriched": {"nodes": {"a1": {"KYC": ["kyc_tier"]}}},
+    }
+    r = client.put(f"/api/explorations/{eid}", json={"snapshot": enriched}, headers=h(OWNER))
+    assert r.status_code == 200, r.text
+    case = client.post("/api/investigations", json={"title": "Case"}, headers=h(OWNER)).json()
+    url = f"/api/investigations/{case['id']}"
+    r = client.post(f"{url}/items", json={"kind": "graph", "subkind": "exploration_ref", "exploration_id": eid}, headers=h(OWNER))
+    assert r.status_code == 201, r.text
+    graph = client.get(f"{url}/graph", headers=h(OWNER)).json()
+    nodes = {n["sources"][0]["node_id"]: n for n in graph["nodes"]}
+    assert nodes["a1"]["properties"]["kyc_tier"] == "high"

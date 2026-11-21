@@ -132,3 +132,40 @@ describe('graph store — a saved exploration keeps what enrichment wrote', () =
     expect(store.nodes.find((n) => n.node_id === 'a')?.properties).toMatchObject({ titular: 'Ana', tier: 'high' });
   });
 });
+
+describe('graph store — live refresh and enrichment', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.restoreAllMocks();
+  });
+
+  it('a pulled snapshot does not put back an older enriched value over the one this session ran', async () => {
+    const store = useGraphStore();
+    store.currentContext = {
+      id: 'c1', title: 'Bank',
+      enrichment_tables: [{ name: 'kyc', label: 'KYC', provider: { name: 'kyc-demo', target: 'nodes', run: 'manual' } }],
+    } as GraphContext;
+    vi.spyOn(api, 'getExploration').mockResolvedValueOnce(exploration(0));
+    vi.spyOn(api, 'getExplorationSnapshot').mockResolvedValueOnce({
+      ...structuredClone(SAVED),
+      nodes: [{ id: 'a', type: 'Conta', properties: { titular: 'Ana', tier: 'low' } }, SAVED.nodes[1]],
+      enriched: { nodes: { a: { KYC: ['tier'] } } },
+    });
+    await store.loadExploration('x1');
+    vi.spyOn(api, 'runEnrichmentQuery').mockResolvedValue({
+      name: 'kyc', label: 'KYC', target: 'nodes', columns: ['tier'], rows: { a: { tier: 'high' } }, truncated: false,
+    } as never);
+    await store.runQueryEnrichment({ names: ['kyc'] });
+    expect(store.nodes.find((n) => n.node_id === 'a')?.properties).toMatchObject({ tier: 'high' });
+
+    // Someone else saves: the snapshot still carries the old enriched value, and a changed title.
+    vi.mocked(api.getExploration).mockResolvedValueOnce(exploration(1));
+    vi.mocked(api.getExplorationSnapshot).mockResolvedValueOnce({
+      ...structuredClone(SAVED),
+      nodes: [{ id: 'a', type: 'Conta', properties: { titular: 'Ana Maria', tier: 'low' } }, SAVED.nodes[1]],
+      enriched: { nodes: { a: { KYC: ['tier'] } } },
+    });
+    await store.applyRemoteChange();
+    expect(store.nodes.find((n) => n.node_id === 'a')?.properties).toMatchObject({ titular: 'Ana Maria', tier: 'high' });
+  });
+});
