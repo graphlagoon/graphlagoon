@@ -171,6 +171,7 @@
                 <option value="copy-text">Copy text</option>
                 <option value="run-query-template">Run query template</option>
                 <option value="show-same-value">Show only nodes with…</option>
+                <option value="show-table">Table from the canvas</option>
               </select>
 
               <label>Applies to</label>
@@ -303,6 +304,114 @@
               </p>
             </div>
 
+            <div v-else-if="editing.kind === 'show-table'" class="kind-fields" data-testid="menu-action-canvas-table">
+              <p class="hint">
+                Rows computed in the browser from the graph on the canvas: instant, and on a
+                case canvas they include file and derived nodes. For everything in the
+                warehouse, use "Run query template" with the Table result.
+              </p>
+              <label>Source</label>
+              <div class="radio-row" data-testid="menu-action-table-source-kind">
+                <label><input v-model="editingTableSource" type="radio" value="neighborhood" /> Neighbors — no code</label>
+                <label><input v-model="editingTableSource" type="radio" value="program" data-testid="menu-action-table-source-program" /> Program — JavaScript</label>
+              </div>
+              <template v-if="editingTableSource === 'neighborhood'">
+                <div class="inline-fields">
+                  <label>Hops
+                    <select v-model.number="editingHops" data-testid="menu-action-hops">
+                      <option v-for="n in MAX_NEIGHBORHOOD_HOPS" :key="n" :value="n">{{ n }}</option>
+                    </select>
+                  </label>
+                  <label>Direction
+                    <select v-model="editingDirection">
+                      <option value="any">any</option>
+                      <option value="out">out</option>
+                      <option value="in">in</option>
+                    </select>
+                  </label>
+                  <label>List
+                    <select v-model="editingList" data-testid="menu-action-list">
+                      <option value="nodes">the nodes reached</option>
+                      <option value="edges">the edges of those nodes</option>
+                    </select>
+                  </label>
+                </div>
+                <label>Walk over edge types <span class="hint-inline">(comma-separated; empty: all)</span></label>
+                <input v-model="editingWalkTypes" type="text" list="menu-action-edge-types" :placeholder="edgeTypes.slice(0, 3).join(', ')" />
+                <label>Node types listed <span class="hint-inline">(empty: all; the walk passes through every type)</span></label>
+                <input v-model="editingListedNodeTypes" type="text" data-testid="menu-action-listed-node-types" :placeholder="nodeTypes.slice(0, 3).join(', ')" />
+                <template v-if="editingList === 'edges'">
+                  <label>Edge types listed <span class="hint-inline">(empty: all)</span></label>
+                  <input v-model="editingListEdgeTypes" type="text" data-testid="menu-action-list-edge-types" :placeholder="edgeTypes.slice(0, 3).join(', ')" />
+                </template>
+                <label>Columns <span class="hint-inline">(properties or metric:&lt;name&gt;; empty: every property)</span></label>
+                <input v-model="editingColumns" type="text" :placeholder="availableConditionRefs.slice(0, 3).join(', ')" />
+                <datalist id="menu-action-edge-types">
+                  <option v-for="t in edgeTypes" :key="t" :value="t" />
+                </datalist>
+              </template>
+              <template v-else>
+                <label>Program</label>
+                <JavaScriptEditor
+                  v-model="editingProgramCode"
+                  :completions="TABLE_PROGRAM_COMPLETIONS"
+                  :has-error="!!canvasSourceError"
+                  placeholder="return hops(item.node_id, 2).map(n => ({ node_id: n.node_id, type: n.node_type, hop: n.hop }))"
+                  data-testid="menu-action-program-code"
+                />
+                <p class="hint">
+                  Runs in a sandboxed worker (no network, no storage, 10 s limit) and returns an
+                  array of objects or <code>{ columns, rows }</code>. In scope: <code>item</code>,
+                  <code>params</code>, <code>nodes</code>, <code>edges</code>, <code>node(id)</code>,
+                  <code>neighbors(id, opts)</code>, <code>hops(id, k, opts)</code>,
+                  <code>edgesOf(ids, opts)</code>, <code>metric(ref, id)</code>, <code>selectedNodeIds</code>.
+                </p>
+                <label>Parameters <span class="hint-inline">(JSON, optional: editable in the table window)</span></label>
+                <textarea
+                  v-model="editingProgramParams"
+                  rows="3"
+                  class="params-json"
+                  data-testid="menu-action-program-params"
+                  placeholder='[{ "id": "min_amount", "label": "Min amount", "default": "0" }]'
+                />
+                <div v-if="programParamIds.length" class="bindings">
+                  <div class="subsection-title">Parameter bindings</div>
+                  <div v-for="id in programParamIds" :key="id" class="binding-row">
+                    <span class="binding-param">{{ id }}</span>
+                    <input v-model="editingBindings[id]" type="text" placeholder="{prop:...} — empty: uses default" />
+                  </div>
+                </div>
+              </template>
+              <p v-if="canvasSourceError" class="hint warning" data-testid="menu-action-canvas-error">{{ canvasSourceError }}</p>
+              <div class="test-row">
+                <button
+                  class="btn-secondary"
+                  :disabled="!!canvasSourceError || !testItem"
+                  data-testid="menu-action-test"
+                  @click="testCanvasTable"
+                >Test on {{ testItem ? `${testItem.type} ${testItem.id}` : 'a selected node' }}</button>
+                <span v-if="!testItem" class="hint-inline">Select a node (or an edge) on the canvas first.</span>
+              </div>
+              <div v-if="testPreview" class="test-preview" data-testid="menu-action-test-preview">
+                <p v-if="testPreview.loading.value" class="hint">Running…</p>
+                <p v-else-if="testPreview.error.value" class="hint warning">{{ testPreview.error.value }}</p>
+                <p v-else-if="testPreview.needsParameters.value" class="hint warning">
+                  Needs: {{ Object.entries(testPreview.problems.value).map(([k, v]) => `${k} ${v}`).join('; ') }}
+                </p>
+                <template v-else>
+                  <p class="hint">{{ testPreview.rows.value.length.toLocaleString() }} rows{{ testPreview.truncated.value ? ' (more)' : '' }}<template v-if="testPreview.rows.value.length > 8">, first 8:</template></p>
+                  <div class="preview-scroll">
+                    <table>
+                      <thead><tr><th v-for="c in testPreview.columns.value" :key="c">{{ c }}</th></tr></thead>
+                      <tbody>
+                        <tr v-for="(r, i) in testPreview.rows.value.slice(0, 8)" :key="i"><td v-for="(v, j) in r" :key="j">{{ v }}</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+              </div>
+            </div>
+
             <div v-else class="kind-fields">
               <label>Query template</label>
               <select v-model="editingTemplateId" data-testid="menu-action-template-select">
@@ -372,7 +481,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, shallowRef, onBeforeUnmount } from 'vue';
+import { resolveBoundValues } from '@/composables/useConfigurableMenuActions';
 import { X, Bot, Download } from 'lucide-vue-next';
 import { useGraphStore } from '@/stores/graph';
 import { useMetricsStore } from '@/stores/metrics';
@@ -389,11 +499,16 @@ import {
 import { buildSourceSchema, downloadJson, readFileAsText, safeFilename } from '@/utils/portableExport';
 import { PORTABLE_EXPORT_VERSION, type PortableContextMenuActions } from '@/types/portable';
 import ContextMenuActionSkillModal from './ContextMenuActionSkillModal.vue';
+import JavaScriptEditor, { type EditorCompletion } from './JavaScriptEditor.vue';
+import { parseCanvasTableSource } from '@/utils/contextMenuActionImport';
+import { useMenuActionTable } from '@/composables/useMenuActionTable';
 import type {
+  CanvasTableSource,
   ContextMenuActionConfig,
   PropertyCondition,
   MenuActionTarget,
 } from '@/types/contextMenuActions';
+import { MAX_NEIGHBORHOOD_HOPS } from '@/types/contextMenuActions';
 
 defineProps<{ modelValue: boolean }>();
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
@@ -461,6 +576,106 @@ const editingBindings = ref<Record<string, string>>({});
 const editingResultMode = ref<'graph' | 'table'>('graph');
 const editingField = ref('');
 const editingMode = ref<'same' | 'has'>('same');
+// show-table (a table from the canvas)
+const editingTableSource = ref<'neighborhood' | 'program'>('neighborhood');
+const editingHops = ref(1);
+const editingDirection = ref<'any' | 'out' | 'in'>('any');
+const editingList = ref<'nodes' | 'edges'>('nodes');
+const editingWalkTypes = ref('');
+const editingListedNodeTypes = ref('');
+const editingListEdgeTypes = ref('');
+const editingColumns = ref('');
+const editingProgramCode = ref('');
+const editingProgramParams = ref('');
+
+const TABLE_PROGRAM_COMPLETIONS: EditorCompletion[] = [
+  { label: 'item', type: 'variable', detail: 'the clicked node or edge (canvas ids)' },
+  { label: 'params', type: 'variable', detail: 'the parameter values' },
+  { label: 'nodes', type: 'variable', detail: 'every node on the canvas' },
+  { label: 'edges', type: 'variable', detail: 'every edge on the canvas' },
+  { label: 'node', type: 'function', detail: '(id) → node', apply: 'node()' },
+  { label: 'neighbors', type: 'function', detail: '(id, {direction, edgeTypes, nodeTypes}) → nodes', apply: 'neighbors(item.node_id)' },
+  { label: 'hops', type: 'function', detail: '(id, k, opts) → nodes with .hop', apply: 'hops(item.node_id, 2)' },
+  { label: 'edgesOf', type: 'function', detail: '(ids, {types, direction}) → edges', apply: 'edgesOf()' },
+  { label: 'metric', type: 'function', detail: '(ref, id) → value', apply: "metric('pagerank', )" },
+  { label: 'selectedNodeIds', type: 'variable', detail: 'ids selected on the canvas' },
+];
+
+const splitList = (text: string) => text.split(',').map((t) => t.trim()).filter(Boolean);
+
+/** The draft's canvas-table source, or what is wrong with it. */
+const canvasSource = computed((): CanvasTableSource | string => {
+  if (editingTableSource.value === 'neighborhood') {
+    return parseCanvasTableSource({
+      type: 'neighborhood',
+      hops: editingHops.value,
+      direction: editingDirection.value,
+      list: editingList.value,
+      edgeTypes: splitList(editingWalkTypes.value),
+      nodeTypes: splitList(editingListedNodeTypes.value),
+      ...(editingList.value === 'edges' ? { listEdgeTypes: splitList(editingListEdgeTypes.value) } : {}),
+      columns: splitList(editingColumns.value),
+    });
+  }
+  let params: unknown;
+  const text = editingProgramParams.value.trim();
+  if (text) {
+    try {
+      params = JSON.parse(text);
+    } catch {
+      return 'Parameters: not valid JSON';
+    }
+  }
+  return parseCanvasTableSource({ type: 'program', code: editingProgramCode.value, params });
+});
+const canvasSourceError = computed(() =>
+  editing.value?.kind === 'show-table' && typeof canvasSource.value === 'string' ? canvasSource.value : null,
+);
+const programParamIds = computed(() =>
+  typeof canvasSource.value !== 'string' && canvasSource.value.type === 'program'
+    ? (canvasSource.value.params ?? []).map((p) => p.id)
+    : [],
+);
+
+/** What "Test" runs on: the first selected node, else the first selected edge. */
+const testItem = computed(() => {
+  const nodeId = graphStore.selectedNodeIds.values().next().value as string | undefined;
+  if (nodeId) {
+    const node = graphStore.nodes.find((n) => n.node_id === nodeId);
+    if (node) return { type: 'node' as const, id: node.node_id, node };
+  }
+  const edgeId = graphStore.selectedEdgeIds.values().next().value as string | undefined;
+  const edge = edgeId ? graphStore.edges.find((e) => e.edge_id === edgeId) : undefined;
+  return edge ? { type: 'edge' as const, id: edge.edge_id, edge } : null;
+});
+const testPreview = shallowRef<ReturnType<typeof useMenuActionTable> | null>(null);
+
+function testCanvasTable() {
+  const source = canvasSource.value;
+  const item = testItem.value;
+  if (typeof source === 'string' || !item) return;
+  testPreview.value?.cancel();
+  const bindings = source.type === 'program' ? editingBindings.value : {};
+  const canvasItem =
+    item.type === 'node'
+      ? { type: 'node' as const, node_id: item.node.node_id, node_type: item.node.node_type, properties: item.node.properties }
+      : { type: 'edge' as const, edge_id: item.edge.edge_id, src: item.edge.src, dst: item.edge.dst, relationship_type: item.edge.relationship_type, properties: item.edge.properties };
+  const preview = useMenuActionTable({
+    contextId: graphStore.currentContext?.id ?? '',
+    actionId: editing.value?.id ?? 'test',
+    label: editing.value?.label || 'Test',
+    target: { type: item.type, id: item.id },
+    parameters: resolveBoundValues(bindings, item.type, item.type === 'node' ? item.node : item.edge, { metrics: metricsStore.metricResolver }),
+    canvas: { source, item: canvasItem, bindings },
+  });
+  testPreview.value = preview;
+  void preview.run();
+}
+onBeforeUnmount(() => testPreview.value?.cancel());
+watch(() => editing.value?.id, () => {
+  testPreview.value?.cancel();
+  testPreview.value = null;
+});
 
 // Isolating by a node's value: an edge has nothing to isolate by.
 watch(() => editing.value?.kind, (kind) => {
@@ -512,11 +727,12 @@ const formValid = computed(() => {
     return editingTextTemplate.value.trim() !== '' && !textTemplateError.value;
   }
   if (draft.kind === 'show-same-value') return editingField.value.trim() !== '';
+  if (draft.kind === 'show-table') return !canvasSourceError.value;
   return editingTemplateId.value !== '';
 });
 
 function kindIconFallback(kind: ContextMenuActionConfig['kind']): string {
-  return kind === 'open-url' ? '🔗' : kind === 'copy-text' ? '📋' : kind === 'show-same-value' ? '◎' : '▶';
+  return kind === 'open-url' ? '🔗' : kind === 'copy-text' ? '📋' : kind === 'show-same-value' ? '◎' : kind === 'show-table' ? '▦' : '▶';
 }
 
 function actionSummary(config: ContextMenuActionConfig): string {
@@ -524,6 +740,13 @@ function actionSummary(config: ContextMenuActionConfig): string {
   if (config.kind === 'copy-text') return config.textTemplate;
   if (config.kind === 'show-same-value') {
     return config.mode === 'has' ? `show only: ${config.field} is set` : `show only: same ${config.field}`;
+  }
+  if (config.kind === 'show-table') {
+    const src = config.source;
+    if (src.type === 'program') return 'canvas table · program';
+    const what = src.list === 'edges' ? `edges${src.listEdgeTypes?.length ? ` ${src.listEdgeTypes.join('/')}` : ''}` : 'nodes';
+    const types = src.nodeTypes?.length ? ` of ${src.nodeTypes.join('/')}` : '';
+    return `canvas table · ${what}${types} within ${src.hops} hop${src.hops === 1 ? '' : 's'}`;
   }
   const name = config.templateName || config.templateId;
   return config.resultMode === 'table' ? `${name} · table` : name;
@@ -550,6 +773,22 @@ function startCreate() {
   editingResultMode.value = 'graph';
   editingField.value = '';
   editingMode.value = 'same';
+  loadCanvasSource(undefined);
+}
+
+function loadCanvasSource(source: CanvasTableSource | undefined) {
+  const n = source?.type === 'neighborhood' ? source : undefined;
+  const p = source?.type === 'program' ? source : undefined;
+  editingTableSource.value = p ? 'program' : 'neighborhood';
+  editingHops.value = n?.hops ?? 1;
+  editingDirection.value = n?.direction ?? 'any';
+  editingList.value = n?.list ?? 'nodes';
+  editingWalkTypes.value = (n?.edgeTypes ?? []).join(', ');
+  editingListedNodeTypes.value = (n?.nodeTypes ?? []).join(', ');
+  editingListEdgeTypes.value = (n?.listEdgeTypes ?? []).join(', ');
+  editingColumns.value = (n?.columns ?? []).join(', ');
+  editingProgramCode.value = p?.code ?? '';
+  editingProgramParams.value = p?.params?.length ? JSON.stringify(p.params, null, 2) : '';
 }
 
 function startEdit(config: ContextMenuActionConfig) {
@@ -574,6 +813,8 @@ function startEdit(config: ContextMenuActionConfig) {
   editingResultMode.value = config.kind === 'run-query-template' && config.resultMode === 'table' ? 'table' : 'graph';
   editingField.value = config.kind === 'show-same-value' ? config.field : '';
   editingMode.value = config.kind === 'show-same-value' ? config.mode : 'same';
+  loadCanvasSource(config.kind === 'show-table' ? config.source : undefined);
+  if (config.kind === 'show-table') editingBindings.value = { ...(config.paramBindings ?? {}) };
 }
 
 function addCondition() {
@@ -614,6 +855,15 @@ function buildConfig(): ContextMenuActionConfig | null {
   }
   if (draft.kind === 'show-same-value') {
     return { ...base, kind: 'show-same-value', field: editingField.value.trim(), mode: editingMode.value };
+  }
+  if (draft.kind === 'show-table') {
+    const source = canvasSource.value;
+    if (typeof source === 'string') return null;
+    const ids = new Set(source.type === 'program' ? (source.params ?? []).map((p) => p.id) : []);
+    const bindings = Object.fromEntries(
+      Object.entries(editingBindings.value).filter(([k, v]) => ids.has(k) && v.trim() !== ''),
+    );
+    return { ...base, kind: 'show-table', source, ...(Object.keys(bindings).length ? { paramBindings: bindings } : {}) };
   }
   return {
     ...base,
@@ -1041,6 +1291,50 @@ function close() {
   color: var(--vt-c-text-2, #555);
 }
 
+.inline-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.inline-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hint-inline {
+  font-weight: normal;
+  font-size: 11px;
+  color: var(--text-muted, #666);
+}
+.params-json {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.test-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.test-preview {
+  border: 1px solid var(--border-color, #eee);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.preview-scroll {
+  max-height: 200px;
+  overflow: auto;
+}
+.preview-scroll table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.preview-scroll th,
+.preview-scroll td {
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--border-color, #eee);
+  text-align: left;
+  white-space: nowrap;
+}
 .radio-row {
   display: flex;
   gap: 18px;

@@ -252,4 +252,66 @@ test.describe('Graph context menu', () => {
     await expect(modal).toHaveCount(0);
     await expect(statusBar).toContainText('5 nodes');
   });
+
+  test('canvas tables: neighbors and a sandboxed program, computed in the browser', async ({ authenticatedPage: page }) => {
+    const server: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/menu-actions/')) server.push(r.url());
+    });
+    await seedContexts(page, [{
+      ...MOCK_CONTEXT,
+      context_menu_actions: [
+        {
+          id: 'nb', label: 'Neighbors (canvas)', enabled: true, kind: 'show-table',
+          match: { target: 'node', nodeTypes: ['Person'] },
+          source: { type: 'neighborhood', hops: 1, direction: 'any', list: 'nodes', columns: ['name'] },
+        },
+        {
+          id: 'prog', label: 'Companies nearby (program)', enabled: true, kind: 'show-table',
+          match: { target: 'node', nodeTypes: ['Person'] },
+          source: {
+            type: 'program',
+            params: [{ id: 'hops', label: 'Hops', default: '1', required: true }],
+            code: "return hops(item.node_id, Number(params.hops), { nodeTypes: ['Company'] }).map(n => ({ node_id: n.node_id, company: n.node_id.toUpperCase(), hop: n.hop }))",
+          },
+        },
+      ],
+    }]);
+    await page.reload();
+    const statusBar = page.getByTestId('graph-status-bar');
+    await expect(statusBar).toContainText('5 nodes', { timeout: 15_000 });
+    await freezeLayout(page);
+
+    const menu = page.getByTestId('graph-context-menu');
+    async function openOn(nodeId: string, label: string) {
+      let opened = false;
+      for (let attempt = 0; attempt < 3 && !opened; attempt++) {
+        await hoverNode(page, nodeId);
+        await page.mouse.down({ button: 'right' });
+        await page.mouse.up({ button: 'right' });
+        opened = await menu.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false);
+      }
+      expect(opened).toBe(true);
+      await menu.getByText(label).click();
+    }
+
+    const modal = page.getByTestId('menu-action-table-modal');
+    await openOn('n1', 'Neighbors (canvas)');
+    await expect(modal).toBeVisible();
+    await expect(page.getByTestId('menu-action-table-source')).toHaveText('Canvas');
+    await expect(modal).toContainText('3 rows');
+    await expect(modal).toContainText('n4');
+    await modal.getByRole('button', { name: 'Close' }).last().click();
+
+    // The program runs in the real worker bundle.
+    await openOn('n1', 'Companies nearby (program)');
+    await expect(modal).toContainText('N4');
+    await expect(modal).not.toContainText('N5');
+    await page.getByTestId('menu-action-param-hops').fill('2');
+    await page.getByTestId('menu-action-table-run').click();
+    await expect(modal).toContainText('N5');
+    expect(server).toEqual([]);
+    await modal.getByRole('button', { name: 'Close' }).last().click();
+    await expect(statusBar).toContainText('5 nodes');
+  });
 });

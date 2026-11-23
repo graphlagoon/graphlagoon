@@ -183,7 +183,7 @@ array (no prose around it) so I can paste it into the Import JSON box.`
 ${intro}
 ${adaptSection}
 
-## What an action can do (the four kinds)
+## What an action can do (the five kinds)
 
 1. \`open-url\` — build a URL from the clicked item's properties and open it in
    a new tab or the current tab. Example: open a PubMed search for a gene node.
@@ -213,6 +213,25 @@ ${adaptSection}
    clicked node's (\`"mode": "same"\`) or is set at all (\`"mode": "has"\`).
    Example: right-click an account shows only the accounts of the same
    \`branch_id\`. The layout stays; the status bar's ✕ shows everything again.
+5. \`show-table\` — a table computed **in the browser from the graph on the
+   canvas** (instant, no warehouse; on a case canvas it includes file and
+   derived nodes). Prefer it over a table template when the answer is in what
+   is loaded. Two sources:
+   - \`{"type": "neighborhood", "hops": 1-5, "direction": "any"|"out"|"in",
+     "edgeTypes": [walk over these], "nodeTypes": [list these],
+     "list": "nodes"|"edges", "listEdgeTypes": [...], "columns": [props or
+     "metric:<name>"]}\` — no code. \`list: "edges"\` lists the edges touching
+     the listed nodes (e.g. the TRANSFER edges of the accounts 2 hops from a
+     company). Hops and direction are editable in the window.
+   - \`{"type": "program", "code": "...", "params": [{"id", "label",
+     "default", "required", "type": "input"|"select", "options"}]}\` —
+     JavaScript run in a sandboxed worker (no network, 10 s). In scope:
+     \`item\` (clicked node/edge), \`params\`, \`nodes\`, \`edges\`,
+     \`node(id)\`, \`neighbors(id, {direction, edgeTypes, nodeTypes})\`,
+     \`hops(id, k, opts)\` (nodes with \`.hop\`), \`edgesOf(ids, {types,
+     direction})\`, \`metric(ref, id)\`, \`selectedNodeIds\`. Return an array
+     of objects or \`{columns, rows}\`. \`paramBindings\` fills params from
+     the clicked item. Agents can run neighborhood tables, not programs.
 
 ## The JSON shape (your final output)
 
@@ -260,6 +279,28 @@ Output a JSON array of action objects:
     "templateName": "Company accounts transactions",
     "paramBindings": { "company": "{node_id}" },
     "resultMode": "table"
+  },
+  {
+    "kind": "show-table",
+    "label": "Transfers of the accounts within 2 hops",
+    "enabled": true,
+    "match": { "target": "node", "nodeTypes": ["Company"] },
+    "source": {
+      "type": "neighborhood", "hops": 2, "direction": "any",
+      "nodeTypes": ["Account"], "list": "edges", "listEdgeTypes": ["TRANSFER"],
+      "columns": ["amount", "date"]
+    }
+  },
+  {
+    "kind": "show-table",
+    "label": "Big transfers nearby",
+    "enabled": true,
+    "match": { "target": "node" },
+    "source": {
+      "type": "program",
+      "params": [{ "id": "min_amount", "label": "Min amount", "default": "1000" }],
+      "code": "const ids = hops(item.node_id, 2).map(n => n.node_id);\\nreturn edgesOf(ids, { types: ['TRANSFER'] })\\n  .filter(e => Number(e.properties?.amount) >= Number(params.min_amount))\\n  .map(e => ({ src: e.src, dst: e.dst, amount: e.properties?.amount }));"
+    }
   },
   {
     "kind": "show-same-value",

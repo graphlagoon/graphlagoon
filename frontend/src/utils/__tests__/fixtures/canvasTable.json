@@ -1,0 +1,74 @@
+{
+  "_comment": "Shared by utils/__tests__/canvasTable.test.ts and api/tests/test_canvas_table.py: the neighborhood table must give the same rows in the browser and for agents.",
+  "graph": {
+    "nodes": [
+      { "node_id": "co", "node_type": "Company", "properties": { "name": "ACME" } },
+      { "node_id": "p1", "node_type": "Person", "properties": { "name": "Ana" } },
+      { "node_id": "a1", "node_type": "Account", "properties": { "branch": "001" } },
+      { "node_id": "a2", "node_type": "Account", "properties": { "branch": "002" } },
+      { "node_id": "a3", "node_type": "Account", "properties": { "branch": "003" } },
+      { "node_id": "x", "node_type": "Account", "properties": {} }
+    ],
+    "edges": [
+      { "edge_id": "e1", "src": "co", "dst": "a1", "relationship_type": "OWNS", "properties": {} },
+      { "edge_id": "e2", "src": "p1", "dst": "co", "relationship_type": "PARTNER_OF", "properties": {} },
+      { "edge_id": "e3", "src": "p1", "dst": "a2", "relationship_type": "OWNS", "properties": {} },
+      { "edge_id": "t1", "src": "a1", "dst": "a3", "relationship_type": "TRANSFER", "properties": { "amount": 100, "at": "2026-11-01" } },
+      { "edge_id": "t2", "src": "a2", "dst": "x", "relationship_type": "TRANSFER", "properties": { "amount": 5000, "at": "2026-11-02" } },
+      { "edge_id": "t3", "src": "a3", "dst": "x", "relationship_type": "TRANSFER", "properties": { "amount": 7, "at": "2026-11-03" } }
+    ]
+  },
+  "cases": [
+    {
+      "name": "accounts within 2 hops over ownership",
+      "item": { "type": "node", "node_id": "co", "node_type": "Company" },
+      "spec": { "type": "neighborhood", "hops": 2, "direction": "any", "edgeTypes": ["OWNS", "PARTNER_OF"], "nodeTypes": ["Account"], "list": "nodes", "columns": ["branch"] },
+      "expected": {
+        "columns": ["node_id", "node_type", "hop", "branch"],
+        "rows": [["a1", "Account", "1", "001"], ["a2", "Account", "2", "002"]],
+        "truncated": false
+      }
+    },
+    {
+      "name": "transfers of those accounts",
+      "item": { "type": "node", "node_id": "co", "node_type": "Company" },
+      "spec": { "type": "neighborhood", "hops": 2, "direction": "any", "edgeTypes": ["OWNS", "PARTNER_OF"], "nodeTypes": ["Account"], "list": "edges", "listEdgeTypes": ["TRANSFER"], "columns": ["amount"] },
+      "expected": {
+        "columns": ["edge_id", "relationship_type", "src", "dst", "hop", "amount"],
+        "rows": [["t1", "TRANSFER", "a1", "a3", "1", "100"], ["t2", "TRANSFER", "a2", "x", "2", "5000"]],
+        "truncated": false
+      }
+    },
+    {
+      "name": "outgoing only, every property",
+      "item": { "type": "node", "node_id": "p1", "node_type": "Person" },
+      "spec": { "type": "neighborhood", "hops": 1, "direction": "out", "list": "nodes" },
+      "expected": {
+        "columns": ["node_id", "node_type", "hop", "name", "branch"],
+        "rows": [["co", "Company", "1", "ACME", null], ["a2", "Account", "1", null, "002"]],
+        "truncated": false
+      }
+    },
+    {
+      "name": "from an edge: both ends are hop 0",
+      "item": { "type": "edge", "edge_id": "t1", "src": "a1", "dst": "a3", "relationship_type": "TRANSFER" },
+      "spec": { "type": "neighborhood", "hops": 1, "direction": "any", "edgeTypes": ["TRANSFER"], "list": "nodes", "columns": [] },
+      "expected": {
+        "columns": ["node_id", "node_type", "hop", "branch"],
+        "rows": [["a1", "Account", "0", "001"], ["a3", "Account", "0", "003"], ["x", "Account", "1", null]],
+        "truncated": false
+      }
+    },
+    {
+      "name": "row limit",
+      "rowLimit": 1,
+      "item": { "type": "node", "node_id": "co", "node_type": "Company" },
+      "spec": { "type": "neighborhood", "hops": 3, "direction": "any", "list": "nodes", "columns": ["name"] },
+      "expected": {
+        "columns": ["node_id", "node_type", "hop", "name"],
+        "rows": [["a1", "Account", "1", null]],
+        "truncated": true
+      }
+    }
+  ]
+}

@@ -157,6 +157,39 @@ describe('parseImportedActionConfigs', () => {
     expect(r.configs[1]).toMatchObject({ field: 'email', mode: 'same' });
   });
 
+  it('parses show-table sources: neighborhood (normalized) and program (with params and bindings)', () => {
+    const r = parseImportedActionConfigs(JSON.stringify([
+      {
+        kind: 'show-table', label: 'Transfers', match: { target: 'node' },
+        source: { type: 'neighborhood', hops: '2', direction: 'sideways', nodeTypes: ['Account', ''], list: 'edges', listEdgeTypes: ['TRANSFER'] },
+      },
+      {
+        kind: 'show-table', label: 'Big', match: { target: 'node' }, paramBindings: { min: '{prop:limit}', bad: 3 },
+        source: { type: 'program', code: 'return []', params: [{ id: 'min', default: '10', type: 'select', options: ['10', '20'] }] },
+      },
+    ]));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.configs[0]).toMatchObject({
+      kind: 'show-table',
+      source: { type: 'neighborhood', hops: 2, direction: 'any', nodeTypes: ['Account'], list: 'edges', listEdgeTypes: ['TRANSFER'] },
+    });
+    expect(r.configs[1]).toMatchObject({
+      paramBindings: { min: '{prop:limit}' },
+      source: { type: 'program', code: 'return []', params: [{ id: 'min', label: 'min', default: '10', type: 'select', options: ['10', '20'] }] },
+    });
+  });
+
+  it('rejects a show-table source that cannot run', () => {
+    const bad = (source: unknown) =>
+      parseImportedActionConfigs(JSON.stringify([{ kind: 'show-table', label: 'X', match: { target: 'node' }, source }]));
+    expect(bad(undefined)).toMatchObject({ ok: false, error: expect.stringContaining('source') });
+    expect(bad({ type: 'neighborhood', hops: 9 })).toMatchObject({ ok: false, error: expect.stringContaining('hops') });
+    expect(bad({ type: 'program', code: ' ' })).toMatchObject({ ok: false, error: expect.stringContaining('code') });
+    expect(bad({ type: 'program', code: 'x', params: [{ id: 'a b' }] })).toMatchObject({ ok: false, error: expect.stringContaining('plain name') });
+    expect(bad({ type: 'sql' })).toMatchObject({ ok: false, error: expect.stringContaining('source.type') });
+  });
+
   it('rejects show-same-value without a field', () => {
     const r = parseImportedActionConfigs(
       JSON.stringify([{ kind: 'show-same-value', label: 'X', match: { target: 'node' }, mode: 'has' }]),

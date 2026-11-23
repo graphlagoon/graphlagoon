@@ -767,9 +767,12 @@ class GraphContextCreate(BaseModel):
     context_menu_actions: list[dict] = Field(
         default_factory=list,
         description="Context-level configurable context-menu actions (open-url, "
-        "copy-text, run-query-template, show-same-value). Passed through opaquely; the frontend "
-        "owns the shape. A run-query-template action with resultMode 'table' also runs on the "
-        "server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table.",
+        "copy-text, run-query-template, show-same-value, show-table). Passed through opaquely; "
+        "the frontend owns the shape. A run-query-template action with resultMode 'table' also "
+        "runs on the server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table. A "
+        "show-table action computes its rows in the browser from the loaded graph (a neighbors "
+        "walk or a sandboxed JavaScript program); agents run its neighbors walk on a case graph "
+        "through the MCP tool run_entity_action.",
     )
     metric_definitions: list[MetricDefinition] = Field(
         default_factory=list,

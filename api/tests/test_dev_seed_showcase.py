@@ -88,3 +88,16 @@ def test_the_edge_table_action_binds_both_ends():
     assert action["match"]["target"] == "edge" and action["paramBindings"] == {"a": "{src}", "b": "{dst}"}
     ok, message = validate_sql_query(substitute(template["query"], {"a": "n1", "b": "n2"}))
     assert ok, message
+
+
+def test_the_canvas_tables_need_no_template_and_import_as_the_browser_reads_them():
+    from graphlagoon.services.canvas_table import neighborhood_table
+
+    canvas = [a for a in showcase.MENU_ACTIONS if a["kind"] == "show-table"]
+    assert {a["source"]["type"] for a in canvas} == {"neighborhood", "program"}
+    assert all(a["label"].startswith("Demo · ") for a in canvas)
+    hood = next(a for a in canvas if a["source"]["type"] == "neighborhood")
+    graph = {"nodes": [{"node_id": "co", "node_type": "Company"}, {"node_id": "a", "node_type": "Account", "properties": {"branch": "B-01"}}],
+             "edges": [{"edge_id": "e", "src": "co", "dst": "a", "relationship_type": "OWNS"}]}
+    rows = neighborhood_table(graph, {"type": "node", "node_id": "co", "node_type": "Company"}, hood["source"])["rows"]
+    assert rows == [["a", "Account", "1", None, "B-01", None, None]]

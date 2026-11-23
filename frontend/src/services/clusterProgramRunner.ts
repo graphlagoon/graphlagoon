@@ -10,11 +10,8 @@
  * Never rejects: compile errors, runtime errors, crashes and timeouts all come
  * back as `{ ok: false, error }`.
  */
-import type {
-  ClusterProgramSnapshot,
-  ClusterProgramWorkerCommand,
-  ClusterProgramWorkerMessage,
-} from '@/types/cluster';
+import type { ClusterProgramSnapshot } from '@/types/cluster';
+import { runInSandboxWorker } from './sandboxRunner';
 import { CLUSTER_PROGRAM_TIMEOUT_MS } from '@/types/cluster';
 
 export type ClusterProgramRunOutcome =
@@ -34,9 +31,6 @@ export function setClusterProgramWorkerFactory(factory: (() => Worker) | null): 
   return prev;
 }
 
-let runCounter = 0;
-const nextRunId = () => `cp-run-${++runCounter}-${Date.now()}`;
-
 /**
  * Run `code` over `snapshot` in a sandboxed worker. The timeout covers the
  * whole run (worker boot, clone and evaluation).
@@ -46,54 +40,7 @@ export function runClusterProgramInWorker(
   snapshot: ClusterProgramSnapshot,
   timeoutMs: number = CLUSTER_PROGRAM_TIMEOUT_MS,
 ): Promise<ClusterProgramRunOutcome> {
-  return new Promise((resolve) => {
-    const runId = nextRunId();
-    let settled = false;
-    let worker: Worker | null = null;
-
-    const finish = (outcome: ClusterProgramRunOutcome) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      worker?.terminate();
-      resolve(outcome);
-    };
-
-    const timer = setTimeout(
-      () => finish({ ok: false, error: `Timed out after ${Math.round(timeoutMs / 1000)}s` }),
-      timeoutMs,
-    );
-
-    let w: Worker;
-    try {
-      w = workerFactory();
-      worker = w;
-    } catch (e) {
-      finish({ ok: false, error: `Could not start the program worker: ${e instanceof Error ? e.message : String(e)}` });
-      return;
-    }
-
-    w.onerror = (ev) =>
-      finish({ ok: false, error: `Worker error: ${(ev as ErrorEvent).message ?? 'unknown'}` });
-
-    w.onmessage = (ev: MessageEvent<ClusterProgramWorkerMessage>) => {
-      const msg = ev.data;
-      if (!msg || typeof msg !== 'object' || settled) return;
-      if (msg.type === 'READY') {
-        const cmd: ClusterProgramWorkerCommand = { type: 'RUN', runId, code, snapshot };
-        try {
-          w.postMessage(cmd);
-        } catch (e) {
-          finish({ ok: false, error: `Could not send the graph to the program worker: ${e instanceof Error ? e.message : String(e)}` });
-        }
-        return;
-      }
-      if (msg.type === 'RESULT' && msg.runId === runId) {
-        finish({ ok: true, result: msg.result });
-      } else if (msg.type === 'ERROR' && msg.runId === runId) {
-        finish({ ok: false, error: String(msg.error) });
-      }
-      // anything else (stale / forged / unknown) is ignored
-    };
-  });
+  return runInSandboxWorker(workerFactory, { code, snapshot }, timeoutMs).outcome.then((o) =>
+    o.ok ? o : { ok: false, error: o.error },
+  );
 }

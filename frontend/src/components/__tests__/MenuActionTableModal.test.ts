@@ -145,3 +145,87 @@ describe('MenuActionTableModal', () => {
     expect(body.provenance).toMatchObject({ tool: 'menu_action', params: { action: 'tx', values: { company: 'co-1', days: '30' } } });
   });
 });
+
+describe('MenuActionTableModal — canvas tables', () => {
+  async function seedCanvas() {
+    const { useGraphStore } = await import('@/stores/graph');
+    const graph = useGraphStore();
+    graph.nodes = [
+      { node_id: 'co', node_type: 'Company', properties: { name: 'ACME' } },
+      { node_id: 'a1', node_type: 'Account', properties: { branch: '001' } },
+      { node_id: 'a2', node_type: 'Account', properties: { branch: '002' } },
+    ];
+    graph.edges = [
+      { edge_id: 'e1', src: 'co', dst: 'a1', relationship_type: 'OWNS' },
+      { edge_id: 'e2', src: 'a1', dst: 'a2', relationship_type: 'OWNS' },
+    ];
+  }
+
+  const canvasRequest = (source: NonNullable<MenuActionTableRequest['canvas']>['source']): MenuActionTableRequest => ({
+    contextId: 'ctx-1',
+    actionId: 'nb',
+    label: 'Accounts nearby',
+    target: { type: 'node', id: 'co', node_type: 'Company' },
+    parameters: {},
+    canvas: { source, item: { type: 'node', node_id: 'co', node_type: 'Company' } },
+  });
+
+  it('a neighborhood shows at once, never asks the server, and re-runs with more hops', async () => {
+    await seedCanvas();
+    const { findByText, getByTestId, queryByText } = render(MenuActionTableModal, {
+      props: { request: canvasRequest({ type: 'neighborhood', hops: 1, direction: 'any', nodeTypes: ['Account'], list: 'nodes', columns: ['branch'] }) },
+      global: { plugins: [[PrimeVue, { theme: 'none' }]] },
+    });
+    expect(await findByText('1 rows')).toBeTruthy();
+    expect(getByTestId('menu-action-table-source').textContent).toContain('Canvas');
+    expect(runMenuActionTable).not.toHaveBeenCalled();
+    const hops = getByTestId('menu-action-table-params').querySelector('select') as HTMLSelectElement;
+    await fireEvent.update(hops, '2');
+    await fireEvent.click(getByTestId('menu-action-table-run'));
+    expect(await findByText('2 rows')).toBeTruthy();
+    expect(queryByText('Parameters changed: Run to update the rows.')).toBeNull();
+  });
+
+  it('a program runs in the worker; its error shows; Add to case records the code', async () => {
+    await seedCanvas();
+    const { setTableProgramWorkerFactory } = await import('@/services/tableProgramRunner');
+    const { evaluateTableProgram } = await import('@/workers/tableProgramEvaluate');
+    // An in-process stand-in for the sandboxed worker.
+    setTableProgramWorkerFactory(() => {
+      const w = {
+        onmessage: null as ((ev: MessageEvent) => void) | null,
+        onerror: null,
+        terminate() {},
+        postMessage(cmd: { runId: string; code: string; snapshot: never }) {
+          let data: unknown;
+          try {
+            data = { type: 'RESULT', runId: cmd.runId, result: evaluateTableProgram(cmd.code, cmd.snapshot) };
+          } catch (e) {
+            data = { type: 'ERROR', runId: cmd.runId, error: (e as Error).message };
+          }
+          queueMicrotask(() => w.onmessage?.({ data } as MessageEvent));
+        },
+      };
+      queueMicrotask(() => w.onmessage?.({ data: { type: 'READY' } } as MessageEvent));
+      return w as unknown as Worker;
+    });
+    createInvestigationItem.mockResolvedValue({ id: 'i1', kind: 'table', title: 't' });
+    const code = 'return hops(item.node_id, 2).map(n => ({ node_id: n.node_id, hop: n.hop }))';
+    const ok = render(MenuActionTableModal, {
+      props: { request: canvasRequest({ type: 'program', code }), caseId: 'case-1' },
+      global: { plugins: [[PrimeVue, { theme: 'none' }]] },
+    });
+    expect(await ok.findByText('2 rows')).toBeTruthy();
+    await fireEvent.click(ok.getByTestId('menu-action-table-add-to-case'));
+    await waitFor(() => expect(createInvestigationItem).toHaveBeenCalled());
+    expect(createInvestigationItem.mock.calls[0][1].provenance).toMatchObject({ tool: 'canvas_table', params: { source: 'program', code, item: 'co' } });
+    cleanup();
+
+    const broken = render(MenuActionTableModal, {
+      props: { request: canvasRequest({ type: 'program', code: 'throw new Error("no such account")' }) },
+      global: { plugins: [[PrimeVue, { theme: 'none' }]] },
+    });
+    expect((await broken.findByTestId('menu-action-table-error')).textContent).toContain('no such account');
+    setTableProgramWorkerFactory(null);
+  });
+});

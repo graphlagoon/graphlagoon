@@ -7,11 +7,13 @@
  * matters (kind, target, url prefix). Never trusts the input shape.
  */
 import type {
+  CanvasTableParam,
+  CanvasTableSource,
   ContextMenuActionConfig,
   MenuActionMatch,
   PropertyCondition,
 } from '@/types/contextMenuActions';
-import { isKnownActionKind } from '@/types/contextMenuActions';
+import { isKnownActionKind, MAX_NEIGHBORHOOD_HOPS, MAX_PROGRAM_CODE_LENGTH } from '@/types/contextMenuActions';
 import type { PortableSourceSchema } from '@/types/portable';
 import { validateUrlTemplate } from './safeUrl';
 import { extractTemplateProperties, extractTemplateMetrics, parseMetricRef } from './labelFormatter';
@@ -169,6 +171,15 @@ export function parseImportedActionConfigs(json: string): ImportResult {
         field: raw.field.trim(),
         mode: raw.mode === 'has' ? 'has' : 'same',
       });
+    } else if (kind === 'show-table') {
+      const parsedSource = parseCanvasTableSource(raw.source);
+      if (typeof parsedSource === 'string') return { ok: false, error: `Action ${i + 1}: ${parsedSource}` };
+      configs.push({
+        ...base,
+        kind: 'show-table',
+        source: parsedSource,
+        ...(parsedSource.type === 'program' ? { paramBindings: stringRecord(raw.paramBindings) } : {}),
+      });
     } else {
       if (typeof raw.templateId !== 'string' || raw.templateId.trim() === '') {
         return { ok: false, error: `Action ${i + 1}: missing "templateId"` };
@@ -261,6 +272,18 @@ export function actionCompatibilityWarnings(
       const metricRef = parseMetricRef(config.field);
       if (metricRef != null) sessionMetricRefs.add(metricRef);
       else if (!properties.has(config.field) && !BUILTIN_PROPERTIES.has(config.field)) missingProperties.add(config.field);
+    } else if (config.kind === 'show-table') {
+      const src = config.source;
+      if (src.type === 'neighborhood') {
+        for (const t of src.nodeTypes ?? []) if (!nodeTypes.has(t)) missingNodeTypes.add(t);
+        for (const t of [...(src.edgeTypes ?? []), ...(src.listEdgeTypes ?? [])]) if (!edgeTypes.has(t)) missingEdgeTypes.add(t);
+        for (const c of src.columns ?? []) {
+          const metricRef = parseMetricRef(c);
+          if (metricRef != null) sessionMetricRefs.add(metricRef);
+          else if (!properties.has(c) && !BUILTIN_PROPERTIES.has(c)) missingProperties.add(c);
+        }
+      }
+      for (const binding of Object.values(config.paramBindings ?? {})) checkTemplate(binding);
     } else {
       if (!templateIds.has(config.templateId)) missingTemplateIds.add(config.templateId);
       for (const binding of Object.values(config.paramBindings)) checkTemplate(binding);
@@ -294,4 +317,68 @@ export function hasActionCompatibilityWarnings(w: ActionCompatibilityWarnings): 
     w.missingTemplateIds.length > 0 ||
     w.sessionMetricRefs.length > 0
   );
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) if (typeof v === 'string') out[key] = v;
+  }
+  return out;
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const kept = value.filter((v): v is string => typeof v === 'string' && v.trim() !== '').map((v) => v.trim());
+  return kept.length ? kept : undefined;
+}
+
+/** A `show-table` action's source, or what is wrong with it. Shared by the import and the editor. */
+export function parseCanvasTableSource(value: unknown): CanvasTableSource | string {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return 'missing "source"';
+  const raw = value as Record<string, unknown>;
+  if (raw.type === 'neighborhood') {
+    const hops = Math.trunc(Number(raw.hops ?? 1));
+    if (!Number.isFinite(hops) || hops < 1 || hops > MAX_NEIGHBORHOOD_HOPS) {
+      return `"source.hops" must be 1 to ${MAX_NEIGHBORHOOD_HOPS}`;
+    }
+    const optional = (key: string) => {
+      const list = stringList(raw[key]);
+      return list ? { [key]: list } : {};
+    };
+    return {
+      type: 'neighborhood',
+      hops,
+      direction: raw.direction === 'out' || raw.direction === 'in' ? raw.direction : 'any',
+      list: raw.list === 'edges' ? 'edges' : 'nodes',
+      ...optional('edgeTypes'),
+      ...optional('nodeTypes'),
+      ...optional('listEdgeTypes'),
+      ...optional('columns'),
+    };
+  }
+  if (raw.type === 'program') {
+    if (typeof raw.code !== 'string' || raw.code.trim() === '') return 'missing "source.code"';
+    if (raw.code.length > MAX_PROGRAM_CODE_LENGTH) return `"source.code" is longer than ${MAX_PROGRAM_CODE_LENGTH} characters`;
+    const params: CanvasTableParam[] = [];
+    if (raw.params != null) {
+      if (!Array.isArray(raw.params)) return '"source.params" must be an array';
+      for (const p of raw.params as unknown[]) {
+        if (p == null || typeof p !== 'object') return '"source.params" entries must be objects';
+        const r = p as Record<string, unknown>;
+        if (typeof r.id !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(r.id)) return `parameter id "${String(r.id)}" must be a plain name`;
+        const options = stringList(r.options);
+        params.push({
+          id: r.id,
+          label: typeof r.label === 'string' && r.label.trim() ? r.label.trim() : r.id,
+          ...(r.type === 'select' && options ? { type: 'select' as const, options } : { type: 'input' as const }),
+          ...(typeof r.default === 'string' ? { default: r.default } : {}),
+          ...(r.required === true ? { required: true } : {}),
+          ...(typeof r.description === 'string' && r.description ? { description: r.description } : {}),
+        });
+      }
+    }
+    return { type: 'program', code: raw.code, ...(params.length ? { params } : {}) };
+  }
+  return '"source.type" must be "neighborhood" or "program"';
 }

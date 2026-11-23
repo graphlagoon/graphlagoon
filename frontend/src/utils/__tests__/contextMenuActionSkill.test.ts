@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildContextMenuActionSkill } from '../contextMenuActionSkill';
+import { parseImportedActionConfigs } from '../contextMenuActionImport';
 
 const INPUT = {
   nodeTypes: ['Person', 'Company'],
@@ -40,9 +41,9 @@ describe('buildContextMenuActionSkill', () => {
     expect(skill).toContain('depth');
   });
 
-  it('documents the four kinds and the JSON contract', () => {
+  it('documents the five kinds and the JSON contract', () => {
     const skill = buildContextMenuActionSkill(INPUT);
-    expect(skill).toContain('the four kinds');
+    expect(skill).toContain('the five kinds');
     expect(skill).toContain('show-same-value');
     expect(skill).toContain('"mode": "same"');
     expect(skill).toContain('open-url');
@@ -52,6 +53,16 @@ describe('buildContextMenuActionSkill', () => {
     expect(skill).toContain('paramBindings');
     expect(skill).toContain('"resultMode": "table"');
     expect(skill).toContain('http://');
+  });
+
+  it('its JSON example imports as is, canvas tables included', () => {
+    const skill = buildContextMenuActionSkill(INPUT);
+    const block = skill.split('```json')[1].split('```')[0];
+    const r = parseImportedActionConfigs(block);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const tables = r.configs.filter((c) => c.kind === 'show-table');
+    expect(tables.map((c) => c.kind === 'show-table' && c.source.type)).toEqual(['neighborhood', 'program']);
   });
 
   it('handles empty metadata with placeholders', () => {
