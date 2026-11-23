@@ -318,13 +318,21 @@ export const useClusterStore = defineStore('cluster', () => {
       // the program can reach `metric(...)`.
       const graphStore = useGraphStore()
       const metricsStore = useMetricsStore()
+      // Only what the user has not hidden (filters, "show only")
+      const scopeNodes = graphStore.visibleNodes
+      const scopeEdges = graphStore.visibleEdges
+      if (graphStore.nodes.length > 0 && scopeNodes.length === 0) {
+        throw new Error('The filters hide every node: there is nothing to group')
+      }
+      const scopeNodeIds = new Set(scopeNodes.map(n => n.node_id))
+      const scopeEdgeIds = new Set(scopeEdges.map(e => e.edge_id))
       const withValues = programUsesMetricLookup(program.code)
       const snapshot: ClusterProgramSnapshot = {
-        nodes: graphStore.nodes.map(n => {
+        nodes: scopeNodes.map(n => {
           const raw = toRaw(n)
           return { node_id: raw.node_id, node_type: raw.node_type, properties: toRaw(raw.properties) }
         }),
-        edges: graphStore.edges.map(e => {
+        edges: scopeEdges.map(e => {
           const raw = toRaw(e)
           return {
             edge_id: raw.edge_id,
@@ -334,8 +342,8 @@ export const useClusterStore = defineStore('cluster', () => {
             properties: toRaw(raw.properties),
           }
         }),
-        selectedNodeIds: Array.from(graphStore.selectedNodeIds),
-        selectedEdgeIds: Array.from(graphStore.selectedEdgeIds),
+        selectedNodeIds: Array.from(graphStore.selectedNodeIds).filter(id => scopeNodeIds.has(id)),
+        selectedEdgeIds: Array.from(graphStore.selectedEdgeIds).filter(id => scopeEdgeIds.has(id)),
         params: { ...resolved.params },
         metrics: [...metricsStore.nodeMetrics, ...metricsStore.edgeMetrics].map(m => ({
           id: m.id,
@@ -486,7 +494,19 @@ export const useClusterStore = defineStore('cluster', () => {
       const existingClusters = clusters.value.filter(
         existing => existing.source_program_id !== programId
       )
+      const replacedIds = new Set(
+        clusters.value.filter(c => c.source_program_id === programId).map(c => c.cluster_id)
+      )
       clusters.value = [...existingClusters, ...newClusters]
+
+      // "Show only" named clusters this run replaced: keep showing their successors
+      const graphStore = useGraphStore()
+      const rule = graphStore.isolation
+      if (rule?.kind === 'cluster' && rule.ids.some(id => replacedIds.has(id))) {
+        const ids = [...rule.ids.filter(id => !replacedIds.has(id)), ...newClusters.map(c => c.cluster_id)]
+        if (ids.length === 0) graphStore.clearIsolation()
+        else graphStore.isolate({ kind: 'cluster', ids, label: `${ids.length} ${ids.length === 1 ? 'cluster' : 'clusters'}` })
+      }
 
       // Record execution
       executions.value.push({

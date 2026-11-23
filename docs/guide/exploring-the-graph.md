@@ -190,6 +190,13 @@ carry it.
   details, metric values, and actions. Clicking a selected node again
   deselects it. **Ctrl + click** multi-selects. **Click empty space** or
   **Esc** clears.
+- **Ids in the details are links** — in the side panel, in **Open details**
+  and in a case's inspector. An edge's source or target, the item's own id, or
+  a property whose value is the id of a loaded node or edge (`manager_id:
+  p-12`) selects that item and moves the camera to it. A number is only a link
+  in a column named like an id, so `age: 3` is not. If the filters hide the
+  item it is selected and a message says so; if it is inside a collapsed
+  cluster the camera goes to the cluster.
 - Selected nodes render at 1.5×. A clicked node also jumps to the front
   of the property-loading queue, so its details fill in immediately.
 - **? Shortcuts** in the status bar (and **About**) is the cheat sheet:

@@ -18,6 +18,7 @@ import { formatTraceTime } from '@/utils/traceView';
 import { toLocalId } from '@/utils/caseLook';
 import { itemKindLabel } from '@/utils/investigationStatus';
 import { explorationUrl } from '@/utils/investigationLinks';
+import type { ItemRef } from '@/utils/itemReference';
 import { isTabular } from '@/utils/itemPreview';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { GROUP_COLORS } from '@/utils/caseVocabulary';
@@ -33,6 +34,7 @@ import type { CaseAnnotation, CaseItem } from '@/types/investigation';
 const props = defineProps<{ activeItem: CaseItem | null; canEdit: boolean; decideMode: boolean }>();
 const emit = defineEmits<{
   'open-entity': [node: UnifiedNode];
+  'focus-item': [ref: ItemRef];
   'select-item': [item: CaseItem | null];
   activate: [item: CaseItem];
   'use-as-param': [ids: string[]];
@@ -377,7 +379,7 @@ const formatTime = (iso: string) => formatDate(iso);
 
     <!-- one entity -->
     <template v-else-if="selected">
-      <div class="muted">{{ selected.node_type }} · {{ shortId(selected.node_id) }}</div>
+      <div class="muted">{{ selected.node_type }} · <button class="link-btn" :title="`Centre the canvas on ${selected.node_id}`" data-testid="inspector-node-id" @click="emit('focus-item', { type: 'node', id: selected.node_id })">{{ shortId(selected.node_id) }}</button></div>
       <h3 class="entity" :title="selected.node_id" data-testid="inspector-title">{{ label(selected) }}</h3>
       <div class="chips">
         <span v-for="sid in selectedSources" :key="sid" class="chip" :style="{ borderColor: store.sourceColors[sid], color: store.sourceColors[sid] }">{{ sourceTitle(sid) }}</span>
@@ -439,7 +441,7 @@ const formatTime = (iso: string) => formatDate(iso);
       </div>
       <div v-if="inspectorTab === 'data'" data-testid="inspector-data">
         <!-- The same properties view as the explorer: visibility allowlist, hidden empties, metrics. -->
-        <SelectionDetails :item="{ type: 'node', data: selected }" :show-identity="false" :conflicts="selected.__conflicts" />
+        <SelectionDetails :item="{ type: 'node', data: selected }" :show-identity="false" :conflicts="selected.__conflicts" @focus-item="emit('focus-item', $event)" />
         <dl v-if="selectedEvents.length" class="props">
           <dt class="section">Events</dt>
           <dd class="section"></dd>
@@ -489,11 +491,11 @@ const formatTime = (iso: string) => formatDate(iso);
 
     <!-- one edge -->
     <template v-else-if="selectedEdge">
-      <div class="muted">{{ selectedEdge.relationship_type }} · {{ shortId(selectedEdge.edge_id) }}</div>
+      <div class="muted">{{ selectedEdge.relationship_type }} · <button class="link-btn" :title="`Centre the canvas on ${selectedEdge.edge_id}`" data-testid="inspector-edge-id" @click="emit('focus-item', { type: 'edge', id: selectedEdge.edge_id })">{{ shortId(selectedEdge.edge_id) }}</button></div>
       <h3 class="entity edge-title" :title="selectedEdge.edge_id" data-testid="inspector-edge-title">
-        <button class="link-btn endpoint" data-testid="inspector-edge-src" @click="graph.selectNode(selectedEdge.src)">{{ nameOf(selectedEdge.src) }}</button>
+        <button class="link-btn endpoint" data-testid="inspector-edge-src" @click="emit('focus-item', { type: 'node', id: selectedEdge.src })">{{ nameOf(selectedEdge.src) }}</button>
         <span class="arrow" aria-hidden="true">→</span>
-        <button class="link-btn endpoint" data-testid="inspector-edge-dst" @click="graph.selectNode(selectedEdge.dst)">{{ nameOf(selectedEdge.dst) }}</button>
+        <button class="link-btn endpoint" data-testid="inspector-edge-dst" @click="emit('focus-item', { type: 'node', id: selectedEdge.dst })">{{ nameOf(selectedEdge.dst) }}</button>
       </h3>
       <div class="chips">
         <span class="chip" :style="{ borderColor: store.sourceColors[baseSourceId(selectedEdge.__source)], color: store.sourceColors[baseSourceId(selectedEdge.__source)] }" data-testid="inspector-edge-source">{{ sourceTitle(selectedEdge.__source) }}</span>
@@ -515,7 +517,7 @@ const formatTime = (iso: string) => formatDate(iso);
         :item="{ type: 'edge', data: selectedEdge }"
         :label-of="nameOf"
         :conflicts="selectedEdge.__conflicts"
-        @select-node="graph.selectNode($event)"
+        @focus-item="emit('focus-item', $event)"
       />
       <div v-else class="notes" data-testid="inspector-edge-notes">
         <div v-for="n in edgeNotes" :key="n.id" class="note" data-testid="note">

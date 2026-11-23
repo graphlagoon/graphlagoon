@@ -172,7 +172,7 @@ export const useCommunityStore = defineStore('community', () => {
   // ============================================================================
 
   /**
-   * Run community detection on the current graph.
+   * Run community detection on the visible graph (filters and "show only" applied).
    *
    * Branches on the selected algorithm:
    * - Louvain: serializes the graph and runs the dedicated worker.
@@ -188,7 +188,16 @@ export const useCommunityStore = defineStore('community', () => {
     progressMessage.value = 'Starting...'
     progressValue.value = 0
 
+    const graphStore = useGraphStore()
+    // A rule naming communities stops meaning anything once they are replaced
+    const shownByCommunity =
+      graphStore.isolation?.kind === 'community' && graphStore.isolatedNodeIds !== null
+
     try {
+      if (graphStore.nodes.length > 0 && graphStore.visibleNodes.length === 0) {
+        error.value = 'The filters hide every node: there is nothing to group'
+        return
+      }
       if (selectedProgramId.value) {
         await runClusterProgramAsCommunity(selectedProgramId.value)
       } else if (algorithm.value === 'weak-components' || algorithm.value === 'strong-components') {
@@ -213,6 +222,12 @@ export const useCommunityStore = defineStore('community', () => {
         modularity.value = result.modularity
         communityLabels.value = {} // Louvain communities are anonymous
         lastComputedAt.value = Date.now()
+      }
+
+      // "Show only" named the old communities: keep showing what was grouped
+      if (shownByCommunity && !error.value) {
+        const ids = [...communitiesById.value.keys()]
+        graphStore.isolate({ kind: 'community', ids, label: `${ids.length} ${ids.length === 1 ? 'community' : 'communities'}` })
       }
 
       // Sync clusters only if collapse is explicitly enabled (independent opt-in).
@@ -299,6 +314,8 @@ export const useCommunityStore = defineStore('community', () => {
     const graphStore = useGraphStore()
 
     ensureProgramParams(programId)
+    // Read before the run: the filters may change while it computes
+    const allNodeIds = graphStore.visibleNodes.map(n => n.node_id)
     const result = await clusterStore.computeClustersFromProgram(
       programId,
       programParams.value[programId]
@@ -310,7 +327,6 @@ export const useCommunityStore = defineStore('community', () => {
     }
 
     const programClusters = result.clusters ?? []
-    const allNodeIds = graphStore.filteredNodes.map(n => n.node_id)
     const map = buildCommunityMapFromClusters(programClusters, allNodeIds)
 
     // Carry the cluster names over as community labels (index = community id);
@@ -410,17 +426,17 @@ export const useCommunityStore = defineStore('community', () => {
   }
 
   /**
-   * Serialize the current filtered graph for the worker.
+   * Serialize the visible graph for the worker.
    */
   function serializeGraph(): SerializedGraph {
     const graphStore = useGraphStore()
 
-    const nodes = graphStore.filteredNodes.map((node) => ({
+    const nodes = graphStore.visibleNodes.map((node) => ({
       id: node.node_id,
       attributes: { node_type: node.node_type },
     }))
 
-    const edges = graphStore.filteredEdges.map((edge) => ({
+    const edges = graphStore.visibleEdges.map((edge) => ({
       id: edge.edge_id,
       source: edge.src,
       target: edge.dst,

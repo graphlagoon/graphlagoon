@@ -18,6 +18,7 @@ import SimilarityPanel from './SimilarityPanel.vue'
 import ClusterProgramSkillModal from './ClusterProgramSkillModal.vue'
 import ClusterProgramLibraryModal from './ClusterProgramLibraryModal.vue'
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
+import RunScopeNote from './RunScopeNote.vue'
 import CommunityNodeModal from './CommunityNodeModal.vue'
 import { X, Play, Loader2, Bot, Eye, EyeOff, MoreHorizontal, Library, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
@@ -384,6 +385,7 @@ const displayOpen = ref(false)
           <small v-if="communityHoldReason" class="help-text hold-warning" data-testid="cluster-run-enrichment-warning">
             {{ communityHoldReason }}
           </small>
+          <RunScopeNote />
           <div class="community-actions">
             <button
               class="btn-detect"
@@ -524,7 +526,7 @@ const displayOpen = ref(false)
               >
                 {{ row.collapsed ? 'collapsed' : 'open' }}
               </button>
-              <span class="community-count">{{ row.count }}</span>
+              <span class="community-count" :title="row.count < row.total ? `${row.count} of ${row.total} nodes pass the filters` : undefined">{{ row.count }}</span>
               <div class="row-menu">
                 <button
                   class="btn-icon-only"

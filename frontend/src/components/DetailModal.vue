@@ -6,6 +6,8 @@ import { useItemMetrics } from '@/composables/useItemMetrics';
 import { formatMetricValue as formatMetric } from '@/utils/metricFormat';
 import type { MetricValue } from '@/types/metrics';
 import { X } from 'lucide-vue-next';
+import { useItemRefs } from '@/composables/useItemRefs';
+import type { ItemRef } from '@/utils/itemReference';
 import { tryParseJson } from '@/utils/jsonDetection';
 import JsonValueViewer from './JsonValueViewer.vue';
 import PropertyVisibilityHint from './PropertyVisibilityHint.vue';
@@ -18,9 +20,18 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
+  'focus-item': [ref: ItemRef];
 }>();
 
 const graphStore = useGraphStore();
+
+const { refOf } = useItemRefs();
+
+/** The canvas is behind the modal: going there closes it. */
+function goTo(target: ItemRef) {
+  emit('close');
+  emit('focus-item', target);
+}
 
 const copiedKey = ref<string | null>(null);
 
@@ -53,16 +64,16 @@ const basicFields = computed(() => {
   if (props.item.type === 'node') {
     const n = props.item.data;
     return [
-      { label: 'ID', colName: nodeColumns.value.id, value: n.node_id },
-      { label: 'Type', colName: nodeColumns.value.type, value: n.node_type },
+      { label: 'ID', colName: nodeColumns.value.id, value: n.node_id, ref: { type: 'node', id: String(n.node_id) } as ItemRef },
+      { label: 'Type', colName: nodeColumns.value.type, value: n.node_type, ref: null },
     ];
   } else {
     const e = props.item.data;
     return [
-      { label: 'ID', colName: edgeColumns.value.id, value: e.edge_id },
-      { label: 'Type', colName: edgeColumns.value.type, value: e.relationship_type },
-      { label: 'Source', colName: edgeColumns.value.src, value: e.src },
-      { label: 'Target', colName: edgeColumns.value.dst, value: e.dst },
+      { label: 'ID', colName: edgeColumns.value.id, value: e.edge_id, ref: { type: 'edge', id: String(e.edge_id) } as ItemRef },
+      { label: 'Type', colName: edgeColumns.value.type, value: e.relationship_type, ref: null },
+      { label: 'Source', colName: edgeColumns.value.src, value: e.src, ref: { type: 'node', id: String(e.src) } as ItemRef },
+      { label: 'Target', colName: edgeColumns.value.dst, value: e.dst, ref: { type: 'node', id: String(e.dst) } as ItemRef },
     ];
   }
 });
@@ -84,6 +95,7 @@ const allowedProperties = computed(() => {
         key,
         value,
         displayValue: formatValue(value),
+        ref: refOf(key, value),
         isJsonValue: jsonResult.isJson,
         parsedJson: jsonResult.isJson ? jsonResult.parsed : null,
       };
@@ -200,7 +212,17 @@ function copyAll() {
                     {{ field.label }}
                     <span class="col-hint">{{ field.colName }}</span>
                   </td>
-                  <td class="prop-val mono" :title="String(field.value)">{{ field.value }}</td>
+                  <td class="prop-val mono" :title="String(field.value)">
+                    <button
+                      v-if="field.ref"
+                      type="button"
+                      class="item-link"
+                      :title="`Go to ${field.value} on the canvas`"
+                      :data-testid="`detail-modal-ref-${field.label}`"
+                      @click="goTo(field.ref)"
+                    >{{ field.value }}</button>
+                    <template v-else>{{ field.value }}</template>
+                  </td>
                   <td class="prop-action">
                     <button
                       class="copy-btn"
@@ -238,6 +260,14 @@ function copyAll() {
                   <td class="prop-key" :title="prop.key">{{ prop.key }}</td>
                   <td class="prop-val mono" :title="!prop.isJsonValue ? prop.displayValue : undefined">
                     <JsonValueViewer v-if="prop.isJsonValue" :value="prop.parsedJson" />
+                    <button
+                      v-else-if="prop.ref"
+                      type="button"
+                      class="item-link"
+                      :title="`Go to the ${prop.ref.type} ${prop.ref.id} on the canvas`"
+                      :data-testid="`detail-modal-ref-${prop.key}`"
+                      @click="goTo(prop.ref)"
+                    >{{ prop.displayValue }}</button>
                     <span v-else>{{ prop.displayValue }}</span>
                   </td>
                   <td class="prop-action">
@@ -298,6 +328,22 @@ function copyAll() {
 </template>
 
 <style scoped>
+.item-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.item-link:hover,
+.item-link:focus-visible {
+  text-decoration: underline;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;

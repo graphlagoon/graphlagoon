@@ -256,19 +256,35 @@ export function useGraphCamera(
     }
     if (!nodeId) return;
 
-    const currentData = graph3d.graphData();
-    const targetNode = currentData.nodes.find((n: GraphNode) => n.id === nodeId);
-    if (!targetNode || targetNode.x === undefined || targetNode.y === undefined || targetNode.z === undefined) return;
+    focusOnNodes([nodeId]);
+  }
+
+  /** Centre the camera on these drawn nodes, close enough to see them all. */
+  function focusOnNodes(nodeIds: string[]) {
+    const graph3d = getGraph3d();
+    if (!graph3d) return;
+
+    const wanted = new Set(nodeIds);
+    const targets = (graph3d.graphData().nodes as GraphNode[]).filter(
+      (n) => wanted.has(n.id) && n.x !== undefined && n.y !== undefined && n.z !== undefined,
+    );
+    if (targets.length === 0) return;
 
     const camera = graph3d.camera();
     const duration = 1000;
 
+    const mid = (axis: 'x' | 'y' | 'z') => {
+      const values = targets.map((n) => n[axis] as number);
+      return { centre: (Math.min(...values) + Math.max(...values)) / 2, extent: Math.max(...values) - Math.min(...values) };
+    };
+    const [x, y, z] = [mid('x'), mid('y'), mid('z')];
+    const targetNode = { x: x.centre, y: y.centre, z: z.centre };
+
     // Compute rendered node radius: 3d-force-graph uses cbrt(nodeVal) * nodeRelSize
-    const nodeVal = targetNode.size ?? 1;
     const nodeRelSize = graph3d.nodeRelSize() ?? 4;
-    const nodeRadius = Math.cbrt(nodeVal) * nodeRelSize;
-    // We want the visible area to be ~10x the node diameter
-    const visibleSpan = Math.max(nodeRadius * 20, 40);
+    const nodeRadius = Math.cbrt(Math.max(...targets.map((n) => n.size ?? 1))) * nodeRelSize;
+    // We want the visible area to be ~10x the node diameter, and to hold them all
+    const visibleSpan = Math.max(nodeRadius * 20, 40, Math.hypot(x.extent, y.extent, z.extent) * 1.6);
 
     if (camera?.isOrthographicCamera) {
       // Orthographic: animate position, lookAt and zoom in a single rAF loop
@@ -498,6 +514,7 @@ export function useGraphCamera(
     resetView,
     centerOnBestMatch,
     focusOnNode,
+    focusOnNodes,
     getViewport,
     applyViewport,
     getIsCameraMoving,

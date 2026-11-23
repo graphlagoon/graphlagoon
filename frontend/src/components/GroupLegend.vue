@@ -74,7 +74,7 @@ const folded = ref(typeof window !== 'undefined' && window.innerWidth < NARROW_P
       >
         <span class="dot" :style="{ backgroundColor: row.color }"></span>
         <span class="name">{{ row.label }}</span>
-        <span class="count">{{ row.count }}</span>
+        <span class="count" :title="row.count < row.total ? `${row.count} of ${row.total} nodes pass the filters` : undefined">{{ row.count }}</span>
       </button>
       <button v-if="more > 0" class="legend-row more" data-testid="group-legend-more" @click="emit('open-panel')">
         +{{ more }} more…

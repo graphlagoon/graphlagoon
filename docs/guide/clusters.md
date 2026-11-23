@@ -99,7 +99,13 @@ return Object.entries(clusters).map(([type, node_ids], i) => ({
 }));
 ```
 
-`nodes` and `edges` are the **full loaded graph**, not the filtered view.
+`nodes` and `edges` are the **visible** graph: what the filters (types,
+search in *Hide* mode, the Data Table, a case's chips) or a
+[show only](./exploring-the-graph.md#show-only) hide is not there, and
+`selectedNodeIds`/`selectedEdgeIds` leave it out too. The run form says **Runs
+on the N visible of M nodes** when something is hidden; clear the filters to
+run on everything loaded. Members of collapsed clusters count as visible, and
+the graph lens does not count as a filter.
 A **closed** cluster collapses its members into a single shaped node (its
 edges are re-pointed there); an **open** cluster keeps members visible.
 A closed cluster's node is labelled with its name and member count —

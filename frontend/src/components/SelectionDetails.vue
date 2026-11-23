@@ -12,6 +12,8 @@ import { ref, computed, watch } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { useItemMetrics, type SelectedGraphItem } from '@/composables/useItemMetrics';
 import { formatMetricValue } from '@/utils/metricFormat';
+import { useItemRefs } from '@/composables/useItemRefs';
+import type { ItemRef } from '@/utils/itemReference';
 import { tryParseJson } from '@/utils/jsonDetection';
 import JsonValueViewer from './JsonValueViewer.vue';
 import PropertyVisibilityHint from './PropertyVisibilityHint.vue';
@@ -23,7 +25,7 @@ const props = withDefaults(
     item: SelectedGraphItem;
     /** The identity rows (id, type, source → target). Off when the host shows them in its own header. */
     showIdentity?: boolean;
-    /** Readable name for an endpoint id; with it, source and target are buttons that select the node. */
+    /** Readable name for an endpoint id. */
     labelOf?: (id: string) => string;
     /** Values other sources disagree on (a case's unified graph), by property. */
     conflicts?: Record<string, { value: unknown; sourceId: string }[]> | null;
@@ -31,7 +33,9 @@ const props = withDefaults(
   { showIdentity: true, labelOf: undefined, conflicts: null },
 );
 
-const emit = defineEmits<{ 'select-node': [id: string] }>();
+const emit = defineEmits<{ 'focus-item': [ref: ItemRef] }>();
+
+const { refOf } = useItemRefs();
 
 const graphStore = useGraphStore();
 
@@ -85,6 +89,7 @@ const allowedProperties = computed(() => {
         fromLayer: fromLayer.has(key),
         fromQuery: fromQuery.get(key) ?? null,
         conflicts: props.conflicts?.[key] ?? null,
+        ref: refOf(key, value),
       };
     });
 });
@@ -144,7 +149,13 @@ const endpointLabel = (id: string) => props.labelOf?.(id) ?? id;
             ID
             <span class="col-name">({{ nodeColumns.id }})</span>
           </span>
-          <span class="value mono" :title="String(item.data.node_id)">{{ item.data.node_id }}</span>
+          <button
+            type="button"
+            class="value mono item-link"
+            :title="`Centre the canvas on ${item.data.node_id}`"
+            data-testid="selection-details-id"
+            @click="emit('focus-item', { type: 'node', id: String(item.data.node_id) })"
+          >{{ item.data.node_id }}</button>
         </div>
         <div class="detail-row">
           <span class="label">
@@ -161,7 +172,13 @@ const endpointLabel = (id: string) => props.labelOf?.(id) ?? id;
             ID
             <span class="col-name">({{ edgeColumns.id }})</span>
           </span>
-          <span class="value mono" :title="String(item.data.edge_id)">{{ item.data.edge_id }}</span>
+          <button
+            type="button"
+            class="value mono item-link"
+            :title="`Centre the canvas on ${item.data.edge_id}`"
+            data-testid="selection-details-id"
+            @click="emit('focus-item', { type: 'edge', id: String(item.data.edge_id) })"
+          >{{ item.data.edge_id }}</button>
         </div>
         <div class="detail-row">
           <span class="label">
@@ -176,13 +193,13 @@ const endpointLabel = (id: string) => props.labelOf?.(id) ?? id;
             <span class="col-name">({{ edgeColumns.src }})</span>
           </span>
           <button
-            v-if="labelOf"
-            class="value link-btn endpoint"
-            :title="String(item.data.src)"
+            type="button"
+            class="value item-link"
+            :class="{ mono: !labelOf }"
+            :title="`Go to ${item.data.src}`"
             data-testid="selection-details-src"
-            @click="emit('select-node', String(item.data.src))"
+            @click="emit('focus-item', { type: 'node', id: String(item.data.src) })"
           >{{ endpointLabel(String(item.data.src)) }}</button>
-          <span v-else class="value mono" :title="String(item.data.src)">{{ item.data.src }}</span>
         </div>
         <div class="detail-row">
           <span class="label">
@@ -190,13 +207,13 @@ const endpointLabel = (id: string) => props.labelOf?.(id) ?? id;
             <span class="col-name">({{ edgeColumns.dst }})</span>
           </span>
           <button
-            v-if="labelOf"
-            class="value link-btn endpoint"
-            :title="String(item.data.dst)"
+            type="button"
+            class="value item-link"
+            :class="{ mono: !labelOf }"
+            :title="`Go to ${item.data.dst}`"
             data-testid="selection-details-dst"
-            @click="emit('select-node', String(item.data.dst))"
+            @click="emit('focus-item', { type: 'node', id: String(item.data.dst) })"
           >{{ endpointLabel(String(item.data.dst)) }}</button>
-          <span v-else class="value mono" :title="String(item.data.dst)">{{ item.data.dst }}</span>
         </div>
       </template>
     </div>
@@ -225,7 +242,15 @@ const endpointLabel = (id: string) => props.labelOf?.(id) ?? id;
         <div v-else class="detail-row">
           <span class="label prop-label" :title="prop.key">{{ prop.key }}</span>
           <span class="value prop-value-text" :title="String(prop.rawValue)">
-            {{ prop.value }}
+            <button
+              v-if="prop.ref"
+              type="button"
+              class="item-link"
+              :title="`Go to the ${prop.ref.type} ${prop.ref.id}`"
+              :data-testid="`selection-details-ref-${prop.key}`"
+              @click="emit('focus-item', prop.ref)"
+            >{{ prop.value }}</button>
+            <template v-else>{{ prop.value }}</template>
             <span v-if="prop.fromLayer" class="layer-chip" title="From your data on this exploration, not from the context" data-testid="prop-from-layer">your data</span>
             <span v-if="prop.fromQuery" class="layer-chip query-chip" :title="`Added after the query by the enrichment query '${prop.fromQuery}' (Databricks tables)`" data-testid="prop-from-query">from {{ prop.fromQuery }}</span>
             <span v-if="prop.conflicts" class="conflict" title="Other items disagree">≠ {{ prop.conflicts.map((c) => c.value).join(', ') }}</span>
@@ -302,14 +327,25 @@ const endpointLabel = (id: string) => props.labelOf?.(id) ?? id;
   font-size: 12px;
 }
 
-.link-btn.endpoint {
+.item-link {
   padding: 0;
   border: none;
   background: none;
   font: inherit;
-  font-size: 13px;
+  text-align: right;
+  overflow-wrap: anywhere;
   color: var(--color-primary);
   cursor: pointer;
+}
+
+.item-link.mono {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.item-link:hover,
+.item-link:focus-visible {
+  text-decoration: underline;
 }
 
 /* `border-bottom` on a `flex: 1` value stretched the dotted line across the

@@ -25,6 +25,7 @@ import { useContextMenuActionsStore } from '@/stores/contextMenuActions';
 import { isTableAction, type ContextMenuActionConfig } from '@/types/contextMenuActions';
 import { useCanvasFullscreen } from '@/composables/useCanvasFullscreen';
 import type { LookTab } from '@/stores/toolbar';
+import { useFocusItem } from '@/composables/useFocusItem';
 import { useToast } from '@/composables/useToast';
 import { useLiveRevision } from '@/composables/useLiveRevision';
 import { useAuthStore } from '@/stores/auth';
@@ -712,6 +713,8 @@ function applyView(content: CaseViewContent) {
   if (canEdit.value) store.saveState({ groups_closed: content.groups_closed ?? [] }).catch((e) => toast.error(getErrorMessage(e, 'Failed to apply the view')));
 }
 
+const { focusItem } = useFocusItem(() => canvasRef.value);
+
 /** A journal line about an entity: selected and framed on the canvas. */
 function focusEntity(id: string) {
   activeItem.value = null;
@@ -838,7 +841,7 @@ onUnmounted(() => {
                   <RouterLink v-if="failedExplorationLink" :to="failedExplorationLink" class="btn btn-outline btn-sm">Open the exploration ↗</RouterLink>
                 </span>
               </div>
-              <div v-else-if="graphStore.nodes.length && graphStore.visibleNodeCount === 0" class="overlay empty-canvas" data-testid="canvas-no-match">
+              <div v-else-if="graphStore.nodes.length && graphStore.visibleNodeCount === 0 && !graphStore.tableFilteredNodeIds" class="overlay empty-canvas" data-testid="canvas-no-match">
                 <p>No node matches the filters.</p>
                 <button class="btn btn-outline btn-sm" data-testid="canvas-no-match-clear" @click="filters.clear()">Clear filters</button>
               </div>
@@ -910,7 +913,7 @@ onUnmounted(() => {
               />
             </section>
             <div v-if="panels.table" class="table-panel" data-testid="panel-table">
-              <DataTablePanel @close="panels.table = false" @focus-node="canvasRef?.focusOnNode($event)" />
+              <DataTablePanel @close="panels.table = false" @focus-node="canvasRef?.focusOnNode($event)" @focus-edge="focusItem({ type: 'edge', id: $event })" />
             </div>
           </div>
 
@@ -926,6 +929,7 @@ onUnmounted(() => {
             @trace="(t, d) => followMoney({ ...t, label: '' }, d)"
             @path-from="analysisBar?.startPath($event)"
             @open-details="showDetailModal = true"
+            @focus-item="focusItem"
           />
         </div>
 
@@ -975,7 +979,7 @@ onUnmounted(() => {
     <ClusterNodeModal v-if="selectedClusterId" :cluster-id="selectedClusterId" @close="selectedClusterId = null" />
     <ClusterProgramRunHost />
     <CommunityNodeModal :community-id="communityTable.selectedCommunityId.value" @close="communityTable.close()" />
-    <DetailModal :item="detailModalItem" @close="showDetailModal = false" />
+    <DetailModal :item="detailModalItem" @focus-item="focusItem" @close="showDetailModal = false" />
     <TemplateExecuteModal
       v-if="pendingTemplateExecution"
       :template="pendingTemplateExecution.template"

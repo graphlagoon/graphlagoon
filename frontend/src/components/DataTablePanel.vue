@@ -335,8 +335,7 @@ function onRowClick(event: any) {
     emit('focus-node', data.node_id);
   } else {
     graphStore.selectEdge(data.edge_id, multi);
-    const edge = graphStore.filteredEdges.find(e => e.edge_id === data.edge_id);
-    if (edge) emit('focus-edge', edge.src);
+    if (graphStore.selectedEdgeIds.has(data.edge_id)) emit('focus-edge', data.edge_id);
   }
 }
 

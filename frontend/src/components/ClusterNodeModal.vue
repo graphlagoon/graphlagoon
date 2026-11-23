@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useClusterStore } from '@/stores/cluster'
 import { useGraphStore } from '@/stores/graph'
+import { useVisibleMembers } from '@/composables/useVisibleMembers'
 import {
   type ColMeta,
   buildNodeColumns, flattenNodeRows,
@@ -27,10 +28,12 @@ const cluster = computed(() => {
   return clusterStore.clusters.find(c => c.cluster_id === props.clusterId)
 })
 
-const nodes = computed(() => {
+const allNodes = computed(() => {
   if (!cluster.value) return []
   return clusterStore.getClusterNodes(cluster.value.cluster_id)
 })
+
+const { nodes, hiddenCount, includeHidden } = useVisibleMembers(allNodes, () => props.clusterId)
 
 // ─── Property keys ───
 
@@ -159,6 +162,10 @@ function exportCSV() {
             <span class="row-count">
               <template v-if="filteredRows.length !== rows.length">{{ filteredRows.length }} of </template>{{ rows.length }} nodes
             </span>
+            <label v-if="hiddenCount > 0" class="row-count" data-testid="members-include-hidden">
+              <input v-model="includeHidden" type="checkbox" />
+              Include {{ hiddenCount }} hidden
+            </label>
             <button class="action-btn" @click="exportCSV" title="Export CSV">CSV</button>
           </div>
         </div>
