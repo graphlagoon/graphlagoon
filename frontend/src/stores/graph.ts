@@ -532,6 +532,8 @@ export const useGraphStore = defineStore('graph', () => {
   let nodeProvenance: EnrichmentProvenance = new Map();
   // Node values a query wrote, put back when background property loading replaces a node's dict.
   let nodeQueryValues = new Map<string, Map<string, { value: unknown; overwrite: boolean }>>();
+  // The same for edges: put back when a live refresh replaces an edge with the saved one.
+  let edgeQueryValues = new Map<string, Map<string, unknown>>();
   const queryEnrichmentVersion = ref(0);
   // Bumped when the graph is replaced or cleared: a run still in flight drops its rows.
   let queryEnrichmentToken = 0;
@@ -553,6 +555,7 @@ export const useGraphStore = defineStore('graph', () => {
     edgeProvenance = new Map();
     nodeProvenance = new Map();
     nodeQueryValues = new Map();
+    edgeQueryValues = new Map();
     queryEnrichmentRuns.value = {};
     queryEnrichmentVersion.value++;
   }
@@ -802,6 +805,8 @@ export const useGraphStore = defineStore('graph', () => {
   const pendingFocusNodeId = ref<string | null>(null);
   /** Bumped when a query the user ran (not a restore) loads: the after-query behaviors watch it. */
   const queryRunSeq = ref(0);
+  // Moves after an expand that brought nodes or edges: the "After a query" analyses run again.
+  const expandSeq = ref(0);
 
   // Computed
   const selectedNode = computed(() => {
@@ -1569,6 +1574,11 @@ export const useGraphStore = defineStore('graph', () => {
             const reached = edges.value.filter((e) => result.rows[e.edge_id]);
             const { patch, written, matched } = runPatch(reached, (e) => e.edge_id, result, overwrite, (id) => edgeProvenance.get(id)?.get(entry.label));
             patchEdgeProperties(patch);
+            for (const [id, keys] of written) {
+              const kept = edgeQueryValues.get(id) ?? new Map<string, unknown>();
+              for (const key of keys) kept.set(key, patch.get(id)![key]);
+              edgeQueryValues.set(id, kept);
+            }
             recordProvenance(edgeProvenance, entry.label, written);
             run.matched += matched;
             run.written += written.size;
@@ -2089,6 +2099,8 @@ export const useGraphStore = defineStore('graph', () => {
         void runQueryEnrichment({
           only: { edges: new Set(newEdges.map((e) => e.edge_id)), nodes: new Set(newNodes.map((n) => n.node_id)) },
         });
+        // After the enrichment run started, so a program that waits for it sees it running.
+        expandSeq.value++;
       }
       // Nothing hidden silently: a cut expansion says so. When the node's own
       // edges are all here (known from its summary), only links among its
@@ -3308,6 +3320,11 @@ export const useGraphStore = defineStore('graph', () => {
       patchNodeProperties(merged.patch, { merge: false });
       overlay.value = layer;
       restoreEnriched(snapshot, merged);
+      // An edge the remote save replaced carries the saved enriched values: this session's are fresher.
+      merged.edges = merged.edges.map((e) => {
+        const mine = edgeQueryValues.get(e.edge_id);
+        return mine ? { ...e, properties: { ...(e.properties ?? {}), ...Object.fromEntries(mine) } } : e;
+      });
       [nodes.value, edges.value] = withOverlay(merged.nodes, merged.edges);
       void runQueryEnrichment();
       liveBase = fingerprints(snapshot);
@@ -3827,6 +3844,7 @@ export const useGraphStore = defineStore('graph', () => {
     focusNodeId,
     pendingFocusNodeId,
     queryRunSeq,
+    expandSeq,
     deleteFromGraph,
     pendingViewport,
     // Progressive load

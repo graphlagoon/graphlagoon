@@ -29,7 +29,7 @@ describe('DatabricksEnrichmentTab', () => {
 
   it('says how to add a query when the context has none', () => {
     const { wrapper } = setup([tables[0]]);
-    expect(wrapper.find('[data-testid="your-data-databricks-empty"]').text()).toContain('Enrich with a query');
+    expect(wrapper.find('[data-testid="your-data-databricks-empty"]').text()).toContain('Enrichments');
     expect(wrapper.find('[data-testid="your-data-databricks-query"]').exists()).toBe(false);
   });
 

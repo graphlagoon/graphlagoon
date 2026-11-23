@@ -83,7 +83,9 @@ graph data clears them — the node set changed, so the answer did too.
 - **Run cluster program** — Off, or a program whose clusters are drawn.
 
 Both run each time a query you run loads, whether from the Query panel, a
-[template](./query-templates.md) or a right-click action. They don't run when
+[template](./query-templates.md) or a right-click action, and again after an
+expand that brings new nodes or edges, so they describe the graph on screen (a
+program's clusters are replaced, not added). They don't run when
 the context auto-loads on open or when a saved exploration reopens, because
 the exploration restores its own communities and clusters. A program that
 needs a parameter value with no default is skipped with a warning that names

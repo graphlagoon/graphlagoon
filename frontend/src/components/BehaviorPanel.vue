@@ -228,7 +228,7 @@ function resetBehaviors() {
         </select>
       </div>
       <p class="behavior-desc">
-        Runs each time a query you run loads (Query panel, templates, menu actions) — not when a saved exploration reopens
+        Runs each time a query you run loads (Query panel, templates, menu actions) and again after an expand that brings new nodes — not when a saved exploration reopens
       </p>
     </div>
 

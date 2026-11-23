@@ -125,4 +125,27 @@ describe('useAfterQueryAnalysis and enrichment', () => {
     expect(toast.warning).not.toHaveBeenCalled();
     expect(waitingOnEnrichment.value?.reason).toBe('failed');
   });
+
+  it('runs again after an expand, and a waiting program waits for that enrichment of that expand', async () => {
+    setup(false);
+    await queryLanded();
+    expect(execute).toHaveBeenCalledTimes(1);
+    graph.expandSeq++;
+    await flushPromises();
+    expect(execute).toHaveBeenCalledTimes(2);
+
+    scope.stop();
+    setup(true);
+    await queryLanded();
+    await enrichmentEnds('done');
+    expect(execute).toHaveBeenCalledTimes(1);
+    // The enrichment of that expand starts before expandSeq moves (as the store does it).
+    graph.queryEnrichmentRuns = { risk: record('running') };
+    graph.queryEnrichmentInFlight = 1;
+    graph.expandSeq++;
+    await flushPromises();
+    expect(execute).toHaveBeenCalledTimes(1);
+    await enrichmentEnds('done');
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
 });

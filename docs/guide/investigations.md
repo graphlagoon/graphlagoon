@@ -342,7 +342,7 @@ entities into one on the canvas and in every server analysis.
 ## Enrichment tables
 
 A context lists its **authorized tables** (KYC, devices, chargebacks) under
-Enrichment Tables in the context form. Only an **allowed source** may be
+Enrichments in the context form. Only an **allowed source** may be
 listed: a table in a `catalog.schema` of `GRAPH_LAGOON_CATALOG_SCHEMAS`, or a
 schema or table of `GRAPH_LAGOON_ENRICHMENT_SOURCES` (see
 [Query scope](./permissions.md#query-scope)). An entry with a **key column** is a

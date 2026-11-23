@@ -1,5 +1,5 @@
 /**
- * "Ask an AI" for a context's Enrichment Tables: a copy-paste prompt that carries this
+ * "Ask an AI" for a context's Enrichments: a copy-paste prompt that carries this
  * context's tables, columns, types and current entries, the exact YAML the form imports, and
  * the rules the server enforces, so the answer pastes straight into "Import YAML".
  * Pure, like the other skill builders.
@@ -43,9 +43,9 @@ export function buildEnrichmentTablesSkill(input: EnrichmentTablesSkillInput): s
     ? `The context's own Delta tables (always readable by a query, no need to list them):\n${own.join('\n')}`
     : `This context reads its graph from \`${input.datasourceType}\`, not from Delta tables: every Delta table a query joins must be listed.`;
 
-  return `# Write the Enrichment Tables of a Graph Lagoon context
+  return `# Write the Enrichments of a Graph Lagoon context
 
-You are helping me configure **Enrichment Tables** for the Graph Lagoon context "${input.title}".
+You are helping me configure the **Enrichments** (\`enrichment_tables\`) for the Graph Lagoon context "${input.title}".
 Answer with ONE \`\`\`yaml block I can paste into the context form's **Import YAML** box, then a
 short explanation. If you need a table's columns, ask me to run \`DESCRIBE TABLE <name>\` on
 Databricks and paste the output; never guess column names.

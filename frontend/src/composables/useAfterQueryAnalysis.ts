@@ -1,7 +1,8 @@
 /**
  * Runs the "After a query" behaviors (communities, a cluster program) each time
- * a query you ran loads — Query panel, template, context-menu action. A restored
- * exploration brings its own analysis state, so restores do not count
+ * a query you ran loads — Query panel, template, context-menu action — and again after
+ * an expand that brought nodes or edges, so they describe the graph on screen. A
+ * restored exploration brings its own analysis state, so restores do not count
  * (`graphStore.queryRunSeq` only moves on a run, see QueryRunOptions.fromRestore).
  *
  * A program marked `wait_for_enrichment` waits for the context's enrichment of that
@@ -32,7 +33,10 @@ export function useAfterQueryAnalysis() {
   const clusterStore = useClusterStore();
   const toast = useToast();
 
-  /** The gated part of the current query's plan, until it runs or another query replaces it. */
+  /** Moves on each trigger (a query, an expand): a run or a hold of an older trigger is void. */
+  let trigger = 0;
+
+  /** The gated part of the current trigger's plan, until it runs or another trigger replaces it. */
   let held: { seq: number; epoch: number; plan: AfterQueryPlan } | null = null;
 
   function drop() {
@@ -82,7 +86,7 @@ export function useAfterQueryAnalysis() {
     if (!held) return;
     // Another query, or another graph altogether (context, exploration, precomputed, clear):
     // what was held belonged to a graph that is gone.
-    if (held.seq !== graphStore.queryRunSeq || held.epoch !== graphStore.queryEnrichmentEpoch || graphStore.nodes.length === 0) {
+    if (held.seq !== trigger || held.epoch !== graphStore.queryEnrichmentEpoch || graphStore.nodes.length === 0) {
       drop();
       return;
     }
@@ -111,7 +115,7 @@ export function useAfterQueryAnalysis() {
     // The stores clear communities and clusters when nodes change; let those
     // watchers flush first, or they would wipe what runs below.
     await nextTick();
-    if (seq !== graphStore.queryRunSeq || graphStore.nodes.length === 0) return;
+    if (seq !== trigger || graphStore.nodes.length === 0) return;
 
     const plan = planAfterQueryAnalysis(
       behaviors,
@@ -126,13 +130,16 @@ export function useAfterQueryAnalysis() {
     const problems = [...plan.problems, ...(await execute(now))];
     if (problems.length > 0) toast.warning(`After the query: ${problems.join(' ')}`, 6000);
     // A newer query may have landed while the part above ran: its own run() holds what it needs.
-    if ((later.community || later.clusterProgram) && seq === graphStore.queryRunSeq) {
+    if ((later.community || later.clusterProgram) && seq === trigger) {
       held = { seq, epoch: graphStore.queryEnrichmentEpoch, plan: later };
       await release();
     }
   }
 
-  watch(() => graphStore.queryRunSeq, (seq) => void run(seq));
+  watch(
+    () => [graphStore.queryRunSeq, graphStore.expandSeq] as const,
+    () => void run(++trigger),
+  );
   // Enrichment finishing (or a Retry) is what releases a held analysis.
   watch(
     () => [graphStore.queryEnrichmentRuns, graphStore.queryEnrichmentInFlight, graphStore.queryEnrichmentEpoch] as const,

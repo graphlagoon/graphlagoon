@@ -46,7 +46,7 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
 
     <div v-if="!entries.length" class="nomatch" data-testid="your-data-databricks-empty">
       This context has no enrichment query or provider yet. Someone with the "Create graph contexts" permission adds one in the
-      context form, under <strong>Enrichment Tables → Enrich with a query</strong>.
+      context form, under <strong>Enrichments</strong>.
     </div>
 
     <template v-else>
