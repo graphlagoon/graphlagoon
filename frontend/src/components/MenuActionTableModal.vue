@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * Rows of a right-click table action (a run-query-template action with
- * `resultMode: 'table'`): the server runs the template for the clicked item and
- * the result shows here, the graph untouched. The parameters arrive with the
+ * Rows of a right-click table action, the graph untouched. Two sources: a
+ * run-query-template action with `resultMode: 'table'` (the server runs the
+ * template against the warehouse) or a `show-table` action (the rows come from
+ * the graph on the canvas, in the browser). The parameters arrive with the
  * answer, editable, so a filter (period, minimum amount, …) is changed and run
  * again without leaving the modal. Mounted by the exploration and the case views.
  */
@@ -45,7 +46,8 @@ const ranWithText = computed(() =>
 const gridColumns = computed(() => buildGenericColumns(table.columns.value, table.rows.value));
 const gridRows = computed(() => buildGenericRows(table.rows.value, gridColumns.value));
 const nodeIdField = computed(() => {
-  const wanted = (props.nodeIdColumns ?? ['node_id']).map((c) => c.toLowerCase());
+  // A canvas table holds canvas ids: its node_id (or an edge's src) is on the canvas.
+  const wanted = (table.isCanvas ? ['node_id', 'src'] : props.nodeIdColumns ?? ['node_id']).map((c) => c.toLowerCase());
   return gridColumns.value.find((c) => wanted.includes(c.header.toLowerCase()))?.field;
 });
 
@@ -65,11 +67,25 @@ async function addRows() {
       rows: table.rows.value,
       title: [props.request.label, props.request.target.id, ranWithText.value].filter(Boolean).join(' · '),
       description: table.templateName.value,
-      provenance: {
-        context_id: props.request.contextId,
-        tool: 'menu_action',
-        params: { action: props.request.actionId, template: table.templateName.value, values: { ...table.ranWith.value }, item: props.request.target.id },
-      },
+      provenance: props.request.canvas
+        ? {
+            ...(props.request.contextId ? { context_id: props.request.contextId } : {}),
+            tool: 'canvas_table',
+            params: {
+              action: props.request.actionId,
+              source: props.request.canvas.source.type,
+              ...(props.request.canvas.source.type === 'neighborhood'
+                ? { spec: { ...props.request.canvas.source } }
+                : { code: props.request.canvas.source.code }),
+              values: { ...table.ranWith.value },
+              item: props.request.target.id,
+            },
+          }
+        : {
+            context_id: props.request.contextId,
+            tool: 'menu_action',
+            params: { action: props.request.actionId, template: table.templateName.value, values: { ...table.ranWith.value }, item: props.request.target.id },
+          },
     });
     if (item) added.value = true;
   } finally {
@@ -92,7 +108,14 @@ onBeforeUnmount(() => {
           <h2>{{ request.label }}</h2>
           <div class="header-meta">
             <span class="item-id" :title="request.target.id">{{ request.target.node_type || request.target.relationship_type }} · {{ request.target.id }}</span>
-            <span v-if="table.templateName.value" class="template-name">Query: {{ table.templateName.value }}</span>
+            <span
+              class="source-badge"
+              :class="table.isCanvas ? 'canvas' : 'warehouse'"
+              data-testid="menu-action-table-source"
+              :title="table.isCanvas ? 'Computed from the graph on the canvas: what is loaded, not everything in the warehouse' : 'Run against the warehouse'"
+            >{{ table.isCanvas ? 'Canvas' : 'Warehouse' }}</span>
+            <span v-if="table.templateName.value && !table.isCanvas" class="template-name">Query: {{ table.templateName.value }}</span>
+            <span v-else-if="table.isCanvas" class="template-name">{{ table.templateName.value }}</span>
             <span v-if="ranWithText && showRows" data-testid="menu-action-table-ran-with">Run with {{ ranWithText }}</span>
           </div>
         </div>
@@ -130,7 +153,9 @@ onBeforeUnmount(() => {
           Fill in the parameters above and run.
         </div>
         <div v-else-if="table.canceled.value" class="state">Canceled.</div>
-        <div v-else-if="showEmpty" class="state" data-testid="menu-action-table-empty">No rows for this {{ request.target.type }}.</div>
+        <div v-else-if="showEmpty" class="state" data-testid="menu-action-table-empty">
+          No rows for this {{ request.target.type }}<template v-if="table.isCanvas"> in the graph on the canvas</template>.
+        </div>
         <template v-else-if="showRows">
           <div v-if="table.truncated.value" class="truncated" data-testid="menu-action-table-truncated">
             Showing the first {{ table.rows.value.length.toLocaleString() }} rows; there are more.
@@ -217,6 +242,15 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--text-muted, #666);
 }
+
+.source-badge {
+  padding: 0 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  border: 1px solid var(--border-color, #ddd);
+}
+.source-badge.canvas { color: var(--success-text, #1b6e3a); }
+.source-badge.warehouse { color: var(--text-muted, #666); }
 
 .item-id {
   overflow: hidden;

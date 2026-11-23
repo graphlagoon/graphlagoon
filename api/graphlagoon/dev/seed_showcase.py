@@ -244,6 +244,27 @@ MENU_ACTIONS = [
      "enabled": True, "match": {"target": "node"}, "field": "node_type", "mode": "same"},
     {"id": "demo-has-risk", "kind": "show-same-value", "label": "Demo · Show only nodes with a risk tier",
      "enabled": True, "match": {"target": "node"}, "field": "risk_tier", "mode": "has"},
+    # Tables from the graph on the canvas: no template, no warehouse, instant.
+    {"id": "demo-canvas-accounts", "kind": "show-table", "label": "Demo · Accounts within 2 hops (canvas)",
+     "icon": "▦", "enabled": True, "match": {"target": "node", "nodeTypes": ["Company", "Person"]},
+     "source": {"type": "neighborhood", "hops": 2, "direction": "any", "nodeTypes": ["Account"], "list": "nodes",
+                "columns": ["display_name", "branch", "risk_tier", "score"]}},
+    {"id": "demo-canvas-scored", "kind": "show-table", "label": "Demo · High-score neighbors (canvas program)",
+     "icon": "▦", "enabled": True, "match": {"target": "node"},
+     "source": {
+         "type": "program",
+         "params": [
+             {"id": "min_score", "label": "Min score", "default": "0.5", "required": True},
+             {"id": "hops", "label": "Hops", "type": "select", "options": ["1", "2", "3"], "default": "2", "required": True},
+         ],
+         "code": (
+             "const min = Number(params.min_score);\n"
+             "return hops(item.node_id, Number(params.hops))\n"
+             "  .filter(n => Number(n.properties?.score ?? 0) >= min)\n"
+             "  .map(n => ({ node_id: n.node_id, type: n.node_type, hop: n.hop,\n"
+             "    score: n.properties?.score, risk: n.properties?.risk_tier, links: edgesOf(n.node_id).length }));"
+         ),
+     }},
 ]
 
 

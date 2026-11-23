@@ -79,7 +79,7 @@ Every action has:
   `metric:<name>` (e.g. `metric:PageRank` *not empty*) — the action then stays
   hidden until that metric is computed in the [Metrics
   panel](./communities-metrics.md), and reappears the moment it is.
-- **A kind** — what clicking it does. Three kinds exist:
+- **A kind** — what clicking it does. Five kinds exist:
 
 ### Open URL
 
@@ -214,6 +214,76 @@ The dev showcase (`make dev-seed-showcase`) has one ready: right-click a
 Company or Person in *Demo · Cluster programs & right-click actions* →
 *Demo · Accounts within 2 hops (table)*, or an edge → *Demo · All links
 between these two (table)* (binds `{src}` and `{dst}`).
+
+### Table from the canvas {#canvas-table}
+
+The rows of a **Table from the canvas** action are computed in your browser
+from the graph that is loaded: no template, no warehouse, no waiting. Pick it
+when the answer is in what you are looking at — the accounts around a
+company, the edges of those accounts, the neighbors with a high score — and
+the [warehouse table](#table-result) when you need everything that exists.
+
+![A table from the canvas: the people 2 hops from the clicked company](/screenshots/context-menu-actions-canvas-table.png)
+
+| | Table from the canvas | Query template as a table |
+| --- | --- | --- |
+| Reads | the nodes and edges loaded on the canvas, with the properties loaded | the context's warehouse tables |
+| Speed | instant | a warehouse query |
+| On a case canvas | every node, files and derived ones included, with the case's ids | the nodes of the canvas's context, with their source ids |
+| Needs | nothing | a saved query template |
+
+Two sources:
+
+- **Neighbors — no code.** Walk *N* hops (1 to 5) from the clicked node, in
+  any direction or only along / against the edges, optionally only over some
+  edge types. Then list either **the nodes reached** (optionally only some
+  types; the walk still passes through every type) or **the edges of those
+  nodes** (optionally only some edge types — e.g. the `TRANSFER` edges of the
+  accounts 2 hops from a company). Columns are properties or
+  `metric:<name>`; none chosen means every property found. Hops and direction
+  can be changed in the window and run again. Clicking an edge walks from both
+  of its ends.
+- **Program — JavaScript.** For anything else. It runs in a sandboxed worker
+  (no network, no storage, stopped after 10 seconds, *Cancel* stops it at
+  once) and returns an array of objects, or `{ columns, rows }`:
+
+  ```js
+  // "Big transfers nearby": a parameter min_amount (default 1000)
+  const ids = hops(item.node_id, 2).map(n => n.node_id);
+  return edgesOf(ids, { types: ['TRANSFER'] })
+    .filter(e => Number(e.properties?.amount) >= Number(params.min_amount))
+    .map(e => ({ src: e.src, dst: e.dst, amount: e.properties?.amount }));
+  ```
+
+  In scope: `item` (the clicked node or edge), `params`, `nodes`, `edges`,
+  `node(id)`, `neighbors(id, { direction, edgeTypes, nodeTypes })`,
+  `hops(id, k, opts)` (nodes nearest first, each with `.hop`),
+  `edgesOf(ids, { types, direction })`, `metric(ref, id)` and
+  `selectedNodeIds`. Parameters are declared as JSON
+  (`[{ "id": "min_amount", "label": "Min amount", "default": "1000" }]`,
+  with `required`, and `"type": "select"` with `options`) and can be bound
+  to the clicked item like a template's. They are inputs of the window.
+
+**Test on the selected node** in the editor runs the draft on whatever is
+selected on the canvas and shows the first rows or the error, before saving.
+
+The window is the same as for warehouse tables (grid, CSV, *Add to case*, the
+rows' node ids focus the node); a **Canvas** badge says where the rows come
+from. *Add to case* records the neighborhood settings or the program's code as
+provenance.
+
+Only what is loaded counts: a property that is not loaded yet (see
+[enrichment](./bring-your-own-data.md#enrich-from-databricks-tables)) is empty in the table, and a node
+outside the canvas is not reached.
+
+**Agents** see these actions too: [`list_entity_actions`](./agents-mcp-tools.md#list-entity-actions)
+lists them with `source: "canvas"`, and [`run_entity_action`](./agents-mcp-tools.md#run-entity-action)
+runs a *Neighbors* table on the case's graph (same rows as in the browser).
+A program runs only in a browser: the agent gets its code, not its rows.
+
+The dev showcase has two: right-click a Company or Person → *Demo · Accounts
+within 2 hops (canvas)*, or any node → *Demo · High-score neighbors (canvas
+program)*.
 
 ### Show only nodes with… {#show-only-nodes-with}
 
@@ -396,6 +466,12 @@ cluster programs), so they follow the context's sharing:
 Running a table action needs only read access: its query goes through the same
 read-only check and table scope as the [Query Console](./exploring-the-graph.md#query-console), so
 it can read nothing a reader could not query there.
+
+A canvas program is code written by someone with write access that runs in
+the browser of whoever clicks it, readers included. It runs in the same
+sandbox as [cluster programs](./clusters.md) — no network, no storage, a hard
+time limit — and sees only the graph already loaded in that browser, so it
+can show that person their own data and nothing else.
 
 Edits save automatically (debounced) and survive reloads in both the
 in-memory dev setup and the PostgreSQL one — `make migrate` applies the

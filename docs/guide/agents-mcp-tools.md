@@ -623,7 +623,7 @@ Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`
 
 ### list_entity_actions
 
-The table actions people configured on the right-click menu of the entity's contexts (e.g. "Transactions of the linked accounts, last 30 days"): each with its parameters, the value each one would take for this entity, and what is still missing. Run one with run_entity_action.
+The table actions people configured on the right-click menu of the entity's contexts (e.g. "Transactions of the linked accounts, last 30 days"): each with its parameters, the value each one would take for this entity, and what is still missing. Run one with run_entity_action. ``source`` says where the rows come from: "warehouse" (a query template) or "canvas" (computed from the case graph: a neighbors walk, which runs here, or a JavaScript program, ``runs_in: "browser"``, listed with its code for reference).
 
 Human twin: `GET /api/graph-contexts/{context_id}`
 
@@ -634,7 +634,7 @@ Human twin: `GET /api/graph-contexts/{context_id}`
 
 ### run_entity_action
 
-Runs a table action of list_entity_actions for one entity and returns its rows (columns, rows, truncated). ``parameters`` override the values the action binds from the entity (e.g. {"days": "90"}); a ``needs_parameters`` status lists what is missing and nothing ran. ``context_id`` picks the context when the entity comes from several. ``save=true`` keeps the rows as a table item of the case (table/result) with the action, template and values as provenance.
+Runs a table action of list_entity_actions for one entity and returns its rows (columns, rows, truncated). ``parameters`` override the values the action binds from the entity (e.g. {"days": "90"}); a ``needs_parameters`` status lists what is missing and nothing ran. ``context_id`` picks the context when the entity comes from several. ``save=true`` keeps the rows as a table item of the case (table/result) with the action, template and values as provenance. A canvas neighbors action walks the case graph itself (``parameters`` hops, direction); a canvas program is refused with BROWSER_ONLY and its code.
 
 Human twin: `POST /api/graph-contexts/{context_id}/menu-actions/{action_id}/table`, `POST /api/investigations/{investigation_id}/items`
 

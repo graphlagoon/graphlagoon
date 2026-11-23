@@ -365,7 +365,7 @@ async function setupPage(page: Page) {
       ...SCREENSHOT_CONTEXT,
       identity_keys: COMPANY_KEY,
       enrichment_tables: DEMO_ENRICHMENT_TABLES,
-      context_menu_actions: [TABLE_ACTION],
+      context_menu_actions: [TABLE_ACTION, CANVAS_TABLE_ACTION],
     },
     {
       ...SCREENSHOT_CONTEXT,
@@ -467,6 +467,12 @@ const TABLE_ACTION = {
   id: 'people-2-hops', label: 'People within 2 hops', enabled: true, kind: 'run-query-template',
   templateId: 'tpl-neighbors', templateName: 'Neighbors within N hops', resultMode: 'table',
   paramBindings: { node: '{node_id}' }, match: { target: 'node', nodeTypes: ['Company'] },
+};
+// A table computed from the graph on the canvas (context-menu-actions/canvas-table).
+const CANVAS_TABLE_ACTION = {
+  id: 'canvas-people', label: 'People nearby (canvas)', enabled: true, kind: 'show-table',
+  match: { target: 'node', nodeTypes: ['Company'] },
+  source: { type: 'neighborhood', hops: 2, direction: 'any', nodeTypes: ['Person'], list: 'nodes' },
 };
 const TABLE_ROWS: (string | null)[][] = [
   ['person-3', 'Person', 'Ana Souza', 'Lisbon', '1'],
@@ -946,6 +952,25 @@ const SCENES: Scene[] = [
         opened = await menu.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false);
       }
       await menu.getByText('People within 2 hops').click();
+      await page.getByTestId('menu-action-table-modal').locator('.p-datatable').waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(400);
+    },
+  },
+  {
+    guide: 'context-menu-actions',
+    scene: 'canvas-table',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      const menu = page.getByTestId('graph-context-menu');
+      let opened = false;
+      for (let attempt = 0; attempt < 5 && !opened; attempt++) {
+        await hoverNode(page, 'company-0');
+        await page.mouse.down({ button: 'right' });
+        await page.mouse.up({ button: 'right' });
+        opened = await menu.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false);
+      }
+      await menu.getByText('People nearby (canvas)').click();
       await page.getByTestId('menu-action-table-modal').locator('.p-datatable').waitFor({ timeout: 15_000 });
       await page.waitForTimeout(400);
     },

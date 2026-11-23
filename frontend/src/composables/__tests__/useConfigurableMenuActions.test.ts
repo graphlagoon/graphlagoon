@@ -547,3 +547,48 @@ describe('table actions (resultMode: table)', () => {
     expect(menu.isVisible(tableConfig({ resultMode: undefined }), nodeTarget('n2'))).toBe(false);
   });
 });
+
+describe('canvas tables (show-table)', () => {
+  const canvasConfig = (overrides: Record<string, unknown> = {}) =>
+    ({
+      id: 'cfg-canvas',
+      label: 'Neighbors',
+      enabled: true,
+      kind: 'show-table',
+      source: { type: 'program', code: 'return []', params: [{ id: 'who', label: 'Who' }] },
+      paramBindings: { who: '{prop:name}' },
+      match: { target: 'both' },
+      ...overrides,
+    }) as ContextMenuActionConfig;
+
+  it('opens with the canvas ids, no datasource mapping needed (a case canvas too)', async () => {
+    seedGraph();
+    // A host that maps nothing: canvas tables never ask it.
+    const menu = useConfigurableMenuActions({ contextId: () => 'ctx-case', sourceNodeId: () => null });
+    expect(menu.isVisible(canvasConfig(), nodeTarget('n2'))).toBe(true);
+    await menu.runAction(canvasConfig(), nodeTarget('n2'));
+    expect(menu.pendingTable.value).toMatchObject({
+      contextId: 'ctx-case',
+      actionId: 'cfg-canvas',
+      target: { type: 'node', id: 'n2', node_type: 'Person' },
+      parameters: { who: 'Ada' },
+      canvas: { item: { type: 'node', node_id: 'n2', node_type: 'Person' }, bindings: { who: '{prop:name}' } },
+    });
+
+    const edge = { type: 'edge' as const, id: 'e1', label: 'e1' };
+    expect(menu.isVisible(canvasConfig(), edge)).toBe(true);
+    await menu.runAction(canvasConfig(), edge);
+    expect(menu.pendingTable.value?.canvas?.item).toMatchObject({ type: 'edge', edge_id: 'e1', src: 'n1', dst: 'n2' });
+  });
+
+  it('a neighborhood takes no bindings', async () => {
+    seedGraph();
+    const menu = useConfigurableMenuActions();
+    await menu.runAction(
+      canvasConfig({ source: { type: 'neighborhood', hops: 1, direction: 'any', list: 'nodes' } }),
+      nodeTarget('n1'),
+    );
+    expect(menu.pendingTable.value?.parameters).toEqual({});
+    expect(menu.pendingTable.value?.contextId).toBe('');
+  });
+});

@@ -24,6 +24,7 @@ import type { Node, Edge, QueryTemplate } from '@/types/graph';
 import type {
   ContextMenuActionConfig,
   RunQueryTemplateActionConfig,
+  ShowTableActionConfig,
 } from '@/types/contextMenuActions';
 import { isKnownActionKind, isTableAction } from '@/types/contextMenuActions';
 
@@ -34,6 +35,7 @@ const KIND_ICONS: Record<string, Component> = {
   'copy-text': Copy,
   'run-query-template': Play,
   'show-same-value': Focus,
+  'show-table': Table,
 };
 
 /**
@@ -249,7 +251,41 @@ export function useConfigurableMenuActions(host?: MenuActionHost) {
         );
         return;
       }
+      case 'show-table':
+        openCanvasTable(config, target, item);
+        return;
     }
+  }
+
+  /**
+   * A canvas table: the rows come from the graph on the canvas, so the clicked
+   * item keeps its canvas ids (on a case canvas: the unified ones, files and
+   * derived nodes included) and no datasource mapping is needed.
+   */
+  function openCanvasTable(config: ShowTableActionConfig, target: ContextMenuTarget, item: Node | Edge) {
+    const canvasItem: NonNullable<MenuActionTableRequest['canvas']>['item'] =
+      target.type === 'node'
+        ? { type: 'node', node_id: (item as Node).node_id, node_type: (item as Node).node_type, properties: (item as Node).properties }
+        : {
+            type: 'edge',
+            edge_id: (item as Edge).edge_id,
+            src: (item as Edge).src,
+            dst: (item as Edge).dst,
+            relationship_type: (item as Edge).relationship_type,
+            properties: (item as Edge).properties,
+          };
+    const bindings = config.source.type === 'program' ? config.paramBindings ?? {} : {};
+    pendingTable.value = {
+      contextId: contextIdOf() ?? '',
+      actionId: config.id,
+      label: config.label,
+      target:
+        canvasItem.type === 'node'
+          ? { type: 'node', id: canvasItem.node_id, node_type: canvasItem.node_type }
+          : { type: 'edge', id: canvasItem.edge_id, relationship_type: canvasItem.relationship_type, src: canvasItem.src, dst: canvasItem.dst },
+      parameters: resolveBoundValues(bindings, target.type, item, labelOptions),
+      canvas: { source: config.source, item: canvasItem, bindings },
+    };
   }
 
   function openTable(config: RunQueryTemplateActionConfig, target: ContextMenuTarget, item: Node | Edge) {

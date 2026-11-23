@@ -1386,18 +1386,39 @@ def build_server():
             target = {"type": "node", "id": origin["node_id"], "node_type": node["type"],
                       "properties": node.get("properties") or {}}
             out.append((context, target))
-        return real, out
+        return real, out, graph, node
+
+    def _canvas_actions(contexts, real: str, node: dict):
+        """The canvas-table actions of the entity's contexts that apply to it, once each,
+        with the target the browser would match them on (the case uid)."""
+        from graphlagoon.services import menu_action_tables as mat
+        from graphlagoon.services.canvas_table import canvas_table_actions
+
+        target = {"type": "node", "id": real, "node_type": node["type"], "properties": node.get("properties") or {}}
+        seen, out = set(), []
+        for context, _ in contexts:
+            for action in canvas_table_actions(context):
+                if action["id"] in seen or not mat.matches(action, target):
+                    continue
+                seen.add(action["id"])
+                out.append((context, action))
+        return out
 
     @tool("list_entity_actions")
     async def list_entity_actions(ctx: Context, investigation_id: UUID, uid: str) -> dict:
         """The table actions people configured on the right-click menu of the
         entity's contexts (e.g. "Transactions of the linked accounts, last 30
         days"): each with its parameters, the value each one would take for this
-        entity, and what is still missing. Run one with run_entity_action."""
+        entity, and what is still missing. Run one with run_entity_action.
+        ``source`` says where the rows come from: "warehouse" (a query
+        template) or "canvas" (computed from the case graph: a neighbors walk,
+        which runs here, or a JavaScript program, ``runs_in: "browser"``,
+        listed with its code for reference)."""
         from graphlagoon.services import menu_action_tables as mat
+        from graphlagoon.services.canvas_table import neighborhood_params
 
         user = _agent(ctx)
-        _, contexts = await _entity_contexts(investigation_id, user, uid)
+        real, contexts, _, node = await _entity_contexts(investigation_id, user, uid)
         actions = []
         for context, target in contexts:
             for action in mat.table_actions(context):
@@ -1412,7 +1433,19 @@ def build_server():
                     "context_id": str(context.id), "action_id": action["id"], "label": action.get("label"),
                     "template": template["name"], "description": template.get("description"),
                     "query_type": template["query_type"], "parameters": parameters, "missing": problems,
+                    "source": "warehouse", "runs_in": "server",
                 })
+        # Tables computed from the case graph itself (show-table): a neighborhood runs here,
+        # a program only in a browser.
+        for context, action in _canvas_actions(contexts, real, node):
+            src = action["source"]
+            entry = {"context_id": str(context.id), "action_id": action["id"], "label": action.get("label"),
+                     "source": "canvas", "canvas_source": src.get("type")}
+            if src.get("type") == "neighborhood":
+                entry.update(runs_in="server", spec=src, parameters=neighborhood_params(src), missing={})
+            else:
+                entry.update(runs_in="browser", code=src.get("code"), parameters=src.get("params") or [], missing={})
+            actions.append(entry)
         await _audit_read(user, "list_entity_actions", investigation_id)
         return _out({"actions": actions})
 
@@ -1427,14 +1460,45 @@ def build_server():
         ``needs_parameters`` status lists what is missing and nothing ran.
         ``context_id`` picks the context when the entity comes from several.
         ``save=true`` keeps the rows as a table item of the case (table/result)
-        with the action, template and values as provenance."""
+        with the action, template and values as provenance. A canvas neighbors
+        action walks the case graph itself (``parameters`` hops, direction); a
+        canvas program is refused with BROWSER_ONLY and its code."""
         from fastapi import HTTPException
 
         from graphlagoon.services import menu_action_tables as mat
 
+        from graphlagoon.services import canvas_table as ct
+
         user = _agent(ctx)
-        real, contexts = await _entity_contexts(investigation_id, user, uid)
+        real, contexts, graph, node = await _entity_contexts(investigation_id, user, uid)
         candidates = [(c, t) for c, t in contexts if context_id is None or str(c.id) == str(context_id)]
+        canvas = next(((c, a) for c, a in _canvas_actions(candidates, real, node) if a["id"] == action_id), None)
+        if canvas is not None:
+            context, action = canvas
+            src = action["source"]
+            if src.get("type") != "neighborhood":
+                raise _tool_error(
+                    "BROWSER_ONLY",
+                    f"'{action.get('label')}' is a JavaScript program that runs only in a browser. "
+                    f"Its code, to do the same with the graph tools: {str(src.get('code', ''))[:2000]}",
+                )
+            spec = ct.with_values(src, parameters or {})
+            table = ct.neighborhood_table(ct.from_case_graph(graph), {"type": "node", "node_id": real, "node_type": node["type"]},
+                                          spec, max(1, min(row_limit, ct.MAX_CANVAS_ROWS)))
+            result = {"action_id": action_id, "label": action.get("label"), "source": "canvas", "status": "succeeded",
+                      "parameters": [{"id": "hops", "value": str(spec["hops"])}, {"id": "direction", "value": spec["direction"]}],
+                      **table, "row_count": len(table["rows"])}
+            await _audit_read(user, "run_entity_action", investigation_id)
+            if save:
+                data = dict(kind="table", subkind="result", title=title or f"{action.get('label')} · {real}",
+                            description=f"Canvas neighbors of {real}",
+                            provenance={"tool": "canvas_table", "context_id": str(context.id), "action": action_id,
+                                        "source": "neighborhood", "spec": spec, "entity": real})
+                item = await _create(investigation_id, user, data, None, {
+                    "columns": table["columns"], "rows": table["rows"],
+                    "row_count": result["row_count"], "truncated": table["truncated"]})
+                result = {**result, "item_id": item.get("id")}
+            return _out(result)
         found = next(((c, t) for c, t in candidates
                       if any(a.get("id") == action_id for a in mat.table_actions(c))), None)
         if found is None:

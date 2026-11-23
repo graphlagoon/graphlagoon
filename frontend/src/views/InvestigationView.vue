@@ -242,10 +242,16 @@ const configurableMenuActions = useConfigurableMenuActions({
 const { pendingTemplateExecution, pendingTable } = configurableMenuActions;
 const caseMenuActions = (configs: ContextMenuActionConfig[]) =>
   configs.filter((c) => c.kind !== 'run-query-template' || isTableAction(c));
-/** A row's node id (a source id of the canvas's context) focuses its unified node. */
+/**
+ * A row's node id focuses its node: a canvas table holds the canvas's own ids,
+ * a warehouse table the source ids of the canvas's context.
+ */
 function focusTableNode(payload: { id: string; multi: boolean }) {
   const ctx = canvasContextId.value;
-  const node = store.unified.nodes.find((n) => n.__sources.some((o) => o.contextId === ctx && o.nodeId === payload.id));
+  const fromCanvas = !!pendingTable.value?.canvas;
+  const node = fromCanvas
+    ? store.unified.nodes.find((n) => n.node_id === payload.id)
+    : store.unified.nodes.find((n) => n.__sources.some((o) => o.contextId === ctx && o.nodeId === payload.id));
   if (!node) {
     toast.info('That node is not on the canvas.');
     return;

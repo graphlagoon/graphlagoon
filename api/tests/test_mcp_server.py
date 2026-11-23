@@ -643,3 +643,37 @@ async def test_an_agent_lists_and_runs_the_table_actions_people_configured(env):
             assert item["kind"] == "table" and item["provenance"]["params"] == {"account": "c1", "days": "90"}
             bad = await client.call_tool("run_entity_action", {"investigation_id": cid, "uid": account, "action_id": "nope"})
             assert bad.is_error and "MENU_ACTION_NOT_FOUND" in bad.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_an_agent_runs_a_canvas_neighborhood_table_but_not_a_program(env):
+    """A show-table action walks the case graph itself (the same rows the
+    browser computes); a JavaScript program is listed for reference only."""
+    app, exploration = env
+    store = InMemoryStore.get_instance()
+    context = store.get_graph_context(exploration.graph_context_id)
+    context.context_menu_actions = [
+        {"id": "holders", "label": "Holders", "enabled": True, "kind": "show-table",
+         "match": {"target": "node", "nodeTypes": ["Account"]},
+         "source": {"type": "neighborhood", "hops": 1, "direction": "any", "list": "nodes", "columns": ["name"]}},
+        {"id": "js", "label": "Program", "enabled": True, "kind": "show-table", "match": {"target": "node"},
+         "source": {"type": "program", "code": "return hops(item.node_id, 2)"}},
+    ]
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        cid = (await rest.post("/api/investigations", json={"title": "x"})).json()["id"]
+        await rest.post(f"/api/investigations/{cid}/items", json={
+            "kind": "graph", "subkind": "exploration_ref", "exploration_id": str(exploration.id)})
+        account = f"c1@{context.id}"
+        async with _mcp(app, token) as client:
+            listed = {a["action_id"]: a for a in (await _tool(client, "list_entity_actions", investigation_id=cid, uid=account))["actions"]}
+            assert listed["holders"]["source"] == "canvas" and listed["holders"]["runs_in"] == "server"
+            assert listed["js"]["runs_in"] == "browser" and "hops(" in listed["js"]["code"]
+            out = await _tool(client, "run_entity_action", investigation_id=cid, uid=account, action_id="holders",
+                              parameters={"hops": "2"}, save=True)
+            assert out["status"] == "succeeded" and out["columns"] == ["node_id", "node_type", "hop", "name"]
+            assert [r[1:] for r in out["rows"]] == [["Person", "1", "Ana"]]
+            item = (await rest.get(f"/api/investigations/{cid}/items/{out['item_id']}")).json()
+            assert item["provenance"]["tool"] == "canvas_table" and item["provenance"]["spec"]["hops"] == 2
+            refused = await client.call_tool("run_entity_action", {"investigation_id": cid, "uid": account, "action_id": "js"})
+            assert refused.is_error and "BROWSER_ONLY" in refused.content[0].text
