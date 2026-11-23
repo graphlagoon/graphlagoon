@@ -168,4 +168,34 @@ describe('graph store — live refresh and enrichment', () => {
     await store.applyRemoteChange();
     expect(store.nodes.find((n) => n.node_id === 'a')?.properties).toMatchObject({ titular: 'Ana Maria', tier: 'high' });
   });
+
+  it('keeps the values this session enriched edge values too, even for an enrichment run by hand', async () => {
+    const store = useGraphStore();
+    store.currentContext = {
+      id: 'c1', title: 'Bank',
+      enrichment_tables: [{ name: 'risk', label: 'Risk', table: 'main.bank.tx', query: { sql: 's', run: 'manual' } }],
+    } as GraphContext;
+    vi.spyOn(api, 'getExploration').mockResolvedValueOnce(exploration(0));
+    vi.spyOn(api, 'getExplorationSnapshot').mockResolvedValueOnce({
+      ...structuredClone(SAVED),
+      edges: [{ id: 'e1', source: 'a', target: 'b', type: 'PIX', properties: { score: 1 } }],
+      enriched: { edges: { e1: { Risk: ['score'] } } },
+    });
+    await store.loadExploration('x1');
+    vi.spyOn(api, 'runEnrichmentQuery').mockResolvedValue({
+      name: 'risk', label: 'Risk', target: 'edges', columns: ['score'], rows: { e1: { score: 9 } }, truncated: false,
+    } as never);
+    await store.runQueryEnrichment({ names: ['risk'] });
+    expect(store.edges[0].properties).toMatchObject({ score: 9 });
+
+    // Someone else saves the old score with a new amount on the edge.
+    vi.mocked(api.getExploration).mockResolvedValueOnce(exploration(1));
+    vi.mocked(api.getExplorationSnapshot).mockResolvedValueOnce({
+      ...structuredClone(SAVED),
+      edges: [{ id: 'e1', source: 'a', target: 'b', type: 'PIX', properties: { score: 1, amount: 5 } }],
+      enriched: { edges: { e1: { Risk: ['score'] } } },
+    });
+    await store.applyRemoteChange();
+    expect(store.edges[0].properties).toMatchObject({ score: 9, amount: 5 });
+  });
 });

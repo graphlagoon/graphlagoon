@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * The Enrichment Tables toolbar of the context form: import entries from YAML (pasted or a
+ * The Enrichments toolbar of the context form: import entries from YAML (pasted or a
  * file), export the current ones, and ask an AI to write them from what the context declares.
  */
 import { computed, ref } from 'vue';

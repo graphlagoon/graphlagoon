@@ -151,7 +151,7 @@ behind an edge, the channel from a second table, an account's activity in the la
 
 ### Which tables a query may read
 
-The context's **Enrichment Tables** list (context form) is its list of **authorized tables**. It may be empty or
+The context's **Enrichments** list (context form, `enrichment_tables` in the API and in YAML) is its list of **authorized tables**, plus any [providers](#enrich-from-a-provider). It may be empty or
 hold many. Being listed is what authorizes a table: a query may read only the listed tables and the context's
 own edge and node tables, nothing else. Each entry can carry a query, and can also look nodes up by key for
 the [investigation inspector](./investigations.md#enrichment-tables) (**Node lookup in the investigation
@@ -201,7 +201,7 @@ The query may define its own CTEs, but not ones named `graph_edges` or `graph_no
 A **provider** is code the deployment registered in Python (see
 [Python API → Enrichment providers](./python-api.md#enrichment-providers)): it gets the same batches a query
 gets and returns new properties per edge or node id, reading whatever the server can reach, typically a
-Lakebase table. When the server has any, the **Enrichment Tables** header shows **+ Attach provider**: pick
+Lakebase table. When the server has any, the **Enrichments** header shows **+ Attach provider**: pick
 the provider, what it enriches (only the targets it supports are offered), when it runs, and the same
 **Replace values** and **Send node properties** switches as a query. A provider entry has no table and no SQL.
 
@@ -222,7 +222,7 @@ from the server still opens: the entry says *not registered on this server* and 
 
 ### Import YAML, or ask an AI
 
-The **Enrichment Tables** header has three helpers:
+The **Enrichments** header has three helpers besides **+ Attach table** (and **+ Attach provider**):
 
 - **Import YAML** takes a list pasted or from a `.yaml` / `.json` file. Entries with the same `name` replace
   the ones in the form; the others are added; an entry that is wrong is skipped and says why. Nothing is saved
@@ -233,7 +233,7 @@ The **Enrichment Tables** header has three helpers:
   current entries, plus the rules above. Describe what you want at the end; paste the YAML it answers into
   **Import YAML**. The prompt holds table and column names, no data.
 
-![The context form: Enrichment Tables with Import YAML and Ask an AI](/screenshots/bring-your-own-data-enrichment-tables.png)
+![The context form: Enrichments with Import YAML and Ask an AI](/screenshots/bring-your-own-data-enrichment-tables.png)
 
 ```yaml
 enrichment_tables:

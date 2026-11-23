@@ -232,7 +232,7 @@ enrichment succeeded** in the program's editor (`"wait_for_enrichment": true` in
 - Run by hand while enrichment is still running or after one failed, its run dialog (or the Clusters panel)
   warns and the button reads **Run anyway**.
 
-An expand runs the enrichment on the new items but does not rerun the program.
+After an expand, the enrichment runs on the new items and the program waits for it again before rerunning.
 
 ## Asking an AI to write one
 

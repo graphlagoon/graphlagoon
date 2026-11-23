@@ -607,7 +607,7 @@ const SCENES: Scene[] = [
     },
   },
   {
-    // The context form's Enrichment Tables: authorized tables, a query on edges, YAML import and "Ask an AI".
+    // The context form's Enrichments: authorized tables, a query on edges, YAML import and "Ask an AI".
     guide: 'bring-your-own-data',
     scene: 'enrichment-tables',
     path: '/contexts',

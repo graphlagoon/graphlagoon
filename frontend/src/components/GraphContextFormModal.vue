@@ -1357,7 +1357,7 @@ async function submit() {
              node lookup (investigation inspector) and/or an enrichment query (edges or nodes). -->
         <div class="column-config-section" data-testid="enrichment-section">
           <div class="section-header-row">
-            <h4>Enrichment Tables</h4>
+            <h4>Enrichments</h4>
             <EnrichmentTablesTools
               :tables="enrichmentTables"
               :skill="enrichmentSkillInput"
@@ -1376,9 +1376,10 @@ async function submit() {
             Every read is audited.
           </p>
           <p v-if="!form.enrichment_tables.length" class="hint" data-testid="enrichment-empty">
-            No authorized tables. Attach one, import a YAML list, or ask an AI to write it: a table can
+            No enrichments. Attach a table, import a YAML list, or ask an AI to write it: a table can
             enrich the edges or the nodes with a query after every graph query, and look nodes up by key
-            in the investigation inspector.
+            in the investigation inspector<template v-if="enrichmentProviders.length">; a provider the
+            deployment registered enriches them from code (for example a Lakebase lookup)</template>.
           </p>
           <div
             v-for="(row, i) in form.enrichment_tables"
