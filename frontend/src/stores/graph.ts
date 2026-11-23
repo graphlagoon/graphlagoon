@@ -1022,6 +1022,10 @@ export const useGraphStore = defineStore('graph', () => {
     return hidden;
   });
 
+  // Data Table filter (keep-sets), set by setTableFilteredIds
+  const tableFilteredNodeIds = ref<Set<string> | null>(null);
+  const tableFilteredEdgeIds = ref<Set<string> | null>(null);
+
   const filteredNodes = computed(() => {
     let result = nodes.value;
 
@@ -1051,17 +1055,36 @@ export const useGraphStore = defineStore('graph', () => {
     return result;
   });
 
+  /** Nodes that pass every filter (types, search, case chips, Data Table), whatever "show only" hides. */
+  const nodesInFilters = computed(() => {
+    const chips = caseHiddenNodeIds.value;
+    const table = tableFilteredNodeIds.value;
+    if (!chips?.size && !table) return filteredNodes.value;
+    return filteredNodes.value.filter((n) => !chips?.has(n.node_id) && (!table || table.has(n.node_id)));
+  });
+
   /**
-   * Nodes actually drawn: the type and search filters, minus what the case chips
-   * and "show only" hide visually. The status bar counts this against the nodes
-   * loaded, so a filter that matches nothing reads "0 of 10", not "10".
+   * The nodes the user has not hidden: every filter plus "show only". What
+   * communities and cluster programs run on, and what the status bar counts
+   * against the nodes loaded. Not subtracted, as they are no choice of data: the
+   * lens (it follows the pointer), members of collapsed groups, and leaves the
+   * layout or the zoom leaves out.
    */
-  const visibleNodeCount = computed(() => {
-    const hidden = searchHiddenNodeIds.value;
-    if (!hidden || hidden.size === 0) return filteredNodes.value.length;
-    let n = 0;
-    for (const node of filteredNodes.value) if (!hidden.has(node.node_id)) n++;
-    return n;
+  const visibleNodes = computed(() => {
+    const keep = isolatedNodeIds.value;
+    return keep ? nodesInFilters.value.filter((n) => keep.has(n.node_id)) : nodesInFilters.value;
+  });
+
+  const visibleNodeCount = computed(() => visibleNodes.value.length);
+
+  /** The edges the user has not hidden, between visible nodes. */
+  const visibleEdges = computed(() => {
+    const table = tableFilteredEdgeIds.value;
+    if (visibleNodes.value === filteredNodes.value && !table) return filteredEdges.value;
+    const ids = new Set(visibleNodes.value.map((n) => n.node_id));
+    return filteredEdges.value.filter(
+      (e) => ids.has(e.src) && ids.has(e.dst) && (!table || table.has(e.edge_id)),
+    );
   });
 
   /** How many node and edge types the Filters panel hides (0 = none). */
@@ -1106,9 +1129,6 @@ export const useGraphStore = defineStore('graph', () => {
   // ============================================================================
   // Table Filter Integration
   // ============================================================================
-
-  const tableFilteredNodeIds = ref<Set<string> | null>(null);
-  const tableFilteredEdgeIds = ref<Set<string> | null>(null);
 
   function setTableFilteredIds(nodeIds: Set<string> | null, edgeIds: Set<string> | null) {
     tableFilteredNodeIds.value = nodeIds;
@@ -3859,6 +3879,9 @@ export const useGraphStore = defineStore('graph', () => {
     clearQueryError,
     filters,
     visibleNodeCount,
+    nodesInFilters,
+    visibleNodes,
+    visibleEdges,
     hiddenTypeCount,
     viewport,
     layoutAlgorithm,

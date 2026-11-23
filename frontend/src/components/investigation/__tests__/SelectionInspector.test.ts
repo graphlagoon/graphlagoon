@@ -198,7 +198,7 @@ describe('SelectionInspector (05 §3, three states)', () => {
     expect(api.createInvestigationItem).toHaveBeenCalledWith('inv-1', expect.objectContaining({ kind: 'note', subkind: 'anchored', anchor: { edge_ids: ['s1:e1'] } }))
 
     await fireEvent.click(getByTestId('inspector-edge-dst'))
-    expect(graph.selectedNodeIds.has('b@c1')).toBe(true)
+    expect(emitted('focus-item')?.[0]).toEqual([{ type: 'node', id: 'b@c1' }])
   })
 
   it('several edges: count, composition by type and the total amount', async () => {

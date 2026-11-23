@@ -33,7 +33,7 @@ All community detection code lives in these files. **Read the relevant ones befo
 ```
 User clicks "Detect" in ClusterProgramPanel (Communities tab)
   -> communityStore.runDetection()
-    -> serializeGraph() from graphStore.filteredNodes/filteredEdges
+    -> serializeGraph() from graphStore.visibleNodes/visibleEdges (filters + show only)
     -> new Worker('communityWorker.ts')
       -> buildUndirectedGraph(graph, edgeTypeFilter)
         - self-loops: dropped

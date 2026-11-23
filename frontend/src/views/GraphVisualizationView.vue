@@ -20,6 +20,7 @@ import LookPanel from '@/components/LookPanel.vue';
 import GraphCanvasToolbar, { type CanvasToolbarButton } from '@/components/GraphCanvasToolbar.vue';
 import GroupLegend from '@/components/GroupLegend.vue';
 import GraphStatusBar from '@/components/GraphStatusBar.vue';
+import { useFocusItem } from '@/composables/useFocusItem';
 import { useCanvasFullscreen } from '@/composables/useCanvasFullscreen';
 import QueryErrorModal from '@/components/QueryErrorModal.vue';
 import QueryRunningState from '@/components/QueryRunningState.vue';
@@ -354,6 +355,8 @@ function showClusterResults() {
   clustersTab.value = 'results';
   openPanel('clusters');
 }
+
+const { focusItem } = useFocusItem(() => graphCanvas3DRef.value);
 
 function handleFocusNode(nodeId: string) {
   graphCanvas3DRef.value?.focusOnNode(nodeId);
@@ -980,7 +983,7 @@ watch(
         <GroupLegend v-if="!showClusterPrograms" @open-panel="openPanel('clusters')" />
 
         <!-- Floating Details Panel (shown in fullscreen mode) -->
-        <SidePanel v-if="isFullscreen" variant="floating" @show-details="showDetailModal = true" />
+        <SidePanel v-if="isFullscreen" variant="floating" @show-details="showDetailModal = true" @focus-item="focusItem" />
 
         <!-- Context Info Panel -->
         <ContextInfoPanel
@@ -1103,7 +1106,7 @@ watch(
         </GraphStatusBar>
       </div>
 
-      <SidePanel v-if="!isFullscreen" @show-details="showDetailModal = true" />
+      <SidePanel v-if="!isFullscreen" @show-details="showDetailModal = true" @focus-item="focusItem" />
     </div>
 
     <!-- Data Table (bottom drawer) -->
@@ -1111,7 +1114,7 @@ watch(
       v-if="showDataTable"
       @close="showDataTable = false"
       @focus-node="handleFocusNode"
-      @focus-edge="handleFocusNode"
+      @focus-edge="focusItem({ type: 'edge', id: $event })"
     />
 
     <!-- Query Console (bottom drawer) -->
@@ -1162,6 +1165,7 @@ watch(
     <!-- Detail Modal (full properties view) -->
     <DetailModal
       :item="detailModalItem"
+      @focus-item="focusItem"
       @close="showDetailModal = false"
     />
   </div>

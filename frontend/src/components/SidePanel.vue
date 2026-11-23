@@ -5,6 +5,7 @@ import { Briefcase, Crosshair, X } from 'lucide-vue-next';
 import { useCurrentCaseStore } from '@/stores/currentCase';
 import { useAddToCase } from '@/composables/useAddToCase';
 import { useToast } from '@/composables/useToast';
+import type { ItemRef } from '@/utils/itemReference';
 import SelectionDetails from './SelectionDetails.vue';
 import NeighborSummaryPanel from './NeighborSummaryPanel.vue';
 
@@ -17,6 +18,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   showDetails: [];
+  focusItem: [ref: ItemRef];
 }>();
 
 const graphStore = useGraphStore();
@@ -114,7 +116,7 @@ function toggleDefaultFocus() {
         </div>
       </div>
 
-      <SelectionDetails :item="selectedItem" />
+      <SelectionDetails :item="selectedItem" @focus-item="emit('focusItem', $event)" />
       <NeighborSummaryPanel
         v-if="selectedItem.type === 'node' && selectedItem.data.node_type !== '__cluster__'"
         :node-id="selectedItem.data.node_id"

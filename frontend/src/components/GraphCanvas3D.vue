@@ -1735,6 +1735,7 @@ function exportPNG(
 defineExpose({
   zoomToFit: camera.zoomToFit,
   focusOnNode: camera.focusOnNode,
+  focusOnNodes: camera.focusOnNodes,
   frame,
   getViewport: camera.getViewport,
   applyViewport: camera.applyViewport,

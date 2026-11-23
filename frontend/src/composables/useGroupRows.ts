@@ -20,7 +20,10 @@ export interface GroupRow {
   id: number | string;
   label: string;
   color: string;
+  /** Members that pass the filters. */
   count: number;
+  /** All its members. */
+  total: number;
   /** Collapsed into one cluster node (clusters, and communities under "Collapse"). */
   collapsed?: boolean;
   /** The cluster node that stands for it, when there is one. */
@@ -38,6 +41,17 @@ export function useGroupRows() {
   const clusterStore = useClusterStore();
   const graphStore = useGraphStore();
 
+  /** Node ids that pass the filters; null = all do. "Show only" is left out: it is what the rows toggle. */
+  const inFilters = computed<Set<string> | null>(() =>
+    graphStore.nodesInFilters.length < graphStore.nodes.length
+      ? new Set(graphStore.nodesInFilters.map((n) => n.node_id))
+      : null,
+  );
+  function countOf(ids: string[]): number {
+    const pass = inFilters.value;
+    return pass ? ids.filter((id) => pass.has(id)).length : ids.length;
+  }
+
   const communityRows = computed<GroupRow[]>(() => {
     const byId = new Map(clusterStore.clusters.map((c) => [c.cluster_id, c]));
     return communityStore.communitiesSorted.map((c) => {
@@ -48,7 +62,8 @@ export function useGroupRows() {
         id: c.id,
         label: c.label,
         color: c.color,
-        count: c.nodeCount,
+        count: countOf(communityStore.communitiesById.get(c.id) ?? []),
+        total: c.nodeCount,
         collapsed: cluster ? cluster.state === 'closed' : undefined,
         clusterId: cluster?.cluster_id,
       };
@@ -65,7 +80,8 @@ export function useGroupRows() {
         id: c.cluster_id,
         label: c.cluster_name,
         color: c.color ?? '#888888',
-        count: c.node_ids.length,
+        count: countOf(c.node_ids),
+        total: c.node_ids.length,
         collapsed: c.state === 'closed',
         clusterId: c.cluster_id,
       })),

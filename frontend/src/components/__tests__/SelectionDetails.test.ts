@@ -37,7 +37,7 @@ describe('SelectionDetails', () => {
     expect(getByTestId('property-visibility-hint').textContent).toContain('1 of 3');
   });
 
-  it('an edge with labelOf: the endpoints are readable buttons that select the node', async () => {
+  it('an edge with labelOf: the endpoints are readable links that move the focus', async () => {
     const { getByTestId, emitted } = render(SelectionDetails, {
       props: { item: { type: 'edge', data: edge }, labelOf: (id: string) => (id === 'n1' ? 'Alice' : 'Bob') },
       global: { stubs },
@@ -45,7 +45,23 @@ describe('SelectionDetails', () => {
     expect(getByTestId('selection-details-src').textContent).toBe('Alice');
     expect(getByTestId('selection-details-dst').textContent).toBe('Bob');
     await fireEvent.click(getByTestId('selection-details-dst'));
-    expect(emitted('select-node')?.[0]).toEqual(['n2']);
+    expect(emitted('focus-item')?.[0]).toEqual([{ type: 'node', id: 'n2' }]);
+  });
+
+  it('ids are links: its own, the endpoints, and a property that names a loaded item', async () => {
+    const store = useGraphStore();
+    store.nodes = [node, { node_id: 'n2', node_type: 'Person', properties: {} }] as never;
+    const own = render(SelectionDetails, {
+      props: { item: { type: 'edge', data: { ...(edge as object), properties: { manager_id: 'n2', note: 'plain' } } as never } },
+      global: { stubs },
+    });
+    await fireEvent.click(own.getByTestId('selection-details-id'));
+    await fireEvent.click(own.getByTestId('selection-details-src'));
+    await fireEvent.click(own.getByTestId('selection-details-ref-manager_id'));
+    expect(own.emitted('focus-item')).toEqual([
+      [{ type: 'edge', id: 'e1' }], [{ type: 'node', id: 'n1' }], [{ type: 'node', id: 'n2' }],
+    ]);
+    expect(own.queryByTestId('selection-details-ref-note')).toBeNull();
   });
 
   it('shows what other sources disagree on, and can hide the identity rows', () => {

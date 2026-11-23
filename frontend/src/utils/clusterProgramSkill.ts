@@ -137,6 +137,7 @@ ${intro}
 ## Input shape (\`context\`)
 
 \`\`\`js
+// Only what is visible on the canvas: filters and "show only" leave nodes and edges out.
 nodes: Array<{
   node_id: string,
   node_type: string,

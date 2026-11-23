@@ -8,6 +8,7 @@ import {
   missingRequiredParams,
 } from '@/utils/clusterProgramParams'
 import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
+import RunScopeNote from './RunScopeNote.vue'
 import { X, Play, Loader2 } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { useGraphStore } from '@/stores/graph'
@@ -105,6 +106,8 @@ async function runNow() {
           <div v-if="missingRequired.length > 0" class="validation-hint">
             Required: {{ missingRequired.map(p => p.label || p.id).join(', ') }}
           </div>
+
+          <RunScopeNote />
 
           <div v-if="holdReason" class="validation-hint" data-testid="run-program-enrichment-warning">{{ holdReason }}</div>
 

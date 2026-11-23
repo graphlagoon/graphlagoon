@@ -35,9 +35,14 @@ the community count and modularity (**Q**). Options:
   (shown when the graph has more than one). Self-loops are ignored;
   parallel edges merge into one weighted edge.
 
-Louvain runs on the **filtered** graph, so active filters change the
-result — often deliberately: filter to one relationship type and detect
-communities within it.
+Every algorithm runs on the **visible** graph: what the filters or a
+[show only](./exploring-the-graph.md#show-only) hide takes no part, and the
+panel says **Runs on the N visible of M nodes**. Use it deliberately: filter
+to one relationship type and detect communities within it, or show only one
+community and run again to split it (what was on screen stays on screen).
+Changing a filter afterwards does not rerun anything: the group list then
+counts the members that pass the filters, and the members table lists the
+visible ones, with **Include N hidden** for the rest.
 
 **Weak components** (connected ignoring edge direction) and **Strong
 components** (every node reaches every other along edge direction) make each

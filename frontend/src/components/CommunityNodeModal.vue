@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useCommunityStore } from '@/stores/community'
 import { useGraphStore } from '@/stores/graph'
+import { useVisibleMembers } from '@/composables/useVisibleMembers'
 import {
   type ColMeta,
   buildNodeColumns, flattenNodeRows,
@@ -27,13 +28,15 @@ const community = computed(() => {
   return communityStore.communitiesSorted.find(c => c.id === props.communityId) ?? null
 })
 
-const nodes = computed(() => {
+const allNodes = computed(() => {
   if (props.communityId === null) return []
   const nodeIds = communityStore.communitiesById.get(props.communityId)
   if (!nodeIds) return []
   const idSet = new Set(nodeIds)
   return graphStore.nodes.filter(n => idSet.has(n.node_id))
 })
+
+const { nodes, hiddenCount, includeHidden } = useVisibleMembers(allNodes, () => props.communityId)
 
 const ALGORITHM_LABELS: Record<string, string> = {
   louvain: 'Louvain',
@@ -160,6 +163,10 @@ function exportCSV() {
             <span class="row-count">
               <template v-if="filteredRows.length !== rows.length">{{ filteredRows.length }} of </template>{{ rows.length }} nodes
             </span>
+            <label v-if="hiddenCount > 0" class="row-count" data-testid="members-include-hidden">
+              <input v-model="includeHidden" type="checkbox" />
+              Include {{ hiddenCount }} hidden
+            </label>
             <button class="action-btn" @click="exportCSV" title="Export CSV">CSV</button>
           </div>
         </div>
