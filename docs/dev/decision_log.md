@@ -14471,3 +14471,20 @@ Both reuse `MenuActionTableModal` (Canvas/Warehouse badge, Add to case with `too
 **Tests:** pytest `test_mcp_explorations` (list: lookup, provider, fallback description, unregistered; run: nodes, edges, node_ids, overwrite, provenance, refusals, provider error saves nothing, batches and truncation), `test_enrichment_providers` (description), `test_agent_registry`; vitest form, YAML, tab, chip.
 **Public docs:** `agents-mcp.md` (Enrichments), `agents-mcp-tools.md` and `openapi.json` regenerated, `bring-your-own-data.md` (Say what each one does), `python-api.md`. **Admin-area impact:** No admin-area impact (no route, setting, table or audit action; `enrichment.run` gains a `tool` key in its metadata).
 **Known limitations:** an agent run of a SQL query is covered through the shared `run_query` path and the provider tests, not by an MCP test against a warehouse; not exercised by hand against a real MCP client.
+
+## [2026-11-23 22:30] - Feature Implemented: import / export of label formats; the Labels AI prompt answers in JSON
+
+**Feature:** Labels panel → **Import JSON / Export JSON**. One paste (the AI's answer, an export from another context, or a style preset) creates the label and tooltip rules of many types at once. The robot prompt now asks for one importable JSON block instead of prose to retype, and has an adapt mode for labels from another graph.
+**Decisions:**
+1. **Frontend only.** Labels have no storage of their own: they persist inside the exploration, a style preset, the context default look or a case's saved look. The import changes the view like typing does, so no route, schema or permission.
+2. **Merge, not replace.** A rule with the same `target` + `name` is replaced in place (id and position kept), the rest appended, and only the defaults named in the JSON change — so an AI can answer with just what should change. "Remove the N current rules first" covers the other case. A style preset import still replaces everything; that asymmetry is deliberate (a preset is a whole look).
+3. **Strict per rule, all or nothing** (like actions, unlike the lenient preset parser): each template goes through `validateTemplate`; the first bad rule fails the import, naming it. Unknown types/properties are warnings only, reusing `styleCompatibilityWarnings`.
+4. **Undo instead of a confirmation or a diff preview:** the toast restores the previous `TextFormatState`.
+5. **No change to `stores/graph.ts`:** pure `mergeTextFormat` + the existing `getTextFormatState` / `loadTextFormatState`.
+6. **The robot button always opens the write prompt;** adapt mode opens only from the warning block's button. (The presets and actions modals switch on any pasted text, which turns the AI's own answer for this graph into an "adapt" prompt.)
+7. Imported ids are ignored (new ids, or the id of the rule being replaced); `scope` defaults to `exploration` — nothing reads it at runtime.
+**Fixed along the way:** the prompt said the stock node default is `{node_id}` (it is `{node_id|truncate:10:...}`) and suggested an "emoji" badge the canvas font draws as `?`.
+**Rejected:** labels as a named saved artifact (presets already are that); a per-type map format (rules with `types: []` are the model; a second shape would need a converter); unifying the three copy-pasted skill modals.
+**Files:** new `utils/labelFormatImport.ts`, `components/LabelFormatPortable.vue`; changed `utils/labelTemplateSkill.ts`, `components/LabelTemplateSkillModal.vue`, `components/TextFormatPanel.vue`, `types/portable.ts` (`PortableLabelFormats`).
+**Tests:** vitest `labelFormatImport`, `labelTemplateSkill` (its JSON example imports as is; adapt mode), `LabelFormatPortable`; e2e `label-import.spec.ts`.
+**Public docs:** `labels.md` (Asking an AI, Exporting and importing), `style-presets.md` (pointer); screenshots `labels-panel`, `labels-import`. **Admin-area impact:** No admin-area impact. **Permission (2.4b):** none — client state, same reach as editing a template by hand.

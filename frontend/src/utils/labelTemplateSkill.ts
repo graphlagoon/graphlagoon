@@ -6,7 +6,9 @@
  * templates for the Labels panel. The prompt embeds the current graph's
  * metadata (node/edge types and their properties) plus the full template
  * mini-language — placeholders, modifiers, date formats, conditionals — and
- * the rule shape the Labels panel expects.
+ * the JSON the Labels panel's "Import JSON" box reads (labelFormatImport.ts),
+ * so one answer sets the labels of every type at once. Given an export from
+ * another graph (`importedJson`), it asks the LLM to adapt it instead.
  *
  * Mirrors `clusterProgramSkill.ts` in shape and tone so both "Ask AI" helpers
  * behave the same way. Pure function — no store access — so it is easy to test.
@@ -14,6 +16,8 @@
 
 import { bulletList, propertyList, metricList, type SkillProperty, type SkillMetric } from './clusterProgramSkill'
 import { MODIFIER_REGISTRY, MAX_REGEX_LENGTH, ALLOWED_REGEX_FLAGS, type ModifierDef } from './labelModifiers'
+import { sourceSchemaSection } from './stylePresetSkill'
+import type { PortableSourceSchema } from '@/types/portable'
 
 export type { SkillProperty, SkillMetric }
 
@@ -52,6 +56,10 @@ export interface LabelTemplateSkillInput {
   nodeMetrics?: SkillMetric[]
   /** Session-computed edge metrics */
   edgeMetrics?: SkillMetric[]
+  /** Label formats pasted in the Import box: switches the prompt to "adapt". */
+  importedJson?: string
+  /** Schema of the graph `importedJson` came from, when the export recorded it. */
+  importedSource?: PortableSourceSchema
 }
 
 /**
@@ -63,23 +71,95 @@ export function buildLabelTemplateSkill(input: LabelTemplateSkillInput): string 
   const nodeMetrics = input.nodeMetrics ?? []
   const edgeMetrics = input.edgeMetrics ?? []
 
-  return `# Task: write "label templates" for a graph visualization tool
+  const adapting = !!input.importedJson?.trim()
 
-You are helping me write **label templates** for Graph Lagoon Studio. A label
+  const task = adapting
+    ? `# Task: adapt "label templates" from another graph to this one`
+    : `# Task: write "label templates" for a graph visualization tool`
+
+  const intro = adapting
+    ? `You are helping me reuse the **label templates** of Graph Lagoon Studio that
+were exported from a **different graph**. A label template is a short string
+with \`{...}\` placeholders that decides the text drawn on each node and each
+edge of a 3D graph. The exported ones name types and properties this graph
+does not have. Your job is to produce the same labels, **rewritten for the
+types and properties listed under "This graph's metadata"**. Your final answer
+will be a **JSON object** that I paste into the Labels panel ("Import JSON"
+box).`
+    : `You are helping me write **label templates** for Graph Lagoon Studio. A label
 template is a short string with \`{...}\` placeholders that decides the text drawn
-on each node and each edge of a 3D graph. I will type your templates into the
-tool's Labels panel.
+on each node and each edge of a 3D graph. Your final answer will be a **JSON
+object** that I paste into the Labels panel ("Import JSON" box), which applies
+the templates of every type at once.
 
 I don't know exactly what I want yet, so **start by asking me questions** (see the
-"How to help me" section at the end) before writing any template.
+"How to help me" section at the end) before writing any template.`
 
+  const adaptSection = adapting
+    ? `
+## The label templates to adapt
+
+${sourceSchemaSection(input.importedSource)}
+
+Here is the export:
+
+\`\`\`json
+${input.importedJson!.trim()}
+\`\`\`
+`
+    : ''
+
+  const howToHelp = adapting
+    ? `## How to help me
+
+**Do NOT write the JSON immediately.** First show me a short mapping table —
+each old type and property name used by the export, and the name in this graph
+you would replace it with — and ask me about every name you cannot map with
+confidence. A rule whose types have no equivalent here should be dropped, not
+guessed. Keep each template's intent (what it shows, its modifiers and
+conditionals); change only the names. When I confirm the mapping, write the
+JSON.`
+    : `## How to help me
+
+I don't know exactly what I want my labels to say yet.
+**Do NOT write templates immediately.** First, **ask me questions, one topic at a
+time**, to figure out what each label should show. Use the node types, edge types
+and properties listed above to make your questions concrete (reference the actual
+types/properties, not generic ones).
+
+Good questions to ask me include:
+- Which node types need their own label, and which can share a default?
+- For each type, which property is the *primary* text (a name, a title, an id)?
+- Should the type be shown as a prefix/suffix, or is it obvious from color/shape?
+- How long can a label be before it clutters the canvas? Should long values be
+  truncated, and at what length?
+- Should any label show a second piece of information on its own line (with
+  \`{br}\`), like a name with a metric under it?
+- Should numbers be formatted (thousands separator, currency + which currency,
+  percentage)? Which properties are numeric?
+- Do any ids or codes have a composite format (prefixes/suffixes with \`_\` or
+  \`-\`, emails, URLs) where only one part should be shown? (That's what
+  \`split\`, \`slice\`, \`match\` and \`replace\` are for.)
+- Are there date properties worth showing, and in what format?
+- Any status/flag property that should become a short word badge (\`NEW\`,
+  \`BLOCKED\`) via a conditional?
+- Do edges need labels at all, or only some relationship types?
+- Should hovering show more than the label (a tooltip with extra fields)?
+
+Ask follow-ups until you have enough to build them. When you're confident you
+understand, **then** write the JSON.`
+
+  return `${task}
+
+${intro}
+${adaptSection}
 ## Where a template goes
 
 There are three places a template can live:
 
 1. **Default templates** — one for nodes, one for edges. Used for anything not
-   covered by a rule. Defaults are \`{node_id}\` for nodes and
-   \`{relationship_type}\` for edges.
+   covered by a rule. Out of the box they are \`{node_id|truncate:10:...}\` for
+   nodes and \`{relationship_type}\` for edges.
 2. **Tooltip templates** — one for nodes, one for edges, used for the text that
    appears when hovering. A tooltip resolves in this order: a matching rule
    whose \`surface\` includes tooltips, then this template, then (when both are
@@ -90,17 +170,16 @@ There are three places a template can live:
    specific types. Give a rule \`surface: 'tooltip'\` for a per-type tooltip
    (\`{if:...}\` is still there for per-VALUE conditions). A rule has:
 
-\`\`\`js
-{
-  name: string,               // human-readable, e.g. "Person labels"
-  target: 'node' | 'edge',    // what it applies to
-  types: string[],            // which node/edge types (EMPTY = all types of that target)
-  template: string,           // the template string
-  priority: number,           // 0-100, higher wins
-  enabled: boolean,
-  surface?: 'label' | 'tooltip' | 'both',  // optional; default 'label'
-}
-\`\`\`
+   - \`name\` — human-readable, e.g. "Person labels". Together with \`target\` it
+     identifies the rule: importing a rule whose name and target match one
+     that already exists **replaces** that one.
+   - \`target\` — \`"node"\` or \`"edge"\`.
+   - \`types\` — which node/edge types it applies to (an EMPTY list = all types
+     of that target). One rule may list several types that share a template.
+   - \`template\` — the template string.
+   - \`priority\` — a number, 0-100; higher wins.
+   - \`surface\` — optional: \`"label"\` (default), \`"tooltip"\` or \`"both"\`.
+   - \`enabled\` — optional, default \`true\`.
 
 Rule selection: among enabled rules with the same \`target\` whose \`types\` list is
 empty or contains the item's type, the highest \`priority\` wins; on a tie, a rule
@@ -251,74 +330,73 @@ ${metricList(nodeMetrics, 'none computed in this session')}
 **Edge metrics (session-computed, available as \`{metric:<name>}\` on edges):**
 ${metricList(edgeMetrics, 'none computed in this session')}
 
-## Worked example
+## The JSON to answer with
 
-Default node template:
-
+\`\`\`json
+{
+  "defaults": {
+    "nodeTemplate": "{prop:name|truncate:24:...}",
+    "nodeTooltipTemplate": "{prop:name}{br}{node_type}"
+  },
+  "rules": [
+    {
+      "name": "Company labels",
+      "target": "node",
+      "types": ["Company"],
+      "template": "{prop:name|truncate:18:...}{br}{prop:revenue|currency:USD}",
+      "priority": 20
+    },
+    {
+      "name": "Account ids",
+      "target": "node",
+      "types": ["Account", "Wallet"],
+      "template": "Acct {node_id|split:_:0}",
+      "priority": 20
+    },
+    {
+      "name": "Recent transactions",
+      "target": "edge",
+      "types": ["PAID"],
+      "template": "{prop:amount|currency:USD} {if:prop:created|daysAgo:<7|NEW|}",
+      "priority": 30
+    },
+    {
+      "name": "Company tooltip",
+      "target": "node",
+      "types": ["Company"],
+      "template": "{prop:name}{br}Revenue: {prop:revenue|currency:USD}{br}Since {date:prop:created|MM/YYYY}",
+      "priority": 20,
+      "surface": "tooltip"
+    }
+  ]
+}
 \`\`\`
-{prop:name|truncate:24:...}
-\`\`\`
 
-Rule "Company labels" — target \`node\`, types \`[Company]\`, priority \`20\`
-(two lines: name on top, revenue under it):
+What this example does: every node shows its name; a Company shows its name
+with the revenue on a second line; Account and Wallet ids like \`12321_ROOT\`
+lose their suffix (extraction); PAID edges show the amount and a \`NEW\` badge
+when recent; hovering a Company shows three lines.
 
-\`\`\`
-{prop:name|truncate:18:...}{br}{prop:revenue|currency:USD}
-\`\`\`
+Rules of the JSON:
+- \`defaults\` keys are \`nodeTemplate\`, \`edgeTemplate\`, \`nodeTooltipTemplate\`
+  and \`edgeTooltipTemplate\`. **Leave out the ones that should not change** —
+  an omitted default keeps its current value. An empty tooltip (\`""\`) means
+  "show the label".
+- \`rules\` is a list: **one rule per type, or per group of types sharing a
+  template**, for every type that needs something different from the default.
+  Rules already in the panel under other names are kept.
+- A template with a syntax error makes the whole import fail, naming the rule.
+- Inside JSON strings, write a backslash as \`\\\\\` and a double quote as \`\\"\`.
 
-Rule "Recent transactions" — target \`edge\`, types \`[PAID]\`, priority \`30\`:
-
-\`\`\`
-{prop:amount|currency:USD} {if:prop:created|daysAgo:<7|NEW|}
-\`\`\`
-
-Rule "Clean company ids" — target \`node\`, types \`[Company]\`, when ids carry a
-fixed suffix like \`12321_ROOT\` (extraction + chaining):
-
-\`\`\`
-Company {node_id|split:_:0}
-\`\`\`
-
-## How to help me
-
-I don't know exactly what I want my labels to say yet.
-**Do NOT write templates immediately.** First, **ask me questions, one topic at a
-time**, to figure out what each label should show. Use the node types, edge types
-and properties listed above to make your questions concrete (reference the actual
-types/properties, not generic ones).
-
-Good questions to ask me include:
-- Which node types need their own label, and which can share a default?
-- For each type, which property is the *primary* text (a name, a title, an id)?
-- Should the type be shown as a prefix/suffix, or is it obvious from color/shape?
-- How long can a label be before it clutters the canvas? Should long values be
-  truncated, and at what length?
-- Should any label show a second piece of information on its own line (with
-  \`{br}\`), like a name with a metric under it?
-- Should numbers be formatted (thousands separator, currency + which currency,
-  percentage)? Which properties are numeric?
-- Do any ids or codes have a composite format (prefixes/suffixes with \`_\` or
-  \`-\`, emails, URLs) where only one part should be shown? (That's what
-  \`split\`, \`slice\`, \`match\` and \`replace\` are for.)
-- Are there date properties worth showing, and in what format?
-- Any status/flag property that should become a short badge or emoji via a
-  conditional?
-- Do edges need labels at all, or only some relationship types?
-
-Ask follow-ups until you have enough to build them. When you're confident you
-understand, **then** write the templates.
+${howToHelp}
 
 ## When you write the templates
 
-Give me, in this exact form so I can type it into the panel:
+Answer with **one \`json\` code block** in the shape above — nothing I have to
+retype. Then briefly explain, in one or two sentences per rule, what it renders
+for a typical item. Only use types, properties and metrics that exist in the
+metadata above.
 
-1. **Default node template:** \`<template>\`
-2. **Default edge template:** \`<template>\`
-3. **Rules** — for each: name, target (node/edge), types, template, priority.
-
-Then briefly explain, in one or two sentences, what each template renders for a
-typical item. Only use placeholders/properties that exist in the metadata above.
-
-Start by asking me your first question.
+${adapting ? 'Start by showing me the mapping table.' : 'Start by asking me your first question.'}
 `
 }

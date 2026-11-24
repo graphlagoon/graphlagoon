@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildLabelTemplateSkill } from '@/utils/labelTemplateSkill'
 import { MODIFIER_REGISTRY, MAX_REGEX_LENGTH } from '@/utils/labelModifiers'
+import { parseImportedLabelFormats } from '@/utils/labelFormatImport'
 
 describe('buildLabelTemplateSkill', () => {
   const fullInput = {
@@ -78,9 +79,9 @@ describe('buildLabelTemplateSkill', () => {
 
   it('documents the rule shape used by the Labels panel', () => {
     const text = buildLabelTemplateSkill(fullInput)
-    expect(text).toContain("target: 'node' | 'edge'")
-    expect(text).toContain('types: string[]')
-    expect(text).toContain('priority: number')
+    expect(text).toContain('`target` — `"node"` or `"edge"`')
+    expect(text).toContain('`types` — which node/edge types')
+    expect(text).toContain('`priority` — a number')
     expect(text).toContain('the highest `priority` wins')
   })
 
@@ -159,7 +160,62 @@ describe('buildLabelTemplateSkill — tooltip templates', () => {
     expect(text).toContain('three places')
     expect(text).toContain('Tooltip templates')
     // Rules can drive tooltips via the surface field.
-    expect(text).toContain("surface?: 'label' | 'tooltip' | 'both'")
+    expect(text).toContain('`surface` — optional: `"label"` (default), `"tooltip"` or `"both"`')
     expect(text.toLowerCase()).toContain('emoji')
+  })
+})
+
+describe('buildLabelTemplateSkill — JSON answer for the Import box', () => {
+  const input = {
+    nodeTypes: ['Person'],
+    edgeTypes: ['KNOWS'],
+    nodeProperties: [{ name: 'name', data_type: 'string' }],
+    edgeProperties: [],
+  }
+
+  it('its JSON example imports as is', () => {
+    const text = buildLabelTemplateSkill(input)
+    const block = text.split('```json')[1].split('```')[0]
+    const r = parseImportedLabelFormats(block)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.textFormat.rules.length).toBeGreaterThan(2)
+    expect(r.textFormat.rules.some((rule) => rule.surface === 'tooltip')).toBe(true)
+    expect(Object.keys(r.textFormat.defaults)).toContain('nodeTooltipTemplate')
+  })
+
+  it('asks for one JSON block and explains that the import merges', () => {
+    const text = buildLabelTemplateSkill(input)
+    expect(text).toContain('"Import JSON"')
+    expect(text).toContain('one `json` code block')
+    expect(text).toContain('an omitted default keeps its current value')
+    expect(text).toContain('**replaces** that one')
+    expect(text).toContain('Start by asking me your first question.')
+    // The stock node default, not the bare id the prompt used to claim.
+    expect(text).toContain('{node_id|truncate:10:...}')
+  })
+
+  it('switches to adapt mode when label formats were pasted', () => {
+    const text = buildLabelTemplateSkill({
+      ...input,
+      importedJson: '{"rules":[{"name":"Old","target":"node","types":["Client"],"template":"{prop:cname}"}]}',
+      importedSource: {
+        context_title: 'Old graph',
+        node_types: ['Client'],
+        relationship_types: [],
+        node_properties: ['cname'],
+        edge_properties: [],
+      },
+    })
+    expect(text).toContain('# Task: adapt "label templates" from another graph')
+    expect(text).toContain('The graph it came from ("Old graph") had:')
+    expect(text).toContain('"types":["Client"]')
+    expect(text).toContain('mapping table')
+    expect(text).not.toContain('Start by asking me your first question.')
+  })
+
+  it('stays in write mode for a whitespace-only import box', () => {
+    const text = buildLabelTemplateSkill({ ...input, importedJson: '  \n ' })
+    expect(text).toContain('# Task: write "label templates"')
   })
 })

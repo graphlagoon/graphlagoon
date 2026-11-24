@@ -11,7 +11,7 @@
  * server `StylePreset`, or an array of actions): an LLM's answer usually comes
  * without the envelope.
  */
-import type { StylePresetSettings } from './graph';
+import type { StylePresetSettings, TextFormatState } from './graph';
 import type { ContextMenuActionConfig } from './contextMenuActions';
 import type { CustomMetricDefinition } from './customMetrics';
 import type { ImportedClusterProgram } from '@/utils/clusterProgramImport';
@@ -62,4 +62,12 @@ export interface PortableClusterPrograms {
   export_version: number;
   source: PortableSourceSchema;
   programs: ImportedClusterProgram[];
+}
+
+/** Labels alone (default templates + rules), without the rest of a look. */
+export interface PortableLabelFormats {
+  graphlagoon_export: 'label-formats';
+  export_version: number;
+  source: PortableSourceSchema;
+  textFormat: TextFormatState;
 }

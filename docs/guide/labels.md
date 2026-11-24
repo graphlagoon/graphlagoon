@@ -249,10 +249,79 @@ in-app reference with worked examples.
 The **robot** button opens "Ask an AI to write label templates": a
 copy-paste prompt that bundles the full template syntax with *this graph's*
 actual node types, edge types, and property columns. Paste it into any
-assistant, describe the labels you want, and the answer comes back in a
-format you can type straight into the panel — default templates plus rules
-with names, targets, and priorities. The same pattern exists for
+assistant and describe the labels you want. The assistant first asks what
+each type should show, then answers with **one JSON block** covering every
+type — paste that into **Import JSON** (next section) and all the rules are
+created at once; nothing has to be retyped. The same pattern exists for
+[style presets](./style-presets.md),
 [context-menu actions](./context-menu-actions.md) and cluster programs.
+
+## Exporting and importing
+
+**Import JSON** and **Export JSON** sit at the top of the panel, above the
+tabs, because a file carries labels *and* tooltips.
+
+![Import JSON in the Labels panel](/screenshots/labels-import.png)
+
+**Export JSON** downloads `labels-<context>.json`: the four default
+templates and every rule, plus the schema of the graph they were written
+for.
+
+**Import JSON** takes pasted text or a file, and applies it to the view in
+one step. It reads:
+
+- the JSON an AI wrote from the robot prompt — a bare `{ "defaults", "rules" }`
+  object, or just a list of rules;
+- a file from **Export JSON**;
+- a [style preset](./style-presets.md) file — only its labels are taken,
+  so you can lift the labels out of a look without its colors and layout.
+
+```json
+{
+  "defaults": { "nodeTemplate": "{prop:name|truncate:24:...}" },
+  "rules": [
+    { "name": "Company", "target": "node", "types": ["Company"],
+      "template": "{prop:name}{br}{prop:revenue|currency:USD}", "priority": 20 },
+    { "name": "Accounts", "target": "node", "types": ["Account", "Wallet"],
+      "template": "Acct {node_id|split:_:0}", "priority": 20 },
+    { "name": "Company tooltip", "target": "node", "types": ["Company"],
+      "template": "{prop:name}{br}Since {date:prop:created|MM/YYYY}",
+      "surface": "tooltip" }
+  ]
+}
+```
+
+| Rule field | Required | Default |
+|---|---|---|
+| `name`, `target` (`node` / `edge`), `template` | yes | — |
+| `types` | no | `[]` = every type of that target |
+| `priority` | no | `100` |
+| `surface` (`label` / `tooltip` / `both`) | no | `label` |
+| `enabled` | no | `true` |
+
+**An import adds to what you have; it does not wipe it.**
+
+- A rule whose **name and target** match a rule already in the panel
+  replaces that rule; every other imported rule is added; rules the file
+  does not mention stay. Tick **Remove the N current rules first** to start
+  from the file's rules only.
+- Only the defaults the file names change (`nodeTemplate`, `edgeTemplate`,
+  `nodeTooltipTemplate`, `edgeTooltipTemplate`). Leave one out to keep it.
+- The toast that confirms the import has an **Undo** that puts back the
+  labels you had.
+
+What can go wrong:
+
+| Situation | What happens |
+|---|---|
+| Not JSON, a rule without `name` / `target` / `template`, a template with a syntax error | One error naming the rule (`Rule 2 ("Company"): Unbalanced braces…`); **nothing** is applied |
+| A type or property this graph does not have | An amber list of the names. It does not block: the rule simply never matches, or shows the `[column]` sentinel. **Ask an AI to adapt it** opens the robot prompt in *adapt* mode, carrying the pasted labels and both schemas, to rewrite them for this graph |
+| A `{metric:…}` reference | Listed as a note: it renders once that metric is computed in the session |
+| A file exported from something else (actions, metrics) | Refused, naming what the file is |
+
+An import changes the view, like typing in the panel does. To keep it, save
+the exploration or a [style preset](./style-presets.md), or make it the
+context default — the same rules as any other label edit.
 
 ## When something is wrong
 

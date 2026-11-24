@@ -8,7 +8,7 @@
           data-testid="label-skill-help"
           title="Ask an AI to write label templates"
           aria-label="Ask an AI to write label templates"
-          @click="showSkill = true"
+          @click="openSkill()"
         >
           <Bot :size="16" />
         </button>
@@ -16,6 +16,9 @@
         <button v-if="!props.embedded" class="btn-icon-only close-btn" aria-label="Close" @click="emit('close')"><X :size="16" /></button>
       </div>
     </div>
+
+    <!-- Above the tabs: an import or export carries labels AND tooltips. -->
+    <LabelFormatPortable @adapt="openSkill($event)" />
 
     <!-- Tabs (house pattern: MetricsPanel, ClusterProgramPanel). One per
          surface — each shows its defaults AND the rules overriding them, so
@@ -186,7 +189,11 @@
     <TextFormatHelpModal v-model="showHelp" />
 
     <!-- AI skill helper modal -->
-    <LabelTemplateSkillModal v-model="showSkill" />
+    <LabelTemplateSkillModal
+      v-model="showSkill"
+      :imported-json="adaptRequest?.json"
+      :imported-source="adaptRequest?.source"
+    />
   </div>
 </template>
 
@@ -197,6 +204,8 @@ import type { TextFormatRule } from '@/types/graph';
 import TextFormatHelpModal from './TextFormatHelpModal.vue';
 import LabelTemplateSkillModal from './LabelTemplateSkillModal.vue';
 import LabelRuleEditorModal from './LabelRuleEditorModal.vue';
+import LabelFormatPortable from './LabelFormatPortable.vue';
+import type { PortableSourceSchema } from '@/types/portable';
 import TemplateInput from './TemplateInput.vue';
 import TemplatePreviewInline from './TemplatePreviewInline.vue';
 import { X, HelpCircle, Bot } from 'lucide-vue-next';
@@ -220,6 +229,13 @@ const showHelp = ref(false);
 
 // AI skill helper modal
 const showSkill = ref(false);
+// Set when the Import box asks to adapt labels from another graph; the robot
+// button always opens the plain "write" prompt.
+const adaptRequest = ref<{ json: string; source?: PortableSourceSchema } | null>(null);
+function openSkill(adapt: { json: string; source?: PortableSourceSchema } | null = null) {
+  adaptRequest.value = adapt;
+  showSkill.value = true;
+}
 
 // Default templates (synced with store)
 const nodeDefaultTemplate = ref(graphStore.textFormatDefaults.nodeTemplate);

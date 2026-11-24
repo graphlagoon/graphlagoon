@@ -3,18 +3,26 @@
     <div v-if="modelValue" class="modal-overlay" @click.self="close">
       <div class="modal-container" data-testid="label-skill-modal">
         <div class="modal-header">
-          <h2>Ask an AI to write label templates</h2>
+          <h2>{{ adapting ? 'Ask an AI to adapt these labels' : 'Ask an AI to write label templates' }}</h2>
           <button class="close-btn" @click="close" title="Close">
             <X :size="20" />
           </button>
         </div>
 
         <div class="modal-content">
-          <p class="intro">
-            Not sure how to write a label template? Copy the text below and paste it
-            into any AI assistant (Gemini, ChatGPT, Claude, etc.), then describe the
-            labels you want. It already includes this graph's node/edge types and
-            properties plus the full template syntax the tool understands.
+          <p v-if="adapting" class="intro">
+            The labels in the Import box come from another graph. Copy the text
+            below into any AI assistant (Gemini, ChatGPT, Claude, etc.): it
+            carries those labels and this graph's types and properties, and
+            asks for the same labels rewritten for this graph. Paste the JSON
+            it answers with back into <strong>Import JSON</strong>.
+          </p>
+          <p v-else class="intro">
+            Copy the text below into any AI assistant (Gemini, ChatGPT, Claude,
+            etc.) and describe the labels you want. It carries this graph's
+            node/edge types and properties plus the full template syntax. The
+            answer is one JSON block: paste it into <strong>Import JSON</strong>
+            in the Labels panel to set every type at once.
           </p>
 
           <div class="skill-toolbar">
@@ -37,9 +45,14 @@ import { X, Copy, Check } from 'lucide-vue-next'
 import { useGraphStore } from '@/stores/graph'
 import { useMetricsStore } from '@/stores/metrics'
 import { buildLabelTemplateSkill } from '@/utils/labelTemplateSkill'
+import { buildSourceSchema } from '@/utils/portableExport'
+import type { PortableSourceSchema } from '@/types/portable'
 
 const props = defineProps<{
   modelValue: boolean
+  /** Label formats from another graph: the prompt asks the AI to adapt them. */
+  importedJson?: string
+  importedSource?: PortableSourceSchema
 }>()
 
 const emit = defineEmits<{
@@ -49,16 +62,26 @@ const emit = defineEmits<{
 const graphStore = useGraphStore()
 const metricsStore = useMetricsStore()
 
-const skillText = computed(() =>
-  buildLabelTemplateSkill({
-    nodeTypes: graphStore.nodeTypes,
-    edgeTypes: graphStore.edgeTypes,
+const adapting = computed(() => !!props.importedJson?.trim())
+
+const skillText = computed(() => {
+  // Declared types too: a context may declare types the canvas has not loaded.
+  const schema = buildSourceSchema({
+    context: graphStore.currentContext,
+    loadedNodeTypes: graphStore.nodeTypes,
+    loadedEdgeTypes: graphStore.edgeTypes,
+  })
+  return buildLabelTemplateSkill({
+    nodeTypes: schema.node_types,
+    edgeTypes: schema.relationship_types,
     nodeProperties: graphStore.currentContext?.node_properties ?? [],
     edgeProperties: graphStore.currentContext?.edge_properties ?? [],
     nodeMetrics: metricsStore.nodeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
     edgeMetrics: metricsStore.edgeMetrics.map((m) => ({ name: m.name, valueType: m.valueType })),
+    importedJson: props.importedJson,
+    importedSource: props.importedSource,
   })
-)
+})
 
 const copied = ref(false)
 let copyTimer: ReturnType<typeof setTimeout> | null = null

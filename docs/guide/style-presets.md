@@ -104,6 +104,10 @@ A preset lives under one context. To carry a look to another context — or to
 another Graph Lagoon instance — the modal exports it as a JSON file and
 imports one back.
 
+To move **only the labels**, use Import/Export JSON in the Labels panel
+instead ([Labels → Exporting and importing](./labels.md#exporting-and-importing));
+it also accepts a preset file and takes just the labels out of it.
+
 **Export** — the download icon next to a saved preset fetches it and downloads
 `style-<name>.json`. **Export current look** (under the save form) does the
 same for whatever the Style panel shows right now, saved or not. The file is
