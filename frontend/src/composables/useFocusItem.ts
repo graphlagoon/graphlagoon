@@ -37,7 +37,7 @@ export function useFocusItem(canvas: () => FocusCanvas | null | undefined) {
       }
       if (!graphStore.selectedNodeIds.has(ref.id)) graphStore.selectNode(ref.id);
       if (!graphStore.visibleNodes.some((n) => n.node_id === ref.id)) {
-        toast.info('That node is hidden by the current filters.');
+        toast.info('That node is hidden by the filters or “show only”.');
         return;
       }
       canvas()?.focusOnNodes?.([drawnId(ref.id)]);
@@ -50,7 +50,7 @@ export function useFocusItem(canvas: () => FocusCanvas | null | undefined) {
     }
     if (!graphStore.selectedEdgeIds.has(ref.id)) graphStore.selectEdge(ref.id);
     if (!graphStore.visibleEdges.some((e) => e.edge_id === ref.id)) {
-      toast.info('That edge is hidden by the current filters.');
+      toast.info('That edge is hidden by the filters or “show only”.');
       return;
     }
     canvas()?.focusOnNodes?.([drawnId(edge.src), drawnId(edge.dst)]);

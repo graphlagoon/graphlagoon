@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useSimilarityStore } from '@/stores/similarity'
 import { useGraphStore } from '@/stores/graph'
+import RunScopeNote from './RunScopeNote.vue'
 import { Loader2 } from 'lucide-vue-next'
 import type { SimilarityParamSpec } from '@/types/similarity'
 
@@ -21,8 +22,8 @@ const selectedEndpointSpec = computed(() =>
 /** Collect all property keys from nodes matching the selected type. */
 const availableProperties = computed(() => {
   const nodes = similarityStore.selectedNodeType
-    ? graphStore.filteredNodes.filter(n => n.node_type === similarityStore.selectedNodeType)
-    : graphStore.filteredNodes
+    ? graphStore.visibleNodes.filter(n => n.node_type === similarityStore.selectedNodeType)
+    : graphStore.visibleNodes
   const keys = new Set<string>()
   for (const node of nodes) {
     if (node.properties) {
@@ -216,6 +217,7 @@ function onEndpointChange(name: string) {
           </div>
         </template>
 
+        <RunScopeNote />
         <!-- Run button -->
         <div class="actions">
           <button

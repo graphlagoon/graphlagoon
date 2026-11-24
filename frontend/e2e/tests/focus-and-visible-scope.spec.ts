@@ -59,6 +59,26 @@ test.describe('Focus from the details, groupings on what is visible', () => {
     const mapped = await page.evaluate(() =>
       (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$pinia._s.get('community').communityMap.size);
     expect(mapped).toBe(shown);
+    await expect(page.getByTestId('groups-count')).not.toContainText('NaN'); // no edges shown
+
+    // Showing everything again: the rest is in no group, and can be.
+    await page.evaluate(() => {
+      (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$pinia._s.get('graph').applyFilters({ node_types: [] });
+    });
+    await expect(page.getByTestId('groups-stale')).toContainText(`${63 - shown} visible nodes are in no group`);
+    await page.screenshot({ path: test.info().outputPath('stale.png') });
+    await page.getByTestId('groups-run-again').click();
+    await expect(page.getByTestId('groups-stale')).toHaveCount(0);
+
+    // A member's id leaves the table and goes to the node.
+    await page.locator('[data-testid^="group-menu-community:"]').first().click();
+    await page.locator('[data-testid^="group-members-community:"]').first().click();
+    const link = page.locator('[data-testid^="member-link-"]').first();
+    const id = (await link.textContent())!.trim();
+    await link.click();
+    await expect(page.getByTestId('community-node-modal')).toHaveCount(0);
+    await expect(page.getByTestId('selection-details-id')).toHaveText(id);
+    await expectCentred(page, id);
   });
 });
 

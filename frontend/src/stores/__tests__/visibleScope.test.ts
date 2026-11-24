@@ -5,6 +5,9 @@ import { createPinia, setActivePinia } from 'pinia';
 import { useGraphStore } from '@/stores/graph';
 import { useClusterStore } from '@/stores/cluster';
 import { useCommunityStore } from '@/stores/community';
+import { useMetricsStore } from '@/stores/metrics';
+import { useSimilarityStore } from '@/stores/similarity';
+import { serializeGraphForCustomMetrics } from '@/services/customMetricRunner';
 import { useGroupRows } from '@/composables/useGroupRows';
 import { createNode } from '@/__tests__/fixtures/nodes';
 import { createEdge } from '@/__tests__/fixtures/edges';
@@ -104,6 +107,14 @@ describe('what runs on it', () => {
     await clusters.executeProgram(program.program_id);
     expect(ids()).toEqual(['p1', 'p2', 'p3']);
     expect(g.isolation).toMatchObject({ kind: 'cluster', ids: [clusters.clusters[0].cluster_id] });
+  });
+
+  it('algorithm metrics and similarity keys use the visible graph; custom metrics leave "show only" out', () => {
+    const g = useGraphStore();
+    g.isolate({ kind: 'value', field: 'node_type', value: 'Person', mode: 'same', label: 'P' });
+    expect(useMetricsStore().graphInfo).toMatchObject({ nodeCount: 3, edgeCount: 1 });
+    expect(useSimilarityStore().extractKeys().total).toBe(3);
+    expect(serializeGraphForCustomMetrics().nodes).toHaveLength(4);
   });
 
   it('everything hidden is an error, not an empty result', async () => {

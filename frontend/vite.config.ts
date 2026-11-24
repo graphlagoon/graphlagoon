@@ -24,6 +24,9 @@ export default defineConfig(({ mode }) => ({
     alias: aliases,
     dedupe: ['three']
   },
+  // Imported only inside workers: found on the first run, they would make the
+  // dev server reload the page (and lose the graph).
+  optimizeDeps: { include: ['graphology', 'graphology-communities-louvain'] },
   build: {
     // Output to the Python package's static directory
     outDir: resolve(__dirname, '../api/graphlagoon/static'),

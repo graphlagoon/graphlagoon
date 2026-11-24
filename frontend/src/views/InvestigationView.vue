@@ -849,7 +849,7 @@ onUnmounted(() => {
 
               <div v-if="panels.filters" class="side-panel left" data-testid="panel-filters"><FilterPanel @close="panels.filters = false" /></div>
               <div v-if="panels.metrics" class="side-panel right" data-testid="panel-metrics"><MetricsPanel @close="panels.metrics = false" /></div>
-              <div v-if="panels.clusters" class="side-panel right" data-testid="panel-clusters"><ClusterProgramPanel @close="panels.clusters = false" /></div>
+              <div v-if="panels.clusters" class="side-panel right" data-testid="panel-clusters"><ClusterProgramPanel @focus-item="focusItem" @close="panels.clusters = false" /></div>
               <div v-if="panels.look" class="side-panel right look-host" data-testid="panel-look">
                 <LookPanel
                   v-model:tab="lookTab"
@@ -948,7 +948,7 @@ onUnmounted(() => {
 
         <GraphStatusBar
           :nodes="graphStore.nodes.length"
-          :edges="graphStore.edges.length"
+          :edges="graphStore.visibleEdges.length"
           test-id="workspace-status"
           :filter-chip="false"
           @open-behaviors="openLook('behaviors')"
@@ -976,9 +976,9 @@ onUnmounted(() => {
     <ShareDialog :open="showShare" @close="showShare = false" />
     <ItemViewer v-if="itemViewer.target && store.current" />
     <EntityPage v-if="entityPage" :node="entityPage" :can-edit="canEdit" @close="entityPage = null" @select-item="(i) => { entityPage = null; selectItem(i); }" />
-    <ClusterNodeModal v-if="selectedClusterId" :cluster-id="selectedClusterId" @close="selectedClusterId = null" />
+    <ClusterNodeModal @focus-item="focusItem" v-if="selectedClusterId" :cluster-id="selectedClusterId" @close="selectedClusterId = null" />
     <ClusterProgramRunHost />
-    <CommunityNodeModal :community-id="communityTable.selectedCommunityId.value" @close="communityTable.close()" />
+    <CommunityNodeModal @focus-item="focusItem" :community-id="communityTable.selectedCommunityId.value" @close="communityTable.close()" />
     <DetailModal :item="detailModalItem" @focus-item="focusItem" @close="showDetailModal = false" />
     <TemplateExecuteModal
       v-if="pendingTemplateExecution"

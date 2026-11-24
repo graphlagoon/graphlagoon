@@ -232,20 +232,20 @@ class MetricsCalculatorService {
   }
 
   /**
-   * Serialize the current filtered graph for worker processing
+   * Serialize the visible graph (filters and "show only" applied) for worker processing
    * Uses JSON.parse/stringify to ensure plain objects (no Vue reactivity)
    */
   private serializeCurrentGraph(): SerializedGraph {
     const graphStore = useGraphStore();
 
-    const nodes = graphStore.filteredNodes.map((node) => ({
+    const nodes = graphStore.visibleNodes.map((node) => ({
       id: node.node_id,
       attributes: {
         node_type: node.node_type,
       },
     }));
 
-    const edges = graphStore.filteredEdges.map((edge) => ({
+    const edges = graphStore.visibleEdges.map((edge) => ({
       id: edge.edge_id,
       source: edge.src,
       target: edge.dst,

@@ -42,7 +42,9 @@ to one relationship type and detect communities within it, or show only one
 community and run again to split it (what was on screen stays on screen).
 Changing a filter afterwards does not rerun anything: the group list then
 counts the members that pass the filters, and the members table lists the
-visible ones, with **Include N hidden** for the rest.
+visible ones, with **Include N hidden** for the rest. When nodes the run did
+not see become visible, the panel says how many are in no group and offers
+**Run again**. A node id in the members table goes to the node.
 
 **Weak components** (connected ignoring edge direction) and **Strong
 components** (every node reaches every other along edge direction) make each
@@ -208,8 +210,11 @@ alongside properties.
   them into the node properties (named after the metric) and saves the
   open exploration; every [investigation](./investigations.md) that uses
   the exploration records it in its journal.
-- Metrics compute over the loaded graph; the built-in Degree counts all
-  loaded edges even when filters hide some of them.
+- Algorithm metrics compute over the **visible** graph (filters and show
+  only), as communities do; nodes hidden at the time get no value. Two
+  exceptions: the built-in Degree counts all loaded edges, and custom metrics
+  follow the type, search and edge filters but not show only (they recompute
+  by themselves, and a show only can depend on their values).
 
 ## Custom metrics
 

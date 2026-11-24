@@ -91,8 +91,8 @@ export const useMetricsStore = defineStore('metrics', () => {
   // ============================================================================
 
   const graphInfo = computed<GraphInfo>(() => {
-    const nodes = graphStore.filteredNodes;
-    const edges = graphStore.filteredEdges;
+    const nodes = graphStore.visibleNodes;
+    const edges = graphStore.visibleEdges;
 
     // Count edge types
     const edgeTypeCounts = new Map<string, number>();
