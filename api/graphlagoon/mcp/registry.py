@@ -18,6 +18,7 @@ _CASE = "/api/investigations/{investigation_id}"
 _ITEM = f"{_CASE}/items/{{item_id}}"
 _ANNOTATION = f"{_CASE}/annotations/{{annotation_id}}"
 _ENRICHMENT = "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"
+_ENRICHMENT_RUN = "/api/graph-contexts/{context_id}/enrichment/{name}/run"
 _EXPLORATION = "/api/explorations/{exploration_id}"
 _MENU_TABLE = "/api/graph-contexts/{context_id}/menu-actions/{action_id}/table"
 _CONTEXT_EXPLORATIONS = "/api/graph-contexts/{context_id}/explorations"
@@ -48,7 +49,8 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "edit_exploration": [("PUT", _EXPLORATION), ("PUT", f"{_EXPLORATION}/overlay"), ("POST", f"{_EXPLORATION}/remove")],
     "expand_exploration": [("POST", "/api/graph-contexts/{context_id}/expand"), ("PUT", _EXPLORATION)],
     "query_into_exploration": [("POST", "/api/graph-contexts/{context_id}/cypher"), ("PUT", _EXPLORATION)],
-    "enrich_exploration": [("POST", _ENRICHMENT), ("PUT", _EXPLORATION)],
+    "enrich_exploration": [("POST", _ENRICHMENT), ("POST", _ENRICHMENT_RUN), ("PUT", _EXPLORATION)],
+    "list_enrichments": [("GET", "/api/graph-contexts/{context_id}")],
     "run_query": [("POST", f"{_ITEM}/run")],
     "join_tables": [("POST", f"{_CASE}/items/join")],
     "compare_tables": [("POST", f"{_CASE}/items/compare")],
@@ -122,11 +124,6 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/api/org/authoring"): (
         "authoring help for people writing case types and library docs; agents read the same "
         "through get_case_type, get_playbook and the tool descriptions"
-    ),
-    ("POST", "/api/graph-contexts/{context_id}/enrichment/{name}/run"): (
-        "enrichment queries and providers run from a person's screen; a saved exploration keeps the "
-        "values they wrote, which an agent reads there and in cases, and it adds data through "
-        "lookup_enrichment / enrich_exploration"
     ),
     ("GET", f"{_ITEM}/content"): (
         "binary never reaches the agent (05 §6) through REST; read_item returns the text extraction, "

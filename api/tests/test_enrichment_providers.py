@@ -320,3 +320,14 @@ def test_an_agent_edit_takes_a_key_from_enrichment():
     assert after["enriched"] == {"nodes": {"a": {"KYC": ["kyc_score"]}}}
     fresh, _, _ = apply_edit(before, None, {"replace": True, "add_nodes": [{"id": "a", "type": "Conta"}]})
     assert "enriched" not in fresh
+
+
+def test_an_entry_may_say_what_it_does_and_old_ones_read_the_same():
+    from graphlagoon.models.schemas import EnrichmentTable
+
+    described = EnrichmentTable(name="kyc", label="KYC", description="KYC tier. Run before grouping by risk.",
+                                provider={"name": "kyc", "target": "nodes"})
+    assert described.model_dump()["description"].startswith("KYC tier")
+    assert EnrichmentTable(name="kyc", label="KYC", provider={"name": "kyc"}).description is None
+    with pytest.raises(ValueError):
+        EnrichmentTable(name="kyc", label="KYC", description="x" * 1001, provider={"name": "kyc"})

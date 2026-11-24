@@ -92,6 +92,18 @@ describe('provider entries', () => {
     expect(parsed.tables).toEqual([entry]);
   });
 
+  it('keeps what an entry says it does, and refuses one that is not text', () => {
+    const entries = [
+      { name: 'kyc', label: 'KYC', description: 'KYC tier. Run before grouping by risk.', provider: { name: 'kyc-demo', target: 'nodes' as const, run: 'manual' as const, overwrite: false, node_props: false } },
+      { name: 'devices', label: 'Devices', description: 'Login devices per account.', table: 'main.risk.devices' },
+    ];
+    const parsed = parseEnrichmentTablesYaml(enrichmentTablesToYaml(entries));
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.tables).toEqual(entries);
+    expect(parseEnrichmentTablesYaml('- {name: d, label: D, table: a.b.c, description: [1]}').errors[0]).toMatch(/description/);
+    expect(parseEnrichmentTablesYaml(`- {name: d, label: D, table: a.b.c, description: ${'x'.repeat(1001)}}`).errors[0]).toMatch(/1000/);
+  });
+
   it('refuses a provider entry that also names a table', () => {
     const parsed = parseEnrichmentTablesYaml('- {name: kyc, label: K, table: a.b.c, provider: kyc-demo}');
     expect(parsed.errors[0]).toMatch(/no table/);

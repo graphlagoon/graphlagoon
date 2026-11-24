@@ -553,6 +553,8 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
                 enrichment_tables=[{
                     "name": "risk_profile",
                     "label": "Demo · KYC profile (Python)",
+                    "description": "KYC tier (low, medium, high) and score of each node. Run it before "
+                                   "grouping or filtering by risk; it is quick and safe to rerun.",
                     "provider": {"name": "demo-kyc", "target": "nodes", "run": "auto"},
                 }],
                 cluster_programs=[{

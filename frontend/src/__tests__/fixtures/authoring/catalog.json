@@ -1074,7 +1074,7 @@
   },
   {
    "name": "enrich_exploration",
-   "summary": "Look up enrichment table ``table`` (a name from the context's ``enrichment_tables``) for the nodes it applies to (``node_ids``, or every node of its types) and save the first row's columns as their properties: missing ones only, or every column with ``overwrite``."
+   "summary": "Run enrichment ``table`` (a name from list_enrichments, which says what each one adds and when to use it) on the exploration and save the values as properties."
   },
   {
    "name": "expand_exploration",
@@ -1133,6 +1133,14 @@
    "summary": "A page of the cases you can read: ``items`` (id, title, status, case_type, fields, deadline, item and suggestion counts), ``total`` and ``counts``."
   },
   {
+   "name": "list_enrichments",
+   "summary": "The enrichments of a context (``context_id`` of an exploration or a case's graph item): extra data its author attached, to add as properties of the nodes or edges on a graph."
+  },
+  {
+   "name": "list_entity_actions",
+   "summary": "The table actions people configured on the right-click menu of the entity's contexts (e.g."
+  },
+  {
    "name": "list_events",
    "summary": "The case journal, oldest first; ``after`` is the last event id you saw."
   },
@@ -1179,6 +1187,10 @@
   {
    "name": "run_analysis",
    "summary": "The analyses of the workspace on the unified graph."
+  },
+  {
+   "name": "run_entity_action",
+   "summary": "Runs a table action of list_entity_actions for one entity and returns its rows (columns, rows, truncated)."
   },
   {
    "name": "run_query",

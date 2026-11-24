@@ -10703,6 +10703,18 @@
             "minLength": 1,
             "title": "Label"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "table": {
             "anyOf": [
               {

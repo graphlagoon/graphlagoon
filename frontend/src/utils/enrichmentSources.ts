@@ -20,6 +20,14 @@ export function configuredEnrichmentProviders(): EnrichmentProviderInfo[] {
   return Array.isArray(providers) ? providers : [];
 }
 
+/** What an enrichment says it does: the author's description, else its provider's registered one. */
+export function enrichmentDescription(
+  entry: { description?: string | null; provider?: { name: string } | null },
+  providers: EnrichmentProviderInfo[] = configuredEnrichmentProviders(),
+): string {
+  return entry.description?.trim() || providers.find((p) => p.name === entry.provider?.name)?.description?.trim() || '';
+}
+
 /**
  * False only when `table` is a full catalog.schema.table that is neither one of `ownTables`
  * nor inside `sources`. Unknown cases (no sources announced, a two-part name the server

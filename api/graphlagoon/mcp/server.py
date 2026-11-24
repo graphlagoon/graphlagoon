@@ -1010,17 +1010,127 @@ def build_server():
         return await _save_exploration(user, loaded, "query_into_exploration", snapshot, overlay, report, info=info,
                                        state_changes={"graph_query": query} if mode == "replace" else None)
 
+    async def _run_enrichment(user: str, loaded, context, spec: dict, node_ids: Optional[list[str]], overwrite: bool) -> dict:
+        """The ``run`` half of enrich_exploration: the entry's query or provider over
+        the saved graph, its values saved with the provenance the page records."""
+        from graphlagoon.models.schemas import EnrichmentRunEdge, EnrichmentRunNode
+        from graphlagoon.services import enrichment
+        from graphlagoon.services.warehouse import get_warehouse_client
+
+        ref = spec.get("provider") or spec.get("query")
+        if not ref:
+            raise _tool_error("ENRICHMENT_NOT_QUERY", f"'{spec['name']}' declares no query or provider to run; use how=\"lookup\"")
+        target = ref.get("target", "edges")
+        kind, plural = ("node", "nodes") if target == "nodes" else ("edge", "edges")
+        graph = exploration_graph.effective_graph(loaded.snapshot, loaded.overlay)
+        nodes = [EnrichmentRunNode(node_id=str(n["id"]), node_type=n.get("type") or "", properties=n.get("properties") or {})
+                 for n in graph["nodes"]]
+        edges = [EnrichmentRunEdge(edge_id=str(e["id"]), src=str(e["source"]), dst=str(e["target"]),
+                                   relationship_type=e.get("type") or "", properties=e.get("properties") or {})
+                 for e in graph["edges"]]
+        only = None
+        if node_ids:
+            only = set(_resolve_exploration_nodes(graph, node_ids))
+            if target == "edges":
+                only = {e.edge_id for e in edges if e.src in only or e.dst in only}
+        try:
+            result = await enrichment.run_over_graph(get_warehouse_client(), context, spec["name"], nodes, edges, user, only)
+        except enrichment.EnrichmentError as exc:
+            raise _tool_error(exc.code, exc.message) from exc
+        label = spec.get("label") or spec["name"]
+        replace = overwrite or bool(ref.get("overwrite"))
+        recorded = ((loaded.snapshot or {}).get("enriched") or {}).get(plural) or {}
+        ops: dict = {"set_properties": []}
+        written: dict[str, list[str]] = {}
+        for item in graph[plural]:
+            ident = str(item["id"])
+            row = result["rows"].get(ident)
+            if not row:
+                continue
+            current = item.get("properties") or {}
+            own = set((recorded.get(ident) or {}).get(label) or [])
+            props = {c: v for c, v in row.items() if v is not None and (replace or current.get(c) is None or c in own)}
+            if props:
+                ops["set_properties"].append({"id": ident, "kind": kind, "properties": props})
+                written[ident] = sorted(props)
+        snapshot, overlay, report = _edited(loaded.snapshot, loaded.overlay, ops)
+        # After the edit (which drops the provenance of every value it changed): these
+        # values are this enrichment's, so the page's next Run refreshes them as its own.
+        saved_ids = {str(i.get("id")) for i in snapshot.get(plural) or []}
+        for ident, keys in written.items():
+            if ident not in saved_ids:
+                continue
+            enriched = snapshot.get("enriched") or {}
+            by_id = enriched.get(plural) or {}
+            by_label = by_id.get(ident) or {}
+            by_label[label] = sorted(set(by_label.get(label) or []) | set(keys))
+            by_id[ident], enriched[plural], snapshot["enriched"] = by_label, by_id, enriched
+        await audit.record(
+            user, AuditAction.ENRICHMENT_RUN, resource_type="graph_context", resource_id=context.id,
+            metadata={"query": spec["name"], "target": target, "edges": len(edges), "nodes": len(nodes),
+                      "rows": len(result["rows"]), "truncated": result["truncated"], "tool": "enrich_exploration"},
+        )
+        info = {"table": spec["name"], "how": "run", "target": target, "targets": result["targets"],
+                "matched": len(result["rows"]), "written": len(written), "columns": result["columns"],
+                "truncated": result["truncated"]}
+        return await _save_exploration(user, loaded, "enrich_exploration", snapshot, overlay, report, info=info)
+
+    @tool("list_enrichments")
+    async def list_enrichments(ctx: Context, context_id: UUID) -> dict:
+        """The enrichments of a context (``context_id`` of an exploration or a
+        case's graph item): extra data its author attached, to add as properties
+        of the nodes or edges on a graph. Each has ``name`` (what the other
+        tools take), ``label``, ``description`` (what it adds and when to use
+        it, when the author wrote one) and one or both of:
+        ``lookup``: a table read by a node key (``match_node_types``,
+        ``columns``); enrich_exploration saves its columns on an exploration,
+        lookup_enrichment reads its rows for one entity of a case.
+        ``run``: a SQL ``query`` (its ``sql`` is given) or a ``provider`` (code
+        the deployment registered; ``registered`` false means it cannot run
+        here) computed over the graph, writing ``target`` nodes or edges.
+        ``mode`` "auto" runs by itself when a person loads a query; "manual"
+        only when asked. enrich_exploration with how="run" runs either.
+        ``authorized_tables`` are the tables those queries may read. In a
+        query's ``sql``, ``graph_edges`` and ``graph_nodes`` are the graph being
+        enriched and exist only inside an enrichment: a query of your own
+        (save_query, run_query) reads the authorized tables without them."""
+        from graphlagoon.services import enrichment
+        from graphlagoon.utils.context_access import get_context_with_access
+
+        user = _agent(ctx)
+        try:
+            context = await get_context_with_access(context_id, user)
+        except HTTPException as exc:
+            raise _http_tool_error(exc) from exc
+        entries = enrichment.describe_tables(context)
+        for entry in entries:
+            entry["tools"] = (["enrich_exploration", "lookup_enrichment"] if entry["lookup"] else ["enrich_exploration"])
+        tables = [context.edge_table_name, getattr(context, "node_table_name", None),
+                  *(e["table"] for e in entries)]
+        await _audit_read(user, "list_enrichments")
+        return _out({"context_id": context.id, "authorized_tables": list(dict.fromkeys(t for t in tables if t)),
+                     "enrichments": entries})
+
     @tool("enrich_exploration")
     async def enrich_exploration(ctx: Context, exploration_id: UUID, table: str,
                                  node_ids: Optional[list[str]] = None, overwrite: bool = False,
-                                 promote: bool = False, expected_revision: Optional[int] = None) -> dict:
-        """Look up enrichment table ``table`` (a name from the context's
-        ``enrichment_tables``) for the nodes it applies to (``node_ids``, or
-        every node of its types) and save the first row's columns as their
-        properties: missing ones only, or every column with ``overwrite``.
-        ``promote`` also turns the table's promote column into nodes linked
-        from each node (the page's "promote to nodes"; ids
-        ``<node_type>:<value>``)."""
+                                 promote: bool = False, expected_revision: Optional[int] = None,
+                                 how: Optional[str] = None) -> dict:
+        """Run enrichment ``table`` (a name from list_enrichments, which says what
+        each one adds and when to use it) on the exploration and save the values
+        as properties. ``how`` picks what the entry does: "lookup" (its default
+        when it has one) or "run" (its query or provider).
+        lookup: reads the table for the nodes it applies to (``node_ids``, or
+        every node of its types) and saves the first row's columns: missing
+        ones only, or every column with ``overwrite``. ``promote`` also turns
+        the table's promote column into nodes linked from each node (the page's
+        "promote to nodes"; ids ``<node_type>:<value>``).
+        run: the entry's SQL query or registered provider over the saved graph,
+        as the page's Run does it: every node (or edge, its ``target``), or
+        those of ``node_ids`` (for edges: the ones touching them). A value
+        already there stays unless the entry or ``overwrite`` says otherwise;
+        values the same enrichment wrote before are refreshed. An entry with
+        ``mode: "manual"`` runs only when someone asks, like this."""
         from graphlagoon.routers.graph_contexts import run_enrichment_lookup
         from graphlagoon.services.warehouse import get_warehouse_client
         from graphlagoon.utils.context_access import get_context_with_access
@@ -1031,11 +1141,19 @@ def build_server():
             context = await get_context_with_access(loaded.context_id, user)
         except HTTPException as exc:
             raise _http_tool_error(exc) from exc
-        lookups = [t for t in context.enrichment_tables or [] if t.get("key_column")]
-        spec = next((t for t in lookups if t["name"] == table), None)
+        spec = next((t for t in context.enrichment_tables or [] if t["name"] == table), None)
         if spec is None:
-            names = [t["name"] for t in lookups]
-            raise _tool_error("ENRICHMENT_TABLE_NOT_FOUND", f"No enrichment table '{table}' with a lookup in this context; it has {names}")
+            names = [t["name"] for t in context.enrichment_tables or []]
+            raise _tool_error("ENRICHMENT_TABLE_NOT_FOUND", f"No enrichment '{table}' in this context; it has {names} (list_enrichments describes them)")
+        mode = how or ("lookup" if spec.get("key_column") else "run")
+        if mode not in ("lookup", "run"):
+            raise _tool_error("INVALID_BODY", 'how is "lookup" or "run"')
+        if mode == "run":
+            if promote:
+                raise _tool_error("NOT_PROMOTABLE", "promote belongs to a lookup, not to a query or provider run")
+            return await _run_enrichment(user, loaded, context, spec, node_ids, overwrite)
+        if not spec.get("key_column"):
+            raise _tool_error("ENRICHMENT_NOT_LOOKUP", f"'{table}' declares no lookup by node key; run it with how=\"run\"")
         if promote and not spec.get("promote"):
             raise _tool_error("NOT_PROMOTABLE", f"Table '{table}' declares no promote column")
         graph = exploration_graph.effective_graph(loaded.snapshot, loaded.overlay)

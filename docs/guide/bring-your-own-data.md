@@ -196,6 +196,18 @@ GROUP BY n.node_id
 
 The query may define its own CTEs, but not ones named `graph_edges` or `graph_nodes`.
 
+### Say what each one does
+
+Every entry, a table, a query or a provider, takes an optional **What it adds and when to use it** text
+(`description`, up to 1000 characters): *"KYC tier and score per account. Run before grouping by risk; slow
+above 5 000 nodes."* It is shown under the enrichment in **Your data → Context enrichments** and in the
+status-bar chip, and it is what an [AI agent](./agents-mcp.md#enrichments) reads to decide whether to run
+one. Without it, people see the name only, and a provider shows the description the deployment registered.
+
+An enrichment set to run **only from Your data** never runs by itself: a person runs it there, or an agent
+runs it on a saved exploration with `enrich_exploration`. Use that for one that is slow, costly, or only
+relevant to some questions, and say so in its description.
+
 ### Enrich from a provider
 
 A **provider** is code the deployment registered in Python (see
@@ -209,6 +221,7 @@ the provider, what it enriches (only the targets it supports are offered), when 
 enrichment_tables:
   - name: kyc
     label: KYC profile
+    description: KYC tier and score per account. Run before grouping by risk.
     provider:
       name: lakebase-kyc        # a provider registered on this server
       target: nodes

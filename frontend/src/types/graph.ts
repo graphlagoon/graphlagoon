@@ -197,6 +197,8 @@ export interface EnrichmentTable {
   /** Slug, unique in the context; used in the lookup and run URLs. */
   name: string;
   label: string;
+  /** What it adds and when to use it: shown to people, and what an agent reads to decide whether to run it. */
+  description?: string | null;
   /** catalog.schema.table; null on a provider entry. */
   table?: string | null;
   key_column?: string | null;
