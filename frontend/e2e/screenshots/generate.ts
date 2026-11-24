@@ -731,6 +731,33 @@ const SCENES: Scene[] = [
   },
   {
     guide: 'labels',
+    scene: 'import',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openLook(page, 'labels');
+      await page.getByTestId('label-import-toggle').click();
+      // What an AI answers with: one rule per type, applied in one go.
+      await page.getByTestId('label-import-text').fill(
+        JSON.stringify(
+          {
+            defaults: { nodeTemplate: '{prop:name|truncate:24:...}' },
+            rules: [
+              { name: 'Person', target: 'node', types: ['Person'], template: '{prop:name}{br}{prop:role}', priority: 20 },
+              { name: 'Company', target: 'node', types: ['Company'], template: '{prop:name|upper}', priority: 20 },
+            ],
+          },
+          null,
+          2,
+        ),
+      );
+      await expect(page.getByTestId('label-import-summary')).toBeVisible();
+      // fill() leaves the textarea scrolled to its end; show the start.
+      await page.getByTestId('label-import-text').evaluate((el) => (el.scrollTop = 0));
+    },
+  },
+  {
+    guide: 'labels',
     scene: 'rule-modal',
     path: GRAPH_URL,
     prepare: async (page) => {
