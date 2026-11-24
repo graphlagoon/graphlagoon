@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** Says that a grouping runs on part of the graph, when filters or "show only" hide the rest. */
+/** Says that an analysis runs on part of the graph, when filters or "show only" hide the rest. */
 import { computed } from 'vue'
 import { useGraphStore } from '@/stores/graph'
 

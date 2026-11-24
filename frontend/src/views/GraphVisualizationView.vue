@@ -902,7 +902,7 @@ watch(
         @close="showMetricsPanel = false; toolbarStore.setPanelActive('metrics', false)"
         @show-resource-monitor="showResourceMonitor = true"
       />
-      <ClusterProgramPanel
+      <ClusterProgramPanel @focus-item="focusItem"
         v-if="showClusterPrograms"
         v-model:tab="clustersTab"
         @close="showClusterPrograms = false; toolbarStore.setPanelActive('clusters', false)"
@@ -1028,7 +1028,7 @@ watch(
 
         <GraphStatusBar
           :nodes="graphStore.filteredNodes.length"
-          :edges="graphStore.filteredEdges.length"
+          :edges="graphStore.visibleEdges.length"
           @open-behaviors="openLook('behaviors')"
           @show-clusters="showClusterResults"
         >
@@ -1150,14 +1150,14 @@ watch(
     <ExpandNeighborsDialog />
 
     <!-- Cluster Node Modal -->
-    <ClusterNodeModal
+    <ClusterNodeModal @focus-item="focusItem"
       :cluster-id="selectedClusterId"
       @close="selectedClusterId = null"
     />
 
     <!-- Community Node Modal (opened via node context menu) -->
     <ClusterProgramRunHost />
-    <CommunityNodeModal
+    <CommunityNodeModal @focus-item="focusItem"
       :community-id="communityTable.selectedCommunityId.value"
       @close="communityTable.close()"
     />

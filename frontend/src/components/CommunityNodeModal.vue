@@ -7,6 +7,7 @@ import {
   type ColMeta,
   buildNodeColumns, flattenNodeRows,
 } from '@/composables/useTableColumns'
+import type { ItemRef } from '@/utils/itemReference'
 import { X } from 'lucide-vue-next'
 import { escapeDelimitedField } from '@/utils/csvSafe'
 import PropertyVisibilityHint from '@/components/PropertyVisibilityHint.vue'
@@ -18,6 +19,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
+  'focus-item': [ref: ItemRef]
 }>()
 
 const communityStore = useCommunityStore()
@@ -112,6 +114,12 @@ function formatCell(value: unknown): string {
   return String(value)
 }
 
+/** The canvas is behind the modal: going there closes it. */
+function goTo(id: string) {
+  emit('close')
+  emit('focus-item', { type: 'node', id })
+}
+
 function handleClose() {
   emit('close')
 }
@@ -194,7 +202,15 @@ function exportCSV() {
               </tr>
               <tr v-for="row in filteredRows" :key="row.node_id as string">
                 <td v-for="col in cols" :key="col.field" :class="{ mono: col.field === 'node_id' }">
-                  {{ formatCell(row[col.field]) }}
+                  <button
+                    v-if="col.field === 'node_id'"
+                    type="button"
+                    class="btn-link item-link"
+                    title="Go to this node on the canvas"
+                    :data-testid="`member-link-${row.node_id}`"
+                    @click="goTo(String(row.node_id))"
+                  >{{ formatCell(row[col.field]) }}</button>
+                  <template v-else>{{ formatCell(row[col.field]) }}</template>
                 </td>
               </tr>
             </tbody>
@@ -210,6 +226,21 @@ function exportCSV() {
 </template>
 
 <style scoped>
+.item-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.item-link:hover,
+.item-link:focus-visible {
+  text-decoration: underline;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;

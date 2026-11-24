@@ -10,6 +10,7 @@ import ClusterProgramRunModal from './ClusterProgramRunModal.vue'
 import { parseImportedClusterPrograms, portableClusterProgram } from '@/utils/clusterProgramImport'
 import { buildSourceSchema, downloadJson, readFileAsText, safeFilename } from '@/utils/portableExport'
 import { PORTABLE_EXPORT_VERSION, type PortableClusterPrograms } from '@/types/portable'
+import RunScopeNote from './RunScopeNote.vue'
 import { X, Play, Bot, Pencil, Trash2, Download, Upload, ChevronDown, ChevronRight, CornerDownLeft } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { confirmAction } from '@/composables/useConfirm'
@@ -215,6 +216,7 @@ function exportAll() {
         </div>
 
         <div class="modal-body">
+          <RunScopeNote />
           <div v-if="showImport" class="import-section">
             <span class="field-hint">
               Paste one program, a list, or a file from <strong>Export all</strong> — the

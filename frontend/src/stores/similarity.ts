@@ -138,8 +138,8 @@ export const useSimilarityStore = defineStore('similarity', () => {
   function extractKeys(): { keys: string[]; skipped: number; duplicates: number; total: number } {
     const graphStore = useGraphStore()
     const targetNodes = selectedNodeType.value
-      ? graphStore.filteredNodes.filter(n => n.node_type === selectedNodeType.value)
-      : graphStore.filteredNodes
+      ? graphStore.visibleNodes.filter(n => n.node_type === selectedNodeType.value)
+      : graphStore.visibleNodes
     const { keys, skipped, duplicates } = extractKeysFromNodes(targetNodes)
     return { keys, skipped, duplicates, total: targetNodes.length }
   }
@@ -171,8 +171,8 @@ export const useSimilarityStore = defineStore('similarity', () => {
 
     // Extract node keys for the selected node type
     const targetNodes = selectedNodeType.value
-      ? graphStore.filteredNodes.filter(n => n.node_type === selectedNodeType.value)
-      : graphStore.filteredNodes
+      ? graphStore.visibleNodes.filter(n => n.node_type === selectedNodeType.value)
+      : graphStore.visibleNodes
 
     if (targetNodes.length < 2) {
       error.value = 'Need at least 2 nodes of the selected type'
@@ -214,7 +214,7 @@ export const useSimilarityStore = defineStore('similarity', () => {
 
       // Translate keys back to node_ids when using a non-id property
       const useNodeId = keyProperty.value === 'node_id'
-      const nodeIdSet = new Set(graphStore.filteredNodes.map(n => n.node_id))
+      const nodeIdSet = new Set(graphStore.visibleNodes.map(n => n.node_id))
 
       const translatedEdges = response.edges
         .map(e => {

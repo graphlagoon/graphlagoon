@@ -14441,7 +14441,19 @@ Both reuse `MenuActionTableModal` (Canvas/Warehouse badge, Add to case with `too
 **Change:**
 1. `useFocusItem` (select + camera, both hosts) and `itemRefOf`: the item's id, edge endpoints and property values naming a loaded item are links in SelectionDetails, DetailModal and the case inspector. `useGraphCamera.focusOnNodes` frames several nodes, so an edge frames both ends (a Data Table edge row too; it centred its source). Hidden items are selected and said, not flown to; a collapsed member leads to its cluster.
 2. `graphStore.visibleNodes` / `visibleEdges` (types, search-hide, case chips, Data Table, isolation) are the scope of `communityStore.runDetection` and `computeClustersFromProgram`; the run forms say "Runs on the N visible of M nodes" (`RunScopeNote`). All hidden = an error. A re-run under "show only" these groups re-points the rule at the new groups, whose ids would otherwise mean others. Group counts follow the filters (`nodesInFilters`, not isolation: the rows toggle it); member tables list visible members with "Include N hidden". `visibleNodeCount` now counts the Data Table filter too.
-**Not in scope:** the lens (follows the pointer), leaves hidden by zoom/layout and members of collapsed groups stay in. Not reran on filter change. Metrics, custom metrics and Similarity still use `filteredNodes` (no "show only"). No "run on everything" switch: clear the filters.
+**Not in scope:** the lens (follows the pointer), leaves hidden by zoom/layout and members of collapsed groups stay in. Not reran on filter change. Metrics and Similarity: see the entry below. No "run on everything" switch: clear the filters.
 **Trap:** numbers are links only in id-like columns, or `age: 3` would link to node "3".
 **Tests:** vitest `visibleScope`, `useFocusItem`, `itemReference`, `SelectionDetails`, `SelectionInspector`; e2e `focus-and-visible-scope.spec.ts`.
 **Public docs:** `exploring-the-graph.md`, `clusters.md`, `communities-metrics.md`. **Admin-area impact:** No admin-area impact.
+
+## [2026-11-23 21:30] - Follow-ups: the rest of the analyses on the visible graph, stale groups said, member ids as links
+
+**Change:**
+1. Algorithm metrics (and Graph Info), Similarity keys and the case Groups panel's "connected component" rule use `visibleNodes`/`visibleEdges`; `RunScopeNote` is also in the program library, Metrics and Similarity. The status bars count visible edges.
+2. The Clusters panel says when visible nodes are in no group (a filter loosened since the run) with **Run again**; the run summary says "N of M nodes".
+3. Node ids in the community and cluster member tables move the focus. A focus from a panel also stops an automatic fit from landing over it.
+4. `optimizeDeps.include` for the libraries only workers import: on a cold Vite cache the first Louvain run made the dev server reload the page (lost graph; also a flaky e2e).
+5. No modularity (instead of "Q NaN") when no edge is visible.
+**Kept on purpose:** custom metrics do not honour "show only" — they recompute on population change and a rule can read their values, so it would loop. The case's paths analysis keeps `filteredEdges` and the property/role/tag group rules keep the whole case: they write evidence and annotations, not a view.
+**Tests:** vitest `visibleScope`; e2e `focus-and-visible-scope.spec.ts`, on a cold Vite cache.
+**Public docs:** `communities-metrics.md`, `similarity.md`. **Admin-area impact:** No admin-area impact.

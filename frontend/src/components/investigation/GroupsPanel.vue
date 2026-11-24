@@ -57,8 +57,8 @@ function partition(): Map<string, string[]> {
     for (const [id, c] of community.communityMap) add(community.communityLabels[c] ?? `Community ${c + 1}`, id);
   } else if (by.value === 'component') {
     const comps = connectedComponents(
-      nodes.map((n) => n.node_id),
-      store.unified.edges.map((e) => [e.src, e.dst] as [string, string]),
+      graph.visibleNodes.map((n) => n.node_id),
+      graph.visibleEdges.map((e) => [e.src, e.dst] as [string, string]),
       'weak',
     );
     for (const [id, c] of comps) add(`Component ${c + 1}`, id);

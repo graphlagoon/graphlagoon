@@ -1734,8 +1734,9 @@ function exportPNG(
 
 defineExpose({
   zoomToFit: camera.zoomToFit,
-  focusOnNode: camera.focusOnNode,
-  focusOnNodes: camera.focusOnNodes,
+  // Marked as a focus, so a layout still settling does not fit over it
+  focusOnNode: (id: string) => { lastFocusAt = performance.now(); camera.focusOnNode(id); },
+  focusOnNodes: (ids: string[]) => { lastFocusAt = performance.now(); camera.focusOnNodes(ids); },
   frame,
   getViewport: camera.getViewport,
   applyViewport: camera.applyViewport,

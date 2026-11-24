@@ -21,6 +21,7 @@ import ClusterProgramParamInputs from './ClusterProgramParamInputs.vue'
 import RunScopeNote from './RunScopeNote.vue'
 import CommunityNodeModal from './CommunityNodeModal.vue'
 import { X, Play, Loader2, Bot, Eye, EyeOff, MoreHorizontal, Library, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import type { ItemRef } from '@/utils/itemReference'
 import { useToast } from '@/composables/useToast'
 
 /**
@@ -36,6 +37,7 @@ const props = withDefaults(defineProps<{ tab?: ClustersTab }>(), { tab: undefine
 const emit = defineEmits<{
   'update:tab': [tab: ClustersTab]
   close: []
+  'focus-item': [ref: ItemRef]
 }>()
 
 const clusterStore = useClusterStore()
@@ -122,10 +124,19 @@ const algorithmName = computed(() => {
 /** One line saying how the groups on screen were made. */
 const runSummary = computed(() => {
   const parts = [algorithmName.value]
+  const grouped = communityStore.communityMap.size
+  if (grouped < graphStore.nodes.length) parts.push(`${grouped} of ${graphStore.nodes.length} nodes`)
   if (communityStore.isLouvain) parts.push(`resolution ${communityStore.resolution.toFixed(1)}`)
   parts.push(communityStore.collapseEnabled ? 'Collapse' : 'Color')
   return parts.join(' · ')
 })
+
+/** Visible nodes the last run did not see: a filter was loosened since. */
+const ungroupedCount = computed(() =>
+  communityStore.hasResults
+    ? graphStore.visibleNodes.filter(n => !communityStore.communityMap.has(n.node_id)).length
+    : 0
+)
 
 // The run bar folds into its summary once there is a result, so the groups
 // get the room; "change" opens it again.
@@ -431,6 +442,11 @@ const displayOpen = ref(false)
           </div>
         </div>
 
+        <div v-if="ungroupedCount > 0" class="groups-showing" data-testid="groups-stale">
+          {{ ungroupedCount.toLocaleString() }} visible {{ ungroupedCount === 1 ? 'node is' : 'nodes are' }} in no group: what is shown changed since the run.
+          <button class="btn-link" data-testid="groups-run-again" :disabled="communityStore.computing || communityMissingParams.length > 0" @click="run">Run again</button>
+        </div>
+
         <div v-if="communityStore.error" class="community-error">
           {{ communityStore.error }}
         </div>
@@ -612,6 +628,7 @@ const displayOpen = ref(false)
     <CommunityNodeModal
       v-if="membersCommunityId !== null"
       :community-id="membersCommunityId"
+      @focus-item="emit('focus-item', $event)"
       @close="membersCommunityId = null"
     />
   </div>

@@ -140,7 +140,7 @@ The similarity UI lives in the **Clusters panel > Similarity tab**:
 3. **Select key property** — the node property whose values become keys sent to the endpoint. Defaults to `node_id`. If the property contains a JSON string, check "Value is JSON string" and specify a dot-separated path (e.g. `embedding.id`)
 4. **Preview keys** — click to inspect extracted keys before running
 5. **Configure parameters** — dynamic form rendered from the endpoint's param schema
-6. **Run** — calls the endpoint, injects similarity edges into the graph
+6. **Run** — sends the keys of the visible nodes (filters and show only apply) to the endpoint, injects similarity edges into the graph
 
 ### Display Modes
 

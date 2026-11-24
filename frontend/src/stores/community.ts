@@ -219,7 +219,8 @@ export const useCommunityStore = defineStore('community', () => {
         }
         communityMap.value = map
         communityCount.value = result.count
-        modularity.value = result.modularity
+        // No edges among the visible nodes: modularity is 0/0
+        modularity.value = Number.isFinite(result.modularity) ? result.modularity : null
         communityLabels.value = {} // Louvain communities are anonymous
         lastComputedAt.value = Date.now()
       }

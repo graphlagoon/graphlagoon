@@ -12,6 +12,7 @@ import { formatMetricValue } from '@/utils/metricFormat';
 import { useFeatureFlags } from '@/composables/useFeatureFlags';
 import type { CustomMetricDefinition } from '@/types/customMetrics';
 import { useCustomMetricsStore } from '@/stores/customMetrics';
+import RunScopeNote from './RunScopeNote.vue';
 import CustomMetricEditorModal from './CustomMetricEditorModal.vue';
 import CustomMetricSkillModal from './CustomMetricSkillModal.vue';
 import { parseImportedCustomMetrics } from '@/utils/customMetricImport';
@@ -675,6 +676,7 @@ function toggleSection(section: keyof typeof expandedSections.value) {
           </div>
 
           <!-- Compute Button -->
+          <RunScopeNote />
           <button
             v-if="selectedAlgorithm"
             class="compute-btn"

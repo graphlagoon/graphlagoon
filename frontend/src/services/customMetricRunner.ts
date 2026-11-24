@@ -41,8 +41,8 @@ import { useCommunityStore } from '@/stores/community';
 // ============================================================================
 
 /**
- * Serialize the current filtered graph (the same population the algorithm
- * metrics use) together with degrees, built-in + algorithm metric values,
+ * Serialize the current filtered graph ("show only" is not applied: these
+ * recompute by themselves, and a rule can read their values, which would loop) together with degrees, built-in + algorithm metric values,
  * and community membership. Custom metrics are never included: a definition
  * cannot depend on another custom metric (no ordering, no cycles).
  */
