@@ -55,6 +55,7 @@ describe('graph store — perf instrumentation (Phase 0)', () => {
   afterEach(() => {
     clearPerfEntries()
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   describe('loadContext', () => {
@@ -182,6 +183,24 @@ describe('graph store — perf instrumentation (Phase 0)', () => {
 
     it('keeps fetch and assign as disjoint spans', async () => {
       vi.useFakeTimers()
+      // A controlled clock: fake timers leave performance.now real here, so
+      // the polling would cost nothing and a loaded machine decides the result.
+      const ASSIGN_COST = 1000
+      let assignCost = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => Date.now() + assignCost)
+      // Reading the rows is the first thing the assign does; charge it there.
+      const result = {
+        ...RESPONSE,
+        get nodes() {
+          assignCost = ASSIGN_COST
+          return RESPONSE.nodes
+        },
+      }
+      vi.mocked(api.getGraphQueryJob).mockResolvedValue({
+        status: 'succeeded',
+        job_id: 'job-1',
+        result,
+      } as any)
       const store = useGraphStore()
 
       const run = store.executeGraphQuery('SELECT 1')
@@ -192,7 +211,9 @@ describe('graph store — perf instrumentation (Phase 0)', () => {
       // the two must never double-count the same interval.
       const fetch = entry('load:query:fetch')!
       const assign = entry('load:query:assign')!
-      expect(fetch.ms).toBeGreaterThanOrEqual(assign.ms)
+      expect(fetch.ms).toBeGreaterThan(0)
+      expect(fetch.ms).toBeLessThanOrEqual(400)
+      expect(assign.ms).toBe(ASSIGN_COST)
     })
   })
 })
