@@ -48,6 +48,22 @@ describe('DatabricksEnrichmentTab', () => {
     expect(outcome).toContain('row limit');
   });
 
+  it('says what each enrichment does: the author\u2019s words, or the registered provider\u2019s', () => {
+    window.__GRAPH_LAGOON_CONFIG__ = {
+      enrichment_providers: [{ name: 'kyc-demo', label: 'KYC', description: 'Risk from Lakebase', targets: ['nodes'] }],
+    };
+    try {
+      const { wrapper } = setup([
+        { ...tables[1], description: 'Risk per transaction. Run before sizing edges.' },
+        { name: 'kyc', label: 'KYC', provider: { name: 'kyc-demo', target: 'nodes', run: 'manual' } },
+      ]);
+      const said = wrapper.findAll('[data-testid="your-data-databricks-description"]').map((d) => d.text());
+      expect(said).toEqual(['Risk per transaction. Run before sizing edges.', 'Risk from Lakebase']);
+    } finally {
+      delete window.__GRAPH_LAGOON_CONFIG__;
+    }
+  });
+
   it('shows why a run failed', async () => {
     vi.spyOn(api, 'runEnrichmentQuery').mockRejectedValue({
       response: { data: { detail: { error: { code: 'ENRICHMENT_SCOPE_DENIED', message: 'it reads hr.salaries' } } } },

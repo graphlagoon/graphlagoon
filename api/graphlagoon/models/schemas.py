@@ -537,6 +537,9 @@ class EnrichmentTable(BaseModel):
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,40}$")
     label: str = Field(min_length=1, max_length=100)
+    # What it adds and when to use it: shown to people, and what an agent reads
+    # (``list_enrichments``) to decide whether to run it.
+    description: Optional[str] = Field(default=None, max_length=1000)
     table: Optional[str] = Field(default=None, min_length=1, max_length=400)
     key_column: Optional[str] = Field(default=None, min_length=1, max_length=200)
     match_node_types: list[str] = Field(default_factory=list, max_length=50)

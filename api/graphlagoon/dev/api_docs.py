@@ -31,7 +31,7 @@ GROUPS: list[tuple[str, list[str]]] = [
     ("Brief and material", ["get_brief", "write_brief", "list_items", "read_item", "update_item", "search_case"]),
     ("Adding material", ["add_note", "add_document", "add_table", "save_query", "import_file", "upload_file", "add_item"]),
     ("Explorations", ["list_explorations", "get_exploration", "create_exploration", "edit_exploration",
-                      "expand_exploration", "query_into_exploration", "enrich_exploration"]),
+                      "expand_exploration", "query_into_exploration", "list_enrichments", "enrich_exploration"]),
     ("Queries and tables", ["run_query", "join_tables", "compare_tables", "promote_tables"]),
     ("Annotations and evidence", ["annotate", "group", "list_annotations", "pin_evidence"]),
     ("Tasks", ["list_tasks", "add_task", "update_task"]),

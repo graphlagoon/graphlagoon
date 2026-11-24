@@ -194,7 +194,31 @@ your own layer on top, each node and edge marked `snapshot` or `layer`);
 it writes, or both; `edit_exploration` changes the graph in one atomic batch
 (add, **delete**, set properties, or `replace` to start a brand-new graph);
 `expand_exploration`, `query_into_exploration` and `enrich_exploration` bring
-neighbours, a query's answer or an enrichment table's columns in.
+neighbours, a query's answer or an enrichment's values in.
+
+### Enrichments
+
+A context's [enrichments](./bring-your-own-data.md#enrich-from-databricks-tables) are extra data its author
+attached: a table looked up by a node key, a SQL query over the graph, or a provider the deployment registered
+(for example a Lakebase read). An agent works with them in three steps:
+
+1. **Discover.** `list_enrichments(context_id)` returns each one with its `description` (what it adds and when
+   to use it, as the author wrote it; a provider's registered description when the author wrote none), whether
+   it is a `lookup` or a `run`, what it targets (nodes or edges), whether it runs by itself for people
+   (`mode: auto`) or only when asked (`manual`), a query's SQL, and the context's authorized tables.
+2. **Run.** `enrich_exploration(exploration_id, table)` runs it over the saved graph and saves the values as
+   properties: a lookup by default when the entry has one, `how="run"` for its query or provider. `node_ids`
+   narrows it to some nodes (or the edges touching them). The agent needs what a person needs: read access to
+   the context and write access to the exploration. A run is audited as `enrichment.run`.
+3. **Read.** The values are in the exploration (`get_exploration`) and in every case that holds it
+   (`get_graph`, `get_entity`), marked as written by that enrichment, so a person's next **Run** refreshes
+   them instead of treating them as the graph's own.
+
+A **manual** enrichment never runs for anyone until a person or an agent asks, which suits a slow or costly
+one: its description is where the author says so. An agent that only wants to write its own SQL reads the
+queries and `authorized_tables` from `list_enrichments` as a starting point; `graph_edges` and `graph_nodes`
+exist only inside an enrichment, so a query saved with `save_query` reads the tables directly. An agent
+cannot add or change a context's enrichments: that stays with people who hold **Create graph contexts**.
 
 The **look** is the agent's too: `create_exploration(look=…)` and
 `edit_exploration(look=…)` take the keys of a [style preset](./style-presets.md)

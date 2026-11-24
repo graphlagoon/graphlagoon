@@ -447,6 +447,7 @@ describe('GraphContextFormModal', () => {
         await fireEvent.click(getByTestId('enrichment-add-provider'))
         expect((getByTestId('enrichment-label') as HTMLInputElement).value).toBe('KYC (demo)')
         await fireEvent.update(getByTestId('enrichment-provider-run'), 'manual')
+        await fireEvent.update(getByTestId('enrichment-description'), ' KYC tier per account. Run before grouping by risk. ')
         await fireEvent.click(getByTestId('create-context-submit'))
         await flush()
         const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
@@ -454,6 +455,7 @@ describe('GraphContextFormModal', () => {
           {
             name: 'kyc_demo',
             label: 'KYC (demo)',
+            description: 'KYC tier per account. Run before grouping by risk.',
             provider: { name: 'kyc-demo', target: 'nodes', run: 'manual', overwrite: false, node_props: false },
           },
         ])

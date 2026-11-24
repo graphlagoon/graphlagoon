@@ -335,7 +335,9 @@ async def kyc_profile(request: EnrichmentProviderRequest) -> dict[str, dict]:
 
 `enrichment_providers` is the complete list: each `create_mountable_app` / `create_app` call replaces the
 providers registered before. Registered providers are listed in `/api/config` (`enrichment_providers`: name,
-label, description, targets — never anything operational). The dev server registers a pure-Python demo,
+label, description, targets — never anything operational). The `description` is also what people and
+[AI agents](./agents-mcp.md#enrichments) read for a context entry whose author wrote none, so say what the
+provider adds and when to use it. The dev server registers a pure-Python demo,
 `graphlagoon/dev/enrichment_demo.py`.
 
 ::: tip Registries are process-wide

@@ -106,6 +106,7 @@ function emptyForm() {
 interface EnrichmentRow {
   name: string;
   label: string;
+  description: string;
   table: string;
   key_column: string;
   match_node_types: string;
@@ -128,6 +129,7 @@ function rowFromEnrichment(t: EnrichmentTable): EnrichmentRow {
   return {
     name: t.name,
     label: t.label,
+    description: t.description ?? '',
     table: t.table ?? '',
     key_column: t.key_column ?? '',
     match_node_types: (t.match_node_types ?? []).join(', '),
@@ -157,6 +159,7 @@ function enrichmentFromRow(row: EnrichmentRow): EnrichmentTable {
     return {
       name: row.name.trim() || slug(row.label || row.provider),
       label: row.label.trim() || info?.label || row.provider,
+      ...(row.description.trim() ? { description: row.description.trim() } : {}),
       provider: {
         name: row.provider,
         target: row.query_target,
@@ -179,6 +182,7 @@ function enrichmentFromRow(row: EnrichmentRow): EnrichmentTable {
     label: row.label.trim() || row.table.trim(),
     table: row.table.trim(),
   };
+  if (row.description.trim()) entry.description = row.description.trim();
   // The lookup is optional: an entry without a key column only authorizes its table.
   if (row.key_column.trim()) {
     Object.assign(entry, {
@@ -738,6 +742,7 @@ function addEnrichmentTable(reveal = true) {
   form.value.enrichment_tables.push({
     name: '',
     label: '',
+    description: '',
     table: '',
     key_column: '',
     match_node_types: '',
@@ -1415,6 +1420,17 @@ async function submit() {
                   &times;
                 </button>
               </div>
+              <div class="form-group">
+                <label>What it adds and when to use it <span class="muted">(optional; people and AI agents read it before running it)</span></label>
+                <textarea
+                  v-model="row.description"
+                  class="form-control enrichment-description"
+                  rows="1"
+                  maxlength="1000"
+                  placeholder="KYC tier and score per account. Run before grouping by risk."
+                  data-testid="enrichment-description"
+                ></textarea>
+              </div>
               <div class="form-row">
                 <div class="form-group">
                   <label>Enriches</label>
@@ -1462,6 +1478,17 @@ async function submit() {
                 &times;
               </button>
             </div>
+              <div class="form-group">
+                <label>What it adds and when to use it <span class="muted">(optional; people and AI agents read it before running it)</span></label>
+                <textarea
+                  v-model="row.description"
+                  class="form-control enrichment-description"
+                  rows="1"
+                  maxlength="1000"
+                  placeholder="KYC tier and score per account. Run before grouping by risk."
+                  data-testid="enrichment-description"
+                ></textarea>
+              </div>
             <details class="enrichment-block" :open="!!row.key_column" data-testid="enrichment-lookup">
               <summary>Node lookup in the investigation inspector <span class="muted">{{ row.key_column.trim() ? `· by ${row.key_column.trim()}` : '(optional)' }}</span></summary>
               <div class="form-row">
@@ -1757,6 +1784,12 @@ async function submit() {
   font-size: 0.8rem;
   margin: 4px 0 0;
 }
+.enrichment-description {
+  resize: vertical;
+  min-height: 2.4em;
+  font-family: inherit;
+}
+
 .enrichment-row .provider-row {
   align-items: flex-start;
 }

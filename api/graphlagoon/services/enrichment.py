@@ -559,3 +559,113 @@ async def run_provider(
         "truncated": kept > settings.enrichment_max_rows,
         "query_ms": query_ms,
     }
+
+
+# --- What an agent reads and runs ----------------------------------------------
+
+# An agent run walks the whole exploration in batches; this caps the warehouse or
+# provider calls of one tool call (the rest is reported as ``truncated``).
+MAX_GRAPH_RUN_BATCHES = 20
+
+
+def describe_tables(context) -> list[dict]:
+    """Each enrichment of ``context`` as an agent needs it to choose one: what it is,
+    the author's description (a provider's registered one when the entry has none),
+    its lookup and/or run settings, and whether its provider is registered here."""
+    from graphlagoon.services.enrichment_providers import get_enrichment_provider
+
+    out = []
+    for spec in getattr(context, "enrichment_tables", None) or []:
+        description = (spec.get("description") or "").strip()
+        lookup = run = None
+        if spec.get("key_column"):
+            lookup = {
+                "key_column": spec["key_column"],
+                "match_node_types": spec.get("match_node_types") or [],
+                "match_source": spec.get("match_source", "node_id"),
+                "columns": spec.get("columns") or [],
+                "cardinality": spec.get("cardinality", "one"),
+                "promote": spec.get("promote"),
+            }
+        ref = spec.get("provider") or spec.get("query")
+        if ref:
+            run = {
+                "kind": "provider" if spec.get("provider") else "query",
+                "target": ref.get("target", "edges"),
+                "mode": ref.get("run", "manual"),
+                "overwrite": bool(ref.get("overwrite")),
+                "node_props": bool(ref.get("node_props")),
+            }
+            if spec.get("provider"):
+                provider = get_enrichment_provider(ref.get("name", ""))
+                run["provider"] = {
+                    "name": ref.get("name"),
+                    "label": (provider.label or provider.name) if provider else ref.get("name"),
+                    "registered": provider is not None,
+                }
+                if not description and provider:
+                    description = provider.description
+            else:
+                run["sql"] = ref.get("sql")
+        out.append(
+            {
+                "name": spec.get("name"),
+                "label": spec.get("label"),
+                "description": description or None,
+                "table": spec.get("table"),
+                "lookup": lookup,
+                "run": run,
+            }
+        )
+    return out
+
+
+async def run_over_graph(
+    warehouse, context, name: str, nodes: list, edges: list, user_email: Optional[str],
+    only: Optional[set] = None,
+) -> dict:
+    """Enrichment ``name`` (a query or a provider) over a whole graph, in batches of
+    ``enrichment_max_keys`` shaped as the page sends them: target nodes with the edges
+    that touch them, or target edges with their endpoint nodes. ``only`` narrows the
+    targets to those ids. Same result as one run, plus ``targets`` and ``batches``."""
+    spec = find_table(context, name)
+    ref = spec.get("provider") or spec.get("query")
+    if not ref:
+        raise EnrichmentError(
+            400, "ENRICHMENT_NOT_QUERY", f"'{name}' declares no enrichment query or provider"
+        )
+    target = ref.get("target", "edges")
+    size = get_settings().enrichment_max_keys
+    if target == "nodes":
+        targets = [n for n in nodes if only is None or n.node_id in only]
+    else:
+        targets = [e for e in edges if only is None or e.edge_id in only]
+    if not targets:
+        noun = "nodes" if target == "nodes" else "edges"
+        raise EnrichmentError(400, "INVALID_KEY", f"No {noun} for '{name}' to enrich")
+    by_id = {n.node_id: n for n in nodes}
+    merged: dict = {
+        "name": spec["name"], "label": spec.get("label"), "target": target, "columns": [],
+        "rows": {}, "truncated": False, "query_ms": 0.0, "targets": len(targets), "batches": 0,
+    }
+    for start in range(0, len(targets), size):
+        if merged["batches"] >= MAX_GRAPH_RUN_BATCHES:
+            merged["truncated"] = True
+            break
+        batch = targets[start : start + size]
+        if target == "nodes":
+            ids = {n.node_id for n in batch}
+            batch_nodes, batch_edges = batch, [e for e in edges if e.src in ids or e.dst in ids]
+        else:
+            ends = {i for e in batch for i in (e.src, e.dst)}
+            batch_nodes, batch_edges = [by_id[i] for i in ends if i in by_id], batch
+        if spec.get("provider"):
+            result = await run_provider(context, name, batch_edges, batch_nodes, user_email)
+        else:
+            result = await run_query(warehouse, context, name, batch_edges, batch_nodes)
+        merged["batches"] += 1
+        merged["rows"].update(result["rows"])
+        merged["columns"].extend(c for c in result["columns"] if c not in merged["columns"])
+        merged["truncated"] = merged["truncated"] or result["truncated"]
+        merged["query_ms"] = round(merged["query_ms"] + (result.get("query_ms") or 0), 2)
+    return merged

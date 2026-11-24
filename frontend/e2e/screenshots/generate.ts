@@ -459,7 +459,12 @@ const DEMO_ENRICHMENT_TABLES = [
     table: 'main.sales.orders',
     query: { sql: "SELECT e.edge_id, sum(o.amount) AS deal_size\nFROM graph_edges e\nJOIN main.sales.orders o ON o.buyer_id = e.src AND o.product_id = e.dst\nGROUP BY e.edge_id", run: 'manual' },
   },
-  { name: 'company_risk', label: 'Company risk (Lakebase)', provider: { name: 'lakebase-risk', target: 'nodes', run: 'manual' } },
+  {
+    name: 'company_risk',
+    label: 'Company risk (Lakebase)',
+    description: 'Risk tier of each company from the risk service. Run before grouping or colouring by risk.',
+    provider: { name: 'lakebase-risk', target: 'nodes', run: 'manual' },
+  },
 ];
 
 // A right-click table action and what its query answers (context-menu-actions/table).

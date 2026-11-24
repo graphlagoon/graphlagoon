@@ -9,6 +9,7 @@ import { computed, ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { authorizedTables, queryEntries, runSpec, targetOf } from '@/utils/queryEnrichment';
 import { describeRun } from '@/utils/enrichmentStatus';
+import { enrichmentDescription } from '@/utils/enrichmentSources';
 import { guideUrl } from '@/utils/docsLinks';
 
 const graph = useGraphStore();
@@ -68,6 +69,7 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
               {{ running === q.name ? 'Running…' : graph.queryEnrichmentRuns[q.name]?.status === 'error' ? 'Retry' : 'Run' }}
             </button>
           </div>
+          <p v-if="enrichmentDescription(q)" class="what" data-testid="your-data-databricks-description">{{ enrichmentDescription(q) }}</p>
           <p
             v-if="outcome(q.name)"
             class="outcome"
@@ -87,6 +89,13 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
 </template>
 
 <style scoped>
+.what {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #666);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
 .hint,
 .tables {
   font-size: 0.85rem;

@@ -8,14 +8,14 @@ outline: [2, 3]
 
 ::: v-pre
 
-Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (49 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
+Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (50 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
 
 | Group | Tools |
 |---|---|
 | Cases | [`list_cases`](#list-cases), [`get_case`](#get-case), [`create_case`](#create-case), [`update_case`](#update-case) |
 | Brief and material | [`get_brief`](#get-brief), [`write_brief`](#write-brief), [`list_items`](#list-items), [`read_item`](#read-item), [`update_item`](#update-item), [`search_case`](#search-case) |
 | Adding material | [`add_note`](#add-note), [`add_document`](#add-document), [`add_table`](#add-table), [`save_query`](#save-query), [`import_file`](#import-file), [`upload_file`](#upload-file), [`add_item`](#add-item) |
-| Explorations | [`list_explorations`](#list-explorations), [`get_exploration`](#get-exploration), [`create_exploration`](#create-exploration), [`edit_exploration`](#edit-exploration), [`expand_exploration`](#expand-exploration), [`query_into_exploration`](#query-into-exploration), [`enrich_exploration`](#enrich-exploration) |
+| Explorations | [`list_explorations`](#list-explorations), [`get_exploration`](#get-exploration), [`create_exploration`](#create-exploration), [`edit_exploration`](#edit-exploration), [`expand_exploration`](#expand-exploration), [`query_into_exploration`](#query-into-exploration), [`list_enrichments`](#list-enrichments), [`enrich_exploration`](#enrich-exploration) |
 | Queries and tables | [`run_query`](#run-query), [`join_tables`](#join-tables), [`compare_tables`](#compare-tables), [`promote_tables`](#promote-tables) |
 | Annotations and evidence | [`annotate`](#annotate), [`group`](#group), [`list_annotations`](#list-annotations), [`pin_evidence`](#pin-evidence) |
 | Tasks | [`list_tasks`](#list-tasks), [`add_task`](#add-task), [`update_task`](#update-task) |
@@ -395,11 +395,21 @@ Human twin: `POST /api/graph-contexts/{context_id}/cypher`, `PUT /api/exploratio
 | `mode` | string |  | `"add"` |
 | `expected_revision` | integer |  | null |
 
+### list_enrichments
+
+The enrichments of a context (``context_id`` of an exploration or a case's graph item): extra data its author attached, to add as properties of the nodes or edges on a graph. Each has ``name`` (what the other tools take), ``label``, ``description`` (what it adds and when to use it, when the author wrote one) and one or both of: ``lookup``: a table read by a node key (``match_node_types``, ``columns``); enrich_exploration saves its columns on an exploration, lookup_enrichment reads its rows for one entity of a case. ``run``: a SQL ``query`` (its ``sql`` is given) or a ``provider`` (code the deployment registered; ``registered`` false means it cannot run here) computed over the graph, writing ``target`` nodes or edges. ``mode`` "auto" runs by itself when a person loads a query; "manual" only when asked. enrich_exploration with how="run" runs either. ``authorized_tables`` are the tables those queries may read. In a query's ``sql``, ``graph_edges`` and ``graph_nodes`` are the graph being enriched and exist only inside an enrichment: a query of your own (save_query, run_query) reads the authorized tables without them.
+
+Human twin: `GET /api/graph-contexts/{context_id}`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `context_id` | uuid | yes |  |
+
 ### enrich_exploration
 
-Look up enrichment table ``table`` (a name from the context's ``enrichment_tables``) for the nodes it applies to (``node_ids``, or every node of its types) and save the first row's columns as their properties: missing ones only, or every column with ``overwrite``. ``promote`` also turns the table's promote column into nodes linked from each node (the page's "promote to nodes"; ids ``&lt;node_type&gt;:&lt;value&gt;``).
+Run enrichment ``table`` (a name from list_enrichments, which says what each one adds and when to use it) on the exploration and save the values as properties. ``how`` picks what the entry does: "lookup" (its default when it has one) or "run" (its query or provider). lookup: reads the table for the nodes it applies to (``node_ids``, or every node of its types) and saves the first row's columns: missing ones only, or every column with ``overwrite``. ``promote`` also turns the table's promote column into nodes linked from each node (the page's "promote to nodes"; ids ``&lt;node_type&gt;:&lt;value&gt;``). run: the entry's SQL query or registered provider over the saved graph, as the page's Run does it: every node (or edge, its ``target``), or those of ``node_ids`` (for edges: the ones touching them). A value already there stays unless the entry or ``overwrite`` says otherwise; values the same enrichment wrote before are refreshed. An entry with ``mode: "manual"`` runs only when someone asks, like this.
 
-Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `PUT /api/explorations/{exploration_id}`
+Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `POST /api/graph-contexts/{context_id}/enrichment/{name}/run`, `PUT /api/explorations/{exploration_id}`
 
 | Parameter | Type | Required | Default |
 |---|---|---|---|
@@ -409,6 +419,7 @@ Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `P
 | `overwrite` | boolean |  | `false` |
 | `promote` | boolean |  | `false` |
 | `expected_revision` | integer |  | null |
+| `how` | string |  | null |
 
 ## Queries and tables
 

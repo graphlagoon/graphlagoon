@@ -10,6 +10,7 @@ import { AlertTriangle, CheckCircle2, Clock, Loader2, PauseCircle } from 'lucide
 import { useGraphStore } from '@/stores/graph';
 import { waitingOnEnrichment } from '@/composables/useAfterQueryAnalysis';
 import { describeRun, summarizeEnrichment } from '@/utils/enrichmentStatus';
+import { enrichmentDescription } from '@/utils/enrichmentSources';
 import YourDataModal from '@/components/YourDataModal.vue';
 
 const graph = useGraphStore();
@@ -19,6 +20,12 @@ const yourDataOpen = ref(false);
 const summary = computed(() => summarizeEnrichment(graph.queryEnrichmentRuns, graph.queryEnrichmentInFlight));
 const runs = computed(() => Object.entries(graph.queryEnrichmentRuns));
 const failedNames = computed(() => runs.value.filter(([, r]) => r.status === 'error').map(([name]) => name));
+/** name → what the enrichment says it does (the author's description, or its provider's). */
+const descriptions = computed(() => {
+  const out: Record<string, string> = {};
+  for (const entry of graph.currentContext?.enrichment_tables ?? []) out[entry.name] = enrichmentDescription(entry);
+  return out;
+});
 const busy = computed(() => summary.value?.state === 'running');
 
 function retry(names: string[]) {
@@ -67,6 +74,7 @@ function openYourData() {
                 @click="retry([name])"
               >Retry</button>
             </div>
+            <p v-if="descriptions[name]" class="what" data-testid="enrichment-status-description">{{ descriptions[name] }}</p>
             <p class="detail" data-testid="enrichment-status-detail">{{ describeRun(r) }}</p>
           </li>
           <li v-if="waitingOnEnrichment" class="waiting" data-testid="enrichment-status-waiting">
@@ -154,6 +162,15 @@ ul {
 }
 .muted {
   color: var(--color-text-muted);
+}
+.what {
+  margin: 2px 0 0 20px;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .detail {
   margin: 2px 0 0 20px;

@@ -29,6 +29,16 @@ const strings = (v: unknown): string[] | null =>
         ? (v as string[]).map((x) => x.trim()).filter(Boolean)
         : null;
 
+const MAX_DESCRIPTION = 1000;
+
+/** The entry's description ('' when it has none), or null when it is not text or too long. */
+function descriptionOf(r: Record<string, unknown>): string | null {
+  if (r.description === undefined || r.description === null) return '';
+  if (typeof r.description !== 'string') return null;
+  const text = r.description.trim();
+  return text.length > MAX_DESCRIPTION ? null : text;
+}
+
 /** One entry, or the reason it is refused (`where` names it in the message). */
 function entryOf(raw: unknown, where: string): EnrichmentTable | string {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return `${where}: expected a mapping with name, label and table`;
@@ -44,6 +54,9 @@ function entryOf(raw: unknown, where: string): EnrichmentTable | string {
   const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : slug(label);
   if (!NAME.test(name)) return `${where}: name "${name}" must be lowercase letters, digits and _ (starting with a letter)`;
   const entry: EnrichmentTable = { name, label, table };
+  const description = descriptionOf(r);
+  if (description === null) return `${where}: description is text of at most ${MAX_DESCRIPTION} characters`;
+  if (description) entry.description = description;
 
   const keyColumn = typeof r.key_column === 'string' ? r.key_column.trim() : '';
   const types = strings(r.match_node_types);
@@ -101,9 +114,12 @@ function providerEntryOf(r: Record<string, unknown>, where: string): EnrichmentT
   const label = (typeof r.label === 'string' && r.label.trim()) || providerName;
   const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : slug(label);
   if (!NAME.test(name)) return `${where}: name "${name}" must be lowercase letters, digits and _ (starting with a letter)`;
+  const description = descriptionOf(r);
+  if (description === null) return `${where}: description is text of at most ${MAX_DESCRIPTION} characters`;
   return {
     name,
     label,
+    ...(description ? { description } : {}),
     provider: {
       name: providerName,
       target: p.target === 'nodes' ? 'nodes' : 'edges',
@@ -142,14 +158,16 @@ export function parseEnrichmentTablesYaml(text: string): ParsedEnrichmentTables 
   return { tables, errors };
 }
 
+const described = (t: EnrichmentTable) => (t.description?.trim() ? { description: t.description.trim() } : {});
+
 /** The entries as YAML, SQL as a block, in the API's field names. */
 export function enrichmentTablesToYaml(tables: EnrichmentTable[]): string {
   const clean = tables.map((t) => {
     if (t.provider?.name) {
       const p = t.provider;
-      return { name: t.name, label: t.label, provider: { name: p.name, target: p.target ?? 'edges', run: p.run ?? 'manual', overwrite: !!p.overwrite, node_props: !!p.node_props } };
+      return { name: t.name, label: t.label, ...described(t), provider: { name: p.name, target: p.target ?? 'edges', run: p.run ?? 'manual', overwrite: !!p.overwrite, node_props: !!p.node_props } };
     }
-    const out: Record<string, unknown> = { name: t.name, label: t.label, table: t.table };
+    const out: Record<string, unknown> = { name: t.name, label: t.label, ...described(t), table: t.table };
     if (t.key_column) {
       Object.assign(out, {
         key_column: t.key_column,

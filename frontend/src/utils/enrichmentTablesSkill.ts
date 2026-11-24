@@ -63,6 +63,10 @@ lets a query read the table. An entry may also:
 
 An entry with neither just authorizes its table so another entry's query can join it.
 
+Give every entry that looks nodes up or runs a query a \`description\` (optional, up to 1000
+characters): what it adds and when to use it, in one or two sentences. People see it next to the
+enrichment, and an AI agent reads it to decide whether to run it.
+
 ## This graph
 
 - Datasource: \`${input.datasourceType}\`
@@ -111,6 +115,7 @@ enrichment_tables:
     table: main.fraud.channels
   - name: tx_risk
     label: Transaction risk
+    description: Risk score and channel of each transaction. Use before filtering or sizing edges by risk.
     table: main.fraud.transactions
     query:
       target: edges           # edges | nodes

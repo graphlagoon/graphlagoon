@@ -28,6 +28,7 @@ describe('EnrichmentStatusChip', () => {
 
   it('says how far a run is, then lists every run with its error and a Retry', async () => {
     const graph = useGraphStore();
+    graph.currentContext = { id: 'c1', enrichment_tables: [{ name: 'kyc', label: 'KYC', description: 'KYC tier per account.', provider: { name: 'kyc' } }] } as never;
     graph.queryEnrichmentRuns = { risk: record({}), kyc: record({ label: 'KYC', status: 'running', finishedAt: null }) };
     const { getByTestId, findByTestId, findAllByTestId } = mount();
     expect(getByTestId('enrichment-status-chip').textContent).toContain('Enriching 1 of 2');
@@ -41,6 +42,7 @@ describe('EnrichmentStatusChip', () => {
     expect(getByTestId('enrichment-status-chip').textContent).toContain('Enrichment: 1 failed');
     const details = (await findAllByTestId('enrichment-status-detail')).map((d) => d.textContent);
     expect(details[1]).toContain('ENRICHMENT_PROVIDER_FAILED: Lakebase is down');
+    expect((await findAllByTestId('enrichment-status-description')).map((d) => d.textContent)).toEqual(['KYC tier per account.']);
     expect((await findByTestId('enrichment-status-waiting')).textContent).toContain('Clusters “By risk”');
     expect(getByTestId('enrichment-status-chip').textContent).toContain('1 analysis skipped');
 
