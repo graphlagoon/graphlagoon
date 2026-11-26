@@ -116,6 +116,22 @@ function providerEntryOf(r: Record<string, unknown>, where: string): EnrichmentT
   if (!NAME.test(name)) return `${where}: name "${name}" must be lowercase letters, digits and _ (starting with a letter)`;
   const description = descriptionOf(r);
   if (description === null) return `${where}: description is text of at most ${MAX_DESCRIPTION} characters`;
+  const params: Record<string, string | number | boolean> = {};
+  if (p.params !== undefined && p.params !== null) {
+    if (typeof p.params !== 'object' || Array.isArray(p.params)) return `${where}: provider.params is a mapping of parameter name to value`;
+    for (const [key, value] of Object.entries(p.params as Record<string, unknown>)) {
+      if (value === null || value === undefined) continue;
+      if (!['string', 'number', 'boolean'].includes(typeof value)) return `${where}: provider.params.${key} must be text, a number or true/false`;
+      params[key] = value as string | number | boolean;
+    }
+  }
+  let runtime: string[] = [];
+  if (p.runtime_params !== undefined && p.runtime_params !== null) {
+    if (!Array.isArray(p.runtime_params) || p.runtime_params.some((n) => typeof n !== 'string')) {
+      return `${where}: provider.runtime_params is a list of parameter names`;
+    }
+    runtime = (p.runtime_params as string[]).map((n) => n.trim()).filter(Boolean);
+  }
   return {
     name,
     label,
@@ -126,6 +142,9 @@ function providerEntryOf(r: Record<string, unknown>, where: string): EnrichmentT
       run: p.run === 'manual' ? 'manual' : 'auto',
       overwrite: p.overwrite === true,
       node_props: p.node_props === true,
+      ...(p.edge_props === true ? { edge_props: true } : {}),
+      ...(Object.keys(params).length ? { params } : {}),
+      ...(runtime.length ? { runtime_params: runtime } : {}),
     },
   };
 }
@@ -165,7 +184,13 @@ export function enrichmentTablesToYaml(tables: EnrichmentTable[]): string {
   const clean = tables.map((t) => {
     if (t.provider?.name) {
       const p = t.provider;
-      return { name: t.name, label: t.label, ...described(t), provider: { name: p.name, target: p.target ?? 'edges', run: p.run ?? 'manual', overwrite: !!p.overwrite, node_props: !!p.node_props } };
+      return { name: t.name, label: t.label, ...described(t), provider: {
+          name: p.name, target: p.target ?? 'edges', run: p.run ?? 'manual', overwrite: !!p.overwrite, node_props: !!p.node_props,
+          ...(p.edge_props ? { edge_props: true } : {}),
+          ...(p.params && Object.keys(p.params).length ? { params: p.params } : {}),
+          ...(p.runtime_params?.length ? { runtime_params: p.runtime_params } : {}),
+        },
+      };
     }
     const out: Record<string, unknown> = { name: t.name, label: t.label, ...described(t), table: t.table };
     if (t.key_column) {

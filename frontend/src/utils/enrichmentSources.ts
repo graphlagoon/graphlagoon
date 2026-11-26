@@ -4,7 +4,7 @@
  * enrichment-only schemas and tables). The server decides on save and on every run; this only
  * lets the form warn early. Pure.
  */
-import type { EnrichmentProviderInfo } from '@/types/graph';
+import type { EnrichmentProviderInfo, TableProviderInfo } from '@/types/graph';
 
 const bare = (part: string) => part.trim().replace(/`/g, '').toLowerCase();
 
@@ -18,6 +18,18 @@ export function configuredEnrichmentSources(): string[] | null {
 export function configuredEnrichmentProviders(): EnrichmentProviderInfo[] {
   const providers = window.__GRAPH_LAGOON_CONFIG__?.enrichment_providers;
   return Array.isArray(providers) ? providers : [];
+}
+
+/** Table providers the deployment registered (/api/config `table_providers`). */
+export function configuredTableProviders(): TableProviderInfo[] {
+  const providers = window.__GRAPH_LAGOON_CONFIG__?.table_providers;
+  return Array.isArray(providers) ? providers : [];
+}
+
+/** Targets one enrichment run may carry: the server's `enrichment_max_keys` (500 when it does not say). */
+export function enrichmentBatchSize(): number {
+  const size = window.__GRAPH_LAGOON_CONFIG__?.enrichment_max_keys;
+  return typeof size === 'number' && size >= 1 ? Math.floor(size) : 500;
 }
 
 /** What an enrichment says it does: the author's description, else its provider's registered one. */

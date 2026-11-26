@@ -3,7 +3,7 @@
   "info": {
     "title": "Graph Lagoon Studio",
     "description": "Graph visualization, exploration and investigations",
-    "version": "0.44.0"
+    "version": "0.45.0"
   },
   "paths": {
     "/graphlagoon/api/config": {
@@ -1517,7 +1517,7 @@
           "graph-contexts"
         ],
         "summary": "Run Menu Action Table",
-        "description": "Run a table action of the right-click menu (a ``run-query-template``\naction with ``resultMode: \"table\"``) for one node or edge and return its rows,\nwithout touching the graph. Anyone who can read the context may run it; the\nquery is scoped and read-only like the Query Console's. ``running`` is polled\nand cancelled on ``.../query/table/{statement_id}``.",
+        "description": "Run a table action of the right-click menu (a ``run-query-template``\naction with ``resultMode: \"table\"``) for one node or edge and return its rows,\nwithout touching the graph. Anyone who can read the context may run it; the\nquery is scoped and read-only like the Query Console's. ``running`` is polled\nand cancelled on ``.../query/table/{statement_id}``. A ``run-table-provider``\naction runs the deployer's registered table provider instead and answers at\nonce (``succeeded`` or ``failed``).",
         "operationId": "graph_contexts_run_menu_action_table",
         "parameters": [
           {
@@ -10479,6 +10479,40 @@
             "type": "boolean",
             "title": "Node Props",
             "default": false
+          },
+          "edge_props": {
+            "type": "boolean",
+            "title": "Edge Props",
+            "default": false
+          },
+          "params": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "object",
+            "maxProperties": 32,
+            "title": "Params"
+          },
+          "runtime_params": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Runtime Params"
           }
         },
         "additionalProperties": false,
@@ -10618,6 +10652,37 @@
             },
             "type": "array",
             "title": "Nodes"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object",
+                "maxProperties": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
           }
         },
         "type": "object",
@@ -10680,6 +10745,18 @@
               }
             ],
             "title": "Query Ms"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
           }
         },
         "type": "object",
@@ -12032,7 +12109,7 @@
             },
             "type": "array",
             "title": "Context Menu Actions",
-            "description": "Context-level configurable context-menu actions (open-url, copy-text, run-query-template, show-same-value, show-table). Passed through opaquely; the frontend owns the shape. A run-query-template action with resultMode 'table' also runs on the server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table. A show-table action computes its rows in the browser from the loaded graph (a neighbors walk or a sandboxed JavaScript program); agents run its neighbors walk on a case graph through the MCP tool run_entity_action."
+            "description": "Context-level configurable context-menu actions (open-url, copy-text, run-query-template, show-same-value, show-table, run-table-provider). Passed through opaquely; the frontend owns the shape. A run-query-template action with resultMode 'table' also runs on the server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table. A show-table action computes its rows in the browser from the loaded graph (a neighbors walk or a sandboxed JavaScript program); agents run its neighbors walk on a case graph through the MCP tool run_entity_action. A run-table-provider action runs a table provider the deployment registered (provider, paramBindings, params) through the same route."
           },
           "metric_definitions": {
             "items": {
@@ -14833,6 +14910,11 @@
             ],
             "title": "Source",
             "default": "default"
+          },
+          "locked": {
+            "type": "boolean",
+            "title": "Locked",
+            "default": false
           }
         },
         "type": "object",
@@ -14893,7 +14975,14 @@
             "title": "Label"
           },
           "template_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Template Id"
           },
           "template_name": {
@@ -15006,7 +15095,6 @@
         "type": "object",
         "required": [
           "action_id",
-          "template_id",
           "template_name",
           "query_type",
           "parameters",
@@ -15014,7 +15102,7 @@
           "row_limit"
         ],
         "title": "MenuActionTableResponse",
-        "description": "``status``: ``needs_parameters`` (nothing ran; ``problems`` per parameter),\n``running`` (poll ``GET .../query/table/{statement_id}``), ``succeeded`` or\n``failed`` (``error``: the warehouse's code and message)."
+        "description": "``status``: ``needs_parameters`` (nothing ran; ``problems`` per parameter),\n``running`` (poll ``GET .../query/table/{statement_id}``), ``succeeded`` or\n``failed`` (``error``: the warehouse's code and message). A\n``run-table-provider`` action has no template: ``template_id`` is null,\n``template_name`` its provider's label, ``query_type`` \"provider\", and it is\nnever ``running``."
       },
       "MenuActionTarget": {
         "properties": {

@@ -464,6 +464,47 @@ describe('GraphContextFormModal', () => {
       }
     })
 
+    it('sets a provider\'s declared parameters and says which ones a run may change', async () => {
+      const context = createGraphContext({ id: 'ctx-edit' })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+      window.__GRAPH_LAGOON_CONFIG__ = {
+        enrichment_providers: [{
+          name: 'kyc-demo', label: 'KYC (demo)', description: 'Risk from Lakebase', targets: ['nodes'], columns: ['kyc_tier'],
+          params: [
+            { name: 'as_of_days', type: 'int', required: false, default: 30, description: 'Window in days', choices: null, min: 1, max: 365 },
+            { name: 'source', type: 'str', required: false, default: 'internal', description: '', choices: ['bureau', 'internal'], min: null, max: null },
+            { name: 'tenant', type: 'str', required: true, default: null, description: '', choices: null, min: null, max: null },
+          ],
+        }],
+      }
+      try {
+        const { getByTestId, getAllByTestId, queryByTestId } = renderModal({ open: true, mode: 'edit', context })
+        await flush()
+        await fireEvent.click(getByTestId('enrichment-add-provider'))
+        expect(getByTestId('enrichment-provider-columns').textContent).toContain('kyc_tier')
+        expect(getAllByTestId('enrichment-provider-param')[0].textContent).toContain('Window in days (int, 1 to 365)')
+        // A required parameter with no value, not left to the run, blocks the save.
+        expect(getByTestId('enrichment-provider-param-problem').textContent).toContain('tenant needs a value')
+        expect((getByTestId('create-context-submit') as HTMLButtonElement).disabled).toBe(true)
+        await fireEvent.click(getByTestId('enrichment-provider-runtime-tenant'))
+        expect(queryByTestId('enrichment-provider-param-problem')).toBeNull()
+        await fireEvent.update(getByTestId('enrichment-provider-param-as_of_days'), '9999')
+        expect(getByTestId('enrichment-provider-param-problem').textContent).toContain('at most 365')
+        await fireEvent.update(getByTestId('enrichment-provider-param-as_of_days'), '90')
+        await fireEvent.update(getByTestId('enrichment-provider-param-source'), 'bureau')
+        await fireEvent.click(getByTestId('enrichment-provider-edge-props'))
+        await fireEvent.click(getByTestId('create-context-submit'))
+        await flush()
+        const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+        expect(payload.enrichment_tables![0].provider).toEqual({
+          name: 'kyc-demo', target: 'nodes', run: 'auto', overwrite: false, node_props: false, edge_props: true,
+          params: { as_of_days: 90, source: 'bureau' }, runtime_params: ['tenant'],
+        })
+      } finally {
+        delete window.__GRAPH_LAGOON_CONFIG__
+      }
+    })
+
     it('names the allowed sources and warns on a table outside them', async () => {
       window.__GRAPH_LAGOON_CONFIG__ = { enrichment_sources: ['main.graphs', 'main.risk', 'ext.kyc.people'] }
       try {

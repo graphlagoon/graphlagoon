@@ -118,7 +118,9 @@ class ParamError(ValueError):
 # ---------------------------------------------------------------------------
 
 
-def validate_param_specs(specs: Sequence[ParamSpec], *, owner: str) -> None:
+def validate_param_specs(
+    specs: Sequence[ParamSpec], *, owner: str, url: bool = True
+) -> None:
     """Reject malformed parameter declarations at app construction.
 
     Failing here means the developer sees the error on startup rather than the
@@ -131,10 +133,12 @@ def validate_param_specs(specs: Sequence[ParamSpec], *, owner: str) -> None:
             raise ValueError(
                 f"{owner}: params must be ParamSpec instances, got {type(spec).__name__}"
             )
-        _validate_one_spec(spec, owner=owner, seen=seen)
+        _validate_one_spec(spec, owner=owner, seen=seen, url=url)
 
 
-def _validate_one_spec(spec: ParamSpec, *, owner: str, seen: set[str]) -> None:
+def _validate_one_spec(
+    spec: ParamSpec, *, owner: str, seen: set[str], url: bool = True
+) -> None:
     where = f"{owner}: param '{spec.name}'"
 
     if not PARAM_NAME_RE.match(spec.name or ""):
@@ -146,7 +150,10 @@ def _validate_one_spec(spec: ParamSpec, *, owner: str, seen: set[str]) -> None:
         raise ValueError(f"{owner}: param '{spec.name}' is declared twice")
     seen.add(spec.name)
 
-    if spec.name in RESERVED_PARAM_NAMES or spec.name.startswith(RESERVED_PARAM_PREFIX):
+    # Only a parameter read from the page URL can collide with the frontend's keys.
+    if url and (
+        spec.name in RESERVED_PARAM_NAMES or spec.name.startswith(RESERVED_PARAM_PREFIX)
+    ):
         raise ValueError(
             f"{where} is a reserved query key. The frontend never forwards "
             f"{sorted(RESERVED_PARAM_NAMES)} or anything starting with "
@@ -284,6 +291,24 @@ def coerce_params(
     return resolved
 
 
+def coerce_values(specs: Sequence[ParamSpec], values: Optional[dict]) -> dict[str, Any]:
+    """``coerce_params`` for values that arrive as JSON (a context entry, a request
+    body, an agent's arguments) instead of a query string: same rules, same errors.
+    A ``None`` value counts as not given."""
+    pairs = []
+    for key, value in (values or {}).items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            text = "true" if value else "false"
+        elif isinstance(value, float) and value.is_integer():
+            text = str(int(value))
+        else:
+            text = str(value)
+        pairs.append((str(key), text))
+    return coerce_params(specs, pairs)
+
+
 def _coerce_one(spec: ParamSpec, raw: str) -> Any:
     if spec.type == "str":
         return raw
@@ -370,5 +395,6 @@ __all__ = [
     "ParamError",
     "ParamSpec",
     "coerce_params",
+    "coerce_values",
     "validate_param_specs",
 ]

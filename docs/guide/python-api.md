@@ -48,6 +48,8 @@ def create_mountable_app(
     similarity_endpoints: list | None = None,
     rest_connections: list | None = None,
     precomputed_graph_providers: list | None = None,
+    enrichment_providers: list | None = None,
+    table_providers: list | None = None,
 ) -> FastAPI
 ```
 
@@ -279,7 +281,8 @@ the context form ([Enrich from a provider](/guide/bring-your-own-data#enrich-fro
 
 ```python
 from graphlagoon import (
-    EnrichmentProvider, EnrichmentProviderError, EnrichmentProviderRequest, create_mountable_app,
+    EnrichmentProvider, EnrichmentProviderError, EnrichmentProviderRequest, ParamSpec,
+    create_mountable_app,
 )
 
 async def kyc_profile(request: EnrichmentProviderRequest) -> dict[str, dict]:
@@ -287,6 +290,7 @@ async def kyc_profile(request: EnrichmentProviderRequest) -> dict[str, dict]:
     # ({node_id, node_type, properties} / {edge_id, src, dst, relationship_type, properties}).
     ids = [n["node_id"] for n in request.nodes]
     ...  # read your source, binding `ids` as a parameter
+    # request.params holds the declared parameters, typed: {"as_of_days": 30, "source": "internal"}
     return {"acc-1": {"kyc_tier": "high", "kyc_score": 0.91}}   # id -> new properties
 
 app = create_mountable_app(
@@ -295,11 +299,46 @@ app = create_mountable_app(
         enrich=kyc_profile,             # must be async def
         targets=("nodes",),             # what it can enrich
         label="KYC profile (Lakebase)",
-        description="kyc_tier and kyc_score from the KYC table",
+        description="KYC tier and score of each account, from the KYC table. Use before "
+                    "grouping or filtering by risk; one indexed read per batch.",
         timeout_seconds=15,
+        params=[                        # optional: what a context (and a run) may set
+            ParamSpec("as_of_days", type="int", default=30, min=1, max=365,
+                      description="How far back a KYC review still counts"),
+            ParamSpec("source", choices=["bureau", "internal"], default="internal"),
+        ],
+        columns=("kyc_tier", "kyc_score"),   # optional: the properties it writes
+        applies_to=lambda context: context.edge_table_name.startswith("main.fraud."),  # optional
     )],
 )
 ```
+
+**Parameters.** `params` takes the same `ParamSpec` a
+[precomputed graph provider](#precomputed-graph-providers) declares: `type` (`str`, `int`, `float`, `bool`),
+`default` or `required`, `choices`, `min` / `max`, `max_length`, `description`. A context author sets values
+in the entry (`provider.params`) and lists in `provider.runtime_params` the parameters whoever runs it by hand
+(a person in **Your data**, or an AI agent) may change. Nothing is changeable at run time unless the author
+listed it, and an automatic run always uses the context's values. `request.params` then holds every declared
+name, coerced to its type and inside its bounds; a value outside them is refused when the context is saved and
+when it runs (`ENRICHMENT_PARAM_INVALID`), before your code is called. A coerced `str` is still user text:
+bind it, never interpolate it; give `choices` to anything that picks a table or a column and `min` / `max` to
+anything that becomes a limit or a window.
+
+**Declared columns.** With `columns`, the form, **Your data** and `list_enrichments` say what the provider
+adds before anyone runs it, and any other key it returns is dropped (and logged). Leave it out and whatever is
+returned becomes a property.
+
+**Which contexts.** `applies_to(context)` returning false refuses the provider for that context, when its
+entry is saved and on every run (`ENRICHMENT_PROVIDER_NOT_ALLOWED`). Without it, anyone who may attach
+enrichments can attach it to any context.
+
+**Identity.** `request.user_email` is always the caller. `request.user_token` is the caller's own access
+token when the request carried one (the Databricks Apps proxy's `X-Forwarded-Access-Token`), so the service
+you call can apply that person's permissions; it is `None` otherwise, and always `None` for an agent run. With
+`None` your code has only the app's credentials: authorize by `user_email`.
+
+**What reaches it.** Ids and types always. Node properties only when the entry sets `node_props`, edge
+properties only when it sets `edge_props`: say in the `description` when your provider needs them.
 
 **The framework guarantees** that the caller can read the context, that at most
 `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` targets arrive per call, and that the target is one you declared. It drops
@@ -335,10 +374,91 @@ async def kyc_profile(request: EnrichmentProviderRequest) -> dict[str, dict]:
 
 `enrichment_providers` is the complete list: each `create_mountable_app` / `create_app` call replaces the
 providers registered before. Registered providers are listed in `/api/config` (`enrichment_providers`: name,
-label, description, targets — never anything operational). The `description` is also what people and
-[AI agents](./agents-mcp.md#enrichments) read for a context entry whose author wrote none, so say what the
-provider adds and when to use it. The dev server registers a pure-Python demo,
-`graphlagoon/dev/enrichment_demo.py`.
+label, description, targets, parameters, columns — never anything operational). The dev server registers a
+pure-Python demo, `graphlagoon/dev/enrichment_demo.py`.
+
+**Write the `description` for someone choosing.** It is what a context author reads when picking the
+provider, what people and [AI agents](./agents-mcp.md#enrichments) read for an entry whose author wrote none,
+and what the form's *Ask an AI* prompt gives the assistant. Say what it adds, when to use it, and what it
+costs (slow, rate-limited, needs node properties).
+
+**Known limits** (yours to handle):
+
+- No cache, de-duplication or rate limit. An entry set to run after every query calls your code on every
+  query and expand of every user. Cache inside the provider when the service behind it is slow or metered.
+- A value cannot be cleared: a `None` is ignored, and a value the item already has stays unless the entry
+  says **Replace values**.
+- Lists and objects become their text. Return scalars; for many rows about one item, register a
+  [table provider](#table-providers).
+- A synchronous call inside `enrich` blocks the server and is not cancelled by the timeout.
+- An agent's run over a whole exploration stops after 20 batches or 120 seconds and reports `truncated`; a
+  batch that fails after others succeeded keeps what those returned (`partial: true`).
+
+### Table providers
+
+A table provider returns **rows about one node or edge**: the transactions of this account from the ledger
+service, the tickets of this customer. A context author turns it into a right-click action
+([Table from a provider](./context-menu-actions.md#table-provider)); the rows open in the same window as a
+query template's table, with CSV export and **Add to case**, on a case canvas too, and
+[AI agents](./agents-mcp.md) run it with `run_entity_action`.
+
+```python
+from graphlagoon import (
+    ParamSpec, TableProvider, TableProviderError, TableProviderRequest, TableProviderResult,
+    create_mountable_app,
+)
+
+async def tx_history(request: TableProviderRequest) -> TableProviderResult:
+    # request.target: {"type": "node", "id": "acc-1", "node_type": "Account", ...} (no properties)
+    # request.params: {"account": "acc-1", "days": 90}; request.row_limit: how many rows to return
+    try:
+        rows = await ledger.transactions(request.params["account"], request.params["days"],
+                                         limit=request.row_limit + 1, token=request.user_token)
+    except LedgerDown as e:
+        raise TableProviderError("The ledger service is not answering") from e
+    return TableProviderResult(
+        columns=["at", "amount", "counterparty"],
+        rows=[[r.at, r.amount, r.counterparty] for r in rows],   # lists, or dicts keyed by column
+    )
+
+app = create_mountable_app(
+    table_providers=[TableProvider(
+        name="tx-history",
+        run=tx_history,                 # must be async def
+        targets=("node",),              # "node" and/or "edge"
+        label="Transactions (ledger)",
+        description="Transactions of one account from the ledger service, newest first. "
+                    "Use for an account's recent activity; one call per click.",
+        params=[
+            ParamSpec("account", required=True, description="Account id"),
+            ParamSpec("days", type="int", default=90, min=1, max=365, description="How many days back"),
+        ],
+        timeout_seconds=20,
+    )],
+)
+```
+
+Each parameter's value comes from, in order: a value the action **fixes** (set by whoever configured the
+action; whoever runs it cannot change it), the value typed in the table window, the action's **binding** to
+the clicked item (`{node_id}`, `{prop:x}`), the declared default. A required parameter with no value means
+your code is not called: the window asks for it.
+
+**The framework guarantees** that the caller can read the context, that the clicked item's kind is one you
+declared, that `applies_to(context)` (when given) accepted the context, and that `request.params` holds only
+declared names, typed and inside their bounds. Afterwards it keeps at most `row_limit` rows (more are cut and
+the table says so), turns every cell into text, and cancels the call after `timeout_seconds`
+(`TABLE_PROVIDER_TIMEOUT`). The clicked item's properties are **not** sent: what you need from the item
+arrives as a bound parameter, so the action's author decides what leaves.
+
+**You owe** the same as for an enrichment provider: bind values, authorize by `user_email` (and use
+`user_token` when it is there), honour `row_limit` at the source, do not block the event loop. Raise
+`TableProviderError("…")` for a message the user should read.
+
+`table_providers` is the complete list, replaced on every `create_mountable_app` / `create_app` call, and
+listed in `/api/config` (`table_providers`: name, label, description, targets, parameters). The
+`description` is what the action editor shows, what its *Ask an AI* prompt gives the assistant, and what an
+agent reads in `list_entity_actions`. The dev server registers `demo-activity`
+(`graphlagoon/dev/enrichment_demo.py`).
 
 ::: tip Registries are process-wide
 Similarity, REST, and precomputed registrations — like the auth provider —

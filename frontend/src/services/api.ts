@@ -143,6 +143,9 @@ declare global {
        */
       enrichment_sources?: string[];
       enrichment_providers?: import('@/types/graph').EnrichmentProviderInfo[];
+      /** Targets one enrichment run may carry (the page batches by it). */
+      enrichment_max_keys?: number;
+      table_providers?: import('@/types/graph').TableProviderInfo[];
       /** Personal agent tokens (GRAPH_LAGOON_AGENTS_ENABLED). */
       agents_enabled?: boolean;
       /** Upload ceiling for case files, in bytes (413 above it). */
@@ -280,7 +283,12 @@ class ApiService {
   async runEnrichmentQuery(
     contextId: string,
     name: string,
-    body: { edges: Edge[]; nodes: Pick<Node, 'node_id' | 'node_type' | 'properties'>[] },
+    body: {
+      edges: Edge[];
+      nodes: Pick<Node, 'node_id' | 'node_type' | 'properties'>[];
+      /** A provider entry: values for the parameters its author lets a run change. */
+      params?: Record<string, string | number | boolean>;
+    },
   ): Promise<EnrichmentRunResult> {
     const response = await this.client.post(`/api/graph-contexts/${contextId}/enrichment/${name}/run`, body);
     return response.data;

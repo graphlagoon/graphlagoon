@@ -646,6 +646,59 @@ async def test_an_agent_lists_and_runs_the_table_actions_people_configured(env):
 
 
 @pytest.mark.asyncio
+async def test_an_agent_lists_and_runs_a_table_from_a_registered_provider(env):
+    """A run-table-provider action is listed with what its provider returns and
+    its typed parameters, and runs like any other table action."""
+    from graphlagoon.services.table_providers import (
+        ParamSpec, TableProvider, TableProviderResult, clear_table_provider_registry, register_table_provider,
+    )
+
+    app, exploration = env
+    store = InMemoryStore.get_instance()
+    context = store.get_graph_context(exploration.graph_context_id)
+    seen = []
+
+    async def run(request):
+        seen.append(request)
+        return TableProviderResult(columns=["at", "amount"], rows=[["2026-11-01", 10], ["2026-11-02", 20]])
+
+    clear_table_provider_registry()
+    register_table_provider(TableProvider(
+        name="tx-history", run=run, label="Transactions (API)", description="Transactions of one account",
+        params=[ParamSpec("account", required=True), ParamSpec("days", type="int", default=90, max=365)]))
+    context.context_menu_actions = [
+        {"id": "api", "label": "Transactions", "enabled": True, "kind": "run-table-provider", "provider": "tx-history",
+         "paramBindings": {"account": "{node_id}"}, "match": {"target": "node", "nodeTypes": ["Account"]}},
+        {"id": "gone", "label": "Gone", "enabled": True, "kind": "run-table-provider", "provider": "removed",
+         "match": {"target": "node"}},
+    ]
+    try:
+        async with mcp_lifespan(app), _rest(app) as rest:
+            token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+            cid = (await rest.post("/api/investigations", json={"title": "x"})).json()["id"]
+            await rest.post(f"/api/investigations/{cid}/items", json={
+                "kind": "graph", "subkind": "exploration_ref", "exploration_id": str(exploration.id)})
+            account = f"c1@{context.id}"
+            async with _mcp(app, token) as client:
+                listed = (await _tool(client, "list_entity_actions", investigation_id=cid, uid=account))["actions"]
+                # One whose provider is not registered here offers nothing.
+                assert [a["action_id"] for a in listed] == ["api"]
+                assert (listed[0]["source"], listed[0]["provider"]) == ("provider", "tx-history")
+                assert listed[0]["description"] == "Transactions of one account" and listed[0]["missing"] == {}
+                out = await _tool(client, "run_entity_action", investigation_id=cid, uid=account, action_id="api",
+                                  parameters={"days": "30"}, save=True)
+                assert out["status"] == "succeeded" and out["rows"] == [["2026-11-01", "10"], ["2026-11-02", "20"]]
+                assert seen[-1].params == {"account": "c1", "days": 30} and seen[-1].user_token is None
+                item = (await rest.get(f"/api/investigations/{cid}/items/{out['item_id']}")).json()
+                assert item["provenance"]["params"] == {"account": "c1", "days": "30"}
+                out = await _tool(client, "run_entity_action", investigation_id=cid, uid=account, action_id="api",
+                                  parameters={"days": "9999"})
+                assert out["status"] == "needs_parameters" and "maximum" in out["problems"]["days"]
+    finally:
+        clear_table_provider_registry()
+
+
+@pytest.mark.asyncio
 async def test_an_agent_runs_a_canvas_neighborhood_table_but_not_a_program(env):
     """A show-table action walks the case graph itself (the same rows the
     browser computes); a JavaScript program is listed for reference only."""

@@ -181,6 +181,13 @@ from graphlagoon.services.enrichment_providers import (
     EnrichmentProviderRequest,
     register_enrichment_provider,
 )
+from graphlagoon.services.table_providers import (
+    TableProvider,
+    TableProviderError,
+    TableProviderRequest,
+    TableProviderResult,
+    register_table_provider,
+)
 
 __all__ = [
     "create_app",
@@ -220,6 +227,11 @@ __all__ = [
     "EnrichmentProviderError",
     "EnrichmentProviderRequest",
     "register_enrichment_provider",
+    "TableProvider",
+    "TableProviderError",
+    "TableProviderRequest",
+    "TableProviderResult",
+    "register_table_provider",
 ]
 
 

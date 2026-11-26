@@ -17,6 +17,7 @@ from graphlagoon.services.datasource import (
     available_datasource_types,
 )
 from graphlagoon.services.enrichment_providers import get_enrichment_providers
+from graphlagoon.services.table_providers import get_table_providers
 from graphlagoon.utils.authz import is_superuser
 
 
@@ -65,6 +66,10 @@ async def build_public_config(
         ] + settings.enrichment_source_list,
         # Enrichment providers the deployer registered in Python (copy and targets only).
         "enrichment_providers": [p.ui_payload() for p in get_enrichment_providers()],
+        # Targets one enrichment run may carry: the page batches by it.
+        "enrichment_max_keys": settings.enrichment_max_keys,
+        # Table providers a right-click action may run (copy, targets and parameters only).
+        "table_providers": [p.ui_payload() for p in get_table_providers()],
         # Personal agent tokens (Bearer glt_…) and their admin list.
         "agents_enabled": settings.agents_enabled,
         "investigation_file_max_bytes": settings.investigation_file_max_bytes,

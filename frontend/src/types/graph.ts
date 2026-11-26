@@ -178,6 +178,24 @@ export interface EnrichmentProviderRef {
   run?: 'auto' | 'manual';
   overwrite?: boolean;
   node_props?: boolean;
+  /** Edge properties reach the provider only when asked for, like node ones. */
+  edge_props?: boolean;
+  /** Values for the parameters the provider declares. */
+  params?: Record<string, string | number | boolean>;
+  /** The parameters whoever runs it may change (none when empty). */
+  runtime_params?: string[];
+}
+
+/** One parameter a registered provider declares (the server coerces and bounds the value). */
+export interface ProviderParamInfo {
+  name: string;
+  type: 'str' | 'int' | 'float' | 'bool';
+  required: boolean;
+  default: string | number | boolean | null;
+  description: string;
+  choices: string[] | null;
+  min: number | null;
+  max: number | null;
 }
 
 /** A registered provider as /api/config describes it. */
@@ -186,6 +204,18 @@ export interface EnrichmentProviderInfo {
   label: string;
   description: string;
   targets: ('edges' | 'nodes')[];
+  params?: ProviderParamInfo[];
+  /** The properties it writes, when its author declared them. */
+  columns?: string[];
+}
+
+/** A registered table provider (a right-click "table from a provider" action runs one). */
+export interface TableProviderInfo {
+  name: string;
+  label: string;
+  description: string;
+  targets: ('node' | 'edge')[];
+  params?: ProviderParamInfo[];
 }
 
 /**
@@ -221,6 +251,8 @@ export interface EnrichmentRunResult {
   rows: Record<string, Record<string, unknown>>;
   truncated: boolean;
   query_ms?: number | null;
+  /** A provider entry: the parameter values it ran with. */
+  params?: Record<string, unknown> | null;
 }
 
 /** Which edge properties carry the amount and the time (investigations F3.1). */
@@ -1065,13 +1097,16 @@ export interface MenuActionParameter {
   binding?: string | null;
   value: string;
   source: 'given' | 'binding' | 'default';
+  /** A provider action's fixed value: shown, not changeable by whoever runs it. */
+  locked?: boolean;
 }
 
 /** `POST /api/graph-contexts/{id}/menu-actions/{action_id}/table`. */
 export interface MenuActionTableResponse {
   action_id: string;
   label?: string | null;
-  template_id: string;
+  /** Null for a `run-table-provider` action (`template_name` is then its provider's label). */
+  template_id: string | null;
   template_name: string;
   query_type: string;
   parameters: MenuActionParameter[];

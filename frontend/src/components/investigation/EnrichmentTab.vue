@@ -22,11 +22,12 @@ import {
   type EnrichmentTarget,
 } from '@/utils/enrichment';
 import type { UnifiedNode } from '@/utils/unifyGraph';
+import { enrichmentBatchSize } from '@/utils/enrichmentSources';
 
 const props = defineProps<{ node: UnifiedNode; canEdit: boolean }>();
 
-// Matches the server default (enrichment_max_keys). shortcut: the first 500 keys of the graph only.
-const MAX_KEYS = 500;
+// The server's enrichment_max_keys. shortcut: the first batch of keys of the graph only.
+const MAX_KEYS = enrichmentBatchSize();
 
 type Row = Record<string, string | null>;
 interface Lookup {

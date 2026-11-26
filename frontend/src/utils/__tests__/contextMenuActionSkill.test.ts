@@ -41,9 +41,9 @@ describe('buildContextMenuActionSkill', () => {
     expect(skill).toContain('depth');
   });
 
-  it('documents the five kinds and the JSON contract', () => {
+  it('documents the six kinds and the JSON contract', () => {
     const skill = buildContextMenuActionSkill(INPUT);
-    expect(skill).toContain('the five kinds');
+    expect(skill).toContain('the six kinds');
     expect(skill).toContain('show-same-value');
     expect(skill).toContain('"mode": "same"');
     expect(skill).toContain('open-url');
@@ -63,6 +63,31 @@ describe('buildContextMenuActionSkill', () => {
     if (!r.ok) return;
     const tables = r.configs.filter((c) => c.kind === 'show-table');
     expect(tables.map((c) => c.kind === 'show-table' && c.source.type)).toEqual(['neighborhood', 'program']);
+  });
+
+  it('lists every table provider with what it returns and its parameters, and its example imports', () => {
+    expect(buildContextMenuActionSkill(INPUT)).toContain('no table providers registered on this server');
+    const providers = [{
+      name: 'tx-history', label: 'Transactions (API)', description: 'Transactions of one account from the ledger service.',
+      targets: ['node' as const],
+      params: [
+        { name: 'account', type: 'str' as const, required: true, default: null, description: 'Account id', choices: null, min: null, max: null },
+        { name: 'days', type: 'int' as const, required: false, default: 90, description: 'Window', choices: null, min: 1, max: 365 },
+      ],
+    }];
+    const skill = buildContextMenuActionSkill({ ...INPUT, tableProviders: providers });
+    expect(skill).toContain('name: `tx-history` — "Transactions (API)" — Transactions of one account from the ledger service.');
+    expect(skill).toContain('Has a table for: node.');
+    expect(skill).toContain('- `account` (str, required): Account id');
+    expect(skill).toContain('- `days` (int, default 90, min 1, max 365): Window');
+    expect(skill).toContain('never invent one');
+    expect(skill).toContain('Would any of the table providers listed above');
+    const r = parseImportedActionConfigs(skill.split('```json')[1].split('```')[0], providers);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.configs.find((c) => c.kind === 'run-table-provider')).toMatchObject({
+      provider: 'tx-history', paramBindings: { account: '{node_id}' },
+    });
   });
 
   it('handles empty metadata with placeholders', () => {

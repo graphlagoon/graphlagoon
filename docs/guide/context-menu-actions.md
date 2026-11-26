@@ -79,7 +79,7 @@ Every action has:
   `metric:<name>` (e.g. `metric:PageRank` *not empty*) — the action then stays
   hidden until that metric is computed in the [Metrics
   panel](./communities-metrics.md), and reappears the moment it is.
-- **A kind** — what clicking it does. Five kinds exist:
+- **A kind** — what clicking it does. Six kinds exist:
 
 ### Open URL
 
@@ -285,6 +285,37 @@ The dev showcase has two: right-click a Company or Person → *Demo · Accounts
 within 2 hops (canvas)*, or any node → *Demo · High-score neighbors (canvas
 program)*.
 
+### Table from a provider {#table-provider}
+
+Rows about the clicked item from **code the deployment registered**: a call to an internal service, a read
+from another database, anything a query template cannot reach. The kind is offered when the server has at
+least one [table provider](./python-api.md#table-providers); the editor lists every one with its description
+(what it returns and when to use it) and whether it has a table for nodes, edges or both.
+
+For each parameter the provider declares, with its type and limits, pick where the value comes from:
+
+| Choice | What happens |
+|---|---|
+| **Default, editable in the window** | The provider's default applies; whoever runs the action may type another value in the table window. A required parameter with no default is asked there. |
+| **From the clicked item** | A [template](#templates) such as `{node_id}` or `{prop:account_id}`, filled when the action runs. This is how the provider learns which item was clicked: it receives its parameters, not the item's properties. |
+| **Fixed value** | Your value, always. The window shows it greyed out, and an agent cannot change it either. |
+
+![The action editor on "Table from a provider": the provider's description and where each parameter's value comes from](/screenshots/context-menu-actions-table-provider.png)
+
+It opens the same window as a [query template's table](#table-result): edit the open parameters and run
+again, export CSV, **Add to case**. It works on a case canvas and is listed for agents by
+[`list_entity_actions`](./agents-mcp-tools.md#list-entity-actions) with `source: "provider"`. An action whose
+provider is not registered on this server stays hidden from the menu and shows a warning in the editor.
+
+| Message | Meaning |
+|---|---|
+| `TABLE_PROVIDER_FAILED` | The provider raised an error; its message is shown when it wrote one for you, otherwise *The provider failed* (the server log names it). |
+| `TABLE_PROVIDER_TIMEOUT` | The provider did not answer within its timeout. |
+| `TABLE_PROVIDER_NOT_REGISTERED`, `TABLE_PROVIDER_TARGET`, `TABLE_PROVIDER_NOT_ALLOWED` | The provider is not on this server, has no table for this kind of item, or is restricted to other contexts. |
+
+The dev showcase has one in the context *Demo · Provider enrichment and a program that waits*: right-click
+any node → *Demo · Monthly activity (provider)*.
+
 ### Show only nodes with… {#show-only-nodes-with}
 
 Nodes only. Hides every node except those whose **field** — a node property,
@@ -404,14 +435,19 @@ external link. Read the prompt before you press Enter.
 
 The robot button in the editor's header generates a copy-pasteable prompt for
 any AI assistant. It embeds this context's node/edge types, properties and
-query templates plus the exact JSON contract, and instructs the AI to
+query templates, **every table provider registered on the server** (name,
+what it returns, what it has a table for, and each parameter with its type,
+default and limits) plus the exact JSON contract, and instructs the AI to
 interview you first ("which properties hold external ids?", "new tab or
 current?") before producing anything.
 
 The AI's final answer is a JSON array — paste it into the editor's **Import
 JSON** box and the actions are added after validation (unknown kinds, bad
 operators and `javascript:`/`data:`/`file:` URL templates are rejected with a
-pointed error).
+pointed error; so are a provider parameter that does not exist and a fixed
+value outside its limits). The context form's *Ask an AI* for
+[enrichments](./bring-your-own-data.md#import-yaml-or-ask-an-ai) lists the
+registered enrichment providers the same way.
 
 ## Exporting and importing
 

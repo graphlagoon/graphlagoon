@@ -354,8 +354,11 @@ def providers():
         return {e["edge_id"]: {"weight": 7} for e in request.edges}
 
     clear_enrichment_provider_registry()
-    register_enrichment_provider(EnrichmentProvider(name="kyc", enrich=kyc, targets=("nodes",),
-                                                    label="KYC", description="Registered description"))
+    from graphlagoon.services.enrichment_providers import ParamSpec
+
+    register_enrichment_provider(EnrichmentProvider(
+        name="kyc", enrich=kyc, targets=("nodes",), label="KYC", description="Registered description",
+        params=[ParamSpec("as_of_days", type="int", default=30, min=1, max=365)], columns=("kyc_tier", "titular")))
     register_enrichment_provider(EnrichmentProvider(name="weight", enrich=weight, targets=("edges",)))
     yield calls
     clear_enrichment_provider_registry()
@@ -387,8 +390,14 @@ async def test_an_agent_reads_what_each_enrichment_of_a_context_does(env, provid
             assert devices["tools"] == ["enrich_exploration", "lookup_enrichment"]
             kyc = by_name["kyc"]
             assert kyc["description"].startswith("KYC tier") and kyc["lookup"] is None and kyc["table"] is None
-            assert kyc["run"] == {"kind": "provider", "target": "nodes", "mode": "manual", "overwrite": False,
-                                  "node_props": False, "provider": {"name": "kyc", "label": "KYC", "registered": True}}
+            assert kyc["run"] == {
+                "kind": "provider", "target": "nodes", "mode": "manual", "overwrite": False,
+                "node_props": False, "edge_props": False,
+                "provider": {"name": "kyc", "label": "KYC", "registered": True},
+                "columns": ["kyc_tier", "titular"],
+                "params": [{"name": "as_of_days", "type": "int", "required": False, "default": 30, "description": "",
+                            "choices": None, "min": 1, "max": 365, "value": 30, "overridable": False}],
+            }
             # With no description of its own, the one the deployer registered.
             assert by_name["plain"]["description"] == "Registered description"
             assert by_name["gone"]["run"]["provider"]["registered"] is False and by_name["gone"]["description"] is None
@@ -472,3 +481,66 @@ async def test_a_run_over_a_big_exploration_goes_in_batches(env, providers, monk
             # 7 nodes, 2 per batch, 2 batches at most: 4 reached, and it says the rest was left out.
             assert (out["targets"], out["matched"], out["truncated"]) == (7, 4, True)
             assert [len(c.nodes) for c in providers] == [2, 2]
+
+
+@pytest.mark.asyncio
+async def test_an_agent_sets_only_the_parameters_the_author_left_open(env, providers):
+    app, context, exploration, files, ds = env
+    locked = _entry("kyc", "kyc", "nodes")
+    opened = _entry("kyc_open", "kyc", "nodes")
+    opened["provider"].update(params={"as_of_days": 90}, runtime_params=["as_of_days"])
+    context.enrichment_tables = [locked, opened, DEVICES]
+    eid = str(exploration.id)
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        async with _mcp(app, token) as client:
+            listed = await _tool(client, "list_enrichments", context_id=str(context.id))
+            param = next(e for e in listed["enrichments"] if e["name"] == "kyc_open")["run"]["params"][0]
+            assert (param["value"], param["overridable"]) == (90, True)
+
+            out = await _tool(client, "enrich_exploration", exploration_id=eid, table="kyc_open")
+            assert out["params"] == {"as_of_days": 90} and providers[-1].params == {"as_of_days": 90}
+            assert providers[-1].user_token is None
+            out = await _tool(client, "enrich_exploration", exploration_id=eid, table="kyc_open",
+                              params={"as_of_days": 7})
+            assert out["params"] == {"as_of_days": 7} and providers[-1].params == {"as_of_days": 7}
+            for args in ({"table": "kyc", "params": {"as_of_days": 7}},
+                         {"table": "kyc_open", "params": {"as_of_days": 0}},
+                         {"table": "devices", "params": {"as_of_days": 7}}):
+                assert "ENRICHMENT_PARAM_INVALID" in await _error(client, "enrich_exploration", exploration_id=eid, **args)
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_fails_does_not_lose_the_ones_before_it(env, providers, monkeypatch):
+    app, context, exploration, files, ds = env
+    monkeypatch.setenv("GRAPH_LAGOON_ENRICHMENT_MAX_KEYS", "2")
+    get_settings.cache_clear()
+    context.enrichment_tables = [_entry("kyc", "kyc", "nodes")]
+    eid = str(exploration.id)
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        async with _mcp(app, token) as client:
+            # Nodes 1 and 2 go in the first batch; "boom" (which the provider refuses) in the second.
+            await _tool(client, "edit_exploration", exploration_id=eid, add_nodes=[{"id": "boom", "type": "Conta"}])
+            out = await _tool(client, "enrich_exploration", exploration_id=eid, table="kyc")
+            assert (out["partial"], out["truncated"], out["written"]) == (True, True, 2)
+            assert out["error"] == {"code": "ENRICHMENT_PROVIDER_FAILED", "message": "KYC service is down"}
+            saved = files.graph(eid)
+            assert next(n for n in saved["nodes"] if n["id"] == "2")["properties"]["kyc_tier"] == "tier-2"
+
+
+@pytest.mark.asyncio
+async def test_a_run_stops_when_its_time_is_up(env, providers, monkeypatch):
+    app, context, exploration, files, ds = env
+    monkeypatch.setenv("GRAPH_LAGOON_ENRICHMENT_MAX_KEYS", "1")
+    get_settings.cache_clear()
+    from graphlagoon.services import enrichment
+
+    monkeypatch.setattr(enrichment, "MAX_GRAPH_RUN_SECONDS", -1.0)
+    context.enrichment_tables = [_entry("kyc", "kyc", "nodes")]
+    async with mcp_lifespan(app), _rest(app) as rest:
+        token = (await rest.post("/api/agent-tokens", json={"name": "claude"})).json()["token"]
+        async with _mcp(app, token) as client:
+            assert "INVALID" not in str(await _tool(client, "list_enrichments", context_id=str(context.id)))
+            out = await _tool(client, "enrich_exploration", exploration_id=str(exploration.id), table="kyc")
+            assert (out["truncated"], out["matched"]) == (True, 0)

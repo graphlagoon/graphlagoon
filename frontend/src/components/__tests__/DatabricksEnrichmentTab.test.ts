@@ -64,6 +64,47 @@ describe('DatabricksEnrichmentTab', () => {
     }
   });
 
+  it('lets a run change only the parameters the author left open, and says what it ran with', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = {
+      enrichment_providers: [{
+        name: 'kyc-demo', label: 'KYC', description: 'Risk from Lakebase', targets: ['nodes'], columns: ['kyc_tier'],
+        params: [
+          { name: 'as_of_days', type: 'int', required: false, default: 30, description: 'Window', choices: null, min: 1, max: 365 },
+          { name: 'source', type: 'str', required: false, default: 'internal', description: '', choices: ['bureau', 'internal'], min: null, max: null },
+        ],
+      }],
+    };
+    try {
+      const spy = vi.spyOn(api, 'runEnrichmentQuery').mockResolvedValue({
+        name: 'kyc', label: 'KYC', target: 'nodes', columns: ['kyc_tier'], rows: { a: { kyc_tier: 'low' } }, truncated: false,
+        params: { as_of_days: 7, source: 'internal' },
+      });
+      const { wrapper } = setup([
+        { name: 'kyc', label: 'KYC', provider: { name: 'kyc-demo', target: 'nodes', run: 'manual', params: { as_of_days: 90 }, runtime_params: ['as_of_days'] } },
+      ]);
+      expect(wrapper.get('[data-testid="your-data-databricks-columns"]').text()).toBe('Adds: kyc_tier');
+      // Only the open one is offered, with this context's value as the default.
+      expect(wrapper.find('[data-testid="your-data-databricks-param-source"]').exists()).toBe(false);
+      const input = wrapper.get('[data-testid="your-data-databricks-param-as_of_days"]');
+      expect(input.attributes('placeholder')).toContain('90');
+      await input.setValue('999');
+      expect(wrapper.get('[data-testid="your-data-databricks-param-problem"]').text()).toContain('at most 365');
+      expect(wrapper.get('[data-testid="your-data-databricks-run"]').attributes('disabled')).toBeDefined();
+      await input.setValue('7');
+      await wrapper.get('[data-testid="your-data-databricks-run"]').trigger('click');
+      await flushPromises();
+      expect(spy.mock.calls[0][2].params).toEqual({ as_of_days: 7 });
+      expect(wrapper.get('[data-testid="your-data-databricks-outcome"]').text()).toContain('with as_of_days=7, source=internal');
+      // Nothing typed: the context's values, so nothing is sent.
+      await input.setValue('');
+      await wrapper.get('[data-testid="your-data-databricks-run"]').trigger('click');
+      await flushPromises();
+      expect(spy.mock.calls[1][2].params).toBeUndefined();
+    } finally {
+      delete window.__GRAPH_LAGOON_CONFIG__;
+    }
+  });
+
   it('shows why a run failed', async () => {
     vi.spyOn(api, 'runEnrichmentQuery').mockRejectedValue({
       response: { data: { detail: { error: { code: 'ENRICHMENT_SCOPE_DENIED', message: 'it reads hr.salaries' } } } },

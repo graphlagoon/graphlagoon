@@ -27,6 +27,7 @@ import ContextDefaultLookField from '@/components/ContextDefaultLookField.vue';
 import EnrichmentQueryField from '@/components/EnrichmentQueryField.vue';
 import EnrichmentTablesTools from '@/components/EnrichmentTablesTools.vue';
 import { configuredEnrichmentProviders, configuredEnrichmentSources, isAllowedEnrichmentSource, removedTablesReadBy } from '@/utils/enrichmentSources';
+import { paramHint, paramProblem, paramText, paramValues } from '@/utils/providerParams';
 import { storedDefaultLook, withDefaultLook, type DefaultLook } from '@/composables/useContextDefaultLook';
 
 /**
@@ -123,6 +124,11 @@ interface EnrichmentRow {
   query_node_props: boolean;
   /** Registered provider name: a provider row (no table, uses the query_* run settings); null = table row. */
   provider: string | null;
+  /** A provider row: the text typed for each declared parameter ('' = not set). */
+  provider_params: Record<string, string>;
+  /** A provider row: the parameters whoever runs it may change. */
+  provider_runtime: string[];
+  provider_edge_props: boolean;
 }
 
 function rowFromEnrichment(t: EnrichmentTable): EnrichmentRow {
@@ -145,6 +151,9 @@ function rowFromEnrichment(t: EnrichmentTable): EnrichmentRow {
     query_overwrite: !!(t.query ?? t.provider)?.overwrite,
     query_node_props: !!(t.query ?? t.provider)?.node_props,
     provider: t.provider?.name ?? null,
+    provider_params: Object.fromEntries(Object.entries(t.provider?.params ?? {}).map(([k, v]) => [k, paramText(v)])),
+    provider_runtime: [...(t.provider?.runtime_params ?? [])],
+    provider_edge_props: !!t.provider?.edge_props,
   };
 }
 
@@ -156,6 +165,8 @@ function slug(text: string): string {
 function enrichmentFromRow(row: EnrichmentRow): EnrichmentTable {
   if (row.provider !== null) {
     const info = enrichmentProviders.find((p) => p.name === row.provider);
+    const params = paramValues(info?.params, row.provider_params);
+    const runtime = row.provider_runtime.filter((n) => !info || info.params?.some((p) => p.name === n));
     return {
       name: row.name.trim() || slug(row.label || row.provider),
       label: row.label.trim() || info?.label || row.provider,
@@ -166,6 +177,10 @@ function enrichmentFromRow(row: EnrichmentRow): EnrichmentTable {
         run: row.query_run,
         overwrite: row.query_overwrite,
         node_props: row.query_node_props,
+        ...(row.provider_edge_props ? { edge_props: true } : {}),
+        // Only what this provider declares (one not registered here keeps what it had).
+        ...(Object.keys(params).length ? { params } : {}),
+        ...(runtime.length ? { runtime_params: runtime } : {}),
       },
     };
   }
@@ -695,6 +710,7 @@ const enrichmentSkillInput = computed(() => ({
   nodeTypes: nodeTypeOptions.value,
   relationshipTypes: splitCsv(form.value.relationship_types),
   allowedSources: enrichmentSources,
+  providers: enrichmentProviders,
 }));
 
 /** Tables the saved context listed that no row lists any more. */
@@ -728,6 +744,29 @@ function providerTargets(row: EnrichmentRow): ('edges' | 'nodes')[] {
   return enrichmentProviders.find((p) => p.name === row.provider)?.targets ?? ['edges', 'nodes'];
 }
 
+const providerInfo = (row: EnrichmentRow) => enrichmentProviders.find((p) => p.name === row.provider);
+
+/** Why a provider row's parameter cannot be saved as typed, or ''. */
+function providerParamProblem(row: EnrichmentRow, name: string): string {
+  const spec = providerInfo(row)?.params?.find((p) => p.name === name);
+  if (!spec) return '';
+  const text = row.provider_params[name] ?? '';
+  if (!text.trim() && spec.required && !row.provider_runtime.includes(name)) {
+    return 'needs a value, or let whoever runs it set it';
+  }
+  return paramProblem(spec, text);
+}
+
+function toggleRuntimeParam(row: EnrichmentRow, name: string, on: boolean) {
+  row.provider_runtime = on ? [...new Set([...row.provider_runtime, name])] : row.provider_runtime.filter((n) => n !== name);
+}
+
+const providerParamsInvalid = computed(() =>
+  form.value.enrichment_tables.some(
+    (row) => row.provider !== null && (providerInfo(row)?.params ?? []).some((p) => providerParamProblem(row, p.name)),
+  ),
+);
+
 function addProviderRow() {
   addEnrichmentTable(false);
   const row = form.value.enrichment_tables[form.value.enrichment_tables.length - 1];
@@ -758,6 +797,9 @@ function addEnrichmentTable(reveal = true) {
     query_overwrite: false,
     query_node_props: false,
     provider: null,
+    provider_params: {},
+    provider_runtime: [],
+    provider_edge_props: false,
   });
   if (reveal) revealEnrichmentRow(form.value.enrichment_tables.length - 1);
 }
@@ -1409,7 +1451,12 @@ async function submit() {
                   <p v-if="row.provider && !enrichmentProviders.some((p) => p.name === row.provider)" class="field-error" data-testid="enrichment-provider-missing">
                     Not registered on this server: this enrichment cannot run until the deployment registers it.
                   </p>
-                  <p v-else class="hint">{{ enrichmentProviders.find((p) => p.name === row.provider)?.description }}</p>
+                  <p v-else class="hint">
+                    {{ providerInfo(row)?.description }}
+                    <span v-if="providerInfo(row)?.columns?.length" class="provider-adds" data-testid="enrichment-provider-columns">
+                      Adds: {{ providerInfo(row)!.columns!.join(', ') }}.
+                    </span>
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -1454,6 +1501,52 @@ async function submit() {
                 <input v-model="row.query_node_props" type="checkbox" />
                 Send node properties to the provider (otherwise id and type only)
               </label>
+              <label class="checkbox-label">
+                <input v-model="row.provider_edge_props" type="checkbox" data-testid="enrichment-provider-edge-props" />
+                Send edge properties to the provider (otherwise ids and type only)
+              </label>
+              <div v-if="providerInfo(row)?.params?.length" class="provider-params" data-testid="enrichment-provider-params">
+                <label>Parameters</label>
+                <div v-for="p in providerInfo(row)!.params" :key="p.name" class="provider-param" data-testid="enrichment-provider-param">
+                  <div class="provider-param-name">
+                    <code>{{ p.name }}</code>
+                    <span v-if="paramHint(p)" class="muted">{{ paramHint(p) }}</span>
+                  </div>
+                  <select
+                    v-if="p.choices?.length || p.type === 'bool'"
+                    class="form-control"
+                    :value="row.provider_params[p.name] ?? ''"
+                    :aria-label="`Value of ${p.name}`"
+                    :data-testid="`enrichment-provider-param-${p.name}`"
+                    @change="row.provider_params[p.name] = ($event.target as HTMLSelectElement).value"
+                  >
+                    <option value="">{{ p.default === null || p.default === undefined ? '(not set)' : `Default (${paramText(p.default)})` }}</option>
+                    <option v-for="c in p.type === 'bool' ? ['true', 'false'] : p.choices!" :key="c" :value="c">{{ c }}</option>
+                  </select>
+                  <input
+                    v-else
+                    v-model="row.provider_params[p.name]"
+                    type="text"
+                    class="form-control"
+                    :inputmode="p.type === 'str' ? undefined : 'decimal'"
+                    :placeholder="p.default === null || p.default === undefined ? (p.required ? 'required' : '') : `Default: ${paramText(p.default)}`"
+                    :aria-label="`Value of ${p.name}`"
+                    :data-testid="`enrichment-provider-param-${p.name}`"
+                  />
+                  <label class="checkbox-label provider-param-runtime" title="Otherwise only this context's value is used, by people and by AI agents">
+                    <input
+                      type="checkbox"
+                      :checked="row.provider_runtime.includes(p.name)"
+                      :data-testid="`enrichment-provider-runtime-${p.name}`"
+                      @change="toggleRuntimeParam(row, p.name, ($event.target as HTMLInputElement).checked)"
+                    />
+                    Can be changed when running
+                  </label>
+                  <p v-if="providerParamProblem(row, p.name)" class="field-error provider-param-problem" data-testid="enrichment-provider-param-problem">
+                    {{ p.name }} {{ providerParamProblem(row, p.name) }}
+                  </p>
+                </div>
+              </div>
             </template>
             <template v-else>
             <div class="form-row">
@@ -1614,7 +1707,7 @@ async function submit() {
             type="submit"
             class="btn btn-primary"
             data-testid="create-context-submit"
-            :disabled="contextsStore.loading || !!defaultBehaviorsError || !requiredTablesChosen"
+            :disabled="contextsStore.loading || !!defaultBehaviorsError || !requiredTablesChosen || providerParamsInvalid"
             :title="requiredTablesChosen
               ? undefined
               : form.edge_table_name && form.edge_table_name === form.node_table_name
@@ -1788,6 +1881,39 @@ async function submit() {
   resize: vertical;
   min-height: 2.4em;
   font-family: inherit;
+}
+
+.provider-adds {
+  display: block;
+}
+
+.provider-params {
+  margin-top: 8px;
+}
+
+.provider-param {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.provider-param-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.provider-param-runtime {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.provider-param-problem {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .enrichment-row .provider-row {

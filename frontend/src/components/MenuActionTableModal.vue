@@ -123,13 +123,18 @@ onBeforeUnmount(() => {
       </div>
 
       <form v-if="table.parameters.value.length" class="params" data-testid="menu-action-table-params" @submit.prevent="table.run()">
-        <label v-for="p in table.parameters.value" :key="p.id" class="param" :title="p.description || undefined">
+        <label
+          v-for="p in table.parameters.value"
+          :key="p.id"
+          class="param"
+          :title="p.locked ? `Fixed by this action${p.description ? `: ${p.description}` : ''}` : p.description || undefined"
+        >
           <span class="param-label">{{ p.label }}<span v-if="p.required" class="required">*</span></span>
-          <select v-if="p.type === 'select'" v-model="table.values.value[p.id]" :class="{ invalid: table.problems.value[p.id] }">
+          <select v-if="p.type === 'select'" v-model="table.values.value[p.id]" :disabled="p.locked" :class="{ invalid: table.problems.value[p.id] }">
             <option v-if="!p.required" value="">—</option>
             <option v-for="o in p.options ?? []" :key="o" :value="o">{{ o }}</option>
           </select>
-          <input v-else v-model="table.values.value[p.id]" type="text" :class="{ invalid: table.problems.value[p.id] }" :data-testid="`menu-action-param-${p.id}`" />
+          <input v-else v-model="table.values.value[p.id]" type="text" :disabled="p.locked" :class="{ invalid: table.problems.value[p.id] }" :data-testid="`menu-action-param-${p.id}`" />
           <span v-if="table.problems.value[p.id]" class="problem">{{ table.problems.value[p.id] }}</span>
         </label>
         <button type="submit" class="btn btn-primary run" :disabled="table.loading.value" data-testid="menu-action-table-run">

@@ -49,6 +49,7 @@ import { useGraphStore } from '@/stores/graph'
 import { useMetricsStore } from '@/stores/metrics'
 import { useQueryTemplatesStore } from '@/stores/queryTemplates'
 import { buildContextMenuActionSkill } from '@/utils/contextMenuActionSkill'
+import { configuredTableProviders } from '@/utils/enrichmentSources'
 import type { PortableSourceSchema } from '@/types/portable'
 import { buildSourceSchema } from '@/utils/portableExport'
 
@@ -98,6 +99,7 @@ const skillText = computed(() =>
         required: p.required,
       })),
     })),
+    tableProviders: configuredTableProviders(),
     // The modal only opens from the graph view, so the current location IS
     // this context's graph URL — used by the ego-layout deep-link example.
     graphViewUrl: `${window.location.origin}${window.location.pathname}`,
